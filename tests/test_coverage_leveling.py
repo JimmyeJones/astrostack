@@ -1,0 +1,103 @@
+"""
+Per-coverage sky leveling: panel-step removal for mosaic stacks.
+
+The bug it fixes: in a mosaic, each distinct coverage value can end up at
+a slightly different mean sky brightness for various reasons (reproject
+edge effects, residual bg-flatten bias, real sky differences between
+panels). The visible result is rectangle-shaped brightness steps tracing
+the coverage map. This pass equalises sky brightness across coverage
+values.
+"""
+
+import numpy as np
+import pytest
+
+pytest.importorskip("astropy")
+
+from seestack.bg.coverage_leveling import level_by_coverage
+
+
+def _mosaic_image_with_panel_steps(h=200, w=300, levels=(2, 5, 9)):
+    """
+    Synthesise a mosaic-like result with three coverage regions, each at a
+    different mean brightness. Add a few stars so the object mask has work
+    to do.
+    """
+    rng = np.random.default_rng(0)
+    rgb = rng.normal(0.0, 5.0, size=(h, w, 3)).astype(np.float32)
+    coverage = np.zeros((h, w), dtype=np.int32)
+    # Three vertical bands with different coverage values + sky offsets.
+    bands = np.array_split(np.arange(w), len(levels))
+    offsets = (10.0, 30.0, -15.0)  # per-band sky offsets
+    for cols, lvl, off in zip(bands, levels, offsets):
+        coverage[:, cols] = lvl
+        rgb[:, cols, :] += off
+    # Plant some stars across the canvas.
+    for _ in range(25):
+        y = int(rng.integers(8, h - 8))
+        x = int(rng.integers(8, w - 8))
+        rgb[y - 2:y + 3, x - 2:x + 3, :] += 1500.0
+    return rgb, coverage, offsets
+
+
+def test_panel_steps_disappear_after_leveling():
+    rgb, coverage, offsets = _mosaic_image_with_panel_steps()
+    out = level_by_coverage(rgb, coverage)
+    # The median sky in each band must collapse to the same value (≈ 0)
+    # after leveling, regardless of the input offsets.
+    for lvl, off in zip((2, 5, 9), offsets):
+        region = (coverage == lvl)
+        # Same object-masking the function applies internally.
+        for c in range(3):
+            sky_pixels = out[region, c]
+            # Drop the brightest 10% to ignore stars.
+            sky_pixels = sky_pixels[sky_pixels < np.percentile(sky_pixels, 90)]
+            med = float(np.median(sky_pixels))
+            assert abs(med) < 2.0, (
+                f"coverage {lvl} (input offset {off}): "
+                f"channel {c} median = {med:.2f} (should be ~0)"
+            )
+
+
+def test_leveling_preserves_relative_star_brightness_within_band():
+    rgb, coverage, _ = _mosaic_image_with_panel_steps()
+    # Note the brightness of one star before…
+    star_y, star_x = 100, 50
+    rgb[star_y - 2:star_y + 3, star_x - 2:star_x + 3, :] += 4000.0
+    before = float(rgb[star_y, star_x, 1])
+    before_bg = float(rgb[star_y - 10, star_x - 10, 1])  # nearby sky
+
+    out = level_by_coverage(rgb, coverage)
+    after = float(out[star_y, star_x, 1])
+    after_bg = float(out[star_y - 10, star_x - 10, 1])
+    # The (star - nearby-sky) contrast is unchanged — leveling subtracts a
+    # constant from the whole region.
+    assert abs((before - before_bg) - (after - after_bg)) < 1.0
+
+
+def test_leveling_skips_thinly_covered_levels():
+    """Coverage values with too few sky pixels are left alone (no median
+    can be reliably computed)."""
+    rgb = np.zeros((40, 60, 3), dtype=np.float32)
+    coverage = np.full((40, 60), 5, dtype=np.int32)
+    # A handful of pixels at a different coverage — too few to level.
+    coverage[0, :5] = 1
+    rgb[0, :5, :] = 99.0  # would otherwise be subtracted
+    out = level_by_coverage(rgb, coverage, min_pixels_per_level=200)
+    # Those pixels are unchanged.
+    np.testing.assert_array_equal(out[0, :5, :], rgb[0, :5, :])
+
+
+def test_uncovered_region_is_left_alone():
+    """coverage == 0 pixels (uncovered canvas) must not be touched."""
+    rng = np.random.default_rng(1)
+    h, w = 80, 100
+    rgb = rng.normal(0.0, 5.0, size=(h, w, 3)).astype(np.float32)
+    rgb[:, :30, :] = np.nan  # uncovered band
+    coverage = np.full((h, w), 4, dtype=np.int32)
+    coverage[:, :30] = 0
+    # Make the covered region have a known offset.
+    rgb[:, 30:, :] += 25.0
+    out = level_by_coverage(rgb, coverage)
+    # Uncovered region: still NaN.
+    assert np.all(np.isnan(out[:, :30, 0]))

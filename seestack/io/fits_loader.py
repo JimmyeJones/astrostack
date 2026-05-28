@@ -1,0 +1,303 @@
+"""
+FITS loading and RGGB debayering for Seestar raw subs.
+
+Seestar raws are single-extension FITS, BITPIX=16 (unsigned via BZERO=32768),
+with a Bayer mosaic in the data array and an ``BAYERPAT`` header (usually 'RGGB').
+
+We keep this module focused on *loading* — no QC, no warping. The output of
+``load_seestar_raw`` is either:
+  - the raw 2D Bayer array (default, what the QC pipeline wants — star detection
+    works fine on the green channel via the mosaic), or
+  - a debayered (H, W, 3) float32 image (when ``debayer=True``, what the
+    thumbnail / preview wants).
+
+The bilinear debayer here is deliberately simple and pure-numpy. It's good enough
+for previews and stacking — better demosaicers (VNG, AHD) cost a lot more time
+for a marginal quality gain on 10s subs that are going to be stacked anyway.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+
+log = logging.getLogger(__name__)
+
+
+@dataclass
+class FitsHeaderInfo:
+    """Subset of FITS header values we care about."""
+
+    timestamp_utc: str | None
+    exposure_s: float | None
+    gain: float | None
+    sensor_temp_c: float | None
+    width_px: int
+    height_px: int
+    bayer_pattern: str | None  # 'RGGB' / 'BGGR' / 'GRBG' / 'GBRG'
+    raw_header: dict[str, Any]
+
+
+def load_header(path: str | Path) -> FitsHeaderInfo:
+    """Read just the FITS header — fast, no pixel data."""
+    from astropy.io import fits
+
+    path = Path(path)
+    with fits.open(path, memmap=True) as hdul:
+        h = hdul[0].header
+        data_shape = hdul[0].shape  # (H, W) for 2D raw
+
+    height, width = (data_shape[-2], data_shape[-1]) if len(data_shape) >= 2 else (0, 0)
+    return FitsHeaderInfo(
+        timestamp_utc=_parse_timestamp(h),
+        exposure_s=_get_float(h, ("EXPTIME", "EXPOSURE")),
+        gain=_get_float(h, ("GAIN",)),
+        sensor_temp_c=_get_float(h, ("CCD-TEMP", "TEMP", "SET-TEMP")),
+        width_px=int(width),
+        height_px=int(height),
+        bayer_pattern=_get_str(h, ("BAYERPAT", "BAYRPAT")),
+        raw_header=dict(h),
+    )
+
+
+def load_seestar_raw(
+    path: str | Path,
+    *,
+    debayer: bool = False,
+    out_dtype: np.dtype | type = np.float32,
+) -> tuple[np.ndarray, FitsHeaderInfo]:
+    """
+    Load a Seestar FITS file.
+
+    Parameters
+    ----------
+    path
+        Path to the FITS file (local or UNC).
+    debayer
+        If True, return an (H, W, 3) RGB float array. Otherwise return the raw
+        2D Bayer mosaic.
+    out_dtype
+        dtype of the returned image. float32 is the right default — debayered
+        outputs need to be float, and float32 matches what the rest of the
+        pipeline uses.
+
+    Returns
+    -------
+    image, header_info
+    """
+    from astropy.io import fits
+
+    path = Path(path)
+    with fits.open(path, memmap=False) as hdul:
+        hdu = hdul[0]
+        data = np.asarray(hdu.data)
+        h = hdu.header
+        info = FitsHeaderInfo(
+            timestamp_utc=_parse_timestamp(h),
+            exposure_s=_get_float(h, ("EXPTIME", "EXPOSURE")),
+            gain=_get_float(h, ("GAIN",)),
+            sensor_temp_c=_get_float(h, ("CCD-TEMP", "TEMP", "SET-TEMP")),
+            width_px=int(data.shape[-1]),
+            height_px=int(data.shape[-2]),
+            bayer_pattern=_get_str(h, ("BAYERPAT", "BAYRPAT")),
+            raw_header=dict(h),
+        )
+
+    if data.ndim != 2:
+        raise ValueError(f"expected 2D Bayer array, got shape {data.shape}")
+
+    img = data.astype(out_dtype, copy=False)
+
+    if debayer:
+        pattern = (info.bayer_pattern or "RGGB").upper()
+        img = bilinear_debayer(img, pattern=pattern)
+
+    return img, info
+
+
+# ---- debayer ------------------------------------------------------------
+
+
+def bilinear_debayer(mosaic: np.ndarray, pattern: str = "RGGB") -> np.ndarray:
+    """
+    Bilinear RGGB-style debayering, pure numpy.
+
+    Parameters
+    ----------
+    mosaic
+        2D array (H, W) of the raw Bayer mosaic. H and W must be even.
+    pattern
+        One of 'RGGB', 'BGGR', 'GRBG', 'GBRG'. The Seestar uses 'RGGB'.
+
+    Returns
+    -------
+    rgb
+        3D array (H, W, 3), same dtype as input.
+    """
+    if mosaic.ndim != 2:
+        raise ValueError("mosaic must be 2D")
+    h, w = mosaic.shape
+    if h % 2 or w % 2:
+        # Pad by one to keep math simple; we crop back at the end.
+        pad_h = h % 2
+        pad_w = w % 2
+        mosaic = np.pad(mosaic, ((0, pad_h), (0, pad_w)), mode="edge")
+        h, w = mosaic.shape
+        crop = (pad_h, pad_w)
+    else:
+        crop = (0, 0)
+
+    # Build R, G, B planes, zero where the pixel doesn't belong to that channel.
+    r = np.zeros_like(mosaic)
+    g = np.zeros_like(mosaic)
+    b = np.zeros_like(mosaic)
+
+    pattern = pattern.upper()
+    # 2x2 layout: top-left, top-right, bottom-left, bottom-right
+    layouts = {
+        "RGGB": (("r", "g"), ("g", "b")),
+        "BGGR": (("b", "g"), ("g", "r")),
+        "GRBG": (("g", "r"), ("b", "g")),
+        "GBRG": (("g", "b"), ("r", "g")),
+    }
+    if pattern not in layouts:
+        raise ValueError(f"unsupported bayer pattern {pattern!r}")
+    (tl, tr), (bl, br) = layouts[pattern]
+    plane = {"r": r, "g": g, "b": b}
+    plane[tl][0::2, 0::2] = mosaic[0::2, 0::2]
+    plane[tr][0::2, 1::2] = mosaic[0::2, 1::2]
+    plane[bl][1::2, 0::2] = mosaic[1::2, 0::2]
+    plane[br][1::2, 1::2] = mosaic[1::2, 1::2]
+
+    # Bilinear interpolation for the missing values in each plane.
+    # R and B have a 50% sparse grid — interpolate from 4 nearest neighbours.
+    # G has a 50% checkerboard — interpolate from 4 cross neighbours.
+    r_full = _interp_rb(r, layouts[pattern], "r")
+    b_full = _interp_rb(b, layouts[pattern], "b")
+    g_full = _interp_g(g)
+
+    rgb = np.stack([r_full, g_full, b_full], axis=-1)
+
+    if crop != (0, 0):
+        rgb = rgb[: rgb.shape[0] - crop[0], : rgb.shape[1] - crop[1], :]
+    return rgb
+
+
+def _shift(a: np.ndarray, dy: int, dx: int) -> np.ndarray:
+    """Shift array by (dy, dx) with edge replication."""
+    return np.roll(a, shift=(dy, dx), axis=(0, 1))
+
+
+def _interp_g(g_plane: np.ndarray) -> np.ndarray:
+    """
+    Fill the missing G samples (R and B sites) by averaging the 4 cross
+    neighbours of each missing site.
+    """
+    has_g = g_plane != 0
+    # Average up/down/left/right neighbours.
+    up = _shift(g_plane, 1, 0)
+    down = _shift(g_plane, -1, 0)
+    left = _shift(g_plane, 0, 1)
+    right = _shift(g_plane, 0, -1)
+    avg = (up + down + left + right) * 0.25
+    return np.where(has_g, g_plane, avg)
+
+
+def _interp_rb(plane: np.ndarray, layout: tuple, channel: str) -> np.ndarray:
+    """
+    Fill R or B plane.
+
+    R (or B) is present on a 2x2 grid; each missing site falls into one of three
+    cases that need different interpolations because **only same-channel
+    neighbours are valid samples**:
+
+      * Same row as samples, missing column → average horizontal neighbours.
+      * Same column as samples, missing row → average vertical neighbours.
+      * Both row and column missing → average four diagonal neighbours.
+
+    A naive average of all four axial neighbours (h+v+...)/4 is wrong: half of
+    those neighbours are zeros (the wrong-channel sites in the plane).
+    """
+    has = plane != 0
+    h_avg = (_shift(plane, 0, 1) + _shift(plane, 0, -1)) * 0.5
+    v_avg = (_shift(plane, 1, 0) + _shift(plane, -1, 0)) * 0.5
+    d_avg = (
+        _shift(plane, 1, 1)
+        + _shift(plane, 1, -1)
+        + _shift(plane, -1, 1)
+        + _shift(plane, -1, -1)
+    ) * 0.25
+
+    h, w = plane.shape
+    yy, xx = np.indices((h, w))
+    (tl, tr), (bl, br) = layout
+    if channel == tl:
+        py, px = 0, 0
+    elif channel == tr:
+        py, px = 0, 1
+    elif channel == bl:
+        py, px = 1, 0
+    elif channel == br:
+        py, px = 1, 1
+    else:
+        # Channel not in this layout (shouldn't happen for R/B in any RGGB-family
+        # pattern). Return as-is.
+        return plane
+    on_sample_row = (yy % 2) == py
+    on_sample_col = (xx % 2) == px
+    out = plane.copy()
+    # Same row, different col → horizontal interp.
+    out = np.where(~has & on_sample_row & ~on_sample_col, h_avg, out)
+    # Same col, different row → vertical interp.
+    out = np.where(~has & ~on_sample_row & on_sample_col, v_avg, out)
+    # Both different → diagonal.
+    out = np.where(~has & ~on_sample_row & ~on_sample_col, d_avg, out)
+    return out
+
+
+# ---- header helpers -----------------------------------------------------
+
+
+def _get_float(h, keys: tuple[str, ...]) -> float | None:
+    for k in keys:
+        if k in h:
+            try:
+                return float(h[k])
+            except (TypeError, ValueError):
+                pass
+    return None
+
+
+def _get_str(h, keys: tuple[str, ...]) -> str | None:
+    for k in keys:
+        if k in h:
+            try:
+                return str(h[k]).strip()
+            except Exception:  # noqa: BLE001
+                pass
+    return None
+
+
+def _parse_timestamp(h) -> str | None:
+    """
+    Return an ISO-8601 UTC timestamp string, or None.
+
+    Seestar uses ``DATE-OBS`` like '2024-09-12T03:14:55.123'. We normalise to
+    timezone-aware UTC ISO format for consistent storage.
+    """
+    raw = _get_str(h, ("DATE-OBS", "DATE_OBS"))
+    if not raw:
+        return None
+    # Try a few common formats.
+    for fmt in ("%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+        try:
+            dt = datetime.strptime(raw, fmt).replace(tzinfo=timezone.utc)
+            return dt.isoformat()
+        except ValueError:
+            continue
+    return raw  # fall back to whatever the header had

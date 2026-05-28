@@ -1,0 +1,162 @@
+"""
+End-to-end stack pipeline test.
+
+Builds a small project with synthesised plate-solved frames, runs the full
+stacker (both no-clip and sigma-clipped paths), and verifies that the output
+files exist and contain reasonable data.
+
+This is the test that proves the headline feature works.
+"""
+
+import numpy as np
+import pytest
+
+pytest.importorskip("astropy")
+pytest.importorskip("scipy")
+pytest.importorskip("photutils")
+pytest.importorskip("PIL")
+pytest.importorskip("tifffile")
+
+from seestack.io.project import FrameRow, Project  # noqa: E402
+from seestack.stack.stacker import StackOptions, run_stack  # noqa: E402
+from tests.synth import make_synth_wcs_text, write_seestar_fits  # noqa: E402
+
+
+def _build_project(tmp_path, n: int = 5, *, with_outlier: bool = False) -> Project:
+    proj = Project.create(tmp_path / "p", name="stacktest")
+    wcs_text = make_synth_wcs_text()
+    raws = tmp_path / "raws"
+    raws.mkdir()
+    for i in range(n):
+        # All frames have the same WCS — they all land on the same canvas.
+        path = write_seestar_fits(
+            raws / f"f{i}.fit",
+            add_wcs=True,
+            seed=10 + i,
+            n_stars=30,
+            streak=(with_outlier and i == 0),
+        )
+        fid = proj.add_frame(FrameRow(
+            source_path=str(path),
+            cached_path=str(path),
+            width_px=480, height_px=320,
+            bayer_pattern="RGGB",
+            wcs_json=wcs_text,
+            ra_center_deg=83.6, dec_center_deg=-5.4,
+        ))
+    return proj
+
+
+def test_stack_no_clip(tmp_path):
+    proj = _build_project(tmp_path, n=4)
+    try:
+        result = run_stack(
+            proj,
+            StackOptions(sigma_clip=False, max_workers=2, output_name="nostack"),
+        )
+    finally:
+        proj.close()
+
+    assert result.fits_path.exists()
+    assert result.tiff_path.exists()
+    assert result.preview_path.exists()
+    assert result.n_frames_used == 4
+    # Coverage map should reflect that every pixel has all 4 frames in the
+    # interior of the canvas.
+    assert result.coverage_max == 4
+
+
+def test_stack_sigma_clipped(tmp_path):
+    proj = _build_project(tmp_path, n=6, with_outlier=True)
+    try:
+        result = run_stack(
+            proj,
+            StackOptions(sigma_clip=True, sigma_kappa=2.5, max_workers=2,
+                         output_name="clipped"),
+        )
+    finally:
+        proj.close()
+
+    assert result.fits_path.exists()
+    assert result.tiff_path.exists()
+    assert result.preview_path.exists()
+    assert result.n_frames_used == 6
+
+
+def test_stack_fails_with_no_solved_frames(tmp_path):
+    proj = Project.create(tmp_path / "p", name="empty")
+    try:
+        # add a frame with no WCS
+        proj.add_frame(FrameRow(source_path="x.fit"))
+        with pytest.raises(ValueError):
+            run_stack(proj, StackOptions(sigma_clip=False))
+    finally:
+        proj.close()
+
+
+def test_stack_progress_callback_called(tmp_path):
+    proj = _build_project(tmp_path, n=3)
+    calls: list[tuple[str, int, int]] = []
+    try:
+        run_stack(
+            proj,
+            StackOptions(sigma_clip=False, max_workers=1, output_name="prog"),
+            progress=lambda phase, done, total: calls.append((phase, done, total)),
+        )
+    finally:
+        proj.close()
+    assert len(calls) > 0
+    # We should see "Stacking" phase emitted multiple times.
+    assert any("Stack" in c[0] for c in calls)
+
+
+def test_stack_fits_has_3_channels(tmp_path):
+    from astropy.io import fits
+
+    proj = _build_project(tmp_path, n=3)
+    try:
+        result = run_stack(
+            proj,
+            StackOptions(
+                sigma_clip=False, max_workers=1,
+                background_flatten=False, output_name="m",
+            ),
+        )
+    finally:
+        proj.close()
+
+    with fits.open(result.fits_path) as hdul:
+        data = hdul[0].data
+        # Cube layout: (channels, H, W).
+        assert data.shape[0] == 3
+        finite = data[np.isfinite(data)]
+        assert finite.size > 0
+        # Even with bg flatten off, the post-stack coverage-leveling pass now
+        # subtracts the per-coverage sky median, so the final stack lands at
+        # roughly zero — we no longer expect the raw ~1000 ADU sky level.
+        assert abs(float(np.median(finite))) < 200
+
+
+def test_stack_with_bg_flatten_subtracts_sky(tmp_path):
+    """With bg-flatten on, the stack median should be near zero, not ~1000."""
+    from astropy.io import fits
+
+    proj = _build_project(tmp_path, n=3)
+    try:
+        result = run_stack(
+            proj,
+            StackOptions(
+                sigma_clip=False, max_workers=1,
+                background_flatten=True, background_box_size=32,
+                output_name="bgflat",
+            ),
+        )
+    finally:
+        proj.close()
+
+    with fits.open(result.fits_path) as hdul:
+        data = hdul[0].data
+        finite = data[np.isfinite(data)]
+        assert finite.size > 0
+        # Sky was 1000 ADU before flattening; should be near zero after.
+        assert abs(float(np.median(finite))) < 50

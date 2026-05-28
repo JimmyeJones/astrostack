@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Test / typing caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+
+# Seestack runtime
+*.seestack/         # project files
+seestack_cache/     # local cache directories
+*.fits.tmp
+*.mmap
+
+# OS
+Thumbs.db
+.DS_Store

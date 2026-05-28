@@ -1,0 +1,98 @@
+"""Drizzle path — accumulator construction, single-frame and multi-frame stacking."""
+
+import numpy as np
+import pytest
+
+pytest.importorskip("astropy")
+pytest.importorskip("drizzle")
+
+from seestack.io.project import FrameRow, Project  # noqa: E402
+from seestack.io.wcs_io import wcs_from_text  # noqa: E402
+from seestack.stack.drizzle_path import DrizzleParams, DrizzleStacker  # noqa: E402
+from seestack.stack.stacker import StackOptions, run_stack  # noqa: E402
+from tests.synth import make_synth_wcs_text, write_seestar_fits  # noqa: E402
+
+
+def test_drizzle_canvas_scaling():
+    """Drizzle output canvas should be ``ref_shape * scale``."""
+    wcs = wcs_from_text(make_synth_wcs_text(width=480, height=320))
+    drz = DrizzleStacker(wcs, (320, 480), DrizzleParams(scale=2.0, pixfrac=1.0))
+    assert drz.output_canvas_shape == (640, 960)
+
+
+def test_drizzle_single_frame_round_trip():
+    """Adding one frame at scale=1, pixfrac=1: output should match input data."""
+    wcs = wcs_from_text(make_synth_wcs_text(width=120, height=80))
+    drz = DrizzleStacker(wcs, (80, 120), DrizzleParams(scale=1.0, pixfrac=1.0))
+    rng = np.random.default_rng(0)
+    rgb = rng.random((80, 120, 3), dtype=np.float32) * 1000 + 500
+    drz.add_frame(rgb, wcs)
+    result = drz.result()
+    assert result.shape == (80, 120, 3)
+    # Interior pixels should approximate the input (drizzle averages the
+    # contributions; with one frame at unit weight, output ≈ input).
+    interior = result[5:-5, 5:-5, :]
+    in_interior = rgb[5:-5, 5:-5, :]
+    np.testing.assert_allclose(interior, in_interior, rtol=0.1, atol=20.0)
+
+
+def _build_project(tmp_path, n: int = 4) -> Project:
+    proj = Project.create(tmp_path / "p", name="drizzle_test")
+    wcs_text = make_synth_wcs_text()
+    raws = tmp_path / "raws"
+    raws.mkdir()
+    for i in range(n):
+        path = write_seestar_fits(
+            raws / f"f{i}.fit",
+            add_wcs=True, seed=20 + i, n_stars=20,
+        )
+        proj.add_frame(FrameRow(
+            source_path=str(path), cached_path=str(path),
+            width_px=480, height_px=320, bayer_pattern="RGGB",
+            wcs_json=wcs_text,
+            ra_center_deg=83.6, dec_center_deg=-5.4,
+        ))
+    return proj
+
+
+def test_drizzle_pipeline_e2e(tmp_path):
+    proj = _build_project(tmp_path, n=4)
+    try:
+        result = run_stack(
+            proj,
+            StackOptions(
+                drizzle=True,
+                drizzle_pixfrac=0.8,
+                drizzle_scale=1.5,
+                background_flatten=False,  # cleaner numerical comparison
+                max_workers=2,
+                output_name="driz",
+            ),
+        )
+    finally:
+        proj.close()
+
+    assert result.fits_path.exists()
+    assert result.tiff_path.exists()
+    assert result.preview_path.exists()
+    # Drizzle output canvas is ref * scale.
+    expected_h = int(round(320 * 1.5))
+    expected_w = int(round(480 * 1.5))
+    assert result.canvas_shape == (expected_h, expected_w)
+
+
+def test_drizzle_super_resolution_increases_canvas(tmp_path):
+    proj = _build_project(tmp_path, n=3)
+    try:
+        result = run_stack(
+            proj,
+            StackOptions(
+                drizzle=True, drizzle_scale=2.0, drizzle_pixfrac=0.7,
+                background_flatten=False, max_workers=1,
+                output_name="superres",
+            ),
+        )
+    finally:
+        proj.close()
+    # 2× scale: canvas is 2× per side.
+    assert result.canvas_shape == (640, 960)
