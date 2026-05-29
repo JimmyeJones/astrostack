@@ -706,7 +706,7 @@ def _save_quick_look(
     """
     try:
         from PIL import Image
-        from seestack.gui.thumbnail import autostretch
+        from seestack.render.thumbnail import autostretch
 
         # Pass NaN straight through — autostretch is nan-aware and must compute
         # its stats over covered pixels only (a mosaic's no-data gaps would

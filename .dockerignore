@@ -1,0 +1,15 @@
+**/__pycache__/
+**/*.pyc
+.git/
+.venv/
+venv/
+tests/
+frontend/node_modules/
+frontend/dist/
+webapp/static/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+docker/astap/*.290
+docker/astap/astap

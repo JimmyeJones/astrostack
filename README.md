@@ -1,8 +1,17 @@
-# Seestack
+# Seestack / AstroStack
 
-A Windows-first astrophotography stacker for the ZWO Seestar smart telescope.
-Built as a scalable, beginner-friendly alternative to DeepSkyStacker — designed
-to handle 10,000+ raw subs of a single target.
+A scalable, beginner-friendly astrophotography stacker for the ZWO Seestar smart
+telescope — an alternative to DeepSkyStacker designed to handle 10,000+ raw subs
+of a single target.
+
+It ships in two forms that share the same processing engine:
+
+- **Seestack** — the original Windows-first PySide6 desktop app.
+- **AstroStack Web** — a headless, containerised web service built for
+  **TrueNAS** (or any Docker host): point it at a dataset, drop your Seestar
+  data in, and it automatically ingests, runs QC, and plate-solves new frames.
+  You then preview raws and run stacking from a sleek web UI.
+  **See [docs/webapp.md](docs/webapp.md).**
 
 See [PLAN.md](PLAN.md) for the full design.
 
@@ -45,7 +54,12 @@ seestack/
   stack/   Streaming, memory-mapped accumulators
   post/    Stretch, color cal, export
   gui/     PySide6 application
+  render/  headless debayer / autostretch / thumbnails (no Qt)
   core/    GPU/CPU shim, cache manager, job runner
+webapp/    FastAPI web service: job manager, folder watcher, REST API, SPA
+frontend/  React + Vite + TypeScript web UI (built into webapp/static)
+docker/    Dockerfile + docker-compose.yml for TrueNAS / Docker
 docs/
   glossary.md   beginner-friendly term glossary (linked from the GUI)
+  webapp.md     AstroStack Web: deployment + usage
 ```

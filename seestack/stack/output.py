@@ -196,7 +196,7 @@ def _autostretch_for_export(rgb: np.ndarray) -> np.ndarray:
     only, so a mosaic's no-data gaps can't corrupt the black point or skew
     the colour balance.
     """
-    from seestack.gui.thumbnail import autostretch
+    from seestack.render.thumbnail import autostretch
 
     return autostretch(
         rgb.astype(np.float32, copy=False), target_bg=0.06, sigma_factor=-2.8,
