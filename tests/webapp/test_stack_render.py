@@ -72,6 +72,29 @@ def test_render_stack_png_helper(tmp_path):
     assert hi_mean > lo_mean  # stronger stretch reveals more
 
 
+def test_render_with_nan_borders_is_not_blank(tmp_path):
+    # Stacks carry NaN in uncovered/mosaic-gap regions. The render must exclude
+    # those (not let them blank the whole frame) — regression for the "preview
+    # goes blank after Adjust" bug.
+    h, w = 120, 240
+    yy, xx = np.mgrid[0:h, 0:w]
+    blob = np.exp(-(((xx - 160) ** 2 + (yy - 70) ** 2) / 1500.0)).astype(np.float32)
+    chan = (0.05 + blob).astype(np.float32)
+    cube = np.stack([chan, chan * 0.7, chan * 0.5]).astype(np.float32)
+    cube[:, :15, :] = np.nan   # uncovered top
+    cube[:, :, :25] = np.nan   # uncovered left
+    fp = tmp_path / "mosaic.fits"
+    fits.PrimaryHDU(data=cube).writeto(fp)
+
+    png = render_stack_png(fp, target_bg=0.2, sigma_factor=-2.5, max_width=80)
+    from io import BytesIO
+
+    from PIL import Image
+    arr = np.asarray(Image.open(BytesIO(png)))
+    assert arr.max() > 0          # not all black
+    assert arr.mean() > 1.0       # the blob/sky actually rendered
+
+
 def test_render_endpoint_returns_png(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
     _, run_id = _make_run_with_fits(solved_library, safe)
