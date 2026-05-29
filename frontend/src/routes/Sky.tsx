@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect } from "react";
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls, Html } from "@react-three/drei";
 import * as THREE from "three";
 import { useQuery } from "@tanstack/react-query";
@@ -124,6 +124,28 @@ function ImagePlane({
   );
 }
 
+/**
+ * Scroll-wheel zoom by camera field-of-view. The camera lives at the centre of
+ * the sphere, so OrbitControls' dolly-zoom has nowhere useful to travel —
+ * narrowing/widening the FOV gives a natural "zoom in on the sky" instead.
+ * Also calls preventDefault so the wheel doesn't scroll the page.
+ */
+function FovZoom({ min = 12, max = 85, step = 0.06 }: { min?: number; max?: number; step?: number }) {
+  const { camera, gl } = useThree();
+  useEffect(() => {
+    const el = gl.domElement;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const cam = camera as THREE.PerspectiveCamera;
+      cam.fov = THREE.MathUtils.clamp(cam.fov + e.deltaY * step, min, max);
+      cam.updateProjectionMatrix();
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [camera, gl, min, max, step]);
+  return null;
+}
+
 function Scene({ stars, images, onSelect }: {
   stars: SkyStar[]; images: SkyImage[]; onSelect: (i: SkyImage) => void;
 }) {
@@ -138,13 +160,12 @@ function Scene({ stars, images, onSelect }: {
       {ordered.map((img, i) => (
         <ImagePlane key={`${img.safe}-${img.run_id}`} img={img} renderOrder={i + 1} onSelect={onSelect} />
       ))}
+      <FovZoom />
       <OrbitControls
         makeDefault
         enablePan={false}
+        enableZoom={false}   // zoom handled by FovZoom (camera is at the centre)
         rotateSpeed={-0.35}
-        zoomSpeed={0.8}
-        minDistance={0.05}
-        maxDistance={240}
         target={[0, 0, 0]}
       />
     </>
