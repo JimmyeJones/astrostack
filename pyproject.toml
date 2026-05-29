@@ -31,19 +31,34 @@ dependencies = [
 
 [project.optional-dependencies]
 gpu = ["cupy-cuda12x>=13.0"]
+# Headless web service (TrueNAS / Docker). Deliberately excludes PySide6.
+web = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "watchdog>=4.0",
+    "sse-starlette>=2.1",
+    "python-multipart>=0.0.9",
+    "pydantic>=2.6",
+]
 dev = [
     "pytest>=8.0",
     "pytest-qt>=4.4",
     "ruff>=0.4",
     "mypy>=1.10",
+    "httpx>=0.27",
 ]
 
 [project.scripts]
 seestack = "seestack.gui.main:main"
+astrostack-web = "webapp.main:run"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["seestack*"]
+include = ["seestack*", "webapp*"]
+
+[tool.setuptools.package-data]
+# The built React SPA (produced by `npm run build` into webapp/static).
+webapp = ["static/*", "static/assets/*"]
 
 [tool.ruff]
 line-length = 100

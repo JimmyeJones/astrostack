@@ -1,0 +1,38 @@
+# AstroStack — TrueNAS SCALE "Custom App" / docker compose deployment.
+#
+# 1. Point the /data volume at a TrueNAS dataset (create one, e.g. tank/astro).
+# 2. Inside that dataset the app uses three sub-folders, created automatically:
+#       incoming/   ← drop your Seestar target folders here
+#       library/    ← organised per-target projects + stacks live here
+#       state/      ← config.json + jobs database
+# 3. Browse to http://<truenas-ip>:8000
+#
+# Build locally with:   docker compose -f docker/docker-compose.yml up -d --build
+# (run from the repo root so the build context sees ./frontend, ./seestack, ./webapp)
+
+services:
+  astrostack:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: astrostack:latest
+    container_name: astrostack
+    ports:
+      - "8000:8000"
+    # ProcessPoolExecutor + numpy need a decent /dev/shm for big stacks.
+    shm_size: "1gb"
+    volumes:
+      - /mnt/tank/astro:/data          # <-- change to your dataset path
+      # Optional: mount an ASTAP install instead of bundling it in the image.
+      # - /mnt/tank/apps/astap:/opt/astap:ro
+    environment:
+      - ASTROSTACK_DATA=/data
+      - ASTROSTACK_CPU_WORKERS=4        # blank/remove to use all cores
+      - SEESTACK_ASTAP_PATH=/opt/astap/astap
+      - TZ=UTC
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
