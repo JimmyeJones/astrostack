@@ -9,6 +9,8 @@ job record so the SSE stream and the jobs DB stay current.
 
 from __future__ import annotations
 
+import contextlib
+import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -17,7 +19,7 @@ from seestack.io.library import Library
 from seestack.io.scanner import run_qc_and_solve, scan_and_organize
 from webapp.config import Settings
 from webapp.jobs import Job, JobManager
-from webapp.schemas import coerce_stack_options
+from webapp.schemas import STACK_DEFAULTS_META_KEY, coerce_stack_options
 
 log = logging.getLogger(__name__)
 
@@ -131,15 +133,24 @@ def _stack_target(
     """Run a stack for one target and record it. Returns a small summary."""
     from seestack.stack.stacker import run_stack
 
+    # Option precedence:
+    #   global settings.default_stack_options
+    #     → per-target "Save as defaults" (used by auto-stack)
+    #       → explicit options passed for this run (manual stack from the form)
     opts_dict = dict(settings.default_stack_options)
-    if options:
-        opts_dict.update(options)
-    if opts_dict.get("max_workers") is None and settings.cpu_workers:
-        opts_dict["max_workers"] = settings.cpu_workers
-    opts = coerce_stack_options(opts_dict)
-
     proj = lib.open_target(safe)
     try:
+        if options is None:
+            raw = proj.get_meta(STACK_DEFAULTS_META_KEY)
+            if raw:
+                with contextlib.suppress(json.JSONDecodeError):
+                    opts_dict.update(json.loads(raw))
+        else:
+            opts_dict.update(options)
+        if opts_dict.get("max_workers") is None and settings.cpu_workers:
+            opts_dict["max_workers"] = settings.cpu_workers
+        opts = coerce_stack_options(opts_dict)
+
         result = run_stack(
             proj, opts,
             progress=lambda phase, done, total: (

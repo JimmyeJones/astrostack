@@ -207,6 +207,11 @@ def _dataclass_defaults() -> dict[str, Any]:
     return out
 
 
+# Project meta key under which per-target stacking defaults are stored. Shared
+# by the stack router (read/write) and the pipeline (auto-stack reads it).
+STACK_DEFAULTS_META_KEY = "web_stack_defaults"
+
+
 def stack_option_fields() -> list[StackOptionField]:
     """The form schema, with defaults sourced from the dataclass."""
     defaults = _dataclass_defaults()
