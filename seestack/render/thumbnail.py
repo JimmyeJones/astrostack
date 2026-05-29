@@ -109,6 +109,49 @@ def generate_thumbnail(
     return out_path
 
 
+def render_stack_png(
+    fits_path: str | Path,
+    *,
+    target_bg: float = 0.10,
+    sigma_factor: float = -2.5,
+    max_width: int = 1024,
+) -> bytes:
+    """Render a stacked-image FITS to PNG bytes with adjustable stretch.
+
+    Unlike :func:`generate_thumbnail` (which debayers a raw Seestar mosaic),
+    this reads an already-processed stack FITS — a 3-channel ``(C, H, W)`` float
+    cube (or 2-D mono) — and applies :func:`autostretch` with caller-supplied
+    ``target_bg`` (stretch strength; higher reveals fainter nebulosity) and
+    ``sigma_factor`` (black point). Because it works from the full-dynamic-range
+    FITS, faint detail that the baked 8-bit preview clipped comes back.
+    """
+    import io
+
+    from astropy.io import fits as _fits
+    from PIL import Image
+
+    arr = np.asarray(_fits.getdata(fits_path), dtype=np.float32)
+    if arr.ndim == 3:                       # (channels, H, W) → (H, W, channels)
+        rgb = np.transpose(arr, (1, 2, 0))
+        if rgb.shape[2] == 1:
+            rgb = np.repeat(rgb, 3, axis=2)
+        elif rgb.shape[2] > 3:
+            rgb = rgb[..., :3]
+    else:                                   # 2-D mono → grey RGB
+        rgb = np.stack([arr, arr, arr], axis=-1)
+
+    h, w = rgb.shape[:2]
+    if w > max_width:
+        target_h = max(1, int(round(h * (max_width / w))))
+        rgb = _downsample_rgb(rgb, target_h, max_width)
+
+    stretched = autostretch(rgb, target_bg=target_bg, sigma_factor=sigma_factor)
+    u8 = (np.clip(stretched, 0.0, 1.0) * 255).astype(np.uint8)
+    buf = io.BytesIO()
+    Image.fromarray(u8, mode="RGB").save(buf, format="PNG")
+    return buf.getvalue()
+
+
 def autostretch(
     rgb: np.ndarray,
     *,
