@@ -63,12 +63,13 @@ Point the container's `/data` volume at a TrueNAS dataset. The app creates:
 
 ### ASTAP (plate solving)
 
-The app runs without ASTAP (frames stay "unsolved"; you can still preview and
-stack already-solved data). To enable solving, either **bundle** a headless
-`astap` binary + a star database into the image, or **mount** an existing
-install over `/opt/astap`. See [docker/astap/README.md](../docker/astap/README.md).
-For the Seestar's ~1.3° field of view the small **g05**/**d05** database is
-plenty.
+The Docker image **automatically downloads** the ASTAP headless CLI and the
+**d05** star database at build time — no manual steps needed. Plate solving
+works out of the box for the Seestar's ~1.3° field of view.
+
+If you need a larger star database or want to pin a specific ASTAP version,
+mount your own install over `/opt/astap` at runtime (see
+[docker/astap/README.md](../docker/astap/README.md)).
 
 ## Local development
 

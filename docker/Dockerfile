@@ -34,11 +34,33 @@ COPY --from=frontend /build/dist/ ./webapp/static/
 
 RUN pip install --no-cache-dir .[web]
 
-# Optional ASTAP plate solver. If you place a headless `astap` binary and a
-# star database under docker/astap/ before building, they'll be bundled here.
-# Otherwise mount them at runtime (see docker-compose.yml) — the app runs fine
-# without ASTAP, it just can't plate-solve until one is available.
-COPY docker/astap/ /opt/astap/
+# ASTAP headless plate solver + d05 star database (500 stars/sq.deg; sufficient
+# for the Seestar's ~1.3° FOV).  Downloaded at image-build time from SourceForge
+# so users don't have to bundle anything manually.
+# Override at runtime by mounting a different install over /opt/astap (see
+# docker-compose.yml) or by setting astap_path in the Settings page.
+RUN apt-get update && apt-get install -y --no-install-recommends curl unzip \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /opt/astap \
+    \
+    # ASTAP headless CLI binary (Linux x86_64)
+    && curl -fsSL -o /tmp/astap_cli.zip \
+         "https://sourceforge.net/projects/astap-program/files/linux_installer/astap_command-line_version_Linux_amd64.zip/download" \
+    && unzip -j /tmp/astap_cli.zip -d /opt/astap \
+    && mv /opt/astap/astap_cli /opt/astap/astap \
+    && chmod +x /opt/astap/astap \
+    && rm /tmp/astap_cli.zip \
+    \
+    # d05 star database (.290 index files)
+    && curl -fsSL -o /tmp/d05.deb \
+         "https://sourceforge.net/projects/astap-program/files/star_databases/d05_star_database.deb/download" \
+    && dpkg -x /tmp/d05.deb /tmp/d05 \
+    && find /tmp/d05 -name "*.290" -exec mv {} /opt/astap/ \; \
+    && rm -rf /tmp/d05.deb /tmp/d05 \
+    \
+    # Remove build-time tools to keep the layer lean
+    && apt-get purge -y --auto-remove curl unzip
+
 ENV SEESTACK_ASTAP_PATH=/opt/astap/astap
 ENV ASTROSTACK_DATA=/data
 ENV ASTROSTACK_PORT=8000
