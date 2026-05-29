@@ -43,12 +43,12 @@ RUN pip install --no-cache-dir .[web]
 # over /opt/astap at runtime; see docker-compose.yml).
 ARG ASTAP_DB=d05
 COPY docker/install-astap.sh /tmp/install-astap.sh
-RUN apt-get update && apt-get install -y --no-install-recommends curl unzip \
+RUN apt-get update && apt-get install -y --no-install-recommends curl unzip file \
     && rm -rf /var/lib/apt/lists/* \
     && chmod +x /tmp/install-astap.sh \
     && ASTAP_DB="${ASTAP_DB}" /tmp/install-astap.sh \
     && rm /tmp/install-astap.sh \
-    && apt-get purge -y --auto-remove curl unzip
+    && apt-get purge -y --auto-remove curl unzip file
 
 ENV SEESTACK_ASTAP_PATH=/opt/astap/astap
 ENV ASTROSTACK_DATA=/data

@@ -35,6 +35,7 @@ webapp/static/
 # Bundled ASTAP (provide your own; don't commit binaries / star DBs)
 docker/astap/astap
 docker/astap/*.290
+docker/astap/*.1476
 
 # OS
 Thumbs.db
