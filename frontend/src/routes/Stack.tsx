@@ -1,83 +1,15 @@
 import {
-  Accordion, Button, Center, Group, Loader, NumberInput, Paper, Progress, Select,
-  Stack, Switch, Text, TextInput, Title, Tooltip,
+  Accordion, Button, Center, Group, Loader, Paper, Progress,
+  Stack, Text, Title, Tooltip,
 } from "@mantine/core";
-import { IconInfoCircle, IconPlayerPlay } from "@tabler/icons-react";
+import { IconPlayerPlay } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
 import { api, type StackOptionField } from "../api/client";
+import { StackOptionControl as FieldControl } from "../components/StackOptionControl";
 import { useJobEvents } from "../hooks/useJobEvents";
-
-function FieldControl({
-  field,
-  value,
-  onChange,
-  disabled,
-}: {
-  field: StackOptionField;
-  value: unknown;
-  onChange: (v: unknown) => void;
-  disabled: boolean;
-}) {
-  const label = (
-    <Group gap={4}>
-      <Text size="sm">{field.label}</Text>
-      {field.help ? (
-        <Tooltip label={field.help} multiline w={240} withArrow>
-          <IconInfoCircle size={14} color="var(--mantine-color-dimmed)" />
-        </Tooltip>
-      ) : null}
-    </Group>
-  );
-
-  switch (field.type) {
-    case "bool":
-      return (
-        <Switch
-          label={label}
-          checked={Boolean(value)}
-          disabled={disabled}
-          onChange={(e) => onChange(e.currentTarget.checked)}
-        />
-      );
-    case "enum":
-      return (
-        <Select
-          label={label}
-          data={field.options ?? []}
-          value={(value as string) ?? null}
-          disabled={disabled}
-          onChange={(v) => onChange(v)}
-          allowDeselect={false}
-        />
-      );
-    case "int":
-    case "float":
-      return (
-        <NumberInput
-          label={label}
-          value={value === null || value === undefined ? "" : (value as number)}
-          min={field.min ?? undefined}
-          max={field.max ?? undefined}
-          step={field.step ?? (field.type === "int" ? 1 : 0.1)}
-          decimalScale={field.type === "int" ? 0 : 2}
-          disabled={disabled}
-          onChange={(v) => onChange(v === "" ? null : Number(v))}
-        />
-      );
-    default:
-      return (
-        <TextInput
-          label={label}
-          value={(value as string) ?? ""}
-          disabled={disabled}
-          onChange={(e) => onChange(e.currentTarget.value)}
-        />
-      );
-  }
-}
 
 export function StackView() {
   const { safe = "" } = useParams();
@@ -106,7 +38,12 @@ export function StackView() {
 
   const saveDefaults = useMutation({
     mutationFn: () => api.putStackDefaults(safe, values),
-    onSuccess: () => notifications.show({ message: "Saved as defaults", color: "teal" }),
+    onSuccess: () => notifications.show({
+      title: "Saved as defaults",
+      message: "These options will pre-fill this form and drive auto-stacking for this target.",
+      color: "teal",
+    }),
+    onError: (e: Error) => notifications.show({ message: `Save failed: ${e.message}`, color: "red" }),
   });
 
   if (schema.isLoading || defaults.isLoading) {
@@ -193,9 +130,11 @@ export function StackView() {
           ) : null}
 
           <Group justify="flex-end" mt="sm">
-            <Button variant="default" onClick={() => saveDefaults.mutate()} loading={saveDefaults.isPending}>
-              Save as defaults
-            </Button>
+            <Tooltip label="Remember these options for this target — they pre-fill this form and are used when auto-stacking is on">
+              <Button variant="default" onClick={() => saveDefaults.mutate()} loading={saveDefaults.isPending}>
+                Save as defaults
+              </Button>
+            </Tooltip>
             <Button
               leftSection={<IconPlayerPlay size={16} />}
               onClick={() => trigger.mutate()}

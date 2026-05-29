@@ -12,7 +12,12 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 
 from webapp import deps, pipeline
-from webapp.schemas import StackOptionField, StackRunOut, stack_option_fields
+from webapp.schemas import (
+    STACK_DEFAULTS_META_KEY,
+    StackOptionField,
+    StackRunOut,
+    stack_option_fields,
+)
 
 router = APIRouter(tags=["stack"])
 
@@ -37,8 +42,6 @@ def _run_fits_path(request: Request, safe: str, run_id: int) -> tuple[str, str |
         raise HTTPException(status_code=404, detail="No such run")
     return run.output_basename, run.fits_path
 
-_STACK_DEFAULTS_META_KEY = "web_stack_defaults"
-
 
 @router.get("/api/stack/options/schema", response_model=list[StackOptionField])
 def options_schema() -> list[StackOptionField]:
@@ -50,7 +53,7 @@ def get_stack_defaults(safe: str, request: Request) -> dict[str, Any]:
     settings = deps.get_settings(request)
     lib, proj = deps.open_target_project(request, safe)
     try:
-        raw = proj.get_meta(_STACK_DEFAULTS_META_KEY)
+        raw = proj.get_meta(STACK_DEFAULTS_META_KEY)
     finally:
         proj.close()
         lib.close()
@@ -70,7 +73,7 @@ def put_stack_defaults(safe: str, body: dict[str, Any], request: Request) -> dic
     clean = {k: v for k, v in body.items() if k in valid}
     lib, proj = deps.open_target_project(request, safe)
     try:
-        proj.set_meta(_STACK_DEFAULTS_META_KEY, json.dumps(clean))
+        proj.set_meta(STACK_DEFAULTS_META_KEY, json.dumps(clean))
     finally:
         proj.close()
         lib.close()
