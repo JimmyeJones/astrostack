@@ -104,6 +104,18 @@ _BRIGHT_STARS: list[tuple[str, float, float, float]] = [
 ]
 
 
+def bright_star_catalog() -> list[dict[str, float | str]]:
+    """The built-in bright-star list as plain dicts (name, ra_deg, dec_deg, mag).
+
+    Used by the all-sky map and by the web app's interactive sky viewer so both
+    share a single offline catalog (no external survey/catalog server needed).
+    """
+    return [
+        {"name": name, "ra_deg": ra, "dec_deg": dec, "mag": mag}
+        for (name, ra, dec, mag) in _BRIGHT_STARS
+    ]
+
+
 @dataclass
 class SkyMapOptions:
     """Knobs for ``render_skymap``."""

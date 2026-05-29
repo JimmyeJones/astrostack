@@ -1,0 +1,60 @@
+"""Sky viewer endpoint: bright-star catalog + placed stacked images."""
+
+from __future__ import annotations
+
+from seestack.io.library import Library
+from seestack.io.project import StackRunRow
+
+
+def _add_stack_run_with_preview(data_root, safe: str) -> None:
+    """Give one target a plate-scale + a stack run with a real preview file."""
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            # Ensure at least one frame carries a pixel scale so the sky router
+            # can size the image on the sphere.
+            first = next(proj.iter_frames())
+            proj.update_frame(first.id, pixscale_arcsec=2.5, rotation_deg=12.0)
+
+            preview = lib.target_dir(lib.find_target(safe)) / "master_preview.png"
+            preview.write_bytes(b"\x89PNG\r\n\x1a\n")  # token PNG bytes
+            proj.add_stack_run(StackRunRow(
+                id=None, timestamp_utc="2026-05-01T00:00:00Z",
+                output_basename="master", fits_path=None, tiff_path=None,
+                preview_path=str(preview), n_frames_used=3,
+                canvas_h=1080, canvas_w=1920, coverage_min=1, coverage_max=3,
+                options_json="{}",
+            ))
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+    finally:
+        lib.close()
+
+
+def test_sky_returns_stars(client):
+    r = client.get("/api/sky")
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data["stars"]) > 20
+    sirius = next(s for s in data["stars"] if s["name"] == "Sirius")
+    assert sirius["ra_deg"] > 100 and sirius["mag"] < 0  # brightest star
+    # No stacked images yet.
+    assert data["images"] == []
+
+
+def test_sky_places_stacked_image(client, solved_library):
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _add_stack_run_with_preview(solved_library, safe)
+
+    data = client.get("/api/sky").json()
+    assert len(data["images"]) == 1
+    img = data["images"][0]
+    assert img["safe"] == safe
+    # 1920 px * 2.5"/px / 3600 = 1.333 deg wide; 1080 → 0.75 deg tall.
+    assert abs(img["width_deg"] - 1.3333) < 1e-2
+    assert abs(img["height_deg"] - 0.75) < 1e-2
+    assert img["rotation_deg"] == 12.0
+    assert img["preview_url"].endswith(f"/stack-runs/{img['run_id']}/preview")
+    assert img["ra_deg"] is not None and img["dec_deg"] is not None
