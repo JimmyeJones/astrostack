@@ -6,9 +6,27 @@ solver is available, and you can still preview and stack already-solved data.
 
 ## Bundled automatically in the Docker image
 
-The Dockerfile downloads the headless Linux CLI binary (`astap_cli`) and the
-**d05** star database (500 stars/sq.deg; sufficient for the Seestar's ~1.3°
-field of view) from SourceForge at image-build time. No manual steps required.
+The Dockerfile runs [`install-astap.sh`](../install-astap.sh), which downloads
+the headless Linux CLI binary (`astap_cli`) and the **d05** star database
+(500 stars/sq.deg; sufficient for the Seestar's ~1.3° field of view). No manual
+steps required.
+
+The installer is deliberately robust:
+
+- It tries **several download sources** in turn (the SourceForge command-line
+  zip, a mirror URL, then the full `.deb` package), with retries/backoff, so a
+  single flaky or moved URL doesn't break the build.
+- It **verifies the binary actually runs** (catching missing libraries, a wrong
+  architecture, or a truncated download) and **fails the build loudly** if it
+  can't — so you never get a silently solver-less image.
+
+Pick a different star database at build time:
+
+```bash
+docker compose -f docker/docker-compose.yml build --build-arg ASTAP_DB=d20
+```
+
+Valid values: `d05` (default), `d20`, `d50`, `d80` (denser = larger).
 
 ## Override at runtime (optional)
 

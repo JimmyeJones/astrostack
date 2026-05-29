@@ -17,7 +17,10 @@ See [PLAN.md](PLAN.md) for the full design.
 
 ## Status
 
-Early scaffold (milestone M1). Not yet usable.
+- **AstroStack Web** — complete and tested: auto-pipeline (ingest → QC →
+  plate-solve), per-target organisation, web UI for preview/stacking, folder
+  watcher, and a Docker image (with ASTAP bundled automatically) for TrueNAS.
+- **Seestack** desktop — the original PySide6 app; mature processing engine.
 
 ## Requirements
 
