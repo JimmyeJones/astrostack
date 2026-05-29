@@ -35,30 +35,19 @@ COPY --from=frontend /build/dist/ ./webapp/static/
 RUN pip install --no-cache-dir .[web]
 
 # ASTAP headless plate solver + d05 star database (500 stars/sq.deg; sufficient
-# for the Seestar's ~1.3° FOV).  Downloaded at image-build time from SourceForge
-# so users don't have to bundle anything manually.
-# Override at runtime by mounting a different install over /opt/astap (see
-# docker-compose.yml) or by setting astap_path in the Settings page.
+# for the Seestar's ~1.3° FOV). Fetched at image-build time so users don't have
+# to bundle anything manually. install-astap.sh tries several download sources
+# in turn and verifies the binary actually runs — a broken URL fails the build
+# loudly instead of producing a silently solver-less image.
+# Override the database with --build-arg ASTAP_DB=d20 (or mount your own install
+# over /opt/astap at runtime; see docker-compose.yml).
+ARG ASTAP_DB=d05
+COPY docker/install-astap.sh /tmp/install-astap.sh
 RUN apt-get update && apt-get install -y --no-install-recommends curl unzip \
     && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /opt/astap \
-    \
-    # ASTAP headless CLI binary (Linux x86_64)
-    && curl -fsSL -o /tmp/astap_cli.zip \
-         "https://sourceforge.net/projects/astap-program/files/linux_installer/astap_command-line_version_Linux_amd64.zip/download" \
-    && unzip -j /tmp/astap_cli.zip -d /opt/astap \
-    && mv /opt/astap/astap_cli /opt/astap/astap \
-    && chmod +x /opt/astap/astap \
-    && rm /tmp/astap_cli.zip \
-    \
-    # d05 star database (.290 index files)
-    && curl -fsSL -o /tmp/d05.deb \
-         "https://sourceforge.net/projects/astap-program/files/star_databases/d05_star_database.deb/download" \
-    && dpkg -x /tmp/d05.deb /tmp/d05 \
-    && find /tmp/d05 -name "*.290" -exec mv {} /opt/astap/ \; \
-    && rm -rf /tmp/d05.deb /tmp/d05 \
-    \
-    # Remove build-time tools to keep the layer lean
+    && chmod +x /tmp/install-astap.sh \
+    && ASTAP_DB="${ASTAP_DB}" /tmp/install-astap.sh \
+    && rm /tmp/install-astap.sh \
     && apt-get purge -y --auto-remove curl unzip
 
 ENV SEESTACK_ASTAP_PATH=/opt/astap/astap
