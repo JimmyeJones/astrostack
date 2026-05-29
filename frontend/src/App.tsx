@@ -37,6 +37,7 @@ export function App() {
 
   const links = [
     { to: "/", label: "Library", icon: <IconStars size={18} />, end: true },
+    { to: "/sky", label: "Sky Map", icon: <IconRadar2 size={18} /> },
     { to: "/jobs", label: "Jobs", icon: <IconActivity size={18} /> },
     { to: "/settings", label: "Settings", icon: <IconSettings size={18} /> },
   ];

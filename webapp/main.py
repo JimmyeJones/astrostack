@@ -25,7 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from webapp import pipeline
 from webapp.config import SettingsStore
 from webapp.jobs import JobManager
-from webapp.routers import frames, jobs, settings, stack, system, targets
+from webapp.routers import frames, jobs, settings, sky, stack, system, targets
 from webapp.routers import pipeline as pipeline_router
 from webapp.watcher import Watcher
 
@@ -82,7 +82,7 @@ def create_app() -> FastAPI:
 
     for r in (
         targets.router, frames.router, stack.router, jobs.router,
-        pipeline_router.router, settings.router, system.router,
+        pipeline_router.router, settings.router, system.router, sky.router,
     ):
         app.include_router(r)
 

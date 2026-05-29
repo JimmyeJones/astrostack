@@ -17,6 +17,11 @@ handles the rest.
   sort/accept/reject by quality, configure & run stacking with the full set of
   engine options (advanced ones tucked behind a disclosure), watch live job
   progress, and download results (FITS / TIFF / PNG).
+- **Sky Map** — an interactive 3D viewer of the night sky (a built-in
+  bright-star backdrop, no external survey needed) with every stacked image
+  dropped onto the celestial sphere at its plate-solved position and angular
+  size. Where fields overlap, the most recent image is drawn on top. Drag to
+  look around, scroll to zoom, click an image to jump to that target.
 
 ## How it's built
 

@@ -1,5 +1,12 @@
 // Tiny typed fetch wrapper around the AstroStack API.
 
+import type { SkyImage, SkyStar } from "../sky/projection";
+
+export interface SkyData {
+  stars: SkyStar[];
+  images: SkyImage[];
+}
+
 export interface Target {
   safe_name: string;
   name: string;
@@ -186,4 +193,7 @@ export const api = {
   putSettings: (patch: Record<string, unknown>) =>
     req<Settings>("/api/settings", { method: "PUT", body: JSON.stringify(patch) }),
   getSystem: () => req<SystemInfo>("/api/system"),
+
+  // sky viewer
+  getSky: () => req<SkyData>("/api/sky"),
 };
