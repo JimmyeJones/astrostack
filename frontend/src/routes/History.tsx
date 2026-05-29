@@ -14,6 +14,9 @@ import { api, type StackRun } from "../api/client";
 // reveal faint nebulosity that the baked 8-bit preview clipped.
 const DEFAULT_STRETCH = 0.1;
 const DEFAULT_BLACK = -2.5;
+// The Adjust thumbnail is only ~180px tall, so render it small for snappy,
+// debounce-friendly live updates. "Save as preview" renders at full size.
+const ADJUST_PREVIEW_PX = 480;
 
 function RunCard({ safe, run, onDelete }: { safe: string; run: StackRun; onDelete: () => void }) {
   const qc = useQueryClient();
@@ -36,7 +39,7 @@ function RunCard({ safe, run, onDelete }: { safe: string; run: StackRun; onDelet
 
   const previewSrc = `${api.stackArtifactUrl(safe, run.id, "preview")}${cacheBust ? `?v=${cacheBust}` : ""}`;
   const imgSrc = adjust && run.has_fits
-    ? api.stackRenderUrl(safe, run.id, dStretch, dBlack)
+    ? api.stackRenderUrl(safe, run.id, dStretch, dBlack, ADJUST_PREVIEW_PX)
     : previewSrc;
 
   return (
