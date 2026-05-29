@@ -85,7 +85,17 @@ export interface SystemInfo {
   cpu_count: number | null;
   cpu_workers: number | null;
   gpu_available: boolean;
-  astap: { found: boolean; path: string | null };
+  astap: {
+    found: boolean;
+    path: string | null;
+    star_db_found?: boolean;
+    star_db_dir?: string | null;
+    star_db_count?: number;
+    runs?: boolean;
+    version?: string | null;
+    hint?: string;
+    error?: string;
+  };
   disk: { total_gb?: number; used_gb?: number; free_gb?: number };
   watcher_enabled: boolean;
 }

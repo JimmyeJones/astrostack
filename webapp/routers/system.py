@@ -13,11 +13,53 @@ router = APIRouter(tags=["system"])
 
 
 def _astap_info(settings) -> dict:  # noqa: ANN001
+    """Report ASTAP availability *and* whether it can actually solve.
+
+    A common failure mode is "binary found but no star database" — every solve
+    then fails. We surface the database directory + ``.290`` count and a short
+    self-test so the cause is obvious from the Settings page.
+    """
     try:
-        from seestack.solve.astap import find_astap
+        import subprocess
+
+        from seestack.solve.astap import find_astap, find_star_db_dir
 
         path = find_astap(settings.astap_path)
-        return {"found": path is not None, "path": str(path) if path else None}
+        if path is None:
+            return {
+                "found": False, "path": None, "star_db_found": False,
+                "star_db_dir": None, "star_db_count": 0,
+                "hint": "ASTAP binary not found. Set astap_path or SEESTACK_ASTAP_PATH.",
+            }
+
+        db_dir = find_star_db_dir(path)
+        db_count = len(list(db_dir.glob("*.290"))) if db_dir else 0
+        info = {
+            "found": True,
+            "path": str(path),
+            "star_db_found": db_count > 0,
+            "star_db_dir": str(db_dir) if db_dir else None,
+            "star_db_count": db_count,
+        }
+        # Quick "does it even run" probe (does not solve a frame).
+        try:
+            proc = subprocess.run(  # noqa: S603
+                [str(path), "-h"], capture_output=True, text=True, timeout=15, check=False,
+            )
+            out = (proc.stdout + proc.stderr)
+            ver = next((ln for ln in out.splitlines() if "version" in ln.lower()), "")
+            info["runs"] = True
+            info["version"] = ver.strip()[:120] or None
+        except Exception as exc:  # noqa: BLE001
+            info["runs"] = False
+            info["error"] = f"ASTAP failed to run: {exc}"
+        if db_count == 0:
+            info["hint"] = (
+                "ASTAP is installed but no star database (*.290) was found next "
+                "to it — every solve will fail. Add one (e.g. d05) to "
+                f"{path.parent} or set SEESTACK_ASTAP_DATA."
+            )
+        return info
     except Exception as exc:  # noqa: BLE001
         return {"found": False, "path": None, "error": str(exc)}
 
