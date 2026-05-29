@@ -177,6 +177,12 @@ export const api = {
     req(`/api/targets/${safe}/stack-runs/${id}`, { method: "DELETE" }),
   stackArtifactUrl: (safe: string, id: number, kind: "preview" | "fits" | "tiff") =>
     `/api/targets/${safe}/stack-runs/${id}/${kind}`,
+  stackRenderUrl: (safe: string, id: number, stretch: number, black: number) =>
+    `/api/targets/${safe}/stack-runs/${id}/render?stretch=${stretch}&black=${black}`,
+  saveStackPreview: (safe: string, id: number, stretch: number, black: number) =>
+    req<{ ok: boolean }>(`/api/targets/${safe}/stack-runs/${id}/preview`, {
+      method: "POST", body: JSON.stringify({ stretch, black }),
+    }),
 
   // pipeline
   scan: () => req<{ job_id: string }>("/api/scan", { method: "POST", body: "{}" }),

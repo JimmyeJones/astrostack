@@ -1,23 +1,54 @@
+import { useState } from "react";
 import {
-  ActionIcon, Badge, Button, Card, Center, Group, Image, Loader, SimpleGrid, Stack, Text, Title,
+  ActionIcon, Badge, Button, Card, Center, Group, Image, Loader, SimpleGrid,
+  Slider, Stack, Text, Title, Tooltip,
 } from "@mantine/core";
-import { IconDownload, IconTrash } from "@tabler/icons-react";
+import { useDebouncedValue } from "@mantine/hooks";
+import { notifications } from "@mantine/notifications";
+import { IconAdjustments, IconDeviceFloppy, IconDownload, IconTrash } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api, type StackRun } from "../api/client";
 
+// Defaults mirror the engine's preview stretch; users push "Stretch" up to
+// reveal faint nebulosity that the baked 8-bit preview clipped.
+const DEFAULT_STRETCH = 0.1;
+const DEFAULT_BLACK = -2.5;
+
 function RunCard({ safe, run, onDelete }: { safe: string; run: StackRun; onDelete: () => void }) {
+  const qc = useQueryClient();
+  const [adjust, setAdjust] = useState(false);
+  const [stretch, setStretch] = useState(DEFAULT_STRETCH);
+  const [black, setBlack] = useState(DEFAULT_BLACK);
+  const [cacheBust, setCacheBust] = useState(0);
+  const [dStretch] = useDebouncedValue(stretch, 250);
+  const [dBlack] = useDebouncedValue(black, 250);
+
+  const save = useMutation({
+    mutationFn: () => api.saveStackPreview(safe, run.id, dStretch, dBlack),
+    onSuccess: () => {
+      setCacheBust(Date.now());
+      qc.invalidateQueries({ queryKey: ["sky"] });
+      notifications.show({ message: "Preview updated", color: "teal" });
+    },
+    onError: () => notifications.show({ message: "Could not save preview", color: "red" }),
+  });
+
+  const previewSrc = `${api.stackArtifactUrl(safe, run.id, "preview")}${cacheBust ? `?v=${cacheBust}` : ""}`;
+  const imgSrc = adjust && run.has_fits
+    ? api.stackRenderUrl(safe, run.id, dStretch, dBlack)
+    : previewSrc;
+
   return (
     <Card withBorder padding="md" radius="md">
       <Card.Section>
-        {run.has_preview ? (
-          <Image src={api.stackArtifactUrl(safe, run.id, "preview")} h={180} fit="contain" bg="#000" />
+        {run.has_preview || (adjust && run.has_fits) ? (
+          <Image src={imgSrc} h={180} fit="contain" bg="#000" />
         ) : (
-          <Center h={180} bg="dark.6">
-            <Text c="dimmed">No preview</Text>
-          </Center>
+          <Center h={180} bg="dark.6"><Text c="dimmed">No preview</Text></Center>
         )}
       </Card.Section>
+
       <Group justify="space-between" mt="sm">
         <Text fw={600}>{run.output_basename}</Text>
         <Badge variant="light">{run.n_frames_used} frames</Badge>
@@ -25,8 +56,59 @@ function RunCard({ safe, run, onDelete }: { safe: string; run: StackRun; onDelet
       <Text size="xs" c="dimmed">
         {run.timestamp_utc.replace("T", " ").slice(0, 19)} · {run.canvas_w}×{run.canvas_h}
       </Text>
+
+      {adjust && run.has_fits ? (
+        <Stack gap={6} mt="sm">
+          <div>
+            <Group justify="space-between" gap={4}>
+              <Text size="xs">Stretch</Text>
+              <Text size="xs" c="dimmed">{stretch.toFixed(2)}</Text>
+            </Group>
+            <Slider
+              min={0.02} max={0.6} step={0.01} value={stretch} onChange={setStretch}
+              label={(v) => v.toFixed(2)} size="sm"
+            />
+          </div>
+          <div>
+            <Group justify="space-between" gap={4}>
+              <Text size="xs">Black point</Text>
+              <Text size="xs" c="dimmed">{black.toFixed(1)}</Text>
+            </Group>
+            <Slider
+              min={-4} max={1} step={0.1} value={black} onChange={setBlack}
+              label={(v) => v.toFixed(1)} size="sm"
+            />
+          </div>
+          <Group gap="xs" mt={4}>
+            <Button
+              size="xs" leftSection={<IconDeviceFloppy size={14} />}
+              loading={save.isPending} onClick={() => save.mutate()}
+            >
+              Save as preview
+            </Button>
+            <Button
+              size="xs" variant="subtle"
+              onClick={() => { setStretch(DEFAULT_STRETCH); setBlack(DEFAULT_BLACK); }}
+            >
+              Reset
+            </Button>
+          </Group>
+        </Stack>
+      ) : null}
+
       <Group mt="sm" justify="space-between">
         <Group gap="xs">
+          {run.has_fits && (
+            <Tooltip label="Adjust stretch / black point from the full-range FITS">
+              <Button
+                size="xs" variant={adjust ? "filled" : "light"}
+                leftSection={<IconAdjustments size={14} />}
+                onClick={() => setAdjust((a) => !a)}
+              >
+                Adjust
+              </Button>
+            </Tooltip>
+          )}
           {run.has_fits && (
             <Button
               size="xs" variant="light" leftSection={<IconDownload size={14} />}
@@ -63,11 +145,7 @@ export function HistoryView() {
   });
 
   if (runs.isLoading) {
-    return (
-      <Center h={300}>
-        <Loader />
-      </Center>
-    );
+    return <Center h={300}><Loader /></Center>;
   }
 
   const list = runs.data ?? [];

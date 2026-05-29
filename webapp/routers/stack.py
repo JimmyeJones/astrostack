@@ -7,13 +7,35 @@ import json
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 
 from webapp import deps, pipeline
 from webapp.schemas import StackOptionField, StackRunOut, stack_option_fields
 
 router = APIRouter(tags=["stack"])
+
+# Stretch (target_bg) and black-point (sigma_factor) bounds for the renderer.
+_STRETCH_MIN, _STRETCH_MAX = 0.02, 0.6
+_BLACK_MIN, _BLACK_MAX = -4.0, 2.0
+
+
+def _clamp(v: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, v))
+
+
+def _run_fits_path(request: Request, safe: str, run_id: int) -> tuple[str, str | None]:
+    """Return (basename, fits_path) for a run, or raise 404."""
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
+    finally:
+        proj.close()
+        lib.close()
+    if run is None:
+        raise HTTPException(status_code=404, detail="No such run")
+    return run.output_basename, run.fits_path
 
 _STACK_DEFAULTS_META_KEY = "web_stack_defaults"
 
@@ -99,6 +121,69 @@ _KIND_FIELDS = {
     "fits": ("fits_path", "application/fits"),
     "tiff": ("tiff_path", "image/tiff"),
 }
+
+
+# NOTE: declared before the "/{kind}" download route so "render" isn't
+# swallowed by that catch-all path parameter.
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/render")
+async def render_stack_run(
+    safe: str, run_id: int, request: Request,
+    stretch: float = 0.10, black: float = -2.5, size: int = 1024,
+) -> Response:
+    """Live, adjustable re-render of a run's stacked FITS (full dynamic range).
+
+    ``stretch`` → autostretch target background (higher reveals fainter detail);
+    ``black`` → black-point sigma factor. Runs in a threadpool so it never
+    blocks the job worker.
+    """
+    _, fits_path = _run_fits_path(request, safe, run_id)
+    if not fits_path or not Path(fits_path).exists():
+        raise HTTPException(status_code=404, detail="No FITS for this run to render")
+
+    from seestack.render.thumbnail import render_stack_png
+    png = await run_in_threadpool(
+        render_stack_png, fits_path,
+        target_bg=_clamp(stretch, _STRETCH_MIN, _STRETCH_MAX),
+        sigma_factor=_clamp(black, _BLACK_MIN, _BLACK_MAX),
+        max_width=int(_clamp(size, 128, 4096)),
+    )
+    return Response(content=png, media_type="image/png",
+                    headers={"Cache-Control": "no-store"})
+
+
+@router.post("/api/targets/{safe}/stack-runs/{run_id}/preview")
+async def save_stack_preview(
+    safe: str, run_id: int, body: dict[str, Any], request: Request,
+) -> dict[str, Any]:
+    """Persist a stretch as the run's preview PNG.
+
+    Re-renders from the FITS at the chosen stretch/black point and overwrites
+    the run's ``preview_path`` so the new look shows everywhere the preview is
+    used (history thumbnails and the Sky Map).
+    """
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
+    finally:
+        proj.close()
+        lib.close()
+    if run is None:
+        raise HTTPException(status_code=404, detail="No such run")
+    if not run.fits_path or not Path(run.fits_path).exists():
+        raise HTTPException(status_code=404, detail="No FITS for this run to render")
+    if not run.preview_path:
+        raise HTTPException(status_code=400, detail="Run has no preview path to overwrite")
+
+    stretch = _clamp(float(body.get("stretch", 0.10)), _STRETCH_MIN, _STRETCH_MAX)
+    black = _clamp(float(body.get("black", -2.5)), _BLACK_MIN, _BLACK_MAX)
+
+    from seestack.render.thumbnail import render_stack_png
+    png = await run_in_threadpool(
+        render_stack_png, run.fits_path,
+        target_bg=stretch, sigma_factor=black, max_width=1024,
+    )
+    Path(run.preview_path).write_bytes(png)
+    return {"ok": True, "stretch": stretch, "black": black}
 
 
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/{kind}")
