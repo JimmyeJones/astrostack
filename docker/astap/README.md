@@ -39,8 +39,10 @@ volumes:
   - /mnt/tank/apps/astap:/opt/astap:ro
 ```
 
-Make sure `/opt/astap/astap` is the executable and the star DB `.290` files
-live in the same directory.
+Make sure `/opt/astap/astap` is the executable and the star database files
+live in the same directory. ASTAP databases come in two band formats — older
+`.290` (g/h/v/w series) and newer `.1476` (d series, e.g. d05) — and either
+works.
 
 You can also override the path in the **Settings** page of the web UI
 (`astap_path` setting) without rebuilding the image.

@@ -88,32 +88,57 @@ done
 
 # ---------------------------------------------------------------------------
 # 2) Star database (default d05 — ample for the Seestar's ~1.3° FOV).
+#
+# ASTAP databases ship in two band formats: older `.290` (g/h/v/w series) and
+# newer `.1476` (d series, e.g. d05). Either works — we collect both. The d05
+# `.deb` and `.zip` are both offered on SourceForge; we try `.deb` first, then
+# fall back to the `.zip` (which holds the database files directly).
 # ---------------------------------------------------------------------------
 declare -a DB_SOURCES=(
   "$SF/star_databases/${DB}_star_database.deb/download|db.deb"
   "$SF_DL/star_databases/${DB}_star_database.deb|db.deb"
+  "$SF/star_databases/${DB}_star_database.zip/download|db.zip"
+  "$SF_DL/star_databases/${DB}_star_database.zip|db.zip"
 )
+
+# Copy any ASTAP database files (.290 or .1476) found under $1 into $DEST.
+# Returns 0 if at least one was copied.
+collect_db_files() {
+  local from="$1" n
+  find "$from" -type f \( -name '*.290' -o -name '*.1476' \) -exec cp -f {} "$DEST/" \; 2>/dev/null || true
+  n=$(find "$DEST" -maxdepth 1 -type f \( -name '*.290' -o -name '*.1476' \) | wc -l)
+  [ "$n" -gt 0 ]
+}
 
 got_db=0
 for src in "${DB_SOURCES[@]}"; do
   url="${src%%|*}"; out="${src##*|}"
   log "trying star database ($DB): $url"
-  if fetch "$url" "$out"; then
-    rm -rf /tmp/astap-work/db && mkdir -p /tmp/astap-work/db
-    dpkg-deb -x "$out" /tmp/astap-work/db
-    if find /tmp/astap-work/db -name '*.290' -exec cp -f {} "$DEST/" \; ; then
-      if ls "$DEST"/*.290 >/dev/null 2>&1; then
-        log "installed $(ls "$DEST"/*.290 | wc -l) star DB file(s) -> $DEST"
-        got_db=1
-        break
-      fi
-    fi
+  if ! fetch "$url" "$out"; then warn "download failed, trying next…"; continue; fi
+
+  rm -rf /tmp/astap-work/db && mkdir -p /tmp/astap-work/db
+  # Validate + extract by real archive type (guards against an HTML interstitial
+  # page being saved as if it were the archive).
+  case "$(file -b "$out" 2>/dev/null)" in
+    *Debian*|*"Debian binary package"*) dpkg-deb -x "$out" /tmp/astap-work/db 2>/dev/null || true ;;
+    *Zip*|*"Zip archive"*)              unzip -o -q "$out" -d /tmp/astap-work/db 2>/dev/null || true ;;
+    *) warn "downloaded file is not a .deb/.zip (got: $(file -b "$out" 2>/dev/null)); trying next…"; continue ;;
+  esac
+
+  if collect_db_files /tmp/astap-work/db; then
+    log "installed $(find "$DEST" -maxdepth 1 -type f \( -name '*.290' -o -name '*.1476' \) | wc -l) star DB file(s) -> $DEST"
+    got_db=1
+    break
   fi
-  warn "db source failed, trying next…"
+  warn "archive extracted but contained no .290/.1476 files; contents were:"
+  find /tmp/astap-work/db -type f -printf '  %p (%s bytes)\n' 2>/dev/null | head -20 >&2 || true
 done
+
+# A solver-less image is useless for this app, so a missing database is fatal.
 if [ "$got_db" != 1 ]; then
-  warn "no star database installed — plate solving will fail until one is"
-  warn "added to $DEST (mount one, or set ASTAP_DB and rebuild)."
+  die "could not install the '$DB' star database from any source. Plate solving
+       requires it. Check the ASTAP_DB build arg (d05|d20|d50|d80) and that
+       SourceForge is reachable from the build."
 fi
 
 # ---------------------------------------------------------------------------

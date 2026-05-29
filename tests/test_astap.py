@@ -59,8 +59,17 @@ def test_find_star_db_dir_beside_binary(tmp_path):
     assert find_star_db_dir(tmp_path / "astap") == tmp_path
 
 
+def test_find_star_db_dir_1476_format(tmp_path):
+    # The D-series databases (d05/d50) use .1476 files, not .290.
+    (tmp_path / "astap").write_bytes(b"")
+    (tmp_path / "d05_0101.1476").write_bytes(b"x")
+    assert find_star_db_dir(tmp_path / "astap") == tmp_path
+
+
 def test_find_star_db_dir_none_when_absent(tmp_path):
     (tmp_path / "astap").write_bytes(b"")
+    # A stray non-database file must not count as a star database.
+    (tmp_path / "readme.txt").write_bytes(b"x")
     assert find_star_db_dir(tmp_path / "astap") is None
 
 

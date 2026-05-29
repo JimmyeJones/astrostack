@@ -33,7 +33,10 @@ def _astap_info(settings) -> dict:  # noqa: ANN001
             }
 
         db_dir = find_star_db_dir(path)
-        db_count = len(list(db_dir.glob("*.290"))) if db_dir else 0
+        db_count = (
+            len(list(db_dir.glob("*.290"))) + len(list(db_dir.glob("*.1476")))
+            if db_dir else 0
+        )
         info = {
             "found": True,
             "path": str(path),

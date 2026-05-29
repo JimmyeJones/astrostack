@@ -93,17 +93,21 @@ def find_astap(user_path: str | os.PathLike[str] | None = None) -> Path | None:
 
 def find_star_db_dir(astap_path: str | os.PathLike[str] | None = None) -> Path | None:
     """
-    Locate the directory holding ASTAP's star database (``*.290`` files).
+    Locate the directory holding ASTAP's star database.
+
+    ASTAP databases come in two band formats: the older ``.290`` files (G/H/V/W
+    series, e.g. g05, h18) and the newer ``.1476`` files (D series, e.g. d05,
+    d50). Either works; we look for both.
 
     ASTAP normally finds its database automatically when it lives next to the
     executable (the Windows install layout). In other layouts — notably the
-    Docker image, where the binary and the ``.290`` files live in ``/opt/astap``
-    but ASTAP is invoked with a different working directory — auto-detection can
-    miss it, and *every* solve then fails with "no star database found". We pass
-    the directory explicitly via ASTAP's ``-d`` flag when we can find one.
+    Docker image, where the binary and the database live in ``/opt/astap`` but
+    ASTAP is invoked with a different working directory — auto-detection can miss
+    it, and *every* solve then fails with "no star database found". We pass the
+    directory explicitly via ASTAP's ``-d`` flag when we can find one.
 
     Order: ``SEESTACK_ASTAP_DATA`` env var → the executable's own directory.
-    Returns ``None`` if no ``.290`` files are found (then we omit ``-d`` and let
+    Returns ``None`` if no database files are found (then we omit ``-d`` and let
     ASTAP search on its own, preserving the old behaviour).
     """
     candidates: list[Path] = []
@@ -114,7 +118,7 @@ def find_star_db_dir(astap_path: str | os.PathLike[str] | None = None) -> Path |
         candidates.append(Path(astap_path).resolve().parent)
     for d in candidates:
         try:
-            if d.is_dir() and any(d.glob("*.290")):
+            if d.is_dir() and (any(d.glob("*.290")) or any(d.glob("*.1476"))):
                 return d
         except OSError:
             continue
