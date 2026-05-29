@@ -43,21 +43,39 @@ export function SettingsView() {
     <Stack maw={680}>
       <Title order={2}>Settings</Title>
 
-      {system.data ? (
-        <Alert icon={<IconInfoCircle size={16} />} color={system.data.astap.found ? "teal" : "yellow"}>
-          <Group gap="lg">
-            <Text size="sm">Data root: <b>{system.data.data_root}</b></Text>
-            <Text size="sm">CPUs: <b>{system.data.cpu_count}</b></Text>
-            <Badge color={system.data.astap.found ? "teal" : "red"}>
-              ASTAP {system.data.astap.found ? "found" : "missing"}
-            </Badge>
-            {system.data.gpu_available ? <Badge color="violet">GPU</Badge> : null}
-            {system.data.disk.free_gb ? (
-              <Text size="sm">Free: <b>{system.data.disk.free_gb} GB</b></Text>
-            ) : null}
-          </Group>
-        </Alert>
-      ) : null}
+      {system.data ? (() => {
+        const astap = system.data.astap;
+        // Solving needs BOTH the binary and a star database.
+        const solveReady = astap.found && astap.star_db_found !== false;
+        return (
+          <Alert icon={<IconInfoCircle size={16} />} color={solveReady ? "teal" : "yellow"}>
+            <Stack gap={6}>
+              <Group gap="lg">
+                <Text size="sm">Data root: <b>{system.data.data_root}</b></Text>
+                <Text size="sm">CPUs: <b>{system.data.cpu_count}</b></Text>
+                <Badge color={astap.found ? "teal" : "red"}>
+                  ASTAP {astap.found ? "found" : "missing"}
+                </Badge>
+                {astap.found ? (
+                  <Badge color={astap.star_db_found ? "teal" : "red"}>
+                    star DB {astap.star_db_found ? `${astap.star_db_count} files` : "missing"}
+                  </Badge>
+                ) : null}
+                {system.data.gpu_available ? <Badge color="violet">GPU</Badge> : null}
+                {system.data.disk.free_gb ? (
+                  <Text size="sm">Free: <b>{system.data.disk.free_gb} GB</b></Text>
+                ) : null}
+              </Group>
+              {astap.version ? (
+                <Text size="xs" c="dimmed">{astap.version}</Text>
+              ) : null}
+              {astap.hint ? (
+                <Text size="sm" c="yellow">{astap.hint}</Text>
+              ) : null}
+            </Stack>
+          </Alert>
+        );
+      })() : null}
 
       <Paper withBorder p="lg">
         <Stack>

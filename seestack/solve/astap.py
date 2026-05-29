@@ -91,6 +91,36 @@ def find_astap(user_path: str | os.PathLike[str] | None = None) -> Path | None:
     return None
 
 
+def find_star_db_dir(astap_path: str | os.PathLike[str] | None = None) -> Path | None:
+    """
+    Locate the directory holding ASTAP's star database (``*.290`` files).
+
+    ASTAP normally finds its database automatically when it lives next to the
+    executable (the Windows install layout). In other layouts — notably the
+    Docker image, where the binary and the ``.290`` files live in ``/opt/astap``
+    but ASTAP is invoked with a different working directory — auto-detection can
+    miss it, and *every* solve then fails with "no star database found". We pass
+    the directory explicitly via ASTAP's ``-d`` flag when we can find one.
+
+    Order: ``SEESTACK_ASTAP_DATA`` env var → the executable's own directory.
+    Returns ``None`` if no ``.290`` files are found (then we omit ``-d`` and let
+    ASTAP search on its own, preserving the old behaviour).
+    """
+    candidates: list[Path] = []
+    env_dir = os.environ.get("SEESTACK_ASTAP_DATA")
+    if env_dir:
+        candidates.append(Path(env_dir))
+    if astap_path:
+        candidates.append(Path(astap_path).resolve().parent)
+    for d in candidates:
+        try:
+            if d.is_dir() and any(d.glob("*.290")):
+                return d
+        except OSError:
+            continue
+    return None
+
+
 class ASTAPSolver:
     """Run ASTAP on FITS files. Configure once, solve many."""
 
@@ -108,6 +138,8 @@ class ASTAPSolver:
                 "and either add it to PATH or set the path in Settings."
             )
         self.astap_path = path
+        # Where the star database (*.290) lives. None → let ASTAP search itself.
+        self.db_dir = find_star_db_dir(path)
         # Seestar S50 has ~1.27° FOV; S30 is wider. 1.3° is a safe default and
         # ASTAP just uses it as a starting hint, so a small mismatch is fine.
         self.fov_deg = fov_deg
@@ -133,6 +165,10 @@ class ASTAPSolver:
             "-r", f"{self.search_radius_deg}",
             "-wcs",
         ]
+        # Point ASTAP at the star database explicitly when we know where it is,
+        # so solving doesn't depend on the working directory / auto-detection.
+        if self.db_dir is not None:
+            cmd += ["-d", str(self.db_dir)]
         log.debug("astap cmd: %s", cmd)
         try:
             proc = subprocess.run(
