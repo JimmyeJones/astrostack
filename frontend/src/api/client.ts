@@ -56,6 +56,22 @@ export interface StackRun {
   notes: string | null;
 }
 
+export interface GalleryItem {
+  safe: string;
+  target_name: string;
+  run_id: number;
+  output_basename: string;
+  timestamp_utc: string;
+  n_frames_used: number;
+  canvas_w: number;
+  canvas_h: number;
+  has_preview: boolean;
+  has_fits: boolean;
+  has_tiff: boolean;
+  preview_url: string;
+  options: Record<string, unknown>;
+}
+
 export interface Job {
   id: string;
   kind: string;
@@ -202,4 +218,7 @@ export const api = {
 
   // sky viewer
   getSky: () => req<SkyData>("/api/sky"),
+
+  // gallery
+  getGallery: () => req<{ items: GalleryItem[] }>("/api/gallery"),
 };

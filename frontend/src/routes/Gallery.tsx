@@ -1,0 +1,138 @@
+import { useMemo } from "react";
+import {
+  Badge, Card, Center, Group, Image, Loader, SimpleGrid, Spoiler, Stack, Text,
+  Title, Tooltip,
+} from "@mantine/core";
+import { IconPhoto } from "@tabler/icons-react";
+import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
+import { api, type GalleryItem, type StackOptionField } from "../api/client";
+
+/** Format an option value for display (booleans → On/Off, round floats). */
+function fmt(v: unknown): string {
+  if (v === null || v === undefined || v === "") return "—";
+  if (typeof v === "boolean") return v ? "On" : "Off";
+  if (typeof v === "number") return Number.isInteger(v) ? String(v) : v.toFixed(2);
+  return String(v);
+}
+
+/** A few headline settings shown as badges on every card. */
+function highlightBadges(opts: Record<string, unknown>) {
+  const badges: { label: string; on: boolean }[] = [];
+  if (opts.sigma_clip) badges.push({ label: `σ-clip κ${fmt(opts.sigma_kappa)}`, on: true });
+  if (opts.quality_weighted) badges.push({ label: "Quality-weighted", on: true });
+  if (opts.background_flatten) badges.push({ label: "BG flatten", on: true });
+  if (opts.drizzle) badges.push({ label: `Drizzle ×${fmt(opts.drizzle_scale)}`, on: true });
+  if (opts.final_gradient_removal) badges.push({ label: "Gradient removal", on: true });
+  if (typeof opts.lucky_fraction === "number" && opts.lucky_fraction < 1) {
+    badges.push({ label: `Lucky ${Math.round(opts.lucky_fraction * 100)}%`, on: true });
+  }
+  return badges;
+}
+
+function GalleryCard({ item, labels }: {
+  item: GalleryItem;
+  labels: Map<string, string>;
+}) {
+  const badges = highlightBadges(item.options);
+  // Full settings list (only keys we have a label for, in schema order).
+  const rows = useMemo(
+    () =>
+      [...labels.entries()]
+        .filter(([key]) => item.options[key] !== undefined)
+        .map(([key, label]) => ({ label, value: fmt(item.options[key]) })),
+    [item.options, labels],
+  );
+
+  return (
+    <Card withBorder padding="md" radius="md">
+      <Card.Section
+        component={Link}
+        to={`/targets/${item.safe}/history`}
+        style={{ display: "block" }}
+      >
+        {item.has_preview ? (
+          <Image src={item.preview_url} h={200} fit="contain" bg="#000" />
+        ) : (
+          <Center h={200} bg="dark.6"><Text c="dimmed">No preview</Text></Center>
+        )}
+      </Card.Section>
+
+      <Group justify="space-between" mt="sm" wrap="nowrap">
+        <Text fw={600} truncate component={Link} to={`/targets/${item.safe}/history`}>
+          {item.target_name}
+        </Text>
+        <Badge variant="light" style={{ flexShrink: 0 }}>{item.n_frames_used} frames</Badge>
+      </Group>
+      <Text size="xs" c="dimmed">
+        {item.output_basename} · {item.timestamp_utc.replace("T", " ").slice(0, 16)}
+        {" · "}{item.canvas_w}×{item.canvas_h}
+      </Text>
+
+      {badges.length > 0 ? (
+        <Group gap={6} mt="xs">
+          {badges.map((b) => (
+            <Badge key={b.label} size="sm" variant="dot" color="violet">{b.label}</Badge>
+          ))}
+        </Group>
+      ) : null}
+
+      {rows.length > 0 ? (
+        <Spoiler maxHeight={0} showLabel="Stacking settings" hideLabel="Hide settings" mt="xs">
+          <Stack gap={2} mt={6}>
+            {rows.map((r) => (
+              <Group key={r.label} justify="space-between" gap="xs" wrap="nowrap">
+                <Text size="xs" c="dimmed" truncate>{r.label}</Text>
+                <Text size="xs" style={{ flexShrink: 0 }}>{r.value}</Text>
+              </Group>
+            ))}
+          </Stack>
+        </Spoiler>
+      ) : null}
+    </Card>
+  );
+}
+
+export function GalleryView() {
+  const gallery = useQuery({ queryKey: ["gallery"], queryFn: api.getGallery });
+  const schema = useQuery({ queryKey: ["stackSchema"], queryFn: api.optionsSchema });
+
+  const labels = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const f of (schema.data ?? []) as StackOptionField[]) {
+      // output_name isn't an interesting "setting" to show in the gallery.
+      if (f.key !== "output_name") m.set(f.key, f.label);
+    }
+    return m;
+  }, [schema.data]);
+
+  if (gallery.isLoading) {
+    return <Center h={300}><Loader /></Center>;
+  }
+
+  const items = gallery.data?.items ?? [];
+
+  return (
+    <Stack>
+      <Group gap="xs">
+        <IconPhoto size={24} />
+        <Title order={2}>Gallery</Title>
+        <Tooltip label="Every stacked image across all targets">
+          <Badge variant="light">{items.length}</Badge>
+        </Tooltip>
+      </Group>
+
+      {items.length === 0 ? (
+        <Text c="dimmed">
+          No stacked images yet. Stack a target and its results will appear here.
+        </Text>
+      ) : (
+        <SimpleGrid cols={{ base: 1, sm: 2, md: 3, lg: 4 }}>
+          {items.map((it) => (
+            <GalleryCard key={`${it.safe}-${it.run_id}`} item={it} labels={labels} />
+          ))}
+        </SimpleGrid>
+      )}
+    </Stack>
+  );
+}

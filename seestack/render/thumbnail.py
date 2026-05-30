@@ -15,6 +15,7 @@ Generation is a pure function so it can run in worker processes via JobRunner.
 from __future__ import annotations
 
 import logging
+import math
 from pathlib import Path
 
 import numpy as np
@@ -112,18 +113,18 @@ def generate_thumbnail(
 def render_stack_png(
     fits_path: str | Path,
     *,
-    target_bg: float = 0.10,
-    sigma_factor: float = -2.5,
+    stretch: float = 0.5,
+    black: float = 0.35,
     max_width: int = 1024,
 ) -> bytes:
-    """Render a stacked-image FITS to PNG bytes with adjustable stretch.
+    """Render a stacked-image FITS to PNG bytes with an adjustable asinh stretch.
 
     Unlike :func:`generate_thumbnail` (which debayers a raw Seestar mosaic),
     this reads an already-processed stack FITS — a 3-channel ``(C, H, W)`` float
-    cube (or 2-D mono) — and applies :func:`autostretch` with caller-supplied
-    ``target_bg`` (stretch strength; higher reveals fainter nebulosity) and
-    ``sigma_factor`` (black point). Because it works from the full-dynamic-range
-    FITS, faint detail that the baked 8-bit preview clipped comes back.
+    cube (or 2-D mono) — and applies :func:`asinh_stretch` with caller-supplied
+    ``stretch`` (how hard to lift faint detail) and ``black`` (black point),
+    both in ``[0, 1]``. Because it works from the full-dynamic-range FITS, faint
+    detail that the baked 8-bit preview clipped comes back.
     """
     import io
 
@@ -145,16 +146,83 @@ def render_stack_png(
         # Decimate by striding (nearest) rather than box-averaging. Stack FITS
         # carry NaN in uncovered/mosaic-gap regions; box averaging (and a plain
         # min/max normalize) would smear NaN across the whole frame and blank
-        # it out. Striding preserves NaN so the NaN-aware autostretch below can
+        # it out. Striding preserves NaN so the NaN-aware stretch below can
         # exclude those pixels — and it's faster, which suits live previews.
         step = int(np.ceil(w / max_width))
         rgb = rgb[::step, ::step]
 
-    stretched = autostretch(rgb, target_bg=target_bg, sigma_factor=sigma_factor)
+    stretched = asinh_stretch(rgb, stretch=stretch, black=black)
     u8 = (np.clip(np.nan_to_num(stretched), 0.0, 1.0) * 255).astype(np.uint8)
     buf = io.BytesIO()
     Image.fromarray(u8, mode="RGB").save(buf, format="PNG")
     return buf.getvalue()
+
+
+def asinh_stretch(
+    rgb: np.ndarray,
+    *,
+    stretch: float = 0.5,
+    black: float = 0.35,
+) -> np.ndarray:
+    """Asinh (inverse-hyperbolic-sine) stretch — the astrophotographer's stretch.
+
+    Asinh is near-linear for bright pixels (so stars and bright cores keep their
+    shape and colour) but strongly amplifies faint values, which is exactly what
+    nebulae and galaxy halos need. Compared with the MTF/STF curve in
+    :func:`autostretch` it gives a far more natural, less "crunchy" reveal of
+    faint signal.
+
+    Two intuitive controls, both in ``[0, 1]``:
+
+      * ``stretch`` — how hard to lift faint detail. ``0`` ≈ linear, ``1`` ≈
+        extreme. The mapping is geometric so equal slider steps feel evenly
+        spaced.
+      * ``black`` — the black point. Raising it darkens / cleans the sky
+        background. It is anchored to each channel's robust sky level so the
+        background stays a neutral grey (no colour cast), and the response is
+        monotonic: more ``black`` always means a darker background.
+
+    NaN pixels (uncovered mosaic canvas) are excluded from every statistic and
+    rendered black, exactly as in :func:`autostretch`.
+    """
+    img = rgb.astype(np.float32, copy=True)
+    if img.ndim == 2:
+        img = np.stack([img, img, img], axis=-1)
+
+    finite_any = np.isfinite(img).any(axis=2)
+    if not finite_any.any():
+        return np.zeros_like(np.nan_to_num(img))
+
+    # Normalize over covered pixels only; keeps per-channel scales intact.
+    lo = float(np.nanmin(img))
+    hi = float(np.nanmax(img))
+    if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+        return np.zeros_like(np.nan_to_num(img))
+    img = (img - lo) / (hi - lo)
+
+    # asinh softening `a`: geometric sweep from 1.0 (≈linear) at stretch=0 down
+    # to 0.004 (very aggressive) at stretch=1.
+    s = float(np.clip(stretch, 0.0, 1.0))
+    a = float(0.004 ** s)
+    denom = math.asinh(1.0 / a)
+    b = float(np.clip(black, 0.0, 1.0))
+
+    out = np.zeros_like(img)
+    for c in range(3):
+        chan = img[..., c]
+        finite = np.isfinite(chan)
+        if not finite.any():
+            continue
+        med, sigma = _robust_median_sigma(chan[finite])
+        # Black point anchored to the sky median: black=0 keeps almost
+        # everything (median − 2σ), black≈0.33 sits at the sky median, black=1
+        # cuts well into the signal (median + 4σ).
+        shadows = float(np.clip(med + (b * 6.0 - 2.0) * sigma, 0.0, 0.999))
+        rng = max(1.0 - shadows, 1e-6)
+        x = np.clip((chan[finite] - shadows) / rng, 0.0, 1.0)
+        out[..., c][finite] = np.clip(np.arcsinh(x / a) / denom, 0.0, 1.0)
+
+    return out
 
 
 def autostretch(

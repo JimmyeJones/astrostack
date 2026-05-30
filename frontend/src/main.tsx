@@ -13,6 +13,7 @@ import { Library } from "./routes/Library";
 import { TargetView } from "./routes/Target";
 import { StackView } from "./routes/Stack";
 import { HistoryView } from "./routes/History";
+import { GalleryView } from "./routes/Gallery";
 import { JobsView } from "./routes/Jobs";
 import { SettingsView } from "./routes/Settings";
 
@@ -38,6 +39,7 @@ const router = createBrowserRouter([
     element: <App />,
     children: [
       { index: true, element: <Library /> },
+      { path: "gallery", element: <GalleryView /> },
       { path: "targets/:safe", element: <TargetView /> },
       { path: "targets/:safe/stack", element: <StackView /> },
       { path: "targets/:safe/history", element: <HistoryView /> },
