@@ -28,7 +28,7 @@ into a continuous frame before taking the median.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -54,6 +54,17 @@ class CanvasResult:
     is_mosaic: bool             # True if the union is materially bigger than ref
     n_footprints: int
     span_deg: float             # diagonal sky span of the union
+    # Frame ids (or names) dropped as gross plate-solve outliers so the canvas
+    # would fit. The stacker also excludes these from the stack itself.
+    excluded_frame_ids: list = field(default_factory=list)
+
+
+def _ang_sep_deg(ra1: float, dec1: float, ra2: float, dec2: float) -> float:
+    """Great-circle angular separation between two sky points, in degrees."""
+    r1, d1, r2, d2 = (np.radians(v) for v in (ra1, dec1, ra2, dec2))
+    h = (np.sin((d2 - d1) / 2) ** 2
+         + np.cos(d1) * np.cos(d2) * np.sin((r2 - r1) / 2) ** 2)
+    return float(np.degrees(2 * np.arcsin(np.sqrt(np.clip(h, 0.0, 1.0)))))
 
 
 def compute_mosaic_canvas(
@@ -86,10 +97,11 @@ def compute_mosaic_canvas(
 
     from seestack.io.wcs_io import footprint_radec_deg, wcs_from_text, wcs_to_text
 
-    all_ra: list[float] = []
-    all_dec: list[float] = []
+    # Collect each frame's footprint separately (keep its identity) so a single
+    # bad plate-solve can be identified and dropped rather than blowing up the
+    # whole canvas.
+    foot: list[tuple[object, np.ndarray, np.ndarray]] = []  # (key, ra[], dec[])
     pixscales: list[float] = []
-    n_footprints = 0
 
     for f in frames:
         if not f.wcs_json or f.width_px is None or f.height_px is None:
@@ -100,10 +112,14 @@ def compute_mosaic_canvas(
         corners = footprint_radec_deg(wcs, f.width_px, f.height_px)
         if not corners:
             continue
-        n_footprints += 1
-        for ra, dec in corners:
-            all_ra.append(ra)
-            all_dec.append(dec)
+        key = getattr(f, "id", None)
+        if key is None:
+            key = getattr(f, "name", len(foot))
+        foot.append((
+            key,
+            np.array([c[0] for c in corners], dtype=np.float64),
+            np.array([c[1] for c in corners], dtype=np.float64),
+        ))
         # Derive the pixel scale from the WCS itself, not from the DB field —
         # the DB's pixscale_arcsec is populated by plate-solving and may be
         # None (e.g. frames imported with an embedded WCS). proj_plane_pixel_
@@ -116,53 +132,84 @@ def compute_mosaic_canvas(
         except Exception:  # noqa: BLE001 — degenerate WCS; fall back below
             pass
 
-    if n_footprints == 0 or len(all_ra) < 4:
+    if not foot or sum(len(r) for _, r, _ in foot) < 4:
         return None
 
-    ra = np.asarray(all_ra, dtype=np.float64)
-    dec = np.asarray(all_dec, dtype=np.float64)
-
-    # RA wraparound: if the apparent spread is huge, the set straddles 0°.
-    # Shift everything > 180° into negative so the data is continuous.
-    if ra.max() - ra.min() > 180.0:
-        ra = np.where(ra > 180.0, ra - 360.0, ra)
-
-    center_ra = float(np.median(ra))
-    center_dec = float(np.median(dec))
     # Median pixel scale of the inputs; fall back to a Seestar-ish value.
     pixscale_arcsec = float(np.median(pixscales)) if pixscales else 2.5
 
-    # Provisional TAN WCS at the union centroid.
-    w = WCS(naxis=2)
-    w.wcs.ctype = ["RA---TAN", "DEC--TAN"]
-    w.wcs.crval = [center_ra % 360.0, center_dec]
-    w.wcs.cdelt = [-pixscale_arcsec / 3600.0, pixscale_arcsec / 3600.0]
-    w.wcs.crpix = [1.0, 1.0]
+    def _bbox(active: list[int]):
+        """Bounding box (and provisional WCS) for the union of ``active`` frames.
 
-    # Project every corner into this WCS's pixel space (0-based).
-    sky = SkyCoord((ra % 360.0) * u.deg, dec * u.deg)
-    xs, ys = w.world_to_pixel(sky)
-    xs = np.asarray(xs, dtype=np.float64)
-    ys = np.asarray(ys, dtype=np.float64)
-    finite = np.isfinite(xs) & np.isfinite(ys)
-    if not finite.any():
-        return None
-    xs = xs[finite]
-    ys = ys[finite]
+        Returns ``(w, x_min, x_max, y_min, y_max, width, height, center)`` or
+        ``None`` if nothing projects finitely.
+        """
+        ra = np.concatenate([foot[i][1] for i in active])
+        dec = np.concatenate([foot[i][2] for i in active])
+        # RA wraparound: if the apparent spread is huge, the set straddles 0°.
+        if ra.max() - ra.min() > 180.0:
+            ra = np.where(ra > 180.0, ra - 360.0, ra)
+        center_ra = float(np.median(ra))
+        center_dec = float(np.median(dec))
 
-    x_min = float(np.floor(xs.min()))
-    x_max = float(np.ceil(xs.max()))
-    y_min = float(np.floor(ys.min()))
-    y_max = float(np.ceil(ys.max()))
+        w = WCS(naxis=2)
+        w.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+        w.wcs.crval = [center_ra % 360.0, center_dec]
+        w.wcs.cdelt = [-pixscale_arcsec / 3600.0, pixscale_arcsec / 3600.0]
+        w.wcs.crpix = [1.0, 1.0]
 
-    # Pad by 1 px on every side so reproject interpolation at the edge is safe.
-    width = int(x_max - x_min) + 3
-    height = int(y_max - y_min) + 3
-    if width > max_canvas_px or height > max_canvas_px:
-        raise ValueError(
-            f"mosaic canvas would be {width}×{height} px, exceeding the "
-            f"{max_canvas_px} px limit. A frame with a bad plate-solve may be "
-            "flinging the canvas across the sky — check the Footprints tab."
+        sky = SkyCoord((ra % 360.0) * u.deg, dec * u.deg)
+        xs, ys = w.world_to_pixel(sky)
+        xs = np.asarray(xs, dtype=np.float64)
+        ys = np.asarray(ys, dtype=np.float64)
+        ok = np.isfinite(xs) & np.isfinite(ys)
+        if not ok.any():
+            return None
+        xs, ys = xs[ok], ys[ok]
+        x_min, x_max = float(np.floor(xs.min())), float(np.ceil(xs.max()))
+        y_min, y_max = float(np.floor(ys.min())), float(np.ceil(ys.max()))
+        # Pad by 1 px on every side so reproject interpolation at the edge is safe.
+        width = int(x_max - x_min) + 3
+        height = int(y_max - y_min) + 3
+        return w, x_min, x_max, y_min, y_max, width, height, (center_ra, center_dec)
+
+    # Iteratively drop the single most-extreme outlier frame until the canvas
+    # fits. For a healthy frame set this loop runs once and changes nothing; it
+    # only kicks in when a bad plate-solve has flung the union across the sky.
+    active = list(range(len(foot)))
+    excluded: list[object] = []
+    max_excluded = max(1, len(foot) // 2)  # never drop more than half
+    while True:
+        bb = _bbox(active)
+        if bb is None:
+            return None
+        w, x_min, x_max, y_min, y_max, width, height, (center_ra, center_dec) = bb
+        if width <= max_canvas_px and height <= max_canvas_px:
+            break
+        if len(excluded) >= max_excluded or len(active) <= 1:
+            raise ValueError(
+                f"mosaic canvas would be {width}×{height} px, exceeding the "
+                f"{max_canvas_px} px limit, even after dropping outliers. "
+                "Several frames likely have a bad plate-solve. Open the target's "
+                "Frames table, sort by RA/Dec, and reject the ones whose centre "
+                "is far from the rest (or re-solve them)."
+            )
+        # Drop the active frame whose footprint centre is farthest from the
+        # union centre — that's the one flinging the canvas.
+        seps = {
+            i: _ang_sep_deg(
+                float(np.median(foot[i][1])), float(np.median(foot[i][2])),
+                center_ra, center_dec,
+            )
+            for i in active
+        }
+        worst = max(seps, key=seps.get)  # type: ignore[arg-type]
+        excluded.append(foot[worst][0])
+        active.remove(worst)
+        log.warning(
+            "Dropping frame %s from mosaic canvas: plate-solve centre is %.2f° "
+            "from the others (canvas would be %d×%d px)",
+            foot[worst][0], seps[worst], width, height,
         )
 
     # Shift CRPIX so the bounding-box min corner lands at pixel (1, 1) with a
@@ -187,6 +234,7 @@ def compute_mosaic_canvas(
         wcs_text=wcs_to_text(w),
         shape=(height, width),
         is_mosaic=is_mosaic,
-        n_footprints=n_footprints,
+        n_footprints=len(active),
         span_deg=span_deg,
+        excluded_frame_ids=excluded,
     )

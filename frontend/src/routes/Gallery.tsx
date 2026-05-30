@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   Badge, Card, Center, Group, Image, Loader, SimpleGrid, Spoiler, Stack, Text,
   Title, Tooltip,
@@ -7,6 +7,7 @@ import { IconPhoto } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type GalleryItem, type StackOptionField } from "../api/client";
+import { ImageLightbox } from "../components/ImageLightbox";
 
 /** Format an option value for display (booleans → On/Off, round floats). */
 function fmt(v: unknown): string {
@@ -30,9 +31,10 @@ function highlightBadges(opts: Record<string, unknown>) {
   return badges;
 }
 
-function GalleryCard({ item, labels }: {
+function GalleryCard({ item, labels, onView }: {
   item: GalleryItem;
   labels: Map<string, string>;
+  onView: (item: GalleryItem) => void;
 }) {
   const badges = highlightBadges(item.options);
   // Full settings list (only keys we have a label for, in schema order).
@@ -46,13 +48,15 @@ function GalleryCard({ item, labels }: {
 
   return (
     <Card withBorder padding="md" radius="md">
-      <Card.Section
-        component={Link}
-        to={`/targets/${item.safe}/history`}
-        style={{ display: "block" }}
-      >
+      <Card.Section>
         {item.has_preview ? (
-          <Image src={item.preview_url} h={200} fit="contain" bg="#000" />
+          <Tooltip label="Click to view fullscreen" openDelay={400}>
+            <Image
+              src={item.preview_url} h={200} fit="contain" bg="#000"
+              style={{ cursor: "zoom-in" }}
+              onClick={() => onView(item)}
+            />
+          </Tooltip>
         ) : (
           <Center h={200} bg="dark.6"><Text c="dimmed">No preview</Text></Center>
         )}
@@ -96,6 +100,7 @@ function GalleryCard({ item, labels }: {
 export function GalleryView() {
   const gallery = useQuery({ queryKey: ["gallery"], queryFn: api.getGallery });
   const schema = useQuery({ queryKey: ["stackSchema"], queryFn: api.optionsSchema });
+  const [viewing, setViewing] = useState<GalleryItem | null>(null);
 
   const labels = useMemo(() => {
     const m = new Map<string, string>();
@@ -129,10 +134,21 @@ export function GalleryView() {
       ) : (
         <SimpleGrid cols={{ base: 1, sm: 2, md: 3, lg: 4 }}>
           {items.map((it) => (
-            <GalleryCard key={`${it.safe}-${it.run_id}`} item={it} labels={labels} />
+            <GalleryCard
+              key={`${it.safe}-${it.run_id}`} item={it} labels={labels}
+              onView={setViewing}
+            />
           ))}
         </SimpleGrid>
       )}
+
+      <ImageLightbox
+        src={viewing ? viewing.preview_url : null}
+        title={viewing ? `${viewing.target_name} · ${viewing.output_basename}` : undefined}
+        downloadHref={viewing?.has_fits
+          ? api.stackArtifactUrl(viewing.safe, viewing.run_id, "fits") : undefined}
+        onClose={() => setViewing(null)}
+      />
     </Stack>
   );
 }
