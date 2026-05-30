@@ -128,6 +128,21 @@ def find_star_db_dir(astap_path: str | os.PathLike[str] | None = None) -> Path |
 class ASTAPSolver:
     """Run ASTAP on FITS files. Configure once, solve many."""
 
+    # Adaptive solve ladder. Each frame is tried with progressively stronger
+    # noise suppression until one attempt solves. Clean frames solve on the
+    # first (cheap) attempt; only noisy frames pay for the extra tries.
+    #
+    # ``downsample`` maps to ASTAP's ``-z`` (bin NxN before detecting stars):
+    # binning collapses single-pixel hot/read noise that would otherwise be
+    # mistaken for stars, while real stars survive with higher SNR. ``max_stars``
+    # maps to ``-s`` (cap on detected stars used for matching) — fewer, brighter
+    # stars means less chance of matching against noise.
+    _SOLVE_LADDER: tuple[dict[str, int | None], ...] = (
+        {"downsample": None},                  # ASTAP default (auto)
+        {"downsample": 2},                     # bin 2x — suppress noise
+        {"downsample": 4, "max_stars": 200},   # bin 4x, brightest stars only
+    )
+
     def __init__(
         self,
         astap_path: str | os.PathLike[str] | None = None,
@@ -151,15 +166,54 @@ class ASTAPSolver:
         self.timeout_s = timeout_s
 
     def solve(self, fits_path: str | os.PathLike[str]) -> ASTAPResult:
-        """Solve one FITS file. Returns a result with ``solved=False`` on failure."""
+        """Solve one FITS file, escalating noise suppression on failure.
+
+        Tries each rung of :attr:`_SOLVE_LADDER` in turn and returns the first
+        attempt that solves. If none solve, returns the last failed result with
+        a log that records every attempt. A fatal error (e.g. no star database)
+        stops the ladder immediately — retrying can't help.
+        """
         fits_path = Path(fits_path)
         if not fits_path.exists():
             raise FileNotFoundError(fits_path)
 
+        attempts_log: list[str] = []
+        last: ASTAPResult | None = None
+        for i, params in enumerate(self._SOLVE_LADDER):
+            result = self._solve_once(
+                fits_path,
+                downsample=params.get("downsample"),
+                max_stars=params.get("max_stars"),
+            )
+            last = result
+            if result.solved:
+                if i > 0:
+                    log.info("solved %s on attempt %d (%s)", fits_path.name, i + 1, params)
+                return result
+            attempts_log.append(f"[attempt {i + 1} {params}] {result.log_tail.strip()[-300:]}")
+            if _is_fatal_solve_error(result.log_tail):
+                break  # no database / unreadable file — more tries won't help
+
+        if last is not None:
+            last.log_tail = "\n".join(attempts_log)[-2000:]
+            return last
+        # Defensive: ladder was empty (shouldn't happen).
+        raise ASTAPError("no solve attempts were configured")
+
+    def _solve_once(
+        self,
+        fits_path: Path,
+        *,
+        downsample: int | None = None,
+        max_stars: int | None = None,
+    ) -> ASTAPResult:
+        """One ASTAP invocation with a specific detection configuration."""
         # ASTAP CLI flags:
         #   -f <file>       FITS file to solve
         #   -fov <deg>      approximate FOV
         #   -r   <deg>      search radius
+        #   -z   <0-4>      downsample (bin) before star detection; suppresses noise
+        #   -s   <N>        max number of detected stars to use for matching
         #   -wcs            write a .wcs sidecar
         #   -update         also update FITS header (we DON'T want this — keep raws untouched)
         cmd = [
@@ -169,6 +223,10 @@ class ASTAPSolver:
             "-r", f"{self.search_radius_deg}",
             "-wcs",
         ]
+        if downsample is not None:
+            cmd += ["-z", str(downsample)]
+        if max_stars is not None:
+            cmd += ["-s", str(max_stars)]
         # Point ASTAP at the star database explicitly when we know where it is,
         # so solving doesn't depend on the working directory / auto-detection.
         if self.db_dir is not None:
@@ -207,6 +265,15 @@ class ASTAPSolver:
             solved=solved,
             log_tail=log_tail,
         )
+
+
+def _is_fatal_solve_error(log_tail: str) -> bool:
+    """True if the failure is unrecoverable (retrying with other params is futile)."""
+    low = log_tail.lower()
+    return any(
+        sig in low
+        for sig in ("no star database", "star database not found", "could not open", "error reading")
+    )
 
 
 def _parse_astap_ini(ini_path: Path) -> tuple[float, float, float, float]:
