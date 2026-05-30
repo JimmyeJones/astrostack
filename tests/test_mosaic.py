@@ -95,12 +95,28 @@ def test_no_usable_frames_returns_none():
     assert compute_mosaic_canvas(frames, reference_shape=(320, 480)) is None
 
 
-def test_oversized_canvas_raises():
-    """A frame flung across the sky (bad solve) should be caught, not OOM.
+def test_single_bad_solve_is_dropped():
+    """One frame flung across the sky (bad solve) is dropped, not fatal.
 
-    15° away at 5"/px ≈ 10 800 px — still finite under TAN projection but well
-    past a 4000 px limit.
+    Four good frames + one 15° away (≈10 800 px at 5"/px). Rather than failing
+    the whole stack, the outlier is excluded and the canvas covers the good
+    cluster — well under the limit.
     """
-    frames = [_frame(10.0, 10.0), _frame(10.0, 10.0), _frame(25.0, 10.0)]
-    with pytest.raises(ValueError, match="exceeding"):
+    frames = [_frame(10.0, 10.0) for _ in range(4)] + [_frame(25.0, 10.0)]
+    canvas = compute_mosaic_canvas(frames, reference_shape=(320, 480), max_canvas_px=4000)
+    assert canvas is not None
+    assert len(canvas.excluded_frame_ids) == 1   # the flung frame
+    assert canvas.n_footprints == 4              # the good cluster
+    assert canvas.shape[0] < 4000 and canvas.shape[1] < 4000
+
+
+def test_unsalvageable_canvas_raises():
+    """If dropping outliers can't salvage it, raise — with web guidance.
+
+    Three mutually-distant frames can't be brought under a 4000 px limit by
+    dropping at most half, so it still raises. The message points at the web
+    Frames table (there is no desktop "Footprints tab" here).
+    """
+    frames = [_frame(10.0, 10.0), _frame(25.0, 10.0), _frame(40.0, 10.0)]
+    with pytest.raises(ValueError, match="Frames table"):
         compute_mosaic_canvas(frames, reference_shape=(320, 480), max_canvas_px=4000)

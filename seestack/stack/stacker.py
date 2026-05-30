@@ -181,6 +181,17 @@ def run_stack(
                         "using reference-frame canvas", exc)
             canvas = None
         if canvas is not None:
+            # Frames dropped as gross plate-solve outliers during canvas sizing
+            # must also be excluded from the stack — otherwise they'd reproject
+            # to the wrong place (or off-canvas) and contaminate the result.
+            if canvas.excluded_frame_ids:
+                bad = set(canvas.excluded_frame_ids)
+                kept = [f for f in frames if getattr(f, "id", None) not in bad]
+                log.warning(
+                    "Excluded %d frame(s) with a bad plate-solve from the stack "
+                    "(ids: %s)", len(frames) - len(kept), sorted(bad),
+                )
+                frames = kept
             use_union = options.mosaic_canvas == "union" or canvas.is_mosaic
             if use_union:
                 dst_wcs_text = canvas.wcs_text

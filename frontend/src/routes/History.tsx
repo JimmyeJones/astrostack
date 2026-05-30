@@ -9,6 +9,7 @@ import { IconAdjustments, IconDeviceFloppy, IconDownload, IconTrash } from "@tab
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api, type StackRun } from "../api/client";
+import { ImageLightbox } from "../components/ImageLightbox";
 
 // Asinh stretch controls, both 0..1 (see seestack asinh_stretch). "Stretch"
 // lifts faint nebulosity; "Black point" cleans the sky background. Users push
@@ -22,6 +23,7 @@ function RunCard({ safe, run, onDelete }: { safe: string; run: StackRun; onDelet
   const [stretch, setStretch] = useState(DEFAULT_STRETCH);
   const [black, setBlack] = useState(DEFAULT_BLACK);
   const [cacheBust, setCacheBust] = useState(0);
+  const [light, setLight] = useState(false);
   const [dStretch] = useDebouncedValue(stretch, 250);
   const [dBlack] = useDebouncedValue(black, 250);
 
@@ -44,7 +46,10 @@ function RunCard({ safe, run, onDelete }: { safe: string; run: StackRun; onDelet
     <Card withBorder padding="md" radius="md">
       <Card.Section>
         {run.has_preview || (adjust && run.has_fits) ? (
-          <Image src={imgSrc} h={180} fit="contain" bg="#000" />
+          <Image
+            src={imgSrc} h={180} fit="contain" bg="#000"
+            style={{ cursor: "zoom-in" }} onClick={() => setLight(true)}
+          />
         ) : (
           <Center h={180} bg="dark.6"><Text c="dimmed">No preview</Text></Center>
         )}
@@ -131,6 +136,17 @@ function RunCard({ safe, run, onDelete }: { safe: string; run: StackRun; onDelet
           <IconTrash size={16} />
         </ActionIcon>
       </Group>
+
+      <ImageLightbox
+        src={light
+          ? (adjust && run.has_fits
+              ? `${api.stackRenderUrl(safe, run.id, dStretch, dBlack)}&size=2048`
+              : previewSrc)
+          : null}
+        title={run.output_basename}
+        downloadHref={run.has_fits ? api.stackArtifactUrl(safe, run.id, "fits") : undefined}
+        onClose={() => setLight(false)}
+      />
     </Card>
   );
 }
