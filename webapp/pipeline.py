@@ -76,8 +76,34 @@ def _pipeline_body(
                 finally:
                     proj.close()
                 lib.refresh_target_stats(safe)
-                if settings.auto_stack and not job.cancel_requested():
+
+        # Auto-stack runs as its own pass (not gated on QC/solve being on) and is
+        # non-fatal per target. It considers *all* targets — not just the ones
+        # touched by this batch — so enabling auto-stack and running a scan picks
+        # up existing data too. A target is (re)stacked only when it has new
+        # plate-solved accepted frames since its last stack, so repeated scans
+        # don't redundantly re-stack unchanged targets.
+        if settings.auto_stack:
+            stacked: list[str] = []
+            skipped: list[str] = []
+            stack_errors: dict[str, str] = {}
+            for entry in lib.list_targets():
+                if job.cancel_requested():
+                    break
+                safe = entry.safe_name
+                if not _needs_auto_stack(lib, safe):
+                    skipped.append(safe)
+                    continue
+                try:
                     _stack_target(settings, jm, job, lib, safe)
+                    stacked.append(safe)
+                except Exception as exc:  # noqa: BLE001 — one target shouldn't sink the batch
+                    log.warning("auto-stack failed for %s: %s", safe, exc)
+                    stack_errors[safe] = str(exc)
+            summary["auto_stacked"] = stacked
+            summary["auto_stack_skipped"] = skipped
+            if stack_errors:
+                summary["stack_errors"] = stack_errors
         return summary
     finally:
         lib.close()
@@ -119,6 +145,26 @@ def submit_stack(
             lib.close()
 
     return jm.submit("stack", body, target=safe)
+
+
+def _needs_auto_stack(lib: Library, safe: str) -> bool:
+    """True if a target has new plate-solved accepted frames to (re)stack.
+
+    Stacks the first time a target has solvable data, and again only when more
+    accepted+solved frames exist than the last stack used — so repeated scans
+    don't redundantly re-stack unchanged targets.
+    """
+    proj = lib.open_target(safe)
+    try:
+        solved_accepted = sum(
+            1 for f in proj.iter_frames(accepted_only=True) if f.wcs_json
+        )
+        if solved_accepted == 0:
+            return False
+        latest = next(iter(proj.iter_stack_runs()), None)  # newest first
+        return latest is None or solved_accepted > latest.n_frames_used
+    finally:
+        proj.close()
 
 
 def _stack_target(
