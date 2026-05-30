@@ -77,13 +77,16 @@ def _gpu_available() -> bool:
 
 
 @router.get("/api/health")
-def health(request: Request) -> dict:
-    settings = deps.get_settings(request)
-    return {
-        "ok": True,
-        "astap_found": _astap_info(settings)["found"],
-        "library_ok": settings.resolved_library_root.exists(),
-    }
+async def health() -> dict:
+    """Liveness probe. Deliberately trivial — no subprocess, no disk, no locks.
+
+    This is what Docker's HEALTHCHECK hits. It must answer *instantly* even when
+    the job worker is pinning every core on a long stack; anything heavier here
+    (e.g. shelling out to ASTAP, which is slow under load) can blow the probe's
+    timeout, get the container restarted mid-stack, and leave jobs "interrupted".
+    Rich status (ASTAP, disk, GPU) lives on ``/api/system`` instead.
+    """
+    return {"ok": True}
 
 
 @router.get("/api/system")

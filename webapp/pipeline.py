@@ -23,6 +23,13 @@ from webapp.schemas import STACK_DEFAULTS_META_KEY, coerce_stack_options
 
 log = logging.getLogger(__name__)
 
+# Per-target meta marker recording the solved+accepted frame count of the last
+# *auto*-stack attempt. Used to break a crash loop: if a stack repeatedly kills
+# the process (e.g. OOM), the container restarts, the watcher re-scans, and
+# without this we'd auto-stack the same data forever. We attempt a given frame
+# count once; the user can still trigger a manual stack to retry.
+AUTO_STACK_ATTEMPT_META_KEY = "web_auto_stack_attempt"
+
 
 def _progress(jm: JobManager, job: Job):
     """Engine ``(phase, done, total)`` callback bound to a job."""
@@ -91,9 +98,14 @@ def _pipeline_body(
                 if job.cancel_requested():
                     break
                 safe = entry.safe_name
-                if not _needs_auto_stack(lib, safe):
+                attempt_n = _auto_stack_frame_count(lib, safe)
+                if attempt_n is None:
                     skipped.append(safe)
                     continue
+                # Record the attempt *before* stacking so that if this stack
+                # crashes the whole process, the watcher won't re-trigger the
+                # identical stack on restart (crash-loop guard).
+                _mark_auto_stack_attempt(lib, safe, attempt_n)
                 try:
                     _stack_target(settings, jm, job, lib, safe)
                     stacked.append(safe)
@@ -147,22 +159,41 @@ def submit_stack(
     return jm.submit("stack", body, target=safe)
 
 
-def _needs_auto_stack(lib: Library, safe: str) -> bool:
-    """True if a target has new plate-solved accepted frames to (re)stack.
+def _solved_accepted_count(proj: Any) -> int:
+    return sum(1 for f in proj.iter_frames(accepted_only=True) if f.wcs_json)
+
+
+def _auto_stack_frame_count(lib: Library, safe: str) -> int | None:
+    """Solved+accepted frame count to stack now, or ``None`` to skip the target.
 
     Stacks the first time a target has solvable data, and again only when more
     accepted+solved frames exist than the last stack used — so repeated scans
-    don't redundantly re-stack unchanged targets.
+    don't redundantly re-stack unchanged targets. Also skips a target whose
+    auto-stack was already attempted at this exact frame count but produced no
+    run (crash-loop guard); a manual stack bypasses this.
     """
     proj = lib.open_target(safe)
     try:
-        solved_accepted = sum(
-            1 for f in proj.iter_frames(accepted_only=True) if f.wcs_json
-        )
+        solved_accepted = _solved_accepted_count(proj)
         if solved_accepted == 0:
-            return False
+            return None
         latest = next(iter(proj.iter_stack_runs()), None)  # newest first
-        return latest is None or solved_accepted > latest.n_frames_used
+        if latest is not None and solved_accepted <= latest.n_frames_used:
+            return None
+        attempted = proj.get_meta(AUTO_STACK_ATTEMPT_META_KEY)
+        if attempted is not None:
+            with contextlib.suppress(TypeError, ValueError):
+                if int(attempted) >= solved_accepted:
+                    return None  # already tried this data; don't loop
+        return solved_accepted
+    finally:
+        proj.close()
+
+
+def _mark_auto_stack_attempt(lib: Library, safe: str, frame_count: int) -> None:
+    proj = lib.open_target(safe)
+    try:
+        proj.set_meta(AUTO_STACK_ATTEMPT_META_KEY, str(frame_count))
     finally:
         proj.close()
 

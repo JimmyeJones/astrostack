@@ -60,7 +60,9 @@ ENV PYTHONPATH=/app
 EXPOSE 8000
 VOLUME ["/data"]
 
-HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health').status==200 else 1)"
+# Trivial liveness probe with generous slack so a long, CPU-saturating stack
+# never trips a restart that would interrupt the running job.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=6 \
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health', timeout=10).status==200 else 1)"
 
 CMD ["uvicorn", "webapp.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
