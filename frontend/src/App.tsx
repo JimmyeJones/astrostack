@@ -1,5 +1,5 @@
 import { AppShell, Badge, Button, Group, NavLink, ScrollArea, Text, Title } from "@mantine/core";
-import { IconActivity, IconPhoto, IconRadar2, IconSettings, IconStars } from "@tabler/icons-react";
+import { IconActivity, IconLayoutGrid, IconPhoto, IconRadar2, IconSettings, IconStars } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { NavLink as RouterNavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
@@ -37,6 +37,7 @@ export function App() {
 
   const links = [
     { to: "/", label: "Library", icon: <IconStars size={18} />, end: true },
+    { to: "/gallery", label: "Gallery", icon: <IconLayoutGrid size={18} /> },
     { to: "/sky", label: "Sky Map", icon: <IconRadar2 size={18} /> },
     { to: "/jobs", label: "Jobs", icon: <IconActivity size={18} /> },
     { to: "/settings", label: "Settings", icon: <IconSettings size={18} /> },

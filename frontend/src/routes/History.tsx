@@ -10,10 +10,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api, type StackRun } from "../api/client";
 
-// Defaults mirror the engine's preview stretch; users push "Stretch" up to
-// reveal faint nebulosity that the baked 8-bit preview clipped.
-const DEFAULT_STRETCH = 0.1;
-const DEFAULT_BLACK = -2.5;
+// Asinh stretch controls, both 0..1 (see seestack asinh_stretch). "Stretch"
+// lifts faint nebulosity; "Black point" cleans the sky background. Users push
+// Stretch up to reveal detail the baked 8-bit preview clipped.
+const DEFAULT_STRETCH = 0.5;
+const DEFAULT_BLACK = 0.35;
 
 function RunCard({ safe, run, onDelete }: { safe: string; run: StackRun; onDelete: () => void }) {
   const qc = useQueryClient();
@@ -61,22 +62,22 @@ function RunCard({ safe, run, onDelete }: { safe: string; run: StackRun; onDelet
         <Stack gap={6} mt="sm">
           <div>
             <Group justify="space-between" gap={4}>
-              <Text size="xs">Stretch</Text>
+              <Text size="xs">Stretch (asinh)</Text>
               <Text size="xs" c="dimmed">{stretch.toFixed(2)}</Text>
             </Group>
             <Slider
-              min={0.02} max={0.6} step={0.01} value={stretch} onChange={setStretch}
+              min={0} max={1} step={0.01} value={stretch} onChange={setStretch}
               label={(v) => v.toFixed(2)} size="sm"
             />
           </div>
           <div>
             <Group justify="space-between" gap={4}>
               <Text size="xs">Black point</Text>
-              <Text size="xs" c="dimmed">{black.toFixed(1)}</Text>
+              <Text size="xs" c="dimmed">{black.toFixed(2)}</Text>
             </Group>
             <Slider
-              min={-4} max={1} step={0.1} value={black} onChange={setBlack}
-              label={(v) => v.toFixed(1)} size="sm"
+              min={0} max={1} step={0.01} value={black} onChange={setBlack}
+              label={(v) => v.toFixed(2)} size="sm"
             />
           </div>
           <Group gap="xs" mt={4}>

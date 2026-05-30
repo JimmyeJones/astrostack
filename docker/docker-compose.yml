@@ -32,7 +32,11 @@ services:
       - TZ=UTC
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health').status==200 else 1)"]
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health', timeout=10).status==200 else 1)"]
       interval: 30s
-      timeout: 5s
-      retries: 3
+      timeout: 10s
+      # Generous start_period + retries so a long, CPU-saturating stack never
+      # trips a restart (which would mark the running job "interrupted" and, with
+      # auto-stack on, loop). The probe itself is trivial; these just add slack.
+      start_period: 120s
+      retries: 6

@@ -93,3 +93,35 @@ def test_auto_stack_failure_is_non_fatal(solved_library, monkeypatch):
         lib.close()
     assert summary["stack_errors"]
     assert summary["auto_stacked"] == []
+
+
+def test_auto_stack_does_not_loop_on_repeated_crash(solved_library, monkeypatch):
+    # A stack that kills the run (here: raises) must be auto-attempted only ONCE
+    # per data state — otherwise a process-crashing stack + watcher re-trigger
+    # would loop forever (every job "interrupted").
+    calls: list[str] = []
+
+    def boom(proj, opts, *, progress=None, cancel=None):  # noqa: ANN001
+        calls.append(getattr(proj, "name", "?"))
+        raise MemoryError("simulated OOM")
+
+    monkeypatch.setattr("seestack.stack.stacker.run_stack", boom)
+
+    def run_pipeline():
+        lib = Library.open_or_create(solved_library / "library")
+        try:
+            return pipeline._pipeline_body(
+                _settings(solved_library), _FakeJM(), Job(kind="pipeline"), root=None
+            )
+        finally:
+            lib.close()
+
+    first = run_pipeline()
+    attempted = len(calls)
+    assert attempted >= 1            # tried each eligible target once
+    assert first["stack_errors"]
+
+    second = run_pipeline()          # same data → must NOT retry the crash
+    assert len(calls) == attempted   # no further attempts
+    assert second["auto_stacked"] == []
+    assert second["auto_stack_skipped"]

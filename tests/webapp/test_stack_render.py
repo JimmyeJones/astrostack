@@ -59,8 +59,8 @@ def test_render_stack_png_helper(tmp_path):
     fp = tmp_path / "m.fits"
     fits.PrimaryHDU(data=cube).writeto(fp)
 
-    low = render_stack_png(fp, target_bg=0.05, sigma_factor=-2.5, max_width=32)
-    high = render_stack_png(fp, target_bg=0.40, sigma_factor=-2.5, max_width=32)
+    low = render_stack_png(fp, stretch=0.15, black=0.35, max_width=32)
+    high = render_stack_png(fp, stretch=0.85, black=0.35, max_width=32)
     assert low[:8] == b"\x89PNG\r\n\x1a\n"
     assert high[:8] == b"\x89PNG\r\n\x1a\n"
 
@@ -86,7 +86,7 @@ def test_render_with_nan_borders_is_not_blank(tmp_path):
     fp = tmp_path / "mosaic.fits"
     fits.PrimaryHDU(data=cube).writeto(fp)
 
-    png = render_stack_png(fp, target_bg=0.2, sigma_factor=-2.5, max_width=80)
+    png = render_stack_png(fp, stretch=0.6, black=0.35, max_width=80)
     from io import BytesIO
 
     from PIL import Image
@@ -100,7 +100,7 @@ def test_render_endpoint_returns_png(client, solved_library):
     _, run_id = _make_run_with_fits(solved_library, safe)
 
     r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/render",
-                   params={"stretch": 0.3, "black": -2.0, "size": 128})
+                   params={"stretch": 0.6, "black": 0.35, "size": 128})
     assert r.status_code == 200
     assert r.headers["content-type"] == "image/png"
     assert r.content[:8] == b"\x89PNG\r\n\x1a\n"
@@ -113,7 +113,7 @@ def test_save_preview_overwrites_file(client, solved_library):
     before = Path(preview_path).read_bytes()
 
     r = client.post(f"/api/targets/{safe}/stack-runs/{run_id}/preview",
-                    json={"stretch": 0.25, "black": -2.0})
+                    json={"stretch": 0.5, "black": 0.35})
     assert r.status_code == 200
     assert r.json()["ok"] is True
     after = Path(preview_path).read_bytes()

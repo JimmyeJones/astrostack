@@ -21,9 +21,12 @@ from webapp.schemas import (
 
 router = APIRouter(tags=["stack"])
 
-# Stretch (target_bg) and black-point (sigma_factor) bounds for the renderer.
-_STRETCH_MIN, _STRETCH_MAX = 0.02, 0.6
-_BLACK_MIN, _BLACK_MAX = -4.0, 2.0
+# Asinh stretch + black-point bounds for the renderer. Both are 0..1: stretch
+# is how hard to lift faint detail; black is the black point (higher = darker
+# background). See seestack.render.thumbnail.asinh_stretch.
+_STRETCH_MIN, _STRETCH_MAX = 0.0, 1.0
+_BLACK_MIN, _BLACK_MAX = 0.0, 1.0
+_STRETCH_DEFAULT, _BLACK_DEFAULT = 0.5, 0.35
 
 
 def _clamp(v: float, lo: float, hi: float) -> float:
@@ -131,13 +134,13 @@ _KIND_FIELDS = {
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/render")
 async def render_stack_run(
     safe: str, run_id: int, request: Request,
-    stretch: float = 0.10, black: float = -2.5, size: int = 1024,
+    stretch: float = _STRETCH_DEFAULT, black: float = _BLACK_DEFAULT, size: int = 1024,
 ) -> Response:
     """Live, adjustable re-render of a run's stacked FITS (full dynamic range).
 
-    ``stretch`` → autostretch target background (higher reveals fainter detail);
-    ``black`` → black-point sigma factor. Runs in a threadpool so it never
-    blocks the job worker.
+    ``stretch`` (0..1) → how hard the asinh curve lifts faint detail; ``black``
+    (0..1) → the black point (higher = darker background). Runs in a threadpool
+    so it never blocks the job worker.
     """
     _, fits_path = _run_fits_path(request, safe, run_id)
     if not fits_path or not Path(fits_path).exists():
@@ -146,8 +149,8 @@ async def render_stack_run(
     from seestack.render.thumbnail import render_stack_png
     png = await run_in_threadpool(
         render_stack_png, fits_path,
-        target_bg=_clamp(stretch, _STRETCH_MIN, _STRETCH_MAX),
-        sigma_factor=_clamp(black, _BLACK_MIN, _BLACK_MAX),
+        stretch=_clamp(stretch, _STRETCH_MIN, _STRETCH_MAX),
+        black=_clamp(black, _BLACK_MIN, _BLACK_MAX),
         max_width=int(_clamp(size, 128, 4096)),
     )
     return Response(content=png, media_type="image/png",
@@ -177,13 +180,13 @@ async def save_stack_preview(
     if not run.preview_path:
         raise HTTPException(status_code=400, detail="Run has no preview path to overwrite")
 
-    stretch = _clamp(float(body.get("stretch", 0.10)), _STRETCH_MIN, _STRETCH_MAX)
-    black = _clamp(float(body.get("black", -2.5)), _BLACK_MIN, _BLACK_MAX)
+    stretch = _clamp(float(body.get("stretch", _STRETCH_DEFAULT)), _STRETCH_MIN, _STRETCH_MAX)
+    black = _clamp(float(body.get("black", _BLACK_DEFAULT)), _BLACK_MIN, _BLACK_MAX)
 
     from seestack.render.thumbnail import render_stack_png
     png = await run_in_threadpool(
         render_stack_png, run.fits_path,
-        target_bg=stretch, sigma_factor=black, max_width=1024,
+        stretch=stretch, black=black, max_width=1024,
     )
     Path(run.preview_path).write_bytes(png)
     return {"ok": True, "stretch": stretch, "black": black}

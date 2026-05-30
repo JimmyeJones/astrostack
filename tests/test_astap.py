@@ -109,3 +109,90 @@ def test_solver_passes_db_dir(tmp_path, monkeypatch):
     solver.solve(frame)
     assert "-d" in captured["cmd"]
     assert str(tmp_path) in captured["cmd"]
+
+
+def _make_solver(tmp_path):
+    (tmp_path / "astap").write_bytes(b"")
+    (tmp_path / "d05_0101.290").write_bytes(b"x")
+    return ASTAPSolver(astap_path=tmp_path / "astap")
+
+
+def test_adaptive_ladder_escalates_downsample(tmp_path, monkeypatch):
+    # ASTAP "fails" until the frame is downsampled (binned) to suppress noise,
+    # then solves. solve() should walk the ladder and return the solved result.
+    frame = tmp_path / "frame.fits"
+    frame.write_bytes(b"")
+    solver = _make_solver(tmp_path)
+    wcs = frame.with_suffix(".wcs")
+    ini = frame.with_suffix(".ini")
+
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+
+        class _P:
+            stdout = ""
+            stderr = ""
+            returncode = 1
+        # Only "solve" (write sidecars, rc 0) once ASTAP is told to downsample.
+        if "-z" in cmd:
+            wcs.write_text("CRVAL1=10\n")
+            ini.write_text("CRVAL1=10\nCRVAL2=20\nCDELT2=0.0007\nCROTA2=0\n")
+            _P.returncode = 0
+        else:
+            wcs.unlink(missing_ok=True)
+            _P.returncode = 1
+            _P.stderr = "no solution found"
+        return _P()
+
+    monkeypatch.setattr("seestack.solve.astap.subprocess.run", fake_run)
+    result = solver.solve(frame)
+    assert result.solved
+    # First attempt had no -z (default); a later one added it.
+    assert "-z" not in calls[0]
+    assert any("-z" in c for c in calls)
+
+
+def test_adaptive_ladder_stops_on_fatal_error(tmp_path, monkeypatch):
+    # A "no star database" failure is unrecoverable — don't burn the whole ladder.
+    frame = tmp_path / "frame.fits"
+    frame.write_bytes(b"")
+    solver = _make_solver(tmp_path)
+    n = {"calls": 0}
+
+    def fake_run(cmd, **kwargs):
+        n["calls"] += 1
+
+        class _P:
+            returncode = 1
+            stdout = ""
+            stderr = "Error: no star database found"
+        return _P()
+
+    monkeypatch.setattr("seestack.solve.astap.subprocess.run", fake_run)
+    result = solver.solve(frame)
+    assert not result.solved
+    assert n["calls"] == 1  # stopped after the first (fatal) attempt
+
+
+def test_solve_once_emits_z_and_s_flags(tmp_path, monkeypatch):
+    frame = tmp_path / "frame.fits"
+    frame.write_bytes(b"")
+    solver = _make_solver(tmp_path)
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+
+        class _P:
+            returncode = 1
+            stdout = ""
+            stderr = "no solution"
+        return _P()
+
+    monkeypatch.setattr("seestack.solve.astap.subprocess.run", fake_run)
+    solver._solve_once(frame, downsample=4, max_stars=200)
+    cmd = captured["cmd"]
+    assert "-z" in cmd and "4" in cmd
+    assert "-s" in cmd and "200" in cmd

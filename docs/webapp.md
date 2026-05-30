@@ -17,6 +17,12 @@ handles the rest.
   sort/accept/reject by quality, configure & run stacking with the full set of
   engine options (advanced ones tucked behind a disclosure), watch live job
   progress, and download results (FITS / TIFF / PNG).
+- **Gallery** — every stacked image across all targets in one browsable grid,
+  each showing the exact stacking settings that produced it.
+- **Adjustable stretch** — on a target's stack History, re-render any result
+  live from the full-range FITS with an **asinh** stretch (the
+  astrophotographer's curve: lifts faint nebulosity while keeping star colour)
+  plus an intuitive black-point control, then save the look as the preview.
 - **Sky Map** — an interactive viewer of the night sky with every stacked image
   placed at its plate-solved position; where fields overlap, the newest is drawn
   on top. Two backgrounds, switchable in the page:
@@ -112,4 +118,4 @@ Interactive docs at `/docs`. Highlights: `GET /api/targets`,
 `GET /api/targets/{safe}/frames`, `GET /api/targets/{safe}/frames/{id}/preview`,
 `GET /api/stack/options/schema`, `POST /api/targets/{safe}/stack`,
 `GET /api/jobs/{id}/events` (SSE), `POST /api/scan`, `GET/PUT /api/settings`,
-`GET /api/health`.
+`GET /api/gallery`, `GET /api/sky`, `GET /api/health`.
