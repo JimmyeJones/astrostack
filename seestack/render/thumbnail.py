@@ -142,11 +142,16 @@ def render_stack_png(
 
     h, w = rgb.shape[:2]
     if w > max_width:
-        target_h = max(1, int(round(h * (max_width / w))))
-        rgb = _downsample_rgb(rgb, target_h, max_width)
+        # Decimate by striding (nearest) rather than box-averaging. Stack FITS
+        # carry NaN in uncovered/mosaic-gap regions; box averaging (and a plain
+        # min/max normalize) would smear NaN across the whole frame and blank
+        # it out. Striding preserves NaN so the NaN-aware autostretch below can
+        # exclude those pixels — and it's faster, which suits live previews.
+        step = int(np.ceil(w / max_width))
+        rgb = rgb[::step, ::step]
 
     stretched = autostretch(rgb, target_bg=target_bg, sigma_factor=sigma_factor)
-    u8 = (np.clip(stretched, 0.0, 1.0) * 255).astype(np.uint8)
+    u8 = (np.clip(np.nan_to_num(stretched), 0.0, 1.0) * 255).astype(np.uint8)
     buf = io.BytesIO()
     Image.fromarray(u8, mode="RGB").save(buf, format="PNG")
     return buf.getvalue()
