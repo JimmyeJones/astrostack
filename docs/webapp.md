@@ -17,11 +17,13 @@ handles the rest.
   sort/accept/reject by quality, configure & run stacking with the full set of
   engine options (advanced ones tucked behind a disclosure), watch live job
   progress, and download results (FITS / TIFF / PNG).
-- **Sky Map** — an interactive 3D viewer of the night sky (a built-in
-  bright-star backdrop, no external survey needed) with every stacked image
-  dropped onto the celestial sphere at its plate-solved position and angular
-  size. Where fields overlap, the most recent image is drawn on top. Drag to
-  look around, scroll to zoom, click an image to jump to that target.
+- **Sky Map** — an interactive viewer of the night sky with every stacked image
+  placed at its plate-solved position; where fields overlap, the newest is drawn
+  on top. Two backgrounds, switchable in the page:
+  - **Real sky (online)** — a true sky atlas via [Aladin Lite](https://aladin.cds.unistra.fr/AladinLite/)
+    (CDS imagery); needs your browser to reach the internet.
+  - **Stars (offline)** — a self-contained bright-star backdrop that works with
+    no internet at all.
 
 ## How it's built
 

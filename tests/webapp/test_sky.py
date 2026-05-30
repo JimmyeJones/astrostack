@@ -17,8 +17,10 @@ def _add_stack_run_with_preview(data_root, safe: str) -> None:
             first = next(proj.iter_frames())
             proj.update_frame(first.id, pixscale_arcsec=2.5, rotation_deg=12.0)
 
+            # A real (small) PNG so the router can read its dimensions for WCS.
+            from PIL import Image
             preview = lib.target_dir(lib.find_target(safe)) / "master_preview.png"
-            preview.write_bytes(b"\x89PNG\r\n\x1a\n")  # token PNG bytes
+            Image.new("RGB", (960, 540)).save(preview)
             proj.add_stack_run(StackRunRow(
                 id=None, timestamp_utc="2026-05-01T00:00:00Z",
                 output_basename="master", fits_path=None, tiff_path=None,
@@ -58,3 +60,14 @@ def test_sky_places_stacked_image(client, solved_library):
     assert img["rotation_deg"] == 12.0
     assert img["preview_url"].endswith(f"/stack-runs/{img['run_id']}/preview")
     assert img["ra_deg"] is not None and img["dec_deg"] is not None
+
+    # WCS for the preview PNG (960×540 here) so Aladin can place it.
+    wcs = img["wcs"]
+    assert wcs is not None
+    assert wcs["CTYPE1"] == "RA---TAN" and wcs["CTYPE2"] == "DEC--TAN"
+    assert wcs["NAXIS1"] == 960 and wcs["NAXIS2"] == 540
+    assert abs(wcs["CRVAL1"] - img["ra_deg"]) < 1e-9
+    assert abs(wcs["CRPIX1"] - (960 / 2 + 0.5)) < 1e-9
+    # Scale = width_deg / preview_w ; |CD| diagonal ≈ that scale.
+    scale = img["width_deg"] / 960
+    assert abs((wcs["CD1_1"] ** 2 + wcs["CD1_2"] ** 2) ** 0.5 - scale) < 1e-9

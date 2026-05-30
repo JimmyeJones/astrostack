@@ -3,11 +3,12 @@ import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls, Html } from "@react-three/drei";
 import * as THREE from "three";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Badge, Button, Group, Loader, Paper, Text } from "@mantine/core";
+import { Alert, Badge, Button, Group, Loader, Paper, SegmentedControl, Text } from "@mantine/core";
 import { IconStars } from "@tabler/icons-react";
 import { useNavigate } from "react-router-dom";
 
 import { api } from "../api/client";
+import { AladinSky } from "./AladinSky";
 import {
   angularToWorld,
   orientationFor,
@@ -172,32 +173,65 @@ function Scene({ stars, images, onSelect }: {
   );
 }
 
+/** Self-contained Three.js viewer (bright-star backdrop, no internet). */
+function OfflineSky({ stars, images, onSelect }: {
+  stars: SkyStar[]; images: SkyImage[]; onSelect: (i: SkyImage) => void;
+}) {
+  return (
+    <Canvas camera={{ position: [0, 0, 0.1], fov: 70, near: 0.01, far: 1000 }}>
+      <Scene stars={stars} images={images} onSelect={onSelect} />
+    </Canvas>
+  );
+}
+
+type SkyMode = "online" | "offline";
+const MODE_KEY = "astrostack.skyMode";
+
 export function SkyView() {
   const navigate = useNavigate();
   const [selected, setSelected] = useState<SkyImage | null>(null);
+  const [mode, setMode] = useState<SkyMode>(
+    () => (localStorage.getItem(MODE_KEY) as SkyMode) || "online",
+  );
   const sky = useQuery({ queryKey: ["sky"], queryFn: api.getSky });
+
+  const setSkyMode = (m: SkyMode) => {
+    localStorage.setItem(MODE_KEY, m);
+    setSelected(null);
+    setMode(m);
+  };
 
   return (
     <div style={{ position: "relative", height: "calc(100vh - 120px)", minHeight: 480 }}>
-      <Canvas camera={{ position: [0, 0, 0.1], fov: 70, near: 0.01, far: 1000 }}>
-        {sky.data ? (
-          <Scene stars={sky.data.stars} images={sky.data.images} onSelect={setSelected} />
-        ) : null}
-      </Canvas>
+      {mode === "online" ? (
+        <AladinSky images={sky.data?.images ?? []} />
+      ) : sky.data ? (
+        <OfflineSky stars={sky.data.stars} images={sky.data.images} onSelect={setSelected} />
+      ) : null}
 
       {/* Overlay UI */}
       <Paper
         withBorder p="sm" radius="md"
-        style={{ position: "absolute", top: 12, left: 12, maxWidth: 320, background: "rgba(12,14,22,0.82)" }}
+        style={{ position: "absolute", top: 12, left: 12, maxWidth: 340, background: "rgba(12,14,22,0.82)" }}
       >
-        <Group gap={8} mb={4}>
+        <Group gap={8} mb={6}>
           <IconStars size={18} />
           <Text fw={600}>Sky Map</Text>
           {sky.data ? <Badge variant="light">{sky.data.images.length} images</Badge> : null}
         </Group>
-        <Text size="xs" c="dimmed">
-          Drag to look around · scroll to zoom. Your stacked images are placed at
-          their plate-solved positions; newer images sit on top where they overlap.
+        <SegmentedControl
+          fullWidth size="xs" value={mode}
+          onChange={(v) => setSkyMode(v as SkyMode)}
+          data={[
+            { label: "Real sky (online)", value: "online" },
+            { label: "Stars (offline)", value: "offline" },
+          ]}
+        />
+        <Text size="xs" c="dimmed" mt={6}>
+          {mode === "online"
+            ? "Real-sky atlas (needs internet). Drag to pan, scroll to zoom."
+            : "Built-in star map (offline). Drag to look around, scroll to zoom."}
+          {" "}Your images sit at their plate-solved positions; newest on top where they overlap.
         </Text>
         {sky.isLoading ? <Group mt="xs" gap={6}><Loader size="xs" /><Text size="xs">Loading…</Text></Group> : null}
         {sky.data && sky.data.images.length === 0 ? (

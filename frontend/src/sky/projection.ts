@@ -24,6 +24,8 @@ export interface SkyImage {
   preview_url: string;
   timestamp_utc: string | null;
   run_id: number;
+  /** FITS WCS keywords for the preview PNG grid (used by the Aladin viewer). */
+  wcs?: Record<string, number | string> | null;
 }
 
 export interface SkyStar {

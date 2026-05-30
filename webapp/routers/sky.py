@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+import math
+
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
@@ -39,6 +41,10 @@ class SkyImage(BaseModel):
     preview_url: str
     timestamp_utc: str | None
     run_id: int
+    # FITS WCS keywords matching the *preview PNG* pixel grid, so a sky atlas
+    # (Aladin Lite) can place the PNG by WCS. None if the preview size is
+    # unreadable; the built-in viewer uses ra/dec/width/height/rotation instead.
+    wcs: dict | None = None
 
 
 class SkyResponse(BaseModel):
@@ -52,6 +58,39 @@ def _representative_pixscale_rotation(proj) -> tuple[float | None, float | None]
         if f.pixscale_arcsec:
             return f.pixscale_arcsec, (f.rotation_deg or 0.0)
     return None, None
+
+
+def _png_size(path: str) -> tuple[int, int] | None:
+    """(width, height) of a PNG from its header, without decoding pixels."""
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            return int(im.width), int(im.height)
+    except Exception:  # noqa: BLE001 — missing/corrupt preview → no WCS
+        return None
+
+
+def _tan_wcs(
+    ra_deg: float, dec_deg: float, width_deg: float,
+    preview_w: int, preview_h: int, rotation_deg: float,
+) -> dict:
+    """A TAN-projection WCS dict (FITS keywords) for the preview PNG grid.
+
+    Scale comes from the image's angular width spread across the preview's pixel
+    width, so it matches the downscaled PNG exactly. RA increases to the left
+    (negative on axis 1). Sign of the rotation is a best-effort starting point.
+    """
+    scale = width_deg / max(preview_w, 1)            # deg / preview-pixel
+    theta = math.radians(rotation_deg or 0.0)
+    cos_t, sin_t = math.cos(theta), math.sin(theta)
+    return {
+        "NAXIS": 2, "NAXIS1": preview_w, "NAXIS2": preview_h,
+        "CTYPE1": "RA---TAN", "CTYPE2": "DEC--TAN",
+        "CRPIX1": preview_w / 2 + 0.5, "CRPIX2": preview_h / 2 + 0.5,
+        "CRVAL1": ra_deg, "CRVAL2": dec_deg,
+        "CD1_1": -scale * cos_t, "CD1_2": scale * sin_t,
+        "CD2_1": scale * sin_t, "CD2_2": scale * cos_t,
+    }
 
 
 @router.get("/api/sky", response_model=SkyResponse)
@@ -82,6 +121,12 @@ def get_sky(request: Request) -> SkyResponse:
                     continue
                 width_deg = run.canvas_w * pixscale / 3600.0
                 height_deg = run.canvas_h * pixscale / 3600.0
+                wcs = None
+                if run.preview_path and (size := _png_size(run.preview_path)):
+                    wcs = _tan_wcs(
+                        float(t.ra_deg), float(t.dec_deg), width_deg,
+                        size[0], size[1], rotation or 0.0,
+                    )
                 images.append(SkyImage(
                     safe=t.safe_name,
                     name=t.name,
@@ -93,6 +138,7 @@ def get_sky(request: Request) -> SkyResponse:
                     preview_url=f"/api/targets/{t.safe_name}/stack-runs/{run.id}/preview",
                     timestamp_utc=run.timestamp_utc,
                     run_id=run.id,
+                    wcs=wcs,
                 ))
             finally:
                 if proj is not None:
