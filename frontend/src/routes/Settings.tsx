@@ -1,6 +1,6 @@
 import {
   Accordion, Alert, Badge, Button, Center, Divider, Group, Loader, NumberInput,
-  Paper, Stack, Switch, Text, TextInput, Title,
+  Paper, SimpleGrid, Stack, Switch, Text, TextInput, Title,
 } from "@mantine/core";
 import { IconDeviceFloppy, IconInfoCircle } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -107,7 +107,7 @@ export function SettingsView() {
           <Text fw={600}>Watched folders</Text>
           <TextInput label={lbl("data_root", "Data root")} value={(form.data_root as string) ?? ""}
             onChange={(e) => set("data_root", e.currentTarget.value)} />
-          <Group grow>
+          <SimpleGrid cols={{ base: 1, xs: 2 }}>
             <TextInput label={lbl("incoming_dir", "Incoming dir")}
               value={(form.incoming_dir as string) ?? ""}
               placeholder={settings.data.resolved_incoming_dir}
@@ -116,20 +116,20 @@ export function SettingsView() {
               value={(form.library_root as string) ?? ""}
               placeholder={settings.data.resolved_library_root}
               onChange={(e) => set("library_root", e.currentTarget.value)} />
-          </Group>
+          </SimpleGrid>
 
           <Divider label="Watcher" />
           <Switch label={lbl("watcher_enabled", "Watch for new files automatically")}
             checked={bool("watcher_enabled")}
             onChange={(e) => set("watcher_enabled", e.currentTarget.checked)} />
-          <Group grow>
+          <SimpleGrid cols={{ base: 1, xs: 2 }}>
             <NumberInput label={lbl("watch_quiet_period_s", "Quiet period (s)")}
               value={num("watch_quiet_period_s")} min={5}
               onChange={(v) => set("watch_quiet_period_s", Number(v))} />
             <NumberInput label={lbl("watch_poll_interval_s", "Poll interval (s)")}
               value={num("watch_poll_interval_s")} min={2}
               onChange={(v) => set("watch_poll_interval_s", Number(v))} />
-          </Group>
+          </SimpleGrid>
 
           <Divider label="Automatic pipeline" />
           <Group>
@@ -151,14 +151,14 @@ export function SettingsView() {
             value={(form.astap_path as string) ?? ""}
             placeholder="auto-detect"
             onChange={(e) => set("astap_path", e.currentTarget.value || null)} />
-          <Group grow>
+          <SimpleGrid cols={{ base: 1, xs: 3 }}>
             <NumberInput label={lbl("astap_fov_deg", "ASTAP FOV (deg)")} value={num("astap_fov_deg")}
               step={0.1} min={0.1} onChange={(v) => set("astap_fov_deg", Number(v))} />
             <NumberInput label={lbl("astap_timeout_s", "ASTAP timeout (s)")} value={num("astap_timeout_s")}
               min={5} onChange={(v) => set("astap_timeout_s", Number(v))} />
             <NumberInput label={lbl("cpu_workers", "CPU workers")} value={num("cpu_workers")}
               min={1} onChange={(v) => set("cpu_workers", v === "" ? null : Number(v))} />
-          </Group>
+          </SimpleGrid>
 
           <Group justify="flex-end">
             <Button leftSection={<IconDeviceFloppy size={16} />}

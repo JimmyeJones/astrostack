@@ -87,29 +87,30 @@ export function TargetView() {
 
   return (
     <Stack>
-      <Group justify="space-between">
-        <Group>
-          <Title order={2}>{target.data?.name}</Title>
+      <Group justify="space-between" gap="xs">
+        <Group gap="xs" style={{ minWidth: 0 }}>
+          <Title order={2} style={{ wordBreak: "break-word" }}>{target.data?.name}</Title>
           <Badge variant="light" color="violet">
             {target.data?.n_frames_accepted}/{target.data?.n_frames} accepted
           </Badge>
         </Group>
-        <Group>
+        <Group gap="xs">
           <Button
             variant="default"
             leftSection={<IconTelescope size={16} />}
             onClick={() => qcSolve.mutate()}
             loading={qcSolve.isPending}
+            aria-label="Re-run QC and Solve"
           >
-            Re-run QC + Solve
+            <Box visibleFrom="sm">Re-run QC + Solve</Box>
           </Button>
           <Button component={Link} to={`/targets/${safe}/history`} variant="default"
-            leftSection={<IconHistory size={16} />}>
-            History
+            leftSection={<IconHistory size={16} />} aria-label="History">
+            <Box visibleFrom="sm">History</Box>
           </Button>
           <Button component={Link} to={`/targets/${safe}/stack`}
-            leftSection={<IconStack2 size={16} />}>
-            Stack
+            leftSection={<IconStack2 size={16} />} aria-label="Stack">
+            <Box visibleFrom="sm">Stack</Box>
           </Button>
         </Group>
       </Group>

@@ -14,20 +14,39 @@ const RESET: Transform = { scale: 1, tx: 0, ty: 0 };
 const MIN_SCALE = 1;
 const MAX_SCALE = 12;
 
+const clampScale = (s: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, s));
+
 /**
- * Fullscreen image viewer with scroll-to-zoom (toward the cursor) and
- * drag-to-pan. Used to inspect stacked images up close. Pure DOM transforms —
- * no extra dependencies. Double-click toggles fit ⇄ zoomed at the cursor.
+ * Pure pinch math (extracted so it's unit-testable without DOM pointer events).
+ * Scales by the ratio of current/initial finger distance and translates so the
+ * image point that was under the initial pinch midpoint stays under the current
+ * midpoint. All coordinates are relative to the surface centre (transform
+ * origin). `imgX/imgY` are that fixed point in image space.
+ */
+export function computePinch(
+  startScale: number, startDist: number, curDist: number,
+  midX: number, midY: number, imgX: number, imgY: number,
+): Transform {
+  const scale = clampScale(startScale * (curDist / (startDist || 1)));
+  if (scale <= MIN_SCALE) return { scale, tx: 0, ty: 0 };
+  return { scale, tx: midX - imgX * scale, ty: midY - imgY * scale };
+}
+
+/**
+ * Fullscreen image viewer for inspecting stacked images up close.
+ *
+ * Desktop: scroll to zoom (toward the cursor), drag to pan, double-click to
+ * toggle. Touch: pinch to zoom, one finger to pan. Pure DOM transforms — no
+ * extra dependencies.
  *
  * Implementation notes (both learned the hard way):
  *  - State updaters must be PURE: never read a mutable ref inside a setState
- *    updater. A pointermove + pointerup can both fire before React flushes, so
- *    a lazily-run updater that dereferenced `drag.current` crashed once the
- *    pointerup had nulled it. We capture values before calling setState.
- *  - The wheel listener is bound through a CALLBACK REF, not an effect. Mantine
- *    mounts the Modal body through a portal with a transition, so an effect
- *    keyed on `src` couldn't reliably find the node; a callback ref binds the
- *    non-passive listener exactly when the surface element mounts.
+ *    updater. A move + release can both fire before React flushes, so a lazily
+ *    run updater that dereferenced a gesture ref crashed once release had
+ *    nulled it. We capture values before calling setState.
+ *  - The wheel listener is bound through a CALLBACK REF, not an effect, because
+ *    Mantine mounts the Modal body through a portal with a transition and an
+ *    effect keyed on `src` couldn't reliably find the node.
  */
 export function ImageLightbox({
   src, title, downloadHref, onClose,
@@ -41,14 +60,28 @@ export function ImageLightbox({
   const [dragging, setDragging] = useState(false);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const wheelCleanup = useRef<(() => void) | null>(null);
-  const drag = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
+
+  // Active pointers (touch/mouse) by id, plus the in-flight gesture state.
+  const pointers = useRef<Map<number, { x: number; y: number }>>(new Map());
+  const pan = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
+  const pinch = useRef<
+    { startDist: number; startScale: number; imgX: number; imgY: number } | null
+  >(null);
 
   // Reset view whenever a new image is opened (or it closes).
   useEffect(() => {
     setT(RESET);
     setDragging(false);
-    drag.current = null;
+    pointers.current.clear();
+    pan.current = null;
+    pinch.current = null;
   }, [src]);
+
+  /** Cursor position relative to the surface centre (the transform origin). */
+  const toLocal = (clientX: number, clientY: number) => {
+    const rect = surfaceRef.current!.getBoundingClientRect();
+    return [clientX - rect.left - rect.width / 2, clientY - rect.top - rect.height / 2] as const;
+  };
 
   const zoomAt = useCallback((clientX: number, clientY: number, factor: number) => {
     const el = surfaceRef.current;
@@ -85,23 +118,74 @@ export function ImageLightbox({
     }
   }, [zoomAt]);
 
-  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (t.scale <= MIN_SCALE) return;
-    drag.current = { x: e.clientX, y: e.clientY, tx: t.tx, ty: t.ty };
-    setDragging(true);
-    e.currentTarget.setPointerCapture(e.pointerId);
+  /** Begin (or restart) a one-pointer pan from the current transform. */
+  const startPan = (clientX: number, clientY: number, cur: Transform) => {
+    pan.current = { x: clientX, y: clientY, tx: cur.tx, ty: cur.ty };
   };
+
+  /** Begin a two-pointer pinch from the current transform. */
+  const startPinch = (cur: Transform) => {
+    const pts = [...pointers.current.values()];
+    if (pts.length < 2) return;
+    const [a, b] = pts;
+    const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+    const [mx, my] = toLocal((a.x + b.x) / 2, (a.y + b.y) / 2);
+    pinch.current = {
+      startDist: dist,
+      startScale: cur.scale,
+      // Image-space point currently under the pinch midpoint — kept fixed.
+      imgX: (mx - cur.tx) / cur.scale,
+      imgY: (my - cur.ty) / cur.scale,
+    };
+    pan.current = null;
+  };
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    if (pointers.current.size >= 2) {
+      setDragging(true);
+      startPinch(t);
+    } else if (t.scale > MIN_SCALE) {
+      setDragging(true);
+      startPan(e.clientX, e.clientY, t);
+    }
+  };
+
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    const d = drag.current;
-    if (!d) return;
+    const tracked = pointers.current.get(e.pointerId);
+    if (!tracked) return;
+    tracked.x = e.clientX;
+    tracked.y = e.clientY;
+
+    if (pinch.current && pointers.current.size >= 2) {
+      const [a, b] = [...pointers.current.values()];
+      const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+      const [mx, my] = toLocal((a.x + b.x) / 2, (a.y + b.y) / 2);
+      const pc = pinch.current;
+      setT(computePinch(pc.startScale, pc.startDist, dist, mx, my, pc.imgX, pc.imgY));
+      return;
+    }
+
+    const p = pan.current;
+    if (!p) return;
     // Capture values OUTSIDE the updater so it stays pure (see note above).
-    const tx = d.tx + (e.clientX - d.x);
-    const ty = d.ty + (e.clientY - d.y);
+    const tx = p.tx + (e.clientX - p.x);
+    const ty = p.ty + (e.clientY - p.y);
     setT((prev) => ({ ...prev, tx, ty }));
   };
-  const onPointerUp = () => {
-    drag.current = null;
-    setDragging(false);
+
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    pointers.current.delete(e.pointerId);
+    pinch.current = null;
+    if (pointers.current.size === 1 && t.scale > MIN_SCALE) {
+      // Dropped from pinch to a single finger — keep panning from where it is.
+      const [only] = [...pointers.current.values()];
+      startPan(only.x, only.y, t);
+    } else if (pointers.current.size === 0) {
+      pan.current = null;
+      setDragging(false);
+    }
   };
 
   const onDoubleClick = (e: React.MouseEvent) => {
@@ -120,32 +204,36 @@ export function ImageLightbox({
       withCloseButton={false}
       padding={0}
       transitionProps={{ transition: "fade", duration: 120 }}
-      styles={{ body: { height: "100vh", background: "#000" } }}
+      styles={{ body: { height: "100dvh", background: "#000" } }}
     >
       <div style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden" }}>
         {/* Toolbar */}
         <Group
-          gap="xs"
+          gap={4}
+          wrap="nowrap"
           style={{
-            position: "absolute", top: 12, right: 12, zIndex: 5,
-            background: "rgba(12,14,22,0.7)", borderRadius: 8, padding: "4px 8px",
+            position: "absolute", top: 10, right: 10, zIndex: 5,
+            background: "rgba(12,14,22,0.72)", borderRadius: 8, padding: "4px 6px",
           }}
         >
-          {title ? <Text size="sm" c="gray.3" mr={4} maw={360} truncate>{title}</Text> : null}
-          <Text size="xs" c="dimmed" w={42} ta="right">{Math.round(t.scale * 100)}%</Text>
-          <Tooltip label="Zoom in"><ActionIcon variant="subtle" color="gray"
-            onClick={() => zoomAt(...center(), 1.4)}>
-            <IconZoomIn size={18} /></ActionIcon></Tooltip>
-          <Tooltip label="Zoom out"><ActionIcon variant="subtle" color="gray"
-            onClick={() => zoomAt(...center(), 1 / 1.4)}>
-            <IconZoomOut size={18} /></ActionIcon></Tooltip>
-          <Tooltip label="Reset"><ActionIcon variant="subtle" color="gray" onClick={() => setT(RESET)}>
-            <IconArrowsMaximize size={18} /></ActionIcon></Tooltip>
-          {downloadHref ? (
-            <Tooltip label="Download"><ActionIcon variant="subtle" color="gray"
-              component="a" href={downloadHref}><IconDownload size={18} /></ActionIcon></Tooltip>
+          {title ? (
+            <Text size="sm" c="gray.3" mr={4} maw={180} truncate visibleFrom="xs">{title}</Text>
           ) : null}
-          <ActionIcon variant="subtle" color="gray" onClick={onClose} aria-label="Close">✕</ActionIcon>
+          <Text size="xs" c="dimmed" w={42} ta="right">{Math.round(t.scale * 100)}%</Text>
+          <Tooltip label="Zoom in"><ActionIcon size="lg" variant="subtle" color="gray"
+            onClick={() => zoomAt(...center(), 1.4)} aria-label="Zoom in">
+            <IconZoomIn size={20} /></ActionIcon></Tooltip>
+          <Tooltip label="Zoom out"><ActionIcon size="lg" variant="subtle" color="gray"
+            onClick={() => zoomAt(...center(), 1 / 1.4)} aria-label="Zoom out">
+            <IconZoomOut size={20} /></ActionIcon></Tooltip>
+          <Tooltip label="Reset"><ActionIcon size="lg" variant="subtle" color="gray"
+            onClick={() => setT(RESET)} aria-label="Reset zoom">
+            <IconArrowsMaximize size={20} /></ActionIcon></Tooltip>
+          {downloadHref ? (
+            <Tooltip label="Download"><ActionIcon size="lg" variant="subtle" color="gray"
+              component="a" href={downloadHref} aria-label="Download"><IconDownload size={20} /></ActionIcon></Tooltip>
+          ) : null}
+          <ActionIcon size="lg" variant="subtle" color="gray" onClick={onClose} aria-label="Close">✕</ActionIcon>
         </Group>
 
         {/* Zoom/pan surface */}
@@ -183,7 +271,7 @@ export function ImageLightbox({
           size="xs" c="dimmed"
           style={{ position: "absolute", bottom: 10, left: 0, right: 0, textAlign: "center" }}
         >
-          Scroll to zoom · drag to pan · double-click to toggle · Esc to close
+          Scroll or pinch to zoom · drag to pan · double-tap to reset · Esc to close
         </Text>
       </div>
     </Modal>

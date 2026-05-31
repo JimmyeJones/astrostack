@@ -1,7 +1,7 @@
 import { MantineProvider } from "@mantine/core";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { ImageLightbox } from "./ImageLightbox";
+import { ImageLightbox, computePinch } from "./ImageLightbox";
 
 function renderLightbox(props: Partial<React.ComponentProps<typeof ImageLightbox>> = {}) {
   return render(
@@ -58,5 +58,24 @@ describe("ImageLightbox", () => {
     expect(() =>
       fireEvent.pointerMove(s, { clientX: 80, clientY: 60, pointerId: 1 }),
     ).not.toThrow();
+  });
+});
+
+describe("computePinch", () => {
+  it("scales by the finger-distance ratio (spread 100→200px = 2×)", () => {
+    const r = computePinch(1, 100, 200, 200, 0, 150, 0);
+    expect(r.scale).toBe(2);
+    // The fixed image point (150) stays under the new midpoint (200): 200-150*2.
+    expect(r.tx).toBe(-100);
+  });
+
+  it("pinching in shrinks and snaps back to fit at 1×", () => {
+    const r = computePinch(2, 200, 50, 30, 30, 10, 10);
+    expect(r.scale).toBe(1);     // clamped to MIN
+    expect(r).toMatchObject({ tx: 0, ty: 0 });
+  });
+
+  it("clamps very large spreads to the max zoom", () => {
+    expect(computePinch(2, 10, 100000, 0, 0, 0, 0).scale).toBe(12);
   });
 });
