@@ -126,23 +126,48 @@ function ImagePlane({
 }
 
 /**
- * Scroll-wheel zoom by camera field-of-view. The camera lives at the centre of
- * the sphere, so OrbitControls' dolly-zoom has nowhere useful to travel —
- * narrowing/widening the FOV gives a natural "zoom in on the sky" instead.
- * Also calls preventDefault so the wheel doesn't scroll the page.
+ * Zoom by camera field-of-view. The camera lives at the centre of the sphere,
+ * so OrbitControls' dolly-zoom has nowhere useful to travel — narrowing /
+ * widening the FOV gives a natural "zoom in on the sky" instead. Handles both
+ * the desktop scroll-wheel and two-finger pinch on touch devices (OrbitControls
+ * has zoom disabled, so two fingers are free for us). preventDefault stops the
+ * page from scrolling/pinch-zooming underneath.
  */
 function FovZoom({ min = 12, max = 85, step = 0.06 }: { min?: number; max?: number; step?: number }) {
   const { camera, gl } = useThree();
   useEffect(() => {
     const el = gl.domElement;
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      const cam = camera as THREE.PerspectiveCamera;
-      cam.fov = THREE.MathUtils.clamp(cam.fov + e.deltaY * step, min, max);
+    const cam = camera as THREE.PerspectiveCamera;
+    const setFov = (fov: number) => {
+      cam.fov = THREE.MathUtils.clamp(fov, min, max);
       cam.updateProjectionMatrix();
     };
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      setFov(cam.fov + e.deltaY * step);
+    };
+    const dist = (touches: TouchList) =>
+      Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY);
+    let lastDist = 0;
+    const onTouchStart = (e: TouchEvent) => { if (e.touches.length === 2) lastDist = dist(e.touches); };
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length !== 2) return;
+      e.preventDefault();
+      const d = dist(e.touches);
+      if (lastDist > 0 && d > 0) setFov(cam.fov * (lastDist / d)); // pinch out → narrower FOV → zoom in
+      lastDist = d;
+    };
+    const onTouchEnd = (e: TouchEvent) => { if (e.touches.length < 2) lastDist = 0; };
     el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
+    el.addEventListener("touchstart", onTouchStart, { passive: false });
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
+    el.addEventListener("touchend", onTouchEnd);
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("touchend", onTouchEnd);
+    };
   }, [camera, gl, min, max, step]);
   return null;
 }
@@ -202,7 +227,7 @@ export function SkyView() {
   };
 
   return (
-    <div style={{ position: "relative", height: "calc(100vh - 120px)", minHeight: 480 }}>
+    <div style={{ position: "relative", height: "calc(100dvh - 110px)", minHeight: 420 }}>
       {mode === "online" ? (
         <AladinSky images={sky.data?.images ?? []} />
       ) : sky.data ? (

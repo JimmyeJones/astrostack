@@ -1,4 +1,5 @@
-import { AppShell, Badge, Button, Group, NavLink, ScrollArea, Text, Title } from "@mantine/core";
+import { AppShell, Badge, Box, Burger, Button, Group, NavLink, ScrollArea, Text, Title } from "@mantine/core";
+import { useDisclosure } from "@mantine/hooks";
 import { IconActivity, IconLayoutGrid, IconPhoto, IconRadar2, IconSettings, IconStars } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { NavLink as RouterNavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
@@ -24,6 +25,9 @@ export function App() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const location = useLocation();
+  // Mobile navbar drawer. On desktop the navbar is always shown (see AppShell
+  // navbar.collapsed below); this only toggles the mobile overlay.
+  const [navOpened, { toggle: toggleNav, close: closeNav }] = useDisclosure(false);
 
   const scan = useMutation({
     mutationFn: api.scan,
@@ -44,22 +48,29 @@ export function App() {
   ];
 
   return (
-    <AppShell header={{ height: 60 }} navbar={{ width: 240, breakpoint: "sm" }} padding="md">
+    <AppShell
+      header={{ height: 60 }}
+      navbar={{ width: 240, breakpoint: "sm", collapsed: { mobile: !navOpened, desktop: false } }}
+      padding={{ base: "sm", sm: "md" }}
+    >
       <AppShell.Header>
-        <Group h="100%" px="md" justify="space-between">
-          <Group gap="xs">
-            <IconPhoto size={26} color="var(--mantine-color-violet-4)" />
-            <Title order={3}>AstroStack</Title>
+        <Group h="100%" px={{ base: "sm", sm: "md" }} justify="space-between" wrap="nowrap" gap="xs">
+          <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
+            <Burger opened={navOpened} onClick={toggleNav} hiddenFrom="sm" size="sm" aria-label="Toggle navigation" />
+            <IconPhoto size={26} color="var(--mantine-color-violet-4)" style={{ flexShrink: 0 }} />
+            <Title order={3} style={{ whiteSpace: "nowrap" }}>AstroStack</Title>
           </Group>
-          <Group>
+          <Group gap="xs" wrap="nowrap">
             <ActiveJobsBadge />
             <Button
               leftSection={<IconRadar2 size={16} />}
               onClick={() => scan.mutate()}
               loading={scan.isPending}
               variant="light"
+              aria-label="Scan incoming"
+              px={{ base: "xs", xs: "md" }}
             >
-              Scan incoming
+              <Box visibleFrom="xs">Scan incoming</Box>
             </Button>
           </Group>
         </Group>
@@ -75,6 +86,7 @@ export function App() {
               end={l.end}
               label={l.label}
               leftSection={l.icon}
+              onClick={closeNav}
               active={l.end ? location.pathname === "/" : location.pathname.startsWith(l.to)}
             />
           ))}
