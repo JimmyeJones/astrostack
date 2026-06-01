@@ -1,9 +1,9 @@
 import {
-  Accordion, Button, Center, Group, Loader, Paper, Progress,
+  Accordion, Alert, Button, Center, Group, Loader, Paper, Progress,
   Stack, Text, Title, Tooltip,
 } from "@mantine/core";
-import { IconPlayerPlay } from "@tabler/icons-react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { IconPlayerPlay, IconTelescope } from "@tabler/icons-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
@@ -13,6 +13,7 @@ import { useJobEvents } from "../hooks/useJobEvents";
 
 export function StackView() {
   const { safe = "" } = useParams();
+  const qc = useQueryClient();
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [jobId, setJobId] = useState<string | null>(null);
   const job = useJobEvents(jobId);
@@ -22,10 +23,26 @@ export function StackView() {
     queryKey: ["stack-defaults", safe],
     queryFn: () => api.getStackDefaults(safe),
   });
+  const frames = useQuery({ queryKey: ["frames", safe], queryFn: () => api.listFrames(safe) });
+
+  const qcSolve = useMutation({
+    mutationFn: () => api.qcSolve(safe),
+    onSuccess: () => {
+      notifications.show({ message: "QC + plate-solve started — watch the Jobs page", color: "violet" });
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
 
   useEffect(() => {
     if (defaults.data) setValues(defaults.data);
   }, [defaults.data]);
+
+  // When a stack finishes it may have auto-rejected outlier frames — refresh
+  // the frame list so the solved/accepted counts (and this page's guard) update.
+  useEffect(() => {
+    if (job?.state === "done") qc.invalidateQueries({ queryKey: ["frames", safe] });
+  }, [job?.state, qc, safe]);
 
   const trigger = useMutation({
     mutationFn: () => api.triggerStack(safe, values),
@@ -64,6 +81,12 @@ export function StackView() {
   const running = job && (job.state === "running" || job.state === "queued");
   const pct = job && job.total ? Math.round((job.done / job.total) * 100) : 0;
 
+  // Stacking needs at least one accepted, plate-solved frame to align against.
+  // Block it in the UI (rather than letting the job error) when there are none.
+  const solvedAccepted = (frames.data ?? []).filter((f) => f.accept && f.solved).length;
+  const noSolved = !frames.isLoading && frames.data !== undefined && solvedAccepted === 0;
+  const excludedFrames = (job?.result?.excluded_frames as string[] | undefined) ?? [];
+
   return (
     <Stack maw={720}>
       <Group justify="space-between">
@@ -72,6 +95,25 @@ export function StackView() {
           Back to frames
         </Button>
       </Group>
+
+      {noSolved ? (
+        <Alert color="yellow" title="No plate-solved frames yet" icon={<IconTelescope size={18} />}>
+          <Stack gap="xs" align="flex-start">
+            <Text size="sm">
+              Stacking needs at least one accepted frame with a successful plate-solve to align
+              against. Run plate-solving first, then come back to stack.
+            </Text>
+            <Button
+              size="xs" variant="light"
+              leftSection={<IconTelescope size={14} />}
+              onClick={() => qcSolve.mutate()}
+              loading={qcSolve.isPending}
+            >
+              Run QC + plate-solve
+            </Button>
+          </Stack>
+        </Alert>
+      ) : null}
 
       <Paper withBorder p="lg">
         <Stack>
@@ -121,6 +163,14 @@ export function StackView() {
                 color={job.state === "error" ? "red" : job.state === "done" ? "teal" : "violet"}
                 animated={Boolean(running)}
               />
+              {job.state === "done" && excludedFrames.length > 0 ? (
+                <Alert color="orange" mt="xs" p="xs">
+                  <Text size="xs">
+                    Dropped {excludedFrames.length} frame(s) with a bad plate-solve (footprint far
+                    from the group) and flagged them rejected: {excludedFrames.join(", ")}
+                  </Text>
+                </Alert>
+              ) : null}
               {job.state === "done" ? (
                 <Button component={Link} to={`/targets/${safe}/history`} variant="light" mt="xs">
                   View result in History
@@ -135,13 +185,19 @@ export function StackView() {
                 Save as defaults
               </Button>
             </Tooltip>
-            <Button
-              leftSection={<IconPlayerPlay size={16} />}
-              onClick={() => trigger.mutate()}
-              loading={trigger.isPending || Boolean(running)}
+            <Tooltip
+              label="Plate-solve at least one accepted frame first"
+              disabled={!noSolved}
             >
-              Start stacking
-            </Button>
+              <Button
+                leftSection={<IconPlayerPlay size={16} />}
+                onClick={() => trigger.mutate()}
+                loading={trigger.isPending || Boolean(running)}
+                disabled={noSolved}
+              >
+                Start stacking
+              </Button>
+            </Tooltip>
           </Group>
         </Stack>
       </Paper>

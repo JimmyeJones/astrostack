@@ -31,7 +31,7 @@ def _patch_run_stack(monkeypatch):
         calls.append(getattr(proj, "name", "?"))
         return SimpleNamespace(
             output_dir="/tmp/x", n_frames_used=3, canvas_shape=(1, 1, 3),
-            cancelled=False, errors=[],
+            cancelled=False, errors=[], excluded_frames=[],
         )
 
     monkeypatch.setattr("seestack.stack.stacker.run_stack", fake_run_stack)
