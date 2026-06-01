@@ -6,6 +6,18 @@ import { NavLink as RouterNavLink, Outlet, useLocation, useNavigate } from "reac
 import { notifications } from "@mantine/notifications";
 import { api } from "./api/client";
 
+// Shows the running backend build, so you can confirm a rebuild actually took
+// effect (the version bumps with each shipped change).
+function AppVersion() {
+  const { data } = useQuery({ queryKey: ["system"], queryFn: api.getSystem, staleTime: 60_000 });
+  if (!data?.version) return null;
+  return (
+    <Text size="xs" c="dimmed" mt="md" px="sm">
+      AstroStack v{data.version}
+    </Text>
+  );
+}
+
 function ActiveJobsBadge() {
   const { data } = useQuery({
     queryKey: ["jobs"],
@@ -93,6 +105,7 @@ export function App() {
           <Text size="xs" c="dimmed" mt="lg" px="sm">
             Drop Seestar folders into the watched dataset; processing runs automatically.
           </Text>
+          <AppVersion />
         </ScrollArea>
       </AppShell.Navbar>
 
