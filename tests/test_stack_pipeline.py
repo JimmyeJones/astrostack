@@ -94,6 +94,50 @@ def test_stack_fails_with_no_solved_frames(tmp_path):
         proj.close()
 
 
+def test_stack_drops_and_flags_bad_plate_solve_outlier(tmp_path):
+    """A frame with a wildly-off WCS is dropped (not fatal) and flagged rejected.
+
+    Regression for the "mosaic canvas would be N px, exceeding the limit" crash:
+    instead of failing the whole stack, the outlier is excluded and marked
+    rejected so the user can see which frame was bad.
+    """
+    proj = Project.create(tmp_path / "p", name="outlier")
+    raws = tmp_path / "raws"
+    raws.mkdir()
+    good_wcs = make_synth_wcs_text(ra_center_deg=83.6, dec_center_deg=-5.4)
+    bad_wcs = make_synth_wcs_text(ra_center_deg=120.0, dec_center_deg=-5.4)  # ~36° away
+    bad_id = None
+    try:
+        for i in range(4):
+            path = write_seestar_fits(raws / f"g{i}.fit", add_wcs=True, seed=10 + i, n_stars=30)
+            proj.add_frame(FrameRow(
+                source_path=str(path), cached_path=str(path),
+                width_px=480, height_px=320, bayer_pattern="RGGB",
+                wcs_json=good_wcs, ra_center_deg=83.6, dec_center_deg=-5.4,
+            ))
+        bad_path = write_seestar_fits(raws / "bad_solve.fit", add_wcs=True, seed=99, n_stars=30)
+        bad_id = proj.add_frame(FrameRow(
+            source_path=str(bad_path), cached_path=str(bad_path),
+            width_px=480, height_px=320, bayer_pattern="RGGB",
+            wcs_json=bad_wcs, ra_center_deg=120.0, dec_center_deg=-5.4,
+        ))
+
+        result = run_stack(proj, StackOptions(
+            sigma_clip=False, max_workers=2, mosaic_canvas="union", output_name="o",
+        ))
+
+        # The outlier was dropped from the stack, the 4 good frames remain.
+        assert result.n_frames_used == 4
+        assert len(result.excluded_frames) == 1
+        assert "bad_solve.fit" in result.excluded_frames[0]
+        # ...and it was flagged rejected in the project DB.
+        bad = proj.get_frame(bad_id)
+        assert bad.accept is False
+        assert "plate-solve" in (bad.reject_reason or "")
+    finally:
+        proj.close()
+
+
 def test_stack_progress_callback_called(tmp_path):
     proj = _build_project(tmp_path, n=3)
     calls: list[tuple[str, int, int]] = []

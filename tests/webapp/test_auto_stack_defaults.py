@@ -20,7 +20,7 @@ def _capture_opts(monkeypatch):
         captured["opts"] = opts
         return SimpleNamespace(
             output_dir="/tmp/x", n_frames_used=0, canvas_shape=(1, 1, 3),
-            cancelled=False, errors=[],
+            cancelled=False, errors=[], excluded_frames=[],
         )
 
     monkeypatch.setattr("seestack.stack.stacker.run_stack", fake_run_stack)

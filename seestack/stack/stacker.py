@@ -116,6 +116,9 @@ class StackResult:
     options: StackOptions
     cancelled: bool = False
     errors: list[str] = field(default_factory=list)
+    # Frames dropped (and flagged rejected) for a bad plate-solve that would
+    # have flung the mosaic canvas across the sky. Human-readable labels.
+    excluded_frames: list[str] = field(default_factory=list)
 
 
 CancelFn = Callable[[], bool]
@@ -168,6 +171,7 @@ def run_stack(
     dst_shape = ref_shape
     dst_wcs_text = ref.wcs_json
     is_mosaic_canvas = False
+    excluded_frames: list[str] = []
     if options.mosaic_canvas != "reference":
         try:
             from seestack.stack.mosaic import compute_mosaic_canvas
@@ -186,12 +190,24 @@ def run_stack(
             # to the wrong place (or off-canvas) and contaminate the result.
             if canvas.excluded_frame_ids:
                 bad = set(canvas.excluded_frame_ids)
-                kept = [f for f in frames if getattr(f, "id", None) not in bad]
+                dropped = [f for f in frames if getattr(f, "id", None) in bad]
+                frames = [f for f in frames if getattr(f, "id", None) not in bad]
+                for f in dropped:
+                    label = Path(f.source_path).name if f.source_path else f"frame {f.id}"
+                    excluded_frames.append(label)
+                    # Flag it rejected so it's visible in the Frames table and
+                    # doesn't keep breaking this (and future) stacks.
+                    try:
+                        project.update_frame(
+                            f.id, accept=False,
+                            reject_reason="bad plate-solve (footprint far from the group)",
+                        )
+                    except Exception as exc:  # noqa: BLE001 — flagging is best-effort
+                        log.warning("Could not flag outlier frame %s: %s", f.id, exc)
                 log.warning(
                     "Excluded %d frame(s) with a bad plate-solve from the stack "
-                    "(ids: %s)", len(frames) - len(kept), sorted(bad),
+                    "and flagged them rejected: %s", len(dropped), excluded_frames,
                 )
-                frames = kept
             use_union = options.mosaic_canvas == "union" or canvas.is_mosaic
             if use_union:
                 dst_wcs_text = canvas.wcs_text
@@ -516,6 +532,7 @@ def run_stack(
         coverage_max=int(cov_2d.max()),
         options=options,
         errors=errors,
+        excluded_frames=excluded_frames,
     )
 
 

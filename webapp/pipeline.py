@@ -245,4 +245,5 @@ def _stack_target(
         "canvas_shape": list(result.canvas_shape),
         "cancelled": result.cancelled,
         "errors": result.errors,
+        "excluded_frames": result.excluded_frames,
     }
