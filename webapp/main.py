@@ -22,10 +22,10 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from webapp import pipeline
+from webapp import logbuffer, pipeline
 from webapp.config import SettingsStore
 from webapp.jobs import JobManager
-from webapp.routers import frames, gallery, jobs, settings, sky, stack, system, targets
+from webapp.routers import frames, gallery, jobs, logs, settings, sky, stack, system, targets
 from webapp.routers import pipeline as pipeline_router
 from webapp.watcher import Watcher
 
@@ -52,6 +52,9 @@ async def lifespan(app: FastAPI):
         level=os.environ.get("ASTROSTACK_LOG_LEVEL", "INFO"),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    # Capture logs into an in-memory ring buffer, surfaced at /api/logs so the
+    # cause of a crash/error is visible in the app, not just in docker logs.
+    logbuffer.install()
     # spawn keeps ProcessPoolExecutor behavior consistent across base images.
     with contextlib.suppress(RuntimeError):
         multiprocessing.set_start_method("spawn", force=True)
@@ -83,7 +86,7 @@ def create_app() -> FastAPI:
     for r in (
         targets.router, frames.router, stack.router, jobs.router,
         pipeline_router.router, settings.router, system.router, sky.router,
-        gallery.router,
+        gallery.router, logs.router,
     ):
         app.include_router(r)
 

@@ -35,6 +35,10 @@ import numpy as np
 
 log = logging.getLogger(__name__)
 
+# Set once (per process) if a GPU background-flatten attempt fails, so we stop
+# retrying the GPU path — and stop logging the warning — for every frame.
+_gpu_bg_disabled = False
+
 
 MODE_PER_CHANNEL = "per_channel"
 MODE_LUMINANCE = "luminance"
@@ -94,6 +98,8 @@ def subtract_background(
     """
     from seestack.core.xp import GPU_AVAILABLE
 
+    global _gpu_bg_disabled
+
     if options is None:
         options = BackgroundOptions()
     if not options.enabled or options.mode == MODE_OFF:
@@ -109,11 +115,18 @@ def subtract_background(
         return _subtract_background_luminance(rgb, options, use_gpu=use_gpu)
 
     # MODE_PER_CHANNEL
-    if use_gpu:
+    if use_gpu and not _gpu_bg_disabled:
         try:
             return _subtract_background_gpu(rgb, options)
         except Exception as exc:  # noqa: BLE001 — fall back if cupy hiccups
-            log.warning("GPU bg flatten failed (%s); falling back to CPU", exc)
+            # Disable GPU bg-flatten for the rest of this worker and warn ONCE,
+            # instead of logging per frame (it fired hundreds of times/min when
+            # cupy isn't importable in the worker process).
+            _gpu_bg_disabled = True
+            log.warning(
+                "GPU bg flatten unavailable (%s); using CPU for this and all "
+                "subsequent frames in this worker", exc,
+            )
 
     return _subtract_background_cpu(rgb, options)
 

@@ -110,6 +110,44 @@ def test_single_bad_solve_is_dropped():
     assert canvas.shape[0] < 4000 and canvas.shape[1] < 4000
 
 
+def test_scattered_bad_solves_dropped_before_sizing():
+    """Many good frames + a few wildly-off solves → the bad ones are dropped up
+    front (M_13 case: a tiny object whose canvas span was inflated to ~20°)."""
+    frames = [_frame(50.0, 10.0) for _ in range(20)]
+    frames.append(_frame(60.0, 10.0))   # ~10° off
+    frames.append(_frame(50.0, 22.0))   # ~12° off
+    canvas = compute_mosaic_canvas(frames, reference_shape=(320, 480))
+    assert canvas is not None
+    assert len(canvas.excluded_frame_ids) == 2     # only the two outliers
+    assert canvas.n_footprints == 20
+    assert canvas.span_deg < 1.0                    # back to ~one field
+
+
+def test_legit_spread_mosaic_keeps_all_panels():
+    """A real, evenly-spread mosaic isn't mistaken for outliers."""
+    centers = [(100.0 + 0.4 * i, 20.0) for i in range(6)]  # 6 panels stepping in RA
+    frames = [_frame(ra, dec) for ra, dec in centers for _ in range(3)]
+    canvas = compute_mosaic_canvas(frames, reference_shape=(320, 480))
+    assert canvas is not None
+    assert canvas.excluded_frame_ids == []
+    assert canvas.n_footprints == 18
+
+
+def test_area_budget_raises_even_under_dimension_cap():
+    """A canvas under the per-dimension cap but over the MP budget fails fast."""
+    # Two clusters ~5° apart at 5"/px: ~3600 px each axis-ish but the product is
+    # large; with a tiny MP budget it must raise (mentions the env var).
+    frames = (
+        [_frame(40.0, 10.0) for _ in range(6)]
+        + [_frame(44.0, 14.0) for _ in range(6)]
+    )
+    with pytest.raises(ValueError, match="MEGAPIXELS|MP memory budget"):
+        compute_mosaic_canvas(
+            frames, reference_shape=(320, 480),
+            max_canvas_px=100000, max_canvas_mp=0.5,
+        )
+
+
 def test_unsalvageable_canvas_raises():
     """If dropping outliers can't salvage it, raise — with web guidance.
 
