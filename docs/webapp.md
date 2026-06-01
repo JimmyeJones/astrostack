@@ -80,9 +80,17 @@ The Docker image **automatically downloads** the ASTAP headless CLI and the
 **d05** star database at build time — no manual steps needed. Plate solving
 works out of the box for the Seestar's ~1.3° field of view.
 
+The ASTAP fetch is an early, cached layer, so **routine rebuilds reuse it** —
+ASTAP is only re-downloaded when `install-astap.sh` or the `ASTAP_DB` build-arg
+changes. Rebuild with `docker compose -f docker/docker-compose.yml build`
+(do **not** add `--no-cache` for routine updates, or every layer — including the
+big ASTAP download — is forced to re-run). Use `--no-cache` only to deliberately
+rebuild everything from scratch.
+
 If you need a larger star database or want to pin a specific ASTAP version,
 mount your own install over `/opt/astap` at runtime (see
-[docker/astap/README.md](../docker/astap/README.md)).
+[docker/astap/README.md](../docker/astap/README.md)) — this also keeps ASTAP out
+of the image build entirely.
 
 ## Local development
 
