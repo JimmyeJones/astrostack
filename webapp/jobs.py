@@ -131,12 +131,31 @@ class JobManager:
                 """
             )
 
+    _INTERRUPT_MSG = (
+        "Container restarted while this job was running — likely an out-of-memory "
+        "kill (very large mosaic stacks can exhaust RAM) or a manual redeploy. "
+        "The job was not completed; re-queue it. If it's a big stack that keeps "
+        "crashing, reject bad plate-solve frames or lower the frame count, and see "
+        "the Logs page for the last lines before the restart."
+    )
+
     def _recover_interrupted(self) -> None:
-        """Any job left running/queued when the process died is interrupted."""
+        """Any job left running/queued when the process died is interrupted.
+
+        We record an explanatory error so the user isn't left with a silent
+        ``interrupted`` + ``error: null`` (a SIGKILL/OOM gives the worker no
+        chance to write its own error). A running job almost certainly died to a
+        crash; a merely-queued one just never started.
+        """
         with self._connect() as conn:
             conn.execute(
+                "UPDATE jobs SET state='interrupted', finished_utc=?, error=? "
+                "WHERE state='running'",
+                (_utc(), self._INTERRUPT_MSG),
+            )
+            conn.execute(
                 "UPDATE jobs SET state='interrupted', finished_utc=? "
-                "WHERE state IN ('running','queued')",
+                "WHERE state='queued'",
                 (_utc(),),
             )
 

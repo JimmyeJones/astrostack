@@ -15,6 +15,7 @@ import { StackView } from "./routes/Stack";
 import { HistoryView } from "./routes/History";
 import { GalleryView } from "./routes/Gallery";
 import { JobsView } from "./routes/Jobs";
+import { LogsView } from "./routes/Logs";
 import { SettingsView } from "./routes/Settings";
 
 // Lazy-load the 3D sky viewer so three.js stays out of the main bundle.
@@ -49,6 +50,7 @@ const router = createBrowserRouter([
         </React.Suspense>
       ) },
       { path: "jobs", element: <JobsView /> },
+      { path: "logs", element: <LogsView /> },
       { path: "settings", element: <SettingsView /> },
     ],
   },

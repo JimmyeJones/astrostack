@@ -28,6 +28,7 @@ into a continuous frame before taking the median.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -37,6 +38,22 @@ log = logging.getLogger(__name__)
 # Hard ceiling so a pathological frame set (one bad plate-solve flung across
 # the sky) can't try to allocate a terabyte-scale canvas.
 MAX_CANVAS_PX = 16000
+
+# Area budget (megapixels). Even when both dimensions are under MAX_CANVAS_PX,
+# the *product* can be huge — e.g. 11194×14127 ≈ 158 MP — and that, times the
+# accumulator/reproject buffers a big stack needs, OOM-kills the process. We
+# fail fast with a clear error instead. Override with the env var for hosts with
+# more RAM (or to allow genuinely large mosaics).
+MAX_CANVAS_MEGAPIXELS = float(os.environ.get("ASTROSTACK_MAX_CANVAS_MEGAPIXELS", "150"))
+
+# Proactive plate-solve outlier rejection. A frame whose footprint centre is a
+# gross statistical outlier (and farther than the floor) from the group is
+# dropped *before* sizing the canvas — this catches scattered bad solves that
+# inflate the span without any single dimension hitting MAX_CANVAS_PX (the
+# M_13 "19.97° span for a 0.5° object" case).
+OUTLIER_FLOOR_DEG = 3.0   # never flag a frame closer than this to the group centre
+OUTLIER_SIGMA = 5.0       # MAD-sigmas beyond the median separation to flag
+OUTLIER_MIN_FRAMES = 5    # need at least this many frames for robust statistics
 
 # In "auto" mode, only switch to a union canvas when it's meaningfully bigger
 # than the reference frame — otherwise a normal dithered single-target stack
@@ -67,11 +84,48 @@ def _ang_sep_deg(ra1: float, dec1: float, ra2: float, dec2: float) -> float:
     return float(np.degrees(2 * np.arcsin(np.sqrt(np.clip(h, 0.0, 1.0)))))
 
 
+def _footprint_outlier_indices(
+    foot: list[tuple[object, np.ndarray, np.ndarray]],
+) -> tuple[set[int], list[float]]:
+    """Indices of frames whose footprint centre is a gross plate-solve outlier.
+
+    Robust (median + MAD) so a tight cluster of good frames with a handful of
+    badly-solved ones flags only the bad ones, while a genuinely spread-out
+    mosaic (large, consistent MAD) keeps all its panels. Returns the outlier
+    index set and each frame's separation from the group centre (for logging).
+    """
+    n = len(foot)
+    centers_ra = np.array([np.median(r) for _, r, _ in foot], dtype=np.float64)
+    centers_dec = np.array([np.median(d) for _, _, d in foot], dtype=np.float64)
+    # Unwrap RA across centres in case the group straddles 0°.
+    cr = centers_ra.copy()
+    if cr.max() - cr.min() > 180.0:
+        cr = np.where(cr > 180.0, cr - 360.0, cr)
+    med_ra, med_dec = float(np.median(cr)), float(np.median(centers_dec))
+    seps = [
+        _ang_sep_deg(float(cr[i]) % 360.0, float(centers_dec[i]), med_ra % 360.0, med_dec)
+        for i in range(n)
+    ]
+    if n < OUTLIER_MIN_FRAMES:
+        return set(), seps
+    arr = np.array(seps)
+    med_sep = float(np.median(arr))
+    mad = float(np.median(np.abs(arr - med_sep)))
+    threshold = max(OUTLIER_FLOOR_DEG, med_sep + OUTLIER_SIGMA * 1.4826 * mad)
+    outliers = {i for i, s in enumerate(seps) if s > threshold}
+    # Never drop more than half the frames this way — if that many are "outliers"
+    # the data is something else (a real wide mosaic); leave it to the size caps.
+    if len(outliers) > n // 2:
+        return set(), seps
+    return outliers, seps
+
+
 def compute_mosaic_canvas(
     frames,
     reference_shape: tuple[int, int],
     *,
     max_canvas_px: int = MAX_CANVAS_PX,
+    max_canvas_mp: float = MAX_CANVAS_MEGAPIXELS,
 ) -> CanvasResult | None:
     """
     Compute the union output canvas for a set of plate-solved frames.
@@ -173,11 +227,29 @@ def compute_mosaic_canvas(
         height = int(y_max - y_min) + 3
         return w, x_min, x_max, y_min, y_max, width, height, (center_ra, center_dec)
 
-    # Iteratively drop the single most-extreme outlier frame until the canvas
-    # fits. For a healthy frame set this loop runs once and changes nothing; it
-    # only kicks in when a bad plate-solve has flung the union across the sky.
     active = list(range(len(foot)))
     excluded: list[object] = []
+
+    # Proactive pass: drop gross plate-solve outliers up front, by statistics,
+    # *before* sizing the canvas. This catches scattered bad solves that inflate
+    # the span/area without any single dimension hitting the pixel cap.
+    outliers, seps = _footprint_outlier_indices(foot)
+    if outliers:
+        for i in sorted(outliers):
+            excluded.append(foot[i][0])
+        active = [i for i in active if i not in outliers]
+        log.warning(
+            "Dropping %d frame(s) with outlying plate-solves before sizing the "
+            "canvas (separations up to %.1f° from the group centre): %s",
+            len(outliers), max(seps[i] for i in outliers),
+            [foot[i][0] for i in sorted(outliers)],
+        )
+    if not active:
+        return None
+
+    # Iteratively drop the single most-extreme outlier frame until the canvas
+    # fits the pixel cap. For a healthy frame set this loop runs once and changes
+    # nothing; it's a backstop for the dimension limit.
     max_excluded = max(1, len(foot) // 2)  # never drop more than half
     while True:
         bb = _bbox(active)
@@ -210,6 +282,21 @@ def compute_mosaic_canvas(
             "Dropping frame %s from mosaic canvas: plate-solve centre is %.2f° "
             "from the others (canvas would be %d×%d px)",
             foot[worst][0], seps[worst], width, height,
+        )
+
+    # Area / memory budget. Both dimensions can be under the pixel cap while
+    # their product is still ruinous (e.g. 11194×14127 ≈ 158 MP), which OOM-kills
+    # the process once the stack's accumulator + reproject buffers are added.
+    # Fail fast with an actionable error instead.
+    megapixels = (width * height) / 1e6
+    if megapixels > max_canvas_mp:
+        raise ValueError(
+            f"mosaic canvas would be {width}×{height} px ({megapixels:.0f} MP), "
+            f"exceeding the {max_canvas_mp:.0f} MP memory budget. This usually "
+            "means bad plate-solves are inflating the field (a small object "
+            "shouldn't need a huge canvas) — open the Frames table, reject the "
+            "frames whose centre is far from the rest, then re-stack. To allow a "
+            "genuinely large mosaic, raise ASTROSTACK_MAX_CANVAS_MEGAPIXELS."
         )
 
     # Shift CRPIX so the bounding-box min corner lands at pixel (1, 1) with a

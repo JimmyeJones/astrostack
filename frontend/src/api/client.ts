@@ -72,6 +72,15 @@ export interface GalleryItem {
   options: Record<string, unknown>;
 }
 
+export interface LogEntry {
+  seq: number;
+  ts: string;
+  level: string;
+  levelno: number;
+  logger: string;
+  message: string;
+}
+
 export interface Job {
   id: string;
   kind: string;
@@ -221,4 +230,10 @@ export const api = {
 
   // gallery
   getGallery: () => req<{ items: GalleryItem[] }>("/api/gallery"),
+
+  // logs
+  getLogs: (level?: string, limit = 1000) =>
+    req<{ logs: LogEntry[]; last_seq: number }>(
+      `/api/logs?limit=${limit}${level ? `&level=${level}` : ""}`,
+    ),
 };
