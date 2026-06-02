@@ -56,6 +56,7 @@ class SeestarManager:
         self._lock = threading.Lock()
         self._devices: dict[str, dict[str, Any]] = {}
         self._clients: dict[str, SeestarClient] = {}
+        self._last_ok: dict[str, bool] = {}  # per-ip telemetry state, for transition logs
         self._stop = threading.Event()
         self._scan_now = threading.Event()
         self._scan_thread: threading.Thread | None = None
@@ -96,6 +97,7 @@ class SeestarManager:
     def disconnect(self, ip: str) -> None:
         with self._lock:
             client = self._clients.pop(ip, None)
+            self._last_ok.pop(ip, None)
             dev = self._devices.get(ip)
             if dev is not None:
                 dev["connected"] = False
@@ -132,6 +134,7 @@ class SeestarManager:
                 return client
             client = SeestarClient(ip)
             self._clients[ip] = client
+            self._last_ok.pop(ip, None)  # re-log telemetry state after a fresh connect
         client.connect()  # may raise SeestarError → surfaced to caller
         with self._lock:
             dev = self._devices.setdefault(ip, _new_device(ip))
@@ -181,9 +184,17 @@ class SeestarManager:
                         continue
                 tel, errors = collect_telemetry(client)
                 if tel is not None:
-                    # Keep partial-failure detail visible without hiding the data.
                     self._store_telemetry(ip, tel, error="; ".join(errors) or None)
+                    if not self._last_ok.get(ip):
+                        log.info("seestar %s: telemetry OK (model=%s battery=%s%% target=%s)",
+                                 ip, tel.get("model"), tel.get("battery_pct"),
+                                 tel.get("target_name"))
+                    self._last_ok[ip] = True
                 else:
+                    if self._last_ok.get(ip) is not False:
+                        log.warning("seestar %s: connected but no telemetry — %s",
+                                    ip, "; ".join(errors) or "device silent")
+                    self._last_ok[ip] = False
                     self._mark_error(ip, "; ".join(errors) or "no telemetry")
             time.sleep(max(2, int(settings.seestar_poll_interval_s)))
 
