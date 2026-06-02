@@ -9,6 +9,7 @@ import "@mantine/core/styles.css";
 import "@mantine/notifications/styles.css";
 
 import { App } from "./App";
+import { Dashboard } from "./routes/Dashboard";
 import { Library } from "./routes/Library";
 import { TargetView } from "./routes/Target";
 import { StackView } from "./routes/Stack";
@@ -17,6 +18,8 @@ import { GalleryView } from "./routes/Gallery";
 import { JobsView } from "./routes/Jobs";
 import { LogsView } from "./routes/Logs";
 import { SettingsView } from "./routes/Settings";
+import { StorageView } from "./routes/Storage";
+import { SeestarView } from "./routes/Seestar";
 
 // Lazy-load the 3D sky viewer so three.js stays out of the main bundle.
 const SkyView = React.lazy(() =>
@@ -39,7 +42,10 @@ const router = createBrowserRouter([
     path: "/",
     element: <App />,
     children: [
-      { index: true, element: <Library /> },
+      { index: true, element: <Dashboard /> },
+      { path: "library", element: <Library /> },
+      { path: "telescope", element: <SeestarView /> },
+      { path: "storage", element: <StorageView /> },
       { path: "gallery", element: <GalleryView /> },
       { path: "targets/:safe", element: <TargetView /> },
       { path: "targets/:safe/stack", element: <StackView /> },

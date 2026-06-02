@@ -74,6 +74,22 @@ class Settings(BaseModel):
     # --- compute -----------------------------------------------------------
     cpu_workers: int | None = Field(default_factory=_default_cpu_workers)
 
+    # --- Seestar telescope integration -------------------------------------
+    # Monitor (and optionally control) Seestar scopes over the LAN via the
+    # unofficial JSON-RPC port 4700. Off by default — it only makes sense when
+    # the container can actually reach the scope's network (Station mode).
+    seestar_enabled: bool = False
+    # Control commands (goto / start / stop / park) are gated separately so
+    # monitoring can be on without any risk of disturbing an active session.
+    seestar_control_enabled: bool = False
+    # CIDR to scan for scopes (e.g. "192.168.1.0/24"). Blank = auto-detect from
+    # the container's own interfaces.
+    seestar_scan_subnet: str = ""
+    # Devices that auto-discovery can't reach can be pinned here by IP.
+    seestar_known_ips: list[str] = Field(default_factory=list)
+    seestar_scan_interval_s: int = 300
+    seestar_poll_interval_s: int = 5
+
     # --- stacking ----------------------------------------------------------
     # Global default StackOptions (per-target overrides live in project meta).
     default_stack_options: dict[str, Any] = Field(default_factory=dict)

@@ -17,6 +17,90 @@ export interface Target {
   total_exposure_s: number;
   last_activity_utc: string | null;
   has_preview: boolean;
+  notes: string | null;
+  tags: string[];
+}
+
+export interface DashboardStats {
+  n_targets: number;
+  n_frames: number;
+  n_frames_accepted: number;
+  total_exposure_s: number;
+  integration_hours: number;
+  acceptance_rate: number | null;
+  n_stack_runs: number;
+  n_targets_with_stacks: number;
+  active_jobs: number;
+  recent_stacks: {
+    safe: string;
+    target_name: string;
+    run_id: number;
+    output_basename: string;
+    timestamp_utc: string;
+    n_frames_used: number;
+    has_preview: boolean;
+    preview_url: string;
+  }[];
+  disk: { total_gb?: number; used_gb?: number; free_gb?: number };
+}
+
+export interface TargetStorage {
+  safe: string;
+  name: string;
+  total_bytes: number;
+  output_bytes: number;
+  cache_bytes: number;
+  stage1_bytes: number;
+  stage2_bytes: number;
+  thumbs_bytes: number;
+  n_stack_runs: number;
+}
+
+export interface StorageInfo {
+  targets: TargetStorage[];
+  total_bytes: number;
+  output_bytes: number;
+  cache_bytes: number;
+  disk: { total_gb?: number; used_gb?: number; free_gb?: number };
+}
+
+export interface SeestarTelemetry {
+  device_name: string | null;
+  model: string | null;
+  firmware: string | null;
+  temp_c: number | null;
+  battery_pct: number | null;
+  charging: boolean | null;
+  charger_status: string | null;
+  free_storage_mb: number | null;
+  total_storage_mb: number | null;
+  mode: string | null;
+  state: string | null;
+  stage: string | null;
+  target_name: string | null;
+  stacked_frames: number | null;
+  dropped_frames: number | null;
+  ra_hours: number | null;
+  dec_deg: number | null;
+}
+
+export interface SeestarDevice {
+  id: string;
+  ip: string;
+  device_name: string | null;
+  model: string | null;
+  firmware: string | null;
+  reachable: boolean;
+  connected: boolean;
+  last_seen_utc: string | null;
+  telemetry: SeestarTelemetry | null;
+  error: string | null;
+}
+
+export interface SeestarDevices {
+  enabled: boolean;
+  control_enabled: boolean;
+  devices: SeestarDevice[];
 }
 
 export interface Frame {
@@ -161,6 +245,8 @@ export const api = {
   getTarget: (safe: string) => req<Target>(`/api/targets/${safe}`),
   createTarget: (name: string) =>
     req<Target>("/api/targets", { method: "POST", body: JSON.stringify({ name }) }),
+  patchTarget: (safe: string, body: { notes?: string | null; tags?: string[] }) =>
+    req<Target>(`/api/targets/${safe}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteTarget: (safe: string, removeFiles: boolean) =>
     req(`/api/targets/${safe}?remove_files=${removeFiles}`, { method: "DELETE" }),
   mergeTargets: (into: string, sources: string[]) =>
@@ -236,4 +322,31 @@ export const api = {
     req<{ logs: LogEntry[]; last_seq: number }>(
       `/api/logs?limit=${limit}${level ? `&level=${level}` : ""}`,
     ),
+
+  // dashboard
+  getStats: () => req<DashboardStats>("/api/stats"),
+
+  // storage / housekeeping
+  getStorage: () => req<StorageInfo>("/api/storage"),
+  clearCache: (safe: string, stage: "stage1" | "stage2" | "thumbs" | "all") =>
+    req<{ cleared: string[] }>(`/api/targets/${safe}/cache/clear?stage=${stage}`, {
+      method: "POST",
+    }),
+  pruneStackRuns: (safe: string, body: { keep?: number; ids?: number[] }) =>
+    req<{ deleted: number[] }>(`/api/targets/${safe}/stack-runs/prune`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  // seestar telescope
+  getSeestarDevices: () => req<SeestarDevices>("/api/seestar/devices"),
+  seestarScan: () => req<{ scanning: boolean }>("/api/seestar/scan", { method: "POST" }),
+  seestarConnect: (ip: string) =>
+    req<{ connected: string }>(`/api/seestar/${ip}/connect`, { method: "POST" }),
+  seestarDisconnect: (ip: string) =>
+    req<{ disconnected: string }>(`/api/seestar/${ip}/disconnect`, { method: "POST" }),
+  seestarGoto: (ip: string, body: { ra_hours: number; dec_deg: number; target_name?: string }) =>
+    req(`/api/seestar/${ip}/goto`, { method: "POST", body: JSON.stringify(body) }),
+  seestarStop: (ip: string) => req(`/api/seestar/${ip}/stop`, { method: "POST" }),
+  seestarPark: (ip: string) => req(`/api/seestar/${ip}/park`, { method: "POST" }),
 };

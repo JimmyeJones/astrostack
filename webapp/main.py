@@ -25,8 +25,12 @@ from fastapi.staticfiles import StaticFiles
 from webapp import logbuffer, pipeline
 from webapp.config import SettingsStore
 from webapp.jobs import JobManager
-from webapp.routers import frames, gallery, jobs, logs, settings, sky, stack, system, targets
+from webapp.routers import (
+    frames, gallery, jobs, logs, seestar, settings, sky, stack, stats, storage,
+    system, targets,
+)
 from webapp.routers import pipeline as pipeline_router
+from webapp.seestar.manager import SeestarManager
 from webapp.watcher import Watcher
 
 log = logging.getLogger(__name__)
@@ -72,10 +76,16 @@ async def lifespan(app: FastAPI):
     )
     watcher.start()
     app.state.watcher = watcher
+
+    seestar_mgr = SeestarManager(get_settings=store.get)
+    seestar_mgr.start()
+    app.state.seestar_manager = seestar_mgr
+
     log.info("AstroStack web started; data_root=%s", store.get().data_root)
     try:
         yield
     finally:
+        seestar_mgr.stop()
         watcher.stop()
         jm.stop()
 
@@ -86,7 +96,8 @@ def create_app() -> FastAPI:
     for r in (
         targets.router, frames.router, stack.router, jobs.router,
         pipeline_router.router, settings.router, system.router, sky.router,
-        gallery.router, logs.router,
+        gallery.router, logs.router, stats.router, storage.router,
+        seestar.router,
     ):
         app.include_router(r)
 

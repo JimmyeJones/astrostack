@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 
 from webapp import deps
-from webapp.schemas import MergeRequest, TargetCreate, TargetOut
+from webapp.schemas import MergeRequest, TargetCreate, TargetOut, TargetPatch
 
 router = APIRouter(prefix="/api/targets", tags=["targets"])
 
@@ -24,6 +24,8 @@ def _to_out(entry) -> TargetOut:  # noqa: ANN001
         total_exposure_s=entry.total_exposure_s,
         last_activity_utc=entry.last_activity_utc,
         has_preview=bool(entry.last_stack_preview and Path(entry.last_stack_preview).exists()),
+        notes=entry.notes,
+        tags=list(entry.tags),
     )
 
 
@@ -65,6 +67,19 @@ def get_target(safe: str, request: Request) -> TargetOut:
     lib = deps.open_library(request)
     try:
         entry = lib.find_target(safe)
+        if entry is None:
+            raise HTTPException(status_code=404, detail=f"No target '{safe}'")
+        return _to_out(entry)
+    finally:
+        lib.close()
+
+
+@router.patch("/{safe}", response_model=TargetOut)
+def patch_target(safe: str, body: TargetPatch, request: Request) -> TargetOut:
+    """Edit user-owned target metadata: free-text notes and tags."""
+    lib = deps.open_library(request)
+    try:
+        entry = lib.update_target(safe, notes=body.notes, tags=body.tags)
         if entry is None:
             raise HTTPException(status_code=404, detail=f"No target '{safe}'")
         return _to_out(entry)

@@ -23,17 +23,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Install Python deps first (better layer caching). Copy the source needed for
-# the build backend to resolve the package, then install with the web extra.
-COPY pyproject.toml README.md ./
-COPY seestack/ ./seestack/
-COPY webapp/ ./webapp/
-
-# Bring in the built SPA so it's packaged into webapp/static.
-COPY --from=frontend /build/dist/ ./webapp/static/
-
-RUN pip install --no-cache-dir .[web]
-
 # ASTAP headless plate solver + d05 star database (500 stars/sq.deg; sufficient
 # for the Seestar's ~1.3° FOV). Fetched at image-build time so users don't have
 # to bundle anything manually. install-astap.sh tries several download sources
@@ -41,6 +30,11 @@ RUN pip install --no-cache-dir .[web]
 # loudly instead of producing a silently solver-less image.
 # Override the database with --build-arg ASTAP_DB=d20 (or mount your own install
 # over /opt/astap at runtime; see docker-compose.yml).
+#
+# IMPORTANT: this block is placed BEFORE copying the app source so that editing
+# code doesn't invalidate it. ASTAP (a ~hundreds-of-MB download) is only
+# re-fetched when install-astap.sh or ASTAP_DB actually change — not on every
+# code update. (Routine rebuilds must NOT use --no-cache, or this is defeated.)
 ARG ASTAP_DB=d05
 COPY docker/install-astap.sh /tmp/install-astap.sh
 RUN apt-get update && apt-get install -y --no-install-recommends curl unzip file \
@@ -49,6 +43,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl unzip file
     && ASTAP_DB="${ASTAP_DB}" /tmp/install-astap.sh \
     && rm /tmp/install-astap.sh \
     && apt-get purge -y --auto-remove curl unzip file
+
+# Python deps + app source. A BuildKit pip cache keeps downloaded wheels on the
+# build host, so a code change reinstalls quickly instead of re-downloading
+# numpy/astropy/etc. Source is copied last (it changes most often).
+COPY pyproject.toml README.md ./
+COPY seestack/ ./seestack/
+COPY webapp/ ./webapp/
+
+# Bring in the built SPA so it's packaged into webapp/static.
+COPY --from=frontend /build/dist/ ./webapp/static/
+
+RUN --mount=type=cache,target=/root/.cache/pip pip install .[web]
 
 ENV SEESTACK_ASTAP_PATH=/opt/astap/astap
 ENV ASTROSTACK_DATA=/data

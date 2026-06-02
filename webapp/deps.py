@@ -26,6 +26,11 @@ def get_job_manager(request: Request) -> JobManager:
     return request.app.state.job_manager
 
 
+def get_seestar_manager(request: Request):
+    """The Seestar device manager (created in the app lifespan)."""
+    return request.app.state.seestar_manager
+
+
 def open_library(request: Request) -> Library:
     """Open the library. Caller MUST close it."""
     settings = request.app.state.settings_store.get()

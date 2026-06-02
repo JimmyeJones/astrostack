@@ -30,6 +30,13 @@ class TargetOut(BaseModel):
     total_exposure_s: float = 0.0
     last_activity_utc: str | None = None
     has_preview: bool = False
+    notes: str | None = None
+    tags: list[str] = []
+
+
+class TargetPatch(BaseModel):
+    notes: str | None = None
+    tags: list[str] | None = None
 
 
 class FrameOut(BaseModel):
