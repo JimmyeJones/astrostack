@@ -165,6 +165,31 @@ def test_rpc_before_connect_raises():
         c.get_device_state()
 
 
+def test_timeout_on_silent_device_explains_single_controller():
+    """A device that accepts the TCP connection but never replies (e.g. the app
+    is already connected) should produce an actionable error, not a bare timeout."""
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    port = srv.getsockname()[1]
+    accepted = []
+    t = threading.Thread(target=lambda: accepted.append(srv.accept()), daemon=True)
+    t.start()
+    try:
+        c = SeestarClient("127.0.0.1", port)
+        c.connect()
+        try:
+            with pytest.raises(SeestarError) as exc:
+                c.get_device_state(timeout=0.5)
+            assert c.bytes_received == 0
+            assert "no data" in str(exc.value)
+            assert "one controller" in str(exc.value)
+        finally:
+            c.disconnect()
+    finally:
+        srv.close()
+
+
 # --------------------------------------------------------------------------- #
 # collect_telemetry — best-effort, degrades gracefully
 # --------------------------------------------------------------------------- #
