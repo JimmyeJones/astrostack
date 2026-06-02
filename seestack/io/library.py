@@ -33,11 +33,12 @@ totals are refreshed after each scan / stack.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import sqlite3
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator
 
@@ -45,7 +46,7 @@ from seestack.io.project import Project
 
 log = logging.getLogger(__name__)
 
-LIBRARY_SCHEMA_VERSION = 2
+LIBRARY_SCHEMA_VERSION = 3
 _REGISTRY_FILENAME = "library.sqlite"
 _TARGETS_SUBDIR = "targets"
 
@@ -75,7 +76,8 @@ CREATE TABLE IF NOT EXISTS targets (
     n_frames_accepted     INTEGER NOT NULL DEFAULT 0,
     total_exposure_s      REAL NOT NULL DEFAULT 0,
     last_stack_preview    TEXT,                     -- absolute path to latest preview
-    notes                 TEXT
+    notes                 TEXT,
+    tags                  TEXT                       -- JSON array of tag strings
 );
 
 CREATE INDEX IF NOT EXISTS idx_targets_radec ON targets(ra_deg, dec_deg);
@@ -98,6 +100,7 @@ class TargetEntry:
     total_exposure_s: float
     last_stack_preview: str | None
     notes: str | None
+    tags: list[str] = field(default_factory=list)
 
 
 def make_safe_name(name: str) -> str:
@@ -177,11 +180,22 @@ class Library:
         assert self._conn is not None
         self._conn.executescript(_REGISTRY_SCHEMA_SQL)
         self._set_meta("schema_version", str(LIBRARY_SCHEMA_VERSION))
+        self._ensure_columns()
+
+    def _ensure_columns(self) -> None:
+        """Add columns introduced by later schema versions to an existing
+        ``targets`` table. ``CREATE TABLE IF NOT EXISTS`` never adds columns,
+        so each additive column needs an explicit, idempotent ALTER."""
+        assert self._conn is not None
+        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(targets)")}
+        if "tags" not in cols:
+            self._conn.execute("ALTER TABLE targets ADD COLUMN tags TEXT")
 
     def _check_schema(self) -> None:
         assert self._conn is not None
         v = self._conn.execute("PRAGMA user_version").fetchone()[0]
         if v == LIBRARY_SCHEMA_VERSION:
+            self._ensure_columns()
             return
         if v < LIBRARY_SCHEMA_VERSION:
             # Older library (possibly created by a pre-scan build that still
@@ -295,6 +309,34 @@ class Library:
             (name_or_safe, name_or_safe),
         ).fetchone()
         return _row_to_target(row) if row else None
+
+    def update_target(self, name_or_safe: str, *, notes: str | None = None,
+                      tags: list[str] | None = None) -> TargetEntry | None:
+        """Patch user-editable target metadata (notes / tags). Only the
+        arguments explicitly passed are changed; ``None`` means "leave as is".
+        Returns the refreshed entry, or ``None`` if the target is unknown."""
+        assert self._conn is not None
+        entry = self.find_target(name_or_safe)
+        if entry is None:
+            return None
+        sets: list[str] = []
+        params: list[object] = []
+        if notes is not None:
+            sets.append("notes = ?")
+            params.append(notes)
+        if tags is not None:
+            cleaned = [str(t).strip() for t in tags if str(t).strip()]
+            # De-duplicate while preserving order.
+            seen: set[str] = set()
+            unique = [t for t in cleaned if not (t in seen or seen.add(t))]
+            sets.append("tags = ?")
+            params.append(json.dumps(unique))
+        if sets:
+            params.append(entry.id)
+            self._conn.execute(
+                f"UPDATE targets SET {', '.join(sets)} WHERE id = ?", params
+            )
+        return self.find_target(name_or_safe)
 
     def list_targets(self) -> list[TargetEntry]:
         assert self._conn is not None
@@ -511,7 +553,18 @@ def _row_to_target(row: sqlite3.Row) -> TargetEntry:
         total_exposure_s=row["total_exposure_s"],
         last_stack_preview=row["last_stack_preview"],
         notes=row["notes"],
+        tags=_parse_tags(row["tags"] if "tags" in row.keys() else None),
     )
+
+
+def _parse_tags(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    try:
+        val = json.loads(raw)
+    except (ValueError, TypeError):
+        return []
+    return [str(t) for t in val] if isinstance(val, list) else []
 
 
 def _median_radec(proj: Project) -> tuple[float | None, float | None]:

@@ -1,0 +1,206 @@
+"""Seestar integration: telemetry parsing, JSON-RPC client, discovery, gating."""
+
+from __future__ import annotations
+
+import json
+import socket
+import threading
+
+import pytest
+
+from webapp.seestar import discovery, telemetry
+from webapp.seestar.client import SeestarClient, SeestarError
+
+
+# --------------------------------------------------------------------------- #
+# telemetry.normalize
+# --------------------------------------------------------------------------- #
+
+def test_normalize_full_payload():
+    device_state = {
+        "device": {"name": "Seestar S50", "firmware_ver_string": "4.02"},
+        "pi_status": {"temp": 41.5, "battery_capacity": 88, "charger_status": "Charging"},
+        "storage": {"storage_volume": [{"freeMB": 12000, "totalMB": 30000}]},
+    }
+    view_state = {"View": {"state": "working", "mode": "star", "target_name": "M 42",
+                           "stage": "Stack", "Stack": {"stacked_frame": 42, "dropped_frame": 3}}}
+    equ = {"ra": 5.6, "dec": -5.4}
+
+    t = telemetry.normalize(device_state, view_state, equ)
+    assert t["model"] == "Seestar S50"
+    assert t["firmware"] == "4.02"
+    assert t["temp_c"] == 41.5
+    assert t["battery_pct"] == 88
+    assert t["charging"] is True
+    assert t["free_storage_mb"] == 12000
+    assert t["target_name"] == "M 42"
+    assert t["stacked_frames"] == 42
+    assert t["dropped_frames"] == 3
+    assert t["ra_hours"] == 5.6 and t["dec_deg"] == -5.4
+    assert t["raw"]["view_state"] == view_state
+
+
+def test_normalize_tolerates_empty_and_partial():
+    t = telemetry.normalize({}, {}, {})
+    assert t["battery_pct"] is None
+    assert t["target_name"] is None
+    assert t["stacked_frames"] is None
+    # Discharging → not charging.
+    t2 = telemetry.normalize({"pi_status": {"charger_status": "Discharging"}}, {}, {})
+    assert t2["charging"] is False
+
+
+# --------------------------------------------------------------------------- #
+# SeestarClient against a fake TCP server
+# --------------------------------------------------------------------------- #
+
+class _FakeSeestar:
+    """Minimal newline-delimited JSON-RPC server speaking the Seestar dialect."""
+
+    def __init__(self, responses: dict):
+        self.responses = responses
+        self.received: list[dict] = []
+        self._srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._srv.bind(("127.0.0.1", 0))
+        self._srv.listen(1)
+        self.port = self._srv.getsockname()[1]
+        self._stop = False
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+
+    def start(self):
+        self._thread.start()
+
+    def _serve(self):
+        try:
+            conn, _ = self._srv.accept()
+        except OSError:
+            return
+        with conn:
+            # Unsolicited event push (no id) before any request.
+            conn.sendall((json.dumps({"Event": "PiStatus", "battery": 50}) + "\r\n").encode())
+            buf = b""
+            while not self._stop:
+                try:
+                    data = conn.recv(4096)
+                except OSError:
+                    break
+                if not data:
+                    break
+                buf += data
+                while b"\n" in buf:
+                    line, buf = buf.split(b"\n", 1)
+                    line = line.strip()
+                    if not line:
+                        continue
+                    msg = json.loads(line)
+                    self.received.append(msg)
+                    result = self.responses.get(msg["method"], {})
+                    conn.sendall((json.dumps({"id": msg["id"], "result": result}) + "\r\n").encode())
+
+    def stop(self):
+        self._stop = True
+        try:
+            self._srv.close()
+        except OSError:
+            pass
+
+
+@pytest.fixture
+def fake_seestar():
+    server = _FakeSeestar(responses={
+        "get_device_state": {"device": {"name": "S50"}},
+        "get_view_state": {"View": {"mode": "star"}},
+        "scope_get_equ_coord": {"ra": 1.0, "dec": 2.0},
+        "iscope_start_view": {"code": 0},
+    })
+    server.start()
+    yield server
+    server.stop()
+
+
+def test_client_rpc_roundtrip_and_event(fake_seestar):
+    c = SeestarClient("127.0.0.1", fake_seestar.port)
+    c.connect()
+    try:
+        assert c.is_connected
+        assert c.get_device_state()["device"]["name"] == "S50"
+        assert c.get_view_state()["View"]["mode"] == "star"
+        assert c.get_equ_coord()["ra"] == 1.0
+        # The unsolicited event was captured.
+        assert c.last_event.get("Event") == "PiStatus"
+    finally:
+        c.disconnect()
+    assert not c.is_connected
+
+
+def test_client_goto_sends_expected_payload(fake_seestar):
+    c = SeestarClient("127.0.0.1", fake_seestar.port)
+    c.connect()
+    try:
+        c.goto(5.5, -10.0, "M 1")
+    finally:
+        c.disconnect()
+    goto = next(m for m in fake_seestar.received if m["method"] == "iscope_start_view")
+    assert goto["params"]["target_ra_dec"] == [5.5, -10.0]
+    assert goto["params"]["target_name"] == "M 1"
+    assert goto["params"]["mode"] == "star"
+
+
+def test_rpc_before_connect_raises():
+    c = SeestarClient("127.0.0.1", 4700)
+    with pytest.raises(SeestarError):
+        c.get_device_state()
+
+
+# --------------------------------------------------------------------------- #
+# discovery
+# --------------------------------------------------------------------------- #
+
+def test_scan_finds_listening_extra_ip():
+    # A listening socket on localhost stands in for a reachable scope.
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    port = srv.getsockname()[1]
+    try:
+        # Probe that specific port via the private helper.
+        assert discovery._probe("127.0.0.1", port) is True
+        assert discovery._probe("127.0.0.1", port + 1) in (False, True)  # may or may not be open
+    finally:
+        srv.close()
+
+
+def test_scan_empty_when_no_hosts():
+    # TEST-NET-3 /31 → at most two probes, none will answer.
+    assert discovery.scan("203.0.113.0/31") == []
+
+
+# --------------------------------------------------------------------------- #
+# router gating (manager idles because seestar_enabled defaults False)
+# --------------------------------------------------------------------------- #
+
+def test_devices_endpoint_disabled_by_default(client):
+    r = client.get("/api/seestar/devices")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["enabled"] is False
+    assert body["control_enabled"] is False
+    assert body["devices"] == []
+
+
+def test_scan_and_control_blocked_when_disabled(client):
+    assert client.post("/api/seestar/scan").status_code == 409
+    assert client.post("/api/seestar/1.2.3.4/goto",
+                       json={"ra_hours": 1, "dec_deg": 2}).status_code == 409
+
+
+def test_control_blocked_when_only_monitoring_enabled(client):
+    # Enable monitoring with a tiny no-host subnet so the background scan is a no-op.
+    client.put("/api/settings", json={
+        "seestar_enabled": True, "seestar_scan_subnet": "203.0.113.0/31",
+    })
+    assert client.post("/api/seestar/scan").status_code == 200
+    # Control still gated.
+    r = client.post("/api/seestar/1.2.3.4/park")
+    assert r.status_code == 409
+    client.put("/api/settings", json={"seestar_enabled": False})

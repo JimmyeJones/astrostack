@@ -1,8 +1,8 @@
 import {
   Accordion, Alert, Badge, Button, Center, Divider, Group, Loader, NumberInput,
-  Paper, SimpleGrid, Stack, Switch, Text, TextInput, Title,
+  Paper, SimpleGrid, Stack, Switch, TagsInput, Text, TextInput, Title,
 } from "@mantine/core";
-import { IconDeviceFloppy, IconInfoCircle } from "@tabler/icons-react";
+import { IconDeviceFloppy, IconInfoCircle, IconTelescope } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { notifications } from "@mantine/notifications";
@@ -28,6 +28,12 @@ const HINTS: Record<string, string> = {
   astap_fov_deg: "Approximate field-of-view height in degrees, used as a solving hint (~1.3° suits the Seestar).",
   astap_timeout_s: "Give up on solving a single frame after this many seconds.",
   cpu_workers: "CPU workers for QC / solve / stack. Blank = all cores.",
+  seestar_enabled: "Discover and monitor Seestar telescopes on the LAN via their unofficial local API (port 4700). The container must be able to reach the scope (Station mode).",
+  seestar_control_enabled: "Allow sending commands (goto / start / stop / park) to the scope. Off = monitoring only, so watching can never disturb a session.",
+  seestar_scan_subnet: "CIDR to scan for scopes, e.g. 192.168.1.0/24. Blank = auto-detect from the container's network.",
+  seestar_known_ips: "Pin specific Seestar IPs that auto-discovery can't reach.",
+  seestar_scan_interval_s: "How often to re-scan the network for devices.",
+  seestar_poll_interval_s: "How often to poll each connected scope for telemetry.",
 };
 
 export function SettingsView() {
@@ -160,6 +166,52 @@ export function SettingsView() {
               min={1} onChange={(v) => set("cpu_workers", v === "" ? null : Number(v))} />
           </SimpleGrid>
 
+          <Group justify="flex-end">
+            <Button leftSection={<IconDeviceFloppy size={16} />}
+              onClick={() => save.mutate(form)} loading={save.isPending}>
+              Save settings
+            </Button>
+          </Group>
+        </Stack>
+      </Paper>
+
+      <Paper withBorder p="lg">
+        <Stack>
+          <Group gap={6}>
+            <IconTelescope size={18} />
+            <Text fw={600}>Telescope (Seestar)</Text>
+            <Badge variant="light" color={bool("seestar_enabled") ? "teal" : "gray"}>
+              {bool("seestar_enabled") ? "on" : "off"}
+            </Badge>
+          </Group>
+          <Text size="sm" c="dimmed">
+            Monitor Seestar scopes over the LAN (battery, temperature, stacking progress) and
+            optionally control them. This uses an unofficial, firmware-dependent API — see the
+            Telescope page for caveats.
+          </Text>
+          <Group>
+            <Switch label={lbl("seestar_enabled", "Enable Seestar integration")}
+              checked={bool("seestar_enabled")}
+              onChange={(e) => set("seestar_enabled", e.currentTarget.checked)} />
+            <Switch label={lbl("seestar_control_enabled", "Allow control commands")}
+              checked={bool("seestar_control_enabled")} disabled={!bool("seestar_enabled")}
+              onChange={(e) => set("seestar_control_enabled", e.currentTarget.checked)} />
+          </Group>
+          <TextInput label={lbl("seestar_scan_subnet", "Scan subnet (CIDR)")}
+            value={(form.seestar_scan_subnet as string) ?? ""} placeholder="auto-detect"
+            onChange={(e) => set("seestar_scan_subnet", e.currentTarget.value)} />
+          <TagsInput label={lbl("seestar_known_ips", "Known device IPs")}
+            placeholder="e.g. 192.168.1.50"
+            value={(form.seestar_known_ips as string[]) ?? []}
+            onChange={(v) => set("seestar_known_ips", v)} />
+          <SimpleGrid cols={{ base: 1, xs: 2 }}>
+            <NumberInput label={lbl("seestar_scan_interval_s", "Scan interval (s)")}
+              value={num("seestar_scan_interval_s")} min={30}
+              onChange={(v) => set("seestar_scan_interval_s", Number(v))} />
+            <NumberInput label={lbl("seestar_poll_interval_s", "Poll interval (s)")}
+              value={num("seestar_poll_interval_s")} min={2}
+              onChange={(v) => set("seestar_poll_interval_s", Number(v))} />
+          </SimpleGrid>
           <Group justify="flex-end">
             <Button leftSection={<IconDeviceFloppy size={16} />}
               onClick={() => save.mutate(form)} loading={save.isPending}>

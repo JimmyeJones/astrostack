@@ -218,8 +218,13 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request) -> F
 
 @router.delete("/api/targets/{safe}/stack-runs/{run_id}")
 def delete_stack_run(safe: str, run_id: int, request: Request) -> dict:
+    from webapp.routers.storage import delete_run_artifacts
+
     lib, proj = deps.open_target_project(request, safe)
     try:
+        run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
+        if run is not None:
+            delete_run_artifacts(run)
         proj.delete_stack_run(run_id)
     finally:
         proj.close()

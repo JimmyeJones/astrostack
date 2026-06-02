@@ -1,6 +1,6 @@
 import { AppShell, Badge, Box, Burger, Button, Group, NavLink, ScrollArea, Text, Title } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
-import { IconActivity, IconFileText, IconLayoutGrid, IconPhoto, IconRadar2, IconSettings, IconStars } from "@tabler/icons-react";
+import { IconActivity, IconDatabase, IconFileText, IconGauge, IconLayoutGrid, IconPhoto, IconRadar2, IconSettings, IconStars, IconTelescope } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { NavLink as RouterNavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
@@ -52,10 +52,13 @@ export function App() {
   });
 
   const links = [
-    { to: "/", label: "Library", icon: <IconStars size={18} />, end: true },
+    { to: "/", label: "Dashboard", icon: <IconGauge size={18} />, end: true },
+    { to: "/library", label: "Library", icon: <IconStars size={18} /> },
+    { to: "/telescope", label: "Telescope", icon: <IconTelescope size={18} /> },
     { to: "/gallery", label: "Gallery", icon: <IconLayoutGrid size={18} /> },
     { to: "/sky", label: "Sky Map", icon: <IconRadar2 size={18} /> },
     { to: "/jobs", label: "Jobs", icon: <IconActivity size={18} /> },
+    { to: "/storage", label: "Storage", icon: <IconDatabase size={18} /> },
     { to: "/logs", label: "Logs", icon: <IconFileText size={18} /> },
     { to: "/settings", label: "Settings", icon: <IconSettings size={18} /> },
   ];
