@@ -134,6 +134,23 @@ def test_client_rpc_roundtrip_and_event(fake_seestar):
     assert not c.is_connected
 
 
+def test_connect_sends_udp_intro(fake_seestar, monkeypatch):
+    # The scope expects a UDP intro on :4720 before it serves the TCP channel.
+    udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    udp.bind(("127.0.0.1", 0))
+    udp.settimeout(2.0)
+    monkeypatch.setattr("webapp.seestar.client._UDP_INTRO_PORT", udp.getsockname()[1])
+
+    c = SeestarClient("127.0.0.1", fake_seestar.port)
+    c.connect()
+    try:
+        data, _ = udp.recvfrom(1024)
+        assert json.loads(data)["method"] == "scan_iscope"
+    finally:
+        c.disconnect()
+        udp.close()
+
+
 def test_client_goto_sends_expected_payload(fake_seestar):
     c = SeestarClient("127.0.0.1", fake_seestar.port)
     c.connect()

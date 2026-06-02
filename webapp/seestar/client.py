@@ -31,6 +31,11 @@ log = logging.getLogger(__name__)
 DEFAULT_PORT = 4700
 _CONNECT_TIMEOUT = 5.0
 _RPC_TIMEOUT = 10.0
+# Before the TCP control channel will answer, the Seestar expects a UDP "intro"
+# broadcast on port 4720 (this is what the seestar_alp client sends on connect).
+# Without it some firmware accepts the TCP socket but never replies to anything.
+_UDP_INTRO_PORT = 4720
+_UDP_INTRO_MSG = {"id": 1, "method": "scan_iscope", "params": ""}
 # Sub-states get_device_state should return. Real firmware expects a "keys"
 # param and may not reply at all if it's missing (seen as an RPC timeout), so
 # we always send it — matching the seestar_alp reference client.
@@ -39,6 +44,20 @@ _DEFAULT_STATE_KEYS = ["device", "setting", "pi_status", "storage"]
 
 class SeestarError(RuntimeError):
     """A Seestar RPC call failed or the device is unreachable."""
+
+
+def _send_udp_intro(host: str) -> None:
+    """Fire-and-forget UDP intro that prompts the scope to start serving its
+    TCP control channel. Best-effort: failures (no route, no listener) are
+    swallowed — they don't stop the TCP attempt that follows."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            sock.sendto(json.dumps(_UDP_INTRO_MSG).encode("utf-8"),
+                        (host, _UDP_INTRO_PORT))
+        log.debug("seestar %s: sent UDP intro on :%d", host, _UDP_INTRO_PORT)
+    except OSError as exc:
+        log.debug("seestar %s: UDP intro failed: %s", host, exc)
 
 
 class _Pending:
@@ -80,6 +99,7 @@ class SeestarClient:
         with self._lock:
             if self._connected:
                 return
+            _send_udp_intro(self.host)
             sock = socket.create_connection((self.host, self.port), _CONNECT_TIMEOUT)
             sock.settimeout(None)
             self._sock = sock
