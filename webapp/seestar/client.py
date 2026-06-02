@@ -64,12 +64,17 @@ class SeestarClient:
         self._stop = threading.Event()
         self._connected = False
         self.last_event: dict[str, Any] = {}
+        self._rx_bytes = 0  # total bytes received since connect (silence detector)
 
     # ---- lifecycle --------------------------------------------------------
 
     @property
     def is_connected(self) -> bool:
         return self._connected
+
+    @property
+    def bytes_received(self) -> int:
+        return self._rx_bytes
 
     def connect(self) -> None:
         with self._lock:
@@ -79,6 +84,7 @@ class SeestarClient:
             sock.settimeout(None)
             self._sock = sock
             self._connected = True
+            self._rx_bytes = 0
             self._stop.clear()
             self._reader = threading.Thread(
                 target=self._read_loop, name=f"seestar-{self.host}", daemon=True
@@ -116,6 +122,7 @@ class SeestarClient:
                 chunk = sock.recv(8192)
                 if not chunk:
                     break  # peer closed
+                self._rx_bytes += len(chunk)
                 buf += chunk
                 while b"\n" in buf:
                     line, buf = buf.split(b"\n", 1)
@@ -172,10 +179,24 @@ class SeestarClient:
                 raise SeestarError(f"{self.host}: send failed: {exc}") from exc
         if not pending.event.wait(timeout):
             self._pending.pop(mid, None)
-            raise SeestarError(f"{self.host}: '{method}' timed out")
+            raise SeestarError(f"{self.host}: '{method}' timed out{self._timeout_hint()}")
         if pending.error is not None:
             raise SeestarError(f"{self.host}: '{method}' error: {pending.error}")
         return pending.result
+
+    def _timeout_hint(self) -> str:
+        """Turn a bare timeout into a diagnosis based on what (if anything) the
+        device has sent us since connecting."""
+        if self._rx_bytes == 0:
+            return (" — connected but the device sent no data at all. The Seestar "
+                    "serves one controller at a time: close the Seestar phone app "
+                    "(and any other tool) and try again. Also confirm this IP is a "
+                    "Seestar.")
+        if self.last_event:
+            return (" — the device is sending data (events) but did not answer this "
+                    "command. It may be busy or this method isn't supported on its "
+                    "firmware.")
+        return ""
 
     # ---- telemetry --------------------------------------------------------
 
