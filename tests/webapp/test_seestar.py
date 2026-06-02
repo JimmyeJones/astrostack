@@ -200,7 +200,7 @@ def test_timeout_on_silent_device_explains_single_controller():
                 c.get_device_state(timeout=0.5)
             assert c.bytes_received == 0
             assert "no data" in str(exc.value)
-            assert "one controller" in str(exc.value)
+            assert "power-cycle" in str(exc.value)
         finally:
             c.disconnect()
     finally:
