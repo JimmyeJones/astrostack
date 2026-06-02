@@ -31,6 +31,10 @@ log = logging.getLogger(__name__)
 DEFAULT_PORT = 4700
 _CONNECT_TIMEOUT = 5.0
 _RPC_TIMEOUT = 10.0
+# Sub-states get_device_state should return. Real firmware expects a "keys"
+# param and may not reply at all if it's missing (seen as an RPC timeout), so
+# we always send it — matching the seestar_alp reference client.
+_DEFAULT_STATE_KEYS = ["device", "setting", "pi_status", "storage"]
 
 
 class SeestarError(RuntimeError):
@@ -125,9 +129,11 @@ class SeestarClient:
             self._connected = False
 
     def _dispatch(self, line: bytes) -> None:
+        raw = line.decode("utf-8", "replace")
+        log.debug("seestar %s recv: %s", self.host, raw[:1000])
         try:
-            msg = json.loads(line.decode("utf-8", "replace"))
-        except (ValueError, UnicodeDecodeError):
+            msg = json.loads(raw)
+        except ValueError:
             return
         if not isinstance(msg, dict):
             return
@@ -139,6 +145,10 @@ class SeestarClient:
             else:
                 p.result = msg.get("result", msg)
             p.event.set()
+        elif mid is not None:
+            # A reply we have no waiter for (e.g. the heartbeat id, or an id
+            # type mismatch). Log it so protocol surprises are diagnosable.
+            log.debug("seestar %s: unmatched response id=%r", self.host, mid)
         else:
             # Asynchronous event push — keep the most recent one for telemetry.
             self.last_event = msg
@@ -169,16 +179,18 @@ class SeestarClient:
 
     # ---- telemetry --------------------------------------------------------
 
-    def get_device_state(self) -> dict:
-        res = self._rpc("get_device_state")
+    def get_device_state(self, keys: list[str] | None = None,
+                         timeout: float = _RPC_TIMEOUT) -> dict:
+        res = self._rpc("get_device_state",
+                        {"keys": keys or _DEFAULT_STATE_KEYS}, timeout)
         return res if isinstance(res, dict) else {}
 
-    def get_view_state(self) -> dict:
-        res = self._rpc("get_view_state")
+    def get_view_state(self, timeout: float = _RPC_TIMEOUT) -> dict:
+        res = self._rpc("get_view_state", timeout=timeout)
         return res if isinstance(res, dict) else {}
 
-    def get_equ_coord(self) -> dict:
-        res = self._rpc("scope_get_equ_coord")
+    def get_equ_coord(self, timeout: float = _RPC_TIMEOUT) -> dict:
+        res = self._rpc("scope_get_equ_coord", timeout=timeout)
         return res if isinstance(res, dict) else {}
 
     # ---- control (only used when the caller has gated it on) --------------
