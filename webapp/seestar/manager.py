@@ -24,7 +24,30 @@ from webapp.seestar.client import SeestarClient, SeestarError
 
 log = logging.getLogger(__name__)
 
-_IDLE_SLEEP = 5.0  # how often the loops re-check settings while disabled
+_IDLE_SLEEP = 5.0   # how often the loops re-check settings while disabled
+_POLL_TIMEOUT = 6.0  # per-call RPC timeout while polling (keeps the loop snappy)
+
+
+def collect_telemetry(client: SeestarClient) -> tuple[dict[str, Any] | None, list[str]]:
+    """Best-effort telemetry: query each endpoint independently so an
+    unsupported/slow method on one firmware doesn't blank the whole dashboard.
+    Returns ``(telemetry | None, errors)`` — None only if *every* call failed."""
+    errors: list[str] = []
+
+    def safe(label: str, fn):  # noqa: ANN001
+        try:
+            return fn()
+        except SeestarError as exc:
+            errors.append(f"{label}: {exc}")
+            log.debug("seestar telemetry %s failed: %s", label, exc)
+            return None
+
+    ds = safe("device_state", lambda: client.get_device_state(timeout=_POLL_TIMEOUT))
+    vs = safe("view_state", lambda: client.get_view_state(timeout=_POLL_TIMEOUT))
+    eq = safe("equ_coord", lambda: client.get_equ_coord(timeout=_POLL_TIMEOUT))
+    if ds is None and vs is None and eq is None:
+        return None, errors
+    return telemetry.normalize(ds or {}, vs or {}, eq or {}), errors
 
 
 class SeestarManager:
@@ -156,15 +179,12 @@ class SeestarManager:
                     except SeestarError as exc:
                         self._mark_error(ip, str(exc))
                         continue
-                try:
-                    tel = telemetry.normalize(
-                        client.get_device_state(),
-                        client.get_view_state(),
-                        client.get_equ_coord(),
-                    )
-                    self._store_telemetry(ip, tel)
-                except SeestarError as exc:
-                    self._mark_error(ip, str(exc))
+                tel, errors = collect_telemetry(client)
+                if tel is not None:
+                    # Keep partial-failure detail visible without hiding the data.
+                    self._store_telemetry(ip, tel, error="; ".join(errors) or None)
+                else:
+                    self._mark_error(ip, "; ".join(errors) or "no telemetry")
             time.sleep(max(2, int(settings.seestar_poll_interval_s)))
 
     def _teardown_all(self) -> None:
@@ -188,12 +208,12 @@ class SeestarManager:
                 if ip not in seen:
                     dev["reachable"] = False
 
-    def _store_telemetry(self, ip: str, tel: dict[str, Any]) -> None:
+    def _store_telemetry(self, ip: str, tel: dict[str, Any], error: str | None = None) -> None:
         with self._lock:
             dev = self._devices.setdefault(ip, _new_device(ip))
             dev["telemetry"] = tel
             dev["connected"] = True
-            dev["error"] = None
+            dev["error"] = error
             dev["last_seen_utc"] = _utc_iso()
             for key in ("device_name", "model", "firmware"):
                 if tel.get(key):

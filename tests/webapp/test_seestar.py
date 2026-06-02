@@ -10,6 +10,7 @@ import pytest
 
 from webapp.seestar import discovery, telemetry
 from webapp.seestar.client import SeestarClient, SeestarError
+from webapp.seestar.manager import collect_telemetry
 
 
 # --------------------------------------------------------------------------- #
@@ -146,10 +147,68 @@ def test_client_goto_sends_expected_payload(fake_seestar):
     assert goto["params"]["mode"] == "star"
 
 
+def test_get_device_state_sends_keys_param(fake_seestar):
+    # Real firmware may not reply to get_device_state without a "keys" param.
+    c = SeestarClient("127.0.0.1", fake_seestar.port)
+    c.connect()
+    try:
+        c.get_device_state()
+    finally:
+        c.disconnect()
+    req = next(m for m in fake_seestar.received if m["method"] == "get_device_state")
+    assert isinstance(req["params"]["keys"], list) and req["params"]["keys"]
+
+
 def test_rpc_before_connect_raises():
     c = SeestarClient("127.0.0.1", 4700)
     with pytest.raises(SeestarError):
         c.get_device_state()
+
+
+# --------------------------------------------------------------------------- #
+# collect_telemetry — best-effort, degrades gracefully
+# --------------------------------------------------------------------------- #
+
+class _FakeClient:
+    def __init__(self, fail: set[str]):
+        self.fail = fail
+
+    def get_device_state(self, timeout: float = 0):
+        if "ds" in self.fail:
+            raise SeestarError("device_state timed out")
+        return {"pi_status": {"battery_capacity": 80}}
+
+    def get_view_state(self, timeout: float = 0):
+        if "vs" in self.fail:
+            raise SeestarError("view_state timed out")
+        return {"View": {"mode": "star", "target_name": "M 31"}}
+
+    def get_equ_coord(self, timeout: float = 0):
+        if "eq" in self.fail:
+            raise SeestarError("equ timed out")
+        return {"ra": 1.0, "dec": 2.0}
+
+
+def test_collect_telemetry_all_ok():
+    tel, errors = collect_telemetry(_FakeClient(set()))
+    assert errors == []
+    assert tel["battery_pct"] == 80 and tel["target_name"] == "M 31"
+
+
+def test_collect_telemetry_partial_failure_still_returns_data():
+    # device_state times out (the reported symptom) but the rest still populate.
+    tel, errors = collect_telemetry(_FakeClient({"ds"}))
+    assert tel is not None
+    assert tel["target_name"] == "M 31"
+    assert tel["ra_hours"] == 1.0
+    assert tel["battery_pct"] is None
+    assert any("device_state" in e for e in errors)
+
+
+def test_collect_telemetry_total_failure_returns_none():
+    tel, errors = collect_telemetry(_FakeClient({"ds", "vs", "eq"}))
+    assert tel is None
+    assert len(errors) == 3
 
 
 # --------------------------------------------------------------------------- #
