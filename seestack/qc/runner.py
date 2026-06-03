@@ -45,11 +45,20 @@ def compute_for_db_row(
         return QCResult(frame_id=frame_id, metrics=None, error=f"{type(exc).__name__}: {exc}")
 
 
-def build_qc_arglist(project) -> list[tuple[int, str, str | None, bool]]:
-    """Build ``[(frame_id, path, bayer, detect_streaks), ...]`` from a project."""
+def build_qc_arglist(project, *, only_new: bool = False) -> list[tuple[int, str, str | None, bool]]:
+    """Build ``[(frame_id, path, bayer, detect_streaks), ...]`` from a project.
+
+    With ``only_new`` (used by the auto-pipeline), skip frames that have already
+    been QC'd — successfully (``star_count`` populated) or with a prior QC error
+    — so a re-scan of a large library only processes genuinely new frames instead
+    of recomputing metrics for everything every time.
+    """
     out: list[tuple[int, str, str | None, bool]] = []
     for f in project.iter_frames():
         if f.id is None:
+            continue
+        if only_new and (f.star_count is not None
+                         or (f.reject_reason or "").startswith("qc_error")):
             continue
         path = f.cached_path or f.source_path
         if not path or not Path(path).exists():

@@ -182,6 +182,7 @@ def run_qc_and_solve(
     run_qc: bool = True,
     run_solve: bool = True,
     serial: bool = False,
+    only_new_qc: bool = False,
     progress: ProgressFn | None = None,
     should_stop: ShouldStopFn | None = None,
 ) -> dict:
@@ -213,7 +214,7 @@ def run_qc_and_solve(
     summary = {"qc_done": 0, "qc_total": 0, "solve_done": 0, "solve_total": 0}
 
     if run_qc and not _stopped(should_stop):
-        qc_args = build_qc_arglist(project)
+        qc_args = build_qc_arglist(project, only_new=only_new_qc)
         summary["qc_total"] = len(qc_args)
         for done, result in _map_jobs(
             compute_for_db_row, qc_args,
