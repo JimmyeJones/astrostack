@@ -27,7 +27,8 @@ import logging
 import os
 import threading
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from itertools import islice
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -600,6 +601,33 @@ def run_stack(
     )
 
 
+def _imap_bounded(ex: ThreadPoolExecutor, fn, items, max_in_flight: int):
+    """Submit at most ``max_in_flight`` tasks to ``ex`` at a time, yielding
+    ``(item, future)`` as each completes and only then topping up.
+
+    The plain ``{ex.submit(fn, x): x for x in items}`` pattern submits *every*
+    task up front; when each result is a full-resolution image and the consumer
+    is slower than the workers, completed results pile up unbounded and can OOM
+    the process (thousands of frames × tens of MB each). Capping in-flight work
+    bounds peak memory to ~``max_in_flight`` results regardless of frame count.
+    """
+    it = iter(items)
+    item_of: dict = {}
+    pending: set = set()
+    for item in islice(it, max_in_flight):
+        fu = ex.submit(fn, item)
+        item_of[fu] = item
+        pending.add(fu)
+    while pending:
+        done, pending = wait(pending, return_when=FIRST_COMPLETED)
+        for fu in done:
+            yield item_of.pop(fu), fu
+        for item in islice(it, max_in_flight - len(pending)):
+            fu = ex.submit(fn, item)
+            item_of[fu] = item
+            pending.add(fu)
+
+
 def _pass(
     frames: list[FrameRow],
     ref: FrameRow,
@@ -631,25 +659,24 @@ def _pass(
 
     bg_opts = options.background_options()
     sp_refine = options.subpixel_refine and ref_patch is not None
+    def _submit(f: FrameRow):
+        return _align_for_stack(
+            f, dst_wcs_text, dst_shape, bg_opts,
+            options.use_gpu, options.suppress_hot_pixels, options.hot_pixel_sigma,
+            ref_patch if sp_refine else None,
+            ref_patch_origin if sp_refine else None,
+            sp_refine,
+        )
+
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        futures = {
-            ex.submit(
-                _align_for_stack, f, dst_wcs_text, dst_shape, bg_opts,
-                options.use_gpu, options.suppress_hot_pixels, options.hot_pixel_sigma,
-                ref_patch if sp_refine else None,
-                ref_patch_origin if sp_refine else None,
-                sp_refine,
-            ): f
-            for f in frames
-        }
-        for fut in as_completed(futures):
+        # Bounded in-flight work: aligned full-res frames must not pile up
+        # faster than the (serialised) consumer drains them, or thousands of
+        # frames will OOM the process.
+        for f, fut in _imap_bounded(ex, _submit, frames, max_workers * 2):
             done += 1
             if cancel():
-                for other in futures:
-                    other.cancel()
                 progress(phase_label + " (cancelled)", done, total)
                 break
-            f = futures[fut]
             try:
                 aligned = fut.result()
             except Exception as exc:  # noqa: BLE001
@@ -713,15 +740,14 @@ def _drizzle_pass(
         return rgb, in_wcs
 
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        futures = {ex.submit(prepare, f): f for f in frames}
-        for fut in as_completed(futures):
+        # Bounded in-flight work: prepared full-res RGB frames must not pile up
+        # faster than the (serialised) drizzler consumes them — submitting all
+        # frames at once is what drove the OOM on large (5k+ frame) targets.
+        for f, fut in _imap_bounded(ex, prepare, frames, max_workers * 2):
             done += 1
             if cancel():
-                for other in futures:
-                    other.cancel()
                 progress("Drizzle (cancelled)", done, total)
                 break
-            f = futures[fut]
             try:
                 payload = fut.result()
             except Exception as exc:  # noqa: BLE001
