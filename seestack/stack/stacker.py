@@ -41,6 +41,65 @@ from seestack.stack.align import align_one, extract_reference_patch
 from seestack.stack.reference import ReferenceChoice, pick_reference_frame
 from seestack.stack.weighting import compute_frame_weights, unit_weights
 
+# Peak count of full-canvas float32 RGB arrays alive at once across the stack
+# passes (Welford mean/M2/count, or drizzle output/weight/context, plus working
+# copies). Used only to *estimate* memory and refuse oversized stacks before
+# allocating — a wrong guess just shifts the refusal threshold a little.
+_PEAK_CANVAS_ARRAYS = 4
+_DEFAULT_STACK_BUDGET_GB = 12.0
+
+
+def _available_memory_bytes() -> int | None:
+    """Linux MemAvailable in bytes, or None if it can't be read."""
+    try:
+        with open("/proc/meminfo") as fh:
+            for line in fh:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) * 1024
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def _stack_memory_budget_bytes() -> float:
+    """How much working memory a single stack may use. Honors an explicit
+    ASTROSTACK_MAX_STACK_GB override, else ~70% of currently-available RAM
+    (leaving headroom for worker subprocesses, OS cache and the web app)."""
+    override = os.environ.get("ASTROSTACK_MAX_STACK_GB")
+    if override:
+        try:
+            return float(override) * 1e9
+        except ValueError:
+            pass
+    avail = _available_memory_bytes()
+    if avail:
+        return avail * 0.7
+    return _DEFAULT_STACK_BUDGET_GB * 1e9
+
+
+def _guard_stack_memory(dst_shape: tuple[int, int], *, drizzle: bool,
+                        drizzle_scale: float) -> None:
+    """Refuse a stack whose output canvas would blow the memory budget instead
+    of letting it OOM-kill the whole process. ``dst_shape`` is (h, w) of the
+    pre-drizzle canvas; drizzle multiplies each axis by ``drizzle_scale``."""
+    h, w = dst_shape
+    if drizzle:
+        s = max(1.0, float(drizzle_scale))
+        out_pixels = int(h * s + 1) * int(w * s + 1)
+    else:
+        out_pixels = h * w
+    need = out_pixels * 3 * 4 * _PEAK_CANVAS_ARRAYS  # float32 RGB working arrays
+    budget = _stack_memory_budget_bytes()
+    if need > budget:
+        raise MemoryError(
+            f"stack output canvas {w}×{h}"
+            + (f" ×{drizzle_scale:g} drizzle" if drizzle else "")
+            + f" needs ~{need / 1e9:.1f} GB of working memory, over the "
+            f"~{budget / 1e9:.1f} GB budget. Reduce drizzle scale, switch Canvas "
+            f"mode to 'reference', reject outlier/off-target frames, or raise "
+            f"ASTROSTACK_MAX_STACK_GB to override."
+        )
+
 log = logging.getLogger(__name__)
 
 
@@ -301,6 +360,11 @@ def run_stack(
     )
 
     canvas_3 = (dst_shape[0], dst_shape[1], 3)
+    # Refuse a stack that would exhaust RAM *before* allocating anything — a
+    # drizzled near-cap mosaic canvas can otherwise reach tens of GB and get the
+    # whole container OOM-killed (there's no cgroup limit to catch it).
+    _guard_stack_memory(dst_shape, drizzle=options.drizzle,
+                        drizzle_scale=options.drizzle_scale)
     errors: list[str] = []
 
     # ---- 3a. Drizzle path (alternate single-pass accumulator) -------------
