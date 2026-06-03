@@ -27,7 +27,8 @@ import logging
 import os
 import threading
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from itertools import islice
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -40,6 +41,65 @@ from seestack.stack.accumulator import WeightedSumAccumulator, WelfordAccumulato
 from seestack.stack.align import align_one, extract_reference_patch
 from seestack.stack.reference import ReferenceChoice, pick_reference_frame
 from seestack.stack.weighting import compute_frame_weights, unit_weights
+
+# Peak count of full-canvas float32 RGB arrays alive at once across the stack
+# passes (Welford mean/M2/count, or drizzle output/weight/context, plus working
+# copies). Used only to *estimate* memory and refuse oversized stacks before
+# allocating — a wrong guess just shifts the refusal threshold a little.
+_PEAK_CANVAS_ARRAYS = 4
+_DEFAULT_STACK_BUDGET_GB = 12.0
+
+
+def _available_memory_bytes() -> int | None:
+    """Linux MemAvailable in bytes, or None if it can't be read."""
+    try:
+        with open("/proc/meminfo") as fh:
+            for line in fh:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) * 1024
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def _stack_memory_budget_bytes() -> float:
+    """How much working memory a single stack may use. Honors an explicit
+    ASTROSTACK_MAX_STACK_GB override, else ~70% of currently-available RAM
+    (leaving headroom for worker subprocesses, OS cache and the web app)."""
+    override = os.environ.get("ASTROSTACK_MAX_STACK_GB")
+    if override:
+        try:
+            return float(override) * 1e9
+        except ValueError:
+            pass
+    avail = _available_memory_bytes()
+    if avail:
+        return avail * 0.7
+    return _DEFAULT_STACK_BUDGET_GB * 1e9
+
+
+def _guard_stack_memory(dst_shape: tuple[int, int], *, drizzle: bool,
+                        drizzle_scale: float) -> None:
+    """Refuse a stack whose output canvas would blow the memory budget instead
+    of letting it OOM-kill the whole process. ``dst_shape`` is (h, w) of the
+    pre-drizzle canvas; drizzle multiplies each axis by ``drizzle_scale``."""
+    h, w = dst_shape
+    if drizzle:
+        s = max(1.0, float(drizzle_scale))
+        out_pixels = int(h * s + 1) * int(w * s + 1)
+    else:
+        out_pixels = h * w
+    need = out_pixels * 3 * 4 * _PEAK_CANVAS_ARRAYS  # float32 RGB working arrays
+    budget = _stack_memory_budget_bytes()
+    if need > budget:
+        raise MemoryError(
+            f"stack output canvas {w}×{h}"
+            + (f" ×{drizzle_scale:g} drizzle" if drizzle else "")
+            + f" needs ~{need / 1e9:.1f} GB of working memory, over the "
+            f"~{budget / 1e9:.1f} GB budget. Reduce drizzle scale, switch Canvas "
+            f"mode to 'reference', reject outlier/off-target frames, or raise "
+            f"ASTROSTACK_MAX_STACK_GB to override."
+        )
 
 log = logging.getLogger(__name__)
 
@@ -301,6 +361,11 @@ def run_stack(
     )
 
     canvas_3 = (dst_shape[0], dst_shape[1], 3)
+    # Refuse a stack that would exhaust RAM *before* allocating anything — a
+    # drizzled near-cap mosaic canvas can otherwise reach tens of GB and get the
+    # whole container OOM-killed (there's no cgroup limit to catch it).
+    _guard_stack_memory(dst_shape, drizzle=options.drizzle,
+                        drizzle_scale=options.drizzle_scale)
     errors: list[str] = []
 
     # ---- 3a. Drizzle path (alternate single-pass accumulator) -------------
@@ -536,6 +601,33 @@ def run_stack(
     )
 
 
+def _imap_bounded(ex: ThreadPoolExecutor, fn, items, max_in_flight: int):
+    """Submit at most ``max_in_flight`` tasks to ``ex`` at a time, yielding
+    ``(item, future)`` as each completes and only then topping up.
+
+    The plain ``{ex.submit(fn, x): x for x in items}`` pattern submits *every*
+    task up front; when each result is a full-resolution image and the consumer
+    is slower than the workers, completed results pile up unbounded and can OOM
+    the process (thousands of frames × tens of MB each). Capping in-flight work
+    bounds peak memory to ~``max_in_flight`` results regardless of frame count.
+    """
+    it = iter(items)
+    item_of: dict = {}
+    pending: set = set()
+    for item in islice(it, max_in_flight):
+        fu = ex.submit(fn, item)
+        item_of[fu] = item
+        pending.add(fu)
+    while pending:
+        done, pending = wait(pending, return_when=FIRST_COMPLETED)
+        for fu in done:
+            yield item_of.pop(fu), fu
+        for item in islice(it, max_in_flight - len(pending)):
+            fu = ex.submit(fn, item)
+            item_of[fu] = item
+            pending.add(fu)
+
+
 def _pass(
     frames: list[FrameRow],
     ref: FrameRow,
@@ -567,25 +659,24 @@ def _pass(
 
     bg_opts = options.background_options()
     sp_refine = options.subpixel_refine and ref_patch is not None
+    def _submit(f: FrameRow):
+        return _align_for_stack(
+            f, dst_wcs_text, dst_shape, bg_opts,
+            options.use_gpu, options.suppress_hot_pixels, options.hot_pixel_sigma,
+            ref_patch if sp_refine else None,
+            ref_patch_origin if sp_refine else None,
+            sp_refine,
+        )
+
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        futures = {
-            ex.submit(
-                _align_for_stack, f, dst_wcs_text, dst_shape, bg_opts,
-                options.use_gpu, options.suppress_hot_pixels, options.hot_pixel_sigma,
-                ref_patch if sp_refine else None,
-                ref_patch_origin if sp_refine else None,
-                sp_refine,
-            ): f
-            for f in frames
-        }
-        for fut in as_completed(futures):
+        # Bounded in-flight work: aligned full-res frames must not pile up
+        # faster than the (serialised) consumer drains them, or thousands of
+        # frames will OOM the process.
+        for f, fut in _imap_bounded(ex, _submit, frames, max_workers * 2):
             done += 1
             if cancel():
-                for other in futures:
-                    other.cancel()
                 progress(phase_label + " (cancelled)", done, total)
                 break
-            f = futures[fut]
             try:
                 aligned = fut.result()
             except Exception as exc:  # noqa: BLE001
@@ -649,15 +740,14 @@ def _drizzle_pass(
         return rgb, in_wcs
 
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        futures = {ex.submit(prepare, f): f for f in frames}
-        for fut in as_completed(futures):
+        # Bounded in-flight work: prepared full-res RGB frames must not pile up
+        # faster than the (serialised) drizzler consumes them — submitting all
+        # frames at once is what drove the OOM on large (5k+ frame) targets.
+        for f, fut in _imap_bounded(ex, prepare, frames, max_workers * 2):
             done += 1
             if cancel():
-                for other in futures:
-                    other.cancel()
                 progress("Drizzle (cancelled)", done, total)
                 break
-            f = futures[fut]
             try:
                 payload = fut.result()
             except Exception as exc:  # noqa: BLE001

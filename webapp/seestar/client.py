@@ -208,10 +208,11 @@ class SeestarClient:
         """Turn a bare timeout into a diagnosis based on what (if anything) the
         device has sent us since connecting."""
         if self._rx_bytes == 0:
-            return (" — connected but the device sent no data at all. The Seestar "
-                    "serves one controller at a time: close the Seestar phone app "
-                    "(and any other tool) and try again. Also confirm this IP is a "
-                    "Seestar.")
+            return (" — connected but the device sent no data at all. Either another "
+                    "controller holds the session (close the Seestar phone app), or "
+                    "the scope is in standby / mid firmware-update / has the local API "
+                    "disabled by firmware. Try: close the app, fully power-cycle the "
+                    "scope (let any update finish), and confirm this IP is the Seestar.")
         if self.last_event:
             return (" — the device is sending data (events) but did not answer this "
                     "command. It may be busy or this method isn't supported on its "

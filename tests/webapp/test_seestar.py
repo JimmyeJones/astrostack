@@ -200,7 +200,7 @@ def test_timeout_on_silent_device_explains_single_controller():
                 c.get_device_state(timeout=0.5)
             assert c.bytes_received == 0
             assert "no data" in str(exc.value)
-            assert "one controller" in str(exc.value)
+            assert "power-cycle" in str(exc.value)
         finally:
             c.disconnect()
     finally:
@@ -272,8 +272,33 @@ def test_scan_finds_listening_extra_ip():
 
 
 def test_scan_empty_when_no_hosts():
-    # TEST-NET-3 /31 → at most two probes, none will answer.
-    assert discovery.scan("203.0.113.0/31") == []
+    # TEST-NET-3 /31 → at most two TCP probes, none answer; no UDP replies.
+    assert discovery.scan("203.0.113.0/31", udp_timeout=0.2) == []
+
+
+def test_discover_udp_finds_responder(monkeypatch):
+    # A fake UDP server that answers scan_iscope stands in for a real scope.
+    resp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    resp.bind(("127.0.0.1", 0))
+    port = resp.getsockname()[1]
+
+    def serve():
+        try:
+            data, addr = resp.recvfrom(4096)
+            assert json.loads(data)["method"] == "scan_iscope"
+            resp.sendto(json.dumps({"name": "Seestar S50"}).encode(), addr)
+        except OSError:
+            pass
+
+    threading.Thread(target=serve, daemon=True).start()
+    monkeypatch.setattr("webapp.seestar.discovery._UDP_PORT", port)
+    monkeypatch.setattr("webapp.seestar.discovery._broadcast_addrs", lambda subnet: ["127.0.0.1"])
+    try:
+        found = discovery.discover_udp(timeout=1.0)
+        assert "127.0.0.1" in found
+        assert found["127.0.0.1"].get("name") == "Seestar S50"
+    finally:
+        resp.close()
 
 
 # --------------------------------------------------------------------------- #

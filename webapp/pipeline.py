@@ -77,6 +77,7 @@ def _pipeline_body(
                         max_workers=settings.cpu_workers,
                         run_qc=settings.auto_qc,
                         run_solve=settings.auto_solve,
+                        only_new_qc=True,  # don't re-QC frames already done on re-scans
                         progress=_progress(jm, job),
                         should_stop=job.cancel_requested,
                     )
