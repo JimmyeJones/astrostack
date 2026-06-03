@@ -191,11 +191,14 @@ class SeestarManager:
                                  tel.get("target_name"))
                     self._last_ok[ip] = True
                 else:
+                    # Connected but the device serves nothing. Expected when the
+                    # scope's local API is unavailable; an environmental state,
+                    # not an app error — so log it once, concisely, at INFO.
+                    detail = "device not serving telemetry (port 4700 returned no data)"
                     if self._last_ok.get(ip) is not False:
-                        log.warning("seestar %s: connected but no telemetry — %s",
-                                    ip, "; ".join(errors) or "device silent")
+                        log.info("seestar %s: connected but %s", ip, detail)
                     self._last_ok[ip] = False
-                    self._mark_error(ip, "; ".join(errors) or "no telemetry")
+                    self._mark_error(ip, detail)
             time.sleep(max(2, int(settings.seestar_poll_interval_s)))
 
     def _teardown_all(self) -> None:
