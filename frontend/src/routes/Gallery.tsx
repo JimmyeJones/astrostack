@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
 import {
-  Badge, Card, Center, Group, Image, Loader, SimpleGrid, Spoiler, Stack, Text,
+  Badge, Button, Card, Center, Group, Image, Loader, SimpleGrid, Spoiler, Stack, Text,
   Title, Tooltip,
 } from "@mantine/core";
-import { IconPhoto } from "@tabler/icons-react";
+import { IconPhoto, IconWand } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type GalleryItem, type StackOptionField } from "../api/client";
@@ -72,6 +72,13 @@ function GalleryCard({ item, labels, onView }: {
         {item.output_basename} · {item.timestamp_utc.replace("T", " ").slice(0, 16)}
         {" · "}{item.canvas_w}×{item.canvas_h}
       </Text>
+
+      <Button
+        component={Link} to={`/targets/${item.safe}/edit/${item.run_id}`}
+        leftSection={<IconWand size={14} />} variant="light" size="xs" mt="xs" fullWidth
+      >
+        Edit image
+      </Button>
 
       {badges.length > 0 ? (
         <Group gap={6} mt="xs">
