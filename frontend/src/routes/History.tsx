@@ -5,7 +5,7 @@ import {
 } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
-import { IconAdjustments, IconDeviceFloppy, IconDownload, IconTrash } from "@tabler/icons-react";
+import { IconAdjustments, IconDeviceFloppy, IconDownload, IconSparkles, IconTrash } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api, type StackRun } from "../api/client";
@@ -104,6 +104,14 @@ function RunCard({ safe, run, onDelete }: { safe: string; run: StackRun; onDelet
 
       <Group mt="sm" justify="space-between">
         <Group gap="xs">
+          {run.has_fits && (
+            <Button
+              size="xs" variant="light" color="grape" leftSection={<IconSparkles size={14} />}
+              component={Link} to={`/targets/${safe}/edit/${run.id}`}
+            >
+              Edit
+            </Button>
+          )}
           {run.has_fits && (
             <Tooltip label="Adjust stretch / black point from the full-range FITS">
               <Button

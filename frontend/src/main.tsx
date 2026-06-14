@@ -14,6 +14,7 @@ import { Library } from "./routes/Library";
 import { TargetView } from "./routes/Target";
 import { StackView } from "./routes/Stack";
 import { HistoryView } from "./routes/History";
+import { EditorView } from "./routes/Editor";
 import { GalleryView } from "./routes/Gallery";
 import { JobsView } from "./routes/Jobs";
 import { LogsView } from "./routes/Logs";
@@ -50,6 +51,7 @@ const router = createBrowserRouter([
       { path: "targets/:safe", element: <TargetView /> },
       { path: "targets/:safe/stack", element: <StackView /> },
       { path: "targets/:safe/history", element: <HistoryView /> },
+      { path: "targets/:safe/edit/:runId", element: <EditorView /> },
       { path: "sky", element: (
         <React.Suspense fallback={<Center h="60vh"><Loader /></Center>}>
           <SkyView />
