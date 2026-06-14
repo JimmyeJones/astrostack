@@ -15,6 +15,7 @@ from typing import Any
 import numpy as np
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from seestack.edit.histogram import compute_histogram
@@ -194,9 +195,14 @@ async def edit_histogram(safe: str, run_id: int, request: Request,
 
     def work() -> dict:
         rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
+        # Flag a stack whose proxy has no finite pixels (failed solve/stack), so
+        # the UI can say "no image data" instead of showing a mystery black frame.
+        empty = not bool(np.isfinite(rgb).any())
         ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None)
         out = apply_recipe(rgb, rec, ctx, for_preview=True)
-        return compute_histogram(out)
+        hist = compute_histogram(out)
+        hist["empty"] = empty
+        return hist
 
     return await run_in_threadpool(work)
 
@@ -231,6 +237,37 @@ def export_run(safe: str, run_id: int, body: ExportRequest, request: Request) ->
         output_name=body.output_name, tiff_mode=body.tiff_mode,
     )
     return {"job_id": job.id}
+
+
+class PngRequest(BaseModel):
+    recipe: dict | None = None
+
+
+@router.post("/api/targets/{safe}/stack-runs/{run_id}/editor/export-png")
+def export_png(safe: str, run_id: int, body: PngRequest, request: Request) -> dict:
+    """Kick off a full-resolution PNG render of the recipe. Poll the job, then
+    GET .../editor/png/{job_id} to download the result."""
+    from webapp import pipeline
+
+    settings = deps.get_settings(request)
+    jm = deps.get_job_manager(request)
+    job = pipeline.submit_editor_png(settings, jm, safe, run_id, body.recipe or {})
+    return {"job_id": job.id}
+
+
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/editor/png/{job_id}")
+def download_png(safe: str, run_id: int, job_id: str, request: Request) -> FileResponse:
+    jm = deps.get_job_manager(request)
+    job = jm.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="No such job")
+    if job.state != "done" or not job.result:
+        raise HTTPException(status_code=409, detail=f"PNG not ready (job {job.state})")
+    png_path = job.result.get("png_path")
+    if not png_path or not Path(png_path).exists():
+        raise HTTPException(status_code=404, detail="PNG not found")
+    filename = job.result.get("filename") or Path(png_path).name
+    return FileResponse(png_path, media_type="image/png", filename=filename)
 
 
 class BatchRequest(BaseModel):

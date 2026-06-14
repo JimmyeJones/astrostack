@@ -187,6 +187,43 @@ def _load_full_rgb_wcs(fits_path: str) -> tuple[Any, Any]:
     return rgb, wcs
 
 
+def _render_recipe_fullres(fits_path: str, recipe_dict: dict, progress) -> tuple[Any, Any]:
+    """Apply an editor recipe to a full-res FITS. Returns ``(out_rgb, recipe)``
+    where ``out_rgb`` is the display-stretched 0..1 result. A default asinh
+    stretch is applied if the recipe has no stretch op (so the result is never
+    raw-linear/black)."""
+    import numpy as np
+
+    from seestack.edit.recipe import recipe_from_dict
+    from seestack.edit.registry import EditContext, as_rgb, get_op
+
+    rgb, wcs = _load_full_rgb_wcs(fits_path)
+    recipe = recipe_from_dict(recipe_dict)
+    n = max(len([o for o in recipe.ops if o.enabled]), 1)
+    ctx = EditContext(wcs=wcs, is_proxy=False, proxy_scale=1.0)
+    ctx.stage = "linear"
+    out = as_rgb(np.asarray(rgb, dtype=np.float32))
+    stretched = False
+    done = 0
+    for op in [o for o in recipe.ops if o.enabled]:
+        spec = get_op(op.id)
+        if spec is None:
+            continue
+        try:
+            out = as_rgb(spec.apply(out, op.params, ctx))
+            if spec.is_stretch:
+                stretched = True
+                ctx.stage = "nonlinear"
+        except Exception as exc:  # noqa: BLE001
+            log.warning("editor op %s failed: %s", op.id, exc)
+        done += 1
+        progress("render", done, n)
+    if not stretched:
+        from seestack.render.thumbnail import asinh_stretch
+        out = asinh_stretch(out)
+    return out, recipe
+
+
 def _apply_editor_to_run(lib: Library, safe: str, run_id: int, recipe_dict: dict,
                          *, output_name: str | None, tiff_mode: str,
                          progress) -> dict[str, Any]:
@@ -197,9 +234,6 @@ def _apply_editor_to_run(lib: Library, safe: str, run_id: int, recipe_dict: dict
 
     import numpy as np
 
-    from seestack.edit.pipeline import apply_recipe
-    from seestack.edit.recipe import recipe_from_dict
-    from seestack.edit.registry import EditContext
     from seestack.io.project import Project, StackRunRow
     from seestack.stack.output import write_stack_outputs
 
@@ -213,35 +247,7 @@ def _apply_editor_to_run(lib: Library, safe: str, run_id: int, recipe_dict: dict
             raise FileNotFoundError(f"run {run_id} has no FITS")
         base = output_name or f"{run.output_basename}_edit"
 
-        rgb, wcs = _load_full_rgb_wcs(run.fits_path)
-        recipe = recipe_from_dict(recipe_dict)
-        n = len(recipe.ops)
-        done = 0
-
-        # Per-op progress: wrap apply by stepping through ops via a callback.
-        from seestack.edit.registry import get_op
-        ctx = EditContext(wcs=wcs, is_proxy=False, proxy_scale=1.0)
-        ctx.stage = "linear"
-        out = np.asarray(rgb, dtype=np.float32)
-        from seestack.edit.registry import as_rgb
-        out = as_rgb(out)
-        stretched = False
-        for op in [o for o in recipe.ops if o.enabled]:
-            spec = get_op(op.id)
-            if spec is None:
-                continue
-            try:
-                out = as_rgb(spec.apply(out, op.params, ctx))
-                if spec.is_stretch:
-                    stretched = True
-                    ctx.stage = "nonlinear"
-            except Exception as exc:  # noqa: BLE001
-                log.warning("editor export op %s failed: %s", op.id, exc)
-            done += 1
-            progress("export", done, max(n, 1))
-        if not stretched:
-            from seestack.render.thumbnail import asinh_stretch
-            out = asinh_stretch(out)
+        out, recipe = _render_recipe_fullres(run.fits_path, recipe_dict, progress)
 
         coverage = np.ones(out.shape[:2], dtype=np.float32)
         paths = write_stack_outputs(
@@ -283,6 +289,41 @@ def submit_editor_export(settings: Settings, jm: JobManager, safe: str, run_id: 
             lib.close()
 
     return jm.submit("editor_export", body, target=safe)
+
+
+def submit_editor_png(settings: Settings, jm: JobManager, safe: str, run_id: int,
+                      recipe_dict: dict) -> Job:
+    """Render an editor recipe at full resolution and write a downloadable PNG
+    (no new stack run created). The PNG path is returned in the job result."""
+    def body(job: Job) -> dict[str, Any]:
+        from datetime import datetime, timezone
+
+        from seestack.io.project import Project
+        from seestack.stack.output import write_full_res_png
+
+        lib = Library.open_or_create(settings.resolved_library_root)
+        try:
+            entry = lib.find_target(safe)
+            if entry is None:
+                raise FileNotFoundError(f"no target '{safe}'")
+            proj = Project.open(lib.target_dir(entry))
+            try:
+                run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
+                if run is None or not run.fits_path or not Path(run.fits_path).exists():
+                    raise FileNotFoundError(f"run {run_id} has no FITS")
+                out, _recipe = _render_recipe_fullres(
+                    run.fits_path, recipe_dict, _progress(jm, job))
+                ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+                png = Path(proj.project_dir) / "output" / f"{run.output_basename}_edit_{ts}.png"
+                write_full_res_png(png, out)
+            finally:
+                proj.close()
+            return {"safe": safe, "run_id": run_id,
+                    "png_path": str(png), "filename": png.name}
+        finally:
+            lib.close()
+
+    return jm.submit("editor_png", body, target=safe)
 
 
 def submit_editor_batch(settings: Settings, jm: JobManager, items: list[dict],

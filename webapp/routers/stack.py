@@ -209,7 +209,7 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request) -> F
     if not path or not Path(path).exists():
         raise HTTPException(status_code=404, detail=f"No {kind} for this run")
     filename = f"{run.output_basename}{Path(path).suffix}"
-    download = kind in ("fits", "tiff")
+    download = kind in ("fits", "tiff", "preview")
     return FileResponse(
         path, media_type=media,
         filename=filename if download else None,

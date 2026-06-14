@@ -261,6 +261,7 @@ export interface Histogram {
   r: number[];
   g: number[];
   b: number[];
+  empty?: boolean;
 }
 
 function encodeRecipe(recipe: Recipe): string {
@@ -415,6 +416,12 @@ export const api = {
       `/api/targets/${safe}/stack-runs/${runId}/editor/histogram?recipe=${encodeRecipe(recipe)}`),
   autoProcess: (safe: string, runId: number) =>
     req<Recipe>(`/api/targets/${safe}/stack-runs/${runId}/editor/auto`, { method: "POST" }),
+  exportPng: (safe: string, runId: number, recipe: Recipe) =>
+    req<{ job_id: string }>(`/api/targets/${safe}/stack-runs/${runId}/editor/export-png`, {
+      method: "POST", body: JSON.stringify({ recipe }),
+    }),
+  editPngUrl: (safe: string, runId: number, jobId: string) =>
+    `/api/targets/${safe}/stack-runs/${runId}/editor/png/${jobId}`,
   exportRun: (safe: string, runId: number, recipe: Recipe, outputName: string, tiffMode: string) =>
     req<{ job_id: string }>(`/api/targets/${safe}/stack-runs/${runId}/editor/export`, {
       method: "POST",

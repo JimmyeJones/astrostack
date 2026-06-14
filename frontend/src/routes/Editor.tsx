@@ -1,10 +1,11 @@
 import {
-  Button, Center, Grid, Group, Image, Loader, Menu, Paper, Select, Stack, Text,
+  Alert, Button, Center, Grid, Group, Loader, Menu, Paper, Select, Stack, Text,
   TextInput, Title,
 } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import {
-  IconArrowLeft, IconDeviceFloppy, IconDownload, IconPlus, IconSparkles, IconZoomScan,
+  IconAlertTriangle, IconArrowLeft, IconDeviceFloppy, IconDownload, IconPhotoDown,
+  IconPlus, IconRefresh, IconSparkles, IconZoomScan,
 } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -62,14 +63,42 @@ export function EditorView() {
   const recipe: Recipe = useMemo(() => ({ ops, base_run_id: rid }), [ops, rid]);
   const recipeKey = JSON.stringify(ops);
   const [dKey] = useDebouncedValue(recipeKey, 250);
-  const dRecipe: Recipe = useMemo(() => ({ ops: JSON.parse(dKey), base_run_id: rid }), [dKey, rid]);
+  const [bust, setBust] = useState(0);
+  const dRecipe: Recipe = useMemo(() => {
+    let parsed: OpInstance[] = [];
+    try { const p = JSON.parse(dKey); if (Array.isArray(p)) parsed = p; } catch { /* keep [] */ }
+    return { ops: parsed, base_run_id: rid };
+  }, [dKey, rid]);
 
-  const previewUrl = api.editPreviewUrl(safe, rid, dRecipe);
+  // Live preview: fetch as a blob so we get real loading/error states (a failed
+  // render shows a message instead of a silently blank panel) and can revoke URLs.
+  const preview = useQuery({
+    queryKey: ["edit-preview", safe, rid, dKey, bust],
+    enabled: !!opsSchema.data && !saved.isLoading,
+    queryFn: async () => {
+      const res = await fetch(api.editPreviewUrl(safe, rid, dRecipe, bust));
+      if (!res.ok) {
+        let detail = `HTTP ${res.status}`;
+        try { detail = (await res.json()).detail ?? detail; } catch { /* ignore */ }
+        throw new Error(detail);
+      }
+      return URL.createObjectURL(await res.blob());
+    },
+  });
+  useEffect(() => {
+    const url = preview.data;
+    return () => { if (url) URL.revokeObjectURL(url); };
+  }, [preview.data]);
+
   const hist = useQuery({
     queryKey: ["edit-hist", safe, rid, dKey],
     queryFn: () => api.getHistogram(safe, rid, dRecipe),
     enabled: !!opsSchema.data,
   });
+  const refreshPreview = () => {
+    setBust(Date.now());
+    qc.invalidateQueries({ queryKey: ["edit-hist", safe, rid] });
+  };
 
   // --- mutations -----------------------------------------------------------
   const saveRecipe = useMutation({
@@ -94,6 +123,30 @@ export function EditorView() {
       notifications.show({ message: "Export started — saving full-resolution image", color: "violet" });
       qc.invalidateQueries({ queryKey: ["jobs"] });
       navigate("/jobs");
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
+
+  const downloadPng = useMutation({
+    mutationFn: async () => {
+      const { job_id } = await api.exportPng(safe, rid, recipe);
+      // Full-res render can be slow on mosaics — poll the job to completion.
+      for (;;) {
+        const j = await api.getJob(job_id);
+        if (j.state === "done") return job_id;
+        if (["error", "cancelled", "interrupted"].includes(j.state)) {
+          throw new Error(j.error || "PNG render failed");
+        }
+        await new Promise((r) => setTimeout(r, 500));
+      }
+    },
+    onSuccess: (jobId) => {
+      const a = document.createElement("a");
+      a.href = api.editPngUrl(safe, rid, jobId);
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      notifications.show({ message: "Full-resolution PNG ready", color: "teal" });
     },
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
@@ -153,13 +206,37 @@ export function EditorView() {
         {/* Preview + histogram */}
         <Grid.Col span={{ base: 12, md: 7 }}>
           <Paper withBorder p="xs">
-            <div style={{ position: "relative", background: "#000", borderRadius: 8 }}>
-              <Image src={previewUrl} alt="preview" fallbackSrc=""
-                style={{ cursor: "zoom-in", maxHeight: "62vh", objectFit: "contain" }}
-                onClick={() => setLightbox(true)} />
-              <Button size="xs" variant="default" leftSection={<IconZoomScan size={14} />}
-                style={{ position: "absolute", right: 8, top: 8 }}
-                onClick={() => setLightbox(true)}>Zoom</Button>
+            <div style={{ position: "relative", background: "#000", borderRadius: 8, minHeight: 220 }}>
+              {hist.data?.empty ? (
+                <Alert color="yellow" icon={<IconAlertTriangle size={16} />} m="md">
+                  This stack has no image data (all pixels are empty) — it likely failed to
+                  plate-solve or stack, so there's nothing to edit. Check the stack on the
+                  Target page.
+                </Alert>
+              ) : preview.isError ? (
+                <Alert color="red" icon={<IconAlertTriangle size={16} />} m="md">
+                  Preview failed: {(preview.error as Error)?.message}
+                  <div>
+                    <Button size="xs" variant="light" color="red" mt="xs"
+                      leftSection={<IconRefresh size={14} />} onClick={refreshPreview}>
+                      Retry
+                    </Button>
+                  </div>
+                </Alert>
+              ) : preview.data ? (
+                <img src={preview.data} alt="preview"
+                  style={{ display: "block", width: "100%", maxHeight: "62vh",
+                           objectFit: "contain", cursor: "zoom-in" }}
+                  onClick={() => setLightbox(true)} />
+              ) : (
+                <Center h={240}><Loader /></Center>
+              )}
+              <Group gap={6} style={{ position: "absolute", right: 8, top: 8 }}>
+                <Button size="xs" variant="default" leftSection={<IconRefresh size={14} />}
+                  loading={preview.isFetching} onClick={refreshPreview}>Refresh</Button>
+                <Button size="xs" variant="default" leftSection={<IconZoomScan size={14} />}
+                  disabled={!preview.data} onClick={() => setLightbox(true)}>Zoom</Button>
+              </Group>
             </div>
             <Histogram data={hist.data} />
           </Paper>
@@ -213,16 +290,21 @@ export function EditorView() {
                 loading={exportRun.isPending} onClick={() => exportRun.mutate()}>
                 Export as new image
               </Button>
+              <Button mt="xs" fullWidth variant="light" leftSection={<IconPhotoDown size={16} />}
+                loading={downloadPng.isPending} onClick={() => downloadPng.mutate()}>
+                Download full-res PNG
+              </Button>
               <Text size="xs" c="dimmed" mt={6}>
-                Writes a new stack run (FITS/TIFF/PNG). The original is never changed.
-                Heavy ops (e.g. deconvolution) are applied here at full resolution.
+                "Export" writes a new stack run (FITS/TIFF/PNG); the original is never
+                changed. "Download full-res PNG" renders your edits at native resolution
+                and downloads the PNG (can be slow on large/mosaic images).
               </Text>
             </Paper>
           </Stack>
         </Grid.Col>
       </Grid>
 
-      <ImageLightbox src={lightbox ? previewUrl : null}
+      <ImageLightbox src={lightbox ? (preview.data ?? null) : null}
         title={`${safe} — edited`} onClose={() => setLightbox(false)} />
     </Stack>
   );
