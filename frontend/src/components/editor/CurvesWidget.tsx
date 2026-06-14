@@ -1,10 +1,26 @@
 import { Box, Group, Text } from "@mantine/core";
 import { useRef } from "react";
+import type { Histogram } from "../../api/client";
 
 type Pt = [number, number];
 
 const SIZE = 220;
 const PAD = 10;
+
+/** Faint combined-channel histogram polygon to sit behind the curve, mapped into
+ * the curve's [PAD, SIZE-PAD] box with a sqrt scale (astro shadows are crowded). */
+function histPath(h: Histogram): string {
+  const n = h.bins || 1;
+  const combined = h.r.map((_, i) => (h.r[i] ?? 0) + (h.g[i] ?? 0) + (h.b[i] ?? 0));
+  const peak = Math.max(1, ...combined);
+  const span = SIZE - 2 * PAD;
+  const pts = combined.map((v, i) => {
+    const x = PAD + (i / (n - 1)) * span;
+    const y = SIZE - PAD - Math.sqrt(v / peak) * span;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  return `${PAD},${SIZE - PAD} ${pts.join(" ")} ${SIZE - PAD},${SIZE - PAD}`;
+}
 
 function toSvg(x: number, y: number): [number, number] {
   return [PAD + x * (SIZE - 2 * PAD), PAD + (1 - y) * (SIZE - 2 * PAD)];
@@ -17,9 +33,10 @@ function fromSvg(px: number, py: number): Pt {
 
 /** A small draggable tone-curve editor. Endpoints keep their x (0 and 1); inner
  * points move freely; click empty space to add a point, double-click to remove. */
-export function CurvesWidget({ points, onChange }: {
+export function CurvesWidget({ points, onChange, histogram }: {
   points: Pt[];
   onChange: (pts: Pt[]) => void;
+  histogram?: Histogram;
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const drag = useRef<number | null>(null);
@@ -70,6 +87,9 @@ export function CurvesWidget({ points, onChange }: {
         onPointerLeave={() => (drag.current = null)}
         onDoubleClick={addPoint}
       >
+        {histogram ? (
+          <polygon points={histPath(histogram)} fill="#5c5f66" fillOpacity={0.35} stroke="none" />
+        ) : null}
         {[0.25, 0.5, 0.75].map((g) => (
           <g key={g} stroke="#333" strokeWidth={0.5}>
             <line x1={toSvg(g, 0)[0]} y1={PAD} x2={toSvg(g, 0)[0]} y2={SIZE - PAD} />

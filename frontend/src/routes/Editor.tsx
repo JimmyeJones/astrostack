@@ -100,6 +100,23 @@ export function EditorView() {
     qc.invalidateQueries({ queryKey: ["edit-hist", safe, rid] });
   };
 
+  // Before/after: lazily fetch the base (no-ops) render to compare against.
+  const [showBase, setShowBase] = useState(false);
+  const basePreview = useQuery({
+    queryKey: ["edit-base", safe, rid],
+    enabled: showBase && !!opsSchema.data && !saved.isLoading,
+    queryFn: async () => {
+      const res = await fetch(api.editPreviewUrl(safe, rid, { ops: [], base_run_id: rid }));
+      if (!res.ok) throw new Error("base preview failed");
+      return URL.createObjectURL(await res.blob());
+    },
+  });
+  useEffect(() => {
+    const u = basePreview.data;
+    return () => { if (u) URL.revokeObjectURL(u); };
+  }, [basePreview.data]);
+  const shownSrc = showBase ? (basePreview.data ?? preview.data) : preview.data;
+
   // --- mutations -----------------------------------------------------------
   const saveRecipe = useMutation({
     mutationFn: () => api.putRecipe(safe, rid, recipe),
@@ -223,22 +240,40 @@ export function EditorView() {
                     </Button>
                   </div>
                 </Alert>
-              ) : preview.data ? (
-                <img src={preview.data} alt="preview"
+              ) : shownSrc ? (
+                <img src={shownSrc} alt="preview"
                   style={{ display: "block", width: "100%", maxHeight: "62vh",
                            objectFit: "contain", cursor: "zoom-in" }}
                   onClick={() => setLightbox(true)} />
               ) : (
                 <Center h={240}><Loader /></Center>
               )}
+              {showBase ? (
+                <Text size="xs" c="white" style={{ position: "absolute", left: 12, top: 10,
+                  background: "rgba(0,0,0,0.6)", padding: "2px 8px", borderRadius: 4 }}>
+                  Original
+                </Text>
+              ) : null}
               <Group gap={6} style={{ position: "absolute", right: 8, top: 8 }}>
+                <Button size="xs" variant={showBase ? "filled" : "default"}
+                  disabled={!preview.data}
+                  onClick={() => setShowBase((s) => !s)}>
+                  {showBase ? "Edited" : "Compare"}
+                </Button>
                 <Button size="xs" variant="default" leftSection={<IconRefresh size={14} />}
                   loading={preview.isFetching} onClick={refreshPreview}>Refresh</Button>
                 <Button size="xs" variant="default" leftSection={<IconZoomScan size={14} />}
-                  disabled={!preview.data} onClick={() => setLightbox(true)}>Zoom</Button>
+                  disabled={!shownSrc} onClick={() => setLightbox(true)}>Zoom</Button>
               </Group>
             </div>
             <Histogram data={hist.data} />
+            {hist.data?.errors?.length ? (
+              <Alert color="orange" icon={<IconAlertTriangle size={16} />} mt="xs" py={6}>
+                <Text size="xs">
+                  Skipped {hist.data.errors.length} failed operation(s): {hist.data.errors.join("; ")}
+                </Text>
+              </Alert>
+            ) : null}
           </Paper>
         </Grid.Col>
 
@@ -254,7 +289,12 @@ export function EditorView() {
                   <div key={g}>
                     <Menu.Label>{GROUP_LABELS[g] ?? g}</Menu.Label>
                     {grouped[g].map((s) => (
-                      <Menu.Item key={s.id} onClick={() => addOp(s)}>{s.label}</Menu.Item>
+                      <Menu.Item key={s.id} onClick={() => addOp(s)}>
+                        <Text size="sm">{s.label}</Text>
+                        {s.help ? (
+                          <Text size="10px" c="dimmed" lineClamp={2}>{s.help}</Text>
+                        ) : null}
+                      </Menu.Item>
                     ))}
                   </div>
                 ))}
@@ -274,7 +314,7 @@ export function EditorView() {
                   <Text size="xs" c="dimmed" mb="xs">{specs[selectedOp.id].help}</Text>
                 ) : null}
                 <OpParamPanel spec={specs[selectedOp.id]} params={selectedOp.params}
-                  onChange={(p) => setParams(selectedOp.uid, p)} />
+                  histogram={hist.data} onChange={(p) => setParams(selectedOp.uid, p)} />
               </Paper>
             ) : null}
 
@@ -304,8 +344,8 @@ export function EditorView() {
         </Grid.Col>
       </Grid>
 
-      <ImageLightbox src={lightbox ? (preview.data ?? null) : null}
-        title={`${safe} — edited`} onClose={() => setLightbox(false)} />
+      <ImageLightbox src={lightbox ? (shownSrc ?? null) : null}
+        title={`${safe} — ${showBase ? "original" : "edited"}`} onClose={() => setLightbox(false)} />
     </Stack>
   );
 }

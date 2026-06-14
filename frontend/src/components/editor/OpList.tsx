@@ -29,9 +29,14 @@ export function OpList({ ops, specs, selected, onSelect, onMove, onToggle, onRem
             <Group justify="space-between" wrap="nowrap" gap="xs">
               <Group gap={6} wrap="nowrap" style={{ minWidth: 0 }}>
                 <Text size="xs" c="dimmed" w={16} ta="right">{i + 1}</Text>
-                <Text size="sm" fw={active ? 600 : 400} lineClamp={1}>
-                  {spec?.label ?? op.id}
-                </Text>
+                <div style={{ minWidth: 0 }}>
+                  <Text size="sm" fw={active ? 600 : 400} lineClamp={1}>
+                    {spec?.label ?? op.id}
+                  </Text>
+                  {spec?.help ? (
+                    <Text size="10px" c="dimmed" lineClamp={1}>{spec.help}</Text>
+                  ) : null}
+                </div>
               </Group>
               <Group gap={2} wrap="nowrap" onClick={(e) => e.stopPropagation()}>
                 <Switch size="xs" checked={op.enabled} onChange={() => onToggle(op.uid)}

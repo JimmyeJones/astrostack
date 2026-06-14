@@ -38,28 +38,37 @@ def _hot_pixels(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
 def _denoise(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     method = str(params.get("method", "wavelet"))
     strength = float(params.get("strength", 0.5))
+    if strength <= 0.0:
+        return as_rgb(rgb)  # explicit no-op so the slider has a true identity at 0
 
     def run(img: np.ndarray) -> np.ndarray:
         from skimage import restoration
-        lo = float(img.min())
-        hi = float(img.max())
+
+        # Robust scale (NOT min/max): on linear astro data a single hot star sets
+        # max(), crushing the sky noise to ~0 of the range so denoise does nothing.
+        # Scale by the 0.5–99.5th percentile and DON'T clip the highlights, so the
+        # sky noise occupies a meaningful fraction of the range and stars survive.
+        lo = float(np.nanpercentile(img, 0.5))
+        hi = float(np.nanpercentile(img, 99.5))
+        if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+            lo, hi = float(img.min()), float(img.max())
         if hi <= lo:
             return img
-        norm = (img - lo) / (hi - lo)
+        norm = (img - lo) / (hi - lo)  # joint scale → colour preserved; stars may exceed 1
         if method == "wavelet":
             try:
                 den = restoration.denoise_wavelet(
                     norm, channel_axis=-1, rescale_sigma=True,
                     method="BayesShrink", mode="soft")
-                den = norm + strength * (den - norm)  # blend by strength
-                return (den * (hi - lo) + lo).astype(np.float32)
-            except ImportError:
-                pass  # PyWavelets missing → fall through to TV
-        if method == "bilateral":
+            except (ImportError, ValueError):
+                den = restoration.denoise_tv_chambolle(
+                    norm, weight=0.02 + 0.2 * strength, channel_axis=-1)
+            den = norm + strength * (den - norm)  # blend by strength
+        elif method == "bilateral":
             den = restoration.denoise_bilateral(
                 norm, sigma_color=0.02 + 0.15 * strength, sigma_spatial=2.0,
                 channel_axis=-1)
-        else:  # tv (also the wavelet fallback)
+        else:  # tv
             den = restoration.denoise_tv_chambolle(
                 norm, weight=0.02 + 0.2 * strength, channel_axis=-1)
         return (den * (hi - lo) + lo).astype(np.float32)
@@ -91,17 +100,21 @@ def _deconvolve(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
         yy, xx = np.mgrid[-rad:rad + 1, -rad:rad + 1]
         psf = np.exp(-(xx ** 2 + yy ** 2) / (2 * psf_sigma ** 2))
         psf /= psf.sum()
-        lo = float(img.min())
-        hi = float(img.max())
+        # Joint robust scale (shared across channels → no colour shift); keep
+        # highlights (don't clip stars away) — RL only needs non-negativity.
+        lo = float(np.nanpercentile(img, 1.0))
+        hi = float(np.nanpercentile(img, 99.5))
+        if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+            lo, hi = float(img.min()), float(img.max())
         if hi <= lo:
             return img
         out = np.empty_like(img)
         for c in range(3):
-            norm = np.clip((img[..., c] - lo) / (hi - lo), 0.0, 1.0)
-            dec = richardson_lucy(norm, psf, num_iter=iterations, clip=True)
+            norm = np.clip((img[..., c] - lo) / (hi - lo), 0.0, None)
+            dec = richardson_lucy(norm, psf, num_iter=iterations, clip=False)
             out[..., c] = dec * (hi - lo) + lo
-        # mild guard against ringing blow-ups
-        return gaussian_filter(out, sigma=0).astype(np.float32)
+        # Real ring-suppression: a sub-pixel spatial blur (NOT across channels).
+        return gaussian_filter(out, sigma=(0.4, 0.4, 0)).astype(np.float32)
 
     return _with_nan_filled(rgb, run)
 
@@ -116,8 +129,8 @@ register(OpSpec(
     id="detail.denoise", label="Noise reduction", group="detail", stage="linear",
     apply=_denoise, proxy_safe=True, help="Wavelet / bilateral / TV denoise.",
     params=[
-        EditParam("method", "Method", "enum", default="tv",
-                  options=["tv", "bilateral", "wavelet"]),
+        EditParam("method", "Method", "enum", default="wavelet",
+                  options=["wavelet", "tv", "bilateral"]),
         EditParam("strength", "Strength", "float", default=0.5, min=0.0, max=1.0, step=0.05),
     ],
 ))

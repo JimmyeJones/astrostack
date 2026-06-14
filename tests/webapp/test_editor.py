@@ -187,6 +187,33 @@ def test_export_png_full_res_download(client, solved_library):
     assert img.size == (100, 80)
 
 
+def test_histogram_reports_op_errors(client, solved_library, monkeypatch):
+    from seestack.edit.registry import get_op
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe)
+
+    def boom(*_a, **_k):
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr(get_op("tone.saturation"), "apply", boom)
+    recipe = {"ops": [{"id": "tone.stretch", "params": {}},
+                      {"id": "tone.saturation", "params": {"amount": 1.2}}]}
+    h = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/histogram?recipe={_enc(recipe)}").json()
+    assert any("kaboom" in e for e in h["errors"])
+
+
+def test_stf_stretch_renders_non_black(client, solved_library):
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe)
+    recipe = {"ops": [{"id": "tone.stretch", "params": {"mode": "stf", "target_bg": 0.2}}]}
+    h = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/histogram?recipe={_enc(recipe)}").json()
+    assert h["empty"] is False
+    assert sum(h["r"]) > 0 and h["errors"] == []
+
+
 def test_histogram_flags_empty_stack(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
 

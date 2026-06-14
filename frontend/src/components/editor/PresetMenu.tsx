@@ -40,6 +40,15 @@ export function PresetMenu({ currentOps, onApply }: {
   const builtin = presets.data?.builtin ?? [];
   const user = presets.data?.user ?? [];
 
+  // Applying a preset replaces the whole pipeline — confirm if that throws away work.
+  const applyPreset = (p: Preset) => {
+    if (currentOps.length && !window.confirm(
+      `Apply "${p.label}"? This replaces your current ${currentOps.length}-operation pipeline.`)) {
+      return;
+    }
+    onApply(toOps(p));
+  };
+
   return (
     <>
       <Menu shadow="md" position="bottom-start" width={240}>
@@ -50,11 +59,11 @@ export function PresetMenu({ currentOps, onApply }: {
         <Menu.Dropdown>
           <Menu.Label>Built-in</Menu.Label>
           {builtin.map((p) => (
-            <Menu.Item key={p.id} onClick={() => onApply(toOps(p))}>{p.label}</Menu.Item>
+            <Menu.Item key={p.id} onClick={() => applyPreset(p)}>{p.label}</Menu.Item>
           ))}
           {user.length ? <Menu.Label>My presets</Menu.Label> : null}
           {user.map((p) => (
-            <Menu.Item key={p.id} onClick={() => onApply(toOps(p))}
+            <Menu.Item key={p.id} onClick={() => applyPreset(p)}
               rightSection={
                 <ActionIcon size="xs" variant="subtle" color="red" component="div"
                   onClick={(e) => { e.stopPropagation(); del.mutate(p.id); }}>
