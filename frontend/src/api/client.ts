@@ -184,7 +184,7 @@ export interface Job {
 export interface StackOptionField {
   key: string;
   label: string;
-  type: "bool" | "int" | "float" | "str" | "enum";
+  type: "bool" | "int" | "float" | "str" | "enum" | "curve";
   group: "simple" | "advanced";
   default: unknown;
   min: number | null;
@@ -220,6 +220,55 @@ export type Settings = Record<string, unknown> & {
   resolved_incoming_dir: string;
   resolved_library_root: string;
 };
+
+// --- editor ---------------------------------------------------------------
+
+export interface EditOp {
+  id: string;
+  label: string;
+  group: string;
+  stage: string;
+  proxy_safe: boolean;
+  is_stretch: boolean;
+  help: string | null;
+  params: StackOptionField[];
+}
+
+export interface OpInstance {
+  uid: string;
+  id: string;
+  enabled: boolean;
+  params: Record<string, unknown>;
+}
+
+export interface Recipe {
+  version?: number;
+  base_run_id?: number | null;
+  updated_utc?: string | null;
+  ops: OpInstance[];
+}
+
+export interface Preset {
+  id: string;
+  label: string;
+  group: string;
+  ops: { id: string; params: Record<string, unknown>; enabled?: boolean; uid?: string }[];
+}
+
+export interface Histogram {
+  bins: number;
+  edges: number[];
+  r: number[];
+  g: number[];
+  b: number[];
+}
+
+function encodeRecipe(recipe: Recipe): string {
+  const bytes = new TextEncoder().encode(JSON.stringify(recipe));
+  let bin = "";
+  bytes.forEach((b) => (bin += String.fromCharCode(b)));
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_");
+}
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
@@ -349,4 +398,34 @@ export const api = {
     req(`/api/seestar/${ip}/goto`, { method: "POST", body: JSON.stringify(body) }),
   seestarStop: (ip: string) => req(`/api/seestar/${ip}/stop`, { method: "POST" }),
   seestarPark: (ip: string) => req(`/api/seestar/${ip}/park`, { method: "POST" }),
+
+  // editor
+  editorOps: () => req<EditOp[]>("/api/editor/ops/schema"),
+  getRecipe: (safe: string, runId: number) =>
+    req<Recipe>(`/api/targets/${safe}/stack-runs/${runId}/editor/recipe`),
+  putRecipe: (safe: string, runId: number, recipe: Recipe) =>
+    req<Recipe>(`/api/targets/${safe}/stack-runs/${runId}/editor/recipe`, {
+      method: "PUT", body: JSON.stringify(recipe),
+    }),
+  editPreviewUrl: (safe: string, runId: number, recipe: Recipe, bust = 0) =>
+    `/api/targets/${safe}/stack-runs/${runId}/editor/preview?recipe=${encodeRecipe(recipe)}`
+    + (bust ? `&v=${bust}` : ""),
+  getHistogram: (safe: string, runId: number, recipe: Recipe) =>
+    req<Histogram>(
+      `/api/targets/${safe}/stack-runs/${runId}/editor/histogram?recipe=${encodeRecipe(recipe)}`),
+  autoProcess: (safe: string, runId: number) =>
+    req<Recipe>(`/api/targets/${safe}/stack-runs/${runId}/editor/auto`, { method: "POST" }),
+  exportRun: (safe: string, runId: number, recipe: Recipe, outputName: string, tiffMode: string) =>
+    req<{ job_id: string }>(`/api/targets/${safe}/stack-runs/${runId}/editor/export`, {
+      method: "POST",
+      body: JSON.stringify({ recipe, output_name: outputName, tiff_mode: tiffMode }),
+    }),
+  listPresets: () => req<{ builtin: Preset[]; user: Preset[] }>("/api/editor/presets"),
+  createPreset: (label: string, ops: OpInstance[]) =>
+    req<Preset>("/api/editor/presets", { method: "POST", body: JSON.stringify({ label, ops }) }),
+  deletePreset: (id: string) => req(`/api/editor/presets/${id}`, { method: "DELETE" }),
+  batchApply: (body: {
+    items: { safe: string; run_id: number }[];
+    recipe?: Recipe; preset_id?: string; output_name?: string;
+  }) => req<{ job_id: string }>("/api/editor/batch", { method: "POST", body: JSON.stringify(body) }),
 };

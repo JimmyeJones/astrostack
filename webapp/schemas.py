@@ -128,7 +128,7 @@ class ScanRequest(BaseModel):
 class StackOptionField(BaseModel):
     key: str
     label: str
-    type: Literal["bool", "int", "float", "str", "enum"]
+    type: Literal["bool", "int", "float", "str", "enum", "curve"]
     group: Literal["simple", "advanced"]
     default: Any = None
     min: float | None = None
@@ -239,3 +239,41 @@ def coerce_stack_options(data: dict[str, Any]) -> StackOptions:
     valid = {f.name for f in dataclasses.fields(StackOptions)}
     clean = {k: v for k, v in data.items() if k in valid}
     return StackOptions(**clean)
+
+
+# ---------------------------------------------------------------------------
+# Editor operation schema (adapts the engine's EditParam to StackOptionField so
+# the frontend renders editor controls with the same machinery as stack options).
+# ---------------------------------------------------------------------------
+
+
+class EditOpOut(BaseModel):
+    id: str
+    label: str
+    group: str
+    stage: str
+    proxy_safe: bool
+    is_stretch: bool
+    help: str | None = None
+    params: list[StackOptionField]
+
+
+def editor_ops_schema() -> list[EditOpOut]:
+    from seestack.edit.registry import all_specs
+
+    out: list[EditOpOut] = []
+    for spec in all_specs():
+        params = [
+            StackOptionField(
+                key=p.key, label=p.label, type=p.type, group=p.group,
+                default=p.default, min=p.min, max=p.max, step=p.step,
+                options=p.options, help=p.help, depends_on=p.depends_on,
+            )
+            for p in spec.params
+        ]
+        out.append(EditOpOut(
+            id=spec.id, label=spec.label, group=spec.group, stage=spec.stage,
+            proxy_safe=spec.proxy_safe, is_stretch=spec.is_stretch,
+            help=spec.help, params=params,
+        ))
+    return out

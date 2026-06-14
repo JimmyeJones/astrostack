@@ -160,6 +160,164 @@ def submit_stack(
     return jm.submit("stack", body, target=safe)
 
 
+def _load_full_rgb_wcs(fits_path: str) -> tuple[Any, Any]:
+    """Read a stack FITS to float32 (H,W,3) + an optional celestial WCS."""
+    import numpy as np
+    from astropy.io import fits as _fits
+
+    with _fits.open(fits_path) as hdul:
+        data = np.asarray(hdul[0].data, dtype=np.float32)
+        header = hdul[0].header
+    if data.ndim == 3:
+        rgb = np.transpose(data, (1, 2, 0))
+        if rgb.shape[2] == 1:
+            rgb = np.repeat(rgb, 3, axis=2)
+        elif rgb.shape[2] > 3:
+            rgb = rgb[..., :3]
+    else:
+        rgb = np.stack([data, data, data], axis=-1)
+    wcs = None
+    try:
+        from astropy.wcs import WCS
+        w = WCS(header).celestial
+        if w.has_celestial:
+            wcs = w
+    except Exception:  # noqa: BLE001
+        wcs = None
+    return rgb, wcs
+
+
+def _apply_editor_to_run(lib: Library, safe: str, run_id: int, recipe_dict: dict,
+                         *, output_name: str | None, tiff_mode: str,
+                         progress) -> dict[str, Any]:
+    """Apply an editor recipe to one run's full-res FITS and record a NEW run.
+    Non-destructive: the source run is untouched."""
+    import json as _json
+    from datetime import datetime, timezone
+
+    import numpy as np
+
+    from seestack.edit.pipeline import apply_recipe
+    from seestack.edit.recipe import recipe_from_dict
+    from seestack.edit.registry import EditContext
+    from seestack.io.project import Project, StackRunRow
+    from seestack.stack.output import write_stack_outputs
+
+    entry = lib.find_target(safe)
+    if entry is None:
+        raise FileNotFoundError(f"no target '{safe}'")
+    proj = Project.open(lib.target_dir(entry))
+    try:
+        run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
+        if run is None or not run.fits_path or not Path(run.fits_path).exists():
+            raise FileNotFoundError(f"run {run_id} has no FITS")
+        base = output_name or f"{run.output_basename}_edit"
+
+        rgb, wcs = _load_full_rgb_wcs(run.fits_path)
+        recipe = recipe_from_dict(recipe_dict)
+        n = len(recipe.ops)
+        done = 0
+
+        # Per-op progress: wrap apply by stepping through ops via a callback.
+        from seestack.edit.registry import get_op
+        ctx = EditContext(wcs=wcs, is_proxy=False, proxy_scale=1.0)
+        ctx.stage = "linear"
+        out = np.asarray(rgb, dtype=np.float32)
+        from seestack.edit.registry import as_rgb
+        out = as_rgb(out)
+        stretched = False
+        for op in [o for o in recipe.ops if o.enabled]:
+            spec = get_op(op.id)
+            if spec is None:
+                continue
+            try:
+                out = as_rgb(spec.apply(out, op.params, ctx))
+                if spec.is_stretch:
+                    stretched = True
+                    ctx.stage = "nonlinear"
+            except Exception as exc:  # noqa: BLE001
+                log.warning("editor export op %s failed: %s", op.id, exc)
+            done += 1
+            progress("export", done, max(n, 1))
+        if not stretched:
+            from seestack.render.thumbnail import asinh_stretch
+            out = asinh_stretch(out)
+
+        coverage = np.ones(out.shape[:2], dtype=np.float32)
+        paths = write_stack_outputs(
+            project_dir=proj.project_dir, rgb=out, coverage=coverage,
+            wcs_text=None, out_basename=base, tiff_mode=tiff_mode,
+        )
+        new_id = proj.add_stack_run(StackRunRow(
+            id=None,
+            timestamp_utc=datetime.now(timezone.utc).isoformat(),
+            output_basename=base,
+            fits_path=str(paths["fits"]), tiff_path=str(paths["tiff"]),
+            preview_path=str(paths["preview"]),
+            n_frames_used=run.n_frames_used,
+            canvas_h=out.shape[0], canvas_w=out.shape[1],
+            coverage_min=1, coverage_max=1,
+            options_json=_json.dumps({"editor_recipe": recipe.to_dict(),
+                                      "derived_from": run_id}),
+            notes="edited",
+        ))
+    finally:
+        proj.close()
+    lib.refresh_target_stats(safe)
+    return {"safe": safe, "run_id": new_id, "output_basename": base,
+            "output_dir": str(Path(paths["fits"]).parent)}
+
+
+def submit_editor_export(settings: Settings, jm: JobManager, safe: str, run_id: int,
+                         recipe_dict: dict, *, output_name: str | None = None,
+                         tiff_mode: str = "linear") -> Job:
+    def body(job: Job) -> dict[str, Any]:
+        lib = Library.open_or_create(settings.resolved_library_root)
+        try:
+            return _apply_editor_to_run(
+                lib, safe, run_id, recipe_dict,
+                output_name=output_name, tiff_mode=tiff_mode,
+                progress=_progress(jm, job),
+            )
+        finally:
+            lib.close()
+
+    return jm.submit("editor_export", body, target=safe)
+
+
+def submit_editor_batch(settings: Settings, jm: JobManager, items: list[dict],
+                        recipe_dict: dict, *, output_name: str | None = None,
+                        tiff_mode: str = "linear") -> Job:
+    def body(job: Job) -> dict[str, Any]:
+        lib = Library.open_or_create(settings.resolved_library_root)
+        exported: list[dict] = []
+        errors: dict[str, str] = {}
+        total = len(items)
+        try:
+            for i, item in enumerate(items, start=1):
+                if job.cancel_requested():
+                    break
+                safe = str(item.get("safe"))
+                rid = int(item.get("run_id"))
+                job.set_progress("batch", i, total, f"{safe} run {rid}")
+                jm.maybe_flush(job)
+                try:
+                    res = _apply_editor_to_run(
+                        lib, safe, rid, recipe_dict,
+                        output_name=output_name, tiff_mode=tiff_mode,
+                        progress=lambda *a: None,  # per-item detail not surfaced
+                    )
+                    exported.append(res)
+                except Exception as exc:  # noqa: BLE001 — one item shouldn't sink the batch
+                    log.warning("batch edit failed for %s/%s: %s", safe, rid, exc)
+                    errors[f"{safe}:{rid}"] = str(exc)
+        finally:
+            lib.close()
+        return {"exported": exported, "errors": errors}
+
+    return jm.submit("editor_batch", body)
+
+
 def _solved_accepted_count(proj: Any) -> int:
     return sum(1 for f in proj.iter_frames(accepted_only=True) if f.wcs_json)
 

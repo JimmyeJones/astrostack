@@ -220,12 +220,18 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request) -> F
 def delete_stack_run(safe: str, run_id: int, request: Request) -> dict:
     from webapp.routers.storage import delete_run_artifacts
 
+    from seestack.edit.proxy import clear_proxy
+
     lib, proj = deps.open_target_project(request, safe)
     try:
         run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
         if run is not None:
             delete_run_artifacts(run)
         proj.delete_stack_run(run_id)
+        # Drop the editor's cached proxy + saved recipe for this run.
+        clear_proxy(Path(proj.project_dir), run_id)
+        with contextlib.suppress(Exception):
+            proj.set_meta(f"editor_recipe:{run_id}", "")
     finally:
         proj.close()
         lib.close()
