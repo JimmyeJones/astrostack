@@ -26,8 +26,8 @@ from webapp import logbuffer, pipeline
 from webapp.config import SettingsStore
 from webapp.jobs import JobManager
 from webapp.routers import (
-    frames, gallery, jobs, logs, seestar, settings, sky, stack, stats, storage,
-    system, targets,
+    editor, frames, gallery, jobs, logs, seestar, settings, sky, stack, stats,
+    storage, system, targets,
 )
 from webapp.routers import pipeline as pipeline_router
 from webapp.seestar.manager import SeestarManager
@@ -97,7 +97,7 @@ def create_app() -> FastAPI:
         targets.router, frames.router, stack.router, jobs.router,
         pipeline_router.router, settings.router, system.router, sky.router,
         gallery.router, logs.router, stats.router, storage.router,
-        seestar.router,
+        seestar.router, editor.router,
     ):
         app.include_router(r)
 
