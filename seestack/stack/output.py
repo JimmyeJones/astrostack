@@ -155,6 +155,22 @@ def _write_preview_png(path: Path, rgb: np.ndarray, *, max_width: int = 1024) ->
     img.save(path, format="PNG")
 
 
+def write_full_res_png(path: Path, rgb: np.ndarray) -> Path:
+    """Write a native-resolution 8-bit RGB PNG of an already display-stretched
+    image (values in 0..1). Unlike ``_write_preview_png`` this does NOT autostretch
+    or downsize — it's for downloading the editor result exactly as shown. NaN
+    (uncovered) pixels render black."""
+    from PIL import Image
+
+    arr = np.nan_to_num(np.asarray(rgb, dtype=np.float32), nan=0.0)
+    u8 = (np.clip(arr, 0.0, 1.0) * 255.0).astype(np.uint8)
+    if u8.ndim == 2:
+        u8 = np.stack([u8, u8, u8], axis=-1)
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Image.fromarray(u8, mode="RGB").save(path, format="PNG")
+    return Path(path)
+
+
 def _to_uint16_linear(rgb: np.ndarray) -> np.ndarray:
     """
     Pack float32 stack data into 16-bit unsigned without stretching.

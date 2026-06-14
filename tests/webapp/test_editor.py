@@ -161,3 +161,53 @@ def test_batch_apply(client, solved_library):
     job = _wait_job(client, r.json()["job_id"])
     assert job["state"] == "done", job
     assert len(job["result"]["exported"]) == 2
+
+
+def test_export_png_full_res_download(client, solved_library):
+    import io
+
+    from PIL import Image
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, h=80, w=100)
+    recipe = {"ops": [{"id": "tone.stretch", "params": {"stretch": 0.6}}]}
+
+    r = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/export-png",
+                    json={"recipe": recipe})
+    assert r.status_code == 200
+    job = _wait_job(client, r.json()["job_id"])
+    assert job["state"] == "done", job
+
+    dl = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/png/{r.json()['job_id']}")
+    assert dl.status_code == 200
+    assert dl.headers["content-type"].startswith("image/png")
+    assert "attachment" in dl.headers.get("content-disposition", "")
+    # Full resolution: PNG matches the native canvas (w=100, h=80).
+    img = Image.open(io.BytesIO(dl.content))
+    assert img.size == (100, 80)
+
+
+def test_histogram_flags_empty_stack(client, solved_library):
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+
+    # A normal stack is not empty.
+    rid = _make_run(solved_library, safe)
+    h = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/histogram").json()
+    assert h["empty"] is False
+
+    # An all-NaN stack (failed solve/stack) is flagged empty, not a 500.
+    nan_id = _make_run(solved_library, safe, basename="blank")
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == nan_id)
+            cube = np.full((3, 80, 100), np.nan, dtype="float32")
+            fits.writeto(run.fits_path, cube, overwrite=True)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    hb = client.get(f"/api/targets/{safe}/stack-runs/{nan_id}/editor/histogram")
+    assert hb.status_code == 200
+    assert hb.json()["empty"] is True

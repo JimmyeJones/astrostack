@@ -2,7 +2,7 @@ import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EditorView } from "./Editor";
 import * as client from "../api/client";
 import type { EditOp } from "../api/client";
@@ -23,7 +23,7 @@ const CURVES: EditOp = {
 };
 
 function renderEditor() {
-  const qc = new QueryClient();
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <MantineProvider>
       <QueryClientProvider client={qc}>
@@ -39,16 +39,31 @@ function renderEditor() {
 
 afterEach(() => vi.restoreAllMocks());
 
+beforeEach(() => {
+  // jsdom lacks object-URL APIs the blob preview uses.
+  vi.stubGlobal("URL", Object.assign(URL, {
+    createObjectURL: vi.fn(() => "blob:mock"),
+    revokeObjectURL: vi.fn(),
+  }));
+});
+
+function mockEditorQueries() {
+  vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES]);
+  vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+    ops: [{ uid: "x1", id: "tone.stretch", enabled: true, params: { stretch: 0.6 } }],
+    base_run_id: 3,
+  });
+  vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+  vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+    { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+}
+
 describe("EditorView", () => {
   it("loads the saved recipe and renders its operations", async () => {
-    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES]);
-    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
-      ops: [{ uid: "x1", id: "tone.stretch", enabled: true, params: { stretch: 0.6 } }],
-      base_run_id: 3,
-    });
-    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
-    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
-      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    mockEditorQueries();
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
 
     renderEditor();
 
@@ -56,6 +71,19 @@ describe("EditorView", () => {
     // The saved stretch op shows in the pipeline list.
     expect(screen.getByText("Stretch")).toBeInTheDocument();
     expect(screen.getByText("Export as new image")).toBeInTheDocument();
+    expect(screen.getByText("Download full-res PNG")).toBeInTheDocument();
+  });
+
+  it("shows an error message when the preview render fails (not a blank panel)", async () => {
+    mockEditorQueries();
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: false, status: 500, json: async () => ({ detail: "boom while rendering" }),
+    })));
+
+    renderEditor();
+
+    await waitFor(() => expect(screen.getByText(/Preview failed/)).toBeInTheDocument());
+    expect(screen.getByText(/boom while rendering/)).toBeInTheDocument();
   });
 });
 
