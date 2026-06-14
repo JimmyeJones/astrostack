@@ -199,9 +199,11 @@ async def edit_histogram(safe: str, run_id: int, request: Request,
         # the UI can say "no image data" instead of showing a mystery black frame.
         empty = not bool(np.isfinite(rgb).any())
         ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None)
-        out = apply_recipe(rgb, rec, ctx, for_preview=True)
+        errors: list[str] = []
+        out = apply_recipe(rgb, rec, ctx, for_preview=True, errors=errors)
         hist = compute_histogram(out)
         hist["empty"] = empty
+        hist["errors"] = errors  # ops that failed (surfaced near the preview)
         return hist
 
     return await run_in_threadpool(work)

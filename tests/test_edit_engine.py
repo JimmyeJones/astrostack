@@ -124,6 +124,75 @@ def test_proxy_build_cache_and_bound(tmp_path):
     assert not (pdir / "cache" / "edit_proxies" / "run_7.npy").exists()
 
 
+def test_auto_recipe_adapts_to_noise():
+    """Auto-process must read the image, not emit a constant recipe."""
+    from seestack.edit.presets import analyze_proxy, auto_recipe
+
+    rng = np.random.default_rng(1)
+    smooth = np.full((80, 100, 3), 0.05, np.float32)
+    smooth[30:50, 40:60] += 0.5
+    noisy = smooth + rng.normal(0, 0.08, smooth.shape).astype("float32")
+
+    assert analyze_proxy(noisy)["noisy"] is True
+    assert analyze_proxy(smooth)["noisy"] is False
+
+    s_ids = [o.id for o in auto_recipe(smooth).ops]
+    n_ids = [o.id for o in auto_recipe(noisy).ops]
+    assert s_ids != n_ids                                  # genuinely adaptive
+    assert "detail.denoise" in n_ids and "detail.denoise" not in s_ids
+    # denoise (linear) must precede the stretch
+    assert n_ids.index("detail.denoise") < n_ids.index("tone.stretch")
+    # auto uses the proven per-channel STF, not a hardcoded asinh
+    stretch = next(o for o in auto_recipe(noisy).ops if o.id == "tone.stretch")
+    assert stretch.params["mode"] == "stf"
+
+
+def test_denoise_identity_at_zero_and_preserves_colour():
+    base = np.empty((40, 50, 3), np.float32)
+    for c, lvl in enumerate((0.1, 0.2, 0.3)):
+        base[..., c] = lvl
+    base += np.random.default_rng(2).normal(0, 0.02, base.shape).astype("float32")
+    spec = get_op("detail.denoise")
+
+    ident = spec.apply(base, {"method": "wavelet", "strength": 0.0}, EditContext())
+    assert np.allclose(ident, base, atol=1e-6)            # true no-op at 0
+
+    den = spec.apply(base, {"method": "tv", "strength": 0.8}, EditContext())
+    # Channel means stay put (no per-channel rescale destroying colour).
+    for c, lvl in enumerate((0.1, 0.2, 0.3)):
+        assert abs(float(den[..., c].mean()) - lvl) < 0.02
+
+
+def test_deconvolve_preserves_colour_balance():
+    gray = np.full((40, 48, 3), 0.3, np.float32)
+    gray[15:25, 20:30] = 0.7                              # a bright blob, equal in all channels
+    out = get_op("detail.deconvolve").apply(
+        gray, {"iterations": 3, "psf_sigma": 1.2}, EditContext())
+    means = [float(out[..., c].mean()) for c in range(3)]
+    assert max(means) - min(means) < 0.01                 # no colour shift
+
+
+def test_pipeline_collects_op_errors(monkeypatch):
+    img = _img(nan_band=0)
+
+    def boom(*_a, **_k):
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr(get_op("tone.saturation"), "apply", boom)
+    rec = Recipe(ops=validate_ops([
+        OpInstance(id="tone.stretch", params={}),
+        OpInstance(id="tone.saturation", params={"amount": 1.2}),
+    ]))
+    errors: list[str] = []
+    out = apply_recipe(img, rec, EditContext(), errors=errors)
+    assert out is not None and np.isfinite(out).any()      # render still completes
+    assert any("kaboom" in e for e in errors)              # failure surfaced, not swallowed
+
+
+def test_white_balance_is_linear_stage():
+    assert get_op("tone.white_balance").stage == "linear"
+
+
 def test_crop_fraction_consistent_across_scales():
     """A fractional crop selects the same relative region at proxy and full size."""
     spec = get_op("geometry.crop")

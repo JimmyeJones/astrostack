@@ -108,8 +108,9 @@ register(OpSpec(
 ))
 
 register(OpSpec(
-    id="tone.white_balance", label="White balance", group="tone", stage="any",
-    apply=_white_balance, proxy_safe=True, help="Manual per-channel gain.",
+    id="tone.white_balance", label="White balance", group="tone", stage="linear",
+    apply=_white_balance, proxy_safe=True,
+    help="Manual per-channel gain (applied to linear data).",
     params=[
         EditParam("r", "Red gain", "float", default=1.0, min=0.0, max=3.0, step=0.01),
         EditParam("g", "Green gain", "float", default=1.0, min=0.0, max=3.0, step=0.01),
@@ -155,7 +156,7 @@ register(OpSpec(
 ))
 
 register(OpSpec(
-    id="tone.scnr", label="SCNR (green removal)", group="tone", stage="nonlinear",
+    id="tone.scnr", label="SCNR (green removal)", group="tone", stage="any",
     apply=_scnr, proxy_safe=True, help="Remove the green colour cast on OSC nebulae.",
     params=[
         EditParam("amount", "Amount", "float", default=0.8, min=0.0, max=1.0, step=0.05),

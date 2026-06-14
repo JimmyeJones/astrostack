@@ -262,6 +262,7 @@ export interface Histogram {
   g: number[];
   b: number[];
   empty?: boolean;
+  errors?: string[];
 }
 
 function encodeRecipe(recipe: Recipe): string {
