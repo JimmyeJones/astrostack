@@ -28,6 +28,7 @@ const HINTS: Record<string, string> = {
   astap_fov_deg: "Approximate field-of-view height in degrees, used as a solving hint (~1.3° suits the Seestar).",
   astap_timeout_s: "Give up on solving a single frame after this many seconds.",
   cpu_workers: "CPU workers for QC / solve / stack. Blank = all cores.",
+  astap_use_solve_hints: "Use each frame's telescope target RA/Dec (from its FITS header) to localise ASTAP's search — faster, more reliable solving. Turn off if your frames lack/contain wrong coordinates.",
   seestar_enabled: "Discover and monitor Seestar telescopes on the LAN via their unofficial local API (port 4700). The container must be able to reach the scope (Station mode).",
   seestar_control_enabled: "Allow sending commands (goto / start / stop / park) to the scope. Off = monitoring only, so watching can never disturb a session.",
   seestar_scan_subnet: "CIDR to scan for scopes, e.g. 192.168.1.0/24. Blank = auto-detect from the container's network.",
@@ -168,6 +169,9 @@ export function SettingsView() {
             <NumberInput label={lbl("cpu_workers", "CPU workers")} value={num("cpu_workers")}
               min={1} onChange={(v) => set("cpu_workers", v === "" ? null : Number(v))} />
           </SimpleGrid>
+          <Switch label={lbl("astap_use_solve_hints", "Use telescope target as solve hint")}
+            checked={bool("astap_use_solve_hints")}
+            onChange={(e) => set("astap_use_solve_hints", e.currentTarget.checked)} />
 
           <Group justify="flex-end">
             <Button leftSection={<IconDeviceFloppy size={16} />}

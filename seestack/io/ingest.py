@@ -114,6 +114,8 @@ def ingest_files(
             width_px=info.width_px,
             height_px=info.height_px,
             bayer_pattern=info.bayer_pattern,
+            ra_hint_deg=info.ra_target_deg,
+            dec_hint_deg=info.dec_target_deg,
         )
         frame_id = project.add_frame(row)
 

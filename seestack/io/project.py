@@ -30,7 +30,7 @@ from typing import Any, Iterator
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA_SQL = f"""
 PRAGMA user_version = {SCHEMA_VERSION};
@@ -74,6 +74,9 @@ CREATE TABLE IF NOT EXISTS frames (
     width_px            INTEGER,
     height_px           INTEGER,
     bayer_pattern       TEXT,                   -- e.g. 'RGGB'
+    -- telescope target hint (from the raw FITS header, used to speed plate-solving)
+    ra_hint_deg         REAL,
+    dec_hint_deg        REAL,
     -- plate solve
     wcs_json            TEXT,                   -- serialized astropy WCS header
     ra_center_deg       REAL,
@@ -118,6 +121,8 @@ class FrameRow:
     width_px: int | None = None
     height_px: int | None = None
     bayer_pattern: str | None = None
+    ra_hint_deg: float | None = None
+    dec_hint_deg: float | None = None
     wcs_json: str | None = None
     ra_center_deg: float | None = None
     dec_center_deg: float | None = None
@@ -140,6 +145,7 @@ _INSERT_COLS = [
     "source_path", "cached_path", "aligned_cache_path",
     "timestamp_utc", "exposure_s", "gain", "sensor_temp_c",
     "width_px", "height_px", "bayer_pattern",
+    "ra_hint_deg", "dec_hint_deg",
     "wcs_json", "ra_center_deg", "dec_center_deg", "pixscale_arcsec", "rotation_deg",
     "fwhm_px", "star_count", "sky_adu_median", "eccentricity_median", "transparency_score",
     "streak_detected", "streak_count",
@@ -244,6 +250,13 @@ class Project:
                 CREATE INDEX IF NOT EXISTS idx_stack_runs_ts ON stack_runs(timestamp_utc);
                 """
             )
+        if from_version < 3:
+            # Telescope-target hint columns (additive; never destroys data).
+            for col in ("ra_hint_deg", "dec_hint_deg"):
+                try:
+                    self._conn.execute(f"ALTER TABLE frames ADD COLUMN {col} REAL")
+                except sqlite3.OperationalError:
+                    pass  # already present
         self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @contextmanager
@@ -415,6 +428,8 @@ def _row_to_frame(row: sqlite3.Row) -> FrameRow:
         width_px=row["width_px"],
         height_px=row["height_px"],
         bayer_pattern=row["bayer_pattern"],
+        ra_hint_deg=row["ra_hint_deg"],
+        dec_hint_deg=row["dec_hint_deg"],
         wcs_json=row["wcs_json"],
         ra_center_deg=row["ra_center_deg"],
         dec_center_deg=row["dec_center_deg"],

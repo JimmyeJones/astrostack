@@ -74,7 +74,7 @@ def test_solve_one_with_mock_solver(tmp_path):
         def __init__(self, *a, **kw):
             pass
 
-        def solve(self, _path):
+        def solve(self, _path, **_kw):  # accepts ra_hint_deg/dec_hint_deg/radius_deg
             return fake_result
 
     with patch("seestack.solve.runner.ASTAPSolver", FakeSolver), \

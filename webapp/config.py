@@ -70,6 +70,9 @@ class Settings(BaseModel):
     astap_path: str | None = None  # falls back to $SEESTACK_ASTAP_PATH, then PATH
     astap_fov_deg: float = 1.3
     astap_timeout_s: float = 60.0
+    # Use the telescope target RA/Dec from each frame's FITS header as a
+    # plate-solve search hint (localises ASTAP's search; speeds up solving).
+    astap_use_solve_hints: bool = True
 
     # --- compute -----------------------------------------------------------
     cpu_workers: int | None = Field(default_factory=_default_cpu_workers)

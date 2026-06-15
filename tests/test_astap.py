@@ -196,3 +196,41 @@ def test_solve_once_emits_z_and_s_flags(tmp_path, monkeypatch):
     cmd = captured["cmd"]
     assert "-z" in cmd and "4" in cmd
     assert "-s" in cmd and "200" in cmd
+
+
+def _capture_cmd(monkeypatch):
+    captured: dict = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+
+        class _P:
+            returncode = 1
+            stdout = ""
+            stderr = "no solution"
+        return _P()
+
+    monkeypatch.setattr("seestack.solve.astap.subprocess.run", fake_run)
+    return captured
+
+
+def test_solver_adds_position_hint(tmp_path, monkeypatch):
+    solver = _make_solver(tmp_path)
+    frame = tmp_path / "frame.fits"
+    frame.write_bytes(b"")
+    captured = _capture_cmd(monkeypatch)
+    solver.solve(frame, ra_hint_deg=83.6, dec_hint_deg=-5.4, radius_deg=10.0)
+    cmd = captured["cmd"]
+    assert "-ra" in cmd and "-spd" in cmd
+    assert abs(float(cmd[cmd.index("-ra") + 1]) - 83.6 / 15.0) < 1e-3   # degrees → hours
+    assert abs(float(cmd[cmd.index("-spd") + 1]) - (-5.4 + 90.0)) < 1e-3  # dec → south-polar-dist
+    assert float(cmd[cmd.index("-r") + 1]) == 10.0
+
+
+def test_solver_omits_hint_when_absent(tmp_path, monkeypatch):
+    solver = _make_solver(tmp_path)
+    frame = tmp_path / "frame.fits"
+    frame.write_bytes(b"")
+    captured = _capture_cmd(monkeypatch)
+    solver.solve(frame)
+    assert "-ra" not in captured["cmd"] and "-spd" not in captured["cmd"]

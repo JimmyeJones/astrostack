@@ -46,6 +46,9 @@ def solve_one(
     astap_path: str | None = None,
     fov_deg: float = 1.3,
     timeout_s: float = 60.0,
+    ra_hint_deg: float | None = None,
+    dec_hint_deg: float | None = None,
+    search_radius_deg: float = 30.0,
 ) -> SolveResult:
     """
     Plate-solve one frame. Picklable, safe to call from ``ProcessPoolExecutor``.
@@ -67,7 +70,8 @@ def solve_one(
         )
 
     try:
-        r = solver.solve(fits_path)
+        r = solver.solve(fits_path, ra_hint_deg=ra_hint_deg, dec_hint_deg=dec_hint_deg,
+                         radius_deg=search_radius_deg)
     except Exception as exc:  # noqa: BLE001
         return SolveResult(
             frame_id=frame_id, fits_path=fits_path, solved=False,
@@ -89,17 +93,22 @@ def solve_one(
     )
 
 
-def build_solve_arglist(project) -> list[tuple[int, str, str | None, float, float]]:
+def build_solve_arglist(
+    project, *, use_hint: bool = True,
+) -> list[tuple[int, str, str | None, float, float, float | None, float | None, float]]:
     """
-    Build ``[(frame_id, path, astap_path, fov_deg, timeout_s), ...]``.
+    Build ``[(frame_id, path, astap_path, fov_deg, timeout_s, ra_hint_deg,
+    dec_hint_deg, search_radius_deg), ...]`` for :func:`solve_one`.
 
-    Skips frames that have already been solved (already have a ``wcs_json``)
-    so a re-run only touches the still-unsolved ones.
+    Skips frames already solved (have a ``wcs_json``). When ``use_hint`` is on
+    and a frame carries a telescope-target hint (``ra_hint_deg``/``dec_hint_deg``
+    from its FITS header), it's threaded into ASTAP to localise the search.
     """
-    out: list[tuple[int, str, str | None, float, float]] = []
     astap_path = project.get_meta("astap_path")  # may be None → use auto-find
     fov_deg = float(project.get_meta("astap_fov_deg") or 1.3)
     timeout_s = float(project.get_meta("astap_timeout_s") or 60.0)
+    radius_deg = float(project.get_meta("astap_hint_radius_deg") or 30.0)
+    out: list[tuple[int, str, str | None, float, float, float | None, float | None, float]] = []
     for f in project.iter_frames():
         if f.id is None:
             continue
@@ -108,7 +117,9 @@ def build_solve_arglist(project) -> list[tuple[int, str, str | None, float, floa
         path = f.cached_path or f.source_path
         if not path or not Path(path).exists():
             continue
-        out.append((f.id, str(path), astap_path, fov_deg, timeout_s))
+        ra_hint = f.ra_hint_deg if use_hint else None
+        dec_hint = f.dec_hint_deg if use_hint else None
+        out.append((f.id, str(path), astap_path, fov_deg, timeout_s, ra_hint, dec_hint, radius_deg))
     return out
 
 

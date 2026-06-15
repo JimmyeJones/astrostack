@@ -78,6 +78,7 @@ def _pipeline_body(
                         run_qc=settings.auto_qc,
                         run_solve=settings.auto_solve,
                         only_new_qc=True,  # don't re-QC frames already done on re-scans
+                        use_solve_hints=settings.astap_use_solve_hints,
                         progress=_progress(jm, job),
                         should_stop=job.cancel_requested,
                     )
@@ -134,6 +135,7 @@ def submit_qc_solve(settings: Settings, jm: JobManager, safe: str) -> Job:
                     max_workers=settings.cpu_workers,
                     run_qc=settings.auto_qc or True,
                     run_solve=settings.auto_solve or True,
+                    use_solve_hints=settings.astap_use_solve_hints,
                     progress=_progress(jm, job),
                     should_stop=job.cancel_requested,
                 )

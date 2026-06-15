@@ -69,8 +69,12 @@ def test_v1_schema_migrates_to_v2(tmp_path):
             options_json="{}",
         ))
         assert len(list(proj.iter_stack_runs())) == 1
-        # Version stamp updated.
+        # Version stamp updated to the current schema.
+        from seestack.io.project import SCHEMA_VERSION
         version = proj._conn.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 2
+        assert version == SCHEMA_VERSION
+        # v3 hint columns exist after migration.
+        cols = {r[1] for r in proj._conn.execute("PRAGMA table_info(frames)")}
+        assert {"ra_hint_deg", "dec_hint_deg"} <= cols
     finally:
         proj.close()

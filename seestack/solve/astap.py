@@ -165,7 +165,14 @@ class ASTAPSolver:
         self.search_radius_deg = search_radius_deg
         self.timeout_s = timeout_s
 
-    def solve(self, fits_path: str | os.PathLike[str]) -> ASTAPResult:
+    def solve(
+        self,
+        fits_path: str | os.PathLike[str],
+        *,
+        ra_hint_deg: float | None = None,
+        dec_hint_deg: float | None = None,
+        radius_deg: float | None = None,
+    ) -> ASTAPResult:
         """Solve one FITS file, escalating noise suppression on failure.
 
         Tries each rung of :attr:`_SOLVE_LADDER` in turn and returns the first
@@ -184,6 +191,9 @@ class ASTAPSolver:
                 fits_path,
                 downsample=params.get("downsample"),
                 max_stars=params.get("max_stars"),
+                ra_hint_deg=ra_hint_deg,
+                dec_hint_deg=dec_hint_deg,
+                radius_deg=radius_deg,
             )
             last = result
             if result.solved:
@@ -206,23 +216,34 @@ class ASTAPSolver:
         *,
         downsample: int | None = None,
         max_stars: int | None = None,
+        ra_hint_deg: float | None = None,
+        dec_hint_deg: float | None = None,
+        radius_deg: float | None = None,
     ) -> ASTAPResult:
         """One ASTAP invocation with a specific detection configuration."""
         # ASTAP CLI flags:
         #   -f <file>       FITS file to solve
         #   -fov <deg>      approximate FOV
         #   -r   <deg>      search radius
+        #   -ra  <hours>    search-centre RA (hours) — telescope-target hint
+        #   -spd <deg>      search-centre south-polar-distance (Dec+90°)
         #   -z   <0-4>      downsample (bin) before star detection; suppresses noise
         #   -s   <N>        max number of detected stars to use for matching
         #   -wcs            write a .wcs sidecar
         #   -update         also update FITS header (we DON'T want this — keep raws untouched)
+        radius = radius_deg if radius_deg is not None else self.search_radius_deg
         cmd = [
             str(self.astap_path),
             "-f", str(fits_path),
             "-fov", f"{self.fov_deg}",
-            "-r", f"{self.search_radius_deg}",
+            "-r", f"{radius}",
             "-wcs",
         ]
+        # Telescope-target hint: when present, point ASTAP's search at it so it
+        # doesn't blind-search the whole radius. Purely additive (ASTAP already
+        # auto-reads header RA/Dec when this is omitted).
+        if ra_hint_deg is not None and dec_hint_deg is not None:
+            cmd += ["-ra", f"{ra_hint_deg / 15.0:.6f}", "-spd", f"{dec_hint_deg + 90.0:.6f}"]
         if downsample is not None:
             cmd += ["-z", str(downsample)]
         if max_stars is not None:
