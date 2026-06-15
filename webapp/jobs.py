@@ -290,11 +290,22 @@ class JobManager:
                 self._evict_old()
 
     def _evict_old(self) -> None:
-        """Drop finished jobs from the in-memory map (DB keeps history)."""
+        """Drop old finished jobs from the in-memory map AND prune the DB so
+        jobs.sqlite doesn't grow without bound on a long-running watcher."""
         with self._lock:
             finished = [j for j in self._jobs.values() if j.state in _TERMINAL]
-            if len(finished) <= self.max_history:
-                return
-            finished.sort(key=lambda j: j.finished_utc or "")
-            for j in finished[: len(finished) - self.max_history]:
-                self._jobs.pop(j.id, None)
+            if len(finished) > self.max_history:
+                finished.sort(key=lambda j: j.finished_utc or "")
+                for j in finished[: len(finished) - self.max_history]:
+                    self._jobs.pop(j.id, None)
+        # Keep at most ~10× the in-memory cap on disk (history for the UI).
+        keep = max(self.max_history * 10, 50)
+        try:
+            with self._connect() as conn:
+                conn.execute(
+                    "DELETE FROM jobs WHERE id NOT IN "
+                    "(SELECT id FROM jobs ORDER BY COALESCE(created_utc,'') DESC LIMIT ?)",
+                    (keep,),
+                )
+        except sqlite3.Error as exc:  # noqa: BLE001 — pruning is best-effort
+            log.warning("jobs DB prune failed: %s", exc)

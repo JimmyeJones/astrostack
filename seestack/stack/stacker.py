@@ -317,6 +317,7 @@ def run_stack(
     # the reference frame to itself once and extracting a central luminance
     # window. This happens before the parallel passes so every worker can
     # share it.
+    canvas_3 = (dst_shape[0], dst_shape[1], 3)  # needed by the sub-pixel block below
     ref_patch: np.ndarray | None = None
     ref_patch_origin: tuple[int, int] | None = None
     if options.subpixel_refine:
@@ -360,7 +361,6 @@ def run_stack(
         options.background_flatten, options.sigma_clip,
     )
 
-    canvas_3 = (dst_shape[0], dst_shape[1], 3)
     # Refuse a stack that would exhaust RAM *before* allocating anything — a
     # drizzled near-cap mosaic canvas can otherwise reach tens of GB and get the
     # whole container OOM-killed (there's no cgroup limit to catch it).

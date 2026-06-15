@@ -313,8 +313,10 @@ def submit_editor_png(settings: Settings, jm: JobManager, safe: str, run_id: int
                     raise FileNotFoundError(f"run {run_id} has no FITS")
                 out, _recipe = _render_recipe_fullres(
                     run.fits_path, recipe_dict, _progress(jm, job))
+                from seestack.stack.output import safe_basename
                 ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-                png = Path(proj.project_dir) / "output" / f"{run.output_basename}_edit_{ts}.png"
+                png = (Path(proj.project_dir) / "output"
+                       / f"{safe_basename(run.output_basename)}_edit_{ts}.png")
                 write_full_res_png(png, out)
             finally:
                 proj.close()

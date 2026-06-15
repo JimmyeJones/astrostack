@@ -186,13 +186,18 @@ class Project:
             self._conn = None
 
     def _open(self) -> None:
-        self._conn = sqlite3.connect(self.db_path, isolation_level=None)  # autocommit
-        self._conn.row_factory = sqlite3.Row
-        # A library scan adds frames to a target's project on a worker thread
-        # while the GUI may read the same project. busy_timeout makes a
-        # contended connection wait for the lock rather than raising
-        # "database is locked" outright.
-        self._conn.execute("PRAGMA busy_timeout = 5000")
+        conn = sqlite3.connect(self.db_path, isolation_level=None)  # autocommit
+        try:
+            conn.row_factory = sqlite3.Row
+            # A library scan adds frames to a target's project on a worker thread
+            # while the GUI may read the same project. busy_timeout makes a
+            # contended connection wait for the lock rather than raising
+            # "database is locked" outright.
+            conn.execute("PRAGMA busy_timeout = 5000")
+        except Exception:
+            conn.close()
+            raise
+        self._conn = conn
 
     def _init_schema(self) -> None:
         assert self._conn is not None

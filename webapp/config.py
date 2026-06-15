@@ -163,6 +163,10 @@ class SettingsStore:
     def save(self) -> None:
         with self._lock:
             self._settings.state_dir.mkdir(parents=True, exist_ok=True)
-            self._settings.config_path.write_text(
-                json.dumps(json.loads(self._settings.model_dump_json()), indent=2)
-            )
+            path = self._settings.config_path
+            payload = json.dumps(json.loads(self._settings.model_dump_json()), indent=2)
+            # Atomic write: a crash mid-write must not corrupt config.json (which
+            # would silently revert all settings to defaults on next boot).
+            tmp = path.with_suffix(".json.tmp")
+            tmp.write_text(payload)
+            os.replace(tmp, path)

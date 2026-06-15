@@ -47,6 +47,43 @@ def _build_project(tmp_path, n: int = 5, *, with_outlier: bool = False) -> Proje
     return proj
 
 
+def test_subpixel_refine_actually_runs(tmp_path, monkeypatch):
+    """Regression: sub-pixel refine used `canvas_3` before it was defined, so it
+    raised NameError that the surrounding except swallowed — silently disabling
+    the feature. Verify the refinement path now executes."""
+    import seestack.stack.stacker as st
+
+    calls = {"n": 0}
+    orig = st.extract_reference_patch
+    monkeypatch.setattr(st, "extract_reference_patch",
+                        lambda *a, **k: (calls.__setitem__("n", calls["n"] + 1), orig(*a, **k))[1])
+
+    proj = _build_project(tmp_path, n=3)
+    try:
+        run_stack(proj, StackOptions(sigma_clip=False, subpixel_refine=True,
+                                     max_workers=1, output_name="sp"))
+    finally:
+        proj.close()
+    assert calls["n"] >= 1  # was 0 before the fix
+
+
+def test_output_name_is_sanitized_against_path_traversal(tmp_path):
+    from seestack.stack.output import safe_basename
+
+    assert "/" not in safe_basename("../../etc/passwd")
+    assert ".." not in safe_basename("../../etc/passwd")
+
+    proj = _build_project(tmp_path, n=2)
+    try:
+        out_dir = (tmp_path / "p" / "output").resolve()
+        result = run_stack(proj, StackOptions(sigma_clip=False, max_workers=1,
+                                              output_name="../../escape"))
+        # Everything must stay inside the project's output/ dir.
+        assert result.fits_path.resolve().parent == out_dir
+    finally:
+        proj.close()
+
+
 def test_stack_no_clip(tmp_path):
     proj = _build_project(tmp_path, n=4)
     try:

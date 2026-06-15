@@ -82,6 +82,19 @@ def ingest_files(
             yield IngestResult(source_path=src, frame_id=None, cached_path=None, skipped=True)
             continue
 
+        # Zero-byte files are half-finished copies (or a stalled NAS transfer);
+        # skip them cleanly instead of letting astropy raise a confusing error.
+        try:
+            if src.stat().st_size == 0:
+                log.info("skipping empty file %s", src)
+                yield IngestResult(source_path=src, frame_id=None, cached_path=None,
+                                   skipped=True, error="empty file")
+                continue
+        except OSError as exc:
+            yield IngestResult(source_path=src, frame_id=None, cached_path=None,
+                               skipped=False, error=str(exc))
+            continue
+
         try:
             info = load_header(src)
         except Exception as exc:  # noqa: BLE001 — astropy raises a zoo of exceptions

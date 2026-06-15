@@ -40,9 +40,12 @@ def open_library(request: Request) -> Library:
 def open_target_project(request: Request, safe: str) -> tuple[Library, Project]:
     """Open (library, project) for ``safe``. Caller closes both. 404 if missing."""
     lib = open_library(request)
-    entry = lib.find_target(safe)
-    if entry is None:
-        lib.close()
-        raise HTTPException(status_code=404, detail=f"No target '{safe}'")
-    proj = Project.open(lib.target_dir(entry))
+    try:
+        entry = lib.find_target(safe)
+        if entry is None:
+            raise HTTPException(status_code=404, detail=f"No target '{safe}'")
+        proj = Project.open(lib.target_dir(entry))
+    except BaseException:
+        lib.close()  # don't leak the library if lookup/open fails
+        raise
     return lib, proj
