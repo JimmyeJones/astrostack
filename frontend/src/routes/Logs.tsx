@@ -21,7 +21,7 @@ export function LogsView() {
   const [search, setSearch] = useState("");
 
   const logs = useQuery({
-    queryKey: ["logs", level],
+    queryKey: ["logs", level, 2000],
     queryFn: () => api.getLogs(level === "ALL" ? undefined : level, 2000),
     refetchInterval: auto ? 3000 : false,
   });
@@ -44,7 +44,9 @@ export function LogsView() {
     a.href = url;
     a.download = `astrostack-logs-${new Date().toISOString().slice(0, 19)}.txt`;
     a.click();
-    URL.revokeObjectURL(url);
+    // Revoke after the browser has had a tick to start the download (revoking
+    // synchronously can cancel it in some browsers).
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   return (

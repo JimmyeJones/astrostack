@@ -1,5 +1,5 @@
 import {
-  Badge, Button, Card, Group, Image, Select, SimpleGrid, Stack, Text, TextInput,
+  Alert, Badge, Button, Card, Group, Image, Select, SimpleGrid, Stack, Text, TextInput,
   Title, Loader, Center, Chip,
 } from "@mantine/core";
 import { IconChevronRight, IconSearch, IconStars } from "@tabler/icons-react";
@@ -76,7 +76,7 @@ function TargetCard({ t }: { t: Target }) {
 }
 
 export function Library() {
-  const { data, isLoading } = useQuery({ queryKey: ["targets"], queryFn: api.listTargets });
+  const { data, isLoading, isError, error } = useQuery({ queryKey: ["targets"], queryFn: api.listTargets });
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortKey>("recent");
   const [activeTags, setActiveTags] = useState<string[]>([]);
@@ -101,6 +101,9 @@ export function Library() {
     return sortTargets(filtered, sort);
   }, [targets, search, sort, activeTags]);
 
+  if (isError) {
+    return <Alert color="red" m="md" title="Could not load targets">{(error as Error)?.message}</Alert>;
+  }
   if (isLoading) {
     return <Center h={300}><Loader /></Center>;
   }

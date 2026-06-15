@@ -1,11 +1,12 @@
 import { useMemo, useState } from "react";
 import {
-  Badge, Button, Card, Center, Group, Image, Loader, SimpleGrid, Spoiler, Stack, Text,
-  Title, Tooltip,
+  Alert, Badge, Button, Card, Center, Checkbox, Group, Image, Loader, Menu, Paper,
+  SimpleGrid, Spoiler, Stack, Text, Title, Tooltip,
 } from "@mantine/core";
 import { IconPhoto, IconWand } from "@tabler/icons-react";
-import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { notifications } from "@mantine/notifications";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, useNavigate } from "react-router-dom";
 import { api, type GalleryItem, type StackOptionField } from "../api/client";
 import { ImageLightbox } from "../components/ImageLightbox";
 
@@ -31,10 +32,12 @@ function highlightBadges(opts: Record<string, unknown>) {
   return badges;
 }
 
-function GalleryCard({ item, labels, onView }: {
+function GalleryCard({ item, labels, onView, selected, onToggleSelect }: {
   item: GalleryItem;
   labels: Map<string, string>;
   onView: (item: GalleryItem) => void;
+  selected: boolean;
+  onToggleSelect: () => void;
 }) {
   const badges = highlightBadges(item.options);
   // Full settings list (only keys we have a label for, in schema order).
@@ -47,8 +50,14 @@ function GalleryCard({ item, labels, onView }: {
   );
 
   return (
-    <Card withBorder padding="md" radius="md">
-      <Card.Section>
+    <Card withBorder padding="md" radius="md"
+      style={selected ? { outline: "2px solid var(--mantine-color-violet-5)" } : undefined}>
+      <Card.Section style={{ position: "relative" }}>
+        <Checkbox
+          checked={selected} onChange={onToggleSelect}
+          aria-label="Select for batch edit"
+          styles={{ root: { position: "absolute", top: 8, left: 8, zIndex: 2 } }}
+        />
         {item.has_preview ? (
           <Tooltip label="Click to view fullscreen" openDelay={400}>
             <Image
@@ -105,9 +114,39 @@ function GalleryCard({ item, labels, onView }: {
 }
 
 export function GalleryView() {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
   const gallery = useQuery({ queryKey: ["gallery"], queryFn: api.getGallery });
   const schema = useQuery({ queryKey: ["stackSchema"], queryFn: api.optionsSchema });
+  const presets = useQuery({ queryKey: ["presets"], queryFn: api.listPresets });
   const [viewing, setViewing] = useState<GalleryItem | null>(null);
+  // Batch selection: key "safe:run_id" -> {safe, run_id}.
+  const [selected, setSelected] = useState<Record<string, { safe: string; run_id: number }>>({});
+  const selKey = (it: GalleryItem) => `${it.safe}:${it.run_id}`;
+  const toggleSelect = (it: GalleryItem) =>
+    setSelected((s) => {
+      const k = selKey(it);
+      const next = { ...s };
+      if (next[k]) delete next[k]; else next[k] = { safe: it.safe, run_id: it.run_id };
+      return next;
+    });
+  const selItems = Object.values(selected);
+
+  const batch = useMutation({
+    mutationFn: (preset_id: string) => api.batchApply({ items: selItems, preset_id }),
+    onSuccess: () => {
+      notifications.show({ message: `Batch edit started on ${selItems.length} images`, color: "violet" });
+      setSelected({});
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      navigate("/jobs");
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
+  const applyPreset = (id: string, label: string) => {
+    if (window.confirm(`Apply "${label}" to ${selItems.length} image(s)? Each becomes a new edited stack.`)) {
+      batch.mutate(id);
+    }
+  };
 
   const labels = useMemo(() => {
     const m = new Map<string, string>();
@@ -120,6 +159,11 @@ export function GalleryView() {
 
   if (gallery.isLoading) {
     return <Center h={300}><Loader /></Center>;
+  }
+  if (gallery.isError) {
+    return <Alert color="red" m="md" title="Could not load the gallery">
+      {(gallery.error as Error)?.message}
+    </Alert>;
   }
 
   const items = gallery.data?.items ?? [];
@@ -134,6 +178,34 @@ export function GalleryView() {
         </Tooltip>
       </Group>
 
+      {selItems.length ? (
+        <Paper withBorder p="sm" pos="sticky" top={8} style={{ zIndex: 3 }}>
+          <Group justify="space-between" wrap="wrap" gap="xs">
+            <Text fw={600}>{selItems.length} selected</Text>
+            <Group gap="xs">
+              <Button variant="subtle" size="xs" onClick={() => setSelected({})}>Clear</Button>
+              <Menu shadow="md" position="bottom-end" width={240}>
+                <Menu.Target>
+                  <Button size="xs" leftSection={<IconWand size={14} />} loading={batch.isPending}>
+                    Apply preset to selected
+                  </Button>
+                </Menu.Target>
+                <Menu.Dropdown mah={400} style={{ overflowY: "auto" }}>
+                  <Menu.Label>Built-in</Menu.Label>
+                  {(presets.data?.builtin ?? []).map((p) => (
+                    <Menu.Item key={p.id} onClick={() => applyPreset(p.id, p.label)}>{p.label}</Menu.Item>
+                  ))}
+                  {(presets.data?.user ?? []).length ? <Menu.Label>My presets</Menu.Label> : null}
+                  {(presets.data?.user ?? []).map((p) => (
+                    <Menu.Item key={p.id} onClick={() => applyPreset(p.id, p.label)}>{p.label}</Menu.Item>
+                  ))}
+                </Menu.Dropdown>
+              </Menu>
+            </Group>
+          </Group>
+        </Paper>
+      ) : null}
+
       {items.length === 0 ? (
         <Text c="dimmed">
           No stacked images yet. Stack a target and its results will appear here.
@@ -144,6 +216,8 @@ export function GalleryView() {
             <GalleryCard
               key={`${it.safe}-${it.run_id}`} item={it} labels={labels}
               onView={setViewing}
+              selected={!!selected[selKey(it)]}
+              onToggleSelect={() => toggleSelect(it)}
             />
           ))}
         </SimpleGrid>

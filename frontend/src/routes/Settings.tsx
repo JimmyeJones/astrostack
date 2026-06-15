@@ -57,6 +57,9 @@ export function SettingsView() {
     onError: (e: Error) => notifications.show({ message: `Save failed: ${e.message}`, color: "red" }),
   });
 
+  if (settings.isError) {
+    return <Alert color="red" m="md" title="Could not load settings">{(settings.error as Error)?.message}</Alert>;
+  }
   if (settings.isLoading || !settings.data) {
     return <Center h={300}><Loader /></Center>;
   }

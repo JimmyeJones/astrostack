@@ -1,5 +1,5 @@
 import {
-  Badge, Card, Center, Group, Image, Loader, Paper, SimpleGrid, Stack, Text, Title,
+  Alert, Badge, Card, Center, Group, Image, Loader, Paper, SimpleGrid, Stack, Text, Title,
 } from "@mantine/core";
 import {
   IconActivity, IconClock, IconLayoutGrid, IconPhoto, IconStack2, IconStars,
@@ -28,10 +28,13 @@ function StatCard({ icon, label, value, sub }: {
 }
 
 export function Dashboard() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ["stats"], queryFn: api.getStats, refetchInterval: 10_000,
   });
 
+  if (isError) {
+    return <Alert color="red" m="md" title="Could not load the dashboard">{(error as Error)?.message}</Alert>;
+  }
   if (isLoading || !data) {
     return <Center h={300}><Loader /></Center>;
   }

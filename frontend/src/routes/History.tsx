@@ -1,6 +1,6 @@
 import { useState } from "react";
 import {
-  ActionIcon, Badge, Button, Card, Center, Group, Image, Loader, SimpleGrid,
+  ActionIcon, Alert, Badge, Button, Card, Center, Group, Image, Loader, SimpleGrid,
   Slider, Stack, Text, Title, Tooltip,
 } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
@@ -17,7 +17,9 @@ import { ImageLightbox } from "../components/ImageLightbox";
 const DEFAULT_STRETCH = 0.5;
 const DEFAULT_BLACK = 0.35;
 
-function RunCard({ safe, run, onDelete }: { safe: string; run: StackRun; onDelete: () => void }) {
+function RunCard({ safe, run, onDelete, deleting }: {
+  safe: string; run: StackRun; onDelete: () => void; deleting?: boolean;
+}) {
   const qc = useQueryClient();
   const [adjust, setAdjust] = useState(false);
   const [stretch, setStretch] = useState(DEFAULT_STRETCH);
@@ -32,6 +34,7 @@ function RunCard({ safe, run, onDelete }: { safe: string; run: StackRun; onDelet
     onSuccess: () => {
       setCacheBust(Date.now());
       qc.invalidateQueries({ queryKey: ["sky"] });
+      qc.invalidateQueries({ queryKey: ["gallery"] });
       notifications.show({ message: "Preview updated", color: "teal" });
     },
     onError: () => notifications.show({ message: "Could not save preview", color: "red" }),
@@ -140,9 +143,17 @@ function RunCard({ safe, run, onDelete }: { safe: string; run: StackRun; onDelet
             </Button>
           )}
         </Group>
-        <ActionIcon variant="subtle" color="red" onClick={onDelete}>
-          <IconTrash size={16} />
-        </ActionIcon>
+        <Tooltip label="Delete this stack run">
+          <ActionIcon variant="subtle" color="red" loading={deleting}
+            onClick={() => {
+              if (window.confirm(
+                `Delete "${run.output_basename}" permanently? Its FITS/TIFF/preview will be removed.`)) {
+                onDelete();
+              }
+            }}>
+            <IconTrash size={16} />
+          </ActionIcon>
+        </Tooltip>
       </Group>
 
       <ImageLightbox
@@ -166,11 +177,21 @@ export function HistoryView() {
 
   const del = useMutation({
     mutationFn: (id: number) => api.deleteStackRun(safe, id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["runs", safe] }),
+    onSuccess: () => {
+      // A deleted run also vanishes from the Gallery, Sky map and Dashboard.
+      qc.invalidateQueries({ queryKey: ["runs", safe] });
+      qc.invalidateQueries({ queryKey: ["gallery"] });
+      qc.invalidateQueries({ queryKey: ["sky"] });
+      qc.invalidateQueries({ queryKey: ["stats"] });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
 
   if (runs.isLoading) {
     return <Center h={300}><Loader /></Center>;
+  }
+  if (runs.isError) {
+    return <Alert color="red" m="md" title="Could not load stacks">{(runs.error as Error)?.message}</Alert>;
   }
 
   const list = runs.data ?? [];
@@ -182,11 +203,18 @@ export function HistoryView() {
         <Button component={Link} to={`/targets/${safe}/stack`}>New stack</Button>
       </Group>
       {list.length === 0 ? (
-        <Text c="dimmed">No stacks yet.</Text>
+        <Card withBorder padding="xl">
+          <Stack align="center" gap="sm">
+            <Text c="dimmed">No stacks yet for this target.</Text>
+            <Button component={Link} to={`/targets/${safe}/stack`}>Stack it now</Button>
+          </Stack>
+        </Card>
       ) : (
         <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }}>
           {list.map((r) => (
-            <RunCard key={r.id} safe={safe} run={r} onDelete={() => del.mutate(r.id)} />
+            <RunCard key={r.id} safe={safe} run={r}
+              onDelete={() => del.mutate(r.id)}
+              deleting={del.isPending && del.variables === r.id} />
           ))}
         </SimpleGrid>
       )}
