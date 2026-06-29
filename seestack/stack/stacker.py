@@ -31,6 +31,7 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from itertools import islice
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -41,6 +42,9 @@ from seestack.stack.accumulator import WeightedSumAccumulator, WelfordAccumulato
 from seestack.stack.align import align_one, extract_reference_patch
 from seestack.stack.reference import ReferenceChoice, pick_reference_frame
 from seestack.stack.weighting import compute_frame_weights, unit_weights
+
+if TYPE_CHECKING:
+    from seestack.calibrate.apply import CalibrationMasters
 
 # Peak count of full-canvas float32 RGB arrays alive at once across the stack
 # passes (Welford mean/M2/count, or drizzle output/weight/context, plus working
@@ -152,6 +156,11 @@ class StackOptions:
     #   'union'     — always use the union-of-footprints canvas.
     #   'reference' — always crop to the reference frame's footprint.
     mosaic_canvas: str = "auto"
+    # Dark/flat calibration. Server-side filesystem paths to master FITS frames
+    # (resolved from the calibration store by the webapp — never user input).
+    # None disables that correction. Applied to the raw Bayer mosaic per frame.
+    dark_path: str | None = None
+    flat_path: str | None = None
 
     def background_options(self) -> BackgroundOptions:
         return BackgroundOptions(
@@ -223,6 +232,20 @@ def run_stack(
     ]
     if not frames:
         raise ValueError("no accepted, plate-solved frames to stack")
+
+    # ---- 1a. Load calibration masters (once, shared across workers) --------
+    calibration = None
+    if options.dark_path or options.flat_path:
+        from seestack.calibrate.apply import CalibrationMasters
+
+        calibration = CalibrationMasters.load(options.dark_path, options.flat_path)
+        if calibration.is_empty:
+            calibration = None
+        else:
+            # Fail fast on a camera/binning mismatch (raw dims = the un-debayered
+            # reference frame size) rather than silently skipping every frame.
+            calibration.validate(ref_shape)
+            log.info("Calibration: applying %s master(s)", calibration.describe())
 
     # ---- 1b. Build the output canvas --------------------------------------
     # For a single-target stack the reference frame's footprint is fine. For a
@@ -390,6 +413,7 @@ def run_stack(
             options=options,
             progress=progress, cancel=cancel,
             errors=errors,
+            calibration=calibration,
         )
         if n_used == 0:
             raise ValueError("drizzle: no usable frames")
@@ -423,6 +447,7 @@ def run_stack(
             progress=progress, cancel=cancel,
             errors=errors,
             ref_patch=ref_patch, ref_patch_origin=ref_patch_origin,
+            calibration=calibration,
         )
         if n_used_p1 == 0:
             raise ValueError("pass 1 produced no usable frames")
@@ -449,6 +474,7 @@ def run_stack(
             progress=progress, cancel=cancel,
             errors=errors,
             ref_patch=ref_patch, ref_patch_origin=ref_patch_origin,
+            calibration=calibration,
         )
         n_used = min(n_used_p1, n_used_p2)
         result_image = wsum.result()
@@ -474,6 +500,7 @@ def run_stack(
             progress=progress, cancel=cancel,
             errors=errors,
             ref_patch=ref_patch, ref_patch_origin=ref_patch_origin,
+            calibration=calibration,
         )
         if n_used == 0:
             raise ValueError("no frames could be aligned")
@@ -643,6 +670,7 @@ def _pass(
     errors: list[str],
     ref_patch: np.ndarray | None = None,
     ref_patch_origin: tuple[int, int] | None = None,
+    calibration: "CalibrationMasters | None" = None,
 ) -> int:
     """
     Run one pass over ``frames``, feeding each windowed aligned image plus its
@@ -666,6 +694,7 @@ def _pass(
             ref_patch if sp_refine else None,
             ref_patch_origin if sp_refine else None,
             sp_refine,
+            calibration,
         )
 
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
@@ -706,6 +735,7 @@ def _drizzle_pass(
     progress: ProgressFn,
     cancel: CancelFn,
     errors: list[str],
+    calibration: "CalibrationMasters | None" = None,
 ) -> int:
     """
     One-shot drizzle accumulation. Drizzle's ``add_image`` mutates internal
@@ -730,6 +760,8 @@ def _drizzle_pass(
         from seestack.io.fits_loader import bilinear_debayer, load_seestar_raw
 
         raw, info = load_seestar_raw(path, debayer=False, out_dtype=np.float32)
+        if calibration is not None:
+            raw = calibration.apply_raw(raw)
         pattern = frame.bayer_pattern or info.bayer_pattern or "RGGB"
         rgb = bilinear_debayer(raw, pattern=pattern)
         if bg_opts.enabled:
@@ -778,6 +810,7 @@ def _align_for_stack(
     ref_patch: np.ndarray | None,
     ref_patch_origin: tuple[int, int] | None,
     subpixel_refine: bool,
+    calibration: "CalibrationMasters | None" = None,
 ) -> tuple[np.ndarray, int, int] | None:
     """
     Worker entry point. Returns ``(window_rgb, y0, x0)`` — the reprojected
@@ -802,6 +835,7 @@ def _align_for_stack(
         ref_patch=ref_patch,
         ref_patch_origin=ref_patch_origin,
         subpixel_refine=subpixel_refine,
+        calibration=calibration,
     )
     if result is None:
         return None

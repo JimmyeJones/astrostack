@@ -28,12 +28,16 @@ speedup.
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from seestack.bg.hot_pixels import suppress_hot_cold_pixels
 from seestack.bg.per_frame import BackgroundOptions, subtract_background
 from seestack.core.xp import GPU_AVAILABLE, to_cpu, to_device
+
+if TYPE_CHECKING:
+    from seestack.calibrate.apply import CalibrationMasters
 
 log = logging.getLogger(__name__)
 
@@ -77,9 +81,10 @@ def align_one(
     ref_patch: np.ndarray | None = None,
     ref_patch_origin: tuple[int, int] | None = None,
     subpixel_refine: bool = False,
+    calibration: "CalibrationMasters | None" = None,
 ) -> tuple[np.ndarray, np.ndarray, int, int] | None:
     """
-    Load → debayer → bg-flatten → reproject one frame, **windowed**.
+    Load → (calibrate) → debayer → bg-flatten → reproject one frame, **windowed**.
 
     Rather than reprojecting onto the whole output canvas, we first work out
     where the source frame's footprint lands on the canvas and only reproject
@@ -110,6 +115,10 @@ def align_one(
     from seestack.io.wcs_io import wcs_from_text
 
     raw, info = load_seestar_raw(fits_path, debayer=False, out_dtype=np.float32)
+    # Dark/flat calibration happens on the raw Bayer mosaic, before debayering —
+    # the masters are raw sensor readouts, so this is the correct domain.
+    if calibration is not None:
+        raw = calibration.apply_raw(raw)
     pattern = bayer_pattern or info.bayer_pattern or "RGGB"
     rgb = bilinear_debayer(raw, pattern=pattern)
 
