@@ -289,6 +289,24 @@ class JobManager:
                 self._persist(job)
                 self._evict_old()
 
+    def clear_history(self) -> int:
+        """Delete all finished jobs (DB + memory); keep running/queued. Returns
+        how many were removed."""
+        with self._lock:
+            removed = [jid for jid, j in self._jobs.items() if j.state in _TERMINAL]
+            for jid in removed:
+                self._jobs.pop(jid, None)
+        try:
+            with self._connect() as conn:
+                cur = conn.execute(
+                    f"DELETE FROM jobs WHERE state IN ({','.join('?' * len(_TERMINAL))})",
+                    tuple(_TERMINAL),
+                )
+                return cur.rowcount if cur.rowcount and cur.rowcount > 0 else len(removed)
+        except sqlite3.Error as exc:  # noqa: BLE001
+            log.warning("clear job history failed: %s", exc)
+            return len(removed)
+
     def _evict_old(self) -> None:
         """Drop old finished jobs from the in-memory map AND prune the DB so
         jobs.sqlite doesn't grow without bound on a long-running watcher."""

@@ -22,7 +22,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 log = logging.getLogger(__name__)
 
@@ -96,6 +96,28 @@ class Settings(BaseModel):
     # --- stacking ----------------------------------------------------------
     # Global default StackOptions (per-target overrides live in project meta).
     default_stack_options: dict[str, Any] = Field(default_factory=dict)
+
+    # ---- validation -------------------------------------------------------
+
+    @field_validator(
+        "watch_quiet_period_s", "watch_poll_interval_s", "astap_timeout_s",
+        "astap_fov_deg", "seestar_scan_interval_s", "seestar_poll_interval_s",
+    )
+    @classmethod
+    def _at_least_one(cls, v):  # noqa: ANN001
+        """Clamp these to a sane floor rather than reject — a bad value in
+        config.json must not crash loading and wipe every other setting."""
+        try:
+            return type(v)(max(v, type(v)(1)))
+        except (TypeError, ValueError):
+            return v
+
+    @field_validator("cpu_workers")
+    @classmethod
+    def _workers_positive(cls, v):  # noqa: ANN001
+        if v is None:
+            return None
+        return max(1, int(v))
 
     # ---- resolved paths ---------------------------------------------------
 

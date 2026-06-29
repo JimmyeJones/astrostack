@@ -48,6 +48,8 @@ export function SettingsView() {
     if (settings.data) setForm(settings.data);
   }, [settings.data]);
 
+  const astapTest = useMutation({ mutationFn: () => api.astapTest() });
+
   const save = useMutation({
     mutationFn: (patch: Record<string, unknown>) => api.putSettings(patch),
     onSuccess: () => {
@@ -107,6 +109,19 @@ export function SettingsView() {
               </Group>
               {astap.version ? <Text size="xs" c="dimmed">{astap.version}</Text> : null}
               {astap.hint ? <Text size="sm" c="yellow">{astap.hint}</Text> : null}
+              <Group gap="xs" align="center">
+                <Button size="xs" variant="light" loading={astapTest.isPending}
+                  disabled={!astap.found} onClick={() => astapTest.mutate()}>
+                  Test solve on a real frame
+                </Button>
+                {astapTest.data ? (
+                  <Text size="xs" c={astapTest.data.ok ? "teal" : "red"}>
+                    {astapTest.data.ok
+                      ? `Solved ${astapTest.data.frame} in ${astapTest.data.elapsed_s}s`
+                      : `Failed: ${astapTest.data.detail}`}
+                  </Text>
+                ) : null}
+              </Group>
             </Stack>
           </Alert>
         );

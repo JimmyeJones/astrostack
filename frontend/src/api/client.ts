@@ -353,6 +353,7 @@ export const api = {
 
   // jobs
   listJobs: () => req<Job[]>("/api/jobs"),
+  clearJobs: () => req<{ removed: number }>("/api/jobs/clear", { method: "POST" }),
   getJob: (id: string) => req<Job>(`/api/jobs/${id}`),
   cancelJob: (id: string) => req(`/api/jobs/${id}/cancel`, { method: "POST" }),
 
@@ -361,6 +362,10 @@ export const api = {
   putSettings: (patch: Record<string, unknown>) =>
     req<Settings>("/api/settings", { method: "PUT", body: JSON.stringify(patch) }),
   getSystem: () => req<SystemInfo>("/api/system"),
+  astapTest: () => req<{
+    ok: boolean; detail?: string | null; solved?: boolean; target?: string;
+    frame?: string; ra_deg?: number | null; dec_deg?: number | null; elapsed_s?: number;
+  }>("/api/system/astap-test", { method: "POST" }),
 
   // sky viewer
   getSky: () => req<SkyData>("/api/sky"),

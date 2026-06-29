@@ -4,12 +4,70 @@ from __future__ import annotations
 
 import os
 import shutil
+import time
+from pathlib import Path
 
 from fastapi import APIRouter, Request
+from fastapi.concurrency import run_in_threadpool
 
 from webapp import deps
 
 router = APIRouter(tags=["system"])
+
+
+def _first_solvable_frame(lib) -> tuple[str, str] | None:
+    """Return (target_safe, fits_path) of the first frame we could solve, or None."""
+    from seestack.io.project import Project
+
+    for t in lib.list_targets():
+        proj = None
+        try:
+            proj = Project.open(lib.target_dir(t))
+            for f in proj.iter_frames():
+                path = f.cached_path or f.source_path
+                if path and Path(path).exists():
+                    return t.safe_name, str(path)
+        except Exception:  # noqa: BLE001 — skip broken projects
+            pass
+        finally:
+            if proj is not None:
+                proj.close()
+    return None
+
+
+@router.post("/api/system/astap-test")
+async def astap_test(request: Request) -> dict:
+    """Actually run ASTAP on a real frame from the library — the only test that
+    confirms the binary + star database + a solve all work end-to-end."""
+    settings = deps.get_settings(request)
+
+    def work() -> dict:
+        from seestack.solve.runner import solve_one
+
+        lib = deps.open_library(request)
+        try:
+            found = _first_solvable_frame(lib)
+        finally:
+            lib.close()
+        if found is None:
+            return {"ok": False, "detail": "No ingested frames to test on. Scan some data first."}
+        safe, path = found
+        t0 = time.monotonic()
+        res = solve_one(0, path, astap_path=settings.astap_path,
+                        fov_deg=settings.astap_fov_deg, timeout_s=min(settings.astap_timeout_s, 45.0))
+        elapsed = time.monotonic() - t0
+        return {
+            "ok": res.solved,
+            "target": safe,
+            "frame": Path(path).name,
+            "solved": res.solved,
+            "ra_deg": res.ra_center_deg,
+            "dec_deg": res.dec_center_deg,
+            "elapsed_s": round(elapsed, 1),
+            "detail": None if res.solved else (res.error or "solve failed"),
+        }
+
+    return await run_in_threadpool(work)
 
 
 def _astap_info(settings) -> dict:  # noqa: ANN001

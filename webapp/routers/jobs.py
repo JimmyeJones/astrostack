@@ -27,6 +27,13 @@ def list_jobs(request: Request, limit: int = 100) -> list[JobOut]:
     return [_to_out(j) for j in jm.list(limit=limit)]
 
 
+@router.post("/clear")
+def clear_history(request: Request) -> dict:
+    """Delete all finished jobs (keeps running/queued ones)."""
+    jm = deps.get_job_manager(request)
+    return {"removed": jm.clear_history()}
+
+
 @router.get("/{job_id}", response_model=JobOut)
 def get_job(job_id: str, request: Request) -> JobOut:
     jm = deps.get_job_manager(request)

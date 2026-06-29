@@ -32,6 +32,24 @@ def test_evict_old_prunes_jobs_db(tmp_path):
     assert n == 50  # pruned to the on-disk cap, not unbounded
 
 
+def test_clear_history_removes_finished_only(tmp_path):
+    import sqlite3
+
+    jm = JobManager(tmp_path / "jobs.sqlite")
+    for i in range(5):
+        job = Job(kind="t", state="done")
+        job.created_utc = job.finished_utc = f"{i:04d}"
+        jm._persist(job)
+    running = Job(kind="t", state="running")
+    jm._persist(running)
+
+    removed = jm.clear_history()
+    assert removed == 5
+    with sqlite3.connect(jm.db_path) as conn:
+        states = [r[0] for r in conn.execute("SELECT state FROM jobs")]
+    assert states == ["running"]  # only the in-flight job survives
+
+
 def test_runs_and_records_result(tmp_path):
     jm = JobManager(tmp_path / "jobs.sqlite")
     jm.start()

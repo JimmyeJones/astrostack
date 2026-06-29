@@ -88,6 +88,13 @@ export function JobsView() {
     mutationFn: (id: string) => api.cancelJob(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["jobs"] }),
   });
+  const clear = useMutation({
+    mutationFn: () => api.clearJobs(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["jobs"] }),
+  });
+  const finished = (data ?? []).filter(
+    (j) => !["running", "queued"].includes(j.state),
+  ).length;
 
   if (isLoading) {
     return (
@@ -101,7 +108,15 @@ export function JobsView() {
 
   return (
     <Stack>
-      <Title order={2}>Jobs</Title>
+      <Group justify="space-between">
+        <Title order={2}>Jobs</Title>
+        {finished > 0 ? (
+          <Button size="xs" variant="subtle" color="gray" loading={clear.isPending}
+            onClick={() => clear.mutate()}>
+            Clear {finished} finished
+          </Button>
+        ) : null}
+      </Group>
       {jobs.length === 0 ? (
         <Text c="dimmed">No jobs yet.</Text>
       ) : (
