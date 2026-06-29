@@ -115,6 +115,8 @@ export interface Frame {
   solved: boolean;
   ra_center_deg: number | null;
   dec_center_deg: number | null;
+  ra_hint_deg: number | null;
+  dec_hint_deg: number | null;
   fwhm_px: number | null;
   star_count: number | null;
   sky_adu_median: number | null;

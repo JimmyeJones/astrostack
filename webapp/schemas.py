@@ -51,6 +51,8 @@ class FrameOut(BaseModel):
     solved: bool = False
     ra_center_deg: float | None = None
     dec_center_deg: float | None = None
+    ra_hint_deg: float | None = None
+    dec_hint_deg: float | None = None
     fwhm_px: float | None = None
     star_count: int | None = None
     sky_adu_median: float | None = None
