@@ -204,12 +204,16 @@ class WelfordAccumulator:
         return out
 
     def variance(self) -> np.ndarray:
+        # Unbiased sample variance (divide by n-1), NaN for n<2. NaN is the
+        # signal the sigma-clip pass uses to *not* clip single-coverage pixels:
+        # with population variance, n=1 gives std=0 and the clip tolerance
+        # collapses to 0, so float-rounding noise spuriously rejects the only
+        # frame covering a mosaic-edge pixel. The stacker widens a NaN std to an
+        # infinite tolerance (keep-all), which is the correct behaviour here.
         out = np.full(self.shape, np.nan, dtype=self._m2.dtype)
-        nz = self._n > 0
-        # Use population variance (divide by n). Makes n=1 give variance=0
-        # rather than NaN; the caller already handles "single sample" cases by
-        # widening the clip threshold.
-        out[nz] = self._m2[nz] / self._n[nz].astype(self._m2.dtype)
+        valid = self._n >= 2
+        nf = self._n[valid].astype(self._m2.dtype)
+        out[valid] = self._m2[valid] / (nf - 1.0)
         return out
 
     def std(self) -> np.ndarray:

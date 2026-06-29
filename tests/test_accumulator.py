@@ -44,9 +44,20 @@ def test_welford_mean_matches_numpy():
     for s in samples:
         acc.add(s)
     expected_mean = np.mean(samples, axis=0)
-    expected_std = np.std(samples, axis=0)
+    expected_std = np.std(samples, axis=0, ddof=1)  # unbiased sample std (matches accumulator)
     np.testing.assert_allclose(acc.mean(), expected_mean, rtol=1e-3)
     np.testing.assert_allclose(acc.std(), expected_std, rtol=1e-3)
+
+
+def test_welford_single_coverage_std_is_nan():
+    # n=1 (and n=0) → NaN std, so the sigma-clip pass widens the tolerance and
+    # never spuriously rejects a single-coverage (mosaic-edge) pixel.
+    acc = WelfordAccumulator((2, 2))
+    one = np.array([[1.0, np.nan], [np.nan, np.nan]], dtype=np.float32)
+    acc.add(one)
+    std = acc.std()
+    assert np.isnan(std[0, 0])  # one sample → undefined variance → NaN
+    assert np.isnan(std[0, 1])  # never sampled → NaN
 
 
 def test_welford_handles_nan():
