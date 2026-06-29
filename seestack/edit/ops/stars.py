@@ -1,16 +1,24 @@
-"""Classic star reduction (no ML).
+"""Star-mask-aware local edits (no ML).
 
 Grey-scale morphological erosion shrinks small bright features (stars) far more
-than extended structure (nebulosity/galaxy), so blending in the erosion only where
-it darkens reduces stars while barely touching the rest. A star mask from the
-existing detector further protects non-star regions when available.
+than extended structure (nebulosity/galaxy), so blending in the erosion only
+where it darkens reduces stars while barely touching the rest. A soft **star
+mask** (see :mod:`seestack.edit.starmask`) gates the effect so the bright cores
+of nebulae and galaxies — which erosion would also pull down — are protected.
+
+The same mask drives :func:`_boost_nebula`, which lifts and saturates the
+*background* (everything that isn't a star) so faint nebulosity pops without
+bloating or brightening the stars.
 """
 
 from __future__ import annotations
 
 import numpy as np
 
-from seestack.edit.registry import EditContext, EditParam, OpSpec, as_rgb, finite_mask, register
+from seestack.edit.registry import (
+    EditContext, EditParam, OpSpec, as_rgb, finite_mask, luminance, register,
+)
+from seestack.edit.starmask import star_mask
 
 
 def _reduce(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
@@ -18,6 +26,7 @@ def _reduce(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
 
     amount = float(params.get("amount", 0.5))
     size = max(1, int(params.get("size", 2)))
+    protect = bool(params.get("protect_nebula", True))
     out = as_rgb(rgb).copy()
     cover = finite_mask(out)
     if not cover.any() or amount <= 0:
@@ -28,12 +37,42 @@ def _reduce(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
         chan = filled[..., c]
         chan[~cover] = float(np.nanmedian(chan)) if np.isfinite(chan).any() else 0.0
 
+    # Gate the reduction to actual stars so we don't erode nebula/galaxy cores.
+    gate = star_mask(out, size_px=2.0 * size, ctx=ctx) if protect else np.ones(cover.shape, np.float32)
+
     footprint = np.ones((2 * size + 1, 2 * size + 1), dtype=bool)
     for c in range(3):
         eroded = grey_erosion(filled[..., c], footprint=footprint)
-        # Only pull pixels down where erosion darkens them (star cores/halos).
-        reduced = filled[..., c] - amount * np.maximum(0.0, filled[..., c] - eroded)
+        # Only pull pixels down where erosion darkens them (star cores/halos),
+        # and only as far as the star mask allows.
+        darken = np.maximum(0.0, filled[..., c] - eroded)
+        reduced = filled[..., c] - amount * gate * darken
         out[..., c][cover] = reduced[cover]
+    return out
+
+
+def _boost_nebula(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
+    """Lift + saturate the background (non-star) regions to bring out faint
+    nebulosity, leaving stars untouched. Runs in display space [0, 1]."""
+    amount = float(params.get("amount", 0.3))
+    size = max(1, int(params.get("size", 4)))
+    out = as_rgb(rgb).copy()
+    cover = finite_mask(out)
+    if not cover.any() or amount <= 0:
+        return out
+
+    bg = (1.0 - star_mask(out, size_px=size, ctx=ctx))[..., None]  # 1 on background
+    clipped = np.clip(out, 0.0, 1.0)
+    lum = luminance(clipped)[..., None]
+    # Gamma lift brightens midtones; a mild saturation boost adds colour.
+    gamma = max(0.2, 1.0 - 0.6 * amount)
+    brightened = clipped ** gamma
+    saturated = lum + (1.0 + 0.5 * amount) * (brightened - lum)
+    target = np.clip(saturated, 0.0, 1.0)
+
+    w = bg * amount  # only touch background, scaled by strength
+    blended = out * (1.0 - w) + target * w
+    out[cover] = blended[cover]
     return out
 
 
@@ -44,5 +83,20 @@ register(OpSpec(
     params=[
         EditParam("amount", "Amount", "float", default=0.5, min=0.0, max=1.0, step=0.05),
         EditParam("size", "Star size (px)", "int", default=2, min=1, max=8, step=1),
+        EditParam("protect_nebula", "Protect nebula", "bool", default=True, group="advanced",
+                  help="Gate the reduction with a star mask so nebula/galaxy cores aren't eroded."),
+    ],
+))
+
+register(OpSpec(
+    id="stars.boost_nebula", label="Boost nebula", group="stars_geometry", stage="nonlinear",
+    apply=_boost_nebula, proxy_safe=True,
+    help="Lift and saturate the background (non-star) regions so faint nebulosity "
+         "pops, leaving stars untouched.",
+    params=[
+        EditParam("amount", "Amount", "float", default=0.3, min=0.0, max=1.0, step=0.05),
+        EditParam("size", "Star size (px)", "int", default=4, min=1, max=12, step=1,
+                  group="advanced",
+                  help="Star mask footprint — larger excludes bigger stars from the boost."),
     ],
 ))
