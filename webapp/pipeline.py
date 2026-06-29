@@ -123,6 +123,37 @@ def _pipeline_body(
         lib.close()
 
 
+def submit_build_master(
+    settings: Settings, jm: JobManager, *,
+    kind: str, source_dir: str, name: str | None = None,
+    method: str = "median", sigma: float = 3.0,
+) -> Job:
+    """Build a master dark/flat/bias from a folder of raw FITS frames and
+    register it in the library-level calibration store."""
+    def body(job: Job) -> dict[str, Any]:
+        from webapp import calibration
+        from seestack.calibrate.masters import build_master
+
+        paths = calibration.find_fits_in_dir(source_dir)
+        if not paths:
+            raise FileNotFoundError(f"No FITS files found in {source_dir}")
+        job.set_progress("loading", 0, len(paths), f"{len(paths)} frames")
+        array, meta = build_master(
+            paths, kind=kind, method=method, sigma=sigma,
+            progress=_progress(jm, job),
+        )
+        entry = calibration.register_master(
+            settings.resolved_library_root, name=name or "", array=array, meta=meta,
+        )
+        return {
+            "id": entry["id"], "name": entry["name"], "kind": entry["kind"],
+            "n_frames": entry["n_frames"], "width_px": entry["width_px"],
+            "height_px": entry["height_px"],
+        }
+
+    return jm.submit("build_master", body)
+
+
 def submit_qc_solve(settings: Settings, jm: JobManager, safe: str) -> Job:
     def body(job: Job) -> dict[str, Any]:
         lib = Library.open_or_create(settings.resolved_library_root)

@@ -232,6 +232,12 @@ def stack_option_fields() -> list[StackOptionField]:
     return fields
 
 
+# StackOptions fields that are intentionally NOT user-facing form controls:
+# the webapp resolves them server-side (calibration master paths) and they must
+# never be set from raw client input, so they have no descriptor.
+NON_FORM_KEYS = {"dark_path", "flat_path"}
+
+
 def describable_keys() -> set[str]:
     return {d["key"] for d in _DESCRIPTORS}
 

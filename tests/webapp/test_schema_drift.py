@@ -5,12 +5,19 @@ from __future__ import annotations
 import dataclasses
 
 from seestack.stack.stacker import StackOptions
-from webapp.schemas import coerce_stack_options, describable_keys, stack_option_fields
+from webapp.schemas import (
+    NON_FORM_KEYS,
+    coerce_stack_options,
+    describable_keys,
+    stack_option_fields,
+)
 
 
 def test_every_stackoption_is_described():
     dataclass_keys = {f.name for f in dataclasses.fields(StackOptions)}
-    described = describable_keys()
+    # Server-resolved fields (calibration paths) intentionally have no form
+    # control and are excluded from the lockstep guard.
+    described = describable_keys() | NON_FORM_KEYS
     missing = dataclass_keys - described
     assert not missing, f"StackOptions fields not in the form schema: {missing}"
 
