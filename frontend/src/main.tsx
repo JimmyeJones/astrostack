@@ -23,6 +23,7 @@ import { SettingsView } from "./routes/Settings";
 import { StorageView } from "./routes/Storage";
 import { SeestarView } from "./routes/Seestar";
 import { CalibrationView } from "./routes/Calibration";
+import { CombineView } from "./routes/Combine";
 
 // Lazy-load the 3D sky viewer so three.js stays out of the main bundle.
 const SkyView = React.lazy(() =>
@@ -50,6 +51,7 @@ const router = createBrowserRouter([
       { path: "telescope", element: <SeestarView /> },
       { path: "storage", element: <StorageView /> },
       { path: "calibration", element: <CalibrationView /> },
+      { path: "combine", element: <CombineView /> },
       { path: "gallery", element: <GalleryView /> },
       { path: "targets/:safe", element: <TargetView /> },
       { path: "targets/:safe/stack", element: <StackView /> },

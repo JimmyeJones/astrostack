@@ -156,6 +156,10 @@ class StackOptions:
     #   'union'     — always use the union-of-footprints canvas.
     #   'reference' — always crop to the reference frame's footprint.
     mosaic_canvas: str = "auto"
+    # Mono stacking: treat each raw frame as a single-channel luminance image
+    # (no debayer) and stack it into a grayscale result. For mono cameras and
+    # filtered (L / R / G / B / narrowband) subs. Off = OSC debayer (default).
+    mono: bool = False
     # Dark/flat calibration. Server-side filesystem paths to master FITS frames
     # (resolved from the calibration store by the webapp — never user input).
     # None disables that correction. Applied to the raw Bayer mosaic per frame.
@@ -414,6 +418,7 @@ def run_stack(
             progress=progress, cancel=cancel,
             errors=errors,
             calibration=calibration,
+            mono=options.mono,
         )
         if n_used == 0:
             raise ValueError("drizzle: no usable frames")
@@ -448,6 +453,7 @@ def run_stack(
             errors=errors,
             ref_patch=ref_patch, ref_patch_origin=ref_patch_origin,
             calibration=calibration,
+            mono=options.mono,
         )
         if n_used_p1 == 0:
             raise ValueError("pass 1 produced no usable frames")
@@ -475,6 +481,7 @@ def run_stack(
             errors=errors,
             ref_patch=ref_patch, ref_patch_origin=ref_patch_origin,
             calibration=calibration,
+            mono=options.mono,
         )
         n_used = min(n_used_p1, n_used_p2)
         result_image = wsum.result()
@@ -501,6 +508,7 @@ def run_stack(
             errors=errors,
             ref_patch=ref_patch, ref_patch_origin=ref_patch_origin,
             calibration=calibration,
+            mono=options.mono,
         )
         if n_used == 0:
             raise ValueError("no frames could be aligned")
@@ -671,6 +679,7 @@ def _pass(
     ref_patch: np.ndarray | None = None,
     ref_patch_origin: tuple[int, int] | None = None,
     calibration: "CalibrationMasters | None" = None,
+    mono: bool = False,
 ) -> int:
     """
     Run one pass over ``frames``, feeding each windowed aligned image plus its
@@ -695,6 +704,7 @@ def _pass(
             ref_patch_origin if sp_refine else None,
             sp_refine,
             calibration,
+            mono,
         )
 
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
@@ -736,6 +746,7 @@ def _drizzle_pass(
     cancel: CancelFn,
     errors: list[str],
     calibration: "CalibrationMasters | None" = None,
+    mono: bool = False,
 ) -> int:
     """
     One-shot drizzle accumulation. Drizzle's ``add_image`` mutates internal
@@ -762,8 +773,11 @@ def _drizzle_pass(
         raw, info = load_seestar_raw(path, debayer=False, out_dtype=np.float32)
         if calibration is not None:
             raw = calibration.apply_raw(raw)
-        pattern = frame.bayer_pattern or info.bayer_pattern or "RGGB"
-        rgb = bilinear_debayer(raw, pattern=pattern)
+        if mono:
+            rgb = np.repeat(raw[..., None], 3, axis=2)
+        else:
+            pattern = frame.bayer_pattern or info.bayer_pattern or "RGGB"
+            rgb = bilinear_debayer(raw, pattern=pattern)
         if bg_opts.enabled:
             rgb = subtract_background(rgb, bg_opts, use_gpu=options.use_gpu)
         in_wcs = wcs_from_text(frame.wcs_json)
@@ -811,6 +825,7 @@ def _align_for_stack(
     ref_patch_origin: tuple[int, int] | None,
     subpixel_refine: bool,
     calibration: "CalibrationMasters | None" = None,
+    mono: bool = False,
 ) -> tuple[np.ndarray, int, int] | None:
     """
     Worker entry point. Returns ``(window_rgb, y0, x0)`` — the reprojected
@@ -836,6 +851,7 @@ def _align_for_stack(
         ref_patch_origin=ref_patch_origin,
         subpixel_refine=subpixel_refine,
         calibration=calibration,
+        mono=mono,
     )
     if result is None:
         return None

@@ -115,6 +115,28 @@ def trigger_stack(safe: str, body: dict[str, Any], request: Request) -> dict[str
     return {"job_id": job.id}
 
 
+@router.post("/api/targets/{safe}/channel-combine")
+def channel_combine(safe: str, body: dict[str, Any], request: Request) -> dict[str, str]:
+    """Combine several mono stacks (assigned to L/R/G/B) into one colour run
+    recorded under ``safe``."""
+    settings = deps.get_settings(request)
+    jm = deps.get_job_manager(request)
+    lib, proj = deps.open_target_project(request, safe)
+    proj.close()
+    lib.close()
+
+    items = body.get("items") or []
+    if not isinstance(items, list) or not items:
+        raise HTTPException(status_code=400, detail="items (list of channel assignments) required")
+    weights = body.get("weights") if isinstance(body.get("weights"), dict) else None
+    job = pipeline.submit_channel_combine(
+        settings, jm, safe, items,
+        output_name=str(body.get("output_name") or "").strip() or None,
+        weights=weights,
+    )
+    return {"job_id": job.id}
+
+
 @router.get("/api/targets/{safe}/stack-runs", response_model=list[StackRunOut])
 def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
     lib, proj = deps.open_target_project(request, safe)

@@ -162,6 +162,9 @@ _DESCRIPTORS: list[dict[str, Any]] = [
      "help": "Keep only the best fraction of frames by FWHM. 1.0 = keep all."},
     {"key": "drizzle", "label": "Drizzle (super-resolution)", "type": "bool", "group": "simple",
      "help": "Use the drizzle algorithm. Best with 200+ dithered frames."},
+    {"key": "mono", "label": "Mono / filtered subs", "type": "bool", "group": "simple",
+     "help": "Stack as single-channel luminance (no debayer). For mono cameras and "
+             "L/R/G/B/narrowband subs. Combine channels later in Channel combine."},
     # --- advanced ---
     {"key": "background_mode", "label": "Background mode", "type": "enum", "group": "advanced",
      "options": ["per_channel", "luminance"], "depends_on": "background_flatten"},

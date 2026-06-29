@@ -461,6 +461,14 @@ export const api = {
     recipe?: Recipe; preset_id?: string; output_name?: string;
   }) => req<{ job_id: string }>("/api/editor/batch", { method: "POST", body: JSON.stringify(body) }),
 
+  // channel combine (LRGB / RGB from mono stacks)
+  channelCombine: (safe: string, body: {
+    items: { safe: string; run_id: number; channel: string }[];
+    output_name?: string; weights?: Record<string, number>;
+  }) => req<{ job_id: string }>(`/api/targets/${safe}/channel-combine`, {
+    method: "POST", body: JSON.stringify(body),
+  }),
+
   // access control (optional HTTP Basic auth)
   authStatus: () => req<{ enabled: boolean; username: string }>("/api/auth/status"),
   setAuthPassword: (body: { password: string; username?: string }) =>
