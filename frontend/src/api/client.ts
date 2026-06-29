@@ -461,6 +461,13 @@ export const api = {
     recipe?: Recipe; preset_id?: string; output_name?: string;
   }) => req<{ job_id: string }>("/api/editor/batch", { method: "POST", body: JSON.stringify(body) }),
 
+  // access control (optional HTTP Basic auth)
+  authStatus: () => req<{ enabled: boolean; username: string }>("/api/auth/status"),
+  setAuthPassword: (body: { password: string; username?: string }) =>
+    req<{ enabled: boolean; username: string }>("/api/auth/password", {
+      method: "POST", body: JSON.stringify(body),
+    }),
+
   // calibration masters (library-level dark/flat frames)
   listCalibrationMasters: () => req<CalibrationMaster[]>("/api/calibration/masters"),
   buildCalibrationMaster: (body: {

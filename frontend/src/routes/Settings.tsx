@@ -37,6 +37,82 @@ const HINTS: Record<string, string> = {
   seestar_poll_interval_s: "How often to poll each connected scope for telemetry.",
 };
 
+function AccessControl() {
+  const qc = useQueryClient();
+  const status = useQuery({ queryKey: ["auth-status"], queryFn: api.authStatus });
+  const [username, setUsername] = useState("admin");
+  const [password, setPassword] = useState("");
+
+  useEffect(() => {
+    if (status.data?.username) setUsername(status.data.username);
+  }, [status.data?.username]);
+
+  const enabled = status.data?.enabled ?? false;
+
+  const setPw = useMutation({
+    mutationFn: () => api.setAuthPassword({ password, username }),
+    onSuccess: (r) => {
+      notifications.show({
+        message: r.enabled
+          ? "Password set — you'll be asked to sign in on the next request."
+          : "Access control disabled.",
+        color: "teal",
+      });
+      setPassword("");
+      qc.invalidateQueries({ queryKey: ["auth-status"] });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
+
+  const disable = useMutation({
+    mutationFn: () => api.setAuthPassword({ password: "" }),
+    onSuccess: () => {
+      notifications.show({ message: "Access control disabled.", color: "teal" });
+      qc.invalidateQueries({ queryKey: ["auth-status"] });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
+
+  return (
+    <Paper withBorder p="lg">
+      <Stack>
+        <Group gap={6}>
+          <Text fw={600}>Access control</Text>
+          <Badge variant="light" color={enabled ? "teal" : "gray"}>
+            {enabled ? "password protected" : "open"}
+          </Badge>
+        </Group>
+        <Text size="sm" c="dimmed">
+          Optionally require a username and password (HTTP Basic) to reach AstroStack.
+          Leave it off on a trusted LAN; turn it on if the app is exposed beyond your
+          network. Best paired with HTTPS so credentials aren't sent in the clear.
+        </Text>
+        <Group align="flex-end" gap="sm" wrap="wrap">
+          <TextInput label="Username" value={username} w={160}
+            onChange={(e) => setUsername(e.currentTarget.value)} />
+          <TextInput label={enabled ? "New password" : "Password"} type="password"
+            placeholder="At least 4 characters" value={password} style={{ flex: 1, minWidth: 180 }}
+            onChange={(e) => setPassword(e.currentTarget.value)} />
+          <Button onClick={() => setPw.mutate()} loading={setPw.isPending}
+            disabled={password.length < 4}>
+            {enabled ? "Update" : "Enable"}
+          </Button>
+          {enabled ? (
+            <Button color="red" variant="light" loading={disable.isPending}
+              onClick={() => {
+                if (window.confirm("Disable access control? The app will be open to anyone who can reach it.")) {
+                  disable.mutate();
+                }
+              }}>
+              Disable
+            </Button>
+          ) : null}
+        </Group>
+      </Stack>
+    </Paper>
+  );
+}
+
 export function SettingsView() {
   const qc = useQueryClient();
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
@@ -290,6 +366,8 @@ export function SettingsView() {
           </Group>
         </Stack>
       </Paper>
+
+      <AccessControl />
     </Stack>
   );
 }

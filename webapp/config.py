@@ -97,6 +97,13 @@ class Settings(BaseModel):
     # Global default StackOptions (per-target overrides live in project meta).
     default_stack_options: dict[str, Any] = Field(default_factory=dict)
 
+    # --- access control ----------------------------------------------------
+    # Optional HTTP Basic auth. Empty hash = disabled (the app is open). Managed
+    # only via /api/auth/password — never set these through the settings PUT.
+    auth_username: str = "admin"
+    auth_password_hash: str = ""
+    auth_salt: str = ""
+
     # ---- validation -------------------------------------------------------
 
     @field_validator(

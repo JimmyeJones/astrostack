@@ -26,6 +26,7 @@ from webapp import logbuffer, pipeline
 from webapp.config import SettingsStore
 from webapp.jobs import JobManager
 from webapp.routers import (
+    auth as auth_router,
     calibration, editor, frames, gallery, jobs, logs, seestar, settings, sky,
     stack, stats, storage, system, targets,
 )
@@ -97,12 +98,39 @@ def create_app() -> FastAPI:
         targets.router, frames.router, stack.router, jobs.router,
         pipeline_router.router, settings.router, system.router, sky.router,
         gallery.router, logs.router, stats.router, storage.router,
-        seestar.router, editor.router, calibration.router,
+        seestar.router, editor.router, calibration.router, auth_router.router,
     ):
         app.include_router(r)
 
+    _install_auth_gate(app)
     _mount_spa(app)
     return app
+
+
+# Paths reachable without auth even when a password is set. The Docker
+# healthcheck must keep working, and the browser needs the 401 challenge itself.
+_AUTH_OPEN_PATHS = frozenset({"/api/health"})
+
+
+def _install_auth_gate(app: FastAPI) -> None:
+    from starlette.responses import JSONResponse
+
+    from webapp import auth
+
+    @app.middleware("http")
+    async def _auth_gate(request, call_next):  # noqa: ANN001
+        store = getattr(request.app.state, "settings_store", None)
+        if store is not None and request.url.path not in _AUTH_OPEN_PATHS:
+            settings = store.get()
+            if auth.is_enabled(settings) and not auth.check_basic_auth(
+                settings, request.headers.get("Authorization")
+            ):
+                return JSONResponse(
+                    {"detail": "Authentication required"},
+                    status_code=401,
+                    headers={"WWW-Authenticate": 'Basic realm="AstroStack"'},
+                )
+        return await call_next(request)
 
 
 def _mount_spa(app: FastAPI) -> None:
