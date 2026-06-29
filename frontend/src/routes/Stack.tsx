@@ -88,7 +88,7 @@ export function StackView() {
       .filter((m) => m.kind === kind && m.exists)
       .map((m) => ({
         value: String(m.id),
-        label: `${m.name} (${m.n_frames} frames${m.width_px}×${m.height_px})`,
+        label: `${m.name} (${m.n_frames} frames, ${m.width_px}×${m.height_px})`,
       }));
   const darkOpts = masterOpts("dark");
   const flatOpts = masterOpts("flat");
