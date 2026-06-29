@@ -1,8 +1,8 @@
 import {
   Accordion, Alert, Button, Center, Group, Loader, Paper, Progress,
-  Stack, Text, Title, Tooltip,
+  Select, Stack, Text, Title, Tooltip,
 } from "@mantine/core";
-import { IconPlayerPlay, IconTelescope } from "@tabler/icons-react";
+import { IconFlask, IconPlayerPlay, IconTelescope } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
@@ -24,6 +24,10 @@ export function StackView() {
     queryFn: () => api.getStackDefaults(safe),
   });
   const frames = useQuery({ queryKey: ["frames", safe], queryFn: () => api.listFrames(safe) });
+  const masters = useQuery({
+    queryKey: ["calibration-masters"],
+    queryFn: api.listCalibrationMasters,
+  });
 
   const qcSolve = useMutation({
     mutationFn: () => api.qcSolve(safe),
@@ -78,6 +82,18 @@ export function StackView() {
 
   const simple = fields.filter((f) => f.group === "simple");
   const advanced = fields.filter((f) => f.group === "advanced");
+
+  const masterOpts = (kind: string) =>
+    (masters.data ?? [])
+      .filter((m) => m.kind === kind && m.exists)
+      .map((m) => ({
+        value: String(m.id),
+        label: `${m.name} (${m.n_frames} frames${m.width_px}×${m.height_px})`,
+      }));
+  const darkOpts = masterOpts("dark");
+  const flatOpts = masterOpts("flat");
+  const hasMasters = darkOpts.length > 0 || flatOpts.length > 0;
+  const asStr = (v: unknown) => (v === undefined || v === null ? null : String(v));
   const running = job && (job.state === "running" || job.state === "queued");
   const pct = job && job.total ? Math.round((job.done / job.total) * 100) : 0;
 
@@ -126,6 +142,34 @@ export function StackView() {
               onChange={(v) => set(f.key, v)}
             />
           ))}
+
+          <Paper withBorder p="sm" bg="var(--mantine-color-default)">
+            <Group gap={6} mb={hasMasters ? "xs" : 0}>
+              <IconFlask size={16} />
+              <Text fw={600} size="sm">Calibration</Text>
+            </Group>
+            {hasMasters ? (
+              <Group grow align="flex-end">
+                <Select
+                  label="Master dark" placeholder="None" clearable
+                  data={darkOpts} value={asStr(values.dark_master_id)}
+                  onChange={(v) => set("dark_master_id", v)}
+                  disabled={darkOpts.length === 0}
+                />
+                <Select
+                  label="Master flat" placeholder="None" clearable
+                  data={flatOpts} value={asStr(values.flat_master_id)}
+                  onChange={(v) => set("flat_master_id", v)}
+                  disabled={flatOpts.length === 0}
+                />
+              </Group>
+            ) : (
+              <Text size="xs" c="dimmed">
+                No masters built yet. Create darks/flats on the{" "}
+                <Link to="/calibration">Calibration page</Link> to apply them here.
+              </Text>
+            )}
+          </Paper>
 
           <Accordion variant="separated" mt="xs">
             <Accordion.Item value="advanced">

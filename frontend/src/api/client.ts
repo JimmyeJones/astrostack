@@ -267,6 +267,23 @@ export interface Histogram {
   errors?: string[];
 }
 
+export interface CalibrationMaster {
+  id: number;
+  name: string;
+  kind: "dark" | "flat" | "bias";
+  filename: string;
+  n_frames: number;
+  method: string;
+  exposure_s: number | null;
+  gain: number | null;
+  sensor_temp_c: number | null;
+  bayer_pattern: string | null;
+  width_px: number;
+  height_px: number;
+  created_utc: string;
+  exists: boolean;
+}
+
 function encodeRecipe(recipe: Recipe): string {
   const bytes = new TextEncoder().encode(JSON.stringify(recipe));
   let bin = "";
@@ -443,4 +460,14 @@ export const api = {
     items: { safe: string; run_id: number }[];
     recipe?: Recipe; preset_id?: string; output_name?: string;
   }) => req<{ job_id: string }>("/api/editor/batch", { method: "POST", body: JSON.stringify(body) }),
+
+  // calibration masters (library-level dark/flat frames)
+  listCalibrationMasters: () => req<CalibrationMaster[]>("/api/calibration/masters"),
+  buildCalibrationMaster: (body: {
+    kind: string; source_dir: string; name?: string; method?: string; sigma?: number;
+  }) => req<{ job_id: string }>("/api/calibration/masters", {
+    method: "POST", body: JSON.stringify(body),
+  }),
+  deleteCalibrationMaster: (id: number) =>
+    req<{ deleted: number }>(`/api/calibration/masters/${id}`, { method: "DELETE" }),
 };
