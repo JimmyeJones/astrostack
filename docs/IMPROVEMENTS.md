@@ -43,7 +43,6 @@ _(none — claim an item here with your branch name)_
 
 ### Features that serve real workflows
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
-- Settings + presets export/import (backup & restore a config). (S)
 - Annotated sky overlay (label detected objects / show solved field). (M)
 - Drizzle memory estimate surfaced in the Stack form before you run it. (S)
 - Star-mask preview toggle in the editor (visualise the mask driving star ops). (S)
@@ -99,6 +98,10 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- Settings backup & restore — `GET /api/settings/export` (self-identifying JSON
+  envelope, auth/derived fields excluded) + `POST /api/settings/import`
+  (merge, validates → 422, ignores auth/unknown keys), with Export/Import
+  buttons on the Settings page. (v0.14.0, this run)
 - FITS export metadata — `master.fits` now carries standard integration cards
   (`NCOMBINE`, `EXPTIME`, `TOTALEXP`, `GAIN`, `CCD-TEMP`, `DATE-OBS`/`DATE-END`,
   `STACKMTD`, `CFA`) built by `build_stack_header_meta`, so the scientific

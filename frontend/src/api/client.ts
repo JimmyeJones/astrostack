@@ -380,6 +380,9 @@ export const api = {
   getSettings: () => req<Settings>("/api/settings"),
   putSettings: (patch: Record<string, unknown>) =>
     req<Settings>("/api/settings", { method: "PUT", body: JSON.stringify(patch) }),
+  exportSettings: () => req<Record<string, unknown>>("/api/settings/export"),
+  importSettings: (payload: Record<string, unknown>) =>
+    req<Settings>("/api/settings/import", { method: "POST", body: JSON.stringify(payload) }),
   getSystem: () => req<SystemInfo>("/api/system"),
   astapTest: () => req<{
     ok: boolean; detail?: string | null; solved?: boolean; target?: string;
