@@ -27,14 +27,14 @@ _(none — claim an item here with your branch name)_
 ## Ideas (pick roughly top-down; use the value ÷ effort×risk rule)
 
 ### Correctness & robustness (highest priority)
-- **Feed `transparency_score` into quality weighting + a grader hint** — the
-  per-frame metric is now computed (median flux of the brightest stars, shipped
-  v0.33.0) and surfaced in the Target table, but nothing *uses* it yet. Next:
-  normalise it against the target's best frame (a per-target baseline) and (a)
-  optionally weight frames in the stack by relative transparency, (b) show an
-  advisory "poor transparency night" hint when a run's median frame sits well
-  below the target's clear-sky baseline. Needs care: the raw score isn't
-  comparable across gain/exposure, so normalise within a target. (M, correctness)
+- **Transparency-night grader hint (part b of the weighting item)** — the
+  quality-weighting side shipped in v0.36.0 (a `transparency_factor` in
+  `compute_frame_weights`, normalised within-target against the median). The
+  remaining half: show an advisory "poor transparency night" hint when a run's
+  median frame sits well below the target's clear-sky baseline (the target's
+  best-transparency frames), so a user knows a stack was shot through haze even
+  when they didn't reject those subs. UI-only advisory; reuse the same
+  within-target normalisation. (S, approachability)
 - Per-pixel extremes / percentile rejection for small stacks (the *robust*
   fix for a lone satellite/plane trail below ~11 frames). **NB:** the previously
   filed "iterated κ-σ" idea was investigated and dropped — re-estimation clips
@@ -112,6 +112,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Weight the stack by frame transparency** — `compute_frame_weights` gained a
+  fourth `transparency_factor` (`frame_transparency / median_transparency`,
+  clipped to `[min_weight, 1.0]`), so with quality-weighting on, hazy/thin-cloud
+  subs (whose bright stars dimmed) pull less into the average while clear frames
+  cap at the neutral factor. Normalised against the median of the frames being
+  stacked (within one target), because the raw score isn't comparable across
+  gain/exposure. Frames without a transparency score keep the neutral factor.
+  Additive; gated by the existing (off-by-default) `quality_weighted` flag.
+  (v0.36.0, this run)
 
 - **Inline reject-reason chip on rejected frame rows** — rejected rows in the
   Target table were only dimmed; each now carries a small muted plain-language
