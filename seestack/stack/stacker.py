@@ -485,7 +485,7 @@ def run_stack(
                  params.pixfrac, params.scale, params.kernel,
                  drizzler.output_canvas_shape[1], drizzler.output_canvas_shape[0])
         n_used = _drizzle_pass(
-            frames, ref, drizzler,
+            frames, ref, drizzler, weights,
             options=options,
             progress=progress, cancel=cancel,
             errors=errors,
@@ -814,11 +814,13 @@ def _drizzle_pass(
     frames: list[FrameRow],
     ref: FrameRow,
     drizzler,
+    weights: dict[int, float],
     *,
     options: StackOptions,
     progress: ProgressFn,
     cancel: CancelFn,
     errors: list[str],
+    phase_label: str = "Drizzle",
     calibration: "CalibrationMasters | None" = None,
     mono: bool = False,
 ) -> int:
@@ -831,7 +833,7 @@ def _drizzle_pass(
     from seestack.io.wcs_io import wcs_from_text
 
     total = len(frames)
-    progress("Drizzle", 0, total)
+    progress(phase_label, 0, total)
     max_workers = options.max_workers or max(1, (os.cpu_count() or 4))
     bg_opts = options.background_options()
     used = 0
@@ -841,6 +843,7 @@ def _drizzle_pass(
         path = frame.cached_path or frame.source_path
         if not path or not Path(path).exists() or not frame.wcs_json:
             return None
+        from seestack.bg.hot_pixels import suppress_hot_cold_pixels
         from seestack.bg.per_frame import subtract_background
         from seestack.io.fits_loader import bilinear_debayer, load_seestar_raw
 
@@ -852,6 +855,12 @@ def _drizzle_pass(
         else:
             pattern = frame.bayer_pattern or info.bayer_pattern or "RGGB"
             rgb = bilinear_debayer(raw, pattern=pattern)
+        # Same per-frame cleanup order as the standard path (align_one):
+        # debayer → hot-pixel suppression → background flatten.
+        if options.suppress_hot_pixels:
+            rgb = suppress_hot_cold_pixels(
+                rgb, sigma=options.hot_pixel_sigma, use_gpu=options.use_gpu
+            )
         if bg_opts.enabled:
             rgb = subtract_background(rgb, bg_opts, use_gpu=options.use_gpu)
         in_wcs = wcs_from_text(frame.wcs_json)
@@ -866,24 +875,24 @@ def _drizzle_pass(
         for f, fut in _imap_bounded(ex, prepare, frames, max_workers * 2):
             done += 1
             if cancel():
-                progress("Drizzle (cancelled)", done, total)
+                progress(phase_label + " (cancelled)", done, total)
                 break
             try:
                 payload = fut.result()
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"{Path(f.source_path).name}: {type(exc).__name__}: {exc}")
-                progress("Drizzle", done, total)
+                progress(phase_label, done, total)
                 continue
             if payload is None:
-                progress("Drizzle", done, total)
+                progress(phase_label, done, total)
                 continue
             rgb, in_wcs = payload
             try:
-                drizzler.add_frame(rgb, in_wcs)
+                drizzler.add_frame(rgb, in_wcs, weight=weights.get(f.id or -1, 1.0))
                 used += 1
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"{Path(f.source_path).name}: drizzle add_image: {exc}")
-            progress("Drizzle", done, total)
+            progress(phase_label, done, total)
     return used
 
 

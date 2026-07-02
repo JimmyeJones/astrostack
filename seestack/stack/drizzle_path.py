@@ -71,12 +71,18 @@ class DrizzleStacker:
         self.ref_shape = ref_shape
         self.out_shape, self.out_wcs = _compute_output_canvas(ref_wcs, ref_shape, params.scale)
 
+        # ``disable_ctx``: the context bitmask records *which* input frames hit
+        # each output pixel — we never read it, and it costs one full-canvas
+        # int32 plane per 32 frames (re-copied via np.append every time a plane
+        # is added). On a multi-thousand-frame Seestar stack that is tens of GB
+        # and quadratic copying, so it must stay off.
         self._drizzlers = [
             Drizzle(
                 kernel=params.kernel,
                 fillval=0.0,
                 out_shape=self.out_shape,
                 exptime=0.0,
+                disable_ctx=True,
             )
             for _ in range(3)
         ]
@@ -86,12 +92,14 @@ class DrizzleStacker:
     def output_canvas_shape(self) -> tuple[int, int]:
         return self.out_shape
 
-    def add_frame(self, rgb: np.ndarray, in_wcs) -> None:
+    def add_frame(self, rgb: np.ndarray, in_wcs, *, weight: float = 1.0) -> None:
         """
         Add one debayered, optionally bg-flattened frame to the drizzle.
 
         ``rgb`` is (H, W, 3) at the input frame's resolution. ``in_wcs`` is
-        the input frame's astropy WCS.
+        the input frame's astropy WCS. ``weight`` scales this frame's
+        contribution (quality weighting) — since the drizzle output is a
+        weighted average, scaling the weight map yields the weighted mean.
         """
         # Drizzle wants a "pixmap" — for each input pixel, the (x, y)
         # coordinate in the output. Compute once per frame, share across
@@ -99,17 +107,22 @@ class DrizzleStacker:
         pixmap = _build_pixmap(in_wcs, self.out_wcs, rgb.shape[0], rgb.shape[1])
         # Mask out-of-bounds pixels with a weight map of 0.
         h_out, w_out = self.out_shape
-        weight = (
+        in_bounds = (
             (pixmap[..., 0] >= 0) & (pixmap[..., 0] <= w_out - 1)
             & (pixmap[..., 1] >= 0) & (pixmap[..., 1] <= h_out - 1)
-        ).astype(np.float32)
+        )
         for c in range(3):
-            ch = np.where(np.isfinite(rgb[..., c]), rgb[..., c], 0.0).astype(np.float32, copy=False)
+            vals = rgb[..., c]
+            finite = np.isfinite(vals)
+            # NaN (no-data) input pixels must carry zero weight — replacing
+            # them with 0.0 at full weight would dilute real signal.
+            wmap = np.where(in_bounds & finite, float(weight), 0.0).astype(np.float32)
+            ch = np.where(finite, vals, 0.0).astype(np.float32, copy=False)
             self._drizzlers[c].add_image(
                 data=ch,
                 exptime=1.0,
                 pixmap=pixmap,
-                weight_map=weight,
+                weight_map=wmap,
                 pixfrac=self.params.pixfrac,
                 in_units="counts",
             )

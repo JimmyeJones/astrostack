@@ -20,7 +20,13 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
-_(none — claim an item here with your branch name)_
+- **Outlier-safe drizzle** — two-pass κ-σ outlier rejection for the drizzle
+  path (satellites/plane trails/cosmic rays currently land permanently in
+  drizzled output), plus parity fixes (hot-pixel suppression and quality
+  weights were silently ignored by drizzle) and a hot-path memory-safety fix
+  (the unused drizzle context bitmask grows a full-canvas int32 plane per 32
+  frames, re-copied on growth — tens of GB on 5k+ sub stacks). (M–L,
+  correctness/scale) — branch `claude/astrostack-leverage-improvement-vcithb`
 
 ---
 
