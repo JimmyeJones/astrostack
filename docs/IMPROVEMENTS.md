@@ -9,6 +9,20 @@ Items under "Needs owner sign-off" must not be started autonomously — see
 
 ## Shipped
 
+- **[Security] Close the quick-look-preview gap in the `output_name`
+  sanitizer** — S — the `output_name` sanitizer below (`_sanitize_basename`
+  in `seestack/stack/output.py`) is only called inside
+  `write_stack_outputs()`. `run_stack()`'s quick-look preview path
+  (`_save_quick_look` in `seestack/stack/stacker.py`, periodic PNG saves
+  during pass 1) builds its own filename from `options.output_name`
+  independently and was still unsanitized. `run_stack()` now sanitizes
+  `options.output_name` once, up front, before either path can use it.
+  Covered by
+  `tests/test_stack_pipeline.py::test_stack_sanitizes_path_traversal_output_name`
+  (also updated `tests/webapp/test_editor.py`'s equivalent test — the editor
+  export job now succeeds with a sanitized name rather than erroring, to
+  match `_sanitize_basename`'s fix-it-not-fail-it approach). *(2026-07-02)*
+
 - **[Reliability] `lucky_fraction` had no bounds validation** — S —
   `run_stack()` (`seestack/stack/stacker.py`) now raises `ValueError` up
   front if `StackOptions.lucky_fraction` isn't in `(0, 1]`. Previously 0

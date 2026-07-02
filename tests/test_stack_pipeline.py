@@ -94,6 +94,26 @@ def test_stack_fails_with_no_solved_frames(tmp_path):
         proj.close()
 
 
+def test_stack_sanitizes_path_traversal_output_name(tmp_path):
+    # output_name reaches here as free-text from the web API (StackOptions
+    # .output_name); a value containing a path separator must never be able
+    # to write outside <project>/output/ — including via the quick-look
+    # preview path (_save_quick_look), which builds its own filename from
+    # options.output_name independently of write_stack_outputs.
+    proj = _build_project(tmp_path, n=4)
+    try:
+        result = run_stack(
+            proj,
+            StackOptions(sigma_clip=False, max_workers=2,
+                         output_name="../../../../tmp/pwned"),
+        )
+    finally:
+        proj.close()
+    assert not (tmp_path / "tmp" / "pwned.fits").exists()
+    assert result.fits_path.parent == proj.project_dir / "output"
+    assert result.fits_path.exists()
+
+
 @pytest.mark.parametrize("lucky_fraction", [0.0, -0.5, 1.5])
 def test_stack_rejects_out_of_range_lucky_fraction(tmp_path, lucky_fraction):
     # 0 previously fell back to `max(1, ...)` and silently kept exactly one
