@@ -72,7 +72,6 @@ _(none — claim an item here with your branch name)_
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
-- Keyboard shortcuts beyond the frame grader (e.g. editor undo/redo hints). (S)
 
 ### Performance (only with a measurement)
 - Profile the stack hot path on a large synthetic target; find a safe win that
@@ -112,6 +111,13 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Editor undo/redo keyboard shortcuts** — the editor's undo/redo buttons now
+  have keyboard equivalents: Cmd/Ctrl+Z undoes an op-pipeline change, Cmd/Ctrl+
+  Shift+Z (or Ctrl+Y) redoes. Skipped while a text field is focused so editing
+  the output name / curve inputs isn't hijacked, and the button tooltips now show
+  the shortcut. Frontend-only; reuses the existing `useUndoable` history.
+  (v0.34.1, this run)
 
 - **Star-mask preview toggle in the editor** — a new
   `GET …/editor/star-mask` endpoint renders the soft `[0,1]` mask that gates the

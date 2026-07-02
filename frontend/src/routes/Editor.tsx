@@ -140,6 +140,29 @@ export function EditorView() {
       ? (basePreview.data ?? preview.data)
       : preview.data;
 
+  // Keyboard undo/redo for the op pipeline: Cmd/Ctrl+Z undoes, Cmd/Ctrl+Shift+Z
+  // (or Ctrl+Y) redoes. Skipped while typing in a field so editing the output
+  // name / curve inputs isn't hijacked.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const el = e.target as HTMLElement | null;
+      const tag = el?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || el?.isContentEditable) return;
+      const key = e.key.toLowerCase();
+      if (key === "z") {
+        e.preventDefault();
+        if (e.shiftKey) { if (canRedo) redo(); }
+        else if (canUndo) undo();
+      } else if (key === "y") {
+        e.preventDefault();
+        if (canRedo) redo();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [undo, redo, canUndo, canRedo]);
+
   // --- mutations -----------------------------------------------------------
   const saveRecipe = useMutation({
     mutationFn: () => api.putRecipe(safe, rid, recipe),
@@ -237,9 +260,9 @@ export function EditorView() {
           <Title order={2}>Editor — {safe}</Title>
         </Group>
         <Group gap="xs">
-          <Tooltip label="Undo"><ActionIcon variant="default" disabled={!canUndo}
+          <Tooltip label="Undo (Ctrl+Z)"><ActionIcon variant="default" disabled={!canUndo}
             onClick={undo} aria-label="Undo"><IconArrowBackUp size={16} /></ActionIcon></Tooltip>
-          <Tooltip label="Redo"><ActionIcon variant="default" disabled={!canRedo}
+          <Tooltip label="Redo (Ctrl+Shift+Z)"><ActionIcon variant="default" disabled={!canRedo}
             onClick={redo} aria-label="Redo"><IconArrowForwardUp size={16} /></ActionIcon></Tooltip>
           <Button variant="light" color="grape" leftSection={<IconSparkles size={16} />}
             loading={auto.isPending} onClick={() => auto.mutate()}>Auto-process</Button>
