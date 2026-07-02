@@ -32,10 +32,19 @@ _(none — claim an item here with your branch name)_
   flux vs the target's per-star baseline — and feed it into quality weighting
   and an advisory "poor transparency" grader hint. Turns two schema fields
   into real value on cloudy-night data. (M, correctness)
-- Iterated κ-σ rejection (both paths): a very bright outlier inflates the
-  pass-1 σ enough that clipping can't fire below ~11 frames
-  ((n−1)/√n < κ). One re-estimation round after the first clip would let
-  small stacks reject trails too. (M, correctness)
+- Per-pixel extremes / percentile rejection for small stacks (the *robust*
+  fix for a lone satellite/plane trail below ~11 frames). **NB:** the previously
+  filed "iterated κ-σ" idea was investigated and dropped — re-estimation clips
+  against the *same* κ, and a lone outlier's deviation is `(n−1)/√n·σ` which is
+  already below κ for n<11 (κ=3), so it escapes the first clip *and* every
+  refinement round (verified: n=6→2.04, n=10→2.85, n=11→3.02). Mean/σ-based
+  methods (including Winsorising) all hit this wall because the outlier inflates
+  its own σ. The tools that actually reject a lone trail in a tiny stack are
+  **order-statistic**: reject the per-pixel max (min/max clipping) or a top
+  percentile before averaging, or use **median/MAD** as the location/scale.
+  Needs care for uniform/low-coverage pixels (don't reject the only sample) and
+  a streaming, memory-bounded implementation (the app deliberately avoids
+  holding all frames). (M, correctness)
 - Bias masters can be built but are never applied — `CalibrationMasters.load`
   only takes dark/flat/flat-dark. Wire bias in (and dark *scaling* by
   exposure ratio once bias exists) for mismatched-exposure dark workflows.
@@ -48,7 +57,8 @@ _(none — claim an item here with your branch name)_
 - Audit NaN/coverage handling on the newer paths (calibration, mono) for
   single-frame and mosaic-edge cases. Add edge-case tests. (S–M) — *channel
   combine done (v0.16.1); mono single-frame + sigma-clip verified (v0.22.1);
-  calibration and the mono mosaic-edge (partial-overlap → NaN) case still to
+  mono mosaic-edge partial-overlap → NaN verified (v0.28.1); the calibration
+  path (dark/flat apply on a partial-coverage canvas) is the last piece to
   audit.*
 - Channel combine: reproject stacks that don't share a canvas (via WCS) instead
   of erroring, so filters shot in separate sessions can be combined. (M–L)
@@ -112,6 +122,14 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Mono mosaic-edge NaN/coverage audit** — added a regression test that stacks
+  two mono frames whose sky footprints only partially overlap onto a union
+  canvas and asserts the uncovered margin stays NaN (never zero-filled into a
+  black wedge that would drag downstream reductions toward zero), coverage is
+  genuine (min 0, max 2), and the output stays pure luminance. Confirms the mono
+  path already handles partial coverage correctly; no code change. (v0.28.1,
+  this run)
 
 - **Suggest a fitting drizzle scale when over budget** — the `stack-estimate`
   endpoint now returns `suggested_drizzle_scale`: when a drizzle run would blow the
