@@ -382,6 +382,11 @@ export const api = {
   listStackRuns: (safe: string) => req<StackRun[]>(`/api/targets/${safe}/stack-runs`),
   deleteStackRun: (safe: string, id: number) =>
     req(`/api/targets/${safe}/stack-runs/${id}`, { method: "DELETE" }),
+  updateStackRunNotes: (safe: string, id: number, notes: string) =>
+    req<{ id: number; notes: string | null }>(
+      `/api/targets/${safe}/stack-runs/${id}`,
+      { method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notes }) }),
   stackRunInfo: (safe: string, id: number) =>
     req<StackRunInfo>(`/api/targets/${safe}/stack-runs/${id}/info`),
   stackRunOptions: (safe: string, id: number) =>

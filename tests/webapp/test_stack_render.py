@@ -240,6 +240,43 @@ def test_stack_runs_reusable_flag(client, solved_library):
     assert runs[combine_id]["reusable"] is False
 
 
+def test_update_stack_run_notes(client, solved_library):
+    """PATCH sets, trims, clears and 404s a run's free-text label."""
+    import json
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _add_run_with_options(solved_library, safe, json.dumps({"sigma_clip": True}))
+    url = f"/api/targets/{safe}/stack-runs/{run_id}"
+
+    # Set (with surrounding whitespace, which is trimmed).
+    r = client.patch(url, json={"notes": "  best RGB v2  "})
+    assert r.status_code == 200 and r.json()["notes"] == "best RGB v2"
+    got = next(x for x in client.get(f"/api/targets/{safe}/stack-runs").json() if x["id"] == run_id)
+    assert got["notes"] == "best RGB v2"
+
+    # Empty string clears the note back to null.
+    r = client.patch(url, json={"notes": "   "})
+    assert r.status_code == 200 and r.json()["notes"] is None
+
+    # Missing field and bad type are rejected.
+    assert client.patch(url, json={}).status_code == 422
+    assert client.patch(url, json={"notes": 5}).status_code == 422
+
+    # Unknown run → 404.
+    assert client.patch(f"/api/targets/{safe}/stack-runs/999999",
+                        json={"notes": "x"}).status_code == 404
+
+
+def test_update_stack_run_notes_caps_length(client, solved_library):
+    import json
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _add_run_with_options(solved_library, safe, json.dumps({"sigma_clip": True}))
+    r = client.patch(f"/api/targets/{safe}/stack-runs/{run_id}", json={"notes": "z" * 800})
+    assert r.status_code == 200
+    assert len(r.json()["notes"]) == 500
+
+
 def test_stack_runs_expose_integration_time(client, solved_library):
     """The stack-runs list carries total_exposure_s so History can show it inline."""
     import json

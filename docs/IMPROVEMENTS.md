@@ -50,6 +50,16 @@ _(none — claim an item here with your branch name)_
 - Drizzle memory estimate surfaced in the Stack form before you run it. (S)
 - Star-mask preview toggle in the editor (visualise the mask driving star ops). (S)
 - Per-target "notes/tags" search improvements and saved filters in Library. (S)
+- **Show/search run labels in the Gallery** — now that a run's `notes` label is
+  editable (v0.23.0), surface it on Gallery cards and add a text filter that
+  matches label + target name, so a user can find "best RGB v2" across all
+  targets. Reuses the `notes` field already returned per run. (S, approachability)
+- **Pre-run stack estimate endpoint** — a lightweight
+  `GET /targets/{safe}/stack-estimate?drizzle_scale=` that computes the
+  union-of-footprints canvas from the accepted+solved frames and returns the
+  output dimensions + estimated peak memory (same maths as
+  `_guard_stack_memory`), so the Stack form can warn *before* a run is refused
+  for OOM ("Drizzle ×2 → ~7680×4320, ≈2.1 GB peak"). (M, scale/approachability)
 
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
@@ -94,6 +104,13 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Editable notes/label on History cards** — the long-standing `notes` column
+  finally has a UI: a new `PATCH /api/targets/{safe}/stack-runs/{id}` (trims
+  whitespace, empty → null, capped at 500 chars) plus `Project.set_stack_run_notes`.
+  Each History card shows an inline pencil-edit label ("best RGB v2", "cloudy
+  night") so users can annotate and later recognise runs. Additive/upgrade-safe.
+  (v0.23.0, this run)
 
 - **Mono single-frame edge test** — verified the mono stack path on a
   one-frame, sigma-clip-on stack: coverage tops at 1, the single-coverage

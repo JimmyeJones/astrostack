@@ -114,6 +114,27 @@ describe("HistoryView", () => {
     expect(buttons[0]).toHaveAttribute("href", "/targets/M_42/stack?from=1");
   });
 
+  it("edits a run's note and persists it via PATCH", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ notes: null })]);
+    const upd = vi.spyOn(client.api, "updateStackRunNotes")
+      .mockResolvedValue({ id: 1, notes: "best RGB v2" });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("No label")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit note" }));
+    fireEvent.change(screen.getByLabelText("Stack note"), { target: { value: "best RGB v2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save note" }));
+
+    await waitFor(() => expect(upd).toHaveBeenCalledWith("M_42", 1, "best RGB v2"));
+  });
+
+  it("shows an existing note as a quoted label", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ notes: "cloudy" })]);
+    renderHistory();
+    await waitFor(() => expect(screen.getByText(/cloudy/)).toBeInTheDocument());
+  });
+
   it("shows an error notification when deletion fails", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
     vi.spyOn(client.api, "deleteStackRun").mockRejectedValue(new Error("stack is in use"));

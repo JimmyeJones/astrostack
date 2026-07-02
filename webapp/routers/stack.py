@@ -383,6 +383,42 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request) -> F
     )
 
 
+_MAX_NOTES_LEN = 500
+
+
+@router.patch("/api/targets/{safe}/stack-runs/{run_id}")
+def update_stack_run(
+    safe: str, run_id: int, body: dict[str, Any], request: Request,
+) -> dict:
+    """Update a run's free-text notes/label.
+
+    The only mutable field is ``notes`` (a short user label like "best RGB v2").
+    Whitespace is trimmed; an empty string clears the note. Length is capped so
+    a stray paste can't bloat the DB. Additive — the ``notes`` column already
+    exists, so this is upgrade-safe.
+    """
+    if "notes" not in body:
+        raise HTTPException(status_code=422, detail="Missing 'notes' field")
+    raw = body["notes"]
+    if raw is not None and not isinstance(raw, str):
+        raise HTTPException(status_code=422, detail="'notes' must be a string or null")
+    notes: str | None = raw.strip() if isinstance(raw, str) else None
+    if notes == "":
+        notes = None
+    if notes is not None and len(notes) > _MAX_NOTES_LEN:
+        notes = notes[:_MAX_NOTES_LEN]
+
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        updated = proj.set_stack_run_notes(run_id, notes)
+    finally:
+        proj.close()
+        lib.close()
+    if not updated:
+        raise HTTPException(status_code=404, detail="No such run")
+    return {"id": run_id, "notes": notes}
+
+
 @router.delete("/api/targets/{safe}/stack-runs/{run_id}")
 def delete_stack_run(safe: str, run_id: int, request: Request) -> dict:
     from webapp.routers.storage import delete_run_artifacts
