@@ -165,6 +165,7 @@ def stack_estimate(
         "budget_gb": round(est.budget_bytes / 1e9, 2),
         "would_exceed": est.would_exceed,
         "suggested_drizzle_scale": est.suggested_drizzle_scale,
+        "suggested_reference_canvas": est.suggested_reference_canvas,
     }
 
 

@@ -400,6 +400,16 @@ export function StackView() {
                 >
                   Use drizzle ×{est.suggested_drizzle_scale} instead (fits the budget)
                 </Button>
+              ) : est?.suggested_reference_canvas ? (
+                <Button
+                  mt={6}
+                  size="xs"
+                  variant="light"
+                  color="red"
+                  onClick={() => set("mosaic_canvas", "reference")}
+                >
+                  Use the reference canvas instead (fits the budget)
+                </Button>
               ) : null}
             </Alert>
           ) : estimateLine && !noSolved ? (

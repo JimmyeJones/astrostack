@@ -137,6 +137,17 @@ def bulk_frames(safe: str, body: BulkFrameAction, request: Request) -> dict:
                     reject_reason=f"bulk:{body.metric}",
                 )
                 changed += 1
+        elif body.action == "reject_streaked":
+            # Drop every accepted frame still flagged with a satellite/plane
+            # trail. Pairs with the "N streaked" badge for users who'd rather
+            # discard the streaked subs than rely on per-pixel rejection.
+            for f in proj.iter_frames(accepted_only=True):
+                if f.streak_detected:
+                    proj.update_frame(
+                        f.id, accept=False, user_override=True,
+                        reject_reason="bulk:streaked",
+                    )
+                    changed += 1
         return {"changed": changed}
     finally:
         proj.close()

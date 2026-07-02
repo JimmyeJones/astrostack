@@ -345,6 +345,23 @@ export function SettingsView() {
             value={num("max_stack_memory_gb")} min={0.5} max={1024} step={0.5}
             decimalScale={1} placeholder="auto (~70% of RAM)" w={{ base: "100%", xs: 260 }}
             onChange={(v) => set("max_stack_memory_gb", v === "" ? null : Number(v))} />
+          {(() => {
+            // Advisory only: a budget higher than the box's available RAM re-opens
+            // the OOM door the guard exists to close.
+            const budget = form.max_stack_memory_gb;
+            const avail = system.data?.memory?.available_gb;
+            if (typeof budget !== "number" || typeof avail !== "number") return null;
+            if (budget <= avail) return null;
+            return (
+              <Alert color="orange" icon={<IconInfoCircle size={16} />}
+                title="Budget is higher than this machine's available RAM">
+                You set {budget} GB, but only about {avail} GB is currently
+                available on this box. A stack that actually uses this much could
+                still run out of memory. Consider lowering it, or leave it blank
+                for the automatic ~70%-of-RAM cap.
+              </Alert>
+            );
+          })()}
 
           <Group justify="flex-end">
             <Button leftSection={<IconDeviceFloppy size={16} />}

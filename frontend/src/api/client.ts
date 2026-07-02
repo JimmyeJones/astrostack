@@ -170,6 +170,7 @@ export interface StackEstimate {
   budget_gb: number;
   would_exceed: boolean;
   suggested_drizzle_scale: number | null;
+  suggested_reference_canvas: boolean;
 }
 
 export interface GalleryItem {
@@ -248,6 +249,7 @@ export interface SystemInfo {
     error?: string;
   };
   disk: { total_gb?: number; used_gb?: number; free_gb?: number };
+  memory: { total_gb?: number; available_gb?: number };
   watcher_enabled: boolean;
 }
 

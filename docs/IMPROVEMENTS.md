@@ -54,12 +54,6 @@ _(none — claim an item here with your branch name)_
   calibration binding, per-night QC roll-ups. Coverage-levelling's docstring
   already names "between sessions" as motivation but keys on coverage count.
   Large but high value for the multi-night Seestar workflow. (L, correctness)
-- Audit NaN/coverage handling on the newer paths (calibration, mono) for
-  single-frame and mosaic-edge cases. Add edge-case tests. (S–M) — *channel
-  combine done (v0.16.1); mono single-frame + sigma-clip verified (v0.22.1);
-  mono mosaic-edge partial-overlap → NaN verified (v0.28.1); the calibration
-  path (dark/flat apply on a partial-coverage canvas) is the last piece to
-  audit.*
 - Channel combine: reproject stacks that don't share a canvas (via WCS) instead
   of erroring, so filters shot in separate sessions can be combined. (M–L)
 - Seestar client (`webapp/seestar/client.py`) has no reconnect/retry on a
@@ -69,29 +63,23 @@ _(none — claim an item here with your branch name)_
   testable in isolation from real hardware. (M, correctness)
 
 ### Features that serve real workflows
-- **One-click "reject all streaked frames" from the Target badge** — the new
-  "N streaked" badge (v0.27.1) tells the user how many accepted frames carry a
-  trail; pair it with a bulk action (a new `BulkFrameAction` "reject_streaked",
-  or reuse the existing bulk endpoint filtered on `streak_detected`) so a user
-  who'd rather drop the streaked subs than rely on per-pixel rejection can do it
-  in one gesture. Reuses the existing flag + bulk-reject plumbing. (S,
-  approachability)
-- **Suggest "reference" canvas when a non-drizzle mosaic is over budget** — the
-  drizzle-scale suggestion (v0.28.0) only fires when drizzle is on. When drizzle
-  is off but the union mosaic canvas alone exceeds the budget, compute the
-  reference-frame canvas peak and offer a one-click "use reference canvas
-  instead" (mirrors the drizzle suggestion). Turns the other over-budget refusal
-  into a usable path too. (S, scale/approachability) *(follow-on to v0.28.0)*
-- **Warn when the memory-budget Setting exceeds available RAM** — now that
-  `max_stack_memory_gb` is user-settable (v0.29.0), a value larger than the box's
-  RAM is a footgun that re-opens the OOM door the guard exists to close. The
-  Settings save (or the stack-estimate response) could compare it against
-  `/proc/meminfo` MemAvailable and show an advisory "higher than this machine's
-  RAM — a big stack could still OOM". Advisory only. (S, correctness)
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
 - Star-mask preview toggle in the editor (visualise the mask driving star ops). (S)
 - Per-target "notes/tags" search improvements and saved filters in Library. (S)
+- **Undo the last bulk frame action** — `reject_worst` and the new
+  `reject_streaked` can over-reject (e.g. a 30% cut that was too aggressive) and
+  there's no one-click way back. Have the `/frames/bulk` endpoint return the list
+  of ids it changed, and let the Target view keep the last batch so it can offer
+  an "Undo" that re-accepts exactly those frames. Reuses `update_frame`; purely
+  additive. (S, approachability)
+- **Reject-reason breakdown on the Target view** — the accepted/rejected badge
+  says *how many* were dropped but not *why*. A small popover/tooltip grouping
+  rejected frames by `reject_reason` (qc:fwhm, bulk:streaked, user, …) tells a
+  beginner what QC and their bulk actions actually did, and flags a dominant
+  failure mode (e.g. "18 rejected for high FWHM — a focus/seeing night"). Reuses
+  the existing column; frontend + a tiny count endpoint or client-side tally.
+  (S, approachability)
 
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
@@ -136,6 +124,39 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Calibration mosaic-edge NaN/coverage audit** — completes the NaN/coverage
+  audit series (channel combine v0.16.1, mono single-frame v0.22.1, mono
+  mosaic-edge v0.28.1). Added a regression test that stacks two dark/flat-
+  *calibrated* frames with only partial footprint overlap onto a union canvas
+  and asserts the uncovered margin stays NaN — calibration (dark subtract + flat
+  divide) never fabricates a zero wedge where there's no coverage — while
+  coverage is genuine (0..2) and the interior stays finite. Confirms the
+  calibration path already handles partial coverage correctly; no code change.
+  (v0.31.1, this run)
+
+- **Suggest the reference canvas when a non-drizzle mosaic is over budget** —
+  the drizzle-off mirror of the v0.28.0 drizzle-scale suggestion. `stack-estimate`
+  now returns `suggested_reference_canvas`: when drizzle is off and the union
+  mosaic canvas alone blows the memory budget but the smaller reference-frame
+  canvas would fit, the Stack form's over-budget alert offers a one-click "Use
+  the reference canvas instead" that sets `mosaic_canvas=reference`. Turns the
+  other over-budget refusal into a usable path. (v0.31.0, this run)
+
+- **Warn when the stack budget exceeds available RAM** — `/api/system` now
+  reports `memory.total_gb`/`available_gb` (from `/proc/meminfo`), and the
+  Settings page shows an advisory Alert when `max_stack_memory_gb` is set higher
+  than the box's currently-available RAM — a footgun that re-opens the OOM door
+  the guard exists to close. Advisory only; the value is still honoured.
+  Additive/upgrade-safe. (v0.30.1, this run)
+
+- **One-click "reject all streaked frames"** — the "N streaked" badge on the
+  Target view now carries a "Reject all" action (with a confirm) that rejects
+  every accepted frame flagged `streak_detected` in one gesture, via a new
+  `reject_streaked` `BulkFrameAction` (reject reason `bulk:streaked`,
+  `user_override` set). For users who'd rather drop the streaked subs than rely
+  on per-pixel rejection. Reuses the existing flag + bulk plumbing; additive.
+  (v0.30.0, this run)
 
 - **De-flake `Editor.test.tsx`** — `main`'s CI was intermittently red on the
   editor "loads the saved recipe" test: it gated `waitFor` on the static "Add

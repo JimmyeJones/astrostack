@@ -294,7 +294,7 @@ describe("StackView", () => {
       n_frames: 2, canvas_w: 480, canvas_h: 320, output_w: 480, output_h: 320,
       is_mosaic: false, peak_bytes: 7e6, peak_gb: 0.01,
       budget_bytes: 8e9, budget_gb: 8, would_exceed: false,
-      suggested_drizzle_scale: null,
+      suggested_drizzle_scale: null, suggested_reference_canvas: false,
     });
 
     renderStack();
@@ -313,7 +313,7 @@ describe("StackView", () => {
       n_frames: 2, canvas_w: 8000, canvas_h: 6000, output_w: 16000, output_h: 12000,
       is_mosaic: true, peak_bytes: 5.4e9, peak_gb: 5.4,
       budget_bytes: 1.4e9, budget_gb: 1.4, would_exceed: true,
-      suggested_drizzle_scale: null,
+      suggested_drizzle_scale: null, suggested_reference_canvas: false,
     });
 
     renderStack();
@@ -333,7 +333,7 @@ describe("StackView", () => {
       n_frames: 2, canvas_w: 4000, canvas_h: 3000, output_w: 8000, output_h: 6000,
       is_mosaic: false, peak_bytes: 2.3e9, peak_gb: 2.3,
       budget_bytes: 1.4e9, budget_gb: 1.4, would_exceed: true,
-      suggested_drizzle_scale: 1.4,
+      suggested_drizzle_scale: 1.4, suggested_reference_canvas: false,
     });
 
     renderStack();
@@ -344,5 +344,27 @@ describe("StackView", () => {
     await waitFor(() =>
       expect(client.api.stackEstimate).toHaveBeenCalledWith(
         "M_42", expect.objectContaining({ drizzle_scale: 1.4 })));
+  });
+
+  it("offers the reference canvas when a non-drizzle mosaic is over budget", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: true });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1), mkFrame(2)]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+    vi.spyOn(client.api, "stackEstimate").mockResolvedValue({
+      n_frames: 2, canvas_w: 8000, canvas_h: 6000, output_w: 8000, output_h: 6000,
+      is_mosaic: true, peak_bytes: 2.3e9, peak_gb: 2.3,
+      budget_bytes: 1.4e9, budget_gb: 1.4, would_exceed: true,
+      suggested_drizzle_scale: null, suggested_reference_canvas: true,
+    });
+
+    renderStack();
+
+    const btn = await screen.findByRole("button", { name: /Use the reference canvas instead/ });
+    fireEvent.click(btn);
+    // Clicking switches mosaic_canvas → reference so the next estimate re-queries.
+    await waitFor(() =>
+      expect(client.api.stackEstimate).toHaveBeenCalledWith(
+        "M_42", expect.objectContaining({ mosaic_canvas: "reference" })));
   });
 });
