@@ -152,6 +152,86 @@ def test_stack_fails_with_no_solved_frames(tmp_path):
         proj.close()
 
 
+def test_stack_single_frame(tmp_path):
+    """One accepted frame is a valid (degenerate) stack: sigma-clip has nothing
+    to clip, coverage tops out at 1, and the output is finite where covered."""
+    from astropy.io import fits
+
+    proj = _build_project(tmp_path, n=1)
+    try:
+        result = run_stack(
+            proj,
+            StackOptions(sigma_clip=True, sigma_kappa=2.5, max_workers=1,
+                         output_name="single"),
+        )
+    finally:
+        proj.close()
+
+    assert result.n_frames_used == 1
+    assert result.coverage_max == 1
+    assert result.fits_path.exists()
+    with fits.open(result.fits_path) as hdul:
+        data = np.asarray(hdul[0].data)
+    # The covered interior must be real signal, not NaN/zero everywhere.
+    assert np.isfinite(data).any()
+    assert np.nanmax(data) > 0
+
+
+def test_stack_all_rejected_raises(tmp_path):
+    """If the user rejects every frame, stacking fails cleanly rather than
+    producing an empty/garbage result."""
+    proj = _build_project(tmp_path, n=4)
+    try:
+        for f in proj.iter_frames():
+            proj.update_frame(f.id, accept=False)
+        with pytest.raises(ValueError):
+            run_stack(proj, StackOptions(sigma_clip=False, output_name="none"))
+    finally:
+        proj.close()
+
+
+def test_stack_drizzle_vs_sigma_clip_parity(tmp_path):
+    """Drizzle and sigma-clip are two paths to the same scene: both must produce
+    a finite, positive, non-degenerate result of the same order of magnitude.
+    Guards against a drizzle path that silently zeroes or NaNs the image.
+
+    NOTE: the two paths do *not* currently agree tightly on absolute brightness
+    (drizzle's mean runs several× lower on identical frames — see the
+    "drizzle vs mean flux scale" backlog item); this test only asserts they are
+    within an order of magnitude, not exact parity.
+    """
+    from astropy.io import fits
+
+    proj = _build_project(tmp_path, n=5)
+    try:
+        clip = run_stack(
+            proj,
+            StackOptions(sigma_clip=True, background_flatten=False,
+                         max_workers=2, output_name="parity_clip"),
+        )
+        driz = run_stack(
+            proj,
+            StackOptions(drizzle=True, drizzle_scale=1.0, drizzle_pixfrac=1.0,
+                         background_flatten=False, max_workers=2,
+                         output_name="parity_driz"),
+        )
+    finally:
+        proj.close()
+
+    with fits.open(clip.fits_path) as hdul:
+        a = np.asarray(hdul[0].data, dtype=np.float64)
+    with fits.open(driz.fits_path) as hdul:
+        b = np.asarray(hdul[0].data, dtype=np.float64)
+
+    # Both paths must yield real, positive signal (not all-zero / all-NaN).
+    assert np.isfinite(a).any() and np.isfinite(b).any()
+    med_a = float(np.nanmedian(a[np.isfinite(a) & (a > 0)]))
+    med_b = float(np.nanmedian(b[np.isfinite(b) & (b > 0)]))
+    assert med_a > 0 and med_b > 0
+    ratio = med_a / med_b
+    assert 0.1 < ratio < 10.0, f"brightness mismatch: clip={med_a} driz={med_b}"
+
+
 def test_stack_sanitizes_path_traversal_output_name(tmp_path):
     # output_name reaches here as free-text from the web API (StackOptions
     # .output_name); a value containing a path separator must never be able

@@ -32,8 +32,13 @@ _(none — claim an item here with your branch name)_
   combine done (v0.16.1); calibration/mono still to audit.*
 - Channel combine: reproject stacks that don't share a canvas (via WCS) instead
   of erroring, so filters shot in separate sessions can be combined. (M–L)
-- Property/edge tests for `run_stack`: empty input, all-rejected, 1 frame,
-  drizzle vs sigma-clip parity on a synthetic scene. (M)
+- **Investigate drizzle-vs-mean flux scale** — on identical frames the drizzle
+  path's median is several× lower than the sigma-clip/mean path (see
+  `test_stack_drizzle_vs_sigma_clip_parity`, which only asserts same-order-of-
+  magnitude for now). Drizzle at `scale=1.0, pixfrac=1.0` should conserve surface
+  brightness; a ~5× gap plus an "overflow encountered in divide" warning in
+  `drizzle_path.result()` suggests a normalisation/weight issue worth a dedicated
+  look. (M, correctness)
 - Seestar client (`webapp/seestar/client.py`) has no reconnect/retry on a
   dropped TCP socket — a flaky Wi-Fi link to the scope currently requires
   the user to manually reconnect via the UI. Core hardware-integration
@@ -106,6 +111,12 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- `run_stack` edge-case tests — single accepted frame (degenerate stack, coverage
+  tops at 1, finite output), all-frames-rejected (raises cleanly instead of
+  garbage), and a drizzle-vs-sigma-clip order-of-magnitude parity guard. The
+  parity test surfaced a real drizzle flux-scale discrepancy, now filed as its own
+  backlog item. (v0.16.3, this run)
 
 - Editor-export provenance — the derived `master.fits` from an editor recipe now
   carries the source integration cards (OBJECT/NFRAMES/EXPOSURE/EXPTOTAL/COLORTYP/
