@@ -126,3 +126,43 @@ def test_render_404_without_fits(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
     r = client.get(f"/api/targets/{safe}/stack-runs/99999/render")
     assert r.status_code == 404
+
+
+def test_stack_info_reads_provenance_cards(client, solved_library):
+    """The info endpoint surfaces the provenance header cards (integration time,
+    frame count, method) from the run's master FITS."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    # Stamp provenance onto the FITS header as a real stack would.
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            with fits.open(run.fits_path, mode="update") as hdul:
+                hdul[0].header["OBJECT"] = "M31"
+                hdul[0].header["NFRAMES"] = 840
+                hdul[0].header["EXPTOTAL"] = 2520.0
+                hdul[0].header["STACKER"] = "sigma-clip"
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/info")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["integration_s"] == 2520.0
+    assert body["n_frames"] == 840
+    keys = {c["key"]: c["value"] for c in body["cards"]}
+    assert keys["OBJECT"] == "M31"
+    assert keys["STACKER"] == "sigma-clip"
+    # cards carry a comment field (may be empty) and preserve display order
+    order = [c["key"] for c in body["cards"]]
+    assert order.index("OBJECT") < order.index("EXPTOTAL") < order.index("STACKER")
+
+
+def test_stack_info_404_without_fits(client, solved_library):
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    r = client.get(f"/api/targets/{safe}/stack-runs/99999/info")
+    assert r.status_code == 404

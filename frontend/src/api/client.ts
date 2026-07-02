@@ -142,6 +142,19 @@ export interface StackRun {
   notes: string | null;
 }
 
+export interface StackInfoCard {
+  key: string;
+  value: string | number | boolean;
+  comment: string | null;
+}
+
+export interface StackRunInfo {
+  run_id: number;
+  integration_s: number | null;
+  n_frames: number | null;
+  cards: StackInfoCard[];
+}
+
 export interface GalleryItem {
   safe: string;
   target_name: string;
@@ -356,6 +369,8 @@ export const api = {
   listStackRuns: (safe: string) => req<StackRun[]>(`/api/targets/${safe}/stack-runs`),
   deleteStackRun: (safe: string, id: number) =>
     req(`/api/targets/${safe}/stack-runs/${id}`, { method: "DELETE" }),
+  stackRunInfo: (safe: string, id: number) =>
+    req<StackRunInfo>(`/api/targets/${safe}/stack-runs/${id}/info`),
   stackArtifactUrl: (safe: string, id: number, kind: "preview" | "fits" | "tiff") =>
     `/api/targets/${safe}/stack-runs/${id}/${kind}`,
   stackRenderUrl: (safe: string, id: number, stretch: number, black: number) =>

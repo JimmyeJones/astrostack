@@ -51,13 +51,9 @@ _(none — claim an item here with your branch name)_
   flat-dark goes with which lights. Registry already stores exposure_s/gain/temp
   on each master; surface a "recommended" badge and pre-select the best match in
   the Stack calibration picker. (M, approachability/correctness)
-- Show integration time + frame count on stack-run cards in History/Gallery now
-  that the data is written (EXPTOTAL/NFRAMES); a beginner reads "2.3 h, 840
-  subs" at a glance instead of digging into the FITS. (S, approachability)
-- "Stack info" panel: read the FITS header cards (NCOMBINE/NFRAMES, EXPOSURE,
-  EXPTOTAL, DATE-OBS/END, STACKER) from a run's `master.fits` and show them in
-  the History detail view — no new storage needed, just a header read + a small
-  endpoint. (S, approachability)
+- Show integration time + frame count on **Gallery** cards too, reusing the new
+  `/stack-runs/{id}/info` endpoint + `formatIntegration` helper (History already
+  does this via the Info panel). (S, approachability)
 - Auto-suggest a sensible sigma-clip kappa (and whether to enable rejection)
   from the accepted-frame count — e.g. skip clipping under ~5 frames, loosen
   kappa for very large stacks — with a one-line "why" in the form. Removes a
@@ -111,6 +107,13 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Stack info panel** — new `GET /stack-runs/{id}/info` reads the provenance
+  cards from a run's `master.fits` (OBJECT, NFRAMES/NCOMBINE, EXPOSURE, EXPTOTAL,
+  DATE-OBS/END, STACKER/STACKMTD, COLORTYP, EDITFROM…) and an "Info" toggle on
+  each History card shows them, led by a friendly integration-time line
+  ("Integration: 2.3 h · 840 subs"). No new storage — just a header read.
+  (v0.17.0, this run)
 
 - `run_stack` edge-case tests — single accepted frame (degenerate stack, coverage
   tops at 1, finite output), all-frames-rejected (raises cleanly instead of
