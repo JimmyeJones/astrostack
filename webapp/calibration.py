@@ -94,9 +94,16 @@ def resolve_master_paths(
     library_root: str | Path,
     dark_master_id: Any = None,
     flat_master_id: Any = None,
-) -> tuple[str | None, str | None]:
-    """Map dark/flat master ids → on-disk FITS paths. Raises ``KeyError`` with
-    a human message if an id is given but no such master exists."""
+    flat_dark_master_id: Any = None,
+) -> tuple[str | None, str | None, str | None]:
+    """Map dark/flat/flat-dark master ids → on-disk FITS paths. Raises
+    ``KeyError`` with a human message if an id is given but no such master
+    exists.
+
+    ``flat_dark_master_id`` is a dark/bias matched to the flat's exposure,
+    subtracted from the flat before normalising (see
+    :meth:`CalibrationMasters.load`).
+    """
     def _one(mid: Any, kind: str) -> str | None:
         if mid in (None, "", "none"):
             return None
@@ -108,7 +115,11 @@ def resolve_master_paths(
             raise KeyError(f"{kind} master {mid} file is missing")
         return str(fp)
 
-    return _one(dark_master_id, "dark"), _one(flat_master_id, "flat")
+    return (
+        _one(dark_master_id, "dark"),
+        _one(flat_master_id, "flat"),
+        _one(flat_dark_master_id, "flat-dark"),
+    )
 
 
 def _next_id(entries: list[dict[str, Any]]) -> int:

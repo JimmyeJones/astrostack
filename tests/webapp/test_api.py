@@ -149,61 +149,56 @@ def test_settings_rejects_out_of_bounds_values(client):
     assert client.get("/api/settings").json()["astap_timeout_s"] == 60.0
 
 
-def test_settings_export_envelope_excludes_secrets(client):
+def test_settings_export_excludes_secrets_and_host_paths(client):
     r = client.get("/api/settings/export")
     assert r.status_code == 200
+    assert "attachment" in r.headers.get("content-disposition", "")
     body = r.json()
-    assert body["astrostack_settings"] is True
-    assert "app_version" in body and "exported_utc" in body
-    s = body["settings"]
-    # A real setting is present; auth + derived fields are not.
-    assert "auto_solve" in s
-    for secret in ("auth_password_hash", "auth_salt", "auth_username"):
-        assert secret not in s
-    for derived in ("resolved_incoming_dir", "resolved_library_root"):
-        assert derived not in s
+    # Secrets and host-specific paths are never in a backup.
+    for k in ("auth_password_hash", "auth_salt", "auth_username",
+              "data_root", "incoming_dir", "library_root", "astap_path"):
+        assert k not in body
+    # Normal tunables are present.
+    assert "auto_stack" in body
+    assert "watch_quiet_period_s" in body
 
 
-def test_settings_import_roundtrip_from_export(client):
-    # Change a value, export, mutate the exported copy, re-import → applied.
-    client.put("/api/settings", json={"auto_stack": False, "watch_quiet_period_s": 30})
+def test_settings_import_roundtrip(client):
+    # Change a couple of values, export, mutate live, then restore the backup.
+    client.put("/api/settings", json={"auto_stack": True, "watch_quiet_period_s": 45})
     backup = client.get("/api/settings/export").json()
-    backup["settings"]["auto_stack"] = True
-    backup["settings"]["watch_quiet_period_s"] = 90
+
+    client.put("/api/settings", json={"auto_stack": False, "watch_quiet_period_s": 99})
+    assert client.get("/api/settings").json()["watch_quiet_period_s"] == 99
+
     r = client.post("/api/settings/import", json=backup)
     assert r.status_code == 200
-    assert r.json()["auto_stack"] is True
-    assert client.get("/api/settings").json()["watch_quiet_period_s"] == 90
+    restored = client.get("/api/settings").json()
+    assert restored["auto_stack"] is True
+    assert restored["watch_quiet_period_s"] == 45
 
 
-def test_settings_import_accepts_bare_object(client):
-    r = client.post("/api/settings/import", json={"auto_qc": False})
-    assert r.status_code == 200
-    assert r.json()["auto_qc"] is False
-
-
-def test_settings_import_rejects_bad_values_without_applying(client):
-    before = client.get("/api/settings").json()["astap_timeout_s"]
-    r = client.post("/api/settings/import", json={"settings": {"astap_timeout_s": 0}})
-    assert r.status_code == 422
-    assert client.get("/api/settings").json()["astap_timeout_s"] == before
-
-
-def test_settings_import_ignores_auth_and_unknown_keys(client):
-    # Auth creds and junk keys are dropped; a valid field still applies.
+def test_settings_import_ignores_secrets_host_paths_and_unknown(client):
+    before = client.get("/api/settings").json()
     r = client.post("/api/settings/import", json={
-        "auth_password_hash": "deadbeef", "auth_username": "hacker",
-        "totally_unknown_key": 1, "auto_ingest": False,
+        "auto_qc": False,                       # applied
+        "auth_password_hash": "sneaky",         # ignored (secret)
+        "data_root": "/etc",                    # ignored (host path)
+        "totally_unknown_key": 1,               # ignored (unknown)
     })
     assert r.status_code == 200
-    assert r.json()["auto_ingest"] is False
-    # Auth stays managed only via /api/auth/password → still disabled/open.
-    assert client.get("/api/auth/status").json()["enabled"] is False
+    after = r.json()
+    assert after["auto_qc"] is False
+    assert "auth_password_hash" not in after
+    # data_root is host-owned and must be untouched by an import.
+    assert after["resolved_library_root"] == before["resolved_library_root"]
 
 
-def test_settings_import_empty_payload_422s(client):
-    r = client.post("/api/settings/import", json={"settings": {}})
+def test_settings_import_rejects_invalid_values(client):
+    r = client.post("/api/settings/import", json={"astap_timeout_s": 0})
     assert r.status_code == 422
+    # A rejected import must not partially apply.
+    assert client.get("/api/settings").json()["astap_timeout_s"] == 60.0
 
 
 def test_jobs_list_limit_is_clamped(client):

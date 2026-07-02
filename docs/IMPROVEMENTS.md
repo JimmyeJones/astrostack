@@ -29,9 +29,7 @@ _(none — claim an item here with your branch name)_
 ### Correctness & robustness (highest priority)
 - Audit NaN/coverage handling on the newer paths (calibration, mono) for
   single-frame and mosaic-edge cases. Add edge-case tests. (S–M) — *channel
-  combine done this run (v0.14.1); calibration/mono still to audit.*
-- Flat calibration: optionally dark-subtract the flat before normalising
-  (flat-dark support) for more correct flats. Currently mean-normalised only. (M)
+  combine done (v0.16.1); calibration/mono still to audit.*
 - Channel combine: reproject stacks that don't share a canvas (via WCS) instead
   of erroring, so filters shot in separate sessions can be combined. (M–L)
 - Property/edge tests for `run_stack`: empty input, all-rejected, 1 frame,
@@ -43,15 +41,21 @@ _(none — claim an item here with your branch name)_
   testable in isolation from real hardware. (M, correctness)
 
 ### Features that serve real workflows
-- Record & surface total integration time per stack run. The engine now knows
-  it (median-sub × frames), but `StackRunRow`/the History UI don't show it. Add
-  an additive `total_exposure_s` column (schema migration + backfill from FITS
-  where possible) and display "N subs · 3.2h" on the History/Gallery cards so a
-  user can compare integration at a glance. (M, approachability/correctness)
-- "Stack info" panel: read the new FITS header cards (NCOMBINE, EXPTIME,
-  TOTALEXP, DATE-OBS/END, STACKMTD) from a run's `master.fits` and show them in
+- Auto-suggest calibration masters that match a target's frames (by exposure /
+  gain / sensor-temp), so a beginner doesn't have to know which dark/flat/
+  flat-dark goes with which lights. Registry already stores exposure_s/gain/temp
+  on each master; surface a "recommended" badge and pre-select the best match in
+  the Stack calibration picker. (M, approachability/correctness)
+- Carry provenance headers into editor-export FITS too — `_apply_editor_to_run`
+  writes a derived `master.fits` with no OBJECT/derived-from/recipe summary.
+  Reuse the `header_meta` arg to record what it came from. (S, correctness)
+- Show integration time + frame count on stack-run cards in History/Gallery now
+  that the data is written (EXPTOTAL/NFRAMES); a beginner reads "2.3 h, 840
+  subs" at a glance instead of digging into the FITS. (S, approachability)
+- "Stack info" panel: read the FITS header cards (NCOMBINE/NFRAMES, EXPOSURE,
+  EXPTOTAL, DATE-OBS/END, STACKER) from a run's `master.fits` and show them in
   the History detail view — no new storage needed, just a header read + a small
-  endpoint. Pairs well with the metadata shipped this run. (S, approachability)
+  endpoint. (S, approachability)
 - Auto-suggest a sensible sigma-clip kappa (and whether to enable rejection)
   from the accepted-frame count — e.g. skip clipping under ~5 frames, loosen
   kappa for very large stacks — with a one-line "why" in the form. Removes a
@@ -77,8 +81,6 @@ _(none — claim an item here with your branch name)_
 - ~~Add a retention/pruning policy for `jobs.sqlite`~~ — **already implemented**
   (`JobManager._evict_old` prunes the DB to ~10× `max_history` after every job);
   a future refinement could make the cap a configurable setting. (S, scale)
-- `GET /api/stats` re-opens every target's SQLite project on each call — cache or
-  batch it so the dashboard stays fast with many targets. (M, scale)
 - Add a `SessionStart` hook (or a `scripts/setup.sh`) that provisions the venv +
   `npm ci` so every autonomous iteration starts from a known-green baseline. (S)
 - Reduce the frontend bundle warning (code-split the heavy Sky/aladin chunks). (S)
@@ -110,27 +112,35 @@ _Newest first. One line each: what + commit/PR._
 
 - Channel-combine provenance — the LRGB/RGB combined FITS now carries
   `NCOMBINE` (source stacks) and `STACKMTD` ("channel-combine (RGB)"), matching
-  the new stack-export metadata. (v0.14.3, this run)
-
+  the stack-export provenance headers. (v0.16.1, this run)
 - Accessibility sweep — added `aria-label` to the remaining icon-only
   `ActionIcon` buttons (frame accept/reject, delete calibration master, delete
   preset) so they have accessible names for screen readers, plus a test
-  asserting the delete-master button is reachable by name. (v0.14.2, this run)
-
+  asserting the delete-master button is reachable by name. (v0.16.1, this run)
 - Channel-combine NaN fix — LRGB pixels covered in G/B/L but uncovered in a
   colour channel now become cleanly uncovered (NaN) instead of `[NaN, 0, 0]`
   (which zeroed real G/B signal at mosaic edges). Added NaN/coverage +
-  single-pixel edge tests. (v0.14.1, this run)
-
-- Settings backup & restore — `GET /api/settings/export` (self-identifying JSON
-  envelope, auth/derived fields excluded) + `POST /api/settings/import`
-  (merge, validates → 422, ignores auth/unknown keys), with Export/Import
-  buttons on the Settings page. (v0.14.0, this run)
-- FITS export metadata — `master.fits` now carries standard integration cards
-  (`NCOMBINE`, `EXPTIME`, `TOTALEXP`, `GAIN`, `CCD-TEMP`, `DATE-OBS`/`DATE-END`,
-  `STACKMTD`, `CFA`) built by `build_stack_header_meta`, so the scientific
-  output is self-describing in Siril/PixInsight. (v0.14.0, this run)
-
+  single-pixel edge tests. (v0.16.1, this run)
+- **Flat-dark support** — a master flat can now be dark-subtracted before
+  normalising (`CalibrationMasters.load` gains `flat_dark_path`,
+  `StackOptions.flat_dark_path`, server-resolved from a `flat_dark_master_id`).
+  Removes the flat's dark-current/bias pedestal for a more correct flat; opt-in
+  via a new Flat-dark selector on the Stack page. (v0.16.0, this run)
+- **Dashboard stats caching** — `GET /api/stats` no longer re-opens every target's
+  SQLite on each poll. The expensive per-target roll-up is cached on the app,
+  keyed by a cheap registry signature (per-target activity stamp + latest preview)
+  so a completed stack refreshes it promptly, with a 30 s TTL backstop.
+  (v0.15.1, this run)
+- **Settings backup & restore** — `GET /api/settings/export` downloads a portable
+  JSON backup and `POST /api/settings/import` restores it; secrets and
+  host-specific paths (data root, incoming/library, ASTAP path) are excluded so a
+  backup is safe to share and restores on any install. Backup & restore panel on
+  the Settings page. (v0.15.0, this run)
+- **FITS output provenance headers** — `master.fits` now records OBJECT (target),
+  NFRAMES, EXPOSURE (per-sub), EXPTOTAL (integration time), STACKER (method) and
+  COLORTYP so the scientific output self-documents for Siril/PixInsight/APP.
+  Additive `header_meta` arg on `write_stack_outputs`; defensive card merge.
+  (v0.14.0, this run)
 - CI safety net (`.github/workflows/ci.yml`) — full Python + frontend suites run
   on every PR and push to `main`; independent check on autonomous self-merges.
 

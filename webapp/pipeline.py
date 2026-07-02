@@ -457,7 +457,7 @@ def _channel_combine(
         paths = write_stack_outputs(
             project_dir=dst.project_dir, rgb=out, coverage=coverage,
             wcs_text=wcs_text, out_basename=base, tiff_mode="linear",
-            meta=combine_meta,
+            header_meta=combine_meta,
         )
         new_id = dst.add_stack_run(StackRunRow(
             id=None,

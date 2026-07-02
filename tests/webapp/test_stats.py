@@ -45,3 +45,50 @@ def test_stats_rolls_up_library(client, solved_library):
     assert len(b["recent_stacks"]) == 1
     assert b["recent_stacks"][0]["safe"] == safe
     assert "integration_hours" in b
+
+
+def _add_stack_run(root, safe, ts="2026-05-02T00:00:00Z", preview="master_preview.png"):
+    lib = Library.open_or_create(root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            proj.add_stack_run(StackRunRow(
+                id=None, timestamp_utc=ts, output_basename="master",
+                fits_path=None, tiff_path=None, preview_path=preview,
+                n_frames_used=3, canvas_h=320, canvas_w=480,
+                coverage_min=1, coverage_max=3, options_json=json.dumps({}),
+            ))
+        finally:
+            proj.close()
+        # Bumps last_activity_utc + last_stack_preview → cache signature changes.
+        lib.refresh_target_stats(safe)
+    finally:
+        lib.close()
+
+
+def test_stats_caches_rollup_until_activity_changes(client, solved_library, monkeypatch):
+    import webapp.routers.stats as stats_mod
+
+    calls = {"n": 0}
+    real = stats_mod._rollup_stacks
+
+    def counting(lib, targets):
+        calls["n"] += 1
+        return real(lib, targets)
+
+    monkeypatch.setattr(stats_mod, "_rollup_stacks", counting)
+
+    # First hit does the expensive roll-up; a second hit with nothing changed
+    # is served from cache (no extra project opens).
+    assert client.get("/api/stats").json()["n_stack_runs"] == 0
+    assert calls["n"] == 1
+    assert client.get("/api/stats").json()["n_stack_runs"] == 0
+    assert calls["n"] == 1
+
+    # A completed stack bumps last_activity_utc, which changes the cache
+    # signature — the next call re-rolls up and reflects the new run.
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _add_stack_run(solved_library, safe)
+    body = client.get("/api/stats").json()
+    assert calls["n"] == 2
+    assert body["n_stack_runs"] == 1

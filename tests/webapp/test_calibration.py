@@ -44,9 +44,10 @@ def test_store_register_list_resolve_delete(tmp_path):
     listed = calibration.list_masters(root)
     assert len(listed) == 1 and listed[0]["exists"] is True
 
-    dark_path, flat_path = calibration.resolve_master_paths(root, 1, None)
+    dark_path, flat_path, flat_dark_path = calibration.resolve_master_paths(root, 1, None)
     assert dark_path and Path(dark_path).exists()
     assert flat_path is None
+    assert flat_dark_path is None
 
     assert calibration.delete_master(root, 1) is True
     assert calibration.list_masters(root) == []
@@ -57,6 +58,24 @@ def test_resolve_unknown_raises(tmp_path):
 
     with pytest.raises(KeyError):
         calibration.resolve_master_paths(tmp_path / "lib", 999, None)
+
+
+def test_resolve_flat_dark_master(tmp_path):
+    from seestack.calibrate.masters import MasterMeta
+
+    root = tmp_path / "lib"
+    arr = np.full((4, 4), 5.0, dtype=np.float32)
+    flat = calibration.register_master(
+        root, name="Flat", array=np.full((4, 4), 100.0, dtype=np.float32),
+        meta=MasterMeta("flat", 5, 4, 4, "median"))
+    fd = calibration.register_master(
+        root, name="FlatDark", array=arr, meta=MasterMeta("dark", 5, 4, 4, "median"))
+
+    dark_path, flat_path, flat_dark_path = calibration.resolve_master_paths(
+        root, None, flat["id"], fd["id"])
+    assert dark_path is None
+    assert flat_path and Path(flat_path).exists()
+    assert flat_dark_path and Path(flat_dark_path).exists()
 
 
 def test_build_master_endpoint(client, data_root, tmp_path):

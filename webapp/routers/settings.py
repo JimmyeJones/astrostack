@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import json
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import ValidationError
 
 from webapp import deps
@@ -16,10 +16,6 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 # exposed in the settings GET nor accepted through the settings PUT — otherwise
 # a client could read the hash or set a password to one it already knows.
 _AUTH_KEYS = ("auth_password_hash", "auth_salt", "auth_username")
-
-# Read-only fields the GET decorates onto the payload; they're derived, not
-# stored, so they must be dropped before an imported config is applied.
-_DERIVED_KEYS = ("resolved_incoming_dir", "resolved_library_root")
 
 
 def _serialize(s) -> dict[str, Any]:  # noqa: ANN001
@@ -51,48 +47,49 @@ def update_settings(patch: dict[str, Any], request: Request) -> dict[str, Any]:
     return _serialize(s)
 
 
-@router.get("/export")
-def export_settings(request: Request) -> dict[str, Any]:
-    """Download the current config as a self-identifying backup envelope.
+# Settings that only make sense for the machine they were written on — they're
+# env/host-specific and would point a restored config at the wrong place. Kept
+# out of export/import so a backup taken on one install restores cleanly on
+# another (and never repoints the data root out from under a running app).
+_HOST_KEYS = ("data_root", "incoming_dir", "library_root", "astap_path")
 
-    Auth credentials and derived paths are excluded, so the file is safe to
-    keep and to restore onto another install. Import accepts this envelope (or
-    a bare settings object) back via ``POST /api/settings/import``.
-    """
-    from webapp import __version__
 
-    store = deps.get_settings_store(request)
-    data = _serialize(store.get())
-    for k in _DERIVED_KEYS:
+def _export_payload(s) -> dict[str, Any]:  # noqa: ANN001
+    """The persistable settings suitable for backup — no secrets, no host paths."""
+    data = s.model_dump()
+    for k in (*_AUTH_KEYS, *_HOST_KEYS):
         data.pop(k, None)
-    return {
-        "astrostack_settings": True,
-        "app_version": __version__,
-        "exported_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "settings": data,
-    }
+    return data
+
+
+@router.get("/export")
+def export_settings(request: Request) -> Response:
+    """Download the current config as a portable JSON backup.
+
+    Excludes auth credentials and host-specific paths (see ``_HOST_KEYS``) so the
+    file can be restored on any install without leaking the password hash or
+    repointing the data root.
+    """
+    store = deps.get_settings_store(request)
+    payload = json.dumps(_export_payload(store.get()), indent=2)
+    return Response(
+        content=payload,
+        media_type="application/json",
+        headers={"Content-Disposition": "attachment; filename=astrostack-settings.json"},
+    )
 
 
 @router.post("/import")
 def import_settings(payload: dict[str, Any], request: Request) -> dict[str, Any]:
-    """Restore settings from an exported backup (or a bare settings object).
+    """Restore settings from an exported backup.
 
-    Only known settings fields are applied; auth credentials, derived paths and
-    any unknown keys are ignored, and an out-of-range value 422s rather than
-    corrupting the live config. This is a merge (like PUT), so fields absent
-    from the file keep their current values.
+    Additive and safe: only known, non-secret, non-host fields are applied — any
+    auth credentials, host paths, or unknown keys in the uploaded file are
+    ignored (the existing values are kept). Validation failures surface as 422.
     """
-    # Accept both the export envelope ({"settings": {...}}) and a bare dict.
-    incoming = payload.get("settings") if isinstance(payload.get("settings"), dict) else payload
-    if not isinstance(incoming, dict):
-        raise HTTPException(status_code=422, detail="no settings object found in payload")
-    clean = {
-        k: v for k, v in incoming.items()
-        if k not in _AUTH_KEYS and k not in _DERIVED_KEYS
-    }
-    if not clean:
-        raise HTTPException(status_code=422, detail="no importable settings fields found")
     store = deps.get_settings_store(request)
+    skip = (*_AUTH_KEYS, *_HOST_KEYS)
+    clean = {k: v for k, v in payload.items() if k not in skip}
     try:
         s = store.update(clean)
     except ValidationError as exc:

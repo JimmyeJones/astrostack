@@ -58,73 +58,6 @@ def safe_basename(name: str) -> str:
     return _sanitize_basename(name)
 
 
-def build_stack_header_meta(
-    frames: list,
-    n_used: int,
-    *,
-    method: str | None = None,
-    mono: bool | None = None,
-) -> dict[str, tuple[Any, str]]:
-    """Summarise a stack into standard FITS header cards.
-
-    Returns a mapping of ``{FITS_KEYWORD: (value, comment)}`` describing the
-    integration — how many subs went in, the per-sub and total exposure, and
-    the acquisition instrument/conditions aggregated across the input frames.
-    These are the fields DSS / Siril / PixInsight surface, so writing them makes
-    our ``master.fits`` self-describing instead of an anonymous pixel cube.
-
-    Only fields that can actually be derived are emitted; a frame list with no
-    exposure metadata (e.g. synthetic test frames) simply yields ``NCOMBINE``.
-    ``frames`` is the list of accepted, plate-solved frames handed to the
-    accumulator; ``n_used`` is how many were actually combined (``n_used`` can
-    be smaller when some frames fail to reproject). Total integration is
-    reported as ``median-sub-exposure × n_used`` so a partial run isn't
-    over-counted.
-    """
-    meta: dict[str, tuple[Any, str]] = {}
-    n_used = int(max(0, n_used))
-    meta["NCOMBINE"] = (n_used, "number of frames combined")
-
-    def _vals(attr: str) -> list[float]:
-        out: list[float] = []
-        for f in frames:
-            v = getattr(f, attr, None)
-            if v is not None and np.isfinite(v):
-                out.append(float(v))
-        return out
-
-    exps = _vals("exposure_s")
-    if exps:
-        sub = float(np.median(exps))
-        meta["EXPTIME"] = (round(sub, 4), "[s] single-sub exposure (median)")
-        # Total integration counts only the frames actually combined.
-        meta["TOTALEXP"] = (round(sub * n_used, 3), "[s] total integration time")
-
-    gains = _vals("gain")
-    if gains:
-        meta["GAIN"] = (round(float(np.median(gains)), 3), "sensor gain (median)")
-
-    temps = _vals("sensor_temp_c")
-    if temps:
-        meta["CCD-TEMP"] = (round(float(np.median(temps)), 2), "[C] sensor temp (median)")
-
-    stamps = sorted(
-        str(getattr(f, "timestamp_utc", None))
-        for f in frames
-        if getattr(f, "timestamp_utc", None)
-    )
-    if stamps:
-        meta["DATE-OBS"] = (stamps[0], "UTC start of first sub")
-        meta["DATE-END"] = (stamps[-1], "UTC start of last sub")
-
-    if method:
-        meta["STACKMTD"] = (str(method)[:68], "stacking / rejection method")
-    if mono is not None:
-        meta["CFA"] = (not mono, "True if colour (CFA/debayered), False if mono")
-
-    return meta
-
-
 def write_stack_outputs(
     project_dir: Path,
     rgb: np.ndarray,
@@ -133,13 +66,20 @@ def write_stack_outputs(
     wcs_text: str | None,
     out_basename: str = "master",
     tiff_mode: str = "linear",
-    meta: dict[str, tuple[Any, str]] | None = None,
+    header_meta: dict[str, Any] | None = None,
 ) -> dict[str, Path]:
     """
     Write the FITS + TIFF + preview PNG. Returns a dict of ``{kind: path}``.
 
     Parameters
     ----------
+    header_meta
+        Optional extra FITS header cards to record in ``master.fits`` — stack
+        provenance such as target name, number of frames, integration time and
+        stacking method. Keys are treated as FITS keyword names (see
+        :func:`_merge_header_meta`); values may be ``(value, comment)`` tuples.
+        Purely additive: downstream tools that don't read these keys are
+        unaffected, and omitting the argument reproduces the old output exactly.
     tiff_mode
         ``"linear"`` (default) writes a 16-bit TIFF with no stretching, scaled
         to fill 16-bit range based on the data's robust min/max. This matches
@@ -160,7 +100,7 @@ def write_stack_outputs(
 
     _archive_if_exists([fits_path, tiff_path, preview_path, cov_fits_path])
 
-    _write_fits(fits_path, rgb, wcs_text, meta=meta)
+    _write_fits(fits_path, rgb, wcs_text, header_meta)
     _write_coverage_fits(cov_fits_path, coverage)
     _write_tiff(tiff_path, rgb, mode=tiff_mode)
     # Preview PNG always uses autostretch — it's there for the "did the stack
@@ -182,8 +122,7 @@ def _write_fits(
     path: Path,
     rgb: np.ndarray,
     wcs_text: str | None,
-    *,
-    meta: dict[str, tuple[Any, str]] | None = None,
+    header_meta: dict[str, Any] | None = None,
 ) -> None:
     """Write a 3-channel float32 FITS cube with WCS header."""
     from astropy.io import fits
@@ -196,13 +135,8 @@ def _write_fits(
     h["DATE"] = (datetime.now(timezone.utc).isoformat(), "UTC")
     h["NAXIS3"] = (3, "R, G, B")
     h["BUNIT"] = ("ADU", "linear units (uncalibrated)")
-    # Integration/instrument summary cards (frames combined, exposure totals,
-    # gain/temp, obs window) so the scientific FITS is self-describing.
-    for key, (value, comment) in (meta or {}).items():
-        try:
-            h[key] = (value, comment)
-        except Exception:  # noqa: BLE001 — a bad card must never fail the write
-            log.warning("Could not write FITS header card %s", key)
+    if header_meta:
+        _merge_header_meta(h, header_meta)
     if wcs_text:
         # Merge the reference WCS in. We strip NAXIS keys so they don't clash
         # with the cube's own.
@@ -215,6 +149,38 @@ def _write_fits(
         except Exception:  # noqa: BLE001
             log.warning("Could not merge WCS into output FITS")
     hdu.writeto(path, overwrite=True)
+
+
+def _merge_header_meta(header, meta: dict[str, Any]) -> None:  # noqa: ANN001
+    """Merge caller-supplied provenance cards into a FITS header, defensively.
+
+    FITS keywords are 8-char uppercase (A–Z, 0–9, ``-``, ``_``); values must be
+    str/int/float/bool. We skip ``None`` values and any key/value that can't be
+    coerced into a valid card, so a stray field never aborts writing the stack.
+    Values may be a bare scalar or a ``(value, comment)`` tuple.
+    """
+    for raw_key, raw_val in meta.items():
+        key = re.sub(r"[^A-Z0-9_-]", "", str(raw_key).upper())[:8]
+        if not key:
+            continue
+        comment = ""
+        val = raw_val
+        if isinstance(raw_val, tuple) and len(raw_val) == 2:
+            val, comment = raw_val
+        if val is None:
+            continue
+        if isinstance(val, bool):
+            pass  # bool is a valid FITS logical
+        elif isinstance(val, (int, float, str)):
+            pass
+        else:
+            val = str(val)
+        if isinstance(val, str):
+            val = val[:68]  # keep the card within the 80-column limit
+        try:
+            header[key] = (val, comment) if comment else val
+        except (ValueError, TypeError):  # unrepresentable value — drop the card
+            log.debug("skipping non-FITS-safe header meta %r=%r", key, raw_val)
 
 
 def _write_coverage_fits(path: Path, coverage: np.ndarray) -> None:

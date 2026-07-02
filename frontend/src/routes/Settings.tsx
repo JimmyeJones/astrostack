@@ -1,12 +1,12 @@
 import {
-  Accordion, Alert, Badge, Button, Center, Divider, Group, Loader, NumberInput,
-  Paper, SimpleGrid, Stack, Switch, TagsInput, Text, TextInput, Title,
+  Accordion, Alert, Badge, Button, Center, Divider, FileButton, Group, Loader,
+  NumberInput, Paper, SimpleGrid, Stack, Switch, TagsInput, Text, TextInput, Title,
 } from "@mantine/core";
 import {
   IconDeviceFloppy, IconDownload, IconInfoCircle, IconTelescope, IconUpload,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { notifications } from "@mantine/notifications";
 import { api } from "../api/client";
 import { HintLabel, StackOptionControl } from "../components/StackOptionControl";
@@ -38,6 +38,75 @@ const HINTS: Record<string, string> = {
   seestar_scan_interval_s: "How often to re-scan the network for devices.",
   seestar_poll_interval_s: "How often to poll each connected scope for telemetry.",
 };
+
+function BackupRestore() {
+  const qc = useQueryClient();
+  const restore = useMutation({
+    mutationFn: (config: Record<string, unknown>) => api.importSettings(config),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["settings"] });
+      notifications.show({ color: "teal", message: "Settings restored from backup." });
+    },
+    onError: (e: Error) =>
+      notifications.show({ color: "red", title: "Restore failed", message: e.message }),
+  });
+
+  const onFile = (file: File | null) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result));
+        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+          throw new Error("not a settings object");
+        }
+        restore.mutate(parsed as Record<string, unknown>);
+      } catch {
+        notifications.show({
+          color: "red", title: "Restore failed",
+          message: "That file isn't a valid AstroStack settings backup.",
+        });
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  return (
+    <Paper withBorder p="lg">
+      <Stack>
+        <Text fw={600}>Backup &amp; restore</Text>
+        <Text size="sm" c="dimmed">
+          Download all your settings as a JSON file, or restore them from a
+          previous backup. Passwords and machine-specific paths (data root,
+          incoming/library folders, ASTAP path) are never included, so a backup
+          is safe to share and restores cleanly on any install.
+        </Text>
+        <Group>
+          <Button
+            component="a"
+            href={api.settingsExportUrl()}
+            variant="default"
+            leftSection={<IconDownload size={16} />}
+          >
+            Export settings
+          </Button>
+          <FileButton onChange={onFile} accept="application/json,.json">
+            {(props) => (
+              <Button
+                {...props}
+                variant="default"
+                loading={restore.isPending}
+                leftSection={<IconUpload size={16} />}
+              >
+                Import settings…
+              </Button>
+            )}
+          </FileButton>
+        </Group>
+      </Stack>
+    </Paper>
+  );
+}
 
 function AccessControl() {
   const qc = useQueryClient();
@@ -109,76 +178,6 @@ function AccessControl() {
               Disable
             </Button>
           ) : null}
-        </Group>
-      </Stack>
-    </Paper>
-  );
-}
-
-export function BackupRestore() {
-  const qc = useQueryClient();
-  const fileRef = useRef<HTMLInputElement>(null);
-
-  const exportNow = useMutation({
-    mutationFn: api.exportSettings,
-    onSuccess: (data) => {
-      const text = JSON.stringify(data, null, 2);
-      const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `astrostack-settings-${new Date().toISOString().slice(0, 19).replace(/:/g, "")}.json`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 0);
-    },
-    onError: (e: Error) => notifications.show({ message: `Export failed: ${e.message}`, color: "red" }),
-  });
-
-  const importNow = useMutation({
-    mutationFn: (payload: Record<string, unknown>) => api.importSettings(payload),
-    onSuccess: () => {
-      notifications.show({ message: "Settings restored from backup", color: "teal" });
-      qc.invalidateQueries({ queryKey: ["settings"] });
-      qc.invalidateQueries({ queryKey: ["system"] });
-    },
-    onError: (e: Error) => notifications.show({ message: `Import failed: ${e.message}`, color: "red" }),
-  });
-
-  const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.currentTarget.files?.[0];
-    e.currentTarget.value = ""; // allow re-selecting the same file
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const parsed = JSON.parse(String(reader.result));
-        importNow.mutate(parsed);
-      } catch {
-        notifications.show({ message: "That file isn't valid JSON", color: "red" });
-      }
-    };
-    reader.readAsText(file);
-  };
-
-  return (
-    <Paper withBorder p="lg">
-      <Stack>
-        <Text fw={600}>Backup &amp; restore</Text>
-        <Text size="sm" c="dimmed">
-          Download all settings as a JSON file to keep a backup or copy them to another
-          install. Restoring merges the file over your current settings; access-control
-          credentials are never included or changed.
-        </Text>
-        <Group>
-          <Button variant="light" leftSection={<IconDownload size={16} />}
-            loading={exportNow.isPending} onClick={() => exportNow.mutate()}>
-            Export settings
-          </Button>
-          <Button variant="light" leftSection={<IconUpload size={16} />}
-            loading={importNow.isPending} onClick={() => fileRef.current?.click()}>
-            Import settings
-          </Button>
-          <input ref={fileRef} type="file" accept="application/json,.json"
-            style={{ display: "none" }} onChange={onFile} />
         </Group>
       </Stack>
     </Paper>

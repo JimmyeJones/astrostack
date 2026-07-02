@@ -149,20 +149,31 @@ export function StackView() {
               <Text fw={600} size="sm">Calibration</Text>
             </Group>
             {hasMasters ? (
-              <Group grow align="flex-end">
-                <Select
-                  label="Master dark" placeholder="None" clearable
-                  data={darkOpts} value={asStr(values.dark_master_id)}
-                  onChange={(v) => set("dark_master_id", v)}
-                  disabled={darkOpts.length === 0}
-                />
-                <Select
-                  label="Master flat" placeholder="None" clearable
-                  data={flatOpts} value={asStr(values.flat_master_id)}
-                  onChange={(v) => set("flat_master_id", v)}
-                  disabled={flatOpts.length === 0}
-                />
-              </Group>
+              <Stack gap="xs">
+                <Group grow align="flex-end">
+                  <Select
+                    label="Master dark" placeholder="None" clearable
+                    data={darkOpts} value={asStr(values.dark_master_id)}
+                    onChange={(v) => set("dark_master_id", v)}
+                    disabled={darkOpts.length === 0}
+                  />
+                  <Select
+                    label="Master flat" placeholder="None" clearable
+                    data={flatOpts} value={asStr(values.flat_master_id)}
+                    onChange={(v) => set("flat_master_id", v)}
+                    disabled={flatOpts.length === 0}
+                  />
+                </Group>
+                {values.flat_master_id && darkOpts.length > 0 ? (
+                  <Select
+                    label="Flat-dark (optional)"
+                    description="A dark matched to the flat's exposure, subtracted from the flat before normalising for a more accurate flat."
+                    placeholder="None" clearable
+                    data={darkOpts} value={asStr(values.flat_dark_master_id)}
+                    onChange={(v) => set("flat_dark_master_id", v)}
+                  />
+                ) : null}
+              </Stack>
             ) : (
               <Text size="xs" c="dimmed">
                 No masters built yet. Create darks/flats on the{" "}
