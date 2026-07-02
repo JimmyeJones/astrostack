@@ -403,6 +403,34 @@ def _integration_time_s(frames: list, n_used: int) -> float | None:
     return round(per_sub * n_used, 2)
 
 
+def _compute_transparency_ratio(project: Project, frames: list) -> float | None:
+    """Median transparency of the stacked frames vs this target's clear-sky
+    baseline, normalised within the target (the raw ``transparency_score`` isn't
+    comparable across gain/exposure).
+
+    Returns ``median(run) / p90(all)`` — a value well below 1.0 means the stack
+    was shot through haze / thin cloud relative to the target's clearest nights.
+    Mirrors the Stack form's pre-run hint so a completed run can carry the same
+    verdict for an at-a-glance "hazy night" badge. ``None`` when there isn't a
+    meaningful sample on both sides. Best-effort: never raises into the caller.
+    """
+    try:
+        run = [f.transparency_score for f in frames
+               if getattr(f, "transparency_score", None) and f.transparency_score > 0]
+        all_scores = [f.transparency_score for f in project.iter_frames()
+                      if f.transparency_score is not None and f.transparency_score > 0]
+        # Need a reasonable sample on both sides to say anything meaningful.
+        if len(all_scores) < 5 or len(run) < 3:
+            return None
+        baseline = float(np.percentile(all_scores, 90))
+        if baseline <= 0:
+            return None
+        run_med = float(np.percentile(run, 50))
+        return round(run_med / baseline, 4)
+    except Exception:  # noqa: BLE001 — a diagnostic must never break the stack
+        return None
+
+
 def _build_output_header_meta(
     project: Project, frames: list, options: StackOptions, n_used: int,
     wstats: WeightingStats | None = None,
@@ -911,6 +939,7 @@ def run_stack(
             options_json=_json.dumps(asdict(options)),
             notes=color_cal_note or None,
             total_exposure_s=_integration_time_s(frames, n_used),
+            transparency_ratio=_compute_transparency_ratio(project, frames),
         ))
     except Exception as exc:  # noqa: BLE001 — history is non-critical
         log.warning("Could not record stack run in history: %s", exc)

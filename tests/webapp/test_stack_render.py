@@ -202,6 +202,36 @@ def test_stack_info_weighting_absent_for_unweighted_stack(client, solved_library
     assert body["weighting"] is None
 
 
+def test_transparency_ratio_surfaces_on_runs_and_gallery(client, solved_library):
+    """A run's persisted transparency verdict rides along on both the runs list
+    and the gallery so the frontend can badge a hazy night at a glance."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run_id = proj.add_stack_run(StackRunRow(
+                id=None, timestamp_utc="2026-05-01T00:00:00Z",
+                output_basename="hazy_master", fits_path=None, tiff_path=None,
+                preview_path=None, n_frames_used=5, canvas_h=32, canvas_w=32,
+                coverage_min=1, coverage_max=5, options_json="{}",
+                transparency_ratio=0.44,
+            ))
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+    finally:
+        lib.close()
+
+    runs = client.get(f"/api/targets/{safe}/stack-runs").json()
+    run = next(r for r in runs if r["id"] == run_id)
+    assert run["transparency_ratio"] == 0.44
+
+    gal = client.get("/api/gallery").json()["items"]
+    item = next(i for i in gal if i["run_id"] == run_id)
+    assert item["transparency_ratio"] == 0.44
+
+
 def test_stack_info_404_without_fits(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
     r = client.get(f"/api/targets/{safe}/stack-runs/99999/info")

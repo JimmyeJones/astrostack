@@ -60,13 +60,6 @@ _(none — claim an item here with your branch name)_
 ### Features that serve real workflows
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
-- **Transparency-night badge on History/Gallery cards** — the Stack-form
-  transparency hint (v0.36.1) only fires *before* a run. Persist the run's
-  median-transparency-vs-target-baseline verdict (or recompute it) and show a
-  small "hazy night" badge on the completed run's History and Gallery cards, so
-  a user browsing past stacks can see at a glance which were shot through haze
-  without reopening the frames. Reuse the within-target normalisation.
-  (S, approachability)
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
@@ -109,6 +102,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Transparency-night badge on History/Gallery cards** — completes the
+  transparency series. `run_stack` now records each run's transparency verdict
+  (`median transparency of the stacked frames ÷ the target's p90 clear-sky
+  baseline`) in a new additive `stack_runs.transparency_ratio` column (schema
+  v4→v5 migration; old runs stay NULL), mirroring the Stack-form pre-run hint's
+  within-target normalisation. `StackRunOut` and the gallery response carry it,
+  and a shared `HazyNightBadge` shows a small orange "Hazy night" badge (with a
+  "% below clearest nights" tooltip) on History and Gallery cards when the ratio
+  is below 0.6 — so a user browsing past stacks sees which were shot through
+  haze at a glance, no reopening. Additive/upgrade-safe. (v0.40.0, this run)
 
 - **Surface the quality-weighting summary in the run Info panel** — a
   quality-weighted stack now stamps its `WeightingStats` onto the master FITS

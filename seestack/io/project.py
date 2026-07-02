@@ -30,7 +30,7 @@ from typing import Any, Iterator
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 SCHEMA_SQL = f"""
 PRAGMA user_version = {SCHEMA_VERSION};
@@ -56,7 +56,8 @@ CREATE TABLE IF NOT EXISTS stack_runs (
     coverage_max    INTEGER NOT NULL DEFAULT 0,
     options_json    TEXT NOT NULL,
     notes           TEXT,
-    total_exposure_s REAL
+    total_exposure_s REAL,
+    transparency_ratio REAL
 );
 
 CREATE INDEX IF NOT EXISTS idx_stack_runs_ts ON stack_runs(timestamp_utc);
@@ -266,6 +267,15 @@ class Project:
                     "ALTER TABLE stack_runs ADD COLUMN total_exposure_s REAL")
             except sqlite3.OperationalError:
                 pass  # already present
+        if from_version < 5:
+            # Recorded transparency verdict per stack run (median transparency of
+            # the stacked frames ÷ the target's clear-sky baseline). Additive;
+            # older runs stay NULL and simply show no "hazy night" badge.
+            try:
+                self._conn.execute(
+                    "ALTER TABLE stack_runs ADD COLUMN transparency_ratio REAL")
+            except sqlite3.OperationalError:
+                pass  # already present
         self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @contextmanager
@@ -373,13 +383,14 @@ class Project:
             "INSERT INTO stack_runs("
             "  timestamp_utc, output_basename, fits_path, tiff_path, preview_path,"
             "  n_frames_used, canvas_h, canvas_w, coverage_min, coverage_max,"
-            "  options_json, notes, total_exposure_s"
-            ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "  options_json, notes, total_exposure_s, transparency_ratio"
+            ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 run.timestamp_utc, run.output_basename, run.fits_path,
                 run.tiff_path, run.preview_path, run.n_frames_used,
                 run.canvas_h, run.canvas_w, run.coverage_min, run.coverage_max,
                 run.options_json, run.notes, run.total_exposure_s,
+                run.transparency_ratio,
             ),
         )
         return cur.lastrowid  # type: ignore[return-value]
@@ -406,6 +417,10 @@ class Project:
                 total_exposure_s=(
                     row["total_exposure_s"]
                     if "total_exposure_s" in row.keys() else None
+                ),
+                transparency_ratio=(
+                    row["transparency_ratio"]
+                    if "transparency_ratio" in row.keys() else None
                 ),
             )
 
@@ -442,6 +457,10 @@ class StackRunRow:
     # Effective integration time in seconds (median sub × frames combined).
     # None for runs recorded before this column existed (schema < 4).
     total_exposure_s: float | None = None
+    # Median transparency of the stacked frames ÷ this target's clear-sky
+    # baseline (< ~0.6 ⇒ shot through haze). None when not computable or for
+    # runs recorded before this column existed (schema < 5).
+    transparency_ratio: float | None = None
 
 
 def _to_db(value: Any) -> Any:

@@ -143,6 +143,7 @@ export interface StackRun {
   notes: string | null;
   total_exposure_s?: number | null;
   reusable?: boolean;
+  transparency_ratio?: number | null;
 }
 
 export interface StackInfoCard {
@@ -200,6 +201,7 @@ export interface GalleryItem {
   preview_url: string;
   options: Record<string, unknown>;
   reusable?: boolean;
+  transparency_ratio?: number | null;
 }
 
 export interface LogEntry {

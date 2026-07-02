@@ -216,6 +216,7 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
             notes=r.notes,
             total_exposure_s=r.total_exposure_s,
             reusable=_run_is_reusable(r.options_json),
+            transparency_ratio=r.transparency_ratio,
         ))
     return out
 
