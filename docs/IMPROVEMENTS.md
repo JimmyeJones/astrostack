@@ -40,6 +40,17 @@ _(none — claim an item here with your branch name)_
   testable in isolation from real hardware. (M, correctness)
 
 ### Features that serve real workflows
+- Auto-suggest calibration masters that match a target's frames (by exposure /
+  gain / sensor-temp), so a beginner doesn't have to know which dark/flat/
+  flat-dark goes with which lights. Registry already stores exposure_s/gain/temp
+  on each master; surface a "recommended" badge and pre-select the best match in
+  the Stack calibration picker. (M, approachability/correctness)
+- Carry provenance headers into editor-export FITS too — `_apply_editor_to_run`
+  writes a derived `master.fits` with no OBJECT/derived-from/recipe summary.
+  Reuse the new `header_meta` arg to record what it came from. (S, correctness)
+- Show integration time + frame count on stack-run cards in History/Gallery now
+  that the data is written (EXPTOTAL/NFRAMES); a beginner reads "2.3 h, 840
+  subs" at a glance instead of digging into the FITS. (S, approachability)
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
 - Drizzle memory estimate surfaced in the Stack form before you run it. (S)
