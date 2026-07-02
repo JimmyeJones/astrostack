@@ -80,15 +80,6 @@ _(none — claim an item here with your branch name)_
   (S–M, approachability)
 
 ### UX & polish
-- **"N trailed frames" badge on the Target view** — mirror the existing
-  "N streaked" badge for eccentricity: count *accepted* frames whose
-  `eccentricity_median` is a strong within-target outlier (e.g. above the median
-  + 3·MAD, or above a sane absolute floor like ~0.6) and show a small badge next
-  to the accepted count, with a one-click "reject worst by eccentricity" (the
-  bulk action + metric already exist). Surfaces a night of tracking trouble at a
-  glance, complementing this run's ecc-weighting (v0.38.0). Reuses existing
-  plumbing; frontend-only if the outlier count is computed client-side.
-  (S, approachability)
 - **Nudge quality weighting when frame quality varies a lot** — on the Stack
   form, when the accepted+solved frames show a wide spread in FWHM / star-count /
   transparency (e.g. IQR/median above a threshold) but `quality_weighted` is
@@ -137,6 +128,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **"N trailed frames" badge on the Target view** — mirrors the "N streaked"
+  badge for star *shape*. A shared `trailed_frame_ids` helper flags accepted
+  frames whose `eccentricity_median` is *both* a strong within-target outlier
+  (> median + 3·MAD) *and* above a 0.6 absolute floor of noticeably elongated
+  stars (needs ≥5 measured frames, so a tiny set is never nuked) — a
+  bad-tracking/wind/bumped-mount night. The Target view shows a yellow
+  "N trailed" badge (computed client-side with the identical criterion) with a
+  one-click "Reject all" that calls a new `reject_trailed` bulk action
+  (reason `bulk:trailed`, wired into the existing one-click undo). Reuses
+  existing plumbing; additive/upgrade-safe. (v0.42.0, this run)
 
 - **Auto-grade: automatic, explained frame-quality grading** — the QC layer
   measured five per-sub quality metrics but (streaks aside) nothing acted on
