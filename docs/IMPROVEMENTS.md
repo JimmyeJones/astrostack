@@ -61,6 +61,22 @@ _(none — claim an item here with your branch name)_
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
 ### UX & polish
+- **"N trailed frames" badge on the Target view** — mirror the existing
+  "N streaked" badge for eccentricity: count *accepted* frames whose
+  `eccentricity_median` is a strong within-target outlier (e.g. above the median
+  + 3·MAD, or above a sane absolute floor like ~0.6) and show a small badge next
+  to the accepted count, with a one-click "reject worst by eccentricity" (the
+  bulk action + metric already exist). Surfaces a night of tracking trouble at a
+  glance, complementing this run's ecc-weighting (v0.38.0). Reuses existing
+  plumbing; frontend-only if the outlier count is computed client-side.
+  (S, approachability)
+- **Nudge quality weighting when frame quality varies a lot** — on the Stack
+  form, when the accepted+solved frames show a wide spread in FWHM / star-count /
+  transparency (e.g. IQR/median above a threshold) but `quality_weighted` is
+  off, show an advisory suggesting the user turn it on, because a mixed-quality
+  set is exactly where down-weighting the worst subs helps most (and a uniform
+  set barely changes). Advisory only; reuses metrics already fetched for the
+  transparency hint. Client-side, within-target. (S, approachability)
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
 
