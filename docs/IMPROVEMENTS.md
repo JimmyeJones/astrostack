@@ -67,8 +67,6 @@ _(none — claim an item here with your branch name)_
   consider wiring ruff into CI once the count is low. (L, correctness/maintainability)
 - Add a retention/pruning policy for `jobs.sqlite` so the job history can't grow
   unbounded on a long-lived NAS deployment. (S, scale)
-- `GET /api/stats` re-opens every target's SQLite project on each call — cache or
-  batch it so the dashboard stays fast with many targets. (M, scale)
 - Add a `SessionStart` hook (or a `scripts/setup.sh`) that provisions the venv +
   `npm ci` so every autonomous iteration starts from a known-green baseline. (S)
 - CI workflow (GitHub Actions) running the Python + frontend suites on PRs, so
@@ -100,6 +98,11 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Dashboard stats caching** — `GET /api/stats` no longer re-opens every target's
+  SQLite on each poll. The expensive per-target roll-up is cached on the app,
+  keyed by a cheap registry signature (per-target activity stamp + latest preview)
+  so a completed stack refreshes it promptly, with a 30 s TTL backstop.
+  (v0.15.1, this run)
 - **Settings backup & restore** — `GET /api/settings/export` downloads a portable
   JSON backup and `POST /api/settings/import` restores it; secrets and
   host-specific paths (data root, incoming/library, ASTAP path) are excluded so a

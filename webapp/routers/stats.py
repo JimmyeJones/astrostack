@@ -9,6 +9,7 @@ strip does open each project, exactly like the Gallery endpoint does.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from fastapi import APIRouter, Request
@@ -17,6 +18,14 @@ from pydantic import BaseModel
 from webapp import deps
 
 router = APIRouter(tags=["stats"])
+
+# The per-target roll-up opens every project's SQLite, which is the expensive
+# part of this endpoint on a library with many targets. We cache that result on
+# the app and reuse it while nothing has changed. The cache key is a cheap
+# signature of the registry (each target's last-activity stamp), so a completed
+# stack — which bumps ``last_activity_utc`` — invalidates it immediately; the TTL
+# is only a backstop for changes the signature can't see (e.g. a deleted run).
+_STATS_CACHE_TTL_S = 30.0
 
 
 class RecentStack(BaseModel):
@@ -44,6 +53,44 @@ class StatsResponse(BaseModel):
     disk: dict
 
 
+def _rollup_stacks(lib, targets) -> tuple[list[RecentStack], int, int]:
+    """Open each target's project and collect its stack runs. Expensive — this
+    is what the cache below is protecting."""
+    from seestack.io.project import Project
+
+    recent: list[RecentStack] = []
+    n_stack_runs = 0
+    n_targets_with_stacks = 0
+    for t in targets:
+        proj = None
+        try:
+            proj = Project.open(lib.target_dir(t))
+            target_runs = 0
+            for run in proj.iter_stack_runs():
+                target_runs += 1
+                has_preview = bool(run.preview_path and Path(run.preview_path).exists())
+                recent.append(RecentStack(
+                    safe=t.safe_name,
+                    target_name=t.name,
+                    run_id=run.id,
+                    output_basename=run.output_basename,
+                    timestamp_utc=run.timestamp_utc,
+                    n_frames_used=run.n_frames_used,
+                    has_preview=has_preview,
+                    preview_url=f"/api/targets/{t.safe_name}/stack-runs/{run.id}/preview",
+                ))
+            n_stack_runs += target_runs
+            if target_runs:
+                n_targets_with_stacks += 1
+        except Exception:  # noqa: BLE001 — a broken project must not 500 the dashboard
+            pass
+        finally:
+            if proj is not None:
+                proj.close()
+    recent.sort(key=lambda r: r.timestamp_utc, reverse=True)
+    return recent, n_stack_runs, n_targets_with_stacks
+
+
 @router.get("/api/stats", response_model=StatsResponse)
 def get_stats(request: Request, recent_limit: int = 8) -> StatsResponse:
     import shutil
@@ -52,43 +99,29 @@ def get_stats(request: Request, recent_limit: int = 8) -> StatsResponse:
     jm = deps.get_job_manager(request)
 
     lib = deps.open_library(request)
-    recent: list[RecentStack] = []
-    n_stack_runs = 0
-    n_targets_with_stacks = 0
     try:
         camp = lib.campaign_stats()
-        from seestack.io.project import Project
-
-        for t in lib.list_targets():
-            proj = None
-            try:
-                proj = Project.open(lib.target_dir(t))
-                target_runs = 0
-                for run in proj.iter_stack_runs():
-                    target_runs += 1
-                    has_preview = bool(run.preview_path and Path(run.preview_path).exists())
-                    recent.append(RecentStack(
-                        safe=t.safe_name,
-                        target_name=t.name,
-                        run_id=run.id,
-                        output_basename=run.output_basename,
-                        timestamp_utc=run.timestamp_utc,
-                        n_frames_used=run.n_frames_used,
-                        has_preview=has_preview,
-                        preview_url=f"/api/targets/{t.safe_name}/stack-runs/{run.id}/preview",
-                    ))
-                n_stack_runs += target_runs
-                if target_runs:
-                    n_targets_with_stacks += 1
-            except Exception:  # noqa: BLE001 — a broken project must not 500 the dashboard
-                pass
-            finally:
-                if proj is not None:
-                    proj.close()
+        targets = lib.list_targets()
+        # Cheap signature over the registry: the roll-up only changes when the
+        # set of targets, their activity stamp, or their latest-stack preview
+        # does. Any of those bumps when a stack completes, so the cache refreshes
+        # promptly; the TTL backstops the rare same-second collision.
+        sig = tuple(sorted(
+            (t.safe_name, t.last_activity_utc or "", t.last_stack_preview or "")
+            for t in targets
+        ))
+        cache = getattr(request.app.state, "stats_cache", None)
+        now = time.monotonic()
+        if cache and cache["sig"] == sig and (now - cache["at"]) < _STATS_CACHE_TTL_S:
+            recent, n_stack_runs, n_targets_with_stacks = cache["data"]
+        else:
+            recent, n_stack_runs, n_targets_with_stacks = _rollup_stacks(lib, targets)
+            request.app.state.stats_cache = {
+                "sig": sig, "at": now,
+                "data": (recent, n_stack_runs, n_targets_with_stacks),
+            }
     finally:
         lib.close()
-
-    recent.sort(key=lambda r: r.timestamp_utc, reverse=True)
 
     disk: dict = {}
     try:
