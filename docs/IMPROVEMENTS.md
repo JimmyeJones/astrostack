@@ -54,12 +54,6 @@ _(none — claim an item here with your branch name)_
   calibration binding, per-night QC roll-ups. Coverage-levelling's docstring
   already names "between sessions" as motivation but keys on coverage count.
   Large but high value for the multi-night Seestar workflow. (L, correctness)
-- Audit NaN/coverage handling on the newer paths (calibration, mono) for
-  single-frame and mosaic-edge cases. Add edge-case tests. (S–M) — *channel
-  combine done (v0.16.1); mono single-frame + sigma-clip verified (v0.22.1);
-  mono mosaic-edge partial-overlap → NaN verified (v0.28.1); the calibration
-  path (dark/flat apply on a partial-coverage canvas) is the last piece to
-  audit.*
 - Channel combine: reproject stacks that don't share a canvas (via WCS) instead
   of erroring, so filters shot in separate sessions can be combined. (M–L)
 - Seestar client (`webapp/seestar/client.py`) has no reconnect/retry on a
@@ -117,6 +111,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Calibration mosaic-edge NaN/coverage audit** — completes the NaN/coverage
+  audit series (channel combine v0.16.1, mono single-frame v0.22.1, mono
+  mosaic-edge v0.28.1). Added a regression test that stacks two dark/flat-
+  *calibrated* frames with only partial footprint overlap onto a union canvas
+  and asserts the uncovered margin stays NaN — calibration (dark subtract + flat
+  divide) never fabricates a zero wedge where there's no coverage — while
+  coverage is genuine (0..2) and the interior stays finite. Confirms the
+  calibration path already handles partial coverage correctly; no code change.
+  (v0.31.1, this run)
 
 - **Suggest the reference canvas when a non-drizzle mosaic is over budget** —
   the drizzle-off mirror of the v0.28.0 drizzle-scale suggestion. `stack-estimate`
