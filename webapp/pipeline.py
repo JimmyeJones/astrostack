@@ -449,9 +449,15 @@ def _channel_combine(
     try:
         base = output_name or "lrgb"
         coverage = np.isfinite(out).all(axis=2).astype(np.float32)
+        combo = "".join(c for c in ("L", "R", "G", "B") if c in channels)
+        combine_meta = {
+            "NCOMBINE": (len(items), "source stacks combined"),
+            "STACKMTD": (f"channel-combine ({combo})", "how this image was produced"),
+        }
         paths = write_stack_outputs(
             project_dir=dst.project_dir, rgb=out, coverage=coverage,
             wcs_text=wcs_text, out_basename=base, tiff_mode="linear",
+            header_meta=combine_meta,
         )
         new_id = dst.add_stack_run(StackRunRow(
             id=None,

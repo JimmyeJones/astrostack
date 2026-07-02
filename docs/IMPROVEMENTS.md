@@ -27,8 +27,9 @@ _(none — claim an item here with your branch name)_
 ## Ideas (pick roughly top-down; use the value ÷ effort×risk rule)
 
 ### Correctness & robustness (highest priority)
-- Audit NaN/coverage handling on the newer paths (calibration, mono, channel
-  combine) for single-frame and mosaic-edge cases. Add edge-case tests. (S–M)
+- Audit NaN/coverage handling on the newer paths (calibration, mono) for
+  single-frame and mosaic-edge cases. Add edge-case tests. (S–M) — *channel
+  combine done (v0.16.1); calibration/mono still to audit.*
 - Channel combine: reproject stacks that don't share a canvas (via WCS) instead
   of erroring, so filters shot in separate sessions can be combined. (M–L)
 - Property/edge tests for `run_stack`: empty input, all-rejected, 1 frame,
@@ -47,10 +48,18 @@ _(none — claim an item here with your branch name)_
   the Stack calibration picker. (M, approachability/correctness)
 - Carry provenance headers into editor-export FITS too — `_apply_editor_to_run`
   writes a derived `master.fits` with no OBJECT/derived-from/recipe summary.
-  Reuse the new `header_meta` arg to record what it came from. (S, correctness)
+  Reuse the `header_meta` arg to record what it came from. (S, correctness)
 - Show integration time + frame count on stack-run cards in History/Gallery now
   that the data is written (EXPTOTAL/NFRAMES); a beginner reads "2.3 h, 840
   subs" at a glance instead of digging into the FITS. (S, approachability)
+- "Stack info" panel: read the FITS header cards (NCOMBINE/NFRAMES, EXPOSURE,
+  EXPTOTAL, DATE-OBS/END, STACKER) from a run's `master.fits` and show them in
+  the History detail view — no new storage needed, just a header read + a small
+  endpoint. (S, approachability)
+- Auto-suggest a sensible sigma-clip kappa (and whether to enable rejection)
+  from the accepted-frame count — e.g. skip clipping under ~5 frames, loosen
+  kappa for very large stacks — with a one-line "why" in the form. Removes a
+  knob a beginner can't reason about. (M, approachability/correctness)
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
 - Drizzle memory estimate surfaced in the Stack form before you run it. (S)
@@ -61,11 +70,6 @@ _(none — claim an item here with your branch name)_
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
 - Keyboard shortcuts beyond the frame grader (e.g. editor undo/redo hints). (S)
-- Icon-only buttons repo-wide are still mostly missing `aria-label` (a few
-  landed incidentally with recent `History.tsx`/`Jobs.tsx` fixes). One
-  focused accessibility sweep across `frontend/src/routes/*.tsx` and
-  `components/*.tsx`, with a small test asserting known icon buttons have
-  accessible names. (M)
 
 ### Performance (only with a measurement)
 - Profile the stack hot path on a large synthetic target; find a safe win that
@@ -74,8 +78,9 @@ _(none — claim an item here with your branch name)_
 ### Infra / maintainability
 - Chip away at the ~127 pre-existing `ruff check .` findings (don't add new ones);
   consider wiring ruff into CI once the count is low. (L, correctness/maintainability)
-- Add a retention/pruning policy for `jobs.sqlite` so the job history can't grow
-  unbounded on a long-lived NAS deployment. (S, scale)
+- ~~Add a retention/pruning policy for `jobs.sqlite`~~ — **already implemented**
+  (`JobManager._evict_old` prunes the DB to ~10× `max_history` after every job);
+  a future refinement could make the cap a configurable setting. (S, scale)
 - Add a `SessionStart` hook (or a `scripts/setup.sh`) that provisions the venv +
   `npm ci` so every autonomous iteration starts from a known-green baseline. (S)
 - Reduce the frontend bundle warning (code-split the heavy Sky/aladin chunks). (S)
@@ -105,6 +110,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- Channel-combine provenance — the LRGB/RGB combined FITS now carries
+  `NCOMBINE` (source stacks) and `STACKMTD` ("channel-combine (RGB)"), matching
+  the stack-export provenance headers. (v0.16.1, this run)
+- Accessibility sweep — added `aria-label` to the remaining icon-only
+  `ActionIcon` buttons (frame accept/reject, delete calibration master, delete
+  preset) so they have accessible names for screen readers, plus a test
+  asserting the delete-master button is reachable by name. (v0.16.1, this run)
+- Channel-combine NaN fix — LRGB pixels covered in G/B/L but uncovered in a
+  colour channel now become cleanly uncovered (NaN) instead of `[NaN, 0, 0]`
+  (which zeroed real G/B signal at mosaic edges). Added NaN/coverage +
+  single-pixel edge tests. (v0.16.1, this run)
 - **Flat-dark support** — a master flat can now be dark-subtracted before
   normalising (`CalibrationMasters.load` gains `flat_dark_path`,
   `StackOptions.flat_dark_path`, server-resolved from a `flat_dark_master_id`).

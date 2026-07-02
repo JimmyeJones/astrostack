@@ -64,3 +64,67 @@ def test_missing_colour_channel_is_zero():
     out = combine_channels({"R": np.ones((2, 2), np.float32),
                             "B": np.ones((2, 2), np.float32)})
     np.testing.assert_allclose(out[..., 1], 0.0)  # no green supplied
+
+
+# ---- NaN / coverage semantics (NaN = "no coverage") ---------------------
+
+def test_rgb_uncovered_pixel_stays_nan():
+    # A pixel uncovered (NaN) in every supplied colour channel must remain NaN
+    # across all output channels — never silently become 0 (a valid dark pixel).
+    nan = np.nan
+    r = np.array([[1.0, nan]], np.float32)
+    g = np.array([[1.0, nan]], np.float32)
+    b = np.array([[1.0, nan]], np.float32)
+    out = combine_channels({"R": r, "G": g, "B": b})
+    assert np.all(np.isnan(out[0, 1]))
+    assert np.all(np.isfinite(out[0, 0]))
+
+
+def test_lum_only_preserves_nan():
+    lum = np.array([[0.3, np.nan]], np.float32)
+    out = combine_channels({"L": lum})
+    assert np.all(np.isnan(out[0, 1]))
+    np.testing.assert_allclose(out[0, 0], 0.3)
+
+
+def test_lrgb_uncovered_luminance_pixel_is_nan():
+    # L uncovered at a pixel → that pixel has no defined brightness → NaN.
+    r = np.full((1, 2), 0.4, np.float32)
+    g = np.full((1, 2), 0.2, np.float32)
+    b = np.full((1, 2), 0.2, np.float32)
+    lum = np.array([[0.3, np.nan]], np.float32)
+    out = combine_channels({"R": r, "G": g, "B": b, "L": lum})
+    assert np.all(np.isnan(out[0, 1]))
+    assert np.all(np.isfinite(out[0, 0]))
+
+
+def test_lrgb_partial_colour_coverage_pixel_is_fully_nan():
+    # Regression: at a mosaic-edge pixel covered in G/B/L but NOT R, the colour
+    # is undefined. It must become fully uncovered (all NaN), not [NaN, 0, 0]
+    # which would zero-out the G/B signal that *was* covered.
+    r = np.array([[0.4, np.nan]], np.float32)
+    g = np.array([[0.2, 0.2]], np.float32)
+    b = np.array([[0.2, 0.2]], np.float32)
+    lum = np.array([[0.3, 0.3]], np.float32)
+    out = combine_channels({"R": r, "G": g, "B": b, "L": lum})
+    assert np.all(np.isnan(out[0, 1]))  # not [nan, 0, 0]
+
+
+def test_lrgb_black_but_covered_pixel_stays_black_not_nan():
+    # A genuinely dark (RGB≈0) but *covered* pixel must stay finite (0), not be
+    # confused with an uncovered NaN pixel.
+    zeros = np.zeros((1, 1), np.float32)
+    lum = np.array([[0.5]], np.float32)
+    out = combine_channels({"R": zeros, "G": zeros, "B": zeros, "L": lum})
+    assert np.all(np.isfinite(out[0, 0]))
+    np.testing.assert_allclose(out[0, 0], 0.0)
+
+
+def test_single_pixel_combine():
+    # Degenerate 1×1 canvas must not crash any path.
+    out = combine_channels({"R": np.array([[0.5]], np.float32),
+                            "G": np.array([[0.4]], np.float32),
+                            "B": np.array([[0.3]], np.float32),
+                            "L": np.array([[0.6]], np.float32)})
+    assert out.shape == (1, 1, 3)
+    assert np.all(np.isfinite(out))
