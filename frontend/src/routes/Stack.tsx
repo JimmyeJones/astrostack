@@ -45,6 +45,17 @@ export function StackView() {
     queryKey: ["calibration-suggestions", safe],
     queryFn: () => api.calibrationSuggestions(safe),
   });
+  // Auto-grade preview: how many accepted frames look like quality outliers
+  // (clouds / poor focus / tracking). Points the user at the one-click cleanup
+  // on the Target page *before* they stack junk. Only fetched once there are
+  // enough accepted frames for the grader's robust statistics to say anything
+  // (it needs ≥10 measured frames per metric, so gate the request on that).
+  const acceptedCount = (frames.data ?? []).filter((f) => f.accept).length;
+  const autoGrade = useQuery({
+    queryKey: ["auto-grade-preview", safe],
+    queryFn: () => api.autoGradePreview(safe),
+    enabled: acceptedCount >= 10,
+  });
   // When arriving via "Reuse settings" (?from=<runId>), fetch that run's options
   // so we can pre-fill the form from how a previous stack was made.
   const reuse = useQuery({
@@ -281,6 +292,16 @@ export function StackView() {
     return `Your ${run.length} accepted frames vary a lot in ${which} — a mixed-quality set is exactly where quality weighting helps, letting the best subs count for more than the worst instead of every frame counting equally. Turn on Quality weighting in the options above.`;
   })();
 
+  // Auto-grade hint: if the grader flags some accepted frames as likely
+  // outliers, nudge the user to review them on the Target page before stacking
+  // junk. Advisory only; it never rejects anything from here.
+  const autoGradeHint = (() => {
+    const rep = autoGrade.data;
+    if (!rep || rep.recommendations.length === 0) return null;
+    const n = rep.recommendations.length;
+    return `Auto-grade thinks ${n} of your ${rep.n_accepted} accepted frame${n === 1 ? "" : "s"} look like quality outliers (clouds, poor focus or tracking). Review Auto-grade on the Target page to drop ${n === 1 ? "it" : "them"} in one click before you stack.`;
+  })();
+
   // Drizzle accumulates in a single pass, so the sigma-clip toggle doesn't
   // apply to it — a user who enabled both would reasonably expect satellite
   // trails to be rejected and be surprised when they aren't. Point them at
@@ -464,6 +485,22 @@ export function StackView() {
           {qualityWeightNudge ? (
             <Alert color="blue" variant="light" py={6} px="sm">
               <Text size="xs">{qualityWeightNudge}</Text>
+            </Alert>
+          ) : null}
+
+          {autoGradeHint ? (
+            <Alert color="yellow" variant="light" py={6} px="sm">
+              <Text size="xs">{autoGradeHint}</Text>
+              <Button
+                mt={6}
+                size="xs"
+                variant="light"
+                color="yellow"
+                component={Link}
+                to={`/targets/${safe}`}
+              >
+                Review Auto-grade
+              </Button>
             </Alert>
           ) : null}
 

@@ -69,11 +69,6 @@ _(none — claim an item here with your branch name)_
 ### Features that serve real workflows
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
-- **Auto-grade hint on the Stack form** — the Stack form already advises on
-  sigma-clip/streaks/transparency; add "N of your accepted frames look like
-  outliers — review Auto-grade on the Target page" by calling the new
-  `frames/auto-grade` preview endpoint, so a user about to stack junk gets
-  pointed at the one-click fix. (S, approachability)
 - **PSF-from-stars for editor deconvolution** — `detail.deconvolve` makes the
   user hand-tune a Gaussian σ; the project median FWHM (already measured by
   QC) is the right default, and a "from your stars" button would set it.
@@ -121,6 +116,15 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Auto-grade hint on the Stack form** — the Stack form now calls the
+  `frames/auto-grade` preview endpoint (only once there are ≥10 accepted frames,
+  matching the grader's robust-stats floor) and, when it flags some accepted
+  frames as likely quality outliers, shows a yellow advisory ("Auto-grade thinks
+  N of your M accepted frames look like quality outliers …") with a "Review
+  Auto-grade" button linking back to the Target page — so a user about to stack
+  junk is pointed at the one-click cleanup. Advisory only; nothing is rejected
+  from the Stack form. (v0.42.2, this run)
 
 - **Nudge quality weighting when frame quality varies a lot** — the Stack form
   now shows an advisory when the frames that would be stacked (accepted +

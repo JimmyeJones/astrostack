@@ -348,6 +348,53 @@ describe("StackView", () => {
     expect(screen.queryByText(/mixed-quality set is exactly where/)).not.toBeInTheDocument();
   });
 
+  it("hints to review auto-grade when accepted frames look like outliers", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
+    const frames = Array.from({ length: 12 }, (_, i) => mkFrame(i + 1));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+    vi.spyOn(client.api, "autoGradePreview").mockResolvedValue({
+      sensitivity: "normal", n_accepted: 12, n_considered: 12,
+      recommendations: [
+        { frame_id: 1, name: "f1.fits", reasons: [
+          { metric: "star_count", label: "far fewer stars than typical", value: 20, typical: 300, z: 8 },
+        ] },
+        { frame_id: 2, name: "f2.fits", reasons: [
+          { metric: "fwhm_px", label: "much softer than typical", value: 6, typical: 2.5, z: 7 },
+        ] },
+      ],
+      metrics_used: ["fwhm_px", "star_count"], metrics_skipped: {},
+      capped: false, changed_ids: null,
+    });
+
+    renderStack();
+
+    await waitFor(() =>
+      expect(screen.getByText(/Auto-grade thinks 2 of your 12 accepted frames look like quality outliers/))
+        .toBeInTheDocument());
+    expect(screen.getByRole("link", { name: "Review Auto-grade" }))
+      .toHaveAttribute("href", "/targets/M_42");
+  });
+
+  it("does not hint auto-grade when nothing is flagged", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
+    const frames = Array.from({ length: 12 }, (_, i) => mkFrame(i + 1));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+    vi.spyOn(client.api, "autoGradePreview").mockResolvedValue({
+      sensitivity: "normal", n_accepted: 12, n_considered: 12,
+      recommendations: [], metrics_used: ["fwhm_px"], metrics_skipped: {},
+      capped: false, changed_ids: null,
+    });
+
+    renderStack();
+
+    await waitFor(() => expect(screen.getByText("Start stacking")).toBeInTheDocument());
+    expect(screen.queryByText(/look like quality outliers/)).not.toBeInTheDocument();
+  });
+
   it("shows the pre-run output canvas + peak-memory estimate line", async () => {
     vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: true });
