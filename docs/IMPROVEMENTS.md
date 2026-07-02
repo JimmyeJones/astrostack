@@ -9,6 +9,17 @@ Items under "Needs owner sign-off" must not be started autonomously — see
 
 ## Shipped
 
+- **[Usability] Silent job-cancel failures; Logs download ignored the
+  active filter** — S — `Jobs.tsx`'s cancel mutation had no `onError`, so
+  cancelling a job that had already finished (or any other failure) gave
+  no feedback; added a notification and an `aria-label` on the icon-only
+  cancel button. `Logs.tsx`'s download button built its file from the
+  unfiltered `entries` while the UI badge showed the `filtered` count —
+  a user who searched for something specific and hit Download got the
+  whole log instead of what they were looking at; fixed to export
+  `filtered`. Covered by `frontend/src/routes/Jobs.test.tsx` and
+  `frontend/src/routes/Logs.test.tsx`. *(2026-07-02)*
+
 - **[Usability] Confirm + surface errors on stack-run deletion** — S —
   `History.tsx`'s delete (trash icon) fired the mutation the instant it was
   clicked — no confirmation, and no `onError`, even though it permanently
