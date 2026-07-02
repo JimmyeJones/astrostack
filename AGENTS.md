@@ -291,9 +291,16 @@ them or merge into them.
    `git fetch origin` → merge `origin/main` into your branch → re-run the full
    test suite (§5) and, if the frontend changed, the frontend build. Resolve any
    conflicts conservatively.
-4. **Merge into `main`** (fast-forward or a normal merge commit is fine), push
-   `main`, and delete your topic branch. Opening a PR first is optional and nice
-   for history, but do not *wait* on it — merge it yourself once green.
+4. **Merge into `main` and delete your topic branch.** Preferred path (keeps the
+   branch list clean automatically): open a PR and immediately merge it yourself
+   (`create_pull_request` → `merge_pull_request`) — with the repo's *"Automatically
+   delete head branches"* setting on, GitHub removes the branch on merge, so you
+   don't have to. Do not *wait* for a human on the PR; you merge it.
+   Fallback if PRs aren't available in your environment: merge `main` fast-forward
+   and `git push origin main`, then delete the topic branch
+   (`git push origin --delete <branch>`). If branch deletion is rejected by the
+   host, that's fine — a *merged* leftover branch is harmless; never delete an
+   *unmerged* branch.
 
 **Absolute rules for merging:**
 - Only ever merge a **fully green** branch. Green tests are the safety gate that
@@ -408,5 +415,6 @@ Per task (repeat ~3–6×, or fewer if large):
 End of run:
 [ ] added ≥1–2 new ideas to IMPROVEMENTS.md (§4)
 [ ] synced branch with latest default; full suite still green
-[ ] merged your green work into the default branch yourself; pushed; branch tidied
+[ ] merged into main yourself (PR-merge preferred so the branch auto-deletes);
+    topic branch deleted/gone; only main + truly-in-progress branches remain
 ```
