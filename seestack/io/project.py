@@ -350,6 +350,20 @@ class Project:
             sql += " WHERE accept = 1"
         return self._conn.execute(sql).fetchone()[0]
 
+    def reject_reason_counts(self) -> dict[str, int]:
+        """Tally rejected frames by ``reject_reason`` (e.g. ``qc:fwhm``,
+        ``bulk:streaked``, ``user``). A rejected frame with a NULL reason is
+        bucketed under ``"user"`` — that's how a manual reject with no explicit
+        reason is recorded elsewhere. Accepted frames are ignored."""
+        assert self._conn is not None
+        out: dict[str, int] = {}
+        for reason, n in self._conn.execute(
+            "SELECT COALESCE(reject_reason, 'user') AS r, COUNT(*) "
+            "FROM frames WHERE accept = 0 GROUP BY r"
+        ):
+            out[reason] = n
+        return out
+
     # ---- stack runs ----------------------------------------------------
 
     def add_stack_run(self, run: StackRunRow) -> int:

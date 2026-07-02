@@ -78,6 +78,19 @@ def test_iter_frames_filters(proj):
     assert len(accepted) == 4
 
 
+def test_reject_reason_counts(proj):
+    proj.add_frames([FrameRow(source_path=f"a{i}.fit") for i in range(6)])
+    proj.update_frame(1, accept=False, reject_reason="qc:fwhm")
+    proj.update_frame(2, accept=False, reject_reason="qc:fwhm")
+    proj.update_frame(3, accept=False, reject_reason="bulk:streaked")
+    # A rejected frame with no explicit reason buckets under "user".
+    proj.update_frame(4, accept=False, reject_reason=None)
+    counts = proj.reject_reason_counts()
+    assert counts == {"qc:fwhm": 2, "bulk:streaked": 1, "user": 1}
+    # Accepted frames are ignored entirely.
+    assert sum(counts.values()) == proj.count() - proj.count(accepted_only=True)
+
+
 def test_unique_source_path(proj):
     import sqlite3
 

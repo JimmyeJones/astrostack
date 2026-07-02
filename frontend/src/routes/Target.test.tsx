@@ -14,7 +14,8 @@ function mkFrame(id: number, overrides: Partial<Frame> = {}): Frame {
     exposure_s: 30, gain: 100, width_px: 480, height_px: 320,
     bayer_pattern: "RGGB", solved: true, ra_center_deg: 10, dec_center_deg: 20,
     ra_hint_deg: null, dec_hint_deg: null, fwhm_px: 2.5, star_count: 100,
-    sky_adu_median: 500, eccentricity_median: 0.4, streak_detected: false,
+    sky_adu_median: 500, eccentricity_median: 0.4, transparency_score: 5000,
+    streak_detected: false,
     accept: true, reject_reason: null, user_override: false, ...overrides,
   };
 }
@@ -72,7 +73,7 @@ describe("TargetView streaked badge", () => {
     ]);
     const bulk = vi
       .spyOn(client.api, "bulkFrames")
-      .mockResolvedValue({ changed: 2 });
+      .mockResolvedValue({ changed: 2, changed_ids: [1, 2] });
     vi.spyOn(window, "confirm").mockReturnValue(true);
 
     renderTarget();
@@ -98,5 +99,52 @@ describe("TargetView streaked badge", () => {
     await waitFor(() =>
       expect(screen.getByText("3/3 accepted")).toBeInTheDocument());
     expect(screen.queryByText(/streaked/)).not.toBeInTheDocument();
+  });
+});
+
+describe("TargetView reject breakdown + undo", () => {
+  it("shows a rejected-count badge with a why breakdown", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ n_frames: 5, n_frames_accepted: 3 }),
+    );
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    const summary = vi
+      .spyOn(client.api, "rejectSummary")
+      .mockResolvedValue({ counts: { "qc:fwhm": 1, user: 1 }, total: 2 });
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(screen.getByText("2 rejected")).toBeInTheDocument());
+    expect(summary).toHaveBeenCalledWith("M_42");
+  });
+
+  it("offers Undo after a bulk reject and re-accepts exactly those ids", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      mkFrame(1, { streak_detected: true }),
+      mkFrame(2, { streak_detected: true }),
+    ]);
+    const bulk = vi
+      .spyOn(client.api, "bulkFrames")
+      .mockResolvedValue({ changed: 2, changed_ids: [1, 2] });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    renderTarget();
+
+    const reject = await screen.findByRole("button", {
+      name: "Reject all streaked frames",
+    });
+    reject.click();
+
+    const undo = await screen.findByRole("button", {
+      name: "Undo last bulk reject",
+    });
+    undo.click();
+
+    await waitFor(() =>
+      expect(bulk).toHaveBeenCalledWith("M_42", { action: "accept", ids: [1, 2] }));
   });
 });

@@ -27,11 +27,14 @@ _(none — claim an item here with your branch name)_
 ## Ideas (pick roughly top-down; use the value ÷ effort×risk rule)
 
 ### Correctness & robustness (highest priority)
-- Implement the dead `transparency_score` frame metric (declared in the DB
-  schema and `FrameRow` since day one but never computed) — e.g. median star
-  flux vs the target's per-star baseline — and feed it into quality weighting
-  and an advisory "poor transparency" grader hint. Turns two schema fields
-  into real value on cloudy-night data. (M, correctness)
+- **Feed `transparency_score` into quality weighting + a grader hint** — the
+  per-frame metric is now computed (median flux of the brightest stars, shipped
+  v0.33.0) and surfaced in the Target table, but nothing *uses* it yet. Next:
+  normalise it against the target's best frame (a per-target baseline) and (a)
+  optionally weight frames in the stack by relative transparency, (b) show an
+  advisory "poor transparency night" hint when a run's median frame sits well
+  below the target's clear-sky baseline. Needs care: the raw score isn't
+  comparable across gain/exposure, so normalise within a target. (M, correctness)
 - Per-pixel extremes / percentile rejection for small stacks (the *robust*
   fix for a lone satellite/plane trail below ~11 frames). **NB:** the previously
   filed "iterated κ-σ" idea was investigated and dropped — re-estimation clips
@@ -65,26 +68,16 @@ _(none — claim an item here with your branch name)_
 ### Features that serve real workflows
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
-- Star-mask preview toggle in the editor (visualise the mask driving star ops). (S)
 - Per-target "notes/tags" search improvements and saved filters in Library. (S)
-- **Undo the last bulk frame action** — `reject_worst` and the new
-  `reject_streaked` can over-reject (e.g. a 30% cut that was too aggressive) and
-  there's no one-click way back. Have the `/frames/bulk` endpoint return the list
-  of ids it changed, and let the Target view keep the last batch so it can offer
-  an "Undo" that re-accepts exactly those frames. Reuses `update_frame`; purely
-  additive. (S, approachability)
-- **Reject-reason breakdown on the Target view** — the accepted/rejected badge
-  says *how many* were dropped but not *why*. A small popover/tooltip grouping
-  rejected frames by `reject_reason` (qc:fwhm, bulk:streaked, user, …) tells a
-  beginner what QC and their bulk actions actually did, and flags a dominant
-  failure mode (e.g. "18 rejected for high FWHM — a focus/seeing night"). Reuses
-  the existing column; frontend + a tiny count endpoint or client-side tally.
-  (S, approachability)
+- **Inline reject-reason on rejected frame rows** — rejected rows in the Target
+  table are only dimmed; add a small muted reason chip/tooltip on each rejected
+  row (reusing `reject_reason`, now surfaced in the breakdown badge) so a user
+  scanning the table sees *why each specific frame* was dropped, not just the
+  aggregate. Frontend-only. (S, approachability)
 
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
-- Keyboard shortcuts beyond the frame grader (e.g. editor undo/redo hints). (S)
 
 ### Performance (only with a measurement)
 - Profile the stack hot path on a large synthetic target; find a safe win that
@@ -124,6 +117,53 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **"Reject worst by transparency" bulk action** — building on this run's
+  `transparency_score`, the `reject_worst` `BulkFrameAction` metric enum and the
+  Target view's "Reject worst by" dropdown now include Transparency. Because
+  higher transparency is *better*, the worst = the *lowest* scores, so the
+  engine's "higher is better" flag set was extended (`star_count` +
+  `transparency_score`). A user can now drop their haziest subs in one gesture.
+  (v0.35.0, this run)
+
+- **Editor undo/redo keyboard shortcuts** — the editor's undo/redo buttons now
+  have keyboard equivalents: Cmd/Ctrl+Z undoes an op-pipeline change, Cmd/Ctrl+
+  Shift+Z (or Ctrl+Y) redoes. Skipped while a text field is focused so editing
+  the output name / curve inputs isn't hijacked, and the button tooltips now show
+  the shortcut. Frontend-only; reuses the existing `useUndoable` history.
+  (v0.34.1, this run)
+
+- **Star-mask preview toggle in the editor** — a new
+  `GET …/editor/star-mask` endpoint renders the soft `[0,1]` mask that gates the
+  star ops (`stars.reduce` / `boost_nebula`) as a grayscale PNG on the live
+  proxy (`size_px`/`grow` query params, clamped). The Editor gained a grape
+  "Star mask" toggle next to Compare that overlays the mask (white = treated as a
+  star) with a "Star mask" label, so a user can *see* what the editor considers a
+  star vs background/nebula before dialling in star reduction. Additive;
+  no-store, proxy-only. (v0.34.0, this run)
+
+- **Compute the dead `transparency_score` frame metric** — the column has been
+  in the schema and `FrameRow` since day one but was never populated. QC now
+  computes it as the median instrumental flux of a frame's brightest ~10 stars
+  (via `median_star_flux`): haze/thin cloud dims all stars, so the bright ones
+  (which stay detected on clear *and* hazy nights) fade measurably, while using
+  only the brightest avoids the confounder where a hazy frame loses its faint
+  stars and inflates the survivors' median. Wired through
+  `apply_qc_result_to_db`, exposed on `FrameOut` (+ sortable), and shown as a new
+  "Transp." column (with a plain-language header tooltip) on the Target view — an
+  imager can now sort to find their haziest subs. Relative within a target; not
+  an absolute magnitude. Follow-up (weighting + grader hint) filed above.
+  Additive/upgrade-safe. (v0.33.0, this run)
+
+- **Undo the last bulk reject + reject-reason breakdown on the Target view** —
+  two related approachability wins. `/frames/bulk` now returns `changed_ids`, so
+  after a `reject_worst`/`reject_streaked` cut the Target view shows a one-click
+  "Undo" that re-accepts exactly those ids (reuses the `accept` bulk action).
+  And a new `GET /frames/reject-summary` (server-side `Project.reject_reason_counts`,
+  NULL-reason bucketed as `user`) powers a "N rejected" badge with a hover-card
+  breakdown by reason (QC: FWHM, Streaked (bulk), Manual, …) so a beginner sees
+  *why* frames were dropped and can spot a dominant failure mode. Purely additive;
+  the summary query is gated on there being rejected frames. (v0.32.0, this run)
 
 - **Calibration mosaic-edge NaN/coverage audit** — completes the NaN/coverage
   audit series (channel combine v0.16.1, mono single-frame v0.22.1, mono

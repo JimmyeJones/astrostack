@@ -87,6 +87,24 @@ def _render_png(project_dir: Path, run, recipe: Recipe) -> bytes:
     return buf.getvalue()
 
 
+def _render_star_mask_png(project_dir: Path, run, size_px: float, grow: float) -> bytes:
+    """Render the soft star mask (the same map that gates star ops) as a grayscale
+    PNG, so the user can *see* what the editor treats as stars vs background."""
+    import io
+
+    from PIL import Image
+
+    from seestack.edit.starmask import star_mask
+
+    rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
+    ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None)
+    mask = star_mask(rgb, size_px=size_px, grow=grow, ctx=ctx)
+    u8 = (np.clip(np.nan_to_num(mask), 0.0, 1.0) * 255).astype(np.uint8)
+    buf = io.BytesIO()
+    Image.fromarray(u8, mode="L").save(buf, format="PNG")
+    return buf.getvalue()
+
+
 # ---- op schema + presets ---------------------------------------------------
 
 @router.get("/api/editor/ops/schema", response_model=list[EditOpOut])
@@ -207,6 +225,20 @@ async def edit_histogram(safe: str, run_id: int, request: Request,
         return hist
 
     return await run_in_threadpool(work)
+
+
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/editor/star-mask")
+async def edit_star_mask(safe: str, run_id: int, request: Request,
+                         size_px: float = 4.0, grow: float = 0.5) -> Response:
+    """Grayscale preview of the star mask (~white on stars, black elsewhere) that
+    drives the star-reduce / boost-nebula ops. `size_px` matches the ops' star
+    size (reduce uses 2× its `size`; boost-nebula uses `size` directly)."""
+    size_px = max(0.5, min(50.0, size_px))
+    grow = max(0.0, min(3.0, grow))
+    project_dir, run = _run_info(request, safe, run_id)
+    png = await run_in_threadpool(_render_star_mask_png, project_dir, run, size_px, grow)
+    return Response(content=png, media_type="image/png",
+                    headers={"Cache-Control": "no-store"})
 
 
 @router.post("/api/targets/{safe}/stack-runs/{run_id}/editor/auto")

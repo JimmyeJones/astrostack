@@ -1,6 +1,6 @@
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EditorView } from "./Editor";
@@ -74,6 +74,46 @@ describe("EditorView", () => {
     expect(screen.getByText("Add operation")).toBeInTheDocument();
     expect(screen.getByText("Export as new image")).toBeInTheDocument();
     expect(screen.getByText("Download full-res PNG")).toBeInTheDocument();
+  });
+
+  it("toggles the star-mask overlay and fetches the mask", async () => {
+    mockEditorQueries();
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+    const maskUrl = vi.spyOn(client.api, "editStarMaskUrl");
+
+    renderEditor();
+
+    const btn = await screen.findByRole("button", { name: "Star mask" });
+    await waitFor(() => expect(btn).not.toBeDisabled());
+    btn.click();
+
+    await waitFor(() => expect(maskUrl).toHaveBeenCalledWith("M_42", 3));
+    // The overlay label switches to "Star mask" and the button flips to "Hide mask".
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Hide mask" })).toBeInTheDocument());
+  });
+
+  it("undoes the last op with Ctrl+Z", async () => {
+    mockEditorQueries();
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    // Pipeline seeds one op ("Stretch"). Add a "Curves" op to create undo history.
+    await screen.findByText("Stretch");
+    fireEvent.click(screen.getByText("Add operation"));
+    fireEvent.click(await screen.findByText("Curves"));
+    await waitFor(() => expect(screen.getAllByText("Curves").length).toBeGreaterThan(0));
+
+    // Ctrl+Z removes the just-added op.
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    await waitFor(() => expect(screen.queryByText("Curves")).not.toBeInTheDocument());
+    // The earlier op survives — undo popped only the last change.
+    expect(screen.getByText("Stretch")).toBeInTheDocument();
   });
 
   it("shows an error message when the preview render fails (not a blank panel)", async () => {

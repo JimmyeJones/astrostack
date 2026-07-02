@@ -121,6 +121,7 @@ export interface Frame {
   star_count: number | null;
   sky_adu_median: number | null;
   eccentricity_median: number | null;
+  transparency_score: number | null;
   streak_detected: boolean;
   accept: boolean;
   reject_reason: string | null;
@@ -376,10 +377,14 @@ export const api = {
       body: JSON.stringify(body),
     }),
   bulkFrames: (safe: string, body: Record<string, unknown>) =>
-    req<{ changed: number }>(`/api/targets/${safe}/frames/bulk`, {
+    req<{ changed: number; changed_ids: number[] }>(`/api/targets/${safe}/frames/bulk`, {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  rejectSummary: (safe: string) =>
+    req<{ counts: Record<string, number>; total: number }>(
+      `/api/targets/${safe}/frames/reject-summary`,
+    ),
   framePreviewUrl: (safe: string, id: number, size = 640, bayer?: string) =>
     `/api/targets/${safe}/frames/${id}/preview?size=${size}${bayer ? `&bayer=${bayer}` : ""}`,
 
@@ -507,6 +512,9 @@ export const api = {
   editPreviewUrl: (safe: string, runId: number, recipe: Recipe, bust = 0) =>
     `/api/targets/${safe}/stack-runs/${runId}/editor/preview?recipe=${encodeRecipe(recipe)}`
     + (bust ? `&v=${bust}` : ""),
+  editStarMaskUrl: (safe: string, runId: number, sizePx?: number) =>
+    `/api/targets/${safe}/stack-runs/${runId}/editor/star-mask`
+    + (sizePx ? `?size_px=${sizePx}` : ""),
   getHistogram: (safe: string, runId: number, recipe: Recipe) =>
     req<Histogram>(
       `/api/targets/${safe}/stack-runs/${runId}/editor/histogram?recipe=${encodeRecipe(recipe)}`),

@@ -116,7 +116,52 @@ export function EditorView() {
     const u = basePreview.data;
     return () => { if (u) URL.revokeObjectURL(u); };
   }, [basePreview.data]);
-  const shownSrc = showBase ? (basePreview.data ?? preview.data) : preview.data;
+
+  // Star-mask overlay: lazily fetch the soft mask that gates the star ops so the
+  // user can see what the editor treats as stars vs background/nebula.
+  const [showMask, setShowMask] = useState(false);
+  const maskPreview = useQuery({
+    queryKey: ["edit-mask", safe, rid],
+    enabled: showMask && !!opsSchema.data && !saved.isLoading,
+    queryFn: async () => {
+      const res = await fetch(api.editStarMaskUrl(safe, rid));
+      if (!res.ok) throw new Error("star mask preview failed");
+      return URL.createObjectURL(await res.blob());
+    },
+  });
+  useEffect(() => {
+    const u = maskPreview.data;
+    return () => { if (u) URL.revokeObjectURL(u); };
+  }, [maskPreview.data]);
+
+  const shownSrc = showMask
+    ? (maskPreview.data ?? preview.data)
+    : showBase
+      ? (basePreview.data ?? preview.data)
+      : preview.data;
+
+  // Keyboard undo/redo for the op pipeline: Cmd/Ctrl+Z undoes, Cmd/Ctrl+Shift+Z
+  // (or Ctrl+Y) redoes. Skipped while typing in a field so editing the output
+  // name / curve inputs isn't hijacked.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const el = e.target as HTMLElement | null;
+      const tag = el?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || el?.isContentEditable) return;
+      const key = e.key.toLowerCase();
+      if (key === "z") {
+        e.preventDefault();
+        if (e.shiftKey) { if (canRedo) redo(); }
+        else if (canUndo) undo();
+      } else if (key === "y") {
+        e.preventDefault();
+        if (canRedo) redo();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [undo, redo, canUndo, canRedo]);
 
   // --- mutations -----------------------------------------------------------
   const saveRecipe = useMutation({
@@ -215,9 +260,9 @@ export function EditorView() {
           <Title order={2}>Editor — {safe}</Title>
         </Group>
         <Group gap="xs">
-          <Tooltip label="Undo"><ActionIcon variant="default" disabled={!canUndo}
+          <Tooltip label="Undo (Ctrl+Z)"><ActionIcon variant="default" disabled={!canUndo}
             onClick={undo} aria-label="Undo"><IconArrowBackUp size={16} /></ActionIcon></Tooltip>
-          <Tooltip label="Redo"><ActionIcon variant="default" disabled={!canRedo}
+          <Tooltip label="Redo (Ctrl+Shift+Z)"><ActionIcon variant="default" disabled={!canRedo}
             onClick={redo} aria-label="Redo"><IconArrowForwardUp size={16} /></ActionIcon></Tooltip>
           <Button variant="light" color="grape" leftSection={<IconSparkles size={16} />}
             loading={auto.isPending} onClick={() => auto.mutate()}>Auto-process</Button>
@@ -256,15 +301,24 @@ export function EditorView() {
               ) : (
                 <Center h={240}><Loader /></Center>
               )}
-              {showBase ? (
+              {showMask || showBase ? (
                 <Text size="xs" c="white" style={{ position: "absolute", left: 12, top: 10,
                   background: "rgba(0,0,0,0.6)", padding: "2px 8px", borderRadius: 4 }}>
-                  Original
+                  {showMask ? "Star mask" : "Original"}
                 </Text>
               ) : null}
               <Group gap={6} style={{ position: "absolute", right: 8, top: 8 }}>
+                <Tooltip label="Show the soft mask that gates star ops (white = treated as a star)">
+                  <Button size="xs" variant={showMask ? "filled" : "default"}
+                    color="grape"
+                    disabled={!preview.data}
+                    loading={showMask && maskPreview.isLoading}
+                    onClick={() => setShowMask((s) => { if (!s) setShowBase(false); return !s; })}>
+                    {showMask ? "Hide mask" : "Star mask"}
+                  </Button>
+                </Tooltip>
                 <Button size="xs" variant={showBase ? "filled" : "default"}
-                  disabled={!preview.data}
+                  disabled={!preview.data || showMask}
                   onClick={() => setShowBase((s) => !s)}>
                   {showBase ? "Edited" : "Compare"}
                 </Button>

@@ -88,6 +88,40 @@ def test_bulk_reject_worst(client, built_library):
     assert r.json()["changed"] == 1
 
 
+def test_bulk_reject_worst_by_transparency(client, built_library, data_root):
+    from seestack.io.library import Library
+
+    frames = client.get("/api/targets/M_42/frames").json()
+    assert len(frames) == 3
+    # Give the three frames distinct transparency scores; the lowest is the haziest.
+    scores = {frames[0]["id"]: 900.0, frames[1]["id"]: 100.0, frames[2]["id"]: 500.0}
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target("M_42")
+        try:
+            for fid, s in scores.items():
+                proj.update_frame(fid, transparency_score=s)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    # Reject the worst ~1/3 by transparency: the single lowest-transparency frame.
+    r = client.post(
+        "/api/targets/M_42/frames/bulk",
+        json={"action": "reject_worst", "metric": "transparency_score", "fraction": 0.34},
+    )
+    assert r.status_code == 200
+    assert r.json()["changed"] == 1
+    after = {f["id"]: f for f in client.get("/api/targets/M_42/frames").json()}
+    haziest = frames[1]["id"]  # score 100.0
+    assert after[haziest]["accept"] is False
+    assert after[haziest]["reject_reason"] == "bulk:transparency_score"
+    # The clearer frames stay accepted.
+    assert after[frames[0]["id"]]["accept"] is True
+    assert after[frames[2]["id"]]["accept"] is True
+
+
 def test_bulk_reject_streaked(client, built_library, data_root):
     from seestack.io.library import Library
 
@@ -124,6 +158,61 @@ def test_bulk_reject_streaked(client, built_library, data_root):
         json={"action": "reject_streaked"},
     )
     assert r.json()["changed"] == 0
+
+
+def test_bulk_returns_changed_ids_for_undo(client, built_library):
+    frames = client.get("/api/targets/M_42/frames").json()
+    ids = [f["id"] for f in frames[:2]]
+    # A bulk reject reports exactly which frame ids it touched...
+    r = client.post(
+        "/api/targets/M_42/frames/bulk",
+        json={"action": "reject", "ids": ids},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["changed"] == 2
+    assert sorted(body["changed_ids"]) == sorted(ids)
+    # ...so the client can undo by re-accepting exactly those ids.
+    r = client.post(
+        "/api/targets/M_42/frames/bulk",
+        json={"action": "accept", "ids": body["changed_ids"]},
+    )
+    assert r.json()["changed"] == 2
+    after = {f["id"]: f for f in client.get("/api/targets/M_42/frames").json()}
+    for fid in ids:
+        assert after[fid]["accept"] is True
+        assert after[fid]["reject_reason"] is None
+
+
+def test_reject_summary_groups_by_reason(client, built_library, data_root):
+    from seestack.io.library import Library
+
+    frames = client.get("/api/targets/M_42/frames").json()
+    # Nothing rejected yet.
+    r = client.get("/api/targets/M_42/frames/reject-summary")
+    assert r.status_code == 200
+    assert r.json() == {"counts": {}, "total": 0}
+
+    # A manual reject (reason "user")...
+    client.post("/api/targets/M_42/frames/bulk",
+                json={"action": "reject", "ids": [frames[0]["id"]]})
+    # ...and a QC-style reject set directly (QC would normally write this reason).
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target("M_42")
+        try:
+            proj.update_frame(frames[1]["id"], accept=False, reject_reason="qc:fwhm")
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    body = client.get("/api/targets/M_42/frames/reject-summary").json()
+    assert body["total"] == sum(body["counts"].values()) == 2
+    assert body["counts"].get("user") == 1
+    assert body["counts"].get("qc:fwhm") == 1
+    # 'reject-summary' is a literal path, not captured as a frame id.
+    assert client.get("/api/targets/M_42/frames/reject-summary").status_code == 200
 
 
 def test_frame_preview_renders_png(client, built_library):
