@@ -29,8 +29,10 @@ Then run the loop:
    `docs/IMPROVEMENTS.md` (tag each with the pillar it serves and a size).
 4. **Ship it yourself** — the default branch is **`main`**: base your work on the
    latest `origin/main` (ignore other/stale branches), and once your change is
-   green *and* synced with `main`, **merge it into `main` yourself**. Nobody
-   reviews or merges for you: if you don't merge it, it never ships.
+   green *and* synced with `main`, **merge it into `main` yourself** (preferably by
+   opening a PR and immediately merging it, so the branch auto-deletes) and remove
+   your topic branch afterwards. Nobody reviews or merges for you: if you don't
+   merge it, it never ships.
 
 **Non-negotiables:** only ever merge fully-green work; never weaken, skip, or delete
 tests to go green; never force-push or break the default branch; keep changes

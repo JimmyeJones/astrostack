@@ -78,8 +78,6 @@ _(none — claim an item here with your branch name)_
   unbounded on a long-lived NAS deployment. (S, scale)
 - Add a `SessionStart` hook (or a `scripts/setup.sh`) that provisions the venv +
   `npm ci` so every autonomous iteration starts from a known-green baseline. (S)
-- CI workflow (GitHub Actions) running the Python + frontend suites on PRs, so
-  autonomous PRs are gated by real checks. (S–M)
 - Reduce the frontend bundle warning (code-split the heavy Sky/aladin chunks). (S)
 - Expand `docs/` (webapp.md) to cover calibration, mono/LRGB, auth. (S)
 - `npm audit` still reports `esbuild`≤0.24.2/`vite`≤6.4.2/`vitest`≤3.2.5
@@ -127,6 +125,8 @@ _Newest first. One line each: what + commit/PR._
   COLORTYP so the scientific output self-documents for Siril/PixInsight/APP.
   Additive `header_meta` arg on `write_stack_outputs`; defensive card merge.
   (v0.14.0, this run)
+- CI safety net (`.github/workflows/ci.yml`) — full Python + frontend suites run
+  on every PR and push to `main`; independent check on autonomous self-merges.
 
 - **Autonomous run (agent, this session):** security fixes — Seestar `goto`
   RA/Dec bounds validation, closed a quick-look-preview gap in the
