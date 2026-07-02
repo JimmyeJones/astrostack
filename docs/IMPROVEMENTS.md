@@ -103,6 +103,14 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Plain-language hints on the Target metric columns** — the FWHM, Stars, Ecc.
+  and Sky column headers now carry the same dotted-underline hint tooltip that
+  only Transparency had, each explaining in one sentence what the metric means
+  and which direction is better (e.g. "Ecc. — median star elongation: 0 = round,
+  closer to 1 = trailed; flags tracking error/wind. Lower is better."). Removes a
+  layer of jargon for a beginner scanning their subs. Frontend-only.
+  (v0.40.1, this run)
+
 - **Transparency-night badge on History/Gallery cards** — completes the
   transparency series. `run_stack` now records each run's transparency verdict
   (`median transparency of the stacked frames ÷ the target's p90 clear-sky
