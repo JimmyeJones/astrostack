@@ -131,6 +131,13 @@ _Newest first. One line each: what + commit/PR._
   offer the same "Reuse settings" action as History, opening the Stack form
   pre-filled via `?from=<runId>`. (v0.21.0, this run)
 
+- **Fix red CI (pytest-qt import crash)** — CI had been failing on every merge:
+  the `pytest-qt` plugin imports Qt at configure time and died on the runner's
+  missing `libEGL.so.1`, aborting the whole run before any test executed (the 3
+  GUI test *files* were ignored, but the plugin still loaded). Added
+  `-p no:pytest-qt` to the CI pytest command so the headless suite runs green,
+  matching the documented local fallback. No app-code change. (this run)
+
 - **Integration time on Gallery cards** — stack runs now record their effective
   integration time (median sub × frames combined) via a new additive
   `total_exposure_s` column (schema v3→v4 migration; old runs stay NULL). The
