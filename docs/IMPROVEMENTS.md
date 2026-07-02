@@ -85,7 +85,6 @@ _(none — claim an item here with your branch name)_
   a future refinement could make the cap a configurable setting. (S, scale)
 - Add a `SessionStart` hook (or a `scripts/setup.sh`) that provisions the venv +
   `npm ci` so every autonomous iteration starts from a known-green baseline. (S)
-- Reduce the frontend bundle warning (code-split the heavy Sky/aladin chunks). (S)
 - Expand `docs/` (webapp.md) to cover calibration, mono/LRGB, auth. (S)
 - `npm audit` still reports `esbuild`≤0.24.2/`vite`≤6.4.2/`vitest`≤3.2.5
   (moderate — dev server only, not the production build) after this run's
@@ -111,6 +110,15 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Code-split the frontend vendor bundle** — the eager app bundle was one
+  720 kB `index` chunk (React + Mantine + TanStack + all routes). A `manualChunks`
+  split in `vite.config.ts` peels the rarely-changing vendors into `react`
+  (65 kB), `mantine` (461 kB) and `query` (41 kB) chunks, dropping the main app
+  chunk to ~153 kB — so no eager chunk trips the 500 kB warning and vendors stay
+  cached across app deploys. The only remaining large chunks are the already
+  lazy-loaded Sky/aladin atlas (loaded only on the Sky page). Build-config only.
+  (v0.45.1, this run)
 
 - **"From your image" denoise-strength suggestion** — the editor's noise-
   reduction op made the user hand-tune a 0..1 strength knob. A new engine module
