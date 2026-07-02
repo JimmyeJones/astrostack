@@ -9,6 +9,18 @@ Items under "Needs owner sign-off" must not be started autonomously — see
 
 ## Shipped
 
+- **[Usability] Surface fetch errors instead of spinning forever** — M —
+  `Dashboard.tsx`, `Gallery.tsx`, `Library.tsx`, `Storage.tsx`, `Jobs.tsx`,
+  `Sky.tsx`, `Logs.tsx` all gated rendering on `isLoading || !data` with no
+  `isError` check, so a 500/network failure just spun the loader forever.
+  Added a shared `QueryError` component (`frontend/src/components/`) and wired
+  it into all seven routes; polling routes (Dashboard/Jobs/Logs) only swap to
+  the error view when there's no cached data to keep showing, to avoid
+  flicker on a single failed background poll. Sky Map keeps its own inline
+  overlay alert (replacing the whole 3D canvas on a transient error would be
+  worse than the loader gap it fixes). Covered by
+  `frontend/src/components/QueryError.test.tsx`. *(2026-07-02)*
+
 - **[Operability] Bound settings that could silently misconfigure the
   service, clamp `/api/jobs` `limit`** — S — `watch_quiet_period_s`,
   `watch_poll_interval_s`, `astap_timeout_s`, `cpu_workers`,
@@ -44,14 +56,6 @@ Items under "Needs owner sign-off" must not be started autonomously — see
   `<project>/output/`). *(2026-07-02)*
 
 ## Backlog
-
-- **[Usability] List/dashboard routes don't surface fetch errors** — M —
-  `Dashboard.tsx`, `Gallery.tsx`, `Library.tsx`, `Storage.tsx`, `Jobs.tsx`,
-  `Sky.tsx`, `Logs.tsx` all gate rendering on `isLoading || !data` and never
-  check `query.isError`, so a 500/network failure just spins the loader
-  forever instead of showing an error state. `Editor.tsx` and `AladinSky.tsx`
-  already handle this correctly — extract their pattern into a shared
-  component/hook and apply it to the rest.
 
 - **[Scale] Frame listing loads + sorts the whole table in Python** — M —
   `GET /api/targets/{safe}/frames` (`webapp/routers/frames.py`) materializes
