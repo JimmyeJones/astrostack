@@ -119,6 +119,25 @@ export function StackView() {
     if (recFlatDarkId !== null) set("flat_dark_master_id", String(recFlatDarkId));
   };
   const asStr = (v: unknown) => (v === undefined || v === null ? null : String(v));
+
+  // Inline cautions when a chosen master is a poor match for the data. A dark
+  // captures thermal/bias signal at a *specific* exposure, so an exposure
+  // mismatch either under- or over-subtracts; a flat-dark must instead match the
+  // flat's exposure. Advisory only — the pick is still honoured.
+  const masterById = (id: unknown) =>
+    (masters.data ?? []).find((m) => String(m.id) === String(id ?? ""));
+  const expMismatch = (a: number | null | undefined, b: number | null | undefined) =>
+    a != null && b != null && b > 0 && Math.abs(a - b) / b > 0.25;
+  const subExp = sug?.params.exposure_s ?? null;
+  const darkM = masterById(values.dark_master_id);
+  const darkWarning = expMismatch(darkM?.exposure_s, subExp)
+    ? `This dark was shot at ${darkM?.exposure_s}s but your subs are ${subExp}s — a mismatched dark leaves residual thermal signal or over-subtracts. A ${subExp}s dark matches better.`
+    : null;
+  const flatM = masterById(values.flat_master_id);
+  const flatDarkM = masterById(values.flat_dark_master_id);
+  const flatDarkWarning = flatDarkM && expMismatch(flatDarkM.exposure_s, flatM?.exposure_s)
+    ? `This flat-dark was shot at ${flatDarkM.exposure_s}s but your flat is ${flatM?.exposure_s}s — a flat-dark should match the flat's exposure to remove its pedestal cleanly.`
+    : null;
   const running = job && (job.state === "running" || job.state === "queued");
   const pct = job && job.total ? Math.round((job.done / job.total) * 100) : 0;
 
@@ -200,6 +219,11 @@ export function StackView() {
                     disabled={flatOpts.length === 0}
                   />
                 </Group>
+                {darkWarning ? (
+                  <Alert color="yellow" variant="light" py={6} px="sm">
+                    <Text size="xs">{darkWarning}</Text>
+                  </Alert>
+                ) : null}
                 {values.flat_master_id && darkOpts.length > 0 ? (
                   <Select
                     label="Flat-dark (optional)"
@@ -208,6 +232,11 @@ export function StackView() {
                     data={flatDarkOpts} value={asStr(values.flat_dark_master_id)}
                     onChange={(v) => set("flat_dark_master_id", v)}
                   />
+                ) : null}
+                {flatDarkWarning ? (
+                  <Alert color="yellow" variant="light" py={6} px="sm">
+                    <Text size="xs">{flatDarkWarning}</Text>
+                  </Alert>
                 ) : null}
               </Stack>
             ) : (

@@ -46,12 +46,6 @@ _(none — claim an item here with your branch name)_
   from the accepted-frame count — e.g. skip clipping under ~5 frames, loosen
   kappa for very large stacks — with a one-line "why" in the form. Removes a
   knob a beginner can't reason about. (M, approachability/correctness)
-- **Warn on a mismatched calibration master pick** — the flip side of the new
-  recommender: if the user selects a dark whose exposure/gain is far from the
-  target's frames (low `recommend_masters` score for the chosen id), show an
-  inline caution ("this dark was shot at 120 s but your subs are 30 s") so a
-  wrong pick doesn't silently degrade the stack. Reuses the scores already
-  returned by `/calibration-suggestions`. (S, correctness/approachability)
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
 - Drizzle memory estimate surfaced in the Stack form before you run it. (S)
@@ -105,6 +99,13 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Warn on a mismatched calibration master pick** — the Stack form now shows an
+  inline caution when a chosen dark's exposure is far (>25%) from the target's
+  subs ("this dark was shot at 120 s but your subs are 30 s") and when a chosen
+  flat-dark's exposure doesn't match the selected flat. Purely advisory — the
+  pick is still honoured. Complements the recommender so a wrong pick doesn't
+  silently degrade the stack. (v0.18.3, this run)
 
 - **Auto-suggest a matching flat-dark** — `recommend_masters` now also returns
   `flat_dark_master_id`: the dark whose exposure best matches the *recommended
