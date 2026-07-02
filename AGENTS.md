@@ -1,9 +1,11 @@
 # Autonomous development playbook — AstroStack
 
-This file tells an AI agent how to improve this app **on its own, one iteration at
-a time, with no human in the loop**. Read it in full before doing anything. It is
-the source of truth for *how to decide what to build and how to ship it safely*.
-The living list of *what* to build is [`docs/IMPROVEMENTS.md`](docs/IMPROVEMENTS.md).
+This file tells an AI agent how to improve this app **on its own, with no human in
+the loop**. A fresh agent starts **once an hour**; each run should complete
+**several** well-scoped improvements, not just one. Read this file in full before
+doing anything. It is the source of truth for *how to decide what to build and how
+to ship it safely*. The living list of *what* to build is
+[`docs/IMPROVEMENTS.md`](docs/IMPROVEMENTS.md).
 
 If anything here conflicts with an explicit instruction from the user in your
 session, the user wins. Otherwise, follow this document exactly.
@@ -19,8 +21,9 @@ without being PixInsight experts.
 
 Your job each run: **make the app meaningfully better for that user** — more
 capable, more correct, more pleasant to use — and leave the tree green, the
-history clean, and the backlog updated. Ship *one* well-scoped, fully-tested
-improvement per iteration. Depth over breadth.
+history clean, and the backlog updated. Optimise for **many high-quality, fully
+tested changes over time**. Each individual change is small and safe; each hourly
+run lands a batch of them.
 
 > Note: `PLAN.md` is the *original* desktop-era design. It is historical. The app
 > has since grown a web layer, a non-destructive editor, dark/flat calibration,
@@ -29,43 +32,59 @@ improvement per iteration. Depth over breadth.
 
 ---
 
-## 2. The loop (do this every iteration)
+## 2. The run — do several tasks each hour
 
-1. **Orient.** `git fetch`, read `docs/IMPROVEMENTS.md`, skim recent `git log`
-   (last ~20 commits) so you don't redo or fight in-flight work. Get the current
-   `webapp/__init__.py` `__version__`.
-2. **Set up the environment** (§6) and confirm the test suite is green *before*
-   you touch anything. If it's already red, your iteration's job is to fix it —
-   that outranks new features.
-3. **Choose one improvement** using the decision framework (§3). Prefer the
-   highest value-per-risk item you can finish and fully test in this iteration.
-4. **Plan briefly**, then **implement** across all relevant layers (engine +
-   webapp + frontend) matching existing style (§5).
-5. **Test everything** (§4). Add tests for what you changed. No green, no ship.
-6. **Commit & push** to your own branch (§7). Bump the version.
-7. **Update `docs/IMPROVEMENTS.md`**: move the item to "Shipped" with the commit,
-   and add any new ideas you discovered while working.
-8. **Open/refresh a PR** (§7) and stop. Do **not** merge to the default branch
-   yourself unless §7's merge policy explicitly allows it.
+A run is an **outer loop over tasks**. Keep completing tasks until you run low on
+time, run out of good candidates, or the only work left needs owner sign-off.
+A healthy run lands **~3–6 tasks** (more if small, fewer if one is large — a
+single big feature can legitimately be the whole run). **Never trade the quality
+bar (§5) for task count.**
 
-One iteration = one focused, shippable change. If a task turns out to be huge,
-split it: ship the first safe slice and record the rest in the backlog.
+**Start of run (once):**
+1. `git fetch`; read `docs/IMPROVEMENTS.md` and skim the last ~20 commits and open
+   PRs/branches so you don't redo or collide with in-flight work.
+2. Set up the environment (§7) and confirm the baseline test suite is green. If
+   it's already red, fixing it is your first task — that outranks everything.
+
+**Per task (repeat):**
+3. **Choose** the next task with the decision framework (§3), or invent one with
+   the ideation process (§4). Mark it **In progress** in `docs/IMPROVEMENTS.md`
+   (with your branch) in the commit that starts it.
+4. **Implement** it across all relevant layers (engine + webapp + frontend),
+   matching existing style (§6).
+5. **Test** everything (§5). Add tests for what you changed. No green, no ship.
+6. **Commit** the task as its own logical commit; bump the version; move the item
+   to **Shipped** in `docs/IMPROVEMENTS.md`. Re-run the suite so each commit is
+   independently green.
+7. **Push** and keep going to the next task.
+
+**End of run (once):**
+8. Make sure everything is pushed, PR(s) opened/updated (§8), and add any new
+   ideas you found to `docs/IMPROVEMENTS.md`. Do **not** merge to the default
+   branch yourself unless §8's merge policy allows it. Then stop.
+
+**Batching guidance:** group closely-related small changes onto one branch as
+separate commits and one PR; put unrelated changes on their own branches/PRs so
+each stays reviewable and revertible. If a task turns out huge, ship the first
+safe slice and log the rest as a new backlog item — then move on.
 
 ---
 
-## 3. How to decide what to work on (make educated decisions)
+## 3. How to decide what to work on (choosing among known candidates)
 
-You are trusted to choose. Score candidate work on three axes and pick the best:
+You are trusted to choose. Score each candidate on three axes:
 
 - **User value** — does a real Seestar/astro imager notice and benefit? Correct
   results and "it finally does X" beat cosmetic tweaks.
-- **Effort** — can you finish it *end-to-end with tests* in one iteration?
+- **Effort** — can you finish it *end-to-end with tests* within the run?
 - **Risk** — how likely to break existing behaviour, corrupt data, or destabilise
   the hot path (ingest/stack)? Lower is better.
 
 **Pick the highest `value ÷ (effort × risk)`.** When two are close, prefer:
 finishing/polishing something half-done > fixing a correctness bug > improving a
-hot path safely > new self-contained feature > cosmetic.
+hot path safely > new self-contained feature > cosmetic. Sequence a run to front-
+load safe, high-confidence wins, then attempt one riskier/bigger item if time
+allows.
 
 ### Where to find candidates (in priority order)
 1. **Anything broken or flaky** — failing/skipped tests, error logs, TODO/FIXME/
@@ -83,19 +102,69 @@ hot path safely > new self-contained feature > cosmetic.
 7. **Maintainability** — safe refactors that reduce duplication or clarify a
    confusing module, *when* they enable upcoming work.
 
-### Judgment calls
-- Prefer improving what exists over adding surface area. A great editor/stacker
-  beats a pile of half-features.
-- Respect the target user: every user-facing option needs a sane default and a
-  plain-language explanation/tooltip.
-- If you're unsure whether something is wanted, build the *conservative,
-  reversible, opt-in* version and note the fuller version in the backlog.
+---
+
+## 4. How to come up with new features and ideas
+
+Don't just drain the backlog — **replenish it**. Every run, spend some effort
+generating genuinely new, valuable ideas and record them (with a why, a rough
+size, and which pillar they serve). Aim to add at least a couple of well-reasoned
+ideas per run. Here's how to find good ones.
+
+### The three product pillars — every idea should push one
+1. **Scale** — handle 10k+ subs, mosaics, big canvases without falling over.
+2. **Correctness** — physically/photometrically right results (calibration,
+   alignment, coverage, colour, noise).
+3. **Approachability** — a non-expert gets a great result with sane defaults,
+   plain-language options, and a "why". This is the app's edge over PixInsight.
+
+An idea that advances one pillar without hurting the others is a good idea.
+
+### Method A — walk the user's journey and find friction
+Trace the whole path and ask "what's missing, confusing, or manual here?":
+`capture → drop files → ingest → QC → plate-solve → stack → preview → edit →
+export → share/compare`. Mentally dogfood each step for a beginner *and* for
+someone with 8,000 subs of one target. Friction points are features:
+missing feedback, no sane default, a manual step that could be automatic, a
+failure with no guidance, a result you can't trust or compare.
+
+### Method B — learn from mature tools, then fit our niche
+Look at what established astro software does and adapt what fits a **headless,
+web, beginner-friendly, scalable** product (not a pro desktop clone):
+DeepSkyStacker, Siril, GraXpert (gradient/denoise), Starnet++ (stars), ASI Studio /
+ASIDeepStack, Astro Pixel Processor, N.I.N.A., PixInsight. Translate a capability
+into *our* idiom — automatic, explained, with presets — rather than exposing a
+hundred knobs. Respect the guardrails (§9): anything needing heavy ML runtimes or
+big model downloads goes to **Needs owner sign-off**, not straight into a build.
+
+### Method C — mine the code and telemetry
+- Settings/`StackOptions`/engine capabilities that have **no UI** yet.
+- Editor ops that *could* exist next to the ones present (`edit/ops/`).
+- FITS header fields we read but don't use; formats/cameras we don't support.
+- Failure modes in logs and error strings — each is a "help the user avoid/fix
+  this" feature (e.g. better guidance when a plate-solve fails).
+- Half-built or TODO-marked seams.
+
+### Method D — think in workflows, not knobs
+The best features remove work or uncertainty: automation (auto-pick best subs,
+auto-suggest settings from the data), trust (show what changed, let users compare
+before/after or A/B two stacks), and repeatability (presets, saved recipes, batch
+apply). Favour these over yet another slider.
+
+### Feasibility filter (before adding an idea)
+Keep an idea if it: fits the headless/web/TrueNAS model; needs no heavy/networked
+dependency without sign-off; can ship with a sane default and a plain-language
+explanation; is additive/reversible; and can be tested. Otherwise, either reshape
+it until it passes or file it under **Needs owner sign-off** with the reason.
+
+Record survivors in `docs/IMPROVEMENTS.md` → **Ideas**, tagged with the pillar
+they serve and a size estimate, so future runs (and other agents) can pick them up.
 
 ---
 
-## 4. Definition of done (non-negotiable quality bar)
+## 5. Definition of done (non-negotiable quality bar, per task)
 
-A change is shippable only when ALL of these hold:
+A task is shippable only when ALL of these hold:
 
 - [ ] Python suite green:
       `python -m pytest tests/ --ignore=tests/test_compare_dialog.py --ignore=tests/test_end_to_end.py --ignore=tests/test_footprint_view.py -q`
@@ -107,18 +176,19 @@ A change is shippable only when ALL of these hold:
       green, and `npx vite build` succeeds.
 - [ ] You did **not** delete, skip, loosen, or `xfail` a test to get green.
 - [ ] `__version__` in `webapp/__init__.py` bumped (patch for fixes/polish, minor
-      for features).
-- [ ] `docs/IMPROVEMENTS.md` updated.
+      for features). One bump per task is fine.
+- [ ] `docs/IMPROVEMENTS.md` updated (item moved to Shipped; new ideas added).
 - [ ] Code matches surrounding style, comment density, and naming. New engine ops/
       settings stay JSON-safe and (for `StackOptions`) either have a form
       descriptor or are added to `NON_FORM_KEYS` (a drift test enforces this).
 
-If you can't meet the bar this iteration, ship a smaller slice that can, and log
-the rest.
+Every committed task must be independently green — so a bad one can be reverted
+without unpicking the others. If you can't meet the bar, ship a smaller slice that
+can, and log the rest.
 
 ---
 
-## 5. Architecture map (so you know where things go)
+## 6. Architecture map (so you know where things go)
 
 - `seestack/` — the pure processing engine (no webapp imports).
   - `io/` — FITS load (`fits_loader.py`), ingest, `project.py` (per-target SQLite;
@@ -155,9 +225,9 @@ Key invariants to respect:
 
 ---
 
-## 6. Environment setup (the container is ephemeral)
+## 7. Environment setup (the container is ephemeral)
 
-Recreate tooling at the start of each iteration if missing:
+Recreate tooling at the start of each run if missing:
 
 ```bash
 # Python engine + webapp (uses a scratch venv; python3.11+ is fine)
@@ -173,36 +243,36 @@ cd frontend && npm ci
 PySide6/Qt is intentionally absent — the 3 GUI tests stay ignored. Put any
 temp/scratch files under the session scratchpad dir, never in the repo.
 
-> Tip: a `SessionStart` hook that runs the above makes every iteration reliable.
-> If one doesn't exist yet, creating it is itself a good backlog item.
+> Tip: a `SessionStart` hook that runs the above makes every run reliable. If one
+> doesn't exist yet, creating it is itself a good backlog item.
 
 ---
 
-## 7. Git, branches, PRs, and merge policy
+## 8. Git, branches, PRs, and merge policy
 
-- **Never commit directly to the default branch.** Each iteration works on its own
-  branch off the latest default:
+- **Never commit directly to the default branch.** Work on your own branch(es) off
+  the latest default:
   `git fetch origin && git checkout -B agent/<short-kebab-topic> origin/<default>`.
-  Keep one topic per branch.
-- Commit in logical, well-described steps. End every commit message with the
-  repo's trailer convention (a `Co-Authored-By:` line; do **not** put any model
-  identifier in commits, code, PR text, or logs).
+- One topic per branch. Multiple related small tasks may share a branch (separate
+  commits, one PR); unrelated tasks get their own branch/PR.
+- Commit each task as its own well-described commit. End every commit message with
+  the repo's trailer convention (a `Co-Authored-By:` line; do **not** put any
+  model identifier in commits, code, PR text, or logs).
 - Push with `git push -u origin <branch>`; retry transient network failures with
-  backoff.
-- Open a PR describing what changed and why, how you tested it, and the risk. If a
-  PR template exists, fill it in.
+  backoff. Push after each task so progress isn't lost if the run ends abruptly.
+- Open a PR per branch describing what changed and why, how you tested it, and the
+  risk. If a PR template exists, fill it in.
 - **Merge policy (default: conservative).** Do **not** merge your own PR into the
   default branch automatically. Leave it green and open for review. Only merge
   autonomously if the repo owner has explicitly enabled that mode (branch
-  protection + required CI green) — and even then, never force-push shared
-  history and never merge a red PR. When in doubt, leave it for review and move on
-  to the next branch/iteration.
-- Do not open a second PR for something an open PR already covers — push follow-ups
+  protection + required CI green) — and even then, never force-push shared history
+  and never merge a red PR.
+- Don't open a second PR for something an open PR already covers — push follow-ups
   to that branch instead.
 
 ---
 
-## 8. Hard guardrails (never cross these)
+## 9. Hard guardrails (never cross these)
 
 - Never weaken, delete, skip, or `xfail` tests to go green. Fix the code.
 - Never break the ingest/stack hot path's memory bounds or NaN/coverage semantics.
@@ -222,26 +292,35 @@ temp/scratch files under the session scratchpad dir, never in the repo.
 
 ---
 
-## 9. Coordinating with other agents
+## 10. Coordinating with other agents
 
-Multiple agents may run this loop. Avoid collisions:
+A new agent runs every hour, so runs overlap in time and history. Avoid
+collisions:
 - Read recent `git log` and open PRs/branches first; skip topics already in
   flight.
 - Keep branches small and single-topic so they rarely conflict.
 - `docs/IMPROVEMENTS.md` is the shared blackboard: claim an item by moving it to
-  "In progress" with your branch name in the same commit that starts the work;
-  release it (to "Shipped" or back to "Ideas") when you finish or abandon it.
+  **In progress** with your branch name in the same commit that starts the work;
+  release it (to **Shipped** or back to **Ideas**) when you finish or abandon it.
+- Prefer picking items *not* recently touched by another branch.
 
 ---
 
-## 10. Iteration checklist (copy/paste)
+## 11. Run checklist (copy/paste)
 
 ```
-[ ] git fetch; read IMPROVEMENTS.md + recent log
-[ ] env ready; baseline test suite green
-[ ] picked ONE item (value ÷ (effort×risk)); noted it In progress
+Start of run:
+[ ] git fetch; read IMPROVEMENTS.md + recent log + open PRs
+[ ] env ready; baseline test suite green (if red, fixing it is task #1)
+
+Per task (repeat ~3–6×, or fewer if large):
+[ ] picked/invented ONE task (§3 decision rule or §4 ideation); marked In progress
 [ ] implemented across engine/webapp/frontend as needed
 [ ] added/updated tests; python + (if FE touched) tsc/vitest/vite build green
-[ ] version bumped; IMPROVEMENTS.md updated
-[ ] branch pushed; PR opened/updated; NOT merged to default
+[ ] version bumped; IMPROVEMENTS.md updated (item → Shipped)
+[ ] committed (independently green) and pushed
+
+End of run:
+[ ] added ≥1–2 new ideas to IMPROVEMENTS.md (§4)
+[ ] PR(s) opened/updated; NOT merged to default; everything pushed
 ```

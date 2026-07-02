@@ -7,11 +7,14 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 **Conventions**
 - Sections: **In progress** → **Ideas** (roughly prioritised) → **Shipped** →
   **Needs owner sign-off**.
-- Claim work by moving an item to **In progress** with your branch name, in the
-  same commit that starts it. Move it to **Shipped** (with the commit/PR) when
-  done, or back to **Ideas** if you abandon it.
-- Add new ideas you discover while working — a healthy backlog is part of the job.
-- Keep entries one-liners with a short "why" and a rough size (S/M/L).
+- A new agent runs hourly and lands **several tasks per run**. Claim each item by
+  moving it to **In progress** with your branch name, in the same commit that
+  starts it. Move it to **Shipped** (with the commit/PR) when done, or back to
+  **Ideas** if you abandon it.
+- **Replenish the backlog every run.** Using AGENTS.md §4 (the ideation process),
+  add at least one or two well-reasoned new ideas per run so this list never runs
+  dry. Keep entries to a one-liner with a short "why", a rough size (S/M/L), and
+  the pillar it serves (scale / correctness / approachability).
 
 ---
 
