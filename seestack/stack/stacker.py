@@ -71,16 +71,20 @@ def _available_memory_bytes() -> int | None:
     return None
 
 
-def _stack_memory_budget_bytes() -> float:
-    """How much working memory a single stack may use. Honors an explicit
-    ASTROSTACK_MAX_STACK_GB override, else ~70% of currently-available RAM
-    (leaving headroom for worker subprocesses, OS cache and the web app)."""
+def _stack_memory_budget_bytes(setting_gb: float | None = None) -> float:
+    """How much working memory a single stack may use. Precedence:
+    the ``ASTROSTACK_MAX_STACK_GB`` env override (a deployment/container knob)
+    wins, then an explicit ``setting_gb`` (the user-facing Settings value passed
+    in by the webapp), then ~70% of currently-available RAM (leaving headroom
+    for worker subprocesses, OS cache and the web app)."""
     override = os.environ.get("ASTROSTACK_MAX_STACK_GB")
     if override:
         try:
             return float(override) * 1e9
         except ValueError:
             pass
+    if setting_gb is not None and setting_gb > 0:
+        return float(setting_gb) * 1e9
     avail = _available_memory_bytes()
     if avail:
         return avail * 0.7
@@ -145,7 +149,8 @@ def _largest_drizzle_scale_within_budget(
 
 def _guard_stack_memory(dst_shape: tuple[int, int], *, drizzle: bool,
                         drizzle_scale: float,
-                        drizzle_reject: bool = False) -> None:
+                        drizzle_reject: bool = False,
+                        memory_budget_gb: float | None = None) -> None:
     """Refuse a stack whose output canvas would blow the memory budget instead
     of letting it OOM-kill the whole process. ``dst_shape`` is (h, w) of the
     pre-drizzle canvas; drizzle multiplies each axis by ``drizzle_scale``."""
@@ -153,7 +158,7 @@ def _guard_stack_memory(dst_shape: tuple[int, int], *, drizzle: bool,
     need, _ = _estimate_peak_bytes(dst_shape, drizzle=drizzle,
                                    drizzle_scale=drizzle_scale,
                                    drizzle_reject=drizzle_reject)
-    budget = _stack_memory_budget_bytes()
+    budget = _stack_memory_budget_bytes(memory_budget_gb)
     if need > budget:
         raise MemoryError(
             f"stack output canvas {w}×{h}"
@@ -287,7 +292,8 @@ class StackEstimate:
     suggested_drizzle_scale: float | None = None
 
 
-def estimate_stack(project: Project, options: StackOptions) -> StackEstimate:
+def estimate_stack(project: Project, options: StackOptions,
+                   memory_budget_gb: float | None = None) -> StackEstimate:
     """Compute the output canvas dimensions and estimated peak working memory a
     stack *would* need, without running it.
 
@@ -339,7 +345,7 @@ def estimate_stack(project: Project, options: StackOptions) -> StackEstimate:
         dst_shape, drizzle=options.drizzle, drizzle_scale=options.drizzle_scale,
         drizzle_reject=options.drizzle_reject and n >= 4,
     )
-    budget = int(_stack_memory_budget_bytes())
+    budget = int(_stack_memory_budget_bytes(memory_budget_gb))
     would_exceed = int(peak) > budget
     suggested_scale: float | None = None
     if would_exceed and options.drizzle:
@@ -428,6 +434,7 @@ def run_stack(
     *,
     progress: ProgressFn | None = None,
     cancel: CancelFn | None = None,
+    memory_budget_gb: float | None = None,
 ) -> StackResult:
     """
     Execute a stacking run end-to-end. Synchronous — call this from a worker
@@ -625,7 +632,8 @@ def run_stack(
     # (Rejection is skipped below 4 frames, so don't charge its extra arrays.)
     _guard_stack_memory(dst_shape, drizzle=options.drizzle,
                         drizzle_scale=options.drizzle_scale,
-                        drizzle_reject=options.drizzle_reject and n >= 4)
+                        drizzle_reject=options.drizzle_reject and n >= 4,
+                        memory_budget_gb=memory_budget_gb)
     errors: list[str] = []
 
     # ---- 3a. Drizzle path (alternate accumulator) --------------------------

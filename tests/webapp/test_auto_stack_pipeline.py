@@ -27,7 +27,8 @@ def _settings(root) -> Settings:
 def _patch_run_stack(monkeypatch):
     calls: list[str] = []
 
-    def fake_run_stack(proj, opts, *, progress=None, cancel=None):  # noqa: ANN001
+    def fake_run_stack(proj, opts, *, progress=None, cancel=None,
+                       memory_budget_gb=None):  # noqa: ANN001
         calls.append(getattr(proj, "name", "?"))
         return SimpleNamespace(
             output_dir="/tmp/x", n_frames_used=3, canvas_shape=(1, 1, 3),
@@ -80,7 +81,8 @@ def test_auto_stack_skips_already_stacked(solved_library, monkeypatch):
 
 
 def test_auto_stack_failure_is_non_fatal(solved_library, monkeypatch):
-    def boom(proj, opts, *, progress=None, cancel=None):  # noqa: ANN001
+    def boom(proj, opts, *, progress=None, cancel=None,
+             memory_budget_gb=None):  # noqa: ANN001
         raise ValueError("No accepted frames are plate-solved yet")
 
     monkeypatch.setattr("seestack.stack.stacker.run_stack", boom)
@@ -101,7 +103,8 @@ def test_auto_stack_does_not_loop_on_repeated_crash(solved_library, monkeypatch)
     # would loop forever (every job "interrupted").
     calls: list[str] = []
 
-    def boom(proj, opts, *, progress=None, cancel=None):  # noqa: ANN001
+    def boom(proj, opts, *, progress=None, cancel=None,
+             memory_budget_gb=None):  # noqa: ANN001
         calls.append(getattr(proj, "name", "?"))
         raise MemoryError("simulated OOM")
 

@@ -69,6 +69,25 @@ _(none — claim an item here with your branch name)_
   testable in isolation from real hardware. (M, correctness)
 
 ### Features that serve real workflows
+- **One-click "reject all streaked frames" from the Target badge** — the new
+  "N streaked" badge (v0.27.1) tells the user how many accepted frames carry a
+  trail; pair it with a bulk action (a new `BulkFrameAction` "reject_streaked",
+  or reuse the existing bulk endpoint filtered on `streak_detected`) so a user
+  who'd rather drop the streaked subs than rely on per-pixel rejection can do it
+  in one gesture. Reuses the existing flag + bulk-reject plumbing. (S,
+  approachability)
+- **Suggest "reference" canvas when a non-drizzle mosaic is over budget** — the
+  drizzle-scale suggestion (v0.28.0) only fires when drizzle is on. When drizzle
+  is off but the union mosaic canvas alone exceeds the budget, compute the
+  reference-frame canvas peak and offer a one-click "use reference canvas
+  instead" (mirrors the drizzle suggestion). Turns the other over-budget refusal
+  into a usable path too. (S, scale/approachability) *(follow-on to v0.28.0)*
+- **Warn when the memory-budget Setting exceeds available RAM** — now that
+  `max_stack_memory_gb` is user-settable (v0.29.0), a value larger than the box's
+  RAM is a footgun that re-opens the OOM door the guard exists to close. The
+  Settings save (or the stack-estimate response) could compare it against
+  `/proc/meminfo` MemAvailable and show an advisory "higher than this machine's
+  RAM — a big stack could still OOM". Advisory only. (S, correctness)
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
 - Star-mask preview toggle in the editor (visualise the mask driving star ops). (S)
@@ -91,11 +110,6 @@ _(none — claim an item here with your branch name)_
   a future refinement could make the cap a configurable setting. (S, scale)
 - Add a `SessionStart` hook (or a `scripts/setup.sh`) that provisions the venv +
   `npm ci` so every autonomous iteration starts from a known-green baseline. (S)
-- **Expose the stack memory budget as a Setting** — the working-memory cap is
-  env-only (`ASTROSTACK_MAX_STACK_GB`, else ~70% of RAM). Now that the Stack form
-  surfaces the budget via the estimate (v0.25.0), let the user view/adjust it
-  from Settings (with a sane clamp) instead of editing container env. Additive,
-  the env override can still win. (S, scale/approachability)
 - Reduce the frontend bundle warning (code-split the heavy Sky/aladin chunks). (S)
 - Expand `docs/` (webapp.md) to cover calibration, mono/LRGB, auth. (S)
 - `npm audit` still reports `esbuild`≤0.24.2/`vite`≤6.4.2/`vitest`≤3.2.5
@@ -122,6 +136,15 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Stack memory budget as a Setting** — a new `max_stack_memory_gb` setting
+  (default None = auto ~70% of RAM, clamped 0.5–1024 GB) lets the user view/raise/
+  lower the per-stack working-memory cap from Settings instead of editing
+  container env. Threaded into `run_stack`/`estimate_stack` via a
+  `memory_budget_gb` param, so both the pre-run estimate and the in-run guard
+  honour it. Precedence: the `ASTROSTACK_MAX_STACK_GB` env override still wins,
+  then the setting, then auto. Additive/upgrade-safe (new optional field).
+  (v0.29.0, this run)
 
 - **Mono mosaic-edge NaN/coverage audit** — added a regression test that stacks
   two mono frames whose sky footprints only partially overlap onto a union

@@ -34,6 +34,35 @@ def test_budget_honors_env_override(monkeypatch):
     assert stacker._stack_memory_budget_bytes() == pytest.approx(42e9)
 
 
+def test_budget_uses_setting_when_no_env(monkeypatch):
+    """The user-facing Settings value applies when the env override is absent."""
+    monkeypatch.delenv("ASTROSTACK_MAX_STACK_GB", raising=False)
+    assert stacker._stack_memory_budget_bytes(8.0) == pytest.approx(8e9)
+
+
+def test_budget_env_wins_over_setting(monkeypatch):
+    """A deployment env override must beat the in-app Settings value."""
+    monkeypatch.setenv("ASTROSTACK_MAX_STACK_GB", "3")
+    assert stacker._stack_memory_budget_bytes(64.0) == pytest.approx(3e9)
+
+
+def test_budget_setting_none_falls_back_to_auto(monkeypatch):
+    """None (auto) leaves the RAM-based default in place, not a zero budget."""
+    monkeypatch.delenv("ASTROSTACK_MAX_STACK_GB", raising=False)
+    assert stacker._stack_memory_budget_bytes(None) > 0
+
+
+def test_guard_honors_setting_budget(monkeypatch):
+    monkeypatch.delenv("ASTROSTACK_MAX_STACK_GB", raising=False)
+    # A 4000×4000 canvas needs ~0.77 GB; a 0.5 GB setting must refuse it.
+    with pytest.raises(MemoryError, match="working memory"):
+        stacker._guard_stack_memory((4000, 4000), drizzle=False, drizzle_scale=1.0,
+                                    memory_budget_gb=0.5)
+    # …and a generous setting must allow it.
+    stacker._guard_stack_memory((4000, 4000), drizzle=False, drizzle_scale=1.0,
+                                memory_budget_gb=8.0)
+
+
 def test_guard_accounts_for_drizzle_reject(monkeypatch):
     monkeypatch.setenv("ASTROSTACK_MAX_STACK_GB", "1.2")
     shape = (4000, 4000)  # 4 arrays ≈ 0.77 GB — fits the 1.2 GB budget…
