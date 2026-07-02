@@ -9,6 +9,15 @@ Items under "Needs owner sign-off" must not be started autonomously — see
 
 ## Shipped
 
+- **[Reliability] Consistent 404s for unknown targets on merge/delete** — S —
+  `POST /api/targets/merge` raised an uncaught `FileNotFoundError` (500) when
+  `into` didn't resolve; `DELETE /api/targets/{safe}` silently returned
+  `200` for a target that never existed (`Library.delete_target` was a
+  no-op on a miss). `merge_targets` now catches and maps to 404;
+  `delete_target` now returns whether it found something, and the router
+  404s when it didn't. Covered by three new tests in `tests/webapp/test_api.py`.
+  *(2026-07-02)*
+
 - **[Security] Sanitize `output_name` before it reaches the filesystem** — M —
   `output_name` (stack options + editor export/batch requests) flowed
   unvalidated into `out_dir / f"{out_basename}.fits"` in
@@ -23,19 +32,6 @@ Items under "Needs owner sign-off" must not be started autonomously — see
   `<project>/output/`). *(2026-07-02)*
 
 ## Backlog
-
-- **[Reliability] `POST /api/targets/merge` 500s instead of 404 on unknown
-  `into`** — S — `Library.merge_targets` raises a bare `FileNotFoundError`
-  when the `into` target doesn't resolve; `webapp/routers/targets.py` doesn't
-  catch it, so the client sees an unhandled 500 with a stack trace instead of
-  a clean 404. `create_target` already has the right pattern to copy.
-
-- **[Reliability] `DELETE /api/targets/{safe}` returns 200 for an unknown
-  target** — S — `Library.delete_target` is a silent no-op when the entry
-  isn't found (`seestack/io/library.py`), so the router still returns
-  `200 {"deleted": ...}` for a target that never existed. Misleading for
-  scripted cleanup; should 404 like the sibling endpoints. (Pairs naturally
-  with the merge-target 404 fix above — same PR, same pattern.)
 
 - **[Usability] List/dashboard routes don't surface fetch errors** — M —
   `Dashboard.tsx`, `Gallery.tsx`, `Library.tsx`, `Storage.tsx`, `Jobs.tsx`,
@@ -82,9 +78,10 @@ Items under "Needs owner sign-off" must not be started autonomously — see
   `targets.py` + `frames.py` + `stack.py` + `settings.py` + `system.py`
   combined; it never exercises `create_target`, `merge_targets`,
   `delete_target`, `patch_target`, the target thumbnail endpoint, or stack
-  history/download/render/delete. Add targeted tests per endpoint (natural
-  follow-on once the 404-handling fixes above land, so the new tests assert
-  the corrected behavior).
+  history/download/render/delete. Add targeted tests per endpoint (basic
+  `delete_target`/`merge` coverage landed with the 404 fix above; still
+  missing: `create_target`, `patch_target`, thumbnail, stack history/download/
+  render/delete).
 
 - **[Usability] Frontend bundle has no code-splitting on Sky/Aladin** — M —
   `npm run build` warns that `assets/aladin-CKJvJOV6.js` (2.4 MB) and

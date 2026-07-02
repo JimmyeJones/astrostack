@@ -114,3 +114,21 @@ def test_settings_roundtrip(client):
 
 def test_unknown_target_404(client):
     assert client.get("/api/targets/does_not_exist/frames").status_code == 404
+
+
+def test_delete_unknown_target_404(client):
+    r = client.delete("/api/targets/does_not_exist")
+    assert r.status_code == 404
+
+
+def test_delete_target_removes_it(client, built_library):
+    assert client.get("/api/targets/M_42").status_code == 200
+    r = client.delete("/api/targets/M_42")
+    assert r.status_code == 200
+    assert r.json() == {"deleted": "M_42", "files_removed": False}
+    assert client.get("/api/targets/M_42").status_code == 404
+
+
+def test_merge_unknown_destination_404(client, built_library):
+    r = client.post("/api/targets/merge", json={"into": "does_not_exist", "sources": ["M_42"]})
+    assert r.status_code == 404

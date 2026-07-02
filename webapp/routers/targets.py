@@ -56,7 +56,10 @@ def create_target(body: TargetCreate, request: Request) -> TargetOut:
 def merge_targets(body: MergeRequest, request: Request) -> dict:
     lib = deps.open_library(request)
     try:
-        added = lib.merge_targets(body.into, body.sources)
+        try:
+            added = lib.merge_targets(body.into, body.sources)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
         return {"into": body.into, "frames_added": added}
     finally:
         lib.close()
@@ -91,7 +94,9 @@ def patch_target(safe: str, body: TargetPatch, request: Request) -> TargetOut:
 def delete_target(safe: str, request: Request, remove_files: bool = False) -> dict:
     lib = deps.open_library(request)
     try:
-        lib.delete_target(safe, remove_files=remove_files)
+        found = lib.delete_target(safe, remove_files=remove_files)
+        if not found:
+            raise HTTPException(status_code=404, detail=f"No target '{safe}'")
         return {"deleted": safe, "files_removed": remove_files}
     finally:
         lib.close()
