@@ -4,6 +4,7 @@ import {
 import { IconX } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Job } from "../api/client";
+import { QueryError } from "../components/QueryError";
 
 const COLOR: Record<string, string> = {
   running: "violet",
@@ -45,7 +46,7 @@ function JobRow({ job, onCancel }: { job: Job; onCancel: () => void }) {
 
 export function JobsView() {
   const qc = useQueryClient();
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["jobs"],
     queryFn: api.listJobs,
     refetchInterval: 1500,
@@ -55,6 +56,9 @@ export function JobsView() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["jobs"] }),
   });
 
+  if (isError && !data) {
+    return <QueryError error={error} onRetry={() => refetch()} />;
+  }
   if (isLoading) {
     return (
       <Center h={300}>

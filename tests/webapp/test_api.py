@@ -83,6 +83,17 @@ def test_frame_preview_renders_png(client, built_library):
     assert r2.status_code == 304
 
 
+def test_frame_preview_rejects_invalid_bayer_pattern(client, built_library):
+    # `bayer` ends up in the cache filename, so it must be validated against
+    # the fixed set of real patterns rather than accepted as free text (which
+    # would let a value like "../../x" reach a filesystem path join).
+    frames = client.get("/api/targets/M_42/frames").json()
+    fid = frames[0]["id"]
+    r = client.get(f"/api/targets/M_42/frames/{fid}/preview",
+                    params={"bayer": "../../../../etc/passwd"})
+    assert r.status_code == 400
+
+
 def test_stack_options_schema(client):
     r = client.get("/api/stack/options/schema")
     assert r.status_code == 200
@@ -112,5 +123,43 @@ def test_settings_roundtrip(client):
     assert body["watch_quiet_period_s"] == 45
 
 
+def test_settings_rejects_out_of_bounds_values(client):
+    # A zero timeout would make every ASTAP solve fail instantly; a zero
+    # quiet-period would defeat the half-written-file guard.
+    r = client.put("/api/settings", json={"astap_timeout_s": 0})
+    assert r.status_code == 422
+    r = client.put("/api/settings", json={"watch_quiet_period_s": -5})
+    assert r.status_code == 422
+    r = client.put("/api/settings", json={"cpu_workers": 0})
+    assert r.status_code == 422
+    # Rejected patches must not partially apply.
+    assert client.get("/api/settings").json()["astap_timeout_s"] == 60.0
+
+
+def test_jobs_list_limit_is_clamped(client):
+    # Neither an absurdly large nor a non-positive limit should error.
+    assert client.get("/api/jobs", params={"limit": 10_000_000}).status_code == 200
+    assert client.get("/api/jobs", params={"limit": 0}).status_code == 200
+    assert client.get("/api/jobs", params={"limit": -5}).status_code == 200
+
+
 def test_unknown_target_404(client):
     assert client.get("/api/targets/does_not_exist/frames").status_code == 404
+
+
+def test_delete_unknown_target_404(client):
+    r = client.delete("/api/targets/does_not_exist")
+    assert r.status_code == 404
+
+
+def test_delete_target_removes_it(client, built_library):
+    assert client.get("/api/targets/M_42").status_code == 200
+    r = client.delete("/api/targets/M_42")
+    assert r.status_code == 200
+    assert r.json() == {"deleted": "M_42", "files_removed": False}
+    assert client.get("/api/targets/M_42").status_code == 404
+
+
+def test_merge_unknown_destination_404(client, built_library):
+    r = client.post("/api/targets/merge", json={"into": "does_not_exist", "sources": ["M_42"]})
+    assert r.status_code == 404

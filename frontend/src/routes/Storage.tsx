@@ -7,6 +7,7 @@ import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, type TargetStorage } from "../api/client";
+import { QueryError } from "../components/QueryError";
 
 function gb(bytes: number): string {
   if (!bytes) return "0 MB";
@@ -119,8 +120,13 @@ function TargetRow({ row, total }: { row: TargetStorage; total: number }) {
 }
 
 export function StorageView() {
-  const { data, isLoading } = useQuery({ queryKey: ["storage"], queryFn: api.getStorage });
+  const { data, isLoading, isError, error, refetch } = useQuery({
+    queryKey: ["storage"], queryFn: api.getStorage,
+  });
 
+  if (isError && !data) {
+    return <QueryError error={error} onRetry={() => refetch()} />;
+  }
   if (isLoading || !data) {
     return <Center h={300}><Loader /></Center>;
   }

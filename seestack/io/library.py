@@ -353,17 +353,21 @@ class Library:
         """The on-disk folder for ``entry``."""
         return self.targets_dir / entry.safe_name
 
-    def delete_target(self, name_or_safe: str, *, remove_files: bool = False) -> None:
+    def delete_target(self, name_or_safe: str, *, remove_files: bool = False) -> bool:
         """Remove a target from the registry. Files are kept unless
-        ``remove_files`` is True (an explicit, destructive choice)."""
+        ``remove_files`` is True (an explicit, destructive choice).
+
+        Returns True if a target was found and deleted, False if
+        ``name_or_safe`` didn't match anything."""
         assert self._conn is not None
         entry = self.find_target(name_or_safe)
         if entry is None:
-            return
+            return False
         self._conn.execute("DELETE FROM targets WHERE id = ?", (entry.id,))
         if remove_files:
             import shutil
             shutil.rmtree(self.targets_dir / entry.safe_name, ignore_errors=True)
+        return True
 
     def find_target_within(self, ra_deg: float, dec_deg: float,
                            radius_deg: float) -> TargetEntry | None:

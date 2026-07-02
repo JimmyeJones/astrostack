@@ -55,9 +55,11 @@ class Settings(BaseModel):
     watcher_enabled: bool = True
     # A file must be size+mtime-stable for this long before it's ingested, so
     # half-copied frames arriving over SMB/NFS are never read mid-write.
-    watch_quiet_period_s: int = 30
+    # Bounded so a typo (e.g. 0) can't defeat the half-written-file guard,
+    # and an absurd value can't stall ingestion for days.
+    watch_quiet_period_s: int = Field(default=30, ge=1, le=3600)
     # Polling safety net — inotify is unreliable on network mounts.
-    watch_poll_interval_s: int = 300
+    watch_poll_interval_s: int = Field(default=300, ge=2, le=86400)
 
     # --- auto pipeline (configurable per the user's request) ---------------
     copy_to_cache: bool = False
@@ -69,10 +71,12 @@ class Settings(BaseModel):
     # --- plate solving -----------------------------------------------------
     astap_path: str | None = None  # falls back to $SEESTACK_ASTAP_PATH, then PATH
     astap_fov_deg: float = 1.3
-    astap_timeout_s: float = 60.0
+    # A too-low timeout (e.g. 0) would make every solve attempt fail instantly.
+    astap_timeout_s: float = Field(default=60.0, ge=5.0, le=1800.0)
 
     # --- compute -----------------------------------------------------------
-    cpu_workers: int | None = Field(default_factory=_default_cpu_workers)
+    # ge=1: a zero/negative worker count would crash the thread/process pool.
+    cpu_workers: int | None = Field(default_factory=_default_cpu_workers, ge=1)
 
     # --- Seestar telescope integration -------------------------------------
     # Monitor (and optionally control) Seestar scopes over the LAN via the
@@ -87,8 +91,8 @@ class Settings(BaseModel):
     seestar_scan_subnet: str = ""
     # Devices that auto-discovery can't reach can be pinned here by IP.
     seestar_known_ips: list[str] = Field(default_factory=list)
-    seestar_scan_interval_s: int = 300
-    seestar_poll_interval_s: int = 5
+    seestar_scan_interval_s: int = Field(default=300, ge=30, le=86400)
+    seestar_poll_interval_s: int = Field(default=5, ge=1, le=3600)
 
     # --- stacking ----------------------------------------------------------
     # Global default StackOptions (per-target overrides live in project meta).

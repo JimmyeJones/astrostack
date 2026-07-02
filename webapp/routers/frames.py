@@ -15,6 +15,8 @@ from webapp.schemas import BulkFrameAction, FrameOut, FramePatch
 
 router = APIRouter(prefix="/api/targets/{safe}/frames", tags=["frames"])
 
+_BAYER_PATTERNS = {"RGGB", "BGGR", "GRBG", "GBRG"}
+
 _SORTABLE = {
     "id", "timestamp_utc", "exposure_s", "fwhm_px", "star_count",
     "sky_adu_median", "eccentricity_median",
@@ -148,6 +150,12 @@ async def frame_preview(
     bayer: str | None = None,
 ) -> Response:
     size = max(64, min(2048, size))
+    # bayer ends up embedded in the cache filename below — it must be one of
+    # the four real patterns, both to fail cleanly and so it can never carry
+    # a path separator into that filename (see write_stack_outputs' output_name
+    # fix for the same class of bug).
+    if bayer is not None and bayer.upper() not in _BAYER_PATTERNS:
+        raise HTTPException(status_code=400, detail=f"Unknown bayer pattern: {bayer!r}")
     lib, proj = deps.open_target_project(request, safe)
     try:
         f = proj.get_frame(frame_id)
@@ -156,7 +164,7 @@ async def frame_preview(
         src = f.cached_path or f.source_path
         if not src or not Path(src).exists():
             raise HTTPException(status_code=404, detail="Frame file not found on disk")
-        pattern = bayer or f.bayer_pattern or "RGGB"
+        pattern = (bayer or f.bayer_pattern or "RGGB").upper()
         cache_dir = thumbs_dir(proj.project_dir)
         out = cache_dir / f"web_{frame_id:06d}_{size}_{pattern}_v{THUMB_VERSION}.png"
         src_path = Path(src)
