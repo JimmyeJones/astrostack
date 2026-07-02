@@ -25,6 +25,7 @@ and accidental clobbers are bad.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -33,6 +34,20 @@ import numpy as np
 log = logging.getLogger(__name__)
 
 OUTPUT_DIRNAME = "output"
+
+_UNSAFE_BASENAME_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _sanitize_basename(name: str) -> str:
+    """Constrain an output basename to safe filename characters.
+
+    ``out_basename`` can originate from a web API request (stack/editor
+    "output name" fields), so it must never be able to place path separators
+    or ``..`` into the joined path and write outside ``<project>/output/``.
+    """
+    cleaned = _UNSAFE_BASENAME_CHARS.sub("_", name.strip())
+    cleaned = cleaned.strip("._-")
+    return cleaned[:128] or "master"
 
 
 def write_stack_outputs(
@@ -58,6 +73,7 @@ def write_stack_outputs(
         ``"autostretch"`` applies a conservative STF stretch (sky → ~6% grey)
         for direct viewing.
     """
+    out_basename = _sanitize_basename(out_basename)
     out_dir = Path(project_dir) / OUTPUT_DIRNAME
     out_dir.mkdir(parents=True, exist_ok=True)
 
