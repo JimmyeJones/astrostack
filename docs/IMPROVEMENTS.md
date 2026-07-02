@@ -69,22 +69,20 @@ _(none — claim an item here with your branch name)_
 ### Features that serve real workflows
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
-- **"From your image" denoise-strength suggestion** — reuse the new generic
-  `suggestions` prop on the editor's `OpParamPanel` (added with the PSF-from-
-  stars button, v0.43.0): estimate the proxy's background noise (robust σ via
-  MAD of the background / off-object pixels, or from the histogram already
-  computed for the editor) and map it to a sensible denoise strength, offered
-  as a one-click default on `detail.denoise`. Removes another hand-tuned knob
-  the way PSF-from-stars did for deconvolution. Needs a small server endpoint
-  (or extend the histogram response with a noise estimate) + the frontend
-  wiring; testable in isolation. (S–M, approachability)
-- **Record the deconvolution PSF σ in the exported FITS header** — when an
-  editor recipe includes `detail.deconvolve`, stamp the σ actually used into
-  the derived `master.fits` (e.g. a `DECONPSF` card), extending the existing
-  editor-export provenance headers (STACKMTD/EDITFROM…). So a sharpened export
-  self-documents in Siril/PixInsight/APP whether and how hard it was
-  deconvolved. Small, additive, follows an established pattern. (S,
-  correctness/approachability)
+- **Show the editor processing chain in the History Info panel** — the
+  editor export now stamps every op as a FITS `HISTORY` card (v0.46.0), but the
+  run Info endpoint only surfaces the structured `_INFO_CARDS`, so a user has to
+  open the FITS in Siril to see how a run was edited. Parse the `HISTORY`
+  commentary cards (astropy exposes them as `header["HISTORY"]`) into a friendly
+  "Processing: stretch → denoise → sharpen" list in the Info panel. Small,
+  additive, reuses the provenance just written. (S, approachability)
+- **Per-stack noise-floor readout / "cleanest stack" badge** — reuse the new
+  `seestack/edit/noise.estimate_noise_sigma` to record each stack run's
+  normalized background noise (an additive `stack_runs` column, NULL for old
+  runs) and show it on History/Gallery cards, so a user comparing several stacks
+  of one target can see at a glance which is the cleanest — turning a subjective
+  "which looks less noisy" into a number. Advisory; within-target comparison.
+  (S–M, approachability/correctness)
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
@@ -101,7 +99,6 @@ _(none — claim an item here with your branch name)_
   a future refinement could make the cap a configurable setting. (S, scale)
 - Add a `SessionStart` hook (or a `scripts/setup.sh`) that provisions the venv +
   `npm ci` so every autonomous iteration starts from a known-green baseline. (S)
-- Reduce the frontend bundle warning (code-split the heavy Sky/aladin chunks). (S)
 - Expand `docs/` (webapp.md) to cover calibration, mono/LRGB, auth. (S)
 - `npm audit` still reports `esbuild`≤0.24.2/`vite`≤6.4.2/`vitest`≤3.2.5
   (moderate — dev server only, not the production build) after this run's
@@ -127,6 +124,45 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Full editor-recipe HISTORY provenance in exported FITS** — an editor export
+  previously recorded only the op *count* (`STACKMTD="editor recipe (N ops)"`).
+  The derived `master.fits` now also carries one FITS `HISTORY` card per enabled
+  op with its key params (e.g. `AstroStack: detail.denoise(method=wavelet,
+  strength=0.5)`) — the canonical provenance mechanism that Siril/PixInsight/APP
+  display — so an edited export self-documents its full processing chain.
+  `_merge_header_meta` gained list-valued `HISTORY` (appends commentary cards)
+  support; disabled/long-structured params are skipped and each card is clamped
+  to the 72-char limit. Additive/upgrade-safe. (v0.46.0, this run)
+
+- **Code-split the frontend vendor bundle** — the eager app bundle was one
+  720 kB `index` chunk (React + Mantine + TanStack + all routes). A `manualChunks`
+  split in `vite.config.ts` peels the rarely-changing vendors into `react`
+  (65 kB), `mantine` (461 kB) and `query` (41 kB) chunks, dropping the main app
+  chunk to ~153 kB — so no eager chunk trips the 500 kB warning and vendors stay
+  cached across app deploys. The only remaining large chunks are the already
+  lazy-loaded Sky/aladin atlas (loaded only on the Sky page). Build-config only.
+  (v0.45.1, this run)
+
+- **"From your image" denoise-strength suggestion** — the editor's noise-
+  reduction op made the user hand-tune a 0..1 strength knob. A new engine module
+  (`seestack/edit/noise.py`) estimates the run's background noise σ robustly
+  (MAD of adjacent-pixel differences, normalized to the image's own p0.5..p99.5
+  signal range so it's comparable across gain/exposure) and maps it linearly to
+  a starting strength (clamped to the op's 0.1..1.0 range, rounded to its 0.05
+  step). Pure-numpy so it never depends on PyWavelets. Exposed via
+  `GET …/editor/denoise-suggestion` and offered as a one-click "From your image
+  (strength X)" button on `detail.denoise`, reusing the generic `suggestions`
+  prop (v0.43.0). Additive/upgrade-safe. (v0.45.0, this run)
+
+- **Record the deconvolution PSF σ in the exported FITS header** — when an
+  editor recipe includes an enabled `detail.deconvolve` op, the derived
+  `master.fits` now carries a `DECONPSF` card recording the Gaussian PSF σ (px)
+  actually used (a single float, or comma-joined when several deconvolutions ran
+  in order), and the History Info panel surfaces it (added to `_INFO_CARDS`). So
+  a sharpened export self-documents in Siril/PixInsight/APP whether and how hard
+  it was deconvolved, extending the existing STACKMTD/EDITFROM provenance
+  pattern. Additive/upgrade-safe. (v0.44.0, this run)
 
 - **PSF-from-stars for editor deconvolution** — the deconvolution op made the
   user hand-guess a Gaussian PSF σ. A new `GET …/editor/psf-suggestion`

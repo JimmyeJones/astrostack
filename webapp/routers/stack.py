@@ -312,7 +312,7 @@ async def save_stack_preview(
 _INFO_CARDS = (
     "OBJECT", "NFRAMES", "NCOMBINE", "EXPOSURE", "EXPTOTAL",
     "DATE-OBS", "DATE-END", "STACKER", "STACKMTD", "COLORTYP",
-    "EDITFROM", "CREATOR", "DATE",
+    "EDITFROM", "DECONPSF", "CREATOR", "DATE",
 )
 
 

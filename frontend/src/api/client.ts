@@ -344,6 +344,11 @@ export interface PsfSuggestion {
   psf_sigma: number | null;
 }
 
+export interface DenoiseSuggestion {
+  noise_sigma: number | null;
+  strength: number | null;
+}
+
 export interface CalibrationMaster {
   id: number;
   name: string;
@@ -555,6 +560,8 @@ export const api = {
   editorOps: () => req<EditOp[]>("/api/editor/ops/schema"),
   psfSuggestion: (safe: string) =>
     req<PsfSuggestion>(`/api/targets/${safe}/editor/psf-suggestion`),
+  denoiseSuggestion: (safe: string, runId: number) =>
+    req<DenoiseSuggestion>(`/api/targets/${safe}/stack-runs/${runId}/editor/denoise-suggestion`),
   getRecipe: (safe: string, runId: number) =>
     req<Recipe>(`/api/targets/${safe}/stack-runs/${runId}/editor/recipe`),
   putRecipe: (safe: string, runId: number, recipe: Recipe) =>

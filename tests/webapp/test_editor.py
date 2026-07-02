@@ -95,6 +95,18 @@ def test_psf_suggestion_clamps_to_op_range(client, built_library, data_root):
     assert body["psf_sigma"] == 5.0
 
 
+def test_denoise_suggestion_from_image_noise(client, solved_library):
+    # The run's proxy has a bright blob on a noisy sky (see _make_run), so the
+    # endpoint returns a measurable noise σ and a usable in-range strength.
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="denoise_src")
+    r = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/denoise-suggestion")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["noise_sigma"] is not None and body["noise_sigma"] > 0
+    assert 0.1 <= body["strength"] <= 1.0
+
+
 def test_ops_schema(client):
     r = client.get("/api/editor/ops/schema")
     assert r.status_code == 200
@@ -234,6 +246,97 @@ def test_export_carries_provenance_headers(client, solved_library):
     # …and the derivation is recorded.
     assert "editor recipe" in str(hdr["STACKMTD"])
     assert int(hdr["EDITFROM"]) == rid
+
+
+def test_export_records_deconvolution_psf_header(client, solved_library):
+    """An editor recipe with a deconvolution op stamps the PSF sigma actually
+    used into the derived master.fits (DECONPSF), self-documenting the sharpen."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="deconv_src")
+    recipe = {"ops": [
+        {"id": "tone.stretch", "params": {"stretch": 0.6}},
+        {"id": "detail.deconvolve", "params": {"psf_sigma": 2.3}},
+    ]}
+    r = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/export",
+                    json={"recipe": recipe, "output_name": "deconv_edit"})
+    assert r.status_code == 200
+    assert _wait_job(client, r.json()["job_id"])["state"] == "done"
+
+    runs = client.get(f"/api/targets/{safe}/stack-runs").json()
+    edited = next(x for x in runs if x["output_basename"] == "deconv_edit")
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            new_run = next(r for r in proj.iter_stack_runs() if r.id == edited["id"])
+            hdr = fits.getheader(new_run.fits_path)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    assert float(hdr["DECONPSF"]) == 2.3
+    # …and the Info endpoint surfaces it as a provenance card.
+    info = client.get(f"/api/targets/{safe}/stack-runs/{edited['id']}/info").json()
+    assert any(c["key"] == "DECONPSF" for c in info["cards"])
+
+
+def test_export_no_deconvolution_omits_psf_header(client, solved_library):
+    """A recipe without a deconvolution op leaves no DECONPSF card."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="nodeconv_src")
+    recipe = {"ops": [{"id": "tone.stretch", "params": {"stretch": 0.6}}]}
+    r = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/export",
+                    json={"recipe": recipe, "output_name": "nodeconv_edit"})
+    assert r.status_code == 200
+    assert _wait_job(client, r.json()["job_id"])["state"] == "done"
+
+    runs = client.get(f"/api/targets/{safe}/stack-runs").json()
+    edited = next(x for x in runs if x["output_basename"] == "nodeconv_edit")
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            new_run = next(r for r in proj.iter_stack_runs() if r.id == edited["id"])
+            hdr = fits.getheader(new_run.fits_path)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    assert "DECONPSF" not in hdr
+
+
+def test_export_records_recipe_history(client, solved_library):
+    """The derived master.fits records each enabled editor op as a FITS HISTORY
+    card, so an edited export self-documents its full processing chain."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="hist_src")
+    recipe = {"ops": [
+        {"id": "tone.stretch", "params": {"stretch": 0.6}},
+        {"id": "detail.denoise", "params": {"method": "tv", "strength": 0.4},
+         "enabled": False},  # disabled ops are not recorded
+        {"id": "detail.sharpen", "params": {"amount": 1.2}},
+    ]}
+    r = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/export",
+                    json={"recipe": recipe, "output_name": "hist_edit"})
+    assert r.status_code == 200
+    assert _wait_job(client, r.json()["job_id"])["state"] == "done"
+
+    runs = client.get(f"/api/targets/{safe}/stack-runs").json()
+    edited = next(x for x in runs if x["output_basename"] == "hist_edit")
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            new_run = next(r for r in proj.iter_stack_runs() if r.id == edited["id"])
+            hdr = fits.getheader(new_run.fits_path)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    history = "\n".join(str(c) for c in hdr["HISTORY"])
+    assert "tone.stretch" in history
+    assert "detail.sharpen" in history
+    assert "detail.denoise" not in history  # disabled op omitted
 
 
 def test_export_sanitizes_path_traversal_output_name(client, solved_library, tmp_path):

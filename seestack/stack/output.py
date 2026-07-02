@@ -163,6 +163,16 @@ def _merge_header_meta(header, meta: dict[str, Any]) -> None:  # noqa: ANN001
         key = re.sub(r"[^A-Z0-9_-]", "", str(raw_key).upper())[:8]
         if not key:
             continue
+        # HISTORY is a FITS commentary card: it may repeat, so a list of lines is
+        # appended one card each (the canonical way to record processing steps)
+        # rather than assigned like a normal keyword.
+        if key == "HISTORY":
+            lines = raw_val if isinstance(raw_val, (list, tuple)) else [raw_val]
+            for line in lines:
+                if line is None:
+                    continue
+                header.add_history(str(line)[:72])
+            continue
         comment = ""
         val = raw_val
         if isinstance(raw_val, tuple) and len(raw_val) == 2:

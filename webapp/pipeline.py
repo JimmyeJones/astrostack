@@ -254,6 +254,46 @@ def _load_full_rgb_wcs(fits_path: str) -> tuple[Any, Any]:
     return rgb, wcs
 
 
+def _deconv_psf_meta(recipe) -> dict[str, Any]:  # noqa: ANN001
+    """If an editor recipe includes enabled ``detail.deconvolve`` op(s), return a
+    ``DECONPSF`` provenance card recording the Gaussian PSF σ (px) actually used,
+    so a sharpened export self-documents whether and how hard it was deconvolved.
+
+    Records a single float when one deconvolution ran, or a comma-joined string
+    when several ran (in application order). Empty dict when none did.
+    """
+    sigmas = [round(float(op.params.get("psf_sigma", 1.5)), 3)
+              for op in recipe.ops
+              if op.enabled and op.id == "detail.deconvolve"]
+    if not sigmas:
+        return {}
+    value: Any = sigmas[0] if len(sigmas) == 1 else ", ".join(str(s) for s in sigmas)
+    return {"DECONPSF": (value, "Richardson-Lucy PSF sigma (px)")}
+
+
+def _recipe_history(recipe) -> list[str]:  # noqa: ANN001
+    """Human-readable FITS HISTORY lines, one per enabled editor op (in order),
+    e.g. ``AstroStack: detail.denoise(method=wavelet, strength=0.5)``. This is the
+    canonical FITS provenance mechanism, so an edited export self-documents its
+    full processing chain in Siril/PixInsight/APP — not just the op count."""
+    lines: list[str] = []
+    for op in recipe.ops:
+        if not op.enabled:
+            continue
+        parts = []
+        for k, v in op.params.items():
+            if isinstance(v, float):
+                v = round(v, 4)
+            # skip long/structured params (e.g. curve control points) — keep the
+            # line human-readable and within the 72-char FITS card limit.
+            text = f"{k}={v}"
+            if len(text) <= 24:
+                parts.append(text)
+        args = ", ".join(parts)
+        lines.append(f"AstroStack: {op.id}({args})"[:72])
+    return lines
+
+
 def _carry_provenance(fits_path: str) -> dict[str, Any]:
     """Read provenance cards from a source stack FITS so a derived export can
     keep describing the underlying integration (target, frame count, exposure).
@@ -344,6 +384,10 @@ def _apply_editor_to_run(lib: Library, safe: str, run_id: int, recipe_dict: dict
         edit_meta["STACKMTD"] = (f"editor recipe ({n_ops} ops)",
                                  "how this image was produced")
         edit_meta["EDITFROM"] = (int(run_id), "source stack run id")
+        edit_meta.update(_deconv_psf_meta(recipe))
+        history = _recipe_history(recipe)
+        if history:
+            edit_meta["HISTORY"] = history
 
         coverage = np.ones(out.shape[:2], dtype=np.float32)
         paths = write_stack_outputs(

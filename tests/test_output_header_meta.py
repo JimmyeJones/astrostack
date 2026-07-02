@@ -78,6 +78,21 @@ def test_merge_header_meta_skips_none_and_bad_keys():
     assert hdr["TOOLONGK"] == 5
 
 
+def test_merge_header_meta_appends_history_lines():
+    hdr = fits.Header()
+    _merge_header_meta(hdr, {
+        "OBJECT": "M31",
+        "HISTORY": ["step one", "step two", "x" * 200],  # list → one card each
+    })
+    hist = [str(c) for c in hdr["HISTORY"]]
+    assert "step one" in hist
+    assert "step two" in hist
+    # each card stays within the FITS commentary limit
+    assert all(len(line) <= 72 for line in hist)
+    # HISTORY is not written as a normal keyword
+    assert hdr["OBJECT"] == "M31"
+
+
 def test_merge_header_meta_coerces_and_truncates_values():
     hdr = fits.Header()
     long_str = "x" * 200
