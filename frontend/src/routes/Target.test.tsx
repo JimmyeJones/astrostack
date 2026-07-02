@@ -100,6 +100,26 @@ describe("TargetView streaked badge", () => {
       expect(screen.getByText("3/3 accepted")).toBeInTheDocument());
     expect(screen.queryByText(/streaked/)).not.toBeInTheDocument();
   });
+
+  it("gives the metric column headers plain-language hint tooltips", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+
+    renderTarget();
+
+    // Each metric header is a dotted-underline span carrying a Tooltip hint, so
+    // a beginner can learn what "Ecc." / "FWHM" mean without leaving the table.
+    // (Some labels also appear in the frame-detail panel, so match the header
+    // span by its dotted-underline styling.)
+    await screen.findAllByText("Ecc.");
+    for (const label of ["FWHM", "Stars", "Ecc.", "Sky", "Transp."]) {
+      const header = screen.getAllByText(label).find(
+        (el) => el.tagName === "SPAN"
+          && (el.getAttribute("style") ?? "").includes("underline dotted"));
+      expect(header, `${label} header should carry a hint`).toBeTruthy();
+    }
+  });
 });
 
 describe("TargetView reject breakdown + undo", () => {
