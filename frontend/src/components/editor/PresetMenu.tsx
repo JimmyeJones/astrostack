@@ -66,6 +66,7 @@ export function PresetMenu({ currentOps, onApply }: {
             <Menu.Item key={p.id} onClick={() => applyPreset(p)}
               rightSection={
                 <ActionIcon size="xs" variant="subtle" color="red" component="div"
+                  aria-label={`Delete preset ${p.label}`}
                   onClick={(e) => { e.stopPropagation(); del.mutate(p.id); }}>
                   <IconTrash size={12} />
                 </ActionIcon>

@@ -45,4 +45,15 @@ describe("CalibrationView", () => {
     await waitFor(() => expect(build).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "dark", source_dir: "/data/darks" })));
   });
+
+  it("gives the icon-only delete button an accessible name", async () => {
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([mk({})]);
+    renderView();
+    await waitFor(() => expect(screen.getByText("Dark 30s")).toBeInTheDocument());
+    // Icon-only ActionIcon must be reachable by an accessible name (aria-label),
+    // not just a hover tooltip — otherwise it's invisible to screen readers.
+    expect(
+      screen.getByRole("button", { name: /Delete master Dark 30s/ }),
+    ).toBeInTheDocument();
+  });
 });

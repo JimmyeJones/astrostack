@@ -146,6 +146,7 @@ export function CalibrationView() {
                     <Table.Td>
                       <Tooltip label="Delete master">
                         <ActionIcon color="red" variant="subtle" loading={del.isPending}
+                          aria-label={`Delete master ${m.name}`}
                           onClick={() => {
                             if (window.confirm(`Delete master "${m.name}"?`)) del.mutate(m.id);
                           }}>

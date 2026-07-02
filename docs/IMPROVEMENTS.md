@@ -53,11 +53,6 @@ _(none — claim an item here with your branch name)_
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
 - Keyboard shortcuts beyond the frame grader (e.g. editor undo/redo hints). (S)
-- Icon-only buttons repo-wide are still mostly missing `aria-label` (a few
-  landed incidentally with recent `History.tsx`/`Jobs.tsx` fixes). One
-  focused accessibility sweep across `frontend/src/routes/*.tsx` and
-  `components/*.tsx`, with a small test asserting known icon buttons have
-  accessible names. (M)
 
 ### Performance (only with a measurement)
 - Profile the stack hot path on a large synthetic target; find a safe win that
@@ -98,6 +93,11 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- Accessibility sweep — added `aria-label` to the remaining icon-only
+  `ActionIcon` buttons (frame accept/reject, delete calibration master, delete
+  preset) so they have accessible names for screen readers, plus a test
+  asserting the delete-master button is reachable by name. (v0.14.2, this run)
 
 - Channel-combine NaN fix — LRGB pixels covered in G/B/L but uncovered in a
   colour channel now become cleanly uncovered (NaN) instead of `[NaN, 0, 0]`
