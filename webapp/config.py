@@ -67,6 +67,13 @@ class Settings(BaseModel):
     auto_qc: bool = True
     auto_solve: bool = True
     auto_stack: bool = False
+    # QC auto-rejects a whole frame when it detects a satellite/plane streak,
+    # discarding ~99% good pixels with it. With this on, streaked frames are
+    # *flagged* but kept accepted, so a stack with per-pixel rejection
+    # (sigma-clip or drizzle rejection) can remove the streak while keeping the
+    # frame's good signal. Off by default (the streak is fully rejected) since it
+    # only pays off when rejection is enabled at stack time.
+    keep_streaked_frames: bool = False
 
     # --- plate solving -----------------------------------------------------
     astap_path: str | None = None  # falls back to $SEESTACK_ASTAP_PATH, then PATH

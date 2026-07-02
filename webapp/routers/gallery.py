@@ -31,6 +31,9 @@ class GalleryItem(BaseModel):
     canvas_h: int
     # Effective integration time in seconds (None for pre-schema-4 runs).
     total_exposure_s: float | None
+    # User label/notes for this run (e.g. "best RGB v2"), if set. Surfaced on the
+    # card and matched by the Gallery search box alongside the target name.
+    notes: str | None = None
     has_preview: bool
     has_fits: bool
     has_tiff: bool
@@ -87,6 +90,7 @@ def get_gallery(request: Request) -> GalleryResponse:
                         canvas_w=run.canvas_w,
                         canvas_h=run.canvas_h,
                         total_exposure_s=run.total_exposure_s,
+                        notes=run.notes,
                         has_preview=has_preview,
                         has_fits=bool(run.fits_path and Path(run.fits_path).exists()),
                         has_tiff=bool(run.tiff_path and Path(run.tiff_path).exists()),

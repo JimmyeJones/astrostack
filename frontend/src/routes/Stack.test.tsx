@@ -181,6 +181,74 @@ describe("StackView", () => {
     expect(screen.queryByText(/it can reject real signal as an outlier/)).not.toBeInTheDocument();
   });
 
+  it("hints to tighten kappa on a very large stack", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+      { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
+        default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+    ]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: true, sigma_kappa: 3 });
+    // 250 accepted, solved frames — well above the large-stack threshold.
+    const frames = Array.from({ length: 250 }, (_, i) => mkFrame(i + 1));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    await waitFor(() =>
+      expect(screen.getByText(/tighter sigma-clip \(κ≈2.5\)/)).toBeInTheDocument());
+  });
+
+  it("does not hint to tighten kappa on a small stack", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+      { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
+        default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+    ]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: true, sigma_kappa: 3 });
+    const frames = Array.from({ length: 20 }, (_, i) => mkFrame(i + 1));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    await waitFor(() => expect(screen.getByText("Sigma clipping")).toBeInTheDocument());
+    expect(screen.queryByText(/tighter sigma-clip/)).not.toBeInTheDocument();
+  });
+
+  it("warns when accepted streaked frames are stacked without rejection", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+      { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
+        default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+    ]);
+    // sigma_clip off → no per-pixel rejection.
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: false });
+    const streaked = { ...mkFrame(1), streak_detected: true };
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([streaked, mkFrame(2), mkFrame(3)]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    await waitFor(() =>
+      expect(screen.getByText(/detected satellite\/plane streak/)).toBeInTheDocument());
+  });
+
+  it("drops the streak warning once rejection has enough frames", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+      { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
+        default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+    ]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: true });
+    // 5 accepted frames (≥4) with sigma-clip on → rejection is active.
+    const frames = Array.from({ length: 5 }, (_, i) =>
+      ({ ...mkFrame(i + 1), streak_detected: i === 0 }));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    await waitFor(() => expect(screen.getByText("Sigma clipping")).toBeInTheDocument());
+    expect(screen.queryByText(/detected satellite\/plane streak/)).not.toBeInTheDocument();
+  });
+
   const drizzleSchema: client.StackOptionField[] = [
     { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
       default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
@@ -215,5 +283,40 @@ describe("StackView", () => {
     await waitFor(() =>
       expect(screen.getByText("Drizzle outlier rejection")).toBeInTheDocument());
     expect(screen.queryByText(/doesn't apply to drizzle's single-pass/)).not.toBeInTheDocument();
+  });
+
+  it("shows the pre-run output canvas + peak-memory estimate line", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: true });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1), mkFrame(2)]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+    vi.spyOn(client.api, "stackEstimate").mockResolvedValue({
+      n_frames: 2, canvas_w: 480, canvas_h: 320, output_w: 480, output_h: 320,
+      is_mosaic: false, peak_bytes: 7e6, peak_gb: 0.01,
+      budget_bytes: 8e9, budget_gb: 8, would_exceed: false,
+    });
+
+    renderStack();
+
+    await waitFor(() =>
+      expect(screen.getByText(/Output canvas 480×320/)).toBeInTheDocument());
+    expect(screen.getByText(/GB peak memory/)).toBeInTheDocument();
+  });
+
+  it("warns in red when the estimate exceeds the memory budget", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: true });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1), mkFrame(2)]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+    vi.spyOn(client.api, "stackEstimate").mockResolvedValue({
+      n_frames: 2, canvas_w: 8000, canvas_h: 6000, output_w: 16000, output_h: 12000,
+      is_mosaic: true, peak_bytes: 5.4e9, peak_gb: 5.4,
+      budget_bytes: 1.4e9, budget_gb: 1.4, would_exceed: true,
+    });
+
+    renderStack();
+
+    await waitFor(() =>
+      expect(screen.getByText(/over the ~1.4 GB budget/)).toBeInTheDocument());
   });
 });

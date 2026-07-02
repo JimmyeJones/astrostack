@@ -26,6 +26,7 @@ const HINTS: Record<string, string> = {
   auto_solve: "On new files: plate-solve with ASTAP so frames can be aligned and placed on the sky.",
   auto_stack: "On new files: also stack each touched target automatically (uses the defaults below, or a target's saved defaults).",
   copy_to_cache: "Copy each frame into a fast local cache before processing. Helps with slow or network-mounted sources.",
+  keep_streaked_frames: "Don't auto-reject a whole frame when QC finds a satellite/plane trail — keep it (flagged) so a stack with sigma-clip or drizzle rejection removes just the streak and keeps the frame's good signal. Only turn on if you stack with rejection enabled.",
   astap_path: "Path to the ASTAP executable. Blank = auto-detect (bundled binary → $SEESTACK_ASTAP_PATH → PATH).",
   astap_fov_deg: "Approximate field-of-view height in degrees, used as a solving hint (~1.3° suits the Seestar).",
   astap_timeout_s: "Give up on solving a single frame after this many seconds.",
@@ -317,6 +318,9 @@ export function SettingsView() {
           <Switch label={lbl("copy_to_cache", "Copy frames into local cache")}
             checked={bool("copy_to_cache")}
             onChange={(e) => set("copy_to_cache", e.currentTarget.checked)} />
+          <Switch label={lbl("keep_streaked_frames", "Keep frames with satellite/plane streaks")}
+            checked={bool("keep_streaked_frames")}
+            onChange={(e) => set("keep_streaked_frames", e.currentTarget.checked)} />
 
           <Divider label="Plate solving & compute" />
           <TextInput label={lbl("astap_path", "ASTAP path")}

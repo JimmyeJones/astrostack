@@ -41,6 +41,21 @@ export function StackView() {
     queryFn: () => api.stackRunOptions(safe, Number(reuseRunId)),
     enabled: !!reuseRunId,
   });
+  // Pre-run sizing: output canvas + estimated peak memory for the current
+  // canvas-affecting knobs, so we can warn *before* a run is refused for OOM.
+  const drizzleOn = !!values.drizzle;
+  const drizzleScale = Number(values.drizzle_scale ?? 1.5);
+  const drizzleReject = !!values.drizzle_reject;
+  const mosaicCanvas = String(values.mosaic_canvas ?? "auto");
+  const estimate = useQuery({
+    queryKey: ["stack-estimate", safe, drizzleOn, drizzleScale, drizzleReject, mosaicCanvas],
+    queryFn: () => api.stackEstimate(safe, {
+      drizzle: drizzleOn, drizzle_scale: drizzleScale,
+      drizzle_reject: drizzleReject, mosaic_canvas: mosaicCanvas,
+    }),
+    enabled: Object.keys(values).length > 0,
+    retry: false,
+  });
 
   const qcSolve = useMutation({
     mutationFn: () => api.qcSolve(safe),
@@ -161,6 +176,20 @@ export function StackView() {
   const noSolved = !frames.isLoading && frames.data !== undefined && solvedAccepted === 0;
   const excludedFrames = (job?.result?.excluded_frames as string[] | undefined) ?? [];
 
+  // "Keep streaked frames" leaves satellite/plane-trailed subs accepted so that
+  // per-pixel rejection can clean them. If the user then stacks *without* any
+  // rejection, the streak lands in the result — warn them so the kept frames
+  // aren't a silent footgun. Advisory only.
+  const streakedAccepted = (frames.data ?? [])
+    .filter((f) => f.accept && f.solved && f.streak_detected).length;
+  const rejectionOn = values.drizzle
+    ? !!values.drizzle_reject
+    : (!!values.sigma_clip && solvedAccepted >= 4);
+  const streakNoRejectionWarning =
+    streakedAccepted > 0 && !rejectionOn
+      ? `${streakedAccepted} accepted frame${streakedAccepted === 1 ? " has" : "s have"} a detected satellite/plane streak, but this stack has no per-pixel rejection enabled — the trail${streakedAccepted === 1 ? "" : "s"} will show in the result. Turn on ${values.drizzle ? "“Drizzle outlier rejection”" : "sigma clipping"} (or reject those frames) to remove ${streakedAccepted === 1 ? "it" : "them"}.`
+      : null;
+
   // Sigma-clip rejection estimates each pixel's spread across the stack, so it
   // needs a handful of frames to be meaningful. With only a few it can throw
   // away real signal as if it were an outlier — a knob a beginner can't reason
@@ -172,6 +201,18 @@ export function StackView() {
       ? `Sigma-clip rejection estimates each pixel's spread across frames, but you only have ${solvedAccepted} accepted, solved frame${solvedAccepted === 1 ? "" : "s"}. With fewer than ~${SIGMA_CLIP_MIN_FRAMES} it can reject real signal as an outlier — consider turning it off for this stack.`
       : null;
 
+  // The flip side of the low-frame caution: with a big stack the per-pixel σ is
+  // very well estimated, so the default κ=3 leaves a lot of satellite/plane/
+  // cosmic-ray signal in that a tighter clip would safely reject. Suggest
+  // nudging κ down for very large stacks. Advisory only; the pick stands.
+  const SIGMA_CLIP_LARGE_FRAMES = 200;
+  const kappa = Number(values.sigma_kappa ?? 3);
+  const sigmaKappaLargeHint =
+    values.sigma_clip && !frames.isLoading
+    && solvedAccepted >= SIGMA_CLIP_LARGE_FRAMES && kappa >= 3
+      ? `With ${solvedAccepted} accepted frames the per-pixel spread is very well measured, so a tighter sigma-clip (κ≈2.5) can safely reject more satellites, planes and cosmic rays than the default κ=${kappa % 1 === 0 ? kappa.toFixed(0) : kappa}. Lower the Sigma kappa in Advanced options if you see trails survive.`
+      : null;
+
   // Drizzle accumulates in a single pass, so the sigma-clip toggle doesn't
   // apply to it — a user who enabled both would reasonably expect satellite
   // trails to be rejected and be surprised when they aren't. Point them at
@@ -180,6 +221,19 @@ export function StackView() {
     values.drizzle && values.sigma_clip && !values.drizzle_reject
       ? "Sigma clipping doesn't apply to drizzle's single-pass accumulation — enable “Drizzle outlier rejection” to reject satellites and cosmic rays in drizzled stacks."
       : null;
+
+  // Pre-run sizing line: shows the output canvas the current knobs would
+  // produce and the estimated peak working memory, so a big drizzle/mosaic
+  // canvas doesn't get silently refused for OOM only after the user hits Stack.
+  const est = estimate.data;
+  const estimateLine = est
+    ? `Output canvas ${est.output_w}×${est.output_h}`
+      + (est.is_mosaic ? " (mosaic union)" : "")
+      + ` · ~${est.peak_gb.toFixed(est.peak_gb < 1 ? 2 : 1)} GB peak memory`
+    : null;
+  const estimateOverBudget = est?.would_exceed
+    ? `This stack would need ~${est.peak_gb.toFixed(1)} GB of working memory, over the ~${est.budget_gb.toFixed(1)} GB budget on this server, so the run will be refused. Lower the drizzle scale, switch Canvas mode to “reference”, or reject off-target frames.`
+    : null;
 
   return (
     <Stack maw={720}>
@@ -314,10 +368,30 @@ export function StackView() {
             </Alert>
           ) : null}
 
+          {sigmaKappaLargeHint ? (
+            <Alert color="blue" variant="light" py={6} px="sm">
+              <Text size="xs">{sigmaKappaLargeHint}</Text>
+            </Alert>
+          ) : null}
+
+          {streakNoRejectionWarning ? (
+            <Alert color="yellow" variant="light" py={6} px="sm">
+              <Text size="xs">{streakNoRejectionWarning}</Text>
+            </Alert>
+          ) : null}
+
           {drizzleClipHint ? (
             <Alert color="blue" variant="light" py={6} px="sm">
               <Text size="xs">{drizzleClipHint}</Text>
             </Alert>
+          ) : null}
+
+          {estimateOverBudget ? (
+            <Alert color="red" variant="light" py={6} px="sm">
+              <Text size="xs">{estimateOverBudget}</Text>
+            </Alert>
+          ) : estimateLine && !noSolved ? (
+            <Text size="xs" c="dimmed">{estimateLine}</Text>
           ) : null}
 
           {job ? (

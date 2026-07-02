@@ -119,6 +119,52 @@ def trigger_stack(safe: str, body: dict[str, Any], request: Request) -> dict[str
     return {"job_id": job.id}
 
 
+@router.get("/api/targets/{safe}/stack-estimate")
+def stack_estimate(
+    safe: str, request: Request,
+    drizzle: bool = False, drizzle_scale: float = 1.5,
+    drizzle_reject: bool = False, mosaic_canvas: str = "auto",
+) -> dict[str, Any]:
+    """Dry-run sizing for a stack: output canvas + estimated peak memory,
+    computed without stacking, so the Stack form can warn *before* a run is
+    submitted and refused for OOM (e.g. "Drizzle ×2 → 7680×4320, ≈2.1 GB peak,
+    over the ~1.4 GB budget").
+
+    Only the canvas-affecting knobs matter to sizing, so those are the only query
+    params. Returns 422 (not 500) when there's nothing solved to size yet, with
+    the same guidance ``run_stack`` gives."""
+    from seestack.stack.stacker import StackOptions, estimate_stack
+
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        options = StackOptions(
+            drizzle=bool(drizzle),
+            drizzle_scale=float(drizzle_scale),
+            drizzle_reject=bool(drizzle_reject),
+            mosaic_canvas=str(mosaic_canvas),
+        )
+        try:
+            est = estimate_stack(proj, options)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    finally:
+        proj.close()
+        lib.close()
+    return {
+        "n_frames": est.n_frames,
+        "canvas_w": est.canvas_w,
+        "canvas_h": est.canvas_h,
+        "output_w": est.output_w,
+        "output_h": est.output_h,
+        "is_mosaic": est.is_mosaic,
+        "peak_bytes": est.peak_bytes,
+        "peak_gb": round(est.peak_bytes / 1e9, 2),
+        "budget_bytes": est.budget_bytes,
+        "budget_gb": round(est.budget_bytes / 1e9, 2),
+        "would_exceed": est.would_exceed,
+    }
+
+
 @router.post("/api/targets/{safe}/channel-combine")
 def channel_combine(safe: str, body: dict[str, Any], request: Request) -> dict[str, str]:
     """Combine several mono stacks (assigned to L/R/G/B) into one colour run

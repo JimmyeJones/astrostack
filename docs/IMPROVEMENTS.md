@@ -32,11 +32,6 @@ _(none — claim an item here with your branch name)_
   flux vs the target's per-star baseline — and feed it into quality weighting
   and an advisory "poor transparency" grader hint. Turns two schema fields
   into real value on cloudy-night data. (M, correctness)
-- Reclaim streaked subs: QC auto-rejects a whole frame on a detected
-  satellite streak, discarding ~99% good pixels. Now that both stacking paths
-  have per-pixel rejection (sigma-clip and `drizzle_reject`), offer an opt-in
-  "keep streaked frames when rejection is on" so big stacks keep that signal.
-  (S–M, correctness/scale)
 - Iterated κ-σ rejection (both paths): a very bright outlier inflates the
   pass-1 σ enough that clipping can't fire below ~11 frames
   ((n−1)/√n < κ). One re-estimation round after the first clip would let
@@ -62,27 +57,28 @@ _(none — claim an item here with your branch name)_
   the user to manually reconnect via the UI. Core hardware-integration
   path; needs care around not spamming reconnect attempts and should be
   testable in isolation from real hardware. (M, correctness)
+- **Suggest the largest drizzle scale that fits the memory budget** — the
+  `stack-estimate` endpoint now knows the budget and whether a scale would
+  exceed it; when it would, compute the largest `drizzle_scale` (to a sensible
+  step) whose peak stays under budget and offer it as a one-click "use ×N
+  instead" in the over-budget alert. Turns a hard refusal into a usable
+  suggestion. (S, scale/approachability) *(builds on v0.25.0)*
 
 ### Features that serve real workflows
-- Loosen/tighten the suggested sigma-clip **kappa** from the accepted-frame
-  count for very large stacks (the low-frame "don't clip under ~5" caution
-  shipped in v0.22.0; the large-stack kappa hint is the remaining half). (S,
-  approachability/correctness)
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
-- Drizzle memory estimate surfaced in the Stack form before you run it. (S)
 - Star-mask preview toggle in the editor (visualise the mask driving star ops). (S)
 - Per-target "notes/tags" search improvements and saved filters in Library. (S)
-- **Show/search run labels in the Gallery** — now that a run's `notes` label is
-  editable (v0.23.0), surface it on Gallery cards and add a text filter that
-  matches label + target name, so a user can find "best RGB v2" across all
-  targets. Reuses the `notes` field already returned per run. (S, approachability)
-- **Pre-run stack estimate endpoint** — a lightweight
-  `GET /targets/{safe}/stack-estimate?drizzle_scale=` that computes the
-  union-of-footprints canvas from the accepted+solved frames and returns the
-  output dimensions + estimated peak memory (same maths as
-  `_guard_stack_memory`), so the Stack form can warn *before* a run is refused
-  for OOM ("Drizzle ×2 → ~7680×4320, ≈2.1 GB peak"). (M, scale/approachability)
+- **Show the pre-run estimate's frame count / mosaic flag inline too** — the
+  `stack-estimate` endpoint already returns `n_frames` and `is_mosaic`; the Stack
+  form only surfaces canvas + memory. A one-liner like "12 accepted, solved
+  frames · mosaic canvas" would confirm what's about to be stacked. (S,
+  approachability) *(follow-on to v0.25.0)*
+- **Streaked-frame count badge on the Target/Frames view** — now that streaks can
+  be kept (v0.27.0), surface how many accepted frames carry a `streak_detected`
+  flag so a user can see at a glance what per-pixel rejection will need to clean
+  (and jump to reject them if they'd rather). Reuses the existing flag. (S,
+  approachability)
 
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
@@ -101,6 +97,11 @@ _(none — claim an item here with your branch name)_
   a future refinement could make the cap a configurable setting. (S, scale)
 - Add a `SessionStart` hook (or a `scripts/setup.sh`) that provisions the venv +
   `npm ci` so every autonomous iteration starts from a known-green baseline. (S)
+- **Expose the stack memory budget as a Setting** — the working-memory cap is
+  env-only (`ASTROSTACK_MAX_STACK_GB`, else ~70% of RAM). Now that the Stack form
+  surfaces the budget via the estimate (v0.25.0), let the user view/adjust it
+  from Settings (with a sane clamp) instead of editing container env. Additive,
+  the env override can still win. (S, scale/approachability)
 - Reduce the frontend bundle warning (code-split the heavy Sky/aladin chunks). (S)
 - Expand `docs/` (webapp.md) to cover calibration, mono/LRGB, auth. (S)
 - `npm audit` still reports `esbuild`≤0.24.2/`vite`≤6.4.2/`vitest`≤3.2.5
@@ -127,6 +128,45 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Reclaim streaked subs** — new opt-in `keep_streaked_frames` setting (default
+  off). QC still detects satellite/plane trails, but with this on it *flags* the
+  frame instead of auto-rejecting it, so a stack with per-pixel rejection
+  (sigma-clip or drizzle rejection) removes just the streak while keeping the
+  frame's ~99% good signal — valuable on big stacks. Threaded through
+  `run_qc_and_solve(auto_reject_streaks=…)` and both webapp QC paths; a Settings
+  toggle exposes it, and the Stack form warns when accepted streaked frames would
+  be stacked *without* rejection (the footgun). User overrides are never
+  clobbered. Additive/upgrade-safe (new setting defaults off). (v0.27.0, this run)
+
+- **Large-stack sigma-kappa hint** — completes the sigma-clip guidance pair. The
+  low-frame "don't clip under ~5" caution shipped in v0.22.0; now, when a stack
+  has ≥200 accepted frames and κ is at/above the default 3, the Stack form
+  suggests nudging κ down (~2.5) because the per-pixel spread is very well
+  measured and a tighter clip safely rejects more satellites/planes/cosmic rays.
+  Advisory only. (v0.26.1, this run)
+
+- **Show/search run labels in the Gallery** — the gallery response now carries
+  each run's `notes` label, so the Gallery card shows it (in violet, above the
+  metadata line) and a new search box filters cards by label + target name +
+  output filename. A user can finally find "best RGB v2" across every target
+  without opening each History page. Purely additive (new response field, new
+  UI). (v0.26.0, this run)
+
+- **Drizzle memory estimate in the Stack form** — subsumed by the pre-run stack
+  estimate below: the "~X GB peak memory" line covers drizzle scales directly, so
+  the standalone "drizzle memory estimate" idea is done. (v0.25.0, this run)
+
+- **Pre-run stack estimate endpoint** — new `GET /targets/{safe}/stack-estimate`
+  (`drizzle`/`drizzle_scale`/`drizzle_reject`/`mosaic_canvas` query params) does a
+  dry-run sizing: picks the reference, computes the reference-vs-union canvas the
+  way `run_stack` does, and returns the output dimensions + estimated peak memory
+  and the server budget, flagging `would_exceed`. The peak-memory maths is
+  factored into a shared `_estimate_peak_bytes` so the warning can never disagree
+  with the in-run `_guard_stack_memory`. The Stack form shows a live "Output
+  canvas W×H · ~X GB peak memory" line and turns it into a red "over budget, run
+  will be refused" alert when it would OOM — so a big drizzle/mosaic canvas is
+  caught *before* the user hits Stack, not after. (v0.25.0, this run)
 
 - **Outlier-safe drizzle** — new opt-in `drizzle_reject`: two-pass κ-σ
   rejection for the drizzle path (pass 1 drizzles values + squares for
