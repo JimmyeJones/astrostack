@@ -1,17 +1,18 @@
 import {
-  Alert, Button, Center, Grid, Group, Loader, Menu, Paper, Select, Stack, Text,
-  TextInput, Title,
+  ActionIcon, Alert, Button, Center, Grid, Group, Loader, Menu, Paper, Select, Stack, Text,
+  TextInput, Title, Tooltip,
 } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import {
-  IconAlertTriangle, IconArrowLeft, IconDeviceFloppy, IconDownload, IconPhotoDown,
-  IconPlus, IconRefresh, IconSparkles, IconZoomScan,
+  IconAlertTriangle, IconArrowBackUp, IconArrowForwardUp, IconArrowLeft, IconDeviceFloppy,
+  IconDownload, IconPhotoDown, IconPlus, IconRefresh, IconSparkles, IconZoomScan,
 } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { api, type EditOp, type OpInstance, type Recipe } from "../api/client";
+import { useUndoable } from "../hooks/useUndoable";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { Histogram } from "../components/editor/Histogram";
 import { OpList } from "../components/editor/OpList";
@@ -38,21 +39,21 @@ export function EditorView() {
   const { safe = "", runId = "" } = useParams();
   const rid = Number(runId);
   const qc = useQueryClient();
-  const navigate = useNavigate();
 
   const opsSchema = useQuery({ queryKey: ["editor-ops"], queryFn: api.editorOps, staleTime: 60_000 });
   const saved = useQuery({ queryKey: ["recipe", safe, rid], queryFn: () => api.getRecipe(safe, rid) });
 
-  const [ops, setOps] = useState<OpInstance[]>([]);
+  const { state: ops, set: setOps, reset: resetOps, undo, redo, canUndo, canRedo } =
+    useUndoable<OpInstance[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [outputName, setOutputName] = useState("");
   const [tiffMode, setTiffMode] = useState("linear");
   const [lightbox, setLightbox] = useState(false);
 
-  // Seed ops from the saved recipe once.
+  // Seed ops from the saved recipe once (clears undo history).
   useEffect(() => {
-    if (saved.data) setOps(saved.data.ops ?? []);
-  }, [saved.data]);
+    if (saved.data) resetOps(saved.data.ops ?? []);
+  }, [saved.data, resetOps]);
 
   const specs = useMemo(() => {
     const m: Record<string, EditOp> = {};
@@ -137,9 +138,12 @@ export function EditorView() {
   const exportRun = useMutation({
     mutationFn: () => api.exportRun(safe, rid, recipe, outputName.trim() || `${safe}_edit`, tiffMode),
     onSuccess: () => {
-      notifications.show({ message: "Export started — saving full-resolution image", color: "violet" });
+      // Stay in the editor (don't bounce to Jobs); the navbar job badge tracks it.
+      notifications.show({
+        message: "Export running — the new image will appear in History when done.",
+        color: "violet",
+      });
       qc.invalidateQueries({ queryKey: ["jobs"] });
-      navigate("/jobs");
     },
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
@@ -211,6 +215,10 @@ export function EditorView() {
           <Title order={2}>Editor — {safe}</Title>
         </Group>
         <Group gap="xs">
+          <Tooltip label="Undo"><ActionIcon variant="default" disabled={!canUndo}
+            onClick={undo} aria-label="Undo"><IconArrowBackUp size={16} /></ActionIcon></Tooltip>
+          <Tooltip label="Redo"><ActionIcon variant="default" disabled={!canRedo}
+            onClick={redo} aria-label="Redo"><IconArrowForwardUp size={16} /></ActionIcon></Tooltip>
           <Button variant="light" color="grape" leftSection={<IconSparkles size={16} />}
             loading={auto.isPending} onClick={() => auto.mutate()}>Auto-process</Button>
           <PresetMenu currentOps={ops} onApply={(o) => setOps(o)} />

@@ -13,6 +13,19 @@ def test_health_and_system(client):
     assert "cpu_count" in body and "astap" in body
 
 
+def test_astap_test_no_frames_is_clean(client):
+    # With no ingested frames the self-test returns a clean message, not a 500.
+    r = client.post("/api/system/astap-test")
+    assert r.status_code == 200
+    assert r.json()["ok"] is False
+
+
+def test_clear_jobs_endpoint(client):
+    r = client.post("/api/jobs/clear")
+    assert r.status_code == 200
+    assert "removed" in r.json()
+
+
 def test_list_targets(client, built_library):
     r = client.get("/api/targets")
     assert r.status_code == 200

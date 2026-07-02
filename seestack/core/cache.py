@@ -70,7 +70,13 @@ class CacheManager:
         if not path.exists():
             return CacheStats(path=path, file_count=0, bytes_total=0)
         files = list(path.iterdir())
-        total = sum(f.stat().st_size for f in files if f.is_file())
+        total = 0
+        for f in files:
+            try:
+                if f.is_file():
+                    total += f.stat().st_size
+            except OSError as exc:  # file vanished/permission — don't crash the report
+                log.warning("could not stat %s: %s", f, exc)
         return CacheStats(path=path, file_count=len(files), bytes_total=total)
 
     def clear(self, stage: str) -> None:

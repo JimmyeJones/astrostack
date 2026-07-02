@@ -50,6 +50,13 @@ def _sanitize_basename(name: str) -> str:
     return cleaned[:128] or "master"
 
 
+# Public alias — used by the webapp (pipeline) and its tests.
+def safe_basename(name: str) -> str:
+    """Sanitize a user-supplied output name to a single safe filename stem
+    (see :func:`_sanitize_basename`)."""
+    return _sanitize_basename(name)
+
+
 def write_stack_outputs(
     project_dir: Path,
     rgb: np.ndarray,

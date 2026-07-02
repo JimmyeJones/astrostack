@@ -70,9 +70,12 @@ class Settings(BaseModel):
 
     # --- plate solving -----------------------------------------------------
     astap_path: str | None = None  # falls back to $SEESTACK_ASTAP_PATH, then PATH
-    astap_fov_deg: float = 1.3
+    astap_fov_deg: float = Field(default=1.3, ge=0.1, le=20.0)
     # A too-low timeout (e.g. 0) would make every solve attempt fail instantly.
     astap_timeout_s: float = Field(default=60.0, ge=5.0, le=1800.0)
+    # Use the telescope target RA/Dec from each frame's FITS header as a
+    # plate-solve search hint (localises ASTAP's search; speeds up solving).
+    astap_use_solve_hints: bool = True
 
     # --- compute -----------------------------------------------------------
     # ge=1: a zero/negative worker count would crash the thread/process pool.
@@ -97,6 +100,16 @@ class Settings(BaseModel):
     # --- stacking ----------------------------------------------------------
     # Global default StackOptions (per-target overrides live in project meta).
     default_stack_options: dict[str, Any] = Field(default_factory=dict)
+
+    # --- access control ----------------------------------------------------
+    # Optional HTTP Basic auth. Empty hash = disabled (the app is open). Managed
+    # only via /api/auth/password — never set these through the settings PUT.
+    auth_username: str = "admin"
+    auth_password_hash: str = ""
+    auth_salt: str = ""
+
+    # Numeric ranges are enforced by the per-field ``Field(ge=, le=)`` bounds
+    # above (a bad value 422s on the settings PUT; see routers/settings.py).
 
     # ---- resolved paths ---------------------------------------------------
 
@@ -130,6 +143,41 @@ class Settings(BaseModel):
             d.mkdir(parents=True, exist_ok=True)
 
 
+def _load_resilient(text: str, root: str) -> "Settings":
+    """Load settings from JSON, tolerating a few bad fields on upgrade.
+
+    A single out-of-range or malformed value must never wipe every other
+    setting (the app persists user config here, and field bounds can tighten
+    between versions). We validate, and if that fails we drop only the offending
+    fields — which then fall back to their defaults — and retry, rather than
+    discarding the whole file.
+    """
+    try:
+        return Settings.model_validate_json(text)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        raw = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        log.warning("config.json is not valid JSON; using defaults")
+        return Settings(data_root=root)
+    if not isinstance(raw, dict):
+        return Settings(data_root=root)
+    from pydantic import ValidationError
+
+    for _ in range(len(raw) + 1):
+        try:
+            return Settings.model_validate(raw)
+        except ValidationError as exc:
+            bad = {e["loc"][0] for e in exc.errors() if e.get("loc")}
+            if not bad or not (bad & raw.keys()):
+                break
+            for k in bad:
+                raw.pop(k, None)  # drop the bad field → it reverts to default
+            log.warning("config.json: reset invalid field(s) %s to defaults", sorted(bad))
+    return Settings(data_root=root)
+
+
 class SettingsStore:
     """Thread-safe load/save wrapper around a single config.json."""
 
@@ -139,15 +187,11 @@ class SettingsStore:
         # Bootstrap: load existing config if present, else defaults.
         cfg_path = Path(root) / "state" / CONFIG_FILENAME
         if cfg_path.exists():
-            try:
-                self._settings = Settings.model_validate_json(cfg_path.read_text())
-                # Honor an explicit data_root override from env on every boot.
-                self._settings.data_root = root
-            except Exception as exc:  # noqa: BLE001
-                log.warning("could not parse %s (%s); using defaults", cfg_path, exc)
-                self._settings = Settings(data_root=root)
+            self._settings = _load_resilient(cfg_path.read_text(), root)
         else:
             self._settings = Settings(data_root=root)
+        # Honor an explicit data_root override from env on every boot.
+        self._settings.data_root = root
         self._settings.ensure_dirs()
         self.save()
 
@@ -167,6 +211,10 @@ class SettingsStore:
     def save(self) -> None:
         with self._lock:
             self._settings.state_dir.mkdir(parents=True, exist_ok=True)
-            self._settings.config_path.write_text(
-                json.dumps(json.loads(self._settings.model_dump_json()), indent=2)
-            )
+            path = self._settings.config_path
+            payload = json.dumps(json.loads(self._settings.model_dump_json()), indent=2)
+            # Atomic write: a crash mid-write must not corrupt config.json (which
+            # would silently revert all settings to defaults on next boot).
+            tmp = path.with_suffix(".json.tmp")
+            tmp.write_text(payload)
+            os.replace(tmp, path)

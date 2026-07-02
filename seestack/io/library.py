@@ -169,12 +169,17 @@ class Library:
             self._conn = None
 
     def _open(self) -> None:
-        self._conn = sqlite3.connect(self.registry_path, isolation_level=None)
-        self._conn.row_factory = sqlite3.Row
-        # A background scan worker and the GUI hold separate connections to
-        # this registry. busy_timeout makes a contended connection wait for
-        # the lock instead of immediately raising "database is locked".
-        self._conn.execute("PRAGMA busy_timeout = 5000")
+        conn = sqlite3.connect(self.registry_path, isolation_level=None)
+        try:
+            conn.row_factory = sqlite3.Row
+            # A background scan worker and the GUI hold separate connections to
+            # this registry. busy_timeout makes a contended connection wait for
+            # the lock instead of immediately raising "database is locked".
+            conn.execute("PRAGMA busy_timeout = 5000")
+        except Exception:
+            conn.close()
+            raise
+        self._conn = conn
 
     def _init_schema(self) -> None:
         assert self._conn is not None

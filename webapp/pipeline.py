@@ -78,6 +78,7 @@ def _pipeline_body(
                         run_qc=settings.auto_qc,
                         run_solve=settings.auto_solve,
                         only_new_qc=True,  # don't re-QC frames already done on re-scans
+                        use_solve_hints=settings.astap_use_solve_hints,
                         progress=_progress(jm, job),
                         should_stop=job.cancel_requested,
                     )
@@ -122,6 +123,37 @@ def _pipeline_body(
         lib.close()
 
 
+def submit_build_master(
+    settings: Settings, jm: JobManager, *,
+    kind: str, source_dir: str, name: str | None = None,
+    method: str = "median", sigma: float = 3.0,
+) -> Job:
+    """Build a master dark/flat/bias from a folder of raw FITS frames and
+    register it in the library-level calibration store."""
+    def body(job: Job) -> dict[str, Any]:
+        from webapp import calibration
+        from seestack.calibrate.masters import build_master
+
+        paths = calibration.find_fits_in_dir(source_dir)
+        if not paths:
+            raise FileNotFoundError(f"No FITS files found in {source_dir}")
+        job.set_progress("loading", 0, len(paths), f"{len(paths)} frames")
+        array, meta = build_master(
+            paths, kind=kind, method=method, sigma=sigma,
+            progress=_progress(jm, job),
+        )
+        entry = calibration.register_master(
+            settings.resolved_library_root, name=name or "", array=array, meta=meta,
+        )
+        return {
+            "id": entry["id"], "name": entry["name"], "kind": entry["kind"],
+            "n_frames": entry["n_frames"], "width_px": entry["width_px"],
+            "height_px": entry["height_px"],
+        }
+
+    return jm.submit("build_master", body)
+
+
 def submit_qc_solve(settings: Settings, jm: JobManager, safe: str) -> Job:
     def body(job: Job) -> dict[str, Any]:
         lib = Library.open_or_create(settings.resolved_library_root)
@@ -134,6 +166,7 @@ def submit_qc_solve(settings: Settings, jm: JobManager, safe: str) -> Job:
                     max_workers=settings.cpu_workers,
                     run_qc=settings.auto_qc or True,
                     run_solve=settings.auto_solve or True,
+                    use_solve_hints=settings.astap_use_solve_hints,
                     progress=_progress(jm, job),
                     should_stop=job.cancel_requested,
                 )
@@ -313,8 +346,10 @@ def submit_editor_png(settings: Settings, jm: JobManager, safe: str, run_id: int
                     raise FileNotFoundError(f"run {run_id} has no FITS")
                 out, _recipe = _render_recipe_fullres(
                     run.fits_path, recipe_dict, _progress(jm, job))
+                from seestack.stack.output import safe_basename
                 ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-                png = Path(proj.project_dir) / "output" / f"{run.output_basename}_edit_{ts}.png"
+                png = (Path(proj.project_dir) / "output"
+                       / f"{safe_basename(run.output_basename)}_edit_{ts}.png")
                 write_full_res_png(png, out)
             finally:
                 proj.close()
@@ -357,6 +392,102 @@ def submit_editor_batch(settings: Settings, jm: JobManager, items: list[dict],
         return {"exported": exported, "errors": errors}
 
     return jm.submit("editor_batch", body)
+
+
+def _channel_combine(
+    lib: Library, target_safe: str, items: list[dict], *,
+    output_name: str | None, weights: dict[str, float] | None, progress,
+) -> dict[str, Any]:
+    """Combine several mono stacks into one LRGB/RGB run, recorded under
+    ``target_safe``. Each item: ``{safe, run_id, channel}`` (channel ∈ L/R/G/B)."""
+    import json as _json
+    from datetime import datetime, timezone
+
+    import numpy as np
+
+    from seestack.io.project import Project, StackRunRow
+    from seestack.stack.channel_combine import combine_channels
+    from seestack.stack.output import write_stack_outputs
+
+    entry = lib.find_target(target_safe)
+    if entry is None:
+        raise FileNotFoundError(f"no target '{target_safe}'")
+
+    channels: dict[str, np.ndarray] = {}
+    wcs_text: str | None = None
+    total = len(items)
+    for i, item in enumerate(items, start=1):
+        ch = str(item.get("channel", "")).upper()
+        if ch not in ("L", "R", "G", "B"):
+            raise ValueError(f"bad channel {item.get('channel')!r} (expected L/R/G/B)")
+        if ch in channels:
+            raise ValueError(f"channel {ch} assigned more than once")
+        safe = str(item.get("safe"))
+        rid = int(item.get("run_id"))
+        progress("loading", i, total, f"{ch} ← {safe} run {rid}")
+        src = lib.find_target(safe)
+        if src is None:
+            raise FileNotFoundError(f"no target '{safe}'")
+        proj = Project.open(lib.target_dir(src))
+        try:
+            run = next((r for r in proj.iter_stack_runs() if r.id == rid), None)
+            if run is None or not run.fits_path or not Path(run.fits_path).exists():
+                raise FileNotFoundError(f"run {rid} in {safe} has no FITS")
+            rgb, wcs = _load_full_rgb_wcs(run.fits_path)
+        finally:
+            proj.close()
+        # Mono stacks have identical channels; luminance == that single channel.
+        channels[ch] = (0.2126 * rgb[..., 0] + 0.7152 * rgb[..., 1] + 0.0722 * rgb[..., 2])
+        if wcs_text is None and wcs is not None:
+            from seestack.io.wcs_io import wcs_to_text
+            wcs_text = wcs_to_text(wcs)
+
+    progress("combining", total, total)
+    out = combine_channels(channels, weights=weights)
+
+    dst = Project.open(lib.target_dir(entry))
+    try:
+        base = output_name or "lrgb"
+        coverage = np.isfinite(out).all(axis=2).astype(np.float32)
+        paths = write_stack_outputs(
+            project_dir=dst.project_dir, rgb=out, coverage=coverage,
+            wcs_text=wcs_text, out_basename=base, tiff_mode="linear",
+        )
+        new_id = dst.add_stack_run(StackRunRow(
+            id=None,
+            timestamp_utc=datetime.now(timezone.utc).isoformat(),
+            output_basename=base,
+            fits_path=str(paths["fits"]), tiff_path=str(paths["tiff"]),
+            preview_path=str(paths["preview"]),
+            n_frames_used=len(items),
+            canvas_h=out.shape[0], canvas_w=out.shape[1],
+            coverage_min=1, coverage_max=1,
+            options_json=_json.dumps({"channel_combine": items, "weights": weights or {}}),
+            notes="channel combine",
+        ))
+    finally:
+        dst.close()
+    lib.refresh_target_stats(target_safe)
+    return {"safe": target_safe, "run_id": new_id, "output_basename": base,
+            "channels": list(channels.keys())}
+
+
+def submit_channel_combine(
+    settings: Settings, jm: JobManager, target_safe: str, items: list[dict],
+    *, output_name: str | None = None, weights: dict[str, float] | None = None,
+) -> Job:
+    def body(job: Job) -> dict[str, Any]:
+        lib = Library.open_or_create(settings.resolved_library_root)
+        try:
+            return _channel_combine(
+                lib, target_safe, items,
+                output_name=output_name, weights=weights,
+                progress=lambda *a: (job.set_progress(*a), jm.maybe_flush(job))[0],
+            )
+        finally:
+            lib.close()
+
+    return jm.submit("channel_combine", body, target=target_safe)
 
 
 def _solved_accepted_count(proj: Any) -> int:

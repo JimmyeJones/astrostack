@@ -9,6 +9,7 @@ import "@mantine/core/styles.css";
 import "@mantine/notifications/styles.css";
 
 import { App } from "./App";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Dashboard } from "./routes/Dashboard";
 import { Library } from "./routes/Library";
 import { TargetView } from "./routes/Target";
@@ -21,6 +22,8 @@ import { LogsView } from "./routes/Logs";
 import { SettingsView } from "./routes/Settings";
 import { StorageView } from "./routes/Storage";
 import { SeestarView } from "./routes/Seestar";
+import { CalibrationView } from "./routes/Calibration";
+import { CombineView } from "./routes/Combine";
 
 // Lazy-load the 3D sky viewer so three.js stays out of the main bundle.
 const SkyView = React.lazy(() =>
@@ -47,6 +50,8 @@ const router = createBrowserRouter([
       { path: "library", element: <Library /> },
       { path: "telescope", element: <SeestarView /> },
       { path: "storage", element: <StorageView /> },
+      { path: "calibration", element: <CalibrationView /> },
+      { path: "combine", element: <CombineView /> },
       { path: "gallery", element: <GalleryView /> },
       { path: "targets/:safe", element: <TargetView /> },
       { path: "targets/:safe/stack", element: <StackView /> },
@@ -68,9 +73,11 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <MantineProvider theme={theme} defaultColorScheme="dark">
       <Notifications />
-      <QueryClientProvider client={queryClient}>
-        <RouterProvider router={router} />
-      </QueryClientProvider>
+      <ErrorBoundary>
+        <QueryClientProvider client={queryClient}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>
+      </ErrorBoundary>
     </MantineProvider>
   </React.StrictMode>,
 );

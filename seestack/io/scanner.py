@@ -183,6 +183,7 @@ def run_qc_and_solve(
     run_solve: bool = True,
     serial: bool = False,
     only_new_qc: bool = False,
+    use_solve_hints: bool = True,
     progress: ProgressFn | None = None,
     should_stop: ShouldStopFn | None = None,
 ) -> dict:
@@ -229,14 +230,14 @@ def run_qc_and_solve(
             summary["qc_done"] = done
 
     if run_solve and not _stopped(should_stop):
-        solve_args = build_solve_arglist(project)
+        solve_args = build_solve_arglist(project, use_hint=use_solve_hints)
         # build_solve_arglist reads astap_path from project meta (usually
         # unset for freshly-scanned targets) — override it if the caller
         # supplied one so the whole scan uses a known-good ASTAP.
         if astap_path is not None:
             solve_args = [
-                (fid, path, str(astap_path), fov, timeout)
-                for (fid, path, _ap, fov, timeout) in solve_args
+                (fid, path, str(astap_path), *rest)
+                for (fid, path, _ap, *rest) in solve_args
             ]
         summary["solve_total"] = len(solve_args)
         for done, result in _map_jobs(

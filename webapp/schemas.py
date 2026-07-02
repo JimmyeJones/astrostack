@@ -51,6 +51,8 @@ class FrameOut(BaseModel):
     solved: bool = False
     ra_center_deg: float | None = None
     dec_center_deg: float | None = None
+    ra_hint_deg: float | None = None
+    dec_hint_deg: float | None = None
     fwhm_px: float | None = None
     star_count: int | None = None
     sky_adu_median: float | None = None
@@ -160,6 +162,9 @@ _DESCRIPTORS: list[dict[str, Any]] = [
      "help": "Keep only the best fraction of frames by FWHM. 1.0 = keep all."},
     {"key": "drizzle", "label": "Drizzle (super-resolution)", "type": "bool", "group": "simple",
      "help": "Use the drizzle algorithm. Best with 200+ dithered frames."},
+    {"key": "mono", "label": "Mono / filtered subs", "type": "bool", "group": "simple",
+     "help": "Stack as single-channel luminance (no debayer). For mono cameras and "
+             "L/R/G/B/narrowband subs. Combine channels later in Channel combine."},
     # --- advanced ---
     {"key": "background_mode", "label": "Background mode", "type": "enum", "group": "advanced",
      "options": ["per_channel", "luminance"], "depends_on": "background_flatten"},
@@ -228,6 +233,12 @@ def stack_option_fields() -> list[StackOptionField]:
         d.setdefault("default", defaults.get(d["key"]))
         fields.append(StackOptionField(**d))
     return fields
+
+
+# StackOptions fields that are intentionally NOT user-facing form controls:
+# the webapp resolves them server-side (calibration master paths) and they must
+# never be set from raw client input, so they have no descriptor.
+NON_FORM_KEYS = {"dark_path", "flat_path"}
 
 
 def describable_keys() -> set[str]:

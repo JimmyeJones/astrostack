@@ -28,6 +28,7 @@ const HINTS: Record<string, string> = {
   astap_fov_deg: "Approximate field-of-view height in degrees, used as a solving hint (~1.3° suits the Seestar).",
   astap_timeout_s: "Give up on solving a single frame after this many seconds.",
   cpu_workers: "CPU workers for QC / solve / stack. Blank = all cores.",
+  astap_use_solve_hints: "Use each frame's telescope target RA/Dec (from its FITS header) to localise ASTAP's search — faster, more reliable solving. Turn off if your frames lack/contain wrong coordinates.",
   seestar_enabled: "Discover and monitor Seestar telescopes on the LAN via their unofficial local API (port 4700). The container must be able to reach the scope (Station mode).",
   seestar_control_enabled: "Allow sending commands (goto / start / stop / park) to the scope. Off = monitoring only, so watching can never disturb a session.",
   seestar_scan_subnet: "CIDR to scan for scopes, e.g. 192.168.1.0/24. Blank = auto-detect from the container's network.",
@@ -35,6 +36,82 @@ const HINTS: Record<string, string> = {
   seestar_scan_interval_s: "How often to re-scan the network for devices.",
   seestar_poll_interval_s: "How often to poll each connected scope for telemetry.",
 };
+
+function AccessControl() {
+  const qc = useQueryClient();
+  const status = useQuery({ queryKey: ["auth-status"], queryFn: api.authStatus });
+  const [username, setUsername] = useState("admin");
+  const [password, setPassword] = useState("");
+
+  useEffect(() => {
+    if (status.data?.username) setUsername(status.data.username);
+  }, [status.data?.username]);
+
+  const enabled = status.data?.enabled ?? false;
+
+  const setPw = useMutation({
+    mutationFn: () => api.setAuthPassword({ password, username }),
+    onSuccess: (r) => {
+      notifications.show({
+        message: r.enabled
+          ? "Password set — you'll be asked to sign in on the next request."
+          : "Access control disabled.",
+        color: "teal",
+      });
+      setPassword("");
+      qc.invalidateQueries({ queryKey: ["auth-status"] });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
+
+  const disable = useMutation({
+    mutationFn: () => api.setAuthPassword({ password: "" }),
+    onSuccess: () => {
+      notifications.show({ message: "Access control disabled.", color: "teal" });
+      qc.invalidateQueries({ queryKey: ["auth-status"] });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
+
+  return (
+    <Paper withBorder p="lg">
+      <Stack>
+        <Group gap={6}>
+          <Text fw={600}>Access control</Text>
+          <Badge variant="light" color={enabled ? "teal" : "gray"}>
+            {enabled ? "password protected" : "open"}
+          </Badge>
+        </Group>
+        <Text size="sm" c="dimmed">
+          Optionally require a username and password (HTTP Basic) to reach AstroStack.
+          Leave it off on a trusted LAN; turn it on if the app is exposed beyond your
+          network. Best paired with HTTPS so credentials aren't sent in the clear.
+        </Text>
+        <Group align="flex-end" gap="sm" wrap="wrap">
+          <TextInput label="Username" value={username} w={160}
+            onChange={(e) => setUsername(e.currentTarget.value)} />
+          <TextInput label={enabled ? "New password" : "Password"} type="password"
+            placeholder="At least 4 characters" value={password} style={{ flex: 1, minWidth: 180 }}
+            onChange={(e) => setPassword(e.currentTarget.value)} />
+          <Button onClick={() => setPw.mutate()} loading={setPw.isPending}
+            disabled={password.length < 4}>
+            {enabled ? "Update" : "Enable"}
+          </Button>
+          {enabled ? (
+            <Button color="red" variant="light" loading={disable.isPending}
+              onClick={() => {
+                if (window.confirm("Disable access control? The app will be open to anyone who can reach it.")) {
+                  disable.mutate();
+                }
+              }}>
+              Disable
+            </Button>
+          ) : null}
+        </Group>
+      </Stack>
+    </Paper>
+  );
+}
 
 export function SettingsView() {
   const qc = useQueryClient();
@@ -47,6 +124,8 @@ export function SettingsView() {
     if (settings.data) setForm(settings.data);
   }, [settings.data]);
 
+  const astapTest = useMutation({ mutationFn: () => api.astapTest() });
+
   const save = useMutation({
     mutationFn: (patch: Record<string, unknown>) => api.putSettings(patch),
     onSuccess: () => {
@@ -57,6 +136,9 @@ export function SettingsView() {
     onError: (e: Error) => notifications.show({ message: `Save failed: ${e.message}`, color: "red" }),
   });
 
+  if (settings.isError) {
+    return <Alert color="red" m="md" title="Could not load settings">{(settings.error as Error)?.message}</Alert>;
+  }
   if (settings.isLoading || !settings.data) {
     return <Center h={300}><Loader /></Center>;
   }
@@ -103,6 +185,19 @@ export function SettingsView() {
               </Group>
               {astap.version ? <Text size="xs" c="dimmed">{astap.version}</Text> : null}
               {astap.hint ? <Text size="sm" c="yellow">{astap.hint}</Text> : null}
+              <Group gap="xs" align="center">
+                <Button size="xs" variant="light" loading={astapTest.isPending}
+                  disabled={!astap.found} onClick={() => astapTest.mutate()}>
+                  Test solve on a real frame
+                </Button>
+                {astapTest.data ? (
+                  <Text size="xs" c={astapTest.data.ok ? "teal" : "red"}>
+                    {astapTest.data.ok
+                      ? `Solved ${astapTest.data.frame} in ${astapTest.data.elapsed_s}s`
+                      : `Failed: ${astapTest.data.detail}`}
+                  </Text>
+                ) : null}
+              </Group>
             </Stack>
           </Alert>
         );
@@ -165,6 +260,9 @@ export function SettingsView() {
             <NumberInput label={lbl("cpu_workers", "CPU workers")} value={num("cpu_workers")}
               min={1} onChange={(v) => set("cpu_workers", v === "" ? null : Number(v))} />
           </SimpleGrid>
+          <Switch label={lbl("astap_use_solve_hints", "Use telescope target as solve hint")}
+            checked={bool("astap_use_solve_hints")}
+            onChange={(e) => set("astap_use_solve_hints", e.currentTarget.checked)} />
 
           <Group justify="flex-end">
             <Button leftSection={<IconDeviceFloppy size={16} />}
@@ -268,6 +366,8 @@ export function SettingsView() {
           </Group>
         </Stack>
       </Paper>
+
+      <AccessControl />
     </Stack>
   );
 }

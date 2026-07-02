@@ -36,6 +36,8 @@ def _to_out(f: FrameRow) -> FrameOut:
         solved=f.wcs_json is not None,
         ra_center_deg=f.ra_center_deg,
         dec_center_deg=f.dec_center_deg,
+        ra_hint_deg=f.ra_hint_deg,
+        dec_hint_deg=f.dec_hint_deg,
         fwhm_px=f.fwhm_px,
         star_count=f.star_count,
         sky_adu_median=f.sky_adu_median,

@@ -29,6 +29,26 @@ def test_find_fits_files(tmp_path):
     assert sorted(p.name for p in flat) == ["a.fit", "b.fits"]
 
 
+def test_ingest_skips_zero_byte_files(tmp_path):
+    src = tmp_path / "raws"
+    src.mkdir()
+    good = write_seestar_fits(src / "good.fit", seed=1)
+    (src / "empty.fit").write_bytes(b"")  # half-finished/stalled NAS copy
+
+    proj = Project.create(tmp_path / "proj", name="t")
+    cache = CacheManager(proj.project_dir)
+    try:
+        results = {r.source_path.name: r for r in ingest_files(proj, cache, find_fits_files(src))}
+        registered = [f.source_path for f in proj.iter_frames()]
+    finally:
+        proj.close()
+
+    assert results["empty.fit"].skipped is True
+    assert results["empty.fit"].frame_id is None
+    assert results["good.fit"].frame_id is not None
+    assert str(good) in registered and str(src / "empty.fit") not in registered
+
+
 def test_ingest_registers_and_caches(tmp_path):
     src = tmp_path / "raws"
     src.mkdir()

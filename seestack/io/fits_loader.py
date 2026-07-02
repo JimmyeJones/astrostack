@@ -40,6 +40,10 @@ class FitsHeaderInfo:
     width_px: int
     height_px: int
     bayer_pattern: str | None  # 'RGGB' / 'BGGR' / 'GRBG' / 'GBRG'
+    # Telescope target the mount was pointed at (degrees), read from the raw
+    # header. Used as a plate-solve search hint; None if the header lacks it.
+    ra_target_deg: float | None
+    dec_target_deg: float | None
     raw_header: dict[str, Any]
 
 
@@ -61,6 +65,8 @@ def load_header(path: str | Path) -> FitsHeaderInfo:
         width_px=int(width),
         height_px=int(height),
         bayer_pattern=_get_str(h, ("BAYERPAT", "BAYRPAT")),
+        ra_target_deg=_target_ra_deg(h),
+        dec_target_deg=_target_dec_deg(h),
         raw_header=dict(h),
     )
 
@@ -105,6 +111,8 @@ def load_seestar_raw(
             width_px=int(data.shape[-1]),
             height_px=int(data.shape[-2]),
             bayer_pattern=_get_str(h, ("BAYERPAT", "BAYRPAT")),
+            ra_target_deg=_target_ra_deg(h),
+            dec_target_deg=_target_dec_deg(h),
             raw_header=dict(h),
         )
 
@@ -280,6 +288,56 @@ def _get_str(h, keys: tuple[str, ...]) -> str | None:
                 return str(h[k]).strip()
             except Exception:  # noqa: BLE001
                 pass
+    return None
+
+
+def _coord_to_deg(value, *, is_ra: bool) -> float | None:
+    """Parse a FITS coordinate value to degrees.
+
+    Decimal values (e.g. ``RA = 83.6``) are treated as degrees. Sexagesimal
+    *strings* (e.g. ``OBJCTRA = '05 35 17.3'``) are parsed — RA in hours
+    (→ ×15), Dec in degrees. Out-of-range results are rejected.
+    """
+    import re
+
+    if value is None:
+        return None
+    try:
+        deg = float(value)  # plain decimal (number or numeric string) → degrees
+    except (TypeError, ValueError):
+        s = str(value).strip()
+        parts = [p for p in re.split(r"[\s:]+", s.lstrip("+")) if p not in ("", "-")]
+        try:
+            nums = [float(p) for p in parts]
+        except ValueError:
+            return None
+        if not nums:
+            return None
+        mag = abs(nums[0]) + (nums[1] / 60 if len(nums) > 1 else 0) \
+            + (nums[2] / 3600 if len(nums) > 2 else 0)
+        deg = -mag if s.startswith("-") else mag
+        if is_ra:
+            deg *= 15.0  # sexagesimal RA is in hours
+    if is_ra:
+        return deg if 0.0 <= deg <= 360.0 else None
+    return deg if -90.0 <= deg <= 90.0 else None
+
+
+def _target_ra_deg(h) -> float | None:
+    for k in ("OBJCTRA", "RA", "CRVAL1"):
+        if k in h:
+            deg = _coord_to_deg(h[k], is_ra=True)
+            if deg is not None:
+                return deg
+    return None
+
+
+def _target_dec_deg(h) -> float | None:
+    for k in ("OBJCTDEC", "OBJCTDE", "DEC", "CRVAL2"):
+        if k in h:
+            deg = _coord_to_deg(h[k], is_ra=False)
+            if deg is not None:
+                return deg
     return None
 
 

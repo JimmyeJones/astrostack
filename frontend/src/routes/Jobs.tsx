@@ -1,9 +1,11 @@
 import {
-  ActionIcon, Badge, Center, Group, Loader, Paper, Progress, Stack, Text, Title,
+  ActionIcon, Badge, Button, Center, Group, Loader, Paper, Progress, Stack, Text, Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { IconX } from "@tabler/icons-react";
+import { IconDownload, IconPhoto, IconX } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
+import { type ReactNode } from "react";
 import { api, type Job } from "../api/client";
 import { QueryError } from "../components/QueryError";
 
@@ -15,6 +17,37 @@ const COLOR: Record<string, string> = {
   cancelled: "orange",
   interrupted: "orange",
 };
+
+/** Result-specific actions for finished editor jobs (download / view). */
+function JobResultActions({ job }: { job: Job }) {
+  if (job.state !== "done" || !job.result) return null;
+  const r = job.result as Record<string, unknown>;
+  let action: ReactNode = null;
+  if (job.kind === "editor_png" && r.png_path && r.safe && r.run_id != null) {
+    action = (
+      <Button size="xs" variant="light" leftSection={<IconDownload size={14} />}
+        component="a" href={api.editPngUrl(String(r.safe), Number(r.run_id), job.id)}>
+        Download PNG
+      </Button>
+    );
+  } else if (job.kind === "editor_export" && r.safe) {
+    action = (
+      <Button size="xs" variant="light" leftSection={<IconPhoto size={14} />}
+        component={Link} to={`/targets/${r.safe}/history`}>
+        View result
+      </Button>
+    );
+  } else if (job.kind === "editor_batch") {
+    const n = Array.isArray(r.exported) ? r.exported.length : 0;
+    action = (
+      <Button size="xs" variant="light" leftSection={<IconPhoto size={14} />}
+        component={Link} to="/gallery">
+        View {n} in Gallery
+      </Button>
+    );
+  }
+  return action ? <Group mt="xs">{action}</Group> : null;
+}
 
 function JobRow({ job, onCancel }: { job: Job; onCancel: () => void }) {
   const pct = job.total ? Math.round((job.done / job.total) * 100) : 0;
@@ -41,6 +74,7 @@ function JobRow({ job, onCancel }: { job: Job; onCancel: () => void }) {
       {active ? <Progress value={job.state === "queued" ? 0 : pct} animated mt="xs" /> : null}
       {job.error ? <Text c="red" size="sm" mt="xs">{job.error}</Text> : null}
       {job.detail ? <Text c="dimmed" size="xs" mt={4}>{job.detail}</Text> : null}
+      <JobResultActions job={job} />
     </Paper>
   );
 }
@@ -57,6 +91,13 @@ export function JobsView() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["jobs"] }),
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
+  const clear = useMutation({
+    mutationFn: () => api.clearJobs(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["jobs"] }),
+  });
+  const finished = (data ?? []).filter(
+    (j) => !["running", "queued"].includes(j.state),
+  ).length;
 
   if (isError && !data) {
     return <QueryError error={error} onRetry={() => refetch()} />;
@@ -73,7 +114,15 @@ export function JobsView() {
 
   return (
     <Stack>
-      <Title order={2}>Jobs</Title>
+      <Group justify="space-between">
+        <Title order={2}>Jobs</Title>
+        {finished > 0 ? (
+          <Button size="xs" variant="subtle" color="gray" loading={clear.isPending}
+            onClick={() => clear.mutate()}>
+            Clear {finished} finished
+          </Button>
+        ) : null}
+      </Group>
       {jobs.length === 0 ? (
         <Text c="dimmed">No jobs yet.</Text>
       ) : (

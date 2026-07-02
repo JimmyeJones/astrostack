@@ -1,198 +1,408 @@
-# AGENTS.md — operating manual for autonomous work on AstroStack
+# Autonomous development playbook — AstroStack
 
-This file is the operating manual for any agent (human or AI) doing unattended,
-scheduled development on this repo. It did not exist before this document was
-written — if you're reading it fresh, you're either the first autonomous run
-or someone deleted it; either way, keep it up to date as the loop evolves.
+This file tells an AI agent how to improve this app **on its own, with no human in
+the loop**. A fresh agent starts **once an hour**; each run should complete
+**several** well-scoped improvements, not just one. Read this file in full before
+doing anything. It is the source of truth for *how to decide what to build and how
+to ship it safely*. The living list of *what* to build is
+[`docs/IMPROVEMENTS.md`](docs/IMPROVEMENTS.md).
 
-## 1. What this project is
+If anything here conflicts with an explicit instruction from the user in your
+session, the user wins. Otherwise, follow this document exactly.
 
-AstroStack / Seestack is an astrophotography stacker for the ZWO Seestar smart
-telescope, built to handle 10,000+ raw subs without falling over (the thing
-DeepSkyStacker can't do). It ships as:
+---
 
-- `seestack/` — the processing engine (io, qc, solve, align, bg, stack, post,
-  edit) plus a PySide6 desktop GUI (`seestack/gui/`). Requires Qt at runtime;
-  in headless CI/containers, run with `QT_QPA_PLATFORM=offscreen` and make
-  sure `libegl1`/`libgl1` are installed or `pytest-qt` tests crash at collection.
-- `webapp/` — a headless FastAPI service (no PySide6) that watches a dataset
-  folder, auto-ingests/QCs/solves new Seestar frames, and exposes a REST+SSE
-  API for the frontend. This is the primary deployable surface (TrueNAS /
-  Docker) and where most user-facing value now accrues.
-- `frontend/` — React + Vite + TypeScript SPA, built into `webapp/static/` and
-  served by FastAPI as a single origin.
+## 1. Mission
 
-Read `PLAN.md` for the original engine design/rationale and `README.md` +
-`docs/webapp.md` for the web service. `docs/glossary.md` is the beginner-facing
-term glossary linked from the UI — keep it in sync with any new jargon you
-introduce in either UI.
+AstroStack is a headless, TrueNAS/Docker-deployable astrophotography web app that
+wraps the `seestack` stacking engine, aimed at ZWO Seestar owners (and, now,
+mono/filtered imagers) who want to stack thousands of subs and edit the result
+without being PixInsight experts.
 
-## 2. Pillars (what "value" means here)
+Your job each run: **make the app meaningfully better for that user** — more
+capable, more correct, more pleasant to use — and leave the tree green, the
+history clean, and the backlog updated. Optimise for **many high-quality, fully
+tested changes over time**. Each individual change is small and safe; each hourly
+run lands a batch of them.
 
-Every backlog item and every commit should serve one of these. Tag backlog
-entries with the pillar they serve:
+> Note: `PLAN.md` is the *original* desktop-era design. It is historical. The app
+> has since grown a web layer, a non-destructive editor, dark/flat calibration,
+> mono + LRGB stacking, and optional auth. Trust the code and `docs/IMPROVEMENTS.md`
+> over `PLAN.md` when they disagree.
 
-- **Reliability** — correctness of the pipeline, no data loss, graceful
-  handling of partial/malformed/adversarial input (half-written files, corrupt
-  FITS, network drops mid-transfer), crash resistance under real Seestar
-  device conditions.
-- **Scale** — the 10k-frame promise: constant/bounded memory, streaming
-  algorithms, job throughput, watcher performance on large datasets.
-- **Usability** — plain-language UI, sensible defaults, presets, "Why?"
-  panels, discoverability. The target user is a Seestar owner who is not a
-  PixInsight expert.
-- **Operability** — logs, health checks, job observability, safe restarts,
-  TrueNAS/Docker deployment friction, config surfaces that don't require
-  editing JSON by hand.
-- **Security & data safety** — this is a LAN-exposed service with no auth by
-  default watching a real filesystem. Path traversal, unbounded resource
-  consumption, and destructive file operations are all in scope. Never trade
-  safety for convenience.
-- **Quality** — test coverage, lint cleanliness, type-checking, reducing
-  flakiness/tech debt.
+---
 
-## 3. How to choose work
+## 2. The run — do several tasks each hour
 
-Score every candidate as **value ÷ (effort × risk)**:
+A run is an **outer loop over tasks**. Keep completing tasks until you run low on
+time, run out of good candidates, or the only work left needs owner sign-off.
+A healthy run lands **~3–6 tasks** (more if small, fewer if one is large — a
+single big feature can legitimately be the whole run). **Never trade the quality
+bar (§5) for task count.**
 
-- **Value**: how much it advances a pillar, weighted toward things a real
-  Seestar owner would notice (a bug that loses a night's stack > a marginal
-  UI polish).
-- **Effort**: implementation + test size. Prefer S/M items most runs; only
-  take an L item if nothing smaller scores comparably and you can still land
-  it fully green within the run.
-- **Risk**: chance of breaking existing behavior, chance the change is
-  contentious (touches defaults, deletes data, changes on-disk formats),
-  chance it can't be verified by the test suite alone.
+**Start of run (once):**
+1. `git fetch`; read `docs/IMPROVEMENTS.md` and skim the last ~20 commits and open
+   PRs/branches so you don't redo or collide with in-flight work.
+2. Set up the environment (§7) and confirm the baseline test suite is green. If
+   it's already red, fixing it is your first task — that outranks everything.
 
-Within `docs/IMPROVEMENTS.md`, prefer items with a clear pillar tag and size
-estimate that are NOT in the "Needs owner sign-off" section. Do 3-6 per run
-(fewer if one is genuinely large); each must land fully tested and green
-before moving to the next.
+**Per task (repeat):**
+3. **Choose** the next task with the decision framework (§3), or invent one with
+   the ideation process (§4). Mark it **In progress** in `docs/IMPROVEMENTS.md`
+   (with your branch) in the commit that starts it.
+4. **Implement** it across all relevant layers (engine + webapp + frontend),
+   matching existing style (§6).
+5. **Test** everything (§5). Add tests for what you changed. No green, no ship.
+6. **Commit** the task as its own logical commit; bump the version; move the item
+   to **Shipped** in `docs/IMPROVEMENTS.md`. Re-run the suite so each commit is
+   independently green.
+7. **Push** and keep going to the next task.
 
-## 4. Ideation guide — how to find new work
+**End of run (once):**
+8. Add any new ideas you found to `docs/IMPROVEMENTS.md`, then **merge your green
+   work into the default branch yourself** and clean up (§8). This project is
+   zero-touch: no human reviews or merges, so shipping = merging. Then stop.
 
-When the backlog runs low, generate new candidates by actually looking, not
-guessing:
+**Batching guidance:** group closely-related small changes onto one branch as
+separate commits and one PR; put unrelated changes on their own branches/PRs so
+each stays reviewable and revertible. If a task turns out huge, ship the first
+safe slice and log the rest as a new backlog item — then move on.
 
-- **Read recent commit history** (`git log --oneline -30`) for patterns —
-  repeated bug-fix commits in the same area usually mean a missing test or a
-  structural gap, not just a one-off bug.
-- **Grep for `TODO`/`FIXME`/`XXX`** across `seestack/`, `webapp/`, `frontend/src/`.
-- **Read router/endpoint code for missing edge-case handling**: unbounded
-  inputs, missing validation on path/query params (esp. target names / file
-  paths — this app reads a real filesystem), missing error responses.
-- **Read frontend routes for missing empty/error/loading states** — a route
-  that renders nothing useful when a fetch fails is a usability gap.
-- **Check `docs/glossary.md` against UI copy** for undefined jargon.
-- **Look for perf hot paths** in `seestack/stack/` and `webapp/pipeline.py`
-  that could regress at 10k frames — anything that isn't streaming/bounded.
-- **Run `ruff check .`** — pre-existing lint debt is fair game for small
-  cleanup tasks, but don't let a lint sweep replace substantive work.
-- **Re-read this file's "Needs owner sign-off" list** before finalizing an
-  idea — if it's on that list, write it up in the backlog but do not start it.
+---
 
-Add at least 1-2 new well-reasoned ideas to `docs/IMPROVEMENTS.md` every run,
-each tagged with pillar + size (S/M/L).
+## 3. How to decide what to work on (choosing among known candidates)
 
-## 5. Quality bar
+You are trusted to choose. Score each candidate on three axes:
 
-- The full test suite (Python `pytest` + frontend `vitest`) must be green
-  before you start and green again before you merge. If it's red at the
-  start, fixing it is the first task of the run, before anything else.
-- Every behavior change ships with a test that would fail without it.
-- Never weaken, skip, delete, or reduce the scope of an existing test to make
-  the suite pass. If a test is genuinely wrong (asserts old, superseded
-  behavior you're intentionally changing), update it to assert the new
-  correct behavior — don't just relax it.
-- New/touched Python files should be `ruff check` clean for the lines you
-  touched (pre-existing errors elsewhere are backlog material, not a blocker).
-- Frontend changes: `npm run build` (tsc + vite build) must succeed; add a
-  `vitest` test alongside any new component/hook with real logic.
-- User-facing changes update `docs/webapp.md` and/or `docs/glossary.md` when
-  they add a setting, endpoint, or new piece of jargon.
-- Keep diffs additive and reversible. New features default OFF unless you're
-  confident the on-by-default behavior is safe (no data loss, no surprising
-  resource use, no behavior change for existing users' saved projects).
+- **User value** — does a real Seestar/astro imager notice and benefit? Correct
+  results and "it finally does X" beat cosmetic tweaks.
+- **Effort** — can you finish it *end-to-end with tests* within the run?
+- **Risk** — how likely to break existing behaviour, corrupt data, or destabilise
+  the hot path (ingest/stack)? Lower is better.
 
-## 6. Git / merge policy
+**Pick the highest `value ÷ (effort × risk)`.** When two are close, prefer:
+finishing/polishing something half-done > fixing a correctness bug > improving a
+hot path safely > new self-contained feature > cosmetic. Sequence a run to front-
+load safe, high-confidence wins, then attempt one riskier/bigger item if time
+allows.
 
-- Work happens on the branch the harness assigns for the session (currently
-  `claude/friendly-lovelace-4327jj`) — never push directly to `main`.
-- One commit per logical task, clear message, no bundling unrelated changes.
-- Bump `pyproject.toml` `[project].version` (and `frontend/package.json`
-  `version` if the change touches the frontend) with each shipped task —
-  patch bump for a fix/small feature, minor bump for a larger feature. This
-  repo has no changelog file yet; the git log + `docs/IMPROVEMENTS.md`
-  "Shipped" entries are the changelog.
-- Before merging: rebase/sync on the latest default branch, re-run the full
-  suite, resolve conflicts without discarding either side's intent.
-- To actually ship: open a PR from the working branch and merge it yourself
-  via the GitHub API (`merge_pull_request`) once it's green and synced —
-  nobody else will click merge. Only ever merge fully-green work.
-- Never force-push, never skip hooks, never rewrite already-pushed history on
-  a branch that might have a PR against it.
+### Where to find candidates (in priority order)
+1. **Anything broken or flaky** — failing/skipped tests, error logs, TODO/FIXME/
+   HACK/XXX comments, `# noqa`d smells, swallowed exceptions.
+2. **The backlog** — `docs/IMPROVEMENTS.md` "Ideas" section, roughly top-down.
+3. **Correctness gaps** — places the math, NaN handling, coverage handling, or
+   edge cases (empty input, single frame, mosaic edges, huge stacks) are wrong or
+   untested. Astro correctness matters more than features.
+4. **Coverage gaps** — modules/branches with thin or no tests; add tests *and*
+   fix what they reveal.
+5. **Real workflow needs** — what an imager actually does next: better previews,
+   sensible defaults, clearer errors, batch operations, export formats, docs.
+6. **Performance** — only with a measurement showing a real hot spot; never
+   trade correctness or memory-safety for speed (this app has OOM history).
+7. **Maintainability** — safe refactors that reduce duplication or clarify a
+   confusing module, *when* they enable upcoming work.
 
-## 7. Environment setup
+---
+
+## 4. How to come up with new features and ideas
+
+Don't just drain the backlog — **replenish it**. Every run, spend some effort
+generating genuinely new, valuable ideas and record them (with a why, a rough
+size, and which pillar they serve). Aim to add at least a couple of well-reasoned
+ideas per run. Here's how to find good ones.
+
+### The three product pillars — every idea should push one
+1. **Scale** — handle 10k+ subs, mosaics, big canvases without falling over.
+2. **Correctness** — physically/photometrically right results (calibration,
+   alignment, coverage, colour, noise).
+3. **Approachability** — a non-expert gets a great result with sane defaults,
+   plain-language options, and a "why". This is the app's edge over PixInsight.
+
+An idea that advances one pillar without hurting the others is a good idea.
+
+### Method A — walk the user's journey and find friction
+Trace the whole path and ask "what's missing, confusing, or manual here?":
+`capture → drop files → ingest → QC → plate-solve → stack → preview → edit →
+export → share/compare`. Mentally dogfood each step for a beginner *and* for
+someone with 8,000 subs of one target. Friction points are features:
+missing feedback, no sane default, a manual step that could be automatic, a
+failure with no guidance, a result you can't trust or compare.
+
+### Method B — learn from mature tools, then fit our niche
+Look at what established astro software does and adapt what fits a **headless,
+web, beginner-friendly, scalable** product (not a pro desktop clone):
+DeepSkyStacker, Siril, GraXpert (gradient/denoise), Starnet++ (stars), ASI Studio /
+ASIDeepStack, Astro Pixel Processor, N.I.N.A., PixInsight. Translate a capability
+into *our* idiom — automatic, explained, with presets — rather than exposing a
+hundred knobs. Respect the guardrails (§9): anything needing heavy ML runtimes or
+big model downloads goes to **Needs owner sign-off**, not straight into a build.
+
+### Method C — mine the code and telemetry
+- Settings/`StackOptions`/engine capabilities that have **no UI** yet.
+- Editor ops that *could* exist next to the ones present (`edit/ops/`).
+- FITS header fields we read but don't use; formats/cameras we don't support.
+- Failure modes in logs and error strings — each is a "help the user avoid/fix
+  this" feature (e.g. better guidance when a plate-solve fails).
+- Half-built or TODO-marked seams.
+
+### Method D — think in workflows, not knobs
+The best features remove work or uncertainty: automation (auto-pick best subs,
+auto-suggest settings from the data), trust (show what changed, let users compare
+before/after or A/B two stacks), and repeatability (presets, saved recipes, batch
+apply). Favour these over yet another slider.
+
+### Feasibility filter (before adding an idea)
+Keep an idea if it: fits the headless/web/TrueNAS model; needs no heavy/networked
+dependency without sign-off; can ship with a sane default and a plain-language
+explanation; is additive/reversible; and can be tested. Otherwise, either reshape
+it until it passes or file it under **Needs owner sign-off** with the reason.
+
+Record survivors in `docs/IMPROVEMENTS.md` → **Ideas**, tagged with the pillar
+they serve and a size estimate, so future runs (and other agents) can pick them up.
+
+---
+
+## 5. Definition of done (non-negotiable quality bar, per task)
+
+A task is shippable only when ALL of these hold:
+
+- [ ] Python suite green — ideally the full suite headless
+      (`QT_QPA_PLATFORM=offscreen python -m pytest -q`); if Qt libs can't be
+      installed, the fallback that skips the 3 GUI tests is in §7. Either way, do
+      **not** "fix" a failing test by weakening it.
+- [ ] New behaviour has tests. Bug fixes get a regression test that fails before
+      and passes after.
+- [ ] If you touched `frontend/`: `npx tsc --noEmit` clean, `npx vitest run`
+      green, and `npx vite build` succeeds.
+- [ ] You did **not** delete, skip, loosen, or `xfail` a test to get green.
+- [ ] **Upgrade-safe (§9):** an existing `config.json` still loads, old
+      project/library DBs migrate additively, on-disk layout is unchanged, no
+      breaking default flips or API-shape changes. If the change touches config,
+      settings, DB schema, or on-disk paths, add/extend an upgrade test.
+- [ ] `__version__` in `webapp/__init__.py` bumped (patch for fixes/polish, minor
+      for features). One bump per task is fine.
+- [ ] `docs/IMPROVEMENTS.md` updated (item moved to Shipped; new ideas added).
+- [ ] Code matches surrounding style, comment density, and naming. New engine ops/
+      settings stay JSON-safe and (for `StackOptions`) either have a form
+      descriptor or are added to `NON_FORM_KEYS` (a drift test enforces this).
+
+Every committed task must be independently green — so a bad one can be reverted
+without unpicking the others. If you can't meet the bar, ship a smaller slice that
+can, and log the rest.
+
+---
+
+## 6. Architecture map (so you know where things go)
+
+- `seestack/` — the pure processing engine (no webapp imports).
+  - `io/` — FITS load (`fits_loader.py`), ingest, `project.py` (per-target SQLite;
+    additive migrations via `SCHEMA_VERSION` + `_migrate_schema`), `library.py`.
+  - `stack/` — `stacker.py` (`run_stack`, `StackOptions`), `align.py` (per-frame
+    load→calibrate→debayer→bg→reproject), `accumulator.py`, `drizzle_path.py`,
+    `mosaic.py`, `channel_combine.py` (LRGB/RGB).
+  - `calibrate/` — master dark/flat build + apply (raw-Bayer domain).
+  - `edit/` — non-destructive editor: `registry.py` (op spec + `EditContext`),
+    `ops/` (tone/detail/background/geometry/stars), `recipe.py`, `proxy.py`,
+    `pipeline.py`, `starmask.py`.
+  - `qc/`, `bg/`, `post/`, `solve/` (ASTAP), `render/`.
+- `webapp/` — FastAPI layer. `main.py` (app + lifespan + auth middleware),
+  `config.py` (`Settings` + atomic store), `jobs.py` (single-worker JobManager,
+  SQLite-persisted), `pipeline.py` (job bodies), `watcher.py`, `deps.py`,
+  `schemas.py` (adapts engine specs to the frontend), `routers/`, `calibration.py`,
+  `auth.py`.
+- `frontend/` — React + Mantine + TanStack Query + react-router. Descriptor-driven
+  forms (`StackOptionControl`) render engine schemas generically, so many new
+  engine params/ops surface in the UI with no frontend work. Routes in
+  `src/routes/`, registered in `src/main.tsx`, nav in `src/App.tsx`.
+  `webapp/static/` is the **build output — gitignored; never edit or commit it.**
+- `tests/` — pytest; `tests/webapp/` uses a real Library/Project fixture (see
+  `conftest.py`), `tests/synth.py` writes synthetic Seestar FITS.
+
+Key invariants to respect:
+- Engine functions stay free of `webapp` imports.
+- `StackOptions` must stay JSON-serialisable (it's persisted in run records).
+- The stack hot path is memory-bounded on purpose (OOM history) — don't
+  accumulate unbounded per-frame results.
+- Calibration master paths are resolved **server-side**; never accept raw
+  filesystem paths from the client.
+- NaN = "no coverage". Keep reductions NaN-aware; don't turn gaps into zeros.
+
+---
+
+## 7. Environment setup (the container is ephemeral)
+
+Recreate tooling at the start of each run if missing:
 
 ```bash
 # Python engine + webapp (needs Python 3.12 specifically; pyproject pins
-# >=3.12,<3.13 — use python3.12 explicitly if the default python3 is older)
-python3.12 -m venv .venv
-source .venv/bin/activate
+# >=3.12,<3.13 — use python3.12 explicitly if the default python3 is older).
+python3.12 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev,web]"
 
-# Headless container extras: PySide6/pytest-qt need libEGL at import time
-# even though the webapp itself never opens a window.
+# Headless container extras: PySide6/pytest-qt need libEGL at import time even
+# though the webapp never opens a window. (Install once per fresh container.)
 apt-get update && apt-get install -y libegl1 libgl1 libxkbcommon0
 
-# Run the Python suite headless:
-QT_QPA_PLATFORM=offscreen python -m pytest -q
-
 # Frontend
-cd frontend
-npm install
-npm test              # vitest
-npm run build          # tsc --noEmit && vite build -> ../webapp/static
+cd frontend && npm install
 ```
 
-Lint (not currently enforced in CI, but check before claiming "quality bar"
-work): `ruff check .` — there is pre-existing debt (~127 findings as of this
-writing); don't let it block unrelated work, but don't add to it either.
+**Running the tests:** prefer the full suite headless —
+`QT_QPA_PLATFORM=offscreen python -m pytest -q` — so the Qt/GUI tests run too.
+If the Qt system libs above can't be installed in your environment, fall back to
+skipping just those three:
+`python -m pytest tests/ --ignore=tests/test_compare_dialog.py --ignore=tests/test_end_to_end.py --ignore=tests/test_footprint_view.py -q`
+(that's a fallback, not a licence to ignore GUI regressions when Qt *is*
+available). Frontend: `npx tsc --noEmit`, `npx vitest run`, `npx vite build`.
 
-## 8. Guardrails (non-negotiable)
+Lint is not enforced in CI yet, but check before claiming quality-bar work:
+`ruff check .` has pre-existing debt — don't let it block unrelated work, and
+don't add to it. Put temp/scratch files under the session scratchpad, never in
+the repo.
 
-- Only ever merge fully-green work (Python + frontend suites both pass).
-- Never weaken, skip, or delete tests to get to green.
-- Never force-push; never break the default branch.
-- Keep changes additive/reversible; new features default OFF unless clearly
-  safe to default ON (no data loss, no surprising resource/network use).
-- Do not touch anything in "Needs owner sign-off" below without explicit
-  human approval — write it up as a backlog idea instead.
-- This app reads/writes a real filesystem on behalf of the user (the mounted
-  dataset). Never add code that deletes or overwrites source frames /
-  `library/` outputs without an explicit, already-approved user action behind
-  it. When in doubt about destructiveness, don't.
+> Tip: a `SessionStart` hook that runs the above makes every run reliable. If one
+> doesn't exist yet, creating it is itself a good backlog item.
 
-## 9. Needs owner sign-off (do NOT start these autonomously)
+---
 
-- Anything that changes the on-disk project/dataset layout or SQLite schema
-  in a way that isn't backward-compatible with existing users' data.
-- Adding authentication/authorization to the web service (changes the threat
-  model and deployment story; needs a human decision on approach).
-- Adding any outbound network dependency that isn't already present (e.g. new
-  third-party API calls, telemetry, analytics) — this is explicitly a
-  no-cloud-services, everything-in-house project (see `PLAN.md`).
-- Changing default values for destructive or resource-heavy settings
-  (`auto_stack`, `copy_to_cache`, cache eviction, anything that deletes
-  files).
-- Major version bumps of core deps (FastAPI, React, Vite, numpy/astropy/etc.)
-  or swapping the plate-solver / stacking library.
-- Docker/deployment topology changes (ports, volumes, compose service
-  boundaries) beyond fixing a clear bug.
-- Anything touching the real Seestar device network protocol
-  (`webapp/seestar/`) without a way to verify it against real or recorded
-  device traffic — silent protocol regressions are hard to detect from unit
-  tests alone.
-- Large refactors that touch >1 pillar's worth of code with no incremental,
-  independently-testable steps.
+## 8. Git and shipping (zero-touch — no human reviews or merges)
+
+This is a solo, autonomous project. **Nobody is going to review or merge your
+work — so if you don't merge it, it never ships.** Your job is to get good,
+tested changes onto the default branch by yourself, safely.
+
+**Work on a branch, then merge it yourself:**
+
+1. Start from the latest default branch:
+   `git fetch origin && git checkout -B agent/<short-kebab-topic> origin/<default>`
+   (the harness may create a branch for you automatically — that's fine; just make
+   sure it's based on the current default). Use a fresh branch per topic; related
+   small tasks may share one.
+2. Commit each task as its own well-described commit. End every commit message with
+   the repo's trailer convention (a `Co-Authored-By:` line; never put any model
+   identifier in commits, code, or logs). Push after each task
+   (`git push -u origin <branch>`); retry transient network errors with backoff.
+3. **Before merging, make it green on top of the latest default:**
+   `git fetch origin` → merge `origin/<default>` into your branch → re-run the full
+   test suite (§5) and, if the frontend changed, the frontend build. Resolve any
+   conflicts conservatively.
+4. **Merge into the default branch** (fast-forward or a normal merge commit is
+   fine), push the default branch, and delete your topic branch. Opening a PR
+   first is optional and nice for history, but do not *wait* on it — merge it
+   yourself once green.
+
+**Absolute rules for merging:**
+- Only ever merge a **fully green** branch. Green tests are the safety gate that
+  replaces a human reviewer — treat §5 as mandatory before every merge.
+- **Never force-push** the default branch or rewrite its history. Only add to it.
+- If a merge conflict is non-trivial or you can't get green after syncing, **do
+  not force it** — leave your branch pushed, note it in `docs/IMPROVEMENTS.md`, and
+  move on. A stuck branch is fine; a broken default branch is not.
+- One change per merge, each independently green, so any single change can be
+  reverted later without unpicking the others.
+
+---
+
+## 9. Backward compatibility — this runs on a LIVE install (read this)
+
+**AstroStack is deployed on a real TrueNAS/Docker box with real data, and it is
+upgraded in place by pulling a new image off the default branch.** Every change
+you merge must be a **safe in-place upgrade** — the owner must never lose data,
+settings, or a working app because an agent shipped something. Treat this as
+non-negotiable as the test suite.
+
+Concretely, a change is upgrade-safe only if:
+
+- **Config survives.** `state/config.json` from the previous version must still
+  load. You may *add* settings (with sensible defaults). Do **not** rename,
+  remove, or repurpose an existing setting, and don't tighten a field's bounds so
+  a value an old version legitimately wrote is now rejected. (The loader resets
+  only invalid fields rather than wiping everything — that's a safety net, not a
+  licence to break configs.)
+- **Databases migrate, never reset.** The per-target `project.sqlite` and the
+  library DB carry user data. Schema changes must be **additive migrations**
+  (`SCHEMA_VERSION` bump + `_migrate_schema` with `ALTER TABLE`/backfill), and
+  must run cleanly from *any* older version. Never drop/rewrite a table or delete
+  rows on upgrade. Test the migration from an old DB.
+- **On-disk layout is stable.** Don't move or rename the library/targets/cache/
+  output/state directory structure, existing stack outputs, or master
+  calibration files. Old paths must keep working.
+- **Defaults don't change behaviour.** Don't flip an existing default in a way
+  that changes a running install (e.g. auth stays **off** by default; auto-stack
+  stays off). New behaviour is opt-in.
+- **APIs stay backward-compatible.** Don't remove endpoints or change response
+  shapes the frontend (or a user's bookmarks/scripts) already depend on; add
+  fields rather than renaming them.
+- **The container still builds and boots.** Don't break the Docker image, the
+  Python version pin, ASTAP bundling, or first-run bootstrapping.
+
+If something genuinely can't be done without a breaking change (a destructive
+migration, a renamed setting, a changed default), **do not ship it** — put it in
+`docs/IMPROVEMENTS.md` under **Needs owner sign-off** with the migration/rollback
+plan spelled out. See `tests/webapp/test_config_upgrade.py` for the pattern:
+add a test that an *old* config/DB upgrades cleanly.
+
+---
+
+## 10. Hard guardrails (never cross these)
+
+- **Never break an in-place upgrade** (§9) — no config wipes, destructive
+  migrations, moved data, or breaking default flips.
+- Never merge anything that isn't fully green (§5), and never force-push or rewrite
+  the default branch's history. Merge via a branch (§8), don't commit straight onto
+  the default branch.
+- Never weaken, delete, skip, or `xfail` tests to go green. Fix the code.
+- Never break the ingest/stack hot path's memory bounds or NaN/coverage semantics.
+- Never do anything destructive to a user's data. Prefer additive, reversible,
+  opt-in changes. New features default **off** unless clearly safe on.
+- Never add a heavy/networked dependency (e.g. large ML runtimes/models like an
+  ONNX StarNet) or make an outward-facing/irreversible change on your own —
+  record it in the backlog as "needs owner sign-off" instead.
+- Never commit secrets or the `webapp/static/` build artifact. Never disable TLS
+  verification or touch proxy/CA settings.
+- Never regress the security posture (auth, server-side path resolution,
+  input validation).
+- Don't rewrite large subsystems speculatively. Refactor only in service of a
+  concrete improvement, in small reviewable steps.
+- Respect the ephemeral env: commit/push anything worth keeping; assume the
+  container is wiped after the session.
+
+---
+
+## 11. Coordinating with other agents
+
+A new agent runs every hour, so runs overlap in time and history. Avoid
+collisions:
+- Read recent `git log` and open PRs/branches first; skip topics already in
+  flight.
+- Keep branches small and single-topic so they rarely conflict.
+- `docs/IMPROVEMENTS.md` is the shared blackboard: claim an item by moving it to
+  **In progress** with your branch name in the same commit that starts the work;
+  release it (to **Shipped** or back to **Ideas**) when you finish or abandon it.
+- Prefer picking items *not* recently touched by another branch.
+- Because everyone merges into the same default branch, always sync with the
+  latest default and re-run tests right before you merge (§8) — another agent may
+  have merged while you were working.
+
+---
+
+## 12. Run checklist (copy/paste)
+
+```
+Start of run:
+[ ] git fetch; read IMPROVEMENTS.md + recent log + open PRs
+[ ] env ready; baseline test suite green (if red, fixing it is task #1)
+
+Per task (repeat ~3–6×, or fewer if large):
+[ ] picked/invented ONE task (§3 decision rule or §4 ideation); marked In progress
+[ ] implemented across engine/webapp/frontend as needed
+[ ] upgrade-safe: config loads, DB migrates, layout/defaults/API unchanged (§9)
+[ ] added/updated tests; python + (if FE touched) tsc/vitest/vite build green
+[ ] version bumped; IMPROVEMENTS.md updated (item → Shipped)
+[ ] committed (independently green) and pushed
+
+End of run:
+[ ] added ≥1–2 new ideas to IMPROVEMENTS.md (§4)
+[ ] synced branch with latest default; full suite still green
+[ ] merged your green work into the default branch yourself; pushed; branch tidied
+```

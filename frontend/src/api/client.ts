@@ -115,6 +115,8 @@ export interface Frame {
   solved: boolean;
   ra_center_deg: number | null;
   dec_center_deg: number | null;
+  ra_hint_deg: number | null;
+  dec_hint_deg: number | null;
   fwhm_px: number | null;
   star_count: number | null;
   sky_adu_median: number | null;
@@ -265,6 +267,23 @@ export interface Histogram {
   errors?: string[];
 }
 
+export interface CalibrationMaster {
+  id: number;
+  name: string;
+  kind: "dark" | "flat" | "bias";
+  filename: string;
+  n_frames: number;
+  method: string;
+  exposure_s: number | null;
+  gain: number | null;
+  sensor_temp_c: number | null;
+  bayer_pattern: string | null;
+  width_px: number;
+  height_px: number;
+  created_utc: string;
+  exists: boolean;
+}
+
 function encodeRecipe(recipe: Recipe): string {
   const bytes = new TextEncoder().encode(JSON.stringify(recipe));
   let bin = "";
@@ -353,6 +372,7 @@ export const api = {
 
   // jobs
   listJobs: () => req<Job[]>("/api/jobs"),
+  clearJobs: () => req<{ removed: number }>("/api/jobs/clear", { method: "POST" }),
   getJob: (id: string) => req<Job>(`/api/jobs/${id}`),
   cancelJob: (id: string) => req(`/api/jobs/${id}/cancel`, { method: "POST" }),
 
@@ -361,6 +381,10 @@ export const api = {
   putSettings: (patch: Record<string, unknown>) =>
     req<Settings>("/api/settings", { method: "PUT", body: JSON.stringify(patch) }),
   getSystem: () => req<SystemInfo>("/api/system"),
+  astapTest: () => req<{
+    ok: boolean; detail?: string | null; solved?: boolean; target?: string;
+    frame?: string; ra_deg?: number | null; dec_deg?: number | null; elapsed_s?: number;
+  }>("/api/system/astap-test", { method: "POST" }),
 
   // sky viewer
   getSky: () => req<SkyData>("/api/sky"),
@@ -436,4 +460,29 @@ export const api = {
     items: { safe: string; run_id: number }[];
     recipe?: Recipe; preset_id?: string; output_name?: string;
   }) => req<{ job_id: string }>("/api/editor/batch", { method: "POST", body: JSON.stringify(body) }),
+
+  // channel combine (LRGB / RGB from mono stacks)
+  channelCombine: (safe: string, body: {
+    items: { safe: string; run_id: number; channel: string }[];
+    output_name?: string; weights?: Record<string, number>;
+  }) => req<{ job_id: string }>(`/api/targets/${safe}/channel-combine`, {
+    method: "POST", body: JSON.stringify(body),
+  }),
+
+  // access control (optional HTTP Basic auth)
+  authStatus: () => req<{ enabled: boolean; username: string }>("/api/auth/status"),
+  setAuthPassword: (body: { password: string; username?: string }) =>
+    req<{ enabled: boolean; username: string }>("/api/auth/password", {
+      method: "POST", body: JSON.stringify(body),
+    }),
+
+  // calibration masters (library-level dark/flat frames)
+  listCalibrationMasters: () => req<CalibrationMaster[]>("/api/calibration/masters"),
+  buildCalibrationMaster: (body: {
+    kind: string; source_dir: string; name?: string; method?: string; sigma?: number;
+  }) => req<{ job_id: string }>("/api/calibration/masters", {
+    method: "POST", body: JSON.stringify(body),
+  }),
+  deleteCalibrationMaster: (id: number) =>
+    req<{ deleted: number }>(`/api/calibration/masters/${id}`, { method: "DELETE" }),
 };

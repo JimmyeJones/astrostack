@@ -289,12 +289,41 @@ class JobManager:
                 self._persist(job)
                 self._evict_old()
 
+    def clear_history(self) -> int:
+        """Delete all finished jobs (DB + memory); keep running/queued. Returns
+        how many were removed."""
+        with self._lock:
+            removed = [jid for jid, j in self._jobs.items() if j.state in _TERMINAL]
+            for jid in removed:
+                self._jobs.pop(jid, None)
+        try:
+            with self._connect() as conn:
+                cur = conn.execute(
+                    f"DELETE FROM jobs WHERE state IN ({','.join('?' * len(_TERMINAL))})",
+                    tuple(_TERMINAL),
+                )
+                return cur.rowcount if cur.rowcount and cur.rowcount > 0 else len(removed)
+        except sqlite3.Error as exc:  # noqa: BLE001
+            log.warning("clear job history failed: %s", exc)
+            return len(removed)
+
     def _evict_old(self) -> None:
-        """Drop finished jobs from the in-memory map (DB keeps history)."""
+        """Drop old finished jobs from the in-memory map AND prune the DB so
+        jobs.sqlite doesn't grow without bound on a long-running watcher."""
         with self._lock:
             finished = [j for j in self._jobs.values() if j.state in _TERMINAL]
-            if len(finished) <= self.max_history:
-                return
-            finished.sort(key=lambda j: j.finished_utc or "")
-            for j in finished[: len(finished) - self.max_history]:
-                self._jobs.pop(j.id, None)
+            if len(finished) > self.max_history:
+                finished.sort(key=lambda j: j.finished_utc or "")
+                for j in finished[: len(finished) - self.max_history]:
+                    self._jobs.pop(j.id, None)
+        # Keep at most ~10× the in-memory cap on disk (history for the UI).
+        keep = max(self.max_history * 10, 50)
+        try:
+            with self._connect() as conn:
+                conn.execute(
+                    "DELETE FROM jobs WHERE id NOT IN "
+                    "(SELECT id FROM jobs ORDER BY COALESCE(created_utc,'') DESC LIMIT ?)",
+                    (keep,),
+                )
+        except sqlite3.Error as exc:  # noqa: BLE001 — pruning is best-effort
+            log.warning("jobs DB prune failed: %s", exc)

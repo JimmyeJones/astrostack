@@ -12,7 +12,10 @@ about astropy import paths or header formatting details.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 
 def wcs_to_text(wcs) -> str:
@@ -35,7 +38,8 @@ def wcs_from_text(text: str | None):
             # harmless normalisation, just noise. Silence it.
             warnings.simplefilter("ignore", FITSFixedWarning)
             return WCS(Header.fromstring(text))
-    except Exception:  # noqa: BLE001 — corrupt cache, treat as missing
+    except Exception as exc:  # noqa: BLE001 — corrupt cache, treat as missing
+        log.warning("WCS parse failed (treating frame as unsolved): %s", exc)
         return None
 
 

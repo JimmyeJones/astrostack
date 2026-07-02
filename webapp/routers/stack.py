@@ -85,13 +85,55 @@ def put_stack_defaults(safe: str, body: dict[str, Any], request: Request) -> dic
 
 @router.post("/api/targets/{safe}/stack")
 def trigger_stack(safe: str, body: dict[str, Any], request: Request) -> dict[str, str]:
+    from webapp import calibration
+
     settings = deps.get_settings(request)
     jm = deps.get_job_manager(request)
     # Validate the target exists.
     lib, proj = deps.open_target_project(request, safe)
     proj.close()
     lib.close()
-    job = pipeline.submit_stack(settings, jm, safe, body or {})
+
+    body = dict(body or {})
+    # Calibration: accept only master *ids* and resolve them to server-side
+    # paths here. Raw dark_path/flat_path from the client are never honoured.
+    body.pop("dark_path", None)
+    body.pop("flat_path", None)
+    dark_id = body.pop("dark_master_id", None)
+    flat_id = body.pop("flat_master_id", None)
+    try:
+        dark_path, flat_path = calibration.resolve_master_paths(
+            settings.resolved_library_root, dark_id, flat_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if dark_path:
+        body["dark_path"] = dark_path
+    if flat_path:
+        body["flat_path"] = flat_path
+
+    job = pipeline.submit_stack(settings, jm, safe, body)
+    return {"job_id": job.id}
+
+
+@router.post("/api/targets/{safe}/channel-combine")
+def channel_combine(safe: str, body: dict[str, Any], request: Request) -> dict[str, str]:
+    """Combine several mono stacks (assigned to L/R/G/B) into one colour run
+    recorded under ``safe``."""
+    settings = deps.get_settings(request)
+    jm = deps.get_job_manager(request)
+    lib, proj = deps.open_target_project(request, safe)
+    proj.close()
+    lib.close()
+
+    items = body.get("items") or []
+    if not isinstance(items, list) or not items:
+        raise HTTPException(status_code=400, detail="items (list of channel assignments) required")
+    weights = body.get("weights") if isinstance(body.get("weights"), dict) else None
+    job = pipeline.submit_channel_combine(
+        settings, jm, safe, items,
+        output_name=str(body.get("output_name") or "").strip() or None,
+        weights=weights,
+    )
     return {"job_id": job.id}
 
 
