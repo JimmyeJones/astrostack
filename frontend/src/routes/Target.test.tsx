@@ -14,7 +14,8 @@ function mkFrame(id: number, overrides: Partial<Frame> = {}): Frame {
     exposure_s: 30, gain: 100, width_px: 480, height_px: 320,
     bayer_pattern: "RGGB", solved: true, ra_center_deg: 10, dec_center_deg: 20,
     ra_hint_deg: null, dec_hint_deg: null, fwhm_px: 2.5, star_count: 100,
-    sky_adu_median: 500, eccentricity_median: 0.4, streak_detected: false,
+    sky_adu_median: 500, eccentricity_median: 0.4, transparency_score: 5000,
+    streak_detected: false,
     accept: true, reject_reason: null, user_override: false, ...overrides,
   };
 }

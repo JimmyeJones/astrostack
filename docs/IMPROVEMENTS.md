@@ -27,11 +27,14 @@ _(none — claim an item here with your branch name)_
 ## Ideas (pick roughly top-down; use the value ÷ effort×risk rule)
 
 ### Correctness & robustness (highest priority)
-- Implement the dead `transparency_score` frame metric (declared in the DB
-  schema and `FrameRow` since day one but never computed) — e.g. median star
-  flux vs the target's per-star baseline — and feed it into quality weighting
-  and an advisory "poor transparency" grader hint. Turns two schema fields
-  into real value on cloudy-night data. (M, correctness)
+- **Feed `transparency_score` into quality weighting + a grader hint** — the
+  per-frame metric is now computed (median flux of the brightest stars, shipped
+  v0.33.0) and surfaced in the Target table, but nothing *uses* it yet. Next:
+  normalise it against the target's best frame (a per-target baseline) and (a)
+  optionally weight frames in the stack by relative transparency, (b) show an
+  advisory "poor transparency night" hint when a run's median frame sits well
+  below the target's clear-sky baseline. Needs care: the raw score isn't
+  comparable across gain/exposure, so normalise within a target. (M, correctness)
 - Per-pixel extremes / percentile rejection for small stacks (the *robust*
   fix for a lone satellite/plane trail below ~11 frames). **NB:** the previously
   filed "iterated κ-σ" idea was investigated and dropped — re-estimation clips
@@ -110,6 +113,19 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Compute the dead `transparency_score` frame metric** — the column has been
+  in the schema and `FrameRow` since day one but was never populated. QC now
+  computes it as the median instrumental flux of a frame's brightest ~10 stars
+  (via `median_star_flux`): haze/thin cloud dims all stars, so the bright ones
+  (which stay detected on clear *and* hazy nights) fade measurably, while using
+  only the brightest avoids the confounder where a hazy frame loses its faint
+  stars and inflates the survivors' median. Wired through
+  `apply_qc_result_to_db`, exposed on `FrameOut` (+ sortable), and shown as a new
+  "Transp." column (with a plain-language header tooltip) on the Target view — an
+  imager can now sort to find their haziest subs. Relative within a target; not
+  an absolute magnitude. Follow-up (weighting + grader hint) filed above.
+  Additive/upgrade-safe. (v0.33.0, this run)
 
 - **Undo the last bulk reject + reject-reason breakdown on the Target view** —
   two related approachability wins. `/frames/bulk` now returns `changed_ids`, so

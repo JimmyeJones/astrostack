@@ -57,6 +57,7 @@ class FrameOut(BaseModel):
     star_count: int | None = None
     sky_adu_median: float | None = None
     eccentricity_median: float | None = None
+    transparency_score: float | None = None
     streak_detected: bool = False
     accept: bool = True
     reject_reason: str | None = None

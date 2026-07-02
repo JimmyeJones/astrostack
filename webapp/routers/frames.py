@@ -19,7 +19,7 @@ _BAYER_PATTERNS = {"RGGB", "BGGR", "GRBG", "GBRG"}
 
 _SORTABLE = {
     "id", "timestamp_utc", "exposure_s", "fwhm_px", "star_count",
-    "sky_adu_median", "eccentricity_median",
+    "sky_adu_median", "eccentricity_median", "transparency_score",
 }
 
 
@@ -42,6 +42,7 @@ def _to_out(f: FrameRow) -> FrameOut:
         star_count=f.star_count,
         sky_adu_median=f.sky_adu_median,
         eccentricity_median=f.eccentricity_median,
+        transparency_score=f.transparency_score,
         streak_detected=f.streak_detected,
         accept=f.accept,
         reject_reason=f.reject_reason,

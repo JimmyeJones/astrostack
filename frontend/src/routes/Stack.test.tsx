@@ -145,6 +145,7 @@ describe("StackView", () => {
       width_px: 480, height_px: 320, bayer_pattern: "RGGB", solved: true,
       ra_center_deg: null, dec_center_deg: null, ra_hint_deg: null, dec_hint_deg: null,
       fwhm_px: null, star_count: null, sky_adu_median: null, eccentricity_median: null,
+      transparency_score: null,
       streak_detected: false, accept: true, reject_reason: null, user_override: false,
     };
   }

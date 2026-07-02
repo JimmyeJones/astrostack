@@ -121,6 +121,7 @@ export interface Frame {
   star_count: number | null;
   sky_adu_median: number | null;
   eccentricity_median: number | null;
+  transparency_score: number | null;
   streak_detected: boolean;
   accept: boolean;
   reject_reason: string | null;

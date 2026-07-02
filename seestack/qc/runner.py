@@ -81,6 +81,7 @@ def apply_qc_result_to_db(project, result: QCResult, *, auto_reject: bool = True
         "star_count": m.star_count,
         "sky_adu_median": m.sky_adu_median,
         "eccentricity_median": m.eccentricity_median,
+        "transparency_score": m.transparency_score,
         "streak_detected": m.streak_detected,
         "streak_count": m.streak_count,
     }

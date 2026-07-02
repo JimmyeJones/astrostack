@@ -46,6 +46,7 @@ class FrameMetrics:
     sky_adu_median: float
     fwhm_px: float | None
     eccentricity_median: float | None
+    transparency_score: float | None = None
     streak_detected: bool = False
     streak_count: int = 0
 
@@ -204,6 +205,32 @@ def median_eccentricity(sources) -> float | None:
     return float(np.median(ecc))
 
 
+def median_star_flux(sources, *, top_k: int = 10) -> float | None:
+    """Median instrumental flux of the brightest detected stars — a per-frame
+    **transparency** proxy.
+
+    Haze, thin cloud and moonlit murk attenuate starlight, so on a poor night the
+    same stars arrive dimmer. Measuring only the brightest ``top_k`` stars (which
+    stay above the detection threshold on both clear and hazy nights) avoids the
+    confounder where a hazy frame loses its faint stars and thereby *raises* the
+    median flux of the brighter survivors.
+
+    The value is DAOStarFinder's instrumental ``flux`` (measured relative to the
+    detection threshold), so it is a *relative* transparency indicator comparable
+    across a single target's frames — not an absolute magnitude. Higher = clearer.
+    Returns ``None`` when no stars were detected.
+    """
+    if sources is None or len(sources) == 0:
+        return None
+    flux = np.asarray(sources["flux"], dtype=float)
+    flux = flux[np.isfinite(flux)]
+    if flux.size == 0:
+        return None
+    flux.sort()
+    top = flux[-top_k:]  # np slicing is safe when fewer than top_k stars exist
+    return float(np.median(top))
+
+
 def compute_frame_metrics(
     fits_path: str | Path,
     *,
@@ -225,6 +252,7 @@ def compute_frame_metrics(
     n_stars = 0 if sources is None else int(len(sources))
     fwhm = median_fwhm(g, sources)
     ecc = median_eccentricity(sources)
+    transparency = median_star_flux(sources)
 
     streak_flag = False
     streak_n = 0
@@ -237,6 +265,7 @@ def compute_frame_metrics(
         sky_adu_median=sky_med,
         fwhm_px=fwhm,
         eccentricity_median=ecc,
+        transparency_score=transparency,
         streak_detected=streak_flag,
         streak_count=streak_n,
     )
