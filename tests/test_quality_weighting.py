@@ -107,6 +107,19 @@ def test_missing_metrics_get_neutral_weight():
     assert stats.n_neutral == 1
 
 
+def test_stats_count_downweighted_frames():
+    # Two below-median-sharpness frames get pulled below full weight; the
+    # best (capped-at-1.0) frame does not count as down-weighted.
+    frames = [
+        _f(1, fwhm=2.0, stars=100, sky=1000),  # best → weight 1.0
+        _f(2, fwhm=3.0, stars=100, sky=1000),  # demoted
+        _f(3, fwhm=4.0, stars=100, sky=1000),  # demoted more
+    ]
+    w, stats = compute_frame_weights(frames)
+    assert stats.n_downweighted == 2
+    assert w[1] == 1.0
+
+
 def test_unit_weights_are_all_one():
     frames = [_f(i, 3.0, 100, 1000) for i in range(5)]
     w = unit_weights(frames)

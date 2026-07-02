@@ -71,7 +71,7 @@ describe("HistoryView", () => {
   it("shows FITS provenance when Info is toggled", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
     const info = vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({
-      run_id: 1, integration_s: 2520, n_frames: 840,
+      run_id: 1, integration_s: 2520, n_frames: 840, weighting: null,
       cards: [
         { key: "OBJECT", value: "M42", comment: "target name" },
         { key: "STACKER", value: "sigma-clip", comment: "stacking method" },
@@ -86,6 +86,23 @@ describe("HistoryView", () => {
     await waitFor(() => expect(info).toHaveBeenCalledWith("M_42", 1));
     await waitFor(() => expect(screen.getByText(/Integration: 42 min/)).toBeInTheDocument());
     expect(screen.getByText("sigma-clip")).toBeInTheDocument();
+  });
+
+  it("shows the quality-weighting summary when present", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({
+      run_id: 1, integration_s: 2520, n_frames: 840,
+      weighting: { mode: "quality", n_downweighted: 7, min: 0.31, max: 1.0, median: 0.72 },
+      cards: [{ key: "STACKER", value: "sigma-clip", comment: "stacking method" }],
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Info" }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/7 frames down-weighted/)).toBeInTheDocument());
+    expect(screen.getByText(/weights 0.31–1.00/)).toBeInTheDocument();
   });
 
   it("shows integration time inline on a card without opening Info", async () => {

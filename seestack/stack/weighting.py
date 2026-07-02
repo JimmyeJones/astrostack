@@ -51,6 +51,9 @@ class WeightingStats:
     min_weight: float
     max_weight: float
     median_weight: float
+    # Frames actually pulled below full weight (weight < ~1.0) — the honest
+    # "how many subs did weighting demote" figure surfaced in the run Info panel.
+    n_downweighted: int = 0
 
 
 def compute_frame_weights(
@@ -119,6 +122,7 @@ def compute_frame_weights(
             min_weight=float(min(weighted_list)),
             max_weight=float(max(weighted_list)),
             median_weight=float(np.median(weighted_list)),
+            n_downweighted=sum(1 for w in weighted_list if w < 0.999),
         )
     else:
         stats = WeightingStats(0, n_neutral, 1.0, 1.0, 1.0)

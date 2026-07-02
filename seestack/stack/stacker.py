@@ -42,7 +42,7 @@ from seestack.stack.accumulator import WeightedSumAccumulator, WelfordAccumulato
 from seestack.stack.align import align_one, extract_reference_patch
 from seestack.stack.output import _sanitize_basename
 from seestack.stack.reference import ReferenceChoice, pick_reference_frame
-from seestack.stack.weighting import compute_frame_weights, unit_weights
+from seestack.stack.weighting import WeightingStats, compute_frame_weights, unit_weights
 
 if TYPE_CHECKING:
     from seestack.calibrate.apply import CalibrationMasters
@@ -404,7 +404,8 @@ def _integration_time_s(frames: list, n_used: int) -> float | None:
 
 
 def _build_output_header_meta(
-    project: Project, frames: list, options: StackOptions, n_used: int
+    project: Project, frames: list, options: StackOptions, n_used: int,
+    wstats: WeightingStats | None = None,
 ) -> dict[str, Any]:
     """Collect provenance for the output FITS header.
 
@@ -440,6 +441,15 @@ def _build_output_header_meta(
     method = "drizzle" if options.drizzle else ("sigma-clip" if options.sigma_clip else "mean")
     meta["STACKER"] = (method, "stacking method")
     meta["COLORTYP"] = ("mono" if options.mono else "OSC", "sensor/stack colour mode")
+    # Quality-weighting provenance: lets the run Info panel report how many subs
+    # weighting actually demoted and over what range, so the user can trust the
+    # (off-by-default) weighting did something and gauge how aggressive it was.
+    if wstats is not None and wstats.n_weighted:
+        meta["WGTMODE"] = ("quality", "frame weighting mode")
+        meta["WGTNDOWN"] = (int(wstats.n_downweighted), "frames down-weighted")
+        meta["WGTMIN"] = (round(float(wstats.min_weight), 3), "min frame weight")
+        meta["WGTMAX"] = (round(float(wstats.max_weight), 3), "max frame weight")
+        meta["WGTMED"] = (round(float(wstats.median_weight), 3), "median frame weight")
     return meta
 
 
@@ -583,6 +593,7 @@ def run_stack(
             frames = kept + without_fwhm
 
     # Build the per-frame weight map. Defaults to all-1.0 unless quality_weighted.
+    wstats: WeightingStats | None = None
     if options.quality_weighted:
         weights, wstats = compute_frame_weights(frames)
         log.info(
@@ -873,7 +884,7 @@ def run_stack(
         wcs_text=dst_wcs_text,
         out_basename=options.output_name,
         tiff_mode=options.tiff_mode,
-        header_meta=_build_output_header_meta(project, frames, options, n_used),
+        header_meta=_build_output_header_meta(project, frames, options, n_used, wstats),
     )
     progress("Saving", 1, 1)
 

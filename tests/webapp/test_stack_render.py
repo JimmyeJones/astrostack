@@ -163,6 +163,45 @@ def test_stack_info_reads_provenance_cards(client, solved_library):
     assert order.index("OBJECT") < order.index("EXPTOTAL") < order.index("STACKER")
 
 
+def test_stack_info_surfaces_quality_weighting_summary(client, solved_library):
+    """A quality-weighted stack stamps WGT* cards; the info endpoint parses them
+    into a friendly weighting summary the panel can show."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            with fits.open(run.fits_path, mode="update") as hdul:
+                hdul[0].header["WGTMODE"] = "quality"
+                hdul[0].header["WGTNDOWN"] = 7
+                hdul[0].header["WGTMIN"] = 0.31
+                hdul[0].header["WGTMAX"] = 1.0
+                hdul[0].header["WGTMED"] = 0.72
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/info").json()
+    w = body["weighting"]
+    assert w is not None
+    assert w["mode"] == "quality"
+    assert w["n_downweighted"] == 7
+    assert w["min"] == 0.31
+    assert w["max"] == 1.0
+    assert w["median"] == 0.72
+
+
+def test_stack_info_weighting_absent_for_unweighted_stack(client, solved_library):
+    """A plain (unweighted) stack has no WGT* cards, so weighting is None."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/info").json()
+    assert body["weighting"] is None
+
+
 def test_stack_info_404_without_fits(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
     r = client.get(f"/api/targets/{safe}/stack-runs/99999/info")

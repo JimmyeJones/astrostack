@@ -151,10 +151,19 @@ export interface StackInfoCard {
   comment: string | null;
 }
 
+export interface StackWeightingSummary {
+  mode: string;
+  n_downweighted?: number;
+  min?: number;
+  max?: number;
+  median?: number;
+}
+
 export interface StackRunInfo {
   run_id: number;
   integration_s: number | null;
   n_frames: number | null;
+  weighting: StackWeightingSummary | null;
   cards: StackInfoCard[];
 }
 

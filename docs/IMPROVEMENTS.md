@@ -67,13 +67,6 @@ _(none — claim an item here with your branch name)_
   a user browsing past stacks can see at a glance which were shot through haze
   without reopening the frames. Reuse the within-target normalisation.
   (S, approachability)
-- **Surface the quality-weighting summary in the run Info panel** — a
-  quality-weighted stack already logs `WeightingStats` (n_weighted, min/max/
-  median weight) but the user never sees it. Record it on the run (or recompute
-  cheaply) and show "N frames down-weighted, weight range 0.31–1.00" in the
-  Stack Info panel, so a user can trust *that* weighting did something and how
-  aggressive it was (trust pillar / Method D). (S, approachability)
-
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
@@ -116,6 +109,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Surface the quality-weighting summary in the run Info panel** — a
+  quality-weighted stack now stamps its `WeightingStats` onto the master FITS
+  header (`WGTMODE`/`WGTNDOWN`/`WGTMIN`/`WGTMAX`/`WGTMED`), and the run Info
+  endpoint parses those into a friendly `weighting` object so the History Info
+  panel shows "Quality-weighted · N frames down-weighted · weights 0.31–1.00
+  (median 0.72)". Lets a user trust the (off-by-default) weighting did something
+  and gauge how aggressive it was, with no extra storage — just header cards,
+  matching the existing provenance pattern. Added `n_downweighted` to
+  `WeightingStats`. (v0.39.0, this run)
 
 - **Eccentricity factor in quality weighting** — `compute_frame_weights` gained a
   fifth `ecc_factor` (`clip(median_ecc / frame_ecc, min_weight, 1.0)`), so with

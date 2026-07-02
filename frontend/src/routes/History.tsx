@@ -33,6 +33,20 @@ function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
           {data.n_frames ? ` · ${data.n_frames} subs` : ""}
         </Text>
       ) : null}
+      {data.weighting ? (
+        <Text size="xs" c="dimmed">
+          Quality-weighted
+          {typeof data.weighting.n_downweighted === "number"
+            ? ` · ${data.weighting.n_downweighted} frame${data.weighting.n_downweighted === 1 ? "" : "s"} down-weighted`
+            : ""}
+          {typeof data.weighting.min === "number" && typeof data.weighting.max === "number"
+            ? ` · weights ${data.weighting.min.toFixed(2)}–${data.weighting.max.toFixed(2)}`
+            : ""}
+          {typeof data.weighting.median === "number"
+            ? ` (median ${data.weighting.median.toFixed(2)})`
+            : ""}
+        </Text>
+      ) : null}
       <Table verticalSpacing={2} horizontalSpacing="xs" fz="xs" withRowBorders={false}>
         <Table.Tbody>
           {data.cards.map((c) => (
