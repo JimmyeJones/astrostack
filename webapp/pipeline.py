@@ -66,6 +66,7 @@ def _pipeline_body(
         summary["targets"] = touched_names
 
         if settings.auto_qc or settings.auto_solve:
+            graded: dict[str, int] = {}
             for safe in touched_names:
                 if job.cancel_requested():
                     break
@@ -83,9 +84,15 @@ def _pipeline_body(
                         progress=_progress(jm, job),
                         should_stop=job.cancel_requested,
                     )
+                    if settings.auto_grade_frames and settings.auto_qc:
+                        n = _auto_grade_target(proj, settings)
+                        if n:
+                            graded[safe] = n
                 finally:
                     proj.close()
                 lib.refresh_target_stats(safe)
+            if graded:
+                summary["auto_graded"] = graded
 
         # Auto-stack runs as its own pass (not gated on QC/solve being on) and is
         # non-fatal per target. It considers *all* targets — not just the ones
@@ -155,6 +162,26 @@ def submit_build_master(
     return jm.submit("build_master", body)
 
 
+def _auto_grade_target(proj: Any, settings: Settings) -> int:
+    """Run auto-grade over a target's accepted frames and apply the rejections
+    (the opt-in ``auto_grade_frames`` pipeline hook). Returns frames rejected.
+    Best-effort: grading must never sink a QC/ingest pass."""
+    from seestack.qc.grading import apply_grade_report, grade_frames
+
+    try:
+        frames = list(proj.iter_frames(accepted_only=True))
+        report = grade_frames(frames, sensitivity=settings.auto_grade_sensitivity)
+        changed = apply_grade_report(proj, report)
+        if changed:
+            log.info("Auto-grade rejected %d frame(s): %s", len(changed),
+                     ", ".join(f"{r.name} ({r.primary_metric})"
+                               for r in report.recommendations if r.frame_id in set(changed)))
+        return len(changed)
+    except Exception as exc:  # noqa: BLE001 — advisory automation, never fatal
+        log.warning("Auto-grade failed: %s", exc)
+        return 0
+
+
 def submit_qc_solve(settings: Settings, jm: JobManager, safe: str) -> Job:
     def body(job: Job) -> dict[str, Any]:
         lib = Library.open_or_create(settings.resolved_library_root)
@@ -172,10 +199,15 @@ def submit_qc_solve(settings: Settings, jm: JobManager, safe: str) -> Job:
                     progress=_progress(jm, job),
                     should_stop=job.cancel_requested,
                 )
+                summary = dict(summary)
+                if settings.auto_grade_frames:
+                    n = _auto_grade_target(proj, settings)
+                    if n:
+                        summary["auto_graded"] = n
             finally:
                 proj.close()
             lib.refresh_target_stats(safe)
-            return dict(summary)
+            return summary
         finally:
             lib.close()
 

@@ -83,6 +83,36 @@ class BulkFrameAction(BaseModel):
     fraction: float = 0.1
 
 
+class GradeReasonOut(BaseModel):
+    """One plain-language reason a frame was flagged by auto-grade."""
+
+    metric: str
+    label: str      # human-readable explanation with numbers
+    value: float
+    typical: float  # population median for this metric
+    z: float        # robust (modified) z-score in the bad direction
+
+
+class GradeRecommendationOut(BaseModel):
+    frame_id: int
+    name: str
+    reasons: list[GradeReasonOut]
+
+
+class GradeReportOut(BaseModel):
+    """Preview of what auto-grade would reject (GET) / did reject (POST)."""
+
+    sensitivity: str
+    n_accepted: int
+    n_considered: int
+    recommendations: list[GradeRecommendationOut]
+    metrics_used: list[str]
+    metrics_skipped: dict[str, str]
+    capped: bool
+    # POST …/apply only: the frame ids actually rejected (for one-click undo).
+    changed_ids: list[int] | None = None
+
+
 class StackRunOut(BaseModel):
     id: int
     timestamp_utc: str

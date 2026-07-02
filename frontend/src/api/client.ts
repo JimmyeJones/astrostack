@@ -128,6 +128,31 @@ export interface Frame {
   user_override: boolean;
 }
 
+export interface GradeReason {
+  metric: string;
+  label: string;
+  value: number;
+  typical: number;
+  z: number;
+}
+
+export interface GradeRecommendation {
+  frame_id: number;
+  name: string;
+  reasons: GradeReason[];
+}
+
+export interface GradeReport {
+  sensitivity: string;
+  n_accepted: number;
+  n_considered: number;
+  recommendations: GradeRecommendation[];
+  metrics_used: string[];
+  metrics_skipped: Record<string, string>;
+  capped: boolean;
+  changed_ids: number[] | null;
+}
+
 export interface StackRun {
   id: number;
   timestamp_utc: string;
@@ -384,6 +409,15 @@ export const api = {
   rejectSummary: (safe: string) =>
     req<{ counts: Record<string, number>; total: number }>(
       `/api/targets/${safe}/frames/reject-summary`,
+    ),
+  autoGradePreview: (safe: string, sensitivity?: string) =>
+    req<GradeReport>(
+      `/api/targets/${safe}/frames/auto-grade${sensitivity ? `?sensitivity=${sensitivity}` : ""}`,
+    ),
+  autoGradeApply: (safe: string, sensitivity?: string) =>
+    req<GradeReport>(
+      `/api/targets/${safe}/frames/auto-grade/apply${sensitivity ? `?sensitivity=${sensitivity}` : ""}`,
+      { method: "POST" },
     ),
   framePreviewUrl: (safe: string, id: number, size = 640, bayer?: string) =>
     `/api/targets/${safe}/frames/${id}/preview?size=${size}${bayer ? `&bayer=${bayer}` : ""}`,

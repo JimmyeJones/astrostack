@@ -1,6 +1,7 @@
 import {
   Accordion, Alert, Badge, Button, Center, Divider, FileButton, Group, Loader,
-  NumberInput, Paper, SimpleGrid, Stack, Switch, TagsInput, Text, TextInput, Title,
+  NumberInput, Paper, Select, SimpleGrid, Stack, Switch, TagsInput, Text, TextInput,
+  Title,
 } from "@mantine/core";
 import {
   IconDeviceFloppy, IconDownload, IconInfoCircle, IconTelescope, IconUpload,
@@ -27,6 +28,8 @@ const HINTS: Record<string, string> = {
   auto_stack: "On new files: also stack each touched target automatically (uses the defaults below, or a target's saved defaults).",
   copy_to_cache: "Copy each frame into a fast local cache before processing. Helps with slow or network-mounted sources.",
   keep_streaked_frames: "Don't auto-reject a whole frame when QC finds a satellite/plane trail — keep it (flagged) so a stack with sigma-clip or drizzle rejection removes just the streak and keeps the frame's good signal. Only turn on if you stack with rejection enabled.",
+  auto_grade_frames: "After QC, automatically reject frames that are clear statistical outliers versus the rest of the target (trailed, cloud-hit or hazy subs), each with a plain-language reason. The same grading is available manually via Auto-grade on a target's page. Frames you graded yourself are never touched.",
+  auto_grade_sensitivity: "How strict auto-grading is. Balanced suits most data; Conservative only drops gross outliers; Aggressive cuts deeper into marginal frames.",
   astap_path: "Path to the ASTAP executable. Blank = auto-detect (bundled binary → $SEESTACK_ASTAP_PATH → PATH).",
   astap_fov_deg: "Approximate field-of-view height in degrees, used as a solving hint (~1.3° suits the Seestar).",
   astap_timeout_s: "Give up on solving a single frame after this many seconds.",
@@ -322,6 +325,20 @@ export function SettingsView() {
           <Switch label={lbl("keep_streaked_frames", "Keep frames with satellite/plane streaks")}
             checked={bool("keep_streaked_frames")}
             onChange={(e) => set("keep_streaked_frames", e.currentTarget.checked)} />
+          <Group align="flex-end">
+            <Switch label={lbl("auto_grade_frames", "Auto-grade frames after QC")}
+              checked={bool("auto_grade_frames")}
+              onChange={(e) => set("auto_grade_frames", e.currentTarget.checked)} />
+            <Select label={lbl("auto_grade_sensitivity", "Sensitivity")} size="xs" w={170}
+              allowDeselect={false} disabled={!bool("auto_grade_frames")}
+              data={[
+                { value: "conservative", label: "Conservative" },
+                { value: "balanced", label: "Balanced" },
+                { value: "aggressive", label: "Aggressive" },
+              ]}
+              value={(form.auto_grade_sensitivity as string) ?? "balanced"}
+              onChange={(v) => set("auto_grade_sensitivity", v ?? "balanced")} />
+          </Group>
 
           <Divider label="Plate solving & compute" />
           <TextInput label={lbl("astap_path", "ASTAP path")}

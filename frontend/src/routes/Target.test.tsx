@@ -102,6 +102,104 @@ describe("TargetView streaked badge", () => {
   });
 });
 
+describe("TargetView auto-grade", () => {
+  function mkReport(overrides: Partial<client.GradeReport> = {}): client.GradeReport {
+    return {
+      sensitivity: "balanced", n_accepted: 30, n_considered: 30,
+      recommendations: [], metrics_used: ["fwhm_px"], metrics_skipped: {},
+      capped: false, changed_ids: null, ...overrides,
+    };
+  }
+
+  it("previews outliers with reasons, applies, and offers undo", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1), mkFrame(2)]);
+    const preview = vi.spyOn(client.api, "autoGradePreview").mockResolvedValue(
+      mkReport({
+        recommendations: [{
+          frame_id: 2, name: "f2.fits",
+          reasons: [{
+            metric: "fwhm_px", value: 8.0, typical: 3.0, z: 6.1,
+            label: "much softer than typical (FWHM 8.0 px vs 3.0 px) — poor seeing, focus drift or cloud",
+          }],
+        }],
+      }),
+    );
+    const apply = vi.spyOn(client.api, "autoGradeApply").mockResolvedValue(
+      mkReport({ changed_ids: [2] }),
+    );
+    const bulk = vi.spyOn(client.api, "bulkFrames")
+      .mockResolvedValue({ changed: 1, changed_ids: [2] });
+
+    renderTarget();
+
+    (await screen.findByRole("button", { name: /Auto-grade/ })).click();
+
+    // The preview modal lists the flagged frame with its plain-language reason.
+    await waitFor(() => expect(preview).toHaveBeenCalledWith("M_42", undefined));
+    expect(await screen.findByText(/of 30 accepted frames look/)).toBeInTheDocument();
+    expect(screen.getByText(/much softer than typical/)).toBeInTheDocument();
+
+    (await screen.findByRole("button", { name: "Reject 1 frame" })).click();
+    await waitFor(() => expect(apply).toHaveBeenCalledWith("M_42", undefined));
+
+    // The apply flows into the shared undo affordance.
+    const undo = await screen.findByRole("button", { name: "Undo last bulk reject" });
+    undo.click();
+    await waitFor(() =>
+      expect(bulk).toHaveBeenCalledWith("M_42", { action: "accept", ids: [2] }));
+  });
+
+  it("shows a quiet all-consistent state when nothing is flagged", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    vi.spyOn(client.api, "autoGradePreview").mockResolvedValue(mkReport());
+
+    renderTarget();
+    (await screen.findByRole("button", { name: /Auto-grade/ })).click();
+
+    expect(await screen.findByText(/No outliers found/)).toBeInTheDocument();
+    // The apply button is disabled with nothing to reject.
+    const rejectBtn = screen.getByRole("button", { name: "Reject 0 frames" });
+    expect(rejectBtn).toBeDisabled();
+  });
+
+  it("explains when there aren't enough graded frames yet", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    vi.spyOn(client.api, "autoGradePreview").mockResolvedValue(
+      mkReport({ metrics_used: [], metrics_skipped: { fwhm_px: "only 3 of 3" } }),
+    );
+
+    renderTarget();
+    (await screen.findByRole("button", { name: /Auto-grade/ })).click();
+
+    expect(await screen.findByText(/Not enough graded frames/)).toBeInTheDocument();
+  });
+
+  it("labels auto-grade rejections on frame rows", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ n_frames: 2, n_frames_accepted: 1 }),
+    );
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "rejectSummary").mockResolvedValue({
+      counts: { "auto:grade:transparency_score": 1 }, total: 1,
+    });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      mkFrame(1),
+      mkFrame(2, { accept: false, reject_reason: "auto:grade:transparency_score" }),
+    ]);
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(screen.getByText("Auto-grade: transparency")).toBeInTheDocument());
+  });
+});
+
 describe("TargetView reject breakdown + undo", () => {
   it("shows a rejected-count badge with a why breakdown", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(
