@@ -28,6 +28,10 @@ export function StackView() {
     queryKey: ["calibration-masters"],
     queryFn: api.listCalibrationMasters,
   });
+  const suggestions = useQuery({
+    queryKey: ["calibration-suggestions", safe],
+    queryFn: () => api.calibrationSuggestions(safe),
+  });
 
   const qcSolve = useMutation({
     mutationFn: () => api.qcSolve(safe),
@@ -83,16 +87,31 @@ export function StackView() {
   const simple = fields.filter((f) => f.group === "simple");
   const advanced = fields.filter((f) => f.group === "advanced");
 
+  const sug = suggestions.data;
+  const recDarkId = sug?.dark_master_id ?? null;
+  const recFlatId = sug?.flat_master_id ?? null;
   const masterOpts = (kind: string) =>
     (masters.data ?? [])
       .filter((m) => m.kind === kind && m.exists)
-      .map((m) => ({
-        value: String(m.id),
-        label: `${m.name} (${m.n_frames} frames, ${m.width_px}×${m.height_px})`,
-      }));
+      .map((m) => {
+        const recId = kind === "dark" ? recDarkId : recFlatId;
+        const star = m.id === recId ? " ★ recommended" : "";
+        return {
+          value: String(m.id),
+          label: `${m.name} (${m.n_frames} frames, ${m.width_px}×${m.height_px})${star}`,
+        };
+      });
   const darkOpts = masterOpts("dark");
   const flatOpts = masterOpts("flat");
   const hasMasters = darkOpts.length > 0 || flatOpts.length > 0;
+  // Show the "use recommended" hint only when there's a suggestion the user
+  // hasn't already applied.
+  const canApplyRec = (recDarkId !== null && String(values.dark_master_id ?? "") !== String(recDarkId))
+    || (recFlatId !== null && String(values.flat_master_id ?? "") !== String(recFlatId));
+  const applyRecommended = () => {
+    if (recDarkId !== null) set("dark_master_id", String(recDarkId));
+    if (recFlatId !== null) set("flat_master_id", String(recFlatId));
+  };
   const asStr = (v: unknown) => (v === undefined || v === null ? null : String(v));
   const running = job && (job.state === "running" || job.state === "queued");
   const pct = job && job.total ? Math.round((job.done / job.total) * 100) : 0;
@@ -150,6 +169,17 @@ export function StackView() {
             </Group>
             {hasMasters ? (
               <Stack gap="xs">
+                {canApplyRec ? (
+                  <Group gap="xs" justify="space-between" wrap="nowrap">
+                    <Text size="xs" c="dimmed">
+                      Matched to this target's frames
+                      {sug?.params.exposure_s ? ` (${sug.params.exposure_s}s subs)` : ""}.
+                    </Text>
+                    <Button size="compact-xs" variant="light" onClick={applyRecommended}>
+                      Use recommended
+                    </Button>
+                  </Group>
+                ) : null}
                 <Group grow align="flex-end">
                   <Select
                     label="Master dark" placeholder="None" clearable

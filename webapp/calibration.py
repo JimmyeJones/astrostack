@@ -122,6 +122,65 @@ def resolve_master_paths(
     )
 
 
+def _match_distance(
+    master: dict[str, Any], *, exposure_s: float | None,
+    gain: float | None, sensor_temp_c: float | None, kind: str,
+) -> float:
+    """How poorly a master matches a target's acquisition params (lower = better).
+
+    Darks capture thermal + bias signal at a *specific* exposure/gain/temperature,
+    so exposure must match closely. Flats are exposure-independent (they're
+    normalised), so only gain/optical-train and temperature matter. A param that
+    is unknown on either side neither helps nor hurts (contributes 0).
+    """
+    d = 0.0
+    if kind == "dark" and exposure_s and master.get("exposure_s"):
+        d += 3.0 * abs(float(master["exposure_s"]) - exposure_s) / max(exposure_s, 1e-6)
+    if gain is not None and master.get("gain") is not None:
+        d += abs(float(master["gain"]) - gain) / max(abs(gain), 1.0)
+    if sensor_temp_c is not None and master.get("sensor_temp_c") is not None:
+        d += 0.1 * abs(float(master["sensor_temp_c"]) - sensor_temp_c)
+    return d
+
+
+def recommend_masters(
+    masters: list[dict[str, Any]], *, exposure_s: float | None = None,
+    gain: float | None = None, sensor_temp_c: float | None = None,
+) -> dict[str, Any]:
+    """Pick the best-matching dark and flat for a target's acquisition params.
+
+    Returns the recommended master ids (or None if none of a kind exist) plus a
+    per-master match score in 0..1 (higher = better) so the UI can badge the
+    best option. Only masters whose file still exists are considered.
+    """
+    scores: dict[int, float] = {}
+    best: dict[str, tuple[int, float]] = {}
+    for m in masters:
+        if not m.get("exists", True):
+            continue
+        kind = str(m.get("kind", ""))
+        if kind not in ("dark", "flat"):
+            continue
+        try:
+            mid = int(m["id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        dist = _match_distance(m, exposure_s=exposure_s, gain=gain,
+                               sensor_temp_c=sensor_temp_c, kind=kind)
+        score = 1.0 / (1.0 + dist)
+        scores[mid] = round(score, 4)
+        cur = best.get(kind)
+        if cur is None or dist < cur[1]:
+            best[kind] = (mid, dist)
+    return {
+        "params": {"exposure_s": exposure_s, "gain": gain,
+                   "sensor_temp_c": sensor_temp_c},
+        "dark_master_id": best["dark"][0] if "dark" in best else None,
+        "flat_master_id": best["flat"][0] if "flat" in best else None,
+        "scores": scores,
+    }
+
+
 def _next_id(entries: list[dict[str, Any]]) -> int:
     return (max((int(e.get("id", 0)) for e in entries), default=0)) + 1
 

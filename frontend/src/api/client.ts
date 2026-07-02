@@ -297,6 +297,14 @@ export interface CalibrationMaster {
   exists: boolean;
 }
 
+export interface CalibrationSuggestions {
+  params: { exposure_s: number | null; gain: number | null; sensor_temp_c: number | null };
+  dark_master_id: number | null;
+  flat_master_id: number | null;
+  scores: Record<string, number>;
+  n_frames: number;
+}
+
 function encodeRecipe(recipe: Recipe): string {
   const bytes = new TextEncoder().encode(JSON.stringify(recipe));
   let bin = "";
@@ -499,6 +507,8 @@ export const api = {
 
   // calibration masters (library-level dark/flat frames)
   listCalibrationMasters: () => req<CalibrationMaster[]>("/api/calibration/masters"),
+  calibrationSuggestions: (safe: string) =>
+    req<CalibrationSuggestions>(`/api/targets/${safe}/calibration-suggestions`),
   buildCalibrationMaster: (body: {
     kind: string; source_dir: string; name?: string; method?: string; sigma?: number;
   }) => req<{ job_id: string }>("/api/calibration/masters", {

@@ -46,11 +46,10 @@ _(none — claim an item here with your branch name)_
   testable in isolation from real hardware. (M, correctness)
 
 ### Features that serve real workflows
-- Auto-suggest calibration masters that match a target's frames (by exposure /
-  gain / sensor-temp), so a beginner doesn't have to know which dark/flat/
-  flat-dark goes with which lights. Registry already stores exposure_s/gain/temp
-  on each master; surface a "recommended" badge and pre-select the best match in
-  the Stack calibration picker. (M, approachability/correctness)
+- Auto-suggest a **flat-dark** too — extend `recommend_masters` to pick a dark
+  whose exposure matches the recommended flat's exposure (flat-darks match the
+  flat, not the lights), and add it to the "Use recommended" one-click apply.
+  (S, approachability/correctness)
 - Show integration time + frame count on **Gallery** cards too, reusing the new
   `/stack-runs/{id}/info` endpoint + `formatIntegration` helper (History already
   does this via the Info panel). (S, approachability)
@@ -107,6 +106,14 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Auto-suggest calibration masters** — new `recommend_masters` ranks the
+  library's dark/flat masters against a target's median frame exposure/gain/temp
+  (darks match on exposure+gain+temp; flats are exposure-independent, matched on
+  gain+temp), exposed via `GET /api/targets/{safe}/calibration-suggestions`. The
+  Stack form badges the best-matching dark/flat with "★ recommended" and offers a
+  one-click "Use recommended" — a beginner no longer needs to know which master
+  goes with which lights. Advisory only; nothing is auto-applied. (v0.18.0, this run)
 
 - **Stack info panel** — new `GET /stack-runs/{id}/info` reads the provenance
   cards from a run's `master.fits` (OBJECT, NFRAMES/NCOMBINE, EXPOSURE, EXPTOTAL,

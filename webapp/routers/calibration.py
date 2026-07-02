@@ -51,6 +51,41 @@ def build_master(body: dict[str, Any], request: Request) -> dict[str, str]:
     return {"job_id": job.id}
 
 
+def _median(values: list[float]) -> float | None:
+    vals = sorted(v for v in values if v is not None)
+    if not vals:
+        return None
+    n = len(vals)
+    return vals[n // 2] if n % 2 else (vals[n // 2 - 1] + vals[n // 2]) / 2.0
+
+
+@router.get("/api/targets/{safe}/calibration-suggestions")
+def calibration_suggestions(safe: str, request: Request) -> dict[str, Any]:
+    """Recommend the dark/flat masters that best match this target's frames.
+
+    Reads the median exposure/gain/sensor-temperature of the target's accepted
+    frames and ranks the library's masters against them, so a beginner doesn't
+    have to know which dark/flat goes with which lights. Purely advisory — the
+    Stack form still lets the user pick anything (or nothing).
+    """
+    settings = deps.get_settings(request)
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        frames = list(proj.iter_frames(accepted_only=True))
+    finally:
+        proj.close()
+        lib.close()
+    exposure_s = _median([f.exposure_s for f in frames if f.exposure_s])
+    gain = _median([f.gain for f in frames if f.gain is not None])
+    sensor_temp_c = _median([f.sensor_temp_c for f in frames if f.sensor_temp_c is not None])
+
+    masters = calibration.list_masters(settings.resolved_library_root)
+    rec = calibration.recommend_masters(
+        masters, exposure_s=exposure_s, gain=gain, sensor_temp_c=sensor_temp_c)
+    rec["n_frames"] = len(frames)
+    return rec
+
+
 @router.delete("/api/calibration/masters/{master_id}")
 def delete_master(master_id: int, request: Request) -> dict[str, Any]:
     settings = deps.get_settings(request)

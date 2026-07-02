@@ -78,6 +78,67 @@ def test_resolve_flat_dark_master(tmp_path):
     assert flat_dark_path and Path(flat_dark_path).exists()
 
 
+def test_recommend_masters_picks_best_match():
+    # Two darks at different exposures; the target shot 30 s subs → the 30 s
+    # dark must win. Flats are exposure-independent → matched by gain instead.
+    masters = [
+        {"id": 1, "kind": "dark", "exposure_s": 30.0, "gain": 80.0, "exists": True},
+        {"id": 2, "kind": "dark", "exposure_s": 120.0, "gain": 80.0, "exists": True},
+        {"id": 3, "kind": "flat", "exposure_s": 2.0, "gain": 80.0, "exists": True},
+        {"id": 4, "kind": "flat", "exposure_s": 2.0, "gain": 200.0, "exists": True},
+    ]
+    rec = calibration.recommend_masters(masters, exposure_s=30.0, gain=80.0)
+    assert rec["dark_master_id"] == 1          # exposure-matched dark
+    assert rec["flat_master_id"] == 3          # gain-matched flat
+    # the well-matched dark scores higher than the exposure-mismatched one
+    assert rec["scores"][1] > rec["scores"][2]
+    assert rec["scores"][3] > rec["scores"][4]
+
+
+def test_recommend_masters_skips_missing_and_handles_empty():
+    # A master whose file is gone must never be recommended.
+    masters = [{"id": 1, "kind": "dark", "exposure_s": 30.0, "exists": False}]
+    rec = calibration.recommend_masters(masters, exposure_s=30.0)
+    assert rec["dark_master_id"] is None
+    assert rec["flat_master_id"] is None
+    # No masters at all → clean empty result, no crash.
+    empty = calibration.recommend_masters([], exposure_s=30.0)
+    assert empty["dark_master_id"] is None and empty["scores"] == {}
+
+
+def test_calibration_suggestions_endpoint(client, solved_library):
+    from seestack.calibrate.masters import MasterMeta
+    from seestack.io.library import Library
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    # Give this target's frames a known exposure/gain.
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            for f in proj.iter_frames():
+                proj.update_frame(f.id, exposure_s=30.0, gain=80.0)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    root = solved_library / "library"
+    good = calibration.register_master(
+        root, name="Dark 30s", array=np.full((4, 4), 1.0, dtype=np.float32),
+        meta=MasterMeta("dark", 5, 4, 4, "median", exposure_s=30.0, gain=80.0))
+    calibration.register_master(
+        root, name="Dark 120s", array=np.full((4, 4), 1.0, dtype=np.float32),
+        meta=MasterMeta("dark", 5, 4, 4, "median", exposure_s=120.0, gain=80.0))
+
+    r = client.get(f"/api/targets/{safe}/calibration-suggestions")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["params"]["exposure_s"] == 30.0
+    assert body["dark_master_id"] == good["id"]
+    assert body["n_frames"] >= 1
+
+
 def test_build_master_endpoint(client, data_root, tmp_path):
     darks = tmp_path / "darks"
     _write_darks(darks)
