@@ -80,13 +80,6 @@ _(none — claim an item here with your branch name)_
   (S–M, approachability)
 
 ### UX & polish
-- **Nudge quality weighting when frame quality varies a lot** — on the Stack
-  form, when the accepted+solved frames show a wide spread in FWHM / star-count /
-  transparency (e.g. IQR/median above a threshold) but `quality_weighted` is
-  off, show an advisory suggesting the user turn it on, because a mixed-quality
-  set is exactly where down-weighting the worst subs helps most (and a uniform
-  set barely changes). Advisory only; reuses metrics already fetched for the
-  transparency hint. Client-side, within-target. (S, approachability)
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
 
@@ -128,6 +121,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Nudge quality weighting when frame quality varies a lot** — the Stack form
+  now shows an advisory when the frames that would be stacked (accepted +
+  solved) show a wide *robust* spread — interquartile spread (p75−p25)/median ≥
+  0.3 in FWHM or ≥ 0.4 in star count — but `quality_weighted` is off, because a
+  mixed-quality set is exactly where down-weighting the worst subs helps and a
+  uniform set barely changes. Needs ≥8 frames; IQR/median is scale-free and
+  outlier-robust so a couple of bad subs don't trigger it. Client-side,
+  within-target, advisory only; reuses the metrics already fetched for the
+  transparency hint. (v0.42.1, this run)
 
 - **"N trailed frames" badge on the Target view** — mirrors the "N streaked"
   badge for star *shape*. A shared `trailed_frame_ids` helper flags accepted

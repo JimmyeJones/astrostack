@@ -318,6 +318,36 @@ describe("StackView", () => {
     expect(screen.queryByText(/likely shot through haze or thin cloud/)).not.toBeInTheDocument();
   });
 
+  it("nudges quality weighting when frame quality varies a lot", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ quality_weighted: false });
+    // A wide FWHM spread across accepted+solved frames (2.0 … 5.0px).
+    const frames = Array.from({ length: 8 }, (_, i) =>
+      ({ ...mkFrame(i + 1), fwhm_px: 2.0 + i * 0.4 }));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    await waitFor(() =>
+      expect(screen.getByText(/mixed-quality set is exactly where quality weighting helps/))
+        .toBeInTheDocument());
+  });
+
+  it("does not nudge quality weighting when the set is uniform", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ quality_weighted: false });
+    const frames = Array.from({ length: 8 }, (_, i) =>
+      ({ ...mkFrame(i + 1), fwhm_px: 2.5 + i * 0.01, star_count: 300 + i }));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    await waitFor(() => expect(screen.getByText("Start stacking")).toBeInTheDocument());
+    expect(screen.queryByText(/mixed-quality set is exactly where/)).not.toBeInTheDocument();
+  });
+
   it("shows the pre-run output canvas + peak-memory estimate line", async () => {
     vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: true });
