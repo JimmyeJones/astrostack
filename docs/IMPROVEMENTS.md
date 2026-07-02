@@ -43,6 +43,19 @@ _(none — claim an item here with your branch name)_
   testable in isolation from real hardware. (M, correctness)
 
 ### Features that serve real workflows
+- Record & surface total integration time per stack run. The engine now knows
+  it (median-sub × frames), but `StackRunRow`/the History UI don't show it. Add
+  an additive `total_exposure_s` column (schema migration + backfill from FITS
+  where possible) and display "N subs · 3.2h" on the History/Gallery cards so a
+  user can compare integration at a glance. (M, approachability/correctness)
+- "Stack info" panel: read the new FITS header cards (NCOMBINE, EXPTIME,
+  TOTALEXP, DATE-OBS/END, STACKMTD) from a run's `master.fits` and show them in
+  the History detail view — no new storage needed, just a header read + a small
+  endpoint. Pairs well with the metadata shipped this run. (S, approachability)
+- Auto-suggest a sensible sigma-clip kappa (and whether to enable rejection)
+  from the accepted-frame count — e.g. skip clipping under ~5 frames, loosen
+  kappa for very large stacks — with a one-line "why" in the form. Removes a
+  knob a beginner can't reason about. (M, approachability/correctness)
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
 - Drizzle memory estimate surfaced in the Stack form before you run it. (S)
@@ -61,8 +74,9 @@ _(none — claim an item here with your branch name)_
 ### Infra / maintainability
 - Chip away at the ~127 pre-existing `ruff check .` findings (don't add new ones);
   consider wiring ruff into CI once the count is low. (L, correctness/maintainability)
-- Add a retention/pruning policy for `jobs.sqlite` so the job history can't grow
-  unbounded on a long-lived NAS deployment. (S, scale)
+- ~~Add a retention/pruning policy for `jobs.sqlite`~~ — **already implemented**
+  (`JobManager._evict_old` prunes the DB to ~10× `max_history` after every job);
+  a future refinement could make the cap a configurable setting. (S, scale)
 - `GET /api/stats` re-opens every target's SQLite project on each call — cache or
   batch it so the dashboard stays fast with many targets. (M, scale)
 - Add a `SessionStart` hook (or a `scripts/setup.sh`) that provisions the venv +
