@@ -27,9 +27,10 @@ Then run the loop:
    Commit it, bump the version, and mark it Shipped in `docs/IMPROVEMENTS.md`.
 3. **Replenish the backlog** — add at least one or two new, well-reasoned ideas to
    `docs/IMPROVEMENTS.md` (tag each with the pillar it serves and a size).
-4. **Ship it yourself** — work on a branch; once your change is green *and* synced
-   with the latest default branch, **merge it into the default branch yourself**.
-   Nobody reviews or merges for you: if you don't merge it, it never ships.
+4. **Ship it yourself** — the default branch is **`main`**: base your work on the
+   latest `origin/main` (ignore other/stale branches), and once your change is
+   green *and* synced with `main`, **merge it into `main` yourself**. Nobody
+   reviews or merges for you: if you don't merge it, it never ships.
 
 **Non-negotiables:** only ever merge fully-green work; never weaken, skip, or delete
 tests to go green; never force-push or break the default branch; keep changes
