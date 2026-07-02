@@ -360,6 +360,23 @@ class Project:
             sql += " WHERE accept = 1"
         return self._conn.execute(sql).fetchone()[0]
 
+    def median_fwhm(self) -> float | None:
+        """Median FWHM (px) across accepted frames that carry a measured value,
+        or ``None`` if none do. Used as the physically-motivated default PSF
+        width for editor deconvolution — the stacked result's effective star
+        size tracks the median of the frames that went into it."""
+        assert self._conn is not None
+        vals = sorted(
+            r[0] for r in self._conn.execute(
+                "SELECT fwhm_px FROM frames WHERE accept = 1 AND fwhm_px IS NOT NULL"
+            )
+        )
+        if not vals:
+            return None
+        n = len(vals)
+        mid = n // 2
+        return vals[mid] if n % 2 else (vals[mid - 1] + vals[mid]) / 2
+
     def reject_reason_counts(self) -> dict[str, int]:
         """Tally rejected frames by ``reject_reason`` (e.g. ``qc:fwhm``,
         ``bulk:streaked``, ``user``). A rejected frame with a NULL reason is

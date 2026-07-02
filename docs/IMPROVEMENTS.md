@@ -69,11 +69,6 @@ _(none — claim an item here with your branch name)_
 ### Features that serve real workflows
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
-- **PSF-from-stars for editor deconvolution** — `detail.deconvolve` makes the
-  user hand-tune a Gaussian σ; the project median FWHM (already measured by
-  QC) is the right default, and a "from your stars" button would set it.
-  (S–M, approachability)
-
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
@@ -116,6 +111,15 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **PSF-from-stars for editor deconvolution** — the deconvolution op made the
+  user hand-guess a Gaussian PSF σ. A new `GET …/editor/psf-suggestion`
+  endpoint derives it from `Project.median_fwhm()` (median FWHM of accepted
+  frames, already measured by QC): σ = FWHM / (2·√(2·ln2)), clamped to the op's
+  0.5–5.0 slider range, null when no frame carries an FWHM. The editor's op
+  param panel gained a generic, reusable `suggestions` prop; for
+  `detail.deconvolve` it renders a one-click "From your stars (σ≈X, FWHM Ypx)"
+  button that sets `psf_sigma`. Additive/upgrade-safe. (v0.43.0, this run)
 
 - **Auto-grade hint on the Stack form** — the Stack form now calls the
   `frames/auto-grade` preview endpoint (only once there are ≥10 accepted frames,

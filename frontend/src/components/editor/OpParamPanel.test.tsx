@@ -32,4 +32,21 @@ describe("OpParamPanel", () => {
     wrap(<OpParamPanel spec={SPEC} params={{ amount: 1.0 }} onChange={() => {}} />);
     expect(screen.getByLabelText("Reset Amount")).toBeDisabled();
   });
+
+  it("offers a data-driven suggestion button that sets the param", () => {
+    const onChange = vi.fn();
+    wrap(
+      <OpParamPanel
+        spec={SPEC} params={{ amount: 1.5 }} onChange={onChange}
+        suggestions={{ amount: { value: 2.2, label: "From your data (2.2)" } }}
+      />,
+    );
+    fireEvent.click(screen.getByText("From your data (2.2)"));
+    expect(onChange).toHaveBeenCalledWith({ amount: 2.2 });
+  });
+
+  it("omits the suggestion button when no suggestion is given for a param", () => {
+    wrap(<OpParamPanel spec={SPEC} params={{ amount: 1.5 }} onChange={() => {}} />);
+    expect(screen.queryByLabelText("Set Amount from your data")).not.toBeInTheDocument();
+  });
 });

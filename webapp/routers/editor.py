@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -175,6 +176,38 @@ def delete_preset(preset_id: str, request: Request) -> dict:
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/editor/recipe")
 def get_recipe(safe: str, run_id: int, request: Request) -> dict:
     return _load_saved_recipe(request, safe, run_id).to_dict()
+
+
+# Gaussian FWHM → σ, and the bounds the deconvolution op's ``psf_sigma`` accepts
+# (kept in step with the EditParam definition in seestack/edit/ops/detail.py).
+_FWHM_TO_SIGMA = 1.0 / (2.0 * math.sqrt(2.0 * math.log(2.0)))  # ≈ 0.4247
+_PSF_SIGMA_MIN = 0.5
+_PSF_SIGMA_MAX = 5.0
+
+
+class PsfSuggestionOut(BaseModel):
+    """A data-driven default PSF width for editor deconvolution, derived from
+    the target's measured star sizes. ``None`` when no frame carries an FWHM."""
+
+    fwhm_px: float | None
+    psf_sigma: float | None
+
+
+@router.get("/api/targets/{safe}/editor/psf-suggestion", response_model=PsfSuggestionOut)
+def psf_suggestion(safe: str, request: Request) -> PsfSuggestionOut:
+    """Suggest a deconvolution PSF σ from the target's median star FWHM, so the
+    user doesn't have to hand-guess a Gaussian width — the QC layer already
+    measured it. σ = FWHM / (2·√(2·ln2)), clamped to the op's slider range."""
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        fwhm = proj.median_fwhm()
+    finally:
+        proj.close()
+        lib.close()
+    if fwhm is None or fwhm <= 0:
+        return PsfSuggestionOut(fwhm_px=None, psf_sigma=None)
+    sigma = max(_PSF_SIGMA_MIN, min(_PSF_SIGMA_MAX, fwhm * _FWHM_TO_SIGMA))
+    return PsfSuggestionOut(fwhm_px=round(fwhm, 3), psf_sigma=round(sigma, 2))
 
 
 @router.put("/api/targets/{safe}/stack-runs/{run_id}/editor/recipe")
