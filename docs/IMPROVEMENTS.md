@@ -69,13 +69,6 @@ _(none — claim an item here with your branch name)_
 ### Features that serve real workflows
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
-- **Show the editor processing chain in the History Info panel** — the
-  editor export now stamps every op as a FITS `HISTORY` card (v0.46.0), but the
-  run Info endpoint only surfaces the structured `_INFO_CARDS`, so a user has to
-  open the FITS in Siril to see how a run was edited. Parse the `HISTORY`
-  commentary cards (astropy exposes them as `header["HISTORY"]`) into a friendly
-  "Processing: stretch → denoise → sharpen" list in the Info panel. Small,
-  additive, reuses the provenance just written. (S, approachability)
 - **Per-stack noise-floor readout / "cleanest stack" badge** — reuse the new
   `seestack/edit/noise.estimate_noise_sigma` to record each stack run's
   normalized background noise (an additive `stack_runs` column, NULL for old
@@ -124,6 +117,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Editor processing chain in the History Info panel** — the run Info endpoint
+  (`GET …/stack-runs/{id}/info`) now parses the `AstroStack: op.id(args)` FITS
+  `HISTORY` cards an editor export writes (v0.46.0) into a friendly, ordered
+  `processing` list (op id + registry label), and the History Info panel shows
+  "Processing: Stretch → Noise reduction → Sharpen" — so a user sees how a run
+  was edited without opening the FITS in Siril. Unknown op ids fall back to the
+  raw id; non-AstroStack HISTORY cards are ignored; plain stacks report an empty
+  chain. Additive/upgrade-safe (just a header read + new response field).
+  (v0.47.0, this run)
 
 - **Full editor-recipe HISTORY provenance in exported FITS** — an editor export
   previously recorded only the op *count* (`STACKMTD="editor recipe (N ops)"`).

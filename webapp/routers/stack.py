@@ -315,6 +315,34 @@ _INFO_CARDS = (
     "EDITFROM", "DECONPSF", "CREATOR", "DATE",
 )
 
+# Editor exports stamp each enabled op as an ``AstroStack: op.id(args)`` FITS
+# HISTORY card (see webapp/pipeline._recipe_history). This prefix picks ours out
+# of any other HISTORY cards a downstream tool may have added.
+_HISTORY_PREFIX = "AstroStack: "
+
+
+def _parse_processing_chain(header: Any) -> list[dict[str, Any]]:
+    """Parse the ``AstroStack: op.id(args)`` HISTORY cards an editor export
+    writes into a friendly, ordered processing chain, so the Info panel can show
+    "Processing: Stretch → Noise reduction → Sharpen" without the user opening
+    the FITS in Siril. Non-AstroStack HISTORY cards are ignored; unknown op ids
+    fall back to the raw id."""
+    if "HISTORY" not in header:
+        return []
+    from seestack.edit.registry import get_op
+
+    chain: list[dict[str, Any]] = []
+    for card in header["HISTORY"]:
+        text = str(card).strip()
+        if not text.startswith(_HISTORY_PREFIX):
+            continue
+        op_id = text[len(_HISTORY_PREFIX):].split("(", 1)[0].strip()
+        if not op_id:
+            continue
+        spec = get_op(op_id)
+        chain.append({"op": op_id, "label": spec.label if spec is not None else op_id})
+    return chain
+
 
 # NOTE: declared before the "/{kind}" download route so "info" isn't swallowed
 # by that catch-all path parameter.
@@ -373,8 +401,10 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
         if key in ("NFRAMES", "NCOMBINE") and n_frames is None:
             with contextlib.suppress(TypeError, ValueError):
                 n_frames = int(value)
+    processing = _parse_processing_chain(header)
     return {"run_id": run_id, "integration_s": integration_s,
-            "n_frames": n_frames, "weighting": weighting, "cards": cards}
+            "n_frames": n_frames, "weighting": weighting,
+            "processing": processing, "cards": cards}
 
 
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/options")

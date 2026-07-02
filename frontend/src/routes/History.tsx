@@ -48,6 +48,11 @@ function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
             : ""}
         </Text>
       ) : null}
+      {data.processing && data.processing.length > 0 ? (
+        <Text size="xs" c="dimmed">
+          Processing: {data.processing.map((s) => s.label).join(" → ")}
+        </Text>
+      ) : null}
       <Table verticalSpacing={2} horizontalSpacing="xs" fz="xs" withRowBorders={false}>
         <Table.Tbody>
           {data.cards.map((c) => (

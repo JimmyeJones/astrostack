@@ -185,11 +185,17 @@ export interface StackWeightingSummary {
   median?: number;
 }
 
+export interface StackProcessingStep {
+  op: string;
+  label: string;
+}
+
 export interface StackRunInfo {
   run_id: number;
   integration_s: number | null;
   n_frames: number | null;
   weighting: StackWeightingSummary | null;
+  processing?: StackProcessingStep[];
   cards: StackInfoCard[];
 }
 
