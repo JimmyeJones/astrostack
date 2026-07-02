@@ -512,6 +512,9 @@ export const api = {
   editPreviewUrl: (safe: string, runId: number, recipe: Recipe, bust = 0) =>
     `/api/targets/${safe}/stack-runs/${runId}/editor/preview?recipe=${encodeRecipe(recipe)}`
     + (bust ? `&v=${bust}` : ""),
+  editStarMaskUrl: (safe: string, runId: number, sizePx?: number) =>
+    `/api/targets/${safe}/stack-runs/${runId}/editor/star-mask`
+    + (sizePx ? `?size_px=${sizePx}` : ""),
   getHistogram: (safe: string, runId: number, recipe: Recipe) =>
     req<Histogram>(
       `/api/targets/${safe}/stack-runs/${runId}/editor/histogram?recipe=${encodeRecipe(recipe)}`),

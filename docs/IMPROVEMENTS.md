@@ -68,7 +68,6 @@ _(none — claim an item here with your branch name)_
 ### Features that serve real workflows
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
-- Star-mask preview toggle in the editor (visualise the mask driving star ops). (S)
 - Per-target "notes/tags" search improvements and saved filters in Library. (S)
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
@@ -113,6 +112,15 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Star-mask preview toggle in the editor** — a new
+  `GET …/editor/star-mask` endpoint renders the soft `[0,1]` mask that gates the
+  star ops (`stars.reduce` / `boost_nebula`) as a grayscale PNG on the live
+  proxy (`size_px`/`grow` query params, clamped). The Editor gained a grape
+  "Star mask" toggle next to Compare that overlays the mask (white = treated as a
+  star) with a "Star mask" label, so a user can *see* what the editor considers a
+  star vs background/nebula before dialling in star reduction. Additive;
+  no-store, proxy-only. (v0.34.0, this run)
 
 - **Compute the dead `transparency_score` frame metric** — the column has been
   in the schema and `FrameRow` since day one but was never populated. QC now

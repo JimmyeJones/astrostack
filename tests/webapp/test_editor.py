@@ -103,6 +103,22 @@ def test_edit_preview_and_histogram(client, solved_library):
     assert sum(hist["r"]) > 0
 
 
+def test_star_mask_preview(client, solved_library):
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe)
+
+    r = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/star-mask")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("image/png")
+    assert r.content[:8] == b"\x89PNG\r\n\x1a\n"
+    # A custom star size is accepted and still renders.
+    r2 = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/star-mask", params={"size_px": 6}
+    )
+    assert r2.status_code == 200
+    assert r2.content[:8] == b"\x89PNG\r\n\x1a\n"
+
+
 def test_auto_process(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
     rid = _make_run(solved_library, safe)
