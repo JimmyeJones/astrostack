@@ -69,15 +69,6 @@ _(none — claim an item here with your branch name)_
 ### Features that serve real workflows
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
-- **"From your image" denoise-strength suggestion** — reuse the new generic
-  `suggestions` prop on the editor's `OpParamPanel` (added with the PSF-from-
-  stars button, v0.43.0): estimate the proxy's background noise (robust σ via
-  MAD of the background / off-object pixels, or from the histogram already
-  computed for the editor) and map it to a sensible denoise strength, offered
-  as a one-click default on `detail.denoise`. Removes another hand-tuned knob
-  the way PSF-from-stars did for deconvolution. Needs a small server endpoint
-  (or extend the histogram response with a noise estimate) + the frontend
-  wiring; testable in isolation. (S–M, approachability)
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
@@ -120,6 +111,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **"From your image" denoise-strength suggestion** — the editor's noise-
+  reduction op made the user hand-tune a 0..1 strength knob. A new engine module
+  (`seestack/edit/noise.py`) estimates the run's background noise σ robustly
+  (MAD of adjacent-pixel differences, normalized to the image's own p0.5..p99.5
+  signal range so it's comparable across gain/exposure) and maps it linearly to
+  a starting strength (clamped to the op's 0.1..1.0 range, rounded to its 0.05
+  step). Pure-numpy so it never depends on PyWavelets. Exposed via
+  `GET …/editor/denoise-suggestion` and offered as a one-click "From your image
+  (strength X)" button on `detail.denoise`, reusing the generic `suggestions`
+  prop (v0.43.0). Additive/upgrade-safe. (v0.45.0, this run)
 
 - **Record the deconvolution PSF σ in the exported FITS header** — when an
   editor recipe includes an enabled `detail.deconvolve` op, the derived

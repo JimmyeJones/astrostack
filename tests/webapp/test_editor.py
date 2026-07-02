@@ -95,6 +95,18 @@ def test_psf_suggestion_clamps_to_op_range(client, built_library, data_root):
     assert body["psf_sigma"] == 5.0
 
 
+def test_denoise_suggestion_from_image_noise(client, solved_library):
+    # The run's proxy has a bright blob on a noisy sky (see _make_run), so the
+    # endpoint returns a measurable noise σ and a usable in-range strength.
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="denoise_src")
+    r = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/denoise-suggestion")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["noise_sigma"] is not None and body["noise_sigma"] > 0
+    assert 0.1 <= body["strength"] <= 1.0
+
+
 def test_ops_schema(client):
     r = client.get("/api/editor/ops/schema")
     assert r.status_code == 200

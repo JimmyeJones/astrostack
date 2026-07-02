@@ -210,6 +210,34 @@ def psf_suggestion(safe: str, request: Request) -> PsfSuggestionOut:
     return PsfSuggestionOut(fwhm_px=round(fwhm, 3), psf_sigma=round(sigma, 2))
 
 
+class DenoiseSuggestionOut(BaseModel):
+    """A data-driven starting strength for the editor's noise-reduction op,
+    derived from the run's own background noise. ``None`` when the proxy has no
+    measurable image data."""
+
+    noise_sigma: float | None
+    strength: float | None
+
+
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/editor/denoise-suggestion",
+            response_model=DenoiseSuggestionOut)
+async def denoise_suggestion(safe: str, run_id: int, request: Request) -> DenoiseSuggestionOut:
+    """Suggest a denoise strength from the run's measured background noise, so the
+    user doesn't have to hand-tune the 0..1 knob — mirrors the PSF-from-stars
+    button for deconvolution. Robust σ of adjacent-pixel differences, normalized
+    to the image's own signal range and mapped to the op's strength slider."""
+    from seestack.edit.noise import suggest_denoise_strength
+
+    project_dir, run = _run_info(request, safe, run_id)
+
+    def work() -> DenoiseSuggestionOut:
+        rgb, _scale = get_proxy(project_dir, run.id, run.fits_path)
+        sigma, strength = suggest_denoise_strength(rgb)
+        return DenoiseSuggestionOut(noise_sigma=sigma, strength=strength)
+
+    return await run_in_threadpool(work)
+
+
 @router.put("/api/targets/{safe}/stack-runs/{run_id}/editor/recipe")
 def put_recipe(safe: str, run_id: int, body: dict, request: Request) -> dict:
     import time

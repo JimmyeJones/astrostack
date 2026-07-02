@@ -49,6 +49,13 @@ export function EditorView() {
     queryFn: () => api.psfSuggestion(safe),
     staleTime: 60_000,
   });
+  // Data-driven default for noise reduction: the run's measured background
+  // noise mapped to a starting strength, offered as a one-click button.
+  const denoise = useQuery({
+    queryKey: ["denoise-suggestion", safe, rid],
+    queryFn: () => api.denoiseSuggestion(safe, rid),
+    staleTime: 60_000,
+  });
 
   const { state: ops, set: setOps, reset: resetOps, undo, redo, canUndo, canRedo } =
     useUndoable<OpInstance[]>([]);
@@ -392,7 +399,14 @@ export function EditorView() {
                           label: `From your stars (σ≈${psf.data.psf_sigma}, FWHM ${psf.data.fwhm_px}px)`,
                         },
                       }
-                      : undefined
+                      : selectedOp.id === "detail.denoise" && denoise.data?.strength != null
+                        ? {
+                          strength: {
+                            value: denoise.data.strength,
+                            label: `From your image (strength ${denoise.data.strength})`,
+                          },
+                        }
+                        : undefined
                   } />
               </Paper>
             ) : null}
