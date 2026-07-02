@@ -39,10 +39,10 @@ _(none — claim an item here with your branch name)_
   testable in isolation from real hardware. (M, correctness)
 
 ### Features that serve real workflows
-- Auto-suggest a sensible sigma-clip kappa (and whether to enable rejection)
-  from the accepted-frame count — e.g. skip clipping under ~5 frames, loosen
-  kappa for very large stacks — with a one-line "why" in the form. Removes a
-  knob a beginner can't reason about. (M, approachability/correctness)
+- Loosen/tighten the suggested sigma-clip **kappa** from the accepted-frame
+  count for very large stacks (the low-frame "don't clip under ~5" caution
+  shipped in v0.22.0; the large-stack kappa hint is the remaining half). (S,
+  approachability/correctness)
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
 - Drizzle memory estimate surfaced in the Stack form before you run it. (S)
@@ -92,6 +92,12 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Low-frame sigma-clip caution** — the Stack form now shows an inline caution
+  when sigma-clip rejection is enabled but fewer than ~5 accepted, plate-solved
+  frames exist ("you only have 3 accepted, solved frames … it can reject real
+  signal as an outlier — consider turning it off"). Removes a knob a beginner
+  can't reason about; advisory only, the setting still stands. (v0.22.0, this run)
 
 - **Integration time inline on History cards + Reuse settings from Gallery** —
   `StackRunOut` now carries `total_exposure_s`, so each History card shows the

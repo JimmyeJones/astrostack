@@ -161,6 +161,17 @@ export function StackView() {
   const noSolved = !frames.isLoading && frames.data !== undefined && solvedAccepted === 0;
   const excludedFrames = (job?.result?.excluded_frames as string[] | undefined) ?? [];
 
+  // Sigma-clip rejection estimates each pixel's spread across the stack, so it
+  // needs a handful of frames to be meaningful. With only a few it can throw
+  // away real signal as if it were an outlier — a knob a beginner can't reason
+  // about, so surface a plain-language "why". Advisory only; the pick stands.
+  const SIGMA_CLIP_MIN_FRAMES = 5;
+  const sigmaClipWarning =
+    values.sigma_clip && !frames.isLoading && solvedAccepted > 0
+    && solvedAccepted < SIGMA_CLIP_MIN_FRAMES
+      ? `Sigma-clip rejection estimates each pixel's spread across frames, but you only have ${solvedAccepted} accepted, solved frame${solvedAccepted === 1 ? "" : "s"}. With fewer than ~${SIGMA_CLIP_MIN_FRAMES} it can reject real signal as an outlier — consider turning it off for this stack.`
+      : null;
+
   return (
     <Stack maw={720}>
       <Group justify="space-between">
@@ -287,6 +298,12 @@ export function StackView() {
               </Accordion.Panel>
             </Accordion.Item>
           </Accordion>
+
+          {sigmaClipWarning ? (
+            <Alert color="yellow" variant="light" py={6} px="sm">
+              <Text size="xs">{sigmaClipWarning}</Text>
+            </Alert>
+          ) : null}
 
           {job ? (
             <Stack gap={4}>
