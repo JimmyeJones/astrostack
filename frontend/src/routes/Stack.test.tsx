@@ -181,6 +181,39 @@ describe("StackView", () => {
     expect(screen.queryByText(/it can reject real signal as an outlier/)).not.toBeInTheDocument();
   });
 
+  it("hints to tighten kappa on a very large stack", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+      { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
+        default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+    ]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: true, sigma_kappa: 3 });
+    // 250 accepted, solved frames — well above the large-stack threshold.
+    const frames = Array.from({ length: 250 }, (_, i) => mkFrame(i + 1));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    await waitFor(() =>
+      expect(screen.getByText(/tighter sigma-clip \(κ≈2.5\)/)).toBeInTheDocument());
+  });
+
+  it("does not hint to tighten kappa on a small stack", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+      { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
+        default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+    ]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: true, sigma_kappa: 3 });
+    const frames = Array.from({ length: 20 }, (_, i) => mkFrame(i + 1));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    await waitFor(() => expect(screen.getByText("Sigma clipping")).toBeInTheDocument());
+    expect(screen.queryByText(/tighter sigma-clip/)).not.toBeInTheDocument();
+  });
+
   const drizzleSchema: client.StackOptionField[] = [
     { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
       default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },

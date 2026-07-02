@@ -64,10 +64,6 @@ _(none — claim an item here with your branch name)_
   testable in isolation from real hardware. (M, correctness)
 
 ### Features that serve real workflows
-- Loosen/tighten the suggested sigma-clip **kappa** from the accepted-frame
-  count for very large stacks (the low-frame "don't clip under ~5" caution
-  shipped in v0.22.0; the large-stack kappa hint is the remaining half). (S,
-  approachability/correctness)
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
 - Drizzle memory estimate surfaced in the Stack form before you run it. (S)
@@ -117,6 +113,13 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Large-stack sigma-kappa hint** — completes the sigma-clip guidance pair. The
+  low-frame "don't clip under ~5" caution shipped in v0.22.0; now, when a stack
+  has ≥200 accepted frames and κ is at/above the default 3, the Stack form
+  suggests nudging κ down (~2.5) because the per-pixel spread is very well
+  measured and a tighter clip safely rejects more satellites/planes/cosmic rays.
+  Advisory only. (v0.26.1, this run)
 
 - **Show/search run labels in the Gallery** — the gallery response now carries
   each run's `notes` label, so the Gallery card shows it (in violet, above the

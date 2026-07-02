@@ -187,6 +187,18 @@ export function StackView() {
       ? `Sigma-clip rejection estimates each pixel's spread across frames, but you only have ${solvedAccepted} accepted, solved frame${solvedAccepted === 1 ? "" : "s"}. With fewer than ~${SIGMA_CLIP_MIN_FRAMES} it can reject real signal as an outlier — consider turning it off for this stack.`
       : null;
 
+  // The flip side of the low-frame caution: with a big stack the per-pixel σ is
+  // very well estimated, so the default κ=3 leaves a lot of satellite/plane/
+  // cosmic-ray signal in that a tighter clip would safely reject. Suggest
+  // nudging κ down for very large stacks. Advisory only; the pick stands.
+  const SIGMA_CLIP_LARGE_FRAMES = 200;
+  const kappa = Number(values.sigma_kappa ?? 3);
+  const sigmaKappaLargeHint =
+    values.sigma_clip && !frames.isLoading
+    && solvedAccepted >= SIGMA_CLIP_LARGE_FRAMES && kappa >= 3
+      ? `With ${solvedAccepted} accepted frames the per-pixel spread is very well measured, so a tighter sigma-clip (κ≈2.5) can safely reject more satellites, planes and cosmic rays than the default κ=${kappa % 1 === 0 ? kappa.toFixed(0) : kappa}. Lower the Sigma kappa in Advanced options if you see trails survive.`
+      : null;
+
   // Drizzle accumulates in a single pass, so the sigma-clip toggle doesn't
   // apply to it — a user who enabled both would reasonably expect satellite
   // trails to be rejected and be surprised when they aren't. Point them at
@@ -339,6 +351,12 @@ export function StackView() {
           {sigmaClipWarning ? (
             <Alert color="yellow" variant="light" py={6} px="sm">
               <Text size="xs">{sigmaClipWarning}</Text>
+            </Alert>
+          ) : null}
+
+          {sigmaKappaLargeHint ? (
+            <Alert color="blue" variant="light" py={6} px="sm">
+              <Text size="xs">{sigmaKappaLargeHint}</Text>
             </Alert>
           ) : null}
 
