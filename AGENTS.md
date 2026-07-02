@@ -175,6 +175,10 @@ A task is shippable only when ALL of these hold:
 - [ ] If you touched `frontend/`: `npx tsc --noEmit` clean, `npx vitest run`
       green, and `npx vite build` succeeds.
 - [ ] You did **not** delete, skip, loosen, or `xfail` a test to get green.
+- [ ] **Upgrade-safe (§9):** an existing `config.json` still loads, old
+      project/library DBs migrate additively, on-disk layout is unchanged, no
+      breaking default flips or API-shape changes. If the change touches config,
+      settings, DB schema, or on-disk paths, add/extend an upgrade test.
 - [ ] `__version__` in `webapp/__init__.py` bumped (patch for fixes/polish, minor
       for features). One bump per task is fine.
 - [ ] `docs/IMPROVEMENTS.md` updated (item moved to Shipped; new ideas added).
@@ -299,8 +303,51 @@ tested changes onto the default branch by yourself, safely.
 
 ---
 
-## 9. Hard guardrails (never cross these)
+## 9. Backward compatibility — this runs on a LIVE install (read this)
 
+**AstroStack is deployed on a real TrueNAS/Docker box with real data, and it is
+upgraded in place by pulling a new image off the default branch.** Every change
+you merge must be a **safe in-place upgrade** — the owner must never lose data,
+settings, or a working app because an agent shipped something. Treat this as
+non-negotiable as the test suite.
+
+Concretely, a change is upgrade-safe only if:
+
+- **Config survives.** `state/config.json` from the previous version must still
+  load. You may *add* settings (with sensible defaults). Do **not** rename,
+  remove, or repurpose an existing setting, and don't tighten a field's bounds so
+  a value an old version legitimately wrote is now rejected. (The loader resets
+  only invalid fields rather than wiping everything — that's a safety net, not a
+  licence to break configs.)
+- **Databases migrate, never reset.** The per-target `project.sqlite` and the
+  library DB carry user data. Schema changes must be **additive migrations**
+  (`SCHEMA_VERSION` bump + `_migrate_schema` with `ALTER TABLE`/backfill), and
+  must run cleanly from *any* older version. Never drop/rewrite a table or delete
+  rows on upgrade. Test the migration from an old DB.
+- **On-disk layout is stable.** Don't move or rename the library/targets/cache/
+  output/state directory structure, existing stack outputs, or master
+  calibration files. Old paths must keep working.
+- **Defaults don't change behaviour.** Don't flip an existing default in a way
+  that changes a running install (e.g. auth stays **off** by default; auto-stack
+  stays off). New behaviour is opt-in.
+- **APIs stay backward-compatible.** Don't remove endpoints or change response
+  shapes the frontend (or a user's bookmarks/scripts) already depend on; add
+  fields rather than renaming them.
+- **The container still builds and boots.** Don't break the Docker image, the
+  Python version pin, ASTAP bundling, or first-run bootstrapping.
+
+If something genuinely can't be done without a breaking change (a destructive
+migration, a renamed setting, a changed default), **do not ship it** — put it in
+`docs/IMPROVEMENTS.md` under **Needs owner sign-off** with the migration/rollback
+plan spelled out. See `tests/webapp/test_config_upgrade.py` for the pattern:
+add a test that an *old* config/DB upgrades cleanly.
+
+---
+
+## 10. Hard guardrails (never cross these)
+
+- **Never break an in-place upgrade** (§9) — no config wipes, destructive
+  migrations, moved data, or breaking default flips.
 - Never merge anything that isn't fully green (§5), and never force-push or rewrite
   the default branch's history. Merge via a branch (§8), don't commit straight onto
   the default branch.
@@ -322,7 +369,7 @@ tested changes onto the default branch by yourself, safely.
 
 ---
 
-## 10. Coordinating with other agents
+## 11. Coordinating with other agents
 
 A new agent runs every hour, so runs overlap in time and history. Avoid
 collisions:
@@ -339,7 +386,7 @@ collisions:
 
 ---
 
-## 11. Run checklist (copy/paste)
+## 12. Run checklist (copy/paste)
 
 ```
 Start of run:
@@ -349,6 +396,7 @@ Start of run:
 Per task (repeat ~3–6×, or fewer if large):
 [ ] picked/invented ONE task (§3 decision rule or §4 ideation); marked In progress
 [ ] implemented across engine/webapp/frontend as needed
+[ ] upgrade-safe: config loads, DB migrates, layout/defaults/API unchanged (§9)
 [ ] added/updated tests; python + (if FE touched) tsc/vitest/vite build green
 [ ] version bumped; IMPROVEMENTS.md updated (item → Shipped)
 [ ] committed (independently green) and pushed
