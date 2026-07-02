@@ -7,11 +7,11 @@ import { Library } from "./Library";
 import * as client from "../api/client";
 import type { Target } from "../api/client";
 
-function mk(name: string, tags: string[], exposure = 0): Target {
+function mk(name: string, tags: string[], exposure = 0, notes: string | null = null): Target {
   return {
     safe_name: name.replace(/\s/g, "_"), name, ra_deg: null, dec_deg: null,
     n_frames: 10, n_frames_accepted: 8, total_exposure_s: exposure,
-    last_activity_utc: null, has_preview: false, notes: null, tags,
+    last_activity_utc: null, has_preview: false, notes, tags,
   };
 }
 
@@ -26,7 +26,10 @@ function renderLibrary() {
   );
 }
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  localStorage.clear();  // filters persist to localStorage — isolate tests
+});
 
 describe("Library", () => {
   it("filters targets by search text and by tag", async () => {
@@ -39,7 +42,7 @@ describe("Library", () => {
     await waitFor(() => expect(screen.getByText("Orion Nebula")).toBeInTheDocument());
     expect(screen.getByText("Andromeda")).toBeInTheDocument();
 
-    const searchBox = screen.getByPlaceholderText("Search name or tag…");
+    const searchBox = screen.getByPlaceholderText("Search name, tag or note…");
     fireEvent.change(searchBox, { target: { value: "andro" } });
     await waitFor(() => expect(screen.queryByText("Orion Nebula")).not.toBeInTheDocument());
     expect(screen.getByText("Andromeda")).toBeInTheDocument();
@@ -51,5 +54,37 @@ describe("Library", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "nebula" }));
     await waitFor(() => expect(screen.queryByText("Andromeda")).not.toBeInTheDocument());
     expect(screen.getByText("Orion Nebula")).toBeInTheDocument();
+  });
+
+  it("matches the search against a target's notes", async () => {
+    vi.spyOn(client.api, "listTargets").mockResolvedValue([
+      mk("Orion Nebula", [], 0, "shot on a hazy night"),
+      mk("Andromeda", [], 0, "crystal clear"),
+    ]);
+    renderLibrary();
+
+    await waitFor(() => expect(screen.getByText("Orion Nebula")).toBeInTheDocument());
+    const searchBox = screen.getByPlaceholderText("Search name, tag or note…");
+    fireEvent.change(searchBox, { target: { value: "hazy" } });
+
+    await waitFor(() => expect(screen.queryByText("Andromeda")).not.toBeInTheDocument());
+    expect(screen.getByText("Orion Nebula")).toBeInTheDocument();
+  });
+
+  it("restores the saved search filter on remount", async () => {
+    localStorage.setItem(
+      "astrostack.library.filters",
+      JSON.stringify({ search: "andro", sort: "recent", tags: [] }),
+    );
+    vi.spyOn(client.api, "listTargets").mockResolvedValue([
+      mk("Orion Nebula", ["nebula"]),
+      mk("Andromeda", ["galaxy"]),
+    ]);
+    renderLibrary();
+
+    // The persisted "andro" search is applied immediately, hiding Orion.
+    await waitFor(() => expect(screen.getByText("Andromeda")).toBeInTheDocument());
+    expect(screen.queryByText("Orion Nebula")).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Search name, tag or note…")).toHaveValue("andro");
   });
 });

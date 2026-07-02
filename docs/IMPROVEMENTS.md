@@ -27,14 +27,16 @@ _(none — claim an item here with your branch name)_
 ## Ideas (pick roughly top-down; use the value ÷ effort×risk rule)
 
 ### Correctness & robustness (highest priority)
-- **Feed `transparency_score` into quality weighting + a grader hint** — the
-  per-frame metric is now computed (median flux of the brightest stars, shipped
-  v0.33.0) and surfaced in the Target table, but nothing *uses* it yet. Next:
-  normalise it against the target's best frame (a per-target baseline) and (a)
-  optionally weight frames in the stack by relative transparency, (b) show an
-  advisory "poor transparency night" hint when a run's median frame sits well
-  below the target's clear-sky baseline. Needs care: the raw score isn't
-  comparable across gain/exposure, so normalise within a target. (M, correctness)
+- **Eccentricity factor in quality weighting** — `compute_frame_weights` now
+  weights by FWHM / star-count / sky / transparency (v0.36.0) but not
+  `eccentricity_median`, which is already computed per frame. Elongated stars
+  signal tracking error / wind on that whole sub, so a
+  `clip(median_ecc / frame_ecc, min, 1.0)` factor (guarding `frame_ecc == 0` as
+  the neutral best case) would down-weight trailed frames symmetrically with the
+  others. Watch for double-counting vs FWHM (both partly track seeing) — they
+  capture size vs shape, so it's defensible, but validate on a synthetic set
+  before flipping. Additive; gated by the off-by-default `quality_weighted`.
+  (S, correctness)
 - Per-pixel extremes / percentile rejection for small stacks (the *robust*
   fix for a lone satellite/plane trail below ~11 frames). **NB:** the previously
   filed "iterated κ-σ" idea was investigated and dropped — re-estimation clips
@@ -68,12 +70,19 @@ _(none — claim an item here with your branch name)_
 ### Features that serve real workflows
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
-- Per-target "notes/tags" search improvements and saved filters in Library. (S)
-- **Inline reject-reason on rejected frame rows** — rejected rows in the Target
-  table are only dimmed; add a small muted reason chip/tooltip on each rejected
-  row (reusing `reject_reason`, now surfaced in the breakdown badge) so a user
-  scanning the table sees *why each specific frame* was dropped, not just the
-  aggregate. Frontend-only. (S, approachability)
+- **Transparency-night badge on History/Gallery cards** — the Stack-form
+  transparency hint (v0.36.1) only fires *before* a run. Persist the run's
+  median-transparency-vs-target-baseline verdict (or recompute it) and show a
+  small "hazy night" badge on the completed run's History and Gallery cards, so
+  a user browsing past stacks can see at a glance which were shot through haze
+  without reopening the frames. Reuse the within-target normalisation.
+  (S, approachability)
+- **Surface the quality-weighting summary in the run Info panel** — a
+  quality-weighted stack already logs `WeightingStats` (n_weighted, min/max/
+  median weight) but the user never sees it. Record it on the run (or recompute
+  cheaply) and show "N frames down-weighted, weight range 0.31–1.00" in the
+  Stack Info panel, so a user can trust *that* weighting did something and how
+  aggressive it was (trust pillar / Method D). (S, approachability)
 
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
@@ -117,6 +126,40 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Library search matches notes + persistent filter view** — the Library
+  free-text search now also matches a target's `notes` (not just name/tags), and
+  the whole view (search text, sort, active tag chips) is persisted to
+  localStorage so a user with a big library keeps their filters when they open a
+  target and come back, or reload. Defensively guarded so a disabled/broken
+  store never breaks the page. Frontend-only. (v0.37.0, this run)
+
+- **Transparency-night hint on the Stack form** — completes the transparency
+  weighting pair (v0.36.0). The Stack form now shows an advisory when the median
+  transparency of the frames that would be stacked (accepted + solved) sits well
+  below (<60% of) this target's clear-sky baseline — the 90th percentile of
+  transparency across all frames that carry a score — so a user knows the stack
+  was shot through haze/thin cloud even if they didn't reject those subs, and is
+  pointed at quality weighting or rejecting the hazy subs. Client-side,
+  within-target normalisation; advisory only. (v0.36.1, this run)
+
+- **Weight the stack by frame transparency** — `compute_frame_weights` gained a
+  fourth `transparency_factor` (`frame_transparency / median_transparency`,
+  clipped to `[min_weight, 1.0]`), so with quality-weighting on, hazy/thin-cloud
+  subs (whose bright stars dimmed) pull less into the average while clear frames
+  cap at the neutral factor. Normalised against the median of the frames being
+  stacked (within one target), because the raw score isn't comparable across
+  gain/exposure. Frames without a transparency score keep the neutral factor.
+  Additive; gated by the existing (off-by-default) `quality_weighted` flag.
+  (v0.36.0, this run)
+
+- **Inline reject-reason chip on rejected frame rows** — rejected rows in the
+  Target table were only dimmed; each now carries a small muted plain-language
+  reason chip (with a raw-reason tooltip) so a user scanning the table sees *why
+  each specific frame* was dropped, not just the aggregate. `rejectReasonLabel`
+  was extended to cover the remaining persisted reason forms (`auto:*`,
+  `qc_error:*`, `solve_failed:*`), which also improves the existing reject-reason
+  breakdown hover-card. Frontend-only. (v0.35.1, this run)
 
 - **"Reject worst by transparency" bulk action** — building on this run's
   `transparency_score`, the `reject_worst` `BulkFrameAction` metric enum and the

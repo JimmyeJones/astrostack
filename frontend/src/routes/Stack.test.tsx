@@ -286,6 +286,38 @@ describe("StackView", () => {
     expect(screen.queryByText(/doesn't apply to drizzle's single-pass/)).not.toBeInTheDocument();
   });
 
+  it("flags a hazy stack whose transparency sits below the target baseline", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
+    // Target's clear-sky baseline is ~10000; the accepted+solved run frames are
+    // all hazy (~3000), well below 0.6× the 90th-percentile baseline.
+    const clear = Array.from({ length: 5 }, (_, i) =>
+      ({ ...mkFrame(100 + i), accept: false, transparency_score: 10000 }));
+    const hazy = Array.from({ length: 5 }, (_, i) =>
+      ({ ...mkFrame(i + 1), transparency_score: 3000 }));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([...clear, ...hazy]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    await waitFor(() =>
+      expect(screen.getByText(/likely shot through haze or thin cloud/)).toBeInTheDocument());
+  });
+
+  it("does not flag transparency when the run matches the target baseline", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
+    const frames = Array.from({ length: 8 }, (_, i) =>
+      ({ ...mkFrame(i + 1), transparency_score: 9000 + i * 10 }));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    await waitFor(() => expect(screen.getByText("Start stacking")).toBeInTheDocument());
+    expect(screen.queryByText(/likely shot through haze or thin cloud/)).not.toBeInTheDocument();
+  });
+
   it("shows the pre-run output canvas + peak-memory estimate line", async () => {
     vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: true });
