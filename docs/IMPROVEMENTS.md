@@ -9,6 +9,15 @@ Items under "Needs owner sign-off" must not be started autonomously — see
 
 ## Shipped
 
+- **[Usability] Confirm + surface errors on stack-run deletion** — S —
+  `History.tsx`'s delete (trash icon) fired the mutation the instant it was
+  clicked — no confirmation, and no `onError`, even though it permanently
+  removes the run's FITS/TIFF/preview files. Added a `window.confirm`
+  prompt and an `onError` notification, matching the pattern already used
+  for destructive actions in `Storage.tsx`; also added the missing
+  `aria-label` on the icon-only delete button. Covered by
+  `frontend/src/routes/History.test.tsx`. *(2026-07-02)*
+
 - **[Security] Validate the `bayer` query param on frame previews** — S —
   Found while replenishing the backlog. `GET .../frames/{id}/preview?bayer=`
   was free text that got embedded straight into the thumbnail cache filename

@@ -140,7 +140,7 @@ function RunCard({ safe, run, onDelete }: { safe: string; run: StackRun; onDelet
             </Button>
           )}
         </Group>
-        <ActionIcon variant="subtle" color="red" onClick={onDelete}>
+        <ActionIcon variant="subtle" color="red" onClick={onDelete} aria-label="Delete stack">
           <IconTrash size={16} />
         </ActionIcon>
       </Group>
@@ -166,8 +166,20 @@ export function HistoryView() {
 
   const del = useMutation({
     mutationFn: (id: number) => api.deleteStackRun(safe, id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["runs", safe] }),
+    onSuccess: () => {
+      notifications.show({ message: "Stack deleted", color: "teal" });
+      qc.invalidateQueries({ queryKey: ["runs", safe] });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
+
+  const confirmDelete = (run: StackRun) => {
+    if (window.confirm(
+      `Permanently delete "${run.output_basename}" (${run.n_frames_used} frames) and its `
+      + `FITS/TIFF/preview files?\n\nThis cannot be undone.`)) {
+      del.mutate(run.id);
+    }
+  };
 
   if (runs.isLoading) {
     return <Center h={300}><Loader /></Center>;
@@ -186,7 +198,7 @@ export function HistoryView() {
       ) : (
         <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }}>
           {list.map((r) => (
-            <RunCard key={r.id} safe={safe} run={r} onDelete={() => del.mutate(r.id)} />
+            <RunCard key={r.id} safe={safe} run={r} onDelete={() => confirmDelete(r)} />
           ))}
         </SimpleGrid>
       )}
