@@ -138,4 +138,46 @@ describe("StackView", () => {
     await waitFor(() =>
       expect(screen.getByText(/shot at 120s but your subs are 30s/)).toBeInTheDocument());
   });
+
+  function mkFrame(id: number): client.Frame {
+    return {
+      id, name: `f${id}.fits`, timestamp_utc: null, exposure_s: 30, gain: 80,
+      width_px: 480, height_px: 320, bayer_pattern: "RGGB", solved: true,
+      ra_center_deg: null, dec_center_deg: null, ra_hint_deg: null, dec_hint_deg: null,
+      fwhm_px: null, star_count: null, sky_adu_median: null, eccentricity_median: null,
+      streak_detected: false, accept: true, reject_reason: null, user_override: false,
+    };
+  }
+
+  it("cautions when sigma-clip is on but too few frames are accepted", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+      { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
+        default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+    ]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: true });
+    // Only 3 accepted, solved frames — below the ~5 sigma-clip needs.
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1), mkFrame(2), mkFrame(3)]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    await waitFor(() =>
+      expect(screen.getByText(/only have 3 accepted, solved frames/)).toBeInTheDocument());
+  });
+
+  it("does not caution when enough frames are accepted for sigma-clip", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+      { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
+        default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+    ]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: true });
+    const frames = Array.from({ length: 8 }, (_, i) => mkFrame(i + 1));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    await waitFor(() => expect(screen.getByText("Sigma clipping")).toBeInTheDocument());
+    expect(screen.queryByText(/it can reject real signal as an outlier/)).not.toBeInTheDocument();
+  });
 });

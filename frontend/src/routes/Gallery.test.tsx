@@ -66,4 +66,22 @@ describe("Gallery batch apply", () => {
     // 300 s → "5 min" rendered in the card's metadata line.
     await waitFor(() => expect(screen.getByText(/5 min/)).toBeInTheDocument());
   });
+
+  it("offers Reuse settings only for reusable cards", async () => {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [
+        { ...item(1), reusable: true },
+        { ...item(2), reusable: false },
+      ],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+
+    renderGallery();
+
+    // Only the reusable card exposes the link, pointing at the Stack form.
+    const links = await screen.findAllByRole("link", { name: /Reuse settings/ });
+    expect(links).toHaveLength(1);
+    expect(links[0]).toHaveAttribute("href", "/targets/M_42/stack?from=1");
+  });
 });

@@ -1,11 +1,11 @@
 import { useState } from "react";
 import {
   ActionIcon, Alert, Badge, Button, Card, Center, Group, Image, Loader, SimpleGrid,
-  Slider, Stack, Table, Text, Title, Tooltip,
+  Slider, Stack, Table, Text, TextInput, Title, Tooltip,
 } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
-import { IconAdjustments, IconCopy, IconDeviceFloppy, IconDownload, IconInfoCircle, IconSparkles, IconTrash } from "@tabler/icons-react";
+import { IconAdjustments, IconCheck, IconCopy, IconDeviceFloppy, IconDownload, IconInfoCircle, IconPencil, IconSparkles, IconTrash, IconX } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api, type StackRun } from "../api/client";
@@ -44,6 +44,63 @@ function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
         </Table.Tbody>
       </Table>
     </Stack>
+  );
+}
+
+// Inline, editable free-text label for a run ("best RGB v2", "cloudy night").
+// Persisted via PATCH; reuses the long-standing notes column.
+function NotesEditor({ safe, run }: { safe: string; run: StackRun }) {
+  const qc = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(run.notes ?? "");
+
+  const save = useMutation({
+    mutationFn: (notes: string) => api.updateStackRunNotes(safe, run.id, notes),
+    onSuccess: () => {
+      setEditing(false);
+      qc.invalidateQueries({ queryKey: ["runs", safe] });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
+
+  if (editing) {
+    return (
+      <Group gap={4} mt={4} wrap="nowrap">
+        <TextInput
+          size="xs" style={{ flex: 1 }} value={draft} maxLength={500} autoFocus
+          placeholder="Label this stack (e.g. best RGB v2)"
+          aria-label="Stack note"
+          onChange={(e) => setDraft(e.currentTarget.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") save.mutate(draft);
+            if (e.key === "Escape") { setDraft(run.notes ?? ""); setEditing(false); }
+          }}
+        />
+        <ActionIcon size="sm" color="teal" variant="light" aria-label="Save note"
+          loading={save.isPending} onClick={() => save.mutate(draft)}>
+          <IconCheck size={14} />
+        </ActionIcon>
+        <ActionIcon size="sm" variant="subtle" aria-label="Cancel note"
+          onClick={() => { setDraft(run.notes ?? ""); setEditing(false); }}>
+          <IconX size={14} />
+        </ActionIcon>
+      </Group>
+    );
+  }
+  return (
+    <Group gap={4} mt={4} wrap="nowrap">
+      {run.notes ? (
+        <Text size="xs" c="dimmed" style={{ flex: 1 }} truncate>“{run.notes}”</Text>
+      ) : (
+        <Text size="xs" c="dimmed" fs="italic" style={{ flex: 1 }}>No label</Text>
+      )}
+      <Tooltip label={run.notes ? "Edit label" : "Add a label"}>
+        <ActionIcon size="sm" variant="subtle" aria-label="Edit note"
+          onClick={() => { setDraft(run.notes ?? ""); setEditing(true); }}>
+          <IconPencil size={14} />
+        </ActionIcon>
+      </Tooltip>
+    </Group>
   );
 }
 
@@ -101,7 +158,9 @@ function RunCard({ safe, run, onDelete, deleting }: {
       </Group>
       <Text size="xs" c="dimmed">
         {run.timestamp_utc.replace("T", " ").slice(0, 19)} · {run.canvas_w}×{run.canvas_h}
+        {run.total_exposure_s ? ` · ${formatIntegration(run.total_exposure_s)}` : ""}
       </Text>
+      <NotesEditor safe={safe} run={run} />
 
       {adjust && run.has_fits ? (
         <Stack gap={6} mt="sm">

@@ -164,6 +164,7 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
             has_tiff=bool(r.tiff_path and Path(r.tiff_path).exists()),
             has_preview=bool(r.preview_path and Path(r.preview_path).exists()),
             notes=r.notes,
+            total_exposure_s=r.total_exposure_s,
             reusable=_run_is_reusable(r.options_json),
         ))
     return out
@@ -380,6 +381,42 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request) -> F
         path, media_type=media,
         filename=filename if download else None,
     )
+
+
+_MAX_NOTES_LEN = 500
+
+
+@router.patch("/api/targets/{safe}/stack-runs/{run_id}")
+def update_stack_run(
+    safe: str, run_id: int, body: dict[str, Any], request: Request,
+) -> dict:
+    """Update a run's free-text notes/label.
+
+    The only mutable field is ``notes`` (a short user label like "best RGB v2").
+    Whitespace is trimmed; an empty string clears the note. Length is capped so
+    a stray paste can't bloat the DB. Additive — the ``notes`` column already
+    exists, so this is upgrade-safe.
+    """
+    if "notes" not in body:
+        raise HTTPException(status_code=422, detail="Missing 'notes' field")
+    raw = body["notes"]
+    if raw is not None and not isinstance(raw, str):
+        raise HTTPException(status_code=422, detail="'notes' must be a string or null")
+    notes: str | None = raw.strip() if isinstance(raw, str) else None
+    if notes == "":
+        notes = None
+    if notes is not None and len(notes) > _MAX_NOTES_LEN:
+        notes = notes[:_MAX_NOTES_LEN]
+
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        updated = proj.set_stack_run_notes(run_id, notes)
+    finally:
+        proj.close()
+        lib.close()
+    if not updated:
+        raise HTTPException(status_code=404, detail="No such run")
+    return {"id": run_id, "notes": notes}
 
 
 @router.delete("/api/targets/{safe}/stack-runs/{run_id}")

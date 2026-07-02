@@ -169,7 +169,8 @@ def test_stack_info_404_without_fits(client, solved_library):
     assert r.status_code == 404
 
 
-def _add_run_with_options(data_root, safe: str, options_json: str) -> int:
+def _add_run_with_options(data_root, safe: str, options_json: str,
+                          total_exposure_s: float | None = None) -> int:
     lib = Library.open_or_create(data_root / "library")
     try:
         proj = lib.open_target(safe)
@@ -179,6 +180,7 @@ def _add_run_with_options(data_root, safe: str, options_json: str) -> int:
                 output_basename="master", fits_path=None, tiff_path=None,
                 preview_path=None, n_frames_used=3, canvas_h=8, canvas_w=8,
                 coverage_min=1, coverage_max=3, options_json=options_json,
+                total_exposure_s=total_exposure_s,
             ))
         finally:
             proj.close()
@@ -236,3 +238,52 @@ def test_stack_runs_reusable_flag(client, solved_library):
     runs = {r["id"]: r for r in client.get(f"/api/targets/{safe}/stack-runs").json()}
     assert runs[stack_id]["reusable"] is True
     assert runs[combine_id]["reusable"] is False
+
+
+def test_update_stack_run_notes(client, solved_library):
+    """PATCH sets, trims, clears and 404s a run's free-text label."""
+    import json
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _add_run_with_options(solved_library, safe, json.dumps({"sigma_clip": True}))
+    url = f"/api/targets/{safe}/stack-runs/{run_id}"
+
+    # Set (with surrounding whitespace, which is trimmed).
+    r = client.patch(url, json={"notes": "  best RGB v2  "})
+    assert r.status_code == 200 and r.json()["notes"] == "best RGB v2"
+    got = next(x for x in client.get(f"/api/targets/{safe}/stack-runs").json() if x["id"] == run_id)
+    assert got["notes"] == "best RGB v2"
+
+    # Empty string clears the note back to null.
+    r = client.patch(url, json={"notes": "   "})
+    assert r.status_code == 200 and r.json()["notes"] is None
+
+    # Missing field and bad type are rejected.
+    assert client.patch(url, json={}).status_code == 422
+    assert client.patch(url, json={"notes": 5}).status_code == 422
+
+    # Unknown run → 404.
+    assert client.patch(f"/api/targets/{safe}/stack-runs/999999",
+                        json={"notes": "x"}).status_code == 404
+
+
+def test_update_stack_run_notes_caps_length(client, solved_library):
+    import json
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _add_run_with_options(solved_library, safe, json.dumps({"sigma_clip": True}))
+    r = client.patch(f"/api/targets/{safe}/stack-runs/{run_id}", json={"notes": "z" * 800})
+    assert r.status_code == 200
+    assert len(r.json()["notes"]) == 500
+
+
+def test_stack_runs_expose_integration_time(client, solved_library):
+    """The stack-runs list carries total_exposure_s so History can show it inline."""
+    import json
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _add_run_with_options(
+        solved_library, safe, json.dumps({"sigma_clip": True}),
+        total_exposure_s=2520.0)
+    runs = {r["id"]: r for r in client.get(f"/api/targets/{safe}/stack-runs").json()}
+    assert runs[run_id]["total_exposure_s"] == 2520.0

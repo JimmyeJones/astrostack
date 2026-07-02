@@ -38,6 +38,9 @@ class GalleryItem(BaseModel):
     # Full StackOptions used for this run (parsed from options_json), so the UI
     # can display exactly how the image was produced. Empty dict if unparseable.
     options: dict[str, Any]
+    # True when this run's settings can pre-fill the Stack form ("reuse settings").
+    # False for editor-recipe / channel-combine runs, which carry no stack knobs.
+    reusable: bool = False
 
 
 class GalleryResponse(BaseModel):
@@ -54,6 +57,12 @@ def _parse_options(options_json: str | None) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
+def _is_reusable(options: dict[str, Any]) -> bool:
+    """A run's settings can pre-fill the Stack form unless it's an editor-recipe
+    or channel-combine run (those carry no stack knobs)."""
+    return "editor_recipe" not in options and "channel_combine" not in options
+
+
 @router.get("/api/gallery", response_model=GalleryResponse)
 def get_gallery(request: Request) -> GalleryResponse:
     items: list[GalleryItem] = []
@@ -67,6 +76,7 @@ def get_gallery(request: Request) -> GalleryResponse:
                 proj = Project.open(lib.target_dir(t))
                 for run in proj.iter_stack_runs():
                     has_preview = bool(run.preview_path and Path(run.preview_path).exists())
+                    options = _parse_options(run.options_json)
                     items.append(GalleryItem(
                         safe=t.safe_name,
                         target_name=t.name,
@@ -83,7 +93,8 @@ def get_gallery(request: Request) -> GalleryResponse:
                         preview_url=(
                             f"/api/targets/{t.safe_name}/stack-runs/{run.id}/preview"
                         ),
-                        options=_parse_options(run.options_json),
+                        options=options,
+                        reusable=_is_reusable(options),
                     ))
             finally:
                 if proj is not None:

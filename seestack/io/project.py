@@ -399,6 +399,14 @@ class Project:
         assert self._conn is not None
         self._conn.execute("DELETE FROM stack_runs WHERE id = ?", (run_id,))
 
+    def set_stack_run_notes(self, run_id: int, notes: str | None) -> bool:
+        """Set (or clear) a run's free-text notes/label. Returns True if a row
+        was updated, False if no run with ``run_id`` exists."""
+        assert self._conn is not None
+        cur = self._conn.execute(
+            "UPDATE stack_runs SET notes = ? WHERE id = ?", (notes, run_id))
+        return cur.rowcount > 0
+
 
 @dataclass
 class StackRunRow:

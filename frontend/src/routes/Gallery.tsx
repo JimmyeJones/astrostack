@@ -3,7 +3,7 @@ import {
   Alert, Badge, Button, Card, Center, Checkbox, Group, Image, Loader, Menu, Paper,
   SimpleGrid, Spoiler, Stack, Text, Title, Tooltip,
 } from "@mantine/core";
-import { IconPhoto, IconWand } from "@tabler/icons-react";
+import { IconCopy, IconPhoto, IconWand } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
@@ -85,12 +85,25 @@ function GalleryCard({ item, labels, onView, selected, onToggleSelect }: {
         {item.total_exposure_s ? ` · ${formatIntegration(item.total_exposure_s)}` : ""}
       </Text>
 
-      <Button
-        component={Link} to={`/targets/${item.safe}/edit/${item.run_id}`}
-        leftSection={<IconWand size={14} />} variant="light" size="xs" mt="xs" fullWidth
-      >
-        Edit image
-      </Button>
+      <Group gap="xs" mt="xs" wrap="nowrap">
+        <Button
+          component={Link} to={`/targets/${item.safe}/edit/${item.run_id}`}
+          leftSection={<IconWand size={14} />} variant="light" size="xs"
+          style={{ flex: 1 }}
+        >
+          Edit image
+        </Button>
+        {item.reusable ? (
+          <Tooltip label="Re-run the Stack form pre-filled with this image's settings">
+            <Button
+              component={Link} to={`/targets/${item.safe}/stack?from=${item.run_id}`}
+              leftSection={<IconCopy size={14} />} variant="light" color="gray" size="xs"
+            >
+              Reuse settings
+            </Button>
+          </Tooltip>
+        ) : null}
+      </Group>
 
       {badges.length > 0 ? (
         <Group gap={6} mt="xs">

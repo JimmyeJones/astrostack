@@ -140,6 +140,7 @@ export interface StackRun {
   has_tiff: boolean;
   has_preview: boolean;
   notes: string | null;
+  total_exposure_s?: number | null;
   reusable?: boolean;
 }
 
@@ -171,6 +172,7 @@ export interface GalleryItem {
   has_tiff: boolean;
   preview_url: string;
   options: Record<string, unknown>;
+  reusable?: boolean;
 }
 
 export interface LogEntry {
@@ -380,6 +382,11 @@ export const api = {
   listStackRuns: (safe: string) => req<StackRun[]>(`/api/targets/${safe}/stack-runs`),
   deleteStackRun: (safe: string, id: number) =>
     req(`/api/targets/${safe}/stack-runs/${id}`, { method: "DELETE" }),
+  updateStackRunNotes: (safe: string, id: number, notes: string) =>
+    req<{ id: number; notes: string | null }>(
+      `/api/targets/${safe}/stack-runs/${id}`,
+      { method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notes }) }),
   stackRunInfo: (safe: string, id: number) =>
     req<StackRunInfo>(`/api/targets/${safe}/stack-runs/${id}/info`),
   stackRunOptions: (safe: string, id: number) =>

@@ -29,7 +29,9 @@ _(none — claim an item here with your branch name)_
 ### Correctness & robustness (highest priority)
 - Audit NaN/coverage handling on the newer paths (calibration, mono) for
   single-frame and mosaic-edge cases. Add edge-case tests. (S–M) — *channel
-  combine done (v0.16.1); calibration/mono still to audit.*
+  combine done (v0.16.1); mono single-frame + sigma-clip verified (v0.22.1);
+  calibration and the mono mosaic-edge (partial-overlap → NaN) case still to
+  audit.*
 - Channel combine: reproject stacks that don't share a canvas (via WCS) instead
   of erroring, so filters shot in separate sessions can be combined. (M–L)
 - Seestar client (`webapp/seestar/client.py`) has no reconnect/retry on a
@@ -39,25 +41,25 @@ _(none — claim an item here with your branch name)_
   testable in isolation from real hardware. (M, correctness)
 
 ### Features that serve real workflows
-- Auto-suggest a sensible sigma-clip kappa (and whether to enable rejection)
-  from the accepted-frame count — e.g. skip clipping under ~5 frames, loosen
-  kappa for very large stacks — with a one-line "why" in the form. Removes a
-  knob a beginner can't reason about. (M, approachability/correctness)
+- Loosen/tighten the suggested sigma-clip **kappa** from the accepted-frame
+  count for very large stacks (the low-frame "don't clip under ~5" caution
+  shipped in v0.22.0; the large-stack kappa hint is the remaining half). (S,
+  approachability/correctness)
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
 - Drizzle memory estimate surfaced in the Stack form before you run it. (S)
 - Star-mask preview toggle in the editor (visualise the mask driving star ops). (S)
 - Per-target "notes/tags" search improvements and saved filters in Library. (S)
-- **Show integration time inline on History cards** — now that runs persist
-  `total_exposure_s` (v0.20.0), add it to `StackRunOut` and render "Integration:
-  2.3 h · 840 subs" on each History card directly (no need to open the Info
-  panel / read the FITS header). The Gallery already shows it from the run row;
-  History should match. (S, approachability)
-- **Offer "Reuse settings" from Gallery cards too** — the Gallery already carries
-  each run's parsed `options`, and the Stack form now accepts `?from=<runId>`.
-  Add the same "Reuse settings" action to Gallery cards (guarded by a `reusable`
-  flag like History) so users can re-run a recipe straight from the browse view.
-  (S, approachability)
+- **Show/search run labels in the Gallery** — now that a run's `notes` label is
+  editable (v0.23.0), surface it on Gallery cards and add a text filter that
+  matches label + target name, so a user can find "best RGB v2" across all
+  targets. Reuses the `notes` field already returned per run. (S, approachability)
+- **Pre-run stack estimate endpoint** — a lightweight
+  `GET /targets/{safe}/stack-estimate?drizzle_scale=` that computes the
+  union-of-footprints canvas from the accepted+solved frames and returns the
+  output dimensions + estimated peak memory (same maths as
+  `_guard_stack_memory`), so the Stack form can warn *before* a run is refused
+  for OOM ("Drizzle ×2 → ~7680×4320, ≈2.1 GB peak"). (M, scale/approachability)
 
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
@@ -102,6 +104,32 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Editable notes/label on History cards** — the long-standing `notes` column
+  finally has a UI: a new `PATCH /api/targets/{safe}/stack-runs/{id}` (trims
+  whitespace, empty → null, capped at 500 chars) plus `Project.set_stack_run_notes`.
+  Each History card shows an inline pencil-edit label ("best RGB v2", "cloudy
+  night") so users can annotate and later recognise runs. Additive/upgrade-safe.
+  (v0.23.0, this run)
+
+- **Mono single-frame edge test** — verified the mono stack path on a
+  one-frame, sigma-clip-on stack: coverage tops at 1, the single-coverage
+  pixels stay finite (no spurious clip-to-NaN), and the output stays grayscale.
+  Closes the single-frame half of the mono NaN/coverage audit. (v0.22.1, this run)
+
+- **Low-frame sigma-clip caution** — the Stack form now shows an inline caution
+  when sigma-clip rejection is enabled but fewer than ~5 accepted, plate-solved
+  frames exist ("you only have 3 accepted, solved frames … it can reject real
+  signal as an outlier — consider turning it off"). Removes a knob a beginner
+  can't reason about; advisory only, the setting still stands. (v0.22.0, this run)
+
+- **Integration time inline on History cards + Reuse settings from Gallery** —
+  `StackRunOut` now carries `total_exposure_s`, so each History card shows the
+  friendly "2.3 h"/"42 min" integration on its metadata line without opening the
+  Info panel (matching the Gallery). The Gallery response gained a `reusable`
+  flag (false for editor-recipe/channel-combine runs), and Gallery cards now
+  offer the same "Reuse settings" action as History, opening the Stack form
+  pre-filled via `?from=<runId>`. (v0.21.0, this run)
 
 - **Fix red CI (pytest-qt import crash)** — CI had been failing on every merge:
   the `pytest-qt` plugin imports Qt at configure time and died on the runner's

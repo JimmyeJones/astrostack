@@ -91,6 +91,9 @@ class StackRunOut(BaseModel):
     has_tiff: bool = False
     has_preview: bool = False
     notes: str | None = None
+    # Effective integration time in seconds (None for pre-schema-4 runs), so the
+    # UI can show "2.3 h · 840 subs" on a card without reading the FITS header.
+    total_exposure_s: float | None = None
     # True when this run's options can pre-fill the Stack form ("reuse settings").
     # False for editor-recipe / channel-combine runs, which carry no stack knobs.
     reusable: bool = False

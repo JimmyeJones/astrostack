@@ -88,6 +88,16 @@ describe("HistoryView", () => {
     expect(screen.getByText("sigma-clip")).toBeInTheDocument();
   });
 
+  it("shows integration time inline on a card without opening Info", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ total_exposure_s: 2520 }),
+    ]);
+
+    renderHistory();
+    // 2520 s → "42 min" on the card metadata line, no Info toggle needed.
+    await waitFor(() => expect(screen.getByText(/42 min/)).toBeInTheDocument());
+  });
+
   it("offers Reuse settings only for reusable runs", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
       mkRun({ id: 1, output_basename: "reusable_run", reusable: true }),
@@ -102,6 +112,27 @@ describe("HistoryView", () => {
     const buttons = screen.getAllByRole("link", { name: /Reuse settings/ });
     expect(buttons).toHaveLength(1);
     expect(buttons[0]).toHaveAttribute("href", "/targets/M_42/stack?from=1");
+  });
+
+  it("edits a run's note and persists it via PATCH", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ notes: null })]);
+    const upd = vi.spyOn(client.api, "updateStackRunNotes")
+      .mockResolvedValue({ id: 1, notes: "best RGB v2" });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("No label")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit note" }));
+    fireEvent.change(screen.getByLabelText("Stack note"), { target: { value: "best RGB v2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save note" }));
+
+    await waitFor(() => expect(upd).toHaveBeenCalledWith("M_42", 1, "best RGB v2"));
+  });
+
+  it("shows an existing note as a quoted label", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ notes: "cloudy" })]);
+    renderHistory();
+    await waitFor(() => expect(screen.getByText(/cloudy/)).toBeInTheDocument());
   });
 
   it("shows an error notification when deletion fails", async () => {
