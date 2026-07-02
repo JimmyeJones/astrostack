@@ -271,25 +271,29 @@ This is a solo, autonomous project. **Nobody is going to review or merge your
 work — so if you don't merge it, it never ships.** Your job is to get good,
 tested changes onto the default branch by yourself, safely.
 
-**Work on a branch, then merge it yourself:**
+**The default branch is `main`.** That is the single source of truth: always
+start from the latest `main` and always merge back into `main`. Ignore any other
+branches you see on the remote (old/stale topic branches) — never base work on
+them or merge into them.
 
-1. Start from the latest default branch:
-   `git fetch origin && git checkout -B agent/<short-kebab-topic> origin/<default>`
-   (the harness may create a branch for you automatically — that's fine; just make
-   sure it's based on the current default). Use a fresh branch per topic; related
-   small tasks may share one.
+**Work on a fresh branch, then merge it into `main` yourself:**
+
+1. Start from the latest `main`:
+   `git fetch origin && git checkout -B agent/<short-kebab-topic> origin/main`
+   (the harness may create a working branch for you automatically — that's fine;
+   just make sure it's based on the current `origin/main`). Use a fresh branch per
+   topic; related small tasks may share one.
 2. Commit each task as its own well-described commit. End every commit message with
    the repo's trailer convention (a `Co-Authored-By:` line; never put any model
    identifier in commits, code, or logs). Push after each task
    (`git push -u origin <branch>`); retry transient network errors with backoff.
-3. **Before merging, make it green on top of the latest default:**
-   `git fetch origin` → merge `origin/<default>` into your branch → re-run the full
+3. **Before merging, make it green on top of the latest `main`:**
+   `git fetch origin` → merge `origin/main` into your branch → re-run the full
    test suite (§5) and, if the frontend changed, the frontend build. Resolve any
    conflicts conservatively.
-4. **Merge into the default branch** (fast-forward or a normal merge commit is
-   fine), push the default branch, and delete your topic branch. Opening a PR
-   first is optional and nice for history, but do not *wait* on it — merge it
-   yourself once green.
+4. **Merge into `main`** (fast-forward or a normal merge commit is fine), push
+   `main`, and delete your topic branch. Opening a PR first is optional and nice
+   for history, but do not *wait* on it — merge it yourself once green.
 
 **Absolute rules for merging:**
 - Only ever merge a **fully green** branch. Green tests are the safety gate that
