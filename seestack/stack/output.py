@@ -28,6 +28,7 @@ import logging
 import re
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -65,12 +66,20 @@ def write_stack_outputs(
     wcs_text: str | None,
     out_basename: str = "master",
     tiff_mode: str = "linear",
+    header_meta: dict[str, Any] | None = None,
 ) -> dict[str, Path]:
     """
     Write the FITS + TIFF + preview PNG. Returns a dict of ``{kind: path}``.
 
     Parameters
     ----------
+    header_meta
+        Optional extra FITS header cards to record in ``master.fits`` — stack
+        provenance such as target name, number of frames, integration time and
+        stacking method. Keys are treated as FITS keyword names (see
+        :func:`_merge_header_meta`); values may be ``(value, comment)`` tuples.
+        Purely additive: downstream tools that don't read these keys are
+        unaffected, and omitting the argument reproduces the old output exactly.
     tiff_mode
         ``"linear"`` (default) writes a 16-bit TIFF with no stretching, scaled
         to fill 16-bit range based on the data's robust min/max. This matches
@@ -91,7 +100,7 @@ def write_stack_outputs(
 
     _archive_if_exists([fits_path, tiff_path, preview_path, cov_fits_path])
 
-    _write_fits(fits_path, rgb, wcs_text)
+    _write_fits(fits_path, rgb, wcs_text, header_meta)
     _write_coverage_fits(cov_fits_path, coverage)
     _write_tiff(tiff_path, rgb, mode=tiff_mode)
     # Preview PNG always uses autostretch — it's there for the "did the stack
@@ -109,7 +118,12 @@ def write_stack_outputs(
 
 # ---- FITS ----------------------------------------------------------------
 
-def _write_fits(path: Path, rgb: np.ndarray, wcs_text: str | None) -> None:
+def _write_fits(
+    path: Path,
+    rgb: np.ndarray,
+    wcs_text: str | None,
+    header_meta: dict[str, Any] | None = None,
+) -> None:
     """Write a 3-channel float32 FITS cube with WCS header."""
     from astropy.io import fits
 
@@ -121,6 +135,8 @@ def _write_fits(path: Path, rgb: np.ndarray, wcs_text: str | None) -> None:
     h["DATE"] = (datetime.now(timezone.utc).isoformat(), "UTC")
     h["NAXIS3"] = (3, "R, G, B")
     h["BUNIT"] = ("ADU", "linear units (uncalibrated)")
+    if header_meta:
+        _merge_header_meta(h, header_meta)
     if wcs_text:
         # Merge the reference WCS in. We strip NAXIS keys so they don't clash
         # with the cube's own.
@@ -133,6 +149,38 @@ def _write_fits(path: Path, rgb: np.ndarray, wcs_text: str | None) -> None:
         except Exception:  # noqa: BLE001
             log.warning("Could not merge WCS into output FITS")
     hdu.writeto(path, overwrite=True)
+
+
+def _merge_header_meta(header, meta: dict[str, Any]) -> None:  # noqa: ANN001
+    """Merge caller-supplied provenance cards into a FITS header, defensively.
+
+    FITS keywords are 8-char uppercase (A–Z, 0–9, ``-``, ``_``); values must be
+    str/int/float/bool. We skip ``None`` values and any key/value that can't be
+    coerced into a valid card, so a stray field never aborts writing the stack.
+    Values may be a bare scalar or a ``(value, comment)`` tuple.
+    """
+    for raw_key, raw_val in meta.items():
+        key = re.sub(r"[^A-Z0-9_-]", "", str(raw_key).upper())[:8]
+        if not key:
+            continue
+        comment = ""
+        val = raw_val
+        if isinstance(raw_val, tuple) and len(raw_val) == 2:
+            val, comment = raw_val
+        if val is None:
+            continue
+        if isinstance(val, bool):
+            pass  # bool is a valid FITS logical
+        elif isinstance(val, (int, float, str)):
+            pass
+        else:
+            val = str(val)
+        if isinstance(val, str):
+            val = val[:68]  # keep the card within the 80-column limit
+        try:
+            header[key] = (val, comment) if comment else val
+        except (ValueError, TypeError):  # unrepresentable value — drop the card
+            log.debug("skipping non-FITS-safe header meta %r=%r", key, raw_val)
 
 
 def _write_coverage_fits(path: Path, coverage: np.ndarray) -> None:

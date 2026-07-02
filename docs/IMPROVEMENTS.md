@@ -47,7 +47,6 @@ _(none — claim an item here with your branch name)_
 - Annotated sky overlay (label detected objects / show solved field). (M)
 - Drizzle memory estimate surfaced in the Stack form before you run it. (S)
 - Star-mask preview toggle in the editor (visualise the mask driving star ops). (S)
-- More export options / metadata in FITS/TIFF (instrument, exposure totals). (S)
 - Per-target "notes/tags" search improvements and saved filters in Library. (S)
 
 ### UX & polish
@@ -101,6 +100,12 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **FITS output provenance headers** — `master.fits` now records OBJECT (target),
+  NFRAMES, EXPOSURE (per-sub), EXPTOTAL (integration time), STACKER (method) and
+  COLORTYP so the scientific output self-documents for Siril/PixInsight/APP.
+  Additive `header_meta` arg on `write_stack_outputs`; defensive card merge.
+  (v0.14.0, this run)
 
 - **Autonomous run (agent, this session):** security fixes — Seestar `goto`
   RA/Dec bounds validation, closed a quick-look-preview gap in the

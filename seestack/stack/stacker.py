@@ -31,7 +31,7 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from itertools import islice
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -201,6 +201,45 @@ ProgressFn = Callable[[str, int, int], None]
 
 class StackCancelled(RuntimeError):
     """Raised internally when the user cancels mid-stack."""
+
+
+def _build_output_header_meta(
+    project: Project, frames: list, options: StackOptions, n_used: int
+) -> dict[str, Any]:
+    """Collect provenance for the output FITS header.
+
+    Records the target name, frame count, integration time, per-sub exposure and
+    stacking method so the saved ``master.fits`` self-documents how it was made
+    (Siril/PixInsight/APP surface these keys). Best-effort: any lookup that fails
+    is simply omitted rather than aborting the write.
+
+    ``EXPTOTAL`` is the effective integration time — the median sub exposure times
+    the number of frames that actually contributed (``n_used``), which is the
+    honest figure when a few candidate subs were dropped mid-stack.
+    """
+    meta: dict[str, Any] = {}
+    try:
+        name = project.get_meta("name")
+        if name:
+            meta["OBJECT"] = (name, "target name")
+    except Exception:  # noqa: BLE001 — provenance is non-critical
+        pass
+    if n_used:
+        meta["NFRAMES"] = (int(n_used), "frames combined")
+    exposures = [
+        float(f.exposure_s) for f in frames
+        if getattr(f, "exposure_s", None) and f.exposure_s > 0
+    ]
+    if exposures:
+        exposures.sort()
+        per_sub = exposures[len(exposures) // 2]  # median
+        meta["EXPOSURE"] = (round(per_sub, 3), "per-sub exposure (s)")
+        if n_used:
+            meta["EXPTOTAL"] = (round(per_sub * n_used, 2), "integration time (s)")
+    method = "drizzle" if options.drizzle else ("sigma-clip" if options.sigma_clip else "mean")
+    meta["STACKER"] = (method, "stacking method")
+    meta["COLORTYP"] = ("mono" if options.mono else "OSC", "sensor/stack colour mode")
+    return meta
 
 
 def run_stack(
@@ -600,6 +639,7 @@ def run_stack(
         wcs_text=dst_wcs_text,
         out_basename=options.output_name,
         tiff_mode=options.tiff_mode,
+        header_meta=_build_output_header_meta(project, frames, options, n_used),
     )
     progress("Saving", 1, 1)
 

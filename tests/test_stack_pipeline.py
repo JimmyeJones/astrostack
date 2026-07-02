@@ -103,6 +103,27 @@ def test_stack_no_clip(tmp_path):
     assert result.coverage_max == 4
 
 
+def test_stack_writes_provenance_header(tmp_path):
+    """The output FITS records how the stack was made (target, count, method)."""
+    from astropy.io import fits
+
+    proj = _build_project(tmp_path, n=4)
+    try:
+        result = run_stack(
+            proj,
+            StackOptions(sigma_clip=True, max_workers=2, output_name="prov"),
+        )
+    finally:
+        proj.close()
+
+    with fits.open(result.fits_path) as hdul:
+        hdr = hdul[0].header
+    assert hdr["OBJECT"] == "stacktest"
+    assert hdr["NFRAMES"] == 4
+    assert hdr["STACKER"] == "sigma-clip"
+    assert hdr["COLORTYP"] == "OSC"
+
+
 def test_stack_sigma_clipped(tmp_path):
     proj = _build_project(tmp_path, n=6, with_outlier=True)
     try:
