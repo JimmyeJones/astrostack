@@ -67,9 +67,11 @@ describe("EditorView", () => {
 
     renderEditor();
 
-    await waitFor(() => expect(screen.getByText("Add operation")).toBeInTheDocument());
-    // The saved stretch op shows in the pipeline list.
-    expect(screen.getByText("Stretch")).toBeInTheDocument();
+    // Wait on the recipe-dependent text, not the static toolbar: "Add operation"
+    // renders before the saved-recipe query resolves, so gating on it (then
+    // checking "Stretch" synchronously) raced and flaked in slower CI.
+    expect(await screen.findByText("Stretch")).toBeInTheDocument();
+    expect(screen.getByText("Add operation")).toBeInTheDocument();
     expect(screen.getByText("Export as new image")).toBeInTheDocument();
     expect(screen.getByText("Download full-res PNG")).toBeInTheDocument();
   });

@@ -137,6 +137,13 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **De-flake `Editor.test.tsx`** — `main`'s CI was intermittently red on the
+  editor "loads the saved recipe" test: it gated `waitFor` on the static "Add
+  operation" toolbar button (which renders before the async saved-recipe query
+  resolves) and then checked the recipe op "Stretch" synchronously, so it raced
+  on slower CI. Now it awaits the recipe-dependent text via `findByText`.
+  Test-only. (v0.29.1, this run)
+
 - **Stack memory budget as a Setting** — a new `max_stack_memory_gb` setting
   (default None = auto ~70% of RAM, clamped 0.5–1024 GB) lets the user view/raise/
   lower the per-stack working-memory cap from Settings instead of editing
