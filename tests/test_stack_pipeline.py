@@ -153,6 +153,11 @@ def test_stack_writes_provenance_header(tmp_path):
     assert hdr["NFRAMES"] == 4
     assert hdr["STACKER"] == "sigma-clip"
     assert hdr["COLORTYP"] == "OSC"
+    # The finished stack's normalized background-noise σ is self-documented in
+    # the header (and matches the run record), so Siril/PixInsight and the Info
+    # panel can show how clean the result is.
+    assert "BKGSIGMA" in hdr
+    assert float(hdr["BKGSIGMA"]) >= 0.0
 
 
 def test_stack_sigma_clipped(tmp_path):

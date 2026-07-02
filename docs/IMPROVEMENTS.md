@@ -69,6 +69,19 @@ _(none — claim an item here with your branch name)_
 ### Features that serve real workflows
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
+- **Sort/filter History & Gallery by noise σ ("cleanest first")** — now that each
+  run records `noise_sigma` (v0.48.0), add a sort option on the History page (and
+  the Gallery search bar) to order stacks by cleanliness, so a user with many
+  stacks of one target can jump straight to the least-noisy one instead of
+  eyeballing every card. Purely additive, reuses the recorded field; the
+  "Cleanest" badge already marks the winner but a sort scales past a handful of
+  runs. (S, approachability)
+- **Noise-improvement readout vs the previous stack** — on the History page,
+  show each run's noise σ as a delta against the same target's prior run
+  ("−18% noise vs your last stack"), so a user tuning settings/adding subs sees
+  whether a change actually helped, turning trial-and-error into feedback. Builds
+  directly on the recorded `noise_sigma`; within-target, advisory. (S,
+  approachability/correctness)
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
@@ -110,6 +123,14 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Stamp the background-noise σ into the master FITS header** — extends the
+  v0.48.0 noise readout: `run_stack` now measures the finished stack's noise σ
+  *once* and records it both as a `BKGSIGMA` FITS provenance card (so Siril/
+  PixInsight/APP see how clean the result is) and in the run record (previously
+  computed twice), and the run Info panel surfaces the card. Additive/upgrade-
+  safe; extends the existing STACKMTD/DECONPSF provenance pattern. (v0.48.1,
+  this run)
 
 - **Per-stack noise-floor readout + "cleanest stack" badge** — `run_stack` now
   records each stack's normalized background-noise σ (reusing

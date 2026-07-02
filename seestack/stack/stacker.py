@@ -921,6 +921,12 @@ def run_stack(
     progress("Saving", 0, 1)
     from seestack.stack.output import write_stack_outputs
 
+    # Measure the finished stack's background noise once and reuse it for both the
+    # self-documenting FITS header and the run record, so the two never disagree.
+    noise_sigma = _compute_noise_sigma(result_image)
+    header_meta = _build_output_header_meta(project, frames, options, n_used, wstats)
+    if noise_sigma is not None:
+        header_meta["BKGSIGMA"] = (noise_sigma, "normalized background noise sigma")
     paths = write_stack_outputs(
         project_dir=project.project_dir,
         rgb=result_image,
@@ -928,7 +934,7 @@ def run_stack(
         wcs_text=dst_wcs_text,
         out_basename=options.output_name,
         tiff_mode=options.tiff_mode,
-        header_meta=_build_output_header_meta(project, frames, options, n_used, wstats),
+        header_meta=header_meta,
     )
     progress("Saving", 1, 1)
 
@@ -956,7 +962,7 @@ def run_stack(
             notes=color_cal_note or None,
             total_exposure_s=_integration_time_s(frames, n_used),
             transparency_ratio=_compute_transparency_ratio(project, frames),
-            noise_sigma=_compute_noise_sigma(result_image),
+            noise_sigma=noise_sigma,
         ))
     except Exception as exc:  # noqa: BLE001 — history is non-critical
         log.warning("Could not record stack run in history: %s", exc)

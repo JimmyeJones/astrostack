@@ -313,7 +313,7 @@ async def save_stack_preview(
 _INFO_CARDS = (
     "OBJECT", "NFRAMES", "NCOMBINE", "EXPOSURE", "EXPTOTAL",
     "DATE-OBS", "DATE-END", "STACKER", "STACKMTD", "COLORTYP",
-    "EDITFROM", "DECONPSF", "CREATOR", "DATE",
+    "EDITFROM", "DECONPSF", "BKGSIGMA", "CREATOR", "DATE",
 )
 
 # Editor exports stamp each enabled op as an ``AstroStack: op.id(args)`` FITS
