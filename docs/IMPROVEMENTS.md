@@ -69,6 +69,22 @@ _(none — claim an item here with your branch name)_
 ### Features that serve real workflows
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
+- **"From your image" denoise-strength suggestion** — reuse the new generic
+  `suggestions` prop on the editor's `OpParamPanel` (added with the PSF-from-
+  stars button, v0.43.0): estimate the proxy's background noise (robust σ via
+  MAD of the background / off-object pixels, or from the histogram already
+  computed for the editor) and map it to a sensible denoise strength, offered
+  as a one-click default on `detail.denoise`. Removes another hand-tuned knob
+  the way PSF-from-stars did for deconvolution. Needs a small server endpoint
+  (or extend the histogram response with a noise estimate) + the frontend
+  wiring; testable in isolation. (S–M, approachability)
+- **Record the deconvolution PSF σ in the exported FITS header** — when an
+  editor recipe includes `detail.deconvolve`, stamp the σ actually used into
+  the derived `master.fits` (e.g. a `DECONPSF` card), extending the existing
+  editor-export provenance headers (STACKMTD/EDITFROM…). So a sharpened export
+  self-documents in Siril/PixInsight/APP whether and how hard it was
+  deconvolved. Small, additive, follows an established pattern. (S,
+  correctness/approachability)
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
