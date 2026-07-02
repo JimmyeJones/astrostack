@@ -46,9 +46,6 @@ _(none — claim an item here with your branch name)_
   flat-dark goes with which lights. Registry already stores exposure_s/gain/temp
   on each master; surface a "recommended" badge and pre-select the best match in
   the Stack calibration picker. (M, approachability/correctness)
-- Carry provenance headers into editor-export FITS too — `_apply_editor_to_run`
-  writes a derived `master.fits` with no OBJECT/derived-from/recipe summary.
-  Reuse the `header_meta` arg to record what it came from. (S, correctness)
 - Show integration time + frame count on stack-run cards in History/Gallery now
   that the data is written (EXPTOTAL/NFRAMES); a beginner reads "2.3 h, 840
   subs" at a glance instead of digging into the FITS. (S, approachability)
@@ -109,6 +106,12 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- Editor-export provenance — the derived `master.fits` from an editor recipe now
+  carries the source integration cards (OBJECT/NFRAMES/EXPOSURE/EXPTOTAL/COLORTYP/
+  DATE-OBS/END) forward and records `STACKMTD="editor recipe (N ops)"` + `EDITFROM`
+  (source run id), so an edited export self-documents in Siril/PixInsight/APP.
+  (v0.16.2, this run)
 
 - Channel-combine provenance — the LRGB/RGB combined FITS now carries
   `NCOMBINE` (source stacks) and `STACKMTD` ("channel-combine (RGB)"), matching
