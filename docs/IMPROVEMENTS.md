@@ -43,7 +43,6 @@ _(none — claim an item here with your branch name)_
 
 ### Features that serve real workflows
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
-- Settings + presets export/import (backup & restore a config). (S)
 - Annotated sky overlay (label detected objects / show solved field). (M)
 - Drizzle memory estimate surfaced in the Stack form before you run it. (S)
 - Star-mask preview toggle in the editor (visualise the mask driving star ops). (S)
@@ -101,6 +100,11 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Settings backup & restore** — `GET /api/settings/export` downloads a portable
+  JSON backup and `POST /api/settings/import` restores it; secrets and
+  host-specific paths (data root, incoming/library, ASTAP path) are excluded so a
+  backup is safe to share and restores on any install. Backup & restore panel on
+  the Settings page. (v0.15.0, this run)
 - **FITS output provenance headers** — `master.fits` now records OBJECT (target),
   NFRAMES, EXPOSURE (per-sub), EXPTOTAL (integration time), STACKER (method) and
   COLORTYP so the scientific output self-documents for Siril/PixInsight/APP.

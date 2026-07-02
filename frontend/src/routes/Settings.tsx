@@ -1,8 +1,10 @@
 import {
-  Accordion, Alert, Badge, Button, Center, Divider, Group, Loader, NumberInput,
-  Paper, SimpleGrid, Stack, Switch, TagsInput, Text, TextInput, Title,
+  Accordion, Alert, Badge, Button, Center, Divider, FileButton, Group, Loader,
+  NumberInput, Paper, SimpleGrid, Stack, Switch, TagsInput, Text, TextInput, Title,
 } from "@mantine/core";
-import { IconDeviceFloppy, IconInfoCircle, IconTelescope } from "@tabler/icons-react";
+import {
+  IconDeviceFloppy, IconDownload, IconInfoCircle, IconTelescope, IconUpload,
+} from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { notifications } from "@mantine/notifications";
@@ -36,6 +38,75 @@ const HINTS: Record<string, string> = {
   seestar_scan_interval_s: "How often to re-scan the network for devices.",
   seestar_poll_interval_s: "How often to poll each connected scope for telemetry.",
 };
+
+function BackupRestore() {
+  const qc = useQueryClient();
+  const restore = useMutation({
+    mutationFn: (config: Record<string, unknown>) => api.importSettings(config),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["settings"] });
+      notifications.show({ color: "teal", message: "Settings restored from backup." });
+    },
+    onError: (e: Error) =>
+      notifications.show({ color: "red", title: "Restore failed", message: e.message }),
+  });
+
+  const onFile = (file: File | null) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result));
+        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+          throw new Error("not a settings object");
+        }
+        restore.mutate(parsed as Record<string, unknown>);
+      } catch {
+        notifications.show({
+          color: "red", title: "Restore failed",
+          message: "That file isn't a valid AstroStack settings backup.",
+        });
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  return (
+    <Paper withBorder p="lg">
+      <Stack>
+        <Text fw={600}>Backup &amp; restore</Text>
+        <Text size="sm" c="dimmed">
+          Download all your settings as a JSON file, or restore them from a
+          previous backup. Passwords and machine-specific paths (data root,
+          incoming/library folders, ASTAP path) are never included, so a backup
+          is safe to share and restores cleanly on any install.
+        </Text>
+        <Group>
+          <Button
+            component="a"
+            href={api.settingsExportUrl()}
+            variant="default"
+            leftSection={<IconDownload size={16} />}
+          >
+            Export settings
+          </Button>
+          <FileButton onChange={onFile} accept="application/json,.json">
+            {(props) => (
+              <Button
+                {...props}
+                variant="default"
+                loading={restore.isPending}
+                leftSection={<IconUpload size={16} />}
+              >
+                Import settings…
+              </Button>
+            )}
+          </FileButton>
+        </Group>
+      </Stack>
+    </Paper>
+  );
+}
 
 function AccessControl() {
   const qc = useQueryClient();
@@ -366,6 +437,8 @@ export function SettingsView() {
           </Group>
         </Stack>
       </Paper>
+
+      <BackupRestore />
 
       <AccessControl />
     </Stack>
