@@ -87,6 +87,22 @@ describe("HistoryView", () => {
     expect(screen.getByText("sigma-clip")).toBeInTheDocument();
   });
 
+  it("offers Reuse settings only for reusable runs", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ id: 1, output_basename: "reusable_run", reusable: true }),
+      mkRun({ id: 2, output_basename: "combine_run", reusable: false }),
+    ]);
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("reusable_run")).toBeInTheDocument());
+
+    // Exactly one "Reuse settings" button (the reusable run) linking to the
+    // Stack form with ?from=<runId>.
+    const buttons = screen.getAllByRole("link", { name: /Reuse settings/ });
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0]).toHaveAttribute("href", "/targets/M_42/stack?from=1");
+  });
+
   it("shows an error notification when deletion fails", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
     vi.spyOn(client.api, "deleteStackRun").mockRejectedValue(new Error("stack is in use"));

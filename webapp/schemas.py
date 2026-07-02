@@ -91,6 +91,9 @@ class StackRunOut(BaseModel):
     has_tiff: bool = False
     has_preview: bool = False
     notes: str | None = None
+    # True when this run's options can pre-fill the Stack form ("reuse settings").
+    # False for editor-recipe / channel-combine runs, which carry no stack knobs.
+    reusable: bool = False
 
 
 class JobOut(BaseModel):

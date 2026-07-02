@@ -90,6 +90,25 @@ def master_path(library_root: str | Path, master_id: int) -> Path | None:
     return fp if fp.exists() else None
 
 
+def master_id_for_path(library_root: str | Path, path: str | None) -> int | None:
+    """Reverse of :func:`master_path` — the master id whose file is ``path``.
+
+    Used to turn a recorded run's server-resolved calibration path back into the
+    master id a form control uses. Matches on filename within the calibration
+    dir, so it survives the library being moved. Returns ``None`` if no master
+    matches (e.g. the master was deleted since the run)."""
+    if not path:
+        return None
+    name = Path(path).name
+    for e in _read_registry(library_root):
+        if e.get("filename") == name:
+            try:
+                return int(e["id"])
+            except (KeyError, TypeError, ValueError):
+                return None
+    return None
+
+
 def resolve_master_paths(
     library_root: str | Path,
     dark_master_id: Any = None,

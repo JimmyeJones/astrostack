@@ -164,8 +164,23 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
             has_tiff=bool(r.tiff_path and Path(r.tiff_path).exists()),
             has_preview=bool(r.preview_path and Path(r.preview_path).exists()),
             notes=r.notes,
+            reusable=_run_is_reusable(r.options_json),
         ))
     return out
+
+
+def _run_is_reusable(options_json: str | None) -> bool:
+    """A run's settings can pre-fill the Stack form unless it's an editor-recipe
+    or channel-combine run (those carry no stack knobs)."""
+    if not options_json:
+        return False
+    try:
+        parsed = json.loads(options_json)
+    except json.JSONDecodeError:
+        return False
+    return (isinstance(parsed, dict)
+            and "editor_recipe" not in parsed
+            and "channel_combine" not in parsed)
 
 
 _KIND_FIELDS = {
@@ -294,6 +309,53 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
                 n_frames = int(value)
     return {"run_id": run_id, "integration_s": integration_s,
             "n_frames": n_frames, "cards": cards}
+
+
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/options")
+def stack_run_options(safe: str, run_id: int, request: Request) -> dict[str, Any]:
+    """Return a run's stack settings as a form-ready payload, so the Stack form
+    can pre-fill from a previous run ("reuse these settings").
+
+    The recorded ``options_json`` stores server-resolved calibration *paths*
+    (never client-writable); those are reverse-mapped back to the master ids the
+    form uses, and the run's ``output_name`` is dropped so reusing settings can't
+    silently overwrite the earlier run's output. Editor-recipe and
+    channel-combine runs carry no reusable stack settings → 400.
+    """
+    settings = deps.get_settings(request)
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
+    finally:
+        proj.close()
+        lib.close()
+    if run is None:
+        raise HTTPException(status_code=404, detail="No such run")
+    try:
+        parsed = json.loads(run.options_json) if run.options_json else {}
+    except json.JSONDecodeError:
+        parsed = {}
+    if not isinstance(parsed, dict) or "editor_recipe" in parsed or "channel_combine" in parsed:
+        raise HTTPException(status_code=400,
+                            detail="This run has no reusable stack settings")
+
+    from webapp import calibration
+
+    valid = {fld.key for fld in stack_option_fields()}
+    options = {k: v for k, v in parsed.items() if k in valid}
+    options.pop("output_name", None)  # a fresh run gets a fresh name
+    # Reverse-map server-resolved calibration paths → master ids for the form.
+    lib_root = settings.resolved_library_root
+    for path_key, id_key in (
+        ("dark_path", "dark_master_id"),
+        ("flat_path", "flat_master_id"),
+        ("flat_dark_path", "flat_dark_master_id"),
+    ):
+        mid = calibration.master_id_for_path(lib_root, parsed.get(path_key))
+        if mid is not None:
+            options[id_key] = mid
+        options.pop(path_key, None)  # never hand raw paths to the client/form
+    return {"run_id": run_id, "options": options}
 
 
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/{kind}")

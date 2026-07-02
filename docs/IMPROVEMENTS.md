@@ -50,10 +50,6 @@ _(none — claim an item here with your branch name)_
 - Annotated sky overlay (label detected objects / show solved field). (M)
 - Drizzle memory estimate surfaced in the Stack form before you run it. (S)
 - Star-mask preview toggle in the editor (visualise the mask driving star ops). (S)
-- **Copy stack settings from a previous run** — a run's `options_json` records
-  exactly how it was made; add a "Reuse these settings" action on a History card
-  that pre-fills the Stack form from that run's options. Repeatability without
-  re-deriving knobs. (S, approachability)
 - Per-target "notes/tags" search improvements and saved filters in Library. (S)
 
 ### UX & polish
@@ -99,6 +95,14 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Reuse stack settings from a previous run** — new
+  `GET /stack-runs/{id}/options` returns a run's settings as a form-ready payload
+  (knobs kept, `output_name` dropped so a rerun can't clobber the old output,
+  calibration paths reverse-mapped to master ids). `StackRunOut` gained a
+  `reusable` flag (false for editor/channel-combine runs); History cards show a
+  "Reuse settings" button on reusable runs that opens the Stack form pre-filled
+  via `?from=<id>`. Repeatability without re-deriving knobs. (v0.19.0, this run)
 
 - **Warn on a mismatched calibration master pick** — the Stack form now shows an
   inline caution when a chosen dark's exposure is far (>25%) from the target's

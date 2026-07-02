@@ -5,7 +5,7 @@ import {
 import { IconFlask, IconPlayerPlay, IconTelescope } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
 import { api, type StackOptionField } from "../api/client";
 import { StackOptionControl as FieldControl } from "../components/StackOptionControl";
@@ -13,6 +13,8 @@ import { useJobEvents } from "../hooks/useJobEvents";
 
 export function StackView() {
   const { safe = "" } = useParams();
+  const [searchParams] = useSearchParams();
+  const reuseRunId = searchParams.get("from");
   const qc = useQueryClient();
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [jobId, setJobId] = useState<string | null>(null);
@@ -32,6 +34,13 @@ export function StackView() {
     queryKey: ["calibration-suggestions", safe],
     queryFn: () => api.calibrationSuggestions(safe),
   });
+  // When arriving via "Reuse settings" (?from=<runId>), fetch that run's options
+  // so we can pre-fill the form from how a previous stack was made.
+  const reuse = useQuery({
+    queryKey: ["stack-run-options", safe, reuseRunId],
+    queryFn: () => api.stackRunOptions(safe, Number(reuseRunId)),
+    enabled: !!reuseRunId,
+  });
 
   const qcSolve = useMutation({
     mutationFn: () => api.qcSolve(safe),
@@ -43,8 +52,13 @@ export function StackView() {
   });
 
   useEffect(() => {
-    if (defaults.data) setValues(defaults.data);
-  }, [defaults.data]);
+    if (!defaults.data) return;
+    // Base on this target's defaults, then overlay a reused run's settings (if
+    // any) once they've loaded, so "Reuse settings" wins over the defaults.
+    if (reuseRunId && !reuse.data) return;  // wait for the reuse payload first
+    const reused = reuseRunId && reuse.data ? reuse.data.options : {};
+    setValues({ ...defaults.data, ...reused });
+  }, [defaults.data, reuseRunId, reuse.data]);
 
   // When a stack finishes it may have auto-rejected outlier frames — refresh
   // the frame list so the solved/accepted counts (and this page's guard) update.
@@ -71,7 +85,7 @@ export function StackView() {
     onError: (e: Error) => notifications.show({ message: `Save failed: ${e.message}`, color: "red" }),
   });
 
-  if (schema.isLoading || defaults.isLoading) {
+  if (schema.isLoading || defaults.isLoading || (!!reuseRunId && reuse.isLoading)) {
     return (
       <Center h={300}>
         <Loader />
@@ -155,6 +169,14 @@ export function StackView() {
           Back to frames
         </Button>
       </Group>
+
+      {reuseRunId && reuse.data ? (
+        <Alert color="blue" variant="light" py={6} px="sm">
+          <Text size="xs">
+            Settings pre-filled from run #{reuseRunId}. Adjust anything, then start a fresh stack.
+          </Text>
+        </Alert>
+      ) : null}
 
       {noSolved ? (
         <Alert color="yellow" title="No plate-solved frames yet" icon={<IconTelescope size={18} />}>

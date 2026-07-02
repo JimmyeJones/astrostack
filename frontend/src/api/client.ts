@@ -140,6 +140,7 @@ export interface StackRun {
   has_tiff: boolean;
   has_preview: boolean;
   notes: string | null;
+  reusable?: boolean;
 }
 
 export interface StackInfoCard {
@@ -380,6 +381,9 @@ export const api = {
     req(`/api/targets/${safe}/stack-runs/${id}`, { method: "DELETE" }),
   stackRunInfo: (safe: string, id: number) =>
     req<StackRunInfo>(`/api/targets/${safe}/stack-runs/${id}/info`),
+  stackRunOptions: (safe: string, id: number) =>
+    req<{ run_id: number; options: Record<string, unknown> }>(
+      `/api/targets/${safe}/stack-runs/${id}/options`),
   stackArtifactUrl: (safe: string, id: number, kind: "preview" | "fits" | "tiff") =>
     `/api/targets/${safe}/stack-runs/${id}/${kind}`,
   stackRenderUrl: (safe: string, id: number, stretch: number, black: number) =>
