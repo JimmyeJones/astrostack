@@ -77,12 +77,6 @@ _(none — claim an item here with your branch name)_
   editable (v0.23.0), surface it on Gallery cards and add a text filter that
   matches label + target name, so a user can find "best RGB v2" across all
   targets. Reuses the `notes` field already returned per run. (S, approachability)
-- **Pre-run stack estimate endpoint** — a lightweight
-  `GET /targets/{safe}/stack-estimate?drizzle_scale=` that computes the
-  union-of-footprints canvas from the accepted+solved frames and returns the
-  output dimensions + estimated peak memory (same maths as
-  `_guard_stack_memory`), so the Stack form can warn *before* a run is refused
-  for OOM ("Drizzle ×2 → ~7680×4320, ≈2.1 GB peak"). (M, scale/approachability)
 
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
@@ -127,6 +121,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Pre-run stack estimate endpoint** — new `GET /targets/{safe}/stack-estimate`
+  (`drizzle`/`drizzle_scale`/`drizzle_reject`/`mosaic_canvas` query params) does a
+  dry-run sizing: picks the reference, computes the reference-vs-union canvas the
+  way `run_stack` does, and returns the output dimensions + estimated peak memory
+  and the server budget, flagging `would_exceed`. The peak-memory maths is
+  factored into a shared `_estimate_peak_bytes` so the warning can never disagree
+  with the in-run `_guard_stack_memory`. The Stack form shows a live "Output
+  canvas W×H · ~X GB peak memory" line and turns it into a red "over budget, run
+  will be refused" alert when it would OOM — so a big drizzle/mosaic canvas is
+  caught *before* the user hits Stack, not after. (v0.25.0, this run)
 
 - **Outlier-safe drizzle** — new opt-in `drizzle_reject`: two-pass κ-σ
   rejection for the drizzle path (pass 1 drizzles values + squares for

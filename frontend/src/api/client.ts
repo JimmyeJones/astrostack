@@ -157,6 +157,20 @@ export interface StackRunInfo {
   cards: StackInfoCard[];
 }
 
+export interface StackEstimate {
+  n_frames: number;
+  canvas_w: number;
+  canvas_h: number;
+  output_w: number;
+  output_h: number;
+  is_mosaic: boolean;
+  peak_bytes: number;
+  peak_gb: number;
+  budget_bytes: number;
+  budget_gb: number;
+  would_exceed: boolean;
+}
+
 export interface GalleryItem {
   safe: string;
   target_name: string;
@@ -392,6 +406,17 @@ export const api = {
   stackRunOptions: (safe: string, id: number) =>
     req<{ run_id: number; options: Record<string, unknown> }>(
       `/api/targets/${safe}/stack-runs/${id}/options`),
+  stackEstimate: (
+    safe: string,
+    opts: { drizzle?: boolean; drizzle_scale?: number; drizzle_reject?: boolean; mosaic_canvas?: string },
+  ) => {
+    const p = new URLSearchParams();
+    if (opts.drizzle) p.set("drizzle", "true");
+    if (opts.drizzle_scale != null) p.set("drizzle_scale", String(opts.drizzle_scale));
+    if (opts.drizzle_reject) p.set("drizzle_reject", "true");
+    if (opts.mosaic_canvas) p.set("mosaic_canvas", opts.mosaic_canvas);
+    return req<StackEstimate>(`/api/targets/${safe}/stack-estimate?${p.toString()}`);
+  },
   stackArtifactUrl: (safe: string, id: number, kind: "preview" | "fits" | "tiff") =>
     `/api/targets/${safe}/stack-runs/${id}/${kind}`,
   stackRenderUrl: (safe: string, id: number, stretch: number, black: number) =>

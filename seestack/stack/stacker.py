@@ -87,6 +87,30 @@ def _stack_memory_budget_bytes() -> float:
     return _DEFAULT_STACK_BUDGET_GB * 1e9
 
 
+def _estimate_peak_bytes(dst_shape: tuple[int, int], *, drizzle: bool,
+                         drizzle_scale: float,
+                         drizzle_reject: bool = False,
+                         ) -> tuple[int, tuple[int, int]]:
+    """Peak working-memory estimate for a stack and its post-drizzle output
+    shape. ``dst_shape`` is (h, w) of the pre-drizzle canvas; drizzle multiplies
+    each axis by ``drizzle_scale``. Returns ``(peak_bytes, (out_h, out_w))``.
+
+    Shared by ``_guard_stack_memory`` (which refuses over-budget stacks) and
+    ``estimate_stack`` (which surfaces the same number to the UI *before* a run
+    is refused), so the warning and the guard can never disagree."""
+    h, w = dst_shape
+    if drizzle:
+        s = max(1.0, float(drizzle_scale))
+        out_h, out_w = int(h * s + 1), int(w * s + 1)
+    else:
+        out_h, out_w = h, w
+    out_pixels = out_h * out_w
+    arrays = (_PEAK_CANVAS_ARRAYS_DRIZZLE_REJECT if (drizzle and drizzle_reject)
+              else _PEAK_CANVAS_ARRAYS)
+    need = out_pixels * 3 * 4 * arrays  # float32 RGB working arrays
+    return need, (out_h, out_w)
+
+
 def _guard_stack_memory(dst_shape: tuple[int, int], *, drizzle: bool,
                         drizzle_scale: float,
                         drizzle_reject: bool = False) -> None:
@@ -94,14 +118,9 @@ def _guard_stack_memory(dst_shape: tuple[int, int], *, drizzle: bool,
     of letting it OOM-kill the whole process. ``dst_shape`` is (h, w) of the
     pre-drizzle canvas; drizzle multiplies each axis by ``drizzle_scale``."""
     h, w = dst_shape
-    if drizzle:
-        s = max(1.0, float(drizzle_scale))
-        out_pixels = int(h * s + 1) * int(w * s + 1)
-    else:
-        out_pixels = h * w
-    arrays = (_PEAK_CANVAS_ARRAYS_DRIZZLE_REJECT if (drizzle and drizzle_reject)
-              else _PEAK_CANVAS_ARRAYS)
-    need = out_pixels * 3 * 4 * arrays  # float32 RGB working arrays
+    need, _ = _estimate_peak_bytes(dst_shape, drizzle=drizzle,
+                                   drizzle_scale=drizzle_scale,
+                                   drizzle_reject=drizzle_reject)
     budget = _stack_memory_budget_bytes()
     if need > budget:
         raise MemoryError(
@@ -211,6 +230,87 @@ class StackResult:
     # Frames dropped (and flagged rejected) for a bad plate-solve that would
     # have flung the mosaic canvas across the sky. Human-readable labels.
     excluded_frames: list[str] = field(default_factory=list)
+
+
+@dataclass
+class StackEstimate:
+    """A dry-run sizing of a stack: the output canvas it would produce and the
+    peak working memory it would need — computed without stacking anything, so
+    the UI can warn ("Drizzle ×2 → ~7680×4320, ≈2.1 GB peak, over budget")
+    *before* a run is submitted and refused."""
+
+    n_frames: int
+    canvas_w: int          # pre-drizzle canvas width
+    canvas_h: int          # pre-drizzle canvas height
+    output_w: int          # post-drizzle output width
+    output_h: int          # post-drizzle output height
+    is_mosaic: bool        # union-of-footprints canvas (spans >1 field)
+    peak_bytes: int
+    budget_bytes: int
+    would_exceed: bool     # peak_bytes > budget_bytes → run would be refused
+
+
+def estimate_stack(project: Project, options: StackOptions) -> StackEstimate:
+    """Compute the output canvas dimensions and estimated peak working memory a
+    stack *would* need, without running it.
+
+    Mirrors ``run_stack``'s reference-pick and canvas-selection (reference vs
+    union-of-footprints), then reuses ``_estimate_peak_bytes`` /
+    ``_stack_memory_budget_bytes`` so the pre-run number matches the guard that
+    would refuse the run. Only the canvas-affecting options are consulted
+    (``drizzle``, ``drizzle_scale``, ``drizzle_reject``, ``mosaic_canvas``);
+    everything else is irrelevant to sizing. Raises ``ValueError`` with the same
+    guidance as ``run_stack`` when there's nothing solved to stack."""
+    choice = pick_reference_frame(project)
+    if choice is None:
+        raise ValueError(
+            "No accepted frames are plate-solved yet. Run Plate Solve first, "
+            "and make sure at least one accepted frame solved successfully."
+        )
+    ref = choice.frame
+    if not ref.wcs_json or ref.width_px is None or ref.height_px is None:
+        raise ValueError("reference frame is missing WCS or dimensions")
+    ref_shape = (int(ref.height_px), int(ref.width_px))
+
+    frames = [
+        f for f in project.iter_frames(accepted_only=True)
+        if f.wcs_json and (f.cached_path or f.source_path)
+    ]
+    if not frames:
+        raise ValueError("no accepted, plate-solved frames to stack")
+
+    dst_shape = ref_shape
+    is_mosaic = False
+    if options.mosaic_canvas != "reference":
+        try:
+            from seestack.stack.mosaic import compute_mosaic_canvas
+
+            canvas = compute_mosaic_canvas(frames, ref_shape)
+        except ValueError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — mirror run_stack's fallback
+            log.warning("Mosaic canvas estimate failed (%s); "
+                        "using reference-frame canvas", exc)
+            canvas = None
+        if canvas is not None and (options.mosaic_canvas == "union"
+                                   or canvas.is_mosaic):
+            dst_shape = canvas.shape
+            is_mosaic = canvas.is_mosaic
+
+    n = len(frames)
+    peak, (out_h, out_w) = _estimate_peak_bytes(
+        dst_shape, drizzle=options.drizzle, drizzle_scale=options.drizzle_scale,
+        drizzle_reject=options.drizzle_reject and n >= 4,
+    )
+    budget = int(_stack_memory_budget_bytes())
+    return StackEstimate(
+        n_frames=n,
+        canvas_w=dst_shape[1], canvas_h=dst_shape[0],
+        output_w=out_w, output_h=out_h,
+        is_mosaic=is_mosaic,
+        peak_bytes=int(peak), budget_bytes=budget,
+        would_exceed=int(peak) > budget,
+    )
 
 
 CancelFn = Callable[[], bool]

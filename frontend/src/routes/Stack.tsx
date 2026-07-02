@@ -41,6 +41,21 @@ export function StackView() {
     queryFn: () => api.stackRunOptions(safe, Number(reuseRunId)),
     enabled: !!reuseRunId,
   });
+  // Pre-run sizing: output canvas + estimated peak memory for the current
+  // canvas-affecting knobs, so we can warn *before* a run is refused for OOM.
+  const drizzleOn = !!values.drizzle;
+  const drizzleScale = Number(values.drizzle_scale ?? 1.5);
+  const drizzleReject = !!values.drizzle_reject;
+  const mosaicCanvas = String(values.mosaic_canvas ?? "auto");
+  const estimate = useQuery({
+    queryKey: ["stack-estimate", safe, drizzleOn, drizzleScale, drizzleReject, mosaicCanvas],
+    queryFn: () => api.stackEstimate(safe, {
+      drizzle: drizzleOn, drizzle_scale: drizzleScale,
+      drizzle_reject: drizzleReject, mosaic_canvas: mosaicCanvas,
+    }),
+    enabled: Object.keys(values).length > 0,
+    retry: false,
+  });
 
   const qcSolve = useMutation({
     mutationFn: () => api.qcSolve(safe),
@@ -181,6 +196,19 @@ export function StackView() {
       ? "Sigma clipping doesn't apply to drizzle's single-pass accumulation — enable “Drizzle outlier rejection” to reject satellites and cosmic rays in drizzled stacks."
       : null;
 
+  // Pre-run sizing line: shows the output canvas the current knobs would
+  // produce and the estimated peak working memory, so a big drizzle/mosaic
+  // canvas doesn't get silently refused for OOM only after the user hits Stack.
+  const est = estimate.data;
+  const estimateLine = est
+    ? `Output canvas ${est.output_w}×${est.output_h}`
+      + (est.is_mosaic ? " (mosaic union)" : "")
+      + ` · ~${est.peak_gb.toFixed(est.peak_gb < 1 ? 2 : 1)} GB peak memory`
+    : null;
+  const estimateOverBudget = est?.would_exceed
+    ? `This stack would need ~${est.peak_gb.toFixed(1)} GB of working memory, over the ~${est.budget_gb.toFixed(1)} GB budget on this server, so the run will be refused. Lower the drizzle scale, switch Canvas mode to “reference”, or reject off-target frames.`
+    : null;
+
   return (
     <Stack maw={720}>
       <Group justify="space-between">
@@ -318,6 +346,14 @@ export function StackView() {
             <Alert color="blue" variant="light" py={6} px="sm">
               <Text size="xs">{drizzleClipHint}</Text>
             </Alert>
+          ) : null}
+
+          {estimateOverBudget ? (
+            <Alert color="red" variant="light" py={6} px="sm">
+              <Text size="xs">{estimateOverBudget}</Text>
+            </Alert>
+          ) : estimateLine && !noSolved ? (
+            <Text size="xs" c="dimmed">{estimateLine}</Text>
           ) : null}
 
           {job ? (
