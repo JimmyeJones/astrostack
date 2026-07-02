@@ -9,6 +9,20 @@ Items under "Needs owner sign-off" must not be started autonomously — see
 
 ## Shipped
 
+- **[Quality] Direct pixel-transform tests for editor ops** — M —
+  `seestack/edit/ops/stars.py` (`stars.reduce`) had no test anywhere — its
+  erosion-based star-shrink algorithm is implemented entirely in the editor
+  op, not backed by a tested `seestack.bg`/`seestack.stars` module. The
+  `background.*` ops do wrap already-tested `seestack.bg.*` functions, but
+  the *wrapper* (recipe-params-dict → `Options` dataclass, the
+  `ctx.coverage is None` early return in `level_coverage`) had no coverage of
+  its own — a param-name typo or dropped field would pass every existing
+  test. Added `tests/test_edit_ops_pixel_transform.py`: real pixel-behavior
+  assertions for `stars.reduce` (shrinks a star core, leaves flat sky alone,
+  `amount=0` is an exact no-op, NaN gaps survive), and wiring tests for the
+  three `background.*` ops (params actually reach the underlying function,
+  `level_coverage` is a no-op with no `ctx.coverage`). *(2026-07-02)*
+
 - **[Usability] Surface fetch errors instead of spinning forever** — M —
   `Dashboard.tsx`, `Gallery.tsx`, `Library.tsx`, `Storage.tsx`, `Jobs.tsx`,
   `Sky.tsx`, `Logs.tsx` all gated rendering on `isLoading || !data` with no
@@ -65,15 +79,6 @@ Items under "Needs owner sign-off" must not be started autonomously — see
   scale this project is built for. Push `ORDER BY <col> LIMIT/OFFSET` into
   SQL with an index on the sortable columns (`fwhm_px`, `star_count`,
   `sky_adu_median`, `eccentricity_median`, `timestamp_utc`).
-
-- **[Quality] Editor pixel ops have no direct unit tests** — M —
-  `seestack/edit/ops/stars.py` (`stars.reduce`) and
-  `seestack/edit/ops/background.py` (`subtract`, `final_gradient`,
-  `level_coverage`) are only exercised indirectly through generic
-  recipe-pipeline tests in `tests/test_edit_engine.py`; nothing asserts their
-  actual pixel transform on a synthetic input (e.g. that `background.subtract`
-  measurably flattens a synthetic gradient). A regression in the transform
-  math itself could pass CI silently.
 
 - **[Quality] Thin API test coverage on target CRUD + stack history** — M —
   `tests/webapp/test_api.py` is ~115 lines / 10 tests covering
