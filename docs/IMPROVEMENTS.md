@@ -9,6 +9,18 @@ Items under "Needs owner sign-off" must not be started autonomously — see
 
 ## Shipped
 
+- **[Operability] Bound settings that could silently misconfigure the
+  service, clamp `/api/jobs` `limit`** — S — `watch_quiet_period_s`,
+  `watch_poll_interval_s`, `astap_timeout_s`, `cpu_workers`,
+  `seestar_scan_interval_s`, `seestar_poll_interval_s` in `webapp/config.py`
+  had no bounds, so `PUT /api/settings` could accept e.g. `astap_timeout_s: 0`
+  (every plate-solve fails instantly) or `cpu_workers: 0` (crashes the
+  pool). Added `Field(ge=..., le=...)` constraints, plus a `ValidationError`
+  → `422` handler in `webapp/routers/settings.py` (previously an
+  out-of-bounds/invalid patch would 500). Also clamped `GET /api/jobs`
+  `limit` to match the existing `/api/logs` pattern. Covered by new tests in
+  `tests/webapp/test_api.py`. *(2026-07-02)*
+
 - **[Reliability] Consistent 404s for unknown targets on merge/delete** — S —
   `POST /api/targets/merge` raised an uncaught `FileNotFoundError` (500) when
   `into` didn't resolve; `DELETE /api/targets/{safe}` silently returned
@@ -40,20 +52,6 @@ Items under "Needs owner sign-off" must not be started autonomously — see
   forever instead of showing an error state. `Editor.tsx` and `AladinSky.tsx`
   already handle this correctly — extract their pattern into a shared
   component/hook and apply it to the rest.
-
-- **[Operability] Settings numeric fields have no bounds** — S —
-  `watch_quiet_period_s`, `watch_poll_interval_s`, `astap_timeout_s`,
-  `seestar_poll_interval_s`, `seestar_scan_interval_s`, `cpu_workers` in
-  `webapp/config.py` are plain `int`/`float` with no `ge=`/`le=` constraints.
-  `PUT /api/settings` currently accepts e.g. `astap_timeout_s: 0` (every solve
-  instantly times out) or a negative `cpu_workers`. Add `Field(ge=..., le=...)`
-  constraints matching sane operational ranges.
-
-- **[Operability] `GET /api/jobs` has no upper clamp on `limit`** — S —
-  Unlike `/api/logs` (clamped to 5000 in `webapp/routers/logs.py`),
-  `list_jobs` in `webapp/routers/jobs.py` passes a caller-supplied `limit`
-  straight into the SQL `LIMIT ?` with no ceiling. Add the same clamp pattern
-  used in `logs.py`.
 
 - **[Scale] Frame listing loads + sorts the whole table in Python** — M —
   `GET /api/targets/{safe}/frames` (`webapp/routers/frames.py`) materializes

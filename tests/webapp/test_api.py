@@ -112,6 +112,26 @@ def test_settings_roundtrip(client):
     assert body["watch_quiet_period_s"] == 45
 
 
+def test_settings_rejects_out_of_bounds_values(client):
+    # A zero timeout would make every ASTAP solve fail instantly; a zero
+    # quiet-period would defeat the half-written-file guard.
+    r = client.put("/api/settings", json={"astap_timeout_s": 0})
+    assert r.status_code == 422
+    r = client.put("/api/settings", json={"watch_quiet_period_s": -5})
+    assert r.status_code == 422
+    r = client.put("/api/settings", json={"cpu_workers": 0})
+    assert r.status_code == 422
+    # Rejected patches must not partially apply.
+    assert client.get("/api/settings").json()["astap_timeout_s"] == 60.0
+
+
+def test_jobs_list_limit_is_clamped(client):
+    # Neither an absurdly large nor a non-positive limit should error.
+    assert client.get("/api/jobs", params={"limit": 10_000_000}).status_code == 200
+    assert client.get("/api/jobs", params={"limit": 0}).status_code == 200
+    assert client.get("/api/jobs", params={"limit": -5}).status_code == 200
+
+
 def test_unknown_target_404(client):
     assert client.get("/api/targets/does_not_exist/frames").status_code == 404
 
