@@ -69,13 +69,11 @@ _(none — claim an item here with your branch name)_
 ### Features that serve real workflows
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
-- **Sort/filter History & Gallery by noise σ ("cleanest first")** — now that each
-  run records `noise_sigma` (v0.48.0), add a sort option on the History page (and
-  the Gallery search bar) to order stacks by cleanliness, so a user with many
-  stacks of one target can jump straight to the least-noisy one instead of
-  eyeballing every card. Purely additive, reuses the recorded field; the
-  "Cleanest" badge already marks the winner but a sort scales past a handful of
-  runs. (S, approachability)
+- **Sort the Gallery by noise σ ("cleanest first")** — the History page now has
+  a Newest/Cleanest sort (v0.49.0); extend the same to the Gallery, where runs
+  span all targets, so the sort is a global "show me my cleanest results". Reuses
+  the recorded `noise_sigma`; the Gallery already has a search box to hang a sort
+  control next to. (S, approachability)
 - **Noise-improvement readout vs the previous stack** — on the History page,
   show each run's noise σ as a delta against the same target's prior run
   ("−18% noise vs your last stack"), so a user tuning settings/adding subs sees
@@ -123,6 +121,14 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Newest/Cleanest sort on the History page** — completes the noise series: the
+  History view gained a Newest/Cleanest `SegmentedControl` (shown only with >1 run
+  and at least one measured σ) that reorders the run cards by ascending
+  `noise_sigma`, keeping unmeasured (pre-v0.48) runs last — so a user with many
+  stacks of one target can jump straight to the least-noisy result rather than
+  eyeballing every card. Pure `sortRuns` helper; frontend-only, additive.
+  (v0.49.0, this run)
 
 - **Stamp the background-noise σ into the master FITS header** — extends the
   v0.48.0 noise readout: `run_stack` now measures the finished stack's noise σ

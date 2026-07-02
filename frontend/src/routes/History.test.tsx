@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { HistoryView } from "./History";
+import { HistoryView, sortRuns } from "./History";
 import { formatIntegration } from "../format";
 import * as client from "../api/client";
 import type { StackRun } from "../api/client";
@@ -152,6 +152,27 @@ describe("HistoryView", () => {
     await waitFor(() => expect(screen.getByText(/cloudy/)).toBeInTheDocument());
   });
 
+  it("reorders cards cleanest-first when the sort is switched", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ id: 1, output_basename: "noisy_run", noise_sigma: 0.05 }),
+      mkRun({ id: 2, output_basename: "clean_run", noise_sigma: 0.01 }),
+    ]);
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("noisy_run")).toBeInTheDocument());
+
+    // Default (newest) keeps API order: noisy_run first.
+    let names = screen.getAllByText(/_run$/).map((n) => n.textContent);
+    expect(names).toEqual(["noisy_run", "clean_run"]);
+
+    fireEvent.click(screen.getByRole("radio", { name: "Cleanest" }));
+
+    await waitFor(() => {
+      names = screen.getAllByText(/_run$/).map((n) => n.textContent);
+      expect(names).toEqual(["clean_run", "noisy_run"]);
+    });
+  });
+
   it("shows an error notification when deletion fails", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
     vi.spyOn(client.api, "deleteStackRun").mockRejectedValue(new Error("stack is in use"));
@@ -165,6 +186,27 @@ describe("HistoryView", () => {
     await waitFor(() => expect(screen.getByText("stack is in use")).toBeInTheDocument());
     // The run stays listed since the delete failed.
     expect(screen.getByText("M42_stack_01")).toBeInTheDocument();
+  });
+});
+
+describe("sortRuns", () => {
+  it("keeps API order for 'newest' and does not mutate the input", () => {
+    const runs = [mkRun({ id: 1, noise_sigma: 0.05 }), mkRun({ id: 2, noise_sigma: 0.01 })];
+    const out = sortRuns(runs, "newest");
+    expect(out.map((r) => r.id)).toEqual([1, 2]);
+    // input untouched
+    expect(runs.map((r) => r.id)).toEqual([1, 2]);
+  });
+
+  it("orders by ascending noise for 'cleanest', with unmeasured runs kept last", () => {
+    const runs = [
+      mkRun({ id: 1, noise_sigma: 0.05 }),
+      mkRun({ id: 2, noise_sigma: null }),
+      mkRun({ id: 3, noise_sigma: 0.01 }),
+      mkRun({ id: 4, noise_sigma: 0.03 }),
+    ];
+    const out = sortRuns(runs, "cleanest");
+    expect(out.map((r) => r.id)).toEqual([3, 4, 1, 2]);
   });
 });
 
