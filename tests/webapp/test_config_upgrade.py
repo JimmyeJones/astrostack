@@ -30,6 +30,19 @@ def test_old_config_loads_keeps_values_and_defaults_new_fields(tmp_path):
     assert s.astap_use_solve_hints is True                 # new field defaulted
     # New streak-keep flag defaults off → streaks still fully rejected as before.
     assert s.keep_streaked_frames is False
+    # Auto-grade defaults off → an upgrade never starts rejecting frames on its
+    # own; the sensitivity default is the balanced middle.
+    assert s.auto_grade_frames is False
+    assert s.auto_grade_sensitivity == "balanced"
+
+
+def test_bad_auto_grade_sensitivity_resets_only_that_field(tmp_path):
+    # A hand-edited/corrupt sensitivity must not wipe the rest of the config.
+    _write_cfg(tmp_path, {"auto_stack": True, "auto_grade_frames": True,
+                          "auto_grade_sensitivity": "extreme"})
+    s = SettingsStore(str(tmp_path)).get()
+    assert s.auto_stack is True and s.auto_grade_frames is True
+    assert s.auto_grade_sensitivity == "balanced"  # only the bad field reset
 
 
 def test_one_bad_field_does_not_wipe_the_rest(tmp_path):

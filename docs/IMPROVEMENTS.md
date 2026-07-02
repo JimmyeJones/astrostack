@@ -27,6 +27,15 @@ _(none — claim an item here with your branch name)_
 ## Ideas (pick roughly top-down; use the value ÷ effort×risk rule)
 
 ### Correctness & robustness (highest priority)
+- **Photometric (multiplicative) frame normalization before combine** — frames
+  are additively sky-zeroed per frame, but nothing gain-matches them: haze/
+  airmass scale the *signal* (stars + nebula) frame-to-frame by tens of
+  percent across a multi-night stack, inflating the per-pixel σ that κ-σ
+  rejection clips against (weaker rejection on bright structure) and letting
+  hazy nights dim the weighted mean. Estimate a per-frame scale from matched
+  bright-star fluxes vs the reference (the `transparency_score` machinery is
+  most of it) and divide it out before accumulation. Needs care: robust to
+  few-star frames, neutral fallback, off by default first. (M, correctness)
 - Per-pixel extremes / percentile rejection for small stacks (the *robust*
   fix for a lone satellite/plane trail below ~11 frames). **NB:** the previously
   filed "iterated κ-σ" idea was investigated and dropped — re-estimation clips
@@ -60,6 +69,16 @@ _(none — claim an item here with your branch name)_
 ### Features that serve real workflows
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
+- **Auto-grade hint on the Stack form** — the Stack form already advises on
+  sigma-clip/streaks/transparency; add "N of your accepted frames look like
+  outliers — review Auto-grade on the Target page" by calling the new
+  `frames/auto-grade` preview endpoint, so a user about to stack junk gets
+  pointed at the one-click fix. (S, approachability)
+- **PSF-from-stars for editor deconvolution** — `detail.deconvolve` makes the
+  user hand-tune a Gaussian σ; the project median FWHM (already measured by
+  QC) is the right default, and a "from your stars" button would set it.
+  (S–M, approachability)
+
 ### UX & polish
 - **"N trailed frames" badge on the Target view** — mirror the existing
   "N streaked" badge for eccentricity: count *accepted* frames whose
@@ -118,6 +137,28 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Auto-grade: automatic, explained frame-quality grading** — the QC layer
+  measured five per-sub quality metrics but (streaks aside) nothing acted on
+  them; picking "reject worst N% by metric X" needs exactly the judgment a
+  beginner lacks. A new engine module (`seestack/qc/grading.py`) grades a
+  target's accepted frames with robust one-sided modified z-scores
+  (median/MAD, meanAD fallback; log-domain for the multiplicative metrics —
+  star count, sky, transparency; linear for FWHM/eccentricity) and only flags
+  frames that are *also* practically worse (≥25% softer FWHM, ≥1.5× brighter
+  sky, ≥30% star/transparency loss, +0.15 eccentricity), each with a
+  plain-language reason ("far fewer stars than typical (25 vs 400) — likely
+  cloud"). Safety rails: ≥10 measured frames per metric, ≤25% of frames ever
+  recommended (worst-by-z kept), user-graded frames never touched, machine
+  rejections don't set `user_override` (reason `auto:grade:<metric>`).
+  Exposed as `GET/POST …/frames/auto-grade[/apply]` (apply recomputes
+  server-side and returns `changed_ids` for the shared one-click undo), a
+  preview-first modal on the Target page, and an opt-in
+  `auto_grade_frames`(+`auto_grade_sensitivity`) setting that grades
+  hands-off after QC in the watcher pipeline and manual QC+solve. Also fixed a
+  pre-existing staleness bug the undo flow exposed: manual accept/reject and
+  bulk frame actions never refreshed the registry's accepted counts. Additive/
+  upgrade-safe; default off. (v0.41.0, manual/frame-auto-grading)
 
 - **Plain-language hints on the Target metric columns** — the FWHM, Stars, Ecc.
   and Sky column headers now carry the same dotted-underline hint tooltip that

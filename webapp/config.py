@@ -20,7 +20,7 @@ import logging
 import os
 from pathlib import Path
 from threading import RLock
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -74,6 +74,13 @@ class Settings(BaseModel):
     # frame's good signal. Off by default (the streak is fully rejected) since it
     # only pays off when rejection is enabled at stack time.
     keep_streaked_frames: bool = False
+    # Auto-grade: after QC, statistically grade each target's accepted frames
+    # (robust outliers on FWHM / stars / sky / eccentricity / transparency) and
+    # reject the clearly-bad ones with a plain-language reason. Off by default —
+    # the Target page's "Auto-grade" preview covers the manual workflow; this
+    # setting makes it hands-off. Frames the user graded are never touched.
+    auto_grade_frames: bool = False
+    auto_grade_sensitivity: Literal["conservative", "balanced", "aggressive"] = "balanced"
 
     # --- plate solving -----------------------------------------------------
     astap_path: str | None = None  # falls back to $SEESTACK_ASTAP_PATH, then PATH

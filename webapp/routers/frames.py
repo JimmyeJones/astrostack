@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
@@ -11,7 +12,14 @@ from fastapi.responses import FileResponse
 from seestack.io.project import FrameRow
 from seestack.render.thumbnail import THUMB_VERSION, generate_thumbnail, thumbs_dir
 from webapp import deps
-from webapp.schemas import BulkFrameAction, FrameOut, FramePatch
+from webapp.schemas import (
+    BulkFrameAction,
+    FrameOut,
+    FramePatch,
+    GradeReasonOut,
+    GradeRecommendationOut,
+    GradeReportOut,
+)
 
 router = APIRouter(prefix="/api/targets/{safe}/frames", tags=["frames"])
 
@@ -91,6 +99,83 @@ def reject_summary(safe: str, request: Request) -> dict:
     return {"counts": counts, "total": sum(counts.values())}
 
 
+def _grade_report_out(report, changed_ids: list[int] | None = None) -> GradeReportOut:
+    return GradeReportOut(
+        sensitivity=report.sensitivity,
+        n_accepted=report.n_accepted,
+        n_considered=report.n_considered,
+        recommendations=[
+            GradeRecommendationOut(
+                frame_id=rec.frame_id,
+                name=rec.name,
+                reasons=[
+                    GradeReasonOut(metric=r.metric, label=r.label, value=r.value,
+                                   typical=r.typical, z=r.z)
+                    for r in rec.reasons
+                ],
+            )
+            for rec in report.recommendations
+        ],
+        metrics_used=report.metrics_used,
+        metrics_skipped=report.metrics_skipped,
+        capped=report.capped,
+        changed_ids=changed_ids,
+    )
+
+
+@router.get("/auto-grade", response_model=GradeReportOut)
+def auto_grade_preview(
+    safe: str,
+    request: Request,
+    sensitivity: Literal["conservative", "balanced", "aggressive"] | None = None,
+) -> GradeReportOut:
+    """Preview which accepted frames auto-grade would reject, and why.
+
+    Pure read — nothing is changed. Defaults to the configured sensitivity.
+    Declared before ``/{frame_id}`` so the literal path isn't captured as an id.
+    """
+    from seestack.qc.grading import grade_frames
+
+    sens = sensitivity or deps.get_settings(request).auto_grade_sensitivity
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        frames = list(proj.iter_frames(accepted_only=True))
+    finally:
+        proj.close()
+        lib.close()
+    return _grade_report_out(grade_frames(frames, sensitivity=sens))
+
+
+@router.post("/auto-grade/apply", response_model=GradeReportOut)
+def auto_grade_apply(
+    safe: str,
+    request: Request,
+    sensitivity: Literal["conservative", "balanced", "aggressive"] | None = None,
+) -> GradeReportOut:
+    """Recompute the grading server-side and reject the recommended frames.
+
+    Recomputing (rather than trusting ids from the client's preview) means the
+    decision always reflects the frames' current state. Returns the applied
+    report with ``changed_ids`` so the client can offer a one-click undo.
+    """
+    from seestack.qc.grading import apply_grade_report, grade_frames
+
+    sens = sensitivity or deps.get_settings(request).auto_grade_sensitivity
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        try:
+            frames = list(proj.iter_frames(accepted_only=True))
+            report = grade_frames(frames, sensitivity=sens)
+            changed = apply_grade_report(proj, report)
+        finally:
+            proj.close()
+        if changed:
+            lib.refresh_target_stats(safe)  # accepted-count badge stays honest
+    finally:
+        lib.close()
+    return _grade_report_out(report, changed_ids=changed)
+
+
 @router.get("/{frame_id}", response_model=FrameOut)
 def get_frame(safe: str, frame_id: int, request: Request) -> FrameOut:
     lib, proj = deps.open_target_project(request, safe)
@@ -120,10 +205,17 @@ def patch_frame(safe: str, frame_id: int, body: FramePatch, request: Request) ->
             patch["bayer_pattern"] = body.bayer_pattern
         if patch:
             proj.update_frame(frame_id, **patch)
-        return _to_out(proj.get_frame(frame_id))
+        out = _to_out(proj.get_frame(frame_id))
     finally:
         proj.close()
+    try:
+        if body.accept is not None:
+            # Keep the registry's accepted-count (Target badge, Library cards)
+            # honest after a manual grade — it's only recomputed on refresh.
+            lib.refresh_target_stats(safe)
+    finally:
         lib.close()
+    return out
 
 
 @router.post("/bulk")
@@ -167,10 +259,16 @@ def bulk_frames(safe: str, body: BulkFrameAction, request: Request) -> dict:
                         reject_reason="bulk:streaked",
                     )
                     changed_ids.append(f.id)
-        return {"changed": len(changed_ids), "changed_ids": changed_ids}
     finally:
         proj.close()
+    try:
+        if changed_ids:
+            # Same registry refresh as the accept/reject PATCH — bulk actions
+            # change the accepted count too.
+            lib.refresh_target_stats(safe)
+    finally:
         lib.close()
+    return {"changed": len(changed_ids), "changed_ids": changed_ids}
 
 
 @router.get("/{frame_id}/preview")
