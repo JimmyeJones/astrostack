@@ -9,6 +9,17 @@ Items under "Needs owner sign-off" must not be started autonomously — see
 
 ## Shipped
 
+- **[Security] Patch `react-router` open-redirect and `form-data`
+  CRLF-injection CVEs** — S — `npm audit` in `frontend/` flagged
+  `react-router`/`react-router-dom` (moderate: same-origin redirect with a
+  `//`-prefixed path is reinterpreted as protocol-relative, enabling open
+  redirect) and `form-data` (high: CRLF injection via unescaped multipart
+  field names/filenames). Both fixed via a non-breaking `npm audit fix`
+  (regenerated `package-lock.json`). Remaining `esbuild`/`vite`/`vitest`
+  findings only affect the dev server, not the production build, and need
+  a deliberate major-version bump — logged as a new backlog item below
+  rather than force-fixed blindly. *(2026-07-02)*
+
 - **[Security] Close the quick-look-preview gap in the `output_name`
   sanitizer** — S — the `output_name` sanitizer below (`_sanitize_basename`
   in `seestack/stack/output.py`) is only called inside
@@ -201,6 +212,41 @@ Items under "Needs owner sign-off" must not be started autonomously — see
   blocking anything. Worth a dedicated cleanup pass with `ruff check --fix`
   plus manual review of the unsafe-fix set, run as its own isolated PR so a
   bad auto-fix is easy to bisect.
+
+- **[Operability] `vite`/`vitest`/`esbuild` dev-toolchain has known CVEs**
+  — M — `npm audit` (after the `react-router`/`form-data` fix shipped this
+  run) still reports esbuild ≤0.24.2 (moderate: the dev server accepts
+  requests from any website) via `vite` ≤6.4.2 → `vitest` ≤3.2.5. Only
+  exploitable while running `npm run dev`, not in the production build
+  served by `webapp/`, so it's not urgent — but `npm audit fix --force`
+  wants to jump to `vite@8`, a real major-version bump across the vite/
+  vitest toolchain (config changes, full test-suite re-verification), so
+  per `AGENTS.md` §9 ("major version bumps of core deps") this needs a
+  deliberate dedicated pass, not a blind `--force` in an automated run.
+
+- **[Operability] No CI workflow** — M — there is no `.github/workflows/`
+  (or equivalent) in this repo; the Python `pytest` and frontend
+  `vitest`/`build` gates only run when a human or the autonomous loop
+  happens to run them locally. Adding a workflow that runs the same
+  commands as `AGENTS.md` §7 on every push/PR would catch regressions
+  immediately instead of at the next hourly run. Purely additive (a new
+  workflow file), no risk to existing behavior.
+
+- **[Usability] Icon-only buttons missing `aria-label`** — M — repo-wide
+  sweep of `frontend/src/routes/*.tsx` and `components/*.tsx`; only a
+  handful of `aria-label`/`role`/`alt` attributes exist across all routes
+  (a few landed incidentally with the `History.tsx`/`Jobs.tsx` fixes
+  above), so most icon-only actions (delete, cancel, download, edit) are
+  unlabeled for screen-reader users. Do as one focused sweep with a small
+  test asserting known icon buttons have accessible names.
+
+- **[Reliability] Seestar client has no reconnect/retry on dropped TCP**
+  — M — `webapp/seestar/client.py` has no backoff/retry on socket drop;
+  a flaky Wi-Fi link to the scope currently requires the user to manually
+  reconnect via the UI. This is the core hardware-integration path for
+  live monitoring/control, so it's worth a dedicated pass — needs care
+  around not spamming reconnect attempts, and the retry/backoff logic
+  should be testable in isolation from real hardware.
 
 ## Needs owner sign-off
 
