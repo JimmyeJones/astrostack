@@ -78,13 +78,6 @@ _(none — claim an item here with your branch name)_
   the way PSF-from-stars did for deconvolution. Needs a small server endpoint
   (or extend the histogram response with a noise estimate) + the frontend
   wiring; testable in isolation. (S–M, approachability)
-- **Record the deconvolution PSF σ in the exported FITS header** — when an
-  editor recipe includes `detail.deconvolve`, stamp the σ actually used into
-  the derived `master.fits` (e.g. a `DECONPSF` card), extending the existing
-  editor-export provenance headers (STACKMTD/EDITFROM…). So a sharpened export
-  self-documents in Siril/PixInsight/APP whether and how hard it was
-  deconvolved. Small, additive, follows an established pattern. (S,
-  correctness/approachability)
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
@@ -127,6 +120,15 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Record the deconvolution PSF σ in the exported FITS header** — when an
+  editor recipe includes an enabled `detail.deconvolve` op, the derived
+  `master.fits` now carries a `DECONPSF` card recording the Gaussian PSF σ (px)
+  actually used (a single float, or comma-joined when several deconvolutions ran
+  in order), and the History Info panel surfaces it (added to `_INFO_CARDS`). So
+  a sharpened export self-documents in Siril/PixInsight/APP whether and how hard
+  it was deconvolved, extending the existing STACKMTD/EDITFROM provenance
+  pattern. Additive/upgrade-safe. (v0.44.0, this run)
 
 - **PSF-from-stars for editor deconvolution** — the deconvolution op made the
   user hand-guess a Gaussian PSF σ. A new `GET …/editor/psf-suggestion`

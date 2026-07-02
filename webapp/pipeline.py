@@ -254,6 +254,23 @@ def _load_full_rgb_wcs(fits_path: str) -> tuple[Any, Any]:
     return rgb, wcs
 
 
+def _deconv_psf_meta(recipe) -> dict[str, Any]:  # noqa: ANN001
+    """If an editor recipe includes enabled ``detail.deconvolve`` op(s), return a
+    ``DECONPSF`` provenance card recording the Gaussian PSF σ (px) actually used,
+    so a sharpened export self-documents whether and how hard it was deconvolved.
+
+    Records a single float when one deconvolution ran, or a comma-joined string
+    when several ran (in application order). Empty dict when none did.
+    """
+    sigmas = [round(float(op.params.get("psf_sigma", 1.5)), 3)
+              for op in recipe.ops
+              if op.enabled and op.id == "detail.deconvolve"]
+    if not sigmas:
+        return {}
+    value: Any = sigmas[0] if len(sigmas) == 1 else ", ".join(str(s) for s in sigmas)
+    return {"DECONPSF": (value, "Richardson-Lucy PSF sigma (px)")}
+
+
 def _carry_provenance(fits_path: str) -> dict[str, Any]:
     """Read provenance cards from a source stack FITS so a derived export can
     keep describing the underlying integration (target, frame count, exposure).
@@ -344,6 +361,7 @@ def _apply_editor_to_run(lib: Library, safe: str, run_id: int, recipe_dict: dict
         edit_meta["STACKMTD"] = (f"editor recipe ({n_ops} ops)",
                                  "how this image was produced")
         edit_meta["EDITFROM"] = (int(run_id), "source stack run id")
+        edit_meta.update(_deconv_psf_meta(recipe))
 
         coverage = np.ones(out.shape[:2], dtype=np.float32)
         paths = write_stack_outputs(
