@@ -36,16 +36,6 @@ _(none — claim an item here with your branch name)_
   bright-star fluxes vs the reference (the `transparency_score` machinery is
   most of it) and divide it out before accumulation. Needs care: robust to
   few-star frames, neutral fallback, off by default first. (M, correctness)
-- **Eccentricity factor in quality weighting** — `compute_frame_weights` now
-  weights by FWHM / star-count / sky / transparency (v0.36.0) but not
-  `eccentricity_median`, which is already computed per frame. Elongated stars
-  signal tracking error / wind on that whole sub, so a
-  `clip(median_ecc / frame_ecc, min, 1.0)` factor (guarding `frame_ecc == 0` as
-  the neutral best case) would down-weight trailed frames symmetrically with the
-  others. Watch for double-counting vs FWHM (both partly track seeing) — they
-  capture size vs shape, so it's defensible, but validate on a synthetic set
-  before flipping. Additive; gated by the off-by-default `quality_weighted`.
-  (S, correctness)
 - Per-pixel extremes / percentile rejection for small stacks (the *robust*
   fix for a lone satellite/plane trail below ~11 frames). **NB:** the previously
   filed "iterated κ-σ" idea was investigated and dropped — re-estimation clips
@@ -79,13 +69,6 @@ _(none — claim an item here with your branch name)_
 ### Features that serve real workflows
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
-- **Transparency-night badge on History/Gallery cards** — the Stack-form
-  transparency hint (v0.36.1) only fires *before* a run. Persist the run's
-  median-transparency-vs-target-baseline verdict (or recompute it) and show a
-  small "hazy night" badge on the completed run's History and Gallery cards, so
-  a user browsing past stacks can see at a glance which were shot through haze
-  without reopening the frames. Reuse the within-target normalisation.
-  (S, approachability)
 - **Auto-grade hint on the Stack form** — the Stack form already advises on
   sigma-clip/streaks/transparency; add "N of your accepted frames look like
   outliers — review Auto-grade on the Target page" by calling the new
@@ -95,14 +78,24 @@ _(none — claim an item here with your branch name)_
   user hand-tune a Gaussian σ; the project median FWHM (already measured by
   QC) is the right default, and a "from your stars" button would set it.
   (S–M, approachability)
-- **Surface the quality-weighting summary in the run Info panel** — a
-  quality-weighted stack already logs `WeightingStats` (n_weighted, min/max/
-  median weight) but the user never sees it. Record it on the run (or recompute
-  cheaply) and show "N frames down-weighted, weight range 0.31–1.00" in the
-  Stack Info panel, so a user can trust *that* weighting did something and how
-  aggressive it was (trust pillar / Method D). (S, approachability)
 
 ### UX & polish
+- **"N trailed frames" badge on the Target view** — mirror the existing
+  "N streaked" badge for eccentricity: count *accepted* frames whose
+  `eccentricity_median` is a strong within-target outlier (e.g. above the median
+  + 3·MAD, or above a sane absolute floor like ~0.6) and show a small badge next
+  to the accepted count, with a one-click "reject worst by eccentricity" (the
+  bulk action + metric already exist). Surfaces a night of tracking trouble at a
+  glance, complementing this run's ecc-weighting (v0.38.0). Reuses existing
+  plumbing; frontend-only if the outlier count is computed client-side.
+  (S, approachability)
+- **Nudge quality weighting when frame quality varies a lot** — on the Stack
+  form, when the accepted+solved frames show a wide spread in FWHM / star-count /
+  transparency (e.g. IQR/median above a threshold) but `quality_weighted` is
+  off, show an advisory suggesting the user turn it on, because a mixed-quality
+  set is exactly where down-weighting the worst subs helps most (and a uniform
+  set barely changes). Advisory only; reuses metrics already fetched for the
+  transparency hint. Client-side, within-target. (S, approachability)
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
 
@@ -162,8 +155,49 @@ _Newest first. One line each: what + commit/PR._
   server-side and returns `changed_ids` for the shared one-click undo), a
   preview-first modal on the Target page, and an opt-in
   `auto_grade_frames`(+`auto_grade_sensitivity`) setting that grades
-  hands-off after QC in the watcher pipeline and manual QC+solve. Additive/
-  upgrade-safe; default off. (v0.38.0, manual/frame-auto-grading)
+  hands-off after QC in the watcher pipeline and manual QC+solve. Also fixed a
+  pre-existing staleness bug the undo flow exposed: manual accept/reject and
+  bulk frame actions never refreshed the registry's accepted counts. Additive/
+  upgrade-safe; default off. (v0.41.0, manual/frame-auto-grading)
+
+- **Plain-language hints on the Target metric columns** — the FWHM, Stars, Ecc.
+  and Sky column headers now carry the same dotted-underline hint tooltip that
+  only Transparency had, each explaining in one sentence what the metric means
+  and which direction is better (e.g. "Ecc. — median star elongation: 0 = round,
+  closer to 1 = trailed; flags tracking error/wind. Lower is better."). Removes a
+  layer of jargon for a beginner scanning their subs. Frontend-only.
+  (v0.40.1, this run)
+
+- **Transparency-night badge on History/Gallery cards** — completes the
+  transparency series. `run_stack` now records each run's transparency verdict
+  (`median transparency of the stacked frames ÷ the target's p90 clear-sky
+  baseline`) in a new additive `stack_runs.transparency_ratio` column (schema
+  v4→v5 migration; old runs stay NULL), mirroring the Stack-form pre-run hint's
+  within-target normalisation. `StackRunOut` and the gallery response carry it,
+  and a shared `HazyNightBadge` shows a small orange "Hazy night" badge (with a
+  "% below clearest nights" tooltip) on History and Gallery cards when the ratio
+  is below 0.6 — so a user browsing past stacks sees which were shot through
+  haze at a glance, no reopening. Additive/upgrade-safe. (v0.40.0, this run)
+
+- **Surface the quality-weighting summary in the run Info panel** — a
+  quality-weighted stack now stamps its `WeightingStats` onto the master FITS
+  header (`WGTMODE`/`WGTNDOWN`/`WGTMIN`/`WGTMAX`/`WGTMED`), and the run Info
+  endpoint parses those into a friendly `weighting` object so the History Info
+  panel shows "Quality-weighted · N frames down-weighted · weights 0.31–1.00
+  (median 0.72)". Lets a user trust the (off-by-default) weighting did something
+  and gauge how aggressive it was, with no extra storage — just header cards,
+  matching the existing provenance pattern. Added `n_downweighted` to
+  `WeightingStats`. (v0.39.0, this run)
+
+- **Eccentricity factor in quality weighting** — `compute_frame_weights` gained a
+  fifth `ecc_factor` (`clip(median_ecc / frame_ecc, min_weight, 1.0)`), so with
+  quality-weighting on, frames whose stars are more *elongated* than the run's
+  median (tracking error / wind / a mount bump) pull less into the average, while
+  rounder-than-median frames cap at the neutral 1.0. Captures star *shape* where
+  the FWHM factor captures *size*, so the two aren't redundant. Guards
+  `frame_ecc == 0` (perfectly round = best case) against divide-by-zero and only
+  applies when the run's median eccentricity is itself measurable. Additive;
+  gated by the off-by-default `quality_weighted`. (v0.38.0, this run)
 
 - **Library search matches notes + persistent filter view** — the Library
   free-text search now also matches a target's `notes` (not just name/tags), and

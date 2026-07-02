@@ -44,6 +44,9 @@ class GalleryItem(BaseModel):
     # True when this run's settings can pre-fill the Stack form ("reuse settings").
     # False for editor-recipe / channel-combine runs, which carry no stack knobs.
     reusable: bool = False
+    # Median transparency of the stacked frames ÷ the target's clear-sky baseline
+    # (< ~0.6 ⇒ hazy). None for pre-schema-5 runs; drives a "hazy night" badge.
+    transparency_ratio: float | None = None
 
 
 class GalleryResponse(BaseModel):
@@ -99,6 +102,7 @@ def get_gallery(request: Request) -> GalleryResponse:
                         ),
                         options=options,
                         reusable=_is_reusable(options),
+                        transparency_ratio=run.transparency_ratio,
                     ))
             finally:
                 if proj is not None:

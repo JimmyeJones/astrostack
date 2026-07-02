@@ -9,6 +9,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { api, type GalleryItem, type StackOptionField } from "../api/client";
 import { formatIntegration } from "../format";
+import { HazyNightBadge } from "../components/HazyNightBadge";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { QueryError } from "../components/QueryError";
 
@@ -77,7 +78,10 @@ function GalleryCard({ item, labels, onView, selected, onToggleSelect }: {
         <Text fw={600} truncate component={Link} to={`/targets/${item.safe}/history`}>
           {item.target_name}
         </Text>
-        <Badge variant="light" style={{ flexShrink: 0 }}>{item.n_frames_used} frames</Badge>
+        <Group gap={4} wrap="nowrap" style={{ flexShrink: 0 }}>
+          <HazyNightBadge ratio={item.transparency_ratio} />
+          <Badge variant="light">{item.n_frames_used} frames</Badge>
+        </Group>
       </Group>
       {item.notes ? (
         <Text size="sm" c="violet.4" fw={500} truncate title={item.notes}>

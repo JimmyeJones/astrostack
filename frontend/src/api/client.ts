@@ -168,6 +168,7 @@ export interface StackRun {
   notes: string | null;
   total_exposure_s?: number | null;
   reusable?: boolean;
+  transparency_ratio?: number | null;
 }
 
 export interface StackInfoCard {
@@ -176,10 +177,19 @@ export interface StackInfoCard {
   comment: string | null;
 }
 
+export interface StackWeightingSummary {
+  mode: string;
+  n_downweighted?: number;
+  min?: number;
+  max?: number;
+  median?: number;
+}
+
 export interface StackRunInfo {
   run_id: number;
   integration_s: number | null;
   n_frames: number | null;
+  weighting: StackWeightingSummary | null;
   cards: StackInfoCard[];
 }
 
@@ -216,6 +226,7 @@ export interface GalleryItem {
   preview_url: string;
   options: Record<string, unknown>;
   reusable?: boolean;
+  transparency_ratio?: number | null;
 }
 
 export interface LogEntry {

@@ -132,6 +132,10 @@ class StackRunOut(BaseModel):
     # True when this run's options can pre-fill the Stack form ("reuse settings").
     # False for editor-recipe / channel-combine runs, which carry no stack knobs.
     reusable: bool = False
+    # Median transparency of the stacked frames ÷ the target's clear-sky
+    # baseline (< ~0.6 ⇒ hazy). None for pre-schema-5 runs or when not
+    # computable; lets the card show a "hazy night" badge at a glance.
+    transparency_ratio: float | None = None
 
 
 class JobOut(BaseModel):

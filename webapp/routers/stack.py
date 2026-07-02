@@ -216,6 +216,7 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
             notes=r.notes,
             total_exposure_s=r.total_exposure_s,
             reusable=_run_is_reusable(r.options_json),
+            transparency_ratio=r.transparency_ratio,
         ))
     return out
 
@@ -339,6 +340,20 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 — a corrupt header shouldn't 500
         raise HTTPException(status_code=422,
                             detail=f"Could not read FITS header: {exc}") from exc
+
+    # Quality-weighting summary (present only on quality-weighted stacks). Parsed
+    # into a friendly object rather than raw cards so the panel can show a single
+    # "N frames down-weighted · weights lo–hi" line.
+    weighting: dict[str, Any] | None = None
+    if "WGTMODE" in header:
+        weighting = {"mode": str(header["WGTMODE"])}
+        for hk, k in (("WGTNDOWN", "n_downweighted"),):
+            with contextlib.suppress(KeyError, TypeError, ValueError):
+                weighting[k] = int(header[hk])
+        for hk, k in (("WGTMIN", "min"), ("WGTMAX", "max"), ("WGTMED", "median")):
+            with contextlib.suppress(KeyError, TypeError, ValueError):
+                weighting[k] = float(header[hk])
+
     for key in _INFO_CARDS:
         if key not in header:
             continue
@@ -359,7 +374,7 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
             with contextlib.suppress(TypeError, ValueError):
                 n_frames = int(value)
     return {"run_id": run_id, "integration_s": integration_s,
-            "n_frames": n_frames, "cards": cards}
+            "n_frames": n_frames, "weighting": weighting, "cards": cards}
 
 
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/options")

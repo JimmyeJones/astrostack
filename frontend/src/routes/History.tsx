@@ -10,6 +10,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api, type StackRun } from "../api/client";
 import { formatIntegration } from "../format";
+import { HazyNightBadge } from "../components/HazyNightBadge";
 import { ImageLightbox } from "../components/ImageLightbox";
 
 function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
@@ -31,6 +32,20 @@ function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
         <Text size="xs" fw={600}>
           Integration: {formatIntegration(data.integration_s)}
           {data.n_frames ? ` · ${data.n_frames} subs` : ""}
+        </Text>
+      ) : null}
+      {data.weighting ? (
+        <Text size="xs" c="dimmed">
+          Quality-weighted
+          {typeof data.weighting.n_downweighted === "number"
+            ? ` · ${data.weighting.n_downweighted} frame${data.weighting.n_downweighted === 1 ? "" : "s"} down-weighted`
+            : ""}
+          {typeof data.weighting.min === "number" && typeof data.weighting.max === "number"
+            ? ` · weights ${data.weighting.min.toFixed(2)}–${data.weighting.max.toFixed(2)}`
+            : ""}
+          {typeof data.weighting.median === "number"
+            ? ` (median ${data.weighting.median.toFixed(2)})`
+            : ""}
         </Text>
       ) : null}
       <Table verticalSpacing={2} horizontalSpacing="xs" fz="xs" withRowBorders={false}>
@@ -152,9 +167,12 @@ function RunCard({ safe, run, onDelete, deleting }: {
         )}
       </Card.Section>
 
-      <Group justify="space-between" mt="sm">
+      <Group justify="space-between" mt="sm" wrap="nowrap">
         <Text fw={600}>{run.output_basename}</Text>
-        <Badge variant="light">{run.n_frames_used} frames</Badge>
+        <Group gap={4} wrap="nowrap">
+          <HazyNightBadge ratio={run.transparency_ratio} />
+          <Badge variant="light">{run.n_frames_used} frames</Badge>
+        </Group>
       </Group>
       <Text size="xs" c="dimmed">
         {run.timestamp_utc.replace("T", " ").slice(0, 19)} · {run.canvas_w}×{run.canvas_h}
