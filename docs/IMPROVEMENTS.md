@@ -69,6 +69,20 @@ _(none — claim an item here with your branch name)_
 ### Features that serve real workflows
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
+- **Show the editor processing chain in the History Info panel** — the
+  editor export now stamps every op as a FITS `HISTORY` card (v0.46.0), but the
+  run Info endpoint only surfaces the structured `_INFO_CARDS`, so a user has to
+  open the FITS in Siril to see how a run was edited. Parse the `HISTORY`
+  commentary cards (astropy exposes them as `header["HISTORY"]`) into a friendly
+  "Processing: stretch → denoise → sharpen" list in the Info panel. Small,
+  additive, reuses the provenance just written. (S, approachability)
+- **Per-stack noise-floor readout / "cleanest stack" badge** — reuse the new
+  `seestack/edit/noise.estimate_noise_sigma` to record each stack run's
+  normalized background noise (an additive `stack_runs` column, NULL for old
+  runs) and show it on History/Gallery cards, so a user comparing several stacks
+  of one target can see at a glance which is the cleanest — turning a subjective
+  "which looks less noisy" into a number. Advisory; within-target comparison.
+  (S–M, approachability/correctness)
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
