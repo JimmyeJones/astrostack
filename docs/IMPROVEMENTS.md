@@ -48,6 +48,16 @@ _(none — claim an item here with your branch name)_
 - Drizzle memory estimate surfaced in the Stack form before you run it. (S)
 - Star-mask preview toggle in the editor (visualise the mask driving star ops). (S)
 - Per-target "notes/tags" search improvements and saved filters in Library. (S)
+- **Show integration time inline on History cards** — now that runs persist
+  `total_exposure_s` (v0.20.0), add it to `StackRunOut` and render "Integration:
+  2.3 h · 840 subs" on each History card directly (no need to open the Info
+  panel / read the FITS header). The Gallery already shows it from the run row;
+  History should match. (S, approachability)
+- **Offer "Reuse settings" from Gallery cards too** — the Gallery already carries
+  each run's parsed `options`, and the Stack form now accepts `?from=<runId>`.
+  Add the same "Reuse settings" action to Gallery cards (guarded by a `reusable`
+  flag like History) so users can re-run a recipe straight from the browse view.
+  (S, approachability)
 
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
