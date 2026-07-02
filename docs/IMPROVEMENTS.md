@@ -9,6 +9,16 @@ Items under "Needs owner sign-off" must not be started autonomously — see
 
 ## Shipped
 
+- **[Security] Validate Seestar `goto` RA/Dec coordinates** — S —
+  `GotoRequest` (`webapp/routers/seestar.py`) forwarded `ra_hours`/
+  `dec_deg` straight to the telescope's RPC with no bounds check. A
+  malformed request now fails fast with a 422 (`Field(ge=0, lt=24)` /
+  `Field(ge=-90, le=90)`) instead of being sent to hardware. (The
+  overlapping `bayer` frame-preview finding from the same pass was
+  already fixed upstream — see the entry below.) Covered by
+  `tests/webapp/test_seestar.py::test_goto_rejects_out_of_range_coordinates`
+  (+ a boundary-acceptance test). *(2026-07-02)*
+
 - **[Usability] Silent job-cancel failures; Logs download ignored the
   active filter** — S — `Jobs.tsx`'s cancel mutation had no `onError`, so
   cancelling a job that had already finished (or any other failure) gave
