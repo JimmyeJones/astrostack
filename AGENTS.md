@@ -59,9 +59,9 @@ bar (§5) for task count.**
 7. **Push** and keep going to the next task.
 
 **End of run (once):**
-8. Make sure everything is pushed, PR(s) opened/updated (§8), and add any new
-   ideas you found to `docs/IMPROVEMENTS.md`. Do **not** merge to the default
-   branch yourself unless §8's merge policy allows it. Then stop.
+8. Add any new ideas you found to `docs/IMPROVEMENTS.md`, then **merge your green
+   work into the default branch yourself** and clean up (§8). This project is
+   zero-touch: no human reviews or merges, so shipping = merging. Then stop.
 
 **Batching guidance:** group closely-related small changes onto one branch as
 separate commits and one PR; put unrelated changes on their own branches/PRs so
@@ -248,32 +248,49 @@ temp/scratch files under the session scratchpad dir, never in the repo.
 
 ---
 
-## 8. Git, branches, PRs, and merge policy
+## 8. Git and shipping (zero-touch — no human reviews or merges)
 
-- **Never commit directly to the default branch.** Work on your own branch(es) off
-  the latest default:
-  `git fetch origin && git checkout -B agent/<short-kebab-topic> origin/<default>`.
-- One topic per branch. Multiple related small tasks may share a branch (separate
-  commits, one PR); unrelated tasks get their own branch/PR.
-- Commit each task as its own well-described commit. End every commit message with
-  the repo's trailer convention (a `Co-Authored-By:` line; do **not** put any
-  model identifier in commits, code, PR text, or logs).
-- Push with `git push -u origin <branch>`; retry transient network failures with
-  backoff. Push after each task so progress isn't lost if the run ends abruptly.
-- Open a PR per branch describing what changed and why, how you tested it, and the
-  risk. If a PR template exists, fill it in.
-- **Merge policy (default: conservative).** Do **not** merge your own PR into the
-  default branch automatically. Leave it green and open for review. Only merge
-  autonomously if the repo owner has explicitly enabled that mode (branch
-  protection + required CI green) — and even then, never force-push shared history
-  and never merge a red PR.
-- Don't open a second PR for something an open PR already covers — push follow-ups
-  to that branch instead.
+This is a solo, autonomous project. **Nobody is going to review or merge your
+work — so if you don't merge it, it never ships.** Your job is to get good,
+tested changes onto the default branch by yourself, safely.
+
+**Work on a branch, then merge it yourself:**
+
+1. Start from the latest default branch:
+   `git fetch origin && git checkout -B agent/<short-kebab-topic> origin/<default>`
+   (the harness may create a branch for you automatically — that's fine; just make
+   sure it's based on the current default). Use a fresh branch per topic; related
+   small tasks may share one.
+2. Commit each task as its own well-described commit. End every commit message with
+   the repo's trailer convention (a `Co-Authored-By:` line; never put any model
+   identifier in commits, code, or logs). Push after each task
+   (`git push -u origin <branch>`); retry transient network errors with backoff.
+3. **Before merging, make it green on top of the latest default:**
+   `git fetch origin` → merge `origin/<default>` into your branch → re-run the full
+   test suite (§5) and, if the frontend changed, the frontend build. Resolve any
+   conflicts conservatively.
+4. **Merge into the default branch** (fast-forward or a normal merge commit is
+   fine), push the default branch, and delete your topic branch. Opening a PR
+   first is optional and nice for history, but do not *wait* on it — merge it
+   yourself once green.
+
+**Absolute rules for merging:**
+- Only ever merge a **fully green** branch. Green tests are the safety gate that
+  replaces a human reviewer — treat §5 as mandatory before every merge.
+- **Never force-push** the default branch or rewrite its history. Only add to it.
+- If a merge conflict is non-trivial or you can't get green after syncing, **do
+  not force it** — leave your branch pushed, note it in `docs/IMPROVEMENTS.md`, and
+  move on. A stuck branch is fine; a broken default branch is not.
+- One change per merge, each independently green, so any single change can be
+  reverted later without unpicking the others.
 
 ---
 
 ## 9. Hard guardrails (never cross these)
 
+- Never merge anything that isn't fully green (§5), and never force-push or rewrite
+  the default branch's history. Merge via a branch (§8), don't commit straight onto
+  the default branch.
 - Never weaken, delete, skip, or `xfail` tests to go green. Fix the code.
 - Never break the ingest/stack hot path's memory bounds or NaN/coverage semantics.
 - Never do anything destructive to a user's data. Prefer additive, reversible,
@@ -303,6 +320,9 @@ collisions:
   **In progress** with your branch name in the same commit that starts the work;
   release it (to **Shipped** or back to **Ideas**) when you finish or abandon it.
 - Prefer picking items *not* recently touched by another branch.
+- Because everyone merges into the same default branch, always sync with the
+  latest default and re-run tests right before you merge (§8) — another agent may
+  have merged while you were working.
 
 ---
 
@@ -322,5 +342,6 @@ Per task (repeat ~3–6×, or fewer if large):
 
 End of run:
 [ ] added ≥1–2 new ideas to IMPROVEMENTS.md (§4)
-[ ] PR(s) opened/updated; NOT merged to default; everything pushed
+[ ] synced branch with latest default; full suite still green
+[ ] merged your green work into the default branch yourself; pushed; branch tidied
 ```

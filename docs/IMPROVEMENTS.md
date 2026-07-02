@@ -67,9 +67,12 @@ _(none — claim an item here with your branch name)_
 ## Needs owner sign-off (do NOT start autonomously)
 - AI star removal (StarNet-class ONNX): high wow-factor but adds a heavy ML
   runtime + model download that may hit the network policy. Needs an explicit OK.
-- Any change that merges to the default branch automatically, exposes the app
-  publicly, or alters auth defaults.
+- Anything that exposes the app publicly, changes auth defaults (e.g. turning auth
+  on by default), or is otherwise hard to reverse.
 - Live capture / real-time Seestar streaming integrations (explicitly de-scoped).
+
+_(Normal, tested changes merge to the default branch automatically — see
+AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ---
 
