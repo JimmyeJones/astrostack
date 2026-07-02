@@ -302,6 +302,13 @@ them or merge into them.
    host, that's fine — a *merged* leftover branch is harmless; never delete an
    *unmerged* branch.
 
+**CI backstop:** `.github/workflows/ci.yml` re-runs the full Python + frontend
+suites on every PR and on every push to `main`. Your local green run (§5) is the
+gate; CI is the independent net. When you merge via a PR, glance at its checks;
+and if `main`'s CI is red at the start of a run, **fixing it is your first task**
+(it means the last merge broke something). Keep CI green — never merge changes
+you expect to fail it.
+
 **Absolute rules for merging:**
 - Only ever merge a **fully green** branch. Green tests are the safety gate that
   replaces a human reviewer — treat §5 as mandatory before every merge.

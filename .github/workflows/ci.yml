@@ -1,0 +1,62 @@
+name: CI
+
+# Independent safety net for the autonomous, self-merging workflow: re-run the
+# full test suite on every change to main and on every PR, so a bad merge is
+# caught even if an agent's local run missed something. This does not *block*
+# merges (no branch protection) — it's a visible green/red health signal on the
+# default branch. If it goes red, fixing it is the next run's first job
+# (see AGENTS.md).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push to the same branch cancels an in-flight run for it.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,web]"
+      - name: Test
+        # The three Qt/GUI tests need a PySide6 desktop stack that isn't
+        # installed here; the headless engine + webapp are what CI guards.
+        run: |
+          python -m pytest tests/ -q \
+            --ignore=tests/test_compare_dialog.py \
+            --ignore=tests/test_end_to_end.py \
+            --ignore=tests/test_footprint_view.py
+
+  frontend:
+    name: Frontend build + tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install
+        working-directory: frontend
+        run: npm ci
+      - name: Typecheck + build
+        working-directory: frontend
+        run: npm run build   # tsc --noEmit && vite build
+      - name: Unit tests
+        working-directory: frontend
+        run: npm run test    # vitest run
