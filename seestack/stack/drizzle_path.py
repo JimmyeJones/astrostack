@@ -19,10 +19,19 @@ Trade-offs vs the standard weighted-sum path:
 
   - Drizzle is **CPU-only**. The GPU reproject path doesn't apply.
   - Drizzle cannot do per-pixel sigma clipping in a single pass — the
-    accumulation is one-shot. Outlier rejection has to come from the
-    frame-level streak detector and from QC (which we already do).
+    accumulation is one-shot. Single-pass drizzle therefore keeps satellites,
+    plane trails and cosmic rays that slipped past frame-level QC. The
+    optional **two-pass rejection** (``StackOptions.drizzle_reject``) fixes
+    this: pass 1 drizzles values *and* their squares to build a per-output-
+    pixel mean/σ of the actual contributions, pass 2 re-drizzles with any
+    contribution outside ``mean ± κ·σ`` given zero weight. Because both the
+    tested value and the statistics are box-sampled raw pixels, PSF-gradient
+    systematics cancel (σ at a star edge automatically widens with the
+    dither-phase spread) — so star cores are not eaten, unlike naive
+    clipping of raw pixels against an interpolated mean.
   - Drizzle is slower per frame than reproject + accumulate, especially with
-    ``scale > 1`` (which expands the output canvas).
+    ``scale > 1`` (which expands the output canvas). Two-pass rejection
+    roughly doubles that again.
 
 Recommendation: use drizzle when you have **lots** of dithered frames
 (typically 200+) AND want extra resolution. Otherwise the weighted-mean path
@@ -37,6 +46,12 @@ from dataclasses import dataclass
 import numpy as np
 
 log = logging.getLogger(__name__)
+
+# Outlier rejection is only trusted where enough frames overlap: with fewer
+# effective contributions the sample σ is meaningless. (Below ~11 frames a
+# non-iterated κ=3 clip can't fire anyway — the largest possible z-score of a
+# point against statistics that include it is (n−1)/√n.)
+_MIN_REJECT_NEFF = 3.0
 
 
 @dataclass
@@ -63,6 +78,8 @@ class DrizzleStacker:
         ref_wcs,
         ref_shape: tuple[int, int],
         params: DrizzleParams,
+        *,
+        compute_stats: bool = False,
     ) -> None:
         from drizzle.resample import Drizzle
 
@@ -71,27 +88,57 @@ class DrizzleStacker:
         self.ref_shape = ref_shape
         self.out_shape, self.out_wcs = _compute_output_canvas(ref_wcs, ref_shape, params.scale)
 
-        self._drizzlers = [
-            Drizzle(
-                kernel=params.kernel,
-                fillval=0.0,
-                out_shape=self.out_shape,
-                exptime=0.0,
-            )
-            for _ in range(3)
-        ]
+        # ``disable_ctx``: the context bitmask records *which* input frames hit
+        # each output pixel — we never read it, and it costs one full-canvas
+        # int32 plane per 32 frames (re-copied via np.append every time a plane
+        # is added). On a multi-thousand-frame Seestar stack that is tens of GB
+        # and quadratic copying, so it must stay off.
+        def _make_drizzlers():
+            return [
+                Drizzle(
+                    kernel=params.kernel,
+                    fillval=0.0,
+                    out_shape=self.out_shape,
+                    exptime=0.0,
+                    disable_ctx=True,
+                )
+                for _ in range(3)
+            ]
+
+        self._drizzlers = _make_drizzlers()
+        # Statistics mode (rejection pass 1): a parallel set of drizzlers fed
+        # with value² under the *same* weights, so E[v²] − E[v]² gives the
+        # per-output-pixel temporal variance of the contributions. (The
+        # library's ``data2`` plane resamples with *squared* weights — meant
+        # for propagating input variance maps — so it can't be reused here.)
+        self._sq_drizzlers = _make_drizzlers() if compute_stats else None
         self._n_added = 0
 
     @property
     def output_canvas_shape(self) -> tuple[int, int]:
         return self.out_shape
 
-    def add_frame(self, rgb: np.ndarray, in_wcs) -> None:
+    def add_frame(
+        self,
+        rgb: np.ndarray,
+        in_wcs,
+        *,
+        weight: float = 1.0,
+        clip: tuple[np.ndarray, np.ndarray] | None = None,
+    ) -> None:
         """
         Add one debayered, optionally bg-flattened frame to the drizzle.
 
         ``rgb`` is (H, W, 3) at the input frame's resolution. ``in_wcs`` is
-        the input frame's astropy WCS.
+        the input frame's astropy WCS. ``weight`` scales this frame's
+        contribution (quality weighting) — since the drizzle output is a
+        weighted average, scaling the weight map yields the weighted mean.
+
+        ``clip`` is an optional ``(mean, tol)`` pair from
+        :meth:`clip_reference` (both ``(H_out, W_out, 3)``). Each input pixel
+        is tested against the statistics of the output pixel nearest its
+        centre: contributions with ``|value − mean| > tol`` get zero weight.
+        NaN mean or infinite tol always keeps the pixel.
         """
         # Drizzle wants a "pixmap" — for each input pixel, the (x, y)
         # coordinate in the output. Compute once per frame, share across
@@ -99,21 +146,82 @@ class DrizzleStacker:
         pixmap = _build_pixmap(in_wcs, self.out_wcs, rgb.shape[0], rgb.shape[1])
         # Mask out-of-bounds pixels with a weight map of 0.
         h_out, w_out = self.out_shape
-        weight = (
+        in_bounds = (
             (pixmap[..., 0] >= 0) & (pixmap[..., 0] <= w_out - 1)
             & (pixmap[..., 1] >= 0) & (pixmap[..., 1] <= h_out - 1)
-        ).astype(np.float32)
+        )
+        if clip is not None:
+            mean, tol = clip
+            # Nearest output pixel per input-pixel centre. Out-of-bounds
+            # coordinates clamp harmlessly — their weight is already 0.
+            xi = np.clip(np.rint(pixmap[..., 0]), 0, w_out - 1).astype(np.intp)
+            yi = np.clip(np.rint(pixmap[..., 1]), 0, h_out - 1).astype(np.intp)
         for c in range(3):
-            ch = np.where(np.isfinite(rgb[..., c]), rgb[..., c], 0.0).astype(np.float32, copy=False)
+            vals = rgb[..., c]
+            finite = np.isfinite(vals)
+            # NaN (no-data) input pixels must carry zero weight — replacing
+            # them with 0.0 at full weight would dilute real signal.
+            wmap = np.where(in_bounds & finite, float(weight), 0.0).astype(np.float32)
+            if clip is not None:
+                # NaN deviations (NaN input or uncovered mean) compare False —
+                # i.e. keep — so only a *finite* excursion above tol rejects.
+                rejected = np.abs(vals - mean[yi, xi, c]) > tol[yi, xi, c]
+                wmap[rejected] = 0.0
+            ch = np.where(finite, vals, 0.0).astype(np.float32, copy=False)
             self._drizzlers[c].add_image(
                 data=ch,
                 exptime=1.0,
                 pixmap=pixmap,
-                weight_map=weight,
+                weight_map=wmap,
                 pixfrac=self.params.pixfrac,
                 in_units="counts",
             )
+            if self._sq_drizzlers is not None:
+                self._sq_drizzlers[c].add_image(
+                    data=ch * ch,
+                    exptime=1.0,
+                    pixmap=pixmap,
+                    weight_map=wmap,
+                    pixfrac=self.params.pixfrac,
+                    in_units="counts",
+                )
         self._n_added += 1
+
+    def clip_reference(self, kappa: float) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Build the per-output-pixel clip reference ``(mean, tol)`` from a
+        statistics pass (``compute_stats=True``).
+
+        ``mean`` is the weighted mean of the contributions (NaN where nothing
+        landed). ``tol`` is ``kappa × σ`` of those contributions, with a
+        Bessel-style small-sample correction, and ``+inf`` (never reject)
+        wherever the effective contribution count is below ``_MIN_REJECT_NEFF``
+        — clipping against one or two samples is noise, not statistics.
+        """
+        if self._sq_drizzlers is None:
+            raise ValueError("clip_reference requires compute_stats=True")
+        h, w = self.out_shape
+        mean = np.full((h, w, 3), np.nan, dtype=np.float32)
+        tol = np.full((h, w, 3), np.inf, dtype=np.float32)
+        for c in range(3):
+            m = self._drizzlers[c].out_img
+            m2 = self._sq_drizzlers[c].out_img
+            wht = self._drizzlers[c].out_wht
+            # Weighted population variance; the accumulated weight doubles as
+            # an effective sample count (unit frame weights × pixfrac overlap
+            # ≈ number of contributing frames).
+            var = np.clip(m2 - m * m, 0.0, None)
+            neff = wht
+            # Bessel factor only where it's meaningful; below the neff gate the
+            # tolerance becomes +inf anyway, so avoid a blow-up/overflow there.
+            bessel = np.where(neff > 1.0, neff / np.maximum(neff - 1.0, 1e-6), 1.0)
+            var = var * bessel
+            t = (float(kappa) * np.sqrt(var)).astype(np.float32)
+            covered = wht > 0
+            t[~covered | (neff < _MIN_REJECT_NEFF)] = np.inf
+            mean[..., c] = np.where(covered, m, np.nan)
+            tol[..., c] = t
+        return mean, tol
 
     def result(self) -> np.ndarray:
         """

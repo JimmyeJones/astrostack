@@ -180,4 +180,40 @@ describe("StackView", () => {
     await waitFor(() => expect(screen.getByText("Sigma clipping")).toBeInTheDocument());
     expect(screen.queryByText(/it can reject real signal as an outlier/)).not.toBeInTheDocument();
   });
+
+  const drizzleSchema: client.StackOptionField[] = [
+    { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
+      default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+    { key: "drizzle", label: "Drizzle (super-resolution)", type: "bool", group: "simple",
+      default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+    { key: "drizzle_reject", label: "Drizzle outlier rejection", type: "bool", group: "simple",
+      default: false, min: null, max: null, step: null, options: null, help: null, depends_on: "drizzle" },
+  ];
+
+  it("hints that sigma-clip doesn't cover drizzle until drizzle rejection is on", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue(drizzleSchema);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue(
+      { sigma_clip: true, drizzle: true, drizzle_reject: false });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    await waitFor(() =>
+      expect(screen.getByText(/doesn't apply to drizzle's single-pass/)).toBeInTheDocument());
+  });
+
+  it("drops the drizzle hint once outlier rejection is enabled", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue(drizzleSchema);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue(
+      { sigma_clip: true, drizzle: true, drizzle_reject: true });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    await waitFor(() =>
+      expect(screen.getByText("Drizzle outlier rejection")).toBeInTheDocument());
+    expect(screen.queryByText(/doesn't apply to drizzle's single-pass/)).not.toBeInTheDocument();
+  });
 });

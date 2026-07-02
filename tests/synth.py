@@ -16,27 +16,45 @@ def make_star_field(
     sky_level: float = 1000.0,
     sky_noise: float = 50.0,
     streak: bool = False,
+    star_shift: tuple[float, float] = (0.0, 0.0),
+    noise_seed: int | None = None,
 ) -> np.ndarray:
     """
     Generate a fake Bayer mosaic with Gaussian stars on a noisy sky.
 
     Width and height refer to the mosaic dimensions (full sensor). The bayer
     pattern is RGGB. Returns a uint16 array suitable for FITS BITPIX=16.
+
+    ``star_shift`` offsets every star centre by ``(dx, dy)`` pixels — combined
+    with a matching CRPIX shift in the frame's WCS it simulates a dithered
+    exposure of the *same* sky. ``noise_seed`` draws the sky noise from a
+    separate stream so dithered frames can share stars (``seed``) but carry
+    independent noise; ``None`` keeps the single-stream draw order so existing
+    fixtures stay byte-identical.
     """
-    rng = np.random.default_rng(seed)
-    img = rng.normal(loc=sky_level, scale=sky_noise, size=(height, width)).astype(np.float32)
+    if noise_seed is None:
+        rng_noise = rng_stars = np.random.default_rng(seed)
+    else:
+        rng_noise = np.random.default_rng(noise_seed)
+        rng_stars = np.random.default_rng(seed)
+    img = rng_noise.normal(
+        loc=sky_level, scale=sky_noise, size=(height, width)
+    ).astype(np.float32)
 
     # Place stars at random positions, each a 2D gaussian.
     sigma = star_fwhm_px_full / 2.3548
     box = max(7, int(np.ceil(sigma * 6)))
     half = box // 2
+    sx, sy = star_shift
     yy, xx = np.indices((box, box))
     for _ in range(n_stars):
         # Keep away from the edges so we don't worry about clipping.
-        cx = int(rng.integers(half + 4, width - half - 4))
-        cy = int(rng.integers(half + 4, height - half - 4))
-        peak = float(rng.uniform(2000, 30000))
-        kernel = peak * np.exp(-((xx - half) ** 2 + (yy - half) ** 2) / (2 * sigma * sigma))
+        cx = int(rng_stars.integers(half + 4, width - half - 4))
+        cy = int(rng_stars.integers(half + 4, height - half - 4))
+        peak = float(rng_stars.uniform(2000, 30000))
+        kernel = peak * np.exp(
+            -((xx - half - sx) ** 2 + (yy - half - sy) ** 2) / (2 * sigma * sigma)
+        )
         img[cy - half : cy - half + box, cx - half : cx - half + box] += kernel
 
     if streak:
@@ -67,12 +85,15 @@ def write_seestar_fits(
     ra_center_deg: float = 83.6,
     dec_center_deg: float = -5.4,
     pixscale_arcsec: float = 5.0,
+    star_shift: tuple[float, float] = (0.0, 0.0),
+    noise_seed: int | None = None,
 ) -> Path:
     """Write a synth FITS file with Seestar-like headers. Requires astropy."""
     from astropy.io import fits
 
     data = make_star_field(
-        width=width, height=height, n_stars=n_stars, seed=seed, streak=streak
+        width=width, height=height, n_stars=n_stars, seed=seed, streak=streak,
+        star_shift=star_shift, noise_seed=noise_seed,
     )
     hdu = fits.PrimaryHDU(data=data)
     hdu.header["BAYERPAT"] = "RGGB"
@@ -103,13 +124,20 @@ def make_synth_wcs_text(
     ra_center_deg: float = 83.6,
     dec_center_deg: float = -5.4,
     pixscale_arcsec: float = 5.0,
+    crpix_shift: tuple[float, float] = (0.0, 0.0),
 ) -> str:
-    """A serialised WCS header string usable as ``frame.wcs_json`` in tests."""
+    """A serialised WCS header string usable as ``frame.wcs_json`` in tests.
+
+    ``crpix_shift`` moves the reference pixel by ``(dx, dy)`` — pair it with
+    ``make_star_field(star_shift=(dx, dy))`` to describe a dithered frame whose
+    stars moved on the sensor but stayed put on the sky.
+    """
     from astropy.wcs import WCS
 
+    dx, dy = crpix_shift
     w = WCS(naxis=2)
     w.wcs.ctype = ["RA---TAN", "DEC--TAN"]
     w.wcs.crval = [ra_center_deg, dec_center_deg]
-    w.wcs.crpix = [width / 2 + 0.5, height / 2 + 0.5]
+    w.wcs.crpix = [width / 2 + 0.5 + dx, height / 2 + 0.5 + dy]
     w.wcs.cdelt = [-pixscale_arcsec / 3600.0, pixscale_arcsec / 3600.0]
     return str(w.to_header(relax=True))

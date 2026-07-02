@@ -48,10 +48,14 @@ if TYPE_CHECKING:
     from seestack.calibrate.apply import CalibrationMasters
 
 # Peak count of full-canvas float32 RGB arrays alive at once across the stack
-# passes (Welford mean/M2/count, or drizzle output/weight/context, plus working
+# passes (Welford mean/M2/count, or drizzle output/weight, plus working
 # copies). Used only to *estimate* memory and refuse oversized stacks before
 # allocating — a wrong guess just shifts the refusal threshold a little.
 _PEAK_CANVAS_ARRAYS = 4
+# Two-pass drizzle rejection holds more at once during pass 1: the value and
+# value² drizzlers (img+wht each → 4 RGB-equivalents) plus the mean/tol maps
+# being extracted (2) and per-channel temporaries (~1).
+_PEAK_CANVAS_ARRAYS_DRIZZLE_REJECT = 7
 _DEFAULT_STACK_BUDGET_GB = 12.0
 
 
@@ -84,7 +88,8 @@ def _stack_memory_budget_bytes() -> float:
 
 
 def _guard_stack_memory(dst_shape: tuple[int, int], *, drizzle: bool,
-                        drizzle_scale: float) -> None:
+                        drizzle_scale: float,
+                        drizzle_reject: bool = False) -> None:
     """Refuse a stack whose output canvas would blow the memory budget instead
     of letting it OOM-kill the whole process. ``dst_shape`` is (h, w) of the
     pre-drizzle canvas; drizzle multiplies each axis by ``drizzle_scale``."""
@@ -94,12 +99,15 @@ def _guard_stack_memory(dst_shape: tuple[int, int], *, drizzle: bool,
         out_pixels = int(h * s + 1) * int(w * s + 1)
     else:
         out_pixels = h * w
-    need = out_pixels * 3 * 4 * _PEAK_CANVAS_ARRAYS  # float32 RGB working arrays
+    arrays = (_PEAK_CANVAS_ARRAYS_DRIZZLE_REJECT if (drizzle and drizzle_reject)
+              else _PEAK_CANVAS_ARRAYS)
+    need = out_pixels * 3 * 4 * arrays  # float32 RGB working arrays
     budget = _stack_memory_budget_bytes()
     if need > budget:
         raise MemoryError(
             f"stack output canvas {w}×{h}"
             + (f" ×{drizzle_scale:g} drizzle" if drizzle else "")
+            + (" with outlier rejection" if (drizzle and drizzle_reject) else "")
             + f" needs ~{need / 1e9:.1f} GB of working memory, over the "
             f"~{budget / 1e9:.1f} GB budget. Reduce drizzle scale, switch Canvas "
             f"mode to 'reference', reject outlier/off-target frames, or raise "
@@ -151,6 +159,12 @@ class StackOptions:
     drizzle_pixfrac: float = 0.8
     drizzle_scale: float = 1.5  # 1.0 = same res as ref, 2.0 = full super-res
     drizzle_kernel: str = "square"
+    # Two-pass drizzle outlier rejection: pass 1 drizzles values + squares to
+    # get per-output-pixel mean/σ of the contributions, pass 2 re-drizzles
+    # zero-weighting contributions outside mean ± sigma_kappa·σ. Removes
+    # satellites/plane trails/cosmic rays that single-pass drizzle keeps, at
+    # roughly 2–3× the stacking time. Needs ≥4 frames.
+    drizzle_reject: bool = False
     # Output canvas mode:
     #   'auto'      — union-of-footprints canvas when frames span more than
     #                 one Seestar field (a mosaic), reference frame otherwise.
@@ -463,11 +477,13 @@ def run_stack(
     # Refuse a stack that would exhaust RAM *before* allocating anything — a
     # drizzled near-cap mosaic canvas can otherwise reach tens of GB and get the
     # whole container OOM-killed (there's no cgroup limit to catch it).
+    # (Rejection is skipped below 4 frames, so don't charge its extra arrays.)
     _guard_stack_memory(dst_shape, drizzle=options.drizzle,
-                        drizzle_scale=options.drizzle_scale)
+                        drizzle_scale=options.drizzle_scale,
+                        drizzle_reject=options.drizzle_reject and n >= 4)
     errors: list[str] = []
 
-    # ---- 3a. Drizzle path (alternate single-pass accumulator) -------------
+    # ---- 3a. Drizzle path (alternate accumulator) --------------------------
     if options.drizzle:
         from seestack.io.wcs_io import wcs_from_text, wcs_to_text
         from seestack.stack.drizzle_path import DrizzleParams, DrizzleStacker
@@ -480,19 +496,46 @@ def run_stack(
             scale=options.drizzle_scale,
             kernel=options.drizzle_kernel,
         )
+        # Optional two-pass outlier rejection: pass 1 accumulates value and
+        # value² to get per-output-pixel contribution statistics, pass 2
+        # re-drizzles with outliers (satellites, plane trails, cosmic rays)
+        # zero-weighted. Mirrors the standard path's n>=4 sigma-clip gate.
+        reject = options.drizzle_reject and n >= 4
+        if options.drizzle_reject and not reject:
+            log.info("Drizzle outlier rejection skipped: needs >=4 frames, have %d", n)
+        clip = None
+        if reject:
+            stats = DrizzleStacker(ref_wcs, dst_shape, params, compute_stats=True)
+            n_stats = _drizzle_pass(
+                frames, ref, stats, weights,
+                options=options,
+                phase_label="Drizzle 1/2 (statistics)",
+                progress=progress, cancel=cancel,
+                errors=errors,
+                calibration=calibration,
+                mono=options.mono,
+            )
+            if n_stats == 0 and not cancel():
+                raise ValueError("drizzle: no usable frames")
+            if not cancel():
+                clip = stats.clip_reference(options.sigma_kappa)
+            # Free the statistics accumulators before pass 2 allocates its own.
+            del stats
         drizzler = DrizzleStacker(ref_wcs, dst_shape, params)
-        log.info("Drizzle: pixfrac=%.2f scale=%.2f kernel=%s output=%dx%d",
-                 params.pixfrac, params.scale, params.kernel,
+        log.info("Drizzle: pixfrac=%.2f scale=%.2f kernel=%s reject=%s output=%dx%d",
+                 params.pixfrac, params.scale, params.kernel, clip is not None,
                  drizzler.output_canvas_shape[1], drizzler.output_canvas_shape[0])
         n_used = _drizzle_pass(
-            frames, ref, drizzler,
+            frames, ref, drizzler, weights,
             options=options,
+            phase_label="Drizzle 2/2 (outlier-clipped)" if clip is not None else "Drizzle",
+            clip=clip,
             progress=progress, cancel=cancel,
             errors=errors,
             calibration=calibration,
             mono=options.mono,
         )
-        if n_used == 0:
+        if n_used == 0 and not cancel():
             raise ValueError("drizzle: no usable frames")
         result_image = drizzler.result()
         coverage = drizzler.coverage
@@ -814,11 +857,14 @@ def _drizzle_pass(
     frames: list[FrameRow],
     ref: FrameRow,
     drizzler,
+    weights: dict[int, float],
     *,
     options: StackOptions,
     progress: ProgressFn,
     cancel: CancelFn,
     errors: list[str],
+    phase_label: str = "Drizzle",
+    clip: tuple[np.ndarray, np.ndarray] | None = None,
     calibration: "CalibrationMasters | None" = None,
     mono: bool = False,
 ) -> int:
@@ -831,7 +877,7 @@ def _drizzle_pass(
     from seestack.io.wcs_io import wcs_from_text
 
     total = len(frames)
-    progress("Drizzle", 0, total)
+    progress(phase_label, 0, total)
     max_workers = options.max_workers or max(1, (os.cpu_count() or 4))
     bg_opts = options.background_options()
     used = 0
@@ -841,6 +887,7 @@ def _drizzle_pass(
         path = frame.cached_path or frame.source_path
         if not path or not Path(path).exists() or not frame.wcs_json:
             return None
+        from seestack.bg.hot_pixels import suppress_hot_cold_pixels
         from seestack.bg.per_frame import subtract_background
         from seestack.io.fits_loader import bilinear_debayer, load_seestar_raw
 
@@ -852,6 +899,12 @@ def _drizzle_pass(
         else:
             pattern = frame.bayer_pattern or info.bayer_pattern or "RGGB"
             rgb = bilinear_debayer(raw, pattern=pattern)
+        # Same per-frame cleanup order as the standard path (align_one):
+        # debayer → hot-pixel suppression → background flatten.
+        if options.suppress_hot_pixels:
+            rgb = suppress_hot_cold_pixels(
+                rgb, sigma=options.hot_pixel_sigma, use_gpu=options.use_gpu
+            )
         if bg_opts.enabled:
             rgb = subtract_background(rgb, bg_opts, use_gpu=options.use_gpu)
         in_wcs = wcs_from_text(frame.wcs_json)
@@ -866,24 +919,25 @@ def _drizzle_pass(
         for f, fut in _imap_bounded(ex, prepare, frames, max_workers * 2):
             done += 1
             if cancel():
-                progress("Drizzle (cancelled)", done, total)
+                progress(phase_label + " (cancelled)", done, total)
                 break
             try:
                 payload = fut.result()
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"{Path(f.source_path).name}: {type(exc).__name__}: {exc}")
-                progress("Drizzle", done, total)
+                progress(phase_label, done, total)
                 continue
             if payload is None:
-                progress("Drizzle", done, total)
+                progress(phase_label, done, total)
                 continue
             rgb, in_wcs = payload
             try:
-                drizzler.add_frame(rgb, in_wcs)
+                drizzler.add_frame(rgb, in_wcs,
+                                   weight=weights.get(f.id or -1, 1.0), clip=clip)
                 used += 1
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"{Path(f.source_path).name}: drizzle add_image: {exc}")
-            progress("Drizzle", done, total)
+            progress(phase_label, done, total)
     return used
 
 

@@ -120,3 +120,90 @@ def test_drizzle_super_resolution_increases_canvas(tmp_path):
         proj.close()
     # 2× scale: canvas is 2× per side.
     assert result.canvas_shape == (640, 960)
+
+
+def test_drizzle_context_array_disabled():
+    """The context bitmask must stay off — it costs a full-canvas int32 plane
+    per 32 frames (re-copied on every growth), which is tens of GB and
+    quadratic copying on a multi-thousand-frame stack."""
+    wcs = wcs_from_text(make_synth_wcs_text(width=100, height=80))
+    drz = DrizzleStacker(wcs, (80, 100), DrizzleParams(scale=1.0, pixfrac=1.0))
+    rgb = np.full((80, 100, 3), 500.0, dtype=np.float32)
+    for _ in range(3):
+        drz.add_frame(rgb, wcs)
+    for d in drz._drizzlers:
+        assert d.out_ctx is None
+
+
+def test_drizzle_nan_input_pixels_carry_zero_weight():
+    """A NaN (no-data) input pixel must not be injected as a 0.0 sample — it
+    should contribute nothing, leaving the output NaN when nothing else lands."""
+    wcs = wcs_from_text(make_synth_wcs_text(width=100, height=80))
+    drz = DrizzleStacker(wcs, (80, 100), DrizzleParams(scale=1.0, pixfrac=1.0))
+    rgb = np.full((80, 100, 3), 500.0, dtype=np.float32)
+    rgb[30:40, 40:50, :] = np.nan
+    drz.add_frame(rgb, wcs)
+    result = drz.result()
+    # The NaN block never received data: it must stay NaN, not become 0.
+    assert np.all(np.isnan(result[32:38, 42:48, :]))
+    # Covered interior pixels keep their value.
+    assert np.nanmedian(result[5:25, 5:35, :]) == pytest.approx(500.0, rel=0.02)
+
+
+def test_drizzle_honors_per_frame_weight():
+    """Per-frame quality weights must scale contributions: mean of value 100 at
+    weight 1 and value 200 at weight 3 is 175 (not the unweighted 150)."""
+    wcs = wcs_from_text(make_synth_wcs_text(width=100, height=80))
+    drz = DrizzleStacker(wcs, (80, 100), DrizzleParams(scale=1.0, pixfrac=1.0))
+    drz.add_frame(np.full((80, 100, 3), 100.0, dtype=np.float32), wcs, weight=1.0)
+    drz.add_frame(np.full((80, 100, 3), 200.0, dtype=np.float32), wcs, weight=3.0)
+    result = drz.result()
+    assert np.nanmedian(result[5:-5, 5:-5, :]) == pytest.approx(175.0, rel=0.01)
+
+
+def _poke_hot_pixel(path, x: int, y: int, value: int = 60000) -> None:
+    """Write a static hot pixel into an on-disk synth FITS mosaic."""
+    from astropy.io import fits
+
+    with fits.open(path, mode="update") as hdul:
+        hdul[0].data[y, x] = value
+        hdul.flush()
+
+
+def test_drizzle_suppresses_hot_pixels(tmp_path):
+    """`suppress_hot_pixels` (default on) must apply on the drizzle path too —
+    it used to be silently ignored, so static hot pixels survived into the
+    drizzled output as bright speckles."""
+    from astropy.io import fits
+
+    hot_x, hot_y = 200, 150  # even/even → R site in RGGB, away from the edges
+    results = {}
+    for suppress in (True, False):
+        proj = _build_project(tmp_path / f"sup_{suppress}", n=3)
+        try:
+            for f in proj.iter_frames():
+                _poke_hot_pixel(f.cached_path, hot_x, hot_y)
+            result = run_stack(
+                proj,
+                StackOptions(
+                    drizzle=True, drizzle_scale=1.0, drizzle_pixfrac=1.0,
+                    suppress_hot_pixels=suppress,
+                    background_flatten=False, max_workers=1,
+                    output_name="hot",
+                ),
+            )
+            with fits.open(result.fits_path) as hdul:
+                results[suppress] = np.asarray(hdul[0].data, dtype=np.float32)
+        finally:
+            proj.close()
+
+    # FITS layout is (3, H, W); R channel is index 0. Bilinear debayer spreads
+    # the 60000 ADU spike into a 3×3 halo before the 3×3 median filter runs, so
+    # (exactly like the standard path) the spike is knocked down to halo level
+    # rather than fully erased — assert the filter ran, not perfection.
+    r_off = results[False][0]
+    r_on = results[True][0]
+    assert r_off[hot_y, hot_x] > 30000.0, "hot pixel should survive with suppression off"
+    assert r_on[hot_y, hot_x] < 0.6 * r_off[hot_y, hot_x], (
+        "hot pixel should be suppressed on the drizzle path too"
+    )
