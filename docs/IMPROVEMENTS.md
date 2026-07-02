@@ -32,13 +32,6 @@ _(none — claim an item here with your branch name)_
   combine done (v0.16.1); calibration/mono still to audit.*
 - Channel combine: reproject stacks that don't share a canvas (via WCS) instead
   of erroring, so filters shot in separate sessions can be combined. (M–L)
-- **Investigate drizzle-vs-mean flux scale** — on identical frames the drizzle
-  path's median is several× lower than the sigma-clip/mean path (see
-  `test_stack_drizzle_vs_sigma_clip_parity`, which only asserts same-order-of-
-  magnitude for now). Drizzle at `scale=1.0, pixfrac=1.0` should conserve surface
-  brightness; a ~5× gap plus an "overflow encountered in divide" warning in
-  `drizzle_path.result()` suggests a normalisation/weight issue worth a dedicated
-  look. (M, correctness)
 - Seestar client (`webapp/seestar/client.py`) has no reconnect/retry on a
   dropped TCP socket — a flaky Wi-Fi link to the scope currently requires
   the user to manually reconnect via the UI. Core hardware-integration
@@ -116,6 +109,15 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Drizzle flux-scale fix** — `DrizzleStacker.result()` no longer divides the
+  already-averaged `out_img` by `out_wht` (the STScI drizzle library keeps
+  `out_img` as a running weighted *average*, not a sum). The old double-normalise
+  deflated drizzle brightness by ~N (the frame count) and threw an "overflow in
+  divide" warning; drizzle at `scale=1, pixfrac=1` now conserves surface
+  brightness and matches the weighted-mean path. Tightened the parity test from
+  order-of-magnitude to <2× and added a multi-frame flux-conservation unit test.
+  (v0.18.1, this run)
 
 - **Auto-suggest calibration masters** — new `recommend_masters` ranks the
   library's dark/flat masters against a target's median frame exposure/gain/temp
