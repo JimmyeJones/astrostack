@@ -67,6 +67,19 @@ _(none — claim an item here with your branch name)_
 - Annotated sky overlay (label detected objects / show solved field). (M)
 - Star-mask preview toggle in the editor (visualise the mask driving star ops). (S)
 - Per-target "notes/tags" search improvements and saved filters in Library. (S)
+- **Undo the last bulk frame action** — `reject_worst` and the new
+  `reject_streaked` can over-reject (e.g. a 30% cut that was too aggressive) and
+  there's no one-click way back. Have the `/frames/bulk` endpoint return the list
+  of ids it changed, and let the Target view keep the last batch so it can offer
+  an "Undo" that re-accepts exactly those frames. Reuses `update_frame`; purely
+  additive. (S, approachability)
+- **Reject-reason breakdown on the Target view** — the accepted/rejected badge
+  says *how many* were dropped but not *why*. A small popover/tooltip grouping
+  rejected frames by `reject_reason` (qc:fwhm, bulk:streaked, user, …) tells a
+  beginner what QC and their bulk actions actually did, and flags a dominant
+  failure mode (e.g. "18 rejected for high FWHM — a focus/seeing night"). Reuses
+  the existing column; frontend + a tiny count endpoint or client-side tally.
+  (S, approachability)
 
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
