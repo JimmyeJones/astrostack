@@ -140,6 +140,11 @@ class StackRunOut(BaseModel):
     # baseline (< ~0.6 ⇒ hazy). None for pre-schema-5 runs or when not
     # computable; lets the card show a "hazy night" badge at a glance.
     transparency_ratio: float | None = None
+    # Background-noise σ of the stacked image, normalized to its own signal range
+    # so it's comparable across gain/exposure (lower = cleaner). None for
+    # pre-schema-6 runs or when not computable; lets the UI show a noise readout
+    # and flag the cleanest of several stacks of one target.
+    noise_sigma: float | None = None
 
 
 class JobOut(BaseModel):

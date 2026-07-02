@@ -63,6 +63,21 @@ def test_stack_records_integration_time(tmp_path):
         proj.close()
 
 
+def test_stack_records_noise_sigma(tmp_path):
+    """run_stack stamps the run record with the stacked image's normalized
+    background-noise σ, so the history/gallery can flag the cleanest stack."""
+    proj = _build_project(tmp_path, n=4)
+    try:
+        run_stack(proj, StackOptions(sigma_clip=False, max_workers=2,
+                                     output_name="noise"))
+        run = next(iter(proj.iter_stack_runs()))
+        # A real stack yields a finite, non-negative normalized σ.
+        assert run.noise_sigma is not None
+        assert run.noise_sigma >= 0.0
+    finally:
+        proj.close()
+
+
 def test_subpixel_refine_actually_runs(tmp_path, monkeypatch):
     """Regression: sub-pixel refine used `canvas_3` before it was defined, so it
     raised NameError that the surrounding except swallowed — silently disabling

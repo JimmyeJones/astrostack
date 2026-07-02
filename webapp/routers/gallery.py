@@ -47,6 +47,9 @@ class GalleryItem(BaseModel):
     # Median transparency of the stacked frames ÷ the target's clear-sky baseline
     # (< ~0.6 ⇒ hazy). None for pre-schema-5 runs; drives a "hazy night" badge.
     transparency_ratio: float | None = None
+    # Background-noise σ of the stacked image, normalized to its own signal range
+    # (lower = cleaner). None for pre-schema-6 runs; drives a noise readout.
+    noise_sigma: float | None = None
 
 
 class GalleryResponse(BaseModel):
@@ -103,6 +106,7 @@ def get_gallery(request: Request) -> GalleryResponse:
                         options=options,
                         reusable=_is_reusable(options),
                         transparency_ratio=run.transparency_ratio,
+                        noise_sigma=run.noise_sigma,
                     ))
             finally:
                 if proj is not None:

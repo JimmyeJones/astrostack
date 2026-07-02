@@ -11,6 +11,7 @@ import { Link, useParams } from "react-router-dom";
 import { api, type StackRun } from "../api/client";
 import { formatIntegration } from "../format";
 import { HazyNightBadge } from "../components/HazyNightBadge";
+import { NoiseReadout, CleanestBadge, cleanestRunId, hasNoise } from "../components/NoiseBadge";
 import { ImageLightbox } from "../components/ImageLightbox";
 
 function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
@@ -130,8 +131,8 @@ function NotesEditor({ safe, run }: { safe: string; run: StackRun }) {
 const DEFAULT_STRETCH = 0.5;
 const DEFAULT_BLACK = 0.35;
 
-function RunCard({ safe, run, onDelete, deleting }: {
-  safe: string; run: StackRun; onDelete: () => void; deleting?: boolean;
+function RunCard({ safe, run, onDelete, deleting, isCleanest }: {
+  safe: string; run: StackRun; onDelete: () => void; deleting?: boolean; isCleanest?: boolean;
 }) {
   const qc = useQueryClient();
   const [adjust, setAdjust] = useState(false);
@@ -175,6 +176,7 @@ function RunCard({ safe, run, onDelete, deleting }: {
       <Group justify="space-between" mt="sm" wrap="nowrap">
         <Text fw={600}>{run.output_basename}</Text>
         <Group gap={4} wrap="nowrap">
+          <CleanestBadge isCleanest={!!isCleanest} />
           <HazyNightBadge ratio={run.transparency_ratio} />
           <Badge variant="light">{run.n_frames_used} frames</Badge>
         </Group>
@@ -182,6 +184,7 @@ function RunCard({ safe, run, onDelete, deleting }: {
       <Text size="xs" c="dimmed">
         {run.timestamp_utc.replace("T", " ").slice(0, 19)} · {run.canvas_w}×{run.canvas_h}
         {run.total_exposure_s ? ` · ${formatIntegration(run.total_exposure_s)}` : ""}
+        {hasNoise(run.noise_sigma) ? <> · <NoiseReadout sigma={run.noise_sigma} /></> : null}
       </Text>
       <NotesEditor safe={safe} run={run} />
 
@@ -338,6 +341,7 @@ export function HistoryView() {
   }
 
   const list = runs.data ?? [];
+  const cleanestId = cleanestRunId(list);
 
   return (
     <Stack>
@@ -357,7 +361,8 @@ export function HistoryView() {
           {list.map((r) => (
             <RunCard key={r.id} safe={safe} run={r}
               onDelete={() => del.mutate(r.id)}
-              deleting={del.isPending && del.variables === r.id} />
+              deleting={del.isPending && del.variables === r.id}
+              isCleanest={r.id === cleanestId} />
           ))}
         </SimpleGrid>
       )}

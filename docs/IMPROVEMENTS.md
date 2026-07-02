@@ -69,13 +69,6 @@ _(none — claim an item here with your branch name)_
 ### Features that serve real workflows
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
-- **Per-stack noise-floor readout / "cleanest stack" badge** — reuse the new
-  `seestack/edit/noise.estimate_noise_sigma` to record each stack run's
-  normalized background noise (an additive `stack_runs` column, NULL for old
-  runs) and show it on History/Gallery cards, so a user comparing several stacks
-  of one target can see at a glance which is the cleanest — turning a subjective
-  "which looks less noisy" into a number. Advisory; within-target comparison.
-  (S–M, approachability/correctness)
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
@@ -117,6 +110,18 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Per-stack noise-floor readout + "cleanest stack" badge** — `run_stack` now
+  records each stack's normalized background-noise σ (reusing
+  `seestack/edit/noise.estimate_noise_sigma` on the finished image) in a new
+  additive `stack_runs.noise_sigma` column (schema v5→v6 migration; old runs stay
+  NULL). `StackRunOut` and the gallery response carry it; History and Gallery
+  cards show a small "Noise 0.021" readout (lower = cleaner, with a plain-language
+  tooltip), and the History page (all runs of one target) flags the single
+  lowest-noise run with a teal "Cleanest" badge — but only when ≥2 runs carry a
+  measured σ, so a lone stack is never singled out. Turns "which looks less noisy"
+  into a number. Additive/upgrade-safe; within-target comparison only. (v0.48.0,
+  this run)
 
 - **Editor processing chain in the History Info panel** — the run Info endpoint
   (`GET …/stack-runs/{id}/info`) now parses the `AstroStack: op.id(args)` FITS

@@ -10,6 +10,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { api, type GalleryItem, type StackOptionField } from "../api/client";
 import { formatIntegration } from "../format";
 import { HazyNightBadge } from "../components/HazyNightBadge";
+import { NoiseReadout, hasNoise } from "../components/NoiseBadge";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { QueryError } from "../components/QueryError";
 
@@ -92,6 +93,7 @@ function GalleryCard({ item, labels, onView, selected, onToggleSelect }: {
         {item.output_basename} · {item.timestamp_utc.replace("T", " ").slice(0, 16)}
         {" · "}{item.canvas_w}×{item.canvas_h}
         {item.total_exposure_s ? ` · ${formatIntegration(item.total_exposure_s)}` : ""}
+        {hasNoise(item.noise_sigma) ? <> · <NoiseReadout sigma={item.noise_sigma} /></> : null}
       </Text>
 
       <Group gap="xs" mt="xs" wrap="nowrap">
