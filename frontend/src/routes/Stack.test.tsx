@@ -294,12 +294,13 @@ describe("StackView", () => {
       n_frames: 2, canvas_w: 480, canvas_h: 320, output_w: 480, output_h: 320,
       is_mosaic: false, peak_bytes: 7e6, peak_gb: 0.01,
       budget_bytes: 8e9, budget_gb: 8, would_exceed: false,
+      suggested_drizzle_scale: null,
     });
 
     renderStack();
 
     await waitFor(() =>
-      expect(screen.getByText(/Output canvas 480×320/)).toBeInTheDocument());
+      expect(screen.getByText(/2 accepted, solved frames · output 480×320/)).toBeInTheDocument());
     expect(screen.getByText(/GB peak memory/)).toBeInTheDocument();
   });
 
@@ -312,11 +313,36 @@ describe("StackView", () => {
       n_frames: 2, canvas_w: 8000, canvas_h: 6000, output_w: 16000, output_h: 12000,
       is_mosaic: true, peak_bytes: 5.4e9, peak_gb: 5.4,
       budget_bytes: 1.4e9, budget_gb: 1.4, would_exceed: true,
+      suggested_drizzle_scale: null,
     });
 
     renderStack();
 
     await waitFor(() =>
       expect(screen.getByText(/over the ~1.4 GB budget/)).toBeInTheDocument());
+  });
+
+  it("offers a one-click smaller drizzle scale when one fits the budget", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({
+      sigma_clip: true, drizzle: true, drizzle_scale: 2.0,
+    });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1), mkFrame(2)]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+    vi.spyOn(client.api, "stackEstimate").mockResolvedValue({
+      n_frames: 2, canvas_w: 4000, canvas_h: 3000, output_w: 8000, output_h: 6000,
+      is_mosaic: false, peak_bytes: 2.3e9, peak_gb: 2.3,
+      budget_bytes: 1.4e9, budget_gb: 1.4, would_exceed: true,
+      suggested_drizzle_scale: 1.4,
+    });
+
+    renderStack();
+
+    const btn = await screen.findByRole("button", { name: /Use drizzle ×1.4 instead/ });
+    fireEvent.click(btn);
+    // Clicking sets the form's drizzle_scale so the next estimate re-queries.
+    await waitFor(() =>
+      expect(client.api.stackEstimate).toHaveBeenCalledWith(
+        "M_42", expect.objectContaining({ drizzle_scale: 1.4 })));
   });
 });

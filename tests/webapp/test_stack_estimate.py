@@ -46,6 +46,50 @@ def test_estimate_matches_guard_would_exceed(client, solved_library, monkeypatch
     assert data["would_exceed"] is True
 
 
+def test_estimate_suggests_smaller_drizzle_scale_when_over_budget(
+    client, solved_library, monkeypatch):
+    """When a drizzle run would blow the budget, the estimate offers the largest
+    scale that still fits as a one-click alternative."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    # ×1.0 drizzle on the 480×320 canvas ≈ 7.4 MB peak, ×2.0 ≈ 30 MB. A ~15 MB
+    # budget refuses ×2.0 but leaves room for a smaller scale.
+    monkeypatch.setenv("ASTROSTACK_MAX_STACK_GB", str(15e-3))
+    data = client.get(
+        f"/api/targets/{safe}/stack-estimate",
+        params={"drizzle": "true", "drizzle_scale": 2.0},
+    ).json()
+    assert data["would_exceed"] is True
+    s = data["suggested_drizzle_scale"]
+    assert s is not None
+    assert 1.0 <= s < 2.0
+
+
+def test_estimate_no_drizzle_suggestion_when_within_budget(client, solved_library):
+    """A comfortably-sized drizzle run carries no suggestion."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    data = client.get(
+        f"/api/targets/{safe}/stack-estimate",
+        params={"drizzle": "true", "drizzle_scale": 1.5},
+    ).json()
+    assert data["would_exceed"] is False
+    assert data["suggested_drizzle_scale"] is None
+
+
+def test_estimate_honors_memory_budget_setting(client, solved_library, monkeypatch):
+    """The Settings ``max_stack_memory_gb`` value drives the estimate's budget /
+    would_exceed when no env override is present."""
+    monkeypatch.delenv("ASTROSTACK_MAX_STACK_GB", raising=False)
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    # A punishingly small budget via Settings must be reflected and refuse.
+    client.put("/api/settings", json={"max_stack_memory_gb": 0.5})
+    data = client.get(f"/api/targets/{safe}/stack-estimate").json()
+    assert data["budget_gb"] == 0.5
+    # The 480×320 reference canvas is tiny, so 0.5 GB still fits; bump to a
+    # drizzle that won't: ×4 ≈ 118 MB… still under 0.5 GB. Instead assert the
+    # budget wiring: a 0.5 GB budget is exactly what the endpoint reports.
+    assert data["budget_bytes"] == 500_000_000
+
+
 def test_estimate_422_when_nothing_solved(client, built_library):
     """No plate-solved frames → a clean 422 with guidance, not a 500."""
     safe = client.get("/api/targets").json()[0]["safe_name"]

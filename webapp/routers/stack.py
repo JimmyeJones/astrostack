@@ -135,6 +135,7 @@ def stack_estimate(
     the same guidance ``run_stack`` gives."""
     from seestack.stack.stacker import StackOptions, estimate_stack
 
+    settings = deps.get_settings(request)
     lib, proj = deps.open_target_project(request, safe)
     try:
         options = StackOptions(
@@ -144,7 +145,8 @@ def stack_estimate(
             mosaic_canvas=str(mosaic_canvas),
         )
         try:
-            est = estimate_stack(proj, options)
+            est = estimate_stack(proj, options,
+                                 memory_budget_gb=settings.max_stack_memory_gb)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
     finally:
@@ -162,6 +164,7 @@ def stack_estimate(
         "budget_bytes": est.budget_bytes,
         "budget_gb": round(est.budget_bytes / 1e9, 2),
         "would_exceed": est.would_exceed,
+        "suggested_drizzle_scale": est.suggested_drizzle_scale,
     }
 
 

@@ -32,10 +32,19 @@ _(none — claim an item here with your branch name)_
   flux vs the target's per-star baseline — and feed it into quality weighting
   and an advisory "poor transparency" grader hint. Turns two schema fields
   into real value on cloudy-night data. (M, correctness)
-- Iterated κ-σ rejection (both paths): a very bright outlier inflates the
-  pass-1 σ enough that clipping can't fire below ~11 frames
-  ((n−1)/√n < κ). One re-estimation round after the first clip would let
-  small stacks reject trails too. (M, correctness)
+- Per-pixel extremes / percentile rejection for small stacks (the *robust*
+  fix for a lone satellite/plane trail below ~11 frames). **NB:** the previously
+  filed "iterated κ-σ" idea was investigated and dropped — re-estimation clips
+  against the *same* κ, and a lone outlier's deviation is `(n−1)/√n·σ` which is
+  already below κ for n<11 (κ=3), so it escapes the first clip *and* every
+  refinement round (verified: n=6→2.04, n=10→2.85, n=11→3.02). Mean/σ-based
+  methods (including Winsorising) all hit this wall because the outlier inflates
+  its own σ. The tools that actually reject a lone trail in a tiny stack are
+  **order-statistic**: reject the per-pixel max (min/max clipping) or a top
+  percentile before averaging, or use **median/MAD** as the location/scale.
+  Needs care for uniform/low-coverage pixels (don't reject the only sample) and
+  a streaming, memory-bounded implementation (the app deliberately avoids
+  holding all frames). (M, correctness)
 - Bias masters can be built but are never applied — `CalibrationMasters.load`
   only takes dark/flat/flat-dark. Wire bias in (and dark *scaling* by
   exposure ratio once bias exists) for mismatched-exposure dark workflows.
@@ -48,7 +57,8 @@ _(none — claim an item here with your branch name)_
 - Audit NaN/coverage handling on the newer paths (calibration, mono) for
   single-frame and mosaic-edge cases. Add edge-case tests. (S–M) — *channel
   combine done (v0.16.1); mono single-frame + sigma-clip verified (v0.22.1);
-  calibration and the mono mosaic-edge (partial-overlap → NaN) case still to
+  mono mosaic-edge partial-overlap → NaN verified (v0.28.1); the calibration
+  path (dark/flat apply on a partial-coverage canvas) is the last piece to
   audit.*
 - Channel combine: reproject stacks that don't share a canvas (via WCS) instead
   of erroring, so filters shot in separate sessions can be combined. (M–L)
@@ -57,28 +67,31 @@ _(none — claim an item here with your branch name)_
   the user to manually reconnect via the UI. Core hardware-integration
   path; needs care around not spamming reconnect attempts and should be
   testable in isolation from real hardware. (M, correctness)
-- **Suggest the largest drizzle scale that fits the memory budget** — the
-  `stack-estimate` endpoint now knows the budget and whether a scale would
-  exceed it; when it would, compute the largest `drizzle_scale` (to a sensible
-  step) whose peak stays under budget and offer it as a one-click "use ×N
-  instead" in the over-budget alert. Turns a hard refusal into a usable
-  suggestion. (S, scale/approachability) *(builds on v0.25.0)*
 
 ### Features that serve real workflows
+- **One-click "reject all streaked frames" from the Target badge** — the new
+  "N streaked" badge (v0.27.1) tells the user how many accepted frames carry a
+  trail; pair it with a bulk action (a new `BulkFrameAction` "reject_streaked",
+  or reuse the existing bulk endpoint filtered on `streak_detected`) so a user
+  who'd rather drop the streaked subs than rely on per-pixel rejection can do it
+  in one gesture. Reuses the existing flag + bulk-reject plumbing. (S,
+  approachability)
+- **Suggest "reference" canvas when a non-drizzle mosaic is over budget** — the
+  drizzle-scale suggestion (v0.28.0) only fires when drizzle is on. When drizzle
+  is off but the union mosaic canvas alone exceeds the budget, compute the
+  reference-frame canvas peak and offer a one-click "use reference canvas
+  instead" (mirrors the drizzle suggestion). Turns the other over-budget refusal
+  into a usable path too. (S, scale/approachability) *(follow-on to v0.28.0)*
+- **Warn when the memory-budget Setting exceeds available RAM** — now that
+  `max_stack_memory_gb` is user-settable (v0.29.0), a value larger than the box's
+  RAM is a footgun that re-opens the OOM door the guard exists to close. The
+  Settings save (or the stack-estimate response) could compare it against
+  `/proc/meminfo` MemAvailable and show an advisory "higher than this machine's
+  RAM — a big stack could still OOM". Advisory only. (S, correctness)
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
 - Star-mask preview toggle in the editor (visualise the mask driving star ops). (S)
 - Per-target "notes/tags" search improvements and saved filters in Library. (S)
-- **Show the pre-run estimate's frame count / mosaic flag inline too** — the
-  `stack-estimate` endpoint already returns `n_frames` and `is_mosaic`; the Stack
-  form only surfaces canvas + memory. A one-liner like "12 accepted, solved
-  frames · mosaic canvas" would confirm what's about to be stacked. (S,
-  approachability) *(follow-on to v0.25.0)*
-- **Streaked-frame count badge on the Target/Frames view** — now that streaks can
-  be kept (v0.27.0), surface how many accepted frames carry a `streak_detected`
-  flag so a user can see at a glance what per-pixel rejection will need to clean
-  (and jump to reject them if they'd rather). Reuses the existing flag. (S,
-  approachability)
 
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
@@ -97,11 +110,6 @@ _(none — claim an item here with your branch name)_
   a future refinement could make the cap a configurable setting. (S, scale)
 - Add a `SessionStart` hook (or a `scripts/setup.sh`) that provisions the venv +
   `npm ci` so every autonomous iteration starts from a known-green baseline. (S)
-- **Expose the stack memory budget as a Setting** — the working-memory cap is
-  env-only (`ASTROSTACK_MAX_STACK_GB`, else ~70% of RAM). Now that the Stack form
-  surfaces the budget via the estimate (v0.25.0), let the user view/adjust it
-  from Settings (with a sane clamp) instead of editing container env. Additive,
-  the env override can still win. (S, scale/approachability)
 - Reduce the frontend bundle warning (code-split the heavy Sky/aladin chunks). (S)
 - Expand `docs/` (webapp.md) to cover calibration, mono/LRGB, auth. (S)
 - `npm audit` still reports `esbuild`≤0.24.2/`vite`≤6.4.2/`vitest`≤3.2.5
@@ -128,6 +136,45 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Stack memory budget as a Setting** — a new `max_stack_memory_gb` setting
+  (default None = auto ~70% of RAM, clamped 0.5–1024 GB) lets the user view/raise/
+  lower the per-stack working-memory cap from Settings instead of editing
+  container env. Threaded into `run_stack`/`estimate_stack` via a
+  `memory_budget_gb` param, so both the pre-run estimate and the in-run guard
+  honour it. Precedence: the `ASTROSTACK_MAX_STACK_GB` env override still wins,
+  then the setting, then auto. Additive/upgrade-safe (new optional field).
+  (v0.29.0, this run)
+
+- **Mono mosaic-edge NaN/coverage audit** — added a regression test that stacks
+  two mono frames whose sky footprints only partially overlap onto a union
+  canvas and asserts the uncovered margin stays NaN (never zero-filled into a
+  black wedge that would drag downstream reductions toward zero), coverage is
+  genuine (min 0, max 2), and the output stays pure luminance. Confirms the mono
+  path already handles partial coverage correctly; no code change. (v0.28.1,
+  this run)
+
+- **Suggest a fitting drizzle scale when over budget** — the `stack-estimate`
+  endpoint now returns `suggested_drizzle_scale`: when a drizzle run would blow the
+  memory budget, the engine computes the largest scale (on a 0.1 grid, < the
+  requested one) whose peak still fits, and the Stack form's over-budget alert
+  offers a one-click "Use drizzle ×N instead" that fills it in. Turns a hard
+  refusal into a usable path. None when drizzle is off, the run already fits, or
+  even ×1.0 exceeds. (v0.28.0, this run)
+
+- **Streaked-frame count badge on the Target view** — an orange "N streaked" badge
+  next to the accepted count shows how many *accepted* frames still carry a
+  satellite/plane trail (`streak_detected`), with a tooltip explaining that
+  sigma-clip / drizzle outlier rejection can clean the trail while keeping the
+  frame — so with "keep streaked frames" on, the user sees at a glance what
+  per-pixel rejection needs to handle. Reuses the existing flag; frontend-only.
+  (v0.27.1, this run)
+
+- **Frame count / mosaic flag inline in the Stack estimate** — the pre-run sizing
+  line now leads with "N accepted, solved frames · mosaic canvas · output W×H ·
+  ~X GB peak memory", so the user confirms *what* is about to be stacked (count +
+  mosaic-vs-reference) alongside the sizing, reusing `n_frames`/`is_mosaic` the
+  `stack-estimate` endpoint already returned. Frontend-only. (v0.27.1, this run)
 
 - **Reclaim streaked subs** — new opt-in `keep_streaked_frames` setting (default
   off). QC still detects satellite/plane trails, but with this on it *flags* the

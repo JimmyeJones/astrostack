@@ -107,6 +107,11 @@ class Settings(BaseModel):
     # --- stacking ----------------------------------------------------------
     # Global default StackOptions (per-target overrides live in project meta).
     default_stack_options: dict[str, Any] = Field(default_factory=dict)
+    # Working-memory cap for a single stack, in GB. None = auto (~70% of
+    # available RAM). The ASTROSTACK_MAX_STACK_GB env var, when set, still wins
+    # over this (a deployment-level override). Bounds keep a fat-fingered value
+    # from either OOM-ing the box or refusing every stack.
+    max_stack_memory_gb: float | None = Field(default=None, ge=0.5, le=1024.0)
 
     # --- access control ----------------------------------------------------
     # Optional HTTP Basic auth. Empty hash = disabled (the app is open). Managed

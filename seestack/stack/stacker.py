@@ -71,16 +71,20 @@ def _available_memory_bytes() -> int | None:
     return None
 
 
-def _stack_memory_budget_bytes() -> float:
-    """How much working memory a single stack may use. Honors an explicit
-    ASTROSTACK_MAX_STACK_GB override, else ~70% of currently-available RAM
-    (leaving headroom for worker subprocesses, OS cache and the web app)."""
+def _stack_memory_budget_bytes(setting_gb: float | None = None) -> float:
+    """How much working memory a single stack may use. Precedence:
+    the ``ASTROSTACK_MAX_STACK_GB`` env override (a deployment/container knob)
+    wins, then an explicit ``setting_gb`` (the user-facing Settings value passed
+    in by the webapp), then ~70% of currently-available RAM (leaving headroom
+    for worker subprocesses, OS cache and the web app)."""
     override = os.environ.get("ASTROSTACK_MAX_STACK_GB")
     if override:
         try:
             return float(override) * 1e9
         except ValueError:
             pass
+    if setting_gb is not None and setting_gb > 0:
+        return float(setting_gb) * 1e9
     avail = _available_memory_bytes()
     if avail:
         return avail * 0.7
@@ -111,9 +115,42 @@ def _estimate_peak_bytes(dst_shape: tuple[int, int], *, drizzle: bool,
     return need, (out_h, out_w)
 
 
+def _largest_drizzle_scale_within_budget(
+    dst_shape: tuple[int, int], *, drizzle_reject: bool, budget: int,
+    max_scale: float, step: float = 0.1,
+) -> float | None:
+    """Largest drizzle scale (rounded down to ``step``, in [1.0, ``max_scale``))
+    whose estimated peak memory stays within ``budget``. Used to turn an
+    over-budget refusal into a one-click "use ×N instead" suggestion. Returns
+    None when even ×1.0 drizzle exceeds the budget (drizzle can't help — the
+    user must drop to the reference canvas or reject frames instead)."""
+    # Memory grows ~ scale²; start from the analytic fit, then step down to be
+    # exact against ``_estimate_peak_bytes`` (which carries +1 offsets and the
+    # rejection-pass array factor the closed form ignores).
+    peak_at_max, _ = _estimate_peak_bytes(
+        dst_shape, drizzle=True, drizzle_scale=max_scale,
+        drizzle_reject=drizzle_reject)
+    if peak_at_max <= budget:
+        return None  # the requested scale already fits — nothing to suggest
+    ratio = budget / peak_at_max if peak_at_max else 0.0
+    guess = max_scale * (ratio ** 0.5)
+    # Round down to the step grid and clamp into [1.0, max_scale).
+    s = min(max_scale, max(1.0, (int(guess / step) * step)))
+    # Walk down until it genuinely fits (analytic guess can round high).
+    while s >= 1.0:
+        peak, _ = _estimate_peak_bytes(
+            dst_shape, drizzle=True, drizzle_scale=s,
+            drizzle_reject=drizzle_reject)
+        if peak <= budget and s < max_scale:
+            return round(s, 2)
+        s = round(s - step, 2)
+    return None
+
+
 def _guard_stack_memory(dst_shape: tuple[int, int], *, drizzle: bool,
                         drizzle_scale: float,
-                        drizzle_reject: bool = False) -> None:
+                        drizzle_reject: bool = False,
+                        memory_budget_gb: float | None = None) -> None:
     """Refuse a stack whose output canvas would blow the memory budget instead
     of letting it OOM-kill the whole process. ``dst_shape`` is (h, w) of the
     pre-drizzle canvas; drizzle multiplies each axis by ``drizzle_scale``."""
@@ -121,7 +158,7 @@ def _guard_stack_memory(dst_shape: tuple[int, int], *, drizzle: bool,
     need, _ = _estimate_peak_bytes(dst_shape, drizzle=drizzle,
                                    drizzle_scale=drizzle_scale,
                                    drizzle_reject=drizzle_reject)
-    budget = _stack_memory_budget_bytes()
+    budget = _stack_memory_budget_bytes(memory_budget_gb)
     if need > budget:
         raise MemoryError(
             f"stack output canvas {w}×{h}"
@@ -248,9 +285,15 @@ class StackEstimate:
     peak_bytes: int
     budget_bytes: int
     would_exceed: bool     # peak_bytes > budget_bytes → run would be refused
+    # When a drizzle run would_exceed the budget, the largest drizzle scale
+    # (< the requested one) whose peak still fits — a one-click "use ×N instead"
+    # the UI can offer. None when drizzle is off, the run already fits, or even
+    # ×1.0 drizzle exceeds (drizzle can't rescue it).
+    suggested_drizzle_scale: float | None = None
 
 
-def estimate_stack(project: Project, options: StackOptions) -> StackEstimate:
+def estimate_stack(project: Project, options: StackOptions,
+                   memory_budget_gb: float | None = None) -> StackEstimate:
     """Compute the output canvas dimensions and estimated peak working memory a
     stack *would* need, without running it.
 
@@ -302,14 +345,22 @@ def estimate_stack(project: Project, options: StackOptions) -> StackEstimate:
         dst_shape, drizzle=options.drizzle, drizzle_scale=options.drizzle_scale,
         drizzle_reject=options.drizzle_reject and n >= 4,
     )
-    budget = int(_stack_memory_budget_bytes())
+    budget = int(_stack_memory_budget_bytes(memory_budget_gb))
+    would_exceed = int(peak) > budget
+    suggested_scale: float | None = None
+    if would_exceed and options.drizzle:
+        suggested_scale = _largest_drizzle_scale_within_budget(
+            dst_shape, drizzle_reject=options.drizzle_reject and n >= 4,
+            budget=budget, max_scale=float(options.drizzle_scale),
+        )
     return StackEstimate(
         n_frames=n,
         canvas_w=dst_shape[1], canvas_h=dst_shape[0],
         output_w=out_w, output_h=out_h,
         is_mosaic=is_mosaic,
         peak_bytes=int(peak), budget_bytes=budget,
-        would_exceed=int(peak) > budget,
+        would_exceed=would_exceed,
+        suggested_drizzle_scale=suggested_scale,
     )
 
 
@@ -383,6 +434,7 @@ def run_stack(
     *,
     progress: ProgressFn | None = None,
     cancel: CancelFn | None = None,
+    memory_budget_gb: float | None = None,
 ) -> StackResult:
     """
     Execute a stacking run end-to-end. Synchronous — call this from a worker
@@ -580,7 +632,8 @@ def run_stack(
     # (Rejection is skipped below 4 frames, so don't charge its extra arrays.)
     _guard_stack_memory(dst_shape, drizzle=options.drizzle,
                         drizzle_scale=options.drizzle_scale,
-                        drizzle_reject=options.drizzle_reject and n >= 4)
+                        drizzle_reject=options.drizzle_reject and n >= 4,
+                        memory_budget_gb=memory_budget_gb)
     errors: list[str] = []
 
     # ---- 3a. Drizzle path (alternate accumulator) --------------------------

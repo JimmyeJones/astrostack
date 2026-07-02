@@ -603,6 +603,7 @@ def _stack_target(
                 job.set_progress(f"stack:{phase}", done, total), jm.maybe_flush(job)
             )[0],
             cancel=job.cancel_requested,
+            memory_budget_gb=settings.max_stack_memory_gb,
         )
     finally:
         proj.close()

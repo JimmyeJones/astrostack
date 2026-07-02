@@ -16,8 +16,10 @@ def _capture_opts(monkeypatch):
     """Patch run_stack to record the StackOptions it's called with."""
     captured = {}
 
-    def fake_run_stack(proj, opts, *, progress=None, cancel=None):  # noqa: ANN001
+    def fake_run_stack(proj, opts, *, progress=None, cancel=None,
+                       memory_budget_gb=None):  # noqa: ANN001
         captured["opts"] = opts
+        captured["memory_budget_gb"] = memory_budget_gb
         return SimpleNamespace(
             output_dir="/tmp/x", n_frames_used=0, canvas_shape=(1, 1, 3),
             cancelled=False, errors=[], excluded_frames=[],
