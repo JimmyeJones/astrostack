@@ -5,7 +5,7 @@ Each frame contributes to the final stack with a weight derived from its QC
 metrics. Better frames (sharper, more stars, darker sky) get pulled more
 heavily into the average; worse frames still contribute but less.
 
-Formula (geometric mean of four sub-weights, each in [0.1, 1.0]):
+Formula (geometric mean of up to five sub-weights, each in [0.1, 1.0]):
 
   - ``fwhm_factor         = (best_fwhm / frame_fwhm)^2`` — favours sharp seeing.
   - ``stars_factor        = frame_stars / median_stars`` — penalises
@@ -17,6 +17,13 @@ Formula (geometric mean of four sub-weights, each in [0.1, 1.0]):
     the median flux of a frame's brightest stars). Normalised against the
     *median of the frames being stacked*, i.e. within this one target, because
     the raw score isn't comparable across gain/exposure.
+  - ``ecc_factor          = median_ecc / frame_ecc`` — penalises frames whose
+    stars are more *elongated* than the run's median (tracking error, wind,
+    a mount bump), symmetrically with the others: a frame with rounder-than-
+    median stars caps at the neutral 1.0. Guards ``frame_ecc == 0`` (perfectly
+    round — the best case) as neutral, and only applies when the run's median
+    eccentricity is itself measurable (> 0). Captures star *shape*, where
+    ``fwhm_factor`` captures star *size*, so the two aren't redundant.
 
 Frames missing any metric get the neutral weight 1.0 for that factor (they
 aren't penalised for things we couldn't measure). Frames with all metrics
@@ -62,11 +69,16 @@ def compute_frame_weights(
     skies = [f.sky_adu_median for f in frames if f.sky_adu_median is not None and f.sky_adu_median > 0]
     transps = [f.transparency_score for f in frames
                if f.transparency_score is not None and f.transparency_score > 0]
+    # Eccentricity 0 (perfectly round) is a valid, best-case measurement, so the
+    # median includes it; the factor guards a 0 divisor per-frame instead.
+    eccs = [f.eccentricity_median for f in frames
+            if f.eccentricity_median is not None and f.eccentricity_median >= 0]
 
     best_fwhm = float(np.percentile(fwhms, 10)) if fwhms else None
     median_stars = float(np.median(stars)) if stars else None
     median_sky = float(np.median(skies)) if skies else None
     median_transp = float(np.median(transps)) if transps else None
+    median_ecc = float(np.median(eccs)) if eccs else None
 
     weights: dict[int, float] = {}
     weighted_list: list[float] = []
@@ -85,6 +97,9 @@ def compute_frame_weights(
         if (f.transparency_score is not None and f.transparency_score > 0
                 and median_transp is not None and median_transp > 0):
             factors.append(float(np.clip(f.transparency_score / median_transp, min_weight, 1.0)))
+        if (f.eccentricity_median is not None and f.eccentricity_median > 0
+                and median_ecc is not None and median_ecc > 0):
+            factors.append(float(np.clip(median_ecc / f.eccentricity_median, min_weight, 1.0)))
 
         if not factors:
             weights[f.id] = 1.0

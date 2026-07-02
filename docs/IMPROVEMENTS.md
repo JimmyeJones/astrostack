@@ -27,16 +27,6 @@ _(none — claim an item here with your branch name)_
 ## Ideas (pick roughly top-down; use the value ÷ effort×risk rule)
 
 ### Correctness & robustness (highest priority)
-- **Eccentricity factor in quality weighting** — `compute_frame_weights` now
-  weights by FWHM / star-count / sky / transparency (v0.36.0) but not
-  `eccentricity_median`, which is already computed per frame. Elongated stars
-  signal tracking error / wind on that whole sub, so a
-  `clip(median_ecc / frame_ecc, min, 1.0)` factor (guarding `frame_ecc == 0` as
-  the neutral best case) would down-weight trailed frames symmetrically with the
-  others. Watch for double-counting vs FWHM (both partly track seeing) — they
-  capture size vs shape, so it's defensible, but validate on a synthetic set
-  before flipping. Additive; gated by the off-by-default `quality_weighted`.
-  (S, correctness)
 - Per-pixel extremes / percentile rejection for small stacks (the *robust*
   fix for a lone satellite/plane trail below ~11 frames). **NB:** the previously
   filed "iterated κ-σ" idea was investigated and dropped — re-estimation clips
@@ -126,6 +116,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Eccentricity factor in quality weighting** — `compute_frame_weights` gained a
+  fifth `ecc_factor` (`clip(median_ecc / frame_ecc, min_weight, 1.0)`), so with
+  quality-weighting on, frames whose stars are more *elongated* than the run's
+  median (tracking error / wind / a mount bump) pull less into the average, while
+  rounder-than-median frames cap at the neutral 1.0. Captures star *shape* where
+  the FWHM factor captures *size*, so the two aren't redundant. Guards
+  `frame_ecc == 0` (perfectly round = best case) against divide-by-zero and only
+  applies when the run's median eccentricity is itself measurable. Additive;
+  gated by the off-by-default `quality_weighted`. (v0.38.0, this run)
 
 - **Library search matches notes + persistent filter view** — the Library
   free-text search now also matches a target's `notes` (not just name/tags), and

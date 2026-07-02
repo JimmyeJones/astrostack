@@ -8,10 +8,10 @@ from seestack.stack.accumulator import WeightedSumAccumulator
 from seestack.stack.weighting import compute_frame_weights, unit_weights
 
 
-def _f(id_, fwhm, stars, sky, transp=None):
+def _f(id_, fwhm, stars, sky, transp=None, ecc=None):
     return FrameRow(id=id_, source_path=f"x{id_}.fit",
                     fwhm_px=fwhm, star_count=stars, sky_adu_median=sky,
-                    transparency_score=transp)
+                    transparency_score=transp, eccentricity_median=ecc)
 
 
 def test_weights_favour_sharper_frames():
@@ -58,6 +58,43 @@ def test_transparency_missing_is_not_penalised():
     ]
     w, _ = compute_frame_weights(frames)
     assert w[1] == w[2] == 1.0
+
+
+def test_weights_penalise_elongated_stars():
+    # All else equal, a frame with more-elongated stars (above-median
+    # eccentricity — tracking error / wind) is down-weighted, while a
+    # rounder-than-median frame caps at the neutral factor.
+    frames = [
+        _f(1, fwhm=3.0, stars=100, sky=1000, ecc=0.2),  # roundest (capped)
+        _f(2, fwhm=3.0, stars=100, sky=1000, ecc=0.4),  # at median
+        _f(3, fwhm=3.0, stars=100, sky=1000, ecc=0.8),  # trailed
+    ]
+    w, _ = compute_frame_weights(frames)
+    assert w[1] == w[2]      # rounder-than-median isn't rewarded
+    assert w[2] > w[3]       # elongated frame is penalised
+
+
+def test_eccentricity_missing_is_not_penalised():
+    # A frame with no eccentricity keeps the neutral factor and isn't dragged
+    # below an otherwise-identical frame that does carry one.
+    frames = [
+        _f(1, fwhm=3.0, stars=100, sky=1000, ecc=None),
+        _f(2, fwhm=3.0, stars=100, sky=1000, ecc=0.4),
+    ]
+    w, _ = compute_frame_weights(frames)
+    assert w[1] == w[2] == 1.0
+
+
+def test_eccentricity_zero_is_best_case_not_divide_error():
+    # A perfectly-round frame (ecc == 0) is the best case: it must not trigger a
+    # divide-by-zero, and it should not be penalised relative to the median.
+    frames = [
+        _f(1, fwhm=3.0, stars=100, sky=1000, ecc=0.0),
+        _f(2, fwhm=3.0, stars=100, sky=1000, ecc=0.5),
+    ]
+    w, _ = compute_frame_weights(frames)
+    assert w[1] == 1.0       # round frame keeps the neutral factor
+    assert w[2] < 1.0        # more-elongated-than-median frame is penalised
 
 
 def test_missing_metrics_get_neutral_weight():
