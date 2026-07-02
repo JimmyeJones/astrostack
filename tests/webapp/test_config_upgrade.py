@@ -51,3 +51,19 @@ def test_load_resilient_keeps_valid_fields():
     s = _load_resilient(txt, "/tmp/x")
     assert s.auto_qc is False                       # valid field preserved
     assert s.cpu_workers == Settings().cpu_workers  # invalid one reset
+
+
+def test_pre_drizzle_reject_stack_options_still_coerce(tmp_path):
+    """A config (or saved per-target defaults / old run record) written before
+    drizzle_reject existed must coerce cleanly, with the new knob defaulting
+    to off — an in-place upgrade must not change what an old drizzle run does."""
+    from webapp.schemas import coerce_stack_options
+
+    old_payload = {"drizzle": True, "drizzle_scale": 2.0, "sigma_clip": True}
+    opts = coerce_stack_options(old_payload)
+    assert opts.drizzle is True and opts.drizzle_scale == 2.0
+    assert opts.drizzle_reject is False  # new behaviour stays opt-in
+
+    _write_cfg(tmp_path, {"default_stack_options": old_payload})
+    s = SettingsStore(str(tmp_path)).get()
+    assert s.default_stack_options == old_payload  # survives verbatim

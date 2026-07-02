@@ -168,6 +168,11 @@ _DESCRIPTORS: list[dict[str, Any]] = [
      "help": "Keep only the best fraction of frames by FWHM. 1.0 = keep all."},
     {"key": "drizzle", "label": "Drizzle (super-resolution)", "type": "bool", "group": "simple",
      "help": "Use the drizzle algorithm. Best with 200+ dithered frames."},
+    {"key": "drizzle_reject", "label": "Drizzle outlier rejection", "type": "bool",
+     "group": "simple", "depends_on": "drizzle",
+     "help": "Second drizzle pass that rejects satellites, plane trails and cosmic "
+             "rays (single-pass drizzle keeps them). Uses Sigma κ; needs 4+ frames. "
+             "Takes roughly 2–3× as long."},
     {"key": "mono", "label": "Mono / filtered subs", "type": "bool", "group": "simple",
      "help": "Stack as single-channel luminance (no debayer). For mono cameras and "
              "L/R/G/B/narrowband subs. Combine channels later in Channel combine."},

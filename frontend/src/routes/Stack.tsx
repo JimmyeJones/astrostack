@@ -172,6 +172,15 @@ export function StackView() {
       ? `Sigma-clip rejection estimates each pixel's spread across frames, but you only have ${solvedAccepted} accepted, solved frame${solvedAccepted === 1 ? "" : "s"}. With fewer than ~${SIGMA_CLIP_MIN_FRAMES} it can reject real signal as an outlier — consider turning it off for this stack.`
       : null;
 
+  // Drizzle accumulates in a single pass, so the sigma-clip toggle doesn't
+  // apply to it — a user who enabled both would reasonably expect satellite
+  // trails to be rejected and be surprised when they aren't. Point them at
+  // the drizzle-specific rejection instead. Advisory only.
+  const drizzleClipHint =
+    values.drizzle && values.sigma_clip && !values.drizzle_reject
+      ? "Sigma clipping doesn't apply to drizzle's single-pass accumulation — enable “Drizzle outlier rejection” to reject satellites and cosmic rays in drizzled stacks."
+      : null;
+
   return (
     <Stack maw={720}>
       <Group justify="space-between">
@@ -302,6 +311,12 @@ export function StackView() {
           {sigmaClipWarning ? (
             <Alert color="yellow" variant="light" py={6} px="sm">
               <Text size="xs">{sigmaClipWarning}</Text>
+            </Alert>
+          ) : null}
+
+          {drizzleClipHint ? (
+            <Alert color="blue" variant="light" py={6} px="sm">
+              <Text size="xs">{drizzleClipHint}</Text>
             </Alert>
           ) : null}
 
