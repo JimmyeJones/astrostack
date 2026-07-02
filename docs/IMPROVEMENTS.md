@@ -60,7 +60,6 @@ _(none — claim an item here with your branch name)_
 ### Features that serve real workflows
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
-- Per-target "notes/tags" search improvements and saved filters in Library. (S)
 
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
@@ -104,6 +103,13 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Library search matches notes + persistent filter view** — the Library
+  free-text search now also matches a target's `notes` (not just name/tags), and
+  the whole view (search text, sort, active tag chips) is persisted to
+  localStorage so a user with a big library keeps their filters when they open a
+  target and come back, or reload. Defensively guarded so a disabled/broken
+  store never breaks the page. Frontend-only. (v0.37.0, this run)
 
 - **Transparency-night hint on the Stack form** — completes the transparency
   weighting pair (v0.36.0). The Stack form now shows an advisory when the median

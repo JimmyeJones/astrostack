@@ -4,7 +4,7 @@ import {
 } from "@mantine/core";
 import { IconChevronRight, IconSearch, IconStars } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type Target } from "../api/client";
 import { QueryError } from "../components/QueryError";
@@ -17,6 +17,38 @@ function expo(seconds: number): string {
 }
 
 type SortKey = "name" | "recent" | "exposure" | "frames";
+
+// Persist the Library view (search text, sort, active tags) so a user with a big
+// library keeps their filters when they open a target and come back, or reload.
+// localStorage-only and defensively guarded so a disabled/broken store never
+// breaks the page.
+const LS_KEY = "astrostack.library.filters";
+type SavedFilters = { search: string; sort: SortKey; tags: string[] };
+
+function loadFilters(): SavedFilters {
+  const fallback: SavedFilters = { search: "", sort: "recent", tags: [] };
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return fallback;
+    const p = JSON.parse(raw) as Partial<SavedFilters>;
+    return {
+      search: typeof p.search === "string" ? p.search : "",
+      sort: (["name", "recent", "exposure", "frames"] as const).includes(p.sort as SortKey)
+        ? (p.sort as SortKey) : "recent",
+      tags: Array.isArray(p.tags) ? p.tags.filter((t): t is string => typeof t === "string") : [],
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function saveFilters(f: SavedFilters): void {
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify(f));
+  } catch {
+    /* storage unavailable — filters just won't persist */
+  }
+}
 
 const SORTS: { value: SortKey; label: string }[] = [
   { value: "recent", label: "Recently active" },
@@ -80,9 +112,15 @@ export function Library() {
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["targets"], queryFn: api.listTargets,
   });
-  const [search, setSearch] = useState("");
-  const [sort, setSort] = useState<SortKey>("recent");
-  const [activeTags, setActiveTags] = useState<string[]>([]);
+  const [initial] = useState(loadFilters);
+  const [search, setSearch] = useState(initial.search);
+  const [sort, setSort] = useState<SortKey>(initial.sort);
+  const [activeTags, setActiveTags] = useState<string[]>(initial.tags);
+
+  // Persist the view whenever any part of it changes.
+  useEffect(() => {
+    saveFilters({ search, sort, tags: activeTags });
+  }, [search, sort, activeTags]);
 
   const targets = useMemo(() => data ?? [], [data]);
 
@@ -96,7 +134,8 @@ export function Library() {
     const q = search.trim().toLowerCase();
     const filtered = targets.filter((t) => {
       const matchesSearch = !q || t.name.toLowerCase().includes(q)
-        || t.tags.some((tag) => tag.toLowerCase().includes(q));
+        || t.tags.some((tag) => tag.toLowerCase().includes(q))
+        || (t.notes?.toLowerCase().includes(q) ?? false);
       const matchesTags = activeTags.length === 0
         || activeTags.every((tag) => t.tags.includes(tag));
       return matchesSearch && matchesTags;
@@ -119,7 +158,7 @@ export function Library() {
           <Group gap="xs">
             <TextInput
               leftSection={<IconSearch size={16} />}
-              placeholder="Search name or tag…"
+              placeholder="Search name, tag or note…"
               value={search}
               onChange={(e) => setSearch(e.currentTarget.value)}
               w={{ base: "100%", xs: 220 }}
