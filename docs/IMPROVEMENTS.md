@@ -57,13 +57,28 @@ _(none — claim an item here with your branch name)_
   the user to manually reconnect via the UI. Core hardware-integration
   path; needs care around not spamming reconnect attempts and should be
   testable in isolation from real hardware. (M, correctness)
+- **Suggest the largest drizzle scale that fits the memory budget** — the
+  `stack-estimate` endpoint now knows the budget and whether a scale would
+  exceed it; when it would, compute the largest `drizzle_scale` (to a sensible
+  step) whose peak stays under budget and offer it as a one-click "use ×N
+  instead" in the over-budget alert. Turns a hard refusal into a usable
+  suggestion. (S, scale/approachability) *(builds on v0.25.0)*
 
 ### Features that serve real workflows
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
-- Drizzle memory estimate surfaced in the Stack form before you run it. (S)
 - Star-mask preview toggle in the editor (visualise the mask driving star ops). (S)
 - Per-target "notes/tags" search improvements and saved filters in Library. (S)
+- **Show the pre-run estimate's frame count / mosaic flag inline too** — the
+  `stack-estimate` endpoint already returns `n_frames` and `is_mosaic`; the Stack
+  form only surfaces canvas + memory. A one-liner like "12 accepted, solved
+  frames · mosaic canvas" would confirm what's about to be stacked. (S,
+  approachability) *(follow-on to v0.25.0)*
+- **Streaked-frame count badge on the Target/Frames view** — now that streaks can
+  be kept (v0.27.0), surface how many accepted frames carry a `streak_detected`
+  flag so a user can see at a glance what per-pixel rejection will need to clean
+  (and jump to reject them if they'd rather). Reuses the existing flag. (S,
+  approachability)
 
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
@@ -82,6 +97,11 @@ _(none — claim an item here with your branch name)_
   a future refinement could make the cap a configurable setting. (S, scale)
 - Add a `SessionStart` hook (or a `scripts/setup.sh`) that provisions the venv +
   `npm ci` so every autonomous iteration starts from a known-green baseline. (S)
+- **Expose the stack memory budget as a Setting** — the working-memory cap is
+  env-only (`ASTROSTACK_MAX_STACK_GB`, else ~70% of RAM). Now that the Stack form
+  surfaces the budget via the estimate (v0.25.0), let the user view/adjust it
+  from Settings (with a sane clamp) instead of editing container env. Additive,
+  the env override can still win. (S, scale/approachability)
 - Reduce the frontend bundle warning (code-split the heavy Sky/aladin chunks). (S)
 - Expand `docs/` (webapp.md) to cover calibration, mono/LRGB, auth. (S)
 - `npm audit` still reports `esbuild`≤0.24.2/`vite`≤6.4.2/`vitest`≤3.2.5
@@ -132,6 +152,10 @@ _Newest first. One line each: what + commit/PR._
   output filename. A user can finally find "best RGB v2" across every target
   without opening each History page. Purely additive (new response field, new
   UI). (v0.26.0, this run)
+
+- **Drizzle memory estimate in the Stack form** — subsumed by the pre-run stack
+  estimate below: the "~X GB peak memory" line covers drizzle scales directly, so
+  the standalone "drizzle memory estimate" idea is done. (v0.25.0, this run)
 
 - **Pre-run stack estimate endpoint** — new `GET /targets/{safe}/stack-estimate`
   (`drizzle`/`drizzle_scale`/`drizzle_reject`/`mosaic_canvas` query params) does a
