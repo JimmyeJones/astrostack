@@ -29,7 +29,9 @@ _(none — claim an item here with your branch name)_
 ### Correctness & robustness (highest priority)
 - Audit NaN/coverage handling on the newer paths (calibration, mono) for
   single-frame and mosaic-edge cases. Add edge-case tests. (S–M) — *channel
-  combine done (v0.16.1); calibration/mono still to audit.*
+  combine done (v0.16.1); mono single-frame + sigma-clip verified (v0.22.1);
+  calibration and the mono mosaic-edge (partial-overlap → NaN) case still to
+  audit.*
 - Channel combine: reproject stacks that don't share a canvas (via WCS) instead
   of erroring, so filters shot in separate sessions can be combined. (M–L)
 - Seestar client (`webapp/seestar/client.py`) has no reconnect/retry on a
@@ -92,6 +94,11 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Mono single-frame edge test** — verified the mono stack path on a
+  one-frame, sigma-clip-on stack: coverage tops at 1, the single-coverage
+  pixels stay finite (no spurious clip-to-NaN), and the output stays grayscale.
+  Closes the single-frame half of the mono NaN/coverage audit. (v0.22.1, this run)
 
 - **Low-frame sigma-clip caution** — the Stack form now shows an inline caution
   when sigma-clip rejection is enabled but fewer than ~5 accepted, plate-solved

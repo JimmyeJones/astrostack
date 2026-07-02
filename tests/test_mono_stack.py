@@ -71,3 +71,42 @@ def test_mono_full_stack(tmp_path):
         ch = [data[c] for c in range(min(3, data.shape[0]))]
         m = _np.isfinite(ch[0]) & _np.isfinite(ch[-1])
         _np.testing.assert_allclose(ch[0][m], ch[-1][m], rtol=1e-4)
+
+
+def test_mono_single_frame_sigma_clip_is_finite_and_gray(tmp_path):
+    """Edge case: a one-frame mono stack with sigma-clip on. Coverage tops out
+    at 1, the covered pixels stay finite (a single-coverage pixel has no spread
+    to clip against, so the frame must not be rejected into NaN), and the three
+    output channels remain identical (pure luminance)."""
+    pytest.importorskip("photutils")
+    import numpy as _np
+    from astropy.io import fits
+
+    from seestack.io.project import FrameRow, Project
+    from seestack.stack.stacker import StackOptions, run_stack
+    from tests.synth import write_seestar_fits as _w
+
+    proj = Project.create(tmp_path / "proj", name="MonoSingle")
+    wcs_text = make_synth_wcs_text()
+    fp = _w(tmp_path / "one.fit", add_wcs=True, n_stars=25, seed=7)
+    proj.add_frame(FrameRow(
+        id=None, source_path=str(fp), cached_path=str(fp),
+        wcs_json=wcs_text, width_px=480, height_px=320,
+        bayer_pattern="RGGB", accept=True,
+        ra_center_deg=83.6, dec_center_deg=-5.4,
+    ))
+    result = run_stack(proj, StackOptions(mono=True, sigma_clip=True,
+                                          sigma_kappa=2.5, background_flatten=False))
+    proj.close()
+
+    assert result.n_frames_used == 1
+    assert result.coverage_max == 1
+    with fits.open(result.fits_path) as hdul:
+        data = _np.asarray(hdul[0].data, dtype=_np.float32)
+    # Real signal survived the (degenerate) clip rather than becoming NaN/zero.
+    assert _np.isfinite(data).any()
+    assert _np.nanmax(data) > 0
+    if data.ndim == 3:
+        ch = [data[c] for c in range(min(3, data.shape[0]))]
+        m = _np.isfinite(ch[0]) & _np.isfinite(ch[-1])
+        _np.testing.assert_allclose(ch[0][m], ch[-1][m], rtol=1e-4)
