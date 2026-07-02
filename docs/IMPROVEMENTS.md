@@ -69,11 +69,6 @@ _(none — claim an item here with your branch name)_
 - Annotated sky overlay (label detected objects / show solved field). (M)
 - Star-mask preview toggle in the editor (visualise the mask driving star ops). (S)
 - Per-target "notes/tags" search improvements and saved filters in Library. (S)
-- **Streaked-frame count badge on the Target/Frames view** — now that streaks can
-  be kept (v0.27.0), surface how many accepted frames carry a `streak_detected`
-  flag so a user can see at a glance what per-pixel rejection will need to clean
-  (and jump to reject them if they'd rather). Reuses the existing flag. (S,
-  approachability)
 
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
@@ -123,6 +118,14 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Streaked-frame count badge on the Target view** — an orange "N streaked" badge
+  next to the accepted count shows how many *accepted* frames still carry a
+  satellite/plane trail (`streak_detected`), with a tooltip explaining that
+  sigma-clip / drizzle outlier rejection can clean the trail while keeping the
+  frame — so with "keep streaked frames" on, the user sees at a glance what
+  per-pixel rejection needs to handle. Reuses the existing flag; frontend-only.
+  (v0.27.1, this run)
 
 - **Frame count / mosaic flag inline in the Stack estimate** — the pre-run sizing
   line now leads with "N accepted, solved frames · mosaic canvas · output W×H ·
