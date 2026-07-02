@@ -32,11 +32,6 @@ _(none — claim an item here with your branch name)_
   flux vs the target's per-star baseline — and feed it into quality weighting
   and an advisory "poor transparency" grader hint. Turns two schema fields
   into real value on cloudy-night data. (M, correctness)
-- Reclaim streaked subs: QC auto-rejects a whole frame on a detected
-  satellite streak, discarding ~99% good pixels. Now that both stacking paths
-  have per-pixel rejection (sigma-clip and `drizzle_reject`), offer an opt-in
-  "keep streaked frames when rejection is on" so big stacks keep that signal.
-  (S–M, correctness/scale)
 - Iterated κ-σ rejection (both paths): a very bright outlier inflates the
   pass-1 σ enough that clipping can't fire below ~11 frames
   ((n−1)/√n < κ). One re-estimation round after the first clip would let
@@ -113,6 +108,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Reclaim streaked subs** — new opt-in `keep_streaked_frames` setting (default
+  off). QC still detects satellite/plane trails, but with this on it *flags* the
+  frame instead of auto-rejecting it, so a stack with per-pixel rejection
+  (sigma-clip or drizzle rejection) removes just the streak while keeping the
+  frame's ~99% good signal — valuable on big stacks. Threaded through
+  `run_qc_and_solve(auto_reject_streaks=…)` and both webapp QC paths; a Settings
+  toggle exposes it, and the Stack form warns when accepted streaked frames would
+  be stacked *without* rejection (the footgun). User overrides are never
+  clobbered. Additive/upgrade-safe (new setting defaults off). (v0.27.0, this run)
 
 - **Large-stack sigma-kappa hint** — completes the sigma-clip guidance pair. The
   low-frame "don't clip under ~5" caution shipped in v0.22.0; now, when a stack

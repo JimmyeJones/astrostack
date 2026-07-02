@@ -28,6 +28,8 @@ def test_old_config_loads_keeps_values_and_defaults_new_fields(tmp_path):
     assert s.auto_stack is True and s.cpu_workers == 6      # existing values kept
     assert s.auth_password_hash == "" and s.auth_username == "admin"  # auth OFF
     assert s.astap_use_solve_hints is True                 # new field defaulted
+    # New streak-keep flag defaults off → streaks still fully rejected as before.
+    assert s.keep_streaked_frames is False
 
 
 def test_one_bad_field_does_not_wipe_the_rest(tmp_path):

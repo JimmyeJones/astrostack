@@ -214,6 +214,41 @@ describe("StackView", () => {
     expect(screen.queryByText(/tighter sigma-clip/)).not.toBeInTheDocument();
   });
 
+  it("warns when accepted streaked frames are stacked without rejection", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+      { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
+        default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+    ]);
+    // sigma_clip off → no per-pixel rejection.
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: false });
+    const streaked = { ...mkFrame(1), streak_detected: true };
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([streaked, mkFrame(2), mkFrame(3)]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    await waitFor(() =>
+      expect(screen.getByText(/detected satellite\/plane streak/)).toBeInTheDocument());
+  });
+
+  it("drops the streak warning once rejection has enough frames", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+      { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
+        default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+    ]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: true });
+    // 5 accepted frames (≥4) with sigma-clip on → rejection is active.
+    const frames = Array.from({ length: 5 }, (_, i) =>
+      ({ ...mkFrame(i + 1), streak_detected: i === 0 }));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    await waitFor(() => expect(screen.getByText("Sigma clipping")).toBeInTheDocument());
+    expect(screen.queryByText(/detected satellite\/plane streak/)).not.toBeInTheDocument();
+  });
+
   const drizzleSchema: client.StackOptionField[] = [
     { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
       default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },

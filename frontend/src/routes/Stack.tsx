@@ -176,6 +176,20 @@ export function StackView() {
   const noSolved = !frames.isLoading && frames.data !== undefined && solvedAccepted === 0;
   const excludedFrames = (job?.result?.excluded_frames as string[] | undefined) ?? [];
 
+  // "Keep streaked frames" leaves satellite/plane-trailed subs accepted so that
+  // per-pixel rejection can clean them. If the user then stacks *without* any
+  // rejection, the streak lands in the result — warn them so the kept frames
+  // aren't a silent footgun. Advisory only.
+  const streakedAccepted = (frames.data ?? [])
+    .filter((f) => f.accept && f.solved && f.streak_detected).length;
+  const rejectionOn = values.drizzle
+    ? !!values.drizzle_reject
+    : (!!values.sigma_clip && solvedAccepted >= 4);
+  const streakNoRejectionWarning =
+    streakedAccepted > 0 && !rejectionOn
+      ? `${streakedAccepted} accepted frame${streakedAccepted === 1 ? " has" : "s have"} a detected satellite/plane streak, but this stack has no per-pixel rejection enabled — the trail${streakedAccepted === 1 ? "" : "s"} will show in the result. Turn on ${values.drizzle ? "“Drizzle outlier rejection”" : "sigma clipping"} (or reject those frames) to remove ${streakedAccepted === 1 ? "it" : "them"}.`
+      : null;
+
   // Sigma-clip rejection estimates each pixel's spread across the stack, so it
   // needs a handful of frames to be meaningful. With only a few it can throw
   // away real signal as if it were an outlier — a knob a beginner can't reason
@@ -357,6 +371,12 @@ export function StackView() {
           {sigmaKappaLargeHint ? (
             <Alert color="blue" variant="light" py={6} px="sm">
               <Text size="xs">{sigmaKappaLargeHint}</Text>
+            </Alert>
+          ) : null}
+
+          {streakNoRejectionWarning ? (
+            <Alert color="yellow" variant="light" py={6} px="sm">
+              <Text size="xs">{streakNoRejectionWarning}</Text>
             </Alert>
           ) : null}
 

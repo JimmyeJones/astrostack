@@ -184,6 +184,7 @@ def run_qc_and_solve(
     serial: bool = False,
     only_new_qc: bool = False,
     use_solve_hints: bool = True,
+    auto_reject_streaks: bool = True,
     progress: ProgressFn | None = None,
     should_stop: ShouldStopFn | None = None,
 ) -> dict:
@@ -224,7 +225,8 @@ def run_qc_and_solve(
         ):
             if result is not None:
                 try:
-                    apply_qc_result_to_db(project, result)
+                    apply_qc_result_to_db(
+                        project, result, auto_reject=auto_reject_streaks)
                 except Exception as exc:  # noqa: BLE001
                     log.warning("QC DB write failed: %s", exc)
             summary["qc_done"] = done
