@@ -111,6 +111,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Full editor-recipe HISTORY provenance in exported FITS** — an editor export
+  previously recorded only the op *count* (`STACKMTD="editor recipe (N ops)"`).
+  The derived `master.fits` now also carries one FITS `HISTORY` card per enabled
+  op with its key params (e.g. `AstroStack: detail.denoise(method=wavelet,
+  strength=0.5)`) — the canonical provenance mechanism that Siril/PixInsight/APP
+  display — so an edited export self-documents its full processing chain.
+  `_merge_header_meta` gained list-valued `HISTORY` (appends commentary cards)
+  support; disabled/long-structured params are skipped and each card is clamped
+  to the 72-char limit. Additive/upgrade-safe. (v0.46.0, this run)
+
 - **Code-split the frontend vendor bundle** — the eager app bundle was one
   720 kB `index` chunk (React + Mantine + TanStack + all routes). A `manualChunks`
   split in `vite.config.ts` peels the rarely-changing vendors into `react`
