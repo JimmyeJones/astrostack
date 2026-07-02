@@ -83,6 +83,17 @@ def test_frame_preview_renders_png(client, built_library):
     assert r2.status_code == 304
 
 
+def test_frame_preview_rejects_invalid_bayer_pattern(client, built_library):
+    # `bayer` ends up in the cache filename, so it must be validated against
+    # the fixed set of real patterns rather than accepted as free text (which
+    # would let a value like "../../x" reach a filesystem path join).
+    frames = client.get("/api/targets/M_42/frames").json()
+    fid = frames[0]["id"]
+    r = client.get(f"/api/targets/M_42/frames/{fid}/preview",
+                    params={"bayer": "../../../../etc/passwd"})
+    assert r.status_code == 400
+
+
 def test_stack_options_schema(client):
     r = client.get("/api/stack/options/schema")
     assert r.status_code == 200
