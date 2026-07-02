@@ -67,6 +67,36 @@ describe("Gallery batch apply", () => {
     await waitFor(() => expect(screen.getByText(/5 min/)).toBeInTheDocument());
   });
 
+  it("shows a run's label and filters by it (and by target name)", async () => {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [
+        { ...item(1, "M_42"), notes: "best RGB v2" },
+        { ...item(2, "NGC_7000"), notes: "cloudy night" },
+      ],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+
+    renderGallery();
+
+    // Both labels are visible up front.
+    await waitFor(() => expect(screen.getByText("best RGB v2")).toBeInTheDocument());
+    expect(screen.getByText("cloudy night")).toBeInTheDocument();
+
+    // Searching the label narrows to the one card.
+    fireEvent.change(screen.getByPlaceholderText(/Search by label/), {
+      target: { value: "rgb v2" },
+    });
+    await waitFor(() => expect(screen.queryByText("cloudy night")).not.toBeInTheDocument());
+    expect(screen.getByText("best RGB v2")).toBeInTheDocument();
+
+    // Searching a target name that matches nothing shows the empty message.
+    fireEvent.change(screen.getByPlaceholderText(/Search by label/), {
+      target: { value: "zzz-nope" },
+    });
+    await waitFor(() => expect(screen.getByText(/No images match/)).toBeInTheDocument());
+  });
+
   it("offers Reuse settings only for reusable cards", async () => {
     vi.spyOn(client.api, "getGallery").mockResolvedValue({
       items: [

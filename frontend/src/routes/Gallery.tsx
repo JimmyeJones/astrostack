@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
 import {
   Alert, Badge, Button, Card, Center, Checkbox, Group, Image, Loader, Menu, Paper,
-  SimpleGrid, Spoiler, Stack, Text, Title, Tooltip,
+  SimpleGrid, Spoiler, Stack, Text, TextInput, Title, Tooltip,
 } from "@mantine/core";
-import { IconCopy, IconPhoto, IconWand } from "@tabler/icons-react";
+import { IconCopy, IconPhoto, IconSearch, IconWand } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
@@ -79,6 +79,11 @@ function GalleryCard({ item, labels, onView, selected, onToggleSelect }: {
         </Text>
         <Badge variant="light" style={{ flexShrink: 0 }}>{item.n_frames_used} frames</Badge>
       </Group>
+      {item.notes ? (
+        <Text size="sm" c="violet.4" fw={500} truncate title={item.notes}>
+          {item.notes}
+        </Text>
+      ) : null}
       <Text size="xs" c="dimmed">
         {item.output_basename} · {item.timestamp_utc.replace("T", " ").slice(0, 16)}
         {" · "}{item.canvas_w}×{item.canvas_h}
@@ -136,6 +141,7 @@ export function GalleryView() {
   const schema = useQuery({ queryKey: ["stackSchema"], queryFn: api.optionsSchema });
   const presets = useQuery({ queryKey: ["presets"], queryFn: api.listPresets });
   const [viewing, setViewing] = useState<GalleryItem | null>(null);
+  const [search, setSearch] = useState("");
   // Batch selection: key "safe:run_id" -> {safe, run_id}.
   const [selected, setSelected] = useState<Record<string, { safe: string; run_id: number }>>({});
   const selKey = (it: GalleryItem) => `${it.safe}:${it.run_id}`;
@@ -185,7 +191,15 @@ export function GalleryView() {
     </Alert>;
   }
 
-  const items = gallery.data?.items ?? [];
+  const allItems = gallery.data?.items ?? [];
+  // Free-text filter across the run's label (notes), target name and output
+  // basename — so a user can find "best RGB v2" or "M42" across every target.
+  const query = search.trim().toLowerCase();
+  const items = query
+    ? allItems.filter((it) =>
+        [it.notes, it.target_name, it.output_basename]
+          .some((s) => (s ?? "").toLowerCase().includes(query)))
+    : allItems;
 
   return (
     <Stack>
@@ -193,9 +207,19 @@ export function GalleryView() {
         <IconPhoto size={24} />
         <Title order={2}>Gallery</Title>
         <Tooltip label="Every stacked image across all targets">
-          <Badge variant="light">{items.length}</Badge>
+          <Badge variant="light">{allItems.length}</Badge>
         </Tooltip>
       </Group>
+
+      {allItems.length > 0 ? (
+        <TextInput
+          value={search}
+          onChange={(e) => setSearch(e.currentTarget.value)}
+          placeholder="Search by label, target or filename…"
+          leftSection={<IconSearch size={16} />}
+          maw={420}
+        />
+      ) : null}
 
       {selItems.length ? (
         <Paper withBorder p="sm" pos="sticky" top={8} style={{ zIndex: 3 }}>
@@ -227,7 +251,9 @@ export function GalleryView() {
 
       {items.length === 0 ? (
         <Text c="dimmed">
-          No stacked images yet. Stack a target and its results will appear here.
+          {query
+            ? `No images match “${search.trim()}”.`
+            : "No stacked images yet. Stack a target and its results will appear here."}
         </Text>
       ) : (
         <SimpleGrid cols={{ base: 1, sm: 2, md: 3, lg: 4 }}>

@@ -49,6 +49,20 @@ def test_gallery_lists_runs_with_options(client, solved_library):
     assert mine["options"]["sigma_kappa"] == 2.5
     # A plain stack run can pre-fill the Stack form ("Reuse settings").
     assert mine["reusable"] is True
+    # No label set yet → notes is null.
+    assert mine["notes"] is None
+
+
+def test_gallery_surfaces_run_notes(client, solved_library):
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _register_run(solved_library, safe, {"sigma_clip": True})
+    # Label the run via the notes PATCH, then confirm the gallery exposes it.
+    r = client.patch(f"/api/targets/{safe}/stack-runs/{run_id}",
+                     json={"notes": "best RGB v2"})
+    assert r.status_code == 200
+    items = client.get("/api/gallery").json()["items"]
+    mine = next(it for it in items if it["run_id"] == run_id)
+    assert mine["notes"] == "best RGB v2"
 
 
 def test_gallery_reusable_flag_excludes_combine_and_editor(client, solved_library):

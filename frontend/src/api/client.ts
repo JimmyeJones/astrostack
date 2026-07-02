@@ -181,6 +181,7 @@ export interface GalleryItem {
   canvas_w: number;
   canvas_h: number;
   total_exposure_s: number | null;
+  notes?: string | null;
   has_preview: boolean;
   has_fits: boolean;
   has_tiff: boolean;

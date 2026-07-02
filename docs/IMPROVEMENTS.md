@@ -73,10 +73,6 @@ _(none — claim an item here with your branch name)_
 - Drizzle memory estimate surfaced in the Stack form before you run it. (S)
 - Star-mask preview toggle in the editor (visualise the mask driving star ops). (S)
 - Per-target "notes/tags" search improvements and saved filters in Library. (S)
-- **Show/search run labels in the Gallery** — now that a run's `notes` label is
-  editable (v0.23.0), surface it on Gallery cards and add a text filter that
-  matches label + target name, so a user can find "best RGB v2" across all
-  targets. Reuses the `notes` field already returned per run. (S, approachability)
 
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
@@ -121,6 +117,13 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Show/search run labels in the Gallery** — the gallery response now carries
+  each run's `notes` label, so the Gallery card shows it (in violet, above the
+  metadata line) and a new search box filters cards by label + target name +
+  output filename. A user can finally find "best RGB v2" across every target
+  without opening each History page. Purely additive (new response field, new
+  UI). (v0.26.0, this run)
 
 - **Pre-run stack estimate endpoint** — new `GET /targets/{safe}/stack-estimate`
   (`drizzle`/`drizzle_scale`/`drizzle_reject`/`mosaic_canvas` query params) does a
