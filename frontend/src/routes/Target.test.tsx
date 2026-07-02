@@ -120,6 +120,28 @@ describe("TargetView reject breakdown + undo", () => {
     expect(summary).toHaveBeenCalledWith("M_42");
   });
 
+  it("shows a per-row plain-language reason chip on rejected frames", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ n_frames: 3, n_frames_accepted: 1 }),
+    );
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "rejectSummary").mockResolvedValue({
+      counts: { "auto:streak": 1, solve_failed: 1 }, total: 2,
+    });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      mkFrame(1),
+      mkFrame(2, { accept: false, reject_reason: "auto:streak" }),
+      mkFrame(3, { accept: false, reject_reason: "solve_failed:no stars" }),
+    ]);
+
+    renderTarget();
+
+    // Each rejected row shows its own plain-language reason; an accepted row shows none.
+    await waitFor(() =>
+      expect(screen.getByText("Auto: streak")).toBeInTheDocument());
+    expect(screen.getByText("Plate-solve failed")).toBeInTheDocument();
+  });
+
   it("offers Undo after a bulk reject and re-accepts exactly those ids", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
