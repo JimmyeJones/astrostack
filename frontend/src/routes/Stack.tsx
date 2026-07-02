@@ -227,8 +227,9 @@ export function StackView() {
   // canvas doesn't get silently refused for OOM only after the user hits Stack.
   const est = estimate.data;
   const estimateLine = est
-    ? `Output canvas ${est.output_w}×${est.output_h}`
-      + (est.is_mosaic ? " (mosaic union)" : "")
+    ? `${est.n_frames} accepted, solved frame${est.n_frames === 1 ? "" : "s"}`
+      + (est.is_mosaic ? " · mosaic canvas" : "")
+      + ` · output ${est.output_w}×${est.output_h}`
       + ` · ~${est.peak_gb.toFixed(est.peak_gb < 1 ? 2 : 1)} GB peak memory`
     : null;
   const estimateOverBudget = est?.would_exceed

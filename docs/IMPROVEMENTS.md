@@ -69,11 +69,6 @@ _(none — claim an item here with your branch name)_
 - Annotated sky overlay (label detected objects / show solved field). (M)
 - Star-mask preview toggle in the editor (visualise the mask driving star ops). (S)
 - Per-target "notes/tags" search improvements and saved filters in Library. (S)
-- **Show the pre-run estimate's frame count / mosaic flag inline too** — the
-  `stack-estimate` endpoint already returns `n_frames` and `is_mosaic`; the Stack
-  form only surfaces canvas + memory. A one-liner like "12 accepted, solved
-  frames · mosaic canvas" would confirm what's about to be stacked. (S,
-  approachability) *(follow-on to v0.25.0)*
 - **Streaked-frame count badge on the Target/Frames view** — now that streaks can
   be kept (v0.27.0), surface how many accepted frames carry a `streak_detected`
   flag so a user can see at a glance what per-pixel rejection will need to clean
@@ -128,6 +123,12 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Frame count / mosaic flag inline in the Stack estimate** — the pre-run sizing
+  line now leads with "N accepted, solved frames · mosaic canvas · output W×H ·
+  ~X GB peak memory", so the user confirms *what* is about to be stacked (count +
+  mosaic-vs-reference) alongside the sizing, reusing `n_frames`/`is_mosaic` the
+  `stack-estimate` endpoint already returned. Frontend-only. (v0.27.1, this run)
 
 - **Reclaim streaked subs** — new opt-in `keep_streaked_frames` setting (default
   off). QC still detects satellite/plane trails, but with this on it *flags* the

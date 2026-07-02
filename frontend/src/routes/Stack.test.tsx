@@ -299,7 +299,7 @@ describe("StackView", () => {
     renderStack();
 
     await waitFor(() =>
-      expect(screen.getByText(/Output canvas 480×320/)).toBeInTheDocument());
+      expect(screen.getByText(/2 accepted, solved frames · output 480×320/)).toBeInTheDocument());
     expect(screen.getByText(/GB peak memory/)).toBeInTheDocument();
   });
 
