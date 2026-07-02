@@ -376,10 +376,14 @@ export const api = {
       body: JSON.stringify(body),
     }),
   bulkFrames: (safe: string, body: Record<string, unknown>) =>
-    req<{ changed: number }>(`/api/targets/${safe}/frames/bulk`, {
+    req<{ changed: number; changed_ids: number[] }>(`/api/targets/${safe}/frames/bulk`, {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  rejectSummary: (safe: string) =>
+    req<{ counts: Record<string, number>; total: number }>(
+      `/api/targets/${safe}/frames/reject-summary`,
+    ),
   framePreviewUrl: (safe: string, id: number, size = 640, bayer?: string) =>
     `/api/targets/${safe}/frames/${id}/preview?size=${size}${bayer ? `&bayer=${bayer}` : ""}`,
 

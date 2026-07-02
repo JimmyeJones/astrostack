@@ -72,7 +72,7 @@ describe("TargetView streaked badge", () => {
     ]);
     const bulk = vi
       .spyOn(client.api, "bulkFrames")
-      .mockResolvedValue({ changed: 2 });
+      .mockResolvedValue({ changed: 2, changed_ids: [1, 2] });
     vi.spyOn(window, "confirm").mockReturnValue(true);
 
     renderTarget();
@@ -98,5 +98,52 @@ describe("TargetView streaked badge", () => {
     await waitFor(() =>
       expect(screen.getByText("3/3 accepted")).toBeInTheDocument());
     expect(screen.queryByText(/streaked/)).not.toBeInTheDocument();
+  });
+});
+
+describe("TargetView reject breakdown + undo", () => {
+  it("shows a rejected-count badge with a why breakdown", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ n_frames: 5, n_frames_accepted: 3 }),
+    );
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    const summary = vi
+      .spyOn(client.api, "rejectSummary")
+      .mockResolvedValue({ counts: { "qc:fwhm": 1, user: 1 }, total: 2 });
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(screen.getByText("2 rejected")).toBeInTheDocument());
+    expect(summary).toHaveBeenCalledWith("M_42");
+  });
+
+  it("offers Undo after a bulk reject and re-accepts exactly those ids", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      mkFrame(1, { streak_detected: true }),
+      mkFrame(2, { streak_detected: true }),
+    ]);
+    const bulk = vi
+      .spyOn(client.api, "bulkFrames")
+      .mockResolvedValue({ changed: 2, changed_ids: [1, 2] });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    renderTarget();
+
+    const reject = await screen.findByRole("button", {
+      name: "Reject all streaked frames",
+    });
+    reject.click();
+
+    const undo = await screen.findByRole("button", {
+      name: "Undo last bulk reject",
+    });
+    undo.click();
+
+    await waitFor(() =>
+      expect(bulk).toHaveBeenCalledWith("M_42", { action: "accept", ids: [1, 2] }));
   });
 });

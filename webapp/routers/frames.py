@@ -76,6 +76,20 @@ def list_frames(
     return [_to_out(f) for f in frames[offset : offset + limit]]
 
 
+@router.get("/reject-summary")
+def reject_summary(safe: str, request: Request) -> dict:
+    """Tally rejected frames by reason (``qc:fwhm``, ``bulk:streaked``,
+    ``user``, …) so the Target view can explain *why* frames were dropped.
+    Declared before ``/{frame_id}`` so the literal path isn't captured as an id."""
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        counts = proj.reject_reason_counts()
+    finally:
+        proj.close()
+        lib.close()
+    return {"counts": counts, "total": sum(counts.values())}
+
+
 @router.get("/{frame_id}", response_model=FrameOut)
 def get_frame(safe: str, frame_id: int, request: Request) -> FrameOut:
     lib, proj = deps.open_target_project(request, safe)
@@ -115,7 +129,9 @@ def patch_frame(safe: str, frame_id: int, body: FramePatch, request: Request) ->
 def bulk_frames(safe: str, body: BulkFrameAction, request: Request) -> dict:
     lib, proj = deps.open_target_project(request, safe)
     try:
-        changed = 0
+        # Track exactly which frames this action touched so the client can offer
+        # a one-click undo of an over-aggressive bulk reject.
+        changed_ids: list[int] = []
         if body.action in ("accept", "reject") and body.ids:
             accept = body.action == "accept"
             for fid in body.ids:
@@ -123,7 +139,7 @@ def bulk_frames(safe: str, body: BulkFrameAction, request: Request) -> dict:
                     fid, accept=accept, user_override=True,
                     reject_reason=None if accept else "user",
                 )
-                changed += 1
+                changed_ids.append(fid)
         elif body.action == "reject_worst":
             frames = [f for f in proj.iter_frames(accepted_only=True)
                       if getattr(f, body.metric) is not None]
@@ -136,7 +152,7 @@ def bulk_frames(safe: str, body: BulkFrameAction, request: Request) -> dict:
                     f.id, accept=False, user_override=True,
                     reject_reason=f"bulk:{body.metric}",
                 )
-                changed += 1
+                changed_ids.append(f.id)
         elif body.action == "reject_streaked":
             # Drop every accepted frame still flagged with a satellite/plane
             # trail. Pairs with the "N streaked" badge for users who'd rather
@@ -147,8 +163,8 @@ def bulk_frames(safe: str, body: BulkFrameAction, request: Request) -> dict:
                         f.id, accept=False, user_override=True,
                         reject_reason="bulk:streaked",
                     )
-                    changed += 1
-        return {"changed": changed}
+                    changed_ids.append(f.id)
+        return {"changed": len(changed_ids), "changed_ids": changed_ids}
     finally:
         proj.close()
         lib.close()

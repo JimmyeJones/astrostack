@@ -67,20 +67,6 @@ _(none — claim an item here with your branch name)_
 - Annotated sky overlay (label detected objects / show solved field). (M)
 - Star-mask preview toggle in the editor (visualise the mask driving star ops). (S)
 - Per-target "notes/tags" search improvements and saved filters in Library. (S)
-- **Undo the last bulk frame action** — `reject_worst` and the new
-  `reject_streaked` can over-reject (e.g. a 30% cut that was too aggressive) and
-  there's no one-click way back. Have the `/frames/bulk` endpoint return the list
-  of ids it changed, and let the Target view keep the last batch so it can offer
-  an "Undo" that re-accepts exactly those frames. Reuses `update_frame`; purely
-  additive. (S, approachability)
-- **Reject-reason breakdown on the Target view** — the accepted/rejected badge
-  says *how many* were dropped but not *why*. A small popover/tooltip grouping
-  rejected frames by `reject_reason` (qc:fwhm, bulk:streaked, user, …) tells a
-  beginner what QC and their bulk actions actually did, and flags a dominant
-  failure mode (e.g. "18 rejected for high FWHM — a focus/seeing night"). Reuses
-  the existing column; frontend + a tiny count endpoint or client-side tally.
-  (S, approachability)
-
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
@@ -124,6 +110,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Undo the last bulk reject + reject-reason breakdown on the Target view** —
+  two related approachability wins. `/frames/bulk` now returns `changed_ids`, so
+  after a `reject_worst`/`reject_streaked` cut the Target view shows a one-click
+  "Undo" that re-accepts exactly those ids (reuses the `accept` bulk action).
+  And a new `GET /frames/reject-summary` (server-side `Project.reject_reason_counts`,
+  NULL-reason bucketed as `user`) powers a "N rejected" badge with a hover-card
+  breakdown by reason (QC: FWHM, Streaked (bulk), Manual, …) so a beginner sees
+  *why* frames were dropped and can spot a dominant failure mode. Purely additive;
+  the summary query is gated on there being rejected frames. (v0.32.0, this run)
 
 - **Calibration mosaic-edge NaN/coverage audit** — completes the NaN/coverage
   audit series (channel combine v0.16.1, mono single-frame v0.22.1, mono
