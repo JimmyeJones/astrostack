@@ -390,6 +390,17 @@ export function StackView() {
           {estimateOverBudget ? (
             <Alert color="red" variant="light" py={6} px="sm">
               <Text size="xs">{estimateOverBudget}</Text>
+              {est?.suggested_drizzle_scale ? (
+                <Button
+                  mt={6}
+                  size="xs"
+                  variant="light"
+                  color="red"
+                  onClick={() => set("drizzle_scale", est.suggested_drizzle_scale)}
+                >
+                  Use drizzle ×{est.suggested_drizzle_scale} instead (fits the budget)
+                </Button>
+              ) : null}
             </Alert>
           ) : estimateLine && !noSolved ? (
             <Text size="xs" c="dimmed">{estimateLine}</Text>

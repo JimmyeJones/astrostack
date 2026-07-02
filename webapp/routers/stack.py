@@ -162,6 +162,7 @@ def stack_estimate(
         "budget_bytes": est.budget_bytes,
         "budget_gb": round(est.budget_bytes / 1e9, 2),
         "would_exceed": est.would_exceed,
+        "suggested_drizzle_scale": est.suggested_drizzle_scale,
     }
 
 

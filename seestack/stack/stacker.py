@@ -111,6 +111,38 @@ def _estimate_peak_bytes(dst_shape: tuple[int, int], *, drizzle: bool,
     return need, (out_h, out_w)
 
 
+def _largest_drizzle_scale_within_budget(
+    dst_shape: tuple[int, int], *, drizzle_reject: bool, budget: int,
+    max_scale: float, step: float = 0.1,
+) -> float | None:
+    """Largest drizzle scale (rounded down to ``step``, in [1.0, ``max_scale``))
+    whose estimated peak memory stays within ``budget``. Used to turn an
+    over-budget refusal into a one-click "use ×N instead" suggestion. Returns
+    None when even ×1.0 drizzle exceeds the budget (drizzle can't help — the
+    user must drop to the reference canvas or reject frames instead)."""
+    # Memory grows ~ scale²; start from the analytic fit, then step down to be
+    # exact against ``_estimate_peak_bytes`` (which carries +1 offsets and the
+    # rejection-pass array factor the closed form ignores).
+    peak_at_max, _ = _estimate_peak_bytes(
+        dst_shape, drizzle=True, drizzle_scale=max_scale,
+        drizzle_reject=drizzle_reject)
+    if peak_at_max <= budget:
+        return None  # the requested scale already fits — nothing to suggest
+    ratio = budget / peak_at_max if peak_at_max else 0.0
+    guess = max_scale * (ratio ** 0.5)
+    # Round down to the step grid and clamp into [1.0, max_scale).
+    s = min(max_scale, max(1.0, (int(guess / step) * step)))
+    # Walk down until it genuinely fits (analytic guess can round high).
+    while s >= 1.0:
+        peak, _ = _estimate_peak_bytes(
+            dst_shape, drizzle=True, drizzle_scale=s,
+            drizzle_reject=drizzle_reject)
+        if peak <= budget and s < max_scale:
+            return round(s, 2)
+        s = round(s - step, 2)
+    return None
+
+
 def _guard_stack_memory(dst_shape: tuple[int, int], *, drizzle: bool,
                         drizzle_scale: float,
                         drizzle_reject: bool = False) -> None:
@@ -248,6 +280,11 @@ class StackEstimate:
     peak_bytes: int
     budget_bytes: int
     would_exceed: bool     # peak_bytes > budget_bytes → run would be refused
+    # When a drizzle run would_exceed the budget, the largest drizzle scale
+    # (< the requested one) whose peak still fits — a one-click "use ×N instead"
+    # the UI can offer. None when drizzle is off, the run already fits, or even
+    # ×1.0 drizzle exceeds (drizzle can't rescue it).
+    suggested_drizzle_scale: float | None = None
 
 
 def estimate_stack(project: Project, options: StackOptions) -> StackEstimate:
@@ -303,13 +340,21 @@ def estimate_stack(project: Project, options: StackOptions) -> StackEstimate:
         drizzle_reject=options.drizzle_reject and n >= 4,
     )
     budget = int(_stack_memory_budget_bytes())
+    would_exceed = int(peak) > budget
+    suggested_scale: float | None = None
+    if would_exceed and options.drizzle:
+        suggested_scale = _largest_drizzle_scale_within_budget(
+            dst_shape, drizzle_reject=options.drizzle_reject and n >= 4,
+            budget=budget, max_scale=float(options.drizzle_scale),
+        )
     return StackEstimate(
         n_frames=n,
         canvas_w=dst_shape[1], canvas_h=dst_shape[0],
         output_w=out_w, output_h=out_h,
         is_mosaic=is_mosaic,
         peak_bytes=int(peak), budget_bytes=budget,
-        would_exceed=int(peak) > budget,
+        would_exceed=would_exceed,
+        suggested_drizzle_scale=suggested_scale,
     )
 
 

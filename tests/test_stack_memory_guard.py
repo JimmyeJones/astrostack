@@ -43,3 +43,38 @@ def test_guard_accounts_for_drizzle_reject(monkeypatch):
         stacker._guard_stack_memory(
             shape, drizzle=True, drizzle_scale=1.0, drizzle_reject=True
         )
+
+
+def _peak(shape, scale, reject=False):
+    peak, _ = stacker._estimate_peak_bytes(
+        shape, drizzle=True, drizzle_scale=scale, drizzle_reject=reject)
+    return peak
+
+
+def test_largest_drizzle_scale_suggests_a_fitting_smaller_scale():
+    shape = (320, 480)
+    # A budget between the ×1.0 and ×2.0 peaks: a smaller scale should fit.
+    budget = int((_peak(shape, 1.0) + _peak(shape, 2.0)) / 2)
+    s = stacker._largest_drizzle_scale_within_budget(
+        shape, drizzle_reject=False, budget=budget, max_scale=2.0)
+    assert s is not None
+    assert 1.0 <= s < 2.0
+    # The suggestion genuinely fits and is on the 0.1 grid.
+    assert _peak(shape, s) <= budget
+    assert round(s * 10) == s * 10
+
+
+def test_largest_drizzle_scale_none_when_request_already_fits():
+    shape = (320, 480)
+    # Generous budget: ×2.0 already fits, so there is nothing to suggest.
+    s = stacker._largest_drizzle_scale_within_budget(
+        shape, drizzle_reject=False, budget=_peak(shape, 2.0) * 2, max_scale=2.0)
+    assert s is None
+
+
+def test_largest_drizzle_scale_none_when_even_unity_exceeds():
+    shape = (320, 480)
+    # Budget below the ×1.0 peak: drizzle can't rescue it (must drop the canvas).
+    s = stacker._largest_drizzle_scale_within_budget(
+        shape, drizzle_reject=False, budget=_peak(shape, 1.0) - 1, max_scale=2.0)
+    assert s is None

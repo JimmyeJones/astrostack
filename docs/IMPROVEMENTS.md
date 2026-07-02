@@ -57,12 +57,6 @@ _(none — claim an item here with your branch name)_
   the user to manually reconnect via the UI. Core hardware-integration
   path; needs care around not spamming reconnect attempts and should be
   testable in isolation from real hardware. (M, correctness)
-- **Suggest the largest drizzle scale that fits the memory budget** — the
-  `stack-estimate` endpoint now knows the budget and whether a scale would
-  exceed it; when it would, compute the largest `drizzle_scale` (to a sensible
-  step) whose peak stays under budget and offer it as a one-click "use ×N
-  instead" in the over-budget alert. Turns a hard refusal into a usable
-  suggestion. (S, scale/approachability) *(builds on v0.25.0)*
 
 ### Features that serve real workflows
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
@@ -118,6 +112,14 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Suggest a fitting drizzle scale when over budget** — the `stack-estimate`
+  endpoint now returns `suggested_drizzle_scale`: when a drizzle run would blow the
+  memory budget, the engine computes the largest scale (on a 0.1 grid, < the
+  requested one) whose peak still fits, and the Stack form's over-budget alert
+  offers a one-click "Use drizzle ×N instead" that fills it in. Turns a hard
+  refusal into a usable path. None when drizzle is off, the run already fits, or
+  even ×1.0 exceeds. (v0.28.0, this run)
 
 - **Streaked-frame count badge on the Target view** — an orange "N streaked" badge
   next to the accepted count shows how many *accepted* frames still carry a
