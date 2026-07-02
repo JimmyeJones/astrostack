@@ -4,7 +4,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { formatIntegration, HistoryView } from "./History";
+import { HistoryView } from "./History";
+import { formatIntegration } from "../format";
 import * as client from "../api/client";
 import type { StackRun } from "../api/client";
 
@@ -85,6 +86,22 @@ describe("HistoryView", () => {
     await waitFor(() => expect(info).toHaveBeenCalledWith("M_42", 1));
     await waitFor(() => expect(screen.getByText(/Integration: 42 min/)).toBeInTheDocument());
     expect(screen.getByText("sigma-clip")).toBeInTheDocument();
+  });
+
+  it("offers Reuse settings only for reusable runs", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ id: 1, output_basename: "reusable_run", reusable: true }),
+      mkRun({ id: 2, output_basename: "combine_run", reusable: false }),
+    ]);
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("reusable_run")).toBeInTheDocument());
+
+    // Exactly one "Reuse settings" button (the reusable run) linking to the
+    // Stack form with ?from=<runId>.
+    const buttons = screen.getAllByRole("link", { name: /Reuse settings/ });
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0]).toHaveAttribute("href", "/targets/M_42/stack?from=1");
   });
 
   it("shows an error notification when deletion fails", async () => {

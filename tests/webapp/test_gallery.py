@@ -8,7 +8,8 @@ from seestack.io.library import Library
 from seestack.io.project import StackRunRow
 
 
-def _register_run(data_root, safe: str, options: dict) -> int:
+def _register_run(data_root, safe: str, options: dict,
+                  total_exposure_s: float | None = None) -> int:
     lib = Library.open_or_create(data_root / "library")
     try:
         proj = lib.open_target(safe)
@@ -19,6 +20,7 @@ def _register_run(data_root, safe: str, options: dict) -> int:
                 preview_path=None, n_frames_used=7,
                 canvas_h=320, canvas_w=480, coverage_min=1, coverage_max=7,
                 options_json=json.dumps(options),
+                total_exposure_s=total_exposure_s,
             ))
         finally:
             proj.close()
@@ -31,7 +33,7 @@ def _register_run(data_root, safe: str, options: dict) -> int:
 def test_gallery_lists_runs_with_options(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
     opts = {"sigma_clip": True, "sigma_kappa": 2.5, "drizzle": False, "output_name": "m42"}
-    run_id = _register_run(solved_library, safe, opts)
+    run_id = _register_run(solved_library, safe, opts, total_exposure_s=3600.0)
 
     r = client.get("/api/gallery")
     assert r.status_code == 200
@@ -40,6 +42,7 @@ def test_gallery_lists_runs_with_options(client, solved_library):
     assert mine["safe"] == safe
     assert mine["n_frames_used"] == 7
     assert mine["canvas_w"] == 480 and mine["canvas_h"] == 320
+    assert mine["total_exposure_s"] == 3600.0
     assert mine["preview_url"].endswith(f"/stack-runs/{run_id}/preview")
     # The full stacking settings round-trip through options_json.
     assert mine["options"]["sigma_clip"] is True

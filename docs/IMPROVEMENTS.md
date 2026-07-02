@@ -32,13 +32,6 @@ _(none — claim an item here with your branch name)_
   combine done (v0.16.1); calibration/mono still to audit.*
 - Channel combine: reproject stacks that don't share a canvas (via WCS) instead
   of erroring, so filters shot in separate sessions can be combined. (M–L)
-- **Investigate drizzle-vs-mean flux scale** — on identical frames the drizzle
-  path's median is several× lower than the sigma-clip/mean path (see
-  `test_stack_drizzle_vs_sigma_clip_parity`, which only asserts same-order-of-
-  magnitude for now). Drizzle at `scale=1.0, pixfrac=1.0` should conserve surface
-  brightness; a ~5× gap plus an "overflow encountered in divide" warning in
-  `drizzle_path.result()` suggests a normalisation/weight issue worth a dedicated
-  look. (M, correctness)
 - Seestar client (`webapp/seestar/client.py`) has no reconnect/retry on a
   dropped TCP socket — a flaky Wi-Fi link to the scope currently requires
   the user to manually reconnect via the UI. Core hardware-integration
@@ -46,32 +39,25 @@ _(none — claim an item here with your branch name)_
   testable in isolation from real hardware. (M, correctness)
 
 ### Features that serve real workflows
-- Auto-suggest a **flat-dark** too — extend `recommend_masters` to pick a dark
-  whose exposure matches the recommended flat's exposure (flat-darks match the
-  flat, not the lights), and add it to the "Use recommended" one-click apply.
-  (S, approachability/correctness)
-- Show integration time + frame count on **Gallery** cards too, reusing the new
-  `/stack-runs/{id}/info` endpoint + `formatIntegration` helper (History already
-  does this via the Info panel). (S, approachability)
 - Auto-suggest a sensible sigma-clip kappa (and whether to enable rejection)
   from the accepted-frame count — e.g. skip clipping under ~5 frames, loosen
   kappa for very large stacks — with a one-line "why" in the form. Removes a
   knob a beginner can't reason about. (M, approachability/correctness)
-- **Warn on a mismatched calibration master pick** — the flip side of the new
-  recommender: if the user selects a dark whose exposure/gain is far from the
-  target's frames (low `recommend_masters` score for the chosen id), show an
-  inline caution ("this dark was shot at 120 s but your subs are 30 s") so a
-  wrong pick doesn't silently degrade the stack. Reuses the scores already
-  returned by `/calibration-suggestions`. (S, correctness/approachability)
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
 - Drizzle memory estimate surfaced in the Stack form before you run it. (S)
 - Star-mask preview toggle in the editor (visualise the mask driving star ops). (S)
-- **Copy stack settings from a previous run** — a run's `options_json` records
-  exactly how it was made; add a "Reuse these settings" action on a History card
-  that pre-fills the Stack form from that run's options. Repeatability without
-  re-deriving knobs. (S, approachability)
 - Per-target "notes/tags" search improvements and saved filters in Library. (S)
+- **Show integration time inline on History cards** — now that runs persist
+  `total_exposure_s` (v0.20.0), add it to `StackRunOut` and render "Integration:
+  2.3 h · 840 subs" on each History card directly (no need to open the Info
+  panel / read the FITS header). The Gallery already shows it from the run row;
+  History should match. (S, approachability)
+- **Offer "Reuse settings" from Gallery cards too** — the Gallery already carries
+  each run's parsed `options`, and the Stack form now accepts `?from=<runId>`.
+  Add the same "Reuse settings" action to Gallery cards (guarded by a `reusable`
+  flag like History) so users can re-run a recipe straight from the browse view.
+  (S, approachability)
 
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
@@ -116,6 +102,44 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Integration time on Gallery cards** — stack runs now record their effective
+  integration time (median sub × frames combined) via a new additive
+  `total_exposure_s` column (schema v3→v4 migration; old runs stay NULL). The
+  gallery response exposes it and each card shows a friendly "2.3 h"/"42 min"
+  next to the frame count — no per-card FITS read, so it scales. Extracted the
+  shared `formatIntegration` helper to `frontend/src/format.ts`. (v0.20.0, this run)
+
+- **Reuse stack settings from a previous run** — new
+  `GET /stack-runs/{id}/options` returns a run's settings as a form-ready payload
+  (knobs kept, `output_name` dropped so a rerun can't clobber the old output,
+  calibration paths reverse-mapped to master ids). `StackRunOut` gained a
+  `reusable` flag (false for editor/channel-combine runs); History cards show a
+  "Reuse settings" button on reusable runs that opens the Stack form pre-filled
+  via `?from=<id>`. Repeatability without re-deriving knobs. (v0.19.0, this run)
+
+- **Warn on a mismatched calibration master pick** — the Stack form now shows an
+  inline caution when a chosen dark's exposure is far (>25%) from the target's
+  subs ("this dark was shot at 120 s but your subs are 30 s") and when a chosen
+  flat-dark's exposure doesn't match the selected flat. Purely advisory — the
+  pick is still honoured. Complements the recommender so a wrong pick doesn't
+  silently degrade the stack. (v0.18.3, this run)
+
+- **Auto-suggest a matching flat-dark** — `recommend_masters` now also returns
+  `flat_dark_master_id`: the dark whose exposure best matches the *recommended
+  flat* (flat-darks calibrate the flat, not the lights), gated so a wildly
+  mismatched dark (e.g. 300 s for a 2 s flat) is never suggested. The Stack
+  form's flat-dark selector badges it "★ recommended" and the one-click "Use
+  recommended" now fills it in too. (v0.18.2, this run)
+
+- **Drizzle flux-scale fix** — `DrizzleStacker.result()` no longer divides the
+  already-averaged `out_img` by `out_wht` (the STScI drizzle library keeps
+  `out_img` as a running weighted *average*, not a sum). The old double-normalise
+  deflated drizzle brightness by ~N (the frame count) and threw an "overflow in
+  divide" warning; drizzle at `scale=1, pixfrac=1` now conserves surface
+  brightness and matches the weighted-mean path. Tightened the parity test from
+  order-of-magnitude to <2× and added a multi-frame flux-conservation unit test.
+  (v0.18.1, this run)
 
 - **Auto-suggest calibration masters** — new `recommend_masters` ranks the
   library's dark/flat masters against a target's median frame exposure/gain/temp

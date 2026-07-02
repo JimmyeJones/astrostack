@@ -8,6 +8,7 @@ import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { api, type GalleryItem, type StackOptionField } from "../api/client";
+import { formatIntegration } from "../format";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { QueryError } from "../components/QueryError";
 
@@ -81,6 +82,7 @@ function GalleryCard({ item, labels, onView, selected, onToggleSelect }: {
       <Text size="xs" c="dimmed">
         {item.output_basename} · {item.timestamp_utc.replace("T", " ").slice(0, 16)}
         {" · "}{item.canvas_w}×{item.canvas_h}
+        {item.total_exposure_s ? ` · ${formatIntegration(item.total_exposure_s)}` : ""}
       </Text>
 
       <Button

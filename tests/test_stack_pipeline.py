@@ -47,6 +47,22 @@ def _build_project(tmp_path, n: int = 5, *, with_outlier: bool = False) -> Proje
     return proj
 
 
+def test_stack_records_integration_time(tmp_path):
+    """run_stack stamps the run record with the effective integration time
+    (median sub exposure × frames combined), so the gallery/history can show it
+    without a FITS read."""
+    proj = _build_project(tmp_path, n=4)
+    try:
+        for f in proj.iter_frames():
+            proj.update_frame(f.id, exposure_s=30.0)
+        run_stack(proj, StackOptions(sigma_clip=False, max_workers=2,
+                                     output_name="integ"))
+        run = next(iter(proj.iter_stack_runs()))
+        assert run.total_exposure_s == 120.0  # 30 s × 4 frames
+    finally:
+        proj.close()
+
+
 def test_subpixel_refine_actually_runs(tmp_path, monkeypatch):
     """Regression: sub-pixel refine used `canvas_3` before it was defined, so it
     raised NameError that the surrounding except swallowed — silently disabling
@@ -192,13 +208,14 @@ def test_stack_all_rejected_raises(tmp_path):
 
 def test_stack_drizzle_vs_sigma_clip_parity(tmp_path):
     """Drizzle and sigma-clip are two paths to the same scene: both must produce
-    a finite, positive, non-degenerate result of the same order of magnitude.
-    Guards against a drizzle path that silently zeroes or NaNs the image.
+    a finite, positive, non-degenerate result. At ``scale=1, pixfrac=1`` drizzle
+    conserves surface brightness, so the two paths' median levels must agree
+    closely (not merely to an order of magnitude).
 
-    NOTE: the two paths do *not* currently agree tightly on absolute brightness
-    (drizzle's mean runs several× lower on identical frames — see the
-    "drizzle vs mean flux scale" backlog item); this test only asserts they are
-    within an order of magnitude, not exact parity.
+    Regression guard for the drizzle flux-scale bug: ``result()`` used to divide
+    the already-averaged ``out_img`` by ``out_wht`` again, deflating drizzle's
+    brightness by ~N (the frame count). Here N=5, so the old code produced a
+    ~5× mismatch; the tight bound below would catch any such re-normalisation.
     """
     from astropy.io import fits
 
@@ -228,8 +245,11 @@ def test_stack_drizzle_vs_sigma_clip_parity(tmp_path):
     med_a = float(np.nanmedian(a[np.isfinite(a) & (a > 0)]))
     med_b = float(np.nanmedian(b[np.isfinite(b) & (b > 0)]))
     assert med_a > 0 and med_b > 0
+    # Surface brightness is conserved: the two medians must agree to well within
+    # a factor of 2 (they differ only by drizzle's kernel/interpolation vs the
+    # weighted mean, not by any N-frame scale factor).
     ratio = med_a / med_b
-    assert 0.1 < ratio < 10.0, f"brightness mismatch: clip={med_a} driz={med_b}"
+    assert 0.5 < ratio < 2.0, f"brightness mismatch: clip={med_a} driz={med_b}"
 
 
 def test_stack_sanitizes_path_traversal_output_name(tmp_path):

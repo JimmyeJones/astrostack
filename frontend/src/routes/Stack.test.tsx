@@ -57,7 +57,8 @@ describe("StackView", () => {
     ]);
     vi.spyOn(client.api, "calibrationSuggestions").mockResolvedValue({
       params: { exposure_s: 30, gain: 80, sensor_temp_c: null },
-      dark_master_id: 1, flat_master_id: null, scores: { "1": 1, "2": 0.5 }, n_frames: 12,
+      dark_master_id: 1, flat_master_id: null, flat_dark_master_id: null,
+      scores: { "1": 1, "2": 0.5 }, n_frames: 12,
     });
 
     renderStack();
@@ -69,5 +70,72 @@ describe("StackView", () => {
     fireEvent.click(screen.getByText("Use recommended"));
     // Once applied, the hint disappears (nothing left to apply).
     await waitFor(() => expect(screen.queryByText("Use recommended")).not.toBeInTheDocument());
+  });
+
+  it("recommends and applies a matching flat-dark", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
+      { id: 1, name: "Dark 30s", kind: "dark", filename: "d1.fits", n_frames: 20,
+        method: "median", exposure_s: 30, gain: 80, sensor_temp_c: null,
+        bayer_pattern: "RGGB", width_px: 480, height_px: 320,
+        created_utc: "2026-01-01T00:00:00", exists: true },
+      { id: 2, name: "Dark 2s", kind: "dark", filename: "d2.fits", n_frames: 20,
+        method: "median", exposure_s: 2, gain: 80, sensor_temp_c: null,
+        bayer_pattern: "RGGB", width_px: 480, height_px: 320,
+        created_utc: "2026-01-01T00:00:00", exists: true },
+      { id: 3, name: "Flat 2s", kind: "flat", filename: "f3.fits", n_frames: 20,
+        method: "median", exposure_s: 2, gain: 80, sensor_temp_c: null,
+        bayer_pattern: "RGGB", width_px: 480, height_px: 320,
+        created_utc: "2026-01-01T00:00:00", exists: true },
+    ]);
+    vi.spyOn(client.api, "calibrationSuggestions").mockResolvedValue({
+      params: { exposure_s: 30, gain: 80, sensor_temp_c: null },
+      dark_master_id: 1, flat_master_id: 3, flat_dark_master_id: 2,
+      scores: { "1": 1, "2": 0.2, "3": 1 }, n_frames: 12,
+    });
+
+    renderStack();
+
+    await waitFor(() => expect(screen.getByText("Use recommended")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Use recommended"));
+
+    // Applying reveals the flat-dark select (it only shows once a flat is set)
+    // and badges the exposure-matched 2 s dark as the recommended flat-dark.
+    await waitFor(() =>
+      expect(screen.getByText("Flat-dark (optional)")).toBeInTheDocument());
+    expect(screen.getByText(/Dark 2s.*★ recommended/)).toBeInTheDocument();
+    // Nothing left to apply → the hint is gone.
+    expect(screen.queryByText("Use recommended")).not.toBeInTheDocument();
+  });
+
+  it("warns when a chosen dark's exposure is far from the subs", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
+      { id: 1, name: "Dark 30s", kind: "dark", filename: "d1.fits", n_frames: 20,
+        method: "median", exposure_s: 30, gain: 80, sensor_temp_c: null,
+        bayer_pattern: "RGGB", width_px: 480, height_px: 320,
+        created_utc: "2026-01-01T00:00:00", exists: true },
+      { id: 2, name: "Dark 120s", kind: "dark", filename: "d2.fits", n_frames: 20,
+        method: "median", exposure_s: 120, gain: 80, sensor_temp_c: null,
+        bayer_pattern: "RGGB", width_px: 480, height_px: 320,
+        created_utc: "2026-01-01T00:00:00", exists: true },
+    ]);
+    // Applying a (deliberately) mismatched 120 s dark against 30 s subs.
+    vi.spyOn(client.api, "calibrationSuggestions").mockResolvedValue({
+      params: { exposure_s: 30, gain: 80, sensor_temp_c: null },
+      dark_master_id: 2, flat_master_id: null, flat_dark_master_id: null,
+      scores: { "1": 1, "2": 0.2 }, n_frames: 12,
+    });
+
+    renderStack();
+
+    await waitFor(() => expect(screen.getByText("Use recommended")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Use recommended"));
+    await waitFor(() =>
+      expect(screen.getByText(/shot at 120s but your subs are 30s/)).toBeInTheDocument());
   });
 });

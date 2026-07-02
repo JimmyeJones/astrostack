@@ -5,20 +5,12 @@ import {
 } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
-import { IconAdjustments, IconDeviceFloppy, IconDownload, IconInfoCircle, IconSparkles, IconTrash } from "@tabler/icons-react";
+import { IconAdjustments, IconCopy, IconDeviceFloppy, IconDownload, IconInfoCircle, IconSparkles, IconTrash } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api, type StackRun } from "../api/client";
+import { formatIntegration } from "../format";
 import { ImageLightbox } from "../components/ImageLightbox";
-
-// Format an integration time in seconds as a friendly "2.3 h" / "42 min" / "8 s"
-// so a beginner reads total exposure at a glance instead of a raw second count.
-export function formatIntegration(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds <= 0) return "—";
-  if (seconds >= 3600) return `${(seconds / 3600).toFixed(seconds >= 36000 ? 0 : 1)} h`;
-  if (seconds >= 60) return `${Math.round(seconds / 60)} min`;
-  return `${Math.round(seconds)} s`;
-}
 
 function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
   const info = useQuery({
@@ -159,6 +151,16 @@ function RunCard({ safe, run, onDelete, deleting }: {
             >
               Edit
             </Button>
+          )}
+          {run.reusable && (
+            <Tooltip label="Pre-fill the Stack form with the exact settings used for this run">
+              <Button
+                size="xs" variant="light" leftSection={<IconCopy size={14} />}
+                component={Link} to={`/targets/${safe}/stack?from=${run.id}`}
+              >
+                Reuse settings
+              </Button>
+            </Tooltip>
           )}
           {run.has_fits && (
             <Tooltip label="Adjust stretch / black point from the full-range FITS">

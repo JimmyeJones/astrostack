@@ -36,6 +36,30 @@ def test_drizzle_single_frame_round_trip():
     np.testing.assert_allclose(interior, in_interior, rtol=0.1, atol=20.0)
 
 
+def test_drizzle_conserves_surface_brightness_multiframe():
+    """Stacking N identical frames at scale=1, pixfrac=1 must return the input
+    brightness, not N× dimmer.
+
+    Regression guard for the flux-scale bug: ``result()`` used to divide the
+    already-averaged ``out_img`` by ``out_wht`` (≈ N), so the mean of N frames
+    came out ~N× too faint. With N=6 that was a 6× error.
+    """
+    wcs = wcs_from_text(make_synth_wcs_text(width=100, height=80))
+    drz = DrizzleStacker(wcs, (80, 100), DrizzleParams(scale=1.0, pixfrac=1.0))
+    rgb = np.full((80, 100, 3), 500.0, dtype=np.float32)
+    n = 6
+    for _ in range(n):
+        drz.add_frame(rgb, wcs)
+    result = drz.result()
+    interior = result[5:-5, 5:-5, :]
+    # Mean of N identical frames is still ~500, regardless of N.
+    assert np.nanmedian(interior) == pytest.approx(500.0, rel=0.02)
+    # Coverage (accumulated weight) grows with frame count — it is *not* the
+    # image normaliser.
+    cov = drz.coverage[5:-5, 5:-5, :]
+    assert np.nanmedian(cov) == pytest.approx(float(n), rel=0.05)
+
+
 def _build_project(tmp_path, n: int = 4) -> Project:
     proj = Project.create(tmp_path / "p", name="drizzle_test")
     wcs_text = make_synth_wcs_text()

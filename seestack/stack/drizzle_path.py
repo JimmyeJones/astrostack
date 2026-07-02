@@ -119,17 +119,22 @@ class DrizzleStacker:
         """
         Mean image, NaN where no input frame contributed.
 
-        Drizzle's ``out_img`` is the sum of contributions and ``out_wht`` is
-        the per-pixel weight (in input pixel area). For our purposes
-        ``out_img / out_wht`` gives the mean intensity per output pixel.
+        The STScI drizzle library already keeps ``out_img`` as the running
+        *weighted average* of every contribution (not the raw sum); ``out_wht``
+        is the accumulated per-pixel weight. So ``out_img`` is directly the mean
+        surface brightness per output pixel — dividing it by ``out_wht`` again
+        would deflate the flux by roughly the number of contributing frames
+        (and overflow where the weight is large). We only need ``out_img``,
+        masked to NaN where nothing landed (``out_wht == 0``), so drizzle at
+        ``scale=1, pixfrac=1`` conserves surface brightness and matches the
+        weighted-mean path.
         """
         h, w = self.out_shape
         rgb = np.full((h, w, 3), np.nan, dtype=np.float32)
         for c, driz in enumerate(self._drizzlers):
             wht = driz.out_wht
             img = driz.out_img
-            nz = wht > 0
-            rgb[..., c] = np.where(nz, img / np.where(nz, wht, 1.0), np.nan)
+            rgb[..., c] = np.where(wht > 0, img, np.nan)
         return rgb
 
     @property

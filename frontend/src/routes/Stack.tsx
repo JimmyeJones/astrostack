@@ -5,7 +5,7 @@ import {
 import { IconFlask, IconPlayerPlay, IconTelescope } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
 import { api, type StackOptionField } from "../api/client";
 import { StackOptionControl as FieldControl } from "../components/StackOptionControl";
@@ -13,6 +13,8 @@ import { useJobEvents } from "../hooks/useJobEvents";
 
 export function StackView() {
   const { safe = "" } = useParams();
+  const [searchParams] = useSearchParams();
+  const reuseRunId = searchParams.get("from");
   const qc = useQueryClient();
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [jobId, setJobId] = useState<string | null>(null);
@@ -32,6 +34,13 @@ export function StackView() {
     queryKey: ["calibration-suggestions", safe],
     queryFn: () => api.calibrationSuggestions(safe),
   });
+  // When arriving via "Reuse settings" (?from=<runId>), fetch that run's options
+  // so we can pre-fill the form from how a previous stack was made.
+  const reuse = useQuery({
+    queryKey: ["stack-run-options", safe, reuseRunId],
+    queryFn: () => api.stackRunOptions(safe, Number(reuseRunId)),
+    enabled: !!reuseRunId,
+  });
 
   const qcSolve = useMutation({
     mutationFn: () => api.qcSolve(safe),
@@ -43,8 +52,13 @@ export function StackView() {
   });
 
   useEffect(() => {
-    if (defaults.data) setValues(defaults.data);
-  }, [defaults.data]);
+    if (!defaults.data) return;
+    // Base on this target's defaults, then overlay a reused run's settings (if
+    // any) once they've loaded, so "Reuse settings" wins over the defaults.
+    if (reuseRunId && !reuse.data) return;  // wait for the reuse payload first
+    const reused = reuseRunId && reuse.data ? reuse.data.options : {};
+    setValues({ ...defaults.data, ...reused });
+  }, [defaults.data, reuseRunId, reuse.data]);
 
   // When a stack finishes it may have auto-rejected outlier frames — refresh
   // the frame list so the solved/accepted counts (and this page's guard) update.
@@ -71,7 +85,7 @@ export function StackView() {
     onError: (e: Error) => notifications.show({ message: `Save failed: ${e.message}`, color: "red" }),
   });
 
-  if (schema.isLoading || defaults.isLoading) {
+  if (schema.isLoading || defaults.isLoading || (!!reuseRunId && reuse.isLoading)) {
     return (
       <Center h={300}>
         <Loader />
@@ -90,29 +104,54 @@ export function StackView() {
   const sug = suggestions.data;
   const recDarkId = sug?.dark_master_id ?? null;
   const recFlatId = sug?.flat_master_id ?? null;
-  const masterOpts = (kind: string) =>
+  const recFlatDarkId = sug?.flat_dark_master_id ?? null;
+  // Badge the master matching `recId` (may differ per select — the light dark
+  // and the flat-dark are both "dark" masters but recommended for different
+  // exposures).
+  const masterOpts = (kind: string, recId: number | null) =>
     (masters.data ?? [])
       .filter((m) => m.kind === kind && m.exists)
       .map((m) => {
-        const recId = kind === "dark" ? recDarkId : recFlatId;
         const star = m.id === recId ? " ★ recommended" : "";
         return {
           value: String(m.id),
           label: `${m.name} (${m.n_frames} frames, ${m.width_px}×${m.height_px})${star}`,
         };
       });
-  const darkOpts = masterOpts("dark");
-  const flatOpts = masterOpts("flat");
+  const darkOpts = masterOpts("dark", recDarkId);
+  const flatDarkOpts = masterOpts("dark", recFlatDarkId);
+  const flatOpts = masterOpts("flat", recFlatId);
   const hasMasters = darkOpts.length > 0 || flatOpts.length > 0;
   // Show the "use recommended" hint only when there's a suggestion the user
-  // hasn't already applied.
+  // hasn't already applied. The flat-dark is only relevant once a flat is set.
   const canApplyRec = (recDarkId !== null && String(values.dark_master_id ?? "") !== String(recDarkId))
-    || (recFlatId !== null && String(values.flat_master_id ?? "") !== String(recFlatId));
+    || (recFlatId !== null && String(values.flat_master_id ?? "") !== String(recFlatId))
+    || (recFlatDarkId !== null && String(values.flat_dark_master_id ?? "") !== String(recFlatDarkId));
   const applyRecommended = () => {
     if (recDarkId !== null) set("dark_master_id", String(recDarkId));
     if (recFlatId !== null) set("flat_master_id", String(recFlatId));
+    if (recFlatDarkId !== null) set("flat_dark_master_id", String(recFlatDarkId));
   };
   const asStr = (v: unknown) => (v === undefined || v === null ? null : String(v));
+
+  // Inline cautions when a chosen master is a poor match for the data. A dark
+  // captures thermal/bias signal at a *specific* exposure, so an exposure
+  // mismatch either under- or over-subtracts; a flat-dark must instead match the
+  // flat's exposure. Advisory only — the pick is still honoured.
+  const masterById = (id: unknown) =>
+    (masters.data ?? []).find((m) => String(m.id) === String(id ?? ""));
+  const expMismatch = (a: number | null | undefined, b: number | null | undefined) =>
+    a != null && b != null && b > 0 && Math.abs(a - b) / b > 0.25;
+  const subExp = sug?.params.exposure_s ?? null;
+  const darkM = masterById(values.dark_master_id);
+  const darkWarning = expMismatch(darkM?.exposure_s, subExp)
+    ? `This dark was shot at ${darkM?.exposure_s}s but your subs are ${subExp}s — a mismatched dark leaves residual thermal signal or over-subtracts. A ${subExp}s dark matches better.`
+    : null;
+  const flatM = masterById(values.flat_master_id);
+  const flatDarkM = masterById(values.flat_dark_master_id);
+  const flatDarkWarning = flatDarkM && expMismatch(flatDarkM.exposure_s, flatM?.exposure_s)
+    ? `This flat-dark was shot at ${flatDarkM.exposure_s}s but your flat is ${flatM?.exposure_s}s — a flat-dark should match the flat's exposure to remove its pedestal cleanly.`
+    : null;
   const running = job && (job.state === "running" || job.state === "queued");
   const pct = job && job.total ? Math.round((job.done / job.total) * 100) : 0;
 
@@ -130,6 +169,14 @@ export function StackView() {
           Back to frames
         </Button>
       </Group>
+
+      {reuseRunId && reuse.data ? (
+        <Alert color="blue" variant="light" py={6} px="sm">
+          <Text size="xs">
+            Settings pre-filled from run #{reuseRunId}. Adjust anything, then start a fresh stack.
+          </Text>
+        </Alert>
+      ) : null}
 
       {noSolved ? (
         <Alert color="yellow" title="No plate-solved frames yet" icon={<IconTelescope size={18} />}>
@@ -194,14 +241,24 @@ export function StackView() {
                     disabled={flatOpts.length === 0}
                   />
                 </Group>
+                {darkWarning ? (
+                  <Alert color="yellow" variant="light" py={6} px="sm">
+                    <Text size="xs">{darkWarning}</Text>
+                  </Alert>
+                ) : null}
                 {values.flat_master_id && darkOpts.length > 0 ? (
                   <Select
                     label="Flat-dark (optional)"
                     description="A dark matched to the flat's exposure, subtracted from the flat before normalising for a more accurate flat."
                     placeholder="None" clearable
-                    data={darkOpts} value={asStr(values.flat_dark_master_id)}
+                    data={flatDarkOpts} value={asStr(values.flat_dark_master_id)}
                     onChange={(v) => set("flat_dark_master_id", v)}
                   />
+                ) : null}
+                {flatDarkWarning ? (
+                  <Alert color="yellow" variant="light" py={6} px="sm">
+                    <Text size="xs">{flatDarkWarning}</Text>
+                  </Alert>
                 ) : null}
               </Stack>
             ) : (

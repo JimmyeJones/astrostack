@@ -140,6 +140,7 @@ export interface StackRun {
   has_tiff: boolean;
   has_preview: boolean;
   notes: string | null;
+  reusable?: boolean;
 }
 
 export interface StackInfoCard {
@@ -164,6 +165,7 @@ export interface GalleryItem {
   n_frames_used: number;
   canvas_w: number;
   canvas_h: number;
+  total_exposure_s: number | null;
   has_preview: boolean;
   has_fits: boolean;
   has_tiff: boolean;
@@ -301,6 +303,7 @@ export interface CalibrationSuggestions {
   params: { exposure_s: number | null; gain: number | null; sensor_temp_c: number | null };
   dark_master_id: number | null;
   flat_master_id: number | null;
+  flat_dark_master_id: number | null;
   scores: Record<string, number>;
   n_frames: number;
 }
@@ -379,6 +382,9 @@ export const api = {
     req(`/api/targets/${safe}/stack-runs/${id}`, { method: "DELETE" }),
   stackRunInfo: (safe: string, id: number) =>
     req<StackRunInfo>(`/api/targets/${safe}/stack-runs/${id}/info`),
+  stackRunOptions: (safe: string, id: number) =>
+    req<{ run_id: number; options: Record<string, unknown> }>(
+      `/api/targets/${safe}/stack-runs/${id}/options`),
   stackArtifactUrl: (safe: string, id: number, kind: "preview" | "fits" | "tiff") =>
     `/api/targets/${safe}/stack-runs/${id}/${kind}`,
   stackRenderUrl: (safe: string, id: number, stretch: number, black: number) =>

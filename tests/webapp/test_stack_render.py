@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 from astropy.io import fits
 
+from seestack.calibrate.masters import MasterMeta
 from seestack.io.library import Library
 from seestack.io.project import StackRunRow
 from seestack.render.thumbnail import render_stack_png
@@ -166,3 +167,72 @@ def test_stack_info_404_without_fits(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
     r = client.get(f"/api/targets/{safe}/stack-runs/99999/info")
     assert r.status_code == 404
+
+
+def _add_run_with_options(data_root, safe: str, options_json: str) -> int:
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            return proj.add_stack_run(StackRunRow(
+                id=None, timestamp_utc="2026-05-02T00:00:00Z",
+                output_basename="master", fits_path=None, tiff_path=None,
+                preview_path=None, n_frames_used=3, canvas_h=8, canvas_w=8,
+                coverage_min=1, coverage_max=3, options_json=options_json,
+            ))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def test_stack_run_options_reuse(client, solved_library):
+    """The options endpoint returns a form-ready payload: knobs preserved,
+    output_name dropped, and calibration paths reverse-mapped to master ids."""
+    import json
+
+    from webapp import calibration
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    root = solved_library / "library"
+    dark = calibration.register_master(
+        root, name="Dark", array=np.full((4, 4), 1.0, dtype=np.float32),
+        meta=MasterMeta("dark", 5, 4, 4, "median", exposure_s=30.0))
+    dark_path = str(calibration.calibration_dir(root) / dark["filename"])
+    run_id = _add_run_with_options(solved_library, safe, json.dumps({
+        "sigma_clip": True, "sigma_kappa": 2.5, "drizzle": True,
+        "output_name": "my_special_run", "dark_path": dark_path,
+    }))
+
+    r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/options")
+    assert r.status_code == 200
+    opts = r.json()["options"]
+    assert opts["sigma_clip"] is True and opts["sigma_kappa"] == 2.5
+    assert opts["drizzle"] is True
+    assert "output_name" not in opts            # a fresh run gets a fresh name
+    assert "dark_path" not in opts              # never expose raw paths
+    assert opts["dark_master_id"] == dark["id"] # reverse-mapped for the form
+
+
+def test_stack_run_options_rejects_non_stack_run(client, solved_library):
+    import json
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _add_run_with_options(
+        solved_library, safe, json.dumps({"channel_combine": [], "weights": {}}))
+    r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/options")
+    assert r.status_code == 400
+
+
+def test_stack_runs_reusable_flag(client, solved_library):
+    """The stack-runs list marks which runs can pre-fill the Stack form."""
+    import json
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    stack_id = _add_run_with_options(
+        solved_library, safe, json.dumps({"sigma_clip": True}))
+    combine_id = _add_run_with_options(
+        solved_library, safe, json.dumps({"channel_combine": []}))
+    runs = {r["id"]: r for r in client.get(f"/api/targets/{safe}/stack-runs").json()}
+    assert runs[stack_id]["reusable"] is True
+    assert runs[combine_id]["reusable"] is False

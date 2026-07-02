@@ -207,6 +207,22 @@ class StackCancelled(RuntimeError):
     """Raised internally when the user cancels mid-stack."""
 
 
+def _integration_time_s(frames: list, n_used: int) -> float | None:
+    """Effective integration time = median sub exposure × frames combined.
+
+    The honest figure when a few candidate subs are dropped mid-stack. Returns
+    ``None`` when no frame carries a usable exposure."""
+    exposures = [
+        float(f.exposure_s) for f in frames
+        if getattr(f, "exposure_s", None) and f.exposure_s > 0
+    ]
+    if not exposures or not n_used:
+        return None
+    exposures.sort()
+    per_sub = exposures[len(exposures) // 2]  # median
+    return round(per_sub * n_used, 2)
+
+
 def _build_output_header_meta(
     project: Project, frames: list, options: StackOptions, n_used: int
 ) -> dict[str, Any]:
@@ -238,8 +254,9 @@ def _build_output_header_meta(
         exposures.sort()
         per_sub = exposures[len(exposures) // 2]  # median
         meta["EXPOSURE"] = (round(per_sub, 3), "per-sub exposure (s)")
-        if n_used:
-            meta["EXPTOTAL"] = (round(per_sub * n_used, 2), "integration time (s)")
+        total = _integration_time_s(frames, n_used)
+        if total is not None:
+            meta["EXPTOTAL"] = (total, "integration time (s)")
     method = "drizzle" if options.drizzle else ("sigma-clip" if options.sigma_clip else "mean")
     meta["STACKER"] = (method, "stacking method")
     meta["COLORTYP"] = ("mono" if options.mono else "OSC", "sensor/stack colour mode")
@@ -671,6 +688,7 @@ def run_stack(
             coverage_max=int(cov_2d.max()),
             options_json=_json.dumps(asdict(options)),
             notes=color_cal_note or None,
+            total_exposure_s=_integration_time_s(frames, n_used),
         ))
     except Exception as exc:  # noqa: BLE001 — history is non-critical
         log.warning("Could not record stack run in history: %s", exc)

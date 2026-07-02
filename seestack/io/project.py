@@ -30,7 +30,7 @@ from typing import Any, Iterator
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA_SQL = f"""
 PRAGMA user_version = {SCHEMA_VERSION};
@@ -55,7 +55,8 @@ CREATE TABLE IF NOT EXISTS stack_runs (
     coverage_min    INTEGER NOT NULL DEFAULT 0,
     coverage_max    INTEGER NOT NULL DEFAULT 0,
     options_json    TEXT NOT NULL,
-    notes           TEXT
+    notes           TEXT,
+    total_exposure_s REAL
 );
 
 CREATE INDEX IF NOT EXISTS idx_stack_runs_ts ON stack_runs(timestamp_utc);
@@ -257,6 +258,14 @@ class Project:
                     self._conn.execute(f"ALTER TABLE frames ADD COLUMN {col} REAL")
                 except sqlite3.OperationalError:
                     pass  # already present
+        if from_version < 4:
+            # Recorded integration time per stack run (additive; older runs stay
+            # NULL and fall back to reading EXPTOTAL from their FITS header).
+            try:
+                self._conn.execute(
+                    "ALTER TABLE stack_runs ADD COLUMN total_exposure_s REAL")
+            except sqlite3.OperationalError:
+                pass  # already present
         self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @contextmanager
@@ -350,13 +359,13 @@ class Project:
             "INSERT INTO stack_runs("
             "  timestamp_utc, output_basename, fits_path, tiff_path, preview_path,"
             "  n_frames_used, canvas_h, canvas_w, coverage_min, coverage_max,"
-            "  options_json, notes"
-            ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "  options_json, notes, total_exposure_s"
+            ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 run.timestamp_utc, run.output_basename, run.fits_path,
                 run.tiff_path, run.preview_path, run.n_frames_used,
                 run.canvas_h, run.canvas_w, run.coverage_min, run.coverage_max,
-                run.options_json, run.notes,
+                run.options_json, run.notes, run.total_exposure_s,
             ),
         )
         return cur.lastrowid  # type: ignore[return-value]
@@ -380,6 +389,10 @@ class Project:
                 coverage_max=row["coverage_max"],
                 options_json=row["options_json"],
                 notes=row["notes"],
+                total_exposure_s=(
+                    row["total_exposure_s"]
+                    if "total_exposure_s" in row.keys() else None
+                ),
             )
 
     def delete_stack_run(self, run_id: int) -> None:
@@ -404,6 +417,9 @@ class StackRunRow:
     coverage_max: int
     options_json: str
     notes: str | None = None
+    # Effective integration time in seconds (median sub × frames combined).
+    # None for runs recorded before this column existed (schema < 4).
+    total_exposure_s: float | None = None
 
 
 def _to_db(value: Any) -> Any:
