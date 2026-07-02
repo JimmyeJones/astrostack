@@ -591,7 +591,17 @@ def run_stack(
 
     # ---- 5. Write outputs -------------------------------------------------
     progress("Saving", 0, 1)
-    from seestack.stack.output import write_stack_outputs
+    from seestack.stack.output import build_stack_header_meta, write_stack_outputs
+
+    if options.drizzle:
+        method = f"drizzle pixfrac={options.drizzle_pixfrac:g} scale={options.drizzle_scale:g}"
+    elif options.sigma_clip:
+        method = f"sigma-clip kappa={options.sigma_kappa:g}"
+    else:
+        method = "weighted mean"
+    header_meta = build_stack_header_meta(
+        frames, n_used, method=method, mono=options.mono,
+    )
 
     paths = write_stack_outputs(
         project_dir=project.project_dir,
@@ -600,6 +610,7 @@ def run_stack(
         wcs_text=dst_wcs_text,
         out_basename=options.output_name,
         tiff_mode=options.tiff_mode,
+        meta=header_meta,
     )
     progress("Saving", 1, 1)
 

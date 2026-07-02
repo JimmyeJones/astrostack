@@ -47,7 +47,6 @@ _(none — claim an item here with your branch name)_
 - Annotated sky overlay (label detected objects / show solved field). (M)
 - Drizzle memory estimate surfaced in the Stack form before you run it. (S)
 - Star-mask preview toggle in the editor (visualise the mask driving star ops). (S)
-- More export options / metadata in FITS/TIFF (instrument, exposure totals). (S)
 - Per-target "notes/tags" search improvements and saved filters in Library. (S)
 
 ### UX & polish
@@ -99,6 +98,11 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- FITS export metadata — `master.fits` now carries standard integration cards
+  (`NCOMBINE`, `EXPTIME`, `TOTALEXP`, `GAIN`, `CCD-TEMP`, `DATE-OBS`/`DATE-END`,
+  `STACKMTD`, `CFA`) built by `build_stack_header_meta`, so the scientific
+  output is self-describing in Siril/PixInsight. (v0.14.0, this run)
 
 - CI safety net (`.github/workflows/ci.yml`) — full Python + frontend suites run
   on every PR and push to `main`; independent check on autonomous self-merges.
