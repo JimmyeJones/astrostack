@@ -203,6 +203,11 @@ def run_stack(
     progress = progress or (lambda *a: None)
     cancel = cancel or (lambda: False)
 
+    if not (0.0 < options.lucky_fraction <= 1.0):
+        raise ValueError(
+            f"lucky_fraction must be in (0, 1], got {options.lucky_fraction!r}"
+        )
+
     # ---- 1. Pick reference -------------------------------------------------
     progress("Setup", 0, 1)
     choice = pick_reference_frame(project)

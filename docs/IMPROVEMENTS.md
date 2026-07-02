@@ -9,6 +9,14 @@ Items under "Needs owner sign-off" must not be started autonomously — see
 
 ## Shipped
 
+- **[Reliability] `lucky_fraction` had no bounds validation** — S —
+  `run_stack()` (`seestack/stack/stacker.py`) now raises `ValueError` up
+  front if `StackOptions.lucky_fraction` isn't in `(0, 1]`. Previously 0
+  silently fell back to keeping exactly one frame via `max(1, ...)`, and
+  negative/`>1` values weren't rejected at all. Covered by
+  `tests/test_stack_pipeline.py::test_stack_rejects_out_of_range_lucky_fraction`.
+  *(2026-07-02)*
+
 - **[Security] Validate Seestar `goto` RA/Dec coordinates** — S —
   `GotoRequest` (`webapp/routers/seestar.py`) forwarded `ra_hours`/
   `dec_deg` straight to the telescope's RPC with no bounds check. A

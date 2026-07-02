@@ -94,6 +94,20 @@ def test_stack_fails_with_no_solved_frames(tmp_path):
         proj.close()
 
 
+@pytest.mark.parametrize("lucky_fraction", [0.0, -0.5, 1.5])
+def test_stack_rejects_out_of_range_lucky_fraction(tmp_path, lucky_fraction):
+    # 0 previously fell back to `max(1, ...)` and silently kept exactly one
+    # frame instead of erroring; negative/>1 values were never rejected at
+    # all. Fail fast before any work (canvas sizing, IO) happens.
+    proj = Project.create(tmp_path / "p", name="empty")
+    try:
+        proj.add_frame(FrameRow(source_path="x.fit"))
+        with pytest.raises(ValueError, match="lucky_fraction"):
+            run_stack(proj, StackOptions(lucky_fraction=lucky_fraction))
+    finally:
+        proj.close()
+
+
 def test_stack_drops_and_flags_bad_plate_solve_outlier(tmp_path):
     """A frame with a wildly-off WCS is dropped (not fatal) and flagged rejected.
 
