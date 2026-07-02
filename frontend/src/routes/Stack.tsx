@@ -11,6 +11,17 @@ import { api, type StackOptionField } from "../api/client";
 import { StackOptionControl as FieldControl } from "../components/StackOptionControl";
 import { useJobEvents } from "../hooks/useJobEvents";
 
+// Linear-interpolated percentile of an unsorted numeric sample (p in [0, 100]).
+function pctile(values: number[], p: number): number {
+  if (values.length === 0) return 0;
+  const s = [...values].sort((a, b) => a - b);
+  if (s.length === 1) return s[0];
+  const idx = (p / 100) * (s.length - 1);
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  return s[lo] + (s[hi] - s[lo]) * (idx - lo);
+}
+
 export function StackView() {
   const { safe = "" } = useParams();
   const [searchParams] = useSearchParams();
@@ -213,6 +224,32 @@ export function StackView() {
       ? `With ${solvedAccepted} accepted frames the per-pixel spread is very well measured, so a tighter sigma-clip (κ≈2.5) can safely reject more satellites, planes and cosmic rays than the default κ=${kappa % 1 === 0 ? kappa.toFixed(0) : kappa}. Lower the Sigma kappa in Advanced options if you see trails survive.`
       : null;
 
+  // Transparency-night hint: compare the median transparency of the frames that
+  // will actually be stacked (accepted + solved) against this target's clear-sky
+  // baseline (a high percentile of transparency across *all* frames that carry a
+  // score). A run whose median sits well below that baseline was shot through
+  // haze / thin cloud even if the user didn't reject those subs — worth
+  // flagging. Normalised within the target (the raw score isn't comparable
+  // across gain/exposure). Advisory only.
+  const transparencyHint = (() => {
+    if (frames.isLoading) return null;
+    const fs = frames.data ?? [];
+    const all = fs
+      .map((f) => f.transparency_score)
+      .filter((t): t is number => t != null && t > 0);
+    const run = fs
+      .filter((f) => f.accept && f.solved)
+      .map((f) => f.transparency_score)
+      .filter((t): t is number => t != null && t > 0);
+    // Need a reasonable sample on both sides to say anything meaningful.
+    if (all.length < 5 || run.length < 3) return null;
+    const baseline = pctile(all, 90);   // clear-sky reference for this target
+    const runMed = pctile(run, 50);
+    if (baseline <= 0 || runMed / baseline >= 0.6) return null;
+    const pct = Math.round((1 - runMed / baseline) * 100);
+    return `The frames in this stack sit about ${pct}% below this target's clearest nights (median transparency ${Math.round(runMed)} vs a ~${Math.round(baseline)} baseline) — they were likely shot through haze or thin cloud. Turn on quality weighting to down-weight the haziest subs, or reject them on the Frames page.`;
+  })();
+
   // Drizzle accumulates in a single pass, so the sigma-clip toggle doesn't
   // apply to it — a user who enabled both would reasonably expect satellite
   // trails to be rejected and be surprised when they aren't. Point them at
@@ -384,6 +421,12 @@ export function StackView() {
           {drizzleClipHint ? (
             <Alert color="blue" variant="light" py={6} px="sm">
               <Text size="xs">{drizzleClipHint}</Text>
+            </Alert>
+          ) : null}
+
+          {transparencyHint ? (
+            <Alert color="blue" variant="light" py={6} px="sm">
+              <Text size="xs">{transparencyHint}</Text>
             </Alert>
           ) : null}
 

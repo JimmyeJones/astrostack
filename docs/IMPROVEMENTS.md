@@ -27,14 +27,6 @@ _(none — claim an item here with your branch name)_
 ## Ideas (pick roughly top-down; use the value ÷ effort×risk rule)
 
 ### Correctness & robustness (highest priority)
-- **Transparency-night grader hint (part b of the weighting item)** — the
-  quality-weighting side shipped in v0.36.0 (a `transparency_factor` in
-  `compute_frame_weights`, normalised within-target against the median). The
-  remaining half: show an advisory "poor transparency night" hint when a run's
-  median frame sits well below the target's clear-sky baseline (the target's
-  best-transparency frames), so a user knows a stack was shot through haze even
-  when they didn't reject those subs. UI-only advisory; reuse the same
-  within-target normalisation. (S, approachability)
 - Per-pixel extremes / percentile rejection for small stacks (the *robust*
   fix for a lone satellite/plane trail below ~11 frames). **NB:** the previously
   filed "iterated κ-σ" idea was investigated and dropped — re-estimation clips
@@ -112,6 +104,15 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Transparency-night hint on the Stack form** — completes the transparency
+  weighting pair (v0.36.0). The Stack form now shows an advisory when the median
+  transparency of the frames that would be stacked (accepted + solved) sits well
+  below (<60% of) this target's clear-sky baseline — the 90th percentile of
+  transparency across all frames that carry a score — so a user knows the stack
+  was shot through haze/thin cloud even if they didn't reject those subs, and is
+  pointed at quality weighting or rejecting the hazy subs. Client-side,
+  within-target normalisation; advisory only. (v0.36.1, this run)
 
 - **Weight the stack by frame transparency** — `compute_frame_weights` gained a
   fourth `transparency_factor` (`frame_transparency / median_transparency`,
