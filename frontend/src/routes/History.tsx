@@ -144,7 +144,7 @@ function RunCard({ safe, run, onDelete, deleting }: {
           )}
         </Group>
         <Tooltip label="Delete this stack run">
-          <ActionIcon variant="subtle" color="red" loading={deleting}
+          <ActionIcon variant="subtle" color="red" loading={deleting} aria-label="Delete stack"
             onClick={() => {
               if (window.confirm(
                 `Delete "${run.output_basename}" permanently? Its FITS/TIFF/preview will be removed.`)) {
@@ -178,6 +178,7 @@ export function HistoryView() {
   const del = useMutation({
     mutationFn: (id: number) => api.deleteStackRun(safe, id),
     onSuccess: () => {
+      notifications.show({ message: "Stack deleted", color: "teal" });
       // A deleted run also vanishes from the Gallery, Sky map and Dashboard.
       qc.invalidateQueries({ queryKey: ["runs", safe] });
       qc.invalidateQueries({ queryKey: ["gallery"] });

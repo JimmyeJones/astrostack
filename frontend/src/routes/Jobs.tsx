@@ -1,6 +1,7 @@
 import {
   ActionIcon, Badge, Button, Center, Group, Loader, Paper, Progress, Stack, Text, Title,
 } from "@mantine/core";
+import { notifications } from "@mantine/notifications";
 import { IconDownload, IconPhoto, IconX } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
@@ -64,7 +65,7 @@ function JobRow({ job, onCancel }: { job: Job; onCancel: () => void }) {
             {job.phase} {job.total ? `${job.done}/${job.total}` : ""}
           </Text>
           {active ? (
-            <ActionIcon variant="subtle" color="red" onClick={onCancel}>
+            <ActionIcon variant="subtle" color="red" onClick={onCancel} aria-label="Cancel job">
               <IconX size={16} />
             </ActionIcon>
           ) : null}
@@ -88,6 +89,7 @@ export function JobsView() {
   const cancel = useMutation({
     mutationFn: (id: string) => api.cancelJob(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["jobs"] }),
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
   const clear = useMutation({
     mutationFn: () => api.clearJobs(),

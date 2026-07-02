@@ -37,7 +37,7 @@ export function LogsView() {
   }, [entries, search]);
 
   const download = () => {
-    const text = entries
+    const text = filtered
       .map((e) => `${e.ts} ${e.level} ${e.logger}: ${e.message}`)
       .join("\n");
     const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
@@ -65,7 +65,7 @@ export function LogsView() {
           <Switch size="xs" label="Auto-refresh" checked={auto}
             onChange={(e) => setAuto(e.currentTarget.checked)} />
           <Button size="xs" variant="light" leftSection={<IconDownload size={14} />}
-            onClick={download} disabled={entries.length === 0}>
+            onClick={download} disabled={filtered.length === 0}>
             Download
           </Button>
         </Group>

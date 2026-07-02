@@ -35,6 +35,11 @@ _(none — claim an item here with your branch name)_
   of erroring, so filters shot in separate sessions can be combined. (M–L)
 - Property/edge tests for `run_stack`: empty input, all-rejected, 1 frame,
   drizzle vs sigma-clip parity on a synthetic scene. (M)
+- Seestar client (`webapp/seestar/client.py`) has no reconnect/retry on a
+  dropped TCP socket — a flaky Wi-Fi link to the scope currently requires
+  the user to manually reconnect via the UI. Core hardware-integration
+  path; needs care around not spamming reconnect attempts and should be
+  testable in isolation from real hardware. (M, correctness)
 
 ### Features that serve real workflows
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
@@ -49,6 +54,11 @@ _(none — claim an item here with your branch name)_
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
 - Keyboard shortcuts beyond the frame grader (e.g. editor undo/redo hints). (S)
+- Icon-only buttons repo-wide are still mostly missing `aria-label` (a few
+  landed incidentally with recent `History.tsx`/`Jobs.tsx` fixes). One
+  focused accessibility sweep across `frontend/src/routes/*.tsx` and
+  `components/*.tsx`, with a small test asserting known icon buttons have
+  accessible names. (M)
 
 ### Performance (only with a measurement)
 - Profile the stack hot path on a large synthetic target; find a safe win that
@@ -67,6 +77,13 @@ _(none — claim an item here with your branch name)_
   autonomous PRs are gated by real checks. (S–M)
 - Reduce the frontend bundle warning (code-split the heavy Sky/aladin chunks). (S)
 - Expand `docs/` (webapp.md) to cover calibration, mono/LRGB, auth. (S)
+- `npm audit` still reports `esbuild`≤0.24.2/`vite`≤6.4.2/`vitest`≤3.2.5
+  (moderate — dev server only, not the production build) after this run's
+  `react-router`/`form-data` fix. `npm audit fix --force` wants `vite@8`,
+  a real major-version bump across the toolchain (config changes, full
+  suite re-verification) — needs a deliberate dedicated pass per
+  `AGENTS.md`'s major-dependency-bump sign-off rule, not a blind
+  `--force`. (M)
 
 ---
 
@@ -85,6 +102,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Autonomous run (agent, this session):** security fixes — Seestar `goto`
+  RA/Dec bounds validation, closed a quick-look-preview gap in the
+  `output_name` sanitizer (`_save_quick_look` built its own unsanitized
+  filename), `react-router`/`form-data` CVE patches (`npm audit fix`) —
+  plus `lucky_fraction` bounds validation, confirm+error-surfacing on
+  stack-run deletion (`History.tsx`), job-cancel error feedback and a
+  Logs-download filter bug (`Jobs.tsx`/`Logs.tsx`). Reconciled with a
+  concurrent autonomous run that independently fixed the `bayer`
+  path-traversal and `output_name` sanitizer issues and its own take on
+  the `History.tsx` delete confirmation — merged rather than duplicated.
 - **Autonomous run #1 (agent):** security + reliability/operability hardening +
   frontend error states — `output_name` sanitizer, `bayer` param validation, 404s
   for unknown targets, settings bounds (pydantic `Field` ge/le + 422), jobs-list

@@ -131,6 +131,22 @@ def test_export_creates_new_run_non_destructive(client, solved_library):
     assert edited["has_fits"] and edited["notes"] == "edited"
 
 
+def test_export_sanitizes_path_traversal_output_name(client, solved_library, tmp_path):
+    # output_name is free text from the client and is spliced into a
+    # filename under <project>/output/; a path-separator payload must not
+    # be able to write outside the project (write_stack_outputs sanitizes
+    # it rather than failing the job outright).
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe)
+    recipe = {"ops": [{"id": "tone.stretch", "params": {"stretch": 0.6}}]}
+    r = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/export",
+                    json={"recipe": recipe, "output_name": "../../../../tmp/pwned"})
+    assert r.status_code == 200
+    job = _wait_job(client, r.json()["job_id"])
+    assert job["state"] == "done", job
+    assert not (Path("/tmp") / "pwned.fits").exists()
+
+
 def test_presets_crud(client):
     base = client.get("/api/editor/presets").json()
     assert any(p["id"] == "nebula_broadband" for p in base["builtin"])

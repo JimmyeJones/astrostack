@@ -330,3 +330,29 @@ def test_control_blocked_when_only_monitoring_enabled(client):
     r = client.post("/api/seestar/1.2.3.4/park")
     assert r.status_code == 409
     client.put("/api/settings", json={"seestar_enabled": False})
+
+
+@pytest.mark.parametrize("ra_hours,dec_deg", [
+    (-0.01, 0),      # ra below 0
+    (24, 0),         # ra at/above 24 is out of range (hours are [0, 24))
+    (24.5, 0),
+    (0, 90.01),      # dec above 90
+    (0, -90.01),     # dec below -90
+])
+def test_goto_rejects_out_of_range_coordinates(client, ra_hours, dec_deg):
+    # Malformed coordinates must be rejected before they'd ever reach the
+    # telescope's RPC, regardless of whether control is enabled.
+    r = client.post("/api/seestar/1.2.3.4/goto",
+                     json={"ra_hours": ra_hours, "dec_deg": dec_deg})
+    assert r.status_code == 422
+
+
+def test_goto_accepts_boundary_coordinates(client):
+    # 0 <= ra_hours < 24 and -90 <= dec_deg <= 90 are valid; with control
+    # disabled the request still gets past validation and is gated at 409.
+    r = client.post("/api/seestar/1.2.3.4/goto",
+                     json={"ra_hours": 0, "dec_deg": 90})
+    assert r.status_code == 409
+    r = client.post("/api/seestar/1.2.3.4/goto",
+                     json={"ra_hours": 23.999, "dec_deg": -90})
+    assert r.status_code == 409

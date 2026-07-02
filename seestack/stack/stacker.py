@@ -40,6 +40,7 @@ from seestack.core.xp import GPU_AVAILABLE
 from seestack.io.project import FrameRow, Project
 from seestack.stack.accumulator import WeightedSumAccumulator, WelfordAccumulator
 from seestack.stack.align import align_one, extract_reference_patch
+from seestack.stack.output import _sanitize_basename
 from seestack.stack.reference import ReferenceChoice, pick_reference_frame
 from seestack.stack.weighting import compute_frame_weights, unit_weights
 
@@ -215,6 +216,15 @@ def run_stack(
     """
     progress = progress or (lambda *a: None)
     cancel = cancel or (lambda: False)
+
+    if not (0.0 < options.lucky_fraction <= 1.0):
+        raise ValueError(
+            f"lucky_fraction must be in (0, 1], got {options.lucky_fraction!r}"
+        )
+    # Sanitize up front (not just inside write_stack_outputs) so the
+    # quick-look preview path below — which builds its own filename from
+    # options.output_name — can't be used to escape <project>/output/ either.
+    options.output_name = _sanitize_basename(options.output_name)
 
     # ---- 1. Pick reference -------------------------------------------------
     progress("Setup", 0, 1)

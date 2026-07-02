@@ -12,7 +12,7 @@ import asyncio
 import json
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from webapp import deps
@@ -100,8 +100,8 @@ async def device_events(ip: str, request: Request) -> EventSourceResponse:
 
 
 class GotoRequest(BaseModel):
-    ra_hours: float
-    dec_deg: float
+    ra_hours: float = Field(ge=0, lt=24)
+    dec_deg: float = Field(ge=-90, le=90)
     target_name: str = "AstroStack"
 
 
