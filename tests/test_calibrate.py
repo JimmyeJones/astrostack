@@ -132,6 +132,59 @@ def test_apply_dark_then_flat(tmp_path):
     np.testing.assert_allclose(out, 100.0)  # (110-10)/1
 
 
+def test_flat_dark_subtracted_before_normalising(tmp_path):
+    # Flat = dark pedestal (100) + illumination signal (left 100, right 200).
+    flat = np.empty((4, 4), dtype=np.float32)
+    flat[:, :2] = 200.0  # left  = 100 pedestal + 100 signal
+    flat[:, 2:] = 300.0  # right = 100 pedestal + 200 signal
+    flat_dark = np.full((4, 4), 100.0, dtype=np.float32)
+    save_master(tmp_path / "flat.fits", flat, MasterMeta("flat", 10, 4, 4, "median"))
+    save_master(tmp_path / "fd.fits", flat_dark, MasterMeta("dark", 10, 4, 4, "median"))
+
+    cal = CalibrationMasters.load(
+        flat_path=str(tmp_path / "flat.fits"),
+        flat_dark_path=str(tmp_path / "fd.fits"),
+    )
+    # After flat-dark: signal = [100, 200], mean = 150,
+    # flat_norm = [0.667, 1.333]. A uniform raw of 300 divides to 450 / 225.
+    raw = np.full((4, 4), 300.0, dtype=np.float32)
+    out = cal.apply_raw(raw)
+    np.testing.assert_allclose(out[:, :2], 450.0, rtol=1e-5)
+    np.testing.assert_allclose(out[:, 2:], 225.0, rtol=1e-5)
+
+
+def test_flat_dark_changes_result_vs_no_flat_dark(tmp_path):
+    flat = np.empty((4, 4), dtype=np.float32)
+    flat[:, :2] = 200.0
+    flat[:, 2:] = 300.0
+    flat_dark = np.full((4, 4), 100.0, dtype=np.float32)
+    save_master(tmp_path / "flat.fits", flat, MasterMeta("flat", 10, 4, 4, "median"))
+    save_master(tmp_path / "fd.fits", flat_dark, MasterMeta("dark", 10, 4, 4, "median"))
+    raw = np.full((4, 4), 300.0, dtype=np.float32)
+
+    without = CalibrationMasters.load(flat_path=str(tmp_path / "flat.fits")).apply_raw(raw)
+    with_fd = CalibrationMasters.load(
+        flat_path=str(tmp_path / "flat.fits"),
+        flat_dark_path=str(tmp_path / "fd.fits"),
+    ).apply_raw(raw)
+    # The pedestal makes a real difference to the flat correction.
+    assert not np.allclose(without, with_fd)
+
+
+def test_flat_dark_shape_mismatch_is_skipped(tmp_path):
+    flat = np.full((4, 4), 2.0, dtype=np.float32)
+    flat_dark = np.full((2, 2), 1.0, dtype=np.float32)  # wrong shape
+    save_master(tmp_path / "flat.fits", flat, MasterMeta("flat", 10, 4, 4, "median"))
+    save_master(tmp_path / "fd.fits", flat_dark, MasterMeta("dark", 10, 2, 2, "median"))
+    # A mismatched flat-dark is ignored (not applied) → flat_norm is all 1.0.
+    cal = CalibrationMasters.load(
+        flat_path=str(tmp_path / "flat.fits"),
+        flat_dark_path=str(tmp_path / "fd.fits"),
+    )
+    raw = np.full((4, 4), 300.0, dtype=np.float32)
+    np.testing.assert_allclose(cal.apply_raw(raw), 300.0, rtol=1e-5)
+
+
 def test_empty_calibration():
     cal = CalibrationMasters()
     assert cal.is_empty

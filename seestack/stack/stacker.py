@@ -166,6 +166,10 @@ class StackOptions:
     # None disables that correction. Applied to the raw Bayer mosaic per frame.
     dark_path: str | None = None
     flat_path: str | None = None
+    # Optional dark/bias matched to the flat's exposure. Subtracted from the
+    # flat before normalising for a more correct flat (a "flat-dark"). Only used
+    # when ``flat_path`` is also set. Server-resolved path, never client input.
+    flat_dark_path: str | None = None
 
     def background_options(self) -> BackgroundOptions:
         return BackgroundOptions(
@@ -291,7 +295,9 @@ def run_stack(
     if options.dark_path or options.flat_path:
         from seestack.calibrate.apply import CalibrationMasters
 
-        calibration = CalibrationMasters.load(options.dark_path, options.flat_path)
+        calibration = CalibrationMasters.load(
+            options.dark_path, options.flat_path, options.flat_dark_path,
+        )
         if calibration.is_empty:
             calibration = None
         else:

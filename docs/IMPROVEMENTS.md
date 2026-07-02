@@ -29,8 +29,6 @@ _(none — claim an item here with your branch name)_
 ### Correctness & robustness (highest priority)
 - Audit NaN/coverage handling on the newer paths (calibration, mono, channel
   combine) for single-frame and mosaic-edge cases. Add edge-case tests. (S–M)
-- Flat calibration: optionally dark-subtract the flat before normalising
-  (flat-dark support) for more correct flats. Currently mean-normalised only. (M)
 - Channel combine: reproject stacks that don't share a canvas (via WCS) instead
   of erroring, so filters shot in separate sessions can be combined. (M–L)
 - Property/edge tests for `run_stack`: empty input, all-rejected, 1 frame,
@@ -98,6 +96,11 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Flat-dark support** — a master flat can now be dark-subtracted before
+  normalising (`CalibrationMasters.load` gains `flat_dark_path`,
+  `StackOptions.flat_dark_path`, server-resolved from a `flat_dark_master_id`).
+  Removes the flat's dark-current/bias pedestal for a more correct flat; opt-in
+  via a new Flat-dark selector on the Stack page. (v0.16.0, this run)
 - **Dashboard stats caching** — `GET /api/stats` no longer re-opens every target's
   SQLite on each poll. The expensive per-target roll-up is cached on the app,
   keyed by a cheap registry signature (per-target activity stamp + latest preview)

@@ -40,8 +40,17 @@ class CalibrationMasters:
         cls,
         dark_path: str | None = None,
         flat_path: str | None = None,
+        flat_dark_path: str | None = None,
     ) -> "CalibrationMasters":
-        """Load masters from disk. Either path may be ``None``."""
+        """Load masters from disk. Any path may be ``None``.
+
+        ``flat_dark_path`` is an optional dark/bias matched to the flat's own
+        exposure. When given it is subtracted from the flat *before*
+        normalising, so the flat captures only the illumination pattern rather
+        than the illumination pattern riding on the flat's dark-current + bias
+        pedestal — a more correct flat (this is what DSS/Siril call a
+        "flat-dark"). Without it the flat is mean-normalised as-is, unchanged.
+        """
         from seestack.calibrate.masters import load_master
 
         dark = None
@@ -52,6 +61,17 @@ class CalibrationMasters:
         if flat_path:
             flat, _ = load_master(flat_path)
             flat = np.asarray(flat, dtype=np.float32)
+            if flat_dark_path:
+                flat_dark, _ = load_master(flat_dark_path)
+                flat_dark = np.asarray(flat_dark, dtype=np.float32)
+                if flat_dark.shape == flat.shape:
+                    flat = flat - flat_dark
+                else:
+                    log.warning(
+                        "flat-dark %s is %s but the flat is %s; skipping the "
+                        "flat-dark subtraction", flat_dark_path,
+                        flat_dark.shape, flat.shape,
+                    )
             mean = float(np.nanmean(flat))
             if not np.isfinite(mean) or mean <= 0:
                 log.warning("flat master %s has non-positive mean; ignoring it", flat_path)
