@@ -44,7 +44,17 @@ def test_channel_combine_end_to_end(client, solved_library):
     assert set(job["result"]["channels"]) == {"R", "G", "B"}
 
     runs = client.get("/api/targets/M_42/stack-runs").json()
-    assert any(run["output_basename"] == "rgb_test" for run in runs)
+    combined = next(run for run in runs if run["output_basename"] == "rgb_test")
+
+    # The combined FITS should carry provenance metadata (how it was made).
+    import io
+
+    from astropy.io import fits
+    r = client.get(f"/api/targets/M_42/stack-runs/{combined['id']}/fits")
+    assert r.status_code == 200
+    header = fits.getheader(io.BytesIO(r.content))
+    assert header["NCOMBINE"] == 3
+    assert header["STACKMTD"] == "channel-combine (RGB)"
 
 
 def test_channel_combine_requires_items(client, solved_library):

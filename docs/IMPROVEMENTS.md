@@ -94,6 +94,10 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- Channel-combine provenance — the LRGB/RGB combined FITS now carries
+  `NCOMBINE` (source stacks) and `STACKMTD` ("channel-combine (RGB)"), matching
+  the new stack-export metadata. (v0.14.3, this run)
+
 - Accessibility sweep — added `aria-label` to the remaining icon-only
   `ActionIcon` buttons (frame accept/reject, delete calibration master, delete
   preset) so they have accessible names for screen readers, plus a test
