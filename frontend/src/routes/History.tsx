@@ -1,7 +1,7 @@
 import { useState } from "react";
 import {
-  ActionIcon, Alert, Badge, Button, Card, Center, Group, Image, Loader, SimpleGrid,
-  Slider, Stack, Table, Text, TextInput, Title, Tooltip,
+  ActionIcon, Alert, Badge, Button, Card, Center, Group, Image, Loader, SegmentedControl,
+  SimpleGrid, Slider, Stack, Table, Text, TextInput, Title, Tooltip,
 } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
@@ -11,7 +11,22 @@ import { Link, useParams } from "react-router-dom";
 import { api, type StackRun } from "../api/client";
 import { formatIntegration } from "../format";
 import { HazyNightBadge } from "../components/HazyNightBadge";
+import { NoiseReadout, CleanestBadge, cleanestRunId, hasNoise } from "../components/NoiseBadge";
 import { ImageLightbox } from "../components/ImageLightbox";
+
+export type RunSort = "newest" | "cleanest";
+
+// Order runs for display. "newest" preserves the API's timestamp-DESC order;
+// "cleanest" puts the lowest-noise runs first, with runs that carry no measured
+// σ (pre-v0.48 or not computable) kept after, in their original order. Pure and
+// non-mutating so it's easy to test.
+export function sortRuns(runs: StackRun[], sort: RunSort): StackRun[] {
+  if (sort !== "cleanest") return runs;
+  const measured = runs.filter((r) => hasNoise(r.noise_sigma));
+  const rest = runs.filter((r) => !hasNoise(r.noise_sigma));
+  measured.sort((a, b) => (a.noise_sigma as number) - (b.noise_sigma as number));
+  return [...measured, ...rest];
+}
 
 function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
   const info = useQuery({
@@ -46,6 +61,11 @@ function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
           {typeof data.weighting.median === "number"
             ? ` (median ${data.weighting.median.toFixed(2)})`
             : ""}
+        </Text>
+      ) : null}
+      {data.processing && data.processing.length > 0 ? (
+        <Text size="xs" c="dimmed">
+          Processing: {data.processing.map((s) => s.label).join(" → ")}
         </Text>
       ) : null}
       <Table verticalSpacing={2} horizontalSpacing="xs" fz="xs" withRowBorders={false}>
@@ -125,8 +145,8 @@ function NotesEditor({ safe, run }: { safe: string; run: StackRun }) {
 const DEFAULT_STRETCH = 0.5;
 const DEFAULT_BLACK = 0.35;
 
-function RunCard({ safe, run, onDelete, deleting }: {
-  safe: string; run: StackRun; onDelete: () => void; deleting?: boolean;
+function RunCard({ safe, run, onDelete, deleting, isCleanest }: {
+  safe: string; run: StackRun; onDelete: () => void; deleting?: boolean; isCleanest?: boolean;
 }) {
   const qc = useQueryClient();
   const [adjust, setAdjust] = useState(false);
@@ -170,6 +190,7 @@ function RunCard({ safe, run, onDelete, deleting }: {
       <Group justify="space-between" mt="sm" wrap="nowrap">
         <Text fw={600}>{run.output_basename}</Text>
         <Group gap={4} wrap="nowrap">
+          <CleanestBadge isCleanest={!!isCleanest} />
           <HazyNightBadge ratio={run.transparency_ratio} />
           <Badge variant="light">{run.n_frames_used} frames</Badge>
         </Group>
@@ -177,6 +198,7 @@ function RunCard({ safe, run, onDelete, deleting }: {
       <Text size="xs" c="dimmed">
         {run.timestamp_utc.replace("T", " ").slice(0, 19)} · {run.canvas_w}×{run.canvas_h}
         {run.total_exposure_s ? ` · ${formatIntegration(run.total_exposure_s)}` : ""}
+        {hasNoise(run.noise_sigma) ? <> · <NoiseReadout sigma={run.noise_sigma} /></> : null}
       </Text>
       <NotesEditor safe={safe} run={run} />
 
@@ -310,6 +332,7 @@ function RunCard({ safe, run, onDelete, deleting }: {
 export function HistoryView() {
   const { safe = "" } = useParams();
   const qc = useQueryClient();
+  const [sort, setSort] = useState<RunSort>("newest");
   const runs = useQuery({ queryKey: ["runs", safe], queryFn: () => api.listStackRuns(safe) });
 
   const del = useMutation({
@@ -333,12 +356,29 @@ export function HistoryView() {
   }
 
   const list = runs.data ?? [];
+  const cleanestId = cleanestRunId(list);
+  const anyNoise = list.some((r) => hasNoise(r.noise_sigma));
+  const sorted = sortRuns(list, sort);
 
   return (
     <Stack>
       <Group justify="space-between">
         <Title order={2}>Stack history — {safe}</Title>
-        <Button component={Link} to={`/targets/${safe}/stack`}>New stack</Button>
+        <Group gap="sm">
+          {list.length > 1 && anyNoise ? (
+            <SegmentedControl
+              size="xs"
+              value={sort}
+              onChange={(v) => setSort(v as RunSort)}
+              data={[
+                { label: "Newest", value: "newest" },
+                { label: "Cleanest", value: "cleanest" },
+              ]}
+              aria-label="Sort stacks"
+            />
+          ) : null}
+          <Button component={Link} to={`/targets/${safe}/stack`}>New stack</Button>
+        </Group>
       </Group>
       {list.length === 0 ? (
         <Card withBorder padding="xl">
@@ -349,10 +389,11 @@ export function HistoryView() {
         </Card>
       ) : (
         <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }}>
-          {list.map((r) => (
+          {sorted.map((r) => (
             <RunCard key={r.id} safe={safe} run={r}
               onDelete={() => del.mutate(r.id)}
-              deleting={del.isPending && del.variables === r.id} />
+              deleting={del.isPending && del.variables === r.id}
+              isCleanest={r.id === cleanestId} />
           ))}
         </SimpleGrid>
       )}

@@ -338,6 +338,22 @@ def test_export_records_recipe_history(client, solved_library):
     assert "detail.sharpen" in history
     assert "detail.denoise" not in history  # disabled op omitted
 
+    # The Info endpoint surfaces the same chain as a friendly, ordered list so
+    # the History panel can show "Processing: Stretch → Sharpen".
+    info = client.get(f"/api/targets/{safe}/stack-runs/{edited['id']}/info").json()
+    chain = info["processing"]
+    assert [s["op"] for s in chain] == ["tone.stretch", "detail.sharpen"]
+    assert [s["label"] for s in chain] == ["Stretch", "Sharpen"]
+
+
+def test_info_processing_chain_empty_for_plain_stack(client, solved_library):
+    """A plain (non-edited) stack has no AstroStack HISTORY cards, so the Info
+    endpoint reports an empty processing chain rather than erroring."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="plain_src")
+    info = client.get(f"/api/targets/{safe}/stack-runs/{rid}/info").json()
+    assert info["processing"] == []
+
 
 def test_export_sanitizes_path_traversal_output_name(client, solved_library, tmp_path):
     # output_name is free text from the client and is spliced into a
