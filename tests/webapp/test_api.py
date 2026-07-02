@@ -160,6 +160,46 @@ def test_bulk_reject_streaked(client, built_library, data_root):
     assert r.json()["changed"] == 0
 
 
+def test_trailed_frame_ids_flags_strong_outliers():
+    """The trailed-outlier helper flags only strong, above-floor eccentricity
+    outliers, needs a floor of measured frames, and ignores unmeasured ones."""
+    from types import SimpleNamespace
+
+    from webapp.routers.frames import trailed_frame_ids
+
+    def frame(fid, ecc):
+        return SimpleNamespace(id=fid, eccentricity_median=ecc)
+
+    # A tight, round set with one badly-trailed sub: only that one is flagged.
+    tight = [frame(i, 0.2 + 0.01 * (i % 3)) for i in range(10)]
+    tight.append(frame(99, 0.85))
+    assert trailed_frame_ids(tight) == [99]
+
+    # Below the minimum measured-frame count → never flags (stats too noisy).
+    assert trailed_frame_ids([frame(1, 0.2), frame(2, 0.9)]) == []
+
+    # A frame that is a >3·MAD outlier but still below the 0.6 absolute floor is
+    # not "trailed" — its stars aren't actually elongated.
+    below_floor = [frame(i, 0.10 + 0.005 * (i % 2)) for i in range(10)]
+    below_floor.append(frame(50, 0.45))
+    assert trailed_frame_ids(below_floor) == []
+
+    # Frames without a measured eccentricity don't count toward the floor and
+    # are never flagged.
+    assert trailed_frame_ids([frame(i, None) for i in range(10)]) == []
+
+
+def test_bulk_reject_trailed_needs_enough_frames(client, built_library):
+    # The default fixture has 3 frames — below the robust-stats floor — so
+    # reject_trailed is a safe no-op rather than nuking a tiny set.
+    r = client.post(
+        "/api/targets/M_42/frames/bulk",
+        json={"action": "reject_trailed"},
+    )
+    assert r.status_code == 200
+    assert r.json()["changed"] == 0
+
+
 def test_bulk_returns_changed_ids_for_undo(client, built_library):
     frames = client.get("/api/targets/M_42/frames").json()
     ids = [f["id"] for f in frames[:2]]

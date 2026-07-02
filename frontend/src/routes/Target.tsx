@@ -26,6 +26,14 @@ const REJECT_METRICS = [
   { value: "transparency_score", label: "Transparency" },
 ];
 
+// Median of a non-empty numeric array (used for the within-target trailed
+// eccentricity outlier count). Sorts a copy, so the input is left untouched.
+function medianOf(xs: number[]): number {
+  const s = [...xs].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+
 // Turn a raw `reject_reason` (qc:fwhm, bulk:streaked, user, …) into a plain-language
 // label so a beginner can see *why* frames were dropped, not just how many.
 const METRIC_LABEL: Record<string, string> = {
@@ -36,6 +44,7 @@ const METRIC_LABEL: Record<string, string> = {
 function rejectReasonLabel(reason: string): string {
   if (reason === "user") return "Manual reject";
   if (reason === "bulk:streaked") return "Streaked (bulk)";
+  if (reason === "bulk:trailed") return "Trailed (bulk)";
   if (reason.startsWith("auto:grade:")) {
     const m = reason.slice(11);
     return `Auto-grade: ${METRIC_LABEL[m] ?? m}`;
@@ -276,8 +285,14 @@ export function TargetView() {
       // Remember a bulk reject so the user can undo it; clear on the undo itself.
       const action = (body as { action?: string }).action;
       const ids = r.changed_ids ?? [];
-      if ((action === "reject_worst" || action === "reject_streaked") && ids.length) {
-        const label = action === "reject_streaked" ? "streaked" : "worst-frame";
+      if (
+        (action === "reject_worst" || action === "reject_streaked" ||
+          action === "reject_trailed") && ids.length
+      ) {
+        const label =
+          action === "reject_streaked" ? "streaked"
+            : action === "reject_trailed" ? "trailed"
+              : "worst-frame";
         setLastReject({ ids, label });
       } else {
         setLastReject(null);
@@ -301,6 +316,22 @@ export function TargetView() {
   // the frame's good signal. Surfacing the count tells the user at a glance what
   // that rejection will need to handle.
   const streakedAccepted = list.filter((f) => f.accept && f.streak_detected).length;
+  // Accepted frames whose stars are a strong eccentricity outlier for this
+  // target — a bad-tracking / wind / bumped-mount sub. A frame counts as
+  // "trailed" only when its eccentricity is *both* a >3·MAD within-target
+  // outlier *and* above an absolute floor of noticeably elongated stars, so a
+  // uniformly round set never flags anything. Mirrors the server-side
+  // `trailed_frame_ids` used by the reject_trailed bulk action; keep in sync.
+  const trailedAccepted = useMemo(() => {
+    const ecc = list
+      .filter((f) => f.accept && f.eccentricity_median != null)
+      .map((f) => f.eccentricity_median as number);
+    if (ecc.length < 5) return 0;
+    const med = medianOf(ecc);
+    const mad = medianOf(ecc.map((v) => Math.abs(v - med)));
+    const threshold = Math.max(med + 3 * mad, 0.6);
+    return ecc.filter((v) => v > threshold).length;
+  }, [list]);
   const selectedFrame = useMemo(
     () => list.find((f) => f.id === selected) ?? list[0],
     [list, selected],
@@ -464,6 +495,37 @@ export function TargetView() {
                     )
                   ) {
                     bulk.mutate({ action: "reject_streaked" });
+                  }
+                }}
+              >
+                Reject all
+              </Button>
+            </Group>
+          ) : null}
+          {trailedAccepted > 0 ? (
+            <Group gap={4}>
+              <Tooltip
+                multiline
+                w={260}
+                label={`${trailedAccepted} accepted frame${trailedAccepted === 1 ? "" : "s"} have unusually elongated stars for this target — a sign of tracking error, wind or a bumped mount on that whole sub. Rejecting them can sharpen the stack.`}
+              >
+                <Badge variant="light" color="yellow">
+                  {trailedAccepted} trailed
+                </Badge>
+              </Tooltip>
+              <Button
+                size="compact-xs"
+                variant="subtle"
+                color="yellow"
+                loading={bulk.isPending}
+                aria-label="Reject all trailed frames"
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      `Reject all ${trailedAccepted} accepted frame${trailedAccepted === 1 ? "" : "s"} with unusually elongated (trailed) stars?`,
+                    )
+                  ) {
+                    bulk.mutate({ action: "reject_trailed" });
                   }
                 }}
               >

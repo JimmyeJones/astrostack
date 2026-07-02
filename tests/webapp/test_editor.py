@@ -54,6 +54,47 @@ def _wait_job(client, job_id, timeout=30.0):
     raise AssertionError("job did not finish in time")
 
 
+def _set_fwhm(data_root, safe, values):
+    """Set fwhm_px on the target's frames (in id order) and mark them accepted."""
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            frames = list(proj.iter_frames())
+            for f, v in zip(frames, values):
+                proj.update_frame(f.id, fwhm_px=v, accept=True)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def test_psf_suggestion_from_median_fwhm(client, built_library, data_root):
+    import math
+
+    _set_fwhm(data_root, "M_42", [2.0, 3.0, 4.0])
+    r = client.get("/api/targets/M_42/editor/psf-suggestion")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["fwhm_px"] == 3.0  # median of 2, 3, 4
+    expected_sigma = 3.0 / (2.0 * math.sqrt(2.0 * math.log(2.0)))
+    assert abs(body["psf_sigma"] - round(expected_sigma, 2)) < 0.01
+
+
+def test_psf_suggestion_none_without_fwhm(client, built_library):
+    # No frame carries an FWHM → both fields null (button won't be offered).
+    r = client.get("/api/targets/M_42/editor/psf-suggestion")
+    assert r.status_code == 200
+    assert r.json() == {"fwhm_px": None, "psf_sigma": None}
+
+
+def test_psf_suggestion_clamps_to_op_range(client, built_library, data_root):
+    # A huge FWHM would map to σ well above the op's 5.0 ceiling; it's clamped.
+    _set_fwhm(data_root, "M_42", [30.0, 30.0, 30.0])
+    body = client.get("/api/targets/M_42/editor/psf-suggestion").json()
+    assert body["psf_sigma"] == 5.0
+
+
 def test_ops_schema(client):
     r = client.get("/api/editor/ops/schema")
     assert r.status_code == 200

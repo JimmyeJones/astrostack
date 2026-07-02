@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from statistics import median
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -29,6 +30,34 @@ _SORTABLE = {
     "id", "timestamp_utc", "exposure_s", "fwhm_px", "star_count",
     "sky_adu_median", "eccentricity_median", "transparency_score",
 }
+
+
+# A frame counts as "trailed" when its median star eccentricity is *both* a
+# strong within-target outlier (> median + 3·MAD) *and* above an absolute floor
+# of noticeably elongated stars — so a target whose whole set is tight and round
+# never has a frame flagged just for being marginally above the pack, and a
+# genuinely bad-tracking night's worst subs surface. Mirrors the client-side
+# badge count on the Target view; keep the two in sync.
+_TRAILED_MAD_K = 3.0
+_TRAILED_ECC_FLOOR = 0.6
+_TRAILED_MIN_FRAMES = 5
+
+
+def trailed_frame_ids(frames: list[FrameRow]) -> list[int]:
+    """Ids of accepted frames whose eccentricity is a strong trailing outlier.
+
+    ``frames`` is any iterable of frame rows; only those carrying a measured
+    ``eccentricity_median`` inform the statistics and are eligible. Returns an
+    empty list when too few frames carry the metric to judge robustly.
+    """
+    measured = [f for f in frames if f.eccentricity_median is not None]
+    if len(measured) < _TRAILED_MIN_FRAMES:
+        return []
+    values = [f.eccentricity_median for f in measured]
+    med = median(values)
+    mad = median([abs(v - med) for v in values])
+    threshold = max(med + _TRAILED_MAD_K * mad, _TRAILED_ECC_FLOOR)
+    return [f.id for f in measured if f.eccentricity_median > threshold]
 
 
 def _to_out(f: FrameRow) -> FrameOut:
@@ -259,6 +288,17 @@ def bulk_frames(safe: str, body: BulkFrameAction, request: Request) -> dict:
                         reject_reason="bulk:streaked",
                     )
                     changed_ids.append(f.id)
+        elif body.action == "reject_trailed":
+            # Drop every accepted frame whose stars are a strong eccentricity
+            # outlier for this target (a bad-tracking / wind / bumped-mount sub).
+            # Pairs with the "N trailed" badge on the Target view.
+            trailed = set(trailed_frame_ids(list(proj.iter_frames(accepted_only=True))))
+            for fid in trailed:
+                proj.update_frame(
+                    fid, accept=False, user_override=True,
+                    reject_reason="bulk:trailed",
+                )
+                changed_ids.append(fid)
     finally:
         proj.close()
     try:

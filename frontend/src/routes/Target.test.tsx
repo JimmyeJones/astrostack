@@ -122,6 +122,61 @@ describe("TargetView streaked badge", () => {
   });
 });
 
+describe("TargetView trailed badge", () => {
+  // Eight tight, round subs plus one strongly-elongated one: only the outlier
+  // (both >3·MAD and above the 0.6 floor) counts as trailed.
+  const trailedSet = () => [
+    ...Array.from({ length: 8 }, (_, i) =>
+      mkFrame(i + 1, { eccentricity_median: 0.2 })),
+    mkFrame(9, { eccentricity_median: 0.85 }),
+  ];
+
+  it("counts accepted frames whose stars are strong eccentricity outliers", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget({ n_frames: 9, n_frames_accepted: 9 }));
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(trailedSet());
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(screen.getByText("1 trailed")).toBeInTheDocument());
+  });
+
+  it("rejects all trailed frames in one gesture from the badge action", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget({ n_frames: 9, n_frames_accepted: 9 }));
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(trailedSet());
+    const bulk = vi
+      .spyOn(client.api, "bulkFrames")
+      .mockResolvedValue({ changed: 1, changed_ids: [9] });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    renderTarget();
+
+    const btn = await screen.findByRole("button", {
+      name: "Reject all trailed frames",
+    });
+    btn.click();
+
+    await waitFor(() =>
+      expect(bulk).toHaveBeenCalledWith("M_42", { action: "reject_trailed" }));
+  });
+
+  it("omits the badge when the set is uniformly round", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget({ n_frames: 6, n_frames_accepted: 6 }));
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(
+      Array.from({ length: 6 }, (_, i) => mkFrame(i + 1, { eccentricity_median: 0.3 })),
+    );
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(screen.getByText("6/6 accepted")).toBeInTheDocument());
+    expect(screen.queryByText(/trailed/)).not.toBeInTheDocument();
+  });
+});
+
 describe("TargetView auto-grade", () => {
   function mkReport(overrides: Partial<client.GradeReport> = {}): client.GradeReport {
     return {

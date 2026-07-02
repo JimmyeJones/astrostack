@@ -45,6 +45,17 @@ export function StackView() {
     queryKey: ["calibration-suggestions", safe],
     queryFn: () => api.calibrationSuggestions(safe),
   });
+  // Auto-grade preview: how many accepted frames look like quality outliers
+  // (clouds / poor focus / tracking). Points the user at the one-click cleanup
+  // on the Target page *before* they stack junk. Only fetched once there are
+  // enough accepted frames for the grader's robust statistics to say anything
+  // (it needs ≥10 measured frames per metric, so gate the request on that).
+  const acceptedCount = (frames.data ?? []).filter((f) => f.accept).length;
+  const autoGrade = useQuery({
+    queryKey: ["auto-grade-preview", safe],
+    queryFn: () => api.autoGradePreview(safe),
+    enabled: acceptedCount >= 10,
+  });
   // When arriving via "Reuse settings" (?from=<runId>), fetch that run's options
   // so we can pre-fill the form from how a previous stack was made.
   const reuse = useQuery({
@@ -250,6 +261,47 @@ export function StackView() {
     return `The frames in this stack sit about ${pct}% below this target's clearest nights (median transparency ${Math.round(runMed)} vs a ~${Math.round(baseline)} baseline) — they were likely shot through haze or thin cloud. Turn on quality weighting to down-weight the haziest subs, or reject them on the Frames page.`;
   })();
 
+  // Quality-weighting nudge: when the frames that will be stacked vary a lot in
+  // quality (a wide spread in FWHM or star count) but quality weighting is off,
+  // suggest turning it on — a mixed-quality set is exactly where down-weighting
+  // the worst subs helps, whereas a uniform set barely changes. Uses the robust
+  // IQR/median (coefficient of quartile spread) so a couple of outliers don't
+  // trigger it and it's scale-free. Within-target; advisory only. Reuses the
+  // metrics already fetched for the transparency hint.
+  const qualityWeightNudge = (() => {
+    if (frames.isLoading || values.quality_weighted) return null;
+    const run = (frames.data ?? []).filter((f) => f.accept && f.solved);
+    if (run.length < 8) return null;  // too few to judge a spread robustly
+    // Fractional spread of a metric = (p75 − p25) / median. Higher = more mixed.
+    const spread = (xs: number[]): number | null => {
+      const v = xs.filter((x): x is number => x != null && x > 0);
+      if (v.length < 8) return null;
+      const med = pctile(v, 50);
+      if (med <= 0) return null;
+      return (pctile(v, 75) - pctile(v, 25)) / med;
+    };
+    const fwhmSpread = spread(run.map((f) => f.fwhm_px as number));
+    const starSpread = spread(run.map((f) => f.star_count as number));
+    // Thresholds picked to fire on genuinely mixed sets, not tight ones: a 30%
+    // FWHM interquartile spread or a 40% star-count spread is a lot of variation.
+    const wideFwhm = fwhmSpread != null && fwhmSpread >= 0.3;
+    const wideStars = starSpread != null && starSpread >= 0.4;
+    if (!wideFwhm && !wideStars) return null;
+    const which = wideFwhm && wideStars ? "sharpness and star count"
+      : wideFwhm ? "sharpness (FWHM)" : "star count";
+    return `Your ${run.length} accepted frames vary a lot in ${which} — a mixed-quality set is exactly where quality weighting helps, letting the best subs count for more than the worst instead of every frame counting equally. Turn on Quality weighting in the options above.`;
+  })();
+
+  // Auto-grade hint: if the grader flags some accepted frames as likely
+  // outliers, nudge the user to review them on the Target page before stacking
+  // junk. Advisory only; it never rejects anything from here.
+  const autoGradeHint = (() => {
+    const rep = autoGrade.data;
+    if (!rep || rep.recommendations.length === 0) return null;
+    const n = rep.recommendations.length;
+    return `Auto-grade thinks ${n} of your ${rep.n_accepted} accepted frame${n === 1 ? "" : "s"} look like quality outliers (clouds, poor focus or tracking). Review Auto-grade on the Target page to drop ${n === 1 ? "it" : "them"} in one click before you stack.`;
+  })();
+
   // Drizzle accumulates in a single pass, so the sigma-clip toggle doesn't
   // apply to it — a user who enabled both would reasonably expect satellite
   // trails to be rejected and be surprised when they aren't. Point them at
@@ -427,6 +479,28 @@ export function StackView() {
           {transparencyHint ? (
             <Alert color="blue" variant="light" py={6} px="sm">
               <Text size="xs">{transparencyHint}</Text>
+            </Alert>
+          ) : null}
+
+          {qualityWeightNudge ? (
+            <Alert color="blue" variant="light" py={6} px="sm">
+              <Text size="xs">{qualityWeightNudge}</Text>
+            </Alert>
+          ) : null}
+
+          {autoGradeHint ? (
+            <Alert color="yellow" variant="light" py={6} px="sm">
+              <Text size="xs">{autoGradeHint}</Text>
+              <Button
+                mt={6}
+                size="xs"
+                variant="light"
+                color="yellow"
+                component={Link}
+                to={`/targets/${safe}`}
+              >
+                Review Auto-grade
+              </Button>
             </Alert>
           ) : null}
 

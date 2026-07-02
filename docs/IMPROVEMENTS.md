@@ -69,33 +69,23 @@ _(none — claim an item here with your branch name)_
 ### Features that serve real workflows
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
-- **Auto-grade hint on the Stack form** — the Stack form already advises on
-  sigma-clip/streaks/transparency; add "N of your accepted frames look like
-  outliers — review Auto-grade on the Target page" by calling the new
-  `frames/auto-grade` preview endpoint, so a user about to stack junk gets
-  pointed at the one-click fix. (S, approachability)
-- **PSF-from-stars for editor deconvolution** — `detail.deconvolve` makes the
-  user hand-tune a Gaussian σ; the project median FWHM (already measured by
-  QC) is the right default, and a "from your stars" button would set it.
-  (S–M, approachability)
-
+- **"From your image" denoise-strength suggestion** — reuse the new generic
+  `suggestions` prop on the editor's `OpParamPanel` (added with the PSF-from-
+  stars button, v0.43.0): estimate the proxy's background noise (robust σ via
+  MAD of the background / off-object pixels, or from the histogram already
+  computed for the editor) and map it to a sensible denoise strength, offered
+  as a one-click default on `detail.denoise`. Removes another hand-tuned knob
+  the way PSF-from-stars did for deconvolution. Needs a small server endpoint
+  (or extend the histogram response with a noise estimate) + the frontend
+  wiring; testable in isolation. (S–M, approachability)
+- **Record the deconvolution PSF σ in the exported FITS header** — when an
+  editor recipe includes `detail.deconvolve`, stamp the σ actually used into
+  the derived `master.fits` (e.g. a `DECONPSF` card), extending the existing
+  editor-export provenance headers (STACKMTD/EDITFROM…). So a sharpened export
+  self-documents in Siril/PixInsight/APP whether and how hard it was
+  deconvolved. Small, additive, follows an established pattern. (S,
+  correctness/approachability)
 ### UX & polish
-- **"N trailed frames" badge on the Target view** — mirror the existing
-  "N streaked" badge for eccentricity: count *accepted* frames whose
-  `eccentricity_median` is a strong within-target outlier (e.g. above the median
-  + 3·MAD, or above a sane absolute floor like ~0.6) and show a small badge next
-  to the accepted count, with a one-click "reject worst by eccentricity" (the
-  bulk action + metric already exist). Surfaces a night of tracking trouble at a
-  glance, complementing this run's ecc-weighting (v0.38.0). Reuses existing
-  plumbing; frontend-only if the outlier count is computed client-side.
-  (S, approachability)
-- **Nudge quality weighting when frame quality varies a lot** — on the Stack
-  form, when the accepted+solved frames show a wide spread in FWHM / star-count /
-  transparency (e.g. IQR/median above a threshold) but `quality_weighted` is
-  off, show an advisory suggesting the user turn it on, because a mixed-quality
-  set is exactly where down-weighting the worst subs helps most (and a uniform
-  set barely changes). Advisory only; reuses metrics already fetched for the
-  transparency hint. Client-side, within-target. (S, approachability)
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
 
@@ -137,6 +127,45 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **PSF-from-stars for editor deconvolution** — the deconvolution op made the
+  user hand-guess a Gaussian PSF σ. A new `GET …/editor/psf-suggestion`
+  endpoint derives it from `Project.median_fwhm()` (median FWHM of accepted
+  frames, already measured by QC): σ = FWHM / (2·√(2·ln2)), clamped to the op's
+  0.5–5.0 slider range, null when no frame carries an FWHM. The editor's op
+  param panel gained a generic, reusable `suggestions` prop; for
+  `detail.deconvolve` it renders a one-click "From your stars (σ≈X, FWHM Ypx)"
+  button that sets `psf_sigma`. Additive/upgrade-safe. (v0.43.0, this run)
+
+- **Auto-grade hint on the Stack form** — the Stack form now calls the
+  `frames/auto-grade` preview endpoint (only once there are ≥10 accepted frames,
+  matching the grader's robust-stats floor) and, when it flags some accepted
+  frames as likely quality outliers, shows a yellow advisory ("Auto-grade thinks
+  N of your M accepted frames look like quality outliers …") with a "Review
+  Auto-grade" button linking back to the Target page — so a user about to stack
+  junk is pointed at the one-click cleanup. Advisory only; nothing is rejected
+  from the Stack form. (v0.42.2, this run)
+
+- **Nudge quality weighting when frame quality varies a lot** — the Stack form
+  now shows an advisory when the frames that would be stacked (accepted +
+  solved) show a wide *robust* spread — interquartile spread (p75−p25)/median ≥
+  0.3 in FWHM or ≥ 0.4 in star count — but `quality_weighted` is off, because a
+  mixed-quality set is exactly where down-weighting the worst subs helps and a
+  uniform set barely changes. Needs ≥8 frames; IQR/median is scale-free and
+  outlier-robust so a couple of bad subs don't trigger it. Client-side,
+  within-target, advisory only; reuses the metrics already fetched for the
+  transparency hint. (v0.42.1, this run)
+
+- **"N trailed frames" badge on the Target view** — mirrors the "N streaked"
+  badge for star *shape*. A shared `trailed_frame_ids` helper flags accepted
+  frames whose `eccentricity_median` is *both* a strong within-target outlier
+  (> median + 3·MAD) *and* above a 0.6 absolute floor of noticeably elongated
+  stars (needs ≥5 measured frames, so a tiny set is never nuked) — a
+  bad-tracking/wind/bumped-mount night. The Target view shows a yellow
+  "N trailed" badge (computed client-side with the identical criterion) with a
+  one-click "Reject all" that calls a new `reject_trailed` bulk action
+  (reason `bulk:trailed`, wired into the existing one-click undo). Reuses
+  existing plumbing; additive/upgrade-safe. (v0.42.0, this run)
 
 - **Auto-grade: automatic, explained frame-quality grading** — the QC layer
   measured five per-sub quality metrics but (streaks aside) nothing acted on

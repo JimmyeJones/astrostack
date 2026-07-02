@@ -42,6 +42,13 @@ export function EditorView() {
 
   const opsSchema = useQuery({ queryKey: ["editor-ops"], queryFn: api.editorOps, staleTime: 60_000 });
   const saved = useQuery({ queryKey: ["recipe", safe, rid], queryFn: () => api.getRecipe(safe, rid) });
+  // Data-driven default for the deconvolution PSF width: the target's median
+  // star FWHM converted to a Gaussian σ, offered as a one-click button.
+  const psf = useQuery({
+    queryKey: ["psf-suggestion", safe],
+    queryFn: () => api.psfSuggestion(safe),
+    staleTime: 60_000,
+  });
 
   const { state: ops, set: setOps, reset: resetOps, undo, redo, canUndo, canRedo } =
     useUndoable<OpInstance[]>([]);
@@ -376,7 +383,17 @@ export function EditorView() {
                   <Text size="xs" c="dimmed" mb="xs">{specs[selectedOp.id].help}</Text>
                 ) : null}
                 <OpParamPanel spec={specs[selectedOp.id]} params={selectedOp.params}
-                  histogram={hist.data} onChange={(p) => setParams(selectedOp.uid, p)} />
+                  histogram={hist.data} onChange={(p) => setParams(selectedOp.uid, p)}
+                  suggestions={
+                    selectedOp.id === "detail.deconvolve" && psf.data?.psf_sigma != null
+                      ? {
+                        psf_sigma: {
+                          value: psf.data.psf_sigma,
+                          label: `From your stars (σ≈${psf.data.psf_sigma}, FWHM ${psf.data.fwhm_px}px)`,
+                        },
+                      }
+                      : undefined
+                  } />
               </Paper>
             ) : null}
 
