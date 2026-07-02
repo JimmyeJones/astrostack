@@ -47,6 +47,20 @@ def test_gallery_lists_runs_with_options(client, solved_library):
     # The full stacking settings round-trip through options_json.
     assert mine["options"]["sigma_clip"] is True
     assert mine["options"]["sigma_kappa"] == 2.5
+    # A plain stack run can pre-fill the Stack form ("Reuse settings").
+    assert mine["reusable"] is True
+
+
+def test_gallery_reusable_flag_excludes_combine_and_editor(client, solved_library):
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    stack_id = _register_run(solved_library, safe, {"sigma_clip": True})
+    combine_id = _register_run(solved_library, safe, {"channel_combine": {"mode": "RGB"}})
+    editor_id = _register_run(solved_library, safe, {"editor_recipe": {"ops": []}})
+
+    items = {it["run_id"]: it for it in client.get("/api/gallery").json()["items"]}
+    assert items[stack_id]["reusable"] is True
+    assert items[combine_id]["reusable"] is False
+    assert items[editor_id]["reusable"] is False
 
 
 def test_gallery_empty_when_no_runs(client):

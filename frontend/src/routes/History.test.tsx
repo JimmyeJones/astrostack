@@ -88,6 +88,16 @@ describe("HistoryView", () => {
     expect(screen.getByText("sigma-clip")).toBeInTheDocument();
   });
 
+  it("shows integration time inline on a card without opening Info", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ total_exposure_s: 2520 }),
+    ]);
+
+    renderHistory();
+    // 2520 s → "42 min" on the card metadata line, no Info toggle needed.
+    await waitFor(() => expect(screen.getByText(/42 min/)).toBeInTheDocument());
+  });
+
   it("offers Reuse settings only for reusable runs", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
       mkRun({ id: 1, output_basename: "reusable_run", reusable: true }),

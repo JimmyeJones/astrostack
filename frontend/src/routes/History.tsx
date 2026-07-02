@@ -101,6 +101,7 @@ function RunCard({ safe, run, onDelete, deleting }: {
       </Group>
       <Text size="xs" c="dimmed">
         {run.timestamp_utc.replace("T", " ").slice(0, 19)} · {run.canvas_w}×{run.canvas_h}
+        {run.total_exposure_s ? ` · ${formatIntegration(run.total_exposure_s)}` : ""}
       </Text>
 
       {adjust && run.has_fits ? (

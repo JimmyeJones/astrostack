@@ -169,7 +169,8 @@ def test_stack_info_404_without_fits(client, solved_library):
     assert r.status_code == 404
 
 
-def _add_run_with_options(data_root, safe: str, options_json: str) -> int:
+def _add_run_with_options(data_root, safe: str, options_json: str,
+                          total_exposure_s: float | None = None) -> int:
     lib = Library.open_or_create(data_root / "library")
     try:
         proj = lib.open_target(safe)
@@ -179,6 +180,7 @@ def _add_run_with_options(data_root, safe: str, options_json: str) -> int:
                 output_basename="master", fits_path=None, tiff_path=None,
                 preview_path=None, n_frames_used=3, canvas_h=8, canvas_w=8,
                 coverage_min=1, coverage_max=3, options_json=options_json,
+                total_exposure_s=total_exposure_s,
             ))
         finally:
             proj.close()
@@ -236,3 +238,15 @@ def test_stack_runs_reusable_flag(client, solved_library):
     runs = {r["id"]: r for r in client.get(f"/api/targets/{safe}/stack-runs").json()}
     assert runs[stack_id]["reusable"] is True
     assert runs[combine_id]["reusable"] is False
+
+
+def test_stack_runs_expose_integration_time(client, solved_library):
+    """The stack-runs list carries total_exposure_s so History can show it inline."""
+    import json
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _add_run_with_options(
+        solved_library, safe, json.dumps({"sigma_clip": True}),
+        total_exposure_s=2520.0)
+    runs = {r["id"]: r for r in client.get(f"/api/targets/{safe}/stack-runs").json()}
+    assert runs[run_id]["total_exposure_s"] == 2520.0

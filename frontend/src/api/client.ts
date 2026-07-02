@@ -140,6 +140,7 @@ export interface StackRun {
   has_tiff: boolean;
   has_preview: boolean;
   notes: string | null;
+  total_exposure_s?: number | null;
   reusable?: boolean;
 }
 
@@ -171,6 +172,7 @@ export interface GalleryItem {
   has_tiff: boolean;
   preview_url: string;
   options: Record<string, unknown>;
+  reusable?: boolean;
 }
 
 export interface LogEntry {
