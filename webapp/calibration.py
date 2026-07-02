@@ -155,6 +155,8 @@ def recommend_masters(
     """
     scores: dict[int, float] = {}
     best: dict[str, tuple[int, float]] = {}
+    darks: list[dict[str, Any]] = []
+    flats_by_id: dict[int, dict[str, Any]] = {}
     for m in masters:
         if not m.get("exists", True):
             continue
@@ -172,13 +174,58 @@ def recommend_masters(
         cur = best.get(kind)
         if cur is None or dist < cur[1]:
             best[kind] = (mid, dist)
+        if kind == "dark":
+            darks.append(m)
+        else:
+            flats_by_id[mid] = m
+
+    flat_id = best["flat"][0] if "flat" in best else None
+    flat_dark_id = _recommend_flat_dark(darks, flats_by_id.get(flat_id))
     return {
         "params": {"exposure_s": exposure_s, "gain": gain,
                    "sensor_temp_c": sensor_temp_c},
         "dark_master_id": best["dark"][0] if "dark" in best else None,
-        "flat_master_id": best["flat"][0] if "flat" in best else None,
+        "flat_master_id": flat_id,
+        "flat_dark_master_id": flat_dark_id,
         "scores": scores,
     }
+
+
+# A flat-dark must match the *flat's* exposure closely (it removes the flat's own
+# dark-current/bias pedestal). Only recommend one whose match distance clears
+# this bar, so we never suggest, say, a 300 s dark for a 2 s flat.
+_FLAT_DARK_MAX_DIST = 1.0
+
+
+def _recommend_flat_dark(
+    darks: list[dict[str, Any]], flat: dict[str, Any] | None,
+) -> int | None:
+    """Pick the dark master that best matches the recommended flat's exposure.
+
+    Flat-darks calibrate the *flat* (not the lights), so they match the flat's
+    exposure/gain/temperature. Returns ``None`` when there is no recommended
+    flat, the flat has no recorded exposure, or no dark matches it closely
+    enough (see :data:`_FLAT_DARK_MAX_DIST`)."""
+    if not flat or not darks:
+        return None
+    flat_exp = flat.get("exposure_s")
+    if not flat_exp:
+        return None  # can't exposure-match a flat-dark without the flat's exposure
+    flat_gain = flat.get("gain")
+    flat_temp = flat.get("sensor_temp_c")
+    best_id: int | None = None
+    best_dist = float("inf")
+    for d in darks:
+        try:
+            did = int(d["id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        dist = _match_distance(d, exposure_s=flat_exp, gain=flat_gain,
+                               sensor_temp_c=flat_temp, kind="dark")
+        if dist < best_dist:
+            best_dist = dist
+            best_id = did
+    return best_id if best_dist <= _FLAT_DARK_MAX_DIST else None
 
 
 def _next_id(entries: list[dict[str, Any]]) -> int:

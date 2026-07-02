@@ -95,6 +95,40 @@ def test_recommend_masters_picks_best_match():
     assert rec["scores"][3] > rec["scores"][4]
 
 
+def test_recommend_masters_suggests_matching_flat_dark():
+    # Lights are 30 s; flats are 2 s. The flat-dark must match the *flat's* 2 s
+    # exposure, not the lights' 30 s — so the 2 s dark wins as the flat-dark
+    # while the 30 s dark wins as the light dark.
+    masters = [
+        {"id": 1, "kind": "dark", "exposure_s": 30.0, "gain": 80.0, "exists": True},
+        {"id": 2, "kind": "dark", "exposure_s": 2.0, "gain": 80.0, "exists": True},
+        {"id": 3, "kind": "flat", "exposure_s": 2.0, "gain": 80.0, "exists": True},
+    ]
+    rec = calibration.recommend_masters(masters, exposure_s=30.0, gain=80.0)
+    assert rec["dark_master_id"] == 1        # light dark matches 30 s lights
+    assert rec["flat_master_id"] == 3
+    assert rec["flat_dark_master_id"] == 2   # flat-dark matches the 2 s flat
+
+
+def test_recommend_masters_no_flat_dark_when_no_close_exposure():
+    # Only a 300 s dark exists; the flat is 2 s. No dark is close enough to be a
+    # sensible flat-dark, so none is recommended (rather than a wild mismatch).
+    masters = [
+        {"id": 1, "kind": "dark", "exposure_s": 300.0, "gain": 80.0, "exists": True},
+        {"id": 2, "kind": "flat", "exposure_s": 2.0, "gain": 80.0, "exists": True},
+    ]
+    rec = calibration.recommend_masters(masters, exposure_s=300.0, gain=80.0)
+    assert rec["flat_master_id"] == 2
+    assert rec["flat_dark_master_id"] is None
+
+
+def test_recommend_masters_no_flat_dark_without_flat():
+    # A dark but no flat → nothing to attach a flat-dark to.
+    masters = [{"id": 1, "kind": "dark", "exposure_s": 2.0, "exists": True}]
+    rec = calibration.recommend_masters(masters, exposure_s=30.0)
+    assert rec["flat_dark_master_id"] is None
+
+
 def test_recommend_masters_skips_missing_and_handles_empty():
     # A master whose file is gone must never be recommended.
     masters = [{"id": 1, "kind": "dark", "exposure_s": 30.0, "exists": False}]

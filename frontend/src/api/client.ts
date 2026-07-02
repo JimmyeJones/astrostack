@@ -301,6 +301,7 @@ export interface CalibrationSuggestions {
   params: { exposure_s: number | null; gain: number | null; sensor_temp_c: number | null };
   dark_master_id: number | null;
   flat_master_id: number | null;
+  flat_dark_master_id: number | null;
   scores: Record<string, number>;
   n_frames: number;
 }

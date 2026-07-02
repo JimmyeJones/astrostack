@@ -90,27 +90,33 @@ export function StackView() {
   const sug = suggestions.data;
   const recDarkId = sug?.dark_master_id ?? null;
   const recFlatId = sug?.flat_master_id ?? null;
-  const masterOpts = (kind: string) =>
+  const recFlatDarkId = sug?.flat_dark_master_id ?? null;
+  // Badge the master matching `recId` (may differ per select — the light dark
+  // and the flat-dark are both "dark" masters but recommended for different
+  // exposures).
+  const masterOpts = (kind: string, recId: number | null) =>
     (masters.data ?? [])
       .filter((m) => m.kind === kind && m.exists)
       .map((m) => {
-        const recId = kind === "dark" ? recDarkId : recFlatId;
         const star = m.id === recId ? " ★ recommended" : "";
         return {
           value: String(m.id),
           label: `${m.name} (${m.n_frames} frames, ${m.width_px}×${m.height_px})${star}`,
         };
       });
-  const darkOpts = masterOpts("dark");
-  const flatOpts = masterOpts("flat");
+  const darkOpts = masterOpts("dark", recDarkId);
+  const flatDarkOpts = masterOpts("dark", recFlatDarkId);
+  const flatOpts = masterOpts("flat", recFlatId);
   const hasMasters = darkOpts.length > 0 || flatOpts.length > 0;
   // Show the "use recommended" hint only when there's a suggestion the user
-  // hasn't already applied.
+  // hasn't already applied. The flat-dark is only relevant once a flat is set.
   const canApplyRec = (recDarkId !== null && String(values.dark_master_id ?? "") !== String(recDarkId))
-    || (recFlatId !== null && String(values.flat_master_id ?? "") !== String(recFlatId));
+    || (recFlatId !== null && String(values.flat_master_id ?? "") !== String(recFlatId))
+    || (recFlatDarkId !== null && String(values.flat_dark_master_id ?? "") !== String(recFlatDarkId));
   const applyRecommended = () => {
     if (recDarkId !== null) set("dark_master_id", String(recDarkId));
     if (recFlatId !== null) set("flat_master_id", String(recFlatId));
+    if (recFlatDarkId !== null) set("flat_dark_master_id", String(recFlatDarkId));
   };
   const asStr = (v: unknown) => (v === undefined || v === null ? null : String(v));
   const running = job && (job.state === "running" || job.state === "queued");
@@ -199,7 +205,7 @@ export function StackView() {
                     label="Flat-dark (optional)"
                     description="A dark matched to the flat's exposure, subtracted from the flat before normalising for a more accurate flat."
                     placeholder="None" clearable
-                    data={darkOpts} value={asStr(values.flat_dark_master_id)}
+                    data={flatDarkOpts} value={asStr(values.flat_dark_master_id)}
                     onChange={(v) => set("flat_dark_master_id", v)}
                   />
                 ) : null}

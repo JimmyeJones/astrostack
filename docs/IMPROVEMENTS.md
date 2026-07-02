@@ -39,10 +39,6 @@ _(none — claim an item here with your branch name)_
   testable in isolation from real hardware. (M, correctness)
 
 ### Features that serve real workflows
-- Auto-suggest a **flat-dark** too — extend `recommend_masters` to pick a dark
-  whose exposure matches the recommended flat's exposure (flat-darks match the
-  flat, not the lights), and add it to the "Use recommended" one-click apply.
-  (S, approachability/correctness)
 - Show integration time + frame count on **Gallery** cards too, reusing the new
   `/stack-runs/{id}/info` endpoint + `formatIntegration` helper (History already
   does this via the Info panel). (S, approachability)
@@ -109,6 +105,13 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Auto-suggest a matching flat-dark** — `recommend_masters` now also returns
+  `flat_dark_master_id`: the dark whose exposure best matches the *recommended
+  flat* (flat-darks calibrate the flat, not the lights), gated so a wildly
+  mismatched dark (e.g. 300 s for a 2 s flat) is never suggested. The Stack
+  form's flat-dark selector badges it "★ recommended" and the one-click "Use
+  recommended" now fills it in too. (v0.18.2, this run)
 
 - **Drizzle flux-scale fix** — `DrizzleStacker.result()` no longer divides the
   already-averaged `out_img` by `out_wht` (the STScI drizzle library keeps
