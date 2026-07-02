@@ -20,19 +20,36 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
-- **Outlier-safe drizzle** — two-pass κ-σ outlier rejection for the drizzle
-  path (satellites/plane trails/cosmic rays currently land permanently in
-  drizzled output), plus parity fixes (hot-pixel suppression and quality
-  weights were silently ignored by drizzle) and a hot-path memory-safety fix
-  (the unused drizzle context bitmask grows a full-canvas int32 plane per 32
-  frames, re-copied on growth — tens of GB on 5k+ sub stacks). (M–L,
-  correctness/scale) — branch `claude/astrostack-leverage-improvement-vcithb`
+_(none — claim an item here with your branch name)_
 
 ---
 
 ## Ideas (pick roughly top-down; use the value ÷ effort×risk rule)
 
 ### Correctness & robustness (highest priority)
+- Implement the dead `transparency_score` frame metric (declared in the DB
+  schema and `FrameRow` since day one but never computed) — e.g. median star
+  flux vs the target's per-star baseline — and feed it into quality weighting
+  and an advisory "poor transparency" grader hint. Turns two schema fields
+  into real value on cloudy-night data. (M, correctness)
+- Reclaim streaked subs: QC auto-rejects a whole frame on a detected
+  satellite streak, discarding ~99% good pixels. Now that both stacking paths
+  have per-pixel rejection (sigma-clip and `drizzle_reject`), offer an opt-in
+  "keep streaked frames when rejection is on" so big stacks keep that signal.
+  (S–M, correctness/scale)
+- Iterated κ-σ rejection (both paths): a very bright outlier inflates the
+  pass-1 σ enough that clipping can't fire below ~11 frames
+  ((n−1)/√n < κ). One re-estimation round after the first clip would let
+  small stacks reject trails too. (M, correctness)
+- Bias masters can be built but are never applied — `CalibrationMasters.load`
+  only takes dark/flat/flat-dark. Wire bias in (and dark *scaling* by
+  exposure ratio once bias exists) for mismatched-exposure dark workflows.
+  (M, correctness)
+- First-class session/night dimension in the project schema (frames only have
+  `timestamp_utc`): per-session sky levelling before combine, per-session
+  calibration binding, per-night QC roll-ups. Coverage-levelling's docstring
+  already names "between sessions" as motivation but keys on coverage count.
+  Large but high value for the multi-night Seestar workflow. (L, correctness)
 - Audit NaN/coverage handling on the newer paths (calibration, mono) for
   single-frame and mosaic-edge cases. Add edge-case tests. (S–M) — *channel
   combine done (v0.16.1); mono single-frame + sigma-clip verified (v0.22.1);
@@ -110,6 +127,20 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Outlier-safe drizzle** — new opt-in `drizzle_reject`: two-pass κ-σ
+  rejection for the drizzle path (pass 1 drizzles values + squares for
+  per-output-pixel contribution statistics, pass 2 zero-weights contributions
+  outside mean ± κ·σ). Removes satellites/plane trails/cosmic rays that
+  single-pass drizzle kept forever, without eating star cores under dither
+  (output-space statistics cancel PSF-gradient systematics; verified to <2%
+  star photometry). Plus drizzle parity/memory fixes shipped alongside:
+  hot-pixel suppression and quality weights were silently ignored on the
+  drizzle path, NaN input pixels were injected as zeros, and the unused
+  drizzle context bitmask grew a full-canvas int32 plane per 32 frames with a
+  full re-copy each time (tens of GB + quadratic copying on 5k+ sub stacks —
+  now disabled). Memory guard charges the rejection pass; Stack form gained
+  the toggle + a "sigma-clip doesn't cover drizzle" hint. (v0.24.0, this run)
 
 - **Editable notes/label on History cards** — the long-standing `notes` column
   finally has a UI: a new `PATCH /api/targets/{safe}/stack-runs/{id}` (trims

@@ -21,10 +21,9 @@ sum by an actual per-pixel weight keeps brightness consistent everywhere.
 Memory
 ------
 For typical Seestar canvases (~1920×1080 RGB) each float32 accumulator is
-about 25 MB — a couple hundred MB for everything. The heavy out-of-core
-mmap variant is wired into ``stack.stacker`` only when the canvas exceeds a
-configurable threshold; both classes here are simple in-RAM versions that
-the mmap variant inherits from in the future.
+about 25 MB — a couple hundred MB for everything. Both classes are simple
+in-RAM accumulators; oversized canvases are refused up-front by the memory
+guard in ``stack.stacker`` (there is no out-of-core variant).
 """
 
 from __future__ import annotations

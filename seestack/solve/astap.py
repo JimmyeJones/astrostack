@@ -15,8 +15,7 @@ This module is a thin wrapper that:
 2. Runs the solver on a FITS file with sensible defaults for Seestar (~1° FOV).
 3. Parses the resulting ``.wcs`` sidecar into an astropy WCS object.
 
-It is a stub for M1 — the full implementation lands in M3 along with parallel
-running, retries, and progress reporting.
+Parallel running and progress reporting live in ``solve.runner``.
 """
 
 from __future__ import annotations
