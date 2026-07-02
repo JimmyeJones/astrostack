@@ -27,8 +27,9 @@ _(none — claim an item here with your branch name)_
 ## Ideas (pick roughly top-down; use the value ÷ effort×risk rule)
 
 ### Correctness & robustness (highest priority)
-- Audit NaN/coverage handling on the newer paths (calibration, mono, channel
-  combine) for single-frame and mosaic-edge cases. Add edge-case tests. (S–M)
+- Audit NaN/coverage handling on the newer paths (calibration, mono) for
+  single-frame and mosaic-edge cases. Add edge-case tests. (S–M) — *channel
+  combine done this run (v0.14.1); calibration/mono still to audit.*
 - Flat calibration: optionally dark-subtract the flat before normalising
   (flat-dark support) for more correct flats. Currently mean-normalised only. (M)
 - Channel combine: reproject stacks that don't share a canvas (via WCS) instead
@@ -97,6 +98,11 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- Channel-combine NaN fix — LRGB pixels covered in G/B/L but uncovered in a
+  colour channel now become cleanly uncovered (NaN) instead of `[NaN, 0, 0]`
+  (which zeroed real G/B signal at mosaic edges). Added NaN/coverage +
+  single-pixel edge tests. (v0.14.1, this run)
 
 - Settings backup & restore — `GET /api/settings/export` (self-identifying JSON
   envelope, auth/derived fields excluded) + `POST /api/settings/import`

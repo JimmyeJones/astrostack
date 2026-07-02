@@ -72,6 +72,12 @@ def combine_channels(
         cur = luminance(rgb)
         with np.errstate(invalid="ignore", divide="ignore"):
             scale = np.where(np.abs(cur) > 1e-6, lum_target / cur, 0.0)
+        # A pixel whose RGB luminance is NaN is uncovered in at least one colour
+        # channel — its colour is undefined, so mark it fully uncovered (NaN)
+        # rather than letting scale=0 zero-out the channels that *were* covered.
+        # This keeps the "NaN = no coverage" invariant clean at mosaic edges
+        # where per-filter footprints differ.
+        scale = np.where(np.isnan(cur), np.nan, scale)
         rgb = rgb * scale[..., None]
 
     return rgb.astype(np.float32, copy=False)
