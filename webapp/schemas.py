@@ -76,7 +76,10 @@ class BulkFrameAction(BaseModel):
     # (`reject_streaked`), or accept/reject an explicit list of ids.
     action: Literal["accept", "reject", "reject_worst", "reject_streaked"]
     ids: list[int] | None = None
-    metric: Literal["fwhm_px", "star_count", "eccentricity_median", "sky_adu_median"] = "fwhm_px"
+    metric: Literal[
+        "fwhm_px", "star_count", "eccentricity_median", "sky_adu_median",
+        "transparency_score",
+    ] = "fwhm_px"
     fraction: float = 0.1
 
 

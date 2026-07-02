@@ -69,6 +69,12 @@ _(none — claim an item here with your branch name)_
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
 - Per-target "notes/tags" search improvements and saved filters in Library. (S)
+- **Inline reject-reason on rejected frame rows** — rejected rows in the Target
+  table are only dimmed; add a small muted reason chip/tooltip on each rejected
+  row (reusing `reject_reason`, now surfaced in the breakdown badge) so a user
+  scanning the table sees *why each specific frame* was dropped, not just the
+  aggregate. Frontend-only. (S, approachability)
+
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
@@ -111,6 +117,14 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **"Reject worst by transparency" bulk action** — building on this run's
+  `transparency_score`, the `reject_worst` `BulkFrameAction` metric enum and the
+  Target view's "Reject worst by" dropdown now include Transparency. Because
+  higher transparency is *better*, the worst = the *lowest* scores, so the
+  engine's "higher is better" flag set was extended (`star_count` +
+  `transparency_score`). A user can now drop their haziest subs in one gesture.
+  (v0.35.0, this run)
 
 - **Editor undo/redo keyboard shortcuts** — the editor's undo/redo buttons now
   have keyboard equivalents: Cmd/Ctrl+Z undoes an op-pipeline change, Cmd/Ctrl+

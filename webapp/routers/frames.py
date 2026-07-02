@@ -144,8 +144,10 @@ def bulk_frames(safe: str, body: BulkFrameAction, request: Request) -> dict:
         elif body.action == "reject_worst":
             frames = [f for f in proj.iter_frames(accepted_only=True)
                       if getattr(f, body.metric) is not None]
-            # Higher FWHM/ecc/sky is worse; higher star_count is better.
-            reverse = body.metric != "star_count"
+            # Higher FWHM/ecc/sky is worse; higher star_count / transparency is
+            # better (so their "worst" are the *lowest* values).
+            higher_is_better = {"star_count", "transparency_score"}
+            reverse = body.metric not in higher_is_better
             frames.sort(key=lambda f: getattr(f, body.metric), reverse=reverse)
             n = int(len(frames) * max(0.0, min(1.0, body.fraction)))
             for f in frames[:n]:
