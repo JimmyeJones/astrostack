@@ -27,6 +27,16 @@ _(none — claim an item here with your branch name)_
 ## Ideas (pick roughly top-down; use the value ÷ effort×risk rule)
 
 ### Correctness & robustness (highest priority)
+- **Eccentricity factor in quality weighting** — `compute_frame_weights` now
+  weights by FWHM / star-count / sky / transparency (v0.36.0) but not
+  `eccentricity_median`, which is already computed per frame. Elongated stars
+  signal tracking error / wind on that whole sub, so a
+  `clip(median_ecc / frame_ecc, min, 1.0)` factor (guarding `frame_ecc == 0` as
+  the neutral best case) would down-weight trailed frames symmetrically with the
+  others. Watch for double-counting vs FWHM (both partly track seeing) — they
+  capture size vs shape, so it's defensible, but validate on a synthetic set
+  before flipping. Additive; gated by the off-by-default `quality_weighted`.
+  (S, correctness)
 - Per-pixel extremes / percentile rejection for small stacks (the *robust*
   fix for a lone satellite/plane trail below ~11 frames). **NB:** the previously
   filed "iterated κ-σ" idea was investigated and dropped — re-estimation clips
@@ -60,6 +70,19 @@ _(none — claim an item here with your branch name)_
 ### Features that serve real workflows
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
+- **Transparency-night badge on History/Gallery cards** — the Stack-form
+  transparency hint (v0.36.1) only fires *before* a run. Persist the run's
+  median-transparency-vs-target-baseline verdict (or recompute it) and show a
+  small "hazy night" badge on the completed run's History and Gallery cards, so
+  a user browsing past stacks can see at a glance which were shot through haze
+  without reopening the frames. Reuse the within-target normalisation.
+  (S, approachability)
+- **Surface the quality-weighting summary in the run Info panel** — a
+  quality-weighted stack already logs `WeightingStats` (n_weighted, min/max/
+  median weight) but the user never sees it. Record it on the run (or recompute
+  cheaply) and show "N frames down-weighted, weight range 0.31–1.00" in the
+  Stack Info panel, so a user can trust *that* weighting did something and how
+  aggressive it was (trust pillar / Method D). (S, approachability)
 
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
