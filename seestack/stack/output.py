@@ -35,15 +35,26 @@ log = logging.getLogger(__name__)
 
 OUTPUT_DIRNAME = "output"
 
+_UNSAFE_BASENAME_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
 
-def safe_basename(name: str) -> str:
-    """Sanitize a user-supplied output name to a single safe filename stem.
 
-    Strips path separators and ``..`` (so a crafted ``output_name`` can't write
-    outside the project's ``output/`` dir), keeping only ``[A-Za-z0-9._-]``.
+def _sanitize_basename(name: str) -> str:
+    """Constrain an output basename to safe filename characters.
+
+    ``out_basename`` can originate from a web API request (stack/editor
+    "output name" fields), so it must never be able to place path separators
+    or ``..`` into the joined path and write outside ``<project>/output/``.
     """
-    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", (name or "").strip()).strip("._-")
-    return (cleaned or "master")[:80]
+    cleaned = _UNSAFE_BASENAME_CHARS.sub("_", name.strip())
+    cleaned = cleaned.strip("._-")
+    return cleaned[:128] or "master"
+
+
+# Public alias — used by the webapp (pipeline) and its tests.
+def safe_basename(name: str) -> str:
+    """Sanitize a user-supplied output name to a single safe filename stem
+    (see :func:`_sanitize_basename`)."""
+    return _sanitize_basename(name)
 
 
 def write_stack_outputs(
@@ -69,7 +80,7 @@ def write_stack_outputs(
         ``"autostretch"`` applies a conservative STF stretch (sky → ~6% grey)
         for direct viewing.
     """
-    out_basename = safe_basename(out_basename)
+    out_basename = _sanitize_basename(out_basename)
     out_dir = Path(project_dir) / OUTPUT_DIRNAME
     out_dir.mkdir(parents=True, exist_ok=True)
 

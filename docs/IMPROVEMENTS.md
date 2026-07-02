@@ -55,6 +55,12 @@ _(none — claim an item here with your branch name)_
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+- Chip away at the ~127 pre-existing `ruff check .` findings (don't add new ones);
+  consider wiring ruff into CI once the count is low. (L, correctness/maintainability)
+- Add a retention/pruning policy for `jobs.sqlite` so the job history can't grow
+  unbounded on a long-lived NAS deployment. (S, scale)
+- `GET /api/stats` re-opens every target's SQLite project on each call — cache or
+  batch it so the dashboard stays fast with many targets. (M, scale)
 - Add a `SessionStart` hook (or a `scripts/setup.sh`) that provisions the venv +
   `npm ci` so every autonomous iteration starts from a known-green baseline. (S)
 - CI workflow (GitHub Actions) running the Python + frontend suites on PRs, so
@@ -79,6 +85,11 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Autonomous run #1 (agent):** security + reliability/operability hardening +
+  frontend error states — `output_name` sanitizer, `bayer` param validation, 404s
+  for unknown targets, settings bounds (pydantic `Field` ge/le + 422), jobs-list
+  clamp, shared `QueryError` component across 7 routes, editor-op pixel tests.
+  (PR #28)
 - Autonomous dev playbook (`AGENTS.md`) + this backlog.
 - Mono stacking + LRGB/RGB channel combine — `StackOptions.mono`, `channel_combine`,
   combine job/endpoint, Channel combine page. (v0.12.0, `9485e28`)

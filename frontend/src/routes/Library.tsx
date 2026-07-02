@@ -1,5 +1,5 @@
 import {
-  Alert, Badge, Button, Card, Group, Image, Select, SimpleGrid, Stack, Text, TextInput,
+  Badge, Button, Card, Group, Image, Select, SimpleGrid, Stack, Text, TextInput,
   Title, Loader, Center, Chip,
 } from "@mantine/core";
 import { IconChevronRight, IconSearch, IconStars } from "@tabler/icons-react";
@@ -7,6 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type Target } from "../api/client";
+import { QueryError } from "../components/QueryError";
 
 function expo(seconds: number): string {
   if (!seconds) return "—";
@@ -76,7 +77,9 @@ function TargetCard({ t }: { t: Target }) {
 }
 
 export function Library() {
-  const { data, isLoading, isError, error } = useQuery({ queryKey: ["targets"], queryFn: api.listTargets });
+  const { data, isLoading, isError, error, refetch } = useQuery({
+    queryKey: ["targets"], queryFn: api.listTargets,
+  });
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortKey>("recent");
   const [activeTags, setActiveTags] = useState<string[]>([]);
@@ -101,8 +104,8 @@ export function Library() {
     return sortTargets(filtered, sort);
   }, [targets, search, sort, activeTags]);
 
-  if (isError) {
-    return <Alert color="red" m="md" title="Could not load targets">{(error as Error)?.message}</Alert>;
+  if (isError && !data) {
+    return <QueryError error={error} onRetry={() => refetch()} />;
   }
   if (isLoading) {
     return <Center h={300}><Loader /></Center>;

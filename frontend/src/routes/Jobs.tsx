@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { type ReactNode } from "react";
 import { api, type Job } from "../api/client";
+import { QueryError } from "../components/QueryError";
 
 const COLOR: Record<string, string> = {
   running: "violet",
@@ -79,7 +80,7 @@ function JobRow({ job, onCancel }: { job: Job; onCancel: () => void }) {
 
 export function JobsView() {
   const qc = useQueryClient();
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["jobs"],
     queryFn: api.listJobs,
     refetchInterval: 1500,
@@ -96,6 +97,9 @@ export function JobsView() {
     (j) => !["running", "queued"].includes(j.state),
   ).length;
 
+  if (isError && !data) {
+    return <QueryError error={error} onRetry={() => refetch()} />;
+  }
   if (isLoading) {
     return (
       <Center h={300}>

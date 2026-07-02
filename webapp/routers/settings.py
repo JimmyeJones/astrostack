@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import ValidationError
 
 from webapp import deps
 
@@ -35,5 +36,11 @@ def get_settings(request: Request) -> dict[str, Any]:
 @router.put("")
 def update_settings(patch: dict[str, Any], request: Request) -> dict[str, Any]:
     store = deps.get_settings_store(request)
+    # Strip auth credentials (managed only via /api/auth/password) and surface a
+    # 422 rather than a 500 when a patch fails validation.
     clean = {k: v for k, v in patch.items() if k not in _AUTH_KEYS}
-    return _serialize(store.update(clean))
+    try:
+        s = store.update(clean)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return _serialize(s)

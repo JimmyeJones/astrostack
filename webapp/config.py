@@ -22,7 +22,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 log = logging.getLogger(__name__)
 
@@ -55,9 +55,11 @@ class Settings(BaseModel):
     watcher_enabled: bool = True
     # A file must be size+mtime-stable for this long before it's ingested, so
     # half-copied frames arriving over SMB/NFS are never read mid-write.
-    watch_quiet_period_s: int = 30
+    # Bounded so a typo (e.g. 0) can't defeat the half-written-file guard,
+    # and an absurd value can't stall ingestion for days.
+    watch_quiet_period_s: int = Field(default=30, ge=1, le=3600)
     # Polling safety net — inotify is unreliable on network mounts.
-    watch_poll_interval_s: int = 300
+    watch_poll_interval_s: int = Field(default=300, ge=2, le=86400)
 
     # --- auto pipeline (configurable per the user's request) ---------------
     copy_to_cache: bool = False
@@ -68,14 +70,16 @@ class Settings(BaseModel):
 
     # --- plate solving -----------------------------------------------------
     astap_path: str | None = None  # falls back to $SEESTACK_ASTAP_PATH, then PATH
-    astap_fov_deg: float = 1.3
-    astap_timeout_s: float = 60.0
+    astap_fov_deg: float = Field(default=1.3, ge=0.1, le=20.0)
+    # A too-low timeout (e.g. 0) would make every solve attempt fail instantly.
+    astap_timeout_s: float = Field(default=60.0, ge=5.0, le=1800.0)
     # Use the telescope target RA/Dec from each frame's FITS header as a
     # plate-solve search hint (localises ASTAP's search; speeds up solving).
     astap_use_solve_hints: bool = True
 
     # --- compute -----------------------------------------------------------
-    cpu_workers: int | None = Field(default_factory=_default_cpu_workers)
+    # ge=1: a zero/negative worker count would crash the thread/process pool.
+    cpu_workers: int | None = Field(default_factory=_default_cpu_workers, ge=1)
 
     # --- Seestar telescope integration -------------------------------------
     # Monitor (and optionally control) Seestar scopes over the LAN via the
@@ -90,8 +94,8 @@ class Settings(BaseModel):
     seestar_scan_subnet: str = ""
     # Devices that auto-discovery can't reach can be pinned here by IP.
     seestar_known_ips: list[str] = Field(default_factory=list)
-    seestar_scan_interval_s: int = 300
-    seestar_poll_interval_s: int = 5
+    seestar_scan_interval_s: int = Field(default=300, ge=30, le=86400)
+    seestar_poll_interval_s: int = Field(default=5, ge=1, le=3600)
 
     # --- stacking ----------------------------------------------------------
     # Global default StackOptions (per-target overrides live in project meta).
@@ -104,27 +108,8 @@ class Settings(BaseModel):
     auth_password_hash: str = ""
     auth_salt: str = ""
 
-    # ---- validation -------------------------------------------------------
-
-    @field_validator(
-        "watch_quiet_period_s", "watch_poll_interval_s", "astap_timeout_s",
-        "astap_fov_deg", "seestar_scan_interval_s", "seestar_poll_interval_s",
-    )
-    @classmethod
-    def _at_least_one(cls, v):  # noqa: ANN001
-        """Clamp these to a sane floor rather than reject — a bad value in
-        config.json must not crash loading and wipe every other setting."""
-        try:
-            return type(v)(max(v, type(v)(1)))
-        except (TypeError, ValueError):
-            return v
-
-    @field_validator("cpu_workers")
-    @classmethod
-    def _workers_positive(cls, v):  # noqa: ANN001
-        if v is None:
-            return None
-        return max(1, int(v))
+    # Numeric ranges are enforced by the per-field ``Field(ge=, le=)`` bounds
+    # above (a bad value 422s on the settings PUT; see routers/settings.py).
 
     # ---- resolved paths ---------------------------------------------------
 
@@ -158,6 +143,41 @@ class Settings(BaseModel):
             d.mkdir(parents=True, exist_ok=True)
 
 
+def _load_resilient(text: str, root: str) -> "Settings":
+    """Load settings from JSON, tolerating a few bad fields on upgrade.
+
+    A single out-of-range or malformed value must never wipe every other
+    setting (the app persists user config here, and field bounds can tighten
+    between versions). We validate, and if that fails we drop only the offending
+    fields — which then fall back to their defaults — and retry, rather than
+    discarding the whole file.
+    """
+    try:
+        return Settings.model_validate_json(text)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        raw = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        log.warning("config.json is not valid JSON; using defaults")
+        return Settings(data_root=root)
+    if not isinstance(raw, dict):
+        return Settings(data_root=root)
+    from pydantic import ValidationError
+
+    for _ in range(len(raw) + 1):
+        try:
+            return Settings.model_validate(raw)
+        except ValidationError as exc:
+            bad = {e["loc"][0] for e in exc.errors() if e.get("loc")}
+            if not bad or not (bad & raw.keys()):
+                break
+            for k in bad:
+                raw.pop(k, None)  # drop the bad field → it reverts to default
+            log.warning("config.json: reset invalid field(s) %s to defaults", sorted(bad))
+    return Settings(data_root=root)
+
+
 class SettingsStore:
     """Thread-safe load/save wrapper around a single config.json."""
 
@@ -167,15 +187,11 @@ class SettingsStore:
         # Bootstrap: load existing config if present, else defaults.
         cfg_path = Path(root) / "state" / CONFIG_FILENAME
         if cfg_path.exists():
-            try:
-                self._settings = Settings.model_validate_json(cfg_path.read_text())
-                # Honor an explicit data_root override from env on every boot.
-                self._settings.data_root = root
-            except Exception as exc:  # noqa: BLE001
-                log.warning("could not parse %s (%s); using defaults", cfg_path, exc)
-                self._settings = Settings(data_root=root)
+            self._settings = _load_resilient(cfg_path.read_text(), root)
         else:
             self._settings = Settings(data_root=root)
+        # Honor an explicit data_root override from env on every boot.
+        self._settings.data_root = root
         self._settings.ensure_dirs()
         self.save()
 

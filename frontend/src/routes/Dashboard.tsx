@@ -1,5 +1,5 @@
 import {
-  Alert, Badge, Card, Center, Group, Image, Loader, Paper, SimpleGrid, Stack, Text, Title,
+  Badge, Card, Center, Group, Image, Loader, Paper, SimpleGrid, Stack, Text, Title,
 } from "@mantine/core";
 import {
   IconActivity, IconClock, IconLayoutGrid, IconPhoto, IconStack2, IconStars,
@@ -7,6 +7,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
+import { QueryError } from "../components/QueryError";
 
 function StatCard({ icon, label, value, sub }: {
   icon: React.ReactNode; label: string; value: string; sub?: string;
@@ -28,12 +29,12 @@ function StatCard({ icon, label, value, sub }: {
 }
 
 export function Dashboard() {
-  const { data, isLoading, isError, error } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["stats"], queryFn: api.getStats, refetchInterval: 10_000,
   });
 
-  if (isError) {
-    return <Alert color="red" m="md" title="Could not load the dashboard">{(error as Error)?.message}</Alert>;
+  if (isError && !data) {
+    return <QueryError error={error} onRetry={() => refetch()} />;
   }
   if (isLoading || !data) {
     return <Center h={300}><Loader /></Center>;

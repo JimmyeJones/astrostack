@@ -166,10 +166,10 @@ they serve and a size estimate, so future runs (and other agents) can pick them 
 
 A task is shippable only when ALL of these hold:
 
-- [ ] Python suite green:
-      `python -m pytest tests/ --ignore=tests/test_compare_dialog.py --ignore=tests/test_end_to_end.py --ignore=tests/test_footprint_view.py -q`
-      (those 3 are Qt-GUI tests that need PySide6, absent in this env — leave them
-      ignored; do **not** "fix" them by weakening anything).
+- [ ] Python suite green — ideally the full suite headless
+      (`QT_QPA_PLATFORM=offscreen python -m pytest -q`); if Qt libs can't be
+      installed, the fallback that skips the 3 GUI tests is in §7. Either way, do
+      **not** "fix" a failing test by weakening it.
 - [ ] New behaviour has tests. Bug fixes get a regression test that fails before
       and passes after.
 - [ ] If you touched `frontend/`: `npx tsc --noEmit` clean, `npx vitest run`
@@ -230,18 +230,31 @@ Key invariants to respect:
 Recreate tooling at the start of each run if missing:
 
 ```bash
-# Python engine + webapp (uses a scratch venv; python3.11+ is fine)
-python3 -m venv /tmp/astrotest && . /tmp/astrotest/bin/activate
-pip install -q numpy scipy astropy photutils scikit-image Pillow tifffile \
-  drizzle reproject astroalign ccdproc tqdm platformdirs matplotlib pydantic \
-  fastapi "uvicorn[standard]" watchdog sse-starlette python-multipart pytest httpx
+# Python engine + webapp (needs Python 3.12 specifically; pyproject pins
+# >=3.12,<3.13 — use python3.12 explicitly if the default python3 is older).
+python3.12 -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev,web]"
+
+# Headless container extras: PySide6/pytest-qt need libEGL at import time even
+# though the webapp never opens a window. (Install once per fresh container.)
+apt-get update && apt-get install -y libegl1 libgl1 libxkbcommon0
 
 # Frontend
-cd frontend && npm ci
+cd frontend && npm install
 ```
 
-PySide6/Qt is intentionally absent — the 3 GUI tests stay ignored. Put any
-temp/scratch files under the session scratchpad dir, never in the repo.
+**Running the tests:** prefer the full suite headless —
+`QT_QPA_PLATFORM=offscreen python -m pytest -q` — so the Qt/GUI tests run too.
+If the Qt system libs above can't be installed in your environment, fall back to
+skipping just those three:
+`python -m pytest tests/ --ignore=tests/test_compare_dialog.py --ignore=tests/test_end_to_end.py --ignore=tests/test_footprint_view.py -q`
+(that's a fallback, not a licence to ignore GUI regressions when Qt *is*
+available). Frontend: `npx tsc --noEmit`, `npx vitest run`, `npx vite build`.
+
+Lint is not enforced in CI yet, but check before claiming quality-bar work:
+`ruff check .` has pre-existing debt — don't let it block unrelated work, and
+don't add to it. Put temp/scratch files under the session scratchpad, never in
+the repo.
 
 > Tip: a `SessionStart` hook that runs the above makes every run reliable. If one
 > doesn't exist yet, creating it is itself a good backlog item.

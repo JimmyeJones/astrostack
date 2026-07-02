@@ -6,6 +6,7 @@ import {
 import { IconDownload, IconSearch } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { api, type LogEntry } from "../api/client";
+import { QueryError } from "../components/QueryError";
 
 const LEVEL_COLOR: Record<string, string> = {
   DEBUG: "gray",
@@ -77,7 +78,9 @@ export function LogsView() {
       />
 
       <Paper withBorder style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
-        {logs.isLoading ? (
+        {logs.isError && !logs.data ? (
+          <QueryError error={logs.error} onRetry={() => logs.refetch()} />
+        ) : logs.isLoading ? (
           <Center h="100%"><Loader /></Center>
         ) : filtered.length === 0 ? (
           <Center h="100%"><Text c="dimmed">No log lines{search ? " match the filter" : " yet"}.</Text></Center>

@@ -259,6 +259,16 @@ export function SkyView() {
           {" "}Your images sit at their plate-solved positions; newest on top where they overlap.
         </Text>
         {sky.isLoading ? <Group mt="xs" gap={6}><Loader size="xs" /><Text size="xs">Loading…</Text></Group> : null}
+        {sky.isError ? (
+          <Alert mt="xs" color="red" p="xs">
+            <Group justify="space-between" gap="xs" wrap="nowrap">
+              <Text size="xs">
+                Couldn't load sky data{sky.error instanceof Error ? `: ${sky.error.message}` : "."}
+              </Text>
+              <Button size="compact-xs" variant="light" onClick={() => sky.refetch()}>Retry</Button>
+            </Group>
+          </Alert>
+        ) : null}
         {sky.data && sky.data.images.length === 0 ? (
           <Alert mt="xs" color="yellow" p="xs">
             <Text size="xs">

@@ -9,6 +9,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { api, type GalleryItem, type StackOptionField } from "../api/client";
 import { ImageLightbox } from "../components/ImageLightbox";
+import { QueryError } from "../components/QueryError";
 
 /** Format an option value for display (booleans → On/Off, round floats). */
 function fmt(v: unknown): string {
@@ -157,6 +158,9 @@ export function GalleryView() {
     return m;
   }, [schema.data]);
 
+  if (gallery.isError && !gallery.data) {
+    return <QueryError error={gallery.error} onRetry={() => gallery.refetch()} />;
+  }
   if (gallery.isLoading) {
     return <Center h={300}><Loader /></Center>;
   }

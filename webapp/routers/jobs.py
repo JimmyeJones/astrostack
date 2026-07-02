@@ -24,6 +24,7 @@ def _to_out(job: Job) -> JobOut:
 @router.get("", response_model=list[JobOut])
 def list_jobs(request: Request, limit: int = 100) -> list[JobOut]:
     jm = deps.get_job_manager(request)
+    limit = max(1, min(int(limit), 2000))
     return [_to_out(j) for j in jm.list(limit=limit)]
 
 
