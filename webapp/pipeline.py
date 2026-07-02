@@ -220,6 +220,29 @@ def _load_full_rgb_wcs(fits_path: str) -> tuple[Any, Any]:
     return rgb, wcs
 
 
+def _carry_provenance(fits_path: str) -> dict[str, Any]:
+    """Read provenance cards from a source stack FITS so a derived export can
+    keep describing the underlying integration (target, frame count, exposure).
+
+    Best-effort: any header that can't be read simply yields no carry-over cards.
+    Only the integration-describing keys are carried; ``STACKER``/``STACKMTD`` are
+    intentionally left for the caller to overwrite with the derivation method.
+    """
+    from astropy.io import fits as _fits
+
+    carry: dict[str, Any] = {}
+    try:
+        with _fits.open(fits_path) as hdul:
+            header = hdul[0].header
+            for key in ("OBJECT", "NFRAMES", "EXPOSURE", "EXPTOTAL",
+                        "COLORTYP", "DATE-OBS", "DATE-END"):
+                if key in header:
+                    carry[key] = (header[key], header.comments[key])
+    except Exception:  # noqa: BLE001 — provenance is non-critical
+        pass
+    return carry
+
+
 def _render_recipe_fullres(fits_path: str, recipe_dict: dict, progress) -> tuple[Any, Any]:
     """Apply an editor recipe to a full-res FITS. Returns ``(out_rgb, recipe)``
     where ``out_rgb`` is the display-stretched 0..1 result. A default asinh
@@ -282,10 +305,17 @@ def _apply_editor_to_run(lib: Library, safe: str, run_id: int, recipe_dict: dict
 
         out, recipe = _render_recipe_fullres(run.fits_path, recipe_dict, progress)
 
+        n_ops = len([o for o in recipe.ops if o.enabled])
+        edit_meta = _carry_provenance(run.fits_path)
+        edit_meta["STACKMTD"] = (f"editor recipe ({n_ops} ops)",
+                                 "how this image was produced")
+        edit_meta["EDITFROM"] = (int(run_id), "source stack run id")
+
         coverage = np.ones(out.shape[:2], dtype=np.float32)
         paths = write_stack_outputs(
             project_dir=proj.project_dir, rgb=out, coverage=coverage,
             wcs_text=None, out_basename=base, tiff_mode=tiff_mode,
+            header_meta=edit_meta,
         )
         new_id = proj.add_stack_run(StackRunRow(
             id=None,

@@ -131,6 +131,54 @@ def test_export_creates_new_run_non_destructive(client, solved_library):
     assert edited["has_fits"] and edited["notes"] == "edited"
 
 
+def test_export_carries_provenance_headers(client, solved_library):
+    """The derived master.fits keeps the source integration provenance
+    (OBJECT/NFRAMES/EXPTOTAL) and records how it was produced (STACKMTD/EDITFROM)."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="prov_src")
+    # Stamp provenance cards onto the source FITS, as a real stack would.
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == rid)
+            with fits.open(run.fits_path, mode="update") as hdul:
+                hdul[0].header["OBJECT"] = "M42"
+                hdul[0].header["NFRAMES"] = 840
+                hdul[0].header["EXPTOTAL"] = 2520.0
+                hdul[0].header["STACKER"] = "sigma-clip"
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    recipe = {"ops": [{"id": "tone.stretch", "params": {"stretch": 0.6}}]}
+    r = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/export",
+                    json={"recipe": recipe, "output_name": "prov_edit"})
+    assert r.status_code == 200
+    assert _wait_job(client, r.json()["job_id"])["state"] == "done"
+
+    runs = client.get(f"/api/targets/{safe}/stack-runs").json()
+    edited = next(x for x in runs if x["output_basename"] == "prov_edit")
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            new_run = next(r for r in proj.iter_stack_runs() if r.id == edited["id"])
+            hdr = fits.getheader(new_run.fits_path)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    # Integration provenance carried forward…
+    assert hdr["OBJECT"] == "M42"
+    assert int(hdr["NFRAMES"]) == 840
+    assert float(hdr["EXPTOTAL"]) == 2520.0
+    # …and the derivation is recorded.
+    assert "editor recipe" in str(hdr["STACKMTD"])
+    assert int(hdr["EDITFROM"]) == rid
+
+
 def test_export_sanitizes_path_traversal_output_name(client, solved_library, tmp_path):
     # output_name is free text from the client and is spliced into a
     # filename under <project>/output/; a path-separator payload must not

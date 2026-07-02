@@ -32,8 +32,13 @@ _(none — claim an item here with your branch name)_
   combine done (v0.16.1); calibration/mono still to audit.*
 - Channel combine: reproject stacks that don't share a canvas (via WCS) instead
   of erroring, so filters shot in separate sessions can be combined. (M–L)
-- Property/edge tests for `run_stack`: empty input, all-rejected, 1 frame,
-  drizzle vs sigma-clip parity on a synthetic scene. (M)
+- **Investigate drizzle-vs-mean flux scale** — on identical frames the drizzle
+  path's median is several× lower than the sigma-clip/mean path (see
+  `test_stack_drizzle_vs_sigma_clip_parity`, which only asserts same-order-of-
+  magnitude for now). Drizzle at `scale=1.0, pixfrac=1.0` should conserve surface
+  brightness; a ~5× gap plus an "overflow encountered in divide" warning in
+  `drizzle_path.result()` suggests a normalisation/weight issue worth a dedicated
+  look. (M, correctness)
 - Seestar client (`webapp/seestar/client.py`) has no reconnect/retry on a
   dropped TCP socket — a flaky Wi-Fi link to the scope currently requires
   the user to manually reconnect via the UI. Core hardware-integration
@@ -41,29 +46,31 @@ _(none — claim an item here with your branch name)_
   testable in isolation from real hardware. (M, correctness)
 
 ### Features that serve real workflows
-- Auto-suggest calibration masters that match a target's frames (by exposure /
-  gain / sensor-temp), so a beginner doesn't have to know which dark/flat/
-  flat-dark goes with which lights. Registry already stores exposure_s/gain/temp
-  on each master; surface a "recommended" badge and pre-select the best match in
-  the Stack calibration picker. (M, approachability/correctness)
-- Carry provenance headers into editor-export FITS too — `_apply_editor_to_run`
-  writes a derived `master.fits` with no OBJECT/derived-from/recipe summary.
-  Reuse the `header_meta` arg to record what it came from. (S, correctness)
-- Show integration time + frame count on stack-run cards in History/Gallery now
-  that the data is written (EXPTOTAL/NFRAMES); a beginner reads "2.3 h, 840
-  subs" at a glance instead of digging into the FITS. (S, approachability)
-- "Stack info" panel: read the FITS header cards (NCOMBINE/NFRAMES, EXPOSURE,
-  EXPTOTAL, DATE-OBS/END, STACKER) from a run's `master.fits` and show them in
-  the History detail view — no new storage needed, just a header read + a small
-  endpoint. (S, approachability)
+- Auto-suggest a **flat-dark** too — extend `recommend_masters` to pick a dark
+  whose exposure matches the recommended flat's exposure (flat-darks match the
+  flat, not the lights), and add it to the "Use recommended" one-click apply.
+  (S, approachability/correctness)
+- Show integration time + frame count on **Gallery** cards too, reusing the new
+  `/stack-runs/{id}/info` endpoint + `formatIntegration` helper (History already
+  does this via the Info panel). (S, approachability)
 - Auto-suggest a sensible sigma-clip kappa (and whether to enable rejection)
   from the accepted-frame count — e.g. skip clipping under ~5 frames, loosen
   kappa for very large stacks — with a one-line "why" in the form. Removes a
   knob a beginner can't reason about. (M, approachability/correctness)
+- **Warn on a mismatched calibration master pick** — the flip side of the new
+  recommender: if the user selects a dark whose exposure/gain is far from the
+  target's frames (low `recommend_masters` score for the chosen id), show an
+  inline caution ("this dark was shot at 120 s but your subs are 30 s") so a
+  wrong pick doesn't silently degrade the stack. Reuses the scores already
+  returned by `/calibration-suggestions`. (S, correctness/approachability)
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
 - Drizzle memory estimate surfaced in the Stack form before you run it. (S)
 - Star-mask preview toggle in the editor (visualise the mask driving star ops). (S)
+- **Copy stack settings from a previous run** — a run's `options_json` records
+  exactly how it was made; add a "Reuse these settings" action on a History card
+  that pre-fills the Stack form from that run's options. Repeatability without
+  re-deriving knobs. (S, approachability)
 - Per-target "notes/tags" search improvements and saved filters in Library. (S)
 
 ### UX & polish
@@ -109,6 +116,33 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Auto-suggest calibration masters** — new `recommend_masters` ranks the
+  library's dark/flat masters against a target's median frame exposure/gain/temp
+  (darks match on exposure+gain+temp; flats are exposure-independent, matched on
+  gain+temp), exposed via `GET /api/targets/{safe}/calibration-suggestions`. The
+  Stack form badges the best-matching dark/flat with "★ recommended" and offers a
+  one-click "Use recommended" — a beginner no longer needs to know which master
+  goes with which lights. Advisory only; nothing is auto-applied. (v0.18.0, this run)
+
+- **Stack info panel** — new `GET /stack-runs/{id}/info` reads the provenance
+  cards from a run's `master.fits` (OBJECT, NFRAMES/NCOMBINE, EXPOSURE, EXPTOTAL,
+  DATE-OBS/END, STACKER/STACKMTD, COLORTYP, EDITFROM…) and an "Info" toggle on
+  each History card shows them, led by a friendly integration-time line
+  ("Integration: 2.3 h · 840 subs"). No new storage — just a header read.
+  (v0.17.0, this run)
+
+- `run_stack` edge-case tests — single accepted frame (degenerate stack, coverage
+  tops at 1, finite output), all-frames-rejected (raises cleanly instead of
+  garbage), and a drizzle-vs-sigma-clip order-of-magnitude parity guard. The
+  parity test surfaced a real drizzle flux-scale discrepancy, now filed as its own
+  backlog item. (v0.16.3, this run)
+
+- Editor-export provenance — the derived `master.fits` from an editor recipe now
+  carries the source integration cards (OBJECT/NFRAMES/EXPOSURE/EXPTOTAL/COLORTYP/
+  DATE-OBS/END) forward and records `STACKMTD="editor recipe (N ops)"` + `EDITFROM`
+  (source run id), so an edited export self-documents in Siril/PixInsight/APP.
+  (v0.16.2, this run)
 
 - Channel-combine provenance — the LRGB/RGB combined FITS now carries
   `NCOMBINE` (source stacks) and `STACKMTD` ("channel-combine (RGB)"), matching

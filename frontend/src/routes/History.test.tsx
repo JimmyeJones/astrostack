@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { HistoryView } from "./History";
+import { formatIntegration, HistoryView } from "./History";
 import * as client from "../api/client";
 import type { StackRun } from "../api/client";
 
@@ -67,6 +67,26 @@ describe("HistoryView", () => {
     await waitFor(() => expect(screen.queryByText("M42_stack_01")).not.toBeInTheDocument());
   });
 
+  it("shows FITS provenance when Info is toggled", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    const info = vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({
+      run_id: 1, integration_s: 2520, n_frames: 840,
+      cards: [
+        { key: "OBJECT", value: "M42", comment: "target name" },
+        { key: "STACKER", value: "sigma-clip", comment: "stacking method" },
+      ],
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Info" }));
+
+    await waitFor(() => expect(info).toHaveBeenCalledWith("M_42", 1));
+    await waitFor(() => expect(screen.getByText(/Integration: 42 min/)).toBeInTheDocument());
+    expect(screen.getByText("sigma-clip")).toBeInTheDocument();
+  });
+
   it("shows an error notification when deletion fails", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
     vi.spyOn(client.api, "deleteStackRun").mockRejectedValue(new Error("stack is in use"));
@@ -80,5 +100,16 @@ describe("HistoryView", () => {
     await waitFor(() => expect(screen.getByText("stack is in use")).toBeInTheDocument());
     // The run stays listed since the delete failed.
     expect(screen.getByText("M42_stack_01")).toBeInTheDocument();
+  });
+});
+
+describe("formatIntegration", () => {
+  it("formats hours, minutes and seconds", () => {
+    expect(formatIntegration(2520)).toBe("42 min");
+    expect(formatIntegration(8280)).toBe("2.3 h");
+    expect(formatIntegration(45)).toBe("45 s");
+    expect(formatIntegration(0)).toBe("—");
+    expect(formatIntegration(-5)).toBe("—");
+    expect(formatIntegration(36000)).toBe("10 h");
   });
 });

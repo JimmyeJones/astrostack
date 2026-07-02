@@ -1,15 +1,59 @@
 import { useState } from "react";
 import {
   ActionIcon, Alert, Badge, Button, Card, Center, Group, Image, Loader, SimpleGrid,
-  Slider, Stack, Text, Title, Tooltip,
+  Slider, Stack, Table, Text, Title, Tooltip,
 } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
-import { IconAdjustments, IconDeviceFloppy, IconDownload, IconSparkles, IconTrash } from "@tabler/icons-react";
+import { IconAdjustments, IconDeviceFloppy, IconDownload, IconInfoCircle, IconSparkles, IconTrash } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api, type StackRun } from "../api/client";
 import { ImageLightbox } from "../components/ImageLightbox";
+
+// Format an integration time in seconds as a friendly "2.3 h" / "42 min" / "8 s"
+// so a beginner reads total exposure at a glance instead of a raw second count.
+export function formatIntegration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "—";
+  if (seconds >= 3600) return `${(seconds / 3600).toFixed(seconds >= 36000 ? 0 : 1)} h`;
+  if (seconds >= 60) return `${Math.round(seconds / 60)} min`;
+  return `${Math.round(seconds)} s`;
+}
+
+function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
+  const info = useQuery({
+    queryKey: ["stack-info", safe, runId],
+    queryFn: () => api.stackRunInfo(safe, runId),
+  });
+  if (info.isLoading) return <Center h={60}><Loader size="sm" /></Center>;
+  if (info.isError) {
+    return <Text size="xs" c="dimmed">Could not read FITS header.</Text>;
+  }
+  const data = info.data!;
+  if (data.cards.length === 0) {
+    return <Text size="xs" c="dimmed">No provenance recorded in this stack's FITS.</Text>;
+  }
+  return (
+    <Stack gap={4} mt="xs">
+      {data.integration_s ? (
+        <Text size="xs" fw={600}>
+          Integration: {formatIntegration(data.integration_s)}
+          {data.n_frames ? ` · ${data.n_frames} subs` : ""}
+        </Text>
+      ) : null}
+      <Table verticalSpacing={2} horizontalSpacing="xs" fz="xs" withRowBorders={false}>
+        <Table.Tbody>
+          {data.cards.map((c) => (
+            <Table.Tr key={c.key}>
+              <Table.Td c="dimmed" style={{ whiteSpace: "nowrap" }}>{c.key}</Table.Td>
+              <Table.Td>{String(c.value)}</Table.Td>
+            </Table.Tr>
+          ))}
+        </Table.Tbody>
+      </Table>
+    </Stack>
+  );
+}
 
 // Asinh stretch controls, both 0..1 (see seestack asinh_stretch). "Stretch"
 // lifts faint nebulosity; "Black point" cleans the sky background. Users push
@@ -22,6 +66,7 @@ function RunCard({ safe, run, onDelete, deleting }: {
 }) {
   const qc = useQueryClient();
   const [adjust, setAdjust] = useState(false);
+  const [showInfo, setShowInfo] = useState(false);
   const [stretch, setStretch] = useState(DEFAULT_STRETCH);
   const [black, setBlack] = useState(DEFAULT_BLACK);
   const [cacheBust, setCacheBust] = useState(0);
@@ -127,6 +172,17 @@ function RunCard({ safe, run, onDelete, deleting }: {
             </Tooltip>
           )}
           {run.has_fits && (
+            <Tooltip label="Show how this stack was made (from the FITS header)">
+              <Button
+                size="xs" variant={showInfo ? "filled" : "light"}
+                leftSection={<IconInfoCircle size={14} />}
+                onClick={() => setShowInfo((s) => !s)}
+              >
+                Info
+              </Button>
+            </Tooltip>
+          )}
+          {run.has_fits && (
             <Button
               size="xs" variant="light" leftSection={<IconDownload size={14} />}
               component="a" href={api.stackArtifactUrl(safe, run.id, "fits")}
@@ -155,6 +211,8 @@ function RunCard({ safe, run, onDelete, deleting }: {
           </ActionIcon>
         </Tooltip>
       </Group>
+
+      {showInfo && run.has_fits ? <StackInfoPanel safe={safe} runId={run.id} /> : null}
 
       <ImageLightbox
         src={light

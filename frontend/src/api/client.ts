@@ -142,6 +142,19 @@ export interface StackRun {
   notes: string | null;
 }
 
+export interface StackInfoCard {
+  key: string;
+  value: string | number | boolean;
+  comment: string | null;
+}
+
+export interface StackRunInfo {
+  run_id: number;
+  integration_s: number | null;
+  n_frames: number | null;
+  cards: StackInfoCard[];
+}
+
 export interface GalleryItem {
   safe: string;
   target_name: string;
@@ -284,6 +297,14 @@ export interface CalibrationMaster {
   exists: boolean;
 }
 
+export interface CalibrationSuggestions {
+  params: { exposure_s: number | null; gain: number | null; sensor_temp_c: number | null };
+  dark_master_id: number | null;
+  flat_master_id: number | null;
+  scores: Record<string, number>;
+  n_frames: number;
+}
+
 function encodeRecipe(recipe: Recipe): string {
   const bytes = new TextEncoder().encode(JSON.stringify(recipe));
   let bin = "";
@@ -356,6 +377,8 @@ export const api = {
   listStackRuns: (safe: string) => req<StackRun[]>(`/api/targets/${safe}/stack-runs`),
   deleteStackRun: (safe: string, id: number) =>
     req(`/api/targets/${safe}/stack-runs/${id}`, { method: "DELETE" }),
+  stackRunInfo: (safe: string, id: number) =>
+    req<StackRunInfo>(`/api/targets/${safe}/stack-runs/${id}/info`),
   stackArtifactUrl: (safe: string, id: number, kind: "preview" | "fits" | "tiff") =>
     `/api/targets/${safe}/stack-runs/${id}/${kind}`,
   stackRenderUrl: (safe: string, id: number, stretch: number, black: number) =>
@@ -484,6 +507,8 @@ export const api = {
 
   // calibration masters (library-level dark/flat frames)
   listCalibrationMasters: () => req<CalibrationMaster[]>("/api/calibration/masters"),
+  calibrationSuggestions: (safe: string) =>
+    req<CalibrationSuggestions>(`/api/targets/${safe}/calibration-suggestions`),
   buildCalibrationMaster: (body: {
     kind: string; source_dir: string; name?: string; method?: string; sigma?: number;
   }) => req<{ job_id: string }>("/api/calibration/masters", {

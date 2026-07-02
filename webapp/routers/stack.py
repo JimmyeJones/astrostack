@@ -238,6 +238,64 @@ async def save_stack_preview(
     return {"ok": True, "stretch": stretch, "black": black}
 
 
+# Human-relevant provenance cards, in display order. Keys not present in a
+# given FITS are simply skipped, so this works for old stacks (no provenance),
+# newer stacks, channel-combines (NCOMBINE/STACKMTD) and editor exports
+# (STACKMTD/EDITFROM) alike.
+_INFO_CARDS = (
+    "OBJECT", "NFRAMES", "NCOMBINE", "EXPOSURE", "EXPTOTAL",
+    "DATE-OBS", "DATE-END", "STACKER", "STACKMTD", "COLORTYP",
+    "EDITFROM", "CREATOR", "DATE",
+)
+
+
+# NOTE: declared before the "/{kind}" download route so "info" isn't swallowed
+# by that catch-all path parameter.
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/info")
+def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
+    """Read the provenance header cards from a run's master FITS.
+
+    Lets the History view show "how this stack was made" (integration time,
+    frame count, method, dates) straight from the self-documenting FITS header —
+    no extra storage, just a cheap header read.
+    """
+    _, fits_path = _run_fits_path(request, safe, run_id)
+    if not fits_path or not Path(fits_path).exists():
+        raise HTTPException(status_code=404, detail="No FITS for this run")
+
+    from astropy.io import fits as _fits
+
+    cards: list[dict[str, Any]] = []
+    integration_s: float | None = None
+    n_frames: int | None = None
+    try:
+        header = _fits.getheader(fits_path)
+    except Exception as exc:  # noqa: BLE001 — a corrupt header shouldn't 500
+        raise HTTPException(status_code=422,
+                            detail=f"Could not read FITS header: {exc}") from exc
+    for key in _INFO_CARDS:
+        if key not in header:
+            continue
+        value = header[key]
+        # astropy returns Undefined/complex types for a few cards; coerce to a
+        # JSON-safe scalar so the response never fails to serialise.
+        if not isinstance(value, (str, int, float, bool)):
+            value = str(value)
+        cards.append({
+            "key": key,
+            "value": value,
+            "comment": str(header.comments[key]) or None,
+        })
+        if key == "EXPTOTAL":
+            with contextlib.suppress(TypeError, ValueError):
+                integration_s = float(value)
+        if key in ("NFRAMES", "NCOMBINE") and n_frames is None:
+            with contextlib.suppress(TypeError, ValueError):
+                n_frames = int(value)
+    return {"run_id": run_id, "integration_s": integration_s,
+            "n_frames": n_frames, "cards": cards}
+
+
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/{kind}")
 def download_stack_run(safe: str, run_id: int, kind: str, request: Request) -> FileResponse:
     if kind not in _KIND_FIELDS:
