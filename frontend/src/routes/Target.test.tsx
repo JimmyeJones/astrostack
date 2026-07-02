@@ -63,6 +63,29 @@ describe("TargetView streaked badge", () => {
       expect(screen.getByText("2 streaked")).toBeInTheDocument());
   });
 
+  it("rejects all streaked frames in one gesture from the badge action", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      mkFrame(1, { streak_detected: true }),
+      mkFrame(2, { streak_detected: true }),
+    ]);
+    const bulk = vi
+      .spyOn(client.api, "bulkFrames")
+      .mockResolvedValue({ changed: 2 });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    renderTarget();
+
+    const btn = await screen.findByRole("button", {
+      name: "Reject all streaked frames",
+    });
+    btn.click();
+
+    await waitFor(() =>
+      expect(bulk).toHaveBeenCalledWith("M_42", { action: "reject_streaked" }));
+  });
+
   it("omits the badge when no accepted frame carries a trail", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);

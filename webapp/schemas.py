@@ -70,9 +70,10 @@ class FramePatch(BaseModel):
 
 
 class BulkFrameAction(BaseModel):
-    # Reject the worst `fraction` of accepted frames by `metric`, or
-    # accept/reject an explicit list of ids.
-    action: Literal["accept", "reject", "reject_worst"]
+    # Reject the worst `fraction` of accepted frames by `metric`,
+    # reject every accepted frame flagged with a satellite/plane trail
+    # (`reject_streaked`), or accept/reject an explicit list of ids.
+    action: Literal["accept", "reject", "reject_worst", "reject_streaked"]
     ids: list[int] | None = None
     metric: Literal["fwhm_px", "star_count", "eccentricity_median", "sky_adu_median"] = "fwhm_px"
     fraction: float = 0.1

@@ -69,13 +69,6 @@ _(none — claim an item here with your branch name)_
   testable in isolation from real hardware. (M, correctness)
 
 ### Features that serve real workflows
-- **One-click "reject all streaked frames" from the Target badge** — the new
-  "N streaked" badge (v0.27.1) tells the user how many accepted frames carry a
-  trail; pair it with a bulk action (a new `BulkFrameAction` "reject_streaked",
-  or reuse the existing bulk endpoint filtered on `streak_detected`) so a user
-  who'd rather drop the streaked subs than rely on per-pixel rejection can do it
-  in one gesture. Reuses the existing flag + bulk-reject plumbing. (S,
-  approachability)
 - **Suggest "reference" canvas when a non-drizzle mosaic is over budget** — the
   drizzle-scale suggestion (v0.28.0) only fires when drizzle is on. When drizzle
   is off but the union mosaic canvas alone exceeds the budget, compute the
@@ -136,6 +129,14 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **One-click "reject all streaked frames"** — the "N streaked" badge on the
+  Target view now carries a "Reject all" action (with a confirm) that rejects
+  every accepted frame flagged `streak_detected` in one gesture, via a new
+  `reject_streaked` `BulkFrameAction` (reject reason `bulk:streaked`,
+  `user_override` set). For users who'd rather drop the streaked subs than rely
+  on per-pixel rejection. Reuses the existing flag + bulk plumbing; additive.
+  (v0.30.0, this run)
 
 - **De-flake `Editor.test.tsx`** — `main`'s CI was intermittently red on the
   editor "loads the saved recipe" test: it gated `waitFor` on the static "Add

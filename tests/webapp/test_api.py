@@ -79,6 +79,44 @@ def test_bulk_reject_worst(client, built_library):
     assert r.json()["changed"] == 1
 
 
+def test_bulk_reject_streaked(client, built_library, data_root):
+    from seestack.io.library import Library
+
+    frames = client.get("/api/targets/M_42/frames").json()
+    assert len(frames) == 3
+    # Flag one accepted frame as streaked via the DB (QC would normally set it).
+    target_id = frames[0]["id"]
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target("M_42")
+        try:
+            proj.update_frame(target_id, streak_detected=True)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    # Only the streaked, accepted frame is rejected.
+    r = client.post(
+        "/api/targets/M_42/frames/bulk",
+        json={"action": "reject_streaked"},
+    )
+    assert r.status_code == 200
+    assert r.json()["changed"] == 1
+
+    after = {f["id"]: f for f in client.get("/api/targets/M_42/frames").json()}
+    assert after[target_id]["accept"] is False
+    assert after[target_id]["reject_reason"] == "bulk:streaked"
+    assert after[target_id]["user_override"] is True
+
+    # Idempotent: a second call rejects nothing (no accepted streaked frames left).
+    r = client.post(
+        "/api/targets/M_42/frames/bulk",
+        json={"action": "reject_streaked"},
+    )
+    assert r.json()["changed"] == 0
+
+
 def test_frame_preview_renders_png(client, built_library):
     frames = client.get("/api/targets/M_42/frames").json()
     fid = frames[0]["id"]
