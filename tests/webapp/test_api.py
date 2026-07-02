@@ -11,6 +11,15 @@ def test_health_and_system(client):
     assert r.status_code == 200
     body = r.json()
     assert "cpu_count" in body and "astap" in body
+    # Memory info lets the UI warn when the stack budget exceeds available RAM.
+    assert "memory" in body
+    mem = body["memory"]
+    assert isinstance(mem, dict)
+    # On Linux both fields are present and sane; on other platforms it's {}.
+    if mem:
+        for k in ("total_gb", "available_gb"):
+            if k in mem:
+                assert mem[k] > 0
 
 
 def test_astap_test_no_frames_is_clean(client):

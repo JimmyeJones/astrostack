@@ -248,6 +248,7 @@ export interface SystemInfo {
     error?: string;
   };
   disk: { total_gb?: number; used_gb?: number; free_gb?: number };
+  memory: { total_gb?: number; available_gb?: number };
   watcher_enabled: boolean;
 }
 

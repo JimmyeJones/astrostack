@@ -125,6 +125,29 @@ def _astap_info(settings) -> dict:  # noqa: ANN001
         return {"found": False, "path": None, "error": str(exc)}
 
 
+def _memory_info() -> dict:
+    """Total + currently-available RAM in GB (Linux /proc/meminfo), so the UI can
+    warn when the stack memory budget is set higher than the box can back. Empty
+    dict when meminfo can't be read (non-Linux / restricted container)."""
+    fields: dict[str, int] = {}
+    try:
+        with open("/proc/meminfo") as fh:
+            for line in fh:
+                key, _, rest = line.partition(":")
+                if key in ("MemTotal", "MemAvailable"):
+                    fields[key] = int(rest.split()[0]) * 1024  # kB → bytes
+                    if len(fields) == 2:
+                        break
+    except (OSError, ValueError):
+        return {}
+    out: dict = {}
+    if "MemTotal" in fields:
+        out["total_gb"] = round(fields["MemTotal"] / 1e9, 1)
+    if "MemAvailable" in fields:
+        out["available_gb"] = round(fields["MemAvailable"] / 1e9, 1)
+    return out
+
+
 def _gpu_available() -> bool:
     try:
         from seestack.core.xp import GPU_AVAILABLE
@@ -169,5 +192,6 @@ def system(request: Request) -> dict:
         "gpu_available": _gpu_available(),
         "astap": astap,
         "disk": disk,
+        "memory": _memory_info(),
         "watcher_enabled": settings.watcher_enabled,
     }

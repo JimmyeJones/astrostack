@@ -75,12 +75,6 @@ _(none — claim an item here with your branch name)_
   reference-frame canvas peak and offer a one-click "use reference canvas
   instead" (mirrors the drizzle suggestion). Turns the other over-budget refusal
   into a usable path too. (S, scale/approachability) *(follow-on to v0.28.0)*
-- **Warn when the memory-budget Setting exceeds available RAM** — now that
-  `max_stack_memory_gb` is user-settable (v0.29.0), a value larger than the box's
-  RAM is a footgun that re-opens the OOM door the guard exists to close. The
-  Settings save (or the stack-estimate response) could compare it against
-  `/proc/meminfo` MemAvailable and show an advisory "higher than this machine's
-  RAM — a big stack could still OOM". Advisory only. (S, correctness)
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
 - Star-mask preview toggle in the editor (visualise the mask driving star ops). (S)
@@ -129,6 +123,13 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Warn when the stack budget exceeds available RAM** — `/api/system` now
+  reports `memory.total_gb`/`available_gb` (from `/proc/meminfo`), and the
+  Settings page shows an advisory Alert when `max_stack_memory_gb` is set higher
+  than the box's currently-available RAM — a footgun that re-opens the OOM door
+  the guard exists to close. Advisory only; the value is still honoured.
+  Additive/upgrade-safe. (v0.30.1, this run)
 
 - **One-click "reject all streaked frames"** — the "N streaked" badge on the
   Target view now carries a "Reject all" action (with a confirm) that rejects
