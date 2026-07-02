@@ -69,12 +69,6 @@ _(none — claim an item here with your branch name)_
   testable in isolation from real hardware. (M, correctness)
 
 ### Features that serve real workflows
-- **Suggest "reference" canvas when a non-drizzle mosaic is over budget** — the
-  drizzle-scale suggestion (v0.28.0) only fires when drizzle is on. When drizzle
-  is off but the union mosaic canvas alone exceeds the budget, compute the
-  reference-frame canvas peak and offer a one-click "use reference canvas
-  instead" (mirrors the drizzle suggestion). Turns the other over-budget refusal
-  into a usable path too. (S, scale/approachability) *(follow-on to v0.28.0)*
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
 - Star-mask preview toggle in the editor (visualise the mask driving star ops). (S)
@@ -123,6 +117,14 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Suggest the reference canvas when a non-drizzle mosaic is over budget** —
+  the drizzle-off mirror of the v0.28.0 drizzle-scale suggestion. `stack-estimate`
+  now returns `suggested_reference_canvas`: when drizzle is off and the union
+  mosaic canvas alone blows the memory budget but the smaller reference-frame
+  canvas would fit, the Stack form's over-budget alert offers a one-click "Use
+  the reference canvas instead" that sets `mosaic_canvas=reference`. Turns the
+  other over-budget refusal into a usable path. (v0.31.0, this run)
 
 - **Warn when the stack budget exceeds available RAM** — `/api/system` now
   reports `memory.total_gb`/`available_gb` (from `/proc/meminfo`), and the

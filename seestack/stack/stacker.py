@@ -290,6 +290,12 @@ class StackEstimate:
     # the UI can offer. None when drizzle is off, the run already fits, or even
     # ×1.0 drizzle exceeds (drizzle can't rescue it).
     suggested_drizzle_scale: float | None = None
+    # When a NON-drizzle mosaic (union canvas) run would_exceed the budget,
+    # whether the reference-frame canvas alone would fit — a one-click "use the
+    # reference canvas instead" the UI can offer (the drizzle-off mirror of
+    # ``suggested_drizzle_scale``). False when drizzle is on, the run already
+    # fits, it isn't a mosaic, or even the reference canvas exceeds the budget.
+    suggested_reference_canvas: bool = False
 
 
 def estimate_stack(project: Project, options: StackOptions,
@@ -348,11 +354,19 @@ def estimate_stack(project: Project, options: StackOptions,
     budget = int(_stack_memory_budget_bytes(memory_budget_gb))
     would_exceed = int(peak) > budget
     suggested_scale: float | None = None
+    suggest_ref_canvas = False
     if would_exceed and options.drizzle:
         suggested_scale = _largest_drizzle_scale_within_budget(
             dst_shape, drizzle_reject=options.drizzle_reject and n >= 4,
             budget=budget, max_scale=float(options.drizzle_scale),
         )
+    elif would_exceed and is_mosaic:
+        # Drizzle off and the union mosaic canvas alone blows the budget — would
+        # the smaller reference-frame canvas fit? If so the UI can offer a
+        # one-click "use the reference canvas instead".
+        ref_peak, _ = _estimate_peak_bytes(
+            ref_shape, drizzle=False, drizzle_scale=1.0)
+        suggest_ref_canvas = int(ref_peak) <= budget
     return StackEstimate(
         n_frames=n,
         canvas_w=dst_shape[1], canvas_h=dst_shape[0],
@@ -361,6 +375,7 @@ def estimate_stack(project: Project, options: StackOptions,
         peak_bytes=int(peak), budget_bytes=budget,
         would_exceed=would_exceed,
         suggested_drizzle_scale=suggested_scale,
+        suggested_reference_canvas=suggest_ref_canvas,
     )
 
 

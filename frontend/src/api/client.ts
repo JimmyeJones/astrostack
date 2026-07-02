@@ -170,6 +170,7 @@ export interface StackEstimate {
   budget_gb: number;
   would_exceed: boolean;
   suggested_drizzle_scale: number | null;
+  suggested_reference_canvas: boolean;
 }
 
 export interface GalleryItem {
