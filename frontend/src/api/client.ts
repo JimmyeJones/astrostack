@@ -165,6 +165,7 @@ export interface GalleryItem {
   n_frames_used: number;
   canvas_w: number;
   canvas_h: number;
+  total_exposure_s: number | null;
   has_preview: boolean;
   has_fits: boolean;
   has_tiff: boolean;

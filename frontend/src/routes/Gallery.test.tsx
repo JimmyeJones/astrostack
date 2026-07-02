@@ -11,7 +11,7 @@ function item(run_id: number, safe = "M_42"): GalleryItem {
   return {
     safe, target_name: safe, run_id, output_basename: `m${run_id}`,
     timestamp_utc: "2026-05-02T00:00:00Z", n_frames_used: 5, canvas_w: 100, canvas_h: 80,
-    has_preview: false, has_fits: true, has_tiff: false,
+    total_exposure_s: 300, has_preview: false, has_fits: true, has_tiff: false,
     preview_url: "", options: {},
   };
 }
@@ -54,5 +54,16 @@ describe("Gallery batch apply", () => {
       preset_id: "galaxy_broadband",
       items: [{ safe: "M_42", run_id: 1 }],
     });
+  });
+
+  it("shows the integration time on a card", async () => {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [item(1)] });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+
+    renderGallery();
+
+    // 300 s → "5 min" rendered in the card's metadata line.
+    await waitFor(() => expect(screen.getByText(/5 min/)).toBeInTheDocument());
   });
 });

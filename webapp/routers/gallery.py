@@ -29,6 +29,8 @@ class GalleryItem(BaseModel):
     n_frames_used: int
     canvas_w: int
     canvas_h: int
+    # Effective integration time in seconds (None for pre-schema-4 runs).
+    total_exposure_s: float | None
     has_preview: bool
     has_fits: bool
     has_tiff: bool
@@ -74,6 +76,7 @@ def get_gallery(request: Request) -> GalleryResponse:
                         n_frames_used=run.n_frames_used,
                         canvas_w=run.canvas_w,
                         canvas_h=run.canvas_h,
+                        total_exposure_s=run.total_exposure_s,
                         has_preview=has_preview,
                         has_fits=bool(run.fits_path and Path(run.fits_path).exists()),
                         has_tiff=bool(run.tiff_path and Path(run.tiff_path).exists()),

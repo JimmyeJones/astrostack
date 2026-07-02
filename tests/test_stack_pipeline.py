@@ -47,6 +47,22 @@ def _build_project(tmp_path, n: int = 5, *, with_outlier: bool = False) -> Proje
     return proj
 
 
+def test_stack_records_integration_time(tmp_path):
+    """run_stack stamps the run record with the effective integration time
+    (median sub exposure × frames combined), so the gallery/history can show it
+    without a FITS read."""
+    proj = _build_project(tmp_path, n=4)
+    try:
+        for f in proj.iter_frames():
+            proj.update_frame(f.id, exposure_s=30.0)
+        run_stack(proj, StackOptions(sigma_clip=False, max_workers=2,
+                                     output_name="integ"))
+        run = next(iter(proj.iter_stack_runs()))
+        assert run.total_exposure_s == 120.0  # 30 s × 4 frames
+    finally:
+        proj.close()
+
+
 def test_subpixel_refine_actually_runs(tmp_path, monkeypatch):
     """Regression: sub-pixel refine used `canvas_3` before it was defined, so it
     raised NameError that the surrounding except swallowed — silently disabling

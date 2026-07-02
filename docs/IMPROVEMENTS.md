@@ -39,9 +39,6 @@ _(none — claim an item here with your branch name)_
   testable in isolation from real hardware. (M, correctness)
 
 ### Features that serve real workflows
-- Show integration time + frame count on **Gallery** cards too, reusing the new
-  `/stack-runs/{id}/info` endpoint + `formatIntegration` helper (History already
-  does this via the Info panel). (S, approachability)
 - Auto-suggest a sensible sigma-clip kappa (and whether to enable rejection)
   from the accepted-frame count — e.g. skip clipping under ~5 frames, loosen
   kappa for very large stacks — with a one-line "why" in the form. Removes a
@@ -95,6 +92,13 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Integration time on Gallery cards** — stack runs now record their effective
+  integration time (median sub × frames combined) via a new additive
+  `total_exposure_s` column (schema v3→v4 migration; old runs stay NULL). The
+  gallery response exposes it and each card shows a friendly "2.3 h"/"42 min"
+  next to the frame count — no per-card FITS read, so it scales. Extracted the
+  shared `formatIntegration` helper to `frontend/src/format.ts`. (v0.20.0, this run)
 
 - **Reuse stack settings from a previous run** — new
   `GET /stack-runs/{id}/options` returns a run's settings as a form-ready payload
