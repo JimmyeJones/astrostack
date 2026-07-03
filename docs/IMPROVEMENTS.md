@@ -51,13 +51,6 @@ problems. Dogfood it every big-picture run and fix root causes.
 - **Editor bug hunt (ongoing)** — there are undocumented issues. Each big-picture
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
-- **Single-click combined "Auto levels" on the Levels op** — the new data-driven
-  Levels buttons (v0.62.0) are per-point: a beginner must click *two* buttons (black,
-  then white) to auto-level. Add one "Auto levels" button (on the op panel header,
-  next to the per-param buttons) that applies *both* suggested points at once from the
-  same `levels-suggestion` payload, so the common case is one click. The per-param
-  buttons stay for fine control. Reuses the existing endpoint + `setParams`; a pure
-  helper sets `{black, white}` together; frontend-only, additive. (S, autonomy/editor)
 - **Show the Levels black/white points as guides on the op's histogram** — the Levels
   op panel already renders the image histogram, but the black/white points a user is
   setting (and the data-driven suggestion) are invisible on it, so it's hard to see
@@ -217,6 +210,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Single-click "Auto levels" on the Levels op** — the data-driven Levels buttons
+  (v0.62.0) were per-point, so auto-levelling a beginner's image took *two* clicks
+  (black, then white). The Levels op-panel header now shows one "Auto levels
+  (black–white)" button that applies *both* suggested points at once, from the same
+  already-fetched `levels-suggestion` payload — so the common case is a single
+  click. The per-param "From your image" buttons stay for fine control (and read as
+  already-applied ✓ once Auto levels sets them). Frontend-only, additive; reuses the
+  existing endpoint + `setParams`. Vitest: one click leaves both per-param buttons
+  disabled/✓ (proving black *and* white were set together). (v0.64.0, this run)
 
 - **Editor: accurate data-driven value labels (Levels buttons + Auto's crossfaded
   sharpen strength)** — two small honesty fixes on data-driven readouts. (1) The new

@@ -550,6 +550,42 @@ describe("EditorView", () => {
     expect(btn).toHaveTextContent("✓");
   });
 
+  it("sets both black and white points at once via 'Auto levels'", async () => {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, LEVELS]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [
+        { uid: "s1", id: "tone.stretch", enabled: true, params: { stretch: 0.6 } },
+        { uid: "lv1", id: "tone.levels", enabled: true, params: { black: 0, white: 1 } },
+      ],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    vi.spyOn(client.api, "levelsSuggestion").mockResolvedValue({ black: 0.12, white: 0.85 });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    fireEvent.click(await screen.findByText("Levels"));
+    // Wait for the data-driven suggestion to load — both per-param buttons render
+    // (draining the pending renders so the header button node stays live).
+    await screen.findByLabelText("Set Black point from your data");
+    await screen.findByLabelText("Set White point from your data");
+    // One click on the header "Auto levels" button applies both suggested points.
+    fireEvent.click(screen.getByRole("button", { name: /Auto levels/ }));
+    // Both per-param buttons now read as already-applied (disabled + ✓), proving
+    // black *and* white were set together.
+    await waitFor(() => {
+      expect(screen.getByLabelText("Set Black point from your data")).toBeDisabled();
+      expect(screen.getByLabelText("Set White point from your data")).toBeDisabled();
+    });
+    expect(screen.getByLabelText("Set Black point from your data")).toHaveTextContent("✓");
+    expect(screen.getByLabelText("Set White point from your data")).toHaveTextContent("✓");
+  });
+
   it("previews the proposed crop then adds a Crop op on Apply", async () => {
     vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CROP]);
     vi.spyOn(client.api, "getRecipe").mockResolvedValue({

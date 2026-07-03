@@ -910,22 +910,43 @@ export function EditorView() {
               <Paper withBorder p="sm">
                 <Group justify="space-between" wrap="nowrap" mb={6}>
                   <Text fw={600} size="sm">{specs[selectedOp.id].label}</Text>
-                  {selectedOp.enabled ? (
-                    <Tooltip
-                      label="Preview the image with only this op bypassed, to see just its effect"
-                      multiline w={220} withArrow>
-                      <Button size="compact-xs"
-                        variant={soloActive ? "filled" : "default"} color="grape"
-                        loading={soloActive && withoutOpPreview.isLoading}
-                        disabled={!preview.data}
-                        onClick={() => setSoloExclude((s) => {
-                          if (!s) { setShowBase(false); setShowMask(false); setShowCoverage(false); }
-                          return !s;
-                        })}>
-                        {soloActive ? "Showing without" : "Without this op"}
-                      </Button>
-                    </Tooltip>
-                  ) : null}
+                  <Group gap="xs" wrap="nowrap">
+                    {/* One-click "Auto levels" sets *both* the black and white
+                        points from the image's own histogram at once, so the
+                        common case is a single click (the per-param "From your
+                        image" buttons stay for fine control). */}
+                    {selectedOp.id === "tone.levels"
+                      && levels.data?.black != null && levels.data?.white != null ? (
+                      <Tooltip
+                        label="Set both the black and white points from this image's histogram"
+                        multiline w={220} withArrow>
+                        <Button size="compact-xs" variant="light" color="blue"
+                          onClick={() => setParams(selectedOp.uid, {
+                            ...selectedOp.params,
+                            black: levels.data!.black,
+                            white: levels.data!.white,
+                          })}>
+                          Auto levels ({levels.data.black}–{levels.data.white})
+                        </Button>
+                      </Tooltip>
+                    ) : null}
+                    {selectedOp.enabled ? (
+                      <Tooltip
+                        label="Preview the image with only this op bypassed, to see just its effect"
+                        multiline w={220} withArrow>
+                        <Button size="compact-xs"
+                          variant={soloActive ? "filled" : "default"} color="grape"
+                          loading={soloActive && withoutOpPreview.isLoading}
+                          disabled={!preview.data}
+                          onClick={() => setSoloExclude((s) => {
+                            if (!s) { setShowBase(false); setShowMask(false); setShowCoverage(false); }
+                            return !s;
+                          })}>
+                          {soloActive ? "Showing without" : "Without this op"}
+                        </Button>
+                      </Tooltip>
+                    ) : null}
+                  </Group>
                 </Group>
                 {specs[selectedOp.id].help ? (
                   <Text size="xs" c="dimmed" mb="xs">{specs[selectedOp.id].help}</Text>
