@@ -52,20 +52,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
 
 ### Editor — make it excellent (PRIORITY 1) — new ideas
-- **Per-op "Reset to defaults" button** — while tuning an op a beginner drags
-  several sliders, dislikes the result, and has no quick way back to the sensible
-  starting point short of removing and re-adding the op (which loses its position).
-  Add a small "Reset" affordance in the selected-op param panel that restores every
-  param to its spec `default` (the values `newOp` seeds). Pure and frontend-only —
-  the ops schema already carries each param's default; reuses `setParams`. (S, editor)
-- **Explain what Auto-process did** — after Auto-process builds a recipe the user
-  sees a pipeline of op names but no sense of *why* those ops or what changed, so
-  the auto result is a black box they can't trust or learn from. Show a one-line
-  plain-language summary derived from the resulting ops + registry labels
-  ("Flattened the background, balanced colour, applied a natural stretch, removed
-  the green cast, lifted saturation, sharpened") in a dismissible note after Auto
-  runs. Builds trust in the one-click path and teaches the recommended order.
-  Reuses the ops schema labels; frontend-only, additive. (S, editor/friendliness)
+_(none right now — see Shipped for recently completed editor work)_
 
 ### Autonomy — "just works" (PRIORITY 2)
 - **One-click "process this target"** — after ingest, reach a good stack *and* a
@@ -173,6 +160,23 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Explain what Auto-process did** — after Auto-process builds a recipe the user
+  saw a pipeline of op names but no sense of *why* those ops, so the one-click
+  result was a black box. A new pure `autoSummarySentence` helper turns the built
+  recipe's *enabled* ops into a plain-language sentence via a phrase map keyed by
+  op id ("Flattened the background, balanced the colour, applied a natural stretch,
+  removed the green cast, boosted colour saturation, then sharpened detail."),
+  falling back to the registry label for any unmapped op. The Editor shows it in a
+  dismissible violet "What Auto-process did" note after Auto runs. Builds trust in
+  the one-click path and teaches the recommended order. Pure helper unit-tested
+  (9 cases) + an Editor wiring test; frontend-only, additive. (v0.56.18, this run)
+
+- **Per-op "Reset to defaults" (already shipped)** — the backlog listed this as an
+  Idea, but it was in fact already implemented (in `0c333bd`): the selected-op
+  param panel carries both a per-param reset icon and a "Reset op" button that
+  restore each param to its spec default. Moved to Shipped to correct the record;
+  no code change. (housekeeping, this run)
 
 - **Plain-language help on the jargon-heavy editor ops** — several detail/tone ops
   spoke in astro-jargon a beginner can't decode ("Wavelet / bilateral / TV
