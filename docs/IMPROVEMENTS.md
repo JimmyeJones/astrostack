@@ -36,11 +36,23 @@ _(none — claim an item here with your branch name)_
   bright-star fluxes vs the reference (the `transparency_score` machinery is
   most of it) and divide it out before accumulation. Needs care: robust to
   few-star frames, neutral fallback, off by default first. (M, correctness)
-- Follow-ups to min/max reject (shipped v0.56.0): (1) a **top/bottom-percentile**
-  variant for big stacks (drop the top/bottom p% rather than a single extreme —
-  more aggressive trail removal when there are hundreds of frames); (3) a
-  **median/MAD** location/scale path for the middle ground. (Item (2), the
-  Stack-form small-stack hint, shipped v0.56.2.) All (S–M, correctness).
+- Follow-ups to min/max reject (shipped v0.56.0). (Item (2), the Stack-form
+  small-stack hint, shipped v0.56.2.) Remaining:
+  - **Top/bottom-k trimmed-mean reject** — generalise `MinMaxRejectAccumulator`
+    to drop the *k* smallest and *k* largest per pixel (opt-in
+    `min_max_reject_count`, default 1 = exactly today's behaviour). Handles
+    multiple satellite/plane trails crossing the same pixel across a session
+    (k=3 → up to 3 trails) that a single-extreme drop leaves behind. Stays
+    memory-bounded and single-pass by tracking the k smallest/largest as 2k
+    canvas planes (vectorised sorted insertion), applying the full k-trim only
+    where `count ≥ 2k+1` (so the two sides are disjoint) and degrading to the
+    proven single min/max drop for `3 ≤ count < 2k+1`. NB: the earlier
+    "percentile (drop p%)" and "median/MAD" framings are **not** streaming-
+    feasible — an exact per-pixel median/percentile needs *every* frame's value
+    held per pixel (tens of GB on a big canvas), which the OOM-bounded hot path
+    forbids; the k-extremes trim is the memory-safe realisation. Must extend
+    `_estimate_peak_bytes` / the memory guard to charge the extra 2k planes so
+    the pre-run estimate stays exact. (M, correctness)
 - **Dark exposure-scaling** (slice (b), now that bias is wired for lights) —
   `scaled_dark = bias + (dark − bias)·(t_light/t_dark)` so a dark shot at a
   different exposure than the lights can still be used. Needs the per-frame
@@ -60,6 +72,19 @@ _(none — claim an item here with your branch name)_
 ### Features that serve real workflows
 - Annotated sky overlay (label detected objects / show solved field). (M)
 ### UX & polish
+- **One-click "Turn on min/max rejection" on the Stack-form nudge** — the
+  small-stack streaked-frame hint (v0.56.2) tells the user min/max reject is the
+  right tool but still makes them hunt for the toggle in Advanced options. Add a
+  one-click button on that advisory that flips `min_max_reject` on (mirroring the
+  calibration "Use recommended" one-click), so a beginner acts on the advice
+  without knowing where the knob lives. Frontend-only, additive. (S,
+  approachability)
+- **Combine-method facet on the Gallery** — now that the gallery response carries
+  each run's `options` (v0.56.1), add a small "All / σ-clip / min-max / drizzle /
+  mean" filter (shown only when the set is *mixed*, like the calibration filter
+  chip) so a user can isolate e.g. every drizzled result across targets. Reuses
+  the pure `rejectionBadge` helper for the per-run method key; frontend-only,
+  additive. (S, approachability)
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
 
