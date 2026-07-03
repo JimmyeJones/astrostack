@@ -402,6 +402,21 @@ describe("EditorView", () => {
     expect(screen.getByText("Sharpen")).toBeInTheDocument();
   });
 
+  it("warns when the recipe clips highlights (from the live histogram)", async () => {
+    mockEditorQueries();
+    // A histogram with a big pile in the top bin (pure white) → highlight clip.
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 40], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    await screen.findByText("Stretch");
+    expect(await screen.findByText(/Highlights are clipping/i)).toBeInTheDocument();
+  });
+
   it("shows an error message when the preview render fails (not a blank panel)", async () => {
     mockEditorQueries();
     vi.stubGlobal("fetch", vi.fn(async () => ({

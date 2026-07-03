@@ -23,6 +23,7 @@ import { applyDataDrivenDefaults, countDataDrivenDefaults, type OpSuggestion }
   from "../components/editor/dataDrivenDefaults";
 import { previewScaleCaption } from "../components/editor/previewScale";
 import { prependCoverageLeveling } from "../components/editor/coverageLeveling";
+import { clippingCaption } from "../components/editor/clipping";
 import { previewDebounceMs } from "../components/editor/previewDebounce";
 import { starMaskSizePx } from "../components/editor/starMaskSize";
 import { coalesceFwhm, measuredContextText } from "../components/editor/measuredContext";
@@ -548,6 +549,17 @@ export function EditorView() {
               <Text size="xs" c="dimmed" mt={4}>
                 {previewScaleCaption(hist.data)}
               </Text>
+            ) : null}
+            {/* Over-stretching blows out star cores (a spike at pure white) or
+                crushes the sky (a spike at pure black), losing detail on export.
+                Surface it from the live histogram so a beginner eases off before
+                baking in the clip. Advisory only — changes nothing. */}
+            {clippingCaption(hist.data) ? (
+              <Group gap={6} wrap="nowrap" align="flex-start" mt={4}>
+                <IconAlertTriangle size={14} color="var(--mantine-color-orange-6)"
+                  style={{ flexShrink: 0, marginTop: 2 }} />
+                <Text size="xs" c="orange.6">{clippingCaption(hist.data)}</Text>
+              </Group>
             ) : null}
             {hist.data?.errors?.length ? (
               <Alert color="orange" icon={<IconAlertTriangle size={16} />} mt="xs" py={6}>

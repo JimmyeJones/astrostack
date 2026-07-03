@@ -51,17 +51,6 @@ problems. Dogfood it every big-picture run and fix root causes.
 - **Editor bug hunt (ongoing)** — there are undocumented issues. Each big-picture
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
-- **Highlight/shadow clipping warning in the editor histogram** — over-stretching
-  is the classic beginner mistake: push the stretch/levels too far and star cores
-  blow out to pure white (a big spike in the top histogram bin) or the sky crushes
-  to pure black (a spike in the bottom bin), losing detail irreversibly on export.
-  The editor already fetches the live histogram (`hist.data.r/g/b`), so a pure
-  helper can measure the fraction of pixels piled in the extreme bin(s) and, above
-  a threshold, show a subtle caption under the preview ("Highlights are clipping —
-  ~4% of pixels are pure white; ease the stretch/white point to keep star-core
-  detail"). Advisory only, no auto-changes; teaches good stretch discipline on the
-  priority-1 editor. Pure, unit-testable helper; frontend-only, additive.
-  (S–M, editor)
 
 
 ### Autonomy — "just works" (PRIORITY 2)
@@ -179,6 +168,20 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Highlight/shadow clipping warning in the editor** — over-stretching is the
+  classic beginner mistake: push the stretch/levels too far and star/nebula cores
+  blow out to pure white or the sky crushes to pure black, losing detail
+  irreversibly on export. The editor's live histogram clips values into [0, 1], so
+  a pure `clippingCaption` helper measures the fraction of pixels piled in the top
+  bin (blown white) and bottom bin (crushed black) across r/g/b and, above tuned
+  thresholds (highlights 2% — reliable/most-damaging; shadows 35% — conservative to
+  avoid nagging on legitimately dark skies), shows a subtle orange caption under the
+  preview ("Highlights are clipping — about 4% of pixels are pure white. Ease the
+  stretch or lower the white point…"). Advisory only, changes nothing; teaches good
+  stretch discipline on the priority-1 editor. Pure helper Vitest-covered (7 cases:
+  thresholds each side, both-clip, worst-channel, null-safety) + an Editor wiring
+  test; frontend-only, additive. (v0.59.4, this run)
 
 - **Explain the editor's TIFF export mode** — the Export panel's "TIFF" dropdown
   offered the raw values "linear" / "autostretch" with no explanation, so a
