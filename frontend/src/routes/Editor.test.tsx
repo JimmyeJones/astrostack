@@ -29,6 +29,14 @@ const DECONVOLVE: EditOp = {
              depends_on: null }],
 };
 
+const SHARPEN: EditOp = {
+  id: "detail.sharpen", label: "Sharpen", group: "detail", stage: "nonlinear",
+  proxy_safe: true, is_stretch: false, help: null,
+  params: [{ key: "radius", label: "Radius (px)", type: "float", group: "simple",
+             default: 2.0, min: 0.5, max: 10, step: 0.5, options: null, help: null,
+             depends_on: null }],
+};
+
 function renderEditor() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -226,6 +234,32 @@ describe("EditorView", () => {
     // The overlay names the isolated op and the button flips to the active label.
     expect(await screen.findByText("Without: Curves")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Showing without" })).toBeInTheDocument();
+  });
+
+  it("applies data-driven defaults across the pipeline in one click", async () => {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, SHARPEN]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [{ uid: "sh1", id: "detail.sharpen", enabled: true, params: { radius: 2.0 } }],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    // The sharpen op's radius suggestion diverges from the current 2.0.
+    vi.spyOn(client.api, "sharpenSuggestion").mockResolvedValue({ fwhm_px: 8, radius: 3.5 });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    // The toolbar surfaces the one-click "Use data defaults" action once a present
+    // op diverges from its measured suggestion.
+    const btn = await screen.findByRole("button", { name: /Use data defaults/ });
+    fireEvent.click(btn);
+    // After applying, nothing diverges any more, so the button disappears.
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /Use data defaults/ })).not.toBeInTheDocument());
   });
 
   it("shows an error message when the preview render fails (not a blank panel)", async () => {

@@ -19,6 +19,8 @@ import { Histogram } from "../components/editor/Histogram";
 import { OpList } from "../components/editor/OpList";
 import { hasEnabledStretch, insertOnCorrectSide, moveToCorrectSide } from "../components/editor/stageConflicts";
 import { autoSummarySentence } from "../components/editor/autoSummary";
+import { applyDataDrivenDefaults, countDataDrivenDefaults, type OpSuggestion }
+  from "../components/editor/dataDrivenDefaults";
 import { previewScaleCaption } from "../components/editor/previewScale";
 import { OpParamPanel } from "../components/editor/OpParamPanel";
 import { PresetMenu } from "../components/editor/PresetMenu";
@@ -353,6 +355,21 @@ export function EditorView() {
     [specs],
   );
 
+  // Map every op that carries a data-driven suggestion to (param, value), so the
+  // per-op "From your data" buttons can be applied across the whole pipeline in
+  // one click. Only present, still-diverging ops are counted/changed.
+  const dataDrivenSuggestions = useMemo(() => {
+    const m: Record<string, OpSuggestion> = {};
+    if (psf.data?.psf_sigma != null) m["detail.deconvolve"] = { param: "psf_sigma", value: psf.data.psf_sigma };
+    if (denoise.data?.strength != null) m["detail.denoise"] = { param: "strength", value: denoise.data.strength };
+    if (sharpen.data?.radius != null) m["detail.sharpen"] = { param: "radius", value: sharpen.data.radius };
+    if (starSize.data?.size != null) m["stars.reduce"] = { param: "size", value: starSize.data.size };
+    return m;
+  }, [psf.data, denoise.data, sharpen.data, starSize.data]);
+  const nDataDriven = countDataDrivenDefaults(ops, dataDrivenSuggestions);
+  const applyDataDefaults = () =>
+    setOps((p) => applyDataDrivenDefaults(p, dataDrivenSuggestions));
+
   if (opsSchema.isLoading || saved.isLoading) {
     return <Center h={300}><Loader /></Center>;
   }
@@ -372,6 +389,15 @@ export function EditorView() {
             onClick={redo} aria-label="Redo"><IconArrowForwardUp size={16} /></ActionIcon></Tooltip>
           <Button variant="light" color="grape" leftSection={<IconSparkles size={16} />}
             loading={auto.isPending} onClick={() => auto.mutate()}>Auto-process</Button>
+          {nDataDriven > 0 ? (
+            <Tooltip multiline w={240} withArrow
+              label="Set the blur width, sharpen radius, denoise strength and star size of the ops in your pipeline to the values measured from your data, in one click">
+              <Button variant="default" color="grape" leftSection={<IconWand size={16} />}
+                onClick={applyDataDefaults}>
+                Use data defaults{nDataDriven > 1 ? ` (${nDataDriven})` : ""}
+              </Button>
+            </Tooltip>
+          ) : null}
           <PresetMenu currentOps={ops} onApply={(o) => setOps(o)} />
           <Button variant="default" leftSection={<IconDeviceFloppy size={16} />}
             loading={saveRecipe.isPending} onClick={() => saveRecipe.mutate()}>Save</Button>

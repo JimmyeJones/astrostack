@@ -52,16 +52,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
 
-### Editor — make it excellent (PRIORITY 1) — new ideas
-- **"Apply data-driven defaults" one-click on the editor** — a user building a
-  recipe by hand must open each of the four suggestion-carrying ops and click its
-  button individually. Add a single toolbar action that seeds every present op's
-  data-driven param (PSF σ, sharpen radius, denoise strength, star size) from the
-  already-fetched suggestions in one click, so hand-tuning starts from the
-  measured values instead of the generic defaults. Reuses the four existing
-  suggestion queries; frontend-only, additive, off-by-nothing (explicit button).
-  (S, editor/autonomy)
-
 ### Autonomy — "just works" (PRIORITY 2)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
@@ -178,6 +168,19 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **"Apply data-driven defaults" one-click on the editor** — a user hand-building
+  a recipe previously had to open each of the four suggestion-carrying ops
+  (Deconvolution, Noise reduction, Sharpen, Star reduction) and click its "From
+  your data" button individually. The editor toolbar now shows a single "Use data
+  defaults (N)" button that seeds every *present* op's data-driven param (PSF σ,
+  denoise strength, sharpen radius, star size) from the already-fetched
+  suggestions in one click. It's shown only when at least one present op still
+  diverges from its measured value (so it never nags once everything's applied),
+  and N counts how many ops would change. Pure `applyDataDrivenDefaults` /
+  `countDataDrivenDefaults` helpers (no mutation) drive it; Vitest-covered (helper:
+  8 cases; editor: button appears, applying it makes it disappear). Frontend-only,
+  additive, explicit-button (off by nothing). (v0.57.10, this run)
 
 - **Dim the "From your data" suggestion button when the param already matches** —
   the editor's four data-driven suggestion buttons (PSF σ, sharpen radius, denoise
