@@ -156,6 +156,18 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Fix: star-reduction over-shrank stars in the live preview vs export** — the
+  `stars.reduce` op scaled its star-mask *gate* for the decimated preview proxy
+  (via `star_mask(..., ctx)`) but built its grey-erosion footprint from the raw
+  full-res `size`, so on a big image (`proxy_scale`≈4) the footprint covered ~4×
+  more scene in the preview than the export delivered — the preview pulled star
+  cores down harder than the exported result, a WYSIWYG/parity violation (the same
+  class of bug fixed for sharpen/denoise/background in v0.56.19/v0.57.1). The
+  footprint now shrinks by `ctx.scaled_px(size)` exactly like the mask, a no-op on
+  export so the exported image is byte-for-byte unchanged. Engine-only, additive;
+  monkeypatched-footprint test proves the erosion side-length shrinks 9→5→3 as
+  proxy_scale goes 1→2→4. (v0.58.4, this run)
+
 - **Auto-suggest the min/max reject count (k) from the streaked-frame count** — with
   min/max reject on, the default k=1 drops only the single worst extreme per pixel, so
   a session with several satellite/plane trails leaves the rest in the result. The

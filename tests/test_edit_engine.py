@@ -442,3 +442,29 @@ def test_final_gradient_box_and_dilate_scaled_to_proxy(monkeypatch):
     spec.apply(img, {"box_size": 256, "dilate_px": 16}, EditContext(proxy_scale=4.0))
     # export unchanged; a 4x proxy quarters both spatial measures.
     assert seen == [(256, 16), (64, 4)]
+
+
+def test_star_reduce_erosion_footprint_scaled_to_proxy(monkeypatch):
+    """The star-reduction erosion footprint is built from a full-res `size`, so on
+    the decimated preview proxy it must shrink by proxy_scale to match the full-res
+    export (the star-mask gate already does — preview↔export parity). We capture
+    the footprint side-length handed to grey_erosion. protect_nebula is off so the
+    star mask isn't involved and only the footprint scaling is under test."""
+    import scipy.ndimage as ndi
+
+    seen: list[int] = []
+
+    def fake_erosion(chan, *, footprint):
+        seen.append(int(footprint.shape[0]))
+        return chan  # identity — we only care about the footprint size
+
+    monkeypatch.setattr(ndi, "grey_erosion", fake_erosion)
+    spec = get_op("stars.reduce")
+    img = _img(20, 20, nan_band=0)
+
+    params = {"amount": 0.5, "size": 4, "protect_nebula": False}
+    spec.apply(img, params, EditContext(proxy_scale=1.0))   # size 4 → (2*4+1)=9
+    spec.apply(img, params, EditContext(proxy_scale=2.0))   # →2 → (2*2+1)=5
+    spec.apply(img, params, EditContext(proxy_scale=4.0))   # →1 → (2*1+1)=3
+    # grey_erosion runs once per channel (3×); the footprint side matches per scale.
+    assert seen == [9, 9, 9, 5, 5, 5, 3, 3, 3]

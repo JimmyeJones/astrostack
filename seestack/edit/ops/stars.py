@@ -40,7 +40,13 @@ def _reduce(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     # Gate the reduction to actual stars so we don't erode nebula/galaxy cores.
     gate = star_mask(out, size_px=2.0 * size, ctx=ctx) if protect else np.ones(cover.shape, np.float32)
 
-    footprint = np.ones((2 * size + 1, 2 * size + 1), dtype=bool)
+    # Scale the erosion footprint for the decimated preview proxy exactly like the
+    # star-mask gate does (starmask.py), so the preview shrinks stars by the same
+    # *physical* amount the full-res export will — otherwise a `2*size+1` footprint
+    # covers proxy_scale× more scene on the proxy and the preview over-reduces. On
+    # the export (proxy_scale == 1) `scaled_px` is a no-op, so output is unchanged.
+    fp = max(1, int(round(ctx.scaled_px(size))))
+    footprint = np.ones((2 * fp + 1, 2 * fp + 1), dtype=bool)
     for c in range(3):
         eroded = grey_erosion(filled[..., c], footprint=footprint)
         # Only pull pixels down where erosion darkens them (star cores/halos),
