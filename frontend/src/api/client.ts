@@ -350,6 +350,13 @@ export interface Histogram {
   b: number[];
   empty?: boolean;
   errors?: string[];
+  // Live preview runs on a downscaled proxy of the (possibly huge) master.
+  // proxy_scale = full_width / proxy_width (>=1); proxy_width is the proxy's
+  // pixel width. Surfaced so the editor can tell the user the preview is
+  // downscaled and set expectations vs the full-res export.
+  proxy_scale?: number;
+  proxy_width?: number;
+  proxy_height?: number;
 }
 
 export interface PsfSuggestion {

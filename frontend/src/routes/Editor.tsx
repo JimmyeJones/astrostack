@@ -19,6 +19,7 @@ import { Histogram } from "../components/editor/Histogram";
 import { OpList } from "../components/editor/OpList";
 import { hasEnabledStretch, insertOnCorrectSide, moveToCorrectSide } from "../components/editor/stageConflicts";
 import { autoSummarySentence } from "../components/editor/autoSummary";
+import { previewScaleCaption } from "../components/editor/previewScale";
 import { OpParamPanel } from "../components/editor/OpParamPanel";
 import { PresetMenu } from "../components/editor/PresetMenu";
 
@@ -423,6 +424,11 @@ export function EditorView() {
               </Group>
             </div>
             <Histogram data={hist.data} />
+            {previewScaleCaption(hist.data) ? (
+              <Text size="xs" c="dimmed" mt={4}>
+                {previewScaleCaption(hist.data)}
+              </Text>
+            ) : null}
             {hist.data?.errors?.length ? (
               <Alert color="orange" icon={<IconAlertTriangle size={16} />} mt="xs" py={6}>
                 <Text size="xs">

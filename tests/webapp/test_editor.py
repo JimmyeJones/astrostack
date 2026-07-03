@@ -154,6 +154,9 @@ def test_edit_preview_and_histogram(client, solved_library):
     hist = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/histogram?recipe={q}").json()
     assert len(hist["r"]) == hist["bins"] and len(hist["g"]) == hist["bins"]
     assert sum(hist["r"]) > 0
+    # Proxy geometry is surfaced so the editor can warn "preview is downscaled".
+    assert hist["proxy_scale"] >= 1.0
+    assert hist["proxy_width"] > 0 and hist["proxy_height"] > 0
 
 
 def test_star_mask_preview(client, solved_library):

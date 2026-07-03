@@ -283,6 +283,14 @@ async def edit_histogram(safe: str, run_id: int, request: Request,
         hist = compute_histogram(out)
         hist["empty"] = empty
         hist["errors"] = errors  # ops that failed (surfaced near the preview)
+        # Surface the proxy geometry so the editor can tell the user the live
+        # preview is downscaled (a ≤1500 px proxy of what may be a 150 MP mosaic),
+        # which sets expectations for why fine detail reads differently than the
+        # full-res export. proxy_scale = full_width / proxy_width (>=1).
+        h, w = rgb.shape[:2]
+        hist["proxy_scale"] = round(float(scale), 3)
+        hist["proxy_width"] = int(w)
+        hist["proxy_height"] = int(h)
         return hist
 
     return await run_in_threadpool(work)
