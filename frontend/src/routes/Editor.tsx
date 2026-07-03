@@ -159,11 +159,39 @@ export function EditorView() {
     return () => { if (u) URL.revokeObjectURL(u); };
   }, [maskPreview.data]);
 
+  // Per-op "show without this op" compare: render the full recipe with just the
+  // selected op bypassed, so while tuning one op the user sees exactly *its*
+  // contribution (unlike Compare, which shows the whole recipe vs the raw base).
+  // Resets whenever the selection changes so each op starts from "showing with".
+  const [soloExclude, setSoloExclude] = useState(false);
+  useEffect(() => { setSoloExclude(false); }, [selected]);
+  const selForSolo = ops.find((o) => o.uid === selected) ?? null;
+  const soloActive = soloExclude && !!selForSolo && selForSolo.enabled;
+  const withoutOpPreview = useQuery({
+    queryKey: ["edit-without-op", safe, rid, dKey, selected, bust],
+    enabled: soloActive && !!opsSchema.data && !saved.isLoading,
+    queryFn: async () => {
+      const withoutRecipe: Recipe = {
+        ops: dRecipe.ops.map((o) => (o.uid === selected ? { ...o, enabled: false } : o)),
+        base_run_id: rid,
+      };
+      const res = await fetch(api.editPreviewUrl(safe, rid, withoutRecipe, bust));
+      if (!res.ok) throw new Error("compare render failed");
+      return URL.createObjectURL(await res.blob());
+    },
+  });
+  useEffect(() => {
+    const u = withoutOpPreview.data;
+    return () => { if (u) URL.revokeObjectURL(u); };
+  }, [withoutOpPreview.data]);
+
   const shownSrc = showMask
     ? (maskPreview.data ?? preview.data)
     : showBase
       ? (basePreview.data ?? preview.data)
-      : preview.data;
+      : soloActive
+        ? (withoutOpPreview.data ?? preview.data)
+        : preview.data;
 
   // Keyboard undo/redo for the op pipeline: Cmd/Ctrl+Z undoes, Cmd/Ctrl+Shift+Z
   // (or Ctrl+Y) redoes. Skipped while typing in a field so editing the output
@@ -345,10 +373,11 @@ export function EditorView() {
               ) : (
                 <Center h={240}><Loader /></Center>
               )}
-              {showMask || showBase ? (
+              {showMask || showBase || soloActive ? (
                 <Text size="xs" c="white" style={{ position: "absolute", left: 12, top: 10,
                   background: "rgba(0,0,0,0.6)", padding: "2px 8px", borderRadius: 4 }}>
-                  {showMask ? "Star mask" : "Original"}
+                  {showMask ? "Star mask" : showBase ? "Original"
+                    : `Without: ${specs[selForSolo!.id]?.label ?? selForSolo!.id}`}
                 </Text>
               ) : null}
               <Group gap={6} style={{ position: "absolute", right: 8, top: 8 }}>
@@ -357,13 +386,15 @@ export function EditorView() {
                     color="grape"
                     disabled={!preview.data}
                     loading={showMask && maskPreview.isLoading}
-                    onClick={() => setShowMask((s) => { if (!s) setShowBase(false); return !s; })}>
+                    onClick={() => setShowMask((s) => {
+                      if (!s) { setShowBase(false); setSoloExclude(false); } return !s;
+                    })}>
                     {showMask ? "Hide mask" : "Star mask"}
                   </Button>
                 </Tooltip>
                 <Button size="xs" variant={showBase ? "filled" : "default"}
                   disabled={!preview.data || showMask}
-                  onClick={() => setShowBase((s) => !s)}>
+                  onClick={() => setShowBase((s) => { if (!s) setSoloExclude(false); return !s; })}>
                   {showBase ? "Edited" : "Compare"}
                 </Button>
                 <Button size="xs" variant="default" leftSection={<IconRefresh size={14} />}
@@ -470,7 +501,24 @@ export function EditorView() {
 
             {selectedOp && specs[selectedOp.id] ? (
               <Paper withBorder p="sm">
-                <Text fw={600} size="sm" mb={6}>{specs[selectedOp.id].label}</Text>
+                <Group justify="space-between" wrap="nowrap" mb={6}>
+                  <Text fw={600} size="sm">{specs[selectedOp.id].label}</Text>
+                  {selectedOp.enabled ? (
+                    <Tooltip
+                      label="Preview the image with only this op bypassed, to see just its effect"
+                      multiline w={220} withArrow>
+                      <Button size="compact-xs"
+                        variant={soloActive ? "filled" : "default"} color="grape"
+                        loading={soloActive && withoutOpPreview.isLoading}
+                        disabled={!preview.data}
+                        onClick={() => setSoloExclude((s) => {
+                          if (!s) { setShowBase(false); setShowMask(false); } return !s;
+                        })}>
+                        {soloActive ? "Showing without" : "Without this op"}
+                      </Button>
+                    </Tooltip>
+                  ) : null}
+                </Group>
                 {specs[selectedOp.id].help ? (
                   <Text size="xs" c="dimmed" mb="xs">{specs[selectedOp.id].help}</Text>
                 ) : null}

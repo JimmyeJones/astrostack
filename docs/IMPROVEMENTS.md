@@ -52,12 +52,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
 
 ### Editor — make it excellent (PRIORITY 1) — new ideas
-- **Per-op "before/after this op" preview toggle** — the editor's Compare button
-  shows the whole recipe vs the raw base, but when tuning one op a user wants to
-  see *just that op's* contribution. Add a small "bypass from here" or "isolate
-  this op" affordance (render the recipe up to but excluding the selected op vs
-  including it) so the effect of the op being tuned is obvious. Reuses the existing
-  preview path with a truncated recipe; frontend-mostly. (M, editor)
 
 ### Autonomy — "just works" (PRIORITY 2)
 - **One-click "process this target"** — after ingest, reach a good stack *and* a
@@ -165,6 +159,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Per-op "without this op" preview compare** — the editor's Compare button shows
+  the whole recipe vs the raw base, but while tuning one op a user wants to see
+  *just that op's* contribution. The selected op's panel now carries a "Without
+  this op" toggle that renders the full recipe with only that op bypassed (reusing
+  the existing preview path with a modified recipe), overlaying a "Without: <op>"
+  label so the isolated op's effect is obvious. Mutually exclusive with the
+  Compare/Star-mask overlays and resets when the selection changes, so each op
+  starts from "showing with". Vitest-covered (toggle flips label + button state);
+  frontend-only, additive. (v0.56.16, this run)
 
 - **Progressive disclosure of the "Add operation" menu** — the menu listed all ~19
   editor ops flat across four groups, so a beginner opening it was faced with every

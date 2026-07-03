@@ -191,6 +191,34 @@ describe("EditorView", () => {
     expect(await screen.findByText("Deconvolution")).toBeInTheDocument();
   });
 
+  it("previews the recipe without the selected op via 'Without this op'", async () => {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [
+        { uid: "s1", id: "tone.stretch", enabled: true, params: { stretch: 0.5 } },
+        { uid: "c1", id: "tone.curves", enabled: true, params: { points: [[0, 0], [1, 1]] } },
+      ],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    // Select the Curves op, then toggle the per-op "without this op" compare.
+    fireEvent.click(await screen.findByText("Curves"));
+    const btn = await screen.findByRole("button", { name: "Without this op" });
+    fireEvent.click(btn);
+
+    // The overlay names the isolated op and the button flips to the active label.
+    expect(await screen.findByText("Without: Curves")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Showing without" })).toBeInTheDocument();
+  });
+
   it("shows an error message when the preview render fails (not a blank panel)", async () => {
     mockEditorQueries();
     vi.stubGlobal("fetch", vi.fn(async () => ({
