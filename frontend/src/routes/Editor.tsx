@@ -27,6 +27,7 @@ import { prependCoverageLeveling } from "../components/editor/coverageLeveling";
 import { applyTrimCrop, trimRectStyle, trimKeptLabel, hasEnabledGeometryOp }
   from "../components/editor/mosaicTrim";
 import { pngProgressLabel } from "../components/editor/pngProgress";
+import { opErrorsMessage } from "../components/editor/opErrors";
 import { clippingCaption } from "../components/editor/clipping";
 import { previewDebounceMs } from "../components/editor/previewDebounce";
 import { starMaskSizePx } from "../components/editor/starMaskSize";
@@ -353,16 +354,38 @@ export function EditorView() {
   });
   const exportRun = useMutation({
     mutationFn: () => api.exportRun(safe, rid, recipe, outputName.trim() || `${safe}_edit`, tiffMode),
-    onSuccess: () => {
+    onSuccess: ({ job_id }) => {
       // Stay in the editor (don't bounce to Jobs); the navbar job badge tracks it.
       notifications.show({
         message: "Export running — the new image will appear in History when done.",
         color: "violet",
       });
       qc.invalidateQueries({ queryKey: ["jobs"] });
+      // Poll the job in the background purely to surface any ops that failed on the
+      // full-res data (dropped best-effort, so the export look changed silently).
+      void pollJobForOpErrors(job_id);
     },
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
+
+  // Watch an export/render job to completion and warn if any op was dropped on the
+  // full-res data. Best-effort and non-blocking; failures to poll are ignored.
+  const pollJobForOpErrors = async (jobId: string) => {
+    try {
+      for (;;) {
+        const j = await api.getJob(jobId);
+        if (["error", "cancelled", "interrupted"].includes(j.state)) return;
+        if (j.state === "done") {
+          const msg = opErrorsMessage(j.result?.op_errors);
+          if (msg) notifications.show({ message: msg, color: "orange", autoClose: 10000 });
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 800));
+      }
+    } catch {
+      /* advisory only — never surface a polling error */
+    }
+  };
 
   // Live progress of the full-res PNG render, shown under the button while it
   // polls (the slowest editor action — a bare spinner reads as "stuck").
@@ -374,7 +397,7 @@ export function EditorView() {
       // Full-res render can be slow on mosaics — poll the job to completion.
       for (;;) {
         const j = await api.getJob(job_id);
-        if (j.state === "done") return job_id;
+        if (j.state === "done") return { jobId: job_id, opErrors: opErrorsMessage(j.result?.op_errors) };
         if (["error", "cancelled", "interrupted"].includes(j.state)) {
           throw new Error(j.error || "PNG render failed");
         }
@@ -382,13 +405,14 @@ export function EditorView() {
         await new Promise((r) => setTimeout(r, 500));
       }
     },
-    onSuccess: (jobId) => {
+    onSuccess: ({ jobId, opErrors }) => {
       const a = document.createElement("a");
       a.href = api.editPngUrl(safe, rid, jobId);
       document.body.appendChild(a);
       a.click();
       a.remove();
       notifications.show({ message: "Full-resolution PNG ready", color: "teal" });
+      if (opErrors) notifications.show({ message: opErrors, color: "orange", autoClose: 10000 });
     },
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
     onSettled: () => setPngProgress(null),

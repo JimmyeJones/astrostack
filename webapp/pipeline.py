@@ -317,11 +317,17 @@ def _carry_provenance(fits_path: str) -> dict[str, Any]:
     return carry
 
 
-def _render_recipe_fullres(fits_path: str, recipe_dict: dict, progress) -> tuple[Any, Any]:
+def _render_recipe_fullres(fits_path: str, recipe_dict: dict, progress,
+                           errors: list[str] | None = None) -> tuple[Any, Any]:
     """Apply an editor recipe to a full-res FITS. Returns ``(out_rgb, recipe)``
     where ``out_rgb`` is the display-stretched 0..1 result. A default asinh
     stretch is applied if the recipe has no stretch op (so the result is never
-    raw-linear/black)."""
+    raw-linear/black).
+
+    An op that raises on the full-res data is dropped (best-effort, like the live
+    preview) but its failure message is appended to ``errors`` (when provided) —
+    same format as ``apply_recipe`` — so the caller can surface it instead of the
+    export silently changing the look with no notice to the user."""
     import numpy as np
 
     from seestack.edit.recipe import recipe_from_dict
@@ -350,7 +356,10 @@ def _render_recipe_fullres(fits_path: str, recipe_dict: dict, progress) -> tuple
                 stretched = True
                 ctx.stage = "nonlinear"
         except Exception as exc:  # noqa: BLE001
-            log.warning("editor op %s failed: %s", op.id, exc)
+            msg = f"{spec.label}: {type(exc).__name__}: {exc}"
+            log.warning("editor op %s failed on export: %s", op.id, msg)
+            if errors is not None:
+                errors.append(msg)
         done += 1
         progress("render", done, n)
     if not stretched:
@@ -382,7 +391,9 @@ def _apply_editor_to_run(lib: Library, safe: str, run_id: int, recipe_dict: dict
             raise FileNotFoundError(f"run {run_id} has no FITS")
         base = output_name or f"{run.output_basename}_edit"
 
-        out, recipe = _render_recipe_fullres(run.fits_path, recipe_dict, progress)
+        op_errors: list[str] = []
+        out, recipe = _render_recipe_fullres(run.fits_path, recipe_dict, progress,
+                                             errors=op_errors)
 
         n_ops = len([o for o in recipe.ops if o.enabled])
         edit_meta = _carry_provenance(run.fits_path)
@@ -417,7 +428,8 @@ def _apply_editor_to_run(lib: Library, safe: str, run_id: int, recipe_dict: dict
         proj.close()
     lib.refresh_target_stats(safe)
     return {"safe": safe, "run_id": new_id, "output_basename": base,
-            "output_dir": str(Path(paths["fits"]).parent)}
+            "output_dir": str(Path(paths["fits"]).parent),
+            "op_errors": op_errors}
 
 
 def submit_editor_export(settings: Settings, jm: JobManager, safe: str, run_id: int,
@@ -457,8 +469,10 @@ def submit_editor_png(settings: Settings, jm: JobManager, safe: str, run_id: int
                 run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
                 if run is None or not run.fits_path or not Path(run.fits_path).exists():
                     raise FileNotFoundError(f"run {run_id} has no FITS")
+                op_errors: list[str] = []
                 out, _recipe = _render_recipe_fullres(
-                    run.fits_path, recipe_dict, _progress(jm, job))
+                    run.fits_path, recipe_dict, _progress(jm, job),
+                    errors=op_errors)
                 from seestack.stack.output import safe_basename
                 ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
                 png = (Path(proj.project_dir) / "output"
@@ -467,7 +481,8 @@ def submit_editor_png(settings: Settings, jm: JobManager, safe: str, run_id: int
             finally:
                 proj.close()
             return {"safe": safe, "run_id": run_id,
-                    "png_path": str(png), "filename": png.name}
+                    "png_path": str(png), "filename": png.name,
+                    "op_errors": op_errors}
         finally:
             lib.close()
 

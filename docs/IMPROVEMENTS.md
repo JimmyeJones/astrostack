@@ -73,14 +73,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   (compare denoise on a full image vs its 2×/4× strided proxy). Off nothing (it's
   a correctness fix), but validate it doesn't weaken the clean-image case.
   (M, editor/correctness)
-- **Surface failed ops on export, not just in the live preview** — the preview and
-  histogram paths collect per-op failures into `errors` and show them under the
-  image (Editor.tsx), but the full-res export path (`_render_recipe_fullres`) only
-  *logs* a failed op and drops it silently — so an op that fails on the full-res
-  data (but worked on the proxy, or vice versa) changes the exported look with no
-  notice to the user. Thread the per-op errors into the export job result and show
-  them in the "Export running/done" notification (or the History card). Reuses the
-  same best-effort try/except; additive. (S–M, editor/trust)
 - **"Original" compare should match the stack's own baseline** — the editor's
   Compare ("Original") renders an *empty* recipe, which the backend tone-maps with
   a hard-coded default asinh (stretch 0.5 / black 0.35). That can look different
@@ -203,6 +195,20 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Surface failed ops on export, not just in the live preview** — the preview /
+  histogram paths collect per-op failures into `errors` and show them under the
+  image, but the full-res export path (`_render_recipe_fullres`) only *logged* a
+  failed op and dropped it silently, so an op that fails on the full-res data (but
+  worked on the proxy, or vice versa) changed the exported look with no notice.
+  `_render_recipe_fullres` now appends each failure (same `label: Type: msg` format
+  as the preview) to an `errors` list threaded into both the export-run and PNG job
+  results as `op_errors`; the editor polls the job and shows an orange "N operations
+  failed and were skipped in the exported image: …" notification (pure
+  `opErrorsMessage` helper) on both the export and full-res-PNG paths. Reuses the
+  best-effort try/except; additive/upgrade-safe (new result field). Tested: webapp
+  (a monkeypatched-to-fail op surfaces in the export job's `op_errors`; a clean
+  recipe reports `[]`) + Vitest helper (4 cases). (v0.61.11, this run)
 
 - **Fix stale/misleading maintainer comments & docstrings** — three inaccuracies a
   future maintainer would trust: the `edit_coverage_map` endpoint docstring still

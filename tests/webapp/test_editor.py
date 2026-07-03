@@ -370,6 +370,42 @@ def test_export_creates_new_run_non_destructive(client, solved_library):
     assert edited["has_fits"] and edited["notes"] == "edited"
 
 
+def test_export_reports_failed_ops_in_result(client, solved_library, monkeypatch):
+    """An op that raises on the full-res data is dropped best-effort, but its
+    failure is threaded into the export job result (op_errors) so the editor can
+    warn the user the exported look changed silently — not just logged away."""
+    from seestack.edit.registry import get_op
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe)
+
+    def boom(*_a, **_k):
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr(get_op("tone.saturation"), "apply", boom)
+    recipe = {"ops": [{"id": "tone.stretch", "params": {}},
+                      {"id": "tone.saturation", "params": {"amount": 1.2}}]}
+    r = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/export",
+                    json={"recipe": recipe, "output_name": "with_failure"})
+    assert r.status_code == 200
+    job = _wait_job(client, r.json()["job_id"])
+    assert job["state"] == "done", job                 # bad op didn't sink the export
+    errs = job["result"]["op_errors"]
+    assert any("kaboom" in e for e in errs), errs
+
+
+def test_export_clean_recipe_has_no_op_errors(client, solved_library):
+    """A recipe whose ops all succeed reports an empty op_errors list."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe)
+    recipe = {"ops": [{"id": "tone.stretch", "params": {}}]}
+    r = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/export",
+                    json={"recipe": recipe, "output_name": "clean"})
+    job = _wait_job(client, r.json()["job_id"])
+    assert job["state"] == "done"
+    assert job["result"]["op_errors"] == []
+
+
 def test_export_carries_provenance_headers(client, solved_library):
     """The derived master.fits keeps the source integration provenance
     (OBJECT/NFRAMES/EXPTOTAL) and records how it was produced (STACKMTD/EDITFROM)."""
