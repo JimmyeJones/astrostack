@@ -161,6 +161,20 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Preview↔export parity for spatial detail ops** — the live preview runs on a
+  striding-decimated proxy (≤1500 px), but the sharpen radius, bilateral-denoise
+  spatial extent, etc. are in *full-resolution* pixels and ignored `proxy_scale`,
+  so on a big image a `radius=2px` sharpen covered `proxy_scale`× more of the
+  proxy than of the full-res export — the preview over-sharpened/over-smoothed
+  relative to what you actually got. Added `EditContext.scaled_px()` (divides a
+  full-res pixel measure by `proxy_scale`, no-op on the export where scale=1) and
+  applied it to `detail.sharpen`'s radius and `detail.denoise`'s bilateral
+  `sigma_spatial`, so the preview now sharpens/smooths the same physical detail as
+  the export. Deconvolution is preview-skipped (`proxy_safe=False`) so it was
+  already export-only. Unit-tested: `scaled_px` scaling + a monkeypatched-radius
+  test proving the sharpen radius shrinks 4→2→1 as proxy_scale goes 1→2→4.
+  Engine-only, additive, export output unchanged. (v0.56.19, this run)
+
 - **Explain what Auto-process did** — after Auto-process builds a recipe the user
   saw a pipeline of op names but no sense of *why* those ops, so the one-click
   result was a black box. A new pure `autoSummarySentence` helper turns the built

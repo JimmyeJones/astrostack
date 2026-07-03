@@ -61,6 +61,17 @@ class EditContext:
     use_gpu: bool | None = None
     stage: Stage = "linear"           # updated by the pipeline as it crosses stretch
 
+    def scaled_px(self, px: float) -> float:
+        """Convert a *full-resolution* pixel measure to this render's pixel scale.
+
+        On the decimated live-preview proxy (``proxy_scale > 1``) a feature that
+        spans ``px`` full-res pixels spans only ``px / proxy_scale`` proxy pixels,
+        so spatial ops (sharpen radius, denoise spatial extent, …) must shrink
+        their pixel radii by the same factor for the preview to match the
+        full-res export. On the export (``proxy_scale == 1``) this is a no-op.
+        """
+        return px / max(1.0, self.proxy_scale)
+
 
 ApplyFn = Callable[[np.ndarray, dict[str, Any], EditContext], np.ndarray]
 

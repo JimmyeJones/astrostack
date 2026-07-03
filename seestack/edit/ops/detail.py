@@ -65,8 +65,11 @@ def _denoise(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
                     norm, weight=0.02 + 0.2 * strength, channel_axis=-1)
             den = norm + strength * (den - norm)  # blend by strength
         elif method == "bilateral":
+            # sigma_spatial is a full-res pixel extent; scale it down on the
+            # preview proxy so the smoothing footprint matches the export.
             den = restoration.denoise_bilateral(
-                norm, sigma_color=0.02 + 0.15 * strength, sigma_spatial=2.0,
+                norm, sigma_color=0.02 + 0.15 * strength,
+                sigma_spatial=max(0.5, ctx.scaled_px(2.0)),
                 channel_axis=-1)
         else:  # tv
             den = restoration.denoise_tv_chambolle(
@@ -78,7 +81,10 @@ def _denoise(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
 
 def _sharpen(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     amount = float(params.get("amount", 1.0))
-    radius = float(params.get("radius", 2.0))
+    # The radius is in *full-resolution* pixels; on the decimated live-preview
+    # proxy shrink it by proxy_scale so the preview sharpens the same physical
+    # detail as the full-res export (parity), floored just above zero.
+    radius = max(0.05, ctx.scaled_px(float(params.get("radius", 2.0))))
 
     def run(img: np.ndarray) -> np.ndarray:
         from skimage.filters import unsharp_mask
