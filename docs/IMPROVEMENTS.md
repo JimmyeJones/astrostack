@@ -51,9 +51,33 @@ problems. Dogfood it every big-picture run and fix root causes.
 - **Editor bug hunt (ongoing)** — there are undocumented issues. Each big-picture
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
+- **Highlight/shadow clipping warning in the editor histogram** — over-stretching
+  is the classic beginner mistake: push the stretch/levels too far and star cores
+  blow out to pure white (a big spike in the top histogram bin) or the sky crushes
+  to pure black (a spike in the bottom bin), losing detail irreversibly on export.
+  The editor already fetches the live histogram (`hist.data.r/g/b`), so a pure
+  helper can measure the fraction of pixels piled in the extreme bin(s) and, above
+  a threshold, show a subtle caption under the preview ("Highlights are clipping —
+  ~4% of pixels are pure white; ease the stretch/white point to keep star-core
+  detail"). Advisory only, no auto-changes; teaches good stretch discipline on the
+  priority-1 editor. Pure, unit-testable helper; frontend-only, additive.
+  (S–M, editor)
 
 
 ### Autonomy — "just works" (PRIORITY 2)
+- **One-click "trim the ragged mosaic border"** — a Seestar mosaic's union canvas
+  has ragged, low-coverage edges (corners covered by a single frame, NaN gaps) that
+  look messy and are noisier than the well-covered interior. The coverage map is
+  already loaded into the editor render context (`ctx.coverage`, wired in v0.58.6),
+  so Auto-process (or a dedicated "Trim to well-covered area" button) could compute
+  the largest axis-aligned rectangle where coverage ≥ some fraction of the max and
+  set the `geometry.crop` op's fractional bounds to it — turning a fiddly manual
+  crop into one click, tuned to the actual data. Only offered on a mosaic
+  (`is_mosaic`, now surfaced on the histogram); a single-field stack is untouched.
+  Needs a robust largest-rectangle computation on the (downsampled) coverage mask
+  and a neutral fallback (no crop) when coverage is uniform or the rectangle would
+  be degenerate. Off-by-default risk nil (explicit button / crop op the user sees
+  and can remove). (M, autonomy/image-quality)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
   different (per-channel vs luminance gradient, star reduction, saturation). The
