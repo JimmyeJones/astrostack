@@ -324,7 +324,13 @@ describe("StackView", () => {
 
     renderStack();
 
-    await waitFor(() => expect(screen.getByText("Min/max rejection")).toBeInTheDocument());
+    // Wait until the *defaults* have actually applied (the min/max reject switch
+    // reads as on), not just until the schema-driven label renders — otherwise the
+    // nudge shows transiently between the schema and defaults queries resolving and
+    // this negative assertion races it (a CI flake). Once the switch is checked the
+    // "already on" suppression is in effect, so the nudge must be absent.
+    const toggle = await screen.findByLabelText("Min/max rejection");
+    await waitFor(() => expect(toggle).toBeChecked());
     expect(screen.queryByText(/drops the single highest and lowest/)).not.toBeInTheDocument();
   });
 
