@@ -58,14 +58,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   this op" affordance (render the recipe up to but excluding the selected op vs
   including it) so the effect of the op being tuned is obvious. Reuses the existing
   preview path with a truncated recipe; frontend-mostly. (M, editor)
-- **Auto-place a newly-added op on the correct side of the stretch** — builds on
-  this run's stage-conflict warning + `moveToCorrectSide`. Adding an op from the
-  menu always appends it at the end of the pipeline, so a linear op (background,
-  denoise, colour cal) added after a stretch immediately triggers the new "should
-  be before the stretch" caution. Instead, insert a new op on its correct side of
-  the (enabled) stretch by default — linear just before, nonlinear just after,
-  `any` at the end — so the conflict never arises for the common add-then-tune
-  flow. Reuses `moveToCorrectSide`; frontend-only. (S, editor)
 - **Progressive disclosure of the "Add operation" menu** — the menu lists all ~18
   ops flat across four groups; a beginner scanning it is overwhelmed and doesn't
   know which few matter. Surface a short curated "Common" section at the top
@@ -179,6 +171,18 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Auto-place a newly-added op on the correct side of the stretch** — adding an op
+  from the menu appended it at the end of the pipeline, so a linear op (background,
+  colour cal, denoise) added after the stretch immediately tripped the v0.56.10
+  "should be before the stretch" caution the user then had to Fix. A new pure
+  `insertOnCorrectSide` helper now inserts a freshly-added op on its correct side of
+  the *enabled* stretch by default — linear just before, nonlinear just after,
+  `any`-stage (and anything added with no enabled stretch) still appended at the
+  end exactly as before — so the common add-then-tune flow never lands on the wrong
+  side. Reuses the same side/stretch logic as `moveToCorrectSide`; unit-tested
+  (5 cases: linear-before, nonlinear-after, any-appends, no-stretch-appends,
+  empty-pipeline); frontend-only. (v0.56.14, this run)
 
 - **"No stretch step" nudge in the editor pipeline** — if a recipe has ops but no
   *enabled* Stretch op, the pipeline silently auto-inserts a default asinh stretch

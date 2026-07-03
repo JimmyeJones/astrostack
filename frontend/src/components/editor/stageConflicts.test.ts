@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { hasEnabledStretch, moveToCorrectSide, stageConflicts } from "./stageConflicts";
+import {
+  hasEnabledStretch, insertOnCorrectSide, moveToCorrectSide, stageConflicts,
+} from "./stageConflicts";
 import type { EditOp, OpInstance } from "../../api/client";
 
 function spec(id: string, stage: string, is_stretch = false): EditOp {
@@ -102,6 +104,37 @@ describe("moveToCorrectSide", () => {
   it("is a no-op when there is no enabled stretch", () => {
     const ops = [op("background.subtract", "bg"), op("tone.saturation", "sat")];
     expect(moveToCorrectSide(ops, "sat", SPECS)).toBe(ops);
+  });
+});
+
+describe("insertOnCorrectSide", () => {
+  it("inserts a linear op just before the enabled stretch", () => {
+    const ops = [op("tone.stretch", "s"), op("tone.saturation", "sat")];
+    const next = insertOnCorrectSide(ops, op("background.subtract", "bg"), SPECS);
+    expect(next.map((o) => o.uid)).toEqual(["bg", "s", "sat"]);
+  });
+
+  it("inserts a nonlinear op just after the enabled stretch", () => {
+    const ops = [op("background.subtract", "bg"), op("tone.stretch", "s")];
+    const next = insertOnCorrectSide(ops, op("tone.saturation", "sat"), SPECS);
+    expect(next.map((o) => o.uid)).toEqual(["bg", "s", "sat"]);
+  });
+
+  it("appends an 'any'-stage op at the end (never mis-placed)", () => {
+    const ops = [op("tone.stretch", "s")];
+    const next = insertOnCorrectSide(ops, op("tone.scnr", "a"), SPECS);
+    expect(next.map((o) => o.uid)).toEqual(["s", "a"]);
+  });
+
+  it("appends when there is no enabled stretch to anchor against", () => {
+    const ops = [op("tone.stretch", "s", false), op("tone.saturation", "sat")];
+    const next = insertOnCorrectSide(ops, op("background.subtract", "bg"), SPECS);
+    expect(next.map((o) => o.uid)).toEqual(["s", "sat", "bg"]);
+  });
+
+  it("appends to an empty pipeline", () => {
+    const next = insertOnCorrectSide([], op("background.subtract", "bg"), SPECS);
+    expect(next.map((o) => o.uid)).toEqual(["bg"]);
   });
 });
 

@@ -16,7 +16,7 @@ import { useUndoable } from "../hooks/useUndoable";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { Histogram } from "../components/editor/Histogram";
 import { OpList } from "../components/editor/OpList";
-import { hasEnabledStretch, moveToCorrectSide } from "../components/editor/stageConflicts";
+import { hasEnabledStretch, insertOnCorrectSide, moveToCorrectSide } from "../components/editor/stageConflicts";
 import { OpParamPanel } from "../components/editor/OpParamPanel";
 import { PresetMenu } from "../components/editor/PresetMenu";
 
@@ -235,7 +235,11 @@ export function EditorView() {
   // --- op list ops ---------------------------------------------------------
   const addOp = (spec: EditOp) => {
     const op = newOp(spec);
-    setOps((p) => [...p, op]);
+    // Insert on the correct side of the (enabled) stretch — linear ops just
+    // before it, nonlinear just after — so a newly-added op doesn't land at the
+    // end and immediately trip the stage-conflict caution. Falls back to
+    // appending when there's no stretch or the op fits either side.
+    setOps((p) => insertOnCorrectSide(p, op, specs));
     setSelected(op.uid);
   };
   const move = (u: string, dir: -1 | 1) => setOps((p) => {
