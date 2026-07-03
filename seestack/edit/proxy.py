@@ -92,6 +92,39 @@ def get_proxy(project_dir: Path, run_id: int, fits_path: str | Path) -> tuple[np
     return rgb, scale
 
 
+def coverage_path_for(fits_path: str | Path) -> Path:
+    """The sibling per-pixel coverage FITS a stack run writes next to its output
+    (``{basename}_coverage.fits`` — see :mod:`seestack.stack.output`)."""
+    p = Path(fits_path)
+    return p.with_name(f"{p.stem}_coverage.fits")
+
+
+def load_coverage(fits_path: str | Path, *, step: int = 1) -> np.ndarray | None:
+    """Load a stack's per-pixel coverage map as a 2D float32 array, or ``None``
+    when no coverage sibling exists (a single-field image the leveling op can't and
+    shouldn't act on).
+
+    ``step`` strides the map the same way :func:`build_proxy` decimates the image,
+    so the returned coverage lines up pixel-for-pixel with a proxy built at that
+    ``proxy_scale`` — essential for the live-preview coverage-leveling op to match
+    the full-res export.
+    """
+    cov_path = coverage_path_for(fits_path)
+    if not cov_path.exists():
+        return None
+    from astropy.io import fits as _fits
+
+    try:
+        cov = np.asarray(_fits.getdata(cov_path), dtype=np.float32)
+    except OSError:
+        return None
+    if cov.ndim == 3:  # defensively collapse a stray per-channel map to 2D
+        cov = cov[..., 0] if cov.shape[-1] <= 3 else cov.mean(axis=-1)
+    if step > 1:
+        cov = cov[::step, ::step]
+    return np.ascontiguousarray(cov, dtype=np.float32)
+
+
 def clear_proxy(project_dir: Path, run_id: int) -> None:
     """Remove a run's cached proxy (call when the run is deleted)."""
     for p in _proxy_paths(project_dir, run_id):

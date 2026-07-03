@@ -156,6 +156,21 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Fix: "Coverage leveling" editor op was a permanent silent no-op** — the
+  Background-group "Coverage leveling" control (equalises sky across mosaic panels
+  with different frame coverage — a core Seestar mosaic case) read `ctx.coverage`,
+  but `EditContext.coverage` was *never* populated anywhere in production (preview,
+  histogram, or export), so the op returned its input unchanged for every user: a
+  guaranteed dead control. Each stack run already writes a sibling
+  `{basename}_coverage.fits`; a new `load_coverage` helper reads it (striding it to
+  the proxy step so the preview lines up with the full-res export), and the export
+  (`_render_recipe_fullres`), preview and histogram paths now feed it into
+  `EditContext.coverage`. Added a shape-mismatch guard so a prior geometry op
+  (crop/resize) makes the op skip cleanly instead of crashing the render. Engine +
+  webapp wiring, additive/upgrade-safe (no on-disk change; None → the existing
+  no-op for single-field images). Tested: `load_coverage` load/stride/None, the
+  webapp `_proxy_coverage` wiring, and the new shape-guard. (v0.58.6, this run)
+
 - **Fix: star-mask overlay ignored the op's star size (always the default 4 px)** —
   the editor's "Star mask" overlay exists so a beginner can see what the star ops
   (`stars.reduce` / `stars.boost_nebula`) treat as stars while tuning "Star size",

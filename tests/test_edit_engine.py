@@ -7,7 +7,10 @@ import pytest
 from astropy.io import fits
 
 from seestack.edit.pipeline import apply_recipe, has_stretch
-from seestack.edit.proxy import PROXY_MAX_PX, build_proxy, clear_proxy, get_proxy
+from seestack.edit.proxy import (
+    PROXY_MAX_PX, build_proxy, clear_proxy, coverage_path_for, get_proxy,
+    load_coverage,
+)
 from seestack.edit.recipe import OpInstance, Recipe, recipe_from_dict, validate_ops
 from seestack.edit.registry import EditContext, all_specs, get_op
 
@@ -442,6 +445,32 @@ def test_final_gradient_box_and_dilate_scaled_to_proxy(monkeypatch):
     spec.apply(img, {"box_size": 256, "dilate_px": 16}, EditContext(proxy_scale=4.0))
     # export unchanged; a 4x proxy quarters both spatial measures.
     assert seen == [(256, 16), (64, 4)]
+
+
+def test_load_coverage_reads_sibling_and_strides_for_proxy(tmp_path):
+    """The per-pixel coverage map lives in a sibling {basename}_coverage.fits; the
+    editor loads it into EditContext so the Coverage-leveling op actually works,
+    striding it by the proxy step so it lines up with a decimated preview."""
+    cov = np.arange(80 * 60, dtype=np.float32).reshape(80, 60)
+    fits_path = tmp_path / "stack_M42.fits"
+    cov_path = coverage_path_for(fits_path)
+    assert cov_path.name == "stack_M42_coverage.fits"
+    fits.PrimaryHDU(data=cov).writeto(cov_path)
+
+    full = load_coverage(fits_path)
+    assert full is not None and full.shape == (80, 60)
+    assert np.array_equal(full, cov)
+
+    # Strided by the proxy step, exactly like build_proxy decimates the image.
+    proxied = load_coverage(fits_path, step=4)
+    assert proxied.shape == cov[::4, ::4].shape
+    assert np.array_equal(proxied, cov[::4, ::4])
+
+
+def test_load_coverage_returns_none_for_single_field_image(tmp_path):
+    # No coverage sibling → the op has nothing to level against, so None (the op's
+    # None-guard then makes it a clean no-op rather than a dead control).
+    assert load_coverage(tmp_path / "single_field.fits") is None
 
 
 def test_star_reduce_erosion_footprint_scaled_to_proxy(monkeypatch):

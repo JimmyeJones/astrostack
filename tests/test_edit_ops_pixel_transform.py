@@ -133,3 +133,14 @@ def test_level_coverage_uses_context_coverage_to_flatten_panel_offsets():
     before_gap = abs(rgb[:, w // 2:, 0].mean() - rgb[:, :w // 2, 0].mean())
     after_gap = abs(out[:, w // 2:, 0].mean() - out[:, :w // 2, 0].mean())
     assert after_gap < before_gap * 0.3
+
+
+def test_level_coverage_skips_on_shape_mismatch_instead_of_crashing():
+    # A geometry op (crop/resize) earlier in the recipe can change the frame shape
+    # so it no longer matches the native-geometry coverage map. The op must skip
+    # (return the input unchanged) rather than raise and blank the render.
+    rgb = _gradient_field()  # e.g. 120x240
+    coverage = np.ones((rgb.shape[0] + 7, rgb.shape[1] - 5), dtype=np.int32)
+    op = get_op("background.level_coverage")
+    out = op.apply(rgb, {}, EditContext(coverage=coverage))
+    assert np.array_equal(out, rgb)

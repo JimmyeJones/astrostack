@@ -44,6 +44,28 @@ def _enc(recipe: dict) -> str:
     return base64.urlsafe_b64encode(json.dumps(recipe).encode()).decode()
 
 
+def test_proxy_coverage_loads_and_strides_the_sibling(tmp_path):
+    """The preview/histogram paths feed EditContext.coverage via _proxy_coverage so
+    the Coverage-leveling op works on the proxy and matches the full-res export."""
+    from webapp.routers.editor import _proxy_coverage
+
+    cov = np.arange(40 * 32, dtype=np.float32).reshape(40, 32)
+    fp = tmp_path / "master.fits"
+    fits.writeto(fp.with_name("master_coverage.fits"), cov)
+
+    full = _proxy_coverage(str(fp), scale=1.0)
+    assert full is not None and np.array_equal(full, cov)
+    # A 2x proxy strides the coverage to match the decimated image.
+    strided = _proxy_coverage(str(fp), scale=2.0)
+    assert np.array_equal(strided, cov[::2, ::2])
+
+
+def test_proxy_coverage_none_without_sibling(tmp_path):
+    from webapp.routers.editor import _proxy_coverage
+
+    assert _proxy_coverage(str(tmp_path / "master.fits"), scale=1.0) is None
+
+
 def _wait_job(client, job_id, timeout=30.0):
     deadline = time.time() + timeout
     while time.time() < deadline:
