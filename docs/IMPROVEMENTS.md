@@ -115,6 +115,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   do next; audit every screen for jargon and add plain-language "why" tooltips;
   reduce visible option clutter (progressive disclosure). (M, friendliness)
 - Better long-job feedback and clearer error messages. (S, friendliness)
+- **A "Reset all points" / whole-op Auto for the Levels op header** — the Levels
+  panel now has a header "Auto levels" (v0.64.0) that *sets* data-driven points, but
+  no matching one-click to *undo* a bad manual drag back to the 0/1/1.0 identity
+  (only the per-param reset icons and the degenerate-range fix exist). Add a small
+  "Reset points" header action next to "Auto levels" that restores black=0, white=1,
+  gamma=1 in one click, so a beginner who over-dragged has a clean escape hatch
+  symmetric with Auto. Pure, reuses `setParams`; frontend-only, additive. (S,
+  editor/friendliness)
+- **Surface the measured midtone target on the gamma suggestion** — the new
+  data-driven gamma button (v0.66.0) reads "From your image (midtones 1.6)"; like the
+  sharpen/denoise buttons that name *why* (FWHM, noise σ), it could name the goal it
+  solves for ("lands the sky at ~25% grey"), so the number has visible provenance and
+  the beginner understands it's brightening the typical tone, not a magic value. Pure
+  label change on the existing suggestion; frontend-only, additive. (S,
+  editor/trust)
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 - **Photometric (multiplicative) frame normalization before combine** — frames
