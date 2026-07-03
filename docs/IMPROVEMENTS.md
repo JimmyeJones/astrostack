@@ -58,6 +58,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   this op" affordance (render the recipe up to but excluding the selected op vs
   including it) so the effect of the op being tuned is obvious. Reuses the existing
   preview path with a truncated recipe; frontend-mostly. (M, editor)
+- **Auto-place a newly-added op on the correct side of the stretch** — builds on
+  this run's stage-conflict warning + `moveToCorrectSide`. Adding an op from the
+  menu always appends it at the end of the pipeline, so a linear op (background,
+  denoise, colour cal) added after a stretch immediately triggers the new "should
+  be before the stretch" caution. Instead, insert a new op on its correct side of
+  the (enabled) stretch by default — linear just before, nonlinear just after,
+  `any` at the end — so the conflict never arises for the common add-then-tune
+  flow. Reuses `moveToCorrectSide`; frontend-only. (S, editor)
+- **Progressive disclosure of the "Add operation" menu** — the menu lists all ~18
+  ops flat across four groups; a beginner scanning it is overwhelmed and doesn't
+  know which few matter. Surface a short curated "Common" section at the top
+  (Stretch, Curves, Saturation, Noise reduction, Sharpen, SCNR, Background) and
+  collapse the rest under a "More operations" expander, so the first-time path is
+  obvious without hiding power. Frontend-only; reuses the ops schema. (S, editor)
 
 ### Autonomy — "just works" (PRIORITY 2)
 - **One-click "process this target"** — after ingest, reach a good stack *and* a
