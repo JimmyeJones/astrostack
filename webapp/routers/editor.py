@@ -386,10 +386,18 @@ async def edit_star_mask(safe: str, run_id: int, request: Request,
 @router.post("/api/targets/{safe}/stack-runs/{run_id}/editor/auto")
 async def auto_process(safe: str, run_id: int, request: Request) -> dict:
     project_dir, run = _run_info(request, safe, run_id)
+    # The target's median star FWHM sizes the auto sharpen radius to the data
+    # (same conversion as the sharpen-from-stars button), not a fixed guess.
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        median_fwhm = proj.median_fwhm()
+    finally:
+        proj.close()
+        lib.close()
 
     def work() -> dict:
         rgb, _scale = get_proxy(project_dir, run.id, run.fits_path)
-        return presets_mod.auto_recipe(rgb).to_dict()
+        return presets_mod.auto_recipe(rgb, median_fwhm=median_fwhm).to_dict()
 
     return await run_in_threadpool(work)
 

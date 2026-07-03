@@ -200,6 +200,32 @@ def test_auto_recipe_denoise_strength_scales_with_noise():
     assert s_heavy > s_mild  # stronger noise → stronger denoise
 
 
+def test_auto_recipe_sharpen_radius_from_fwhm():
+    """Auto's sharpen radius should track the target's own star size (median FWHM
+    → Gaussian σ, clamped to the op's step/range), not a fixed 2.0 guess. A clean
+    (non-noisy) image gets the sharpen op."""
+    import math
+
+    from seestack.edit.presets import auto_recipe
+
+    clean = np.full((80, 100, 3), 0.05, np.float32)
+    clean[30:50, 40:60] += 0.5
+
+    def sharpen_radius(fwhm):
+        op = next((o for o in auto_recipe(clean, median_fwhm=fwhm).ops
+                   if o.id == "detail.sharpen"), None)
+        return None if op is None else float(op.params["radius"])
+
+    # No FWHM → the op's neutral 2.0 default.
+    assert sharpen_radius(None) == 2.0
+    # A measured FWHM maps to ≈ its Gaussian σ, rounded to the op's 0.5 step.
+    expected = 6.0 / (2.0 * math.sqrt(2.0 * math.log(2.0)))
+    expected = round(round(expected / 0.5) * 0.5, 2)
+    assert sharpen_radius(6.0) == expected
+    # A bigger FWHM → a bigger radius (sized to the data).
+    assert sharpen_radius(9.0) > sharpen_radius(3.0)
+
+
 def test_denoise_identity_at_zero_and_preserves_colour():
     base = np.empty((40, 50, 3), np.float32)
     for c, lvl in enumerate((0.1, 0.2, 0.3)):

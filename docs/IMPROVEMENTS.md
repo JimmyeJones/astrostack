@@ -169,6 +169,18 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Data-driven sharpen radius in the one-click Auto recipe** — when Auto-process
+  sharpens a clean stack it used a *fixed* `radius=2.0`, the same for a tight-star
+  and a bloated-star image, even though v0.57.4 already ships the exact FWHM→radius
+  conversion (radius ≈ the star's Gaussian σ) behind the editor's sharpen-from-stars
+  button. The auto endpoint now threads the target's `median_fwhm()` into
+  `auto_recipe`, which sizes the auto sharpen radius to the target's *own* stars
+  (clamped to the op's 0.5–10 step/range), falling back to the neutral 2.0 when no
+  frame carries an FWHM — so the one-click result sharpens the right detail scale
+  instead of guessing. Test asserts the auto sharpen radius tracks the FWHM and
+  falls back to 2.0; engine + one endpoint thread, additive/upgrade-safe.
+  (v0.57.6, this run)
+
 - **Star-size-from-stars suggestion for the star-reduce op** — the `stars.reduce`
   op's `size` param is a physical star-scale in px a beginner can't reason about,
   and QC already measures exactly that as the median star FWHM. A new
