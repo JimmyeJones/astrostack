@@ -74,6 +74,23 @@ def test_guard_accounts_for_drizzle_reject(monkeypatch):
         )
 
 
+def test_guard_accounts_for_k_reject_planes(monkeypatch):
+    monkeypatch.delenv("ASTROSTACK_MAX_STACK_GB", raising=False)
+    shape = (4000, 4000)  # baseline 4 planes ≈ 0.77 GB
+    # k=1 charges the baseline (2 + 2·1 = 4 planes) — same as no reject.
+    base = stacker._min_max_reject_arrays(1)
+    assert base == 4
+    stacker._guard_stack_memory(shape, drizzle=False, drizzle_scale=1.0,
+                                reject_arrays=base, memory_budget_gb=0.9)
+    # k=3 needs 2 + 2·3 = 8 planes ≈ 1.5 GB — the 0.9 GB budget that fit k=1
+    # must now refuse it, so a big k can't sneak past the OOM guard.
+    assert stacker._min_max_reject_arrays(3) == 8
+    with pytest.raises(MemoryError, match="working memory"):
+        stacker._guard_stack_memory(shape, drizzle=False, drizzle_scale=1.0,
+                                    reject_arrays=stacker._min_max_reject_arrays(3),
+                                    memory_budget_gb=0.9)
+
+
 def _peak(shape, scale, reject=False):
     peak, _ = stacker._estimate_peak_bytes(
         shape, drizzle=True, drizzle_scale=scale, drizzle_reject=reject)

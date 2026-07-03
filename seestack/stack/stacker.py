@@ -95,13 +95,25 @@ def _stack_memory_budget_bytes(setting_gb: float | None = None) -> float:
     return _DEFAULT_STACK_BUDGET_GB * 1e9
 
 
+def _min_max_reject_arrays(reject_count: int) -> int:
+    """Canvas-plane count the ``MinMaxRejectAccumulator`` holds at once for a given
+    reject count: ``sum`` + ``count`` + k min-planes + k max-planes = ``2 + 2k``.
+    Charged in the memory estimate so a large k can't slip past the OOM guard."""
+    return 2 + 2 * max(1, int(reject_count))
+
+
 def _estimate_peak_bytes(dst_shape: tuple[int, int], *, drizzle: bool,
                          drizzle_scale: float,
                          drizzle_reject: bool = False,
+                         reject_arrays: int = 0,
                          ) -> tuple[int, tuple[int, int]]:
     """Peak working-memory estimate for a stack and its post-drizzle output
     shape. ``dst_shape`` is (h, w) of the pre-drizzle canvas; drizzle multiplies
     each axis by ``drizzle_scale``. Returns ``(peak_bytes, (out_h, out_w))``.
+
+    ``reject_arrays`` is the number of canvas planes a top/bottom-k min/max reject
+    accumulator holds at once (see ``_min_max_reject_arrays``); it raises the array
+    factor when a k>1 reject would need more than the baseline working set.
 
     Shared by ``_guard_stack_memory`` (which refuses over-budget stacks) and
     ``estimate_stack`` (which surfaces the same number to the UI *before* a run
@@ -113,8 +125,10 @@ def _estimate_peak_bytes(dst_shape: tuple[int, int], *, drizzle: bool,
     else:
         out_h, out_w = h, w
     out_pixels = out_h * out_w
-    arrays = (_PEAK_CANVAS_ARRAYS_DRIZZLE_REJECT if (drizzle and drizzle_reject)
-              else _PEAK_CANVAS_ARRAYS)
+    if drizzle and drizzle_reject:
+        arrays = _PEAK_CANVAS_ARRAYS_DRIZZLE_REJECT
+    else:
+        arrays = max(_PEAK_CANVAS_ARRAYS, reject_arrays)
     need = out_pixels * 3 * 4 * arrays  # float32 RGB working arrays
     return need, (out_h, out_w)
 
@@ -154,6 +168,7 @@ def _largest_drizzle_scale_within_budget(
 def _guard_stack_memory(dst_shape: tuple[int, int], *, drizzle: bool,
                         drizzle_scale: float,
                         drizzle_reject: bool = False,
+                        reject_arrays: int = 0,
                         memory_budget_gb: float | None = None) -> None:
     """Refuse a stack whose output canvas would blow the memory budget instead
     of letting it OOM-kill the whole process. ``dst_shape`` is (h, w) of the
@@ -161,7 +176,8 @@ def _guard_stack_memory(dst_shape: tuple[int, int], *, drizzle: bool,
     h, w = dst_shape
     need, _ = _estimate_peak_bytes(dst_shape, drizzle=drizzle,
                                    drizzle_scale=drizzle_scale,
-                                   drizzle_reject=drizzle_reject)
+                                   drizzle_reject=drizzle_reject,
+                                   reject_arrays=reject_arrays)
     budget = _stack_memory_budget_bytes(memory_budget_gb)
     if need > budget:
         raise MemoryError(
@@ -192,6 +208,13 @@ class StackOptions:
     # weights (it's an order statistic). Off by default; when on it takes
     # precedence over ``sigma_clip`` on the standard (non-drizzle) path.
     min_max_reject: bool = False
+    # How many per-pixel extremes to drop *per side* when ``min_max_reject`` is on.
+    # 1 = the classic single min/max drop (today's behaviour). Raise it to clip
+    # multiple trails crossing one pixel across a session (k=3 → up to 3 satellite/
+    # plane trails). Applied only where a pixel has ≥ 2k+1 samples; below that it
+    # degrades to the proven single min/max drop. Costs 2k canvas planes (charged
+    # in the memory guard). Kept small — the Stack form bounds it at 5.
+    min_max_reject_count: int = 1
     background_flatten: bool = True
     background_box_size: int = 128
     # 'per_channel' (default, good for star fields and small targets)
@@ -368,6 +391,9 @@ def estimate_stack(project: Project, options: StackOptions,
     peak, (out_h, out_w) = _estimate_peak_bytes(
         dst_shape, drizzle=options.drizzle, drizzle_scale=options.drizzle_scale,
         drizzle_reject=options.drizzle_reject and n >= 4,
+        reject_arrays=(_min_max_reject_arrays(options.min_max_reject_count)
+                       if options.min_max_reject and not options.drizzle and n >= 3
+                       else 0),
     )
     budget = int(_stack_memory_budget_bytes(memory_budget_gb))
     would_exceed = int(peak) > budget
@@ -737,6 +763,9 @@ def run_stack(
     _guard_stack_memory(dst_shape, drizzle=options.drizzle,
                         drizzle_scale=options.drizzle_scale,
                         drizzle_reject=options.drizzle_reject and n >= 4,
+                        reject_arrays=(_min_max_reject_arrays(options.min_max_reject_count)
+                                       if options.min_max_reject and not options.drizzle and n >= 3
+                                       else 0),
                         memory_budget_gb=memory_budget_gb)
     errors: list[str] = []
 
@@ -806,7 +835,7 @@ def run_stack(
     # lone per-pixel extreme (satellite/plane trail, hot/cold sample) that κ-σ
     # can't in a small stack. Needs ≥3 frames to spare two samples.
     elif options.min_max_reject and n >= 3:
-        mmr = MinMaxRejectAccumulator(canvas_3)
+        mmr = MinMaxRejectAccumulator(canvas_3, reject_count=options.min_max_reject_count)
         ql_state_mmr = {"counter": 0}
 
         def consume_min_max(aligned: np.ndarray, y0: int, x0: int, weight: float) -> None:

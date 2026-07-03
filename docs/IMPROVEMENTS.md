@@ -52,25 +52,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
 
-### Editor — make it excellent (PRIORITY 1) — new ideas
-- **Retire the now-dead "export only" preview scaffolding** — since v0.57.0 *every*
-  editor op is `proxy_safe=True` (deconvolution renders on the proxy too), so the
-  OpList "export only" badge and the selected-op "The live preview doesn't show
-  this effect" note (Editor.tsx, gated on `!proxy_safe`) are unreachable — and
-  worse, *stale*: if a future op were ever marked `proxy_safe=False` the note would
-  now lie ("doesn't show this effect" when it does). Either delete the dead
-  badge/note (+ their Vitest cases for the removed behaviour) or, if we want to keep
-  a "heavy — preview may lag" affordance, repoint it at the new `heavy` hint (shipped
-  v0.57.17) with accurate copy ("this is slow, so the preview updates after a short
-  pause"). Simplifies the priority-1 editor and removes a future foot-gun.
-  (S, editor/friendliness)
-- **Show a per-op timing hint so "heavy" ops set expectations before you add them**
-  — the `heavy` spec hint (v0.57.17) is currently only consumed by the preview
-  debounce; surface it in the Add-operation menu and the op header too (a small
-  "slower preview" chip on Deconvolution / Noise reduction), so a beginner knows
-  *before* dragging a slider why the preview takes a beat to update, rather than
-  wondering if it's stuck. Pure frontend, reuses the already-threaded `heavy` field;
-  additive. (S, editor/friendliness)
 
 ### Autonomy — "just works" (PRIORITY 2)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
@@ -94,6 +75,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   do next; audit every screen for jargon and add plain-language "why" tooltips;
   reduce visible option clutter (progressive disclosure). (M, friendliness)
 - Better long-job feedback and clearer error messages. (S, friendliness)
+- **Warn when the min/max reject k is too aggressive for the frame count** — the
+  top/bottom-k trim (v0.58.0) only applies its full k-drop where a pixel has ≥ 2k+1
+  frames; below that it *silently* degrades to a single min/max drop. A user who
+  sets `min_max_reject_count=3` on an 8-frame stack gets almost no benefit and no
+  signal why. Add a Stack-form advisory (mirroring the existing small-stack min/max
+  nudge) that fires when `2·k+1 > accepted+solved`, saying e.g. "k=3 needs 7+ frames
+  per pixel to fully apply; you have 8 — it'll mostly fall back to a single drop.
+  Lower k or add frames." Pure frontend, reuses the frame-count the form already
+  has; advisory-only. (S, friendliness/autonomy)
+
+### Autonomy — follow-ups
+- **Auto-suggest the min/max reject count (k) from the streaked-frame count** — the
+  Stack form already nudges a beginner to *turn on* min/max reject when a small stack
+  carries streaked frames (v0.56.2). Now that k is tunable (v0.58.0), extend the
+  nudge to also suggest a *count*: if QC flags N frames with satellite/plane streaks,
+  a k ≈ min(N, 5) drops all of them instead of just the worst one — with a one-click
+  "set k = N" on the advisory. Reuses the streak QC already computed per frame; keep
+  it a suggestion (never auto-applies). (S, autonomy)
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 - **Photometric (multiplicative) frame normalization before combine** — frames
@@ -106,22 +105,8 @@ problems. Dogfood it every big-picture run and fix root causes.
   most of it) and divide it out before accumulation. Needs care: robust to
   few-star frames, neutral fallback, off by default first. (M, correctness)
 - Follow-ups to min/max reject (shipped v0.56.0). (Item (2), the Stack-form
-  small-stack hint, shipped v0.56.2.) Remaining:
-  - **Top/bottom-k trimmed-mean reject** — generalise `MinMaxRejectAccumulator`
-    to drop the *k* smallest and *k* largest per pixel (opt-in
-    `min_max_reject_count`, default 1 = exactly today's behaviour). Handles
-    multiple satellite/plane trails crossing the same pixel across a session
-    (k=3 → up to 3 trails) that a single-extreme drop leaves behind. Stays
-    memory-bounded and single-pass by tracking the k smallest/largest as 2k
-    canvas planes (vectorised sorted insertion), applying the full k-trim only
-    where `count ≥ 2k+1` (so the two sides are disjoint) and degrading to the
-    proven single min/max drop for `3 ≤ count < 2k+1`. NB: the earlier
-    "percentile (drop p%)" and "median/MAD" framings are **not** streaming-
-    feasible — an exact per-pixel median/percentile needs *every* frame's value
-    held per pixel (tens of GB on a big canvas), which the OOM-bounded hot path
-    forbids; the k-extremes trim is the memory-safe realisation. Must extend
-    `_estimate_peak_bytes` / the memory guard to charge the extra 2k planes so
-    the pre-run estimate stays exact. (M, correctness)
+  small-stack hint, shipped v0.56.2; top/bottom-k trimmed-mean reject shipped
+  v0.58.0.) No remaining sub-items.
 - **Dark exposure-scaling** (slice (b), now that bias is wired for lights) —
   `scaled_dark = bias + (dark − bias)·(t_light/t_dark)` so a dark shot at a
   different exposure than the lights can still be used. Needs the per-frame
@@ -188,6 +173,53 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Show the k-count in the rejection badge for a top/bottom-k trim** — follow-on to
+  v0.58.0: the `RejectionBadge` on History/Gallery/Compare cards derives the combine
+  method from a run's stored options, so a stack combined with `min_max_reject_count>1`
+  now reads "min-max ×3" (with a tooltip explaining it dropped the 3 highest and
+  lowest per pixel) instead of a bare "min-max", while the default single drop and
+  old runs (no count stored) still read "min-max". Reuses the already-serialised
+  option; Vitest-covered (×3 label + default/explicit-1 stays plain); frontend-only,
+  additive. (v0.58.1, this run)
+
+- **Top/bottom-k trimmed-mean reject** — generalised `MinMaxRejectAccumulator` to
+  drop the *k* smallest and *k* largest per pixel via an opt-in
+  `StackOptions.min_max_reject_count` (default 1 = exactly today's single min/max
+  drop), so multiple satellite/plane trails crossing one pixel across a session
+  (k=3 → up to 3 trails) are removed where a single-extreme drop left two behind.
+  Stays single-pass and memory-bounded: k sorted min-planes and k max-planes
+  (`2 + 2k` canvas planes) updated by a vectorised insertion (min/max bubble), the
+  full k-trim applied only where `count ≥ 2k+1` (the two sides are then disjoint
+  with a middle), degrading to the proven single min/max drop for `3 ≤ count < 2k+1`
+  and a plain mean below 3 — so k=1 is byte-identical to before. `_estimate_peak_bytes`
+  / the memory guard now charge the extra `2k` planes (`_min_max_reject_arrays`) so a
+  big k can't slip past the OOM guard. Descriptor-driven Stack-form control
+  (advanced, `depends_on=min_max_reject`, bounds 1–5) surfaces it automatically.
+  Unit-tested (k=3 trim / three-trail kill / <2k+1 degrade / NaN+tie / windowed /
+  k=1-identity), guard-tested (k=3 refused where k=1 fit), and end-to-end. Additive/
+  upgrade-safe (new field defaults 1). (v0.58.0, this run)
+
+- **"slower preview" chip in the Add-operation menu** — the `heavy` spec hint
+  (v0.57.17) was only consumed by the preview debounce; now the Add-operation menu
+  (both the curated Common section and the full grouped list) shows a small "slower
+  preview" chip next to each heavy op (Deconvolution / Noise reduction), so a
+  beginner knows *before* adding the op why its live preview will update after a
+  beat rather than instantly — setting the expectation up-front instead of leaving
+  them wondering if it's stuck. Reuses the already-threaded `heavy` field via a
+  shared `SlowPreviewChip`; Vitest-covered (chip shown in the menu); frontend-only,
+  additive. (v0.57.22, this run)
+
+- **Retire the now-dead "export only" preview scaffolding → "slower preview"** —
+  since v0.57.0 *every* editor op is `proxy_safe=True`, so the OpList "export only"
+  badge and the selected-op "The live preview doesn't show this effect" note (both
+  gated on `!proxy_safe`) were unreachable and, worse, stale (they'd lie if an op
+  were ever re-marked non-proxy-safe). Repointed both at the live `heavy` spec hint
+  (v0.57.17): the row now shows a "slower preview" chip and the note explains the
+  preview updates *after a short pause* (matching the adaptive debounce) rather than
+  falsely claiming the effect never shows. Accurate copy, one fewer foot-gun on the
+  priority-1 editor. Vitest case repointed (badge + note); frontend-only, additive.
+  (v0.57.21, this run)
 
 - **NaN-preservation regression tests for the spatial detail ops** — the
   denoise / sharpen / deconvolve ops run on a NaN-filled copy (skimage can't

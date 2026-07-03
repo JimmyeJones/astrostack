@@ -125,37 +125,51 @@ class WeightedSumAccumulator:
 
 
 class MinMaxRejectAccumulator:
-    """Single-pass min/max (extremes) rejection accumulator, NaN-aware.
+    """Single-pass top/bottom-*k* (extremes) rejection accumulator, NaN-aware.
 
-    For each pixel it keeps a running ``sum``, ``count``, ``min`` and ``max`` over
-    the *valid* contributions, then reduces to the mean of the middle values by
-    dropping exactly one minimum and one maximum:
+    For each pixel it keeps a running ``sum`` and ``count`` plus the *k smallest*
+    and *k largest* valid contributions, then reduces to the mean of the middle
+    values by dropping the k lowest and k highest:
 
-        result = (sum − min − max) / (count − 2)   when count ≥ 3
+        result = (sum − Σ(k smallest) − Σ(k largest)) / (count − 2k)   when count ≥ 2k+1
 
-    This is an **order-statistic** reject, so — unlike κ-σ, whose tolerance a lone
-    outlier inflates by its own deviation — it removes a single satellite/plane
-    trail (the per-pixel max) or a lone cold/dead sample (the min) *even in a tiny
-    stack* where κ-σ mathematically can't (a lone outlier's deviation stays below
-    κ for n < 11). It's tie-safe (a saturated star core shared by several frames
-    only ever loses one contribution, because the extreme *value* is subtracted
-    once regardless of how many frames hit it) and memory-bounded (four canvas
+    With the default ``reject_count=1`` this is exactly the classic min/max reject
+    (drop one min, one max). Raising *k* handles **multiple** outliers crossing the
+    same pixel across a session — e.g. three satellite/plane trails at ``k=3`` —
+    which a single-extreme drop leaves behind.
+
+    Like κ-σ's alternative, this is an **order-statistic** reject: it removes a lone
+    satellite/plane trail (a per-pixel max) or cold/dead sample (a min) *even in a
+    tiny stack* where κ-σ mathematically can't (a lone outlier's deviation stays
+    below κ for n < 11). It's tie-safe (a saturated star core shared by several
+    frames loses only k contributions, because each extreme *value* is subtracted
+    once regardless of how many frames hit it) and memory-bounded (``2 + 2k`` canvas
     planes, one pass — no need to hold every frame).
 
-    Pixels with ``count < 3`` can't spare two samples, so they fall back to the
-    plain mean of whatever covered them (``sum / count``); ``count == 0`` stays
-    NaN. Being an order statistic, it ignores per-frame quality weights (like a
-    median would) — the ``weight`` argument is accepted for a uniform consumer
-    signature but not applied.
+    Coverage degrades gracefully:
+
+    * ``count ≥ 2k+1`` — the two k-sets are disjoint with a middle left: full k-trim.
+    * ``3 ≤ count < 2k+1`` — can't spare 2k, so degrade to the proven single min/max
+      drop (``(sum − min − max) / (count − 2)``).
+    * ``1 ≤ count < 3`` — can't spare two: plain mean of whatever covered the pixel.
+    * ``count == 0`` — stays NaN.
+
+    Being an order statistic, it ignores per-frame quality weights (like a median
+    would) — the ``weight`` argument is accepted for a uniform consumer signature
+    but not applied.
     """
 
-    def __init__(self, shape: tuple[int, ...], dtype: np.dtype | type = np.float32) -> None:
+    def __init__(self, shape: tuple[int, ...], dtype: np.dtype | type = np.float32,
+                 reject_count: int = 1) -> None:
         self.shape = shape
+        self._k = max(1, int(reject_count))
         self._sum = np.zeros(shape, dtype=dtype)
         self._count = np.zeros(shape, dtype=np.uint32)
-        # fmin/fmax ignore NaN, so seed with the identities.
-        self._min = np.full(shape, np.inf, dtype=dtype)
-        self._max = np.full(shape, -np.inf, dtype=dtype)
+        # k sorted planes per side; seed with the ±inf identities so an as-yet
+        # uncovered slot never wins the extremes. ``_mins`` ascending (``_mins[0]``
+        # is the true min), ``_maxs`` descending (``_maxs[0]`` is the true max).
+        self._mins = np.full((self._k, *shape), np.inf, dtype=dtype)
+        self._maxs = np.full((self._k, *shape), -np.inf, dtype=dtype)
 
     def add(self, image: np.ndarray, mask: np.ndarray | None = None, weight: float = 1.0) -> None:
         if image.shape != self.shape:
@@ -182,23 +196,46 @@ class MinMaxRejectAccumulator:
         if not valid.any():
             return
         # Contributions of invalid pixels are neutralised: 0 for the sum, and the
-        # fmin/fmax identities so they never win the running extremes.
+        # ±inf identities so they never displace a real value in the k-sets.
         vals = np.where(valid, image, 0.0).astype(self._sum.dtype, copy=False)
         self._sum[ys, xs] += vals
         self._count[ys, xs] += valid.astype(np.uint32, copy=False)
-        hi = np.where(valid, image, -np.inf).astype(self._max.dtype, copy=False)
-        lo = np.where(valid, image, np.inf).astype(self._min.dtype, copy=False)
-        np.fmax(self._max[ys, xs], hi, out=self._max[ys, xs])
-        np.fmin(self._min[ys, xs], lo, out=self._min[ys, xs])
+        # Insertion into the k smallest (invalid → +inf never displaces).
+        cand = np.where(valid, image, np.inf).astype(self._mins.dtype, copy=False)
+        mins = self._mins[:, ys, xs]
+        for j in range(self._k):
+            slot = np.minimum(cand, mins[j])
+            cand = np.maximum(cand, mins[j])  # the larger bubbles down
+            mins[j] = slot
+        self._mins[:, ys, xs] = mins
+        # Insertion into the k largest (invalid → -inf never displaces).
+        cand = np.where(valid, image, -np.inf).astype(self._maxs.dtype, copy=False)
+        maxs = self._maxs[:, ys, xs]
+        for j in range(self._k):
+            slot = np.maximum(cand, maxs[j])
+            cand = np.minimum(cand, maxs[j])  # the smaller bubbles down
+            maxs[j] = slot
+        self._maxs[:, ys, xs] = maxs
 
     def result(self) -> np.ndarray:
         out = np.full(self.shape, np.nan, dtype=self._sum.dtype)
         cnt = self._count
-        # ≥3 samples: drop one min and one max, average the rest.
-        ge3 = cnt >= 3
-        if ge3.any():
-            denom = (cnt[ge3].astype(self._sum.dtype) - 2.0)
-            out[ge3] = (self._sum[ge3] - self._min[ge3] - self._max[ge3]) / denom
+        k = self._k
+        # count ≥ 2k+1: the two k-sets are disjoint with a middle — full k-trim.
+        full = cnt >= (2 * k + 1)
+        if full.any():
+            # Index each side's k-plane sum *before* combining, so the ±inf
+            # identities at still-uncovered pixels never form an inf−inf NaN.
+            drop = self._mins.sum(axis=0)[full] + self._maxs.sum(axis=0)[full]
+            denom = cnt[full].astype(self._sum.dtype) - 2.0 * k
+            out[full] = (self._sum[full] - drop) / denom
+        # 3 ≤ count < 2k+1: can't spare 2k — degrade to a single min/max drop.
+        # (For k=1, 2k+1 == 3 so this band is empty and behaviour is unchanged.)
+        single = (cnt >= 3) & (cnt < (2 * k + 1))
+        if single.any():
+            denom = cnt[single].astype(self._sum.dtype) - 2.0
+            out[single] = (self._sum[single] - self._mins[0][single]
+                           - self._maxs[0][single]) / denom
         # 1–2 samples: can't spare two — fall back to the plain mean.
         lt3 = (cnt >= 1) & (cnt < 3)
         if lt3.any():

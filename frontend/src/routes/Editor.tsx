@@ -1,5 +1,5 @@
 import {
-  ActionIcon, Alert, Button, Center, Grid, Group, Loader, Menu, Paper, Select, Stack, Text,
+  ActionIcon, Alert, Badge, Button, Center, Grid, Group, Loader, Menu, Paper, Select, Stack, Text,
   TextInput, Title, Tooltip,
 } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
@@ -43,6 +43,18 @@ const COMMON_OP_IDS = [
 
 function uid(): string {
   return (crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)).slice(0, 8);
+}
+
+/** A small "slower preview" chip for `heavy` ops, so a beginner knows before
+ * adding the op why its live preview updates after a beat rather than instantly. */
+function SlowPreviewChip() {
+  return (
+    <Tooltip label="Slow to render — the live preview updates after a short pause" withArrow>
+      <Badge size="xs" variant="light" color="grape" style={{ flexShrink: 0, cursor: "help" }}>
+        slower preview
+      </Badge>
+    </Tooltip>
+  );
 }
 
 function newOp(spec: EditOp): OpInstance {
@@ -549,7 +561,10 @@ export function EditorView() {
                     <Menu.Label>Common</Menu.Label>
                     {commonOps.map((s) => (
                       <Menu.Item key={s.id} onClick={() => addOp(s)}>
-                        <Text size="sm">{s.label}</Text>
+                        <Group gap={6} wrap="nowrap">
+                          <Text size="sm">{s.label}</Text>
+                          {s.heavy ? <SlowPreviewChip /> : null}
+                        </Group>
                         {s.help ? (
                           <Text size="10px" c="dimmed" lineClamp={2}>{s.help}</Text>
                         ) : null}
@@ -571,7 +586,10 @@ export function EditorView() {
                       <Menu.Label>{GROUP_LABELS[g] ?? g}</Menu.Label>
                       {grouped[g].map((s) => (
                         <Menu.Item key={s.id} onClick={() => addOp(s)}>
-                          <Text size="sm">{s.label}</Text>
+                          <Group gap={6} wrap="nowrap">
+                            <Text size="sm">{s.label}</Text>
+                            {s.heavy ? <SlowPreviewChip /> : null}
+                          </Group>
                           {s.help ? (
                             <Text size="10px" c="dimmed" lineClamp={2}>{s.help}</Text>
                           ) : null}
@@ -656,13 +674,13 @@ export function EditorView() {
                 {specs[selectedOp.id].help ? (
                   <Text size="xs" c="dimmed" mb="xs">{specs[selectedOp.id].help}</Text>
                 ) : null}
-                {!specs[selectedOp.id].proxy_safe && selectedOp.enabled ? (
+                {specs[selectedOp.id].heavy && selectedOp.enabled ? (
                   <Alert color="grape" variant="light" py={6} mb="xs"
                     icon={<IconInfoCircle size={16} />}>
                     <Text size="xs">
-                      The live preview doesn't show this effect — it's heavy, so it only
-                      runs when you Export or "Download full-res PNG". Adjust its settings
-                      here, then export to see the result at full resolution.
+                      This op is slow to render, so the live preview waits for a short
+                      pause after you change a slider before updating — it's not stuck.
+                      The full-resolution result appears when you Export.
                     </Text>
                   </Alert>
                 ) : null}

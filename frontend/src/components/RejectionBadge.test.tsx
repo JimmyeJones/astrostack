@@ -18,6 +18,14 @@ describe("rejectionBadge", () => {
 
   it("labels min/max rejection", () => {
     expect(rejectionBadge({ min_max_reject: true })?.label).toBe("min-max");
+    // Explicit default count still reads as the plain single-drop label.
+    expect(rejectionBadge({ min_max_reject: true, min_max_reject_count: 1 })?.label)
+      .toBe("min-max");
+  });
+
+  it("shows the k count for a top/bottom-k trim (k>1)", () => {
+    expect(rejectionBadge({ min_max_reject: true, min_max_reject_count: 3 })?.label)
+      .toBe("min-max ×3");
   });
 
   it("min/max takes precedence over sigma-clip (engine ignores κ-σ then)", () => {

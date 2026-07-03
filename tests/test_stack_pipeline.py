@@ -264,6 +264,29 @@ def test_stack_min_max_reject(tmp_path):
     assert np.nanmax(data) > 0
 
 
+def test_stack_min_max_reject_k3(tmp_path):
+    """A top/bottom-k reject (count=3) runs end to end on a small stack and
+    produces a finite, positive result — the k>1 generalisation of min/max."""
+    from astropy.io import fits
+
+    proj = _build_project(tmp_path, n=9, with_outlier=True)
+    try:
+        result = run_stack(
+            proj,
+            StackOptions(sigma_clip=False, min_max_reject=True,
+                         min_max_reject_count=3, max_workers=2, output_name="minmax3"),
+        )
+    finally:
+        proj.close()
+
+    assert result.n_frames_used == 9
+    with fits.open(result.fits_path) as hdul:
+        data = np.asarray(hdul[0].data)
+        assert hdul[0].header["STACKER"] == "min-max-reject"
+    assert np.isfinite(data).any()
+    assert np.nanmax(data) > 0
+
+
 def test_min_max_reject_takes_precedence_over_sigma_clip(tmp_path):
     """With both enabled on the standard path, min/max reject wins (it's the
     stronger order-statistic rejection), reflected in the provenance card."""
