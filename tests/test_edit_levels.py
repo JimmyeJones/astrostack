@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from seestack.edit.levels import suggest_levels_points
+from seestack.edit.levels import suggest_levels_gamma, suggest_levels_points
 
 
 def _scene(black_floor=0.15, bright=0.9, h=120, w=160, seed=0):
@@ -57,3 +57,42 @@ def test_returns_none_when_range_is_degenerate():
     # All-NaN (uncovered) → too few finite pixels.
     allnan = np.full((60, 60, 3), np.nan, dtype="float32")
     assert suggest_levels_points(allnan) is None
+
+
+def test_gamma_lifts_a_dark_median_toward_the_target():
+    # A dark-sky scene: the median sits near the black floor, so after the
+    # black/white remap the typical tone lands low and a >1 gamma is suggested.
+    img = _scene(black_floor=0.12, bright=0.9)
+    pts = suggest_levels_points(img)
+    assert pts is not None
+    gamma = suggest_levels_gamma(img, pts[0], pts[1])
+    assert gamma is not None and gamma > 1.0
+    # Applying it lands the remapped median near the 0.25 target grey.
+    finite = img[np.isfinite(img)]
+    x_m = (float(np.median(finite)) - pts[0]) / (pts[1] - pts[0])
+    assert abs(x_m ** (1.0 / gamma) - 0.25) < 0.05
+
+
+def test_gamma_is_none_when_the_median_already_sits_at_or_above_target():
+    # A bright-midtone image: the median already lands at/above the target after
+    # the remap, so no lift is suggested (leave gamma at 1.0).
+    rng = np.random.default_rng(1)
+    img = np.clip(0.6 + rng.normal(0.0, 0.02, (80, 80, 3)), 0.0, 1.0).astype("float32")
+    # A wide black/white range so the bright median maps high.
+    assert suggest_levels_gamma(img, 0.0, 1.0) is None
+
+
+def test_gamma_guards_degenerate_range_and_too_few_pixels():
+    img = _scene()
+    # white <= black → no range.
+    assert suggest_levels_gamma(img, 0.8, 0.8) is None
+    # All-NaN → too few finite pixels.
+    allnan = np.full((60, 60, 3), np.nan, dtype="float32")
+    assert suggest_levels_gamma(allnan, 0.1, 0.9) is None
+
+
+def test_gamma_is_clamped_to_the_op_range():
+    g = suggest_levels_gamma(_scene(black_floor=0.12), 0.1, 0.95)
+    if g is not None:
+        assert 0.1 <= g <= 5.0
+        assert round(g, 3) == g

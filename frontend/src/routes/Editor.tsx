@@ -921,20 +921,24 @@ export function EditorView() {
                 <Group justify="space-between" wrap="nowrap" mb={6}>
                   <Text fw={600} size="sm">{specs[selectedOp.id].label}</Text>
                   <Group gap="xs" wrap="nowrap">
-                    {/* One-click "Auto levels" sets *both* the black and white
-                        points from the image's own histogram at once, so the
-                        common case is a single click (the per-param "From your
-                        image" buttons stay for fine control). */}
+                    {/* One-click "Auto levels" sets the black and white points
+                        (and the midtone gamma, when a lift is suggested) from the
+                        image's own histogram at once, so the common case is a
+                        single click (the per-param "From your image" buttons stay
+                        for fine control). */}
                     {selectedOp.id === "tone.levels"
                       && levels.data?.black != null && levels.data?.white != null ? (
                       <Tooltip
-                        label="Set both the black and white points from this image's histogram"
+                        label={"Set the black and white points"
+                          + (levels.data.gamma != null ? " and midtone brightness" : "")
+                          + " from this image's histogram"}
                         multiline w={220} withArrow>
                         <Button size="compact-xs" variant="light" color="blue"
                           onClick={() => setParams(selectedOp.uid, {
                             ...selectedOp.params,
                             black: levels.data!.black,
                             white: levels.data!.white,
+                            ...(levels.data!.gamma != null ? { gamma: levels.data!.gamma } : {}),
                           })}>
                           Auto levels ({levels.data.black}–{levels.data.white})
                         </Button>
@@ -1028,6 +1032,14 @@ export function EditorView() {
                                   value: levels.data.white,
                                   label: `From your image (white ${levels.data.white})`,
                                 },
+                                // A midtone lift is only suggested when one meaningfully
+                                // helps, so the gamma button appears conditionally.
+                                ...(levels.data.gamma != null ? {
+                                  gamma: {
+                                    value: levels.data.gamma,
+                                    label: `From your image (midtones ${levels.data.gamma})`,
+                                  },
+                                } : {}),
                               }
                               : undefined
                   } />

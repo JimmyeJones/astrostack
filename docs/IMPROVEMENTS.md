@@ -87,16 +87,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   user saw), accepting that it's the ≤1024 px preview rather than the ≤1500 px editor
   proxy. Care: it's a behaviour change to Compare, so gate/validate the resolution
   swap doesn't jar the A/B. (S, editor/trust)
-- **Suggest a midtone (gamma) point for the Levels op too** — the data-driven Levels
-  suggestion (v0.62.0) + one-click "Auto levels" (v0.64.0) set the black & white
-  points from the image histogram, but leave the **gamma** (midtone) slider at 1.0,
-  so a beginner still hand-guesses the single control that most affects perceived
-  brightness. Extend `suggest_levels_points` (or a sibling) to also return a gamma
-  that lands the sky/median tone at a pleasant target grey (solve `x**(1/γ)=target`
-  for the post-black/white median), and have "Auto levels" apply all three. Keep the
-  per-param buttons for fine control; NaN-aware; return `None` gamma when the median
-  is degenerate. Engine + the existing endpoint + frontend; additive. (S–M,
-  editor/autonomy)
 - **Guide lines on the histogram for the Stretch/clipping too** — the new
   `Histogram` `guides` prop (v0.65.0) draws the Levels black/white points; the same
   mechanism could mark the pure-black (0) and pure-white (1) clipping edges whenever
@@ -218,6 +208,22 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Data-driven midtone (gamma) point for the Levels op** — the Levels suggestion
+  (v0.62.0) + "Auto levels" (v0.64.0) set the black/white points from the histogram
+  but left the **gamma** (midtone) slider — the control that most affects perceived
+  brightness — at 1.0 for a beginner to hand-guess. A new pure
+  `suggest_levels_gamma` helper solves `x_m**(1/γ)=target` for the image's median
+  tone after the black/white remap (lands the typical tone at a pleasant 0.25 grey),
+  returned as an optional `gamma` on the `levels-suggestion` payload. "Auto levels"
+  now applies all three at once and a "From your image (midtones …)" per-param button
+  appears on the gamma slider (only when a meaningful lift exists). NaN-aware,
+  clamped to the op's 0.1–5.0 range, `None` when the median already sits at/above
+  target or the range is degenerate. Engine + endpoint + frontend; additive/
+  upgrade-safe (older clients ignore the new field). Tested: engine helper (5 cases:
+  dark-median lift lands near target / bright-median no-lift / degenerate range /
+  too-few-pixels / clamp+round), webapp (payload carries `gamma`), Vitest (one Auto
+  levels click leaves all three per-param buttons ✓/disabled). (v0.66.0, this run)
 
 - **Friendly labels on the last jargon-bare editor dropdown (denoise Method)** — the
   Noise-reduction op's Method enum was the only editor dropdown still showing raw

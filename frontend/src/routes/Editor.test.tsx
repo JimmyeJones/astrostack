@@ -45,6 +45,8 @@ const LEVELS: EditOp = {
       min: 0, max: 1, step: 0.01, options: null, help: null, depends_on: null },
     { key: "white", label: "White point", type: "float", group: "simple", default: 1,
       min: 0, max: 1, step: 0.01, options: null, help: null, depends_on: null },
+    { key: "gamma", label: "Midtones (gamma)", type: "float", group: "simple", default: 1,
+      min: 0.1, max: 5, step: 0.05, options: null, help: null, depends_on: null },
   ],
 };
 
@@ -555,14 +557,15 @@ describe("EditorView", () => {
     vi.spyOn(client.api, "getRecipe").mockResolvedValue({
       ops: [
         { uid: "s1", id: "tone.stretch", enabled: true, params: { stretch: 0.6 } },
-        { uid: "lv1", id: "tone.levels", enabled: true, params: { black: 0, white: 1 } },
+        { uid: "lv1", id: "tone.levels", enabled: true, params: { black: 0, white: 1, gamma: 1 } },
       ],
       base_run_id: 3,
     });
     vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
     vi.spyOn(client.api, "getHistogram").mockResolvedValue(
       { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
-    vi.spyOn(client.api, "levelsSuggestion").mockResolvedValue({ black: 0.12, white: 0.85 });
+    // Suggestion carries a midtone gamma lift too; Auto levels applies all three.
+    vi.spyOn(client.api, "levelsSuggestion").mockResolvedValue({ black: 0.12, white: 0.85, gamma: 1.6 });
     vi.stubGlobal("fetch", vi.fn(async () => ({
       ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
     })));
@@ -570,20 +573,23 @@ describe("EditorView", () => {
     renderEditor();
 
     fireEvent.click(await screen.findByText("Levels"));
-    // Wait for the data-driven suggestion to load — both per-param buttons render
+    // Wait for the data-driven suggestion to load — the per-param buttons render
     // (draining the pending renders so the header button node stays live).
     await screen.findByLabelText("Set Black point from your data");
     await screen.findByLabelText("Set White point from your data");
-    // One click on the header "Auto levels" button applies both suggested points.
+    await screen.findByLabelText("Set Midtones (gamma) from your data");
+    // One click on the header "Auto levels" button applies black, white and gamma.
     fireEvent.click(screen.getByRole("button", { name: /Auto levels/ }));
-    // Both per-param buttons now read as already-applied (disabled + ✓), proving
-    // black *and* white were set together.
+    // All three per-param buttons now read as already-applied (disabled + ✓),
+    // proving black, white *and* the midtone gamma were set together.
     await waitFor(() => {
       expect(screen.getByLabelText("Set Black point from your data")).toBeDisabled();
       expect(screen.getByLabelText("Set White point from your data")).toBeDisabled();
+      expect(screen.getByLabelText("Set Midtones (gamma) from your data")).toBeDisabled();
     });
     expect(screen.getByLabelText("Set Black point from your data")).toHaveTextContent("✓");
     expect(screen.getByLabelText("Set White point from your data")).toHaveTextContent("✓");
+    expect(screen.getByLabelText("Set Midtones (gamma) from your data")).toHaveTextContent("✓");
   });
 
   it("shows black/white guide labels on the histogram when the Levels op is selected", async () => {
