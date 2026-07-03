@@ -22,6 +22,7 @@ import { autoSummarySentence } from "../components/editor/autoSummary";
 import { applyDataDrivenDefaults, countDataDrivenDefaults, type OpSuggestion }
   from "../components/editor/dataDrivenDefaults";
 import { previewScaleCaption } from "../components/editor/previewScale";
+import { coalesceFwhm, measuredContextText } from "../components/editor/measuredContext";
 import { OpParamPanel } from "../components/editor/OpParamPanel";
 import { PresetMenu } from "../components/editor/PresetMenu";
 
@@ -84,6 +85,19 @@ export function EditorView() {
     queryFn: () => api.starSizeSuggestion(safe),
     staleTime: 60_000,
   });
+
+  // "Your data" context chip: a single dimmed line near the title showing what
+  // the editor measured about *this* stack (star FWHM, background noise), so the
+  // data-driven suggestion buttons have visible provenance. Reuses the already-
+  // fetched suggestion queries; shown only when at least one measure is available.
+  const measuredText = useMemo(
+    () => measuredContextText({
+      fwhm_px: coalesceFwhm(
+        psf.data?.fwhm_px, sharpen.data?.fwhm_px, starSize.data?.fwhm_px),
+      noise_sigma: denoise.data?.noise_sigma,
+    }),
+    [psf.data, sharpen.data, starSize.data, denoise.data],
+  );
 
   const { state: ops, set: setOps, reset: resetOps, undo, redo, canUndo, canRedo } =
     useUndoable<OpInstance[]>([]);
@@ -380,7 +394,15 @@ export function EditorView() {
         <Group gap="xs">
           <Button component={Link} to={`/targets/${safe}/history`} variant="subtle"
             leftSection={<IconArrowLeft size={16} />}>History</Button>
-          <Title order={2}>Editor — {safe}</Title>
+          <div>
+            <Title order={2}>Editor — {safe}</Title>
+            {measuredText ? (
+              <Tooltip multiline w={260} withArrow
+                label="What the editor measured from this stack — the same values behind the 'From your data' suggestion buttons.">
+                <Text size="xs" c="dimmed">{measuredText}</Text>
+              </Tooltip>
+            ) : null}
+          </div>
         </Group>
         <Group gap="xs">
           <Tooltip label="Undo (Ctrl+Z)"><ActionIcon variant="default" disabled={!canUndo}

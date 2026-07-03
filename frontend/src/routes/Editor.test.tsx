@@ -111,6 +111,22 @@ describe("EditorView", () => {
     expect(previewCall![1]?.signal).toBeInstanceOf(AbortSignal);
   });
 
+  it("shows a 'Measured' data-context chip built from the suggestion queries", async () => {
+    mockEditorQueries();
+    vi.spyOn(client.api, "psfSuggestion").mockResolvedValue({ fwhm_px: 3.2, psf_sigma: 1.36 });
+    vi.spyOn(client.api, "denoiseSuggestion")
+      .mockResolvedValue({ noise_sigma: 0.021, strength: 0.4 });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    await screen.findByText("Stretch");
+    expect(await screen.findByText(
+      "Measured: stars ≈ 3.2 px FWHM · background noise σ 0.021")).toBeInTheDocument();
+  });
+
   it("toggles the star-mask overlay and fetches the mask", async () => {
     mockEditorQueries();
     vi.stubGlobal("fetch", vi.fn(async () => ({

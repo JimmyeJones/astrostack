@@ -52,16 +52,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
 
-### Editor — make it excellent (PRIORITY 1) — new ideas
-- **"Your data" context chip in the editor header** — the four data-driven
-  suggestion buttons quote the measured value inline ("FWHM 3.2px"), but there's no
-  single place a user sees what the editor measured about *this* stack. A small
-  dimmed chip near the title ("Measured: stars ≈ 3.2 px FWHM · background noise σ
-  0.021") — built from the already-fetched psf/sharpen/star-size (`fwhm_px`) and
-  denoise (`noise_sigma`) queries via a pure formatter — gives the data-driven
-  buttons visible provenance and builds trust, shown only when at least one measure
-  is available. Pure helper, frontend-only, additive. (S, editor/friendliness)
-
 ### Autonomy — "just works" (PRIORITY 2)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
@@ -178,6 +168,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **"Your data" context chip in the editor header** — the four data-driven
+  suggestion buttons quote their measured value inline ("FWHM 3.2px"), but there
+  was no single place a user could see what the editor measured about *this* stack.
+  A small dimmed chip under the title ("Measured: stars ≈ 3.2 px FWHM · background
+  noise σ 0.021") — built from the already-fetched psf/sharpen/star-size (`fwhm_px`)
+  and denoise (`noise_sigma`) queries via pure `coalesceFwhm` / `measuredContextText`
+  helpers — gives the data-driven buttons visible provenance and builds trust,
+  shown (with an explanatory tooltip) only when at least one measure is available.
+  Pure helpers Vitest-covered (8 cases) + an Editor render test; frontend-only,
+  additive. (v0.57.14, this run)
 
 - **Cancel superseded live-preview renders (editor responsiveness)** — the live
   preview refetches on every debounced param change, but the four blob `fetch`
