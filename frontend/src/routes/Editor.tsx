@@ -5,7 +5,7 @@ import {
 import { useDebouncedValue } from "@mantine/hooks";
 import {
   IconAlertTriangle, IconArrowBackUp, IconArrowForwardUp, IconArrowLeft, IconDeviceFloppy,
-  IconDownload, IconPhotoDown, IconPlus, IconRefresh, IconSparkles, IconZoomScan,
+  IconDownload, IconInfoCircle, IconPhotoDown, IconPlus, IconRefresh, IconSparkles, IconZoomScan,
 } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -381,6 +381,21 @@ export function EditorView() {
               <Text fw={600} size="sm" mb={6}>Pipeline</Text>
               <OpList ops={ops} specs={specs} selected={selected} onSelect={setSelected}
                 onMove={move} onToggle={toggle} onRemove={remove} />
+              {ops.length === 0 ? (
+                <Alert color="grape" variant="light" py={8} mt="xs"
+                  icon={<IconSparkles size={16} />}>
+                  <Text size="xs" mb={6}>
+                    New to this? Let <b>Auto-process</b> build a good starting recipe from
+                    your image (background &amp; colour balance, a natural stretch, gentle
+                    denoise/sharpen) — then tweak from there. Or add operations one at a time.
+                  </Text>
+                  <Button size="compact-xs" variant="light" color="grape"
+                    leftSection={<IconSparkles size={14} />}
+                    loading={auto.isPending} onClick={() => auto.mutate()}>
+                    Auto-process
+                  </Button>
+                </Alert>
+              ) : null}
             </Paper>
 
             {selectedOp && specs[selectedOp.id] ? (
@@ -388,6 +403,16 @@ export function EditorView() {
                 <Text fw={600} size="sm" mb={6}>{specs[selectedOp.id].label}</Text>
                 {specs[selectedOp.id].help ? (
                   <Text size="xs" c="dimmed" mb="xs">{specs[selectedOp.id].help}</Text>
+                ) : null}
+                {!specs[selectedOp.id].proxy_safe && selectedOp.enabled ? (
+                  <Alert color="grape" variant="light" py={6} mb="xs"
+                    icon={<IconInfoCircle size={16} />}>
+                    <Text size="xs">
+                      The live preview doesn't show this effect — it's heavy, so it only
+                      runs when you Export or "Download full-res PNG". Adjust its settings
+                      here, then export to see the result at full resolution.
+                    </Text>
+                  </Alert>
                 ) : null}
                 <OpParamPanel spec={specs[selectedOp.id]} params={selectedOp.params}
                   histogram={hist.data} onChange={(p) => setParams(selectedOp.uid, p)}

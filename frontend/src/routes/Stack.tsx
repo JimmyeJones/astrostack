@@ -254,7 +254,7 @@ export function StackView() {
     !frames.isLoading && streakedAccepted > 0 && !values.min_max_reject
     && !values.drizzle
     && solvedAccepted >= 3 && solvedAccepted < MINMAX_SUGGEST_MAX_FRAMES
-      ? `You have ${streakedAccepted} streaked frame${streakedAccepted === 1 ? "" : "s"} in a small stack of ${solvedAccepted}. Sigma clipping can't reliably reject a lone satellite/plane trail below ~${MINMAX_SUGGEST_MAX_FRAMES} frames (a single outlier's deviation stays within κ), but “Min/max rejection” drops the single highest and lowest value at each pixel — removing the trail while keeping the rest. Turn it on in the options above for this small stack.`
+      ? `You have ${streakedAccepted} streaked frame${streakedAccepted === 1 ? "" : "s"} in a small stack of ${solvedAccepted}. Sigma clipping can't reliably reject a lone satellite/plane trail below ~${MINMAX_SUGGEST_MAX_FRAMES} frames (a single outlier's deviation stays within κ), but “Min/max rejection” drops the single highest and lowest value at each pixel — removing the trail while keeping the rest.`
       : null;
 
   const streakNoRejectionWarning =
@@ -556,6 +556,10 @@ export function StackView() {
           {minMaxRejectHint ? (
             <Alert color="blue" variant="light" py={6} px="sm">
               <Text size="xs">{minMaxRejectHint}</Text>
+              <Button size="compact-xs" variant="light" mt={6}
+                onClick={() => set("min_max_reject", true)}>
+                Turn on min/max rejection
+              </Button>
             </Alert>
           ) : null}
 

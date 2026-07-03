@@ -21,6 +21,13 @@ const CURVES: EditOp = {
              default: [[0, 0], [1, 1]], min: null, max: null, step: null,
              options: null, help: null, depends_on: null }],
 };
+const DECONVOLVE: EditOp = {
+  id: "detail.deconvolve", label: "Deconvolution", group: "detail", stage: "linear",
+  proxy_safe: false, is_stretch: false, help: "heavy",
+  params: [{ key: "psf_sigma", label: "PSF σ (px)", type: "float", group: "simple",
+             default: 1.5, min: 0.5, max: 5, step: 0.1, options: null, help: null,
+             depends_on: null }],
+};
 
 function renderEditor() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -114,6 +121,52 @@ describe("EditorView", () => {
     await waitFor(() => expect(screen.queryByText("Curves")).not.toBeInTheDocument());
     // The earlier op survives — undo popped only the last change.
     expect(screen.getByText("Stretch")).toBeInTheDocument();
+  });
+
+  it("nudges a first-timer with an empty pipeline toward Auto-process", async () => {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({ ops: [], base_run_id: 3 });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    const autoProcess = vi.spyOn(client.api, "autoProcess").mockResolvedValue({
+      ops: [{ uid: "a1", id: "tone.stretch", enabled: true, params: {} }], base_run_id: 3,
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    // The empty pipeline shows a guided nudge with its own Auto-process button.
+    expect(await screen.findByText(/build a good starting recipe from/i))
+      .toBeInTheDocument();
+    // Clicking it (the in-panel one) kicks off auto-process.
+    fireEvent.click(screen.getAllByRole("button", { name: /Auto-process/ })[1]);
+    await waitFor(() => expect(autoProcess).toHaveBeenCalledWith("M_42", 3));
+  });
+
+  it("flags a preview-only (export-only) op so the user knows why the preview doesn't change", async () => {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES, DECONVOLVE]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [{ uid: "d1", id: "detail.deconvolve", enabled: true, params: { psf_sigma: 1.5 } }],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    // The op row carries an "export only" badge...
+    expect(await screen.findByText("export only")).toBeInTheDocument();
+    // ...and selecting it explains why the live preview stays unchanged.
+    fireEvent.click(screen.getByText("Deconvolution"));
+    await waitFor(() =>
+      expect(screen.getByText(/live preview doesn't show this effect/i)).toBeInTheDocument());
   });
 
   it("shows an error message when the preview render fails (not a blank panel)", async () => {

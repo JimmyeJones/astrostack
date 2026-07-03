@@ -145,6 +145,11 @@ def test_auto_recipe_adapts_to_noise():
     # auto uses the proven per-channel STF, not a hardcoded asinh
     stretch = next(o for o in auto_recipe(noisy).ops if o.id == "tone.stretch")
     assert stretch.params["mode"] == "stf"
+    # SCNR (green-cast removal) is always applied, after the stretch and before the
+    # saturation boost (so the boost lifts real colour, not the residual green).
+    for ids in (s_ids, n_ids):
+        assert "tone.scnr" in ids
+        assert ids.index("tone.stretch") < ids.index("tone.scnr") < ids.index("tone.saturation")
 
 
 def test_denoise_identity_at_zero_and_preserves_colour():

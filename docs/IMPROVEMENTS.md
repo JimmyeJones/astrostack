@@ -34,8 +34,10 @@ The editor is where a good stack becomes a good *picture*, and it has real
 problems. Dogfood it every big-picture run and fix root causes.
 - **Live preview** — it's slow / doesn't update well / doesn't match the exported
   full-res result. Audit the proxy→preview path vs the full-res export path; make
-  the preview a fast, faithful representation of the final image, and make it
-  obvious when an op is only preview-approximate. (M, editor)
+  the preview a fast, faithful representation of the final image. (The
+  "make it obvious when an op is only preview-approximate" sub-part shipped in
+  v0.56.5 — non-`proxy_safe` ops like Deconvolution now carry an "export only"
+  badge + an explanatory note.) (M, editor)
 - **Confusing / clunky controls** — too many ops with terse params and no obvious
   starting point. Add plain-language help, a simple/guided default layout, curated
   presets, and progressive disclosure of advanced ops so a beginner gets a good
@@ -43,10 +45,26 @@ problems. Dogfood it every big-picture run and fix root causes.
 - **Weak default result** — the auto/default processing should produce a genuinely
   good image out of the box for a typical Seestar OSC stack (good stretch, colour,
   gentle denoise/sharpen). Improve the auto recipe so "Auto" is a great one-click
-  start. (M, editor)
+  start. (Gentle SCNR green-cast removal added to the auto recipe in v0.56.6 —
+  more of these incremental tweaks welcome.) (M, editor)
 - **Editor bug hunt (ongoing)** — there are undocumented issues. Each big-picture
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
+
+### Editor — make it excellent (PRIORITY 1) — new ideas
+- **Per-op "before/after this op" preview toggle** — the editor's Compare button
+  shows the whole recipe vs the raw base, but when tuning one op a user wants to
+  see *just that op's* contribution. Add a small "bypass from here" or "isolate
+  this op" affordance (render the recipe up to but excluding the selected op vs
+  including it) so the effect of the op being tuned is obvious. Reuses the existing
+  preview path with a truncated recipe; frontend-mostly. (M, editor)
+- **Warn when a linear-stage op sits after the stretch (or vice-versa)** — ops
+  declare a `stage` (linear / nonlinear / any) but the UI lets a user drag e.g.
+  a background-gradient (linear) op below the stretch, where it operates on
+  display-space data and misbehaves. Surface a subtle per-op caution in the OpList
+  when an op's `stage` conflicts with its position relative to the single stretch,
+  with a one-click "move to the correct side". Reuses the `stage`/`is_stretch`
+  fields already on the ops schema; frontend-only, advisory. (S, editor)
 
 ### Autonomy — "just works" (PRIORITY 2)
 - **One-click "process this target"** — after ingest, reach a good stack *and* a
@@ -105,19 +123,6 @@ problems. Dogfood it every big-picture run and fix root causes.
 ### Features that serve real workflows
 - Annotated sky overlay (label detected objects / show solved field). (M)
 ### UX & polish
-- **One-click "Turn on min/max rejection" on the Stack-form nudge** — the
-  small-stack streaked-frame hint (v0.56.2) tells the user min/max reject is the
-  right tool but still makes them hunt for the toggle in Advanced options. Add a
-  one-click button on that advisory that flips `min_max_reject` on (mirroring the
-  calibration "Use recommended" one-click), so a beginner acts on the advice
-  without knowing where the knob lives. Frontend-only, additive. (S,
-  approachability)
-- **Combine-method facet on the Gallery** — now that the gallery response carries
-  each run's `options` (v0.56.1), add a small "All / σ-clip / min-max / drizzle /
-  mean" filter (shown only when the set is *mixed*, like the calibration filter
-  chip) so a user can isolate e.g. every drizzled result across targets. Reuses
-  the pure `rejectionBadge` helper for the per-run method key; frontend-only,
-  additive. (S, approachability)
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
 
@@ -167,6 +172,54 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Combine-method facet on the Gallery** — a "All / Drizzle / Min-max / σ-clip /
+  Mean" `SegmentedControl` (shown only when the set is *mixed* — >1 distinct
+  method present — mirroring the calibration filter chip) that isolates e.g. every
+  drizzled result across every target. A new pure `combineMethodKey` helper
+  (coarse key with the engine's precedence: drizzle > min/max > σ-clip > mean;
+  null for editor/channel-combine runs) drives both the facet options and the pure
+  `filterByMethod`. Unit-tested (key precedence + filter) plus render tests for the
+  mixed-vs-uniform gating and narrowing. Frontend-only, additive. (v0.56.8, this run)
+
+- **One-click "Turn on min/max rejection" on the Stack-form nudge** — the
+  small-stack streaked-frame hint (v0.56.2) told the user min/max reject is the
+  right tool but made them hunt for the toggle in Advanced options. The advisory
+  now carries a one-click "Turn on min/max rejection" button that flips
+  `min_max_reject` on (mirroring the calibration "Use recommended" one-click), so
+  a beginner acts on the advice without knowing where the knob lives; the nudge
+  self-dismisses once it's on. Frontend-only, additive. Vitest-covered.
+  (v0.56.7, this run)
+
+- **Gentle green-cast removal in the one-click Auto recipe** — an OSC Seestar
+  stack almost always carries a residual green cast (the Bayer green is the
+  strongest channel), which every built-in nebula preset already fixes with SCNR
+  but the `Auto-process` recipe skipped. Auto now appends a gentle
+  `tone.scnr` (amount 0.7) after the STF stretch and *before* the saturation
+  boost, so the boost lifts real colour instead of amplifying the green. SCNR is
+  monotone (it can only cap green above the R/B neutral, never invent colour), so
+  it's safe on galaxies/clusters too. Auto-process is an explicit button (not a
+  silent upgrade default) and saved recipes are untouched — upgrade-safe. Test
+  asserts SCNR presence + ordering. (v0.56.6, this run)
+
+- **Guided empty-pipeline nudge in the editor** — a first-timer opening the editor
+  with no saved recipe saw only "No operations yet" with no hint of the one-click
+  path. The empty pipeline now shows a grape guided nudge explaining what
+  Auto-process does (background & colour balance, natural stretch, gentle
+  denoise/sharpen) with its own Auto-process button, so a beginner gets a good
+  starting point in one click instead of guessing which op to add first. Reuses
+  the existing `auto` mutation; frontend-only, additive. Vitest-covered.
+  (v0.56.9, this run)
+
+- **"Export only" flag for preview-approximate editor ops** — the Deconvolution op
+  is `proxy_safe=False`, so it's silently skipped in the fast live preview: a user
+  would add it, drag its PSF σ / iterations sliders and see *no change*, which reads
+  as a broken control. The editor now surfaces this: each non-`proxy_safe` op row
+  carries a grape "export only" badge (with a tooltip), and selecting such an op
+  shows an explanatory note ("The live preview doesn't show this effect — it's
+  heavy, so it only runs when you Export or Download full-res PNG"). Reuses the
+  `proxy_safe` field already carried on the ops schema; frontend-only, additive.
+  Vitest-covered (badge + note). (v0.56.5, this run)
 
 - **Plain-language "Combined:" line in the History Info panel** — the Info panel
   showed the raw `STACKER` FITS card ("min-max-reject", "sigma-clip", "mean",

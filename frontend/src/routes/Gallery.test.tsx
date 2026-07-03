@@ -3,7 +3,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GalleryView, sortGallery, filterGallery, filterByCalibration, isCalibrated } from "./Gallery";
+import {
+  GalleryView, sortGallery, filterGallery, filterByCalibration, filterByMethod, isCalibrated,
+} from "./Gallery";
 import * as client from "../api/client";
 import type { GalleryItem } from "../api/client";
 
@@ -137,6 +139,64 @@ describe("Gallery batch apply", () => {
     expect(filterByCalibration(items, "uncalibrated").map((i) => i.run_id)).toEqual([2, 3]);
     // Pure: input untouched.
     expect(items.map((i) => i.run_id)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("filterByMethod keeps runs matching the coarse combine method", () => {
+    const items = [
+      { ...item(1), options: { drizzle: true, drizzle_scale: 2 } },
+      { ...item(2), options: { min_max_reject: true } },
+      { ...item(3), options: { sigma_clip: true } },
+      { ...item(4), options: {} },                              // plain mean
+      { ...item(5), options: { editor_recipe: [] } },           // no method key
+    ];
+    // "all" is a passthrough.
+    expect(filterByMethod(items, "all").map((i) => i.run_id)).toEqual([1, 2, 3, 4, 5]);
+    expect(filterByMethod(items, "drizzle").map((i) => i.run_id)).toEqual([1]);
+    expect(filterByMethod(items, "min-max").map((i) => i.run_id)).toEqual([2]);
+    expect(filterByMethod(items, "sigma-clip").map((i) => i.run_id)).toEqual([3]);
+    expect(filterByMethod(items, "mean").map((i) => i.run_id)).toEqual([4]);
+    // Editor/channel-combine runs (no method key) are excluded by any real filter.
+    expect(filterByMethod(items, "drizzle").some((i) => i.run_id === 5)).toBe(false);
+    // Pure: input untouched.
+    expect(items.map((i) => i.run_id)).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it("shows the combine-method facet only for a mixed set and narrows by it", async () => {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [
+        { ...item(1, "Drizzled"), options: { drizzle: true, drizzle_scale: 2 } },
+        { ...item(2, "Sigma"), options: { sigma_clip: true } },
+      ],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+
+    renderGallery();
+
+    await waitFor(() => expect(screen.getByRole("radio", { name: "Drizzle" })).toBeInTheDocument());
+    const targetLinks = () =>
+      screen.getAllByRole("link").map((l) => l.textContent).filter((t) => t === "Drizzled" || t === "Sigma");
+    expect(targetLinks()).toEqual(["Drizzled", "Sigma"]);
+
+    // Clicking the "σ-clip" segment hides the drizzled card.
+    fireEvent.click(screen.getByRole("radio", { name: "σ-clip" }));
+    await waitFor(() => expect(targetLinks()).toEqual(["Sigma"]));
+  });
+
+  it("hides the combine-method facet when every run used the same method", async () => {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [
+        { ...item(1), options: { sigma_clip: true } },
+        { ...item(2), options: { sigma_clip: true } },
+      ],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+
+    renderGallery();
+
+    await waitFor(() => expect(screen.getAllByLabelText("Select for batch edit").length).toBe(2));
+    expect(screen.queryByRole("radio", { name: "σ-clip" })).not.toBeInTheDocument();
   });
 
   it("shows the calibration filter only for a mixed set and narrows by it", async () => {
