@@ -416,6 +416,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   the clipping caption fires, and the Curves op's endpoint handles, so *every* tonal
   control shows where it lands on the graph. Small, reuses the guides prop;
   frontend-only, advisory. (S, editor/trust)
+- **Optional numeric entry next to editor sliders** — the editor renders every
+  bounded param as a slider only (`StackOptionControl` `preferSlider`), so a user
+  who knows the exact value they want (gamma 1.35, PSF σ 1.8, black 0.07) can only
+  approximate it by dragging and reading the dimmed readout — and a fine value is
+  hard to hit on a touch/trackpad drag. Add a small `NumberInput` beside the slider
+  (or make the readout an editable field) that shares the same value/min/max/step,
+  so precise entry and coarse dragging both work. Reuses the existing field schema;
+  frontend-only, additive, no default change. Care: keep the two in sync and
+  respect `disabled`/`depends_on`. Serves precision without adding a knob. (S,
+  editor/friendliness)
+- **"Modified from default" indicator on op rows** — in the pipeline list a user
+  can't tell at a glance which ops they've tuned vs which sit at stock defaults
+  (relevant after Auto-process or a preset drops in a dozen ops). Show a small dot
+  / "edited" badge on each `OpList` row whose params differ from the op's schema
+  defaults (reuse the `isDefault` comparison already in `OpParamPanel`), so the
+  user sees what they've changed and where to look. Pure, frontend-only, additive,
+  advisory. (S, editor/trust)
 ### Autonomy — "just works" (PRIORITY 2)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
