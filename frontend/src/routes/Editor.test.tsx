@@ -169,6 +169,28 @@ describe("EditorView", () => {
       expect(screen.getByText(/live preview doesn't show this effect/i)).toBeInTheDocument());
   });
 
+  it("hides advanced ops behind 'More operations' in the Add menu", async () => {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES, DECONVOLVE]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({ ops: [], base_run_id: 3 });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    fireEvent.click(await screen.findByText("Add operation"));
+    // The curated "Common" section is shown; the non-common Deconvolution op isn't.
+    expect(await screen.findByText("Common")).toBeInTheDocument();
+    expect(screen.getByText("Stretch")).toBeInTheDocument();
+    expect(screen.queryByText("Deconvolution")).not.toBeInTheDocument();
+    // Expanding "More operations" reveals the full grouped list including Deconvolution.
+    fireEvent.click(screen.getByText("More operations"));
+    expect(await screen.findByText("Deconvolution")).toBeInTheDocument();
+  });
+
   it("shows an error message when the preview render fails (not a blank panel)", async () => {
     mockEditorQueries();
     vi.stubGlobal("fetch", vi.fn(async () => ({

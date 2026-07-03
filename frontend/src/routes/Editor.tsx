@@ -4,8 +4,9 @@ import {
 } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import {
-  IconAlertTriangle, IconArrowBackUp, IconArrowForwardUp, IconArrowLeft, IconDeviceFloppy,
-  IconDownload, IconInfoCircle, IconPhotoDown, IconPlus, IconRefresh, IconSparkles, IconZoomScan,
+  IconAlertTriangle, IconArrowBackUp, IconArrowForwardUp, IconArrowLeft, IconChevronDown,
+  IconChevronUp, IconDeviceFloppy, IconDownload, IconInfoCircle, IconPhotoDown, IconPlus,
+  IconRefresh, IconSparkles, IconZoomScan,
 } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -25,6 +26,14 @@ const GROUP_LABELS: Record<string, string> = {
   stars_geometry: "Stars & geometry",
 };
 const GROUP_ORDER = ["background", "tone", "detail", "stars_geometry"];
+
+// The handful of ops a beginner actually reaches for, surfaced in a curated
+// "Common" section at the top of the Add-operation menu so the first-time path is
+// obvious; the full grouped list stays one click away under "More operations".
+const COMMON_OP_IDS = [
+  "tone.stretch", "tone.curves", "tone.saturation", "tone.scnr",
+  "detail.denoise", "detail.sharpen", "background.subtract",
+];
 
 function uid(): string {
   return (crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)).slice(0, 8);
@@ -61,6 +70,7 @@ export function EditorView() {
   const { state: ops, set: setOps, reset: resetOps, undo, redo, canUndo, canRedo } =
     useUndoable<OpInstance[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
+  const [showAllOps, setShowAllOps] = useState(false);
   const [outputName, setOutputName] = useState("");
   const [tiffMode, setTiffMode] = useState("linear");
   const [lightbox, setLightbox] = useState(false);
@@ -274,6 +284,12 @@ export function EditorView() {
     (opsSchema.data ?? []).forEach((s) => { (g[s.group] ??= []).push(s); });
     return g;
   }, [opsSchema.data]);
+  // The curated common ops, in the order they're listed, restricted to ops the
+  // engine actually exposes (so it degrades gracefully if an op is removed).
+  const commonOps = useMemo(
+    () => COMMON_OP_IDS.map((id) => specs[id]).filter((s): s is EditOp => !!s),
+    [specs],
+  );
 
   if (opsSchema.isLoading || saved.isLoading) {
     return <Center h={300}><Loader /></Center>;
@@ -375,10 +391,12 @@ export function EditorView() {
                 <Button leftSection={<IconPlus size={16} />} variant="light">Add operation</Button>
               </Menu.Target>
               <Menu.Dropdown mah={400} style={{ overflowY: "auto" }}>
-                {GROUP_ORDER.filter((g) => grouped[g]).map((g) => (
-                  <div key={g}>
-                    <Menu.Label>{GROUP_LABELS[g] ?? g}</Menu.Label>
-                    {grouped[g].map((s) => (
+                {/* Curated "Common" section first so a beginner isn't faced with
+                    all ~19 ops at once; the full list is one click away below. */}
+                {commonOps.length ? (
+                  <div>
+                    <Menu.Label>Common</Menu.Label>
+                    {commonOps.map((s) => (
                       <Menu.Item key={s.id} onClick={() => addOp(s)}>
                         <Text size="sm">{s.label}</Text>
                         {s.help ? (
@@ -387,7 +405,30 @@ export function EditorView() {
                       </Menu.Item>
                     ))}
                   </div>
-                ))}
+                ) : null}
+                <Menu.Item closeMenuOnClick={false}
+                  leftSection={showAllOps
+                    ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />}
+                  onClick={() => setShowAllOps((v) => !v)}>
+                  <Text size="sm" c="dimmed">
+                    {showAllOps ? "Fewer operations" : "More operations"}
+                  </Text>
+                </Menu.Item>
+                {showAllOps
+                  ? GROUP_ORDER.filter((g) => grouped[g]).map((g) => (
+                    <div key={g}>
+                      <Menu.Label>{GROUP_LABELS[g] ?? g}</Menu.Label>
+                      {grouped[g].map((s) => (
+                        <Menu.Item key={s.id} onClick={() => addOp(s)}>
+                          <Text size="sm">{s.label}</Text>
+                          {s.help ? (
+                            <Text size="10px" c="dimmed" lineClamp={2}>{s.help}</Text>
+                          ) : null}
+                        </Menu.Item>
+                      ))}
+                    </div>
+                  ))
+                  : null}
               </Menu.Dropdown>
             </Menu>
 

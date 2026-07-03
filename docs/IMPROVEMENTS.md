@@ -58,12 +58,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   this op" affordance (render the recipe up to but excluding the selected op vs
   including it) so the effect of the op being tuned is obvious. Reuses the existing
   preview path with a truncated recipe; frontend-mostly. (M, editor)
-- **Progressive disclosure of the "Add operation" menu** — the menu lists all ~18
-  ops flat across four groups; a beginner scanning it is overwhelmed and doesn't
-  know which few matter. Surface a short curated "Common" section at the top
-  (Stretch, Curves, Saturation, Noise reduction, Sharpen, SCNR, Background) and
-  collapse the rest under a "More operations" expander, so the first-time path is
-  obvious without hiding power. Frontend-only; reuses the ops schema. (S, editor)
 
 ### Autonomy — "just works" (PRIORITY 2)
 - **One-click "process this target"** — after ingest, reach a good stack *and* a
@@ -171,6 +165,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Progressive disclosure of the "Add operation" menu** — the menu listed all ~19
+  editor ops flat across four groups, so a beginner opening it was faced with every
+  knob at once and no hint which few matter. The menu now leads with a curated
+  **Common** section (Stretch, Curves, Saturation, SCNR, Noise reduction, Sharpen,
+  Background subtract) and tucks the full grouped list behind a **More operations**
+  toggle (collapsed by default, `closeMenuOnClick={false}` so expanding it keeps the
+  menu open). The common list is restricted to ops the engine actually exposes, so
+  it degrades gracefully if an op id changes. Vitest-covered (Common shown, a
+  non-common op hidden until "More operations" is expanded); frontend-only.
+  (v0.56.15, this run)
 
 - **Auto-place a newly-added op on the correct side of the stretch** — adding an op
   from the menu appended it at the end of the pipeline, so a linear op (background,
