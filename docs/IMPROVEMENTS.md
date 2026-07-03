@@ -62,6 +62,14 @@ _(none — claim an item here with your branch name)_
 ### Features that serve real workflows
 - Annotated sky overlay (label detected objects / show solved field). (M)
 ### UX & polish
+- **Rejection-method badge on History/Gallery cards** — now that a stack can use
+  one of four methods (mean / sigma-clip / min-max reject / drizzle, recorded in
+  the `STACKER` FITS card and the run's stored options), a small badge ("min-max"
+  / "σ-clip κ3" / "drizzle ×2") on each card would let a user see at a glance how
+  each result was combined when comparing runs — complements the existing calstat
+  and noise chips. The Gallery already derives σ-clip/drizzle badges from
+  `options`; extend `highlightBadges` to include min-max and surface the same on
+  History cards. Frontend-only, additive. (S, approachability)
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
 
