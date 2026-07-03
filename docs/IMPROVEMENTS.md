@@ -168,15 +168,15 @@ sitting; move an entry to **In progress**/**Shipped** as usual when you take it.
   machinery the levels-suggestion endpoint already has. Severity: broken-UX
   (misleading trust overlay). Confidence: confirmed (measured).
 
-- **BUG: dragging a curve point past its neighbour silently swaps which point
-  you're dragging** — `CurvesWidget.update()` sorts the points by x on every
-  move (`frontend/src/components/editor/CurvesWidget.tsx:54-60`) but
-  `drag.current` keeps the pre-sort index (`:108`), so when the dragged point
-  crosses another's x the pointer starts moving the *other* point. Steps: Curves
-  op → add interior points at x≈0.3 and x≈0.6 → drag the 0.3 point right past
-  0.6. **Fix:** track the dragged point's identity (recompute its index after
-  sort), or clamp an interior point's x between its neighbours while dragging.
-  Severity: broken-UX (core widget). Confidence: confirmed (traced).
+- **✅ FIXED (v0.69.1): dragging a curve point past its neighbour silently swaps which point
+  you're dragging** — `CurvesWidget.update()` sorted the points by x on every
+  move but `drag.current` kept the pre-sort index, so when the dragged point
+  crossed another's x the pointer started moving the *other* point. Fixed by a
+  pure `moveCurvePoint` helper (`curveDrag.ts`) that clamps an interior point's
+  x strictly between its neighbours (endpoints keep x=0/1), so the sort order —
+  and the dragged index — can never go stale. Regression test covers the
+  cross-right / cross-left / endpoint-lock / clamp cases. Severity: broken-UX
+  (core widget). Confidence: confirmed (traced).
 
 - **BUG: one slider drag floods the undo history with dozens of entries (and
   can evict all earlier edits)** — editor sliders commit on every drag tick
