@@ -196,6 +196,18 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Warn about a degenerate Levels op (empty black↔white range)** — companion to
+  the v0.61.12 engine guard: since a Levels op with `white ≤ black` is now silently
+  treated as identity, the pipeline panel shows an orange advisory ("A Levels op has
+  its white point at or below its black point, so its range is empty — it does
+  nothing.") with a one-click "Reset the black & white points" that restores the
+  0..1 range — so the guard doesn't leave the user staring at a control that
+  quietly does nothing (mirrors the double-stretch advisory). Pure
+  `degenerateLevelsUids` helper drives it; frontend-only, additive. Vitest: helper
+  (5 cases: white<black / white==black / healthy / disabled / non-Levels) + an
+  Editor test that the warning shows and clicking the fix clears it. (v0.61.13,
+  this run)
+
 - **Guard the Levels op against a degenerate (white ≤ black) range** — the Levels
   op's black-point and white-point are independent 0..1 sliders, so a beginner can
   drag the white point down to or below the black point. That collapses the range

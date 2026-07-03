@@ -37,6 +37,23 @@ export function extraEnabledStretchUids(
   return enabledStretches.slice(1).map((o) => o.uid);
 }
 
+/** The uids of every *enabled* `tone.levels` op whose white point is at or below
+ * its black point. The black/white sliders are independent, so a user can drag
+ * white down past black; that collapses the range and the engine now treats it as
+ * identity (so the op silently does nothing). The UI uses this to explain *why*
+ * the op has no effect and offer a one-click reset of its black/white to 0/1.
+ * Pure; empty when no enabled Levels op is degenerate. */
+export function degenerateLevelsUids(ops: OpInstance[]): string[] {
+  return ops
+    .filter((o) => {
+      if (!o.enabled || o.id !== "tone.levels") return false;
+      const black = Number(o.params?.black ?? 0);
+      const white = Number(o.params?.white ?? 1);
+      return white - black < 1e-3;
+    })
+    .map((o) => o.uid);
+}
+
 /** Map of op uid -> the (mis-placed) stage, for every *enabled* op sitting on the
  * wrong side of an *enabled* stretch op. Empty when there's no explicit stretch
  * boundary (nothing to check against) or nothing conflicts. */

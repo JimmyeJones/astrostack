@@ -17,7 +17,7 @@ import { useUndoable } from "../hooks/useUndoable";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { Histogram } from "../components/editor/Histogram";
 import { OpList } from "../components/editor/OpList";
-import { extraEnabledStretchUids, hasEnabledStretch, insertOnCorrectSide, moveToCorrectSide }
+import { degenerateLevelsUids, extraEnabledStretchUids, hasEnabledStretch, insertOnCorrectSide, moveToCorrectSide }
   from "../components/editor/stageConflicts";
 import { autoSummarySentence, autoValueSentence } from "../components/editor/autoSummary";
 import { applyDataDrivenDefaults, countDataDrivenDefaults, type OpSuggestion }
@@ -461,6 +461,14 @@ export function EditorView() {
   const disableExtraStretches = () =>
     setOps((p) => p.map((o) =>
       extraStretchUids.includes(o.uid) ? { ...o, enabled: false } : o));
+  // A Levels op with its white point at or below its black point collapses the
+  // range: the engine treats it as identity (does nothing), which is confusing.
+  // Flag it and offer a one-click reset of black/white to the full 0..1 range.
+  const degenerateLevels = degenerateLevelsUids(ops);
+  const resetDegenerateLevels = () =>
+    setOps((p) => p.map((o) =>
+      degenerateLevels.includes(o.uid)
+        ? { ...o, params: { ...o.params, black: 0, white: 1 } } : o));
   const grouped = useMemo(() => {
     const g: Record<string, EditOp[]> = {};
     (opsSchema.data ?? []).forEach((s) => { (g[s.group] ??= []).push(s); });
@@ -867,6 +875,20 @@ export function EditorView() {
                   <Button size="compact-xs" variant="light" color="orange"
                     onClick={disableExtraStretches}>
                     Disable the extra stretch{extraStretchUids.length > 1 ? "es" : ""}
+                  </Button>
+                </Alert>
+              ) : null}
+              {degenerateLevels.length > 0 ? (
+                <Alert color="orange" variant="light" py={8} mt="xs"
+                  icon={<IconAlertTriangle size={16} />}>
+                  <Text size="xs" mb={6}>
+                    A <b>Levels</b> op has its white point at or below its black point,
+                    so its range is empty — it does nothing. Reset the black and white
+                    points to spread across the full range again.
+                  </Text>
+                  <Button size="compact-xs" variant="light" color="orange"
+                    onClick={resetDegenerateLevels}>
+                    Reset the black &amp; white points
                   </Button>
                 </Alert>
               ) : null}
