@@ -189,6 +189,39 @@ def test_stack_records_calibration_provenance(tmp_path):
     with fits.open(result.fits_path) as hdul:
         assert hdul[0].header["CALSTAT"] == "bias+flat"
 
+    # The same verdict is recorded in the run history (additive `calstat` column)
+    # so a History/Gallery card can show a "bias+flat" chip without re-reading the
+    # FITS.
+    from seestack.io.project import Project
+
+    proj2 = Project.open(tmp_path / "p")
+    try:
+        runs = list(proj2.iter_stack_runs())
+        assert runs and runs[0].calstat == "bias+flat"
+    finally:
+        proj2.close()
+
+
+def test_uncalibrated_stack_records_no_calstat(tmp_path):
+    """A stack with no masters leaves `calstat` NULL (no calibration chip)."""
+    from seestack.io.project import Project
+
+    proj = _build_project(tmp_path, n=4)
+    try:
+        run_stack(
+            proj,
+            StackOptions(sigma_clip=False, max_workers=2, output_name="plain"),
+        )
+    finally:
+        proj.close()
+
+    proj2 = Project.open(tmp_path / "p")
+    try:
+        runs = list(proj2.iter_stack_runs())
+        assert runs and runs[0].calstat is None
+    finally:
+        proj2.close()
+
 
 def test_stack_sigma_clipped(tmp_path):
     proj = _build_project(tmp_path, n=6, with_outlier=True)

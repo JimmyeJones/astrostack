@@ -145,6 +145,10 @@ class StackRunOut(BaseModel):
     # pre-schema-6 runs or when not computable; lets the UI show a noise readout
     # and flag the cleanest of several stacks of one target.
     noise_sigma: float | None = None
+    # Which calibration masters were applied to the lights ("dark+flat",
+    # "bias+flat", "flat", …), or None when the stack was uncalibrated / for
+    # pre-schema-7 runs; lets a card show a "dark+flat" chip at a glance.
+    calstat: str | None = None
 
 
 class JobOut(BaseModel):

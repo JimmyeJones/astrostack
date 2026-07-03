@@ -73,12 +73,6 @@ _(none — claim an item here with your branch name)_
 ### Features that serve real workflows
 - Annotated sky overlay (label detected objects / show solved field). (M)
 ### UX & polish
-- **Show the applied calibration inline on History/Gallery cards** — v0.53.1
-  records `CALSTAT` ("dark+flat", "bias+flat", …) in the FITS and surfaces it in
-  the Info panel, but a user must open Info to see it. A tiny "dark+flat" chip on
-  the card (read from the run's provenance, or a new additive column to avoid a
-  per-card FITS read) would show at a glance whether a stack was calibrated —
-  useful when comparing a calibrated vs uncalibrated run. (S, approachability)
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
 
@@ -119,6 +113,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Calibration chip on History/Gallery cards** — a stack now records which
+  calibration masters were applied to its lights in a new additive
+  `stack_runs.calstat` column (schema v6→v7 migration; "dark+flat", "bias+flat",
+  "flat", …, NULL when uncalibrated / for old runs), mirroring the `CALSTAT` FITS
+  card the engine already stamps but read from the run record so no per-card FITS
+  read is needed. `StackRunOut` and the gallery response carry it, and a shared
+  teal `CalibrationBadge` shows a small "dark+flat" chip (with a plain-language
+  tooltip) on History and Gallery cards — so a user sees at a glance whether a
+  stack was calibrated, useful when comparing a calibrated vs uncalibrated run.
+  Additive/upgrade-safe. (v0.55.0, this run)
 
 - **Per-target noise-σ trend sparkline** — the History page now shows a small
   "Noise trend" card (a reusable inline-SVG `Sparkline`) plotting each measured

@@ -10,6 +10,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { api, type GalleryItem, type StackOptionField } from "../api/client";
 import { formatIntegration } from "../format";
 import { HazyNightBadge } from "../components/HazyNightBadge";
+import { CalibrationBadge } from "../components/CalibrationBadge";
 import { NoiseReadout, hasNoise } from "../components/NoiseBadge";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { QueryError } from "../components/QueryError";
@@ -97,6 +98,7 @@ function GalleryCard({ item, labels, onView, selected, onToggleSelect }: {
         </Text>
         <Group gap={4} wrap="nowrap" style={{ flexShrink: 0 }}>
           <HazyNightBadge ratio={item.transparency_ratio} />
+          <CalibrationBadge calstat={item.calstat} />
           <Badge variant="light">{item.n_frames_used} frames</Badge>
         </Group>
       </Group>

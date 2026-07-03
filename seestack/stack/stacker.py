@@ -961,6 +961,9 @@ def run_stack(
         from seestack.io.project import StackRunRow
 
         cov_2d = coverage[..., 0] if coverage.ndim == 3 else coverage
+        applied_cal = calibration.describe() if calibration is not None else None
+        if applied_cal in (None, "", "none"):
+            applied_cal = None
         project.add_stack_run(StackRunRow(
             id=None,
             timestamp_utc=datetime.now(timezone.utc).isoformat(),
@@ -978,6 +981,7 @@ def run_stack(
             total_exposure_s=_integration_time_s(frames, n_used),
             transparency_ratio=_compute_transparency_ratio(project, frames),
             noise_sigma=noise_sigma,
+            calstat=applied_cal,
         ))
     except Exception as exc:  # noqa: BLE001 — history is non-critical
         log.warning("Could not record stack run in history: %s", exc)

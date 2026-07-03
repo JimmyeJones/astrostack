@@ -245,6 +245,71 @@ def test_v5_schema_migrates_to_v6_adds_noise_sigma(tmp_path):
         proj.close()
 
 
+def test_v6_schema_migrates_to_v7_adds_calstat(tmp_path):
+    """A v6 stack_runs table (no calstat) must migrate additively: old rows read
+    as None, new inserts carry the calibration string, and no data is lost."""
+    import sqlite3
+
+    db_path = tmp_path / "old.sqlite"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        PRAGMA user_version = 6;
+        CREATE TABLE project_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE frames (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_path TEXT NOT NULL UNIQUE,
+            accept INTEGER NOT NULL DEFAULT 1,
+            ra_hint_deg REAL, dec_hint_deg REAL
+        );
+        CREATE TABLE stack_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp_utc TEXT NOT NULL, output_basename TEXT NOT NULL,
+            fits_path TEXT, tiff_path TEXT, preview_path TEXT,
+            n_frames_used INTEGER NOT NULL, canvas_h INTEGER NOT NULL,
+            canvas_w INTEGER NOT NULL, coverage_min INTEGER NOT NULL DEFAULT 0,
+            coverage_max INTEGER NOT NULL DEFAULT 0, options_json TEXT NOT NULL,
+            notes TEXT, total_exposure_s REAL, transparency_ratio REAL,
+            noise_sigma REAL
+        );
+        INSERT INTO project_meta(key, value) VALUES('name', 'OldProject');
+        INSERT INTO stack_runs(timestamp_utc, output_basename, n_frames_used,
+            canvas_h, canvas_w, options_json, noise_sigma)
+            VALUES('2026-01-01T00:00:00+00:00', 'old_run', 42, 320, 480, '{}',
+                   0.02);
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    proj = Project(tmp_path)
+    proj.db_path = db_path
+    proj._open()
+    proj._check_schema()
+    try:
+        from seestack.io.project import SCHEMA_VERSION
+        assert proj._conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        cols = {r[1] for r in proj._conn.execute("PRAGMA table_info(stack_runs)")}
+        assert "calstat" in cols
+        # The pre-existing run survives and reads its new column as None.
+        rows = {r.output_basename: r for r in proj.iter_stack_runs()}
+        assert rows["old_run"].n_frames_used == 42
+        assert rows["old_run"].noise_sigma == 0.02
+        assert rows["old_run"].calstat is None
+        # New inserts carry the recorded calibration string.
+        proj.add_stack_run(StackRunRow(
+            id=None, timestamp_utc="2026-02-01T00:00:00+00:00",
+            output_basename="new_run", fits_path=None, tiff_path=None,
+            preview_path=None, n_frames_used=10, canvas_h=10, canvas_w=10,
+            coverage_min=0, coverage_max=10, options_json="{}",
+            calstat="dark+flat",
+        ))
+        rows = {r.output_basename: r for r in proj.iter_stack_runs()}
+        assert rows["new_run"].calstat == "dark+flat"
+    finally:
+        proj.close()
+
+
 def test_v1_schema_migrates_to_v2(tmp_path):
     """Open a project created with the v1 schema and verify stack_runs appears."""
     import sqlite3
