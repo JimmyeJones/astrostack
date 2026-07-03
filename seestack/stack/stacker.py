@@ -240,6 +240,11 @@ class StackOptions:
     # flat before normalising for a more correct flat (a "flat-dark"). Only used
     # when ``flat_path`` is also set. Server-resolved path, never client input.
     flat_dark_path: str | None = None
+    # Optional master bias subtracted from the *lights* as the readout pedestal,
+    # for the bias+flat (no dark) workflow — ``(light − bias) / flat``. Ignored
+    # when ``dark_path`` is set (a dark already contains the bias, so both would
+    # double-subtract it). Server-resolved path, never client input.
+    bias_path: str | None = None
 
     def background_options(self) -> BackgroundOptions:
         return BackgroundOptions(
@@ -450,6 +455,7 @@ def _compute_noise_sigma(rgb: np.ndarray) -> float | None:
 def _build_output_header_meta(
     project: Project, frames: list, options: StackOptions, n_used: int,
     wstats: WeightingStats | None = None,
+    calibration: "Any | None" = None,
 ) -> dict[str, Any]:
     """Collect provenance for the output FITS header.
 
@@ -485,6 +491,13 @@ def _build_output_header_meta(
     method = "drizzle" if options.drizzle else ("sigma-clip" if options.sigma_clip else "mean")
     meta["STACKER"] = (method, "stacking method")
     meta["COLORTYP"] = ("mono" if options.mono else "OSC", "sensor/stack colour mode")
+    # Calibration provenance: which masters were actually applied to the lights
+    # ("dark+flat", "bias+flat", "flat", …) so a calibrated stack self-documents.
+    # Omitted when nothing was applied (describe() == "none").
+    if calibration is not None:
+        applied = calibration.describe()
+        if applied and applied != "none":
+            meta["CALSTAT"] = (applied, "calibration masters applied")
     # Quality-weighting provenance: lets the run Info panel report how many subs
     # weighting actually demoted and over what range, so the user can trust the
     # (off-by-default) weighting did something and gauge how aggressive it was.
@@ -544,11 +557,12 @@ def run_stack(
 
     # ---- 1a. Load calibration masters (once, shared across workers) --------
     calibration = None
-    if options.dark_path or options.flat_path:
+    if options.dark_path or options.flat_path or options.bias_path:
         from seestack.calibrate.apply import CalibrationMasters
 
         calibration = CalibrationMasters.load(
             options.dark_path, options.flat_path, options.flat_dark_path,
+            options.bias_path,
         )
         if calibration.is_empty:
             calibration = None
@@ -924,7 +938,8 @@ def run_stack(
     # Measure the finished stack's background noise once and reuse it for both the
     # self-documenting FITS header and the run record, so the two never disagree.
     noise_sigma = _compute_noise_sigma(result_image)
-    header_meta = _build_output_header_meta(project, frames, options, n_used, wstats)
+    header_meta = _build_output_header_meta(project, frames, options, n_used, wstats,
+                                            calibration=calibration)
     if noise_sigma is not None:
         header_meta["BKGSIGMA"] = (noise_sigma, "normalized background noise sigma")
     paths = write_stack_outputs(

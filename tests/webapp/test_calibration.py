@@ -44,10 +44,11 @@ def test_store_register_list_resolve_delete(tmp_path):
     listed = calibration.list_masters(root)
     assert len(listed) == 1 and listed[0]["exists"] is True
 
-    dark_path, flat_path, flat_dark_path = calibration.resolve_master_paths(root, 1, None)
+    dark_path, flat_path, flat_dark_path, bias_path = calibration.resolve_master_paths(root, 1, None)
     assert dark_path and Path(dark_path).exists()
     assert flat_path is None
     assert flat_dark_path is None
+    assert bias_path is None
 
     assert calibration.delete_master(root, 1) is True
     assert calibration.list_masters(root) == []
@@ -71,11 +72,26 @@ def test_resolve_flat_dark_master(tmp_path):
     fd = calibration.register_master(
         root, name="FlatDark", array=arr, meta=MasterMeta("dark", 5, 4, 4, "median"))
 
-    dark_path, flat_path, flat_dark_path = calibration.resolve_master_paths(
+    dark_path, flat_path, flat_dark_path, bias_path = calibration.resolve_master_paths(
         root, None, flat["id"], fd["id"])
     assert dark_path is None
     assert flat_path and Path(flat_path).exists()
     assert flat_dark_path and Path(flat_dark_path).exists()
+    assert bias_path is None
+
+
+def test_resolve_bias_master(tmp_path):
+    from seestack.calibrate.masters import MasterMeta
+
+    root = tmp_path / "lib"
+    bias = calibration.register_master(
+        root, name="Bias", array=np.full((4, 4), 3.0, dtype=np.float32),
+        meta=MasterMeta("bias", 0, 4, 4, "median"))
+
+    dark_path, flat_path, flat_dark_path, bias_path = calibration.resolve_master_paths(
+        root, None, None, None, bias["id"])
+    assert dark_path is None and flat_path is None and flat_dark_path is None
+    assert bias_path and Path(bias_path).exists()
 
 
 def test_recommend_masters_picks_best_match():
@@ -120,6 +136,25 @@ def test_recommend_masters_no_flat_dark_when_no_close_exposure():
     rec = calibration.recommend_masters(masters, exposure_s=300.0, gain=80.0)
     assert rec["flat_master_id"] == 2
     assert rec["flat_dark_master_id"] is None
+
+
+def test_recommend_masters_picks_bias_by_gain():
+    # Bias is exposure-independent (zero-second pedestal): matched on gain/temp
+    # like a flat. The gain-80 bias must win over the gain-200 one for 80-gain
+    # lights.
+    masters = [
+        {"id": 1, "kind": "bias", "exposure_s": 0.0, "gain": 80.0, "exists": True},
+        {"id": 2, "kind": "bias", "exposure_s": 0.0, "gain": 200.0, "exists": True},
+    ]
+    rec = calibration.recommend_masters(masters, exposure_s=30.0, gain=80.0)
+    assert rec["bias_master_id"] == 1
+    assert rec["scores"][1] > rec["scores"][2]
+
+
+def test_recommend_masters_no_bias_when_none_exist():
+    masters = [{"id": 1, "kind": "dark", "exposure_s": 30.0, "exists": True}]
+    rec = calibration.recommend_masters(masters, exposure_s=30.0)
+    assert rec["bias_master_id"] is None
 
 
 def test_recommend_masters_no_flat_dark_without_flat():

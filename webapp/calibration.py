@@ -114,13 +114,15 @@ def resolve_master_paths(
     dark_master_id: Any = None,
     flat_master_id: Any = None,
     flat_dark_master_id: Any = None,
-) -> tuple[str | None, str | None, str | None]:
-    """Map dark/flat/flat-dark master ids → on-disk FITS paths. Raises
+    bias_master_id: Any = None,
+) -> tuple[str | None, str | None, str | None, str | None]:
+    """Map dark/flat/flat-dark/bias master ids → on-disk FITS paths. Raises
     ``KeyError`` with a human message if an id is given but no such master
     exists.
 
     ``flat_dark_master_id`` is a dark/bias matched to the flat's exposure,
-    subtracted from the flat before normalising (see
+    subtracted from the flat before normalising; ``bias_master_id`` is a master
+    bias subtracted from the lights when no dark is chosen (see
     :meth:`CalibrationMasters.load`).
     """
     def _one(mid: Any, kind: str) -> str | None:
@@ -138,6 +140,7 @@ def resolve_master_paths(
         _one(dark_master_id, "dark"),
         _one(flat_master_id, "flat"),
         _one(flat_dark_master_id, "flat-dark"),
+        _one(bias_master_id, "bias"),
     )
 
 
@@ -166,11 +169,13 @@ def recommend_masters(
     masters: list[dict[str, Any]], *, exposure_s: float | None = None,
     gain: float | None = None, sensor_temp_c: float | None = None,
 ) -> dict[str, Any]:
-    """Pick the best-matching dark and flat for a target's acquisition params.
+    """Pick the best-matching dark, flat and bias for a target's acquisition params.
 
     Returns the recommended master ids (or None if none of a kind exist) plus a
     per-master match score in 0..1 (higher = better) so the UI can badge the
-    best option. Only masters whose file still exists are considered.
+    best option. Only masters whose file still exists are considered. A bias is
+    exposure-independent (the zero-second read pedestal), so — like a flat — it's
+    matched on gain/temperature only.
     """
     scores: dict[int, float] = {}
     best: dict[str, tuple[int, float]] = {}
@@ -180,7 +185,7 @@ def recommend_masters(
         if not m.get("exists", True):
             continue
         kind = str(m.get("kind", ""))
-        if kind not in ("dark", "flat"):
+        if kind not in ("dark", "flat", "bias"):
             continue
         try:
             mid = int(m["id"])
@@ -206,6 +211,7 @@ def recommend_masters(
         "dark_master_id": best["dark"][0] if "dark" in best else None,
         "flat_master_id": flat_id,
         "flat_dark_master_id": flat_dark_id,
+        "bias_master_id": best["bias"][0] if "bias" in best else None,
         "scores": scores,
     }
 

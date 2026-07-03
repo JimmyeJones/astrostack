@@ -49,18 +49,13 @@ _(none — claim an item here with your branch name)_
   Needs care for uniform/low-coverage pixels (don't reject the only sample) and
   a streaming, memory-bounded implementation (the app deliberately avoids
   holding all frames). (M, correctness)
-- Bias masters can be built but are never applied — `CalibrationMasters.load`
-  only takes dark/flat/flat-dark. Wire bias in (and dark *scaling* by
-  exposure ratio once bias exists) for mismatched-exposure dark workflows.
-  **Scoping note (from a run that looked at it):** the *correct* math needs
-  care — a master dark already contains the bias pedestal, so subtracting both a
-  bias *and* an unscaled dark double-subtracts bias. Two clean, unambiguous
-  slices: (a) **bias-only for lights when no dark is chosen** —
-  `(light − bias) / flat` — trivially correct and additive; (b) **dark
-  exposure-scaling** — `scaled_dark = bias + (dark − bias)·(t_light/t_dark)`,
-  which needs the per-frame light exposure threaded into `apply_raw` (the harder
-  part) and a neutral fallback when either exposure is unknown. Ship (a) first,
-  file (b) separately; keep both opt-in and guard shape/exposure mismatches.
+- **Dark exposure-scaling** (slice (b), now that bias is wired for lights) —
+  `scaled_dark = bias + (dark − bias)·(t_light/t_dark)` so a dark shot at a
+  different exposure than the lights can still be used. Needs the per-frame
+  light exposure threaded into `apply_raw` (the harder part) and a neutral
+  fallback (unscaled dark) when either exposure or a bias is unknown. Keep it
+  opt-in and guard shape/exposure mismatches. Slice (a) — bias-only for lights
+  when no dark is chosen, `(light − bias) / flat` — shipped v0.53.0.
   (M, correctness)
 - First-class session/night dimension in the project schema (frames only have
   `timestamp_utc`): per-session sky levelling before combine, per-session
@@ -77,21 +72,13 @@ _(none — claim an item here with your branch name)_
 
 ### Features that serve real workflows
 - Annotated sky overlay (label detected objects / show solved field). (M)
-- **"Compare with…" entry point on the History page** — the compare view
-  (v0.51.0) is currently reachable only from the Gallery's multi-select, but the
-  *most common* comparison is two stacks of the **same target** (did adding subs
-  / changing κ / turning on quality-weighting actually help?). The History page
-  already lists exactly those runs. Add a lightweight per-card "Compare" action
-  (e.g. "compare with the previous run", or a pick-two mode) that deep-links into
-  the existing `/compare?a=…&b=…` route via the shipped `compareHref` helper — no
-  backend, reuses everything. (S, approachability)
-- **Per-target noise-σ trend sparkline** — the History page shows each run's
-  noise σ and its delta vs the previous run; a tiny time-series sparkline of a
-  target's stack σ across all its runs would let a user see the *trajectory*
-  (are my results getting cleaner as I add nights?) at a glance, not just the
-  last hop. Reuses the recorded `noise_sigma`; within-target; frontend-only.
-  (S/M, approachability)
 ### UX & polish
+- **Show the applied calibration inline on History/Gallery cards** — v0.53.1
+  records `CALSTAT` ("dark+flat", "bias+flat", …) in the FITS and surfaces it in
+  the Info panel, but a user must open Info to see it. A tiny "dark+flat" chip on
+  the card (read from the run's provenance, or a new additive column to avoid a
+  per-card FITS read) would show at a glance whether a stack was calibrated —
+  useful when comparing a calibrated vs uncalibrated run. (S, approachability)
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
 
@@ -132,6 +119,57 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Per-target noise-σ trend sparkline** — the History page now shows a small
+  "Noise trend" card (a reusable inline-SVG `Sparkline`) plotting each measured
+  stack's background-noise σ oldest→newest, so a user sees the *trajectory* (are
+  my results getting cleaner as I add nights?) at a glance, not just the last
+  hop — teal + "Cleaner than your first" when trending down, orange + "Noisier"
+  when up. Shown only with ≥2 measured runs. Pure `noiseTrendSeries` /
+  `sparklinePoints` helpers, tested; reuses the recorded `noise_sigma`;
+  within-target, frontend-only. (v0.52.1, this run)
+
+- **Recommend a master bias for the bias+flat (no-dark) workflow** — completes
+  the v0.53.0 bias feature. `recommend_masters` now also ranks bias masters
+  (exposure-independent, so matched on gain/temp like a flat) and returns a
+  `bias_master_id`; the endpoint passes it through, and the Stack form badges the
+  best bias "★ recommended" and includes it in the "Use recommended" one-click —
+  but only when *no* dark is recommended (a dark already carries the bias, so the
+  engine would ignore it). So the no-dark calibration path is now as guided as
+  dark+flat. Additive/upgrade-safe. (v0.54.0, this run)
+
+- **Record which calibration masters were applied in the FITS header** — a
+  calibrated stack didn't self-document its calibration (only the log said so).
+  `run_stack` now stamps a `CALSTAT` provenance card recording the masters
+  actually applied to the lights ("dark+flat", "bias+flat", "flat", …), threaded
+  from `CalibrationMasters.describe()` into `_build_output_header_meta`, and the
+  run Info panel surfaces it (added to `_INFO_CARDS`). Omitted when nothing was
+  applied. Additive/upgrade-safe; extends the existing STACKER/COLORTYP
+  provenance pattern. (v0.53.1, this run)
+
+- **Bias-only calibration for lights when no dark is chosen** (bias slice (a))
+  — master bias frames could be built but were never applied to lights.
+  `CalibrationMasters.load` now takes a `bias_path`; `apply_raw` subtracts the
+  bias as the readout pedestal — `(light − bias) / flat` — but **only when no
+  master dark is set** (a dark already contains the bias, so both would
+  double-subtract it: the bias is loaded but inert when a dark is present).
+  Threaded end-to-end: `StackOptions.bias_path` (+ `NON_FORM_KEYS`),
+  `resolve_master_paths` returns a 4th bias path, the stack router resolves a
+  `bias_master_id` server-side and the reuse-settings endpoint reverse-maps it,
+  and the Stack form gained a "Master bias (no dark)" selector with a caution
+  when a dark is also picked. Additive/upgrade-safe (new optional field,
+  default None). Slice (b) — dark exposure-scaling — filed above. (v0.53.0,
+  this run)
+
+- **"Compare with previous run" action on the History page** — the Compare view
+  (v0.51.0) was reachable only from the Gallery's multi-select, but the most
+  common comparison is two stacks of the *same* target ("did adding subs /
+  changing κ actually help?"). Each History card (all but the oldest run) now
+  carries a grape "Compare" button that deep-links into the existing
+  `/compare?a=…&b=…` route against the chronologically previous run — the
+  Compare view resolves both refs from the gallery, so no backend change. Pure
+  `previousRunId` (walks the newest-first list, null for the oldest/unknown) and
+  `historyCompareHref` helpers, tested; frontend-only, additive. (v0.52.0, this run)
 
 - **"Which stack is cleaner" verdict in the Compare view** — when both compared
   stacks carry a measured noise σ, the Compare page now shows a plain-language

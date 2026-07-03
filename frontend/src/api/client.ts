@@ -379,6 +379,7 @@ export interface CalibrationSuggestions {
   dark_master_id: number | null;
   flat_master_id: number | null;
   flat_dark_master_id: number | null;
+  bias_master_id: number | null;
   scores: Record<string, number>;
   n_frames: number;
 }
