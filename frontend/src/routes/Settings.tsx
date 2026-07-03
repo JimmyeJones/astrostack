@@ -35,6 +35,7 @@ const HINTS: Record<string, string> = {
   astap_timeout_s: "Give up on solving a single frame after this many seconds.",
   cpu_workers: "CPU workers for QC / solve / stack. Blank = all cores.",
   max_stack_memory_gb: "Working-memory cap for a single stack. Blank = auto (~70% of RAM). Raise it on a big box to allow larger drizzle/mosaic canvases; lower it to leave more headroom. The ASTROSTACK_MAX_STACK_GB env var, if set, overrides this.",
+  job_history_limit: "How many finished jobs to keep in the Jobs history (the jobs.sqlite database retains about 10× this). Higher keeps more history at the cost of a slightly larger DB. Takes effect immediately. Default 200.",
   astap_use_solve_hints: "Use each frame's telescope target RA/Dec (from its FITS header) to localise ASTAP's search — faster, more reliable solving. Turn off if your frames lack/contain wrong coordinates.",
   seestar_enabled: "Discover and monitor Seestar telescopes on the LAN via their unofficial local API (port 4700). The container must be able to reach the scope (Station mode).",
   seestar_control_enabled: "Allow sending commands (goto / start / stop / park) to the scope. Off = monitoring only, so watching can never disturb a session.",
@@ -379,6 +380,10 @@ export function SettingsView() {
               </Alert>
             );
           })()}
+          <NumberInput label={lbl("job_history_limit", "Job history to keep")}
+            value={num("job_history_limit")} min={10} max={100000} step={50}
+            allowDecimal={false} w={{ base: "100%", xs: 260 }}
+            onChange={(v) => set("job_history_limit", v === "" ? 200 : Number(v))} />
 
           <Group justify="flex-end">
             <Button leftSection={<IconDeviceFloppy size={16} />}

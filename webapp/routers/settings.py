@@ -44,6 +44,13 @@ def update_settings(patch: dict[str, Any], request: Request) -> dict[str, Any]:
         s = store.update(clean)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    # Apply the (possibly changed) history cap to the running JobManager so it
+    # takes effect without a restart. Best-effort: never fail the settings save
+    # if the manager isn't wired up (e.g. in a lightweight test app).
+    try:
+        deps.get_job_manager(request).max_history = s.job_history_limit
+    except Exception:  # noqa: BLE001 — a missing manager must not 500 the save
+        pass
     return _serialize(s)
 
 

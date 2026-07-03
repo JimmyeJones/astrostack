@@ -120,6 +120,15 @@ class Settings(BaseModel):
     # from either OOM-ing the box or refusing every stack.
     max_stack_memory_gb: float | None = Field(default=None, ge=0.5, le=1024.0)
 
+    # --- jobs --------------------------------------------------------------
+    # How many finished jobs the in-memory map keeps (and, at ~10×, how many
+    # rows jobs.sqlite retains) before old history is pruned. Higher keeps more
+    # of the Jobs/Logs history at the cost of a slightly larger DB; the default
+    # matches the long-standing hard-coded cap so an existing install is
+    # unchanged. Bounds keep a fat-fingered value from either losing all history
+    # or letting the DB grow without bound.
+    job_history_limit: int = Field(default=200, ge=10, le=100000)
+
     # --- access control ----------------------------------------------------
     # Optional HTTP Basic auth. Empty hash = disabled (the app is open). Managed
     # only via /api/auth/password — never set these through the settings PUT.

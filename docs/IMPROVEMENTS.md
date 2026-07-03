@@ -79,9 +79,9 @@ _(none — claim an item here with your branch name)_
 ### Infra / maintainability
 - Chip away at the ~127 pre-existing `ruff check .` findings (don't add new ones);
   consider wiring ruff into CI once the count is low. (L, correctness/maintainability)
-- ~~Add a retention/pruning policy for `jobs.sqlite`~~ — **already implemented**
-  (`JobManager._evict_old` prunes the DB to ~10× `max_history` after every job);
-  a future refinement could make the cap a configurable setting. (S, scale)
+- ~~Add a retention/pruning policy for `jobs.sqlite`~~ — **done, then made
+  configurable** (`JobManager._evict_old` + the `job_history_limit` setting,
+  v0.51.1). (S, scale)
 - Add a `SessionStart` hook (or a `scripts/setup.sh`) that provisions the venv +
   `npm ci` so every autonomous iteration starts from a known-green baseline. (S)
 - Expand `docs/` (webapp.md) to cover calibration, mono/LRGB, auth. (S)
@@ -109,6 +109,15 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Configurable job-history retention** — the job-history cap (how many finished
+  jobs the in-memory map keeps, and at ~10× how many rows `jobs.sqlite` retains)
+  was a hard-coded 200; it's now a `job_history_limit` setting (default 200,
+  bounds 10–100000) surfaced on the Settings page and threaded into the
+  `JobManager` at startup. A settings change applies to the running manager
+  immediately (no restart). Additive/upgrade-safe: the default equals the old
+  constant, so an existing install keeps exactly as much history as before.
+  (v0.51.1, this run)
 
 - **Compare-two-stacks web view** — a new `/compare?a=<safe>:<run>&b=<safe>:<run>`
   route (bookmarkable) shows two stacks **side by side** or as a **blink**
