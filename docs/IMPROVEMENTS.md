@@ -29,6 +29,8 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- **BUG (flaky test): `test_detail_ops_preserve_nan_on_partial_coverage[detail.sharpen-params1]` intermittently fails in the full suite** — passes in isolation and in-file, fails ~sometimes in full-suite order (a covered pixel comes back NaN). The `_with_nan_filled` fill->unsharp_mask->restore path for sharpen has an order/FP-sensitive edge. De-flake it (stabilise the fill or assert with tolerance); a flaky test intermittently reddens CI, which the zero-touch loop treats as 'fix first'. Severity: broken-UX (CI noise). Confidence: confirmed (observed).
+
 Verified findings from a dedicated QA audit (2026-07-03, branch
 `claude/astrostack-qa-audit-gonkds`). Every entry was traced through the code
 and, where marked *reproduced*, demonstrated by running it. Editor bugs first,
@@ -75,7 +77,7 @@ sitting; move an entry to **In progress**/**Shipped** as usual when you take it.
   downstream renderers skip their default stretch. Severity: wrong-result
   (trust/export mismatch). Confidence: confirmed (traced).
 
-- **BUG: the stretch turns NaN (no-coverage) into 0.0, so every post-stretch
+- **✅ FIXED (v0.68.0): the stretch turns NaN (no-coverage) into 0.0, so every post-stretch
   consumer treats uncovered mosaic pixels as real black data** — `asinh_stretch`
   and `autostretch` (`seestack/render/thumbnail.py:210-225, 274-291`) write 0
   into non-finite pixels, so after the stretch op the editor pipeline has no NaN
