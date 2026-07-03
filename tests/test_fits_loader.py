@@ -57,3 +57,13 @@ def test_bilinear_debayer_unsupported_pattern():
 def test_bilinear_debayer_non_2d():
     with pytest.raises(ValueError):
         bilinear_debayer(np.zeros((10, 10, 3), dtype=np.float32))
+
+
+def test_debayer_edge_does_not_wrap_opposite_side():
+    """A bright pixel on the last column must not leak into column 0 via the
+    debayer neighbour average (the old np.roll-based _shift wrapped edges)."""
+    mosaic = np.full((8, 8), 100.0, dtype=np.float32)
+    mosaic[:, -1] = 60000.0            # bright last column
+    rgb = bilinear_debayer(mosaic, pattern="RGGB")
+    # Column 0 should stay near the background, not pick up the far-edge spike.
+    assert float(rgb[:, 0].max()) < 1000.0

@@ -197,8 +197,21 @@ def bilinear_debayer(mosaic: np.ndarray, pattern: str = "RGGB") -> np.ndarray:
 
 
 def _shift(a: np.ndarray, dy: int, dx: int) -> np.ndarray:
-    """Shift array by (dy, dx) with edge replication."""
-    return np.roll(a, shift=(dy, dx), axis=(0, 1))
+    """Shift by (dy, dx) with **edge replication**.
+
+    Matches ``np.roll``'s element mapping (``out[i] = a[i - dy]``) but *clamps*
+    instead of wrapping. ``np.roll`` wrapped the opposite sensor edge into the
+    bilinear-debayer neighbour average, contaminating the outermost pixel ring of
+    every frame (a bright edge pixel/star/trail leaked to the far edge). The align
+    path insets 3 px so it never showed there, but the drizzle path stacks the
+    full frame, so drizzle results could acquire spurious edge features."""
+    h, w = a.shape[:2]
+    pad = [(max(dy, 0), max(-dy, 0)), (max(dx, 0), max(-dx, 0))]
+    if a.ndim == 3:
+        pad.append((0, 0))
+    padded = np.pad(a, pad, mode="edge")
+    y0, x0 = max(-dy, 0), max(-dx, 0)
+    return padded[y0:y0 + h, x0:x0 + w]
 
 
 def _interp_g(g_plane: np.ndarray) -> np.ndarray:
