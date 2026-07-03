@@ -987,13 +987,15 @@ export function EditorView() {
                             : selectedOp.id === "tone.levels"
                               && levels.data?.black != null && levels.data?.white != null
                               ? {
+                                // Each button sets only its own point, so label it
+                                // with just that value (not both) to match what it does.
                                 black: {
                                   value: levels.data.black,
-                                  label: `From your image (black ${levels.data.black}, white ${levels.data.white})`,
+                                  label: `From your image (black ${levels.data.black})`,
                                 },
                                 white: {
                                   value: levels.data.white,
-                                  label: `From your image (black ${levels.data.black}, white ${levels.data.white})`,
+                                  label: `From your image (white ${levels.data.white})`,
                                 },
                               }
                               : undefined

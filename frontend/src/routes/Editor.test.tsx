@@ -538,7 +538,11 @@ describe("EditorView", () => {
     // Select the Levels op; its black-point suggestion diverges from the current 0.
     fireEvent.click(await screen.findByText("Levels"));
     const btn = await screen.findByLabelText("Set Black point from your data");
-    expect(btn).toHaveTextContent("0.12");
+    // Each button names only its own point (black here), matching what it sets.
+    expect(btn).toHaveTextContent("black 0.12");
+    expect(btn).not.toHaveTextContent("white");
+    const whiteBtn = await screen.findByLabelText("Set White point from your data");
+    expect(whiteBtn).toHaveTextContent("white 0.85");
     fireEvent.click(btn);
     // After applying, the black point matches the suggestion, so the button reads
     // as already-applied (disabled + ✓).

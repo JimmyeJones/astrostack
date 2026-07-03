@@ -102,6 +102,13 @@ describe("autoValuePhrases", () => {
     expect(autoValuePhrases(ops)).toEqual(["sharpen radius 1.35 px"]);
   });
 
+  it("surfaces the crossfaded sharpen strength when eased below full", () => {
+    // A mildly-noisy stack gets a gentler sharpen (amount < 0.5), which the
+    // crossfade tuned from the data — so name it alongside the radius.
+    const ops = [pop("detail.sharpen", { amount: 0.3, radius: 1.4 })];
+    expect(autoValuePhrases(ops)).toEqual(["sharpen radius 1.4 px (strength 0.3)"]);
+  });
+
   it("omits the STF sky level when the stretch is not in STF mode", () => {
     expect(autoValuePhrases([pop("tone.stretch", { mode: "asinh", stretch: 0.5 })])).toEqual([]);
   });

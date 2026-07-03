@@ -51,6 +51,21 @@ problems. Dogfood it every big-picture run and fix root causes.
 - **Editor bug hunt (ongoing)** — there are undocumented issues. Each big-picture
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
+- **Single-click combined "Auto levels" on the Levels op** — the new data-driven
+  Levels buttons (v0.62.0) are per-point: a beginner must click *two* buttons (black,
+  then white) to auto-level. Add one "Auto levels" button (on the op panel header,
+  next to the per-param buttons) that applies *both* suggested points at once from the
+  same `levels-suggestion` payload, so the common case is one click. The per-param
+  buttons stay for fine control. Reuses the existing endpoint + `setParams`; a pure
+  helper sets `{black, white}` together; frontend-only, additive. (S, autonomy/editor)
+- **Show the Levels black/white points as guides on the op's histogram** — the Levels
+  op panel already renders the image histogram, but the black/white points a user is
+  setting (and the data-driven suggestion) are invisible on it, so it's hard to see
+  *where* on the tonal range they land. Overlay two vertical guide lines on the
+  panel histogram at the current `black`/`white` (and a faint marker at the suggested
+  values), so the beginner can see the points relative to the sky peak and the
+  highlights they're clipping. Reuses the histogram already in the panel; frontend-
+  only, additive, advisory. (S–M, editor/trust)
 - **Coverage overlay should follow the recipe's geometry ops** — the coverage-map
   overlay renders the run's *raw* full-frame coverage sibling, so once a crop/rotate/
   resize op is in the recipe it no longer lines up with the reshaped preview
@@ -202,6 +217,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Editor: accurate data-driven value labels (Levels buttons + Auto's crossfaded
+  sharpen strength)** — two small honesty fixes on data-driven readouts. (1) The new
+  Levels "From your image" buttons each set only their *own* point, but both showed
+  "From your image (black X, white Y)", implying each sets both; each now names just
+  the value it applies ("black X" / "white Y"). (2) Now that the Auto crossfade
+  (v0.63.0) eases the sharpen *amount* below its full 0.5 on noisier stacks, the
+  "Tuned to your data" note surfaces that strength alongside the radius ("sharpen
+  radius 1.4 px (strength 0.3)") when reduced — so the note reflects the crossfade's
+  new adaptivity. Frontend-only, additive. Vitest updated (distinct Levels labels;
+  the eased-sharpen value phrase; full-strength case unchanged). (v0.63.1, this run)
 
 - **Smooth the Auto recipe's noisy/clean cliff (denoise ↔ sharpen crossfade)** —
   `auto_recipe` treated `analyze_proxy`'s `noisy` verdict as a hard boolean
