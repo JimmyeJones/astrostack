@@ -171,6 +171,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Fix a flaky Stack-form vitest ("does not suggest min/max reject when already
+  on")** — the test waited only for the schema-driven "Min/max rejection" *label*
+  before asserting the streak nudge was absent, but the nudge is suppressed by the
+  `getStackDefaults` value (`min_max_reject: true`) which resolves in a *separate*
+  query — so between the two queries the switch reads off and the nudge shows
+  transiently, racing the negative assertion (it took down main's CI on the prior
+  merge, though the code was fine). Now it waits for the switch to actually read
+  *checked* (defaults applied) before asserting the nudge is gone — same assertion,
+  no race. Test-only; keeps CI reliable. (v0.61.2, this run)
+
 - **"Trim border" selects the new Crop op + reports the kept fraction** — polish on
   the v0.60.0 trim feature: applying "Trim border" now selects the resulting
   `geometry.crop` op (so its adjustable bounds panel opens immediately — making
