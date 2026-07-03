@@ -38,7 +38,7 @@ sitting; move an entry to **In progress**/**Shipped** as usual when you take it.
 
 ### Editor — engine & backend (PRIORITY 1)
 
-- **BUG: "Wavelet (recommended)" denoise never runs wavelet — PyWavelets isn't
+- **✅ FIXED (v0.67.0): "Wavelet (recommended)" denoise never runs wavelet — PyWavelets isn't
   installed, silent TV fallback with strength applied twice** — `_denoise`'s
   wavelet branch (`seestack/edit/ops/detail.py:63-71`) calls
   `skimage.restoration.denoise_wavelet`, which needs PyWavelets — but `pywavelets`
@@ -56,7 +56,7 @@ sitting; move an entry to **In progress**/**Shipped** as usual when you take it.
   runs at all — fix this first. Severity: wrong-result. Confidence: confirmed
   (reproduced).
 
-- **BUG: editor exports are display-stretched data recorded as if linear — the
+- **✅ FIXED (v0.67.0, preview+TIFF; FITS re-edit double-stretch still open): editor exports are display-stretched data recorded as if linear — the
   History thumbnail doesn't match the editor, and the "Linear" TIFF isn't
   linear** — `_apply_editor_to_run` (`webapp/pipeline.py:395-426`) renders the
   recipe to display space (a stretch is always applied) and passes that to
@@ -261,7 +261,7 @@ sitting; move an entry to **In progress**/**Shipped** as usual when you take it.
 
 ### Rest of the app
 
-- **BUG: good frames near RA=0° are flagged as plate-solve outliers and
+- **✅ FIXED (v0.67.0): good frames near RA=0° are flagged as plate-solve outliers and
   permanently rejected in the DB** — `_footprint_outlier_indices`
   (`seestack/stack/mosaic.py:98-106`; same pattern in the worst-frame drop loop
   `:271-279`) takes each frame's centre as `np.median(raw corner RAs)` *before*
