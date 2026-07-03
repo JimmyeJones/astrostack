@@ -138,17 +138,19 @@ sitting; move an entry to **In progress**/**Shipped** as usual when you take it.
   re-seed. Severity: broken-UX (edit loss in the race; undo loss always).
   Confidence: confirmed (traced).
 
-- **BUG: overlay fetch failures show the wrong image under the wrong label,
-  with no error** — `shownSrc` falls back to the main edited preview whenever an
-  overlay blob query errors (`Editor.tsx:314-322`), while the caption is driven
-  purely by the toggle flags (`Editor.tsx:661-670`), and none of
-  `basePreview`/`maskPreview`/`coveragePreview`/`withoutOpPreview` render their
-  `isError` anywhere. Steps: click "Compare"/"Star mask"/"Coverage"/"Without
-  this op" when that endpoint 404s/500s (e.g. coverage sibling deleted) — the
-  panel shows the *edited* image captioned "Original" (etc.). The user A/Bs the
-  image against itself. **Fix:** surface each overlay query's error (alert or
-  toast) and drop the silent `?? preview.data` fallback while the overlay toggle
-  is on. Severity: wrong-result (mislabeled comparison) / unsurfaced error.
+- **✅ FIXED (v0.69.3): overlay fetch failures show the wrong image under the wrong label,
+  with no error** — `shownSrc` fell back to the main edited preview whenever an
+  overlay blob query errored, while the caption was driven purely by the toggle
+  flags, so a failed "Compare"/"Star mask"/"Coverage"/"Without this op" fetch
+  showed the *edited* image captioned "Original" (etc.) — the user A/B'd the
+  image against itself. Fixed by selecting the active overlay + its query once
+  (precedence-ordered), dropping the silent `?? preview.data` fallback for A/B
+  overlays, and rendering a red "The {overlay} overlay failed to load…" alert
+  with a Retry when the overlay query errors (the mislabeled caption is
+  suppressed). Trim-preview keeps its coverage backdrop fall-back (there the
+  overlay is only a backdrop for the crop rectangle, not an A/B). Regression
+  test: a failing star-mask fetch surfaces the error and shows no "Star mask"
+  caption. Severity: wrong-result (mislabeled comparison) / unsurfaced error.
   Confidence: confirmed (traced).
 
 - **BUG: the star-mask overlay is computed on linear data but the star ops gate

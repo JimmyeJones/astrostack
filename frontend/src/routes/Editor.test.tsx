@@ -266,6 +266,31 @@ describe("EditorView", () => {
       expect(screen.getByRole("button", { name: "Hide mask" })).toBeInTheDocument());
   });
 
+  it("surfaces an overlay fetch error instead of showing the edited image under the overlay's label", async () => {
+    mockEditorQueries();
+    // Preview succeeds, but the star-mask endpoint fails — previously the panel
+    // silently showed the edited preview captioned "Star mask" (A/B against
+    // itself); now it shows an error and no mislabeled caption.
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (typeof url === "string" && url.includes("/editor/star-mask")) {
+        return { ok: false, status: 500, json: async () => ({ detail: "mask boom" }) };
+      }
+      return { ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }) };
+    }));
+
+    renderEditor();
+
+    const btn = await screen.findByRole("button", { name: "Star mask" });
+    await waitFor(() => expect(btn).not.toBeDisabled());
+    btn.click();
+
+    await waitFor(() =>
+      expect(screen.getByText(/star mask overlay failed to load/i)).toBeInTheDocument());
+    // The button has flipped to "Hide mask" and the mislabeled "Star mask" caption
+    // is suppressed, so no "Star mask" text remains on the panel.
+    expect(screen.queryByText("Star mask")).not.toBeInTheDocument();
+  });
+
   it("offers a Coverage overlay on a mosaic and toggles it", async () => {
     mockEditorQueries();
     // is_mosaic:true → the coverage overlay button is offered.
