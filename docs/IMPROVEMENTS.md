@@ -52,14 +52,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
 
-### Editor — make it excellent (PRIORITY 1) — new ideas
-- **Show a per-op timing hint so "heavy" ops set expectations before you add them**
-  — the `heavy` spec hint (v0.57.17) is currently only consumed by the preview
-  debounce; surface it in the Add-operation menu and the op header too (a small
-  "slower preview" chip on Deconvolution / Noise reduction), so a beginner knows
-  *before* dragging a slider why the preview takes a beat to update, rather than
-  wondering if it's stuck. Pure frontend, reuses the already-threaded `heavy` field;
-  additive. (S, editor/friendliness)
 
 ### Autonomy — "just works" (PRIORITY 2)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
@@ -177,6 +169,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **"slower preview" chip in the Add-operation menu** — the `heavy` spec hint
+  (v0.57.17) was only consumed by the preview debounce; now the Add-operation menu
+  (both the curated Common section and the full grouped list) shows a small "slower
+  preview" chip next to each heavy op (Deconvolution / Noise reduction), so a
+  beginner knows *before* adding the op why its live preview will update after a
+  beat rather than instantly — setting the expectation up-front instead of leaving
+  them wondering if it's stuck. Reuses the already-threaded `heavy` field via a
+  shared `SlowPreviewChip`; Vitest-covered (chip shown in the menu); frontend-only,
+  additive. (v0.57.22, this run)
 
 - **Retire the now-dead "export only" preview scaffolding → "slower preview"** —
   since v0.57.0 *every* editor op is `proxy_safe=True`, so the OpList "export only"

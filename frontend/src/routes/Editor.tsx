@@ -1,5 +1,5 @@
 import {
-  ActionIcon, Alert, Button, Center, Grid, Group, Loader, Menu, Paper, Select, Stack, Text,
+  ActionIcon, Alert, Badge, Button, Center, Grid, Group, Loader, Menu, Paper, Select, Stack, Text,
   TextInput, Title, Tooltip,
 } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
@@ -43,6 +43,18 @@ const COMMON_OP_IDS = [
 
 function uid(): string {
   return (crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)).slice(0, 8);
+}
+
+/** A small "slower preview" chip for `heavy` ops, so a beginner knows before
+ * adding the op why its live preview updates after a beat rather than instantly. */
+function SlowPreviewChip() {
+  return (
+    <Tooltip label="Slow to render — the live preview updates after a short pause" withArrow>
+      <Badge size="xs" variant="light" color="grape" style={{ flexShrink: 0, cursor: "help" }}>
+        slower preview
+      </Badge>
+    </Tooltip>
+  );
 }
 
 function newOp(spec: EditOp): OpInstance {
@@ -549,7 +561,10 @@ export function EditorView() {
                     <Menu.Label>Common</Menu.Label>
                     {commonOps.map((s) => (
                       <Menu.Item key={s.id} onClick={() => addOp(s)}>
-                        <Text size="sm">{s.label}</Text>
+                        <Group gap={6} wrap="nowrap">
+                          <Text size="sm">{s.label}</Text>
+                          {s.heavy ? <SlowPreviewChip /> : null}
+                        </Group>
                         {s.help ? (
                           <Text size="10px" c="dimmed" lineClamp={2}>{s.help}</Text>
                         ) : null}
@@ -571,7 +586,10 @@ export function EditorView() {
                       <Menu.Label>{GROUP_LABELS[g] ?? g}</Menu.Label>
                       {grouped[g].map((s) => (
                         <Menu.Item key={s.id} onClick={() => addOp(s)}>
-                          <Text size="sm">{s.label}</Text>
+                          <Group gap={6} wrap="nowrap">
+                            <Text size="sm">{s.label}</Text>
+                            {s.heavy ? <SlowPreviewChip /> : null}
+                          </Group>
                           {s.help ? (
                             <Text size="10px" c="dimmed" lineClamp={2}>{s.help}</Text>
                           ) : null}

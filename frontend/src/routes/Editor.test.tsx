@@ -272,6 +272,8 @@ describe("EditorView", () => {
     // Expanding "More operations" reveals the full grouped list including Deconvolution.
     fireEvent.click(screen.getByText("More operations"));
     expect(await screen.findByText("Deconvolution")).toBeInTheDocument();
+    // The heavy op advertises its slow preview right in the menu, before it's added.
+    expect(screen.getByText("slower preview")).toBeInTheDocument();
   });
 
   it("previews the recipe without the selected op via 'Without this op'", async () => {
