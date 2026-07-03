@@ -25,6 +25,7 @@ import { previewScaleCaption } from "../components/editor/previewScale";
 import { prependCoverageLeveling } from "../components/editor/coverageLeveling";
 import { applyTrimCrop, trimRectStyle, trimKeptLabel, hasEnabledGeometryOp }
   from "../components/editor/mosaicTrim";
+import { pngProgressLabel } from "../components/editor/pngProgress";
 import { clippingCaption } from "../components/editor/clipping";
 import { previewDebounceMs } from "../components/editor/previewDebounce";
 import { starMaskSizePx } from "../components/editor/starMaskSize";
@@ -362,8 +363,12 @@ export function EditorView() {
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
 
+  // Live progress of the full-res PNG render, shown under the button while it
+  // polls (the slowest editor action — a bare spinner reads as "stuck").
+  const [pngProgress, setPngProgress] = useState<string | null>(null);
   const downloadPng = useMutation({
     mutationFn: async () => {
+      setPngProgress("Rendering…");
       const { job_id } = await api.exportPng(safe, rid, recipe);
       // Full-res render can be slow on mosaics — poll the job to completion.
       for (;;) {
@@ -372,6 +377,7 @@ export function EditorView() {
         if (["error", "cancelled", "interrupted"].includes(j.state)) {
           throw new Error(j.error || "PNG render failed");
         }
+        setPngProgress(pngProgressLabel(j));
         await new Promise((r) => setTimeout(r, 500));
       }
     },
@@ -384,6 +390,7 @@ export function EditorView() {
       notifications.show({ message: "Full-resolution PNG ready", color: "teal" });
     },
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+    onSettled: () => setPngProgress(null),
   });
 
   // --- op list ops ---------------------------------------------------------
@@ -900,6 +907,9 @@ export function EditorView() {
                 loading={downloadPng.isPending} onClick={() => downloadPng.mutate()}>
                 Download full-res PNG
               </Button>
+              {downloadPng.isPending && pngProgress ? (
+                <Text size="xs" c="dimmed" ta="center" mt={4}>{pngProgress}</Text>
+              ) : null}
               <Text size="xs" c="dimmed" mt={6}>
                 "Export" writes a new stack run (FITS/TIFF/PNG); the original is never
                 changed. "Download full-res PNG" renders your edits at native resolution

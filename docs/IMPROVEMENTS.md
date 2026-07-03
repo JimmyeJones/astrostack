@@ -154,6 +154,15 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Show render progress for the full-res PNG download** — "Download full-res PNG"
+  polls the render job to completion but only spun the button, so on a large mosaic
+  (the slowest editor action) it read as "stuck" with no signal it was working. The
+  editor now shows a live "Rendering — NN%" line under the button while the job
+  polls, from the job's `phase`/`done`/`total` via a pure `pngProgressLabel` helper
+  (percentage when the total is known, phase name otherwise). Frontend-only,
+  additive. Vitest: helper (percent / clamp / phase-fallback / blank / null) + an
+  Editor test that the progress line shows while the job polls. (v0.61.6, this run)
+
 - **Note the coverage overlay is for the uncropped frame when a crop is applied** —
   the coverage-map overlay (v0.61.0) renders the run's *raw* full-frame coverage
   sibling, so once a `geometry.crop`/rotate/resize op is in the recipe (very likely

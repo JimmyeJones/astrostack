@@ -115,6 +115,29 @@ describe("EditorView", () => {
     expect(screen.getByText("Download full-res PNG")).toBeInTheDocument();
   });
 
+  it("shows render progress while the full-res PNG job is polling", async () => {
+    mockEditorQueries();
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+    vi.spyOn(client.api, "exportPng").mockResolvedValue({ job_id: "png1" });
+    // First poll: still rendering with progress → the label shows; second: done.
+    const runningJob = { id: "png1", kind: "editor_png", target: "M_42", state: "running",
+      phase: "Rendering", done: 1, total: 2, detail: "", created_utc: null, started_utc: null,
+      finished_utc: null, error: null, result: null };
+    let polls = 0;
+    vi.spyOn(client.api, "getJob").mockImplementation(async () => {
+      polls += 1;
+      return polls === 1 ? runningJob : { ...runningJob, state: "done" };
+    });
+
+    renderEditor();
+
+    const btn = await screen.findByText("Download full-res PNG");
+    fireEvent.click(btn);
+    await waitFor(() => expect(screen.getByText("Rendering — 50%")).toBeInTheDocument());
+  });
+
   it("threads an AbortSignal into the live-preview fetch so stale renders can be cancelled", async () => {
     mockEditorQueries();
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => ({
