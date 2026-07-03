@@ -38,11 +38,9 @@ _(none — claim an item here with your branch name)_
   few-star frames, neutral fallback, off by default first. (M, correctness)
 - Follow-ups to min/max reject (shipped v0.56.0): (1) a **top/bottom-percentile**
   variant for big stacks (drop the top/bottom p% rather than a single extreme —
-  more aggressive trail removal when there are hundreds of frames); (2) a
-  Stack-form hint suggesting min/max reject over κ-σ when the accepted, solved
-  frame count is small (<~11) and streaked frames are present, since that's
-  exactly the regime κ-σ can't handle; (3) a **median/MAD** location/scale path
-  for the middle ground. All (S–M, correctness).
+  more aggressive trail removal when there are hundreds of frames); (3) a
+  **median/MAD** location/scale path for the middle ground. (Item (2), the
+  Stack-form small-stack hint, shipped v0.56.2.) All (S–M, correctness).
 - **Dark exposure-scaling** (slice (b), now that bias is wired for lights) —
   `scaled_dark = bias + (dark − bias)·(t_light/t_dark)` so a dark shot at a
   different exposure than the lights can still be used. Needs the per-frame
@@ -102,6 +100,18 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Min/max-reject nudge on the Stack form for small streaked stacks** — below
+  ~11 frames κ-σ mathematically can't reject a lone satellite/plane trail (a
+  single outlier's deviation stays within κ·σ of the mean), which is exactly the
+  regime this run's min/max reject handles. The Stack form now shows a
+  plain-language hint suggesting "Min/max rejection" when a small stack (3 ≤
+  accepted+solved < 11, non-drizzle) carries streaked frames and min/max reject
+  isn't already on — superseding the generic "turn on sigma clipping" streak
+  warning in that regime (where that advice doesn't actually work). Also fixed a
+  pre-existing advisory gap: the streak-no-rejection warning's `rejectionOn`
+  didn't count min/max reject as per-pixel rejection, so it wrongly fired when
+  only min/max reject was enabled. Frontend-only, advisory. (v0.56.2, this run)
 
 - **Rejection-method badge on History/Gallery cards** — a stack can be combined
   one of four ways (mean / σ-clip / min-max reject / drizzle), recorded in the

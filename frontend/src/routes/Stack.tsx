@@ -235,11 +235,30 @@ export function StackView() {
   // aren't a silent footgun. Advisory only.
   const streakedAccepted = (frames.data ?? [])
     .filter((f) => f.accept && f.solved && f.streak_detected).length;
+  // Per-pixel rejection is "on" for streak removal when drizzle rejection is
+  // enabled, sigma-clip is on with enough frames to estimate a spread, or
+  // min/max reject is on with enough frames to drop an extreme (count ≥ 3).
   const rejectionOn = values.drizzle
     ? !!values.drizzle_reject
-    : (!!values.sigma_clip && solvedAccepted >= 4);
+    : ((!!values.sigma_clip && solvedAccepted >= 4)
+       || (!!values.min_max_reject && solvedAccepted >= 3));
+
+  // Min/max-reject nudge: below ~11 frames, κ-σ mathematically can't reject a
+  // lone satellite/plane trail — a single outlier's deviation stays within κ·σ
+  // of the mean — but min/max reject drops the single extreme at each pixel and
+  // handles exactly that. Suggest it when a small stack carries streaked frames
+  // and min/max reject isn't already on (and we're on the standard, non-drizzle
+  // path, where it applies). Advisory only; the pick stands.
+  const MINMAX_SUGGEST_MAX_FRAMES = 11;
+  const minMaxRejectHint =
+    !frames.isLoading && streakedAccepted > 0 && !values.min_max_reject
+    && !values.drizzle
+    && solvedAccepted >= 3 && solvedAccepted < MINMAX_SUGGEST_MAX_FRAMES
+      ? `You have ${streakedAccepted} streaked frame${streakedAccepted === 1 ? "" : "s"} in a small stack of ${solvedAccepted}. Sigma clipping can't reliably reject a lone satellite/plane trail below ~${MINMAX_SUGGEST_MAX_FRAMES} frames (a single outlier's deviation stays within κ), but “Min/max rejection” drops the single highest and lowest value at each pixel — removing the trail while keeping the rest. Turn it on in the options above for this small stack.`
+      : null;
+
   const streakNoRejectionWarning =
-    streakedAccepted > 0 && !rejectionOn
+    streakedAccepted > 0 && !rejectionOn && !minMaxRejectHint
       ? `${streakedAccepted} accepted frame${streakedAccepted === 1 ? " has" : "s have"} a detected satellite/plane streak, but this stack has no per-pixel rejection enabled — the trail${streakedAccepted === 1 ? "" : "s"} will show in the result. Turn on ${values.drizzle ? "“Drizzle outlier rejection”" : "sigma clipping"} (or reject those frames) to remove ${streakedAccepted === 1 ? "it" : "them"}.`
       : null;
 
@@ -531,6 +550,12 @@ export function StackView() {
           {streakNoRejectionWarning ? (
             <Alert color="yellow" variant="light" py={6} px="sm">
               <Text size="xs">{streakNoRejectionWarning}</Text>
+            </Alert>
+          ) : null}
+
+          {minMaxRejectHint ? (
+            <Alert color="blue" variant="light" py={6} px="sm">
+              <Text size="xs">{minMaxRejectHint}</Text>
             </Alert>
           ) : null}
 
