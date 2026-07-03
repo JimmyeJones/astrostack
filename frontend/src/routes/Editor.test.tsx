@@ -539,6 +539,32 @@ describe("EditorView", () => {
     expect(screen.queryByText(/Proposed crop/)).not.toBeInTheDocument();
   });
 
+  it("warns about a second enabled Stretch and disables the extra on click", async () => {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, SHARPEN]);
+    // Two enabled Stretch ops — they compound and wash the image out.
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [
+        { uid: "s1", id: "tone.stretch", enabled: true, params: { stretch: 0.5 } },
+        { uid: "sh1", id: "detail.sharpen", enabled: true, params: { radius: 2 } },
+        { uid: "s2", id: "tone.stretch", enabled: true, params: { stretch: 0.6 } },
+      ],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    // The redundant-stretch advisory shows...
+    expect(await screen.findByText(/More than one/)).toBeInTheDocument();
+    // ...and clicking the fix disables the extra stretch, clearing the warning.
+    fireEvent.click(screen.getByRole("button", { name: /Disable the extra stretch/ }));
+    await waitFor(() =>
+      expect(screen.queryByText(/More than one/)).not.toBeInTheDocument());
+  });
+
   it("shows the proposed crop over the coverage heatmap on a mosaic", async () => {
     vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CROP]);
     vi.spyOn(client.api, "getRecipe").mockResolvedValue({

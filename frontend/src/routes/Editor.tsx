@@ -17,7 +17,8 @@ import { useUndoable } from "../hooks/useUndoable";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { Histogram } from "../components/editor/Histogram";
 import { OpList } from "../components/editor/OpList";
-import { hasEnabledStretch, insertOnCorrectSide, moveToCorrectSide } from "../components/editor/stageConflicts";
+import { extraEnabledStretchUids, hasEnabledStretch, insertOnCorrectSide, moveToCorrectSide }
+  from "../components/editor/stageConflicts";
 import { autoSummarySentence, autoValueSentence } from "../components/editor/autoSummary";
 import { applyDataDrivenDefaults, countDataDrivenDefaults, type OpSuggestion }
   from "../components/editor/dataDrivenDefaults";
@@ -430,6 +431,12 @@ export function EditorView() {
     if (disabledStretch) toggle(disabledStretch.uid);
     else if (specs["tone.stretch"]) addOp(specs["tone.stretch"]);
   };
+  // Two enabled Stretch ops compound: the second re-stretches display-space data
+  // and washes the image out. Flag it and offer a one-click "disable the extras".
+  const extraStretchUids = extraEnabledStretchUids(ops, specs);
+  const disableExtraStretches = () =>
+    setOps((p) => p.map((o) =>
+      extraStretchUids.includes(o.uid) ? { ...o, enabled: false } : o));
   const grouped = useMemo(() => {
     const g: Record<string, EditOp[]> = {};
     (opsSchema.data ?? []).forEach((s) => { (g[s.group] ??= []).push(s); });
@@ -822,6 +829,20 @@ export function EditorView() {
                   <Button size="compact-xs" variant="light" color="yellow"
                     leftSection={<IconPlus size={14} />} onClick={addOrEnableStretch}>
                     {disabledStretch ? "Enable stretch" : "Add stretch"}
+                  </Button>
+                </Alert>
+              ) : null}
+              {extraStretchUids.length > 0 ? (
+                <Alert color="orange" variant="light" py={8} mt="xs"
+                  icon={<IconAlertTriangle size={16} />}>
+                  <Text size="xs" mb={6}>
+                    More than one <b>Stretch</b> is enabled. Stretches compound — the
+                    second one re-stretches already-stretched data and washes the image
+                    out (flat or dark). Keep a single Stretch and tune <i>that</i> one.
+                  </Text>
+                  <Button size="compact-xs" variant="light" color="orange"
+                    onClick={disableExtraStretches}>
+                    Disable the extra stretch{extraStretchUids.length > 1 ? "es" : ""}
                   </Button>
                 </Alert>
               ) : null}

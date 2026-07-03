@@ -163,6 +163,18 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Warn about a redundant second Stretch (double-stretch bug)** — `apply_recipe`
+  marks the pipeline stretched on *every* `is_stretch` op and never dedupes, so two
+  enabled Stretch ops both run — the second re-stretches already display-space data
+  and washes the image out (flat/dark). A beginner hits it by running Auto-process
+  or a preset (both include a stretch) then clicking "Add operation → Stretch" to
+  "tune" it, with no warning. The pipeline panel now shows an orange advisory when
+  more than one Stretch is enabled, with a one-click "Disable the extra stretch(es)"
+  that keeps only the first (via a pure `extraEnabledStretchUids` helper). Advisory
+  + one-click, frontend-only, additive. Vitest: helper (4 cases: single/multi/
+  disabled/first-enabled) + an Editor test that the warning shows and clicking the
+  fix clears it. (v0.61.8, this run)
+
 - **Show the proposed trim over the coverage heatmap** — when the user opened the
   "Trim border" preview (v0.61.4) the dashed crop drew over whatever overlay
   happened to be up (usually the plain edited image), so you couldn't see that it

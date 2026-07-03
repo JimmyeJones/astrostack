@@ -23,6 +23,20 @@ export function hasEnabledStretch(
   return ops.some((o) => o.enabled && specs[o.id]?.is_stretch);
 }
 
+/** The uids of every *enabled* stretch op **beyond the first**. Two enabled
+ * stretches both run in `apply_recipe` (it re-stretches already display-space
+ * data), washing the image out to flat/black — a beginner hits this by running
+ * Auto-process or a preset (which include a stretch) and then adding another
+ * Stretch to "tune" it. The UI uses this to warn and offer a one-click "keep only
+ * the first" that disables the extras. Pure; empty when ≤1 stretch is enabled. */
+export function extraEnabledStretchUids(
+  ops: OpInstance[],
+  specs: Record<string, EditOp>,
+): string[] {
+  const enabledStretches = ops.filter((o) => o.enabled && specs[o.id]?.is_stretch);
+  return enabledStretches.slice(1).map((o) => o.uid);
+}
+
 /** Map of op uid -> the (mis-placed) stage, for every *enabled* op sitting on the
  * wrong side of an *enabled* stretch op. Empty when there's no explicit stretch
  * boundary (nothing to check against) or nothing conflicts. */
