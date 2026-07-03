@@ -50,6 +50,32 @@ export function rejectionBadge(options?: Record<string, unknown> | null): Reject
   return null;
 }
 
+// A coarse, stable combine-method key for a run's stored options — the same
+// precedence as rejectionBadge (drizzle > min/max > σ-clip > mean) but collapsed
+// to a fixed set so it can drive a filter facet. Returns null for editor-recipe /
+// channel-combine runs (no stacking knobs), which are simply excluded from the
+// facet. Unlike rejectionBadge it returns "mean" (not null) for a plain average,
+// so a mean stack is a filterable category.
+export type CombineMethod = "drizzle" | "min-max" | "sigma-clip" | "mean";
+
+export const COMBINE_METHOD_LABELS: Record<CombineMethod, string> = {
+  drizzle: "Drizzle",
+  "min-max": "Min/max",
+  "sigma-clip": "σ-clip",
+  mean: "Mean",
+};
+
+export function combineMethodKey(
+  options?: Record<string, unknown> | null,
+): CombineMethod | null {
+  if (!options || typeof options !== "object") return null;
+  if ("channel_combine" in options || "editor_recipe" in options) return null;
+  if (options.drizzle) return "drizzle";
+  if (options.min_max_reject) return "min-max";
+  if (options.sigma_clip) return "sigma-clip";
+  return "mean";
+}
+
 // Small violet chip for History / Gallery cards showing the combine method.
 export function RejectionBadge({
   options,

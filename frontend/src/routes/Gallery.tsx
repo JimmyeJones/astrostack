@@ -11,13 +11,16 @@ import { api, type GalleryItem, type StackOptionField } from "../api/client";
 import { formatIntegration } from "../format";
 import { HazyNightBadge } from "../components/HazyNightBadge";
 import { CalibrationBadge } from "../components/CalibrationBadge";
-import { RejectionBadge } from "../components/RejectionBadge";
+import {
+  RejectionBadge, combineMethodKey, COMBINE_METHOD_LABELS, type CombineMethod,
+} from "../components/RejectionBadge";
 import { NoiseReadout, hasNoise } from "../components/NoiseBadge";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { QueryError } from "../components/QueryError";
 
 export type GallerySort = "newest" | "cleanest";
 export type CalFilter = "all" | "calibrated" | "uncalibrated";
+export type MethodFilter = "all" | CombineMethod;
 
 // A run counts as "calibrated" when it recorded a non-empty calibration status
 // (the additive `calstat` column, "dark+flat"/"bias+flat"/…). Pre-v0.48 runs
@@ -59,6 +62,14 @@ export function filterGallery(items: GalleryItem[], query: string): GalleryItem[
   return items.filter((it) =>
     [it.notes, it.target_name, it.output_basename, it.calstat]
       .some((s) => (s ?? "").toLowerCase().includes(q)));
+}
+
+// Filter items by their (coarse) combine method. "all" is a passthrough;
+// otherwise keep runs whose effective method matches. Editor/channel-combine runs
+// (no method key) are dropped by any non-"all" filter. Pure and non-mutating.
+export function filterByMethod(items: GalleryItem[], filter: MethodFilter): GalleryItem[] {
+  if (filter === "all") return items;
+  return items.filter((it) => combineMethodKey(it.options) === filter);
 }
 
 /** Format an option value for display (booleans → On/Off, round floats). */
@@ -199,6 +210,7 @@ export function GalleryView() {
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<GallerySort>("newest");
   const [calFilter, setCalFilter] = useState<CalFilter>("all");
+  const [methodFilter, setMethodFilter] = useState<MethodFilter>("all");
   // Batch selection: key "safe:run_id" -> {safe, run_id}.
   const [selected, setSelected] = useState<Record<string, { safe: string; run_id: number }>>({});
   const selKey = (it: GalleryItem) => `${it.safe}:${it.run_id}`;
@@ -252,7 +264,10 @@ export function GalleryView() {
   // Free-text filter across the run's label (notes), target name, output
   // basename and calibration status — so a user can find "best RGB v2", "M42",
   // or their "flat"-calibrated stacks across every target.
-  const items = sortGallery(filterByCalibration(filterGallery(allItems, search), calFilter), sort);
+  const items = sortGallery(
+    filterByMethod(filterByCalibration(filterGallery(allItems, search), calFilter), methodFilter),
+    sort,
+  );
   // Only offer the Cleanest sort once it's a meaningful comparison: more than one
   // image and at least one carries a measured σ (pre-v0.48 runs have none).
   const anyNoise = allItems.some((it) => hasNoise(it.noise_sigma));
@@ -262,6 +277,13 @@ export function GalleryView() {
   const anyCalibrated = allItems.some(isCalibrated);
   const anyUncalibrated = allItems.some((it) => !isCalibrated(it));
   const showCalFilter = anyCalibrated && anyUncalibrated;
+  // Combine-method facet: the distinct methods present across all runs (in the
+  // engine's precedence order). Only offered when the set is *mixed* (>1 distinct
+  // method) so it's a useful cut, not a no-op chip — mirroring the cal filter.
+  const METHOD_ORDER: CombineMethod[] = ["drizzle", "min-max", "sigma-clip", "mean"];
+  const presentMethods = METHOD_ORDER.filter((m) =>
+    allItems.some((it) => combineMethodKey(it.options) === m));
+  const showMethodFilter = presentMethods.length > 1;
 
   return (
     <Stack>
@@ -293,6 +315,19 @@ export function GalleryView() {
                   { label: "All", value: "all" },
                   { label: "Calibrated", value: "calibrated" },
                   { label: "Uncalibrated", value: "uncalibrated" },
+                ]}
+              />
+            </Tooltip>
+          ) : null}
+          {showMethodFilter ? (
+            <Tooltip label="Filter by how each stack was combined (drizzle / min-max / σ-clip / mean).">
+              <SegmentedControl
+                size="xs"
+                value={methodFilter}
+                onChange={(v) => setMethodFilter(v as MethodFilter)}
+                data={[
+                  { label: "All", value: "all" },
+                  ...presentMethods.map((m) => ({ label: COMBINE_METHOD_LABELS[m], value: m })),
                 ]}
               />
             </Tooltip>
@@ -355,9 +390,11 @@ export function GalleryView() {
         <Text c="dimmed">
           {search.trim()
             ? `No images match “${search.trim()}”.`
-            : calFilter !== "all"
-              ? `No ${calFilter} images.`
-              : "No stacked images yet. Stack a target and its results will appear here."}
+            : methodFilter !== "all"
+              ? `No ${COMBINE_METHOD_LABELS[methodFilter]}-combined images.`
+              : calFilter !== "all"
+                ? `No ${calFilter} images.`
+                : "No stacked images yet. Stack a target and its results will appear here."}
         </Text>
       ) : (
         <SimpleGrid cols={{ base: 1, sm: 2, md: 3, lg: 4 }}>

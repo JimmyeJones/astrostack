@@ -108,12 +108,6 @@ problems. Dogfood it every big-picture run and fix root causes.
 ### Features that serve real workflows
 - Annotated sky overlay (label detected objects / show solved field). (M)
 ### UX & polish
-- **Combine-method facet on the Gallery** — now that the gallery response carries
-  each run's `options` (v0.56.1), add a small "All / σ-clip / min-max / drizzle /
-  mean" filter (shown only when the set is *mixed*, like the calibration filter
-  chip) so a user can isolate e.g. every drizzled result across targets. Reuses
-  the pure `rejectionBadge` helper for the per-run method key; frontend-only,
-  additive. (S, approachability)
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
 
@@ -163,6 +157,15 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Combine-method facet on the Gallery** — a "All / Drizzle / Min-max / σ-clip /
+  Mean" `SegmentedControl` (shown only when the set is *mixed* — >1 distinct
+  method present — mirroring the calibration filter chip) that isolates e.g. every
+  drizzled result across every target. A new pure `combineMethodKey` helper
+  (coarse key with the engine's precedence: drizzle > min/max > σ-clip > mean;
+  null for editor/channel-combine runs) drives both the facet options and the pure
+  `filterByMethod`. Unit-tested (key precedence + filter) plus render tests for the
+  mixed-vs-uniform gating and narrowing. Frontend-only, additive. (v0.56.8, this run)
 
 - **One-click "Turn on min/max rejection" on the Stack-form nudge** — the
   small-stack streaked-frame hint (v0.56.2) told the user min/max reject is the

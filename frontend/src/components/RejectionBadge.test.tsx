@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { rejectionBadge } from "./RejectionBadge";
+import { rejectionBadge, combineMethodKey } from "./RejectionBadge";
 
 describe("rejectionBadge", () => {
   it("returns null for a plain mean (no rejection)", () => {
@@ -45,5 +45,25 @@ describe("rejectionBadge", () => {
   it("returns null for editor-recipe and channel-combine runs", () => {
     expect(rejectionBadge({ editor_recipe: [], sigma_clip: true })).toBeNull();
     expect(rejectionBadge({ channel_combine: {}, drizzle: true })).toBeNull();
+  });
+});
+
+describe("combineMethodKey", () => {
+  it("collapses to a coarse key with the same precedence as the badge", () => {
+    expect(combineMethodKey({ drizzle: true, min_max_reject: true, sigma_clip: true })).toBe("drizzle");
+    expect(combineMethodKey({ min_max_reject: true, sigma_clip: true })).toBe("min-max");
+    expect(combineMethodKey({ sigma_clip: true, sigma_kappa: 2.5 })).toBe("sigma-clip");
+  });
+
+  it("returns 'mean' (not null) for a plain average, so it's a filterable category", () => {
+    expect(combineMethodKey({})).toBe("mean");
+    expect(combineMethodKey({ sigma_clip: false })).toBe("mean");
+  });
+
+  it("returns null for editor/channel-combine runs and missing options", () => {
+    expect(combineMethodKey({ editor_recipe: [], sigma_clip: true })).toBeNull();
+    expect(combineMethodKey({ channel_combine: {}, drizzle: true })).toBeNull();
+    expect(combineMethodKey(null)).toBeNull();
+    expect(combineMethodKey(undefined)).toBeNull();
   });
 });
