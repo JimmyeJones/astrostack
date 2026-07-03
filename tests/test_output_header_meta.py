@@ -104,3 +104,31 @@ def test_merge_header_meta_coerces_and_truncates_values():
     assert len(str(hdr["NOTES"])) <= 68
     assert hdr["FLAG"] is True
     assert isinstance(hdr["OBJ"], str)
+
+
+def test_editor_export_writes_display_data_verbatim(tmp_path):
+    """An editor export is already display-space [0,1]; the preview PNG and TIFF
+    must be written as-is (not re-stretched / linear-rescaled), so the History
+    thumbnail matches what the editor showed. Regression for the 'exports stored
+    as linear' bug."""
+    from PIL import Image
+    import tifffile
+
+    # A 0->1 display-space gradient: a faithful write reproduces it (mean ~0.5).
+    ramp = np.linspace(0.0, 1.0, 64, dtype=np.float32)
+    rgb = np.repeat(np.tile(ramp, (16, 1))[..., None], 3, axis=2)
+    cov = np.ones(rgb.shape[:2], dtype=np.float32)
+
+    disp = write_stack_outputs(tmp_path, rgb, cov, wcs_text=None,
+                               out_basename="edit", already_display=True)
+    png = np.asarray(Image.open(disp["preview"]).convert("RGB"))
+    assert abs(int(png.mean()) - 127) <= 3               # ~0.5 mean, not re-stretched
+    tif = tifffile.imread(disp["tiff"])
+    assert abs(int(tif.mean()) - 32768) <= 400           # verbatim to 16-bit
+
+    # The same data written as a *linear stack* is autostretched (STF darkens the
+    # sky), so it looks materially different — proving the flag changes behaviour.
+    lin = write_stack_outputs(tmp_path, rgb, cov, wcs_text=None,
+                              out_basename="lin", already_display=False)
+    png_lin = np.asarray(Image.open(lin["preview"]).convert("RGB"))
+    assert abs(int(png_lin.mean()) - int(png.mean())) > 30

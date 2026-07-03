@@ -406,10 +406,12 @@ def _apply_editor_to_run(lib: Library, safe: str, run_id: int, recipe_dict: dict
             edit_meta["HISTORY"] = history
 
         coverage = np.ones(out.shape[:2], dtype=np.float32)
+        # `out` is the recipe's display-space result (a stretch was applied), so
+        # the TIFF/preview must be written as-is, not re-stretched/linear-rescaled.
         paths = write_stack_outputs(
             project_dir=proj.project_dir, rgb=out, coverage=coverage,
             wcs_text=None, out_basename=base, tiff_mode=tiff_mode,
-            header_meta=edit_meta,
+            header_meta=edit_meta, already_display=True,
         )
         new_id = proj.add_stack_run(StackRunRow(
             id=None,

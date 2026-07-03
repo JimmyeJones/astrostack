@@ -67,6 +67,7 @@ def write_stack_outputs(
     out_basename: str = "master",
     tiff_mode: str = "linear",
     header_meta: dict[str, Any] | None = None,
+    already_display: bool = False,
 ) -> dict[str, Path]:
     """
     Write the FITS + TIFF + preview PNG. Returns a dict of ``{kind: path}``.
@@ -102,10 +103,11 @@ def write_stack_outputs(
 
     _write_fits(fits_path, rgb, wcs_text, header_meta)
     _write_coverage_fits(cov_fits_path, coverage)
-    _write_tiff(tiff_path, rgb, mode=tiff_mode)
-    # Preview PNG always uses autostretch — it's there for the "did the stack
-    # come out OK?" glance. Always-stretched answers that question.
-    _write_preview_png(preview_path, rgb)
+    _write_tiff(tiff_path, rgb, mode=tiff_mode, already_display=already_display)
+    # Preview PNG normally autostretches a linear stack. For an editor export the
+    # data is already in display space (the recipe applied a stretch), so writing
+    # it as-is makes the History/Gallery thumbnail match what the editor showed.
+    _write_preview_png(preview_path, rgb, already_display=already_display)
 
     log.info("Stack outputs written to %s (TIFF mode: %s)", out_dir, tiff_mode)
     return {
@@ -206,11 +208,18 @@ def _write_coverage_fits(path: Path, coverage: np.ndarray) -> None:
 
 # ---- TIFF + preview ------------------------------------------------------
 
-def _write_tiff(path: Path, rgb: np.ndarray, *, mode: str = "linear") -> None:
-    """16-bit RGB TIFF in either linear or autostretched form."""
+def _write_tiff(path: Path, rgb: np.ndarray, *, mode: str = "linear",
+                already_display: bool = False) -> None:
+    """16-bit RGB TIFF in either linear or autostretched form.
+
+    ``already_display`` (editor exports): the data is already the display-space
+    [0,1] image, so write it verbatim — neither a linear rescale nor another
+    stretch applies (both would misrepresent what the editor showed)."""
     import tifffile
 
-    if mode == "linear":
+    if already_display:
+        u16 = (np.clip(np.nan_to_num(rgb, nan=0.0), 0.0, 1.0) * 65535.0).astype(np.uint16)
+    elif mode == "linear":
         u16 = _to_uint16_linear(rgb)
     elif mode == "autostretch":
         stretched = _autostretch_for_export(rgb)
@@ -220,11 +229,13 @@ def _write_tiff(path: Path, rgb: np.ndarray, *, mode: str = "linear") -> None:
     tifffile.imwrite(path, u16, photometric="rgb", compression="zlib")
 
 
-def _write_preview_png(path: Path, rgb: np.ndarray, *, max_width: int = 1024) -> None:
-    """Downsized 8-bit PNG preview — always autostretched (it's the 'preview')."""
+def _write_preview_png(path: Path, rgb: np.ndarray, *, max_width: int = 1024,
+                       already_display: bool = False) -> None:
+    """Downsized 8-bit PNG preview. Autostretched for a linear stack; written
+    as-is when the data is already display-space (an editor export)."""
     from PIL import Image
 
-    stretched = _autostretch_for_export(rgb)
+    stretched = np.nan_to_num(rgb, nan=0.0) if already_display else _autostretch_for_export(rgb)
     h, w = stretched.shape[:2]
     u8 = (np.clip(stretched, 0.0, 1.0) * 255).astype(np.uint8)
     if w > max_width:
