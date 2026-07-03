@@ -9,6 +9,27 @@ export interface TrimCrop {
   y1: number;
 }
 
+/** CSS `left/top/width/height` (percent strings) placing the proposed-crop
+ * rectangle over the preview image, from the fractional bounds. Pure. */
+export function trimRectStyle(
+  crop: TrimCrop,
+): { left: string; top: string; width: string; height: string } {
+  const pct = (v: number) => `${(v * 100).toFixed(2)}%`;
+  return {
+    left: pct(crop.x0),
+    top: pct(crop.y0),
+    width: pct(crop.x1 - crop.x0),
+    height: pct(crop.y1 - crop.y0),
+  };
+}
+
+/** Plain-language "keeps the central W% × H%" summary of a proposed crop. Pure. */
+export function trimKeptLabel(crop: TrimCrop): string {
+  const pctW = Math.round((crop.x1 - crop.x0) * 100);
+  const pctH = Math.round((crop.y1 - crop.y0) * 100);
+  return `keeps the central ${pctW}% × ${pctH}%`;
+}
+
 /** Set (or add) a `geometry.crop` op to the given fractional bounds — the
  * one-click "trim the ragged mosaic border" action. If a crop op already exists
  * it's updated in place and enabled (so re-trimming never stacks duplicate crops);

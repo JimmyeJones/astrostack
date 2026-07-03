@@ -455,7 +455,7 @@ describe("EditorView", () => {
     expect(screen.getByText("Sharpen")).toBeInTheDocument();
   });
 
-  it("offers a 'Trim border' button on a mosaic and adds a Crop op on click", async () => {
+  it("previews the proposed crop then adds a Crop op on Apply", async () => {
     vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CROP]);
     vi.spyOn(client.api, "getRecipe").mockResolvedValue({
       ops: [{ uid: "s1", id: "tone.stretch", enabled: true, params: { stretch: 0.6 } }],
@@ -476,11 +476,18 @@ describe("EditorView", () => {
 
     const btn = await screen.findByRole("button", { name: /Trim border/ });
     fireEvent.click(btn);
-    // A Crop op is inserted after the stretch (nonlinear stage) and selected, so
+    // First click only previews: a dashed outline + a "Proposed crop" caption, and
+    // no Crop op is committed yet.
+    await waitFor(() =>
+      expect(screen.getByText(/Proposed crop — keeps the central 60% × 80%/)).toBeInTheDocument());
+    expect(screen.queryByText("Left")).not.toBeInTheDocument();
+    // Apply commits the crop: it's inserted after the stretch and selected, so
     // "Crop" shows in both the pipeline row and the selected-op panel header...
+    fireEvent.click(screen.getByRole("button", { name: /Apply crop/ }));
     await waitFor(() => expect(screen.getAllByText("Crop").length).toBeGreaterThan(1));
-    // ...and its adjustable bounds panel is shown.
+    // ...and its adjustable bounds panel is shown; the preview caption is gone.
     expect(screen.getByText("Left")).toBeInTheDocument();
+    expect(screen.queryByText(/Proposed crop/)).not.toBeInTheDocument();
   });
 
   it("hides the 'Trim border' button on a single-field stack (no crop)", async () => {

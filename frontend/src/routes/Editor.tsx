@@ -23,7 +23,7 @@ import { applyDataDrivenDefaults, countDataDrivenDefaults, type OpSuggestion }
   from "../components/editor/dataDrivenDefaults";
 import { previewScaleCaption } from "../components/editor/previewScale";
 import { prependCoverageLeveling } from "../components/editor/coverageLeveling";
-import { applyTrimCrop } from "../components/editor/mosaicTrim";
+import { applyTrimCrop, trimRectStyle, trimKeptLabel } from "../components/editor/mosaicTrim";
 import { clippingCaption } from "../components/editor/clipping";
 import { previewDebounceMs } from "../components/editor/previewDebounce";
 import { starMaskSizePx } from "../components/editor/starMaskSize";
@@ -452,18 +452,20 @@ export function EditorView() {
   // The trim-border crop is only offered when this run is a mosaic and a
   // well-covered rectangle worth cropping to was found.
   const trimCrop = trim.data?.is_mosaic ? trim.data.crop : null;
+  // Show the proposed crop as a dashed outline on the preview first (a
+  // lower-commitment step than applying immediately), with an explicit "Apply".
+  const [trimPreview, setTrimPreview] = useState(false);
   const applyTrim = () => {
     if (!trimCrop) return;
     const next = applyTrimCrop(ops, trimCrop, specs, uid);
     setOps(() => next);
+    setTrimPreview(false);
     // Select the crop op so its (adjustable) bounds are visible immediately — it's
     // a normal op the user can fine-tune or remove, not a baked-in change.
     const crop = next.find((o) => o.id === "geometry.crop");
     if (crop) setSelected(crop.uid);
-    const pctW = Math.round((trimCrop.x1 - trimCrop.x0) * 100);
-    const pctH = Math.round((trimCrop.y1 - trimCrop.y0) * 100);
     notifications.show({
-      message: `Trimmed to the well-covered area (keeps the central ${pctW}% × ${pctH}%)`
+      message: `Trimmed to the well-covered area (${trimKeptLabel(trimCrop)})`
         + " — adjust or remove the Crop op to undo",
       color: "violet",
     });
@@ -506,11 +508,21 @@ export function EditorView() {
             </Tooltip>
           ) : null}
           {trimCrop ? (
-            <Tooltip multiline w={250} withArrow
-              label="This is a mosaic with ragged, low-coverage edges. Crop to the largest well-covered rectangle in one click — it adds a Crop op you can fine-tune or remove.">
-              <Button variant="default" color="grape" leftSection={<IconCrop size={16} />}
-                onClick={applyTrim}>Trim border</Button>
-            </Tooltip>
+            trimPreview ? (
+              <Button.Group>
+                <Tooltip label="Add the Crop op for this rectangle (you can fine-tune or remove it after)">
+                  <Button variant="filled" color="grape" leftSection={<IconCrop size={16} />}
+                    onClick={applyTrim}>Apply crop</Button>
+                </Tooltip>
+                <Button variant="default" onClick={() => setTrimPreview(false)}>Cancel</Button>
+              </Button.Group>
+            ) : (
+              <Tooltip multiline w={250} withArrow
+                label="This is a mosaic with ragged, low-coverage edges. Preview the largest well-covered rectangle as a dashed outline, then apply it as a Crop op you can fine-tune or remove.">
+                <Button variant="default" color="grape" leftSection={<IconCrop size={16} />}
+                  onClick={() => setTrimPreview(true)}>Trim border</Button>
+              </Tooltip>
+            )
           ) : null}
           {/* Built-in presets carry a fixed op list with generic sizes: seed their
               data-driven params (sharpen radius, star size) from this target's own
@@ -534,7 +546,8 @@ export function EditorView() {
         {/* Preview + histogram */}
         <Grid.Col span={{ base: 12, md: 7 }}>
           <Paper withBorder p="xs">
-            <div style={{ position: "relative", background: "#000", borderRadius: 8, minHeight: 220 }}>
+            <div style={{ position: "relative", background: "#000", borderRadius: 8,
+              minHeight: 220, overflow: "hidden" }}>
               {hist.data?.empty ? (
                 <Alert color="yellow" icon={<IconAlertTriangle size={16} />} m="md">
                   This stack has no image data (all pixels are empty) — it likely failed to
@@ -565,6 +578,22 @@ export function EditorView() {
                   {showCoverage ? "Coverage map" : showMask ? "Star mask" : showBase ? "Original"
                     : `Without: ${specs[selForSolo!.id]?.label ?? selForSolo!.id}`}
                 </Text>
+              ) : null}
+              {/* Proposed "Trim border" crop, drawn as a dashed outline over the
+                  preview so the user sees exactly what would be kept before it's
+                  applied. Fractional bounds map straight to image-space percentages
+                  (the preview fills the container width, so this lines up). */}
+              {trimPreview && trimCrop && shownSrc ? (
+                <>
+                  <div aria-label="proposed crop" style={{ position: "absolute",
+                    ...trimRectStyle(trimCrop), boxSizing: "border-box",
+                    border: "2px dashed #f0e", pointerEvents: "none",
+                    outline: "9999px solid rgba(0,0,0,0.35)" }} />
+                  <Text size="xs" c="white" style={{ position: "absolute", left: 12, top: 10,
+                    background: "rgba(0,0,0,0.6)", padding: "2px 8px", borderRadius: 4 }}>
+                    Proposed crop — {trimKeptLabel(trimCrop)}
+                  </Text>
+                </>
               ) : null}
               {/* Coverage heatmap legend: the overlay is a viridis map (dark blue =
                   fewest frames → yellow = most), so a small gradient bar with a

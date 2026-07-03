@@ -51,16 +51,6 @@ problems. Dogfood it every big-picture run and fix root causes.
 - **Editor bug hunt (ongoing)** — there are undocumented issues. Each big-picture
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
-- **Preview the "Trim border" rectangle before committing** — the one-click "Trim
-  border" (v0.60.0) applies a `geometry.crop` immediately; a lower-commitment step
-  is to first draw the *proposed* crop as a dashed outline overlay on the preview
-  (the `trim-suggestion` fractional bounds map straight to preview coordinates) so
-  the user sees exactly what would be kept, with an "Apply" confirm. Reuses the
-  overlay-label infrastructure; purely additive/advisory (nothing changes until
-  Apply). Builds trust in the auto-crop and avoids an undo round-trip when the
-  suggestion isn't what they want. (S–M, editor/trust)
-
-
 ### Autonomy — "just works" (PRIORITY 2)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
@@ -163,6 +153,18 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Preview the "Trim border" rectangle before committing** — the one-click "Trim
+  border" (v0.60.0) applied a `geometry.crop` immediately, so a user who didn't like
+  the auto-crop had to undo. "Trim border" now first draws the *proposed* crop as a
+  dashed magenta outline over the preview (with the area outside dimmed and a
+  "Proposed crop — keeps the central W% × H%" caption), and the toolbar shows
+  **Apply crop** / **Cancel** — nothing changes until Apply, which commits the Crop
+  op and selects it (as before). Fractional `trim-suggestion` bounds map straight to
+  image-space percentages via a pure `trimRectStyle`/`trimKeptLabel` helper. Builds
+  trust in the auto-crop and avoids an undo round-trip. Frontend-only, additive.
+  Vitest: helpers (pct mapping + kept-label) and the Editor preview→Apply flow
+  (dashed caption shows, no Crop op until Apply). (v0.61.4, this run)
 
 - **Colour heatmap + legend for the coverage overlay** — the coverage-map overlay
   (v0.61.0) rendered grayscale, which read slowly and looked much like the star
