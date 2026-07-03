@@ -53,17 +53,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
 
 ### Editor — make it excellent (PRIORITY 1) — new ideas
-- **Retire the now-dead "export only" preview scaffolding** — since v0.57.0 *every*
-  editor op is `proxy_safe=True` (deconvolution renders on the proxy too), so the
-  OpList "export only" badge and the selected-op "The live preview doesn't show
-  this effect" note (Editor.tsx, gated on `!proxy_safe`) are unreachable — and
-  worse, *stale*: if a future op were ever marked `proxy_safe=False` the note would
-  now lie ("doesn't show this effect" when it does). Either delete the dead
-  badge/note (+ their Vitest cases for the removed behaviour) or, if we want to keep
-  a "heavy — preview may lag" affordance, repoint it at the new `heavy` hint (shipped
-  v0.57.17) with accurate copy ("this is slow, so the preview updates after a short
-  pause"). Simplifies the priority-1 editor and removes a future foot-gun.
-  (S, editor/friendliness)
 - **Show a per-op timing hint so "heavy" ops set expectations before you add them**
   — the `heavy` spec hint (v0.57.17) is currently only consumed by the preview
   debounce; surface it in the Add-operation menu and the op header too (a small
@@ -188,6 +177,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Retire the now-dead "export only" preview scaffolding → "slower preview"** —
+  since v0.57.0 *every* editor op is `proxy_safe=True`, so the OpList "export only"
+  badge and the selected-op "The live preview doesn't show this effect" note (both
+  gated on `!proxy_safe`) were unreachable and, worse, stale (they'd lie if an op
+  were ever re-marked non-proxy-safe). Repointed both at the live `heavy` spec hint
+  (v0.57.17): the row now shows a "slower preview" chip and the note explains the
+  preview updates *after a short pause* (matching the adaptive debounce) rather than
+  falsely claiming the effect never shows. Accurate copy, one fewer foot-gun on the
+  priority-1 editor. Vitest case repointed (badge + note); frontend-only, additive.
+  (v0.57.21, this run)
 
 - **NaN-preservation regression tests for the spatial detail ops** — the
   denoise / sharpen / deconvolve ops run on a NaN-filled copy (skimage can't

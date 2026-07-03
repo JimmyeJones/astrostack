@@ -44,13 +44,13 @@ export function OpList({ ops, specs, selected, onSelect, onMove, onToggle, onRem
                     <Text size="sm" fw={active ? 600 : 400} lineClamp={1}>
                       {spec?.label ?? op.id}
                     </Text>
-                    {spec && !spec.proxy_safe ? (
+                    {spec?.heavy ? (
                       <Tooltip
-                        label="This effect is applied on export only — the fast live preview approximates the image without it."
+                        label="This op is slow to render, so the live preview updates after a short pause when you change its settings — it's not stuck."
                         multiline w={240} withArrow>
                         <Badge size="xs" variant="light" color="grape"
                           style={{ flexShrink: 0, cursor: "help" }}>
-                          export only
+                          slower preview
                         </Badge>
                       </Tooltip>
                     ) : null}

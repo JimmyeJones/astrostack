@@ -23,7 +23,7 @@ const CURVES: EditOp = {
 };
 const DECONVOLVE: EditOp = {
   id: "detail.deconvolve", label: "Deconvolution", group: "detail", stage: "linear",
-  proxy_safe: false, is_stretch: false, help: "heavy",
+  proxy_safe: true, is_stretch: false, heavy: true, help: "heavy",
   params: [{ key: "psf_sigma", label: "PSF σ (px)", type: "float", group: "simple",
              default: 1.5, min: 0.5, max: 5, step: 0.1, options: null, help: null,
              depends_on: null }],
@@ -229,7 +229,7 @@ describe("EditorView", () => {
       expect(screen.queryByText("What Auto-process did")).not.toBeInTheDocument());
   });
 
-  it("flags a preview-only (export-only) op so the user knows why the preview doesn't change", async () => {
+  it("flags a heavy op so the user knows the preview updates after a pause", async () => {
     vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES, DECONVOLVE]);
     vi.spyOn(client.api, "getRecipe").mockResolvedValue({
       ops: [{ uid: "d1", id: "detail.deconvolve", enabled: true, params: { psf_sigma: 1.5 } }],
@@ -244,12 +244,12 @@ describe("EditorView", () => {
 
     renderEditor();
 
-    // The op row carries an "export only" badge...
-    expect(await screen.findByText("export only")).toBeInTheDocument();
-    // ...and selecting it explains why the live preview stays unchanged.
+    // The op row carries a "slower preview" badge...
+    expect(await screen.findByText("slower preview")).toBeInTheDocument();
+    // ...and selecting it explains why the live preview lags behind the sliders.
     fireEvent.click(screen.getByText("Deconvolution"));
     await waitFor(() =>
-      expect(screen.getByText(/live preview doesn't show this effect/i)).toBeInTheDocument());
+      expect(screen.getByText(/preview waits for a short/i)).toBeInTheDocument());
   });
 
   it("hides advanced ops behind 'More operations' in the Add menu", async () => {

@@ -656,13 +656,13 @@ export function EditorView() {
                 {specs[selectedOp.id].help ? (
                   <Text size="xs" c="dimmed" mb="xs">{specs[selectedOp.id].help}</Text>
                 ) : null}
-                {!specs[selectedOp.id].proxy_safe && selectedOp.enabled ? (
+                {specs[selectedOp.id].heavy && selectedOp.enabled ? (
                   <Alert color="grape" variant="light" py={6} mb="xs"
                     icon={<IconInfoCircle size={16} />}>
                     <Text size="xs">
-                      The live preview doesn't show this effect — it's heavy, so it only
-                      runs when you Export or "Download full-res PNG". Adjust its settings
-                      here, then export to see the result at full resolution.
+                      This op is slow to render, so the live preview waits for a short
+                      pause after you change a slider before updating — it's not stuck.
+                      The full-resolution result appears when you Export.
                     </Text>
                   </Alert>
                 ) : null}
