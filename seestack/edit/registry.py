@@ -43,6 +43,9 @@ class EditParam:
     max: float | None = None
     step: float | None = None
     options: list[str] | None = None
+    # Optional friendly display names for enum ``options`` (value -> label); the
+    # form falls back to the raw value for any option without a mapping.
+    option_labels: dict[str, str] | None = None
     help: str | None = None
     depends_on: str | None = None
 

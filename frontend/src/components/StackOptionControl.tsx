@@ -61,13 +61,17 @@ export function StackOptionControl({
           onChange={(e) => onChange(e.currentTarget.checked)}
         />
       );
-    case "enum":
+    case "enum": {
+      const data = (field.options ?? []).map((o) => ({
+        value: o, label: field.option_labels?.[o] ?? o,
+      }));
       return (
         <Select
-          label={label} data={field.options ?? []} value={(value as string) ?? null}
+          label={label} data={data} value={(value as string) ?? null}
           disabled={disabled} allowDeselect={false} onChange={(v) => onChange(v)}
         />
       );
+    }
     case "int":
     case "float":
       return (

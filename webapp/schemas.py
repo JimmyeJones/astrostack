@@ -199,8 +199,12 @@ class StackOptionField(BaseModel):
     max: float | None = None
     step: float | None = None
     options: list[str] | None = None
+    # Optional friendly display names for enum ``options`` (value -> label); the
+    # form falls back to the raw value for any option without a mapping.
+    option_labels: dict[str, str] | None = None
     help: str | None = None
-    # When set, the field is only relevant if another bool field is true.
+    # When set, the field is only relevant if another field is truthy, or — with
+    # the ``"key=value"`` form — equals a specific value.
     depends_on: str | None = None
 
 
@@ -239,7 +243,9 @@ _DESCRIPTORS: list[dict[str, Any]] = [
              "L/R/G/B/narrowband subs. Combine channels later in Channel combine."},
     # --- advanced ---
     {"key": "background_mode", "label": "Background mode", "type": "enum", "group": "advanced",
-     "options": ["per_channel", "luminance"], "depends_on": "background_flatten"},
+     "options": ["per_channel", "luminance"],
+     "option_labels": {"per_channel": "Per channel", "luminance": "Luminance"},
+     "depends_on": "background_flatten"},
     {"key": "background_box_size", "label": "Background box size", "type": "int",
      "group": "advanced", "min": 32, "max": 512, "step": 16, "depends_on": "background_flatten"},
     {"key": "suppress_hot_pixels", "label": "Hot-pixel suppression", "type": "bool",
@@ -252,13 +258,16 @@ _DESCRIPTORS: list[dict[str, Any]] = [
      "group": "advanced", "help": "Post-stack gradient removal with object masking."},
     {"key": "final_gradient_mode", "label": "Final gradient mode", "type": "enum",
      "group": "advanced", "options": ["per_channel", "luminance"],
+     "option_labels": {"per_channel": "Per channel", "luminance": "Luminance"},
      "depends_on": "final_gradient_removal"},
     {"key": "final_gradient_box_size", "label": "Final gradient box size", "type": "int",
      "group": "advanced", "min": 64, "max": 1024, "step": 32,
      "depends_on": "final_gradient_removal"},
     {"key": "color_calibration", "label": "Color calibration", "type": "bool", "group": "advanced"},
     {"key": "color_calibration_mode", "label": "Color cal. mode", "type": "enum",
-     "group": "advanced", "options": ["gray_star", "gaia"], "depends_on": "color_calibration"},
+     "group": "advanced", "options": ["gray_star", "gaia"],
+     "option_labels": {"gray_star": "Gray-star (offline)", "gaia": "Gaia catalogue"},
+     "depends_on": "color_calibration"},
     {"key": "mosaic_canvas", "label": "Canvas mode", "type": "enum", "group": "advanced",
      "options": ["auto", "union", "reference"]},
     {"key": "tiff_mode", "label": "TIFF mode", "type": "enum", "group": "advanced",
@@ -350,7 +359,8 @@ def editor_ops_schema() -> list[EditOpOut]:
             StackOptionField(
                 key=p.key, label=p.label, type=p.type, group=p.group,
                 default=p.default, min=p.min, max=p.max, step=p.step,
-                options=p.options, help=p.help, depends_on=p.depends_on,
+                options=p.options, option_labels=p.option_labels,
+                help=p.help, depends_on=p.depends_on,
             )
             for p in spec.params
         ]

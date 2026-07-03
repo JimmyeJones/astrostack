@@ -166,6 +166,19 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Friendly names for enum dropdowns (editor + Stack/Settings forms)** — enum
+  params rendered their raw internal values ("asinh", "stf", "gray_star", "gaia",
+  "per_channel", "luminance", "average", "maximum") in the Select dropdowns, jargon
+  a beginner can't decode. Added an optional additive `option_labels` (value →
+  display name) to the shared param descriptor (`EditParam` + `StackOptionField`),
+  threaded through the editor-ops and stack-options schema endpoints, and rendered
+  by the shared `StackOptionControl` (falls back to the raw value for any option
+  without a mapping). Populated it for the Stretch curve (Asinh (manual) / Auto
+  (STF)), SCNR protect, editor + stack colour-calibration mode, and background /
+  final-gradient mode. Upgrade-safe: new optional field defaults null; recipes and
+  configs store values, not labels, so nothing changes on disk. Vitest-covered
+  (friendly label shown + raw-value fallback). (v0.56.12, this run)
+
 - **Grey out stretch params that don't apply to the chosen curve** — the Stretch op
   exposes both the Asinh knobs (Strength, Black point) and the STF knob (STF sky
   level), but only one set does anything for a given `mode`, so a beginner drags a
