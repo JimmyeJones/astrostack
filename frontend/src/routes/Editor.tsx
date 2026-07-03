@@ -32,6 +32,7 @@ import { opErrorsMessage } from "../components/editor/opErrors";
 import { clippingCaption } from "../components/editor/clipping";
 import { previewDebounceMs } from "../components/editor/previewDebounce";
 import { starMaskSizePx } from "../components/editor/starMaskSize";
+import { levelsAtIdentity, resetLevelsPoints } from "../components/editor/levelsReset";
 import { coalesceFwhm, measuredContextText } from "../components/editor/measuredContext";
 import { OpParamPanel } from "../components/editor/OpParamPanel";
 import { PresetMenu } from "../components/editor/PresetMenu";
@@ -979,6 +980,22 @@ export function EditorView() {
                             ...(levels.data!.gamma != null ? { gamma: levels.data!.gamma } : {}),
                           })}>
                           Auto levels ({levels.data.black}–{levels.data.white})
+                        </Button>
+                      </Tooltip>
+                    ) : null}
+                    {/* Escape hatch symmetric with "Auto levels": one click sets
+                        the black/white/gamma points back to their neutral identity
+                        so an over-dragged Levels op is easy to undo. Dimmed when
+                        already neutral. */}
+                    {selectedOp.id === "tone.levels" ? (
+                      <Tooltip
+                        label="Reset the black, white and midtone points to neutral (no tonal change)"
+                        multiline w={220} withArrow>
+                        <Button size="compact-xs" variant="default"
+                          disabled={levelsAtIdentity(selectedOp.params)}
+                          onClick={() => setParams(selectedOp.uid,
+                            resetLevelsPoints(selectedOp.params))}>
+                          Reset points
                         </Button>
                       </Tooltip>
                     ) : null}

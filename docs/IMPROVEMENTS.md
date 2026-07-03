@@ -438,14 +438,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   do next; audit every screen for jargon and add plain-language "why" tooltips;
   reduce visible option clutter (progressive disclosure). (M, friendliness)
 - Better long-job feedback and clearer error messages. (S, friendliness)
-- **A "Reset all points" / whole-op Auto for the Levels op header** — the Levels
-  panel now has a header "Auto levels" (v0.64.0) that *sets* data-driven points, but
-  no matching one-click to *undo* a bad manual drag back to the 0/1/1.0 identity
-  (only the per-param reset icons and the degenerate-range fix exist). Add a small
-  "Reset points" header action next to "Auto levels" that restores black=0, white=1,
-  gamma=1 in one click, so a beginner who over-dragged has a clean escape hatch
-  symmetric with Auto. Pure, reuses `setParams`; frontend-only, additive. (S,
-  editor/friendliness)
 - **Surface the measured midtone target on the gamma suggestion** — the new
   data-driven gamma button (v0.66.0) reads "From your image (midtones 1.6)"; like the
   sharpen/denoise buttons that name *why* (FWHM, noise σ), it could name the goal it
@@ -546,6 +538,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **One-click "Reset points" on the Levels op header** — the Levels header had
+  "Auto levels" to *set* data-driven points but no matching one-click to *undo* a
+  bad manual drag back to the neutral identity (only per-param reset icons). Added
+  a "Reset points" header action (next to "Auto levels") that restores black=0,
+  white=1, gamma=1 in one click, dimmed when already neutral — a clean escape hatch
+  symmetric with Auto for a beginner who over-dragged. Pure `levelsReset` helpers
+  (`levelsAtIdentity`/`resetLevelsPoints`) drive it; frontend-only, additive.
+  Vitest: helper (identity/moved/preserve-other-keys/no-mutate) + an Editor test
+  that clicking Reset returns an over-dragged op to neutral (button dims).
+  (v0.69.4, this run)
 
 - **Data-driven midtone (gamma) point for the Levels op** — the Levels suggestion
   (v0.62.0) + "Auto levels" (v0.64.0) set the black/white points from the histogram

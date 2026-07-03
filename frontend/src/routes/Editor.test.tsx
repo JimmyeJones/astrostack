@@ -649,6 +649,35 @@ describe("EditorView", () => {
     expect(screen.getByLabelText("Set Midtones (gamma) from your data")).toHaveTextContent("✓");
   });
 
+  it("resets an over-dragged Levels op to neutral via the header 'Reset points'", async () => {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, LEVELS]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [
+        { uid: "lv1", id: "tone.levels", enabled: true,
+          params: { black: 0.3, white: 0.6, gamma: 2.0 } },
+      ],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    vi.spyOn(client.api, "levelsSuggestion").mockResolvedValue({ black: 0.12, white: 0.85 });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    fireEvent.click(await screen.findByText("Levels"));
+    // With the points moved off identity the reset button is offered (enabled).
+    const reset = await screen.findByRole("button", { name: "Reset points" });
+    await waitFor(() => expect(reset).not.toBeDisabled());
+    fireEvent.click(reset);
+    // One click returns to neutral, so the button dims (nothing left to reset).
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Reset points" })).toBeDisabled());
+  });
+
   it("shows black/white guide labels on the histogram when the Levels op is selected", async () => {
     vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, LEVELS]);
     vi.spyOn(client.api, "getRecipe").mockResolvedValue({
