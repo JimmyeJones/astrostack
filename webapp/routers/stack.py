@@ -110,6 +110,9 @@ def trigger_stack(safe: str, body: dict[str, Any], request: Request) -> dict[str
             settings.resolved_library_root, dark_id, flat_id, flat_dark_id, bias_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400,
+                            detail=f"invalid calibration master id: {exc}") from exc
     if dark_path:
         body["dark_path"] = dark_path
     if flat_path:
@@ -312,8 +315,12 @@ async def save_stack_preview(
     if not run.preview_path:
         raise HTTPException(status_code=400, detail="Run has no preview path to overwrite")
 
-    stretch = _clamp(float(body.get("stretch", _STRETCH_DEFAULT)), _STRETCH_MIN, _STRETCH_MAX)
-    black = _clamp(float(body.get("black", _BLACK_DEFAULT)), _BLACK_MIN, _BLACK_MAX)
+    try:
+        stretch = _clamp(float(body.get("stretch", _STRETCH_DEFAULT)), _STRETCH_MIN, _STRETCH_MAX)
+        black = _clamp(float(body.get("black", _BLACK_DEFAULT)), _BLACK_MIN, _BLACK_MAX)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400,
+                            detail=f"stretch/black must be numbers: {exc}") from exc
 
     from seestack.render.thumbnail import render_stack_png
     png = await run_in_threadpool(
