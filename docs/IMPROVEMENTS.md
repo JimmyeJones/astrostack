@@ -73,6 +73,19 @@ _(none — claim an item here with your branch name)_
 ### Features that serve real workflows
 - Annotated sky overlay (label detected objects / show solved field). (M)
 ### UX & polish
+- **Recommend a master bias in the calibration suggester** — `recommend_masters`
+  now covers dark/flat/flat-dark but not the new bias-for-lights pick. A bias is
+  exposure-independent (it's the zero-second read pedestal), so match it on
+  gain/temp like flats and badge it "★ recommended" + wire it into the Stack
+  form's "Use recommended" one-click, so the bias+flat (no-dark) workflow is as
+  guided as the dark+flat one. Reuses the v0.53.0 bias plumbing. (S,
+  approachability)
+- **Show the applied calibration inline on History/Gallery cards** — v0.53.1
+  records `CALSTAT` ("dark+flat", "bias+flat", …) in the FITS and surfaces it in
+  the Info panel, but a user must open Info to see it. A tiny "dark+flat" chip on
+  the card (read from the run's provenance, or a new additive column to avoid a
+  per-card FITS read) would show at a glance whether a stack was calibrated —
+  useful when comparing a calibrated vs uncalibrated run. (S, approachability)
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
 
@@ -122,6 +135,15 @@ _Newest first. One line each: what + commit/PR._
   when up. Shown only with ≥2 measured runs. Pure `noiseTrendSeries` /
   `sparklinePoints` helpers, tested; reuses the recorded `noise_sigma`;
   within-target, frontend-only. (v0.52.1, this run)
+
+- **Record which calibration masters were applied in the FITS header** — a
+  calibrated stack didn't self-document its calibration (only the log said so).
+  `run_stack` now stamps a `CALSTAT` provenance card recording the masters
+  actually applied to the lights ("dark+flat", "bias+flat", "flat", …), threaded
+  from `CalibrationMasters.describe()` into `_build_output_header_meta`, and the
+  run Info panel surfaces it (added to `_INFO_CARDS`). Omitted when nothing was
+  applied. Additive/upgrade-safe; extends the existing STACKER/COLORTYP
+  provenance pattern. (v0.53.1, this run)
 
 - **Bias-only calibration for lights when no dark is chosen** (bias slice (a))
   — master bias frames could be built but were never applied to lights.

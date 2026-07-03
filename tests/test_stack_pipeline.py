@@ -160,6 +160,36 @@ def test_stack_writes_provenance_header(tmp_path):
     assert float(hdr["BKGSIGMA"]) >= 0.0
 
 
+def test_stack_records_calibration_provenance(tmp_path):
+    """A calibrated stack self-documents which masters were applied via CALSTAT.
+    Bias-only (no dark) → (light − bias) / flat, recorded as 'bias+flat'."""
+    from astropy.io import fits
+
+    from seestack.calibrate.masters import MasterMeta, save_master
+
+    # Masters must match the raw (un-debayered) frame dimensions: 480×320.
+    bias = np.full((320, 480), 5.0, dtype=np.float32)
+    flat = np.full((320, 480), 100.0, dtype=np.float32)  # uniform → flat_norm == 1
+    save_master(tmp_path / "bias.fits", bias, MasterMeta("bias", 0, 480, 320, "median"))
+    save_master(tmp_path / "flat.fits", flat, MasterMeta("flat", 5, 480, 320, "median"))
+
+    proj = _build_project(tmp_path, n=4)
+    try:
+        result = run_stack(
+            proj,
+            StackOptions(
+                sigma_clip=False, max_workers=2, output_name="calib",
+                bias_path=str(tmp_path / "bias.fits"),
+                flat_path=str(tmp_path / "flat.fits"),
+            ),
+        )
+    finally:
+        proj.close()
+
+    with fits.open(result.fits_path) as hdul:
+        assert hdul[0].header["CALSTAT"] == "bias+flat"
+
+
 def test_stack_sigma_clipped(tmp_path):
     proj = _build_project(tmp_path, n=6, with_outlier=True)
     try:
