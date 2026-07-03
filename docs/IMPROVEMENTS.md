@@ -156,6 +156,15 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Show the k-count in the rejection badge for a top/bottom-k trim** — follow-on to
+  v0.58.0: the `RejectionBadge` on History/Gallery/Compare cards derives the combine
+  method from a run's stored options, so a stack combined with `min_max_reject_count>1`
+  now reads "min-max ×3" (with a tooltip explaining it dropped the 3 highest and
+  lowest per pixel) instead of a bare "min-max", while the default single drop and
+  old runs (no count stored) still read "min-max". Reuses the already-serialised
+  option; Vitest-covered (×3 label + default/explicit-1 stays plain); frontend-only,
+  additive. (v0.58.1, this run)
+
 - **Top/bottom-k trimmed-mean reject** — generalised `MinMaxRejectAccumulator` to
   drop the *k* smallest and *k* largest per pixel via an opt-in
   `StackOptions.min_max_reject_count` (default 1 = exactly today's single min/max

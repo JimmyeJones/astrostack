@@ -34,10 +34,15 @@ export function rejectionBadge(options?: Record<string, unknown> | null): Reject
     };
   }
   if (options.min_max_reject) {
+    // The default single drop shows as "min-max"; a top/bottom-k trim (k>1)
+    // shows the count, e.g. "min-max ×3" for dropping the 3 highest and lowest.
+    const k = typeof options.min_max_reject_count === "number"
+      ? Math.max(1, Math.round(options.min_max_reject_count)) : 1;
     return {
-      label: "min-max",
-      title:
-        "Combined by dropping the single highest and lowest value at each pixel before averaging — removes a lone satellite / plane trail on small stacks where κ-σ can't.",
+      label: k > 1 ? `min-max ×${k}` : "min-max",
+      title: k > 1
+        ? `Combined by dropping the ${k} highest and ${k} lowest values at each pixel before averaging — removes several satellite / plane trails crossing one pixel across a session.`
+        : "Combined by dropping the single highest and lowest value at each pixel before averaging — removes a lone satellite / plane trail on small stacks where κ-σ can't.",
     };
   }
   if (options.sigma_clip) {
