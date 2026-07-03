@@ -11,10 +11,13 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   moving it to **In progress** with your branch name, in the same commit that
   starts it. Move it to **Shipped** (with the commit/PR) when done, or back to
   **Ideas** if you abandon it.
-- **Replenish the backlog every run.** Using AGENTS.md §4 (the ideation process),
-  add at least one or two well-reasoned new ideas per run so this list never runs
-  dry. Keep entries to a one-liner with a short "why", a rough size (S/M/L), and
-  the pillar it serves (scale / correctness / approachability).
+- **Replenish the backlog every run.** Using AGENTS.md §4, add one or two
+  well-reasoned ideas per run — but only ones that serve the **§1 priorities**
+  (1 editor, 2 autonomy, 3 friendliness, 4 image quality). Tag each with a size
+  (S/M/L) and which priority it serves. Do **not** log niche mono/LRGB/
+  channel-combine/narrowband ideas.
+- **Priority order (from AGENTS.md §1) governs this list.** Work the top sections
+  first. The editor is priority 1.
 
 ---
 
@@ -24,9 +27,41 @@ _(none — claim an item here with your branch name)_
 
 ---
 
-## Ideas (pick roughly top-down; use the value ÷ effort×risk rule)
+## Ideas (priority order — work top sections first; AGENTS.md §1)
 
-### Correctness & robustness (highest priority)
+### ⭐ Editor — make it excellent (PRIORITY 1)
+The editor is where a good stack becomes a good *picture*, and it has real
+problems. Dogfood it every big-picture run and fix root causes.
+- **Live preview** — it's slow / doesn't update well / doesn't match the exported
+  full-res result. Audit the proxy→preview path vs the full-res export path; make
+  the preview a fast, faithful representation of the final image, and make it
+  obvious when an op is only preview-approximate. (M, editor)
+- **Confusing / clunky controls** — too many ops with terse params and no obvious
+  starting point. Add plain-language help, a simple/guided default layout, curated
+  presets, and progressive disclosure of advanced ops so a beginner gets a good
+  result without understanding every knob. (M, editor)
+- **Weak default result** — the auto/default processing should produce a genuinely
+  good image out of the box for a typical Seestar OSC stack (good stretch, colour,
+  gentle denoise/sharpen). Improve the auto recipe so "Auto" is a great one-click
+  start. (M, editor)
+- **Editor bug hunt (ongoing)** — there are undocumented issues. Each big-picture
+  run, use the editor end-to-end and fix what's broken/ugly: op failures, export
+  mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
+
+### Autonomy — "just works" (PRIORITY 2)
+- **One-click "process this target"** — after ingest, reach a good stack *and* a
+  good auto-edited preview with zero manual steps: QC → solve → auto-grade →
+  stack → auto-edit, well-defaulted and safe. (M, autonomy)
+- Auto-suggest stack settings from the data (frame count, FWHM spread, streaks)
+  so the user rarely needs to touch the Stack form. (S–M, autonomy)
+
+### Friendliness (PRIORITY 3)
+- Guided "getting started" / empty states that tell a first-timer exactly what to
+  do next; audit every screen for jargon and add plain-language "why" tooltips;
+  reduce visible option clutter (progressive disclosure). (M, friendliness)
+- Better long-job feedback and clearer error messages. (S, friendliness)
+
+### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 - **Photometric (multiplicative) frame normalization before combine** — frames
   are additively sky-zeroed per frame, but nothing gain-matches them: haze/
   airmass scale the *signal* (stars + nebula) frame-to-frame by tens of
@@ -56,8 +91,6 @@ _(none — claim an item here with your branch name)_
   calibration binding, per-night QC roll-ups. Coverage-levelling's docstring
   already names "between sessions" as motivation but keys on coverage count.
   Large but high value for the multi-night Seestar workflow. (L, correctness)
-- Channel combine: reproject stacks that don't share a canvas (via WCS) instead
-  of erroring, so filters shot in separate sessions can be combined. (M–L)
 
 ### Features that serve real workflows
 - Annotated sky overlay (label detected objects / show solved field). (M)
@@ -93,6 +126,15 @@ _(none — claim an item here with your branch name)_
   suite re-verification) — needs a deliberate dedicated pass per
   `AGENTS.md`'s major-dependency-bump sign-off rule, not a blind
   `--force`. (M)
+
+---
+
+## Deprioritised — do NOT invest further (niche for an OSC Seestar owner)
+Leave what exists working; don't extend or add to it. Only touch these to fix an
+outright bug in existing behaviour, never to add capability.
+- Mono / LRGB / **channel combine** (incl. cross-canvas reprojection), narrowband,
+  and other filtered/pro-astro features. The owner shoots OSC and gets no value
+  from these; they've already absorbed too much effort.
 
 ---
 
