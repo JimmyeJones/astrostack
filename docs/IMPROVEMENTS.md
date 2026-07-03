@@ -53,16 +53,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
 
 ### Editor — make it excellent (PRIORITY 1) — new ideas
-- **Show Auto's chosen data-driven values in the "What Auto-process did" note** —
-  the dismissible note lists the ops Auto ran in plain language, but not the
-  *values* it picked from your data (denoise strength, sharpen radius, saturation,
-  STF sky level), which is exactly where the adaptivity lives. Appending them
-  ("eased saturation to 1.1 for a noisy stack; sharpened at radius 1.4 px sized to
-  your 3.2 px stars") would make the one-click result's data-driven reasoning
-  visible and build trust — turning "it did something" into "it did *this, because
-  of my data*". The auto endpoint already computes these; surface them on the note
-  via a pure formatter. Frontend + a couple of response fields, additive.
-  (S, editor/friendliness)
+_(none — claim/add here)_
 
 ### Autonomy — "just works" (PRIORITY 2)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
@@ -180,6 +171,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Show Auto's chosen data-driven values in the "What Auto-process did" note** —
+  the note listed *which* ops Auto ran but not the *values* it picked from your
+  data, which is exactly where Auto's adaptivity lives. A pure `autoValueSentence`
+  helper reads the built recipe's op params directly (no new API) and adds a second
+  line — "Tuned to your data: sky level 0.2, saturation 1.1×, sharpen radius 1.4 px"
+  — for the STF sky level, denoise strength, saturation and sharpen radius, skipping
+  any op whose value isn't present so it degrades gracefully. Turns "it did
+  something" into "it did *this, because of my data*". Vitest-covered (7 helper
+  cases + the Editor note-wiring test asserts the values line); frontend-only,
+  additive. (v0.57.18, this run)
 
 - **Adaptive live-preview debounce for heavy editor ops** — dragging a slider
   while an expensive op (deconvolution, wavelet denoise) is in the pipeline still

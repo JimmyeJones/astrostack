@@ -201,7 +201,8 @@ describe("EditorView", () => {
     vi.spyOn(client.api, "getHistogram").mockResolvedValue(
       { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
     const autoProcess = vi.spyOn(client.api, "autoProcess").mockResolvedValue({
-      ops: [{ uid: "a1", id: "tone.stretch", enabled: true, params: {} }], base_run_id: 3,
+      ops: [{ uid: "a1", id: "tone.stretch", enabled: true,
+              params: { mode: "stf", target_bg: 0.2 } }], base_run_id: 3,
     });
     vi.stubGlobal("fetch", vi.fn(async () => ({
       ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
@@ -218,6 +219,8 @@ describe("EditorView", () => {
     // ...and a plain-language note explains what Auto did.
     expect(await screen.findByText("What Auto-process did")).toBeInTheDocument();
     expect(screen.getByText("Applied a natural stretch.")).toBeInTheDocument();
+    // ...and names the data-driven value it chose (the STF sky level).
+    expect(screen.getByText("Tuned to your data: sky level 0.2.")).toBeInTheDocument();
 
     // Editing the pipeline (removing the op) drops the note so it can't
     // misdescribe the current recipe.
