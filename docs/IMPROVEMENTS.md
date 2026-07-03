@@ -128,19 +128,15 @@ sitting; move an entry to **In progress**/**Shipped** as usual when you take it.
 
 ### Editor — frontend (PRIORITY 1)
 
-- **BUG: Save wipes the undo/redo history and can silently revert edits made
-  while the save is in flight** — the recipe-seeding effect
-  (`frontend/src/routes/Editor.tsx:153-155`) runs on every change of
-  `saved.data`, and `saveRecipe.onSuccess` invalidates `["recipe", safe, rid]`
-  (`Editor.tsx:350-353`); the PUT stamps a fresh `updated_utc`
-  (`webapp/routers/editor.py:477`) so the refetch never structurally matches →
-  `resetOps` clears `past`/`future` (`useUndoable.ts` reset) and replaces `ops`
-  with the server snapshot. Steps: edit → Save → Ctrl+Z does nothing; or Save
-  then keep dragging a slider — when the refetch lands the drag is reverted.
-  **Fix:** seed from `saved.data` only once (a `useRef` seeded flag, or only
-  when the working ops are still empty), and don't reset state on save success.
-  Severity: broken-UX (edit loss in the race; undo loss always). Confidence:
-  confirmed (traced).
+- **✅ FIXED (v0.69.2): Save wipes the undo/redo history and can silently revert edits made
+  while the save is in flight** — the recipe-seeding effect ran on every change
+  of `saved.data`, and `saveRecipe.onSuccess` invalidates `["recipe", safe, rid]`,
+  so the refetch re-ran `resetOps` (clearing `past`/`future` and replacing `ops`
+  with the server snapshot). Fixed by gating the seed on a per-run `seeded` flag
+  so the recipe seeds exactly once and refetches leave the working ops (and undo
+  history) untouched. Regression test: a recipe refetch after mount does not
+  re-seed. Severity: broken-UX (edit loss in the race; undo loss always).
+  Confidence: confirmed (traced).
 
 - **BUG: overlay fetch failures show the wrong image under the wrong label,
   with no error** — `shownSrc` falls back to the main edited preview whenever an
@@ -241,14 +237,14 @@ sitting; move an entry to **In progress**/**Shipped** as usual when you take it.
   Severity: cosmetic (misleading in the letterboxed case). Confidence: confirmed
   (traced CSS).
 
-- **BUG (cosmetic): the first editor render is the empty recipe** — on load
-  `dKey` starts as `"[]"` and the preview query is enabled as soon as the
-  schema/saved queries settle (`Editor.tsx:179-205`), so the first fetch renders
-  the un-edited image and is shown until the seeded recipe's debounced render
-  replaces it — a flash of the wrong image plus one wasted proxy render per
-  editor open (for any saved recipe). **Fix:** hold `enabled` until the ops have
-  been seeded from `saved.data` (seeded-flag state). Severity: cosmetic/perf.
-  Confidence: confirmed (traced).
+- **✅ FIXED (v0.69.2): the first editor render is the empty recipe** — on load
+  `dKey` starts as `"[]"` and the preview/histogram queries were enabled as soon
+  as the schema/saved queries settled, so the first fetch rendered the un-edited
+  image (a flash of the wrong image + one wasted proxy render per editor open for
+  any saved recipe). Fixed together with the Save-history bug: the preview and
+  histogram queries now also gate on the per-run `seeded` flag, so nothing fetches
+  until the saved recipe is seeded. Severity: cosmetic/perf. Confidence: confirmed
+  (traced).
 
 - **BUG (cosmetic/a11y): overlay zoom mislabels + keyboard access gaps** — the
   lightbox titles whatever is shown as "edited" unless Compare is on, so zooming

@@ -76,17 +76,20 @@ const CROP: EditOp = {
 
 function renderEditor() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <MantineProvider>
-      <QueryClientProvider client={qc}>
-        <MemoryRouter initialEntries={["/targets/M_42/edit/3"]}>
-          <Routes>
-            <Route path="/targets/:safe/edit/:runId" element={<EditorView />} />
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>
-    </MantineProvider>,
-  );
+  return {
+    qc,
+    ...render(
+      <MantineProvider>
+        <QueryClientProvider client={qc}>
+          <MemoryRouter initialEntries={["/targets/M_42/edit/3"]}>
+            <Routes>
+              <Route path="/targets/:safe/edit/:runId" element={<EditorView />} />
+            </Routes>
+          </MemoryRouter>
+        </QueryClientProvider>
+      </MantineProvider>,
+    ),
+  };
 }
 
 afterEach(() => vi.restoreAllMocks());
@@ -126,6 +129,35 @@ describe("EditorView", () => {
     expect(screen.getByText("Add operation")).toBeInTheDocument();
     expect(screen.getByText("Export as new image")).toBeInTheDocument();
     expect(screen.getByText("Download full-res PNG")).toBeInTheDocument();
+  });
+
+  it("seeds the recipe only once — a refetch (e.g. after Save) does not re-seed and wipe edits", async () => {
+    mockEditorQueries();
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    const getRecipe = client.api.getRecipe as unknown as ReturnType<typeof vi.fn>;
+    const { qc } = renderEditor();
+    expect(await screen.findByText("Stretch")).toBeInTheDocument();
+    const callsAfterMount = getRecipe.mock.calls.length;
+
+    // Simulate the refetch a save triggers: the recipe query now resolves a
+    // structurally-different snapshot. Before the fix, the seeding effect re-ran
+    // and replaced the working ops (clobbering edits / undo history); after the
+    // fix, the already-seeded pipeline is left untouched.
+    getRecipe.mockResolvedValue({
+      ops: [{ uid: "y9", id: "tone.curves", enabled: true,
+              params: { points: [[0, 0], [1, 1]] } }],
+      base_run_id: 3,
+    });
+    await qc.invalidateQueries({ queryKey: ["recipe", "M_42", 3] });
+    await waitFor(() =>
+      expect(getRecipe.mock.calls.length).toBeGreaterThan(callsAfterMount));
+
+    // The originally-seeded Stretch op stays; the refetched Curves op is ignored.
+    expect(screen.getByText("Stretch")).toBeInTheDocument();
+    expect(screen.queryByText("Curves")).not.toBeInTheDocument();
   });
 
   it("shows render progress while the full-res PNG job is polling", async () => {

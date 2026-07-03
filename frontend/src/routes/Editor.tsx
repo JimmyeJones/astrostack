@@ -149,10 +149,20 @@ export function EditorView() {
   const [autoValues, setAutoValues] = useState<string | null>(null);
   const [autoKey, setAutoKey] = useState<string | null>(null);
 
-  // Seed ops from the saved recipe once (clears undo history).
+  // Seed ops from the saved recipe exactly once per run. Re-seeding on every
+  // `saved.data` change would wipe undo/redo history and clobber edits made while
+  // a save was in flight (saving invalidates the recipe query, which refetches a
+  // structurally-different snapshot), so we gate on a per-run `seeded` flag. The
+  // gate also holds the live preview until the recipe is loaded, so the editor
+  // never flashes the un-edited image (and wastes a proxy render) on open.
+  const [seeded, setSeeded] = useState(false);
+  useEffect(() => { setSeeded(false); }, [rid]);
   useEffect(() => {
-    if (saved.data) resetOps(saved.data.ops ?? []);
-  }, [saved.data, resetOps]);
+    if (saved.data && !seeded) {
+      resetOps(saved.data.ops ?? []);
+      setSeeded(true);
+    }
+  }, [saved.data, seeded, resetOps]);
 
   const specs = useMemo(() => {
     const m: Record<string, EditOp> = {};
@@ -188,7 +198,7 @@ export function EditorView() {
   // render shows a message instead of a silently blank panel) and can revoke URLs.
   const preview = useQuery({
     queryKey: ["edit-preview", safe, rid, dKey, bust],
-    enabled: !!opsSchema.data && !saved.isLoading,
+    enabled: !!opsSchema.data && !saved.isLoading && seeded,
     // Keep the previous render visible while the next one loads (rather than
     // flashing to a black Loader on every slider drag); the "Updating…" badge
     // signals the shown image is momentarily stale.
@@ -211,7 +221,7 @@ export function EditorView() {
   const hist = useQuery({
     queryKey: ["edit-hist", safe, rid, dKey],
     queryFn: ({ signal }) => api.getHistogram(safe, rid, dRecipe, signal),
-    enabled: !!opsSchema.data,
+    enabled: !!opsSchema.data && seeded,
   });
   // Data-driven black/white points for the selected Levels op, measured from the
   // display-space image *entering* that op (all prior ops applied), so a beginner
