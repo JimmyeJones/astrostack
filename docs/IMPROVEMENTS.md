@@ -54,6 +54,16 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 
 ### Autonomy — "just works" (PRIORITY 2)
+- **Auto-add Coverage leveling to the Auto recipe for mosaics** — now that the
+  "Coverage leveling" op actually works (v0.58.6), the one-click Auto-process could
+  detect a mosaic — the run row already carries `coverage_min`/`coverage_max`, and a
+  mosaic has `coverage_max > coverage_min` (uneven panel overlap) — and insert
+  `background.level_coverage` before the stretch, so a Seestar mosaic gets flat,
+  step-free panels without the user ever discovering the op exists. Skip it entirely
+  on a single-field stack (uniform coverage), where it's a no-op. Thread the run's
+  coverage span into `auto_recipe` (mirroring how `median_fwhm` is already threaded
+  for the sharpen radius). Auto is an explicit button so there's no default flip.
+  (M, autonomy/editor)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
   different (per-channel vs luminance gradient, star reduction, saturation). The
@@ -71,6 +81,16 @@ problems. Dogfood it every big-picture run and fix root causes.
   so the user rarely needs to touch the Stack form. (S–M, autonomy)
 
 ### Friendliness (PRIORITY 3)
+- **Tell the user when "Coverage leveling" will do nothing** — the op is only
+  meaningful on a multi-coverage mosaic; on a single-field stack (uniform coverage)
+  it's a deliberate no-op (v0.58.6 wired it, and it returns the input unchanged when
+  coverage is absent/uniform). A beginner who adds it to a single-field edit gets no
+  effect and no explanation. Surface the run's coverage span (the editor already has
+  the run; `coverage_min`/`coverage_max` are on the record) and show a subtle
+  "no effect on a single-field image — this equalises mosaic panels" note (or a
+  disabled/greyed op row) when coverage is uniform, so the control explains its own
+  applicability instead of silently doing nothing. Pairs with the auto-add-for-mosaics
+  autonomy idea above. (S, friendliness/editor)
 - Guided "getting started" / empty states that tell a first-timer exactly what to
   do next; audit every screen for jargon and add plain-language "why" tooltips;
   reduce visible option clutter (progressive disclosure). (M, friendliness)
