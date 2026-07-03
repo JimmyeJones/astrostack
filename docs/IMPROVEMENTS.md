@@ -101,6 +101,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Plain-language "Combined:" line in the History Info panel** — the Info panel
+  showed the raw `STACKER` FITS card ("min-max-reject", "sigma-clip", "mean",
+  "drizzle") — engine jargon a beginner won't recognise. It now also renders a
+  friendly "Combined: Min/max (extremes) rejection — drops the highest and lowest
+  value at each pixel" line (alongside the existing Integration / Quality-weighted
+  / Processing lines), derived from the STACKER card via a pure, case-insensitive
+  `combineMethodLabel` helper (returns null for channel-combine / unknown methods,
+  so the line is simply omitted). Unit-tested + a render assertion. Frontend-only,
+  additive. (v0.56.4, this run)
+
 - **Combine-method badge in the Compare view** — the `RejectionBadge` (v0.56.1)
   now also appears on each panel of the A/B Compare view, so when a user compares
   two stacks of one target to answer "did changing the rejection method help?"

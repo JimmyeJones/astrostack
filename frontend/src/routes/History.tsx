@@ -82,6 +82,26 @@ export function noiseTrendSeries(runs: StackRun[]): number[] {
   return out;
 }
 
+// Translate the raw STACKER FITS card ("mean" / "sigma-clip" / "min-max-reject"
+// / "drizzle") into a plain-language "how it was combined" line for the Info
+// panel — the raw value is engine jargon a beginner won't recognise. Returns
+// null when the method is unknown / absent (e.g. channel-combine runs, which
+// use STACKMTD instead), so the line is simply omitted.
+export function combineMethodLabel(
+  cards: { key: string; value: string | number | boolean }[],
+): string | null {
+  const card = cards.find((c) => c.key === "STACKER");
+  if (!card) return null;
+  const method = String(card.value).trim().toLowerCase();
+  const labels: Record<string, string> = {
+    "mean": "Plain mean (no per-pixel outlier rejection)",
+    "sigma-clip": "κ-σ (sigma-clip) outlier rejection",
+    "min-max-reject": "Min/max (extremes) rejection — drops the highest and lowest value at each pixel",
+    "drizzle": "Drizzle (sub-pixel resampling)",
+  };
+  return labels[method] ?? null;
+}
+
 function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
   const info = useQuery({
     queryKey: ["stack-info", safe, runId],
@@ -115,6 +135,11 @@ function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
           {typeof data.weighting.median === "number"
             ? ` (median ${data.weighting.median.toFixed(2)})`
             : ""}
+        </Text>
+      ) : null}
+      {combineMethodLabel(data.cards) ? (
+        <Text size="xs" c="dimmed">
+          Combined: {combineMethodLabel(data.cards)}
         </Text>
       ) : null}
       {data.processing && data.processing.length > 0 ? (
