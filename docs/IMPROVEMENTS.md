@@ -74,15 +74,6 @@ _(none — claim an item here with your branch name)_
 
 ### Features that serve real workflows
 - Annotated sky overlay (label detected objects / show solved field). (M)
-- **"You have calibration masters but aren't using them" nudge on the Stack
-  form** — a beginner often stacks uncalibrated even though the library holds a
-  matching master. The Stack form already calls `calibration-suggestions`
-  (`recommend_masters`); when it returns a recommended dark/flat/bias and the
-  form's selectors are all empty, show a friendly advisory ("You have a matching
-  master dark + flat — calibrating removes amp glow / dust shadows. [Use
-  recommended]") reusing the existing one-click. Advisory only, within-target,
-  frontend-only. Complements the recommender + the new calstat chip (which shows
-  *after* the fact). (S–M, approachability)
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
@@ -124,6 +115,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **"You have calibration masters but aren't using them" nudge on the Stack
+  form** — the single most common beginner mistake is stacking uncalibrated even
+  though the library holds a matching master. When `calibration-suggestions`
+  returns a recommended dark/flat/bias *and* no calibration selector is set yet,
+  the Stack form now shows a prominent teal advisory ("You have a matching master
+  dark + flat in your library, but this stack isn't calibrated — calibrating
+  removes amp glow, dust shadows and vignetting…") with the same one-click "Use
+  recommended". Once any selector is set it falls back to the existing subtle
+  hint, so it never badgers a user already engaging with calibration. Advisory
+  only, within-target, frontend-only. (v0.55.4, this run)
 
 - **Calibration-status filter chip on the Gallery** — building on the searchable
   `calstat` column (v0.55.2), the Gallery gained an "All / Calibrated /

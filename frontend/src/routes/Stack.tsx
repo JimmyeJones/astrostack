@@ -178,6 +178,26 @@ export function StackView() {
   };
   const asStr = (v: unknown) => (v === undefined || v === null ? null : String(v));
 
+  // Prominent "you have masters but aren't using them" nudge: the single most
+  // common beginner mistake is stacking uncalibrated even though the library
+  // holds a matching master. Show a friendly advisory (with the same one-click)
+  // only when there *is* a recommendation and the user has picked *nothing* yet —
+  // once any calibration selector is set, fall back to the subtle inline hint so
+  // we don't badger someone who's already engaging with calibration.
+  const noneSelected =
+    !values.dark_master_id && !values.flat_master_id
+    && !values.flat_dark_master_id && !values.bias_master_id;
+  const recKinds = [
+    recDarkId !== null ? "dark" : null,
+    recFlatId !== null ? "flat" : null,
+    recBiasForLights !== null ? "bias" : null,
+  ].filter(Boolean) as string[];
+  const showCalNudge = noneSelected && recKinds.length > 0;
+  const recList =
+    recKinds.length === 1
+      ? `master ${recKinds[0]}`
+      : `master ${recKinds.slice(0, -1).join(", ")} + ${recKinds[recKinds.length - 1]}`;
+
   // Inline cautions when a chosen master is a poor match for the data. A dark
   // captures thermal/bias signal at a *specific* exposure, so an exposure
   // mismatch either under- or over-subtracts; a flat-dark must instead match the
@@ -391,7 +411,21 @@ export function StackView() {
             </Group>
             {hasMasters ? (
               <Stack gap="xs">
-                {canApplyRec ? (
+                {showCalNudge ? (
+                  <Alert color="teal" variant="light" py="xs" px="sm">
+                    <Group gap="xs" justify="space-between" wrap="nowrap" align="center">
+                      <Text size="xs">
+                        You have a matching {recList} in your library, but this stack
+                        isn't calibrated. Calibrating removes amp glow, dust shadows
+                        and vignetting for a cleaner, flatter result.
+                      </Text>
+                      <Button size="compact-xs" variant="filled" color="teal"
+                        style={{ flexShrink: 0 }} onClick={applyRecommended}>
+                        Use recommended
+                      </Button>
+                    </Group>
+                  </Alert>
+                ) : canApplyRec ? (
                   <Group gap="xs" justify="space-between" wrap="nowrap">
                     <Text size="xs" c="dimmed">
                       Matched to this target's frames

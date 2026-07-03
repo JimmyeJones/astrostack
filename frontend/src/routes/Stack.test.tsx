@@ -72,6 +72,39 @@ describe("StackView", () => {
     await waitFor(() => expect(screen.queryByText("Use recommended")).not.toBeInTheDocument());
   });
 
+  it("nudges when masters exist but nothing is selected, then hides once applied", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
+      { id: 1, name: "Dark 30s", kind: "dark", filename: "d1.fits", n_frames: 20,
+        method: "median", exposure_s: 30, gain: 80, sensor_temp_c: null,
+        bayer_pattern: "RGGB", width_px: 480, height_px: 320,
+        created_utc: "2026-01-01T00:00:00", exists: true },
+      { id: 3, name: "Flat", kind: "flat", filename: "f3.fits", n_frames: 20,
+        method: "median", exposure_s: 2, gain: 80, sensor_temp_c: null,
+        bayer_pattern: "RGGB", width_px: 480, height_px: 320,
+        created_utc: "2026-01-01T00:00:00", exists: true },
+    ]);
+    vi.spyOn(client.api, "calibrationSuggestions").mockResolvedValue({
+      params: { exposure_s: 30, gain: 80, sensor_temp_c: null },
+      dark_master_id: 1, flat_master_id: 3, flat_dark_master_id: null, bias_master_id: null,
+      scores: { "1": 1, "3": 1 }, n_frames: 12,
+    });
+
+    renderStack();
+
+    // The prominent "you have masters but aren't using them" nudge names both
+    // recommended kinds while nothing is selected.
+    await waitFor(() =>
+      expect(screen.getByText(/matching master dark \+ flat in your library/)).toBeInTheDocument());
+
+    fireEvent.click(screen.getByText("Use recommended"));
+    // Once applied, the nudge (and the apply button) are gone.
+    await waitFor(() =>
+      expect(screen.queryByText(/isn't calibrated/)).not.toBeInTheDocument());
+  });
+
   it("recommends and applies a matching flat-dark", async () => {
     vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
