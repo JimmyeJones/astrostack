@@ -16,7 +16,7 @@ import { useUndoable } from "../hooks/useUndoable";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { Histogram } from "../components/editor/Histogram";
 import { OpList } from "../components/editor/OpList";
-import { moveToCorrectSide } from "../components/editor/stageConflicts";
+import { hasEnabledStretch, moveToCorrectSide } from "../components/editor/stageConflicts";
 import { OpParamPanel } from "../components/editor/OpParamPanel";
 import { PresetMenu } from "../components/editor/PresetMenu";
 
@@ -257,6 +257,14 @@ export function EditorView() {
   const fixStage = (u: string) => setOps((p) => moveToCorrectSide(p, u, specs));
 
   const selectedOp = ops.find((o) => o.uid === selected) ?? null;
+  // No enabled stretch → the pipeline silently applies a default asinh stretch at
+  // the end. Nudge the user to add/enable an explicit, controllable one.
+  const disabledStretch = ops.find((o) => !o.enabled && specs[o.id]?.is_stretch) ?? null;
+  const noStretch = ops.length > 0 && !hasEnabledStretch(ops, specs);
+  const addOrEnableStretch = () => {
+    if (disabledStretch) toggle(disabledStretch.uid);
+    else if (specs["tone.stretch"]) addOp(specs["tone.stretch"]);
+  };
   const grouped = useMemo(() => {
     const g: Record<string, EditOp[]> = {};
     (opsSchema.data ?? []).forEach((s) => { (g[s.group] ??= []).push(s); });
@@ -395,6 +403,21 @@ export function EditorView() {
                     leftSection={<IconSparkles size={14} />}
                     loading={auto.isPending} onClick={() => auto.mutate()}>
                     Auto-process
+                  </Button>
+                </Alert>
+              ) : null}
+              {noStretch ? (
+                <Alert color="yellow" variant="light" py={8} mt="xs"
+                  icon={<IconAlertTriangle size={16} />}>
+                  <Text size="xs" mb={6}>
+                    No <b>Stretch</b> step — a default stretch is applied automatically at
+                    the end so the preview isn't black, but your tone &amp; colour ops are
+                    running on un-stretched (linear) data. Add a Stretch op to control the
+                    look and put those ops on the right side of it.
+                  </Text>
+                  <Button size="compact-xs" variant="light" color="yellow"
+                    leftSection={<IconPlus size={14} />} onClick={addOrEnableStretch}>
+                    {disabledStretch ? "Enable stretch" : "Add stretch"}
                   </Button>
                 </Alert>
               ) : null}

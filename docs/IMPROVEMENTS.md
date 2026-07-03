@@ -166,6 +166,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **"No stretch step" nudge in the editor pipeline** — if a recipe has ops but no
+  *enabled* Stretch op, the pipeline silently auto-inserts a default asinh stretch
+  at the end so the preview isn't black — but the user's tone/colour ops then run
+  on un-stretched (linear) data and the result looks wrong, with no explanation.
+  The pipeline panel now shows a subtle yellow advisory in that case, with a
+  one-click "Add stretch" (or "Enable stretch" when a bypassed one exists) so a
+  beginner gets an explicit, controllable stretch. Complements this run's
+  stage-conflict warning. Pure `hasEnabledStretch` helper, unit-tested;
+  frontend-only, advisory. (v0.56.13, this run)
+
 - **Friendly names for enum dropdowns (editor + Stack/Settings forms)** — enum
   params rendered their raw internal values ("asinh", "stf", "gray_star", "gaia",
   "per_channel", "luminance", "average", "maximum") in the Select dropdowns, jargon

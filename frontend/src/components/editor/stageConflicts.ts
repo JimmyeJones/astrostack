@@ -13,6 +13,16 @@ import type { EditOp, OpInstance } from "../../api/client";
 
 export type WrongStage = "linear" | "nonlinear";
 
+/** True when at least one *enabled* op is the stretch boundary. When false the
+ * pipeline silently auto-inserts a default asinh stretch at the end, so the UI
+ * can nudge the user to add an explicit, controllable stretch. */
+export function hasEnabledStretch(
+  ops: OpInstance[],
+  specs: Record<string, EditOp>,
+): boolean {
+  return ops.some((o) => o.enabled && specs[o.id]?.is_stretch);
+}
+
 /** Map of op uid -> the (mis-placed) stage, for every *enabled* op sitting on the
  * wrong side of an *enabled* stretch op. Empty when there's no explicit stretch
  * boundary (nothing to check against) or nothing conflicts. */

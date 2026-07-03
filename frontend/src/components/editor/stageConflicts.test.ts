@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { moveToCorrectSide, stageConflicts } from "./stageConflicts";
+import { hasEnabledStretch, moveToCorrectSide, stageConflicts } from "./stageConflicts";
 import type { EditOp, OpInstance } from "../../api/client";
 
 function spec(id: string, stage: string, is_stretch = false): EditOp {
@@ -102,5 +102,20 @@ describe("moveToCorrectSide", () => {
   it("is a no-op when there is no enabled stretch", () => {
     const ops = [op("background.subtract", "bg"), op("tone.saturation", "sat")];
     expect(moveToCorrectSide(ops, "sat", SPECS)).toBe(ops);
+  });
+});
+
+describe("hasEnabledStretch", () => {
+  it("is true with an enabled stretch op", () => {
+    expect(hasEnabledStretch([op("tone.stretch", "s")], SPECS)).toBe(true);
+  });
+
+  it("is false with only a disabled stretch op", () => {
+    expect(hasEnabledStretch([op("tone.stretch", "s", false)], SPECS)).toBe(false);
+  });
+
+  it("is false when no stretch op is present", () => {
+    const ops = [op("background.subtract", "bg"), op("tone.saturation", "sat")];
+    expect(hasEnabledStretch(ops, SPECS)).toBe(false);
   });
 });
