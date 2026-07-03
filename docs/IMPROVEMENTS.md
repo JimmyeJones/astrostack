@@ -169,6 +169,18 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Data-driven saturation in the one-click Auto recipe** — Auto's final
+  saturation boost was a fixed `1.2` for every stack, but chroma noise scales with
+  the boost, so on a noisy Seestar stack that fixed lift just amplified colour
+  speckle. Auto now scales the saturation to the measured background noise
+  (`analyze_proxy`'s `sky_sigma`) — a clean stack gets the full `1.25` lift, a
+  noisy one eases down toward `1.05` — with a neutral `1.2` fallback when the proxy
+  can't be measured. Completes the "adapt every knob to the data" pattern already
+  applied to Auto's denoise strength, sharpen radius and STF target. Engine-only,
+  additive; Auto is an explicit button so no default flips. Test asserts the boost
+  is gentler on a noisy stack than a clean one and falls back to 1.2. (v0.57.15,
+  this run)
+
 - **"Your data" context chip in the editor header** — the four data-driven
   suggestion buttons quote their measured value inline ("FWHM 3.2px"), but there
   was no single place a user could see what the editor measured about *this* stack.

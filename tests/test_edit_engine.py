@@ -243,6 +243,32 @@ def test_auto_recipe_sharpen_radius_from_fwhm():
     assert sharpen_radius(9.0) > sharpen_radius(3.0)
 
 
+def test_auto_recipe_saturation_eases_off_on_noisy_stacks():
+    """Auto's saturation boost should be data-driven — a noisy stack gets a
+    gentler boost (chroma noise scales with saturation) than a clean one, not the
+    same fixed 1.2. Falls back to 1.2 when the image can't be measured."""
+    from seestack.edit.presets import auto_recipe
+
+    rng = np.random.default_rng(11)
+    base = np.full((80, 100, 3), 0.05, np.float32)
+    base[30:50, 40:60] += 0.5
+    clean = base.copy()
+    noisy = base + rng.normal(0, 0.06, base.shape).astype("float32")
+
+    def sat_amount(rgb):
+        op = next(o for o in auto_recipe(rgb).ops if o.id == "tone.saturation")
+        return float(op.params["amount"])
+
+    s_clean = sat_amount(clean)
+    s_noisy = sat_amount(noisy)
+    assert s_noisy < s_clean          # noisy → gentler colour boost
+    assert 1.05 <= s_noisy <= 1.25    # stays within a sensible band
+    assert 1.05 <= s_clean <= 1.25
+    # No image to measure → the neutral 1.2 fallback.
+    op = next(o for o in auto_recipe(None).ops if o.id == "tone.saturation")
+    assert float(op.params["amount"]) == 1.2
+
+
 def test_denoise_identity_at_zero_and_preserves_colour():
     base = np.empty((40, 50, 3), np.float32)
     for c, lvl in enumerate((0.1, 0.2, 0.3)):

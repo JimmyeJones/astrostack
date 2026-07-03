@@ -132,16 +132,23 @@ def auto_recipe(rgb: np.ndarray | None = None,
     ones, sized to the target's *own* stars (median FWHM → radius, the same
     conversion the editor's sharpen-from-stars button uses) rather than a fixed
     guess. Saturation lifts colour a touch at the end (after the green cast is
-    gone, so it doesn't amplify it).
+    gone, so it doesn't amplify it) — *scaled to the measured background noise*
+    so a noisy stack gets a gentler boost (less amplified chroma speckle) and a
+    clean one the full lift.
     """
     noisy = False
     target_bg = 0.20
     denoise_strength = 0.5  # neutral fallback when the image can't be measured
+    saturation = 1.2        # neutral fallback when the image can't be measured
     if rgb is not None:
         a = analyze_proxy(rgb)
         noisy = bool(a["noisy"])
         # Darker sky → lift a little more (higher target grey), brighter → less.
         target_bg = float(np.clip(0.24 - a["sky"] * 0.4, 0.14, 0.24))
+        # Chroma noise scales with the saturation boost, so ease off on a noisy
+        # stack (where a strong boost just amplifies colour speckle) and give a
+        # clean one the full lift — rather than the same fixed 1.2 for both.
+        saturation = float(np.clip(1.25 - a["sky_sigma"] * 6.0, 1.05, 1.25))
         if noisy:
             # Match the denoise strength to the actual measured noise (the same
             # estimator behind the editor's "From your image" one-click), so a
@@ -164,7 +171,7 @@ def auto_recipe(rgb: np.ndarray | None = None,
     # so the boost lifts real colour, not the residual OSC green cast. Gentle
     # (0.7) and monotone — it can only *reduce* excess green, never invent colour.
     ops.append(("tone.scnr", {"amount": 0.7}))
-    ops.append(("tone.saturation", {"amount": 1.2}))
+    ops.append(("tone.saturation", {"amount": round(saturation, 3)}))
     if not noisy:  # sharpening clean data helps; sharpening noisy data hurts
         radius = _sharpen_radius_from_fwhm(median_fwhm)
         ops.append(("detail.sharpen", {"amount": 0.5, "radius": radius}))
