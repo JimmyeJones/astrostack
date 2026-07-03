@@ -58,6 +58,16 @@ def test_ops_and_key_params_carry_plain_help():
         for k in keys:
             assert params[k].help, f"{op_id}.{k} needs plain-language help"
 
+    # Stronger invariant: every editor control carries a plain-language hint, so a
+    # beginner never faces a bare slider. The only exception is the curve-editor
+    # widget, whose op-level help explains the whole control.
+    no_param_help = {("tone.curves", "points")}
+    for s in specs.values():
+        for p in s.params:
+            if (s.id, p.key) in no_param_help:
+                continue
+            assert p.help, f"{s.id}.{p.key} needs plain-language help"
+
 
 def test_curves_identity_is_noop():
     img = _img()

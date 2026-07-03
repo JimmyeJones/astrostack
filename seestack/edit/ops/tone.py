@@ -116,9 +116,14 @@ register(OpSpec(
     apply=_white_balance, proxy_safe=True,
     help="Manual per-channel gain (applied to linear data).",
     params=[
-        EditParam("r", "Red gain", "float", default=1.0, min=0.0, max=3.0, step=0.01),
-        EditParam("g", "Green gain", "float", default=1.0, min=0.0, max=3.0, step=0.01),
-        EditParam("b", "Blue gain", "float", default=1.0, min=0.0, max=3.0, step=0.01),
+        EditParam("r", "Red gain", "float", default=1.0, min=0.0, max=3.0, step=0.01,
+                  help="Multiplier for the red channel. 1.0 = unchanged; raise to warm, "
+                       "lower to cool. Prefer Color calibration for an automatic balance."),
+        EditParam("g", "Green gain", "float", default=1.0, min=0.0, max=3.0, step=0.01,
+                  help="Multiplier for the green channel. 1.0 = unchanged."),
+        EditParam("b", "Blue gain", "float", default=1.0, min=0.0, max=3.0, step=0.01,
+                  help="Multiplier for the blue channel. 1.0 = unchanged; raise to cool, "
+                       "lower to warm."),
     ],
 ))
 

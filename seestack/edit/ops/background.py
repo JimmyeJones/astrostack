@@ -106,6 +106,8 @@ register(OpSpec(
     help="Equalize sky across mosaic panels with different frame coverage.",
     params=[
         EditParam("object_sigma", "Object σ", "float", default=2.0, min=1.0, max=5.0,
-                  step=0.1, group="advanced"),
+                  step=0.1, group="advanced",
+                  help="How aggressively to mask off real signal before measuring each "
+                       "panel's sky. Lower masks more; higher lets more into the estimate."),
     ],
 ))

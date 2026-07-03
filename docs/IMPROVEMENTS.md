@@ -169,6 +169,14 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Complete + enforce plain-language help on every editor control** — finished the
+  help sweep by adding hints to the last bare params (geometry crop/rotate/resize,
+  manual white-balance R/G/B gains, coverage-leveling σ), so *every* editor slider
+  now shows a one-line explanation. The help-coverage test now asserts this as an
+  invariant — every param must carry help except the curve-editor widget (which has
+  op-level help) — so a future op can't ship a bare, unexplained control.
+  Metadata + test only, additive. (v0.57.8, this run)
+
 - **Plain-language help on the remaining jargon-bare editor sliders** — v0.56.17
   gave the detail/levels ops per-param help, but the commonly-used tone/star/
   background sliders still showed *no* hint under the control: `tone.saturation`

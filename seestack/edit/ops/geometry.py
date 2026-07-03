@@ -51,10 +51,14 @@ register(OpSpec(
     id="geometry.crop", label="Crop", group="stars_geometry", stage="nonlinear",
     apply=_crop, proxy_safe=True, help="Crop to a fractional rectangle (0..1).",
     params=[
-        EditParam("x0", "Left", "float", default=0.0, min=0.0, max=1.0, step=0.01),
-        EditParam("y0", "Top", "float", default=0.0, min=0.0, max=1.0, step=0.01),
-        EditParam("x1", "Right", "float", default=1.0, min=0.0, max=1.0, step=0.01),
-        EditParam("y1", "Bottom", "float", default=1.0, min=0.0, max=1.0, step=0.01),
+        EditParam("x0", "Left", "float", default=0.0, min=0.0, max=1.0, step=0.01,
+                  help="Left edge as a fraction of width. 0 = far left, 0.5 = centre."),
+        EditParam("y0", "Top", "float", default=0.0, min=0.0, max=1.0, step=0.01,
+                  help="Top edge as a fraction of height. 0 = very top."),
+        EditParam("x1", "Right", "float", default=1.0, min=0.0, max=1.0, step=0.01,
+                  help="Right edge as a fraction of width. 1 = far right."),
+        EditParam("y1", "Bottom", "float", default=1.0, min=0.0, max=1.0, step=0.01,
+                  help="Bottom edge as a fraction of height. 1 = very bottom."),
     ],
 ))
 
@@ -62,11 +66,14 @@ register(OpSpec(
     id="geometry.rotate", label="Rotate", group="stars_geometry", stage="nonlinear",
     apply=_rotate, proxy_safe=True, help="Rotate by an arbitrary angle.",
     params=[EditParam("angle", "Angle (°)", "float", default=0.0, min=-180.0, max=180.0,
-                      step=0.5)],
+                      step=0.5, help="Degrees to rotate, clockwise. Corners exposed by the "
+                                     "rotation are left transparent (rendered black).")],
 ))
 
 register(OpSpec(
     id="geometry.resize", label="Resize", group="stars_geometry", stage="nonlinear",
     apply=_resize, proxy_safe=True, help="Scale the image (1.0 = unchanged).",
-    params=[EditParam("scale", "Scale", "float", default=1.0, min=0.1, max=2.0, step=0.05)],
+    params=[EditParam("scale", "Scale", "float", default=1.0, min=0.1, max=2.0, step=0.05,
+                      help="Resize factor. 1.0 = unchanged, 0.5 = half size, 2.0 = double. "
+                           "Enlarging can't add real detail.")],
 ))
