@@ -45,7 +45,8 @@ problems. Dogfood it every big-picture run and fix root causes.
 - **Weak default result** — the auto/default processing should produce a genuinely
   good image out of the box for a typical Seestar OSC stack (good stretch, colour,
   gentle denoise/sharpen). Improve the auto recipe so "Auto" is a great one-click
-  start. (M, editor)
+  start. (Gentle SCNR green-cast removal added to the auto recipe in v0.56.6 —
+  more of these incremental tweaks welcome.) (M, editor)
 - **Editor bug hunt (ongoing)** — there are undocumented issues. Each big-picture
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
@@ -169,6 +170,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Gentle green-cast removal in the one-click Auto recipe** — an OSC Seestar
+  stack almost always carries a residual green cast (the Bayer green is the
+  strongest channel), which every built-in nebula preset already fixes with SCNR
+  but the `Auto-process` recipe skipped. Auto now appends a gentle
+  `tone.scnr` (amount 0.7) after the STF stretch and *before* the saturation
+  boost, so the boost lifts real colour instead of amplifying the green. SCNR is
+  monotone (it can only cap green above the R/B neutral, never invent colour), so
+  it's safe on galaxies/clusters too. Auto-process is an explicit button (not a
+  silent upgrade default) and saved recipes are untouched — upgrade-safe. Test
+  asserts SCNR presence + ordering. (v0.56.6, this run)
 
 - **"Export only" flag for preview-approximate editor ops** — the Deconvolution op
   is `proxy_safe=False`, so it's silently skipped in the fast live preview: a user

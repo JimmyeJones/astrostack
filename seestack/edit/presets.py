@@ -101,9 +101,12 @@ def auto_recipe(rgb: np.ndarray | None = None) -> Recipe:
 
     Always: background/gradient removal → photometric colour balance → a proper
     per-channel STF stretch (``tone.stretch`` mode ``stf``, the same algorithm as
-    the proven ``autostretch``). Then, only when warranted by the analysis:
-    denoise (on linear data, before the stretch) for noisy frames, and a gentle
-    sharpen for clean ones. Saturation lifts colour a touch at the end.
+    the proven ``autostretch``) → a gentle green-cast removal (SCNR) — the single
+    most common OSC defect, which every built-in nebula preset also fixes. Then,
+    only when warranted by the analysis: denoise (on linear data, before the
+    stretch) for noisy frames, and a gentle sharpen for clean ones. Saturation
+    lifts colour a touch at the end (after the green cast is gone, so it doesn't
+    amplify it).
     """
     noisy = False
     target_bg = 0.20
@@ -120,6 +123,10 @@ def auto_recipe(rgb: np.ndarray | None = None) -> Recipe:
     if noisy:  # denoise belongs on LINEAR data, before the stretch
         ops.append(("detail.denoise", {"method": "wavelet", "strength": 0.5}))
     ops.append(("tone.stretch", {"mode": "stf", "target_bg": target_bg}))
+    # SCNR before the saturation boost: cap the green channel to the R/B neutral
+    # so the boost lifts real colour, not the residual OSC green cast. Gentle
+    # (0.7) and monotone — it can only *reduce* excess green, never invent colour.
+    ops.append(("tone.scnr", {"amount": 0.7}))
     ops.append(("tone.saturation", {"amount": 1.2}))
     if not noisy:  # sharpening clean data helps; sharpening noisy data hurts
         ops.append(("detail.sharpen", {"amount": 0.5, "radius": 2.0}))
