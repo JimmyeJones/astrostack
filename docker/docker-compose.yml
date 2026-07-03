@@ -7,8 +7,14 @@
 #       state/      ← config.json + jobs database
 # 3. Browse to http://<truenas-ip>:8000
 #
-# Build locally with:   docker compose -f docker/docker-compose.yml up -d --build
-# (run from the repo root so the build context sees ./frontend, ./seestack, ./webapp)
+# Your data path comes from the ASTRO_DATA variable so upgrades (git pull /
+# reset) never overwrite it. Put it in an untracked `.env` at the repo root:
+#     echo 'ASTRO_DATA=/mnt/your/dataset' > .env
+# then build from the repo root with:
+#     docker compose --env-file .env -f docker/docker-compose.yml up -d --build
+# (--env-file makes the path unambiguous; run from the repo root so the build
+#  context sees ./frontend, ./seestack, ./webapp). Verify the resolved path with:
+#     docker compose --env-file .env -f docker/docker-compose.yml config | grep /data
 
 services:
   astrostack:
@@ -22,7 +28,9 @@ services:
     # ProcessPoolExecutor + numpy need a decent /dev/shm for big stacks.
     shm_size: "1gb"
     volumes:
-      - /mnt/tank/astro:/data          # <-- change to your dataset path
+      # Host data path from .env (ASTRO_DATA); falls back to the placeholder
+      # below only if you never set it — which is almost certainly wrong.
+      - ${ASTRO_DATA:-/mnt/CHANGE_ME/astro}:/data
       # Optional: mount an ASTAP install instead of bundling it in the image.
       # - /mnt/tank/apps/astap:/opt/astap:ro
     environment:
