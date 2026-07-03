@@ -222,7 +222,7 @@ export function EditorView() {
   const hist = useQuery({
     queryKey: ["edit-hist", safe, rid, dKey],
     queryFn: ({ signal }) => api.getHistogram(safe, rid, dRecipe, signal),
-    enabled: !!opsSchema.data && seeded,
+    enabled: !!opsSchema.data,
   });
   // Data-driven black/white points for the selected Levels op, measured from the
   // display-space image *entering* that op (all prior ops applied), so a beginner

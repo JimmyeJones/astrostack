@@ -243,10 +243,10 @@ sitting; move an entry to **In progress**/**Shipped** as usual when you take it.
   `dKey` starts as `"[]"` and the preview/histogram queries were enabled as soon
   as the schema/saved queries settled, so the first fetch rendered the un-edited
   image (a flash of the wrong image + one wasted proxy render per editor open for
-  any saved recipe). Fixed together with the Save-history bug: the preview and
-  histogram queries now also gate on the per-run `seeded` flag, so nothing fetches
-  until the saved recipe is seeded. Severity: cosmetic/perf. Confidence: confirmed
-  (traced).
+  any saved recipe). Fixed together with the Save-history bug: the live preview
+  query now also gates on the per-run `seeded` flag, so the proxy render doesn't
+  fire until the saved recipe is seeded. Severity: cosmetic/perf. Confidence:
+  confirmed (traced).
 
 - **BUG (cosmetic/a11y): overlay zoom mislabels + keyboard access gaps** — the
   lightbox titles whatever is shown as "edited" unless Compare is on, so zooming
