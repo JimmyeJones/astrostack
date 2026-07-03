@@ -53,16 +53,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
 
 ### Editor — make it excellent (PRIORITY 1) — new ideas
-- **Cancel superseded live-preview renders (responsiveness)** — the editor's live
-  preview refetches on every (debounced) param change, but the `fetch` in the
-  preview `useQuery` doesn't pass the query's `AbortSignal`, so while a user drags a
-  slider on a heavy op (deconvolution, denoise) each stale render runs to completion
-  server-side and the newest result queues behind them — the named "heavy ops on the
-  proxy can lag" hold-out of the live-preview backlog item. Thread the react-query
-  `signal` into `fetch(url, { signal })` for the preview, base, star-mask and
-  without-op queries so a superseded request is aborted the moment the recipe
-  changes, cutting proxy render backlog and latency. Also surfaces a cleaner
-  "rendering…" state. Frontend-only, additive, no API change. (S, editor)
 - **"Your data" context chip in the editor header** — the four data-driven
   suggestion buttons quote the measured value inline ("FWHM 3.2px"), but there's no
   single place a user sees what the editor measured about *this* stack. A small
@@ -188,6 +178,18 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Cancel superseded live-preview renders (editor responsiveness)** — the live
+  preview refetches on every debounced param change, but the four blob `fetch`
+  queries (preview, base, star-mask, without-op) and the histogram query never
+  passed react-query's `AbortSignal`, so while a user dragged a slider on a heavy
+  op each stale render ran to completion server-side and the newest result queued
+  behind them — the named "heavy ops on the proxy can lag" hold-out of the
+  live-preview item. Threaded the query `signal` into every `fetch(url, { signal })`
+  and into `api.getHistogram(..., signal)` (which already accepted a `RequestInit`
+  via `req`), so a superseded request aborts the moment the recipe changes, cutting
+  proxy render backlog and latency. Vitest-covered (the preview fetch is called with
+  an `AbortSignal`). Frontend-only, additive, no API change. (v0.57.13, this run)
 
 - **Direct pixel-transform + NaN-safety tests for the tone/colour editor ops** —
   `seestack/edit/ops/tone.py`'s ops (SCNR, saturation, white balance, curves,

@@ -91,6 +91,26 @@ describe("EditorView", () => {
     expect(screen.getByText("Download full-res PNG")).toBeInTheDocument();
   });
 
+  it("threads an AbortSignal into the live-preview fetch so stale renders can be cancelled", async () => {
+    mockEditorQueries();
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderEditor();
+
+    await screen.findByText("Stretch");
+    // The preview fetch must be called with an options object carrying an
+    // AbortSignal, so react-query can abort a superseded render when the recipe
+    // changes (the "heavy ops lag" hold-out) instead of running it to completion.
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const previewCall = fetchMock.mock.calls.find(
+      (c) => typeof c[0] === "string" && c[0].includes("/editor/preview"));
+    expect(previewCall).toBeDefined();
+    expect(previewCall![1]?.signal).toBeInstanceOf(AbortSignal);
+  });
+
   it("toggles the star-mask overlay and fetches the mask", async () => {
     mockEditorQueries();
     vi.stubGlobal("fetch", vi.fn(async () => ({

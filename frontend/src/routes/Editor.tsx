@@ -134,8 +134,8 @@ export function EditorView() {
   const preview = useQuery({
     queryKey: ["edit-preview", safe, rid, dKey, bust],
     enabled: !!opsSchema.data && !saved.isLoading,
-    queryFn: async () => {
-      const res = await fetch(api.editPreviewUrl(safe, rid, dRecipe, bust));
+    queryFn: async ({ signal }) => {
+      const res = await fetch(api.editPreviewUrl(safe, rid, dRecipe, bust), { signal });
       if (!res.ok) {
         let detail = `HTTP ${res.status}`;
         try { detail = (await res.json()).detail ?? detail; } catch { /* ignore */ }
@@ -151,7 +151,7 @@ export function EditorView() {
 
   const hist = useQuery({
     queryKey: ["edit-hist", safe, rid, dKey],
-    queryFn: () => api.getHistogram(safe, rid, dRecipe),
+    queryFn: ({ signal }) => api.getHistogram(safe, rid, dRecipe, signal),
     enabled: !!opsSchema.data,
   });
   const refreshPreview = () => {
@@ -164,8 +164,8 @@ export function EditorView() {
   const basePreview = useQuery({
     queryKey: ["edit-base", safe, rid],
     enabled: showBase && !!opsSchema.data && !saved.isLoading,
-    queryFn: async () => {
-      const res = await fetch(api.editPreviewUrl(safe, rid, { ops: [], base_run_id: rid }));
+    queryFn: async ({ signal }) => {
+      const res = await fetch(api.editPreviewUrl(safe, rid, { ops: [], base_run_id: rid }), { signal });
       if (!res.ok) throw new Error("base preview failed");
       return URL.createObjectURL(await res.blob());
     },
@@ -181,8 +181,8 @@ export function EditorView() {
   const maskPreview = useQuery({
     queryKey: ["edit-mask", safe, rid],
     enabled: showMask && !!opsSchema.data && !saved.isLoading,
-    queryFn: async () => {
-      const res = await fetch(api.editStarMaskUrl(safe, rid));
+    queryFn: async ({ signal }) => {
+      const res = await fetch(api.editStarMaskUrl(safe, rid), { signal });
       if (!res.ok) throw new Error("star mask preview failed");
       return URL.createObjectURL(await res.blob());
     },
@@ -203,12 +203,12 @@ export function EditorView() {
   const withoutOpPreview = useQuery({
     queryKey: ["edit-without-op", safe, rid, dKey, selected, bust],
     enabled: soloActive && !!opsSchema.data && !saved.isLoading,
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const withoutRecipe: Recipe = {
         ops: dRecipe.ops.map((o) => (o.uid === selected ? { ...o, enabled: false } : o)),
         base_run_id: rid,
       };
-      const res = await fetch(api.editPreviewUrl(safe, rid, withoutRecipe, bust));
+      const res = await fetch(api.editPreviewUrl(safe, rid, withoutRecipe, bust), { signal });
       if (!res.ok) throw new Error("compare render failed");
       return URL.createObjectURL(await res.blob());
     },
