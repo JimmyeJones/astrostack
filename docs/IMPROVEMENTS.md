@@ -48,6 +48,15 @@ problems. Dogfood it every big-picture run and fix root causes.
   gentle denoise/sharpen). Improve the auto recipe so "Auto" is a great one-click
   start. (Gentle SCNR green-cast removal added to the auto recipe in v0.56.6 —
   more of these incremental tweaks welcome.) (M, editor)
+- **One-click "Auto black/white points" for the Levels op** — the Levels op makes a
+  beginner hand-guess a black point and white point, when the natural values come
+  straight from the image histogram (which the editor already computes). Add a
+  "From your image" button on the Levels param panel (mirroring the data-driven
+  sharpen/denoise/star-size buttons) that sets `black` to a low percentile of the
+  finite sky (e.g. p1–p2, clamped so it never crushes visible signal) and `white`
+  to a high percentile (e.g. p99.5) — a safe auto-levels a beginner can then nudge.
+  Reuses the histogram endpoint; additive; needs a guard that it never returns
+  `white ≤ black` (the v0.61.12 degenerate case). (S–M, autonomy/editor)
 - **Editor bug hunt (ongoing)** — there are undocumented issues. Each big-picture
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
@@ -75,12 +84,31 @@ problems. Dogfood it every big-picture run and fix root causes.
   (M, editor/correctness)
 - **"Original" compare should match the stack's own baseline** — the editor's
   Compare ("Original") renders an *empty* recipe, which the backend tone-maps with
-  a hard-coded default asinh (stretch 0.5 / black 0.35). That can look different
-  from the stack thumbnail the user saw on History/Target before entering the
-  editor, so "before" isn't the baseline they expect. Render the Original with the
-  same default the run's own preview/thumbnail uses (or the run's saved recipe if
-  any) so the A/B is honest. (S, editor/trust)
+  a hard-coded default asinh (stretch 0.5 / black 0.35). **Analysis (2026-07):** that
+  default *matches* the `render_stack_run` endpoint's own defaults (`_STRETCH_DEFAULT
+  0.5 / _BLACK_DEFAULT 0.35`), so if the user saw the live adjustable render before
+  editing, "Original" already lines up. The real mismatch is against the run's
+  **stored** `preview_path` PNG (History/Target thumbnail), which `_write_preview_png`
+  renders with `_autostretch_for_export` (MTF/STF), *not* asinh — a different look —
+  and which `save_stack_preview` may have overwritten at a user-chosen stretch (whose
+  values aren't persisted on the run). The clean, fully-honest fix is to serve the
+  run's actual stored `preview_path` as the "Original" overlay (literally what the
+  user saw), accepting that it's the ≤1024 px preview rather than the ≤1500 px editor
+  proxy. Care: it's a behaviour change to Compare, so gate/validate the resolution
+  swap doesn't jar the A/B. (S, editor/trust)
 ### Autonomy — "just works" (PRIORITY 2)
+- **Smooth the Auto recipe's noisy/clean cliff (denoise ↔ sharpen crossfade)** —
+  `auto_recipe` treats `analyze_proxy`'s `noisy` verdict as a hard boolean
+  (`sky_sigma > 0.02`): a stack just over the line gets denoise and *no* sharpen,
+  one just under gets sharpen and *no* denoise, so two near-identical stacks either
+  side of the threshold produce visibly different one-click results (a cliff). A
+  mildly-noisy stack could sensibly get *both* a light denoise and a light sharpen.
+  Replace the boolean branch with a continuous crossfade: scale the denoise strength
+  up and the sharpen amount down as `sky_sigma` rises across a band around the
+  threshold (e.g. 0.012–0.028), so the default result varies smoothly with the data
+  instead of snapping. Reuses the measured `sky_sigma`; Auto is an explicit button
+  so no default flips. Needs a test that the crossfade is monotonic and that the
+  clean/very-noisy ends still match today's recipe. (M, autonomy/editor)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
   different (per-channel vs luminance gradient, star reduction, saturation). The
