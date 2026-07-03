@@ -48,15 +48,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   gentle denoise/sharpen). Improve the auto recipe so "Auto" is a great one-click
   start. (Gentle SCNR green-cast removal added to the auto recipe in v0.56.6 —
   more of these incremental tweaks welcome.) (M, editor)
-- **One-click "Auto black/white points" for the Levels op** — the Levels op makes a
-  beginner hand-guess a black point and white point, when the natural values come
-  straight from the image histogram (which the editor already computes). Add a
-  "From your image" button on the Levels param panel (mirroring the data-driven
-  sharpen/denoise/star-size buttons) that sets `black` to a low percentile of the
-  finite sky (e.g. p1–p2, clamped so it never crushes visible signal) and `white`
-  to a high percentile (e.g. p99.5) — a safe auto-levels a beginner can then nudge.
-  Reuses the histogram endpoint; additive; needs a guard that it never returns
-  `white ≤ black` (the v0.61.12 degenerate case). (S–M, autonomy/editor)
 - **Editor bug hunt (ongoing)** — there are undocumented issues. Each big-picture
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
@@ -223,6 +214,21 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **One-click "From your image" black/white points for the Levels op** — the Levels
+  op made a beginner hand-guess a black point and a white point, when the natural
+  values come straight from the image's own histogram. The Levels param panel now
+  offers a data-driven "From your image (black X, white Y)" button on both the
+  black and white sliders (mirroring the sharpen/denoise/star-size buttons), driven
+  by a new pure `seestack/edit/levels.py:suggest_levels_points` helper (p1 of the
+  finite sky → black, p99.5 → white, NaN-aware, clamped, and returns `None` when the
+  range would collapse — the v0.61.12 degenerate case) and a `…/editor/levels-suggestion`
+  endpoint that measures the percentiles on the display-space image *entering* that
+  op (all prior ops applied, so the values are correct post-stretch; falls back to
+  dropping the Levels op(s) when the uid is stale). Engine + one endpoint + frontend;
+  additive/upgrade-safe. Tested: engine helper (5 cases), webapp (valid pair on a
+  stretched image + unknown-uid fallback), Vitest (the black button shows the
+  measured value and reads as applied after a click). (v0.62.0, this run)
 
 - **Test the PNG-render path also surfaces failed ops** — coverage follow-up to the
   v0.61.11 export-error surfacing: added a webapp test that a full-res PNG render

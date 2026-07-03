@@ -212,6 +212,18 @@ export function EditorView() {
     queryFn: ({ signal }) => api.getHistogram(safe, rid, dRecipe, signal),
     enabled: !!opsSchema.data,
   });
+  // Data-driven black/white points for the selected Levels op, measured from the
+  // display-space image *entering* that op (all prior ops applied), so a beginner
+  // gets a safe auto-levels to nudge instead of hand-guessing. Enabled only when a
+  // Levels op is selected; keyed on the debounced recipe + uid so it refreshes as
+  // upstream ops change.
+  const levelsSelUid = ops.find((o) => o.uid === selected && o.id === "tone.levels")?.uid;
+  const levels = useQuery({
+    queryKey: ["levels-suggestion", safe, rid, dKey, levelsSelUid],
+    queryFn: () => api.levelsSuggestion(safe, rid, dRecipe, levelsSelUid!),
+    enabled: !!opsSchema.data && !saved.isLoading && !!levelsSelUid,
+    staleTime: 30_000,
+  });
   const refreshPreview = () => {
     setBust(Date.now());
     qc.invalidateQueries({ queryKey: ["edit-hist", safe, rid] });
@@ -972,7 +984,19 @@ export function EditorView() {
                                 label: `From your stars (size ${starSize.data.size}, FWHM ${starSize.data.fwhm_px}px)`,
                               },
                             }
-                            : undefined
+                            : selectedOp.id === "tone.levels"
+                              && levels.data?.black != null && levels.data?.white != null
+                              ? {
+                                black: {
+                                  value: levels.data.black,
+                                  label: `From your image (black ${levels.data.black}, white ${levels.data.white})`,
+                                },
+                                white: {
+                                  value: levels.data.white,
+                                  label: `From your image (black ${levels.data.black}, white ${levels.data.white})`,
+                                },
+                              }
+                              : undefined
                   } />
               </Paper>
             ) : null}

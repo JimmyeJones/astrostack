@@ -384,6 +384,13 @@ export interface StarSizeSuggestion {
   size: number | null;
 }
 
+export interface LevelsSuggestion {
+  /** Data-driven black/white points for the Levels op, or null when there's no
+   * useful suggestion (too few finite pixels / a near-empty range). */
+  black: number | null;
+  white: number | null;
+}
+
 export interface TrimSuggestion {
   is_mosaic: boolean;
   /** Fractional (0..1) crop rectangle for the largest well-covered area, or null
@@ -611,6 +618,11 @@ export const api = {
     req<DenoiseSuggestion>(`/api/targets/${safe}/stack-runs/${runId}/editor/denoise-suggestion`),
   trimSuggestion: (safe: string, runId: number) =>
     req<TrimSuggestion>(`/api/targets/${safe}/stack-runs/${runId}/editor/trim-suggestion`),
+  levelsSuggestion: (safe: string, runId: number, recipe: Recipe, uid: string) =>
+    req<LevelsSuggestion>(
+      `/api/targets/${safe}/stack-runs/${runId}/editor/levels-suggestion` +
+      `?recipe=${encodeRecipe(recipe)}&uid=${encodeURIComponent(uid)}`,
+    ),
   getRecipe: (safe: string, runId: number) =>
     req<Recipe>(`/api/targets/${safe}/stack-runs/${runId}/editor/recipe`),
   putRecipe: (safe: string, runId: number, recipe: Recipe) =>
