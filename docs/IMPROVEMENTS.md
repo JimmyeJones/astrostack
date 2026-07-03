@@ -64,11 +64,13 @@ _(none — claim an item here with your branch name)_
   Large but high value for the multi-night Seestar workflow. (L, correctness)
 - Channel combine: reproject stacks that don't share a canvas (via WCS) instead
   of erroring, so filters shot in separate sessions can be combined. (M–L)
-- Seestar client (`webapp/seestar/client.py`) has no reconnect/retry on a
-  dropped TCP socket — a flaky Wi-Fi link to the scope currently requires
-  the user to manually reconnect via the UI. Core hardware-integration
-  path; needs care around not spamming reconnect attempts and should be
-  testable in isolation from real hardware. (M, correctness)
+- Seestar client reconnect is now *hygienic* (v0.55.1: `connect()` tears down a
+  stale socket + pending replies before re-opening, so the manager's per-cycle
+  reconnect no longer leaks an fd per drop), but the retry cadence itself could
+  still be smarter: the poll loop reconnects on a fixed interval with no backoff,
+  so a scope that's genuinely gone gets hammered every cycle. A capped
+  exponential backoff per-ip (and a surfaced "reconnecting…" device state) would
+  be gentler and clearer. (S–M, correctness)
 
 ### Features that serve real workflows
 - Annotated sky overlay (label detected objects / show solved field). (M)
@@ -113,6 +115,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Seestar reconnect hygiene (fd-leak fix)** — the manager's poll loop
+  re-`connect()`s a disconnected client every cycle, but `SeestarClient.connect()`
+  overwrote `self._sock` without closing the dead one or clearing the in-flight
+  `_pending` replies the dropped link left behind — so a flaky Wi-Fi link to the
+  scope leaked a file descriptor (and a stranded pending reply) on every
+  reconnect. `connect()` now runs a shared `_teardown_locked()` (extracted from
+  `disconnect()`) before opening a fresh socket, closing the stale fd and waking
+  any waiter with "disconnected". Unit-tested with injected stale state (no
+  hardware). (v0.55.1, this run)
 
 - **Calibration chip on History/Gallery cards** — a stack now records which
   calibration masters were applied to its lights in a new additive
