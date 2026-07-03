@@ -5,8 +5,8 @@ import {
 import { useDebouncedValue } from "@mantine/hooks";
 import {
   IconAlertTriangle, IconArrowBackUp, IconArrowForwardUp, IconArrowLeft, IconChevronDown,
-  IconChevronUp, IconDeviceFloppy, IconDownload, IconInfoCircle, IconPhotoDown, IconPlus,
-  IconRefresh, IconSparkles, IconWand, IconZoomScan,
+  IconChevronUp, IconCrop, IconDeviceFloppy, IconDownload, IconInfoCircle, IconPhotoDown,
+  IconPlus, IconRefresh, IconSparkles, IconWand, IconZoomScan,
 } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -23,6 +23,7 @@ import { applyDataDrivenDefaults, countDataDrivenDefaults, type OpSuggestion }
   from "../components/editor/dataDrivenDefaults";
 import { previewScaleCaption } from "../components/editor/previewScale";
 import { prependCoverageLeveling } from "../components/editor/coverageLeveling";
+import { applyTrimCrop } from "../components/editor/mosaicTrim";
 import { clippingCaption } from "../components/editor/clipping";
 import { previewDebounceMs } from "../components/editor/previewDebounce";
 import { starMaskSizePx } from "../components/editor/starMaskSize";
@@ -100,6 +101,14 @@ export function EditorView() {
   const starSize = useQuery({
     queryKey: ["star-size-suggestion", safe],
     queryFn: () => api.starSizeSuggestion(safe),
+    staleTime: 60_000,
+  });
+  // One-click "trim the ragged mosaic border": the largest well-covered rectangle
+  // of this run's coverage map, offered only on a mosaic (the endpoint returns a
+  // null crop for a single-field stack, so the button simply doesn't appear).
+  const trim = useQuery({
+    queryKey: ["trim-suggestion", safe, rid],
+    queryFn: () => api.trimSuggestion(safe, rid),
     staleTime: 60_000,
   });
 
@@ -420,6 +429,18 @@ export function EditorView() {
   const applyDataDefaults = () =>
     setOps((p) => applyDataDrivenDefaults(p, dataDrivenSuggestions));
 
+  // The trim-border crop is only offered when this run is a mosaic and a
+  // well-covered rectangle worth cropping to was found.
+  const trimCrop = trim.data?.is_mosaic ? trim.data.crop : null;
+  const applyTrim = () => {
+    if (!trimCrop) return;
+    setOps((p) => applyTrimCrop(p, trimCrop, specs, uid));
+    notifications.show({
+      message: "Trimmed to the well-covered area — adjust or remove the Crop op to undo",
+      color: "violet",
+    });
+  };
+
   if (opsSchema.isLoading || saved.isLoading) {
     return <Center h={300}><Loader /></Center>;
   }
@@ -454,6 +475,13 @@ export function EditorView() {
                 onClick={applyDataDefaults}>
                 Use data defaults{nDataDriven > 1 ? ` (${nDataDriven})` : ""}
               </Button>
+            </Tooltip>
+          ) : null}
+          {trimCrop ? (
+            <Tooltip multiline w={250} withArrow
+              label="This is a mosaic with ragged, low-coverage edges. Crop to the largest well-covered rectangle in one click — it adds a Crop op you can fine-tune or remove.">
+              <Button variant="default" color="grape" leftSection={<IconCrop size={16} />}
+                onClick={applyTrim}>Trim border</Button>
             </Tooltip>
           ) : null}
           {/* Built-in presets carry a fixed op list with generic sizes: seed their

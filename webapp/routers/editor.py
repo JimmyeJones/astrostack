@@ -19,9 +19,10 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from seestack.edit.coverage_trim import largest_covered_rect
 from seestack.edit.histogram import compute_histogram
 from seestack.edit.pipeline import apply_recipe
-from seestack.edit.proxy import get_proxy, load_coverage
+from seestack.edit.proxy import coverage_path_for, get_proxy, load_coverage
 from seestack.edit.recipe import Recipe, recipe_from_dict
 from seestack.edit.registry import EditContext
 from seestack.edit import presets as presets_mod
@@ -317,6 +318,70 @@ async def denoise_suggestion(safe: str, run_id: int, request: Request) -> Denois
         rgb, _scale = get_proxy(project_dir, run.id, run.fits_path)
         sigma, strength = suggest_denoise_strength(rgb)
         return DenoiseSuggestionOut(noise_sigma=sigma, strength=strength)
+
+    return await run_in_threadpool(work)
+
+
+# Cap the coverage grid the O(h·w) largest-rectangle sweep runs on: a mosaic's
+# full-res coverage map can be >100 MP, but fractional crop bounds need nowhere
+# near that precision, so we stride it down first (mirrors the proxy decimation).
+_TRIM_MAX_DIM = 512
+
+
+class TrimCrop(BaseModel):
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+
+
+class TrimSuggestionOut(BaseModel):
+    """A one-click "trim the ragged mosaic border" suggestion. ``crop`` is the
+    fractional (0..1) rectangle of the largest well-covered area to set the
+    ``geometry.crop`` op to, or ``None`` when there's nothing worth trimming
+    (a single-field stack, uniform coverage, or an already-full-frame result)."""
+
+    is_mosaic: bool
+    crop: TrimCrop | None
+
+
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/editor/trim-suggestion",
+            response_model=TrimSuggestionOut)
+async def trim_suggestion(safe: str, run_id: int, request: Request,
+                          min_frac: float = 0.5) -> TrimSuggestionOut:
+    """Suggest a crop to the largest well-covered rectangle of a mosaic, so a
+    user can trim the ragged, low-coverage union-canvas edges in one click
+    instead of hand-dragging the crop bounds. Only offered on a mosaic (uneven
+    panel overlap → ``coverage_max > coverage_min``); a single-field stack is
+    left untouched. The coverage map already written next to the stack drives it.
+    """
+    project_dir, run = _run_info(request, safe, run_id)
+    is_mosaic = bool(int(run.coverage_max) > int(run.coverage_min))
+    if not is_mosaic:
+        return TrimSuggestionOut(is_mosaic=False, crop=None)
+
+    def work() -> TrimSuggestionOut:
+        cov_path = coverage_path_for(run.fits_path)
+        if not cov_path.exists():
+            return TrimSuggestionOut(is_mosaic=True, crop=None)
+        # Stride the (possibly huge) coverage map down before the rectangle sweep.
+        step = 1
+        try:
+            from astropy.io import fits as _fits
+
+            hdr = _fits.getheader(cov_path)
+            dim = max(int(hdr.get("NAXIS1", 0)), int(hdr.get("NAXIS2", 0)))
+            if dim > _TRIM_MAX_DIM:
+                step = -(-dim // _TRIM_MAX_DIM)  # ceil division
+        except (OSError, ValueError):
+            step = 1
+        cov = load_coverage(run.fits_path, step=step)
+        if cov is None:
+            return TrimSuggestionOut(is_mosaic=True, crop=None)
+        rect = largest_covered_rect(cov, min_frac=min_frac)
+        crop = None if rect is None else TrimCrop(x0=round(rect[0], 4), y0=round(rect[1], 4),
+                                                  x1=round(rect[2], 4), y1=round(rect[3], 4))
+        return TrimSuggestionOut(is_mosaic=True, crop=crop)
 
     return await run_in_threadpool(work)
 

@@ -54,19 +54,6 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 
 ### Autonomy — "just works" (PRIORITY 2)
-- **One-click "trim the ragged mosaic border"** — a Seestar mosaic's union canvas
-  has ragged, low-coverage edges (corners covered by a single frame, NaN gaps) that
-  look messy and are noisier than the well-covered interior. The coverage map is
-  already loaded into the editor render context (`ctx.coverage`, wired in v0.58.6),
-  so Auto-process (or a dedicated "Trim to well-covered area" button) could compute
-  the largest axis-aligned rectangle where coverage ≥ some fraction of the max and
-  set the `geometry.crop` op's fractional bounds to it — turning a fiddly manual
-  crop into one click, tuned to the actual data. Only offered on a mosaic
-  (`is_mosaic`, now surfaced on the histogram); a single-field stack is untouched.
-  Needs a robust largest-rectangle computation on the (downsampled) coverage mask
-  and a neutral fallback (no crop) when coverage is uniform or the rectangle would
-  be degenerate. Off-by-default risk nil (explicit button / crop op the user sees
-  and can remove). (M, autonomy/image-quality)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
   different (per-channel vs luminance gradient, star reduction, saturation). The
@@ -168,6 +155,26 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **One-click "Trim to well-covered area" for mosaics** — a Seestar mosaic's union
+  canvas has ragged, low-coverage edges (single-frame corners, NaN gaps) that look
+  messy and are noisier than the well-covered interior, and trimming them by hand
+  means fiddling four fractional crop sliders. A new pure `largest_covered_rect`
+  engine helper finds the largest axis-aligned rectangle whose pixels are all well
+  covered (coverage ≥ a fraction of the peak; NaN counts as uncovered) via the
+  classic O(h·w) maximal-rectangle sweep, returning fractional bounds or `None`
+  when there's nothing worth trimming (uniform/single-field coverage, or an
+  already-full-frame result). A `…/editor/trim-suggestion` endpoint strides the
+  run's coverage sibling down (≤512 px) and runs it, offered **only** on a mosaic
+  (`coverage_max > coverage_min`); the editor shows a "Trim border" button that
+  sets/updates a `geometry.crop` op to that rectangle (pure `applyTrimCrop` helper —
+  updates an existing crop in place rather than stacking duplicates). Off-by-default
+  risk nil (explicit button; the crop op is visible and removable). Engine + one
+  endpoint + frontend; additive/upgrade-safe (no on-disk change). Tested: engine
+  helper (7 cases: uniform/none/ragged-interior/NaN-hole/full-frame/clamp), webapp
+  (mosaic crop / single-field no-op / missing sibling), Vitest (helper 5 cases +
+  Editor: button shows on a mosaic and adds a Crop op, hidden on single-field).
+  (v0.60.0, this run)
 
 - **Highlight/shadow clipping warning in the editor** — over-stretching is the
   classic beginner mistake: push the stretch/levels too far and star/nebula cores
