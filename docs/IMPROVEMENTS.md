@@ -75,6 +75,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   do next; audit every screen for jargon and add plain-language "why" tooltips;
   reduce visible option clutter (progressive disclosure). (M, friendliness)
 - Better long-job feedback and clearer error messages. (S, friendliness)
+- **Warn when the min/max reject k is too aggressive for the frame count** — the
+  top/bottom-k trim (v0.58.0) only applies its full k-drop where a pixel has ≥ 2k+1
+  frames; below that it *silently* degrades to a single min/max drop. A user who
+  sets `min_max_reject_count=3` on an 8-frame stack gets almost no benefit and no
+  signal why. Add a Stack-form advisory (mirroring the existing small-stack min/max
+  nudge) that fires when `2·k+1 > accepted+solved`, saying e.g. "k=3 needs 7+ frames
+  per pixel to fully apply; you have 8 — it'll mostly fall back to a single drop.
+  Lower k or add frames." Pure frontend, reuses the frame-count the form already
+  has; advisory-only. (S, friendliness/autonomy)
+
+### Autonomy — follow-ups
+- **Auto-suggest the min/max reject count (k) from the streaked-frame count** — the
+  Stack form already nudges a beginner to *turn on* min/max reject when a small stack
+  carries streaked frames (v0.56.2). Now that k is tunable (v0.58.0), extend the
+  nudge to also suggest a *count*: if QC flags N frames with satellite/plane streaks,
+  a k ≈ min(N, 5) drops all of them instead of just the worst one — with a one-click
+  "set k = N" on the advisory. Reuses the streak QC already computed per frame; keep
+  it a suggestion (never auto-applies). (S, autonomy)
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 - **Photometric (multiplicative) frame normalization before combine** — frames
