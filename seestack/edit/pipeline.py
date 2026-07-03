@@ -37,8 +37,11 @@ def apply_recipe(
 ) -> np.ndarray:
     """Return the edited RGB in display space ``[0, 1]``.
 
-    ``for_preview`` skips ops marked ``proxy_safe=False`` (heavy ops apply on
-    export / explicit apply, not on every slider drag).
+    The preview renders **every** enabled operation — that's the whole point of a
+    live preview: what you see is what you'll export. Heavy ops just run on the
+    small proxy (and size their pixel-scaled effects via ``ctx.scaled_px`` so the
+    proxy result matches the full-res export). ``for_preview`` is kept for API
+    symmetry but no longer skips anything.
     """
     ctx = ctx or EditContext()
     ctx.stage = "linear"
@@ -49,8 +52,6 @@ def apply_recipe(
     for op in enabled:
         spec = get_op(op.id)
         if spec is None:
-            continue
-        if for_preview and not spec.proxy_safe:
             continue
         try:
             out = as_rgb(spec.apply(out, op.params, ctx))

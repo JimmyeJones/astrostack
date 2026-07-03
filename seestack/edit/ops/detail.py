@@ -96,7 +96,11 @@ def _sharpen(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
 
 def _deconvolve(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     iterations = int(params.get("iterations", 10))
-    psf_sigma = float(params.get("psf_sigma", 1.5))
+    # The PSF width is in full-res pixels; on the decimated live-preview proxy
+    # shrink it by proxy_scale so the preview reverses the same physical blur as
+    # the full-res export (parity), floored just above zero so it stays a real op.
+    psf_sigma = max(0.4, ctx.scaled_px(float(params.get("psf_sigma", 1.5))))
+    ring = max(0.1, ctx.scaled_px(0.4))  # ring-suppression blur, same scaling
 
     def run(img: np.ndarray) -> np.ndarray:
         from scipy.ndimage import gaussian_filter
@@ -120,7 +124,7 @@ def _deconvolve(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
             dec = richardson_lucy(norm, psf, num_iter=iterations, clip=False)
             out[..., c] = dec * (hi - lo) + lo
         # Real ring-suppression: a sub-pixel spatial blur (NOT across channels).
-        return gaussian_filter(out, sigma=(0.4, 0.4, 0)).astype(np.float32)
+        return gaussian_filter(out, sigma=(ring, ring, 0)).astype(np.float32)
 
     return _with_nan_filled(rgb, run)
 
@@ -168,9 +172,9 @@ register(OpSpec(
 
 register(OpSpec(
     id="detail.deconvolve", label="Deconvolution", group="detail", stage="linear",
-    apply=_deconvolve, proxy_safe=False,  # heavy — apply on demand, not every drag
-    help="Recover sharpness lost to seeing by reversing the star blur. Heavy, so it "
-         "only runs on Export / full-res PNG (not the live preview).",
+    apply=_deconvolve, proxy_safe=True,  # shows in the live preview (runs on the proxy)
+    help="Recover sharpness lost to seeing by reversing the star blur. It's a heavy "
+         "effect, so the live preview may take a moment to update while it's on.",
     params=[
         EditParam("iterations", "Iterations", "int", default=10, min=1, max=50, step=1,
                   help="More iterations sharpen harder but can add ringing and noise."),

@@ -32,14 +32,13 @@ _(none — claim an item here with your branch name)_
 ### ⭐ Editor — make it excellent (PRIORITY 1)
 The editor is where a good stack becomes a good *picture*, and it has real
 problems. Dogfood it every big-picture run and fix root causes.
-- **Live preview** — it's slow / doesn't update well / doesn't match the exported
-  full-res result. Audit the proxy→preview path vs the full-res export path; make
-  the preview a fast, faithful representation of the final image. (The
-  "make it obvious when an op is only preview-approximate" sub-part shipped in
-  v0.56.5 — non-`proxy_safe` ops like Deconvolution now carry an "export only"
-  badge + an explanatory note. Spatial *detail* ops — sharpen radius,
-  bilateral-denoise spatial extent — are now `proxy_scale`-corrected so the
-  preview matches the export, v0.56.19.) (M, editor)
+- **Live preview** — the preview must show **every** enabled action (that's the
+  whole point of it). **DONE (v0.57.0):** the last hold-out, Deconvolution, was
+  `proxy_safe=False` and got *skipped* in preview (only a badge told you it was
+  hidden); it now renders on the proxy with a `proxy_scale`-corrected PSF, and the
+  pipeline no longer skips any op. What remains here is *responsiveness* (heavy
+  ops on the proxy can lag) and closing any remaining proxy↔export look
+  differences — chase those, but never by hiding an action again. (S–M, editor)
 - **Confusing / clunky controls** — too many ops with terse params and no obvious
   starting point. Add plain-language help, a simple/guided default layout, curated
   presets, and progressive disclosure of advanced ops so a beginner gets a good

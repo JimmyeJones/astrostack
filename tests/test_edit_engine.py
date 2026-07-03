@@ -112,16 +112,23 @@ def test_recipe_validation_drops_unknown_and_clamps():
     assert rec.ops[0].params["stretch"] == 1.0
 
 
-def test_heavy_op_skipped_in_preview_only():
+def test_every_op_renders_in_preview():
+    # A live preview must show EVERY enabled action — including the heavy
+    # deconvolution op, which used to be skipped. What you see = what you export.
     img = _img(nan_band=0)
-    rec = Recipe(ops=validate_ops([
-        OpInstance(id="detail.deconvolve", params={"iterations": 3, "psf_sigma": 1.2}),
-        OpInstance(id="tone.stretch", params={}),
-    ]))
-    assert get_op("detail.deconvolve").proxy_safe is False
-    prev = apply_recipe(img, rec, EditContext(is_proxy=True), for_preview=True)
-    full = apply_recipe(img, rec, EditContext(is_proxy=False), for_preview=False)
-    assert prev.shape == full.shape  # both render; heavy op only runs in full
+    decon = OpInstance(id="detail.deconvolve", params={"iterations": 5, "psf_sigma": 1.2})
+    stretch = OpInstance(id="tone.stretch", params={})
+    with_decon = Recipe(ops=validate_ops([decon, stretch]))
+    without = Recipe(ops=validate_ops([stretch]))
+
+    assert get_op("detail.deconvolve").proxy_safe is True  # now previewable
+
+    ctx = lambda: EditContext(is_proxy=True, proxy_scale=3.0)  # noqa: E731
+    prev_with = apply_recipe(img, with_decon, ctx(), for_preview=True)
+    prev_without = apply_recipe(img, without, ctx(), for_preview=True)
+    # The deconvolution visibly changes the preview (it's no longer skipped).
+    assert not np.allclose(prev_with, prev_without, atol=1e-4)
+    assert np.isfinite(prev_with).all()
 
 
 def test_proxy_build_cache_and_bound(tmp_path):
