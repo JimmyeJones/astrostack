@@ -37,7 +37,9 @@ problems. Dogfood it every big-picture run and fix root causes.
   the preview a fast, faithful representation of the final image. (The
   "make it obvious when an op is only preview-approximate" sub-part shipped in
   v0.56.5 — non-`proxy_safe` ops like Deconvolution now carry an "export only"
-  badge + an explanatory note.) (M, editor)
+  badge + an explanatory note. Spatial *detail* ops — sharpen radius,
+  bilateral-denoise spatial extent — are now `proxy_scale`-corrected so the
+  preview matches the export, v0.56.19.) (M, editor)
 - **Confusing / clunky controls** — too many ops with terse params and no obvious
   starting point. Add plain-language help, a simple/guided default layout, curated
   presets, and progressive disclosure of advanced ops so a beginner gets a good
@@ -52,7 +54,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
 
 ### Editor — make it excellent (PRIORITY 1) — new ideas
-_(none right now — see Shipped for recently completed editor work)_
+- **Extend proxy-scale parity to the background ops** — v0.56.19 corrected the
+  spatial *detail* ops (sharpen radius, bilateral-denoise extent) for the decimated
+  preview proxy, but `background.subtract` / `background.final_gradient` still use
+  full-resolution pixel measures (`box_size`, `dilate_px`) directly, so their
+  gradient model is estimated at a different physical mesh scale in the preview
+  than in the full-res export. Scale those px params by `EditContext.scaled_px()`
+  too — but carefully: `photutils.Background2D` needs a sane minimum box and a few
+  boxes across the (small) proxy, so floor the scaled `box_size` (and guard that
+  the mesh still tiles the proxy) rather than blindly dividing. Add a
+  monkeypatched-arg test like the sharpen one. Background is smooth so the visible
+  parity gap is smaller than sharpen's, hence a follow-up not a blocker.
+  (S–M, editor/correctness)
 
 ### Autonomy — "just works" (PRIORITY 2)
 - **One-click "process this target"** — after ingest, reach a good stack *and* a
@@ -160,6 +173,14 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Auto-process note clears when the recipe changes** — follow-up to v0.56.18's
+  "What Auto-process did" note: it previously persisted (until dismissed) even
+  after the user edited the pipeline, so it could describe ops that were no longer
+  there. The editor now records the recipe signature right after Auto runs and
+  drops the note the moment the pipeline diverges from it (manual edit, undo,
+  redo), so it only ever describes the current auto result. Frontend-only;
+  Vitest-covered (removing the auto op hides the note). (v0.56.20, this run)
 
 - **Preview↔export parity for spatial detail ops** — the live preview runs on a
   striding-decimated proxy (≤1500 px), but the sharpen radius, bilateral-denoise

@@ -77,7 +77,11 @@ export function EditorView() {
   const [lightbox, setLightbox] = useState(false);
   // Plain-language summary of what the last Auto-process run did, shown as a
   // dismissible note so the one-click result isn't a black box (null = hidden).
+  // `autoKey` is the recipe signature right after Auto ran; once the pipeline
+  // diverges from it (manual edit, undo, redo) the note is cleared so it never
+  // misdescribes the current state.
   const [autoSummary, setAutoSummary] = useState<string | null>(null);
+  const [autoKey, setAutoKey] = useState<string | null>(null);
 
   // Seed ops from the saved recipe once (clears undo history).
   useEffect(() => {
@@ -92,6 +96,14 @@ export function EditorView() {
 
   const recipe: Recipe = useMemo(() => ({ ops, base_run_id: rid }), [ops, rid]);
   const recipeKey = JSON.stringify(ops);
+  // Once the pipeline diverges from what Auto-process produced, drop the
+  // "What Auto-process did" note so it can't misdescribe the current recipe.
+  useEffect(() => {
+    if (autoKey !== null && recipeKey !== autoKey) {
+      setAutoSummary(null);
+      setAutoKey(null);
+    }
+  }, [recipeKey, autoKey]);
   const [dKey] = useDebouncedValue(recipeKey, 250);
   const [bust, setBust] = useState(0);
   const dRecipe: Recipe = useMemo(() => {
@@ -235,6 +247,7 @@ export function EditorView() {
       const built = (r.ops ?? []).map((o) => ({ ...o, uid: o.uid || uid() }));
       setOps(built);
       setAutoSummary(autoSummarySentence(built, specs));
+      setAutoKey(JSON.stringify(built));
       notifications.show({ message: "Auto-process applied — tweak from here", color: "violet" });
     },
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
