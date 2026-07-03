@@ -240,6 +240,11 @@ class StackOptions:
     # flat before normalising for a more correct flat (a "flat-dark"). Only used
     # when ``flat_path`` is also set. Server-resolved path, never client input.
     flat_dark_path: str | None = None
+    # Optional master bias subtracted from the *lights* as the readout pedestal,
+    # for the bias+flat (no dark) workflow — ``(light − bias) / flat``. Ignored
+    # when ``dark_path`` is set (a dark already contains the bias, so both would
+    # double-subtract it). Server-resolved path, never client input.
+    bias_path: str | None = None
 
     def background_options(self) -> BackgroundOptions:
         return BackgroundOptions(
@@ -544,11 +549,12 @@ def run_stack(
 
     # ---- 1a. Load calibration masters (once, shared across workers) --------
     calibration = None
-    if options.dark_path or options.flat_path:
+    if options.dark_path or options.flat_path or options.bias_path:
         from seestack.calibrate.apply import CalibrationMasters
 
         calibration = CalibrationMasters.load(
             options.dark_path, options.flat_path, options.flat_dark_path,
+            options.bias_path,
         )
         if calibration.is_empty:
             calibration = None

@@ -158,7 +158,8 @@ export function StackView() {
   const darkOpts = masterOpts("dark", recDarkId);
   const flatDarkOpts = masterOpts("dark", recFlatDarkId);
   const flatOpts = masterOpts("flat", recFlatId);
-  const hasMasters = darkOpts.length > 0 || flatOpts.length > 0;
+  const biasOpts = masterOpts("bias", null);
+  const hasMasters = darkOpts.length > 0 || flatOpts.length > 0 || biasOpts.length > 0;
   // Show the "use recommended" hint only when there's a suggestion the user
   // hasn't already applied. The flat-dark is only relevant once a flat is set.
   const canApplyRec = (recDarkId !== null && String(values.dark_master_id ?? "") !== String(recDarkId))
@@ -189,6 +190,10 @@ export function StackView() {
   const flatDarkWarning = flatDarkM && expMismatch(flatDarkM.exposure_s, flatM?.exposure_s)
     ? `This flat-dark was shot at ${flatDarkM.exposure_s}s but your flat is ${flatM?.exposure_s}s — a flat-dark should match the flat's exposure to remove its pedestal cleanly.`
     : null;
+  // A master dark already contains the bias pedestal, so a bias picked alongside
+  // a dark is *not* subtracted from the lights again (the engine ignores it to
+  // avoid double-subtraction). Tell the user rather than silently dropping it.
+  const biasIgnoredForLights = Boolean(values.bias_master_id && values.dark_master_id);
   const running = job && (job.state === "running" || job.state === "queued");
   const pct = job && job.total ? Math.round((job.done / job.total) * 100) : 0;
 
@@ -422,6 +427,25 @@ export function StackView() {
                 {flatDarkWarning ? (
                   <Alert color="yellow" variant="light" py={6} px="sm">
                     <Text size="xs">{flatDarkWarning}</Text>
+                  </Alert>
+                ) : null}
+                {biasOpts.length > 0 ? (
+                  <Select
+                    label="Master bias (no dark)"
+                    description="Subtracted from your lights as the readout pedestal — (light − bias) / flat — for the bias+flat workflow when you have no matching dark. Ignored if a dark is selected (a dark already includes the bias)."
+                    placeholder="None" clearable
+                    data={biasOpts} value={asStr(values.bias_master_id)}
+                    onChange={(v) => set("bias_master_id", v)}
+                  />
+                ) : null}
+                {biasIgnoredForLights ? (
+                  <Alert color="yellow" variant="light" py={6} px="sm">
+                    <Text size="xs">
+                      Your master dark already contains the bias pedestal, so this
+                      bias won't be subtracted from the lights again (that would
+                      double-subtract it). Clear the dark to use bias-only
+                      calibration.
+                    </Text>
                   </Alert>
                 ) : null}
               </Stack>

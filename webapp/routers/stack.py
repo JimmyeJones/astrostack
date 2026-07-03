@@ -100,12 +100,14 @@ def trigger_stack(safe: str, body: dict[str, Any], request: Request) -> dict[str
     body.pop("dark_path", None)
     body.pop("flat_path", None)
     body.pop("flat_dark_path", None)
+    body.pop("bias_path", None)
     dark_id = body.pop("dark_master_id", None)
     flat_id = body.pop("flat_master_id", None)
     flat_dark_id = body.pop("flat_dark_master_id", None)
+    bias_id = body.pop("bias_master_id", None)
     try:
-        dark_path, flat_path, flat_dark_path = calibration.resolve_master_paths(
-            settings.resolved_library_root, dark_id, flat_id, flat_dark_id)
+        dark_path, flat_path, flat_dark_path, bias_path = calibration.resolve_master_paths(
+            settings.resolved_library_root, dark_id, flat_id, flat_dark_id, bias_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     if dark_path:
@@ -114,6 +116,8 @@ def trigger_stack(safe: str, body: dict[str, Any], request: Request) -> dict[str
         body["flat_path"] = flat_path
     if flat_dark_path:
         body["flat_dark_path"] = flat_dark_path
+    if bias_path:
+        body["bias_path"] = bias_path
 
     job = pipeline.submit_stack(settings, jm, safe, body)
     return {"job_id": job.id}
@@ -447,6 +451,7 @@ def stack_run_options(safe: str, run_id: int, request: Request) -> dict[str, Any
         ("dark_path", "dark_master_id"),
         ("flat_path", "flat_master_id"),
         ("flat_dark_path", "flat_dark_master_id"),
+        ("bias_path", "bias_master_id"),
     ):
         mid = calibration.master_id_for_path(lib_root, parsed.get(path_key))
         if mid is not None:

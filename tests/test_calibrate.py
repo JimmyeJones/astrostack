@@ -132,6 +132,54 @@ def test_apply_dark_then_flat(tmp_path):
     np.testing.assert_allclose(out, 100.0)  # (110-10)/1
 
 
+def test_apply_bias_subtraction_when_no_dark(tmp_path):
+    # (light - bias) / flat with no dark: bias is the readout pedestal.
+    bias = np.full((4, 4), 30.0, dtype=np.float32)
+    save_master(tmp_path / "bias.fits", bias, MasterMeta("bias", 0, 4, 4, "median"))
+    cal = CalibrationMasters.load(bias_path=str(tmp_path / "bias.fits"))
+    assert cal.describe() == "bias"
+    raw = np.full((4, 4), 200.0, dtype=np.float32)
+    out = cal.apply_raw(raw)
+    np.testing.assert_allclose(out, 170.0)  # 200 - 30
+    np.testing.assert_allclose(raw, 200.0)  # input untouched
+
+
+def test_apply_bias_then_flat_no_dark(tmp_path):
+    bias = np.full((2, 2), 20.0, dtype=np.float32)
+    flat = np.full((2, 2), 4.0, dtype=np.float32)  # uniform → flat_norm == 1
+    save_master(tmp_path / "b.fits", bias, MasterMeta("bias", 0, 2, 2, "median"))
+    save_master(tmp_path / "f.fits", flat, MasterMeta("flat", 5, 2, 2, "mean"))
+    cal = CalibrationMasters.load(
+        flat_path=str(tmp_path / "f.fits"), bias_path=str(tmp_path / "b.fits"))
+    assert cal.describe() == "bias+flat"
+    raw = np.full((2, 2), 120.0, dtype=np.float32)
+    np.testing.assert_allclose(cal.apply_raw(raw), 100.0)  # (120-20)/1
+
+
+def test_bias_not_applied_to_lights_when_dark_present(tmp_path):
+    # A master dark already contains the bias pedestal — the bias must NOT be
+    # subtracted from the lights again (no double-subtraction).
+    dark = np.full((4, 4), 50.0, dtype=np.float32)
+    bias = np.full((4, 4), 30.0, dtype=np.float32)
+    save_master(tmp_path / "dark.fits", dark, MasterMeta("dark", 10, 4, 4, "median"))
+    save_master(tmp_path / "bias.fits", bias, MasterMeta("bias", 0, 4, 4, "median"))
+    cal = CalibrationMasters.load(
+        dark_path=str(tmp_path / "dark.fits"), bias_path=str(tmp_path / "bias.fits"))
+    # Dark wins; describe() shows only the dark (bias is loaded but inert here).
+    assert cal.describe() == "dark"
+    raw = np.full((4, 4), 200.0, dtype=np.float32)
+    np.testing.assert_allclose(cal.apply_raw(raw), 150.0)  # 200 - 50, not 200-50-30
+
+
+def test_bias_shape_mismatch_is_skipped(tmp_path):
+    bias = np.full((2, 2), 30.0, dtype=np.float32)  # wrong shape vs 4×4 raw
+    save_master(tmp_path / "bias.fits", bias, MasterMeta("bias", 0, 2, 2, "median"))
+    cal = CalibrationMasters.load(bias_path=str(tmp_path / "bias.fits"))
+    raw = np.full((4, 4), 200.0, dtype=np.float32)
+    # No matching master applies → raw passes through unchanged.
+    np.testing.assert_allclose(cal.apply_raw(raw), 200.0)
+
+
 def test_flat_dark_subtracted_before_normalising(tmp_path):
     # Flat = dark pedestal (100) + illumination signal (left 100, right 200).
     flat = np.empty((4, 4), dtype=np.float32)

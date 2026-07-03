@@ -114,13 +114,15 @@ def resolve_master_paths(
     dark_master_id: Any = None,
     flat_master_id: Any = None,
     flat_dark_master_id: Any = None,
-) -> tuple[str | None, str | None, str | None]:
-    """Map dark/flat/flat-dark master ids → on-disk FITS paths. Raises
+    bias_master_id: Any = None,
+) -> tuple[str | None, str | None, str | None, str | None]:
+    """Map dark/flat/flat-dark/bias master ids → on-disk FITS paths. Raises
     ``KeyError`` with a human message if an id is given but no such master
     exists.
 
     ``flat_dark_master_id`` is a dark/bias matched to the flat's exposure,
-    subtracted from the flat before normalising (see
+    subtracted from the flat before normalising; ``bias_master_id`` is a master
+    bias subtracted from the lights when no dark is chosen (see
     :meth:`CalibrationMasters.load`).
     """
     def _one(mid: Any, kind: str) -> str | None:
@@ -138,6 +140,7 @@ def resolve_master_paths(
         _one(dark_master_id, "dark"),
         _one(flat_master_id, "flat"),
         _one(flat_dark_master_id, "flat-dark"),
+        _one(bias_master_id, "bias"),
     )
 
 

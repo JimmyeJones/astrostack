@@ -49,18 +49,13 @@ _(none — claim an item here with your branch name)_
   Needs care for uniform/low-coverage pixels (don't reject the only sample) and
   a streaming, memory-bounded implementation (the app deliberately avoids
   holding all frames). (M, correctness)
-- Bias masters can be built but are never applied — `CalibrationMasters.load`
-  only takes dark/flat/flat-dark. Wire bias in (and dark *scaling* by
-  exposure ratio once bias exists) for mismatched-exposure dark workflows.
-  **Scoping note (from a run that looked at it):** the *correct* math needs
-  care — a master dark already contains the bias pedestal, so subtracting both a
-  bias *and* an unscaled dark double-subtracts bias. Two clean, unambiguous
-  slices: (a) **bias-only for lights when no dark is chosen** —
-  `(light − bias) / flat` — trivially correct and additive; (b) **dark
-  exposure-scaling** — `scaled_dark = bias + (dark − bias)·(t_light/t_dark)`,
-  which needs the per-frame light exposure threaded into `apply_raw` (the harder
-  part) and a neutral fallback when either exposure is unknown. Ship (a) first,
-  file (b) separately; keep both opt-in and guard shape/exposure mismatches.
+- **Dark exposure-scaling** (slice (b), now that bias is wired for lights) —
+  `scaled_dark = bias + (dark − bias)·(t_light/t_dark)` so a dark shot at a
+  different exposure than the lights can still be used. Needs the per-frame
+  light exposure threaded into `apply_raw` (the harder part) and a neutral
+  fallback (unscaled dark) when either exposure or a bias is unknown. Keep it
+  opt-in and guard shape/exposure mismatches. Slice (a) — bias-only for lights
+  when no dark is chosen, `(light − bias) / flat` — shipped v0.53.0.
   (M, correctness)
 - First-class session/night dimension in the project schema (frames only have
   `timestamp_utc`): per-session sky levelling before combine, per-session
@@ -127,6 +122,20 @@ _Newest first. One line each: what + commit/PR._
   when up. Shown only with ≥2 measured runs. Pure `noiseTrendSeries` /
   `sparklinePoints` helpers, tested; reuses the recorded `noise_sigma`;
   within-target, frontend-only. (v0.52.1, this run)
+
+- **Bias-only calibration for lights when no dark is chosen** (bias slice (a))
+  — master bias frames could be built but were never applied to lights.
+  `CalibrationMasters.load` now takes a `bias_path`; `apply_raw` subtracts the
+  bias as the readout pedestal — `(light − bias) / flat` — but **only when no
+  master dark is set** (a dark already contains the bias, so both would
+  double-subtract it: the bias is loaded but inert when a dark is present).
+  Threaded end-to-end: `StackOptions.bias_path` (+ `NON_FORM_KEYS`),
+  `resolve_master_paths` returns a 4th bias path, the stack router resolves a
+  `bias_master_id` server-side and the reuse-settings endpoint reverse-maps it,
+  and the Stack form gained a "Master bias (no dark)" selector with a caution
+  when a dark is also picked. Additive/upgrade-safe (new optional field,
+  default None). Slice (b) — dark exposure-scaling — filed above. (v0.53.0,
+  this run)
 
 - **"Compare with previous run" action on the History page** — the Compare view
   (v0.51.0) was reachable only from the Gallery's multi-select, but the most
