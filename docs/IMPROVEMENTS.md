@@ -163,6 +163,15 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Guard the Curves op against a degenerate (blank-the-image) curve** — a tone
+  curve with a single control point (or all-equal x) makes `np.interp` return a
+  constant, blanking the whole image to a flat tone. The CurvesWidget can't produce
+  that (endpoints are locked), but a hand-built or `base64`-encoded recipe / preset
+  could, with no error. `_curves` now returns the input unchanged (identity) when
+  the curve has fewer than two points spanning a range of x, so a degenerate recipe
+  can't silently destroy the picture. Engine-only, additive. Regression test covers
+  the one-point and flat-x cases (identity + NaN preserved). (v0.61.10, this run)
+
 - **Expose the Rotate op's `expand` control (was a dead read)** — `geometry.rotate`
   read `params.get("expand", True)` but never registered an `expand` param, so the
   reshape-vs-crop behaviour was uncontrollable: every rotated export always grew
