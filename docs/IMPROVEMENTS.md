@@ -111,7 +111,7 @@ sitting; move an entry to **In progress**/**Shipped** as usual when you take it.
   preview understates deconvolution when `scaled_px(psf_sigma)` hits the floor.
   Severity: wrong-result (preview misleads). Confidence: confirmed (measured).
 
-- **BUG: Gaia photometric colour calibration never works — per-detection and
+- **✅ FIXED (v0.69.0): Gaia photometric colour calibration never works — per-detection and
   per-catalog arrays are ANDed together** — in `_solve_gaia`
   (`seestack/post/color_cal.py:297`), `matched` has length n_detections (from
   `sky.match_to_catalog_sky`) while `color`/`g_mag` have length n_gaia_rows, so
@@ -282,7 +282,7 @@ sitting; move an entry to **In progress**/**Shipped** as usual when you take it.
   Severity: wrong-result (persistent data loss). Confidence: confirmed
   (reproduced).
 
-- **BUG: debayer edge interpolation wraps to the opposite sensor edge, and the
+- **✅ FIXED (v0.69.0): debayer edge interpolation wraps to the opposite sensor edge, and the
   drizzle path stacks that contaminated ring** — `_shift` claims edge
   replication but is `np.roll` (`seestack/io/fits_loader.py:199-201`), so the
   outermost pixel ring of every debayered frame mixes in values from the
@@ -297,7 +297,7 @@ sitting; move an entry to **In progress**/**Shipped** as usual when you take it.
   drizzle `prepare()`. Severity: wrong-result (drizzle-only, localized).
   Confidence: confirmed (reproduced leak; exposure traced).
 
-- **BUG: cancelling a running non-cancel-aware job discards its completed
+- **✅ FIXED (v0.69.0): cancelling a running non-cancel-aware job discards its completed
   result and mislabels it "cancelled"** — the worker checks
   `job.cancel_requested()` *after* the body returns (`webapp/jobs.py:276-282`);
   bodies that never poll the flag (`build_master`, `editor_export`,
@@ -310,7 +310,7 @@ sitting; move an entry to **In progress**/**Shipped** as usual when you take it.
   despite a late cancel request (cancel then only affects queued jobs).
   Severity: wrong-result (state inconsistency). Confidence: confirmed (traced).
 
-- **BUG: a hung Gaia query still hangs the stack despite the timeout** — the
+- **✅ FIXED (v0.69.0): a hung Gaia query still hangs the stack despite the timeout** — the
   guard around `_solve_gaia` (`seestack/post/color_cal.py:104-115`) calls
   `fut.cancel()` (a no-op on a running future) and then exits the
   `ThreadPoolExecutor` context manager, whose `shutdown(wait=True)` blocks until
@@ -322,7 +322,7 @@ sitting; move an entry to **In progress**/**Shipped** as usual when you take it.
   needs a slow/hung server + gaia mode). Confidence: confirmed (traced;
   standard concurrent.futures semantics).
 
-- **BUG: PATCHing a frame with an invalid `bayer_pattern` is persisted and
+- **✅ FIXED (v0.69.0): PATCHing a frame with an invalid `bayer_pattern` is persisted and
   permanently 500s that frame's preview** — `FramePatch.bayer_pattern` is an
   unconstrained `str | None` (`webapp/schemas.py:70`) written verbatim
   (`webapp/routers/frames.py:233-236`); `frame_preview` validates only the
@@ -334,7 +334,7 @@ sitting; move an entry to **In progress**/**Shipped** as usual when you take it.
   400) when a stored pattern is invalid. Severity: broken-UX (persistent 500).
   Confidence: confirmed (traced).
 
-- **BUG: non-numeric calibration master id in a stack request → 500** —
+- **✅ FIXED (v0.69.0): non-numeric calibration master id in a stack request → 500** —
   `trigger_stack` catches only `KeyError` from `resolve_master_paths`
   (`webapp/routers/stack.py:108-112`), but `_one` does `int(mid)`
   (`webapp/calibration.py:131`) which raises `ValueError` for
@@ -343,7 +343,7 @@ sitting; move an entry to **In progress**/**Shipped** as usual when you take it.
   `(ValueError, TypeError)` alongside `KeyError` → 400/404. Severity: broken-UX
   (500 on bad input). Confidence: confirmed (traced).
 
-- **BUG: non-numeric `stretch`/`black` in save-preview → 500** —
+- **✅ FIXED (v0.69.0): non-numeric `stretch`/`black` in save-preview → 500** —
   `save_stack_preview` does `float(body.get("stretch", …))` on a raw dict
   (`webapp/routers/stack.py:315-316`); `{"stretch": "abc"}` raises `ValueError`
   → 500. The sibling `build_master` endpoint wraps the same pattern in
