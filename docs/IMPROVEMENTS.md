@@ -60,6 +60,34 @@ problems. Dogfood it every big-picture run and fix root causes.
   crop/rotate math) before the PNG, so the overlay tracks the edited image. Reuses
   the existing geometry ops; additive. Care: keep NaN = uncovered through the
   transform, and only apply geometry (not tone) ops. (M, editor/trust)
+- **Wavelet-denoise preview↔export parity** — every other spatial op (sharpen
+  radius, deconv PSF, bilateral spatial σ, background box) is corrected for the
+  decimated preview proxy via `ctx.scaled_px`, but the **default** denoise method
+  (`method="wavelet"`, also what Auto-process uses) has no size compensation: a
+  BayesShrink multi-level DWT's effect scales with image dimensions, so a strength
+  tuned on the ≤1500 px proxy smooths visibly differently on the full-res export.
+  The wavelet branch decomposes the whole image, so there's no single "radius" to
+  scale; a defensible fix is to cap the decomposition `wavelet_levels` to a
+  proxy-independent count (e.g. tie it to a physical scale via `proxy_scale`) or to
+  denoise the export on a matched-resolution pyramid. Needs care and a parity test
+  (compare denoise on a full image vs its 2×/4× strided proxy). Off nothing (it's
+  a correctness fix), but validate it doesn't weaken the clean-image case.
+  (M, editor/correctness)
+- **Surface failed ops on export, not just in the live preview** — the preview and
+  histogram paths collect per-op failures into `errors` and show them under the
+  image (Editor.tsx), but the full-res export path (`_render_recipe_fullres`) only
+  *logs* a failed op and drops it silently — so an op that fails on the full-res
+  data (but worked on the proxy, or vice versa) changes the exported look with no
+  notice to the user. Thread the per-op errors into the export job result and show
+  them in the "Export running/done" notification (or the History card). Reuses the
+  same best-effort try/except; additive. (S–M, editor/trust)
+- **"Original" compare should match the stack's own baseline** — the editor's
+  Compare ("Original") renders an *empty* recipe, which the backend tone-maps with
+  a hard-coded default asinh (stretch 0.5 / black 0.35). That can look different
+  from the stack thumbnail the user saw on History/Target before entering the
+  editor, so "before" isn't the baseline they expect. Render the Original with the
+  same default the run's own preview/thumbnail uses (or the run's saved recipe if
+  any) so the A/B is honest. (S, editor/trust)
 ### Autonomy — "just works" (PRIORITY 2)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
