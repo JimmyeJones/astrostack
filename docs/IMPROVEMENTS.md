@@ -52,20 +52,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
 
-### Editor — make it excellent (PRIORITY 1) — new ideas
-- **Extend proxy-scale parity to the background ops** — v0.56.19 corrected the
-  spatial *detail* ops (sharpen radius, bilateral-denoise extent) for the decimated
-  preview proxy, but `background.subtract` / `background.final_gradient` still use
-  full-resolution pixel measures (`box_size`, `dilate_px`) directly, so their
-  gradient model is estimated at a different physical mesh scale in the preview
-  than in the full-res export. Scale those px params by `EditContext.scaled_px()`
-  too — but carefully: `photutils.Background2D` needs a sane minimum box and a few
-  boxes across the (small) proxy, so floor the scaled `box_size` (and guard that
-  the mesh still tiles the proxy) rather than blindly dividing. Add a
-  monkeypatched-arg test like the sharpen one. Background is smooth so the visible
-  parity gap is smaller than sharpen's, hence a follow-up not a blocker.
-  (S–M, editor/correctness)
-
 ### Autonomy — "just works" (PRIORITY 2)
 - **One-click "process this target"** — after ingest, reach a good stack *and* a
   good auto-edited preview with zero manual steps: QC → solve → auto-grade →
@@ -181,6 +167,21 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Preview↔export parity for the background ops** — v0.56.19 corrected the spatial
+  *detail* ops for the decimated preview proxy, but `background.subtract` /
+  `background.final_gradient` still fed full-resolution pixel measures (`box_size`,
+  `dilate_px`) straight through, so their gradient mesh was estimated at a coarser
+  physical scale in the preview than in the full-res export. A new `_scaled_box`
+  helper divides those px measures by `EditContext.scaled_px()` (a no-op on the
+  export, so the exported result is byte-for-byte unchanged), floored so
+  `Background2D` still gets a sane box with a few cells across the small proxy —
+  and `for_image_size` floors `subtract`'s box further so the mesh always tiles.
+  As a bonus this also makes `final_gradient` behave better on the proxy (a 256 px
+  box on a ≤1500 px proxy previously left barely one mesh cell). Monkeypatched-arg
+  tests prove box_size (and final-gradient's dilate_px) shrink 1×→2×→4× with
+  proxy_scale while the export stays at the param value. Engine-only, additive.
+  (v0.57.1, this run)
 
 - **Auto-process note clears when the recipe changes** — follow-up to v0.56.18's
   "What Auto-process did" note: it previously persisted (until dismissed) even

@@ -267,3 +267,47 @@ def test_sharpen_radius_scaled_to_proxy(monkeypatch):
     spec.apply(img, {"amount": 1.0, "radius": 4.0}, EditContext(proxy_scale=4.0))
     # full-res keeps radius 4; a 2x proxy halves it; a 4x proxy quarters it.
     assert seen == [4.0, 2.0, 1.0]
+
+
+def test_background_subtract_box_scaled_to_proxy(monkeypatch):
+    """The background-subtract box_size is a full-res pixel measure, so on the
+    decimated preview proxy it must shrink by proxy_scale to keep the gradient
+    mesh at the same physical scale as the export (preview↔export parity)."""
+    import seestack.bg.per_frame as pf
+
+    seen: list[int] = []
+
+    def fake_subtract(rgb, opts, *, use_gpu=None):
+        seen.append(int(opts.box_size))
+        return rgb
+
+    monkeypatch.setattr(pf, "subtract_background", fake_subtract)
+    spec = get_op("background.subtract")
+    img = _img(20, 20, nan_band=0)
+
+    spec.apply(img, {"box_size": 128}, EditContext(proxy_scale=1.0))
+    spec.apply(img, {"box_size": 128}, EditContext(proxy_scale=2.0))
+    spec.apply(img, {"box_size": 128}, EditContext(proxy_scale=4.0))
+    # export keeps 128; a 2x proxy halves it; a 4x proxy quarters it.
+    assert seen == [128, 64, 32]
+
+
+def test_final_gradient_box_and_dilate_scaled_to_proxy(monkeypatch):
+    """The final-gradient box_size AND dilate_px are full-res pixel measures, so
+    both shrink by proxy_scale on the preview proxy for export parity."""
+    import seestack.bg.final_gradient as fg
+
+    seen: list[tuple[int, int]] = []
+
+    def fake_remove(rgb, opts):
+        seen.append((int(opts.box_size), int(opts.dilate_px)))
+        return rgb
+
+    monkeypatch.setattr(fg, "remove_final_gradient", fake_remove)
+    spec = get_op("background.final_gradient")
+    img = _img(20, 20, nan_band=0)
+
+    spec.apply(img, {"box_size": 256, "dilate_px": 16}, EditContext(proxy_scale=1.0))
+    spec.apply(img, {"box_size": 256, "dilate_px": 16}, EditContext(proxy_scale=4.0))
+    # export unchanged; a 4x proxy quarters both spatial measures.
+    assert seen == [(256, 16), (64, 4)]
