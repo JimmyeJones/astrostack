@@ -289,6 +289,28 @@ describe("StackView", () => {
         .toBeInTheDocument());
   });
 
+  it("turns on min/max reject in one click from the nudge, then hides the nudge", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+      { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
+        default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+      { key: "min_max_reject", label: "Min/max rejection", type: "bool", group: "simple",
+        default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+    ]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: true, min_max_reject: false });
+    const frames = Array.from({ length: 6 }, (_, i) =>
+      ({ ...mkFrame(i + 1), streak_detected: i === 0 }));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    const btn = await screen.findByRole("button", { name: "Turn on min/max rejection" });
+    fireEvent.click(btn);
+    // The nudge (and its button) disappear once min/max reject is on.
+    await waitFor(() =>
+      expect(screen.queryByText(/drops the single highest and lowest/)).not.toBeInTheDocument());
+  });
+
   it("does not suggest min/max reject when it is already on", async () => {
     vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
       { key: "min_max_reject", label: "Min/max rejection", type: "bool", group: "simple",

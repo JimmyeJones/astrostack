@@ -108,13 +108,6 @@ problems. Dogfood it every big-picture run and fix root causes.
 ### Features that serve real workflows
 - Annotated sky overlay (label detected objects / show solved field). (M)
 ### UX & polish
-- **One-click "Turn on min/max rejection" on the Stack-form nudge** — the
-  small-stack streaked-frame hint (v0.56.2) tells the user min/max reject is the
-  right tool but still makes them hunt for the toggle in Advanced options. Add a
-  one-click button on that advisory that flips `min_max_reject` on (mirroring the
-  calibration "Use recommended" one-click), so a beginner acts on the advice
-  without knowing where the knob lives. Frontend-only, additive. (S,
-  approachability)
 - **Combine-method facet on the Gallery** — now that the gallery response carries
   each run's `options` (v0.56.1), add a small "All / σ-clip / min-max / drizzle /
   mean" filter (shown only when the set is *mixed*, like the calibration filter
@@ -170,6 +163,15 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **One-click "Turn on min/max rejection" on the Stack-form nudge** — the
+  small-stack streaked-frame hint (v0.56.2) told the user min/max reject is the
+  right tool but made them hunt for the toggle in Advanced options. The advisory
+  now carries a one-click "Turn on min/max rejection" button that flips
+  `min_max_reject` on (mirroring the calibration "Use recommended" one-click), so
+  a beginner acts on the advice without knowing where the knob lives; the nudge
+  self-dismisses once it's on. Frontend-only, additive. Vitest-covered.
+  (v0.56.7, this run)
 
 - **Gentle green-cast removal in the one-click Auto recipe** — an OSC Seestar
   stack almost always carries a residual green cast (the Bayer green is the
