@@ -53,7 +53,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
 
 ### Editor — make it excellent (PRIORITY 1) — new ideas
-_(none — claim/add here)_
+- **Retire the now-dead "export only" preview scaffolding** — since v0.57.0 *every*
+  editor op is `proxy_safe=True` (deconvolution renders on the proxy too), so the
+  OpList "export only" badge and the selected-op "The live preview doesn't show
+  this effect" note (Editor.tsx, gated on `!proxy_safe`) are unreachable — and
+  worse, *stale*: if a future op were ever marked `proxy_safe=False` the note would
+  now lie ("doesn't show this effect" when it does). Either delete the dead
+  badge/note (+ their Vitest cases for the removed behaviour) or, if we want to keep
+  a "heavy — preview may lag" affordance, repoint it at the new `heavy` hint (shipped
+  v0.57.17) with accurate copy ("this is slow, so the preview updates after a short
+  pause"). Simplifies the priority-1 editor and removes a future foot-gun.
+  (S, editor/friendliness)
+- **Show a per-op timing hint so "heavy" ops set expectations before you add them**
+  — the `heavy` spec hint (v0.57.17) is currently only consumed by the preview
+  debounce; surface it in the Add-operation menu and the op header too (a small
+  "slower preview" chip on Deconvolution / Noise reduction), so a beginner knows
+  *before* dragging a slider why the preview takes a beat to update, rather than
+  wondering if it's stuck. Pure frontend, reuses the already-threaded `heavy` field;
+  additive. (S, editor/friendliness)
 
 ### Autonomy — "just works" (PRIORITY 2)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
@@ -171,6 +188,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **NaN-preservation regression tests for the spatial detail ops** — the
+  denoise / sharpen / deconvolve ops run on a NaN-filled copy (skimage can't
+  tolerate NaN) and restore the uncovered border via `_with_nan_filled`; that
+  fragile fill→process→restore contract had no direct guard (the same class of
+  gap that let the hot-pixel op regress). Added a parametrized
+  `test_detail_ops_preserve_nan_on_partial_coverage` asserting each keeps an
+  uncovered mosaic border NaN and never leaks NaN into (or a filled value out of)
+  the covered region. Test-only; confirmed all three already correct. (v0.57.20,
+  this run)
 
 - **Fix: hot-pixel editor op silently did nothing on mosaic (NaN) images** — the
   editor's `detail.hot_pixels` op called `suppress_hot_cold_pixels` directly, which

@@ -317,6 +317,24 @@ def test_hot_pixels_works_on_mosaic_nan_image():
     assert out_full[20, 25, 0] < 1.0
 
 
+@pytest.mark.parametrize("op_id,params", [
+    ("detail.denoise", {"method": "wavelet", "strength": 0.7}),
+    ("detail.sharpen", {"amount": 1.0, "radius": 2.0}),
+    ("detail.deconvolve", {"iterations": 3, "psf_sigma": 1.2}),
+])
+def test_detail_ops_preserve_nan_on_partial_coverage(op_id, params):
+    """Every spatial detail op runs on a NaN-filled copy (skimage can't tolerate
+    NaN) and must restore the uncovered border as NaN — never bleeding a filled
+    value into an uncovered pixel, and never leaving NaN inside covered pixels.
+    Guards the fragile fill→process→restore contract in `_with_nan_filled`."""
+    rng = np.random.default_rng(1)
+    img = (rng.random((30, 40, 3), dtype=np.float32) * 0.3)
+    img[:6, :, :] = np.nan                      # uncovered (mosaic) border
+    out = get_op(op_id).apply(img.copy(), params, EditContext())
+    assert np.isnan(out[:6]).all()              # uncovered border stays NaN
+    assert not np.isnan(out[6:]).any()          # covered region is fully finite
+
+
 def test_pipeline_collects_op_errors(monkeypatch):
     img = _img(nan_band=0)
 
