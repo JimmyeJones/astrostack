@@ -81,8 +81,12 @@ register(OpSpec(
     apply=_reduce, proxy_safe=True,
     help="Shrink stars morphologically without touching nebulosity. No AI model.",
     params=[
-        EditParam("amount", "Amount", "float", default=0.5, min=0.0, max=1.0, step=0.05),
-        EditParam("size", "Star size (px)", "int", default=2, min=1, max=8, step=1),
+        EditParam("amount", "Amount", "float", default=0.5, min=0.0, max=1.0, step=0.05,
+                  help="How strongly to shrink stars. 0 = off; start around 0.3 and "
+                       "increase — too high leaves dark holes where bright stars were."),
+        EditParam("size", "Star size (px)", "int", default=2, min=1, max=8, step=1,
+                  help="Roughly how big your stars are, in pixels. Match it to your "
+                       "actual star size — use the 'From your stars' button below."),
         EditParam("protect_nebula", "Protect nebula", "bool", default=True, group="advanced",
                   help="Gate the reduction with a star mask so nebula/galaxy cores aren't eroded."),
     ],
@@ -94,7 +98,9 @@ register(OpSpec(
     help="Lift and saturate the background (non-star) regions so faint nebulosity "
          "pops, leaving stars untouched.",
     params=[
-        EditParam("amount", "Amount", "float", default=0.3, min=0.0, max=1.0, step=0.05),
+        EditParam("amount", "Amount", "float", default=0.3, min=0.0, max=1.0, step=0.05,
+                  help="How strongly to lift and saturate the non-star background so "
+                       "faint nebulosity pops. 0 = off; start gentle."),
         EditParam("size", "Star size (px)", "int", default=4, min=1, max=12, step=1,
                   group="advanced",
                   help="Star mask footprint — larger excludes bigger stars from the boost."),

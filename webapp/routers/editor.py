@@ -247,6 +247,42 @@ def sharpen_suggestion(safe: str, request: Request) -> SharpenSuggestionOut:
     return SharpenSuggestionOut(fwhm_px=round(fwhm, 3), radius=round(radius, 2))
 
 
+# The star-reduction op's ``size`` slider bounds/step (kept in step with the
+# EditParam in seestack/edit/ops/stars.py). ``size`` is a star-scale in pixels —
+# the same physical quantity the FWHM measures — so the median star FWHM is the
+# natural data-driven default, rounded to the op's integer step and clamped.
+_STAR_SIZE_MIN = 1
+_STAR_SIZE_MAX = 8
+
+
+class StarSizeSuggestionOut(BaseModel):
+    """A data-driven star size for the star-reduction op, derived from the
+    target's median star FWHM (``size`` ≈ the star's diameter in px), so the user
+    doesn't hand-guess. ``None`` when no frame carries an FWHM."""
+
+    fwhm_px: float | None
+    size: int | None
+
+
+@router.get("/api/targets/{safe}/editor/star-size-suggestion",
+            response_model=StarSizeSuggestionOut)
+def star_size_suggestion(safe: str, request: Request) -> StarSizeSuggestionOut:
+    """Suggest a star-reduction ``size`` from the target's median star FWHM, so the
+    user doesn't hand-guess how big their stars are — mirrors the sharpen/PSF
+    from-stars buttons. ``size`` is a star-scale in px, so the FWHM maps directly:
+    rounded to the op's integer step and clamped to its slider range."""
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        fwhm = proj.median_fwhm()
+    finally:
+        proj.close()
+        lib.close()
+    if fwhm is None or fwhm <= 0:
+        return StarSizeSuggestionOut(fwhm_px=None, size=None)
+    size = int(max(_STAR_SIZE_MIN, min(_STAR_SIZE_MAX, round(fwhm))))
+    return StarSizeSuggestionOut(fwhm_px=round(fwhm, 3), size=size)
+
+
 class DenoiseSuggestionOut(BaseModel):
     """A data-driven starting strength for the editor's noise-reduction op,
     derived from the run's own background noise. ``None`` when the proxy has no
@@ -350,10 +386,18 @@ async def edit_star_mask(safe: str, run_id: int, request: Request,
 @router.post("/api/targets/{safe}/stack-runs/{run_id}/editor/auto")
 async def auto_process(safe: str, run_id: int, request: Request) -> dict:
     project_dir, run = _run_info(request, safe, run_id)
+    # The target's median star FWHM sizes the auto sharpen radius to the data
+    # (same conversion as the sharpen-from-stars button), not a fixed guess.
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        median_fwhm = proj.median_fwhm()
+    finally:
+        proj.close()
+        lib.close()
 
     def work() -> dict:
         rgb, _scale = get_proxy(project_dir, run.id, run.fits_path)
-        return presets_mod.auto_recipe(rgb).to_dict()
+        return presets_mod.auto_recipe(rgb, median_fwhm=median_fwhm).to_dict()
 
     return await run_in_threadpool(work)
 

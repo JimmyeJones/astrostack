@@ -45,11 +45,28 @@ def test_ops_and_key_params_carry_plain_help():
         "detail.deconvolve": ["iterations", "psf_sigma"],
         "detail.hot_pixels": ["sigma"],
         "tone.levels": ["black", "white", "gamma"],
+        "tone.saturation": ["amount"],
+        "tone.scnr": ["amount"],
+        "tone.color_calibrate": ["mode"],
+        "stars.reduce": ["amount", "size"],
+        "stars.boost_nebula": ["amount"],
+        "background.subtract": ["mode", "box_size"],
+        "background.final_gradient": ["mode", "box_size", "detect_sigma", "dilate_px"],
     }
     for op_id, keys in expected_param_help.items():
         params = {p.key: p for p in specs[op_id].params}
         for k in keys:
             assert params[k].help, f"{op_id}.{k} needs plain-language help"
+
+    # Stronger invariant: every editor control carries a plain-language hint, so a
+    # beginner never faces a bare slider. The only exception is the curve-editor
+    # widget, whose op-level help explains the whole control.
+    no_param_help = {("tone.curves", "points")}
+    for s in specs.values():
+        for p in s.params:
+            if (s.id, p.key) in no_param_help:
+                continue
+            assert p.help, f"{s.id}.{p.key} needs plain-language help"
 
 
 def test_curves_identity_is_noop():
@@ -198,6 +215,32 @@ def test_auto_recipe_denoise_strength_scales_with_noise():
     s_heavy = denoise_strength(heavy)
     assert s_mild is not None and s_heavy is not None  # both are noisy enough to denoise
     assert s_heavy > s_mild  # stronger noise → stronger denoise
+
+
+def test_auto_recipe_sharpen_radius_from_fwhm():
+    """Auto's sharpen radius should track the target's own star size (median FWHM
+    → Gaussian σ, clamped to the op's step/range), not a fixed 2.0 guess. A clean
+    (non-noisy) image gets the sharpen op."""
+    import math
+
+    from seestack.edit.presets import auto_recipe
+
+    clean = np.full((80, 100, 3), 0.05, np.float32)
+    clean[30:50, 40:60] += 0.5
+
+    def sharpen_radius(fwhm):
+        op = next((o for o in auto_recipe(clean, median_fwhm=fwhm).ops
+                   if o.id == "detail.sharpen"), None)
+        return None if op is None else float(op.params["radius"])
+
+    # No FWHM → the op's neutral 2.0 default.
+    assert sharpen_radius(None) == 2.0
+    # A measured FWHM maps to ≈ its Gaussian σ, rounded to the op's 0.5 step.
+    expected = 6.0 / (2.0 * math.sqrt(2.0 * math.log(2.0)))
+    expected = round(round(expected / 0.5) * 0.5, 2)
+    assert sharpen_radius(6.0) == expected
+    # A bigger FWHM → a bigger radius (sized to the data).
+    assert sharpen_radius(9.0) > sharpen_radius(3.0)
 
 
 def test_denoise_identity_at_zero_and_preserves_colour():

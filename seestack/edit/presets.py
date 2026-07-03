@@ -6,11 +6,33 @@ recipe. User-saved presets live in library meta; these built-ins ship with the c
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import numpy as np
 
 from seestack.edit.recipe import OpInstance, Recipe, validate_ops
+
+# Gaussian FWHM → σ, and the sharpen op's radius bounds/step (kept in step with
+# the EditParam in seestack/edit/ops/detail.py). A good unsharp-mask radius is on
+# the scale of the star's own blur (its Gaussian σ), so the median star FWHM is
+# the natural data-driven default — the same conversion the editor's
+# sharpen-from-stars button uses.
+_FWHM_TO_SIGMA = 1.0 / (2.0 * math.sqrt(2.0 * math.log(2.0)))  # ≈ 0.4247
+_SHARPEN_RADIUS_MIN = 0.5
+_SHARPEN_RADIUS_MAX = 10.0
+_SHARPEN_RADIUS_STEP = 0.5
+
+
+def _sharpen_radius_from_fwhm(median_fwhm: float | None) -> float:
+    """Map a target's median star FWHM to an unsharp-mask radius (≈ the star's
+    Gaussian σ), clamped to the op's slider range and rounded to its step.
+    Falls back to the op's 2.0 default when no FWHM is available."""
+    if median_fwhm is None or median_fwhm <= 0:
+        return 2.0
+    raw = median_fwhm * _FWHM_TO_SIGMA
+    radius = max(_SHARPEN_RADIUS_MIN, min(_SHARPEN_RADIUS_MAX, raw))
+    return round(round(radius / _SHARPEN_RADIUS_STEP) * _SHARPEN_RADIUS_STEP, 2)
 
 
 def _ops(*pairs: tuple[str, dict]) -> list[OpInstance]:
@@ -96,7 +118,8 @@ def analyze_proxy(rgb: np.ndarray) -> dict[str, Any]:
     return {"sky": med, "sky_sigma": sky_sigma, "noisy": sky_sigma > 0.02}
 
 
-def auto_recipe(rgb: np.ndarray | None = None) -> Recipe:
+def auto_recipe(rgb: np.ndarray | None = None,
+                median_fwhm: float | None = None) -> Recipe:
     """One-click auto-process built from the image, not hardcoded.
 
     Always: background/gradient removal → photometric colour balance → a proper
@@ -106,7 +129,9 @@ def auto_recipe(rgb: np.ndarray | None = None) -> Recipe:
     only when warranted by the analysis: denoise (on linear data, before the
     stretch) for noisy frames — at a *data-driven* strength scaled to the
     measured background noise, not a fixed guess — and a gentle sharpen for clean
-    ones. Saturation lifts colour a touch at the end (after the green cast is
+    ones, sized to the target's *own* stars (median FWHM → radius, the same
+    conversion the editor's sharpen-from-stars button uses) rather than a fixed
+    guess. Saturation lifts colour a touch at the end (after the green cast is
     gone, so it doesn't amplify it).
     """
     noisy = False
@@ -141,5 +166,6 @@ def auto_recipe(rgb: np.ndarray | None = None) -> Recipe:
     ops.append(("tone.scnr", {"amount": 0.7}))
     ops.append(("tone.saturation", {"amount": 1.2}))
     if not noisy:  # sharpening clean data helps; sharpening noisy data hurts
-        ops.append(("detail.sharpen", {"amount": 0.5, "radius": 2.0}))
+        radius = _sharpen_radius_from_fwhm(median_fwhm)
+        ops.append(("detail.sharpen", {"amount": 0.5, "radius": radius}))
     return Recipe(ops=_ops(*ops))

@@ -106,7 +106,9 @@ register(OpSpec(
     help="Photometric white balance from star colours (gray-star offline, Gaia on export).",
     params=[EditParam("mode", "Mode", "enum", default="gray_star", options=_MODE_CC,
                       option_labels={"gray_star": "Gray-star (offline)",
-                                     "gaia": "Gaia catalogue (on export)"})],
+                                     "gaia": "Gaia catalogue (on export)"},
+                      help="How to find neutral: Gray-star balances from your own star "
+                           "colours (works offline); Gaia uses the catalogue (only on export).")],
 ))
 
 register(OpSpec(
@@ -114,9 +116,14 @@ register(OpSpec(
     apply=_white_balance, proxy_safe=True,
     help="Manual per-channel gain (applied to linear data).",
     params=[
-        EditParam("r", "Red gain", "float", default=1.0, min=0.0, max=3.0, step=0.01),
-        EditParam("g", "Green gain", "float", default=1.0, min=0.0, max=3.0, step=0.01),
-        EditParam("b", "Blue gain", "float", default=1.0, min=0.0, max=3.0, step=0.01),
+        EditParam("r", "Red gain", "float", default=1.0, min=0.0, max=3.0, step=0.01,
+                  help="Multiplier for the red channel. 1.0 = unchanged; raise to warm, "
+                       "lower to cool. Prefer Color calibration for an automatic balance."),
+        EditParam("g", "Green gain", "float", default=1.0, min=0.0, max=3.0, step=0.01,
+                  help="Multiplier for the green channel. 1.0 = unchanged."),
+        EditParam("b", "Blue gain", "float", default=1.0, min=0.0, max=3.0, step=0.01,
+                  help="Multiplier for the blue channel. 1.0 = unchanged; raise to cool, "
+                       "lower to warm."),
     ],
 ))
 
@@ -166,14 +173,18 @@ register(OpSpec(
 register(OpSpec(
     id="tone.saturation", label="Saturation", group="tone", stage="nonlinear",
     apply=_saturation, proxy_safe=True, help="Boost or reduce colour, preserving luminance.",
-    params=[EditParam("amount", "Amount", "float", default=1.0, min=0.0, max=3.0, step=0.05)],
+    params=[EditParam("amount", "Amount", "float", default=1.0, min=0.0, max=3.0, step=0.05,
+                      help="1.0 = unchanged, above 1 lifts colour, below 1 mutes it. "
+                           "Try 1.1–1.3; too high looks garish and amplifies noise.")],
 ))
 
 register(OpSpec(
     id="tone.scnr", label="SCNR (green removal)", group="tone", stage="any",
     apply=_scnr, proxy_safe=True, help="Remove the green colour cast on OSC nebulae.",
     params=[
-        EditParam("amount", "Amount", "float", default=0.8, min=0.0, max=1.0, step=0.05),
+        EditParam("amount", "Amount", "float", default=0.8, min=0.0, max=1.0, step=0.05,
+                  help="How much of the excess green to remove. 0 = off, 1 = fully "
+                       "neutralise. It can only reduce green, never add colour."),
         EditParam("mode", "Protect", "enum", default="average", options=["average", "maximum"],
                   option_labels={"average": "Average of red & blue",
                                  "maximum": "Maximum of red & blue"},

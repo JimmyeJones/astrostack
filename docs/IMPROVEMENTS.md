@@ -53,14 +53,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
 
 ### Editor — make it excellent (PRIORITY 1) — new ideas
-- **Star-size-from-stars suggestion for the star-reduce op** — v0.57.4 gave the
-  Sharpen op a data-driven radius from the target's median star FWHM. The
-  `stars.reduce` op's `size` param is the same kind of physical star-scale guess a
-  beginner can't reason about, and the FWHM is already the natural measure of it.
-  Add a one-click "From your stars" suggestion for `stars.reduce`'s `size` (FWHM
-  rounded to the op's integer step, clamped to its range), reusing the exact
-  `median_fwhm` → suggestion pattern the sharpen/PSF buttons already use — three
-  data-driven buttons now, one more here for consistency. Small, additive.
+- **Dim the "From your data" button when the param already matches** — the editor
+  now has four data-driven suggestion buttons (PSF σ, sharpen radius, denoise
+  strength, star size). While tuning, a user can't tell whether the current value
+  *is* the suggestion or diverged from it. Disable/dim the button (with a "already
+  set from your data" tooltip) when the param already equals the suggested value,
+  so the button doubles as an "am I optimal?" indicator. Reuse the existing
+  `suggestions` prop on `OpParamPanel`; compare the param's current value to
+  `sug.value` with the op's step tolerance. Pure, frontend-only, additive.
+  (S, editor/friendliness)
+- **"Apply data-driven defaults" one-click on the editor** — a user building a
+  recipe by hand must open each of the four suggestion-carrying ops and click its
+  button individually. Add a single toolbar action that seeds every present op's
+  data-driven param (PSF σ, sharpen radius, denoise strength, star size) from the
+  already-fetched suggestions in one click, so hand-tuning starts from the
+  measured values instead of the generic defaults. Reuses the four existing
+  suggestion queries; frontend-only, additive, off-by-nothing (explicit button).
   (S, editor/autonomy)
 
 ### Autonomy — "just works" (PRIORITY 2)
@@ -179,6 +187,49 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Complete + enforce plain-language help on every editor control** — finished the
+  help sweep by adding hints to the last bare params (geometry crop/rotate/resize,
+  manual white-balance R/G/B gains, coverage-leveling σ), so *every* editor slider
+  now shows a one-line explanation. The help-coverage test now asserts this as an
+  invariant — every param must carry help except the curve-editor widget (which has
+  op-level help) — so a future op can't ship a bare, unexplained control.
+  Metadata + test only, additive. (v0.57.8, this run)
+
+- **Plain-language help on the remaining jargon-bare editor sliders** — v0.56.17
+  gave the detail/levels ops per-param help, but the commonly-used tone/star/
+  background sliders still showed *no* hint under the control: `tone.saturation`
+  amount, `tone.scnr` amount, `tone.color_calibrate` mode, `stars.reduce`
+  amount/size, `stars.boost_nebula` amount, and `background.subtract` /
+  `final_gradient` box_size/σ/dilate/mode. Added a one-line plain-language hint to
+  each (what it does + a sensible starting point), plus friendly `option_labels`
+  for the two background `mode` enums so the dropdowns read "Per channel" /
+  "Luminance" instead of raw ids — surfaced automatically in the op param panel via
+  the already-threaded `help`/`option_labels` fields. Metadata-only, additive; the
+  help-coverage test now asserts every one of these params carries a hint.
+  (v0.57.7, this run)
+
+- **Data-driven sharpen radius in the one-click Auto recipe** — when Auto-process
+  sharpens a clean stack it used a *fixed* `radius=2.0`, the same for a tight-star
+  and a bloated-star image, even though v0.57.4 already ships the exact FWHM→radius
+  conversion (radius ≈ the star's Gaussian σ) behind the editor's sharpen-from-stars
+  button. The auto endpoint now threads the target's `median_fwhm()` into
+  `auto_recipe`, which sizes the auto sharpen radius to the target's *own* stars
+  (clamped to the op's 0.5–10 step/range), falling back to the neutral 2.0 when no
+  frame carries an FWHM — so the one-click result sharpens the right detail scale
+  instead of guessing. Test asserts the auto sharpen radius tracks the FWHM and
+  falls back to 2.0; engine + one endpoint thread, additive/upgrade-safe.
+  (v0.57.6, this run)
+
+- **Star-size-from-stars suggestion for the star-reduce op** — the `stars.reduce`
+  op's `size` param is a physical star-scale in px a beginner can't reason about,
+  and QC already measures exactly that as the median star FWHM. A new
+  `GET …/editor/star-size-suggestion` endpoint maps the target's median FWHM to an
+  integer `size` (rounded, clamped to the op's 1–8 range), and the Star reduction
+  op's param panel offers a one-click "From your stars (size X, FWHM Ypx)" button —
+  the fourth data-driven button, mirroring the PSF-, sharpen- and denoise-from-data
+  suggestions exactly. Backend tested (median/clamp/none cases); additive/
+  upgrade-safe. (v0.57.5, this run)
 
 - **Sharpen-radius-from-stars suggestion** — the editor's Sharpen op made the user
   hand-guess a radius, when the natural detail scale to enhance is the star's own

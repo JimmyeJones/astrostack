@@ -67,9 +67,12 @@ register(OpSpec(
     help="Subtract a per-tile sky model to flatten gradients and vignetting.",
     params=[
         EditParam("mode", "Mode", "enum", default="per_channel", options=_MODE,
-                  help="per_channel for star fields; luminance for emission nebulae."),
+                  option_labels={"per_channel": "Per channel", "luminance": "Luminance"},
+                  help="Per channel for star fields; luminance for emission nebulae."),
         EditParam("box_size", "Box size", "int", default=128, min=32, max=512, step=16,
-                  group="advanced"),
+                  group="advanced",
+                  help="Tile size (px) for the sky model. Larger follows only broad "
+                       "gradients; smaller can over-fit and eat real signal."),
     ],
 ))
 
@@ -78,13 +81,22 @@ register(OpSpec(
     stage="linear", apply=_final_gradient, proxy_safe=True,
     help="Object-masked gradient removal — protects stars/nebulosity while flattening sky.",
     params=[
-        EditParam("mode", "Mode", "enum", default="luminance", options=_MODE),
+        EditParam("mode", "Mode", "enum", default="luminance", options=_MODE,
+                  option_labels={"per_channel": "Per channel", "luminance": "Luminance"},
+                  help="Per channel corrects a colour cast in the gradient; luminance "
+                       "flattens brightness only (safest for emission nebulae)."),
         EditParam("box_size", "Box size", "int", default=256, min=64, max=1024, step=32,
-                  group="advanced"),
+                  group="advanced",
+                  help="Tile size (px) for the gradient model. Larger follows only "
+                       "broad gradients; smaller can over-fit and eat real signal."),
         EditParam("detect_sigma", "Object σ", "float", default=2.5, min=1.0, max=6.0,
-                  step=0.1, group="advanced"),
+                  step=0.1, group="advanced",
+                  help="How aggressively to mask off stars/nebulosity before fitting "
+                       "the sky. Lower masks more; higher lets more into the fit."),
         EditParam("dilate_px", "Mask dilate (px)", "int", default=16, min=0, max=64, step=2,
-                  group="advanced"),
+                  group="advanced",
+                  help="Grow the object mask by this many pixels so faint halos around "
+                       "bright stars aren't treated as sky."),
     ],
 ))
 
@@ -94,6 +106,8 @@ register(OpSpec(
     help="Equalize sky across mosaic panels with different frame coverage.",
     params=[
         EditParam("object_sigma", "Object σ", "float", default=2.0, min=1.0, max=5.0,
-                  step=0.1, group="advanced"),
+                  step=0.1, group="advanced",
+                  help="How aggressively to mask off real signal before measuring each "
+                       "panel's sky. Lower masks more; higher lets more into the estimate."),
     ],
 ))
