@@ -566,6 +566,18 @@ export function EditorView() {
                     : `Without: ${specs[selForSolo!.id]?.label ?? selForSolo!.id}`}
                 </Text>
               ) : null}
+              {/* Coverage heatmap legend: the overlay is a viridis map (dark blue =
+                  fewest frames → yellow = most), so a small gradient bar with a
+                  "fewer ↔ more frames" caption makes the gradient legible. */}
+              {showCoverage && coveragePreview.data ? (
+                <Group gap={6} align="center" style={{ position: "absolute", right: 12, bottom: 10,
+                  background: "rgba(0,0,0,0.6)", padding: "3px 8px", borderRadius: 4 }}>
+                  <Text size="xs" c="white">fewer</Text>
+                  <div style={{ width: 72, height: 8, borderRadius: 2,
+                    background: "linear-gradient(to right, rgb(68,1,84), rgb(49,104,142), rgb(31,158,137), rgb(110,206,88), rgb(253,231,37))" }} />
+                  <Text size="xs" c="white">more frames</Text>
+                </Group>
+              ) : null}
               {/* While a superseded render is being replaced (the older result is
                   aborted server-side), tell the user the shown image is stale and
                   a fresh render is on the way — so a laggy heavy op doesn't read as
@@ -580,7 +592,7 @@ export function EditorView() {
               <Group gap={6} style={{ position: "absolute", right: 8, top: 8 }}>
                 {hist.data?.is_mosaic ? (
                   <Tooltip multiline w={230} withArrow
-                    label="Show this mosaic's frame-coverage map: white where the most frames overlap, black at the ragged, uncovered edges. This is what 'Trim border' and 'Coverage leveling' act on.">
+                    label="Show this mosaic's frame-coverage map as a colour heatmap: yellow where the most frames overlap, dark blue at the ragged, uncovered edges. This is what 'Trim border' and 'Coverage leveling' act on.">
                     <Button size="xs" variant={showCoverage ? "filled" : "default"}
                       color="grape"
                       disabled={!preview.data}

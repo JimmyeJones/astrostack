@@ -83,13 +83,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   do next; audit every screen for jargon and add plain-language "why" tooltips;
   reduce visible option clutter (progressive disclosure). (M, friendliness)
 - Better long-job feedback and clearer error messages. (S, friendliness)
-- **Colour heatmap + legend for the coverage overlay** — the coverage-map overlay
-  (v0.61.0) renders grayscale, which reads slowly and looks similar to the star
-  mask. A viridis-style colour map (blue = few frames → yellow = most) with a tiny
-  "fewer ↔ more frames" legend caption would make the coverage gradient obvious at
-  a glance and visually distinct from the star mask. Backend applies a small LUT to
-  the normalized coverage before the PNG; frontend adds the legend. Purely
-  cosmetic/additive. (S, friendliness)
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 - **Photometric (multiplicative) frame normalization before combine** — frames
@@ -170,6 +163,18 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Colour heatmap + legend for the coverage overlay** — the coverage-map overlay
+  (v0.61.0) rendered grayscale, which read slowly and looked much like the star
+  mask. A new pure engine `seestack/render/colormap.py` (viridis LUT, no matplotlib
+  dependency) now colours the normalized coverage — dark blue = fewest frames →
+  yellow = most — so the gradient is legible at a glance and visually distinct from
+  the grayscale star mask. The editor adds a small "fewer ↔ more frames" gradient
+  legend under the preview whenever the coverage overlay is up. Engine + one
+  endpoint + frontend; purely cosmetic/additive (PNG shape unchanged: still a
+  same-size image, now RGB). Tested: engine colormap (LUT endpoints, brightness
+  monotonicity, NaN/out-of-range clamp), Vitest asserts the legend caption shows
+  with the overlay. (v0.61.3, this run)
 
 - **Fix a flaky Stack-form vitest ("does not suggest min/max reject when already
   on")** — the test waited only for the schema-driven "Min/max rejection" *label*

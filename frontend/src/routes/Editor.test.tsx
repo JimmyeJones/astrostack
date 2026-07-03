@@ -219,6 +219,9 @@ describe("EditorView", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Hide coverage" })).toBeInTheDocument());
     expect(screen.getByText("Coverage map")).toBeInTheDocument();
+    // The colour heatmap carries a "fewer ↔ more frames" legend caption.
+    await waitFor(() => expect(screen.getByText("more frames")).toBeInTheDocument());
+    expect(screen.getByText("fewer")).toBeInTheDocument();
   });
 
   it("hides the Coverage overlay button on a single-field stack", async () => {
