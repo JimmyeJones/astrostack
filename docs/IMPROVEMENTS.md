@@ -71,13 +71,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   bright-star fluxes vs the reference (the `transparency_score` machinery is
   most of it) and divide it out before accumulation. Needs care: robust to
   few-star frames, neutral fallback, off by default first. (M, correctness)
-- Follow-ups to min/max reject (shipped v0.56.0): (1) a **top/bottom-percentile**
-  variant for big stacks (drop the top/bottom p% rather than a single extreme —
-  more aggressive trail removal when there are hundreds of frames); (2) a
-  Stack-form hint suggesting min/max reject over κ-σ when the accepted, solved
-  frame count is small (<~11) and streaked frames are present, since that's
-  exactly the regime κ-σ can't handle; (3) a **median/MAD** location/scale path
-  for the middle ground. All (S–M, correctness).
+- Follow-ups to min/max reject (shipped v0.56.0). (Item (2), the Stack-form
+  small-stack hint, shipped v0.56.2.) Remaining:
+  - **Top/bottom-k trimmed-mean reject** — generalise `MinMaxRejectAccumulator`
+    to drop the *k* smallest and *k* largest per pixel (opt-in
+    `min_max_reject_count`, default 1 = exactly today's behaviour). Handles
+    multiple satellite/plane trails crossing the same pixel across a session
+    (k=3 → up to 3 trails) that a single-extreme drop leaves behind. Stays
+    memory-bounded and single-pass by tracking the k smallest/largest as 2k
+    canvas planes (vectorised sorted insertion), applying the full k-trim only
+    where `count ≥ 2k+1` (so the two sides are disjoint) and degrading to the
+    proven single min/max drop for `3 ≤ count < 2k+1`. NB: the earlier
+    "percentile (drop p%)" and "median/MAD" framings are **not** streaming-
+    feasible — an exact per-pixel median/percentile needs *every* frame's value
+    held per pixel (tens of GB on a big canvas), which the OOM-bounded hot path
+    forbids; the k-extremes trim is the memory-safe realisation. Must extend
+    `_estimate_peak_bytes` / the memory guard to charge the extra 2k planes so
+    the pre-run estimate stays exact. (M, correctness)
 - **Dark exposure-scaling** (slice (b), now that bias is wired for lights) —
   `scaled_dark = bias + (dark − bias)·(t_light/t_dark)` so a dark shot at a
   different exposure than the lights can still be used. Needs the per-frame
@@ -95,14 +105,19 @@ problems. Dogfood it every big-picture run and fix root causes.
 ### Features that serve real workflows
 - Annotated sky overlay (label detected objects / show solved field). (M)
 ### UX & polish
-- **Rejection-method badge on History/Gallery cards** — now that a stack can use
-  one of four methods (mean / sigma-clip / min-max reject / drizzle, recorded in
-  the `STACKER` FITS card and the run's stored options), a small badge ("min-max"
-  / "σ-clip κ3" / "drizzle ×2") on each card would let a user see at a glance how
-  each result was combined when comparing runs — complements the existing calstat
-  and noise chips. The Gallery already derives σ-clip/drizzle badges from
-  `options`; extend `highlightBadges` to include min-max and surface the same on
-  History cards. Frontend-only, additive. (S, approachability)
+- **One-click "Turn on min/max rejection" on the Stack-form nudge** — the
+  small-stack streaked-frame hint (v0.56.2) tells the user min/max reject is the
+  right tool but still makes them hunt for the toggle in Advanced options. Add a
+  one-click button on that advisory that flips `min_max_reject` on (mirroring the
+  calibration "Use recommended" one-click), so a beginner acts on the advice
+  without knowing where the knob lives. Frontend-only, additive. (S,
+  approachability)
+- **Combine-method facet on the Gallery** — now that the gallery response carries
+  each run's `options` (v0.56.1), add a small "All / σ-clip / min-max / drizzle /
+  mean" filter (shown only when the set is *mixed*, like the calibration filter
+  chip) so a user can isolate e.g. every drizzled result across targets. Reuses
+  the pure `rejectionBadge` helper for the per-run method key; frontend-only,
+  additive. (S, approachability)
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
 
@@ -152,6 +167,49 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Plain-language "Combined:" line in the History Info panel** — the Info panel
+  showed the raw `STACKER` FITS card ("min-max-reject", "sigma-clip", "mean",
+  "drizzle") — engine jargon a beginner won't recognise. It now also renders a
+  friendly "Combined: Min/max (extremes) rejection — drops the highest and lowest
+  value at each pixel" line (alongside the existing Integration / Quality-weighted
+  / Processing lines), derived from the STACKER card via a pure, case-insensitive
+  `combineMethodLabel` helper (returns null for channel-combine / unknown methods,
+  so the line is simply omitted). Unit-tested + a render assertion. Frontend-only,
+  additive. (v0.56.4, this run)
+
+- **Combine-method badge in the Compare view** — the `RejectionBadge` (v0.56.1)
+  now also appears on each panel of the A/B Compare view, so when a user compares
+  two stacks of one target to answer "did changing the rejection method help?"
+  they can see each side's method ("σ-clip κ3" vs "min-max") at a glance next to
+  the noise verdict. Reuses the gallery `options` the Compare view already
+  fetches; frontend-only, additive. (v0.56.3, this run)
+
+- **Min/max-reject nudge on the Stack form for small streaked stacks** — below
+  ~11 frames κ-σ mathematically can't reject a lone satellite/plane trail (a
+  single outlier's deviation stays within κ·σ of the mean), which is exactly the
+  regime this run's min/max reject handles. The Stack form now shows a
+  plain-language hint suggesting "Min/max rejection" when a small stack (3 ≤
+  accepted+solved < 11, non-drizzle) carries streaked frames and min/max reject
+  isn't already on — superseding the generic "turn on sigma clipping" streak
+  warning in that regime (where that advice doesn't actually work). Also fixed a
+  pre-existing advisory gap: the streak-no-rejection warning's `rejectionOn`
+  didn't count min/max reject as per-pixel rejection, so it wrongly fired when
+  only min/max reject was enabled. Frontend-only, advisory. (v0.56.2, this run)
+
+- **Rejection-method badge on History/Gallery cards** — a stack can be combined
+  one of four ways (mean / σ-clip / min-max reject / drizzle), recorded in the
+  run's stored options. A shared, tooltip'd violet `RejectionBadge` now shows the
+  *effective* combine method ("min-max" / "σ-clip κ3" / "drizzle ×2", nothing for
+  a plain mean) on both Gallery and History cards, honouring the engine's method
+  precedence (drizzle > min-max > σ-clip). The Gallery's `highlightBadges` dropped
+  its ad-hoc σ-clip/drizzle chips in favour of the dedicated badge (which also
+  covers min-max and carries a plain-language tooltip); History gained a new
+  additive `options` field on `StackRunOut` (parsed from the run's `options_json`)
+  to derive it. Pure `rejectionBadge` helper unit-tested (precedence, kappa/scale
+  formatting, editor/channel-combine → null) plus backend tests that the
+  stack-runs list exposes options. Frontend + one additive API field;
+  upgrade-safe. (v0.56.1, this run)
 
 - **Min/max (extremes) rejection for small stacks** — the order-statistic fix
   for a lone satellite/plane trail below ~11 frames that κ-σ mathematically can't

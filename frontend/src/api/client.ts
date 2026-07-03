@@ -172,6 +172,7 @@ export interface StackRun {
   transparency_ratio?: number | null;
   noise_sigma?: number | null;
   calstat?: string | null;
+  options?: Record<string, unknown>;
 }
 
 export interface StackInfoCard {

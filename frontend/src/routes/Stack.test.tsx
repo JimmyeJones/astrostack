@@ -253,16 +253,75 @@ describe("StackView", () => {
       { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
         default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
     ]);
-    // sigma_clip off → no per-pixel rejection.
+    // sigma_clip off → no per-pixel rejection. Use ≥11 frames so the generic
+    // "turn on sigma clipping" advice is the right one (below ~11 the min/max
+    // hint supersedes it — covered separately below).
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: false });
-    const streaked = { ...mkFrame(1), streak_detected: true };
-    vi.spyOn(client.api, "listFrames").mockResolvedValue([streaked, mkFrame(2), mkFrame(3)]);
+    const frames = Array.from({ length: 12 }, (_, i) =>
+      ({ ...mkFrame(i + 1), streak_detected: i === 0 }));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
     vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
 
     renderStack();
 
     await waitFor(() =>
       expect(screen.getByText(/detected satellite\/plane streak/)).toBeInTheDocument());
+  });
+
+  it("suggests min/max reject for a small streaked stack (κ-σ can't handle it)", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+      { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
+        default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+      { key: "min_max_reject", label: "Min/max rejection", type: "bool", group: "simple",
+        default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+    ]);
+    // 6 accepted frames (small, ≥3) with a streak and min/max reject off.
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: true, min_max_reject: false });
+    const frames = Array.from({ length: 6 }, (_, i) =>
+      ({ ...mkFrame(i + 1), streak_detected: i === 0 }));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    await waitFor(() =>
+      expect(screen.getByText(/Min\/max rejection.*drops the single highest and lowest/))
+        .toBeInTheDocument());
+  });
+
+  it("does not suggest min/max reject when it is already on", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+      { key: "min_max_reject", label: "Min/max rejection", type: "bool", group: "simple",
+        default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+    ]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ min_max_reject: true });
+    const frames = Array.from({ length: 6 }, (_, i) =>
+      ({ ...mkFrame(i + 1), streak_detected: i === 0 }));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    await waitFor(() => expect(screen.getByText("Min/max rejection")).toBeInTheDocument());
+    expect(screen.queryByText(/drops the single highest and lowest/)).not.toBeInTheDocument();
+  });
+
+  it("does not suggest min/max reject on a large streaked stack", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+      { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
+        default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+    ]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: true });
+    // 20 frames — above the ~11-frame threshold, so κ-σ can handle it.
+    const frames = Array.from({ length: 20 }, (_, i) =>
+      ({ ...mkFrame(i + 1), streak_detected: i === 0 }));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    await waitFor(() => expect(screen.getByText("Sigma clipping")).toBeInTheDocument());
+    expect(screen.queryByText(/drops the single highest and lowest/)).not.toBeInTheDocument();
   });
 
   it("drops the streak warning once rejection has enough frames", async () => {

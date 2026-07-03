@@ -149,6 +149,10 @@ class StackRunOut(BaseModel):
     # "bias+flat", "flat", …), or None when the stack was uncalibrated / for
     # pre-schema-7 runs; lets a card show a "dark+flat" chip at a glance.
     calstat: str | None = None
+    # The stacking options this run was made with (parsed from options_json), so
+    # the History card can show *how* the result was combined (σ-clip / min-max /
+    # drizzle) — the same badge the Gallery derives. Empty dict when unrecorded.
+    options: dict[str, object] = {}
 
 
 class JobOut(BaseModel):

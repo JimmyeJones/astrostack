@@ -94,6 +94,17 @@ describe("CompareView", () => {
     expect(screen.getByText("B")).toBeInTheDocument();
   });
 
+  it("badges each stack's combine method", async () => {
+    const a = item(3, "M_42", "Orion");
+    const b = item(7, "M_42", "OrionV2");
+    a.options = { sigma_clip: true, sigma_kappa: 3 };
+    b.options = { min_max_reject: true };
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [a, b] });
+    renderCompare("?a=M_42:3&b=M_42:7");
+    await waitFor(() => expect(screen.getByText("σ-clip κ3")).toBeInTheDocument());
+    expect(screen.getByText("min-max")).toBeInTheDocument();
+  });
+
   it("shows a which-is-cleaner verdict when both stacks carry a noise σ", async () => {
     const a = item(3, "M_42", "Orion");
     const b = item(7, "M_42", "OrionV2");

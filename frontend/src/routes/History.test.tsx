@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries } from "./History";
+import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel } from "./History";
 import { formatIntegration } from "../format";
 import * as client from "../api/client";
 import type { StackRun } from "../api/client";
@@ -86,6 +86,8 @@ describe("HistoryView", () => {
     await waitFor(() => expect(info).toHaveBeenCalledWith("M_42", 1));
     await waitFor(() => expect(screen.getByText(/Integration: 42 min/)).toBeInTheDocument());
     expect(screen.getByText("sigma-clip")).toBeInTheDocument();
+    // Plain-language combine line derived from the raw STACKER card.
+    expect(screen.getByText(/Combined: κ-σ \(sigma-clip\) outlier rejection/)).toBeInTheDocument();
   });
 
   it("shows the quality-weighting summary when present", async () => {
@@ -299,6 +301,28 @@ describe("noiseTrendSeries", () => {
   });
   it("returns an empty series when nothing is measured", () => {
     expect(noiseTrendSeries([mkRun({ noise_sigma: null })])).toEqual([]);
+  });
+});
+
+describe("combineMethodLabel", () => {
+  it("translates each known STACKER method to plain language", () => {
+    expect(combineMethodLabel([{ key: "STACKER", value: "mean" }]))
+      .toMatch(/Plain mean/);
+    expect(combineMethodLabel([{ key: "STACKER", value: "sigma-clip" }]))
+      .toMatch(/κ-σ/);
+    expect(combineMethodLabel([{ key: "STACKER", value: "min-max-reject" }]))
+      .toMatch(/Min\/max/);
+    expect(combineMethodLabel([{ key: "STACKER", value: "drizzle" }]))
+      .toMatch(/Drizzle/);
+  });
+  it("is case-insensitive and trims", () => {
+    expect(combineMethodLabel([{ key: "STACKER", value: " Sigma-Clip " }]))
+      .toMatch(/κ-σ/);
+  });
+  it("returns null when STACKER is absent or unknown", () => {
+    expect(combineMethodLabel([{ key: "OBJECT", value: "M42" }])).toBeNull();
+    expect(combineMethodLabel([{ key: "STACKER", value: "quantum" }])).toBeNull();
+    expect(combineMethodLabel([])).toBeNull();
   });
 });
 
