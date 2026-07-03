@@ -116,6 +116,14 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Gallery search matches calibration status** — building on this run's
+  `calstat` column, the Gallery free-text search now also matches a run's
+  calibration status, so typing "flat" surfaces every flat-calibrated stack and
+  "dark" the dark-calibrated ones across every target — handy for finding your
+  properly-calibrated results. Extracted the inline filter into a pure,
+  non-mutating `filterGallery` helper (matches label + target + filename +
+  calstat) and unit-tested it. Frontend-only, additive. (v0.55.2, this run)
+
 - **Seestar reconnect hygiene (fd-leak fix)** — the manager's poll loop
   re-`connect()`s a disconnected client every cycle, but `SeestarClient.connect()`
   overwrote `self._sock` without closing the dead one or clearing the in-flight
