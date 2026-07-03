@@ -51,6 +51,21 @@ problems. Dogfood it every big-picture run and fix root causes.
 - **Editor bug hunt (ongoing)** — there are undocumented issues. Each big-picture
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
+- **Coverage overlay should follow the recipe's geometry ops** — the coverage-map
+  overlay renders the run's *raw* full-frame coverage sibling, so once a crop/rotate/
+  resize op is in the recipe it no longer lines up with the reshaped preview
+  (v0.61.5 added an honest "shown for the uncropped frame" caption acknowledging
+  this). The proper fix is to run the recipe's *enabled geometry ops* over the
+  coverage map (via `apply_recipe` on a geometry-only sub-recipe, or reuse the same
+  crop/rotate math) before the PNG, so the overlay tracks the edited image. Reuses
+  the existing geometry ops; additive. Care: keep NaN = uncovered through the
+  transform, and only apply geometry (not tone) ops. (M, editor/trust)
+- **Show the proposed trim over the coverage heatmap** — when the user opens the
+  "Trim border" preview (v0.61.4) the dashed rectangle draws over whatever overlay
+  is shown; the *most* informative view is the crop over the coverage heatmap
+  (v0.61.3), where you can see it lands on the well-covered interior. Auto-enable
+  (or offer a one-click "show over coverage") when entering trim preview, and
+  de-conflict the two top-left captions. Small, purely advisory. (S, editor/trust)
 ### Autonomy — "just works" (PRIORITY 2)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
