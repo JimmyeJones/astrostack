@@ -300,6 +300,28 @@ def test_trim_suggestion_mosaic_without_coverage_sibling(client, solved_library)
     assert body["is_mosaic"] is True and body["crop"] is None
 
 
+def test_coverage_map_png(client, solved_library):
+    """The coverage-map overlay renders the run's coverage sibling as a PNG."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, h=80, w=100)
+    cov = np.full((80, 100), 1.0, dtype=np.float32)
+    cov[20:60, 25:75] = 5.0
+    _write_coverage(solved_library, safe, cov)
+
+    r = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/coverage-map")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("image/png")
+    assert r.content[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_coverage_map_404_without_sibling(client, solved_library):
+    """A run with no coverage sibling (single-field) has no coverage map → 404."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="nocovmap")
+    r = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/coverage-map")
+    assert r.status_code == 404
+
+
 def test_star_mask_preview(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
     rid = _make_run(solved_library, safe)

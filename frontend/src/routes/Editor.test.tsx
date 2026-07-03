@@ -198,6 +198,41 @@ describe("EditorView", () => {
       expect(screen.getByRole("button", { name: "Hide mask" })).toBeInTheDocument());
   });
 
+  it("offers a Coverage overlay on a mosaic and toggles it", async () => {
+    mockEditorQueries();
+    // is_mosaic:true → the coverage overlay button is offered.
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0],
+        b: [0, 0, 0, 0], is_mosaic: true });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+    const covUrl = vi.spyOn(client.api, "editCoverageMapUrl");
+
+    renderEditor();
+
+    const btn = await screen.findByRole("button", { name: "Coverage" });
+    await waitFor(() => expect(btn).not.toBeDisabled());
+    btn.click();
+
+    await waitFor(() => expect(covUrl).toHaveBeenCalledWith("M_42", 3));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Hide coverage" })).toBeInTheDocument());
+    expect(screen.getByText("Coverage map")).toBeInTheDocument();
+  });
+
+  it("hides the Coverage overlay button on a single-field stack", async () => {
+    mockEditorQueries();  // histogram has no is_mosaic flag → single-field
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    await screen.findByText("Stretch");
+    expect(screen.queryByRole("button", { name: "Coverage" })).not.toBeInTheDocument();
+  });
+
   it("undoes the last op with Ctrl+Z", async () => {
     mockEditorQueries();
     vi.stubGlobal("fetch", vi.fn(async () => ({

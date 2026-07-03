@@ -156,6 +156,20 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Coverage-map overlay in the editor (mosaic trust/explain)** — a Seestar
+  mosaic's ragged edges, the "Trim border" crop (v0.60.0) and the "Coverage
+  leveling" op all act on the per-pixel frame-coverage map, but the user had no
+  way to *see* it. A `…/editor/coverage-map` endpoint renders the run's coverage
+  sibling (strided to the preview proxy so it lines up with the shown image) as a
+  grayscale PNG — white where the most frames overlap, black at the uncovered
+  edges/gaps — and the editor adds a "Coverage" overlay toggle (next to Star mask)
+  shown **only on a mosaic** (`is_mosaic`), mutually exclusive with the other
+  overlays. So a beginner can look at exactly what "Trim border" and "Coverage
+  leveling" are addressing. 404 (no button) on a single-field stack. Engine +
+  one endpoint + frontend; additive/upgrade-safe. Tested: webapp (PNG on a
+  mosaic / 404 without a sibling), Vitest (button shows + toggles on a mosaic,
+  hidden on single-field). (v0.61.0, this run)
+
 - **One-click "Trim to well-covered area" for mosaics** — a Seestar mosaic's union
   canvas has ragged, low-coverage edges (single-frame corners, NaN gaps) that look
   messy and are noisier than the well-covered interior, and trimming them by hand

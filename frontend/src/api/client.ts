@@ -623,6 +623,8 @@ export const api = {
   editStarMaskUrl: (safe: string, runId: number, sizePx?: number) =>
     `/api/targets/${safe}/stack-runs/${runId}/editor/star-mask`
     + (sizePx ? `?size_px=${sizePx}` : ""),
+  editCoverageMapUrl: (safe: string, runId: number) =>
+    `/api/targets/${safe}/stack-runs/${runId}/editor/coverage-map`,
   getHistogram: (safe: string, runId: number, recipe: Recipe, signal?: AbortSignal) =>
     req<Histogram>(
       `/api/targets/${safe}/stack-runs/${runId}/editor/histogram?recipe=${encodeRecipe(recipe)}`,

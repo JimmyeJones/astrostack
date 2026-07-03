@@ -250,6 +250,24 @@ export function EditorView() {
     return () => { if (u) URL.revokeObjectURL(u); };
   }, [maskPreview.data]);
 
+  // Coverage-map overlay: on a mosaic, show the per-pixel frame coverage (white =
+  // most frames overlapped, black = uncovered ragged edges/gaps) so the user can
+  // see what the "Trim border" and "Coverage leveling" tools are acting on.
+  const [showCoverage, setShowCoverage] = useState(false);
+  const coveragePreview = useQuery({
+    queryKey: ["edit-coverage", safe, rid],
+    enabled: showCoverage && !!opsSchema.data && !saved.isLoading,
+    queryFn: async ({ signal }) => {
+      const res = await fetch(api.editCoverageMapUrl(safe, rid), { signal });
+      if (!res.ok) throw new Error("coverage map failed");
+      return URL.createObjectURL(await res.blob());
+    },
+  });
+  useEffect(() => {
+    const u = coveragePreview.data;
+    return () => { if (u) URL.revokeObjectURL(u); };
+  }, [coveragePreview.data]);
+
   // Per-op "show without this op" compare: render the full recipe with just the
   // selected op bypassed, so while tuning one op the user sees exactly *its*
   // contribution (unlike Compare, which shows the whole recipe vs the raw base).
@@ -276,13 +294,15 @@ export function EditorView() {
     return () => { if (u) URL.revokeObjectURL(u); };
   }, [withoutOpPreview.data]);
 
-  const shownSrc = showMask
-    ? (maskPreview.data ?? preview.data)
-    : showBase
-      ? (basePreview.data ?? preview.data)
-      : soloActive
-        ? (withoutOpPreview.data ?? preview.data)
-        : preview.data;
+  const shownSrc = showCoverage
+    ? (coveragePreview.data ?? preview.data)
+    : showMask
+      ? (maskPreview.data ?? preview.data)
+      : showBase
+        ? (basePreview.data ?? preview.data)
+        : soloActive
+          ? (withoutOpPreview.data ?? preview.data)
+          : preview.data;
 
   // Keyboard undo/redo for the op pipeline: Cmd/Ctrl+Z undoes, Cmd/Ctrl+Shift+Z
   // (or Ctrl+Y) redoes. Skipped while typing in a field so editing the output
@@ -531,10 +551,10 @@ export function EditorView() {
               ) : (
                 <Center h={240}><Loader /></Center>
               )}
-              {showMask || showBase || soloActive ? (
+              {showMask || showBase || soloActive || showCoverage ? (
                 <Text size="xs" c="white" style={{ position: "absolute", left: 12, top: 10,
                   background: "rgba(0,0,0,0.6)", padding: "2px 8px", borderRadius: 4 }}>
-                  {showMask ? "Star mask" : showBase ? "Original"
+                  {showCoverage ? "Coverage map" : showMask ? "Star mask" : showBase ? "Original"
                     : `Without: ${specs[selForSolo!.id]?.label ?? selForSolo!.id}`}
                 </Text>
               ) : null}
@@ -550,19 +570,35 @@ export function EditorView() {
                 </Group>
               ) : null}
               <Group gap={6} style={{ position: "absolute", right: 8, top: 8 }}>
+                {hist.data?.is_mosaic ? (
+                  <Tooltip multiline w={230} withArrow
+                    label="Show this mosaic's frame-coverage map: white where the most frames overlap, black at the ragged, uncovered edges. This is what 'Trim border' and 'Coverage leveling' act on.">
+                    <Button size="xs" variant={showCoverage ? "filled" : "default"}
+                      color="grape"
+                      disabled={!preview.data}
+                      loading={showCoverage && coveragePreview.isLoading}
+                      onClick={() => setShowCoverage((s) => {
+                        if (!s) { setShowMask(false); setShowBase(false); setSoloExclude(false); }
+                        return !s;
+                      })}>
+                      {showCoverage ? "Hide coverage" : "Coverage"}
+                    </Button>
+                  </Tooltip>
+                ) : null}
                 <Tooltip label="Show the soft mask that gates star ops (white = treated as a star)">
                   <Button size="xs" variant={showMask ? "filled" : "default"}
                     color="grape"
                     disabled={!preview.data}
                     loading={showMask && maskPreview.isLoading}
                     onClick={() => setShowMask((s) => {
-                      if (!s) { setShowBase(false); setSoloExclude(false); } return !s;
+                      if (!s) { setShowBase(false); setSoloExclude(false); setShowCoverage(false); }
+                      return !s;
                     })}>
                     {showMask ? "Hide mask" : "Star mask"}
                   </Button>
                 </Tooltip>
                 <Button size="xs" variant={showBase ? "filled" : "default"}
-                  disabled={!preview.data || showMask}
+                  disabled={!preview.data || showMask || showCoverage}
                   onClick={() => setShowBase((s) => { if (!s) setSoloExclude(false); return !s; })}>
                   {showBase ? "Edited" : "Compare"}
                 </Button>
@@ -717,7 +753,8 @@ export function EditorView() {
                         loading={soloActive && withoutOpPreview.isLoading}
                         disabled={!preview.data}
                         onClick={() => setSoloExclude((s) => {
-                          if (!s) { setShowBase(false); setShowMask(false); } return !s;
+                          if (!s) { setShowBase(false); setShowMask(false); setShowCoverage(false); }
+                          return !s;
                         })}>
                         {soloActive ? "Showing without" : "Without this op"}
                       </Button>

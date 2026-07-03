@@ -99,6 +99,30 @@ def _render_png(project_dir: Path, run, recipe: Recipe) -> bytes:
     return buf.getvalue()
 
 
+def _render_coverage_png(project_dir: Path, run) -> bytes | None:
+    """Render the run's per-pixel frame-coverage map (strided to the preview
+    proxy so it lines up with the shown image) as a grayscale PNG — white where
+    the most frames overlap, black where none did (the ragged mosaic edges /
+    gaps). ``None`` when the run has no coverage sibling (a single-field image)."""
+    import io
+
+    from PIL import Image
+
+    rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
+    cov = _proxy_coverage(run.fits_path, scale)
+    if cov is None:
+        return None
+    finite = np.isfinite(cov)
+    peak = float(cov[finite].max()) if finite.any() else 0.0
+    norm = np.zeros(cov.shape, dtype=np.float32)
+    if peak > 0:
+        norm = np.clip(np.nan_to_num(cov, nan=0.0) / peak, 0.0, 1.0)
+    u8 = (norm * 255).astype(np.uint8)
+    buf = io.BytesIO()
+    Image.fromarray(u8, mode="L").save(buf, format="PNG")
+    return buf.getvalue()
+
+
 def _render_star_mask_png(project_dir: Path, run, size_px: float, grow: float) -> bytes:
     """Render the soft star mask (the same map that gates star ops) as a grayscale
     PNG, so the user can *see* what the editor treats as stars vs background."""
@@ -460,6 +484,20 @@ async def edit_star_mask(safe: str, run_id: int, request: Request,
     grow = max(0.0, min(3.0, grow))
     project_dir, run = _run_info(request, safe, run_id)
     png = await run_in_threadpool(_render_star_mask_png, project_dir, run, size_px, grow)
+    return Response(content=png, media_type="image/png",
+                    headers={"Cache-Control": "no-store"})
+
+
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/editor/coverage-map")
+async def edit_coverage_map(safe: str, run_id: int, request: Request) -> Response:
+    """Grayscale preview of the run's frame-coverage map (white = most frames
+    overlap, black = uncovered), so a user can *see* the ragged, low-coverage
+    mosaic edges the "Trim border" / "Coverage leveling" tools address. 404 when
+    the run has no coverage sibling (a single-field image)."""
+    project_dir, run = _run_info(request, safe, run_id)
+    png = await run_in_threadpool(_render_coverage_png, project_dir, run)
+    if png is None:
+        raise HTTPException(status_code=404, detail="No coverage map for this run")
     return Response(content=png, media_type="image/png",
                     headers={"Cache-Control": "no-store"})
 
