@@ -10,6 +10,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { api, type GalleryItem, type StackOptionField } from "../api/client";
 import { formatIntegration } from "../format";
 import { HazyNightBadge } from "../components/HazyNightBadge";
+import { CalibrationBadge } from "../components/CalibrationBadge";
 import { NoiseReadout, hasNoise } from "../components/NoiseBadge";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { QueryError } from "../components/QueryError";
@@ -28,6 +29,18 @@ export function sortGallery(items: GalleryItem[], sort: GallerySort): GalleryIte
   const rest = items.filter((it) => !hasNoise(it.noise_sigma));
   measured.sort((a, b) => (a.noise_sigma as number) - (b.noise_sigma as number));
   return [...measured, ...rest];
+}
+
+// Free-text filter across a run's label (notes), target name, output basename
+// and its calibration status ("dark+flat", …) — so a user can find "best RGB
+// v2", "M42", or every "flat"-calibrated stack across every target. Pure and
+// non-mutating so it's easy to test. An empty/whitespace query matches all.
+export function filterGallery(items: GalleryItem[], query: string): GalleryItem[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return items;
+  return items.filter((it) =>
+    [it.notes, it.target_name, it.output_basename, it.calstat]
+      .some((s) => (s ?? "").toLowerCase().includes(q)));
 }
 
 /** Format an option value for display (booleans → On/Off, round floats). */
@@ -97,6 +110,7 @@ function GalleryCard({ item, labels, onView, selected, onToggleSelect }: {
         </Text>
         <Group gap={4} wrap="nowrap" style={{ flexShrink: 0 }}>
           <HazyNightBadge ratio={item.transparency_ratio} />
+          <CalibrationBadge calstat={item.calstat} />
           <Badge variant="light">{item.n_frames_used} frames</Badge>
         </Group>
       </Group>
@@ -215,15 +229,10 @@ export function GalleryView() {
   }
 
   const allItems = gallery.data?.items ?? [];
-  // Free-text filter across the run's label (notes), target name and output
-  // basename — so a user can find "best RGB v2" or "M42" across every target.
-  const query = search.trim().toLowerCase();
-  const filtered = query
-    ? allItems.filter((it) =>
-        [it.notes, it.target_name, it.output_basename]
-          .some((s) => (s ?? "").toLowerCase().includes(query)))
-    : allItems;
-  const items = sortGallery(filtered, sort);
+  // Free-text filter across the run's label (notes), target name, output
+  // basename and calibration status — so a user can find "best RGB v2", "M42",
+  // or their "flat"-calibrated stacks across every target.
+  const items = sortGallery(filterGallery(allItems, search), sort);
   // Only offer the Cleanest sort once it's a meaningful comparison: more than one
   // image and at least one carries a measured σ (pre-v0.48 runs have none).
   const anyNoise = allItems.some((it) => hasNoise(it.noise_sigma));
@@ -244,7 +253,7 @@ export function GalleryView() {
           <TextInput
             value={search}
             onChange={(e) => setSearch(e.currentTarget.value)}
-            placeholder="Search by label, target or filename…"
+            placeholder="Search by label, target, filename or calibration…"
             leftSection={<IconSearch size={16} />}
             maw={420}
             style={{ flex: 1, minWidth: 220 }}
@@ -305,7 +314,7 @@ export function GalleryView() {
 
       {items.length === 0 ? (
         <Text c="dimmed">
-          {query
+          {search.trim()
             ? `No images match “${search.trim()}”.`
             : "No stacked images yet. Stack a target and its results will appear here."}
         </Text>

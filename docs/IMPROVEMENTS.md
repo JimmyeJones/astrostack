@@ -64,21 +64,31 @@ _(none — claim an item here with your branch name)_
   Large but high value for the multi-night Seestar workflow. (L, correctness)
 - Channel combine: reproject stacks that don't share a canvas (via WCS) instead
   of erroring, so filters shot in separate sessions can be combined. (M–L)
-- Seestar client (`webapp/seestar/client.py`) has no reconnect/retry on a
-  dropped TCP socket — a flaky Wi-Fi link to the scope currently requires
-  the user to manually reconnect via the UI. Core hardware-integration
-  path; needs care around not spamming reconnect attempts and should be
-  testable in isolation from real hardware. (M, correctness)
+- Seestar client reconnect is now *hygienic* (v0.55.1: `connect()` tears down a
+  stale socket + pending replies before re-opening, so the manager's per-cycle
+  reconnect no longer leaks an fd per drop), but the retry cadence itself could
+  still be smarter: the poll loop reconnects on a fixed interval with no backoff,
+  so a scope that's genuinely gone gets hammered every cycle. A capped
+  exponential backoff per-ip (and a surfaced "reconnecting…" device state) would
+  be gentler and clearer. (S–M, correctness)
 
 ### Features that serve real workflows
 - Annotated sky overlay (label detected objects / show solved field). (M)
+- **"You have calibration masters but aren't using them" nudge on the Stack
+  form** — a beginner often stacks uncalibrated even though the library holds a
+  matching master. The Stack form already calls `calibration-suggestions`
+  (`recommend_masters`); when it returns a recommended dark/flat/bias and the
+  form's selectors are all empty, show a friendly advisory ("You have a matching
+  master dark + flat — calibrating removes amp glow / dust shadows. [Use
+  recommended]") reusing the existing one-click. Advisory only, within-target,
+  frontend-only. Complements the recommender + the new calstat chip (which shows
+  *after* the fact). (S–M, approachability)
+- **Calibration-status filter chip on the Gallery** — now that `calstat` is on
+  each card and searchable (v0.55.2), a one-click "Calibrated / Uncalibrated"
+  `SegmentedControl` (shown only when the set is mixed) would let a user isolate
+  their uncalibrated stacks worth re-running, without typing. Pure filter helper,
+  frontend-only. (S, approachability)
 ### UX & polish
-- **Show the applied calibration inline on History/Gallery cards** — v0.53.1
-  records `CALSTAT` ("dark+flat", "bias+flat", …) in the FITS and surfaces it in
-  the Info panel, but a user must open Info to see it. A tiny "dark+flat" chip on
-  the card (read from the run's provenance, or a new additive column to avoid a
-  per-card FITS read) would show at a glance whether a stack was calibrated —
-  useful when comparing a calibrated vs uncalibrated run. (S, approachability)
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
 
@@ -119,6 +129,35 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Gallery search matches calibration status** — building on this run's
+  `calstat` column, the Gallery free-text search now also matches a run's
+  calibration status, so typing "flat" surfaces every flat-calibrated stack and
+  "dark" the dark-calibrated ones across every target — handy for finding your
+  properly-calibrated results. Extracted the inline filter into a pure,
+  non-mutating `filterGallery` helper (matches label + target + filename +
+  calstat) and unit-tested it. Frontend-only, additive. (v0.55.2, this run)
+
+- **Seestar reconnect hygiene (fd-leak fix)** — the manager's poll loop
+  re-`connect()`s a disconnected client every cycle, but `SeestarClient.connect()`
+  overwrote `self._sock` without closing the dead one or clearing the in-flight
+  `_pending` replies the dropped link left behind — so a flaky Wi-Fi link to the
+  scope leaked a file descriptor (and a stranded pending reply) on every
+  reconnect. `connect()` now runs a shared `_teardown_locked()` (extracted from
+  `disconnect()`) before opening a fresh socket, closing the stale fd and waking
+  any waiter with "disconnected". Unit-tested with injected stale state (no
+  hardware). (v0.55.1, this run)
+
+- **Calibration chip on History/Gallery cards** — a stack now records which
+  calibration masters were applied to its lights in a new additive
+  `stack_runs.calstat` column (schema v6→v7 migration; "dark+flat", "bias+flat",
+  "flat", …, NULL when uncalibrated / for old runs), mirroring the `CALSTAT` FITS
+  card the engine already stamps but read from the run record so no per-card FITS
+  read is needed. `StackRunOut` and the gallery response carry it, and a shared
+  teal `CalibrationBadge` shows a small "dark+flat" chip (with a plain-language
+  tooltip) on History and Gallery cards — so a user sees at a glance whether a
+  stack was calibrated, useful when comparing a calibrated vs uncalibrated run.
+  Additive/upgrade-safe. (v0.55.0, this run)
 
 - **Per-target noise-σ trend sparkline** — the History page now shows a small
   "Noise trend" card (a reusable inline-SVG `Sparkline`) plotting each measured

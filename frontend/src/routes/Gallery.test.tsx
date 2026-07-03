@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GalleryView, sortGallery } from "./Gallery";
+import { GalleryView, sortGallery, filterGallery } from "./Gallery";
 import * as client from "../api/client";
 import type { GalleryItem } from "../api/client";
 
@@ -95,6 +95,28 @@ describe("Gallery batch apply", () => {
       target: { value: "zzz-nope" },
     });
     await waitFor(() => expect(screen.getByText(/No images match/)).toBeInTheDocument());
+  });
+
+  it("filterGallery matches label, target, basename and calibration status", () => {
+    const items = [
+      { ...item(1, "M_42"), notes: "best RGB v2", calstat: "dark+flat" },
+      { ...item(2, "NGC_7000"), notes: "cloudy night", calstat: null },
+      { ...item(3, "M_31"), notes: null, calstat: "bias+flat" },
+    ];
+    // Empty query is a passthrough (and non-mutating).
+    expect(filterGallery(items, "").map((i) => i.run_id)).toEqual([1, 2, 3]);
+    expect(filterGallery(items, "   ").map((i) => i.run_id)).toEqual([1, 2, 3]);
+    // Label / target / basename still match.
+    expect(filterGallery(items, "rgb v2").map((i) => i.run_id)).toEqual([1]);
+    expect(filterGallery(items, "ngc").map((i) => i.run_id)).toEqual([2]);
+    expect(filterGallery(items, "m3").map((i) => i.run_id)).toEqual([3]);
+    // Calibration status is now searchable: "flat" hits both calibrated runs,
+    // "dark" only the dark+flat one.
+    expect(filterGallery(items, "flat").map((i) => i.run_id)).toEqual([1, 3]);
+    expect(filterGallery(items, "dark").map((i) => i.run_id)).toEqual([1]);
+    // No match → empty; input untouched.
+    expect(filterGallery(items, "zzz")).toEqual([]);
+    expect(items.map((i) => i.run_id)).toEqual([1, 2, 3]);
   });
 
   it("sortGallery puts lowest-noise stacks first and keeps unmeasured runs last", () => {

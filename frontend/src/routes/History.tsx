@@ -11,6 +11,7 @@ import { Link, useParams } from "react-router-dom";
 import { api, type StackRun } from "../api/client";
 import { formatIntegration } from "../format";
 import { HazyNightBadge } from "../components/HazyNightBadge";
+import { CalibrationBadge } from "../components/CalibrationBadge";
 import { NoiseReadout, NoiseDelta, CleanestBadge, cleanestRunId, hasNoise } from "../components/NoiseBadge";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { Sparkline } from "../components/Sparkline";
@@ -245,6 +246,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
         <Group gap={4} wrap="nowrap">
           <CleanestBadge isCleanest={!!isCleanest} />
           <HazyNightBadge ratio={run.transparency_ratio} />
+          <CalibrationBadge calstat={run.calstat} />
           <Badge variant="light">{run.n_frames_used} frames</Badge>
         </Group>
       </Group>

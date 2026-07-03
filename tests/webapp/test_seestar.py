@@ -182,6 +182,58 @@ def test_rpc_before_connect_raises():
         c.get_device_state()
 
 
+def test_reconnect_closes_stale_socket_and_clears_pending(monkeypatch):
+    """After a dropped link the read loop leaves a dead socket and any in-flight
+    reply behind (``_connected`` is False but ``_sock``/``_pending`` linger). A
+    fresh ``connect()`` — which the manager's poll loop issues every cycle for a
+    disconnected client — must close that stale socket and wake the pending reply
+    instead of leaking a file descriptor per reconnect."""
+    from webapp.seestar import client as client_mod
+    from webapp.seestar.client import _Pending
+
+    class _FakeSock:
+        def __init__(self):
+            self.closed = False
+
+        def shutdown(self, how):  # noqa: ANN001
+            pass
+
+        def close(self):
+            self.closed = True
+
+        def settimeout(self, t):  # noqa: ANN001
+            pass
+
+    c = SeestarClient("127.0.0.1", 4700)
+    # Simulate the post-drop state: dead socket, not connected, a reply still
+    # waiting for an answer that will never come.
+    stale = _FakeSock()
+    c._sock = stale
+    c._connected = False
+    pending = _Pending()
+    c._pending[99] = pending
+
+    # A reconnect: no real network — the reader thread and UDP intro are stubbed,
+    # and create_connection hands back a fresh fake socket.
+    fresh = _FakeSock()
+    monkeypatch.setattr(SeestarClient, "_read_loop", lambda self: None)
+    monkeypatch.setattr(client_mod, "_send_udp_intro", lambda host: None)
+    monkeypatch.setattr(client_mod.socket, "create_connection",
+                        lambda *a, **k: fresh)
+
+    c.connect()
+    try:
+        assert stale.closed is True          # the leaked fd is closed
+        assert 99 not in c._pending          # the stale reply is dropped
+        assert pending.error == "disconnected"
+        assert pending.event.is_set()        # and its waiter is woken
+        assert c._sock is fresh
+        assert c.is_connected
+    finally:
+        c.disconnect()
+    assert stale.closed and fresh.closed     # disconnect closes the live socket too
+
+
 def test_timeout_on_silent_device_explains_single_controller():
     """A device that accepts the TCP connection but never replies (e.g. the app
     is already connected) should produce an actionable error, not a bare timeout."""

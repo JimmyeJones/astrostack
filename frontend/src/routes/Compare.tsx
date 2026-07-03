@@ -10,6 +10,7 @@ import { api, type GalleryItem } from "../api/client";
 import { formatIntegration } from "../format";
 import { NoiseReadout, hasNoise } from "../components/NoiseBadge";
 import { HazyNightBadge } from "../components/HazyNightBadge";
+import { CalibrationBadge } from "../components/CalibrationBadge";
 import { QueryError } from "../components/QueryError";
 
 // A compare target is referenced in the URL as "<safe>:<run_id>" (safe target
@@ -56,6 +57,7 @@ function CardMeta({ item }: { item: GalleryItem }) {
         </Text>
         <Group gap={4} wrap="nowrap" style={{ flexShrink: 0 }}>
           <HazyNightBadge ratio={item.transparency_ratio} />
+          <CalibrationBadge calstat={item.calstat} />
           <Badge variant="light">{item.n_frames_used} frames</Badge>
         </Group>
       </Group>

@@ -30,7 +30,7 @@ from typing import Any, Iterator
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 SCHEMA_SQL = f"""
 PRAGMA user_version = {SCHEMA_VERSION};
@@ -58,7 +58,8 @@ CREATE TABLE IF NOT EXISTS stack_runs (
     notes           TEXT,
     total_exposure_s REAL,
     transparency_ratio REAL,
-    noise_sigma REAL
+    noise_sigma REAL,
+    calstat TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_stack_runs_ts ON stack_runs(timestamp_utc);
@@ -286,6 +287,16 @@ class Project:
                     "ALTER TABLE stack_runs ADD COLUMN noise_sigma REAL")
             except sqlite3.OperationalError:
                 pass  # already present
+        if from_version < 7:
+            # Recorded which calibration masters were applied to the lights
+            # ("dark+flat", "bias+flat", "flat", …) so a card can show it at a
+            # glance without re-reading the FITS. Additive; older runs stay NULL
+            # (unknown) and simply show no calibration chip.
+            try:
+                self._conn.execute(
+                    "ALTER TABLE stack_runs ADD COLUMN calstat TEXT")
+            except sqlite3.OperationalError:
+                pass  # already present
         self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @contextmanager
@@ -411,14 +422,14 @@ class Project:
             "  timestamp_utc, output_basename, fits_path, tiff_path, preview_path,"
             "  n_frames_used, canvas_h, canvas_w, coverage_min, coverage_max,"
             "  options_json, notes, total_exposure_s, transparency_ratio,"
-            "  noise_sigma"
-            ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "  noise_sigma, calstat"
+            ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 run.timestamp_utc, run.output_basename, run.fits_path,
                 run.tiff_path, run.preview_path, run.n_frames_used,
                 run.canvas_h, run.canvas_w, run.coverage_min, run.coverage_max,
                 run.options_json, run.notes, run.total_exposure_s,
-                run.transparency_ratio, run.noise_sigma,
+                run.transparency_ratio, run.noise_sigma, run.calstat,
             ),
         )
         return cur.lastrowid  # type: ignore[return-value]
@@ -453,6 +464,10 @@ class Project:
                 noise_sigma=(
                     row["noise_sigma"]
                     if "noise_sigma" in row.keys() else None
+                ),
+                calstat=(
+                    row["calstat"]
+                    if "calstat" in row.keys() else None
                 ),
             )
 
@@ -497,6 +512,10 @@ class StackRunRow:
     # range so it's comparable across gain/exposure (lower = cleaner). None when
     # not computable or for runs recorded before this column existed (schema < 6).
     noise_sigma: float | None = None
+    # Which calibration masters were applied to the lights ("dark+flat",
+    # "bias+flat", "flat", …), or None when nothing was applied / for runs
+    # recorded before this column existed (schema < 7).
+    calstat: str | None = None
 
 
 def _to_db(value: Any) -> Any:

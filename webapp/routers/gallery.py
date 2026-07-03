@@ -50,6 +50,9 @@ class GalleryItem(BaseModel):
     # Background-noise σ of the stacked image, normalized to its own signal range
     # (lower = cleaner). None for pre-schema-6 runs; drives a noise readout.
     noise_sigma: float | None = None
+    # Which calibration masters were applied to the lights ("dark+flat", …), or
+    # None when uncalibrated / pre-schema-7; drives a "dark+flat" chip.
+    calstat: str | None = None
 
 
 class GalleryResponse(BaseModel):
@@ -107,6 +110,7 @@ def get_gallery(request: Request) -> GalleryResponse:
                         reusable=_is_reusable(options),
                         transparency_ratio=run.transparency_ratio,
                         noise_sigma=run.noise_sigma,
+                        calstat=run.calstat,
                     ))
             finally:
                 if proj is not None:

@@ -99,6 +99,13 @@ class SeestarClient:
         with self._lock:
             if self._connected:
                 return
+            # Reconnect hygiene: a prior connection may have dropped — the read
+            # loop sets ``_connected = False`` on its way out but leaves the dead
+            # socket and any in-flight replies behind. Tear those down before we
+            # open a fresh socket, so a flaky Wi-Fi link (the manager's poll loop
+            # re-``connect()``s a disconnected client every cycle) doesn't leak a
+            # file descriptor and a stale pending reply on every reconnect.
+            self._teardown_locked()
             _send_udp_intro(self.host)
             sock = socket.create_connection((self.host, self.port), _CONNECT_TIMEOUT)
             sock.settimeout(None)
@@ -116,21 +123,28 @@ class SeestarClient:
         self._stop.set()
         with self._lock:
             self._connected = False
-            if self._sock is not None:
-                try:
-                    self._sock.shutdown(socket.SHUT_RDWR)
-                except OSError:
-                    pass
-                try:
-                    self._sock.close()
-                except OSError:
-                    pass
-                self._sock = None
-            # Wake anyone waiting on an in-flight reply.
-            for p in self._pending.values():
-                p.error = "disconnected"
-                p.event.set()
-            self._pending.clear()
+            self._teardown_locked()
+
+    def _teardown_locked(self) -> None:
+        """Close the current socket and fail any in-flight replies. The caller
+        must hold ``self._lock``. Idempotent — safe to call when already torn
+        down (e.g. from ``connect()`` after a dropped link). Does not touch
+        ``self._connected``/``self._stop``; the caller owns that transition."""
+        if self._sock is not None:
+            try:
+                self._sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            try:
+                self._sock.close()
+            except OSError:
+                pass
+            self._sock = None
+        # Wake anyone waiting on an in-flight reply.
+        for p in self._pending.values():
+            p.error = "disconnected"
+            p.event.set()
+        self._pending.clear()
 
     # ---- low-level RPC ----------------------------------------------------
 

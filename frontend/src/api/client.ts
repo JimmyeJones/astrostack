@@ -170,6 +170,7 @@ export interface StackRun {
   reusable?: boolean;
   transparency_ratio?: number | null;
   noise_sigma?: number | null;
+  calstat?: string | null;
 }
 
 export interface StackInfoCard {
@@ -235,6 +236,7 @@ export interface GalleryItem {
   reusable?: boolean;
   transparency_ratio?: number | null;
   noise_sigma?: number | null;
+  calstat?: string | null;
 }
 
 export interface LogEntry {
