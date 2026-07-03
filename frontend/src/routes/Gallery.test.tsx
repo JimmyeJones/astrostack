@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GalleryView, sortGallery, filterGallery } from "./Gallery";
+import { GalleryView, sortGallery, filterGallery, filterByCalibration, isCalibrated } from "./Gallery";
 import * as client from "../api/client";
 import type { GalleryItem } from "../api/client";
 
@@ -117,6 +117,62 @@ describe("Gallery batch apply", () => {
     // No match → empty; input untouched.
     expect(filterGallery(items, "zzz")).toEqual([]);
     expect(items.map((i) => i.run_id)).toEqual([1, 2, 3]);
+  });
+
+  it("filterByCalibration splits calibrated from uncalibrated runs", () => {
+    const items = [
+      { ...item(1), calstat: "dark+flat" },
+      { ...item(2), calstat: null },
+      { ...item(3), calstat: "" },
+      { ...item(4), calstat: "flat" },
+    ];
+    expect(isCalibrated(items[0])).toBe(true);
+    expect(isCalibrated(items[1])).toBe(false);
+    expect(isCalibrated(items[2])).toBe(false);
+    // "all" is a passthrough.
+    expect(filterByCalibration(items, "all").map((i) => i.run_id)).toEqual([1, 2, 3, 4]);
+    // Only runs that recorded a non-empty calstat.
+    expect(filterByCalibration(items, "calibrated").map((i) => i.run_id)).toEqual([1, 4]);
+    // The rest (null or empty).
+    expect(filterByCalibration(items, "uncalibrated").map((i) => i.run_id)).toEqual([2, 3]);
+    // Pure: input untouched.
+    expect(items.map((i) => i.run_id)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("shows the calibration filter only for a mixed set and narrows by it", async () => {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [
+        { ...item(1, "Calibrated"), calstat: "dark+flat" },
+        { ...item(2, "Uncalibrated"), calstat: null },
+      ],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+
+    renderGallery();
+
+    await waitFor(() => expect(screen.getByRole("radio", { name: "Uncalibrated" })).toBeInTheDocument());
+    const targetLinks = () =>
+      screen.getAllByRole("link").map((l) => l.textContent).filter((t) => t === "Calibrated" || t === "Uncalibrated");
+    expect(targetLinks()).toEqual(["Calibrated", "Uncalibrated"]);
+
+    // Clicking the "Calibrated" segment hides the uncalibrated card.
+    fireEvent.click(screen.getByRole("radio", { name: "Calibrated" }));
+    await waitFor(() => expect(targetLinks()).toEqual(["Calibrated"]));
+  });
+
+  it("hides the calibration filter when every run is uncalibrated", async () => {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [{ ...item(1), calstat: null }, { ...item(2), calstat: null }],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+
+    renderGallery();
+
+    await waitFor(() => expect(screen.getAllByLabelText("Select for batch edit").length).toBe(2));
+    // No calibration segment when the set isn't mixed.
+    expect(screen.queryByRole("radio", { name: "Uncalibrated" })).toBeNull();
   });
 
   it("sortGallery puts lowest-noise stacks first and keeps unmeasured runs last", () => {

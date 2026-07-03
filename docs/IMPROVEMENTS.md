@@ -83,11 +83,6 @@ _(none — claim an item here with your branch name)_
   recommended]") reusing the existing one-click. Advisory only, within-target,
   frontend-only. Complements the recommender + the new calstat chip (which shows
   *after* the fact). (S–M, approachability)
-- **Calibration-status filter chip on the Gallery** — now that `calstat` is on
-  each card and searchable (v0.55.2), a one-click "Calibrated / Uncalibrated"
-  `SegmentedControl` (shown only when the set is mixed) would let a user isolate
-  their uncalibrated stacks worth re-running, without typing. Pure filter helper,
-  frontend-only. (S, approachability)
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
@@ -129,6 +124,14 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Calibration-status filter chip on the Gallery** — building on the searchable
+  `calstat` column (v0.55.2), the Gallery gained an "All / Calibrated /
+  Uncalibrated" `SegmentedControl` (shown only when the set is *mixed* — some
+  calibrated, some not — so it's never a no-op chip) that isolates the
+  uncalibrated stacks worth re-running without typing. Pure, non-mutating
+  `filterByCalibration`/`isCalibrated` helpers, unit-tested plus a render test
+  for the mixed-vs-uniform gating. Frontend-only, additive. (v0.55.3, this run)
 
 - **Gallery search matches calibration status** — building on this run's
   `calstat` column, the Gallery free-text search now also matches a run's

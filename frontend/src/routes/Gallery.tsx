@@ -16,6 +16,23 @@ import { ImageLightbox } from "../components/ImageLightbox";
 import { QueryError } from "../components/QueryError";
 
 export type GallerySort = "newest" | "cleanest";
+export type CalFilter = "all" | "calibrated" | "uncalibrated";
+
+// A run counts as "calibrated" when it recorded a non-empty calibration status
+// (the additive `calstat` column, "dark+flat"/"bias+flat"/…). Pre-v0.48 runs
+// and uncalibrated stacks have a null/empty calstat.
+export function isCalibrated(it: GalleryItem): boolean {
+  return !!(it.calstat && it.calstat.trim());
+}
+
+// Filter items by calibration status. "all" is a passthrough; "calibrated" keeps
+// runs that applied any master; "uncalibrated" keeps the rest. Pure and
+// non-mutating so it's easy to test.
+export function filterByCalibration(items: GalleryItem[], filter: CalFilter): GalleryItem[] {
+  if (filter === "all") return items;
+  const want = filter === "calibrated";
+  return items.filter((it) => isCalibrated(it) === want);
+}
 
 // Order gallery items for display. "newest" preserves the API's timestamp-DESC
 // order; "cleanest" puts the lowest-noise stacks first (a global "show me my
@@ -179,6 +196,7 @@ export function GalleryView() {
   const [viewing, setViewing] = useState<GalleryItem | null>(null);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<GallerySort>("newest");
+  const [calFilter, setCalFilter] = useState<CalFilter>("all");
   // Batch selection: key "safe:run_id" -> {safe, run_id}.
   const [selected, setSelected] = useState<Record<string, { safe: string; run_id: number }>>({});
   const selKey = (it: GalleryItem) => `${it.safe}:${it.run_id}`;
@@ -232,11 +250,16 @@ export function GalleryView() {
   // Free-text filter across the run's label (notes), target name, output
   // basename and calibration status — so a user can find "best RGB v2", "M42",
   // or their "flat"-calibrated stacks across every target.
-  const items = sortGallery(filterGallery(allItems, search), sort);
+  const items = sortGallery(filterByCalibration(filterGallery(allItems, search), calFilter), sort);
   // Only offer the Cleanest sort once it's a meaningful comparison: more than one
   // image and at least one carries a measured σ (pre-v0.48 runs have none).
   const anyNoise = allItems.some((it) => hasNoise(it.noise_sigma));
   const showSort = allItems.length > 1 && anyNoise;
+  // Only offer the calibration filter when the set is *mixed* — some calibrated
+  // and some not — so it's a useful cut, not a no-op chip.
+  const anyCalibrated = allItems.some(isCalibrated);
+  const anyUncalibrated = allItems.some((it) => !isCalibrated(it));
+  const showCalFilter = anyCalibrated && anyUncalibrated;
 
   return (
     <Stack>
@@ -258,6 +281,20 @@ export function GalleryView() {
             maw={420}
             style={{ flex: 1, minWidth: 220 }}
           />
+          {showCalFilter ? (
+            <Tooltip label="Filter by whether a stack had calibration masters (dark/flat/bias) applied to its lights.">
+              <SegmentedControl
+                size="xs"
+                value={calFilter}
+                onChange={(v) => setCalFilter(v as CalFilter)}
+                data={[
+                  { label: "All", value: "all" },
+                  { label: "Calibrated", value: "calibrated" },
+                  { label: "Uncalibrated", value: "uncalibrated" },
+                ]}
+              />
+            </Tooltip>
+          ) : null}
           {showSort ? (
             <Tooltip label="Cleanest sorts by lowest background noise across every target — the σ is normalized so it's comparable between images.">
               <SegmentedControl
@@ -316,7 +353,9 @@ export function GalleryView() {
         <Text c="dimmed">
           {search.trim()
             ? `No images match “${search.trim()}”.`
-            : "No stacked images yet. Stack a target and its results will appear here."}
+            : calFilter !== "all"
+              ? `No ${calFilter} images.`
+              : "No stacked images yet. Stack a target and its results will appear here."}
         </Text>
       ) : (
         <SimpleGrid cols={{ base: 1, sm: 2, md: 3, lg: 4 }}>
