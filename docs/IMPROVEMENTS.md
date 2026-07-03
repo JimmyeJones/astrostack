@@ -54,16 +54,6 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 
 ### Autonomy — "just works" (PRIORITY 2)
-- **Auto-add Coverage leveling to the Auto recipe for mosaics** — now that the
-  "Coverage leveling" op actually works (v0.58.6), the one-click Auto-process could
-  detect a mosaic — the run row already carries `coverage_min`/`coverage_max`, and a
-  mosaic has `coverage_max > coverage_min` (uneven panel overlap) — and insert
-  `background.level_coverage` before the stretch, so a Seestar mosaic gets flat,
-  step-free panels without the user ever discovering the op exists. Skip it entirely
-  on a single-field stack (uniform coverage), where it's a no-op. Thread the run's
-  coverage span into `auto_recipe` (mirroring how `median_fwhm` is already threaded
-  for the sharpen radius). Auto is an explicit button so there's no default flip.
-  (M, autonomy/editor)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
   different (per-channel vs luminance gradient, star reduction, saturation). The
@@ -175,6 +165,19 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Auto-add Coverage leveling to the Auto recipe for mosaics** — now that the
+  "Coverage leveling" op works (v0.58.6), one-click Auto-process detects a mosaic
+  (the run row's `coverage_max > coverage_min`, i.e. uneven panel overlap) and
+  prepends `background.level_coverage` on linear data — before the gradient fit and
+  the stretch — so a Seestar mosaic gets flat, step-free panels without the user
+  ever discovering the op exists. A single-field stack (uniform coverage) and an
+  unknown span leave the recipe unchanged (the pass would be a no-op there anyway).
+  The run's coverage span is threaded into `auto_recipe` (mirroring how
+  `median_fwhm` is already threaded for the sharpen radius). Auto is an explicit
+  button, so no default flips. Engine + one endpoint thread, additive/upgrade-safe.
+  Tested: mosaic prepends & orders the pass before gradient/stretch; single-field
+  and unknown span omit it. (v0.59.0, this run)
 
 - **Fix: "Coverage leveling" editor op was a permanent silent no-op** — the
   Background-group "Coverage leveling" control (equalises sky across mosaic panels

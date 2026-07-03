@@ -118,8 +118,20 @@ def analyze_proxy(rgb: np.ndarray) -> dict[str, Any]:
     return {"sky": med, "sky_sigma": sky_sigma, "noisy": sky_sigma > 0.02}
 
 
+def _is_mosaic(coverage_span: tuple[int, int] | None) -> bool:
+    """A mosaic stack has uneven panel overlap, so its per-pixel frame coverage
+    spans a range (``coverage_max > coverage_min``); a single-field stack has
+    uniform coverage (max == min), where coverage-leveling is a deliberate no-op.
+    ``None`` (unknown) is treated as single-field so the recipe is unchanged."""
+    if coverage_span is None:
+        return False
+    lo, hi = coverage_span
+    return hi > lo
+
+
 def auto_recipe(rgb: np.ndarray | None = None,
-                median_fwhm: float | None = None) -> Recipe:
+                median_fwhm: float | None = None,
+                coverage_span: tuple[int, int] | None = None) -> Recipe:
     """One-click auto-process built from the image, not hardcoded.
 
     Always: background/gradient removal → photometric colour balance → a proper
@@ -135,6 +147,13 @@ def auto_recipe(rgb: np.ndarray | None = None,
     gone, so it doesn't amplify it) — *scaled to the measured background noise*
     so a noisy stack gets a gentler boost (less amplified chroma speckle) and a
     clean one the full lift.
+
+    When ``coverage_span`` marks a mosaic (``coverage_max > coverage_min``), a
+    ``background.level_coverage`` pass is prepended (on linear data, before the
+    gradient fit) so uneven-overlap panel steps are equalised before anything
+    else — the Seestar mosaic case, fixed without the user discovering the op.
+    On a single-field stack (uniform coverage) it's skipped entirely, where it
+    would be a no-op anyway.
     """
     noisy = False
     target_bg = 0.20
@@ -160,7 +179,13 @@ def auto_recipe(rgb: np.ndarray | None = None,
             if suggested is not None:
                 denoise_strength = suggested
 
-    ops: list[tuple[str, dict]] = [
+    ops: list[tuple[str, dict]] = []
+    if _is_mosaic(coverage_span):
+        # Equalise per-panel sky steps before the gradient fit — the coverage map
+        # is loaded into the render context downstream, so on a single-field
+        # export (no coverage) this op is a harmless no-op even if it slips in.
+        ops.append(("background.level_coverage", {}))
+    ops += [
         ("background.final_gradient", {"mode": "luminance"}),
         ("tone.color_calibrate", {"mode": "gray_star"}),
     ]

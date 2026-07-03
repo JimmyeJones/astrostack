@@ -406,9 +406,15 @@ async def auto_process(safe: str, run_id: int, request: Request) -> dict:
         proj.close()
         lib.close()
 
+    # A mosaic stack (uneven panel overlap → coverage_max > coverage_min) gets a
+    # coverage-leveling pass prepended so its panel steps are flattened; a
+    # single-field stack (uniform coverage) is unchanged.
+    coverage_span = (int(run.coverage_min), int(run.coverage_max))
+
     def work() -> dict:
         rgb, _scale = get_proxy(project_dir, run.id, run.fits_path)
-        return presets_mod.auto_recipe(rgb, median_fwhm=median_fwhm).to_dict()
+        return presets_mod.auto_recipe(
+            rgb, median_fwhm=median_fwhm, coverage_span=coverage_span).to_dict()
 
     return await run_in_threadpool(work)
 
