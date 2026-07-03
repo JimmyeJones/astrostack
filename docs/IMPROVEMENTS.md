@@ -196,6 +196,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Guard the Levels op against a degenerate (white ≤ black) range** — the Levels
+  op's black-point and white-point are independent 0..1 sliders, so a beginner can
+  drag the white point down to or below the black point. That collapses the range
+  (`rng` was floored to `1e-6`) and hard-thresholds every pixel to pure black/white
+  — silently binarising the picture with no error, the same class of foot-gun as
+  the single-point Curves case (v0.61.10). `_levels` now returns the input
+  unchanged (identity) when `white - black < 1e-3`, so a mis-set slider can't
+  destroy the image. Engine-only, additive/upgrade-safe. Regression test covers the
+  inverted (white < black) and equal (white == black) cases (identity + NaN border
+  preserved). (v0.61.12, this run)
+
 - **Surface failed ops on export, not just in the live preview** — the preview /
   histogram paths collect per-op failures into `errors` and show them under the
   image, but the full-res export path (`_render_recipe_fullres`) only *logged* a
