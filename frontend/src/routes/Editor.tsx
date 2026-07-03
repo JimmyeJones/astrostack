@@ -75,6 +75,13 @@ export function EditorView() {
     queryFn: () => api.sharpenSuggestion(safe),
     staleTime: 60_000,
   });
+  // Data-driven default for star reduction: the target's median star FWHM is the
+  // star's own scale in px, offered as a one-click button for the `size` param.
+  const starSize = useQuery({
+    queryKey: ["star-size-suggestion", safe],
+    queryFn: () => api.starSizeSuggestion(safe),
+    staleTime: 60_000,
+  });
 
   const { state: ops, set: setOps, reset: resetOps, undo, redo, canUndo, canRedo } =
     useUndoable<OpInstance[]>([]);
@@ -599,7 +606,14 @@ export function EditorView() {
                               label: `From your stars (radius ${sharpen.data.radius}, FWHM ${sharpen.data.fwhm_px}px)`,
                             },
                           }
-                          : undefined
+                          : selectedOp.id === "stars.reduce" && starSize.data?.size != null
+                            ? {
+                              size: {
+                                value: starSize.data.size,
+                                label: `From your stars (size ${starSize.data.size}, FWHM ${starSize.data.fwhm_px}px)`,
+                              },
+                            }
+                            : undefined
                   } />
               </Paper>
             ) : null}

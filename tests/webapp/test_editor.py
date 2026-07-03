@@ -123,6 +123,29 @@ def test_sharpen_suggestion_clamps_to_op_range(client, built_library, data_root)
     assert client.get("/api/targets/M_42/editor/sharpen-suggestion").json()["radius"] == 10.0
 
 
+def test_star_size_suggestion_from_median_fwhm(client, built_library, data_root):
+    _set_fwhm(data_root, "M_42", [2.0, 3.0, 4.0])
+    r = client.get("/api/targets/M_42/editor/star-size-suggestion")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["fwhm_px"] == 3.0  # median of 2, 3, 4
+    assert body["size"] == 3  # round(3.0), an int in [1, 8]
+
+
+def test_star_size_suggestion_none_without_fwhm(client, built_library):
+    r = client.get("/api/targets/M_42/editor/star-size-suggestion")
+    assert r.status_code == 200
+    assert r.json() == {"fwhm_px": None, "size": None}
+
+
+def test_star_size_suggestion_clamps_to_op_range(client, built_library, data_root):
+    # A tiny FWHM floors at the op's min of 1; a huge one caps at its max of 8.
+    _set_fwhm(data_root, "M_42", [0.2, 0.2, 0.2])
+    assert client.get("/api/targets/M_42/editor/star-size-suggestion").json()["size"] == 1
+    _set_fwhm(data_root, "M_42", [40.0, 40.0, 40.0])
+    assert client.get("/api/targets/M_42/editor/star-size-suggestion").json()["size"] == 8
+
+
 def test_denoise_suggestion_from_image_noise(client, solved_library):
     # The run's proxy has a bright blob on a noisy sky (see _make_run), so the
     # endpoint returns a measurable noise σ and a usable in-range strength.

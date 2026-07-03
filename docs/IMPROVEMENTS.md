@@ -52,17 +52,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
 
-### Editor — make it excellent (PRIORITY 1) — new ideas
-- **Star-size-from-stars suggestion for the star-reduce op** — v0.57.4 gave the
-  Sharpen op a data-driven radius from the target's median star FWHM. The
-  `stars.reduce` op's `size` param is the same kind of physical star-scale guess a
-  beginner can't reason about, and the FWHM is already the natural measure of it.
-  Add a one-click "From your stars" suggestion for `stars.reduce`'s `size` (FWHM
-  rounded to the op's integer step, clamped to its range), reusing the exact
-  `median_fwhm` → suggestion pattern the sharpen/PSF buttons already use — three
-  data-driven buttons now, one more here for consistency. Small, additive.
-  (S, editor/autonomy)
-
 ### Autonomy — "just works" (PRIORITY 2)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
@@ -179,6 +168,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Star-size-from-stars suggestion for the star-reduce op** — the `stars.reduce`
+  op's `size` param is a physical star-scale in px a beginner can't reason about,
+  and QC already measures exactly that as the median star FWHM. A new
+  `GET …/editor/star-size-suggestion` endpoint maps the target's median FWHM to an
+  integer `size` (rounded, clamped to the op's 1–8 range), and the Star reduction
+  op's param panel offers a one-click "From your stars (size X, FWHM Ypx)" button —
+  the fourth data-driven button, mirroring the PSF-, sharpen- and denoise-from-data
+  suggestions exactly. Backend tested (median/clamp/none cases); additive/
+  upgrade-safe. (v0.57.5, this run)
 
 - **Sharpen-radius-from-stars suggestion** — the editor's Sharpen op made the user
   hand-guess a radius, when the natural detail scale to enhance is the star's own

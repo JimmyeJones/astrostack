@@ -374,6 +374,11 @@ export interface SharpenSuggestion {
   radius: number | null;
 }
 
+export interface StarSizeSuggestion {
+  fwhm_px: number | null;
+  size: number | null;
+}
+
 export interface CalibrationMaster {
   id: number;
   name: string;
@@ -588,6 +593,8 @@ export const api = {
     req<PsfSuggestion>(`/api/targets/${safe}/editor/psf-suggestion`),
   sharpenSuggestion: (safe: string) =>
     req<SharpenSuggestion>(`/api/targets/${safe}/editor/sharpen-suggestion`),
+  starSizeSuggestion: (safe: string) =>
+    req<StarSizeSuggestion>(`/api/targets/${safe}/editor/star-size-suggestion`),
   denoiseSuggestion: (safe: string, runId: number) =>
     req<DenoiseSuggestion>(`/api/targets/${safe}/stack-runs/${runId}/editor/denoise-suggestion`),
   getRecipe: (safe: string, runId: number) =>
