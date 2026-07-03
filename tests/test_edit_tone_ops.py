@@ -113,6 +113,19 @@ def test_curves_lifts_midtones():
     assert np.all(out[..., 0] > 0.5)
 
 
+def test_curves_degenerate_single_point_is_identity_not_blank():
+    """A one-point (or all-equal-x) curve can't define a mapping — np.interp would
+    return a constant and blank the image to a flat tone. A degenerate hand-built/
+    preset recipe must be treated as identity, not silently destroy the picture."""
+    rgb = _with_nan_border(_rgb(0.3, 0.5, 0.7))
+    op = get_op("tone.curves")
+    one_point = op.apply(rgb, {"points": [[0.5, 0.5]]}, EditContext())
+    flat_x = op.apply(rgb, {"points": [[0.5, 0.1], [0.5, 0.9]]}, EditContext())
+    for out in (one_point, flat_x):
+        assert np.all(np.isnan(out[:3, :, :]))                       # NaN border kept
+        assert np.allclose(out[3:, :, :], rgb[3:, :, :], atol=1e-3)  # covered = unchanged
+
+
 def test_levels_default_is_noop_and_gamma_brightens():
     rgb = _rgb(0.4, 0.4, 0.4)
     op = get_op("tone.levels")

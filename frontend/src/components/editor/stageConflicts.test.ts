@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  hasEnabledStretch, insertOnCorrectSide, moveToCorrectSide, stageConflicts,
+  extraEnabledStretchUids, hasEnabledStretch, insertOnCorrectSide, moveToCorrectSide,
+  stageConflicts,
 } from "./stageConflicts";
 import type { EditOp, OpInstance } from "../../api/client";
 
@@ -72,6 +73,40 @@ describe("stageConflicts", () => {
       op("background.subtract", "bg", false),
     ];
     expect(stageConflicts(ops, SPECS)).toEqual({});
+  });
+});
+
+describe("extraEnabledStretchUids", () => {
+  it("returns nothing with a single enabled stretch", () => {
+    const ops = [op("background.subtract", "bg"), op("tone.stretch", "s")];
+    expect(extraEnabledStretchUids(ops, SPECS)).toEqual([]);
+  });
+
+  it("returns every enabled stretch beyond the first, in order", () => {
+    const ops = [
+      op("tone.stretch", "s1"),
+      op("tone.saturation", "sat"),
+      op("tone.stretch", "s2"),
+      op("tone.stretch", "s3"),
+    ];
+    expect(extraEnabledStretchUids(ops, SPECS)).toEqual(["s2", "s3"]);
+  });
+
+  it("ignores disabled stretches (they don't run)", () => {
+    const ops = [
+      op("tone.stretch", "s1"),
+      op("tone.stretch", "s2", false), // disabled → doesn't compound
+    ];
+    expect(extraEnabledStretchUids(ops, SPECS)).toEqual([]);
+  });
+
+  it("counts only from the first *enabled* stretch", () => {
+    const ops = [
+      op("tone.stretch", "s0", false), // disabled first
+      op("tone.stretch", "s1"),        // first enabled → kept
+      op("tone.stretch", "s2"),        // extra
+    ];
+    expect(extraEnabledStretchUids(ops, SPECS)).toEqual(["s2"]);
   });
 });
 

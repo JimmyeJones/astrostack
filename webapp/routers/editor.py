@@ -494,10 +494,10 @@ async def edit_star_mask(safe: str, run_id: int, request: Request,
 
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/editor/coverage-map")
 async def edit_coverage_map(safe: str, run_id: int, request: Request) -> Response:
-    """Grayscale preview of the run's frame-coverage map (white = most frames
-    overlap, black = uncovered), so a user can *see* the ragged, low-coverage
-    mosaic edges the "Trim border" / "Coverage leveling" tools address. 404 when
-    the run has no coverage sibling (a single-field image)."""
+    """Viridis-coloured heatmap of the run's frame-coverage map (yellow = most
+    frames overlap, dark blue = uncovered), so a user can *see* the ragged,
+    low-coverage mosaic edges the "Trim border" / "Coverage leveling" tools
+    address. 404 when the run has no coverage sibling (a single-field image)."""
     project_dir, run = _run_info(request, safe, run_id)
     png = await run_in_threadpool(_render_coverage_png, project_dir, run)
     if png is None:

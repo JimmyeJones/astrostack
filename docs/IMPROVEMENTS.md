@@ -60,12 +60,34 @@ problems. Dogfood it every big-picture run and fix root causes.
   crop/rotate math) before the PNG, so the overlay tracks the edited image. Reuses
   the existing geometry ops; additive. Care: keep NaN = uncovered through the
   transform, and only apply geometry (not tone) ops. (M, editor/trust)
-- **Show the proposed trim over the coverage heatmap** — when the user opens the
-  "Trim border" preview (v0.61.4) the dashed rectangle draws over whatever overlay
-  is shown; the *most* informative view is the crop over the coverage heatmap
-  (v0.61.3), where you can see it lands on the well-covered interior. Auto-enable
-  (or offer a one-click "show over coverage") when entering trim preview, and
-  de-conflict the two top-left captions. Small, purely advisory. (S, editor/trust)
+- **Wavelet-denoise preview↔export parity** — every other spatial op (sharpen
+  radius, deconv PSF, bilateral spatial σ, background box) is corrected for the
+  decimated preview proxy via `ctx.scaled_px`, but the **default** denoise method
+  (`method="wavelet"`, also what Auto-process uses) has no size compensation: a
+  BayesShrink multi-level DWT's effect scales with image dimensions, so a strength
+  tuned on the ≤1500 px proxy smooths visibly differently on the full-res export.
+  The wavelet branch decomposes the whole image, so there's no single "radius" to
+  scale; a defensible fix is to cap the decomposition `wavelet_levels` to a
+  proxy-independent count (e.g. tie it to a physical scale via `proxy_scale`) or to
+  denoise the export on a matched-resolution pyramid. Needs care and a parity test
+  (compare denoise on a full image vs its 2×/4× strided proxy). Off nothing (it's
+  a correctness fix), but validate it doesn't weaken the clean-image case.
+  (M, editor/correctness)
+- **Surface failed ops on export, not just in the live preview** — the preview and
+  histogram paths collect per-op failures into `errors` and show them under the
+  image (Editor.tsx), but the full-res export path (`_render_recipe_fullres`) only
+  *logs* a failed op and drops it silently — so an op that fails on the full-res
+  data (but worked on the proxy, or vice versa) changes the exported look with no
+  notice to the user. Thread the per-op errors into the export job result and show
+  them in the "Export running/done" notification (or the History card). Reuses the
+  same best-effort try/except; additive. (S–M, editor/trust)
+- **"Original" compare should match the stack's own baseline** — the editor's
+  Compare ("Original") renders an *empty* recipe, which the backend tone-maps with
+  a hard-coded default asinh (stretch 0.5 / black 0.35). That can look different
+  from the stack thumbnail the user saw on History/Target before entering the
+  editor, so "before" isn't the baseline they expect. Render the Original with the
+  same default the run's own preview/thumbnail uses (or the run's saved recipe if
+  any) so the A/B is honest. (S, editor/trust)
 ### Autonomy — "just works" (PRIORITY 2)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
@@ -168,6 +190,58 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Fix stale/misleading maintainer comments & docstrings** — three inaccuracies a
+  future maintainer would trust: the `edit_coverage_map` endpoint docstring still
+  said "Grayscale … white = most frames" though it renders a viridis heatmap
+  (yellow = most); the CurvesWidget top comment said "click empty space to add a
+  point" when adding is bound to double-click (the visible help text was already
+  correct); and the registry docstring claimed `apply_recipe` is "the source of
+  truth for ordering" when it executes ops in recipe order and does **not** reorder
+  by stage. Corrected all three. Comment/docstring-only, no behaviour change.
+  (housekeeping, this run)
+
+- **Guard the Curves op against a degenerate (blank-the-image) curve** — a tone
+  curve with a single control point (or all-equal x) makes `np.interp` return a
+  constant, blanking the whole image to a flat tone. The CurvesWidget can't produce
+  that (endpoints are locked), but a hand-built or `base64`-encoded recipe / preset
+  could, with no error. `_curves` now returns the input unchanged (identity) when
+  the curve has fewer than two points spanning a range of x, so a degenerate recipe
+  can't silently destroy the picture. Engine-only, additive. Regression test covers
+  the one-point and flat-x cases (identity + NaN preserved). (v0.61.10, this run)
+
+- **Expose the Rotate op's `expand` control (was a dead read)** — `geometry.rotate`
+  read `params.get("expand", True)` but never registered an `expand` param, so the
+  reshape-vs-crop behaviour was uncontrollable: every rotated export always grew
+  the canvas with black corners, with no way to keep the original size. Registered
+  an `expand` bool param (default True = current behaviour, surfaced automatically
+  in the op panel via the descriptor), so a user can now turn it off to keep the
+  frame size and let the rotated corners fall outside. Engine-only, additive/
+  upgrade-safe (default preserves old behaviour). Regression test asserts the param
+  is exposed and actually toggles the output canvas size. (v0.61.9, this run)
+
+- **Warn about a redundant second Stretch (double-stretch bug)** — `apply_recipe`
+  marks the pipeline stretched on *every* `is_stretch` op and never dedupes, so two
+  enabled Stretch ops both run — the second re-stretches already display-space data
+  and washes the image out (flat/dark). A beginner hits it by running Auto-process
+  or a preset (both include a stretch) then clicking "Add operation → Stretch" to
+  "tune" it, with no warning. The pipeline panel now shows an orange advisory when
+  more than one Stretch is enabled, with a one-click "Disable the extra stretch(es)"
+  that keeps only the first (via a pure `extraEnabledStretchUids` helper). Advisory
+  + one-click, frontend-only, additive. Vitest: helper (4 cases: single/multi/
+  disabled/first-enabled) + an Editor test that the warning shows and clicking the
+  fix clears it. (v0.61.8, this run)
+
+- **Show the proposed trim over the coverage heatmap** — when the user opened the
+  "Trim border" preview (v0.61.4) the dashed crop drew over whatever overlay
+  happened to be up (usually the plain edited image), so you couldn't see that it
+  lands on the well-covered interior. Entering trim preview now auto-shows the
+  coverage heatmap (v0.61.3) on a mosaic (remembering the prior overlay state so
+  Cancel/Apply restores it), and the two top-left captions are de-conflicted: the
+  generic overlay label is suppressed during trim preview and the crop caption
+  reads "Proposed crop over coverage — keeps the central W% × H%". Frontend-only,
+  additive, advisory. Vitest: entering trim preview flips the overlay to "Hide
+  coverage" + the over-coverage caption, and Cancel restores it. (v0.61.7, this run)
 
 - **Show render progress for the full-res PNG download** — "Download full-res PNG"
   polls the render job to completion but only spun the button, so on a large mosaic

@@ -30,6 +30,12 @@ def _curves(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     pts = params.get("points") or [[0.0, 0.0], [1.0, 1.0]]
     xs = np.array([p[0] for p in pts], dtype=np.float64)
     ys = np.array([p[1] for p in pts], dtype=np.float64)
+    # A tone curve needs at least two control points spanning a range of x. A
+    # single point (or an all-equal-x set) makes np.interp return a constant,
+    # blanking the whole image to a flat tone — a degenerate hand-built/preset
+    # recipe could otherwise silently destroy the picture. Treat it as identity.
+    if xs.size < 2 or float(xs.max() - xs.min()) < 1e-6:
+        return as_rgb(rgb)
     order = np.argsort(xs)
     xs, ys = xs[order], ys[order]
     grid = np.linspace(0.0, 1.0, 256)

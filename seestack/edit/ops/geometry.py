@@ -65,9 +65,15 @@ register(OpSpec(
 register(OpSpec(
     id="geometry.rotate", label="Rotate", group="stars_geometry", stage="nonlinear",
     apply=_rotate, proxy_safe=True, help="Rotate by an arbitrary angle.",
-    params=[EditParam("angle", "Angle (°)", "float", default=0.0, min=-180.0, max=180.0,
-                      step=0.5, help="Degrees to rotate, clockwise. Corners exposed by the "
-                                     "rotation are left transparent (rendered black).")],
+    params=[
+        EditParam("angle", "Angle (°)", "float", default=0.0, min=-180.0, max=180.0,
+                  step=0.5, help="Degrees to rotate, clockwise. Corners exposed by the "
+                                 "rotation are left transparent (rendered black)."),
+        EditParam("expand", "Expand canvas", "bool", default=True, group="advanced",
+                  help="Grow the image to fit the whole rotated frame (nothing is lost; "
+                       "exposed corners are transparent). Turn off to keep the original "
+                       "size and let the rotated corners fall outside the frame."),
+    ],
 ))
 
 register(OpSpec(
