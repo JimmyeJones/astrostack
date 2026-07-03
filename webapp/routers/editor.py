@@ -210,6 +210,43 @@ def psf_suggestion(safe: str, request: Request) -> PsfSuggestionOut:
     return PsfSuggestionOut(fwhm_px=round(fwhm, 3), psf_sigma=round(sigma, 2))
 
 
+# The sharpen op's radius slider bounds/step (kept in step with the EditParam in
+# seestack/edit/ops/detail.py). A good unsharp-mask radius is on the scale of the
+# star's own blur, so we reuse the FWHM→σ conversion the PSF suggestion uses.
+_SHARPEN_RADIUS_MIN = 0.5
+_SHARPEN_RADIUS_MAX = 10.0
+_SHARPEN_RADIUS_STEP = 0.5
+
+
+class SharpenSuggestionOut(BaseModel):
+    """A data-driven sharpen radius derived from the target's median star FWHM
+    (radius ≈ the star's Gaussian σ), so the user doesn't hand-guess a radius.
+    ``None`` when no frame carries an FWHM."""
+
+    fwhm_px: float | None
+    radius: float | None
+
+
+@router.get("/api/targets/{safe}/editor/sharpen-suggestion", response_model=SharpenSuggestionOut)
+def sharpen_suggestion(safe: str, request: Request) -> SharpenSuggestionOut:
+    """Suggest an unsharp-mask radius from the target's median star FWHM, so the
+    user doesn't hand-guess — mirrors the PSF-from-stars button. The star's
+    Gaussian σ (= FWHM / 2·√(2·ln2)) is the natural detail scale to enhance;
+    clamped to the op's slider range and rounded to its step."""
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        fwhm = proj.median_fwhm()
+    finally:
+        proj.close()
+        lib.close()
+    if fwhm is None or fwhm <= 0:
+        return SharpenSuggestionOut(fwhm_px=None, radius=None)
+    raw = fwhm * _FWHM_TO_SIGMA
+    radius = max(_SHARPEN_RADIUS_MIN, min(_SHARPEN_RADIUS_MAX, raw))
+    radius = round(radius / _SHARPEN_RADIUS_STEP) * _SHARPEN_RADIUS_STEP
+    return SharpenSuggestionOut(fwhm_px=round(fwhm, 3), radius=round(radius, 2))
+
+
 class DenoiseSuggestionOut(BaseModel):
     """A data-driven starting strength for the editor's noise-reduction op,
     derived from the run's own background noise. ``None`` when the proxy has no
@@ -283,6 +320,14 @@ async def edit_histogram(safe: str, run_id: int, request: Request,
         hist = compute_histogram(out)
         hist["empty"] = empty
         hist["errors"] = errors  # ops that failed (surfaced near the preview)
+        # Surface the proxy geometry so the editor can tell the user the live
+        # preview is downscaled (a ≤1500 px proxy of what may be a 150 MP mosaic),
+        # which sets expectations for why fine detail reads differently than the
+        # full-res export. proxy_scale = full_width / proxy_width (>=1).
+        h, w = rgb.shape[:2]
+        hist["proxy_scale"] = round(float(scale), 3)
+        hist["proxy_width"] = int(w)
+        hist["proxy_height"] = int(h)
         return hist
 
     return await run_in_threadpool(work)

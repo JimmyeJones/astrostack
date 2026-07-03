@@ -7,14 +7,31 @@ import numpy as np
 from seestack.edit.registry import EditContext, EditParam, OpSpec, register
 
 
+def _scaled_box(ctx: EditContext, px: int, minimum: int = 16) -> int:
+    """A full-res box/mesh size expressed in *this render's* pixels.
+
+    ``box_size`` (and ``dilate_px``) are full-resolution pixel measures. On the
+    decimated live-preview proxy a box of ``px`` full-res pixels covers
+    ``proxy_scale`` times more of the scene, so the gradient mesh would be
+    estimated at a coarser physical scale in the preview than in the export.
+    Shrinking it by ``proxy_scale`` keeps the mesh at the same physical scale
+    (preview↔export parity), floored so ``Background2D`` still gets a sane box
+    with a few cells across the (small) proxy. On the export (``proxy_scale ==
+    1``) this is a no-op, so the exported result is unchanged.
+    """
+    return max(minimum, round(ctx.scaled_px(px)))
+
+
 def _subtract(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     from seestack.bg.per_frame import BackgroundOptions, subtract_background
 
     opts = BackgroundOptions(
-        box_size=int(params.get("box_size", 128)),
+        box_size=_scaled_box(ctx, int(params.get("box_size", 128))),
         mode=str(params.get("mode", "per_channel")),
         enabled=True,
     )
+    # for_image_size (called inside subtract_background) floors box_size further
+    # for tiny images, so the mesh always tiles the proxy.
     return subtract_background(rgb, opts, use_gpu=ctx.use_gpu)
 
 
@@ -24,9 +41,11 @@ def _final_gradient(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarr
     opts = FinalGradientOptions(
         enabled=True,
         mode=str(params.get("mode", "luminance")),
-        box_size=int(params.get("box_size", 256)),
+        box_size=_scaled_box(ctx, int(params.get("box_size", 256))),
         detect_sigma=float(params.get("detect_sigma", 2.5)),
-        dilate_px=int(params.get("dilate_px", 16)),
+        # dilate_px is a full-res pixel measure too — scale it (floor 0 so a
+        # small full-res dilation can legitimately vanish on a heavy proxy).
+        dilate_px=_scaled_box(ctx, int(params.get("dilate_px", 16)), minimum=0),
     )
     return remove_final_gradient(rgb, opts)
 

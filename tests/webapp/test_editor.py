@@ -95,6 +95,34 @@ def test_psf_suggestion_clamps_to_op_range(client, built_library, data_root):
     assert body["psf_sigma"] == 5.0
 
 
+def test_sharpen_suggestion_from_median_fwhm(client, built_library, data_root):
+    import math
+
+    _set_fwhm(data_root, "M_42", [2.0, 3.0, 4.0])
+    r = client.get("/api/targets/M_42/editor/sharpen-suggestion")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["fwhm_px"] == 3.0  # median of 2, 3, 4
+    # radius ≈ the star's Gaussian σ, rounded to the op's 0.5 step, in [0.5, 10].
+    expected = 3.0 / (2.0 * math.sqrt(2.0 * math.log(2.0)))
+    expected = round(round(expected / 0.5) * 0.5, 2)
+    assert body["radius"] == expected
+
+
+def test_sharpen_suggestion_none_without_fwhm(client, built_library):
+    r = client.get("/api/targets/M_42/editor/sharpen-suggestion")
+    assert r.status_code == 200
+    assert r.json() == {"fwhm_px": None, "radius": None}
+
+
+def test_sharpen_suggestion_clamps_to_op_range(client, built_library, data_root):
+    # A tiny FWHM would map below the op's 0.5 floor; a huge one above its 10 ceiling.
+    _set_fwhm(data_root, "M_42", [0.5, 0.5, 0.5])
+    assert client.get("/api/targets/M_42/editor/sharpen-suggestion").json()["radius"] == 0.5
+    _set_fwhm(data_root, "M_42", [40.0, 40.0, 40.0])
+    assert client.get("/api/targets/M_42/editor/sharpen-suggestion").json()["radius"] == 10.0
+
+
 def test_denoise_suggestion_from_image_noise(client, solved_library):
     # The run's proxy has a bright blob on a noisy sky (see _make_run), so the
     # endpoint returns a measurable noise σ and a usable in-range strength.
@@ -154,6 +182,9 @@ def test_edit_preview_and_histogram(client, solved_library):
     hist = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/histogram?recipe={q}").json()
     assert len(hist["r"]) == hist["bins"] and len(hist["g"]) == hist["bins"]
     assert sum(hist["r"]) > 0
+    # Proxy geometry is surfaced so the editor can warn "preview is downscaled".
+    assert hist["proxy_scale"] >= 1.0
+    assert hist["proxy_width"] > 0 and hist["proxy_height"] > 0
 
 
 def test_star_mask_preview(client, solved_library):

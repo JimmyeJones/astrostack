@@ -179,6 +179,27 @@ def test_auto_recipe_adapts_to_noise():
         assert ids.index("tone.stretch") < ids.index("tone.scnr") < ids.index("tone.saturation")
 
 
+def test_auto_recipe_denoise_strength_scales_with_noise():
+    """Auto's denoise strength should be data-driven — a very noisy stack gets a
+    stronger cut than a mildly-noisy one, not the same fixed 0.5."""
+    from seestack.edit.presets import auto_recipe
+
+    rng = np.random.default_rng(7)
+    base = np.full((80, 100, 3), 0.05, np.float32)
+    base[30:50, 40:60] += 0.5
+    mild = base + rng.normal(0, 0.035, base.shape).astype("float32")
+    heavy = base + rng.normal(0, 0.05, base.shape).astype("float32")
+
+    def denoise_strength(rgb):
+        op = next((o for o in auto_recipe(rgb).ops if o.id == "detail.denoise"), None)
+        return None if op is None else float(op.params["strength"])
+
+    s_mild = denoise_strength(mild)
+    s_heavy = denoise_strength(heavy)
+    assert s_mild is not None and s_heavy is not None  # both are noisy enough to denoise
+    assert s_heavy > s_mild  # stronger noise → stronger denoise
+
+
 def test_denoise_identity_at_zero_and_preserves_colour():
     base = np.empty((40, 50, 3), np.float32)
     for c, lvl in enumerate((0.1, 0.2, 0.3)):
@@ -267,3 +288,47 @@ def test_sharpen_radius_scaled_to_proxy(monkeypatch):
     spec.apply(img, {"amount": 1.0, "radius": 4.0}, EditContext(proxy_scale=4.0))
     # full-res keeps radius 4; a 2x proxy halves it; a 4x proxy quarters it.
     assert seen == [4.0, 2.0, 1.0]
+
+
+def test_background_subtract_box_scaled_to_proxy(monkeypatch):
+    """The background-subtract box_size is a full-res pixel measure, so on the
+    decimated preview proxy it must shrink by proxy_scale to keep the gradient
+    mesh at the same physical scale as the export (preview↔export parity)."""
+    import seestack.bg.per_frame as pf
+
+    seen: list[int] = []
+
+    def fake_subtract(rgb, opts, *, use_gpu=None):
+        seen.append(int(opts.box_size))
+        return rgb
+
+    monkeypatch.setattr(pf, "subtract_background", fake_subtract)
+    spec = get_op("background.subtract")
+    img = _img(20, 20, nan_band=0)
+
+    spec.apply(img, {"box_size": 128}, EditContext(proxy_scale=1.0))
+    spec.apply(img, {"box_size": 128}, EditContext(proxy_scale=2.0))
+    spec.apply(img, {"box_size": 128}, EditContext(proxy_scale=4.0))
+    # export keeps 128; a 2x proxy halves it; a 4x proxy quarters it.
+    assert seen == [128, 64, 32]
+
+
+def test_final_gradient_box_and_dilate_scaled_to_proxy(monkeypatch):
+    """The final-gradient box_size AND dilate_px are full-res pixel measures, so
+    both shrink by proxy_scale on the preview proxy for export parity."""
+    import seestack.bg.final_gradient as fg
+
+    seen: list[tuple[int, int]] = []
+
+    def fake_remove(rgb, opts):
+        seen.append((int(opts.box_size), int(opts.dilate_px)))
+        return rgb
+
+    monkeypatch.setattr(fg, "remove_final_gradient", fake_remove)
+    spec = get_op("background.final_gradient")
+    img = _img(20, 20, nan_band=0)
+
+    spec.apply(img, {"box_size": 256, "dilate_px": 16}, EditContext(proxy_scale=1.0))
+    spec.apply(img, {"box_size": 256, "dilate_px": 16}, EditContext(proxy_scale=4.0))
+    # export unchanged; a 4x proxy quarters both spatial measures.
+    assert seen == [(256, 16), (64, 4)]

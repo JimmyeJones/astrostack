@@ -350,6 +350,13 @@ export interface Histogram {
   b: number[];
   empty?: boolean;
   errors?: string[];
+  // Live preview runs on a downscaled proxy of the (possibly huge) master.
+  // proxy_scale = full_width / proxy_width (>=1); proxy_width is the proxy's
+  // pixel width. Surfaced so the editor can tell the user the preview is
+  // downscaled and set expectations vs the full-res export.
+  proxy_scale?: number;
+  proxy_width?: number;
+  proxy_height?: number;
 }
 
 export interface PsfSuggestion {
@@ -360,6 +367,11 @@ export interface PsfSuggestion {
 export interface DenoiseSuggestion {
   noise_sigma: number | null;
   strength: number | null;
+}
+
+export interface SharpenSuggestion {
+  fwhm_px: number | null;
+  radius: number | null;
 }
 
 export interface CalibrationMaster {
@@ -574,6 +586,8 @@ export const api = {
   editorOps: () => req<EditOp[]>("/api/editor/ops/schema"),
   psfSuggestion: (safe: string) =>
     req<PsfSuggestion>(`/api/targets/${safe}/editor/psf-suggestion`),
+  sharpenSuggestion: (safe: string) =>
+    req<SharpenSuggestion>(`/api/targets/${safe}/editor/sharpen-suggestion`),
   denoiseSuggestion: (safe: string, runId: number) =>
     req<DenoiseSuggestion>(`/api/targets/${safe}/stack-runs/${runId}/editor/denoise-suggestion`),
   getRecipe: (safe: string, runId: number) =>

@@ -19,6 +19,7 @@ import { Histogram } from "../components/editor/Histogram";
 import { OpList } from "../components/editor/OpList";
 import { hasEnabledStretch, insertOnCorrectSide, moveToCorrectSide } from "../components/editor/stageConflicts";
 import { autoSummarySentence } from "../components/editor/autoSummary";
+import { previewScaleCaption } from "../components/editor/previewScale";
 import { OpParamPanel } from "../components/editor/OpParamPanel";
 import { PresetMenu } from "../components/editor/PresetMenu";
 
@@ -65,6 +66,13 @@ export function EditorView() {
   const denoise = useQuery({
     queryKey: ["denoise-suggestion", safe, rid],
     queryFn: () => api.denoiseSuggestion(safe, rid),
+    staleTime: 60_000,
+  });
+  // Data-driven default for the sharpen radius: the target's median star FWHM
+  // converted to a Gaussian σ (the natural detail scale), offered as a button.
+  const sharpen = useQuery({
+    queryKey: ["sharpen-suggestion", safe],
+    queryFn: () => api.sharpenSuggestion(safe),
     staleTime: 60_000,
   });
 
@@ -423,6 +431,11 @@ export function EditorView() {
               </Group>
             </div>
             <Histogram data={hist.data} />
+            {previewScaleCaption(hist.data) ? (
+              <Text size="xs" c="dimmed" mt={4}>
+                {previewScaleCaption(hist.data)}
+              </Text>
+            ) : null}
             {hist.data?.errors?.length ? (
               <Alert color="orange" icon={<IconAlertTriangle size={16} />} mt="xs" py={6}>
                 <Text size="xs">
@@ -579,7 +592,14 @@ export function EditorView() {
                             label: `From your image (strength ${denoise.data.strength})`,
                           },
                         }
-                        : undefined
+                        : selectedOp.id === "detail.sharpen" && sharpen.data?.radius != null
+                          ? {
+                            radius: {
+                              value: sharpen.data.radius,
+                              label: `From your stars (radius ${sharpen.data.radius}, FWHM ${sharpen.data.fwhm_px}px)`,
+                            },
+                          }
+                          : undefined
                   } />
               </Paper>
             ) : null}
@@ -611,7 +631,9 @@ export function EditorView() {
       </Grid>
 
       <ImageLightbox src={lightbox ? (shownSrc ?? null) : null}
-        title={`${safe} — ${showBase ? "original" : "edited"}`} onClose={() => setLightbox(false)} />
+        title={`${safe} — ${showBase ? "original" : "edited"}`
+          + (previewScaleCaption(hist.data) ? ` · ${previewScaleCaption(hist.data)}` : "")}
+        onClose={() => setLightbox(false)} />
     </Stack>
   );
 }

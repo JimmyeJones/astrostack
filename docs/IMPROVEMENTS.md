@@ -53,20 +53,27 @@ problems. Dogfood it every big-picture run and fix root causes.
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
 
 ### Editor — make it excellent (PRIORITY 1) — new ideas
-- **Extend proxy-scale parity to the background ops** — v0.56.19 corrected the
-  spatial *detail* ops (sharpen radius, bilateral-denoise extent) for the decimated
-  preview proxy, but `background.subtract` / `background.final_gradient` still use
-  full-resolution pixel measures (`box_size`, `dilate_px`) directly, so their
-  gradient model is estimated at a different physical mesh scale in the preview
-  than in the full-res export. Scale those px params by `EditContext.scaled_px()`
-  too — but carefully: `photutils.Background2D` needs a sane minimum box and a few
-  boxes across the (small) proxy, so floor the scaled `box_size` (and guard that
-  the mesh still tiles the proxy) rather than blindly dividing. Add a
-  monkeypatched-arg test like the sharpen one. Background is smooth so the visible
-  parity gap is smaller than sharpen's, hence a follow-up not a blocker.
-  (S–M, editor/correctness)
+- **Star-size-from-stars suggestion for the star-reduce op** — v0.57.4 gave the
+  Sharpen op a data-driven radius from the target's median star FWHM. The
+  `stars.reduce` op's `size` param is the same kind of physical star-scale guess a
+  beginner can't reason about, and the FWHM is already the natural measure of it.
+  Add a one-click "From your stars" suggestion for `stars.reduce`'s `size` (FWHM
+  rounded to the op's integer step, clamped to its range), reusing the exact
+  `median_fwhm` → suggestion pattern the sharpen/PSF buttons already use — three
+  data-driven buttons now, one more here for consistency. Small, additive.
+  (S, editor/autonomy)
 
 ### Autonomy — "just works" (PRIORITY 2)
+- **Auto-pick the object preset from the image** — Auto-process builds one general
+  recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
+  different (per-channel vs luminance gradient, star reduction, saturation). The
+  proxy analysis already computes sky/noise; extend it with a couple of cheap
+  content cues (fraction of bright extended pixels vs point sources, colour spread)
+  to *classify* the target coarsely and have Auto start from the matching preset's
+  structure instead of a fixed op list — so "Auto" is tuned to what you actually
+  shot. Keep the current general recipe as the fallback when classification is
+  low-confidence. Off-by-default risk is nil (Auto is an explicit button). Needs a
+  careful, well-tested classifier so it never mis-picks confidently. (M, autonomy/editor)
 - **One-click "process this target"** — after ingest, reach a good stack *and* a
   good auto-edited preview with zero manual steps: QC → solve → auto-grade →
   stack → auto-edit, well-defaulted and safe. (M, autonomy)
@@ -78,15 +85,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   do next; audit every screen for jargon and add plain-language "why" tooltips;
   reduce visible option clutter (progressive disclosure). (M, friendliness)
 - Better long-job feedback and clearer error messages. (S, friendliness)
-- **"Preview is downscaled" hint in the editor** — the live preview always runs on
-  a ≤1500 px proxy of what may be a 150 MP mosaic, so fine detail and sharpening
-  read differently than the exported full-res image even now that spatial ops are
-  proxy-corrected (v0.56.19). A small dimmed caption under the preview (e.g.
-  "Preview at 1500 px — export renders at full resolution") sets the right
-  expectation and reduces "why does my export look different?" confusion. The proxy
-  scale is already known server-side (`proxy_scale`); surface it via the existing
-  histogram/preview response or a tiny field. Frontend-mostly, additive.
-  (S, editor/friendliness)
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 - **Photometric (multiplicative) frame normalization before combine** — frames
@@ -181,6 +179,56 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Sharpen-radius-from-stars suggestion** — the editor's Sharpen op made the user
+  hand-guess a radius, when the natural detail scale to enhance is the star's own
+  blur, which QC already measures. A new `GET …/editor/sharpen-suggestion` endpoint
+  converts the target's median star FWHM to a Gaussian σ (the same
+  `FWHM/2·√(2·ln2)` the deconvolution PSF button uses), clamped to the op's
+  0.5–10 slider range and rounded to its 0.5 step, and the Sharpen op's param panel
+  offers a one-click "From your stars (radius X, FWHM Ypx)" button — mirroring the
+  PSF-from-stars and denoise-from-image buttons. Also folds in a small polish: the
+  editor's zoom lightbox title now carries the "preview is downscaled" note, since
+  zoom is exactly where the proxy resolution surprises users. Backend tested
+  (median/clamp/none cases); additive/upgrade-safe. (v0.57.4, this run)
+
+- **Data-driven denoise strength in the one-click Auto recipe** — when Auto-process
+  decides a stack is noisy it added a wavelet denoise at a *fixed* `strength=0.5`,
+  the same for a barely-grainy stack and a very noisy one. It now scales that
+  strength to the actual measured background noise via the existing
+  `suggest_denoise_strength` estimator (the same one behind the editor's "From your
+  image" one-click), so a mildly-noisy result gets a lighter touch and a very noisy
+  one a firmer cut — with a neutral 0.5 fallback when the proxy can't be measured.
+  Makes the one-click Auto result adapt to the data instead of guessing. Test
+  asserts the auto denoise strength rises with noise level; engine-only, additive.
+  (v0.57.3, this run)
+
+- **"Preview is downscaled" hint in the editor** — the live preview always runs on
+  a ≤1500 px proxy of what may be a 150 MP mosaic, so fine detail reads differently
+  than the exported full-res image (even now that spatial ops are proxy-corrected).
+  The histogram response now carries the proxy geometry (`proxy_scale`,
+  `proxy_width/height`), and a pure `previewScaleCaption` helper turns it into a
+  small dimmed caption under the preview ("Preview shown at 1500 px — export renders
+  at full resolution (4.0× larger)."), shown only when the proxy is meaningfully
+  downscaled (>1.05×) so small stacks that fit the proxy budget aren't nagged. Sets
+  the right expectation and heads off "why does my export look different?"
+  confusion. Pure helper Vitest-covered (5 cases); one additive API field.
+  (v0.57.2, this run)
+
+- **Preview↔export parity for the background ops** — v0.56.19 corrected the spatial
+  *detail* ops for the decimated preview proxy, but `background.subtract` /
+  `background.final_gradient` still fed full-resolution pixel measures (`box_size`,
+  `dilate_px`) straight through, so their gradient mesh was estimated at a coarser
+  physical scale in the preview than in the full-res export. A new `_scaled_box`
+  helper divides those px measures by `EditContext.scaled_px()` (a no-op on the
+  export, so the exported result is byte-for-byte unchanged), floored so
+  `Background2D` still gets a sane box with a few cells across the small proxy —
+  and `for_image_size` floors `subtract`'s box further so the mesh always tiles.
+  As a bonus this also makes `final_gradient` behave better on the proxy (a 256 px
+  box on a ≤1500 px proxy previously left barely one mesh cell). Monkeypatched-arg
+  tests prove box_size (and final-gradient's dilate_px) shrink 1×→2×→4× with
+  proxy_scale while the export stays at the param value. Engine-only, additive.
+  (v0.57.1, this run)
 
 - **Auto-process note clears when the recipe changes** — follow-up to v0.56.18's
   "What Auto-process did" note: it previously persisted (until dismissed) even
