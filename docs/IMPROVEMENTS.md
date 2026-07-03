@@ -156,6 +156,18 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Fix: star-mask overlay ignored the op's star size (always the default 4 px)** —
+  the editor's "Star mask" overlay exists so a beginner can see what the star ops
+  (`stars.reduce` / `stars.boost_nebula`) treat as stars while tuning "Star size",
+  and the endpoint already accepts a matching `size_px` — but the frontend never
+  passed it and the query key had no size, so raising Star size never moved the
+  overlay: it silently misrepresented what the op would gate. The overlay is now
+  sized from the *selected* star op (`2·size` for reduce, `size` for boost-nebula,
+  matching the ops' own gate) via a pure `starMaskSizePx` helper, and the size is in
+  the query key so it refetches on change; a non-star (or no) selection falls back
+  to the endpoint default. Helper Vitest-covered (5 cases) + the overlay wiring
+  test; frontend-only, additive. (v0.58.5, this run)
+
 - **Fix: star-reduction over-shrank stars in the live preview vs export** — the
   `stars.reduce` op scaled its star-mask *gate* for the decimated preview proxy
   (via `star_mask(..., ctx)`) but built its grey-erosion footprint from the raw

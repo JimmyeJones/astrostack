@@ -23,6 +23,7 @@ import { applyDataDrivenDefaults, countDataDrivenDefaults, type OpSuggestion }
   from "../components/editor/dataDrivenDefaults";
 import { previewScaleCaption } from "../components/editor/previewScale";
 import { previewDebounceMs } from "../components/editor/previewDebounce";
+import { starMaskSizePx } from "../components/editor/starMaskSize";
 import { coalesceFwhm, measuredContextText } from "../components/editor/measuredContext";
 import { OpParamPanel } from "../components/editor/OpParamPanel";
 import { PresetMenu } from "../components/editor/PresetMenu";
@@ -217,13 +218,17 @@ export function EditorView() {
   }, [basePreview.data]);
 
   // Star-mask overlay: lazily fetch the soft mask that gates the star ops so the
-  // user can see what the editor treats as stars vs background/nebula.
+  // user can see what the editor treats as stars vs background/nebula. When a star
+  // op is selected, size the overlay to *its* star size (reduce → 2× size,
+  // boost-nebula → size) so tuning "Star size" moves the overlay to match what the
+  // op actually gates — otherwise it's frozen at the endpoint's default 4 px.
   const [showMask, setShowMask] = useState(false);
+  const maskSizePx = starMaskSizePx(ops.find((o) => o.uid === selected));
   const maskPreview = useQuery({
-    queryKey: ["edit-mask", safe, rid],
+    queryKey: ["edit-mask", safe, rid, maskSizePx ?? "default"],
     enabled: showMask && !!opsSchema.data && !saved.isLoading,
     queryFn: async ({ signal }) => {
-      const res = await fetch(api.editStarMaskUrl(safe, rid), { signal });
+      const res = await fetch(api.editStarMaskUrl(safe, rid, maskSizePx), { signal });
       if (!res.ok) throw new Error("star mask preview failed");
       return URL.createObjectURL(await res.blob());
     },
