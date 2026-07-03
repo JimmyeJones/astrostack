@@ -36,19 +36,13 @@ _(none — claim an item here with your branch name)_
   bright-star fluxes vs the reference (the `transparency_score` machinery is
   most of it) and divide it out before accumulation. Needs care: robust to
   few-star frames, neutral fallback, off by default first. (M, correctness)
-- Per-pixel extremes / percentile rejection for small stacks (the *robust*
-  fix for a lone satellite/plane trail below ~11 frames). **NB:** the previously
-  filed "iterated κ-σ" idea was investigated and dropped — re-estimation clips
-  against the *same* κ, and a lone outlier's deviation is `(n−1)/√n·σ` which is
-  already below κ for n<11 (κ=3), so it escapes the first clip *and* every
-  refinement round (verified: n=6→2.04, n=10→2.85, n=11→3.02). Mean/σ-based
-  methods (including Winsorising) all hit this wall because the outlier inflates
-  its own σ. The tools that actually reject a lone trail in a tiny stack are
-  **order-statistic**: reject the per-pixel max (min/max clipping) or a top
-  percentile before averaging, or use **median/MAD** as the location/scale.
-  Needs care for uniform/low-coverage pixels (don't reject the only sample) and
-  a streaming, memory-bounded implementation (the app deliberately avoids
-  holding all frames). (M, correctness)
+- Follow-ups to min/max reject (shipped v0.56.0): (1) a **top/bottom-percentile**
+  variant for big stacks (drop the top/bottom p% rather than a single extreme —
+  more aggressive trail removal when there are hundreds of frames); (2) a
+  Stack-form hint suggesting min/max reject over κ-σ when the accepted, solved
+  frame count is small (<~11) and streaked frames are present, since that's
+  exactly the regime κ-σ can't handle; (3) a **median/MAD** location/scale path
+  for the middle ground. All (S–M, correctness).
 - **Dark exposure-scaling** (slice (b), now that bias is wired for lights) —
   `scaled_dark = bias + (dark − bias)·(t_light/t_dark)` so a dark shot at a
   different exposure than the lights can still be used. Needs the per-frame
@@ -108,6 +102,20 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Min/max (extremes) rejection for small stacks** — the order-statistic fix
+  for a lone satellite/plane trail below ~11 frames that κ-σ mathematically can't
+  reject (a lone outlier's deviation stays below κ for n<11). A new single-pass,
+  NaN-aware `MinMaxRejectAccumulator` tracks per-pixel sum/count/min/max and
+  outputs `(sum − min − max)/(count − 2)` for count≥3 (plain mean below that), so
+  it drops exactly one per-pixel min and max before averaging — tie-safe (a
+  saturated core shared by several frames only loses one contribution) and
+  memory-bounded (four canvas planes, one pass, within the existing peak-array
+  budget). Wired as an opt-in `StackOptions.min_max_reject` (default off, takes
+  precedence over κ-σ on the standard path; descriptor-driven so it surfaces on
+  the Stack form automatically) and stamped into the `STACKER` provenance card.
+  Unit-tested (drop/tie/NaN/low-coverage/windowed) + end-to-end. Additive/
+  upgrade-safe. (v0.56.0, this run)
 
 - **Capped exponential backoff for Seestar reconnects** — the poll loop
   re-`connect()`ed a dropped scope on every cycle (default a few seconds) with no

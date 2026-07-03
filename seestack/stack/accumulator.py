@@ -124,6 +124,94 @@ class WeightedSumAccumulator:
         return self._sum
 
 
+class MinMaxRejectAccumulator:
+    """Single-pass min/max (extremes) rejection accumulator, NaN-aware.
+
+    For each pixel it keeps a running ``sum``, ``count``, ``min`` and ``max`` over
+    the *valid* contributions, then reduces to the mean of the middle values by
+    dropping exactly one minimum and one maximum:
+
+        result = (sum − min − max) / (count − 2)   when count ≥ 3
+
+    This is an **order-statistic** reject, so — unlike κ-σ, whose tolerance a lone
+    outlier inflates by its own deviation — it removes a single satellite/plane
+    trail (the per-pixel max) or a lone cold/dead sample (the min) *even in a tiny
+    stack* where κ-σ mathematically can't (a lone outlier's deviation stays below
+    κ for n < 11). It's tie-safe (a saturated star core shared by several frames
+    only ever loses one contribution, because the extreme *value* is subtracted
+    once regardless of how many frames hit it) and memory-bounded (four canvas
+    planes, one pass — no need to hold every frame).
+
+    Pixels with ``count < 3`` can't spare two samples, so they fall back to the
+    plain mean of whatever covered them (``sum / count``); ``count == 0`` stays
+    NaN. Being an order statistic, it ignores per-frame quality weights (like a
+    median would) — the ``weight`` argument is accepted for a uniform consumer
+    signature but not applied.
+    """
+
+    def __init__(self, shape: tuple[int, ...], dtype: np.dtype | type = np.float32) -> None:
+        self.shape = shape
+        self._sum = np.zeros(shape, dtype=dtype)
+        self._count = np.zeros(shape, dtype=np.uint32)
+        # fmin/fmax ignore NaN, so seed with the identities.
+        self._min = np.full(shape, np.inf, dtype=dtype)
+        self._max = np.full(shape, -np.inf, dtype=dtype)
+
+    def add(self, image: np.ndarray, mask: np.ndarray | None = None, weight: float = 1.0) -> None:
+        if image.shape != self.shape:
+            raise ValueError(f"image shape {image.shape} != accumulator {self.shape}")
+        self._add_into(image, slice(None), slice(None), mask)
+
+    def add_window(
+        self,
+        window_image: np.ndarray,
+        y0: int,
+        x0: int,
+        mask: np.ndarray | None = None,
+        weight: float = 1.0,
+    ) -> None:
+        """Extremes update for a frame covering only ``[y0:y0+wh, x0:x0+ww]``."""
+        wh, ww = window_image.shape[:2]
+        self._add_into(window_image, slice(y0, y0 + wh), slice(x0, x0 + ww), mask)
+
+    def _add_into(self, image: np.ndarray, ys: slice, xs: slice,
+                  mask: np.ndarray | None) -> None:
+        valid = np.isfinite(image)
+        if mask is not None:
+            valid &= np.broadcast_to(mask, image.shape).astype(bool, copy=False)
+        if not valid.any():
+            return
+        # Contributions of invalid pixels are neutralised: 0 for the sum, and the
+        # fmin/fmax identities so they never win the running extremes.
+        vals = np.where(valid, image, 0.0).astype(self._sum.dtype, copy=False)
+        self._sum[ys, xs] += vals
+        self._count[ys, xs] += valid.astype(np.uint32, copy=False)
+        hi = np.where(valid, image, -np.inf).astype(self._max.dtype, copy=False)
+        lo = np.where(valid, image, np.inf).astype(self._min.dtype, copy=False)
+        np.fmax(self._max[ys, xs], hi, out=self._max[ys, xs])
+        np.fmin(self._min[ys, xs], lo, out=self._min[ys, xs])
+
+    def result(self) -> np.ndarray:
+        out = np.full(self.shape, np.nan, dtype=self._sum.dtype)
+        cnt = self._count
+        # ≥3 samples: drop one min and one max, average the rest.
+        ge3 = cnt >= 3
+        if ge3.any():
+            denom = (cnt[ge3].astype(self._sum.dtype) - 2.0)
+            out[ge3] = (self._sum[ge3] - self._min[ge3] - self._max[ge3]) / denom
+        # 1–2 samples: can't spare two — fall back to the plain mean.
+        lt3 = (cnt >= 1) & (cnt < 3)
+        if lt3.any():
+            out[lt3] = self._sum[lt3] / cnt[lt3].astype(self._sum.dtype)
+        return out
+
+    @property
+    def coverage(self) -> np.ndarray:
+        """Per-pixel contributing-frame count (float, matching the other
+        accumulators' coverage semantics)."""
+        return self._count.astype(self._sum.dtype)
+
+
 class WelfordAccumulator:
     """
     Streaming mean + variance via Welford's online algorithm. NaN-aware.

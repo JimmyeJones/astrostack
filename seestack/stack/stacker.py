@@ -38,7 +38,11 @@ import numpy as np
 from seestack.bg.per_frame import BackgroundOptions
 from seestack.core.xp import GPU_AVAILABLE
 from seestack.io.project import FrameRow, Project
-from seestack.stack.accumulator import WeightedSumAccumulator, WelfordAccumulator
+from seestack.stack.accumulator import (
+    MinMaxRejectAccumulator,
+    WeightedSumAccumulator,
+    WelfordAccumulator,
+)
 from seestack.stack.align import align_one, extract_reference_patch
 from seestack.stack.output import _sanitize_basename
 from seestack.stack.reference import ReferenceChoice, pick_reference_frame
@@ -179,6 +183,15 @@ class StackOptions:
 
     sigma_clip: bool = True
     sigma_kappa: float = 3.0
+    # Min/max (extremes) rejection: an order-statistic alternative to κ-σ that
+    # drops exactly one per-pixel minimum and maximum before averaging, so it
+    # removes a lone satellite/plane trail or hot/cold sample *even in a small
+    # stack* where κ-σ mathematically can't (a lone outlier's deviation stays
+    # below κ for n<11). Single streaming pass; needs ≥3 frames to spare two
+    # samples (falls back to a plain mean per pixel below that). Ignores quality
+    # weights (it's an order statistic). Off by default; when on it takes
+    # precedence over ``sigma_clip`` on the standard (non-drizzle) path.
+    min_max_reject: bool = False
     background_flatten: bool = True
     background_box_size: int = 128
     # 'per_channel' (default, good for star fields and small targets)
@@ -488,7 +501,14 @@ def _build_output_header_meta(
         total = _integration_time_s(frames, n_used)
         if total is not None:
             meta["EXPTOTAL"] = (total, "integration time (s)")
-    method = "drizzle" if options.drizzle else ("sigma-clip" if options.sigma_clip else "mean")
+    if options.drizzle:
+        method = "drizzle"
+    elif options.min_max_reject:
+        method = "min-max-reject"
+    elif options.sigma_clip:
+        method = "sigma-clip"
+    else:
+        method = "mean"
     meta["STACKER"] = (method, "stacking method")
     meta["COLORTYP"] = ("mono" if options.mono else "OSC", "sensor/stack colour mode")
     # Calibration provenance: which masters were actually applied to the lights
@@ -780,6 +800,38 @@ def run_stack(
         # reference canvas. The drizzle WCS lives at drizzler.out_wcs.
         dst_wcs_text = wcs_to_text(drizzler.out_wcs)
         dst_shape = drizzler.output_canvas_shape
+
+    # ---- 3a2. Min/max (extremes) rejection: single-pass order statistic ----
+    # Takes precedence over κ-σ on the standard path when enabled. Rejects a
+    # lone per-pixel extreme (satellite/plane trail, hot/cold sample) that κ-σ
+    # can't in a small stack. Needs ≥3 frames to spare two samples.
+    elif options.min_max_reject and n >= 3:
+        mmr = MinMaxRejectAccumulator(canvas_3)
+        ql_state_mmr = {"counter": 0}
+
+        def consume_min_max(aligned: np.ndarray, y0: int, x0: int, weight: float) -> None:
+            mmr.add_window(aligned, y0, x0)
+            if options.quick_look_interval > 0:
+                ql_state_mmr["counter"] += 1
+                if ql_state_mmr["counter"] % options.quick_look_interval == 0:
+                    _save_quick_look(project.project_dir, mmr.result(),
+                                     options.output_name, ql_state_mmr["counter"])
+
+        n_used = _pass(
+            frames, ref, dst_wcs_text, dst_shape, weights,
+            options=options,
+            phase_label="Stacking (min/max reject)",
+            consumer=consume_min_max,
+            progress=progress, cancel=cancel,
+            errors=errors,
+            ref_patch=ref_patch, ref_patch_origin=ref_patch_origin,
+            calibration=calibration,
+            mono=options.mono,
+        )
+        if n_used == 0:
+            raise ValueError("no frames could be aligned")
+        result_image = mmr.result()
+        coverage = mmr.coverage
 
     # ---- 3b. Standard path: pass 1 streaming mean + std --------------------
     # If sigma-clipping is off we go directly to the weighted sum and we're
