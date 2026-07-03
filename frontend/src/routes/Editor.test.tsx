@@ -473,8 +473,11 @@ describe("EditorView", () => {
 
     const btn = await screen.findByRole("button", { name: /Trim border/ });
     fireEvent.click(btn);
-    // A Crop op is inserted after the stretch (nonlinear stage).
-    expect(await screen.findByText("Crop")).toBeInTheDocument();
+    // A Crop op is inserted after the stretch (nonlinear stage) and selected, so
+    // "Crop" shows in both the pipeline row and the selected-op panel header...
+    await waitFor(() => expect(screen.getAllByText("Crop").length).toBeGreaterThan(1));
+    // ...and its adjustable bounds panel is shown.
+    expect(screen.getByText("Left")).toBeInTheDocument();
   });
 
   it("hides the 'Trim border' button on a single-field stack (no crop)", async () => {

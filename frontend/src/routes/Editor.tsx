@@ -454,9 +454,17 @@ export function EditorView() {
   const trimCrop = trim.data?.is_mosaic ? trim.data.crop : null;
   const applyTrim = () => {
     if (!trimCrop) return;
-    setOps((p) => applyTrimCrop(p, trimCrop, specs, uid));
+    const next = applyTrimCrop(ops, trimCrop, specs, uid);
+    setOps(() => next);
+    // Select the crop op so its (adjustable) bounds are visible immediately — it's
+    // a normal op the user can fine-tune or remove, not a baked-in change.
+    const crop = next.find((o) => o.id === "geometry.crop");
+    if (crop) setSelected(crop.uid);
+    const pctW = Math.round((trimCrop.x1 - trimCrop.x0) * 100);
+    const pctH = Math.round((trimCrop.y1 - trimCrop.y0) * 100);
     notifications.show({
-      message: "Trimmed to the well-covered area — adjust or remove the Crop op to undo",
+      message: `Trimmed to the well-covered area (keeps the central ${pctW}% × ${pctH}%)`
+        + " — adjust or remove the Crop op to undo",
       color: "violet",
     });
   };

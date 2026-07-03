@@ -156,6 +156,14 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **"Trim border" selects the new Crop op + reports the kept fraction** — polish on
+  the v0.60.0 trim feature: applying "Trim border" now selects the resulting
+  `geometry.crop` op (so its adjustable bounds panel opens immediately — making
+  clear it's a normal op the user can fine-tune or remove, not a baked-in change)
+  and the confirmation names how much is kept ("keeps the central 78% × 85%") for
+  trust. Frontend-only, additive; Vitest asserts the crop op is selected after the
+  trim. (v0.61.1, this run)
+
 - **Coverage-map overlay in the editor (mosaic trust/explain)** — a Seestar
   mosaic's ragged edges, the "Trim border" crop (v0.60.0) and the "Coverage
   leveling" op all act on the per-pixel frame-coverage map, but the user had no
