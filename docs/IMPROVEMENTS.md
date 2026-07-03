@@ -101,6 +101,13 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Combine-method badge in the Compare view** — the `RejectionBadge` (v0.56.1)
+  now also appears on each panel of the A/B Compare view, so when a user compares
+  two stacks of one target to answer "did changing the rejection method help?"
+  they can see each side's method ("σ-clip κ3" vs "min-max") at a glance next to
+  the noise verdict. Reuses the gallery `options` the Compare view already
+  fetches; frontend-only, additive. (v0.56.3, this run)
+
 - **Min/max-reject nudge on the Stack form for small streaked stacks** — below
   ~11 frames κ-σ mathematically can't reject a lone satellite/plane trail (a
   single outlier's deviation stays within κ·σ of the mean), which is exactly the
