@@ -30,6 +30,21 @@ export function compareHref(a: GalleryItem, b: GalleryItem): string {
   return `/compare?a=${a.safe}:${a.run_id}&b=${b.safe}:${b.run_id}`;
 }
 
+// Compare the two stacks' background-noise σ into a plain-language verdict. Both
+// must carry a measured σ; returns null otherwise (nothing to say). The σ is
+// normalized to each image's own signal range so it's comparable across
+// gain/exposure. `pct` is how much lower the cleaner one's noise is (0–100).
+export function noiseComparison(
+  a: GalleryItem, b: GalleryItem,
+): { winner: "A" | "B"; pct: number } | null {
+  if (!hasNoise(a.noise_sigma) || !hasNoise(b.noise_sigma)) return null;
+  const sa = a.noise_sigma as number;
+  const sb = b.noise_sigma as number;
+  if (sa <= 0 || sb <= 0 || sa === sb) return null;
+  const [winner, hi, lo] = sa < sb ? ["A", sb, sa] as const : ["B", sa, sb] as const;
+  return { winner, pct: Math.round((1 - lo / hi) * 100) };
+}
+
 type CompareMode = "side" | "blink";
 
 function CardMeta({ item }: { item: GalleryItem }) {
@@ -149,6 +164,8 @@ export function CompareView() {
     );
   }
 
+  const verdict = noiseComparison(a, b);
+
   return (
     <Stack>
       <Group justify="space-between" wrap="wrap" gap="xs">
@@ -165,6 +182,16 @@ export function CompareView() {
           {backToGallery}
         </Group>
       </Group>
+
+      {verdict ? (
+        <Alert color="teal" variant="light" py="xs" title={undefined}>
+          <Text size="sm">
+            <b>{verdict.winner}</b> has <b>{verdict.pct}% lower</b> background noise
+            {" "}— it's the cleaner stack. (Noise σ is normalized so it's comparable
+            across gain/exposure; it isn't the only measure of a better image.)
+          </Text>
+        </Alert>
+      ) : null}
 
       {mode === "side" ? (
         <SimpleGrid cols={{ base: 1, md: 2 }}>

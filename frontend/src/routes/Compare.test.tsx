@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CompareView, parseRef, compareHref } from "./Compare";
+import { CompareView, parseRef, compareHref, noiseComparison } from "./Compare";
 import * as client from "../api/client";
 import type { GalleryItem } from "../api/client";
 
@@ -57,6 +57,24 @@ describe("compareHref", () => {
   });
 });
 
+describe("noiseComparison", () => {
+  const withNoise = (run_id: number, sigma: number | null) => {
+    const it = item(run_id, "M_42");
+    it.noise_sigma = sigma;
+    return it;
+  };
+  it("reports which stack is cleaner and by how much", () => {
+    // A=0.04, B=0.05 → A is (1 - 0.04/0.05) = 20% lower.
+    expect(noiseComparison(withNoise(1, 0.04), withNoise(2, 0.05))).toEqual({ winner: "A", pct: 20 });
+    expect(noiseComparison(withNoise(1, 0.05), withNoise(2, 0.04))).toEqual({ winner: "B", pct: 20 });
+  });
+  it("returns null when a σ is missing, non-positive, or equal", () => {
+    expect(noiseComparison(withNoise(1, null), withNoise(2, 0.05))).toBeNull();
+    expect(noiseComparison(withNoise(1, 0.05), withNoise(2, 0.05))).toBeNull();
+    expect(noiseComparison(withNoise(1, 0), withNoise(2, 0.05))).toBeNull();
+  });
+});
+
 describe("CompareView", () => {
   it("prompts to pick two stacks when refs are missing", async () => {
     vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [] });
@@ -74,6 +92,16 @@ describe("CompareView", () => {
     // Both A and B tags present.
     expect(screen.getByText("A")).toBeInTheDocument();
     expect(screen.getByText("B")).toBeInTheDocument();
+  });
+
+  it("shows a which-is-cleaner verdict when both stacks carry a noise σ", async () => {
+    const a = item(3, "M_42", "Orion");
+    const b = item(7, "M_42", "OrionV2");
+    a.noise_sigma = 0.05;
+    b.noise_sigma = 0.04; // B is 20% lower.
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [a, b] });
+    renderCompare("?a=M_42:3&b=M_42:7");
+    await waitFor(() => expect(screen.getByText(/20% lower/)).toBeInTheDocument());
   });
 
   it("warns when a referenced stack was deleted", async () => {

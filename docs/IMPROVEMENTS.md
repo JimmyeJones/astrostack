@@ -110,6 +110,13 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **"Which stack is cleaner" verdict in the Compare view** — when both compared
+  stacks carry a measured noise σ, the Compare page now shows a plain-language
+  banner ("B has 20% lower background noise — it's the cleaner stack"), turning
+  the A/B comparison into a concrete answer for the "did this setting change
+  help?" question. Pure `noiseComparison` helper (guards missing/zero/equal σ);
+  frontend-only, additive. (v0.51.2, this run)
+
 - **Configurable job-history retention** — the job-history cap (how many finished
   jobs the in-memory map keeps, and at ~10× how many rows `jobs.sqlite` retains)
   was a hard-coded 200; it's now a `job_history_limit` setting (default 200,
