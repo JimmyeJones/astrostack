@@ -51,16 +51,21 @@ problems. Dogfood it every big-picture run and fix root causes.
 - **Editor bug hunt (ongoing)** — there are undocumented issues. Each big-picture
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
-- **Preview the "Trim border" rectangle before committing** — the one-click "Trim
-  border" (v0.60.0) applies a `geometry.crop` immediately; a lower-commitment step
-  is to first draw the *proposed* crop as a dashed outline overlay on the preview
-  (the `trim-suggestion` fractional bounds map straight to preview coordinates) so
-  the user sees exactly what would be kept, with an "Apply" confirm. Reuses the
-  overlay-label infrastructure; purely additive/advisory (nothing changes until
-  Apply). Builds trust in the auto-crop and avoids an undo round-trip when the
-  suggestion isn't what they want. (S–M, editor/trust)
-
-
+- **Coverage overlay should follow the recipe's geometry ops** — the coverage-map
+  overlay renders the run's *raw* full-frame coverage sibling, so once a crop/rotate/
+  resize op is in the recipe it no longer lines up with the reshaped preview
+  (v0.61.5 added an honest "shown for the uncropped frame" caption acknowledging
+  this). The proper fix is to run the recipe's *enabled geometry ops* over the
+  coverage map (via `apply_recipe` on a geometry-only sub-recipe, or reuse the same
+  crop/rotate math) before the PNG, so the overlay tracks the edited image. Reuses
+  the existing geometry ops; additive. Care: keep NaN = uncovered through the
+  transform, and only apply geometry (not tone) ops. (M, editor/trust)
+- **Show the proposed trim over the coverage heatmap** — when the user opens the
+  "Trim border" preview (v0.61.4) the dashed rectangle draws over whatever overlay
+  is shown; the *most* informative view is the crop over the coverage heatmap
+  (v0.61.3), where you can see it lands on the well-covered interior. Auto-enable
+  (or offer a one-click "show over coverage") when entering trim preview, and
+  de-conflict the two top-left captions. Small, purely advisory. (S, editor/trust)
 ### Autonomy — "just works" (PRIORITY 2)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
@@ -83,13 +88,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   do next; audit every screen for jargon and add plain-language "why" tooltips;
   reduce visible option clutter (progressive disclosure). (M, friendliness)
 - Better long-job feedback and clearer error messages. (S, friendliness)
-- **Colour heatmap + legend for the coverage overlay** — the coverage-map overlay
-  (v0.61.0) renders grayscale, which reads slowly and looks similar to the star
-  mask. A viridis-style colour map (blue = few frames → yellow = most) with a tiny
-  "fewer ↔ more frames" legend caption would make the coverage gradient obvious at
-  a glance and visually distinct from the star mask. Backend applies a small LUT to
-  the normalized coverage before the PNG; frontend adds the legend. Purely
-  cosmetic/additive. (S, friendliness)
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 - **Photometric (multiplicative) frame normalization before combine** — frames
@@ -170,6 +168,49 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Show render progress for the full-res PNG download** — "Download full-res PNG"
+  polls the render job to completion but only spun the button, so on a large mosaic
+  (the slowest editor action) it read as "stuck" with no signal it was working. The
+  editor now shows a live "Rendering — NN%" line under the button while the job
+  polls, from the job's `phase`/`done`/`total` via a pure `pngProgressLabel` helper
+  (percentage when the total is known, phase name otherwise). Frontend-only,
+  additive. Vitest: helper (percent / clamp / phase-fallback / blank / null) + an
+  Editor test that the progress line shows while the job polls. (v0.61.6, this run)
+
+- **Note the coverage overlay is for the uncropped frame when a crop is applied** —
+  the coverage-map overlay (v0.61.0) renders the run's *raw* full-frame coverage
+  sibling, so once a `geometry.crop`/rotate/resize op is in the recipe (very likely
+  now that "Trim border" adds one) the overlay no longer lines up with the reshaped
+  preview — the coverage looked larger/offset vs the cropped image with no
+  explanation. The overlay label now reads "Coverage map — shown for the uncropped
+  frame" whenever an enabled geometry op is present, via a pure `hasEnabledGeometryOp`
+  helper. Honest, additive, frontend-only. Vitest: helper (enabled/disabled/
+  non-geometry) + the Editor caption with a crop in the recipe. (v0.61.5, this run)
+
+- **Preview the "Trim border" rectangle before committing** — the one-click "Trim
+  border" (v0.60.0) applied a `geometry.crop` immediately, so a user who didn't like
+  the auto-crop had to undo. "Trim border" now first draws the *proposed* crop as a
+  dashed magenta outline over the preview (with the area outside dimmed and a
+  "Proposed crop — keeps the central W% × H%" caption), and the toolbar shows
+  **Apply crop** / **Cancel** — nothing changes until Apply, which commits the Crop
+  op and selects it (as before). Fractional `trim-suggestion` bounds map straight to
+  image-space percentages via a pure `trimRectStyle`/`trimKeptLabel` helper. Builds
+  trust in the auto-crop and avoids an undo round-trip. Frontend-only, additive.
+  Vitest: helpers (pct mapping + kept-label) and the Editor preview→Apply flow
+  (dashed caption shows, no Crop op until Apply). (v0.61.4, this run)
+
+- **Colour heatmap + legend for the coverage overlay** — the coverage-map overlay
+  (v0.61.0) rendered grayscale, which read slowly and looked much like the star
+  mask. A new pure engine `seestack/render/colormap.py` (viridis LUT, no matplotlib
+  dependency) now colours the normalized coverage — dark blue = fewest frames →
+  yellow = most — so the gradient is legible at a glance and visually distinct from
+  the grayscale star mask. The editor adds a small "fewer ↔ more frames" gradient
+  legend under the preview whenever the coverage overlay is up. Engine + one
+  endpoint + frontend; purely cosmetic/additive (PNG shape unchanged: still a
+  same-size image, now RGB). Tested: engine colormap (LUT endpoints, brightness
+  monotonicity, NaN/out-of-range clamp), Vitest asserts the legend caption shows
+  with the overlay. (v0.61.3, this run)
 
 - **Fix a flaky Stack-form vitest ("does not suggest min/max reject when already
   on")** — the test waited only for the schema-driven "Min/max rejection" *label*

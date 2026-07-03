@@ -115,6 +115,29 @@ describe("EditorView", () => {
     expect(screen.getByText("Download full-res PNG")).toBeInTheDocument();
   });
 
+  it("shows render progress while the full-res PNG job is polling", async () => {
+    mockEditorQueries();
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+    vi.spyOn(client.api, "exportPng").mockResolvedValue({ job_id: "png1" });
+    // First poll: still rendering with progress → the label shows; second: done.
+    const runningJob = { id: "png1", kind: "editor_png", target: "M_42", state: "running",
+      phase: "Rendering", done: 1, total: 2, detail: "", created_utc: null, started_utc: null,
+      finished_utc: null, error: null, result: null };
+    let polls = 0;
+    vi.spyOn(client.api, "getJob").mockImplementation(async () => {
+      polls += 1;
+      return polls === 1 ? runningJob : { ...runningJob, state: "done" };
+    });
+
+    renderEditor();
+
+    const btn = await screen.findByText("Download full-res PNG");
+    fireEvent.click(btn);
+    await waitFor(() => expect(screen.getByText("Rendering — 50%")).toBeInTheDocument());
+  });
+
   it("threads an AbortSignal into the live-preview fetch so stale renders can be cancelled", async () => {
     mockEditorQueries();
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => ({
@@ -219,6 +242,35 @@ describe("EditorView", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Hide coverage" })).toBeInTheDocument());
     expect(screen.getByText("Coverage map")).toBeInTheDocument();
+    // The colour heatmap carries a "fewer ↔ more frames" legend caption.
+    await waitFor(() => expect(screen.getByText("more frames")).toBeInTheDocument());
+    expect(screen.getByText("fewer")).toBeInTheDocument();
+  });
+
+  it("notes the coverage overlay is for the uncropped frame when a crop is applied", async () => {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CROP]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [{ uid: "c1", id: "geometry.crop", enabled: true,
+              params: { x0: 0.1, y0: 0.1, x1: 0.9, y1: 0.9 } }],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0],
+        b: [0, 0, 0, 0], is_mosaic: true });
+    vi.spyOn(client.api, "trimSuggestion").mockResolvedValue({ is_mosaic: false, crop: null });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    const btn = await screen.findByRole("button", { name: "Coverage" });
+    await waitFor(() => expect(btn).not.toBeDisabled());
+    btn.click();
+
+    await waitFor(() =>
+      expect(screen.getByText("Coverage map — shown for the uncropped frame")).toBeInTheDocument());
   });
 
   it("hides the Coverage overlay button on a single-field stack", async () => {
@@ -452,7 +504,7 @@ describe("EditorView", () => {
     expect(screen.getByText("Sharpen")).toBeInTheDocument();
   });
 
-  it("offers a 'Trim border' button on a mosaic and adds a Crop op on click", async () => {
+  it("previews the proposed crop then adds a Crop op on Apply", async () => {
     vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CROP]);
     vi.spyOn(client.api, "getRecipe").mockResolvedValue({
       ops: [{ uid: "s1", id: "tone.stretch", enabled: true, params: { stretch: 0.6 } }],
@@ -473,11 +525,18 @@ describe("EditorView", () => {
 
     const btn = await screen.findByRole("button", { name: /Trim border/ });
     fireEvent.click(btn);
-    // A Crop op is inserted after the stretch (nonlinear stage) and selected, so
+    // First click only previews: a dashed outline + a "Proposed crop" caption, and
+    // no Crop op is committed yet.
+    await waitFor(() =>
+      expect(screen.getByText(/Proposed crop — keeps the central 60% × 80%/)).toBeInTheDocument());
+    expect(screen.queryByText("Left")).not.toBeInTheDocument();
+    // Apply commits the crop: it's inserted after the stretch and selected, so
     // "Crop" shows in both the pipeline row and the selected-op panel header...
+    fireEvent.click(screen.getByRole("button", { name: /Apply crop/ }));
     await waitFor(() => expect(screen.getAllByText("Crop").length).toBeGreaterThan(1));
-    // ...and its adjustable bounds panel is shown.
+    // ...and its adjustable bounds panel is shown; the preview caption is gone.
     expect(screen.getByText("Left")).toBeInTheDocument();
+    expect(screen.queryByText(/Proposed crop/)).not.toBeInTheDocument();
   });
 
   it("hides the 'Trim border' button on a single-field stack (no crop)", async () => {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { EditOp, OpInstance } from "../../api/client";
-import { applyTrimCrop } from "./mosaicTrim";
+import { applyTrimCrop, trimRectStyle, trimKeptLabel, hasEnabledGeometryOp }
+  from "./mosaicTrim";
 
 const specs: Record<string, EditOp> = {
   "tone.stretch": { id: "tone.stretch", label: "Stretch", group: "tone",
@@ -59,5 +60,41 @@ describe("applyTrimCrop", () => {
     const out = applyTrimCrop([], crop, {}, makeUid);
     expect(out).toHaveLength(1);
     expect(out[0].params).toEqual(crop);
+  });
+});
+
+describe("trimRectStyle", () => {
+  it("maps fractional bounds to image-space percentages", () => {
+    expect(trimRectStyle(crop)).toEqual({
+      left: "20.00%", top: "10.00%", width: "60.00%", height: "80.00%",
+    });
+  });
+
+  it("handles a full-frame (no-trim) rectangle", () => {
+    expect(trimRectStyle({ x0: 0, y0: 0, x1: 1, y1: 1 })).toEqual({
+      left: "0.00%", top: "0.00%", width: "100.00%", height: "100.00%",
+    });
+  });
+});
+
+describe("trimKeptLabel", () => {
+  it("summarises the kept fraction in plain language", () => {
+    expect(trimKeptLabel(crop)).toBe("keeps the central 60% × 80%");
+  });
+});
+
+describe("hasEnabledGeometryOp", () => {
+  const op = (id: string, enabled: boolean): OpInstance =>
+    ({ uid: id, id, enabled, params: {} });
+
+  it("detects an enabled crop/rotate/resize op", () => {
+    expect(hasEnabledGeometryOp([op("geometry.crop", true)])).toBe(true);
+    expect(hasEnabledGeometryOp([op("geometry.rotate", true)])).toBe(true);
+  });
+
+  it("ignores a disabled geometry op and non-geometry ops", () => {
+    expect(hasEnabledGeometryOp([op("geometry.crop", false)])).toBe(false);
+    expect(hasEnabledGeometryOp([op("tone.stretch", true)])).toBe(false);
+    expect(hasEnabledGeometryOp([])).toBe(false);
   });
 });

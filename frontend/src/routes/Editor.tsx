@@ -23,7 +23,9 @@ import { applyDataDrivenDefaults, countDataDrivenDefaults, type OpSuggestion }
   from "../components/editor/dataDrivenDefaults";
 import { previewScaleCaption } from "../components/editor/previewScale";
 import { prependCoverageLeveling } from "../components/editor/coverageLeveling";
-import { applyTrimCrop } from "../components/editor/mosaicTrim";
+import { applyTrimCrop, trimRectStyle, trimKeptLabel, hasEnabledGeometryOp }
+  from "../components/editor/mosaicTrim";
+import { pngProgressLabel } from "../components/editor/pngProgress";
 import { clippingCaption } from "../components/editor/clipping";
 import { previewDebounceMs } from "../components/editor/previewDebounce";
 import { starMaskSizePx } from "../components/editor/starMaskSize";
@@ -361,8 +363,12 @@ export function EditorView() {
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
 
+  // Live progress of the full-res PNG render, shown under the button while it
+  // polls (the slowest editor action — a bare spinner reads as "stuck").
+  const [pngProgress, setPngProgress] = useState<string | null>(null);
   const downloadPng = useMutation({
     mutationFn: async () => {
+      setPngProgress("Rendering…");
       const { job_id } = await api.exportPng(safe, rid, recipe);
       // Full-res render can be slow on mosaics — poll the job to completion.
       for (;;) {
@@ -371,6 +377,7 @@ export function EditorView() {
         if (["error", "cancelled", "interrupted"].includes(j.state)) {
           throw new Error(j.error || "PNG render failed");
         }
+        setPngProgress(pngProgressLabel(j));
         await new Promise((r) => setTimeout(r, 500));
       }
     },
@@ -383,6 +390,7 @@ export function EditorView() {
       notifications.show({ message: "Full-resolution PNG ready", color: "teal" });
     },
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+    onSettled: () => setPngProgress(null),
   });
 
   // --- op list ops ---------------------------------------------------------
@@ -452,18 +460,20 @@ export function EditorView() {
   // The trim-border crop is only offered when this run is a mosaic and a
   // well-covered rectangle worth cropping to was found.
   const trimCrop = trim.data?.is_mosaic ? trim.data.crop : null;
+  // Show the proposed crop as a dashed outline on the preview first (a
+  // lower-commitment step than applying immediately), with an explicit "Apply".
+  const [trimPreview, setTrimPreview] = useState(false);
   const applyTrim = () => {
     if (!trimCrop) return;
     const next = applyTrimCrop(ops, trimCrop, specs, uid);
     setOps(() => next);
+    setTrimPreview(false);
     // Select the crop op so its (adjustable) bounds are visible immediately — it's
     // a normal op the user can fine-tune or remove, not a baked-in change.
     const crop = next.find((o) => o.id === "geometry.crop");
     if (crop) setSelected(crop.uid);
-    const pctW = Math.round((trimCrop.x1 - trimCrop.x0) * 100);
-    const pctH = Math.round((trimCrop.y1 - trimCrop.y0) * 100);
     notifications.show({
-      message: `Trimmed to the well-covered area (keeps the central ${pctW}% × ${pctH}%)`
+      message: `Trimmed to the well-covered area (${trimKeptLabel(trimCrop)})`
         + " — adjust or remove the Crop op to undo",
       color: "violet",
     });
@@ -506,11 +516,21 @@ export function EditorView() {
             </Tooltip>
           ) : null}
           {trimCrop ? (
-            <Tooltip multiline w={250} withArrow
-              label="This is a mosaic with ragged, low-coverage edges. Crop to the largest well-covered rectangle in one click — it adds a Crop op you can fine-tune or remove.">
-              <Button variant="default" color="grape" leftSection={<IconCrop size={16} />}
-                onClick={applyTrim}>Trim border</Button>
-            </Tooltip>
+            trimPreview ? (
+              <Button.Group>
+                <Tooltip label="Add the Crop op for this rectangle (you can fine-tune or remove it after)">
+                  <Button variant="filled" color="grape" leftSection={<IconCrop size={16} />}
+                    onClick={applyTrim}>Apply crop</Button>
+                </Tooltip>
+                <Button variant="default" onClick={() => setTrimPreview(false)}>Cancel</Button>
+              </Button.Group>
+            ) : (
+              <Tooltip multiline w={250} withArrow
+                label="This is a mosaic with ragged, low-coverage edges. Preview the largest well-covered rectangle as a dashed outline, then apply it as a Crop op you can fine-tune or remove.">
+                <Button variant="default" color="grape" leftSection={<IconCrop size={16} />}
+                  onClick={() => setTrimPreview(true)}>Trim border</Button>
+              </Tooltip>
+            )
           ) : null}
           {/* Built-in presets carry a fixed op list with generic sizes: seed their
               data-driven params (sharpen radius, star size) from this target's own
@@ -534,7 +554,8 @@ export function EditorView() {
         {/* Preview + histogram */}
         <Grid.Col span={{ base: 12, md: 7 }}>
           <Paper withBorder p="xs">
-            <div style={{ position: "relative", background: "#000", borderRadius: 8, minHeight: 220 }}>
+            <div style={{ position: "relative", background: "#000", borderRadius: 8,
+              minHeight: 220, overflow: "hidden" }}>
               {hist.data?.empty ? (
                 <Alert color="yellow" icon={<IconAlertTriangle size={16} />} m="md">
                   This stack has no image data (all pixels are empty) — it likely failed to
@@ -562,9 +583,41 @@ export function EditorView() {
               {showMask || showBase || soloActive || showCoverage ? (
                 <Text size="xs" c="white" style={{ position: "absolute", left: 12, top: 10,
                   background: "rgba(0,0,0,0.6)", padding: "2px 8px", borderRadius: 4 }}>
-                  {showCoverage ? "Coverage map" : showMask ? "Star mask" : showBase ? "Original"
+                  {showCoverage
+                    ? (hasEnabledGeometryOp(ops)
+                        ? "Coverage map — shown for the uncropped frame"
+                        : "Coverage map")
+                    : showMask ? "Star mask" : showBase ? "Original"
                     : `Without: ${specs[selForSolo!.id]?.label ?? selForSolo!.id}`}
                 </Text>
+              ) : null}
+              {/* Proposed "Trim border" crop, drawn as a dashed outline over the
+                  preview so the user sees exactly what would be kept before it's
+                  applied. Fractional bounds map straight to image-space percentages
+                  (the preview fills the container width, so this lines up). */}
+              {trimPreview && trimCrop && shownSrc ? (
+                <>
+                  <div aria-label="proposed crop" style={{ position: "absolute",
+                    ...trimRectStyle(trimCrop), boxSizing: "border-box",
+                    border: "2px dashed #f0e", pointerEvents: "none",
+                    outline: "9999px solid rgba(0,0,0,0.35)" }} />
+                  <Text size="xs" c="white" style={{ position: "absolute", left: 12, top: 10,
+                    background: "rgba(0,0,0,0.6)", padding: "2px 8px", borderRadius: 4 }}>
+                    Proposed crop — {trimKeptLabel(trimCrop)}
+                  </Text>
+                </>
+              ) : null}
+              {/* Coverage heatmap legend: the overlay is a viridis map (dark blue =
+                  fewest frames → yellow = most), so a small gradient bar with a
+                  "fewer ↔ more frames" caption makes the gradient legible. */}
+              {showCoverage && coveragePreview.data ? (
+                <Group gap={6} align="center" style={{ position: "absolute", right: 12, bottom: 10,
+                  background: "rgba(0,0,0,0.6)", padding: "3px 8px", borderRadius: 4 }}>
+                  <Text size="xs" c="white">fewer</Text>
+                  <div style={{ width: 72, height: 8, borderRadius: 2,
+                    background: "linear-gradient(to right, rgb(68,1,84), rgb(49,104,142), rgb(31,158,137), rgb(110,206,88), rgb(253,231,37))" }} />
+                  <Text size="xs" c="white">more frames</Text>
+                </Group>
               ) : null}
               {/* While a superseded render is being replaced (the older result is
                   aborted server-side), tell the user the shown image is stale and
@@ -580,7 +633,7 @@ export function EditorView() {
               <Group gap={6} style={{ position: "absolute", right: 8, top: 8 }}>
                 {hist.data?.is_mosaic ? (
                   <Tooltip multiline w={230} withArrow
-                    label="Show this mosaic's frame-coverage map: white where the most frames overlap, black at the ragged, uncovered edges. This is what 'Trim border' and 'Coverage leveling' act on.">
+                    label="Show this mosaic's frame-coverage map as a colour heatmap: yellow where the most frames overlap, dark blue at the ragged, uncovered edges. This is what 'Trim border' and 'Coverage leveling' act on.">
                     <Button size="xs" variant={showCoverage ? "filled" : "default"}
                       color="grape"
                       disabled={!preview.data}
@@ -854,6 +907,9 @@ export function EditorView() {
                 loading={downloadPng.isPending} onClick={() => downloadPng.mutate()}>
                 Download full-res PNG
               </Button>
+              {downloadPng.isPending && pngProgress ? (
+                <Text size="xs" c="dimmed" ta="center" mt={4}>{pngProgress}</Text>
+              ) : null}
               <Text size="xs" c="dimmed" mt={6}>
                 "Export" writes a new stack run (FITS/TIFF/PNG); the original is never
                 changed. "Download full-res PNG" renders your edits at native resolution

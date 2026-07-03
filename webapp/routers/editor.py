@@ -101,12 +101,16 @@ def _render_png(project_dir: Path, run, recipe: Recipe) -> bytes:
 
 def _render_coverage_png(project_dir: Path, run) -> bytes | None:
     """Render the run's per-pixel frame-coverage map (strided to the preview
-    proxy so it lines up with the shown image) as a grayscale PNG — white where
-    the most frames overlap, black where none did (the ragged mosaic edges /
-    gaps). ``None`` when the run has no coverage sibling (a single-field image)."""
+    proxy so it lines up with the shown image) as a viridis-coloured PNG — dark
+    blue where the fewest frames overlap (the ragged mosaic edges / gaps),
+    yellow where the most do. A colour heatmap reads the coverage gradient at a
+    glance and is visually distinct from the grayscale star mask. ``None`` when
+    the run has no coverage sibling (a single-field image)."""
     import io
 
     from PIL import Image
+
+    from seestack.render.colormap import apply_viridis
 
     rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
     cov = _proxy_coverage(run.fits_path, scale)
@@ -117,9 +121,9 @@ def _render_coverage_png(project_dir: Path, run) -> bytes | None:
     norm = np.zeros(cov.shape, dtype=np.float32)
     if peak > 0:
         norm = np.clip(np.nan_to_num(cov, nan=0.0) / peak, 0.0, 1.0)
-    u8 = (norm * 255).astype(np.uint8)
+    rgb_map = apply_viridis(norm)
     buf = io.BytesIO()
-    Image.fromarray(u8, mode="L").save(buf, format="PNG")
+    Image.fromarray(rgb_map, mode="RGB").save(buf, format="PNG")
     return buf.getvalue()
 
 
