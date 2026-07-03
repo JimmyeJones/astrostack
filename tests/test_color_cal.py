@@ -85,6 +85,81 @@ def test_apply_scale_handles_nan():
     assert out[1, 1, 2] == 50.0
 
 
+def test_solve_gaia_matches_when_catalog_larger_than_detections(monkeypatch):
+    """Regression: the Gaia solver ANDed per-detection and per-catalog masks.
+
+    When the Gaia catalog has more rows than we have detections (the normal
+    case — a cone query returns far more stars than we detect), the old code
+    ``matched & np.isfinite(color) & ...`` combined arrays of different
+    lengths and raised, so Gaia calibration silently fell back to gray-star.
+    Here the catalog is deliberately larger than the detection list.
+    """
+    from astropy.table import Table
+    from astropy.wcs import WCS
+    from seestack.post import color_cal
+    from seestack.post.color_cal import _solve_gaia
+
+    # A trivial TAN WCS: 1 px == 1 arcsec near the origin.
+    wcs = WCS(naxis=2)
+    wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+    wcs.wcs.crpix = [50.0, 50.0]
+    wcs.wcs.crval = [180.0, 0.0]
+    wcs.wcs.cdelt = [-1.0 / 3600.0, 1.0 / 3600.0]
+
+    n_det = 20
+    rng = np.random.default_rng(3)
+    xs = rng.uniform(5, 95, n_det)
+    ys = rng.uniform(5, 95, n_det)
+    sources = Table({"xcentroid": xs, "ycentroid": ys})
+
+    # Detections are neutral stars (R/G = B/G = 1). Give the catalog rows a
+    # colour (BP-RP = 0) so the expected ratios are the intercepts a_r / a_b.
+    fluxes = np.full((n_det, 3), 1000.0, dtype=np.float32)
+
+    # Catalog = the true detection positions PLUS a pile of extra far-away
+    # rows, so len(catalog) > len(detections). Nearest-match must still pick
+    # the co-located rows.
+    det_world = wcs.pixel_to_world(xs, ys)
+    cat_ra = list(det_world.ra.deg) + list(180.0 + rng.uniform(0.2, 0.4, 50))
+    cat_dec = list(det_world.dec.deg) + list(rng.uniform(0.2, 0.4, 50))
+    n_cat = len(cat_ra)
+    gaia_table = Table({
+        "ra": np.asarray(cat_ra),
+        "dec": np.asarray(cat_dec),
+        "phot_bp_mean_mag": np.full(n_cat, 12.0),
+        "phot_rp_mean_mag": np.full(n_cat, 12.0),   # BP-RP = 0
+        "phot_g_mean_mag": np.full(n_cat, 12.0),
+    })
+
+    class _FakeJob:
+        def get_results(self):
+            return gaia_table
+
+    class _FakeGaia:
+        ROW_LIMIT = 0
+
+        @staticmethod
+        def cone_search_async(coordinate, radius):
+            return _FakeJob()
+
+    import sys
+    import types
+    fake_mod = types.ModuleType("astroquery.gaia")
+    fake_mod.Gaia = _FakeGaia
+    monkeypatch.setitem(sys.modules, "astroquery.gaia", fake_mod)
+
+    rgb = np.zeros((100, 100, 3), dtype=np.float32)
+    opts = ColorCalibrationOptions(enabled=True, mode="gaia", min_stars=5)
+    scale, n, note = _solve_gaia(rgb, fluxes, sources, wcs, opts)
+
+    # With neutral stars (measured R/G = B/G = 1) and BP-RP = 0, the fitted
+    # scales should equal the model intercepts a_r=0.95, a_b=1.10.
+    assert n >= 5
+    assert abs(scale[0] - 0.95) < 0.05
+    assert scale[1] == 1.0
+    assert abs(scale[2] - 1.10) < 0.05
+
+
 def test_solve_gray_star_directly():
     fluxes = np.array([[100, 200, 150]] * 50, dtype=np.float32)
     scale, n, note = _solve_gray_star(fluxes)

@@ -103,15 +103,25 @@ def calibrate_color(
             # solver instead of blocking forever.
             from concurrent.futures import ThreadPoolExecutor, TimeoutError as FTimeout
 
-            with ThreadPoolExecutor(max_workers=1) as ex:
+            # NB: don't use `with ThreadPoolExecutor(...)` — its __exit__ calls
+            # shutdown(wait=True), which would block on the still-running Gaia
+            # query and defeat the timeout entirely. Shut down with wait=False
+            # on timeout and let the orphaned thread die on its own.
+            ex = ThreadPoolExecutor(max_workers=1)
+            try:
                 fut = ex.submit(_solve_gaia, rgb, fluxes, detections, wcs, options)
                 try:
                     scale, n, note = fut.result(timeout=options.gaia_timeout_s)
                 except FTimeout:
                     fut.cancel()
+                    ex.shutdown(wait=False)
                     raise RuntimeError(
                         f"Gaia query exceeded {options.gaia_timeout_s:.0f}s"
                     ) from None
+                ex.shutdown(wait=False)
+            except BaseException:
+                ex.shutdown(wait=False)
+                raise
             calibrated = _apply_scale(rgb, scale)
             return calibrated, ColorCalibrationResult(scale, n, "gaia", note)
         except Exception as exc:  # noqa: BLE001
@@ -294,7 +304,19 @@ def _solve_gaia(
     g_mag = np.asarray(gaia_table["phot_g_mean_mag"])
     color = bp - rp
 
-    use = matched & np.isfinite(color) & np.isfinite(g_mag) & (g_mag < options.gaia_max_g_mag)
+    # `matched`, `idx`, `fluxes` are all per-detection (length = #detections);
+    # `color`/`g_mag` are per-catalog-row. Index the catalog arrays by each
+    # detection's matched row (`idx`) so every mask below is per-detection and
+    # the boolean AND lines up. (Using the raw catalog arrays here ANDs arrays
+    # of different lengths → broadcast error → silent fall back to gray-star.)
+    color_at = color[idx]
+    g_mag_at = g_mag[idx]
+    use = (
+        matched
+        & np.isfinite(color_at)
+        & np.isfinite(g_mag_at)
+        & (g_mag_at < options.gaia_max_g_mag)
+    )
     use_idx = idx[use]
     f_match = fluxes[use]
     if len(f_match) < options.min_stars:
