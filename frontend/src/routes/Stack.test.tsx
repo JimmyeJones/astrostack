@@ -346,6 +346,66 @@ describe("StackView", () => {
     expect(screen.queryByText(/drops the single highest and lowest/)).not.toBeInTheDocument();
   });
 
+  it("warns when the min/max reject k is too high for the frame count", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+      { key: "min_max_reject", label: "Min/max rejection", type: "bool", group: "simple",
+        default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+      { key: "min_max_reject_count", label: "Min/max reject count", type: "int", group: "advanced",
+        default: 1, min: 1, max: 5, step: 1, options: null, help: null, depends_on: "min_max_reject" },
+    ]);
+    // 6 accepted frames with k=3 → needs 7+ per pixel, so it can't fully apply.
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ min_max_reject: true, min_max_reject_count: 3 });
+    const frames = Array.from({ length: 6 }, (_, i) => mkFrame(i + 1));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    await waitFor(() =>
+      expect(screen.getByText(/needs at least 7 frames per pixel to fully apply/))
+        .toBeInTheDocument());
+  });
+
+  it("lowers k in one click from the too-high nudge, then hides it", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+      { key: "min_max_reject", label: "Min/max rejection", type: "bool", group: "simple",
+        default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+      { key: "min_max_reject_count", label: "Min/max reject count", type: "int", group: "advanced",
+        default: 1, min: 1, max: 5, step: 1, options: null, help: null, depends_on: "min_max_reject" },
+    ]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ min_max_reject: true, min_max_reject_count: 3 });
+    const frames = Array.from({ length: 6 }, (_, i) => mkFrame(i + 1));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    // 6 frames → largest fully-applicable k is 2.
+    const btn = await screen.findByRole("button", { name: "Lower k to 2" });
+    fireEvent.click(btn);
+    await waitFor(() =>
+      expect(screen.queryByText(/needs at least 7 frames per pixel/)).not.toBeInTheDocument());
+  });
+
+  it("does not warn when the min/max reject k fits the frame count", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+      { key: "min_max_reject", label: "Min/max rejection", type: "bool", group: "simple",
+        default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+      { key: "min_max_reject_count", label: "Min/max reject count", type: "int", group: "advanced",
+        default: 1, min: 1, max: 5, step: 1, options: null, help: null, depends_on: "min_max_reject" },
+    ]);
+    // 8 frames with k=3 → 2·3+1 = 7 ≤ 8, so it fully applies; no warning.
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ min_max_reject: true, min_max_reject_count: 3 });
+    const frames = Array.from({ length: 8 }, (_, i) => mkFrame(i + 1));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    await waitFor(() => expect(screen.getByText("Min/max rejection")).toBeInTheDocument());
+    expect(screen.queryByText(/frames per pixel to fully apply/)).not.toBeInTheDocument();
+  });
+
   it("drops the streak warning once rejection has enough frames", async () => {
     vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
       { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",

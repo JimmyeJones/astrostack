@@ -75,15 +75,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   do next; audit every screen for jargon and add plain-language "why" tooltips;
   reduce visible option clutter (progressive disclosure). (M, friendliness)
 - Better long-job feedback and clearer error messages. (S, friendliness)
-- **Warn when the min/max reject k is too aggressive for the frame count** — the
-  top/bottom-k trim (v0.58.0) only applies its full k-drop where a pixel has ≥ 2k+1
-  frames; below that it *silently* degrades to a single min/max drop. A user who
-  sets `min_max_reject_count=3` on an 8-frame stack gets almost no benefit and no
-  signal why. Add a Stack-form advisory (mirroring the existing small-stack min/max
-  nudge) that fires when `2·k+1 > accepted+solved`, saying e.g. "k=3 needs 7+ frames
-  per pixel to fully apply; you have 8 — it'll mostly fall back to a single drop.
-  Lower k or add frames." Pure frontend, reuses the frame-count the form already
-  has; advisory-only. (S, friendliness/autonomy)
 
 ### Autonomy — follow-ups
 - **Auto-suggest the min/max reject count (k) from the streaked-frame count** — the
@@ -173,6 +164,18 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Warn when the min/max reject k is too aggressive for the frame count** — the
+  top/bottom-k trim (v0.58.0) applies its full k-drop only where a pixel is covered
+  by ≥ 2k+1 frames, silently degrading to a single min/max drop below that. The
+  Stack form now shows a yellow advisory (mirroring the small-stack min/max nudge)
+  when `min_max_reject` is on with `min_max_reject_count>1` and `2·k+1 >
+  accepted+solved`, explaining it needs at least `2k+1` frames per pixel and will
+  mostly fall back to a single drop, with a one-click "Lower k to N" that sets k to
+  the largest value the stack can fully apply (`⌊(n−1)/2⌋`). Reuses the frame-count
+  the form already has; advisory-only, frontend-only, additive. Vitest-covered
+  (fires at k=3/6-frames, one-click lower, no-fire at k=3/8-frames). (v0.58.2,
+  this run)
 
 - **Show the k-count in the rejection badge for a top/bottom-k trim** — follow-on to
   v0.58.0: the `RejectionBadge` on History/Gallery/Compare cards derives the combine
