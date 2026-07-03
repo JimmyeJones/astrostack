@@ -135,6 +135,28 @@ describe("Gallery batch apply", () => {
     await waitFor(() => expect(order()).toEqual(["Clean", "Noisy"]));
   });
 
+  it("offers a Compare link only when exactly two images are selected", async () => {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [item(1), item(2), item(3)] });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+
+    renderGallery();
+
+    await waitFor(() => expect(screen.getAllByLabelText("Select for batch edit").length).toBe(3));
+    const boxes = screen.getAllByLabelText("Select for batch edit");
+    fireEvent.click(boxes[0]);
+    // One selected: no Compare yet.
+    expect(screen.queryByRole("link", { name: /Compare/ })).toBeNull();
+
+    fireEvent.click(boxes[1]);
+    const link = await screen.findByRole("link", { name: /Compare/ });
+    expect(link).toHaveAttribute("href", "/compare?a=M_42:1&b=M_42:2");
+
+    // A third selection removes the (pairwise-only) Compare action again.
+    fireEvent.click(boxes[2]);
+    await waitFor(() => expect(screen.queryByRole("link", { name: /Compare/ })).toBeNull());
+  });
+
   it("offers Reuse settings only for reusable cards", async () => {
     vi.spyOn(client.api, "getGallery").mockResolvedValue({
       items: [

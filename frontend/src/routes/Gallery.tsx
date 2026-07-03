@@ -3,7 +3,7 @@ import {
   Alert, Badge, Button, Card, Center, Checkbox, Group, Image, Loader, Menu, Paper,
   SegmentedControl, SimpleGrid, Spoiler, Stack, Text, TextInput, Title, Tooltip,
 } from "@mantine/core";
-import { IconCopy, IconPhoto, IconSearch, IconWand } from "@tabler/icons-react";
+import { IconCopy, IconGitCompare, IconPhoto, IconSearch, IconWand } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
@@ -271,6 +271,16 @@ export function GalleryView() {
             <Text fw={600}>{selItems.length} selected</Text>
             <Group gap="xs">
               <Button variant="subtle" size="xs" onClick={() => setSelected({})}>Clear</Button>
+              {selItems.length === 2 ? (
+                <Button
+                  component={Link}
+                  to={`/compare?a=${selItems[0].safe}:${selItems[0].run_id}&b=${selItems[1].safe}:${selItems[1].run_id}`}
+                  variant="light" color="grape" size="xs"
+                  leftSection={<IconGitCompare size={14} />}
+                >
+                  Compare
+                </Button>
+              ) : null}
               <Menu shadow="md" position="bottom-end" width={240}>
                 <Menu.Target>
                   <Button size="xs" leftSection={<IconWand size={14} />} loading={batch.isPending}>

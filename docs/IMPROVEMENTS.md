@@ -67,7 +67,6 @@ _(none — claim an item here with your branch name)_
   testable in isolation from real hardware. (M, correctness)
 
 ### Features that serve real workflows
-- Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
@@ -110,6 +109,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Compare-two-stacks web view** — a new `/compare?a=<safe>:<run>&b=<safe>:<run>`
+  route (bookmarkable) shows two stacks **side by side** or as a **blink**
+  comparator (auto-alternates the two images in one frame at ~0.7 s, with
+  play/pause + manual flip) so a subtle difference — less noise, a cleaned
+  satellite trail, sharper stars — pops out. Each panel carries the target,
+  settings-relevant metadata and the noise readout. Launched from the Gallery's
+  existing multi-select: selecting exactly two images reveals a "Compare" action.
+  Reuses the gallery query + preview URLs (no new endpoint); handles a
+  deleted/missing run gracefully. Pure `parseRef`/`compareHref` helpers tested;
+  frontend-only, additive. (v0.51.0, this run)
 
 - **Noise-improvement readout vs the previous stack** — each History card now
   shows its background-noise σ as a delta against the same target's *previous*
