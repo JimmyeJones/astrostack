@@ -52,6 +52,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
 
+### Editor — make it excellent (PRIORITY 1) — new ideas
+- **Cancel superseded live-preview renders (responsiveness)** — the editor's live
+  preview refetches on every (debounced) param change, but the `fetch` in the
+  preview `useQuery` doesn't pass the query's `AbortSignal`, so while a user drags a
+  slider on a heavy op (deconvolution, denoise) each stale render runs to completion
+  server-side and the newest result queues behind them — the named "heavy ops on the
+  proxy can lag" hold-out of the live-preview backlog item. Thread the react-query
+  `signal` into `fetch(url, { signal })` for the preview, base, star-mask and
+  without-op queries so a superseded request is aborted the moment the recipe
+  changes, cutting proxy render backlog and latency. Also surfaces a cleaner
+  "rendering…" state. Frontend-only, additive, no API change. (S, editor)
+- **"Your data" context chip in the editor header** — the four data-driven
+  suggestion buttons quote the measured value inline ("FWHM 3.2px"), but there's no
+  single place a user sees what the editor measured about *this* stack. A small
+  dimmed chip near the title ("Measured: stars ≈ 3.2 px FWHM · background noise σ
+  0.021") — built from the already-fetched psf/sharpen/star-size (`fwhm_px`) and
+  denoise (`noise_sigma`) queries via a pure formatter — gives the data-driven
+  buttons visible provenance and builds trust, shown only when at least one measure
+  is available. Pure helper, frontend-only, additive. (S, editor/friendliness)
+
 ### Autonomy — "just works" (PRIORITY 2)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
