@@ -38,6 +38,45 @@ export function autoSummaryPhrases(
   return out;
 }
 
+/** Compact number for a value note: up to 2 decimals, no trailing-zero padding
+ * (0.2 → "0.2", 1.05 → "1.05", 1.5 → "1.5"). */
+function fmt(n: number): string {
+  return String(Math.round(n * 100) / 100);
+}
+
+/** The *data-driven values* Auto picked from your image, read straight from the
+ * built recipe's op params — this is where Auto's adaptivity actually lives, so
+ * surfacing it turns "it did something" into "it did *this*, because of my data".
+ * Pure; returns phrases in pipeline order for the *enabled*, value-bearing ops
+ * only (STF sky level, denoise strength, saturation, sharpen radius), skipping
+ * any whose param is missing/non-numeric so it degrades gracefully. */
+export function autoValuePhrases(ops: OpInstance[]): string[] {
+  const out: string[] = [];
+  for (const op of ops) {
+    if (!op.enabled) continue;
+    const p = (op.params ?? {}) as Record<string, unknown>;
+    if (op.id === "tone.stretch" && p.mode === "stf" && typeof p.target_bg === "number") {
+      out.push(`sky level ${fmt(p.target_bg)}`);
+    } else if (op.id === "detail.denoise" && typeof p.strength === "number") {
+      out.push(`denoise strength ${fmt(p.strength)}`);
+    } else if (op.id === "tone.saturation" && typeof p.amount === "number") {
+      out.push(`saturation ${fmt(p.amount)}×`);
+    } else if (op.id === "detail.sharpen" && typeof p.radius === "number") {
+      out.push(`sharpen radius ${fmt(p.radius)} px`);
+    }
+  }
+  return out;
+}
+
+/** A single line naming the values Auto chose from the data, or null when none
+ * of the value-bearing ops are present, e.g.
+ * "Tuned to your data: sky level 0.2, saturation 1.1×, sharpen radius 1.4 px." */
+export function autoValueSentence(ops: OpInstance[]): string | null {
+  const phrases = autoValuePhrases(ops);
+  if (phrases.length === 0) return null;
+  return `Tuned to your data: ${phrases.join(", ")}.`;
+}
+
 /** A single friendly sentence describing what Auto-process did, or null when the
  * recipe is empty (nothing to explain). Capitalises the first phrase and joins
  * the rest with commas + a trailing "then" before the last, e.g.

@@ -317,6 +317,7 @@ export interface EditOp {
   stage: string;
   proxy_safe: boolean;
   is_stretch: boolean;
+  heavy?: boolean;
   help: string | null;
   params: StackOptionField[];
 }

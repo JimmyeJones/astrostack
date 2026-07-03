@@ -18,10 +18,11 @@ import { ImageLightbox } from "../components/ImageLightbox";
 import { Histogram } from "../components/editor/Histogram";
 import { OpList } from "../components/editor/OpList";
 import { hasEnabledStretch, insertOnCorrectSide, moveToCorrectSide } from "../components/editor/stageConflicts";
-import { autoSummarySentence } from "../components/editor/autoSummary";
+import { autoSummarySentence, autoValueSentence } from "../components/editor/autoSummary";
 import { applyDataDrivenDefaults, countDataDrivenDefaults, type OpSuggestion }
   from "../components/editor/dataDrivenDefaults";
 import { previewScaleCaption } from "../components/editor/previewScale";
+import { previewDebounceMs } from "../components/editor/previewDebounce";
 import { coalesceFwhm, measuredContextText } from "../components/editor/measuredContext";
 import { OpParamPanel } from "../components/editor/OpParamPanel";
 import { PresetMenu } from "../components/editor/PresetMenu";
@@ -112,6 +113,10 @@ export function EditorView() {
   // diverges from it (manual edit, undo, redo) the note is cleared so it never
   // misdescribes the current state.
   const [autoSummary, setAutoSummary] = useState<string | null>(null);
+  // The data-driven values Auto picked (denoise strength, STF sky level,
+  // saturation, sharpen radius), shown under the summary so the note explains
+  // *this, because of my data* — not just which ops ran.
+  const [autoValues, setAutoValues] = useState<string | null>(null);
   const [autoKey, setAutoKey] = useState<string | null>(null);
 
   // Seed ops from the saved recipe once (clears undo history).
@@ -132,10 +137,16 @@ export function EditorView() {
   useEffect(() => {
     if (autoKey !== null && recipeKey !== autoKey) {
       setAutoSummary(null);
+      setAutoValues(null);
       setAutoKey(null);
     }
   }, [recipeKey, autoKey]);
-  const [dKey] = useDebouncedValue(recipeKey, 250);
+  // Settle the live preview longer while an *enabled, expensive* op is in the
+  // pipeline (deconvolution, wavelet denoise), so dragging a slider re-renders
+  // only the value you land on instead of every intermediate frame through a
+  // slow op; light-only recipes keep the snappy short debounce.
+  const debounceMs = useMemo(() => previewDebounceMs(ops, specs), [ops, specs]);
+  const [dKey] = useDebouncedValue(recipeKey, debounceMs);
   const [bust, setBust] = useState(0);
   const dRecipe: Recipe = useMemo(() => {
     let parsed: OpInstance[] = [];
@@ -282,6 +293,7 @@ export function EditorView() {
       const built = (r.ops ?? []).map((o) => ({ ...o, uid: o.uid || uid() }));
       setOps(built);
       setAutoSummary(autoSummarySentence(built, specs));
+      setAutoValues(autoValueSentence(built));
       setAutoKey(JSON.stringify(built));
       notifications.show({ message: "Auto-process applied — tweak from here", color: "violet" });
     },
@@ -574,8 +586,11 @@ export function EditorView() {
             {autoSummary ? (
               <Alert color="violet" variant="light" py={8} withCloseButton
                 icon={<IconWand size={16} />} title="What Auto-process did"
-                onClose={() => setAutoSummary(null)}>
+                onClose={() => { setAutoSummary(null); setAutoValues(null); }}>
                 <Text size="xs">{autoSummary}</Text>
+                {autoValues ? (
+                  <Text size="xs" mt={4}>{autoValues}</Text>
+                ) : null}
                 <Text size="10px" c="dimmed" mt={4}>
                   These steps were chosen from your image — tweak or remove any of them below.
                 </Text>

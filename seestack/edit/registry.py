@@ -87,6 +87,8 @@ class OpSpec:
     proxy_safe: bool = True                   # if False: skipped in live preview unless forced
     help: str | None = None
     is_stretch: bool = False                  # the single tone-mapping boundary op
+    heavy: bool = False                       # expensive on the proxy (iterative/restoration);
+                                              # the UI settles its preview debounce longer for these
 
     def defaults(self) -> dict[str, Any]:
         return {p.key: p.default for p in self.params}

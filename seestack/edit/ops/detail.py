@@ -31,8 +31,13 @@ def _with_nan_filled(rgb: np.ndarray, fn):
 def _hot_pixels(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     from seestack.bg.hot_pixels import suppress_hot_cold_pixels
 
-    return suppress_hot_cold_pixels(rgb, sigma=float(params.get("sigma", 5.0)),
-                                    use_gpu=ctx.use_gpu)
+    sigma = float(params.get("sigma", 5.0))
+    # suppress_hot_cold_pixels derives its threshold from the median of the whole
+    # residual, which is NaN when the image has any uncovered (mosaic) pixels — so
+    # run it on a NaN-filled copy and restore NaN, exactly like the other detail
+    # ops. Without this the op silently no-ops on any mosaic/partial-coverage image.
+    return _with_nan_filled(
+        rgb, lambda img: suppress_hot_cold_pixels(img, sigma=sigma, use_gpu=ctx.use_gpu))
 
 
 def _denoise(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
@@ -142,7 +147,7 @@ register(OpSpec(
 
 register(OpSpec(
     id="detail.denoise", label="Noise reduction", group="detail", stage="linear",
-    apply=_denoise, proxy_safe=True,
+    apply=_denoise, proxy_safe=True, heavy=True,  # skimage restoration — slow on the proxy
     help="Smooth away background grain while keeping stars and detail. Tip: use the "
          "'From your image' button to set a strength from your own noise level.",
     params=[
@@ -172,7 +177,7 @@ register(OpSpec(
 
 register(OpSpec(
     id="detail.deconvolve", label="Deconvolution", group="detail", stage="linear",
-    apply=_deconvolve, proxy_safe=True,  # shows in the live preview (runs on the proxy)
+    apply=_deconvolve, proxy_safe=True, heavy=True,  # iterative Richardson-Lucy — slow on the proxy
     help="Recover sharpness lost to seeing by reversing the star blur. It's a heavy "
          "effect, so the live preview may take a moment to update while it's on.",
     params=[

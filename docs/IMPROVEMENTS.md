@@ -53,27 +53,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
 
 ### Editor — make it excellent (PRIORITY 1) — new ideas
-- **Per-op debounce so heavy ops render fewer intermediate frames** — now that
-  superseded preview renders abort mid-flight (v0.57.13), the remaining lag while
-  dragging a *heavy* op's slider (deconvolution, wavelet denoise) is that each
-  debounced step still kicks a full proxy render. A light op (levels, saturation)
-  can afford the current 250 ms debounce, but a heavy one wants a longer settle so
-  only the value you land on renders. Make the editor's preview debounce adaptive:
-  key it off whether any *enabled, expensive* op is present (the ops already carry
-  enough in their spec — e.g. a `proxy_safe=false` or a new `heavy` hint — to
-  classify) and stretch it to ~600 ms in that case. Pure "pick a debounce" helper,
-  frontend-only, additive. Cuts wasted heavy renders without making light edits feel
-  sluggish. (S, editor/responsiveness)
-- **Show Auto's chosen data-driven values in the "What Auto-process did" note** —
-  the dismissible note lists the ops Auto ran in plain language, but not the
-  *values* it picked from your data (denoise strength, sharpen radius, saturation,
-  STF sky level), which is exactly where the adaptivity lives. Appending them
-  ("eased saturation to 1.1 for a noisy stack; sharpened at radius 1.4 px sized to
-  your 3.2 px stars") would make the one-click result's data-driven reasoning
-  visible and build trust — turning "it did something" into "it did *this, because
-  of my data*". The auto endpoint already computes these; surface them on the note
-  via a pure formatter. Frontend + a couple of response fields, additive.
+- **Retire the now-dead "export only" preview scaffolding** — since v0.57.0 *every*
+  editor op is `proxy_safe=True` (deconvolution renders on the proxy too), so the
+  OpList "export only" badge and the selected-op "The live preview doesn't show
+  this effect" note (Editor.tsx, gated on `!proxy_safe`) are unreachable — and
+  worse, *stale*: if a future op were ever marked `proxy_safe=False` the note would
+  now lie ("doesn't show this effect" when it does). Either delete the dead
+  badge/note (+ their Vitest cases for the removed behaviour) or, if we want to keep
+  a "heavy — preview may lag" affordance, repoint it at the new `heavy` hint (shipped
+  v0.57.17) with accurate copy ("this is slow, so the preview updates after a short
+  pause"). Simplifies the priority-1 editor and removes a future foot-gun.
   (S, editor/friendliness)
+- **Show a per-op timing hint so "heavy" ops set expectations before you add them**
+  — the `heavy` spec hint (v0.57.17) is currently only consumed by the preview
+  debounce; surface it in the Add-operation menu and the op header too (a small
+  "slower preview" chip on Deconvolution / Noise reduction), so a beginner knows
+  *before* dragging a slider why the preview takes a beat to update, rather than
+  wondering if it's stuck. Pure frontend, reuses the already-threaded `heavy` field;
+  additive. (S, editor/friendliness)
 
 ### Autonomy — "just works" (PRIORITY 2)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
@@ -191,6 +188,53 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **NaN-preservation regression tests for the spatial detail ops** — the
+  denoise / sharpen / deconvolve ops run on a NaN-filled copy (skimage can't
+  tolerate NaN) and restore the uncovered border via `_with_nan_filled`; that
+  fragile fill→process→restore contract had no direct guard (the same class of
+  gap that let the hot-pixel op regress). Added a parametrized
+  `test_detail_ops_preserve_nan_on_partial_coverage` asserting each keeps an
+  uncovered mosaic border NaN and never leaks NaN into (or a filled value out of)
+  the covered region. Test-only; confirmed all three already correct. (v0.57.20,
+  this run)
+
+- **Fix: hot-pixel editor op silently did nothing on mosaic (NaN) images** — the
+  editor's `detail.hot_pixels` op called `suppress_hot_cold_pixels` directly, which
+  derives its outlier threshold from the median of the whole-image residual; with
+  any uncovered (NaN) pixel that median is NaN, so the threshold went NaN, every
+  `|residual| > NaN` comparison was False, and the op became a silent no-op on
+  *every* mosaic/partial-coverage stack (a Seestar owner adding hot-pixel removal
+  to a mosaic edit got nothing, with no error). Wrapped it in the same
+  `_with_nan_filled` helper the other detail ops (denoise/sharpen/deconvolve) use,
+  so it fills NaN with the finite median, suppresses on the clean array, and
+  restores NaN — now it removes hot pixels on mosaics *and* preserves the uncovered
+  border. Engine-only, editor-scoped (the shared stack-path function is untouched);
+  regression test covers mosaic-NaN + fully-covered. (v0.57.19, this run)
+
+- **Show Auto's chosen data-driven values in the "What Auto-process did" note** —
+  the note listed *which* ops Auto ran but not the *values* it picked from your
+  data, which is exactly where Auto's adaptivity lives. A pure `autoValueSentence`
+  helper reads the built recipe's op params directly (no new API) and adds a second
+  line — "Tuned to your data: sky level 0.2, saturation 1.1×, sharpen radius 1.4 px"
+  — for the STF sky level, denoise strength, saturation and sharpen radius, skipping
+  any op whose value isn't present so it degrades gracefully. Turns "it did
+  something" into "it did *this, because of my data*". Vitest-covered (7 helper
+  cases + the Editor note-wiring test asserts the values line); frontend-only,
+  additive. (v0.57.18, this run)
+
+- **Adaptive live-preview debounce for heavy editor ops** — dragging a slider
+  while an expensive op (deconvolution, wavelet denoise) is in the pipeline still
+  kicked a full proxy render on every 250 ms debounce step, so several slow
+  intermediate frames rendered before the value you landed on. Ops now carry a
+  `heavy` spec hint (set on `detail.denoise` / `detail.deconvolve`, threaded to the
+  frontend via the ops schema), and a pure `previewDebounceMs(ops, specs)` helper
+  stretches the editor's preview debounce to 600 ms whenever an *enabled* heavy op
+  is present — so only the value you settle on renders — while light-only recipes
+  keep the snappy 250 ms. Vitest-covered (6 cases incl. disabled-op and
+  missing-`heavy` graceful degrade) + a backend assertion that the schema exposes
+  `heavy`. Additive/upgrade-safe (new optional field defaults false). (v0.57.17,
+  this run)
 
 - **Data-driven saturation in the one-click Auto recipe** — Auto's final
   saturation boost was a fixed `1.2` for every stack, but chroma noise scales with

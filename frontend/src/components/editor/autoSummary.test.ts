@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { autoSummaryPhrases, autoSummarySentence } from "./autoSummary";
+import {
+  autoSummaryPhrases, autoSummarySentence, autoValuePhrases, autoValueSentence,
+} from "./autoSummary";
 import type { EditOp, OpInstance } from "../../api/client";
 
 function spec(id: string, label: string): EditOp {
@@ -74,6 +76,62 @@ describe("autoSummarySentence", () => {
     expect(autoSummarySentence(AUTO_OPS, SPECS)).toBe(
       "Flattened the background, balanced the colour, applied a natural stretch, "
       + "removed the green cast, boosted colour saturation, then sharpened detail.",
+    );
+  });
+});
+
+function pop(id: string, params: Record<string, unknown>, enabled = true): OpInstance {
+  return { uid: id, id, enabled, params };
+}
+
+describe("autoValuePhrases", () => {
+  it("reads the data-driven values from the built recipe in pipeline order", () => {
+    const ops = [
+      pop("background.final_gradient", { mode: "luminance" }),
+      pop("detail.denoise", { method: "wavelet", strength: 0.6 }),
+      pop("tone.stretch", { mode: "stf", target_bg: 0.2 }),
+      pop("tone.saturation", { amount: 1.1 }),
+    ];
+    expect(autoValuePhrases(ops)).toEqual([
+      "denoise strength 0.6", "sky level 0.2", "saturation 1.1×",
+    ]);
+  });
+
+  it("includes the sharpen radius and formats to at most 2 decimals", () => {
+    const ops = [pop("detail.sharpen", { amount: 0.5, radius: 1.35 })];
+    expect(autoValuePhrases(ops)).toEqual(["sharpen radius 1.35 px"]);
+  });
+
+  it("omits the STF sky level when the stretch is not in STF mode", () => {
+    expect(autoValuePhrases([pop("tone.stretch", { mode: "asinh", stretch: 0.5 })])).toEqual([]);
+  });
+
+  it("skips disabled and value-less ops", () => {
+    const ops = [
+      pop("tone.saturation", { amount: 1.2 }, false),
+      pop("tone.color_calibrate", { mode: "gray_star" }),
+    ];
+    expect(autoValuePhrases(ops)).toEqual([]);
+  });
+
+  it("skips an op whose value param is missing/non-numeric", () => {
+    expect(autoValuePhrases([pop("detail.denoise", {})])).toEqual([]);
+  });
+});
+
+describe("autoValueSentence", () => {
+  it("returns null when no value-bearing op is present", () => {
+    expect(autoValueSentence([op("tone.color_calibrate")])).toBeNull();
+  });
+
+  it("prefixes the joined values with a plain-language lead", () => {
+    const ops = [
+      pop("tone.stretch", { mode: "stf", target_bg: 0.2 }),
+      pop("tone.saturation", { amount: 1.05 }),
+      pop("detail.sharpen", { radius: 1.4 }),
+    ];
+    expect(autoValueSentence(ops)).toBe(
+      "Tuned to your data: sky level 0.2, saturation 1.05×, sharpen radius 1.4 px.",
     );
   });
 });

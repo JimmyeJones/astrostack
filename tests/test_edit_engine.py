@@ -294,6 +294,47 @@ def test_deconvolve_preserves_colour_balance():
     assert max(means) - min(means) < 0.01                 # no colour shift
 
 
+def test_hot_pixels_works_on_mosaic_nan_image():
+    """The hot-pixel editor op must remove hot pixels even on a partial-coverage
+    (NaN) mosaic — and preserve NaN. Regression: it used to derive its threshold
+    from the whole-image residual median, which is NaN when any pixel is
+    uncovered, silently turning the op into a no-op on every mosaic."""
+    rng = np.random.default_rng(0)
+    img = (rng.random((40, 40, 3), dtype=np.float32) * 0.2)
+    img[10, 10] = 5.0                          # a hot pixel, far above its neighbours
+    img[:5, :, :] = np.nan                      # uncovered mosaic border
+    spec = get_op("detail.hot_pixels")
+
+    out = spec.apply(img.copy(), {"sigma": 5.0}, EditContext())
+    assert out[10, 10, 0] < 1.0                 # the hot pixel was actually suppressed
+    assert np.isnan(out[:5]).all()              # uncovered border stays NaN
+    assert not np.isnan(out[5:]).any()          # NaN never leaks into covered pixels
+
+    # Still a faithful suppressor on a fully-covered image (unchanged behaviour).
+    full = (rng.random((40, 40, 3), dtype=np.float32) * 0.2)
+    full[20, 25] = 5.0
+    out_full = spec.apply(full.copy(), {"sigma": 5.0}, EditContext())
+    assert out_full[20, 25, 0] < 1.0
+
+
+@pytest.mark.parametrize("op_id,params", [
+    ("detail.denoise", {"method": "wavelet", "strength": 0.7}),
+    ("detail.sharpen", {"amount": 1.0, "radius": 2.0}),
+    ("detail.deconvolve", {"iterations": 3, "psf_sigma": 1.2}),
+])
+def test_detail_ops_preserve_nan_on_partial_coverage(op_id, params):
+    """Every spatial detail op runs on a NaN-filled copy (skimage can't tolerate
+    NaN) and must restore the uncovered border as NaN — never bleeding a filled
+    value into an uncovered pixel, and never leaving NaN inside covered pixels.
+    Guards the fragile fill→process→restore contract in `_with_nan_filled`."""
+    rng = np.random.default_rng(1)
+    img = (rng.random((30, 40, 3), dtype=np.float32) * 0.3)
+    img[:6, :, :] = np.nan                      # uncovered (mosaic) border
+    out = get_op(op_id).apply(img.copy(), params, EditContext())
+    assert np.isnan(out[:6]).all()              # uncovered border stays NaN
+    assert not np.isnan(out[6:]).any()          # covered region is fully finite
+
+
 def test_pipeline_collects_op_errors(monkeypatch):
     img = _img(nan_band=0)
 
