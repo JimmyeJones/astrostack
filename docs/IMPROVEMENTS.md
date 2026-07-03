@@ -52,7 +52,28 @@ problems. Dogfood it every big-picture run and fix root causes.
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
 
+### Editor — make it excellent (PRIORITY 1) — new ideas
+- **Star-size-from-stars suggestion for the star-reduce op** — v0.57.4 gave the
+  Sharpen op a data-driven radius from the target's median star FWHM. The
+  `stars.reduce` op's `size` param is the same kind of physical star-scale guess a
+  beginner can't reason about, and the FWHM is already the natural measure of it.
+  Add a one-click "From your stars" suggestion for `stars.reduce`'s `size` (FWHM
+  rounded to the op's integer step, clamped to its range), reusing the exact
+  `median_fwhm` → suggestion pattern the sharpen/PSF buttons already use — three
+  data-driven buttons now, one more here for consistency. Small, additive.
+  (S, editor/autonomy)
+
 ### Autonomy — "just works" (PRIORITY 2)
+- **Auto-pick the object preset from the image** — Auto-process builds one general
+  recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
+  different (per-channel vs luminance gradient, star reduction, saturation). The
+  proxy analysis already computes sky/noise; extend it with a couple of cheap
+  content cues (fraction of bright extended pixels vs point sources, colour spread)
+  to *classify* the target coarsely and have Auto start from the matching preset's
+  structure instead of a fixed op list — so "Auto" is tuned to what you actually
+  shot. Keep the current general recipe as the fallback when classification is
+  low-confidence. Off-by-default risk is nil (Auto is an explicit button). Needs a
+  careful, well-tested classifier so it never mis-picks confidently. (M, autonomy/editor)
 - **One-click "process this target"** — after ingest, reach a good stack *and* a
   good auto-edited preview with zero manual steps: QC → solve → auto-grade →
   stack → auto-edit, well-defaulted and safe. (M, autonomy)
