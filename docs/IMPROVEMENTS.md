@@ -34,8 +34,10 @@ The editor is where a good stack becomes a good *picture*, and it has real
 problems. Dogfood it every big-picture run and fix root causes.
 - **Live preview** — it's slow / doesn't update well / doesn't match the exported
   full-res result. Audit the proxy→preview path vs the full-res export path; make
-  the preview a fast, faithful representation of the final image, and make it
-  obvious when an op is only preview-approximate. (M, editor)
+  the preview a fast, faithful representation of the final image. (The
+  "make it obvious when an op is only preview-approximate" sub-part shipped in
+  v0.56.5 — non-`proxy_safe` ops like Deconvolution now carry an "export only"
+  badge + an explanatory note.) (M, editor)
 - **Confusing / clunky controls** — too many ops with terse params and no obvious
   starting point. Add plain-language help, a simple/guided default layout, curated
   presets, and progressive disclosure of advanced ops so a beginner gets a good
@@ -167,6 +169,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **"Export only" flag for preview-approximate editor ops** — the Deconvolution op
+  is `proxy_safe=False`, so it's silently skipped in the fast live preview: a user
+  would add it, drag its PSF σ / iterations sliders and see *no change*, which reads
+  as a broken control. The editor now surfaces this: each non-`proxy_safe` op row
+  carries a grape "export only" badge (with a tooltip), and selecting such an op
+  shows an explanatory note ("The live preview doesn't show this effect — it's
+  heavy, so it only runs when you Export or Download full-res PNG"). Reuses the
+  `proxy_safe` field already carried on the ops schema; frontend-only, additive.
+  Vitest-covered (badge + note). (v0.56.5, this run)
 
 - **Plain-language "Combined:" line in the History Info panel** — the Info panel
   showed the raw `STACKER` FITS card ("min-max-reject", "sigma-clip", "mean",

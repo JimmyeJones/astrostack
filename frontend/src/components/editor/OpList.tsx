@@ -1,4 +1,4 @@
-import { ActionIcon, Group, Paper, Stack, Switch, Text } from "@mantine/core";
+import { ActionIcon, Badge, Group, Paper, Stack, Switch, Text, Tooltip } from "@mantine/core";
 import { IconChevronDown, IconChevronUp, IconX } from "@tabler/icons-react";
 import type { EditOp, OpInstance } from "../../api/client";
 
@@ -30,9 +30,21 @@ export function OpList({ ops, specs, selected, onSelect, onMove, onToggle, onRem
               <Group gap={6} wrap="nowrap" style={{ minWidth: 0 }}>
                 <Text size="xs" c="dimmed" w={16} ta="right">{i + 1}</Text>
                 <div style={{ minWidth: 0 }}>
-                  <Text size="sm" fw={active ? 600 : 400} lineClamp={1}>
-                    {spec?.label ?? op.id}
-                  </Text>
+                  <Group gap={6} wrap="nowrap">
+                    <Text size="sm" fw={active ? 600 : 400} lineClamp={1}>
+                      {spec?.label ?? op.id}
+                    </Text>
+                    {spec && !spec.proxy_safe ? (
+                      <Tooltip
+                        label="This effect is applied on export only — the fast live preview approximates the image without it."
+                        multiline w={240} withArrow>
+                        <Badge size="xs" variant="light" color="grape"
+                          style={{ flexShrink: 0, cursor: "help" }}>
+                          export only
+                        </Badge>
+                      </Tooltip>
+                    ) : null}
+                  </Group>
                   {spec?.help ? (
                     <Text size="10px" c="dimmed" lineClamp={1}>{spec.help}</Text>
                   ) : null}
