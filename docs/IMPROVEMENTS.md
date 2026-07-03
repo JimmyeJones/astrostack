@@ -58,13 +58,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   this op" affordance (render the recipe up to but excluding the selected op vs
   including it) so the effect of the op being tuned is obvious. Reuses the existing
   preview path with a truncated recipe; frontend-mostly. (M, editor)
-- **Warn when a linear-stage op sits after the stretch (or vice-versa)** — ops
-  declare a `stage` (linear / nonlinear / any) but the UI lets a user drag e.g.
-  a background-gradient (linear) op below the stretch, where it operates on
-  display-space data and misbehaves. Surface a subtle per-op caution in the OpList
-  when an op's `stage` conflicts with its position relative to the single stretch,
-  with a one-click "move to the correct side". Reuses the `stage`/`is_stretch`
-  fields already on the ops schema; frontend-only, advisory. (S, editor)
 
 ### Autonomy — "just works" (PRIORITY 2)
 - **One-click "process this target"** — after ingest, reach a good stack *and* a
@@ -172,6 +165,18 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Stage-conflict caution + one-click fix in the editor OpList** — ops declare a
+  `stage` (linear / nonlinear / any), and the pipeline runs them across a single
+  stretch boundary, but the op list lets a user drag e.g. a background-gradient
+  (linear) op below the stretch, where it silently operates on display-space data
+  and misbehaves. Each op row now shows a subtle orange caution ("should be
+  before/after the stretch", with an explanatory tooltip) when an *enabled* op
+  sits on the wrong side of the *enabled* stretch, plus a one-click "Fix" that
+  repositions it to the correct side (linear → just before the stretch, nonlinear
+  → just after). Pure, unit-tested `stageConflicts` / `moveToCorrectSide` helpers
+  (10 cases: both sides, `any`-stage neutrality, disabled-op / no-stretch
+  no-ops); frontend-only, advisory. (v0.56.10, this run)
 
 - **Combine-method facet on the Gallery** — a "All / Drizzle / Min-max / σ-clip /
   Mean" `SegmentedControl` (shown only when the set is *mixed* — >1 distinct

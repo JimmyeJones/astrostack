@@ -16,6 +16,7 @@ import { useUndoable } from "../hooks/useUndoable";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { Histogram } from "../components/editor/Histogram";
 import { OpList } from "../components/editor/OpList";
+import { moveToCorrectSide } from "../components/editor/stageConflicts";
 import { OpParamPanel } from "../components/editor/OpParamPanel";
 import { PresetMenu } from "../components/editor/PresetMenu";
 
@@ -253,6 +254,7 @@ export function EditorView() {
   };
   const setParams = (u: string, params: Record<string, unknown>) =>
     setOps((p) => p.map((o) => (o.uid === u ? { ...o, params } : o)));
+  const fixStage = (u: string) => setOps((p) => moveToCorrectSide(p, u, specs));
 
   const selectedOp = ops.find((o) => o.uid === selected) ?? null;
   const grouped = useMemo(() => {
@@ -380,7 +382,7 @@ export function EditorView() {
             <Paper withBorder p="sm">
               <Text fw={600} size="sm" mb={6}>Pipeline</Text>
               <OpList ops={ops} specs={specs} selected={selected} onSelect={setSelected}
-                onMove={move} onToggle={toggle} onRemove={remove} />
+                onMove={move} onToggle={toggle} onRemove={remove} onFix={fixStage} />
               {ops.length === 0 ? (
                 <Alert color="grape" variant="light" py={8} mt="xs"
                   icon={<IconSparkles size={16} />}>
