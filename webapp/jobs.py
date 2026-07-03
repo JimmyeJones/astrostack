@@ -275,7 +275,15 @@ class JobManager:
             self._persist(job)
             try:
                 result = fn(job)
-                if job.cancel_requested():
+                completed = result or job.result
+                if job.cancel_requested() and not completed:
+                    # Cancel was requested and the job honored it — it aborted
+                    # without producing a result. But a job that isn't
+                    # cancel-aware runs to completion and returns its result
+                    # even after cancel is pressed; in that case the work is
+                    # already done, so keep the result and mark it done rather
+                    # than discarding a finished stack and making the user redo
+                    # it.
                     job.state = "cancelled"
                 else:
                     job.state = "done"
