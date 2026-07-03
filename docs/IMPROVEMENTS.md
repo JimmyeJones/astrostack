@@ -88,18 +88,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   proxy. Care: it's a behaviour change to Compare, so gate/validate the resolution
   swap doesn't jar the A/B. (S, editor/trust)
 ### Autonomy — "just works" (PRIORITY 2)
-- **Smooth the Auto recipe's noisy/clean cliff (denoise ↔ sharpen crossfade)** —
-  `auto_recipe` treats `analyze_proxy`'s `noisy` verdict as a hard boolean
-  (`sky_sigma > 0.02`): a stack just over the line gets denoise and *no* sharpen,
-  one just under gets sharpen and *no* denoise, so two near-identical stacks either
-  side of the threshold produce visibly different one-click results (a cliff). A
-  mildly-noisy stack could sensibly get *both* a light denoise and a light sharpen.
-  Replace the boolean branch with a continuous crossfade: scale the denoise strength
-  up and the sharpen amount down as `sky_sigma` rises across a band around the
-  threshold (e.g. 0.012–0.028), so the default result varies smoothly with the data
-  instead of snapping. Reuses the measured `sky_sigma`; Auto is an explicit button
-  so no default flips. Needs a test that the crossfade is monotonic and that the
-  clean/very-noisy ends still match today's recipe. (M, autonomy/editor)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
   different (per-channel vs luminance gradient, star reduction, saturation). The
@@ -214,6 +202,21 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Smooth the Auto recipe's noisy/clean cliff (denoise ↔ sharpen crossfade)** —
+  `auto_recipe` treated `analyze_proxy`'s `noisy` verdict as a hard boolean
+  (`sky_sigma > 0.02`), so a stack just over the line got denoise and *no* sharpen
+  while one just under got sharpen and *no* denoise — two near-identical stacks
+  producing visibly different one-click results. The two now *crossfade* across a
+  band around the old threshold (`_noise_fraction`, 0.012–0.028): denoise strength
+  (still data-driven from the measured noise) fades in and the sharpen amount fades
+  out as σ rises, so a mildly-noisy stack gets a light touch of *both*. The clean
+  end (sharpen only) and very-noisy end (denoise only) are unchanged, and an
+  unmeasurable image falls back to sharpen-only as before. Auto is an explicit
+  button, so no default flips. Engine-only, additive. Tested: `_noise_fraction`
+  endpoints + monotonicity, and that a mid-band stack carries both ops with denoise
+  rising / sharpen falling across the band; existing adapts-to-noise and
+  strength-scaling tests still green. (v0.63.0, this run)
 
 - **One-click "From your image" black/white points for the Levels op** — the Levels
   op made a beginner hand-guess a black point and a white point, when the natural

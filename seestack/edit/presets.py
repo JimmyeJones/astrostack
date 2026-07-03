@@ -129,6 +129,24 @@ def _is_mosaic(coverage_span: tuple[int, int] | None) -> bool:
     return hi > lo
 
 
+# The noisy↔clean crossfade band (in the normalized sky-σ units analyze_proxy
+# reports, centred on its 0.02 "noisy" verdict). Below _NOISE_LO the stack is
+# treated as clean (sharpen only); above _NOISE_HI as noisy (denoise only); in
+# between it gets *both*, crossfading, so two near-identical stacks either side
+# of the old hard threshold no longer produce visibly different one-click results.
+_NOISE_LO = 0.012
+_NOISE_HI = 0.028
+
+
+def _noise_fraction(sky_sigma: float) -> float:
+    """Map the measured background σ to a 0..1 crossfade weight: 0 at/below the
+    clean end (``_NOISE_LO``), 1 at/above the noisy end (``_NOISE_HI``), linear in
+    between. Denoise fades *in* and sharpen fades *out* as this rises."""
+    if _NOISE_HI <= _NOISE_LO:
+        return 1.0 if sky_sigma > _NOISE_LO else 0.0
+    return float(np.clip((sky_sigma - _NOISE_LO) / (_NOISE_HI - _NOISE_LO), 0.0, 1.0))
+
+
 def auto_recipe(rgb: np.ndarray | None = None,
                 median_fwhm: float | None = None,
                 coverage_span: tuple[int, int] | None = None) -> Recipe:
@@ -139,12 +157,16 @@ def auto_recipe(rgb: np.ndarray | None = None,
     the proven ``autostretch``) → a gentle green-cast removal (SCNR) — the single
     most common OSC defect, which every built-in nebula preset also fixes. Then,
     only when warranted by the analysis: denoise (on linear data, before the
-    stretch) for noisy frames — at a *data-driven* strength scaled to the
-    measured background noise, not a fixed guess — and a gentle sharpen for clean
-    ones, sized to the target's *own* stars (median FWHM → radius, the same
-    conversion the editor's sharpen-from-stars button uses) rather than a fixed
-    guess. Saturation lifts colour a touch at the end (after the green cast is
-    gone, so it doesn't amplify it) — *scaled to the measured background noise*
+    stretch) at a *data-driven* strength scaled to the measured background noise,
+    and a gentle sharpen sized to the target's *own* stars (median FWHM → radius,
+    the same conversion the editor's sharpen-from-stars button uses). Rather than a
+    hard noisy/clean switch (which made two near-identical stacks either side of the
+    threshold produce visibly different results), the two *crossfade* across a band
+    around the old threshold: a clean stack gets sharpen only, a very noisy one
+    denoise only, and a mildly-noisy one a light touch of *both* — the denoise
+    fading in and the sharpen fading out as the measured σ rises (see
+    ``_noise_fraction``). Saturation lifts colour a touch at the end (after the
+    green cast is gone, so it doesn't amplify it) — *scaled to the measured noise*
     so a noisy stack gets a gentler boost (less amplified chroma speckle) and a
     clean one the full lift.
 
@@ -155,29 +177,36 @@ def auto_recipe(rgb: np.ndarray | None = None,
     On a single-field stack (uniform coverage) it's skipped entirely, where it
     would be a no-op anyway.
     """
-    noisy = False
     target_bg = 0.20
-    denoise_strength = 0.5  # neutral fallback when the image can't be measured
-    saturation = 1.2        # neutral fallback when the image can't be measured
+    saturation = 1.2          # neutral fallback when the image can't be measured
+    # Crossfade weights: an unmeasurable image is treated as clean (sharpen full,
+    # no denoise) — matching the old boolean fallback.
+    denoise_strength = 0.0
+    sharpen_amount = 0.5
     if rgb is not None:
         a = analyze_proxy(rgb)
-        noisy = bool(a["noisy"])
+        sky_sigma = float(a["sky_sigma"])
+        noise_frac = _noise_fraction(sky_sigma)
         # Darker sky → lift a little more (higher target grey), brighter → less.
         target_bg = float(np.clip(0.24 - a["sky"] * 0.4, 0.14, 0.24))
         # Chroma noise scales with the saturation boost, so ease off on a noisy
         # stack (where a strong boost just amplifies colour speckle) and give a
         # clean one the full lift — rather than the same fixed 1.2 for both.
-        saturation = float(np.clip(1.25 - a["sky_sigma"] * 6.0, 1.05, 1.25))
-        if noisy:
+        saturation = float(np.clip(1.25 - sky_sigma * 6.0, 1.05, 1.25))
+        # Sharpen fades out as noise rises; denoise fades in. So a clean stack
+        # (noise_frac 0) gets full sharpen and no denoise, a very noisy one
+        # (noise_frac 1) full denoise and no sharpen — matching the old ends — and
+        # a mildly-noisy one a light touch of both instead of an abrupt switch.
+        sharpen_amount = round(0.5 * (1.0 - noise_frac), 3)
+        if noise_frac > 0.0:
             # Match the denoise strength to the actual measured noise (the same
-            # estimator behind the editor's "From your image" one-click), so a
-            # mildly-noisy stack gets a light touch and a very noisy one more —
-            # rather than always the same 0.5.
+            # estimator behind the editor's "From your image" one-click), scaled by
+            # the crossfade weight so it eases in across the band.
             from seestack.edit.noise import suggest_denoise_strength
 
             _, suggested = suggest_denoise_strength(rgb)
-            if suggested is not None:
-                denoise_strength = suggested
+            base = suggested if suggested is not None else 0.5
+            denoise_strength = round(base * noise_frac, 3)
 
     ops: list[tuple[str, dict]] = []
     if _is_mosaic(coverage_span):
@@ -189,7 +218,10 @@ def auto_recipe(rgb: np.ndarray | None = None,
         ("background.final_gradient", {"mode": "luminance"}),
         ("tone.color_calibrate", {"mode": "gray_star"}),
     ]
-    if noisy:  # denoise belongs on LINEAR data, before the stretch
+    # Denoise (linear, before the stretch) once the crossfade calls for a
+    # meaningful amount; skip a sub-step sliver so a near-clean stack carries no
+    # no-op op.
+    if denoise_strength >= 0.05:
         ops.append(("detail.denoise", {"method": "wavelet", "strength": denoise_strength}))
     ops.append(("tone.stretch", {"mode": "stf", "target_bg": target_bg}))
     # SCNR before the saturation boost: cap the green channel to the R/B neutral
@@ -197,7 +229,7 @@ def auto_recipe(rgb: np.ndarray | None = None,
     # (0.7) and monotone — it can only *reduce* excess green, never invent colour.
     ops.append(("tone.scnr", {"amount": 0.7}))
     ops.append(("tone.saturation", {"amount": round(saturation, 3)}))
-    if not noisy:  # sharpening clean data helps; sharpening noisy data hurts
+    if sharpen_amount >= 0.05:  # sharpening clean data helps; noisy data hurts
         radius = _sharpen_radius_from_fwhm(median_fwhm)
-        ops.append(("detail.sharpen", {"amount": 0.5, "radius": radius}))
+        ops.append(("detail.sharpen", {"amount": sharpen_amount, "radius": radius}))
     return Recipe(ops=_ops(*ops))
