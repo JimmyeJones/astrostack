@@ -51,6 +51,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
 
+### Editor — make it excellent (PRIORITY 1) — new ideas
+- **Per-op "before/after this op" preview toggle** — the editor's Compare button
+  shows the whole recipe vs the raw base, but when tuning one op a user wants to
+  see *just that op's* contribution. Add a small "bypass from here" or "isolate
+  this op" affordance (render the recipe up to but excluding the selected op vs
+  including it) so the effect of the op being tuned is obvious. Reuses the existing
+  preview path with a truncated recipe; frontend-mostly. (M, editor)
+- **Warn when a linear-stage op sits after the stretch (or vice-versa)** — ops
+  declare a `stage` (linear / nonlinear / any) but the UI lets a user drag e.g.
+  a background-gradient (linear) op below the stretch, where it operates on
+  display-space data and misbehaves. Surface a subtle per-op caution in the OpList
+  when an op's `stage` conflicts with its position relative to the single stretch,
+  with a one-click "move to the correct side". Reuses the `stage`/`is_stretch`
+  fields already on the ops schema; frontend-only, advisory. (S, editor)
+
 ### Autonomy — "just works" (PRIORITY 2)
 - **One-click "process this target"** — after ingest, reach a good stack *and* a
   good auto-edited preview with zero manual steps: QC → solve → auto-grade →
@@ -186,6 +201,15 @@ _Newest first. One line each: what + commit/PR._
   it's safe on galaxies/clusters too. Auto-process is an explicit button (not a
   silent upgrade default) and saved recipes are untouched — upgrade-safe. Test
   asserts SCNR presence + ordering. (v0.56.6, this run)
+
+- **Guided empty-pipeline nudge in the editor** — a first-timer opening the editor
+  with no saved recipe saw only "No operations yet" with no hint of the one-click
+  path. The empty pipeline now shows a grape guided nudge explaining what
+  Auto-process does (background & colour balance, natural stretch, gentle
+  denoise/sharpen) with its own Auto-process button, so a beginner gets a good
+  starting point in one click instead of guessing which op to add first. Reuses
+  the existing `auto` mutation; frontend-only, additive. Vitest-covered.
+  (v0.56.9, this run)
 
 - **"Export only" flag for preview-approximate editor ops** — the Deconvolution op
   is `proxy_safe=False`, so it's silently skipped in the fast live preview: a user

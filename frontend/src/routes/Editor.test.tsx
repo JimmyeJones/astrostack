@@ -123,6 +123,29 @@ describe("EditorView", () => {
     expect(screen.getByText("Stretch")).toBeInTheDocument();
   });
 
+  it("nudges a first-timer with an empty pipeline toward Auto-process", async () => {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({ ops: [], base_run_id: 3 });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    const autoProcess = vi.spyOn(client.api, "autoProcess").mockResolvedValue({
+      ops: [{ uid: "a1", id: "tone.stretch", enabled: true, params: {} }], base_run_id: 3,
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    // The empty pipeline shows a guided nudge with its own Auto-process button.
+    expect(await screen.findByText(/build a good starting recipe from/i))
+      .toBeInTheDocument();
+    // Clicking it (the in-panel one) kicks off auto-process.
+    fireEvent.click(screen.getAllByRole("button", { name: /Auto-process/ })[1]);
+    await waitFor(() => expect(autoProcess).toHaveBeenCalledWith("M_42", 3));
+  });
+
   it("flags a preview-only (export-only) op so the user knows why the preview doesn't change", async () => {
     vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES, DECONVOLVE]);
     vi.spyOn(client.api, "getRecipe").mockResolvedValue({

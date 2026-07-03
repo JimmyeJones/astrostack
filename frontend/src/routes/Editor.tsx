@@ -381,6 +381,21 @@ export function EditorView() {
               <Text fw={600} size="sm" mb={6}>Pipeline</Text>
               <OpList ops={ops} specs={specs} selected={selected} onSelect={setSelected}
                 onMove={move} onToggle={toggle} onRemove={remove} />
+              {ops.length === 0 ? (
+                <Alert color="grape" variant="light" py={8} mt="xs"
+                  icon={<IconSparkles size={16} />}>
+                  <Text size="xs" mb={6}>
+                    New to this? Let <b>Auto-process</b> build a good starting recipe from
+                    your image (background &amp; colour balance, a natural stretch, gentle
+                    denoise/sharpen) — then tweak from there. Or add operations one at a time.
+                  </Text>
+                  <Button size="compact-xs" variant="light" color="grape"
+                    leftSection={<IconSparkles size={14} />}
+                    loading={auto.isPending} onClick={() => auto.mutate()}>
+                    Auto-process
+                  </Button>
+                </Alert>
+              ) : null}
             </Paper>
 
             {selectedOp && specs[selectedOp.id] ? (
