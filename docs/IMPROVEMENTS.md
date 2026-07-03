@@ -172,6 +172,19 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Fix: hot-pixel editor op silently did nothing on mosaic (NaN) images** — the
+  editor's `detail.hot_pixels` op called `suppress_hot_cold_pixels` directly, which
+  derives its outlier threshold from the median of the whole-image residual; with
+  any uncovered (NaN) pixel that median is NaN, so the threshold went NaN, every
+  `|residual| > NaN` comparison was False, and the op became a silent no-op on
+  *every* mosaic/partial-coverage stack (a Seestar owner adding hot-pixel removal
+  to a mosaic edit got nothing, with no error). Wrapped it in the same
+  `_with_nan_filled` helper the other detail ops (denoise/sharpen/deconvolve) use,
+  so it fills NaN with the finite median, suppresses on the clean array, and
+  restores NaN — now it removes hot pixels on mosaics *and* preserves the uncovered
+  border. Engine-only, editor-scoped (the shared stack-path function is untouched);
+  regression test covers mosaic-NaN + fully-covered. (v0.57.19, this run)
+
 - **Show Auto's chosen data-driven values in the "What Auto-process did" note** —
   the note listed *which* ops Auto ran but not the *values* it picked from your
   data, which is exactly where Auto's adaptivity lives. A pure `autoValueSentence`
