@@ -15,7 +15,8 @@ from seestack.io.library import Library
 from seestack.io.project import StackRunRow
 
 
-def _make_run(data_root, safe, basename="master", h=80, w=100):
+def _make_run(data_root, safe, basename="master", h=80, w=100,
+              coverage_min=1, coverage_max=5):
     lib = Library.open_or_create(data_root / "library")
     try:
         proj = lib.open_target(safe)
@@ -32,8 +33,23 @@ def _make_run(data_root, safe, basename="master", h=80, w=100):
             return proj.add_stack_run(StackRunRow(
                 id=None, timestamp_utc="2026-05-02T00:00:00Z", output_basename=basename,
                 fits_path=str(fp), tiff_path=None, preview_path=None, n_frames_used=5,
-                canvas_h=h, canvas_w=w, coverage_min=1, coverage_max=5, options_json="{}",
+                canvas_h=h, canvas_w=w, coverage_min=coverage_min,
+                coverage_max=coverage_max, options_json="{}",
             ))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def _write_coverage(data_root, safe, cov, basename="master"):
+    """Write a ``{basename}_coverage.fits`` sibling next to a run's output FITS."""
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            fp = Path(proj.project_dir) / "output" / f"{basename}_coverage.fits"
+            fits.writeto(fp, np.asarray(cov, dtype="float32"), overwrite=True)
         finally:
             proj.close()
     finally:
@@ -239,6 +255,71 @@ def test_edit_preview_and_histogram(client, solved_library):
     # This run spans coverage 1..5 (a mosaic), so the editor can enable the
     # Coverage-leveling op instead of warning it's a no-op.
     assert hist["is_mosaic"] is True
+
+
+def test_trim_suggestion_mosaic(client, solved_library):
+    """On a mosaic, the trim endpoint returns a fractional crop to the largest
+    well-covered rectangle, excluding the ragged low-coverage border."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, h=80, w=100)  # coverage 1..5 → mosaic
+    cov = np.full((80, 100), 1.0, dtype=np.float32)      # thin single-frame fringe
+    cov[15:65, 20:80] = 5.0                              # well-covered interior
+    _write_coverage(solved_library, safe, cov)
+
+    r = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/trim-suggestion")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["is_mosaic"] is True
+    assert body["crop"] is not None
+    c = body["crop"]
+    assert 0.0 <= c["x0"] < c["x1"] <= 1.0
+    assert 0.0 <= c["y0"] < c["y1"] <= 1.0
+    # It should land on the interior block, not the full frame.
+    assert abs(c["x0"] - 0.20) < 0.02 and abs(c["y0"] - 15 / 80) < 0.02
+
+
+def test_trim_suggestion_single_field_is_noop(client, solved_library):
+    """A single-field stack (uniform coverage) is not a mosaic → no crop offered."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="single",
+                    coverage_min=3, coverage_max=3)
+    r = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/trim-suggestion")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["is_mosaic"] is False
+    assert body["crop"] is None
+
+
+def test_trim_suggestion_mosaic_without_coverage_sibling(client, solved_library):
+    """A mosaic run whose coverage sibling is missing yields no crop, not an error."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="nocov")  # mosaic, no sibling
+    r = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/trim-suggestion")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["is_mosaic"] is True and body["crop"] is None
+
+
+def test_coverage_map_png(client, solved_library):
+    """The coverage-map overlay renders the run's coverage sibling as a PNG."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, h=80, w=100)
+    cov = np.full((80, 100), 1.0, dtype=np.float32)
+    cov[20:60, 25:75] = 5.0
+    _write_coverage(solved_library, safe, cov)
+
+    r = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/coverage-map")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("image/png")
+    assert r.content[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_coverage_map_404_without_sibling(client, solved_library):
+    """A run with no coverage sibling (single-field) has no coverage map → 404."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="nocovmap")
+    r = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/coverage-map")
+    assert r.status_code == 404
 
 
 def test_star_mask_preview(client, solved_library):

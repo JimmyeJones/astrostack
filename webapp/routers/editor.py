@@ -19,9 +19,10 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from seestack.edit.coverage_trim import largest_covered_rect
 from seestack.edit.histogram import compute_histogram
 from seestack.edit.pipeline import apply_recipe
-from seestack.edit.proxy import get_proxy, load_coverage
+from seestack.edit.proxy import coverage_path_for, get_proxy, load_coverage
 from seestack.edit.recipe import Recipe, recipe_from_dict
 from seestack.edit.registry import EditContext
 from seestack.edit import presets as presets_mod
@@ -95,6 +96,30 @@ def _render_png(project_dir: Path, run, recipe: Recipe) -> bytes:
     u8 = (np.clip(np.nan_to_num(out), 0.0, 1.0) * 255).astype(np.uint8)
     buf = io.BytesIO()
     Image.fromarray(u8, mode="RGB").save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _render_coverage_png(project_dir: Path, run) -> bytes | None:
+    """Render the run's per-pixel frame-coverage map (strided to the preview
+    proxy so it lines up with the shown image) as a grayscale PNG — white where
+    the most frames overlap, black where none did (the ragged mosaic edges /
+    gaps). ``None`` when the run has no coverage sibling (a single-field image)."""
+    import io
+
+    from PIL import Image
+
+    rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
+    cov = _proxy_coverage(run.fits_path, scale)
+    if cov is None:
+        return None
+    finite = np.isfinite(cov)
+    peak = float(cov[finite].max()) if finite.any() else 0.0
+    norm = np.zeros(cov.shape, dtype=np.float32)
+    if peak > 0:
+        norm = np.clip(np.nan_to_num(cov, nan=0.0) / peak, 0.0, 1.0)
+    u8 = (norm * 255).astype(np.uint8)
+    buf = io.BytesIO()
+    Image.fromarray(u8, mode="L").save(buf, format="PNG")
     return buf.getvalue()
 
 
@@ -321,6 +346,70 @@ async def denoise_suggestion(safe: str, run_id: int, request: Request) -> Denois
     return await run_in_threadpool(work)
 
 
+# Cap the coverage grid the O(h·w) largest-rectangle sweep runs on: a mosaic's
+# full-res coverage map can be >100 MP, but fractional crop bounds need nowhere
+# near that precision, so we stride it down first (mirrors the proxy decimation).
+_TRIM_MAX_DIM = 512
+
+
+class TrimCrop(BaseModel):
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+
+
+class TrimSuggestionOut(BaseModel):
+    """A one-click "trim the ragged mosaic border" suggestion. ``crop`` is the
+    fractional (0..1) rectangle of the largest well-covered area to set the
+    ``geometry.crop`` op to, or ``None`` when there's nothing worth trimming
+    (a single-field stack, uniform coverage, or an already-full-frame result)."""
+
+    is_mosaic: bool
+    crop: TrimCrop | None
+
+
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/editor/trim-suggestion",
+            response_model=TrimSuggestionOut)
+async def trim_suggestion(safe: str, run_id: int, request: Request,
+                          min_frac: float = 0.5) -> TrimSuggestionOut:
+    """Suggest a crop to the largest well-covered rectangle of a mosaic, so a
+    user can trim the ragged, low-coverage union-canvas edges in one click
+    instead of hand-dragging the crop bounds. Only offered on a mosaic (uneven
+    panel overlap → ``coverage_max > coverage_min``); a single-field stack is
+    left untouched. The coverage map already written next to the stack drives it.
+    """
+    project_dir, run = _run_info(request, safe, run_id)
+    is_mosaic = bool(int(run.coverage_max) > int(run.coverage_min))
+    if not is_mosaic:
+        return TrimSuggestionOut(is_mosaic=False, crop=None)
+
+    def work() -> TrimSuggestionOut:
+        cov_path = coverage_path_for(run.fits_path)
+        if not cov_path.exists():
+            return TrimSuggestionOut(is_mosaic=True, crop=None)
+        # Stride the (possibly huge) coverage map down before the rectangle sweep.
+        step = 1
+        try:
+            from astropy.io import fits as _fits
+
+            hdr = _fits.getheader(cov_path)
+            dim = max(int(hdr.get("NAXIS1", 0)), int(hdr.get("NAXIS2", 0)))
+            if dim > _TRIM_MAX_DIM:
+                step = -(-dim // _TRIM_MAX_DIM)  # ceil division
+        except (OSError, ValueError):
+            step = 1
+        cov = load_coverage(run.fits_path, step=step)
+        if cov is None:
+            return TrimSuggestionOut(is_mosaic=True, crop=None)
+        rect = largest_covered_rect(cov, min_frac=min_frac)
+        crop = None if rect is None else TrimCrop(x0=round(rect[0], 4), y0=round(rect[1], 4),
+                                                  x1=round(rect[2], 4), y1=round(rect[3], 4))
+        return TrimSuggestionOut(is_mosaic=True, crop=crop)
+
+    return await run_in_threadpool(work)
+
+
 @router.put("/api/targets/{safe}/stack-runs/{run_id}/editor/recipe")
 def put_recipe(safe: str, run_id: int, body: dict, request: Request) -> dict:
     import time
@@ -395,6 +484,20 @@ async def edit_star_mask(safe: str, run_id: int, request: Request,
     grow = max(0.0, min(3.0, grow))
     project_dir, run = _run_info(request, safe, run_id)
     png = await run_in_threadpool(_render_star_mask_png, project_dir, run, size_px, grow)
+    return Response(content=png, media_type="image/png",
+                    headers={"Cache-Control": "no-store"})
+
+
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/editor/coverage-map")
+async def edit_coverage_map(safe: str, run_id: int, request: Request) -> Response:
+    """Grayscale preview of the run's frame-coverage map (white = most frames
+    overlap, black = uncovered), so a user can *see* the ragged, low-coverage
+    mosaic edges the "Trim border" / "Coverage leveling" tools address. 404 when
+    the run has no coverage sibling (a single-field image)."""
+    project_dir, run = _run_info(request, safe, run_id)
+    png = await run_in_threadpool(_render_coverage_png, project_dir, run)
+    if png is None:
+        raise HTTPException(status_code=404, detail="No coverage map for this run")
     return Response(content=png, media_type="image/png",
                     headers={"Cache-Control": "no-store"})
 

@@ -384,6 +384,13 @@ export interface StarSizeSuggestion {
   size: number | null;
 }
 
+export interface TrimSuggestion {
+  is_mosaic: boolean;
+  /** Fractional (0..1) crop rectangle for the largest well-covered area, or null
+   * when there's nothing worth trimming (single-field / uniform / full-frame). */
+  crop: { x0: number; y0: number; x1: number; y1: number } | null;
+}
+
 export interface CalibrationMaster {
   id: number;
   name: string;
@@ -602,6 +609,8 @@ export const api = {
     req<StarSizeSuggestion>(`/api/targets/${safe}/editor/star-size-suggestion`),
   denoiseSuggestion: (safe: string, runId: number) =>
     req<DenoiseSuggestion>(`/api/targets/${safe}/stack-runs/${runId}/editor/denoise-suggestion`),
+  trimSuggestion: (safe: string, runId: number) =>
+    req<TrimSuggestion>(`/api/targets/${safe}/stack-runs/${runId}/editor/trim-suggestion`),
   getRecipe: (safe: string, runId: number) =>
     req<Recipe>(`/api/targets/${safe}/stack-runs/${runId}/editor/recipe`),
   putRecipe: (safe: string, runId: number, recipe: Recipe) =>
@@ -614,6 +623,8 @@ export const api = {
   editStarMaskUrl: (safe: string, runId: number, sizePx?: number) =>
     `/api/targets/${safe}/stack-runs/${runId}/editor/star-mask`
     + (sizePx ? `?size_px=${sizePx}` : ""),
+  editCoverageMapUrl: (safe: string, runId: number) =>
+    `/api/targets/${safe}/stack-runs/${runId}/editor/coverage-map`,
   getHistogram: (safe: string, runId: number, recipe: Recipe, signal?: AbortSignal) =>
     req<Histogram>(
       `/api/targets/${safe}/stack-runs/${runId}/editor/histogram?recipe=${encodeRecipe(recipe)}`,

@@ -46,6 +46,21 @@ const LEVEL_COVERAGE: EditOp = {
              depends_on: null }],
 };
 
+const CROP: EditOp = {
+  id: "geometry.crop", label: "Crop", group: "stars_geometry", stage: "nonlinear",
+  proxy_safe: true, is_stretch: false, help: "Crop to a fractional rectangle.",
+  params: [
+    { key: "x0", label: "Left", type: "float", group: "simple", default: 0,
+      min: 0, max: 1, step: 0.01, options: null, help: null, depends_on: null },
+    { key: "y0", label: "Top", type: "float", group: "simple", default: 0,
+      min: 0, max: 1, step: 0.01, options: null, help: null, depends_on: null },
+    { key: "x1", label: "Right", type: "float", group: "simple", default: 1,
+      min: 0, max: 1, step: 0.01, options: null, help: null, depends_on: null },
+    { key: "y1", label: "Bottom", type: "float", group: "simple", default: 1,
+      min: 0, max: 1, step: 0.01, options: null, help: null, depends_on: null },
+  ],
+};
+
 function renderEditor() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -181,6 +196,41 @@ describe("EditorView", () => {
     // The overlay label switches to "Star mask" and the button flips to "Hide mask".
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Hide mask" })).toBeInTheDocument());
+  });
+
+  it("offers a Coverage overlay on a mosaic and toggles it", async () => {
+    mockEditorQueries();
+    // is_mosaic:true → the coverage overlay button is offered.
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0],
+        b: [0, 0, 0, 0], is_mosaic: true });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+    const covUrl = vi.spyOn(client.api, "editCoverageMapUrl");
+
+    renderEditor();
+
+    const btn = await screen.findByRole("button", { name: "Coverage" });
+    await waitFor(() => expect(btn).not.toBeDisabled());
+    btn.click();
+
+    await waitFor(() => expect(covUrl).toHaveBeenCalledWith("M_42", 3));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Hide coverage" })).toBeInTheDocument());
+    expect(screen.getByText("Coverage map")).toBeInTheDocument();
+  });
+
+  it("hides the Coverage overlay button on a single-field stack", async () => {
+    mockEditorQueries();  // histogram has no is_mosaic flag → single-field
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    await screen.findByText("Stretch");
+    expect(screen.queryByRole("button", { name: "Coverage" })).not.toBeInTheDocument();
   });
 
   it("undoes the last op with Ctrl+Z", async () => {
@@ -400,6 +450,48 @@ describe("EditorView", () => {
     // is a mosaic), ahead of the preset's own Sharpen op.
     expect(await screen.findByText("Coverage leveling")).toBeInTheDocument();
     expect(screen.getByText("Sharpen")).toBeInTheDocument();
+  });
+
+  it("offers a 'Trim border' button on a mosaic and adds a Crop op on click", async () => {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CROP]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [{ uid: "s1", id: "tone.stretch", enabled: true, params: { stretch: 0.6 } }],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    // A mosaic with a well-covered rectangle worth cropping to.
+    vi.spyOn(client.api, "trimSuggestion").mockResolvedValue({
+      is_mosaic: true, crop: { x0: 0.2, y0: 0.1, x1: 0.8, y1: 0.9 },
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    const btn = await screen.findByRole("button", { name: /Trim border/ });
+    fireEvent.click(btn);
+    // A Crop op is inserted after the stretch (nonlinear stage) and selected, so
+    // "Crop" shows in both the pipeline row and the selected-op panel header...
+    await waitFor(() => expect(screen.getAllByText("Crop").length).toBeGreaterThan(1));
+    // ...and its adjustable bounds panel is shown.
+    expect(screen.getByText("Left")).toBeInTheDocument();
+  });
+
+  it("hides the 'Trim border' button on a single-field stack (no crop)", async () => {
+    mockEditorQueries();
+    vi.spyOn(client.api, "trimSuggestion").mockResolvedValue({ is_mosaic: false, crop: null });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    await screen.findByText("Stretch");
+    await waitFor(() => expect(client.api.trimSuggestion).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: /Trim border/ })).not.toBeInTheDocument();
   });
 
   it("warns when the recipe clips highlights (from the live histogram)", async () => {

@@ -51,22 +51,17 @@ problems. Dogfood it every big-picture run and fix root causes.
 - **Editor bug hunt (ongoing)** — there are undocumented issues. Each big-picture
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
+- **Preview the "Trim border" rectangle before committing** — the one-click "Trim
+  border" (v0.60.0) applies a `geometry.crop` immediately; a lower-commitment step
+  is to first draw the *proposed* crop as a dashed outline overlay on the preview
+  (the `trim-suggestion` fractional bounds map straight to preview coordinates) so
+  the user sees exactly what would be kept, with an "Apply" confirm. Reuses the
+  overlay-label infrastructure; purely additive/advisory (nothing changes until
+  Apply). Builds trust in the auto-crop and avoids an undo round-trip when the
+  suggestion isn't what they want. (S–M, editor/trust)
 
 
 ### Autonomy — "just works" (PRIORITY 2)
-- **One-click "trim the ragged mosaic border"** — a Seestar mosaic's union canvas
-  has ragged, low-coverage edges (corners covered by a single frame, NaN gaps) that
-  look messy and are noisier than the well-covered interior. The coverage map is
-  already loaded into the editor render context (`ctx.coverage`, wired in v0.58.6),
-  so Auto-process (or a dedicated "Trim to well-covered area" button) could compute
-  the largest axis-aligned rectangle where coverage ≥ some fraction of the max and
-  set the `geometry.crop` op's fractional bounds to it — turning a fiddly manual
-  crop into one click, tuned to the actual data. Only offered on a mosaic
-  (`is_mosaic`, now surfaced on the histogram); a single-field stack is untouched.
-  Needs a robust largest-rectangle computation on the (downsampled) coverage mask
-  and a neutral fallback (no crop) when coverage is uniform or the rectangle would
-  be degenerate. Off-by-default risk nil (explicit button / crop op the user sees
-  and can remove). (M, autonomy/image-quality)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
   different (per-channel vs luminance gradient, star reduction, saturation). The
@@ -88,6 +83,13 @@ problems. Dogfood it every big-picture run and fix root causes.
   do next; audit every screen for jargon and add plain-language "why" tooltips;
   reduce visible option clutter (progressive disclosure). (M, friendliness)
 - Better long-job feedback and clearer error messages. (S, friendliness)
+- **Colour heatmap + legend for the coverage overlay** — the coverage-map overlay
+  (v0.61.0) renders grayscale, which reads slowly and looks similar to the star
+  mask. A viridis-style colour map (blue = few frames → yellow = most) with a tiny
+  "fewer ↔ more frames" legend caption would make the coverage gradient obvious at
+  a glance and visually distinct from the star mask. Backend applies a small LUT to
+  the normalized coverage before the PNG; frontend adds the legend. Purely
+  cosmetic/additive. (S, friendliness)
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 - **Photometric (multiplicative) frame normalization before combine** — frames
@@ -168,6 +170,48 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **"Trim border" selects the new Crop op + reports the kept fraction** — polish on
+  the v0.60.0 trim feature: applying "Trim border" now selects the resulting
+  `geometry.crop` op (so its adjustable bounds panel opens immediately — making
+  clear it's a normal op the user can fine-tune or remove, not a baked-in change)
+  and the confirmation names how much is kept ("keeps the central 78% × 85%") for
+  trust. Frontend-only, additive; Vitest asserts the crop op is selected after the
+  trim. (v0.61.1, this run)
+
+- **Coverage-map overlay in the editor (mosaic trust/explain)** — a Seestar
+  mosaic's ragged edges, the "Trim border" crop (v0.60.0) and the "Coverage
+  leveling" op all act on the per-pixel frame-coverage map, but the user had no
+  way to *see* it. A `…/editor/coverage-map` endpoint renders the run's coverage
+  sibling (strided to the preview proxy so it lines up with the shown image) as a
+  grayscale PNG — white where the most frames overlap, black at the uncovered
+  edges/gaps — and the editor adds a "Coverage" overlay toggle (next to Star mask)
+  shown **only on a mosaic** (`is_mosaic`), mutually exclusive with the other
+  overlays. So a beginner can look at exactly what "Trim border" and "Coverage
+  leveling" are addressing. 404 (no button) on a single-field stack. Engine +
+  one endpoint + frontend; additive/upgrade-safe. Tested: webapp (PNG on a
+  mosaic / 404 without a sibling), Vitest (button shows + toggles on a mosaic,
+  hidden on single-field). (v0.61.0, this run)
+
+- **One-click "Trim to well-covered area" for mosaics** — a Seestar mosaic's union
+  canvas has ragged, low-coverage edges (single-frame corners, NaN gaps) that look
+  messy and are noisier than the well-covered interior, and trimming them by hand
+  means fiddling four fractional crop sliders. A new pure `largest_covered_rect`
+  engine helper finds the largest axis-aligned rectangle whose pixels are all well
+  covered (coverage ≥ a fraction of the peak; NaN counts as uncovered) via the
+  classic O(h·w) maximal-rectangle sweep, returning fractional bounds or `None`
+  when there's nothing worth trimming (uniform/single-field coverage, or an
+  already-full-frame result). A `…/editor/trim-suggestion` endpoint strides the
+  run's coverage sibling down (≤512 px) and runs it, offered **only** on a mosaic
+  (`coverage_max > coverage_min`); the editor shows a "Trim border" button that
+  sets/updates a `geometry.crop` op to that rectangle (pure `applyTrimCrop` helper —
+  updates an existing crop in place rather than stacking duplicates). Off-by-default
+  risk nil (explicit button; the crop op is visible and removable). Engine + one
+  endpoint + frontend; additive/upgrade-safe (no on-disk change). Tested: engine
+  helper (7 cases: uniform/none/ragged-interior/NaN-hole/full-frame/clamp), webapp
+  (mosaic crop / single-field no-op / missing sibling), Vitest (helper 5 cases +
+  Editor: button shows on a mosaic and adds a Crop op, hidden on single-field).
+  (v0.60.0, this run)
 
 - **Highlight/shadow clipping warning in the editor** — over-stretching is the
   classic beginner mistake: push the stretch/levels too far and star/nebula cores

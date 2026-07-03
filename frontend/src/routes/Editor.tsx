@@ -5,8 +5,8 @@ import {
 import { useDebouncedValue } from "@mantine/hooks";
 import {
   IconAlertTriangle, IconArrowBackUp, IconArrowForwardUp, IconArrowLeft, IconChevronDown,
-  IconChevronUp, IconDeviceFloppy, IconDownload, IconInfoCircle, IconPhotoDown, IconPlus,
-  IconRefresh, IconSparkles, IconWand, IconZoomScan,
+  IconChevronUp, IconCrop, IconDeviceFloppy, IconDownload, IconInfoCircle, IconPhotoDown,
+  IconPlus, IconRefresh, IconSparkles, IconWand, IconZoomScan,
 } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -23,6 +23,7 @@ import { applyDataDrivenDefaults, countDataDrivenDefaults, type OpSuggestion }
   from "../components/editor/dataDrivenDefaults";
 import { previewScaleCaption } from "../components/editor/previewScale";
 import { prependCoverageLeveling } from "../components/editor/coverageLeveling";
+import { applyTrimCrop } from "../components/editor/mosaicTrim";
 import { clippingCaption } from "../components/editor/clipping";
 import { previewDebounceMs } from "../components/editor/previewDebounce";
 import { starMaskSizePx } from "../components/editor/starMaskSize";
@@ -100,6 +101,14 @@ export function EditorView() {
   const starSize = useQuery({
     queryKey: ["star-size-suggestion", safe],
     queryFn: () => api.starSizeSuggestion(safe),
+    staleTime: 60_000,
+  });
+  // One-click "trim the ragged mosaic border": the largest well-covered rectangle
+  // of this run's coverage map, offered only on a mosaic (the endpoint returns a
+  // null crop for a single-field stack, so the button simply doesn't appear).
+  const trim = useQuery({
+    queryKey: ["trim-suggestion", safe, rid],
+    queryFn: () => api.trimSuggestion(safe, rid),
     staleTime: 60_000,
   });
 
@@ -241,6 +250,24 @@ export function EditorView() {
     return () => { if (u) URL.revokeObjectURL(u); };
   }, [maskPreview.data]);
 
+  // Coverage-map overlay: on a mosaic, show the per-pixel frame coverage (white =
+  // most frames overlapped, black = uncovered ragged edges/gaps) so the user can
+  // see what the "Trim border" and "Coverage leveling" tools are acting on.
+  const [showCoverage, setShowCoverage] = useState(false);
+  const coveragePreview = useQuery({
+    queryKey: ["edit-coverage", safe, rid],
+    enabled: showCoverage && !!opsSchema.data && !saved.isLoading,
+    queryFn: async ({ signal }) => {
+      const res = await fetch(api.editCoverageMapUrl(safe, rid), { signal });
+      if (!res.ok) throw new Error("coverage map failed");
+      return URL.createObjectURL(await res.blob());
+    },
+  });
+  useEffect(() => {
+    const u = coveragePreview.data;
+    return () => { if (u) URL.revokeObjectURL(u); };
+  }, [coveragePreview.data]);
+
   // Per-op "show without this op" compare: render the full recipe with just the
   // selected op bypassed, so while tuning one op the user sees exactly *its*
   // contribution (unlike Compare, which shows the whole recipe vs the raw base).
@@ -267,13 +294,15 @@ export function EditorView() {
     return () => { if (u) URL.revokeObjectURL(u); };
   }, [withoutOpPreview.data]);
 
-  const shownSrc = showMask
-    ? (maskPreview.data ?? preview.data)
-    : showBase
-      ? (basePreview.data ?? preview.data)
-      : soloActive
-        ? (withoutOpPreview.data ?? preview.data)
-        : preview.data;
+  const shownSrc = showCoverage
+    ? (coveragePreview.data ?? preview.data)
+    : showMask
+      ? (maskPreview.data ?? preview.data)
+      : showBase
+        ? (basePreview.data ?? preview.data)
+        : soloActive
+          ? (withoutOpPreview.data ?? preview.data)
+          : preview.data;
 
   // Keyboard undo/redo for the op pipeline: Cmd/Ctrl+Z undoes, Cmd/Ctrl+Shift+Z
   // (or Ctrl+Y) redoes. Skipped while typing in a field so editing the output
@@ -420,6 +449,26 @@ export function EditorView() {
   const applyDataDefaults = () =>
     setOps((p) => applyDataDrivenDefaults(p, dataDrivenSuggestions));
 
+  // The trim-border crop is only offered when this run is a mosaic and a
+  // well-covered rectangle worth cropping to was found.
+  const trimCrop = trim.data?.is_mosaic ? trim.data.crop : null;
+  const applyTrim = () => {
+    if (!trimCrop) return;
+    const next = applyTrimCrop(ops, trimCrop, specs, uid);
+    setOps(() => next);
+    // Select the crop op so its (adjustable) bounds are visible immediately — it's
+    // a normal op the user can fine-tune or remove, not a baked-in change.
+    const crop = next.find((o) => o.id === "geometry.crop");
+    if (crop) setSelected(crop.uid);
+    const pctW = Math.round((trimCrop.x1 - trimCrop.x0) * 100);
+    const pctH = Math.round((trimCrop.y1 - trimCrop.y0) * 100);
+    notifications.show({
+      message: `Trimmed to the well-covered area (keeps the central ${pctW}% × ${pctH}%)`
+        + " — adjust or remove the Crop op to undo",
+      color: "violet",
+    });
+  };
+
   if (opsSchema.isLoading || saved.isLoading) {
     return <Center h={300}><Loader /></Center>;
   }
@@ -454,6 +503,13 @@ export function EditorView() {
                 onClick={applyDataDefaults}>
                 Use data defaults{nDataDriven > 1 ? ` (${nDataDriven})` : ""}
               </Button>
+            </Tooltip>
+          ) : null}
+          {trimCrop ? (
+            <Tooltip multiline w={250} withArrow
+              label="This is a mosaic with ragged, low-coverage edges. Crop to the largest well-covered rectangle in one click — it adds a Crop op you can fine-tune or remove.">
+              <Button variant="default" color="grape" leftSection={<IconCrop size={16} />}
+                onClick={applyTrim}>Trim border</Button>
             </Tooltip>
           ) : null}
           {/* Built-in presets carry a fixed op list with generic sizes: seed their
@@ -503,10 +559,10 @@ export function EditorView() {
               ) : (
                 <Center h={240}><Loader /></Center>
               )}
-              {showMask || showBase || soloActive ? (
+              {showMask || showBase || soloActive || showCoverage ? (
                 <Text size="xs" c="white" style={{ position: "absolute", left: 12, top: 10,
                   background: "rgba(0,0,0,0.6)", padding: "2px 8px", borderRadius: 4 }}>
-                  {showMask ? "Star mask" : showBase ? "Original"
+                  {showCoverage ? "Coverage map" : showMask ? "Star mask" : showBase ? "Original"
                     : `Without: ${specs[selForSolo!.id]?.label ?? selForSolo!.id}`}
                 </Text>
               ) : null}
@@ -522,19 +578,35 @@ export function EditorView() {
                 </Group>
               ) : null}
               <Group gap={6} style={{ position: "absolute", right: 8, top: 8 }}>
+                {hist.data?.is_mosaic ? (
+                  <Tooltip multiline w={230} withArrow
+                    label="Show this mosaic's frame-coverage map: white where the most frames overlap, black at the ragged, uncovered edges. This is what 'Trim border' and 'Coverage leveling' act on.">
+                    <Button size="xs" variant={showCoverage ? "filled" : "default"}
+                      color="grape"
+                      disabled={!preview.data}
+                      loading={showCoverage && coveragePreview.isLoading}
+                      onClick={() => setShowCoverage((s) => {
+                        if (!s) { setShowMask(false); setShowBase(false); setSoloExclude(false); }
+                        return !s;
+                      })}>
+                      {showCoverage ? "Hide coverage" : "Coverage"}
+                    </Button>
+                  </Tooltip>
+                ) : null}
                 <Tooltip label="Show the soft mask that gates star ops (white = treated as a star)">
                   <Button size="xs" variant={showMask ? "filled" : "default"}
                     color="grape"
                     disabled={!preview.data}
                     loading={showMask && maskPreview.isLoading}
                     onClick={() => setShowMask((s) => {
-                      if (!s) { setShowBase(false); setSoloExclude(false); } return !s;
+                      if (!s) { setShowBase(false); setSoloExclude(false); setShowCoverage(false); }
+                      return !s;
                     })}>
                     {showMask ? "Hide mask" : "Star mask"}
                   </Button>
                 </Tooltip>
                 <Button size="xs" variant={showBase ? "filled" : "default"}
-                  disabled={!preview.data || showMask}
+                  disabled={!preview.data || showMask || showCoverage}
                   onClick={() => setShowBase((s) => { if (!s) setSoloExclude(false); return !s; })}>
                   {showBase ? "Edited" : "Compare"}
                 </Button>
@@ -689,7 +761,8 @@ export function EditorView() {
                         loading={soloActive && withoutOpPreview.isLoading}
                         disabled={!preview.data}
                         onClick={() => setSoloExclude((s) => {
-                          if (!s) { setShowBase(false); setShowMask(false); } return !s;
+                          if (!s) { setShowBase(false); setShowMask(false); setShowCoverage(false); }
+                          return !s;
                         })}>
                         {soloActive ? "Showing without" : "Without this op"}
                       </Button>
