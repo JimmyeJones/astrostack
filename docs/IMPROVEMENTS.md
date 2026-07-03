@@ -128,31 +128,29 @@ sitting; move an entry to **In progress**/**Shipped** as usual when you take it.
 
 ### Editor — frontend (PRIORITY 1)
 
-- **BUG: Save wipes the undo/redo history and can silently revert edits made
-  while the save is in flight** — the recipe-seeding effect
-  (`frontend/src/routes/Editor.tsx:153-155`) runs on every change of
-  `saved.data`, and `saveRecipe.onSuccess` invalidates `["recipe", safe, rid]`
-  (`Editor.tsx:350-353`); the PUT stamps a fresh `updated_utc`
-  (`webapp/routers/editor.py:477`) so the refetch never structurally matches →
-  `resetOps` clears `past`/`future` (`useUndoable.ts` reset) and replaces `ops`
-  with the server snapshot. Steps: edit → Save → Ctrl+Z does nothing; or Save
-  then keep dragging a slider — when the refetch lands the drag is reverted.
-  **Fix:** seed from `saved.data` only once (a `useRef` seeded flag, or only
-  when the working ops are still empty), and don't reset state on save success.
-  Severity: broken-UX (edit loss in the race; undo loss always). Confidence:
-  confirmed (traced).
+- **✅ FIXED (v0.69.2): Save wipes the undo/redo history and can silently revert edits made
+  while the save is in flight** — the recipe-seeding effect ran on every change
+  of `saved.data`, and `saveRecipe.onSuccess` invalidates `["recipe", safe, rid]`,
+  so the refetch re-ran `resetOps` (clearing `past`/`future` and replacing `ops`
+  with the server snapshot). Fixed by gating the seed on a per-run `seeded` flag
+  so the recipe seeds exactly once and refetches leave the working ops (and undo
+  history) untouched. Regression test: a recipe refetch after mount does not
+  re-seed. Severity: broken-UX (edit loss in the race; undo loss always).
+  Confidence: confirmed (traced).
 
-- **BUG: overlay fetch failures show the wrong image under the wrong label,
-  with no error** — `shownSrc` falls back to the main edited preview whenever an
-  overlay blob query errors (`Editor.tsx:314-322`), while the caption is driven
-  purely by the toggle flags (`Editor.tsx:661-670`), and none of
-  `basePreview`/`maskPreview`/`coveragePreview`/`withoutOpPreview` render their
-  `isError` anywhere. Steps: click "Compare"/"Star mask"/"Coverage"/"Without
-  this op" when that endpoint 404s/500s (e.g. coverage sibling deleted) — the
-  panel shows the *edited* image captioned "Original" (etc.). The user A/Bs the
-  image against itself. **Fix:** surface each overlay query's error (alert or
-  toast) and drop the silent `?? preview.data` fallback while the overlay toggle
-  is on. Severity: wrong-result (mislabeled comparison) / unsurfaced error.
+- **✅ FIXED (v0.69.3): overlay fetch failures show the wrong image under the wrong label,
+  with no error** — `shownSrc` fell back to the main edited preview whenever an
+  overlay blob query errored, while the caption was driven purely by the toggle
+  flags, so a failed "Compare"/"Star mask"/"Coverage"/"Without this op" fetch
+  showed the *edited* image captioned "Original" (etc.) — the user A/B'd the
+  image against itself. Fixed by selecting the active overlay + its query once
+  (precedence-ordered), dropping the silent `?? preview.data` fallback for A/B
+  overlays, and rendering a red "The {overlay} overlay failed to load…" alert
+  with a Retry when the overlay query errors (the mislabeled caption is
+  suppressed). Trim-preview keeps its coverage backdrop fall-back (there the
+  overlay is only a backdrop for the crop rectangle, not an A/B). Regression
+  test: a failing star-mask fetch surfaces the error and shows no "Star mask"
+  caption. Severity: wrong-result (mislabeled comparison) / unsurfaced error.
   Confidence: confirmed (traced).
 
 - **BUG: the star-mask overlay is computed on linear data but the star ops gate
@@ -168,15 +166,15 @@ sitting; move an entry to **In progress**/**Shipped** as usual when you take it.
   machinery the levels-suggestion endpoint already has. Severity: broken-UX
   (misleading trust overlay). Confidence: confirmed (measured).
 
-- **BUG: dragging a curve point past its neighbour silently swaps which point
-  you're dragging** — `CurvesWidget.update()` sorts the points by x on every
-  move (`frontend/src/components/editor/CurvesWidget.tsx:54-60`) but
-  `drag.current` keeps the pre-sort index (`:108`), so when the dragged point
-  crosses another's x the pointer starts moving the *other* point. Steps: Curves
-  op → add interior points at x≈0.3 and x≈0.6 → drag the 0.3 point right past
-  0.6. **Fix:** track the dragged point's identity (recompute its index after
-  sort), or clamp an interior point's x between its neighbours while dragging.
-  Severity: broken-UX (core widget). Confidence: confirmed (traced).
+- **✅ FIXED (v0.69.1): dragging a curve point past its neighbour silently swaps which point
+  you're dragging** — `CurvesWidget.update()` sorted the points by x on every
+  move but `drag.current` kept the pre-sort index, so when the dragged point
+  crossed another's x the pointer started moving the *other* point. Fixed by a
+  pure `moveCurvePoint` helper (`curveDrag.ts`) that clamps an interior point's
+  x strictly between its neighbours (endpoints keep x=0/1), so the sort order —
+  and the dragged index — can never go stale. Regression test covers the
+  cross-right / cross-left / endpoint-lock / clamp cases. Severity: broken-UX
+  (core widget). Confidence: confirmed (traced).
 
 - **BUG: one slider drag floods the undo history with dozens of entries (and
   can evict all earlier edits)** — editor sliders commit on every drag tick
@@ -241,14 +239,14 @@ sitting; move an entry to **In progress**/**Shipped** as usual when you take it.
   Severity: cosmetic (misleading in the letterboxed case). Confidence: confirmed
   (traced CSS).
 
-- **BUG (cosmetic): the first editor render is the empty recipe** — on load
-  `dKey` starts as `"[]"` and the preview query is enabled as soon as the
-  schema/saved queries settle (`Editor.tsx:179-205`), so the first fetch renders
-  the un-edited image and is shown until the seeded recipe's debounced render
-  replaces it — a flash of the wrong image plus one wasted proxy render per
-  editor open (for any saved recipe). **Fix:** hold `enabled` until the ops have
-  been seeded from `saved.data` (seeded-flag state). Severity: cosmetic/perf.
-  Confidence: confirmed (traced).
+- **✅ FIXED (v0.69.2): the first editor render is the empty recipe** — on load
+  `dKey` starts as `"[]"` and the preview/histogram queries were enabled as soon
+  as the schema/saved queries settled, so the first fetch rendered the un-edited
+  image (a flash of the wrong image + one wasted proxy render per editor open for
+  any saved recipe). Fixed together with the Save-history bug: the live preview
+  query now also gates on the per-run `seeded` flag, so the proxy render doesn't
+  fire until the saved recipe is seeded. Severity: cosmetic/perf. Confidence:
+  confirmed (traced).
 
 - **BUG (cosmetic/a11y): overlay zoom mislabels + keyboard access gaps** — the
   lightbox titles whatever is shown as "edited" unless Compare is on, so zooming
@@ -418,6 +416,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   the clipping caption fires, and the Curves op's endpoint handles, so *every* tonal
   control shows where it lands on the graph. Small, reuses the guides prop;
   frontend-only, advisory. (S, editor/trust)
+- **Optional numeric entry next to editor sliders** — the editor renders every
+  bounded param as a slider only (`StackOptionControl` `preferSlider`), so a user
+  who knows the exact value they want (gamma 1.35, PSF σ 1.8, black 0.07) can only
+  approximate it by dragging and reading the dimmed readout — and a fine value is
+  hard to hit on a touch/trackpad drag. Add a small `NumberInput` beside the slider
+  (or make the readout an editable field) that shares the same value/min/max/step,
+  so precise entry and coarse dragging both work. Reuses the existing field schema;
+  frontend-only, additive, no default change. Care: keep the two in sync and
+  respect `disabled`/`depends_on`. Serves precision without adding a knob. (S,
+  editor/friendliness)
+- **"Modified from default" indicator on op rows** — in the pipeline list a user
+  can't tell at a glance which ops they've tuned vs which sit at stock defaults
+  (relevant after Auto-process or a preset drops in a dozen ops). Show a small dot
+  / "edited" badge on each `OpList` row whose params differ from the op's schema
+  defaults (reuse the `isDefault` comparison already in `OpParamPanel`), so the
+  user sees what they've changed and where to look. Pure, frontend-only, additive,
+  advisory. (S, editor/trust)
 ### Autonomy — "just works" (PRIORITY 2)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
@@ -440,14 +455,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   do next; audit every screen for jargon and add plain-language "why" tooltips;
   reduce visible option clutter (progressive disclosure). (M, friendliness)
 - Better long-job feedback and clearer error messages. (S, friendliness)
-- **A "Reset all points" / whole-op Auto for the Levels op header** — the Levels
-  panel now has a header "Auto levels" (v0.64.0) that *sets* data-driven points, but
-  no matching one-click to *undo* a bad manual drag back to the 0/1/1.0 identity
-  (only the per-param reset icons and the degenerate-range fix exist). Add a small
-  "Reset points" header action next to "Auto levels" that restores black=0, white=1,
-  gamma=1 in one click, so a beginner who over-dragged has a clean escape hatch
-  symmetric with Auto. Pure, reuses `setParams`; frontend-only, additive. (S,
-  editor/friendliness)
 - **Surface the measured midtone target on the gamma suggestion** — the new
   data-driven gamma button (v0.66.0) reads "From your image (midtones 1.6)"; like the
   sharpen/denoise buttons that name *why* (FWHM, noise σ), it could name the goal it
@@ -548,6 +555,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **One-click "Reset points" on the Levels op header** — the Levels header had
+  "Auto levels" to *set* data-driven points but no matching one-click to *undo* a
+  bad manual drag back to the neutral identity (only per-param reset icons). Added
+  a "Reset points" header action (next to "Auto levels") that restores black=0,
+  white=1, gamma=1 in one click, dimmed when already neutral — a clean escape hatch
+  symmetric with Auto for a beginner who over-dragged. Pure `levelsReset` helpers
+  (`levelsAtIdentity`/`resetLevelsPoints`) drive it; frontend-only, additive.
+  Vitest: helper (identity/moved/preserve-other-keys/no-mutate) + an Editor test
+  that clicking Reset returns an over-dragged op to neutral (button dims).
+  (v0.69.4, this run)
 
 - **Data-driven midtone (gamma) point for the Levels op** — the Levels suggestion
   (v0.62.0) + "Auto levels" (v0.64.0) set the black/white points from the histogram

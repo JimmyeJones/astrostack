@@ -32,6 +32,7 @@ import { opErrorsMessage } from "../components/editor/opErrors";
 import { clippingCaption } from "../components/editor/clipping";
 import { previewDebounceMs } from "../components/editor/previewDebounce";
 import { starMaskSizePx } from "../components/editor/starMaskSize";
+import { levelsAtIdentity, resetLevelsPoints } from "../components/editor/levelsReset";
 import { coalesceFwhm, measuredContextText } from "../components/editor/measuredContext";
 import { OpParamPanel } from "../components/editor/OpParamPanel";
 import { PresetMenu } from "../components/editor/PresetMenu";
@@ -149,10 +150,20 @@ export function EditorView() {
   const [autoValues, setAutoValues] = useState<string | null>(null);
   const [autoKey, setAutoKey] = useState<string | null>(null);
 
-  // Seed ops from the saved recipe once (clears undo history).
+  // Seed ops from the saved recipe exactly once per run. Re-seeding on every
+  // `saved.data` change would wipe undo/redo history and clobber edits made while
+  // a save was in flight (saving invalidates the recipe query, which refetches a
+  // structurally-different snapshot), so we gate on a per-run `seeded` flag. The
+  // gate also holds the live preview until the recipe is loaded, so the editor
+  // never flashes the un-edited image (and wastes a proxy render) on open.
+  const [seeded, setSeeded] = useState(false);
+  useEffect(() => { setSeeded(false); }, [rid]);
   useEffect(() => {
-    if (saved.data) resetOps(saved.data.ops ?? []);
-  }, [saved.data, resetOps]);
+    if (saved.data && !seeded) {
+      resetOps(saved.data.ops ?? []);
+      setSeeded(true);
+    }
+  }, [saved.data, seeded, resetOps]);
 
   const specs = useMemo(() => {
     const m: Record<string, EditOp> = {};
@@ -188,7 +199,7 @@ export function EditorView() {
   // render shows a message instead of a silently blank panel) and can revoke URLs.
   const preview = useQuery({
     queryKey: ["edit-preview", safe, rid, dKey, bust],
-    enabled: !!opsSchema.data && !saved.isLoading,
+    enabled: !!opsSchema.data && !saved.isLoading && seeded,
     // Keep the previous render visible while the next one loads (rather than
     // flashing to a black Loader on every slider drag); the "Updating…" badge
     // signals the shown image is momentarily stale.
@@ -311,15 +322,20 @@ export function EditorView() {
     return () => { if (u) URL.revokeObjectURL(u); };
   }, [withoutOpPreview.data]);
 
-  const shownSrc = showCoverage
-    ? (coveragePreview.data ?? preview.data)
+  // The active overlay (if any) and its query, so the shown image, its caption,
+  // and any error all come from the *same* source. Previously a failed overlay
+  // fetch silently fell back to the edited preview while the caption still read
+  // "Star mask"/"Original"/etc — so the user A/B'd the edited image against
+  // itself with no error. Precedence mirrors the toggle order below.
+  const overlay = showCoverage
+    ? { q: coveragePreview, label: "Coverage map" }
     : showMask
-      ? (maskPreview.data ?? preview.data)
+      ? { q: maskPreview, label: "Star mask" }
       : showBase
-        ? (basePreview.data ?? preview.data)
+        ? { q: basePreview, label: "Original" }
         : soloActive
-          ? (withoutOpPreview.data ?? preview.data)
-          : preview.data;
+          ? { q: withoutOpPreview, label: "without-op comparison" }
+          : null;
 
   // Keyboard undo/redo for the op pipeline: Cmd/Ctrl+Z undoes, Cmd/Ctrl+Shift+Z
   // (or Ctrl+Y) redoes. Skipped while typing in a field so editing the output
@@ -515,6 +531,16 @@ export function EditorView() {
   // Show the proposed crop as a dashed outline on the preview first (a
   // lower-commitment step than applying immediately), with an explicit "Apply".
   const [trimPreview, setTrimPreview] = useState(false);
+  // During trim preview the coverage overlay is only a backdrop for the proposed
+  // crop rectangle, so keep the old fall-back there (and don't let a coverage
+  // failure block the crop UI); for a genuine A/B overlay, surface the error.
+  const overlayError = overlay?.q.isError && !trimPreview ? overlay : null;
+  // No silent fall-back to the edited preview for A/B overlays: while an overlay
+  // is on we show only that overlay's own data (a loader while it loads, an error
+  // if it fails) so the caption never mislabels the edited image as the overlay.
+  const shownSrc = overlay
+    ? (overlay.q.data ?? (trimPreview ? preview.data : undefined))
+    : preview.data;
   // Entering trim preview auto-shows the coverage heatmap so the proposed crop is
   // drawn over exactly what it's addressing — you can see it lands on the
   // well-covered interior. Remember the prior overlay state so Cancel/Apply
@@ -650,6 +676,19 @@ export function EditorView() {
                     </Button>
                   </div>
                 </Alert>
+              ) : overlayError ? (
+                <Alert color="red" icon={<IconAlertTriangle size={16} />} m="md">
+                  The {overlayError.label} overlay failed to load
+                  {(overlayError.q.error as Error)?.message
+                    ? `: ${(overlayError.q.error as Error).message}` : "."}
+                  <div>
+                    <Button size="xs" variant="light" color="red" mt="xs"
+                      leftSection={<IconRefresh size={14} />}
+                      onClick={() => overlayError.q.refetch()}>
+                      Retry
+                    </Button>
+                  </div>
+                </Alert>
               ) : shownSrc ? (
                 <img src={shownSrc} alt="preview"
                   style={{ display: "block", width: "100%", maxHeight: "62vh",
@@ -658,7 +697,7 @@ export function EditorView() {
               ) : (
                 <Center h={240}><Loader /></Center>
               )}
-              {(showMask || showBase || soloActive || showCoverage) && !trimPreview ? (
+              {overlay && !overlayError && !trimPreview ? (
                 <Text size="xs" c="white" style={{ position: "absolute", left: 12, top: 10,
                   background: "rgba(0,0,0,0.6)", padding: "2px 8px", borderRadius: 4 }}>
                   {showCoverage
@@ -941,6 +980,22 @@ export function EditorView() {
                             ...(levels.data!.gamma != null ? { gamma: levels.data!.gamma } : {}),
                           })}>
                           Auto levels ({levels.data.black}–{levels.data.white})
+                        </Button>
+                      </Tooltip>
+                    ) : null}
+                    {/* Escape hatch symmetric with "Auto levels": one click sets
+                        the black/white/gamma points back to their neutral identity
+                        so an over-dragged Levels op is easy to undo. Dimmed when
+                        already neutral. */}
+                    {selectedOp.id === "tone.levels" ? (
+                      <Tooltip
+                        label="Reset the black, white and midtone points to neutral (no tonal change)"
+                        multiline w={220} withArrow>
+                        <Button size="compact-xs" variant="default"
+                          disabled={levelsAtIdentity(selectedOp.params)}
+                          onClick={() => setParams(selectedOp.uid,
+                            resetLevelsPoints(selectedOp.params))}>
+                          Reset points
                         </Button>
                       </Tooltip>
                     ) : null}

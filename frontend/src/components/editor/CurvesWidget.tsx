@@ -1,8 +1,7 @@
 import { Box, Group, Text } from "@mantine/core";
 import { useRef } from "react";
 import type { Histogram } from "../../api/client";
-
-type Pt = [number, number];
+import { moveCurvePoint, type Pt } from "./curveDrag";
 
 const SIZE = 220;
 const PAD = 10;
@@ -52,11 +51,9 @@ export function CurvesWidget({ points, onChange, histogram }: {
   };
 
   const update = (i: number, p: Pt) => {
-    const next = pts.map((q, j) => (j === i ? p : q)) as Pt[];
-    if (i === 0) next[0] = [0, p[1]];
-    if (i === pts.length - 1) next[pts.length - 1] = [1, p[1]];
-    next.sort((a, b) => a[0] - b[0]);
-    onChange(next);
+    // moveCurvePoint clamps interior points between their neighbours so the drag
+    // can't cross another point and swap which handle is being moved.
+    onChange(moveCurvePoint(pts, i, p));
   };
 
   const onMove = (e: React.PointerEvent) => {

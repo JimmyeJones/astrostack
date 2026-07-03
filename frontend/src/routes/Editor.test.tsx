@@ -76,17 +76,20 @@ const CROP: EditOp = {
 
 function renderEditor() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <MantineProvider>
-      <QueryClientProvider client={qc}>
-        <MemoryRouter initialEntries={["/targets/M_42/edit/3"]}>
-          <Routes>
-            <Route path="/targets/:safe/edit/:runId" element={<EditorView />} />
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>
-    </MantineProvider>,
-  );
+  return {
+    qc,
+    ...render(
+      <MantineProvider>
+        <QueryClientProvider client={qc}>
+          <MemoryRouter initialEntries={["/targets/M_42/edit/3"]}>
+            <Routes>
+              <Route path="/targets/:safe/edit/:runId" element={<EditorView />} />
+            </Routes>
+          </MemoryRouter>
+        </QueryClientProvider>
+      </MantineProvider>,
+    ),
+  };
 }
 
 afterEach(() => vi.restoreAllMocks());
@@ -126,6 +129,35 @@ describe("EditorView", () => {
     expect(screen.getByText("Add operation")).toBeInTheDocument();
     expect(screen.getByText("Export as new image")).toBeInTheDocument();
     expect(screen.getByText("Download full-res PNG")).toBeInTheDocument();
+  });
+
+  it("seeds the recipe only once — a refetch (e.g. after Save) does not re-seed and wipe edits", async () => {
+    mockEditorQueries();
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    const getRecipe = client.api.getRecipe as unknown as ReturnType<typeof vi.fn>;
+    const { qc } = renderEditor();
+    expect(await screen.findByText("Stretch")).toBeInTheDocument();
+    const callsAfterMount = getRecipe.mock.calls.length;
+
+    // Simulate the refetch a save triggers: the recipe query now resolves a
+    // structurally-different snapshot. Before the fix, the seeding effect re-ran
+    // and replaced the working ops (clobbering edits / undo history); after the
+    // fix, the already-seeded pipeline is left untouched.
+    getRecipe.mockResolvedValue({
+      ops: [{ uid: "y9", id: "tone.curves", enabled: true,
+              params: { points: [[0, 0], [1, 1]] } }],
+      base_run_id: 3,
+    });
+    await qc.invalidateQueries({ queryKey: ["recipe", "M_42", 3] });
+    await waitFor(() =>
+      expect(getRecipe.mock.calls.length).toBeGreaterThan(callsAfterMount));
+
+    // The originally-seeded Stretch op stays; the refetched Curves op is ignored.
+    expect(screen.getByText("Stretch")).toBeInTheDocument();
+    expect(screen.queryByText("Curves")).not.toBeInTheDocument();
   });
 
   it("shows render progress while the full-res PNG job is polling", async () => {
@@ -232,6 +264,31 @@ describe("EditorView", () => {
     // The overlay label switches to "Star mask" and the button flips to "Hide mask".
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Hide mask" })).toBeInTheDocument());
+  });
+
+  it("surfaces an overlay fetch error instead of showing the edited image under the overlay's label", async () => {
+    mockEditorQueries();
+    // Preview succeeds, but the star-mask endpoint fails — previously the panel
+    // silently showed the edited preview captioned "Star mask" (A/B against
+    // itself); now it shows an error and no mislabeled caption.
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (typeof url === "string" && url.includes("/editor/star-mask")) {
+        return { ok: false, status: 500, json: async () => ({ detail: "mask boom" }) };
+      }
+      return { ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }) };
+    }));
+
+    renderEditor();
+
+    const btn = await screen.findByRole("button", { name: "Star mask" });
+    await waitFor(() => expect(btn).not.toBeDisabled());
+    btn.click();
+
+    await waitFor(() =>
+      expect(screen.getByText(/star mask overlay failed to load/i)).toBeInTheDocument());
+    // The button has flipped to "Hide mask" and the mislabeled "Star mask" caption
+    // is suppressed, so no "Star mask" text remains on the panel.
+    expect(screen.queryByText("Star mask")).not.toBeInTheDocument();
   });
 
   it("offers a Coverage overlay on a mosaic and toggles it", async () => {
@@ -590,6 +647,35 @@ describe("EditorView", () => {
     expect(screen.getByLabelText("Set Black point from your data")).toHaveTextContent("✓");
     expect(screen.getByLabelText("Set White point from your data")).toHaveTextContent("✓");
     expect(screen.getByLabelText("Set Midtones (gamma) from your data")).toHaveTextContent("✓");
+  });
+
+  it("resets an over-dragged Levels op to neutral via the header 'Reset points'", async () => {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, LEVELS]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [
+        { uid: "lv1", id: "tone.levels", enabled: true,
+          params: { black: 0.3, white: 0.6, gamma: 2.0 } },
+      ],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    vi.spyOn(client.api, "levelsSuggestion").mockResolvedValue({ black: 0.12, white: 0.85 });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    fireEvent.click(await screen.findByText("Levels"));
+    // With the points moved off identity the reset button is offered (enabled).
+    const reset = await screen.findByRole("button", { name: "Reset points" });
+    await waitFor(() => expect(reset).not.toBeDisabled());
+    fireEvent.click(reset);
+    // One click returns to neutral, so the button dims (nothing left to reset).
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Reset points" })).toBeDisabled());
   });
 
   it("shows black/white guide labels on the histogram when the Levels op is selected", async () => {
