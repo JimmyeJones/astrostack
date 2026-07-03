@@ -179,6 +179,27 @@ def test_auto_recipe_adapts_to_noise():
         assert ids.index("tone.stretch") < ids.index("tone.scnr") < ids.index("tone.saturation")
 
 
+def test_auto_recipe_denoise_strength_scales_with_noise():
+    """Auto's denoise strength should be data-driven — a very noisy stack gets a
+    stronger cut than a mildly-noisy one, not the same fixed 0.5."""
+    from seestack.edit.presets import auto_recipe
+
+    rng = np.random.default_rng(7)
+    base = np.full((80, 100, 3), 0.05, np.float32)
+    base[30:50, 40:60] += 0.5
+    mild = base + rng.normal(0, 0.035, base.shape).astype("float32")
+    heavy = base + rng.normal(0, 0.05, base.shape).astype("float32")
+
+    def denoise_strength(rgb):
+        op = next((o for o in auto_recipe(rgb).ops if o.id == "detail.denoise"), None)
+        return None if op is None else float(op.params["strength"])
+
+    s_mild = denoise_strength(mild)
+    s_heavy = denoise_strength(heavy)
+    assert s_mild is not None and s_heavy is not None  # both are noisy enough to denoise
+    assert s_heavy > s_mild  # stronger noise → stronger denoise
+
+
 def test_denoise_identity_at_zero_and_preserves_colour():
     base = np.empty((40, 50, 3), np.float32)
     for c, lvl in enumerate((0.1, 0.2, 0.3)):

@@ -104,24 +104,36 @@ def auto_recipe(rgb: np.ndarray | None = None) -> Recipe:
     the proven ``autostretch``) → a gentle green-cast removal (SCNR) — the single
     most common OSC defect, which every built-in nebula preset also fixes. Then,
     only when warranted by the analysis: denoise (on linear data, before the
-    stretch) for noisy frames, and a gentle sharpen for clean ones. Saturation
-    lifts colour a touch at the end (after the green cast is gone, so it doesn't
-    amplify it).
+    stretch) for noisy frames — at a *data-driven* strength scaled to the
+    measured background noise, not a fixed guess — and a gentle sharpen for clean
+    ones. Saturation lifts colour a touch at the end (after the green cast is
+    gone, so it doesn't amplify it).
     """
     noisy = False
     target_bg = 0.20
+    denoise_strength = 0.5  # neutral fallback when the image can't be measured
     if rgb is not None:
         a = analyze_proxy(rgb)
         noisy = bool(a["noisy"])
         # Darker sky → lift a little more (higher target grey), brighter → less.
         target_bg = float(np.clip(0.24 - a["sky"] * 0.4, 0.14, 0.24))
+        if noisy:
+            # Match the denoise strength to the actual measured noise (the same
+            # estimator behind the editor's "From your image" one-click), so a
+            # mildly-noisy stack gets a light touch and a very noisy one more —
+            # rather than always the same 0.5.
+            from seestack.edit.noise import suggest_denoise_strength
+
+            _, suggested = suggest_denoise_strength(rgb)
+            if suggested is not None:
+                denoise_strength = suggested
 
     ops: list[tuple[str, dict]] = [
         ("background.final_gradient", {"mode": "luminance"}),
         ("tone.color_calibrate", {"mode": "gray_star"}),
     ]
     if noisy:  # denoise belongs on LINEAR data, before the stretch
-        ops.append(("detail.denoise", {"method": "wavelet", "strength": 0.5}))
+        ops.append(("detail.denoise", {"method": "wavelet", "strength": denoise_strength}))
     ops.append(("tone.stretch", {"mode": "stf", "target_bg": target_bg}))
     # SCNR before the saturation boost: cap the green channel to the R/B neutral
     # so the boost lifts real colour, not the residual OSC green cast. Gentle

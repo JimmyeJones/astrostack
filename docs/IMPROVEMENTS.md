@@ -159,6 +159,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Data-driven denoise strength in the one-click Auto recipe** — when Auto-process
+  decides a stack is noisy it added a wavelet denoise at a *fixed* `strength=0.5`,
+  the same for a barely-grainy stack and a very noisy one. It now scales that
+  strength to the actual measured background noise via the existing
+  `suggest_denoise_strength` estimator (the same one behind the editor's "From your
+  image" one-click), so a mildly-noisy result gets a lighter touch and a very noisy
+  one a firmer cut — with a neutral 0.5 fallback when the proxy can't be measured.
+  Makes the one-click Auto result adapt to the data instead of guessing. Test
+  asserts the auto denoise strength rises with noise level; engine-only, additive.
+  (v0.57.3, this run)
+
 - **"Preview is downscaled" hint in the editor** — the live preview always runs on
   a ≤1500 px proxy of what may be a 150 MP mosaic, so fine detail reads differently
   than the exported full-res image (even now that spatial ops are proxy-corrected).
