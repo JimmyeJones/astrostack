@@ -156,6 +156,19 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Built-in presets prepend Coverage leveling on a mosaic** — a built-in preset
+  (Galaxy / Nebula / Star cluster) carries a fixed op list that can't know whether
+  *this* stack is a mosaic, so applying one on a Seestar mosaic left the panel steps
+  in. Applying a **built-in** preset now prepends a `background.level_coverage` pass
+  (the same one Auto-process adds, v0.59.0) when the run is a mosaic — reusing the
+  histogram's `is_mosaic` flag (v0.59.1) — on top of the existing data-driven size
+  seeding, so a built-in preset lands both sized to your data and mosaic-aware.
+  Single-field stacks and **user-saved** presets are unchanged (applied exactly as
+  tuned). Pure `prependCoverageLeveling` helper (no-op when not a mosaic, op absent,
+  or a leveling pass is already present, so re-applying never duplicates);
+  frontend-only, additive. Vitest-covered (helper: 5 cases; editor: preset apply on
+  a mosaic leads with the pass). (v0.59.2, this run)
+
 - **Tell the user when "Coverage leveling" will do nothing** — the op only
   equalises panels on a multi-coverage mosaic; on a single-field stack (uniform
   coverage) it's a deliberate no-op, so a beginner who added it saw no effect and

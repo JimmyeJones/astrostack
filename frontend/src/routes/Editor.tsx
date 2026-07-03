@@ -22,6 +22,7 @@ import { autoSummarySentence, autoValueSentence } from "../components/editor/aut
 import { applyDataDrivenDefaults, countDataDrivenDefaults, type OpSuggestion }
   from "../components/editor/dataDrivenDefaults";
 import { previewScaleCaption } from "../components/editor/previewScale";
+import { prependCoverageLeveling } from "../components/editor/coverageLeveling";
 import { previewDebounceMs } from "../components/editor/previewDebounce";
 import { starMaskSizePx } from "../components/editor/starMaskSize";
 import { coalesceFwhm, measuredContextText } from "../components/editor/measuredContext";
@@ -453,13 +454,19 @@ export function EditorView() {
               </Button>
             </Tooltip>
           ) : null}
-          {/* Built-in presets carry generic default sizes; seed their data-driven
-              params (sharpen radius, star size) from this target's own stars so a
-              preset lands sized to your data. User presets are applied as-tuned. */}
+          {/* Built-in presets carry a fixed op list with generic sizes: seed their
+              data-driven params (sharpen radius, star size) from this target's own
+              stars, and on a mosaic prepend a Coverage-leveling pass to flatten the
+              panel steps (the same pass Auto-process adds) — so a built-in preset
+              lands both sized to your data and mosaic-aware. User presets are
+              applied exactly as the user tuned them. */}
           <PresetMenu currentOps={ops}
             onApply={(o, source) =>
               setOps(source === "builtin"
-                ? applyDataDrivenDefaults(o, dataDrivenSuggestions) : o)} />
+                ? prependCoverageLeveling(
+                    applyDataDrivenDefaults(o, dataDrivenSuggestions),
+                    hist.data?.is_mosaic === true, specs, uid)
+                : o)} />
           <Button variant="default" leftSection={<IconDeviceFloppy size={16} />}
             loading={saveRecipe.isPending} onClick={() => saveRecipe.mutate()}>Save</Button>
         </Group>

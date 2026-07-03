@@ -373,6 +373,35 @@ describe("EditorView", () => {
     expect(btn).toHaveTextContent("✓");
   });
 
+  it("prepends Coverage leveling when a built-in preset is applied on a mosaic", async () => {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, SHARPEN, LEVEL_COVERAGE]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({ ops: [], base_run_id: 3 });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({
+      builtin: [{
+        id: "galaxy", label: "Galaxy", group: "Built-in",
+        ops: [{ id: "detail.sharpen", enabled: true, params: { radius: 2.0 } }],
+      }],
+      user: [],
+    });
+    // is_mosaic:true → applying a built-in preset should flatten the panels.
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0],
+        b: [0, 0, 0, 0], is_mosaic: true });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Presets/ }));
+    fireEvent.click(await screen.findByText("Galaxy"));
+
+    // The pipeline now leads with a Coverage-leveling pass (added because the run
+    // is a mosaic), ahead of the preset's own Sharpen op.
+    expect(await screen.findByText("Coverage leveling")).toBeInTheDocument();
+    expect(screen.getByText("Sharpen")).toBeInTheDocument();
+  });
+
   it("shows an error message when the preview render fails (not a blank panel)", async () => {
     mockEditorQueries();
     vi.stubGlobal("fetch", vi.fn(async () => ({
