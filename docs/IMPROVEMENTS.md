@@ -71,16 +71,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   so the user rarely needs to touch the Stack form. (S–M, autonomy)
 
 ### Friendliness (PRIORITY 3)
-- **Tell the user when "Coverage leveling" will do nothing** — the op is only
-  meaningful on a multi-coverage mosaic; on a single-field stack (uniform coverage)
-  it's a deliberate no-op (v0.58.6 wired it, and it returns the input unchanged when
-  coverage is absent/uniform). A beginner who adds it to a single-field edit gets no
-  effect and no explanation. Surface the run's coverage span (the editor already has
-  the run; `coverage_min`/`coverage_max` are on the record) and show a subtle
-  "no effect on a single-field image — this equalises mosaic panels" note (or a
-  disabled/greyed op row) when coverage is uniform, so the control explains its own
-  applicability instead of silently doing nothing. Pairs with the auto-add-for-mosaics
-  autonomy idea above. (S, friendliness/editor)
 - Guided "getting started" / empty states that tell a first-timer exactly what to
   do next; audit every screen for jargon and add plain-language "why" tooltips;
   reduce visible option clutter (progressive disclosure). (M, friendliness)
@@ -165,6 +155,19 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Tell the user when "Coverage leveling" will do nothing** — the op only
+  equalises panels on a multi-coverage mosaic; on a single-field stack (uniform
+  coverage) it's a deliberate no-op, so a beginner who added it saw no effect and
+  no explanation. The histogram endpoint now reports `is_mosaic` (the run's
+  `coverage_max > coverage_min`), and when the `background.level_coverage` op is
+  selected on a non-mosaic run the editor shows a subtle grey "No effect on this
+  stack — it's a single-field image… this op equalises mosaic panels" note, so the
+  control explains its own applicability instead of silently doing nothing. Pairs
+  with the v0.59.0 auto-add-for-mosaics autonomy change. One additive API field +
+  frontend; upgrade-safe. Tested: webapp asserts `is_mosaic` on the histogram;
+  Vitest asserts the note shows on a single-field run and is absent on a mosaic.
+  (v0.59.1, this run)
 
 - **Auto-add Coverage leveling to the Auto recipe for mosaics** — now that the
   "Coverage leveling" op works (v0.58.6), one-click Auto-process detects a mosaic

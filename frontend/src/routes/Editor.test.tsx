@@ -37,6 +37,15 @@ const SHARPEN: EditOp = {
              depends_on: null }],
 };
 
+const LEVEL_COVERAGE: EditOp = {
+  id: "background.level_coverage", label: "Coverage leveling", group: "background",
+  stage: "linear", proxy_safe: true, is_stretch: false,
+  help: "Equalize sky across mosaic panels with different frame coverage.",
+  params: [{ key: "object_sigma", label: "Object σ", type: "float", group: "advanced",
+             default: 2.0, min: 1, max: 5, step: 0.1, options: null, help: null,
+             depends_on: null }],
+};
+
 function renderEditor() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -374,6 +383,54 @@ describe("EditorView", () => {
 
     await waitFor(() => expect(screen.getByText(/Preview failed/)).toBeInTheDocument());
     expect(screen.getByText(/boom while rendering/)).toBeInTheDocument();
+  });
+
+  it("warns that Coverage leveling is a no-op on a single-field (non-mosaic) stack", async () => {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, LEVEL_COVERAGE]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [{ uid: "lc1", id: "background.level_coverage", enabled: true, params: { object_sigma: 2 } }],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    // is_mosaic:false → the run has uniform coverage, so the op does nothing.
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0],
+        b: [0, 0, 0, 0], is_mosaic: false });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    // Selecting the op surfaces the "no effect on a single-field image" note.
+    fireEvent.click(await screen.findByText("Coverage leveling"));
+    expect(await screen.findByText(/No effect on this stack/i)).toBeInTheDocument();
+  });
+
+  it("does not warn about Coverage leveling on a mosaic stack", async () => {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, LEVEL_COVERAGE]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [{ uid: "lc1", id: "background.level_coverage", enabled: true, params: { object_sigma: 2 } }],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    // is_mosaic:true → the op is meaningful, so no no-op warning.
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0],
+        b: [0, 0, 0, 0], is_mosaic: true });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    fireEvent.click(await screen.findByText("Coverage leveling"));
+    // The op panel opens (help shows in both the row and the panel), the
+    // histogram resolves with is_mosaic:true, and the no-op note must not appear.
+    await waitFor(() =>
+      expect(screen.getAllByText(/Equalize sky across mosaic panels/i).length).toBeGreaterThan(1));
+    await waitFor(() => expect(client.api.getHistogram).toHaveBeenCalled());
+    expect(screen.queryByText(/No effect on this stack/i)).not.toBeInTheDocument();
   });
 });
 

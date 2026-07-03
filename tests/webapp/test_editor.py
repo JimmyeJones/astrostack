@@ -236,6 +236,9 @@ def test_edit_preview_and_histogram(client, solved_library):
     # Proxy geometry is surfaced so the editor can warn "preview is downscaled".
     assert hist["proxy_scale"] >= 1.0
     assert hist["proxy_width"] > 0 and hist["proxy_height"] > 0
+    # This run spans coverage 1..5 (a mosaic), so the editor can enable the
+    # Coverage-leveling op instead of warning it's a no-op.
+    assert hist["is_mosaic"] is True
 
 
 def test_star_mask_preview(client, solved_library):
@@ -261,6 +264,10 @@ def test_auto_process(client, solved_library):
     assert r.status_code == 200
     ops = [o["id"] for o in r.json()["ops"]]
     assert "tone.stretch" in ops
+    # This run is a mosaic (coverage 1..5), so Auto prepends a coverage-leveling
+    # pass before the gradient fit to flatten the panel steps.
+    assert "background.level_coverage" in ops
+    assert ops.index("background.level_coverage") < ops.index("tone.stretch")
 
 
 def test_export_creates_new_run_non_destructive(client, solved_library):

@@ -679,6 +679,19 @@ export function EditorView() {
                 {specs[selectedOp.id].help ? (
                   <Text size="xs" c="dimmed" mb="xs">{specs[selectedOp.id].help}</Text>
                 ) : null}
+                {/* Coverage leveling only equalises panels on a mosaic; on a
+                    single-field stack (uniform coverage) it's a deliberate no-op,
+                    so tell the user rather than let the control silently do nothing. */}
+                {selectedOp.id === "background.level_coverage" && hist.data?.is_mosaic === false ? (
+                  <Alert color="gray" variant="light" py={6} mb="xs"
+                    icon={<IconInfoCircle size={16} />}>
+                    <Text size="xs">
+                      No effect on this stack — it's a single-field image with even
+                      coverage. This op equalises the sky across the panels of a
+                      <b> mosaic</b>, where frames overlap unevenly.
+                    </Text>
+                  </Alert>
+                ) : null}
                 {specs[selectedOp.id].heavy && selectedOp.enabled ? (
                   <Alert color="grape" variant="light" py={6} mb="xs"
                     icon={<IconInfoCircle size={16} />}>

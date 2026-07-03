@@ -375,6 +375,11 @@ async def edit_histogram(safe: str, run_id: int, request: Request,
         hist["proxy_scale"] = round(float(scale), 3)
         hist["proxy_width"] = int(w)
         hist["proxy_height"] = int(h)
+        # Whether this run is a mosaic (uneven panel overlap → coverage spans a
+        # range). The "Coverage leveling" op is only meaningful on a mosaic; on a
+        # single-field stack (uniform coverage) it's a deliberate no-op, so the
+        # editor can tell the user the control won't do anything here.
+        hist["is_mosaic"] = bool(int(run.coverage_max) > int(run.coverage_min))
         return hist
 
     return await run_in_threadpool(work)
