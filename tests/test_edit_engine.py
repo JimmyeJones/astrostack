@@ -272,6 +272,30 @@ def test_auto_recipe_saturation_eases_off_on_noisy_stacks():
     assert float(op.params["amount"]) == 1.2
 
 
+def test_auto_recipe_levels_coverage_only_for_mosaics():
+    """Auto prepends a coverage-leveling pass (before the gradient fit) only when
+    the run is a mosaic (coverage_max > coverage_min); a single-field stack
+    (uniform coverage) and an unknown span leave the recipe unchanged."""
+    from seestack.edit.presets import auto_recipe
+
+    clean = np.full((80, 100, 3), 0.05, np.float32)
+    clean[30:50, 40:60] += 0.5
+
+    def ids(span):
+        return [o.id for o in auto_recipe(clean, coverage_span=span).ops]
+
+    # Mosaic: the pass is present and runs on linear data, before the gradient
+    # removal and the stretch.
+    mosaic_ids = ids((1, 6))
+    assert "background.level_coverage" in mosaic_ids
+    assert mosaic_ids.index("background.level_coverage") < mosaic_ids.index("background.final_gradient")
+    assert mosaic_ids.index("background.level_coverage") < mosaic_ids.index("tone.stretch")
+
+    # Single-field (uniform coverage) and unknown span → unchanged (no leveling).
+    assert "background.level_coverage" not in ids((3, 3))
+    assert "background.level_coverage" not in ids(None)
+
+
 def test_denoise_identity_at_zero_and_preserves_colour():
     base = np.empty((40, 50, 3), np.float32)
     for c, lvl in enumerate((0.1, 0.2, 0.3)):

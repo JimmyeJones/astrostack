@@ -358,6 +358,10 @@ export interface Histogram {
   proxy_scale?: number;
   proxy_width?: number;
   proxy_height?: number;
+  // True when this run is a mosaic (uneven panel overlap → coverage spans a
+  // range). The "Coverage leveling" op only does something on a mosaic, so the
+  // editor uses this to tell the user when the control is a no-op here.
+  is_mosaic?: boolean;
 }
 
 export interface PsfSuggestion {

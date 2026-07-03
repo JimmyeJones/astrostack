@@ -22,11 +22,14 @@ import { autoSummarySentence, autoValueSentence } from "../components/editor/aut
 import { applyDataDrivenDefaults, countDataDrivenDefaults, type OpSuggestion }
   from "../components/editor/dataDrivenDefaults";
 import { previewScaleCaption } from "../components/editor/previewScale";
+import { prependCoverageLeveling } from "../components/editor/coverageLeveling";
+import { clippingCaption } from "../components/editor/clipping";
 import { previewDebounceMs } from "../components/editor/previewDebounce";
 import { starMaskSizePx } from "../components/editor/starMaskSize";
 import { coalesceFwhm, measuredContextText } from "../components/editor/measuredContext";
 import { OpParamPanel } from "../components/editor/OpParamPanel";
 import { PresetMenu } from "../components/editor/PresetMenu";
+import { HintLabel } from "../components/StackOptionControl";
 
 const GROUP_LABELS: Record<string, string> = {
   background: "Background", tone: "Tone & color", detail: "Detail",
@@ -453,13 +456,19 @@ export function EditorView() {
               </Button>
             </Tooltip>
           ) : null}
-          {/* Built-in presets carry generic default sizes; seed their data-driven
-              params (sharpen radius, star size) from this target's own stars so a
-              preset lands sized to your data. User presets are applied as-tuned. */}
+          {/* Built-in presets carry a fixed op list with generic sizes: seed their
+              data-driven params (sharpen radius, star size) from this target's own
+              stars, and on a mosaic prepend a Coverage-leveling pass to flatten the
+              panel steps (the same pass Auto-process adds) — so a built-in preset
+              lands both sized to your data and mosaic-aware. User presets are
+              applied exactly as the user tuned them. */}
           <PresetMenu currentOps={ops}
             onApply={(o, source) =>
               setOps(source === "builtin"
-                ? applyDataDrivenDefaults(o, dataDrivenSuggestions) : o)} />
+                ? prependCoverageLeveling(
+                    applyDataDrivenDefaults(o, dataDrivenSuggestions),
+                    hist.data?.is_mosaic === true, specs, uid)
+                : o)} />
           <Button variant="default" leftSection={<IconDeviceFloppy size={16} />}
             loading={saveRecipe.isPending} onClick={() => saveRecipe.mutate()}>Save</Button>
         </Group>
@@ -540,6 +549,17 @@ export function EditorView() {
               <Text size="xs" c="dimmed" mt={4}>
                 {previewScaleCaption(hist.data)}
               </Text>
+            ) : null}
+            {/* Over-stretching blows out star cores (a spike at pure white) or
+                crushes the sky (a spike at pure black), losing detail on export.
+                Surface it from the live histogram so a beginner eases off before
+                baking in the clip. Advisory only — changes nothing. */}
+            {clippingCaption(hist.data) ? (
+              <Group gap={6} wrap="nowrap" align="flex-start" mt={4}>
+                <IconAlertTriangle size={14} color="var(--mantine-color-orange-6)"
+                  style={{ flexShrink: 0, marginTop: 2 }} />
+                <Text size="xs" c="orange.6">{clippingCaption(hist.data)}</Text>
+              </Group>
             ) : null}
             {hist.data?.errors?.length ? (
               <Alert color="orange" icon={<IconAlertTriangle size={16} />} mt="xs" py={6}>
@@ -679,6 +699,19 @@ export function EditorView() {
                 {specs[selectedOp.id].help ? (
                   <Text size="xs" c="dimmed" mb="xs">{specs[selectedOp.id].help}</Text>
                 ) : null}
+                {/* Coverage leveling only equalises panels on a mosaic; on a
+                    single-field stack (uniform coverage) it's a deliberate no-op,
+                    so tell the user rather than let the control silently do nothing. */}
+                {selectedOp.id === "background.level_coverage" && hist.data?.is_mosaic === false ? (
+                  <Alert color="gray" variant="light" py={6} mb="xs"
+                    icon={<IconInfoCircle size={16} />}>
+                    <Text size="xs">
+                      No effect on this stack — it's a single-field image with even
+                      coverage. This op equalises the sky across the panels of a
+                      <b> mosaic</b>, where frames overlap unevenly.
+                    </Text>
+                  </Alert>
+                ) : null}
                 {specs[selectedOp.id].heavy && selectedOp.enabled ? (
                   <Alert color="grape" variant="light" py={6} mb="xs"
                     icon={<IconInfoCircle size={16} />}>
@@ -730,8 +763,15 @@ export function EditorView() {
               <Group align="flex-end" gap="xs">
                 <TextInput label="Output name" placeholder={`${safe}_edit`} value={outputName}
                   onChange={(e) => setOutputName(e.currentTarget.value)} style={{ flex: 1 }} />
-                <Select label="TIFF" w={130} data={["linear", "autostretch"]} value={tiffMode}
-                  allowDeselect={false} onChange={(v) => setTiffMode(v ?? "linear")} />
+                <Select w={150} value={tiffMode} allowDeselect={false}
+                  label={<HintLabel label="TIFF"
+                    hint="Only affects the exported .tiff file. Linear keeps the raw
+                      unstretched data for editing in another tool (Photoshop, GIMP);
+                      Auto-stretched bakes in a display stretch so it looks right when
+                      opened directly. The FITS and PNG outputs are unaffected." />}
+                  data={[{ value: "linear", label: "Linear" },
+                         { value: "autostretch", label: "Auto-stretched" }]}
+                  onChange={(v) => setTiffMode(v ?? "linear")} />
               </Group>
               <Button mt="sm" fullWidth leftSection={<IconDownload size={16} />}
                 loading={exportRun.isPending} onClick={() => exportRun.mutate()}>

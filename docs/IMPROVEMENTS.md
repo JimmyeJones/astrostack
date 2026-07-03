@@ -54,16 +54,19 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 
 ### Autonomy — "just works" (PRIORITY 2)
-- **Auto-add Coverage leveling to the Auto recipe for mosaics** — now that the
-  "Coverage leveling" op actually works (v0.58.6), the one-click Auto-process could
-  detect a mosaic — the run row already carries `coverage_min`/`coverage_max`, and a
-  mosaic has `coverage_max > coverage_min` (uneven panel overlap) — and insert
-  `background.level_coverage` before the stretch, so a Seestar mosaic gets flat,
-  step-free panels without the user ever discovering the op exists. Skip it entirely
-  on a single-field stack (uniform coverage), where it's a no-op. Thread the run's
-  coverage span into `auto_recipe` (mirroring how `median_fwhm` is already threaded
-  for the sharpen radius). Auto is an explicit button so there's no default flip.
-  (M, autonomy/editor)
+- **One-click "trim the ragged mosaic border"** — a Seestar mosaic's union canvas
+  has ragged, low-coverage edges (corners covered by a single frame, NaN gaps) that
+  look messy and are noisier than the well-covered interior. The coverage map is
+  already loaded into the editor render context (`ctx.coverage`, wired in v0.58.6),
+  so Auto-process (or a dedicated "Trim to well-covered area" button) could compute
+  the largest axis-aligned rectangle where coverage ≥ some fraction of the max and
+  set the `geometry.crop` op's fractional bounds to it — turning a fiddly manual
+  crop into one click, tuned to the actual data. Only offered on a mosaic
+  (`is_mosaic`, now surfaced on the histogram); a single-field stack is untouched.
+  Needs a robust largest-rectangle computation on the (downsampled) coverage mask
+  and a neutral fallback (no crop) when coverage is uniform or the rectangle would
+  be degenerate. Off-by-default risk nil (explicit button / crop op the user sees
+  and can remove). (M, autonomy/image-quality)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
   different (per-channel vs luminance gradient, star reduction, saturation). The
@@ -81,16 +84,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   so the user rarely needs to touch the Stack form. (S–M, autonomy)
 
 ### Friendliness (PRIORITY 3)
-- **Tell the user when "Coverage leveling" will do nothing** — the op is only
-  meaningful on a multi-coverage mosaic; on a single-field stack (uniform coverage)
-  it's a deliberate no-op (v0.58.6 wired it, and it returns the input unchanged when
-  coverage is absent/uniform). A beginner who adds it to a single-field edit gets no
-  effect and no explanation. Surface the run's coverage span (the editor already has
-  the run; `coverage_min`/`coverage_max` are on the record) and show a subtle
-  "no effect on a single-field image — this equalises mosaic panels" note (or a
-  disabled/greyed op row) when coverage is uniform, so the control explains its own
-  applicability instead of silently doing nothing. Pairs with the auto-add-for-mosaics
-  autonomy idea above. (S, friendliness/editor)
 - Guided "getting started" / empty states that tell a first-timer exactly what to
   do next; audit every screen for jargon and add plain-language "why" tooltips;
   reduce visible option clutter (progressive disclosure). (M, friendliness)
@@ -175,6 +168,69 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Highlight/shadow clipping warning in the editor** — over-stretching is the
+  classic beginner mistake: push the stretch/levels too far and star/nebula cores
+  blow out to pure white or the sky crushes to pure black, losing detail
+  irreversibly on export. The editor's live histogram clips values into [0, 1], so
+  a pure `clippingCaption` helper measures the fraction of pixels piled in the top
+  bin (blown white) and bottom bin (crushed black) across r/g/b and, above tuned
+  thresholds (highlights 2% — reliable/most-damaging; shadows 35% — conservative to
+  avoid nagging on legitimately dark skies), shows a subtle orange caption under the
+  preview ("Highlights are clipping — about 4% of pixels are pure white. Ease the
+  stretch or lower the white point…"). Advisory only, changes nothing; teaches good
+  stretch discipline on the priority-1 editor. Pure helper Vitest-covered (7 cases:
+  thresholds each side, both-clip, worst-channel, null-safety) + an Editor wiring
+  test; frontend-only, additive. (v0.59.4, this run)
+
+- **Explain the editor's TIFF export mode** — the Export panel's "TIFF" dropdown
+  offered the raw values "linear" / "autostretch" with no explanation, so a
+  beginner couldn't tell which to pick or that it only affects the .tiff file. It
+  now shows friendly labels ("Linear" / "Auto-stretched") and an info-tooltip on
+  the label explaining Linear keeps raw unstretched data for editing elsewhere,
+  Auto-stretched bakes in a display stretch so the file looks right when opened
+  directly, and the FITS/PNG outputs are unaffected. The stored values are
+  unchanged (still "linear"/"autostretch"), so the export API is untouched.
+  Copy/label-only, frontend, additive. (v0.59.3, this run)
+
+- **Built-in presets prepend Coverage leveling on a mosaic** — a built-in preset
+  (Galaxy / Nebula / Star cluster) carries a fixed op list that can't know whether
+  *this* stack is a mosaic, so applying one on a Seestar mosaic left the panel steps
+  in. Applying a **built-in** preset now prepends a `background.level_coverage` pass
+  (the same one Auto-process adds, v0.59.0) when the run is a mosaic — reusing the
+  histogram's `is_mosaic` flag (v0.59.1) — on top of the existing data-driven size
+  seeding, so a built-in preset lands both sized to your data and mosaic-aware.
+  Single-field stacks and **user-saved** presets are unchanged (applied exactly as
+  tuned). Pure `prependCoverageLeveling` helper (no-op when not a mosaic, op absent,
+  or a leveling pass is already present, so re-applying never duplicates);
+  frontend-only, additive. Vitest-covered (helper: 5 cases; editor: preset apply on
+  a mosaic leads with the pass). (v0.59.2, this run)
+
+- **Tell the user when "Coverage leveling" will do nothing** — the op only
+  equalises panels on a multi-coverage mosaic; on a single-field stack (uniform
+  coverage) it's a deliberate no-op, so a beginner who added it saw no effect and
+  no explanation. The histogram endpoint now reports `is_mosaic` (the run's
+  `coverage_max > coverage_min`), and when the `background.level_coverage` op is
+  selected on a non-mosaic run the editor shows a subtle grey "No effect on this
+  stack — it's a single-field image… this op equalises mosaic panels" note, so the
+  control explains its own applicability instead of silently doing nothing. Pairs
+  with the v0.59.0 auto-add-for-mosaics autonomy change. One additive API field +
+  frontend; upgrade-safe. Tested: webapp asserts `is_mosaic` on the histogram;
+  Vitest asserts the note shows on a single-field run and is absent on a mosaic.
+  (v0.59.1, this run)
+
+- **Auto-add Coverage leveling to the Auto recipe for mosaics** — now that the
+  "Coverage leveling" op works (v0.58.6), one-click Auto-process detects a mosaic
+  (the run row's `coverage_max > coverage_min`, i.e. uneven panel overlap) and
+  prepends `background.level_coverage` on linear data — before the gradient fit and
+  the stretch — so a Seestar mosaic gets flat, step-free panels without the user
+  ever discovering the op exists. A single-field stack (uniform coverage) and an
+  unknown span leave the recipe unchanged (the pass would be a no-op there anyway).
+  The run's coverage span is threaded into `auto_recipe` (mirroring how
+  `median_fwhm` is already threaded for the sharpen radius). Auto is an explicit
+  button, so no default flips. Engine + one endpoint thread, additive/upgrade-safe.
+  Tested: mosaic prepends & orders the pass before gradient/stretch; single-field
+  and unknown span omit it. (v0.59.0, this run)
 
 - **Fix: "Coverage leveling" editor op was a permanent silent no-op** — the
   Background-group "Coverage leveling" control (equalises sky across mosaic panels
