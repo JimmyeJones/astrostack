@@ -406,6 +406,68 @@ describe("StackView", () => {
     expect(screen.queryByText(/frames per pixel to fully apply/)).not.toBeInTheDocument();
   });
 
+  it("suggests raising k to the streaked-frame count when min/max reject is on", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+      { key: "min_max_reject", label: "Min/max rejection", type: "bool", group: "simple",
+        default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+      { key: "min_max_reject_count", label: "Min/max reject count", type: "int", group: "advanced",
+        default: 1, min: 1, max: 5, step: 1, options: null, help: null, depends_on: "min_max_reject" },
+    ]);
+    // 12 accepted frames, 3 of them streaked, min/max reject on with default k=1.
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ min_max_reject: true, min_max_reject_count: 1 });
+    const frames = Array.from({ length: 12 }, (_, i) =>
+      ({ ...mkFrame(i + 1), streak_detected: i < 3 }));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    // 3 streaked frames → suggest k=3 (well within the 12-frame budget).
+    const btn = await screen.findByRole("button", { name: "Set k = 3" });
+    fireEvent.click(btn);
+    await waitFor(() =>
+      expect(screen.queryByText(/carry a satellite\/plane streak/)).not.toBeInTheDocument());
+  });
+
+  it("caps the suggested k at what the frame count can fully apply", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+      { key: "min_max_reject", label: "Min/max rejection", type: "bool", group: "simple",
+        default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+      { key: "min_max_reject_count", label: "Min/max reject count", type: "int", group: "advanced",
+        default: 1, min: 1, max: 5, step: 1, options: null, help: null, depends_on: "min_max_reject" },
+    ]);
+    // 4 streaked frames but only 7 solved → largest fully-applicable k is 3, not 4.
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ min_max_reject: true, min_max_reject_count: 1 });
+    const frames = Array.from({ length: 7 }, (_, i) =>
+      ({ ...mkFrame(i + 1), streak_detected: i < 4 }));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    await screen.findByRole("button", { name: "Set k = 3" });
+    expect(screen.queryByRole("button", { name: "Set k = 4" })).not.toBeInTheDocument();
+  });
+
+  it("does not suggest raising k when only one frame is streaked", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+      { key: "min_max_reject", label: "Min/max rejection", type: "bool", group: "simple",
+        default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+      { key: "min_max_reject_count", label: "Min/max reject count", type: "int", group: "advanced",
+        default: 1, min: 1, max: 5, step: 1, options: null, help: null, depends_on: "min_max_reject" },
+    ]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ min_max_reject: true, min_max_reject_count: 1 });
+    const frames = Array.from({ length: 12 }, (_, i) =>
+      ({ ...mkFrame(i + 1), streak_detected: i === 0 }));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    await waitFor(() => expect(screen.getByText("Min/max rejection")).toBeInTheDocument());
+    expect(screen.queryByText(/carry a satellite\/plane streak/)).not.toBeInTheDocument();
+  });
+
   it("drops the streak warning once rejection has enough frames", async () => {
     vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
       { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",

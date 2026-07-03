@@ -273,6 +273,19 @@ export function StackView() {
       ? `Min/max reject is set to drop the ${minMaxK} highest and lowest values (k=${minMaxK}) at each pixel, but that needs at least ${2 * minMaxK + 1} frames per pixel to fully apply — you have ${solvedAccepted}, so it will mostly fall back to a single min/max drop. Lower k to ${minMaxKSuggested} or add more frames.`
       : null;
 
+  // Auto-suggest a min/max reject count (k) from the streaked-frame count. With
+  // min/max reject on, the default k=1 drops only the single worst extreme at each
+  // pixel, so if QC flags several streaked frames one drop leaves the rest of the
+  // trails in the result. Suggest k = the number of streaked frames (capped at 5,
+  // and at the largest k the stack can fully apply) so all the trails get trimmed
+  // where they overlap a pixel. Suggestion only; never auto-applies.
+  const streakKSuggested = Math.min(streakedAccepted, 5, minMaxKSuggested);
+  const minMaxKForStreaksHint =
+    !frames.isLoading && !!values.min_max_reject && !values.drizzle
+    && streakedAccepted >= 2 && streakKSuggested > minMaxK
+      ? `${streakedAccepted} of your frames carry a satellite/plane streak, but min/max reject is set to drop only the ${minMaxK === 1 ? "single" : minMaxK} highest and lowest value${minMaxK === 1 ? "" : "s"} at each pixel (k=${minMaxK}). Raising k to ${streakKSuggested} drops the ${streakKSuggested} highest and lowest — enough to trim all ${streakedAccepted} trails where they cross a pixel.`
+      : null;
+
   const streakNoRejectionWarning =
     streakedAccepted > 0 && !rejectionOn && !minMaxRejectHint
       ? `${streakedAccepted} accepted frame${streakedAccepted === 1 ? " has" : "s have"} a detected satellite/plane streak, but this stack has no per-pixel rejection enabled — the trail${streakedAccepted === 1 ? "" : "s"} will show in the result. Turn on ${values.drizzle ? "“Drizzle outlier rejection”" : "sigma clipping"} (or reject those frames) to remove ${streakedAccepted === 1 ? "it" : "them"}.`
@@ -585,6 +598,16 @@ export function StackView() {
               <Button size="compact-xs" variant="light" mt={6}
                 onClick={() => set("min_max_reject_count", minMaxKSuggested)}>
                 Lower k to {minMaxKSuggested}
+              </Button>
+            </Alert>
+          ) : null}
+
+          {minMaxKForStreaksHint ? (
+            <Alert color="blue" variant="light" py={6} px="sm">
+              <Text size="xs">{minMaxKForStreaksHint}</Text>
+              <Button size="compact-xs" variant="light" mt={6}
+                onClick={() => set("min_max_reject_count", streakKSuggested)}>
+                Set k = {streakKSuggested}
               </Button>
             </Alert>
           ) : null}

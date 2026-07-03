@@ -76,15 +76,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   reduce visible option clutter (progressive disclosure). (M, friendliness)
 - Better long-job feedback and clearer error messages. (S, friendliness)
 
-### Autonomy — follow-ups
-- **Auto-suggest the min/max reject count (k) from the streaked-frame count** — the
-  Stack form already nudges a beginner to *turn on* min/max reject when a small stack
-  carries streaked frames (v0.56.2). Now that k is tunable (v0.58.0), extend the
-  nudge to also suggest a *count*: if QC flags N frames with satellite/plane streaks,
-  a k ≈ min(N, 5) drops all of them instead of just the worst one — with a one-click
-  "set k = N" on the advisory. Reuses the streak QC already computed per frame; keep
-  it a suggestion (never auto-applies). (S, autonomy)
-
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 - **Photometric (multiplicative) frame normalization before combine** — frames
   are additively sky-zeroed per frame, but nothing gain-matches them: haze/
@@ -164,6 +155,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Auto-suggest the min/max reject count (k) from the streaked-frame count** — with
+  min/max reject on, the default k=1 drops only the single worst extreme per pixel, so
+  a session with several satellite/plane trails leaves the rest in the result. The
+  Stack form now shows a blue advisory when ≥2 accepted frames are streaked and the
+  current k is below the streak count, suggesting `k = min(N_streaked, 5,
+  ⌊(n−1)/2⌋)` (capped so it never over-shoots the frame budget and trips the
+  too-high warning) with a one-click "Set k = N". Reuses the per-frame streak QC;
+  suggestion-only, frontend-only, additive. Vitest-covered (suggests at 3 streaks,
+  caps at the frame budget, no-fire for a single streak). (v0.58.3, this run)
 
 - **Warn when the min/max reject k is too aggressive for the frame count** — the
   top/bottom-k trim (v0.58.0) applies its full k-drop only where a pixel is covered
