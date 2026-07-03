@@ -51,6 +51,14 @@ problems. Dogfood it every big-picture run and fix root causes.
 - **Editor bug hunt (ongoing)** — there are undocumented issues. Each big-picture
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
+- **Preview the "Trim border" rectangle before committing** — the one-click "Trim
+  border" (v0.60.0) applies a `geometry.crop` immediately; a lower-commitment step
+  is to first draw the *proposed* crop as a dashed outline overlay on the preview
+  (the `trim-suggestion` fractional bounds map straight to preview coordinates) so
+  the user sees exactly what would be kept, with an "Apply" confirm. Reuses the
+  overlay-label infrastructure; purely additive/advisory (nothing changes until
+  Apply). Builds trust in the auto-crop and avoids an undo round-trip when the
+  suggestion isn't what they want. (S–M, editor/trust)
 
 
 ### Autonomy — "just works" (PRIORITY 2)
@@ -75,6 +83,13 @@ problems. Dogfood it every big-picture run and fix root causes.
   do next; audit every screen for jargon and add plain-language "why" tooltips;
   reduce visible option clutter (progressive disclosure). (M, friendliness)
 - Better long-job feedback and clearer error messages. (S, friendliness)
+- **Colour heatmap + legend for the coverage overlay** — the coverage-map overlay
+  (v0.61.0) renders grayscale, which reads slowly and looks similar to the star
+  mask. A viridis-style colour map (blue = few frames → yellow = most) with a tiny
+  "fewer ↔ more frames" legend caption would make the coverage gradient obvious at
+  a glance and visually distinct from the star mask. Backend applies a small LUT to
+  the normalized coverage before the PNG; frontend adds the legend. Purely
+  cosmetic/additive. (S, friendliness)
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 - **Photometric (multiplicative) frame normalization before combine** — frames
