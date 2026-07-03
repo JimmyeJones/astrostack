@@ -52,6 +52,29 @@ problems. Dogfood it every big-picture run and fix root causes.
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
 
+### Editor — make it excellent (PRIORITY 1) — new ideas
+- **Per-op debounce so heavy ops render fewer intermediate frames** — now that
+  superseded preview renders abort mid-flight (v0.57.13), the remaining lag while
+  dragging a *heavy* op's slider (deconvolution, wavelet denoise) is that each
+  debounced step still kicks a full proxy render. A light op (levels, saturation)
+  can afford the current 250 ms debounce, but a heavy one wants a longer settle so
+  only the value you land on renders. Make the editor's preview debounce adaptive:
+  key it off whether any *enabled, expensive* op is present (the ops already carry
+  enough in their spec — e.g. a `proxy_safe=false` or a new `heavy` hint — to
+  classify) and stretch it to ~600 ms in that case. Pure "pick a debounce" helper,
+  frontend-only, additive. Cuts wasted heavy renders without making light edits feel
+  sluggish. (S, editor/responsiveness)
+- **Show Auto's chosen data-driven values in the "What Auto-process did" note** —
+  the dismissible note lists the ops Auto ran in plain language, but not the
+  *values* it picked from your data (denoise strength, sharpen radius, saturation,
+  STF sky level), which is exactly where the adaptivity lives. Appending them
+  ("eased saturation to 1.1 for a noisy stack; sharpened at radius 1.4 px sized to
+  your 3.2 px stars") would make the one-click result's data-driven reasoning
+  visible and build trust — turning "it did something" into "it did *this, because
+  of my data*". The auto endpoint already computes these; surface them on the note
+  via a pure formatter. Frontend + a couple of response fields, additive.
+  (S, editor/friendliness)
+
 ### Autonomy — "just works" (PRIORITY 2)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
