@@ -52,6 +52,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
 
+### Editor — make it excellent (PRIORITY 1) — new ideas
+- **Dim the "From your data" button when the param already matches** — the editor
+  now has four data-driven suggestion buttons (PSF σ, sharpen radius, denoise
+  strength, star size). While tuning, a user can't tell whether the current value
+  *is* the suggestion or diverged from it. Disable/dim the button (with a "already
+  set from your data" tooltip) when the param already equals the suggested value,
+  so the button doubles as an "am I optimal?" indicator. Reuse the existing
+  `suggestions` prop on `OpParamPanel`; compare the param's current value to
+  `sug.value` with the op's step tolerance. Pure, frontend-only, additive.
+  (S, editor/friendliness)
+- **"Apply data-driven defaults" one-click on the editor** — a user building a
+  recipe by hand must open each of the four suggestion-carrying ops and click its
+  button individually. Add a single toolbar action that seeds every present op's
+  data-driven param (PSF σ, sharpen radius, denoise strength, star size) from the
+  already-fetched suggestions in one click, so hand-tuning starts from the
+  measured values instead of the generic defaults. Reuses the four existing
+  suggestion queries; frontend-only, additive, off-by-nothing (explicit button).
+  (S, editor/autonomy)
+
 ### Autonomy — "just works" (PRIORITY 2)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
