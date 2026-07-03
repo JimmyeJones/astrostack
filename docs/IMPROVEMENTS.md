@@ -79,6 +79,15 @@ problems. Dogfood it every big-picture run and fix root causes.
   do next; audit every screen for jargon and add plain-language "why" tooltips;
   reduce visible option clutter (progressive disclosure). (M, friendliness)
 - Better long-job feedback and clearer error messages. (S, friendliness)
+- **"Preview is downscaled" hint in the editor** — the live preview always runs on
+  a ≤1500 px proxy of what may be a 150 MP mosaic, so fine detail and sharpening
+  read differently than the exported full-res image even now that spatial ops are
+  proxy-corrected (v0.56.19). A small dimmed caption under the preview (e.g.
+  "Preview at 1500 px — export renders at full resolution") sets the right
+  expectation and reduces "why does my export look different?" confusion. The proxy
+  scale is already known server-side (`proxy_scale`); surface it via the existing
+  histogram/preview response or a tiny field. Frontend-mostly, additive.
+  (S, editor/friendliness)
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 - **Photometric (multiplicative) frame normalization before combine** — frames
