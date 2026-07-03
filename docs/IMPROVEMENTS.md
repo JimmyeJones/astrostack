@@ -163,6 +163,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Fix stale/misleading maintainer comments & docstrings** — three inaccuracies a
+  future maintainer would trust: the `edit_coverage_map` endpoint docstring still
+  said "Grayscale … white = most frames" though it renders a viridis heatmap
+  (yellow = most); the CurvesWidget top comment said "click empty space to add a
+  point" when adding is bound to double-click (the visible help text was already
+  correct); and the registry docstring claimed `apply_recipe` is "the source of
+  truth for ordering" when it executes ops in recipe order and does **not** reorder
+  by stage. Corrected all three. Comment/docstring-only, no behaviour change.
+  (housekeeping, this run)
+
 - **Guard the Curves op against a degenerate (blank-the-image) curve** — a tone
   curve with a single control point (or all-equal x) makes `np.interp` return a
   constant, blanking the whole image to a flat tone. The CurvesWidget can't produce

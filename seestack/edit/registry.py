@@ -14,8 +14,10 @@ Operations declare a ``stage``:
   levels, saturation, SCNR, sharpen, star reduction, geometry).
 * ``any``       — valid either side of the stretch.
 
-:func:`seestack.edit.pipeline.apply_recipe` is the source of truth for ordering and
-the single-stretch rule.
+:func:`seestack.edit.pipeline.apply_recipe` executes ops in **recipe order** (it
+does not reorder by stage — the UI flags and offers to fix a mis-placed op) and is
+the source of truth for the single-stretch rule (it auto-inserts a default stretch
+when the recipe has none).
 """
 
 from __future__ import annotations

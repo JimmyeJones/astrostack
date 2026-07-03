@@ -32,7 +32,8 @@ function fromSvg(px: number, py: number): Pt {
 }
 
 /** A small draggable tone-curve editor. Endpoints keep their x (0 and 1); inner
- * points move freely; click empty space to add a point, double-click to remove. */
+ * points move freely; double-click empty space to add a point, double-click a
+ * point to remove it. */
 export function CurvesWidget({ points, onChange, histogram }: {
   points: Pt[];
   onChange: (pts: Pt[]) => void;
