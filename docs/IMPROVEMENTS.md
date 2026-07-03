@@ -87,6 +87,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   user saw), accepting that it's the ≤1024 px preview rather than the ≤1500 px editor
   proxy. Care: it's a behaviour change to Compare, so gate/validate the resolution
   swap doesn't jar the A/B. (S, editor/trust)
+- **Suggest a midtone (gamma) point for the Levels op too** — the data-driven Levels
+  suggestion (v0.62.0) + one-click "Auto levels" (v0.64.0) set the black & white
+  points from the image histogram, but leave the **gamma** (midtone) slider at 1.0,
+  so a beginner still hand-guesses the single control that most affects perceived
+  brightness. Extend `suggest_levels_points` (or a sibling) to also return a gamma
+  that lands the sky/median tone at a pleasant target grey (solve `x**(1/γ)=target`
+  for the post-black/white median), and have "Auto levels" apply all three. Keep the
+  per-param buttons for fine control; NaN-aware; return `None` gamma when the median
+  is degenerate. Engine + the existing endpoint + frontend; additive. (S–M,
+  editor/autonomy)
+- **Guide lines on the histogram for the Stretch/clipping too** — the new
+  `Histogram` `guides` prop (v0.65.0) draws the Levels black/white points; the same
+  mechanism could mark the pure-black (0) and pure-white (1) clipping edges whenever
+  the clipping caption fires, and the Curves op's endpoint handles, so *every* tonal
+  control shows where it lands on the graph. Small, reuses the guides prop;
+  frontend-only, advisory. (S, editor/trust)
 ### Autonomy — "just works" (PRIORITY 2)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
@@ -202,6 +218,15 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Friendly labels on the last jargon-bare editor dropdown (denoise Method)** — the
+  Noise-reduction op's Method enum was the only editor dropdown still showing raw
+  engine ids ("wavelet" / "tv" / "bilateral"); every other enum already had friendly
+  `option_labels`. Added them ("Wavelet (recommended)" / "Total-variation" /
+  "Bilateral"), surfaced automatically in the op panel via the descriptor. Also added
+  a drift-guard test asserting *every* editor enum param carries friendly labels for
+  *all* its options, so a future enum op can't ship bare ids. Metadata + test only,
+  additive. (v0.65.1, this run)
 
 - **Show the Levels black/white points as guides on the histogram** — while setting
   the Levels op's black/white points a beginner couldn't see *where* on the tonal
