@@ -69,12 +69,6 @@ _(none — claim an item here with your branch name)_
 ### Features that serve real workflows
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
-- **Noise-improvement readout vs the previous stack** — on the History page,
-  show each run's noise σ as a delta against the same target's prior run
-  ("−18% noise vs your last stack"), so a user tuning settings/adding subs sees
-  whether a change actually helped, turning trial-and-error into feedback. Builds
-  directly on the recorded `noise_sigma`; within-target, advisory. (S,
-  approachability/correctness)
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
@@ -116,6 +110,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Noise-improvement readout vs the previous stack** — each History card now
+  shows its background-noise σ as a delta against the same target's *previous*
+  measured stack ("−18% noise vs your last stack", teal for cleaner / orange for
+  a regression / dimmed when ≈unchanged), so a user tuning settings or adding
+  subs sees at a glance whether the change actually helped — trial-and-error
+  becomes feedback. Pure `noiseDeltas` helper walks the runs oldest→newest so
+  "previous" is chronological (independent of the display sort) and guards a
+  zero baseline; runs with no earlier measured σ get no readout. Reuses the
+  recorded `noise_sigma`; frontend-only, additive. (v0.50.0, this run)
 
 - **Newest/Cleanest sort on the Gallery** — extends the History-page noise sort
   (v0.49.0) to the Gallery, where runs span every target: a `SegmentedControl`

@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { HistoryView, sortRuns } from "./History";
+import { HistoryView, sortRuns, noiseDeltas } from "./History";
 import { formatIntegration } from "../format";
 import * as client from "../api/client";
 import type { StackRun } from "../api/client";
@@ -207,6 +207,59 @@ describe("sortRuns", () => {
     ];
     const out = sortRuns(runs, "cleanest");
     expect(out.map((r) => r.id)).toEqual([3, 4, 1, 2]);
+  });
+});
+
+describe("noiseDeltas", () => {
+  it("compares each measured run against the previous measured stack (chronologically)", () => {
+    // API order is timestamp-DESC (newest first). id 3 is newest, id 1 oldest.
+    const runs = [
+      mkRun({ id: 3, noise_sigma: 0.04 }),
+      mkRun({ id: 2, noise_sigma: 0.05 }),
+      mkRun({ id: 1, noise_sigma: 0.10 }),
+    ];
+    const d = noiseDeltas(runs);
+    // id 1 is the first measured stack — no earlier run to compare against.
+    expect(d.has(1)).toBe(false);
+    // id 2: (0.05 - 0.10)/0.10 = -0.5 (halved the noise).
+    expect(d.get(2)).toBeCloseTo(-0.5);
+    // id 3: (0.04 - 0.05)/0.05 = -0.2.
+    expect(d.get(3)).toBeCloseTo(-0.2);
+  });
+
+  it("skips runs with no measured σ and compares against the nearest earlier measured one", () => {
+    const runs = [
+      mkRun({ id: 4, noise_sigma: 0.02 }),
+      mkRun({ id: 3, noise_sigma: null }),
+      mkRun({ id: 2, noise_sigma: null }),
+      mkRun({ id: 1, noise_sigma: 0.04 }),
+    ];
+    const d = noiseDeltas(runs);
+    expect(d.has(1)).toBe(false);
+    expect(d.has(2)).toBe(false);
+    expect(d.has(3)).toBe(false);
+    // id 4 compares against id 1 (the nearest earlier measured run).
+    expect(d.get(4)).toBeCloseTo(-0.5);
+  });
+
+  it("guards against a zero baseline", () => {
+    const runs = [mkRun({ id: 2, noise_sigma: 0.03 }), mkRun({ id: 1, noise_sigma: 0 })];
+    // A prior σ of 0 would divide-by-zero, so no delta is produced.
+    expect(noiseDeltas(runs).has(2)).toBe(false);
+  });
+});
+
+describe("HistoryView noise delta", () => {
+  it("shows the improvement readout on the newer stack", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ id: 2, output_basename: "run_b", noise_sigma: 0.041 }),
+      mkRun({ id: 1, output_basename: "run_a", noise_sigma: 0.05 }),
+    ]);
+    renderHistory();
+    await waitFor(() =>
+      expect(screen.getByText(/% noise vs your last stack/)).toBeInTheDocument());
+    // 0.041 vs 0.05 = -18%.
+    expect(screen.getByText(/-18% noise vs your last stack/)).toBeInTheDocument();
   });
 });
 
