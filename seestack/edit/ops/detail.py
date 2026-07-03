@@ -62,13 +62,17 @@ def _denoise(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
         norm = (img - lo) / (hi - lo)  # joint scale → colour preserved; stars may exceed 1
         if method == "wavelet":
             try:
-                den = restoration.denoise_wavelet(
+                full = restoration.denoise_wavelet(
                     norm, channel_axis=-1, rescale_sigma=True,
                     method="BayesShrink", mode="soft")
+                # denoise_wavelet has no strength knob → blend toward it by strength.
+                den = norm + strength * (full - norm)
             except (ImportError, ValueError):
+                # Fallback only if PyWavelets is somehow missing. TV already bakes
+                # strength into its weight, so DON'T also blend (that double-applied
+                # strength and made the fallback differ from the explicit TV option).
                 den = restoration.denoise_tv_chambolle(
                     norm, weight=0.02 + 0.2 * strength, channel_axis=-1)
-            den = norm + strength * (den - norm)  # blend by strength
         elif method == "bilateral":
             # sigma_spatial is a full-res pixel extent; scale it down on the
             # preview proxy so the smoothing footprint matches the export.

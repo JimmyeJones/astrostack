@@ -86,6 +86,26 @@ def test_enum_params_carry_friendly_option_labels():
                     f"{s.id}.{p.key} option {opt!r} needs a friendly label"
 
 
+def test_wavelet_denoise_actually_runs_wavelet():
+    # PyWavelets must be installed so scikit-image's denoise_wavelet works —
+    # otherwise the default "Wavelet (recommended)" denoise silently fell back to
+    # a (mislabelled, double-strengthed) TV denoise. Guard both: the import works,
+    # and the wavelet method gives a genuinely different result from TV.
+    import importlib
+    assert importlib.util.find_spec("pywt") is not None, "PyWavelets must be a hard dep"
+    from skimage import restoration
+    norm = (np.random.default_rng(0).random((32, 32, 3)) * 0.3 + 0.1).astype("float32")
+    restoration.denoise_wavelet(norm, channel_axis=-1, rescale_sigma=True,
+                                method="BayesShrink", mode="soft")  # must not raise
+
+    op = get_op("detail.denoise")
+    base = np.clip(np.nan_to_num(_img(nan_band=0)), 0, 1)
+    wav = op.apply(base, {"method": "wavelet", "strength": 0.6}, EditContext())
+    tv = op.apply(base, {"method": "tv", "strength": 0.6}, EditContext())
+    assert not np.allclose(wav, base, atol=1e-4)      # it actually denoises
+    assert not np.allclose(wav, tv, atol=1e-4)        # wavelet ≠ the TV fallback
+
+
 def test_curves_identity_is_noop():
     img = _img()
     spec = get_op("tone.curves")
