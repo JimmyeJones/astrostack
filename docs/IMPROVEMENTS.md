@@ -160,6 +160,18 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Plain-language help on the jargon-heavy editor ops** — several detail/tone ops
+  spoke in astro-jargon a beginner can't decode ("Wavelet / bilateral / TV
+  denoise", "Unsharp mask", "Black/white point + gamma") and their sliders (denoise
+  method/strength, sharpen amount/radius, deconvolve iterations/PSF, hot-pixel σ,
+  levels black/white/gamma) carried *no* per-param help at all. Rewrote the op help
+  in plain language (what it does + when to use it) and added a one-line hint to
+  each of those sliders — surfaced automatically in the Add-operation menu and the
+  op param panel via the already-threaded `help` field. Also relabelled the
+  cryptic "PSF σ (px)" → "Blur width (px)" and "σ" → "Threshold (σ)". Metadata-only,
+  additive; a test asserts every op has help and the key detail/levels params now
+  carry hints. (v0.56.17, this run)
+
 - **Per-op "without this op" preview compare** — the editor's Compare button shows
   the whole recipe vs the raw base, but while tuning one op a user wants to see
   *just that op's* contribution. The selected op's panel now carries a "Without
