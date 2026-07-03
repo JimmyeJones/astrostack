@@ -142,6 +142,7 @@ export function StackView() {
   const recDarkId = sug?.dark_master_id ?? null;
   const recFlatId = sug?.flat_master_id ?? null;
   const recFlatDarkId = sug?.flat_dark_master_id ?? null;
+  const recBiasId = sug?.bias_master_id ?? null;
   // Badge the master matching `recId` (may differ per select — the light dark
   // and the flat-dark are both "dark" masters but recommended for different
   // exposures).
@@ -158,17 +159,22 @@ export function StackView() {
   const darkOpts = masterOpts("dark", recDarkId);
   const flatDarkOpts = masterOpts("dark", recFlatDarkId);
   const flatOpts = masterOpts("flat", recFlatId);
-  const biasOpts = masterOpts("bias", null);
+  const biasOpts = masterOpts("bias", recBiasId);
   const hasMasters = darkOpts.length > 0 || flatOpts.length > 0 || biasOpts.length > 0;
   // Show the "use recommended" hint only when there's a suggestion the user
   // hasn't already applied. The flat-dark is only relevant once a flat is set.
+  // A bias is only worth recommending for the lights when there's no dark to
+  // recommend — a dark already carries the bias, so the engine would ignore it.
+  const recBiasForLights = recBiasId !== null && recDarkId === null ? recBiasId : null;
   const canApplyRec = (recDarkId !== null && String(values.dark_master_id ?? "") !== String(recDarkId))
     || (recFlatId !== null && String(values.flat_master_id ?? "") !== String(recFlatId))
-    || (recFlatDarkId !== null && String(values.flat_dark_master_id ?? "") !== String(recFlatDarkId));
+    || (recFlatDarkId !== null && String(values.flat_dark_master_id ?? "") !== String(recFlatDarkId))
+    || (recBiasForLights !== null && String(values.bias_master_id ?? "") !== String(recBiasForLights));
   const applyRecommended = () => {
     if (recDarkId !== null) set("dark_master_id", String(recDarkId));
     if (recFlatId !== null) set("flat_master_id", String(recFlatId));
     if (recFlatDarkId !== null) set("flat_dark_master_id", String(recFlatDarkId));
+    if (recBiasForLights !== null) set("bias_master_id", String(recBiasForLights));
   };
   const asStr = (v: unknown) => (v === undefined || v === null ? null : String(v));
 

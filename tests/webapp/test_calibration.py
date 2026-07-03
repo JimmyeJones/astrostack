@@ -138,6 +138,25 @@ def test_recommend_masters_no_flat_dark_when_no_close_exposure():
     assert rec["flat_dark_master_id"] is None
 
 
+def test_recommend_masters_picks_bias_by_gain():
+    # Bias is exposure-independent (zero-second pedestal): matched on gain/temp
+    # like a flat. The gain-80 bias must win over the gain-200 one for 80-gain
+    # lights.
+    masters = [
+        {"id": 1, "kind": "bias", "exposure_s": 0.0, "gain": 80.0, "exists": True},
+        {"id": 2, "kind": "bias", "exposure_s": 0.0, "gain": 200.0, "exists": True},
+    ]
+    rec = calibration.recommend_masters(masters, exposure_s=30.0, gain=80.0)
+    assert rec["bias_master_id"] == 1
+    assert rec["scores"][1] > rec["scores"][2]
+
+
+def test_recommend_masters_no_bias_when_none_exist():
+    masters = [{"id": 1, "kind": "dark", "exposure_s": 30.0, "exists": True}]
+    rec = calibration.recommend_masters(masters, exposure_s=30.0)
+    assert rec["bias_master_id"] is None
+
+
 def test_recommend_masters_no_flat_dark_without_flat():
     # A dark but no flat → nothing to attach a flat-dark to.
     masters = [{"id": 1, "kind": "dark", "exposure_s": 2.0, "exists": True}]

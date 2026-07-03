@@ -57,7 +57,7 @@ describe("StackView", () => {
     ]);
     vi.spyOn(client.api, "calibrationSuggestions").mockResolvedValue({
       params: { exposure_s: 30, gain: 80, sensor_temp_c: null },
-      dark_master_id: 1, flat_master_id: null, flat_dark_master_id: null,
+      dark_master_id: 1, flat_master_id: null, flat_dark_master_id: null, bias_master_id: null,
       scores: { "1": 1, "2": 0.5 }, n_frames: 12,
     });
 
@@ -92,7 +92,7 @@ describe("StackView", () => {
     ]);
     vi.spyOn(client.api, "calibrationSuggestions").mockResolvedValue({
       params: { exposure_s: 30, gain: 80, sensor_temp_c: null },
-      dark_master_id: 1, flat_master_id: 3, flat_dark_master_id: 2,
+      dark_master_id: 1, flat_master_id: 3, flat_dark_master_id: 2, bias_master_id: null,
       scores: { "1": 1, "2": 0.2, "3": 1 }, n_frames: 12,
     });
 
@@ -127,7 +127,7 @@ describe("StackView", () => {
     // Applying a (deliberately) mismatched 120 s dark against 30 s subs.
     vi.spyOn(client.api, "calibrationSuggestions").mockResolvedValue({
       params: { exposure_s: 30, gain: 80, sensor_temp_c: null },
-      dark_master_id: 2, flat_master_id: null, flat_dark_master_id: null,
+      dark_master_id: 2, flat_master_id: null, flat_dark_master_id: null, bias_master_id: null,
       scores: { "1": 1, "2": 0.2 }, n_frames: 12,
     });
 
