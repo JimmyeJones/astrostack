@@ -231,7 +231,16 @@ def patch_frame(safe: str, frame_id: int, body: FramePatch, request: Request) ->
             patch["user_override"] = True
             patch["reject_reason"] = None if body.accept else (body.reject_reason or "user")
         if body.bayer_pattern is not None:
-            patch["bayer_pattern"] = body.bayer_pattern
+            # Validate before it lands in the DB — the stored pattern later gets
+            # embedded in the preview cache filename (frame_preview), so junk
+            # here would poison that path and break debayering.
+            bp = body.bayer_pattern.upper()
+            if bp not in _BAYER_PATTERNS:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Unknown bayer pattern: {body.bayer_pattern!r}",
+                )
+            patch["bayer_pattern"] = bp
         if patch:
             proj.update_frame(frame_id, **patch)
         out = _to_out(proj.get_frame(frame_id))
@@ -335,6 +344,11 @@ async def frame_preview(
         if not src or not Path(src).exists():
             raise HTTPException(status_code=404, detail="Frame file not found on disk")
         pattern = (bayer or f.bayer_pattern or "RGGB").upper()
+        if pattern not in _BAYER_PATTERNS:
+            # Defensive: a legacy/hand-edited DB row could hold a bad pattern.
+            # Fall back to the OSC default rather than emitting it into the
+            # cache filename or handing it to the debayer.
+            pattern = "RGGB"
         cache_dir = thumbs_dir(proj.project_dir)
         out = cache_dir / f"web_{frame_id:06d}_{size}_{pattern}_v{THUMB_VERSION}.png"
         src_path = Path(src)
