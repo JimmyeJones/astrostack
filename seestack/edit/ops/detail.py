@@ -142,7 +142,7 @@ register(OpSpec(
 
 register(OpSpec(
     id="detail.denoise", label="Noise reduction", group="detail", stage="linear",
-    apply=_denoise, proxy_safe=True,
+    apply=_denoise, proxy_safe=True, heavy=True,  # skimage restoration — slow on the proxy
     help="Smooth away background grain while keeping stars and detail. Tip: use the "
          "'From your image' button to set a strength from your own noise level.",
     params=[
@@ -172,7 +172,7 @@ register(OpSpec(
 
 register(OpSpec(
     id="detail.deconvolve", label="Deconvolution", group="detail", stage="linear",
-    apply=_deconvolve, proxy_safe=True,  # shows in the live preview (runs on the proxy)
+    apply=_deconvolve, proxy_safe=True, heavy=True,  # iterative Richardson-Lucy — slow on the proxy
     help="Recover sharpness lost to seeing by reversing the star blur. It's a heavy "
          "effect, so the live preview may take a moment to update while it's on.",
     params=[

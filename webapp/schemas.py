@@ -346,6 +346,7 @@ class EditOpOut(BaseModel):
     stage: str
     proxy_safe: bool
     is_stretch: bool
+    heavy: bool = False
     help: str | None = None
     params: list[StackOptionField]
 
@@ -367,6 +368,6 @@ def editor_ops_schema() -> list[EditOpOut]:
         out.append(EditOpOut(
             id=spec.id, label=spec.label, group=spec.group, stage=spec.stage,
             proxy_safe=spec.proxy_safe, is_stretch=spec.is_stretch,
-            help=spec.help, params=params,
+            heavy=spec.heavy, help=spec.help, params=params,
         ))
     return out

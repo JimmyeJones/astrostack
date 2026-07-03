@@ -22,6 +22,7 @@ import { autoSummarySentence } from "../components/editor/autoSummary";
 import { applyDataDrivenDefaults, countDataDrivenDefaults, type OpSuggestion }
   from "../components/editor/dataDrivenDefaults";
 import { previewScaleCaption } from "../components/editor/previewScale";
+import { previewDebounceMs } from "../components/editor/previewDebounce";
 import { coalesceFwhm, measuredContextText } from "../components/editor/measuredContext";
 import { OpParamPanel } from "../components/editor/OpParamPanel";
 import { PresetMenu } from "../components/editor/PresetMenu";
@@ -135,7 +136,12 @@ export function EditorView() {
       setAutoKey(null);
     }
   }, [recipeKey, autoKey]);
-  const [dKey] = useDebouncedValue(recipeKey, 250);
+  // Settle the live preview longer while an *enabled, expensive* op is in the
+  // pipeline (deconvolution, wavelet denoise), so dragging a slider re-renders
+  // only the value you land on instead of every intermediate frame through a
+  // slow op; light-only recipes keep the snappy short debounce.
+  const debounceMs = useMemo(() => previewDebounceMs(ops, specs), [ops, specs]);
+  const [dKey] = useDebouncedValue(recipeKey, debounceMs);
   const [bust, setBust] = useState(0);
   const dRecipe: Recipe = useMemo(() => {
     let parsed: OpInstance[] = [];

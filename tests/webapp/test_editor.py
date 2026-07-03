@@ -171,6 +171,12 @@ def test_ops_schema(client):
     # the curve param surfaces with the new "curve" type
     curves = next(o for o in ops if o["id"] == "tone.curves")
     assert curves["params"][0]["type"] == "curve"
+    # the `heavy` hint (drives the editor's adaptive preview debounce) is exposed:
+    # the iterative/restoration ops are heavy, the cheap tone ops are not.
+    heavy = {o["id"] for o in ops if o.get("heavy")}
+    assert {"detail.denoise", "detail.deconvolve"} <= heavy
+    assert "tone.saturation" not in heavy
+    assert "tone.stretch" not in heavy
 
 
 def test_recipe_round_trip_and_validation(client, solved_library):

@@ -53,17 +53,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
 
 ### Editor — make it excellent (PRIORITY 1) — new ideas
-- **Per-op debounce so heavy ops render fewer intermediate frames** — now that
-  superseded preview renders abort mid-flight (v0.57.13), the remaining lag while
-  dragging a *heavy* op's slider (deconvolution, wavelet denoise) is that each
-  debounced step still kicks a full proxy render. A light op (levels, saturation)
-  can afford the current 250 ms debounce, but a heavy one wants a longer settle so
-  only the value you land on renders. Make the editor's preview debounce adaptive:
-  key it off whether any *enabled, expensive* op is present (the ops already carry
-  enough in their spec — e.g. a `proxy_safe=false` or a new `heavy` hint — to
-  classify) and stretch it to ~600 ms in that case. Pure "pick a debounce" helper,
-  frontend-only, additive. Cuts wasted heavy renders without making light edits feel
-  sluggish. (S, editor/responsiveness)
 - **Show Auto's chosen data-driven values in the "What Auto-process did" note** —
   the dismissible note lists the ops Auto ran in plain language, but not the
   *values* it picked from your data (denoise strength, sharpen radius, saturation,
@@ -191,6 +180,19 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Adaptive live-preview debounce for heavy editor ops** — dragging a slider
+  while an expensive op (deconvolution, wavelet denoise) is in the pipeline still
+  kicked a full proxy render on every 250 ms debounce step, so several slow
+  intermediate frames rendered before the value you landed on. Ops now carry a
+  `heavy` spec hint (set on `detail.denoise` / `detail.deconvolve`, threaded to the
+  frontend via the ops schema), and a pure `previewDebounceMs(ops, specs)` helper
+  stretches the editor's preview debounce to 600 ms whenever an *enabled* heavy op
+  is present — so only the value you settle on renders — while light-only recipes
+  keep the snappy 250 ms. Vitest-covered (6 cases incl. disabled-op and
+  missing-`heavy` graceful degrade) + a backend assertion that the schema exposes
+  `heavy`. Additive/upgrade-safe (new optional field defaults false). (v0.57.17,
+  this run)
 
 - **Data-driven saturation in the one-click Auto recipe** — Auto's final
   saturation boost was a fixed `1.2` for every stack, but chroma noise scales with
