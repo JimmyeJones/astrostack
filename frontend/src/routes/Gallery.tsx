@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import {
   Alert, Badge, Button, Card, Center, Checkbox, Group, Image, Loader, Menu, Paper,
-  SimpleGrid, Spoiler, Stack, Text, TextInput, Title, Tooltip,
+  SegmentedControl, SimpleGrid, Spoiler, Stack, Text, TextInput, Title, Tooltip,
 } from "@mantine/core";
 import { IconCopy, IconPhoto, IconSearch, IconWand } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
@@ -13,6 +13,22 @@ import { HazyNightBadge } from "../components/HazyNightBadge";
 import { NoiseReadout, hasNoise } from "../components/NoiseBadge";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { QueryError } from "../components/QueryError";
+
+export type GallerySort = "newest" | "cleanest";
+
+// Order gallery items for display. "newest" preserves the API's timestamp-DESC
+// order; "cleanest" puts the lowest-noise stacks first (a global "show me my
+// cleanest results" across every target — the recorded σ is normalized to each
+// image's own signal range so it's comparable across gain/exposure), with runs
+// that carry no measured σ (pre-v0.48 or not computable) kept after, in their
+// original order. Pure and non-mutating so it's easy to test.
+export function sortGallery(items: GalleryItem[], sort: GallerySort): GalleryItem[] {
+  if (sort !== "cleanest") return items;
+  const measured = items.filter((it) => hasNoise(it.noise_sigma));
+  const rest = items.filter((it) => !hasNoise(it.noise_sigma));
+  measured.sort((a, b) => (a.noise_sigma as number) - (b.noise_sigma as number));
+  return [...measured, ...rest];
+}
 
 /** Format an option value for display (booleans → On/Off, round floats). */
 function fmt(v: unknown): string {
@@ -148,6 +164,7 @@ export function GalleryView() {
   const presets = useQuery({ queryKey: ["presets"], queryFn: api.listPresets });
   const [viewing, setViewing] = useState<GalleryItem | null>(null);
   const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<GallerySort>("newest");
   // Batch selection: key "safe:run_id" -> {safe, run_id}.
   const [selected, setSelected] = useState<Record<string, { safe: string; run_id: number }>>({});
   const selKey = (it: GalleryItem) => `${it.safe}:${it.run_id}`;
@@ -201,11 +218,16 @@ export function GalleryView() {
   // Free-text filter across the run's label (notes), target name and output
   // basename — so a user can find "best RGB v2" or "M42" across every target.
   const query = search.trim().toLowerCase();
-  const items = query
+  const filtered = query
     ? allItems.filter((it) =>
         [it.notes, it.target_name, it.output_basename]
           .some((s) => (s ?? "").toLowerCase().includes(query)))
     : allItems;
+  const items = sortGallery(filtered, sort);
+  // Only offer the Cleanest sort once it's a meaningful comparison: more than one
+  // image and at least one carries a measured σ (pre-v0.48 runs have none).
+  const anyNoise = allItems.some((it) => hasNoise(it.noise_sigma));
+  const showSort = allItems.length > 1 && anyNoise;
 
   return (
     <Stack>
@@ -218,13 +240,29 @@ export function GalleryView() {
       </Group>
 
       {allItems.length > 0 ? (
-        <TextInput
-          value={search}
-          onChange={(e) => setSearch(e.currentTarget.value)}
-          placeholder="Search by label, target or filename…"
-          leftSection={<IconSearch size={16} />}
-          maw={420}
-        />
+        <Group justify="space-between" wrap="wrap" gap="xs">
+          <TextInput
+            value={search}
+            onChange={(e) => setSearch(e.currentTarget.value)}
+            placeholder="Search by label, target or filename…"
+            leftSection={<IconSearch size={16} />}
+            maw={420}
+            style={{ flex: 1, minWidth: 220 }}
+          />
+          {showSort ? (
+            <Tooltip label="Cleanest sorts by lowest background noise across every target — the σ is normalized so it's comparable between images.">
+              <SegmentedControl
+                size="xs"
+                value={sort}
+                onChange={(v) => setSort(v as GallerySort)}
+                data={[
+                  { label: "Newest", value: "newest" },
+                  { label: "Cleanest", value: "cleanest" },
+                ]}
+              />
+            </Tooltip>
+          ) : null}
+        </Group>
       ) : null}
 
       {selItems.length ? (

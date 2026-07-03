@@ -69,11 +69,6 @@ _(none — claim an item here with your branch name)_
 ### Features that serve real workflows
 - Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
-- **Sort the Gallery by noise σ ("cleanest first")** — the History page now has
-  a Newest/Cleanest sort (v0.49.0); extend the same to the Gallery, where runs
-  span all targets, so the sort is a global "show me my cleanest results". Reuses
-  the recorded `noise_sigma`; the Gallery already has a search box to hang a sort
-  control next to. (S, approachability)
 - **Noise-improvement readout vs the previous stack** — on the History page,
   show each run's noise σ as a delta against the same target's prior run
   ("−18% noise vs your last stack"), so a user tuning settings/adding subs sees
@@ -121,6 +116,14 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Newest/Cleanest sort on the Gallery** — extends the History-page noise sort
+  (v0.49.0) to the Gallery, where runs span every target: a `SegmentedControl`
+  (shown only with >1 image and at least one measured σ) reorders cards by
+  ascending `noise_sigma`, keeping unmeasured (pre-v0.48) runs last — a global
+  "show me my cleanest results" that reuses the recorded σ (normalized so it's
+  comparable across gain/exposure). Pure `sortGallery` helper; frontend-only,
+  additive. (v0.49.1, this run)
 
 - **Newest/Cleanest sort on the History page** — completes the noise series: the
   History view gained a Newest/Cleanest `SegmentedControl` (shown only with >1 run
