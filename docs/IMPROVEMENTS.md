@@ -74,6 +74,20 @@ _(none — claim an item here with your branch name)_
 
 ### Features that serve real workflows
 - Annotated sky overlay (label detected objects / show solved field). (M)
+- **"You have calibration masters but aren't using them" nudge on the Stack
+  form** — a beginner often stacks uncalibrated even though the library holds a
+  matching master. The Stack form already calls `calibration-suggestions`
+  (`recommend_masters`); when it returns a recommended dark/flat/bias and the
+  form's selectors are all empty, show a friendly advisory ("You have a matching
+  master dark + flat — calibrating removes amp glow / dust shadows. [Use
+  recommended]") reusing the existing one-click. Advisory only, within-target,
+  frontend-only. Complements the recommender + the new calstat chip (which shows
+  *after* the fact). (S–M, approachability)
+- **Calibration-status filter chip on the Gallery** — now that `calstat` is on
+  each card and searchable (v0.55.2), a one-click "Calibrated / Uncalibrated"
+  `SegmentedControl` (shown only when the set is mixed) would let a user isolate
+  their uncalibrated stacks worth re-running, without typing. Pure filter helper,
+  frontend-only. (S, approachability)
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
