@@ -159,6 +159,18 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Sharpen-radius-from-stars suggestion** — the editor's Sharpen op made the user
+  hand-guess a radius, when the natural detail scale to enhance is the star's own
+  blur, which QC already measures. A new `GET …/editor/sharpen-suggestion` endpoint
+  converts the target's median star FWHM to a Gaussian σ (the same
+  `FWHM/2·√(2·ln2)` the deconvolution PSF button uses), clamped to the op's
+  0.5–10 slider range and rounded to its 0.5 step, and the Sharpen op's param panel
+  offers a one-click "From your stars (radius X, FWHM Ypx)" button — mirroring the
+  PSF-from-stars and denoise-from-image buttons. Also folds in a small polish: the
+  editor's zoom lightbox title now carries the "preview is downscaled" note, since
+  zoom is exactly where the proxy resolution surprises users. Backend tested
+  (median/clamp/none cases); additive/upgrade-safe. (v0.57.4, this run)
+
 - **Data-driven denoise strength in the one-click Auto recipe** — when Auto-process
   decides a stack is noisy it added a wavelet denoise at a *fixed* `strength=0.5`,
   the same for a barely-grainy stack and a very noisy one. It now scales that

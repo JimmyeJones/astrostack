@@ -68,6 +68,13 @@ export function EditorView() {
     queryFn: () => api.denoiseSuggestion(safe, rid),
     staleTime: 60_000,
   });
+  // Data-driven default for the sharpen radius: the target's median star FWHM
+  // converted to a Gaussian σ (the natural detail scale), offered as a button.
+  const sharpen = useQuery({
+    queryKey: ["sharpen-suggestion", safe],
+    queryFn: () => api.sharpenSuggestion(safe),
+    staleTime: 60_000,
+  });
 
   const { state: ops, set: setOps, reset: resetOps, undo, redo, canUndo, canRedo } =
     useUndoable<OpInstance[]>([]);
@@ -585,7 +592,14 @@ export function EditorView() {
                             label: `From your image (strength ${denoise.data.strength})`,
                           },
                         }
-                        : undefined
+                        : selectedOp.id === "detail.sharpen" && sharpen.data?.radius != null
+                          ? {
+                            radius: {
+                              value: sharpen.data.radius,
+                              label: `From your stars (radius ${sharpen.data.radius}, FWHM ${sharpen.data.fwhm_px}px)`,
+                            },
+                          }
+                          : undefined
                   } />
               </Paper>
             ) : null}
@@ -617,7 +631,9 @@ export function EditorView() {
       </Grid>
 
       <ImageLightbox src={lightbox ? (shownSrc ?? null) : null}
-        title={`${safe} — ${showBase ? "original" : "edited"}`} onClose={() => setLightbox(false)} />
+        title={`${safe} — ${showBase ? "original" : "edited"}`
+          + (previewScaleCaption(hist.data) ? ` · ${previewScaleCaption(hist.data)}` : "")}
+        onClose={() => setLightbox(false)} />
     </Stack>
   );
 }

@@ -369,6 +369,11 @@ export interface DenoiseSuggestion {
   strength: number | null;
 }
 
+export interface SharpenSuggestion {
+  fwhm_px: number | null;
+  radius: number | null;
+}
+
 export interface CalibrationMaster {
   id: number;
   name: string;
@@ -581,6 +586,8 @@ export const api = {
   editorOps: () => req<EditOp[]>("/api/editor/ops/schema"),
   psfSuggestion: (safe: string) =>
     req<PsfSuggestion>(`/api/targets/${safe}/editor/psf-suggestion`),
+  sharpenSuggestion: (safe: string) =>
+    req<SharpenSuggestion>(`/api/targets/${safe}/editor/sharpen-suggestion`),
   denoiseSuggestion: (safe: string, runId: number) =>
     req<DenoiseSuggestion>(`/api/targets/${safe}/stack-runs/${runId}/editor/denoise-suggestion`),
   getRecipe: (safe: string, runId: number) =>
