@@ -389,6 +389,9 @@ export interface LevelsSuggestion {
    * useful suggestion (too few finite pixels / a near-empty range). */
   black: number | null;
   white: number | null;
+  /** Optional midtone (gamma) lift that lands the typical tone at a pleasant grey
+   * after the black/white points; null when no meaningful lift exists. */
+  gamma?: number | null;
 }
 
 export interface TrimSuggestion {

@@ -153,6 +153,8 @@ register(OpSpec(
     params=[
         EditParam("method", "Method", "enum", default="wavelet",
                   options=["wavelet", "tv", "bilateral"],
+                  option_labels={"wavelet": "Wavelet (recommended)",
+                                 "tv": "Total-variation", "bilateral": "Bilateral"},
                   help="Wavelet suits most stacks; TV and bilateral are alternatives "
                        "worth trying on heavier noise."),
         EditParam("strength", "Strength", "float", default=0.5, min=0.0, max=1.0, step=0.05,

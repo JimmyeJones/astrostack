@@ -213,6 +213,9 @@ def test_levels_suggestion_from_image(client, solved_library):
     body = r.json()
     assert body["black"] is not None and body["white"] is not None
     assert 0.0 <= body["black"] < body["white"] <= 1.0
+    # The payload carries the optional midtone gamma field (a float lift or null).
+    assert "gamma" in body
+    assert body["gamma"] is None or (0.1 <= body["gamma"] <= 5.0)
 
 
 def test_levels_suggestion_unknown_uid_falls_back(client, solved_library):

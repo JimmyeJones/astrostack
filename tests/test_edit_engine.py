@@ -72,6 +72,20 @@ def test_ops_and_key_params_carry_plain_help():
             assert p.help, f"{s.id}.{p.key} needs plain-language help"
 
 
+def test_enum_params_carry_friendly_option_labels():
+    # Every enum control shows friendly display names for *all* its raw option
+    # values (e.g. "Wavelet (recommended)" not "wavelet"), so no dropdown exposes a
+    # bare engine id — an invariant so a future enum op can't ship jargon options.
+    for s in all_specs():
+        for p in s.params:
+            if p.type != "enum":
+                continue
+            assert p.option_labels, f"{s.id}.{p.key} enum needs friendly option_labels"
+            for opt in p.options or []:
+                assert p.option_labels.get(opt), \
+                    f"{s.id}.{p.key} option {opt!r} needs a friendly label"
+
+
 def test_curves_identity_is_noop():
     img = _img()
     spec = get_op("tone.curves")

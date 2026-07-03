@@ -16,6 +16,7 @@ import { api, type EditOp, type OpInstance, type Recipe } from "../api/client";
 import { useUndoable } from "../hooks/useUndoable";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { Histogram } from "../components/editor/Histogram";
+import { levelsHistGuides } from "../components/editor/levelsGuides";
 import { OpList } from "../components/editor/OpList";
 import { degenerateLevelsUids, extraEnabledStretchUids, hasEnabledStretch, insertOnCorrectSide, moveToCorrectSide }
   from "../components/editor/stageConflicts";
@@ -746,7 +747,16 @@ export function EditorView() {
                   disabled={!shownSrc} onClick={() => setLightbox(true)}>Zoom</Button>
               </Group>
             </div>
-            <Histogram data={hist.data} />
+            <Histogram data={hist.data}
+              guides={levelsHistGuides(selectedOp,
+                levels.data?.black != null && levels.data?.white != null
+                  ? { black: levels.data.black, white: levels.data.white } : null)} />
+            {selectedOp?.id === "tone.levels" ? (
+              <Text size="xs" c="dimmed" mt={4}>
+                <b>B</b>/<b>W</b> mark your black &amp; white points on the histogram
+                {levels.data?.black != null ? "; the dashed blue lines are the suggested points" : ""}.
+              </Text>
+            ) : null}
             {previewScaleCaption(hist.data) ? (
               <Text size="xs" c="dimmed" mt={4}>
                 {previewScaleCaption(hist.data)}
@@ -910,22 +920,47 @@ export function EditorView() {
               <Paper withBorder p="sm">
                 <Group justify="space-between" wrap="nowrap" mb={6}>
                   <Text fw={600} size="sm">{specs[selectedOp.id].label}</Text>
-                  {selectedOp.enabled ? (
-                    <Tooltip
-                      label="Preview the image with only this op bypassed, to see just its effect"
-                      multiline w={220} withArrow>
-                      <Button size="compact-xs"
-                        variant={soloActive ? "filled" : "default"} color="grape"
-                        loading={soloActive && withoutOpPreview.isLoading}
-                        disabled={!preview.data}
-                        onClick={() => setSoloExclude((s) => {
-                          if (!s) { setShowBase(false); setShowMask(false); setShowCoverage(false); }
-                          return !s;
-                        })}>
-                        {soloActive ? "Showing without" : "Without this op"}
-                      </Button>
-                    </Tooltip>
-                  ) : null}
+                  <Group gap="xs" wrap="nowrap">
+                    {/* One-click "Auto levels" sets the black and white points
+                        (and the midtone gamma, when a lift is suggested) from the
+                        image's own histogram at once, so the common case is a
+                        single click (the per-param "From your image" buttons stay
+                        for fine control). */}
+                    {selectedOp.id === "tone.levels"
+                      && levels.data?.black != null && levels.data?.white != null ? (
+                      <Tooltip
+                        label={"Set the black and white points"
+                          + (levels.data.gamma != null ? " and midtone brightness" : "")
+                          + " from this image's histogram"}
+                        multiline w={220} withArrow>
+                        <Button size="compact-xs" variant="light" color="blue"
+                          onClick={() => setParams(selectedOp.uid, {
+                            ...selectedOp.params,
+                            black: levels.data!.black,
+                            white: levels.data!.white,
+                            ...(levels.data!.gamma != null ? { gamma: levels.data!.gamma } : {}),
+                          })}>
+                          Auto levels ({levels.data.black}–{levels.data.white})
+                        </Button>
+                      </Tooltip>
+                    ) : null}
+                    {selectedOp.enabled ? (
+                      <Tooltip
+                        label="Preview the image with only this op bypassed, to see just its effect"
+                        multiline w={220} withArrow>
+                        <Button size="compact-xs"
+                          variant={soloActive ? "filled" : "default"} color="grape"
+                          loading={soloActive && withoutOpPreview.isLoading}
+                          disabled={!preview.data}
+                          onClick={() => setSoloExclude((s) => {
+                            if (!s) { setShowBase(false); setShowMask(false); setShowCoverage(false); }
+                            return !s;
+                          })}>
+                          {soloActive ? "Showing without" : "Without this op"}
+                        </Button>
+                      </Tooltip>
+                    ) : null}
+                  </Group>
                 </Group>
                 {specs[selectedOp.id].help ? (
                   <Text size="xs" c="dimmed" mb="xs">{specs[selectedOp.id].help}</Text>
@@ -997,6 +1032,14 @@ export function EditorView() {
                                   value: levels.data.white,
                                   label: `From your image (white ${levels.data.white})`,
                                 },
+                                // A midtone lift is only suggested when one meaningfully
+                                // helps, so the gamma button appears conditionally.
+                                ...(levels.data.gamma != null ? {
+                                  gamma: {
+                                    value: levels.data.gamma,
+                                    label: `From your image (midtones ${levels.data.gamma})`,
+                                  },
+                                } : {}),
                               }
                               : undefined
                   } />

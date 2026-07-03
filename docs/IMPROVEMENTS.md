@@ -51,21 +51,6 @@ problems. Dogfood it every big-picture run and fix root causes.
 - **Editor bug hunt (ongoing)** — there are undocumented issues. Each big-picture
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
-- **Single-click combined "Auto levels" on the Levels op** — the new data-driven
-  Levels buttons (v0.62.0) are per-point: a beginner must click *two* buttons (black,
-  then white) to auto-level. Add one "Auto levels" button (on the op panel header,
-  next to the per-param buttons) that applies *both* suggested points at once from the
-  same `levels-suggestion` payload, so the common case is one click. The per-param
-  buttons stay for fine control. Reuses the existing endpoint + `setParams`; a pure
-  helper sets `{black, white}` together; frontend-only, additive. (S, autonomy/editor)
-- **Show the Levels black/white points as guides on the op's histogram** — the Levels
-  op panel already renders the image histogram, but the black/white points a user is
-  setting (and the data-driven suggestion) are invisible on it, so it's hard to see
-  *where* on the tonal range they land. Overlay two vertical guide lines on the
-  panel histogram at the current `black`/`white` (and a faint marker at the suggested
-  values), so the beginner can see the points relative to the sky peak and the
-  highlights they're clipping. Reuses the histogram already in the panel; frontend-
-  only, additive, advisory. (S–M, editor/trust)
 - **Coverage overlay should follow the recipe's geometry ops** — the coverage-map
   overlay renders the run's *raw* full-frame coverage sibling, so once a crop/rotate/
   resize op is in the recipe it no longer lines up with the reshaped preview
@@ -102,6 +87,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   user saw), accepting that it's the ≤1024 px preview rather than the ≤1500 px editor
   proxy. Care: it's a behaviour change to Compare, so gate/validate the resolution
   swap doesn't jar the A/B. (S, editor/trust)
+- **Guide lines on the histogram for the Stretch/clipping too** — the new
+  `Histogram` `guides` prop (v0.65.0) draws the Levels black/white points; the same
+  mechanism could mark the pure-black (0) and pure-white (1) clipping edges whenever
+  the clipping caption fires, and the Curves op's endpoint handles, so *every* tonal
+  control shows where it lands on the graph. Small, reuses the guides prop;
+  frontend-only, advisory. (S, editor/trust)
 ### Autonomy — "just works" (PRIORITY 2)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
@@ -217,6 +208,53 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Data-driven midtone (gamma) point for the Levels op** — the Levels suggestion
+  (v0.62.0) + "Auto levels" (v0.64.0) set the black/white points from the histogram
+  but left the **gamma** (midtone) slider — the control that most affects perceived
+  brightness — at 1.0 for a beginner to hand-guess. A new pure
+  `suggest_levels_gamma` helper solves `x_m**(1/γ)=target` for the image's median
+  tone after the black/white remap (lands the typical tone at a pleasant 0.25 grey),
+  returned as an optional `gamma` on the `levels-suggestion` payload. "Auto levels"
+  now applies all three at once and a "From your image (midtones …)" per-param button
+  appears on the gamma slider (only when a meaningful lift exists). NaN-aware,
+  clamped to the op's 0.1–5.0 range, `None` when the median already sits at/above
+  target or the range is degenerate. Engine + endpoint + frontend; additive/
+  upgrade-safe (older clients ignore the new field). Tested: engine helper (5 cases:
+  dark-median lift lands near target / bright-median no-lift / degenerate range /
+  too-few-pixels / clamp+round), webapp (payload carries `gamma`), Vitest (one Auto
+  levels click leaves all three per-param buttons ✓/disabled). (v0.66.0, this run)
+
+- **Friendly labels on the last jargon-bare editor dropdown (denoise Method)** — the
+  Noise-reduction op's Method enum was the only editor dropdown still showing raw
+  engine ids ("wavelet" / "tv" / "bilateral"); every other enum already had friendly
+  `option_labels`. Added them ("Wavelet (recommended)" / "Total-variation" /
+  "Bilateral"), surfaced automatically in the op panel via the descriptor. Also added
+  a drift-guard test asserting *every* editor enum param carries friendly labels for
+  *all* its options, so a future enum op can't ship bare ids. Metadata + test only,
+  additive. (v0.65.1, this run)
+
+- **Show the Levels black/white points as guides on the histogram** — while setting
+  the Levels op's black/white points a beginner couldn't see *where* on the tonal
+  range they land (relative to the sky peak / the highlights they clip). When a
+  `tone.levels` op is selected, the editor histogram now overlays two solid vertical
+  guides ("B"/"W") at the current black/white points, plus faint dashed blue markers
+  at the data-driven suggestion (only where it differs from the current value), with
+  a one-line caption explaining them. Pure, testable `levelsHistGuides` helper drives
+  it; the `Histogram` component grew an optional `guides` prop. Frontend-only,
+  additive, advisory. Vitest: helper (5 cases: none/non-Levels/current-only/
+  suggestion-diff/both-diff) + an Editor test that the caption appears only once the
+  Levels op is selected. (v0.65.0, this run)
+
+- **Single-click "Auto levels" on the Levels op** — the data-driven Levels buttons
+  (v0.62.0) were per-point, so auto-levelling a beginner's image took *two* clicks
+  (black, then white). The Levels op-panel header now shows one "Auto levels
+  (black–white)" button that applies *both* suggested points at once, from the same
+  already-fetched `levels-suggestion` payload — so the common case is a single
+  click. The per-param "From your image" buttons stay for fine control (and read as
+  already-applied ✓ once Auto levels sets them). Frontend-only, additive; reuses the
+  existing endpoint + `setParams`. Vitest: one click leaves both per-param buttons
+  disabled/✓ (proving black *and* white were set together). (v0.64.0, this run)
 
 - **Editor: accurate data-driven value labels (Levels buttons + Auto's crossfaded
   sharpen strength)** — two small honesty fixes on data-driven readouts. (1) The new
