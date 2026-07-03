@@ -52,6 +52,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
 
 ### Editor — make it excellent (PRIORITY 1) — new ideas
+- **Per-op "Reset to defaults" button** — while tuning an op a beginner drags
+  several sliders, dislikes the result, and has no quick way back to the sensible
+  starting point short of removing and re-adding the op (which loses its position).
+  Add a small "Reset" affordance in the selected-op param panel that restores every
+  param to its spec `default` (the values `newOp` seeds). Pure and frontend-only —
+  the ops schema already carries each param's default; reuses `setParams`. (S, editor)
+- **Explain what Auto-process did** — after Auto-process builds a recipe the user
+  sees a pipeline of op names but no sense of *why* those ops or what changed, so
+  the auto result is a black box they can't trust or learn from. Show a one-line
+  plain-language summary derived from the resulting ops + registry labels
+  ("Flattened the background, balanced colour, applied a natural stretch, removed
+  the green cast, lifted saturation, sharpened") in a dismissible note after Auto
+  runs. Builds trust in the one-click path and teaches the recommended order.
+  Reuses the ops schema labels; frontend-only, additive. (S, editor/friendliness)
 
 ### Autonomy — "just works" (PRIORITY 2)
 - **One-click "process this target"** — after ingest, reach a good stack *and* a
