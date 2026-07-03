@@ -77,14 +77,6 @@ _(none — claim an item here with your branch name)_
 
 ### Features that serve real workflows
 - Annotated sky overlay (label detected objects / show solved field). (M)
-- **"Compare with…" entry point on the History page** — the compare view
-  (v0.51.0) is currently reachable only from the Gallery's multi-select, but the
-  *most common* comparison is two stacks of the **same target** (did adding subs
-  / changing κ / turning on quality-weighting actually help?). The History page
-  already lists exactly those runs. Add a lightweight per-card "Compare" action
-  (e.g. "compare with the previous run", or a pick-two mode) that deep-links into
-  the existing `/compare?a=…&b=…` route via the shipped `compareHref` helper — no
-  backend, reuses everything. (S, approachability)
 - **Per-target noise-σ trend sparkline** — the History page shows each run's
   noise σ and its delta vs the previous run; a tiny time-series sparkline of a
   target's stack σ across all its runs would let a user see the *trajectory*
@@ -132,6 +124,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **"Compare with previous run" action on the History page** — the Compare view
+  (v0.51.0) was reachable only from the Gallery's multi-select, but the most
+  common comparison is two stacks of the *same* target ("did adding subs /
+  changing κ actually help?"). Each History card (all but the oldest run) now
+  carries a grape "Compare" button that deep-links into the existing
+  `/compare?a=…&b=…` route against the chronologically previous run — the
+  Compare view resolves both refs from the gallery, so no backend change. Pure
+  `previousRunId` (walks the newest-first list, null for the oldest/unknown) and
+  `historyCompareHref` helpers, tested; frontend-only, additive. (v0.52.0, this run)
 
 - **"Which stack is cleaner" verdict in the Compare view** — when both compared
   stacks carry a measured noise σ, the Compare page now shows a plain-language

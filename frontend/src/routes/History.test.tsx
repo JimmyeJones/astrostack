@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { HistoryView, sortRuns, noiseDeltas } from "./History";
+import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref } from "./History";
 import { formatIntegration } from "../format";
 import * as client from "../api/client";
 import type { StackRun } from "../api/client";
@@ -113,6 +113,25 @@ describe("HistoryView", () => {
     renderHistory();
     // 2520 s → "42 min" on the card metadata line, no Info toggle needed.
     await waitFor(() => expect(screen.getByText(/42 min/)).toBeInTheDocument());
+  });
+
+  it("offers Compare linking to the previous run on all but the oldest card", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ id: 3, output_basename: "newest_run" }),
+      mkRun({ id: 2, output_basename: "middle_run" }),
+      mkRun({ id: 1, output_basename: "oldest_run" }),
+    ]);
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("newest_run")).toBeInTheDocument());
+
+    // The oldest run has no earlier run to compare against, so 2 of 3 cards
+    // carry a Compare link, each pointing at the chronologically previous run.
+    const links = screen.getAllByRole("link", { name: /Compare/ });
+    expect(links).toHaveLength(2);
+    const hrefs = links.map((l) => l.getAttribute("href"));
+    expect(hrefs).toContain("/compare?a=M_42:3&b=M_42:2");
+    expect(hrefs).toContain("/compare?a=M_42:2&b=M_42:1");
   });
 
   it("offers Reuse settings only for reusable runs", async () => {
@@ -246,6 +265,25 @@ describe("noiseDeltas", () => {
     const runs = [mkRun({ id: 2, noise_sigma: 0.03 }), mkRun({ id: 1, noise_sigma: 0 })];
     // A prior σ of 0 would divide-by-zero, so no delta is produced.
     expect(noiseDeltas(runs).has(2)).toBe(false);
+  });
+});
+
+describe("previousRunId", () => {
+  it("returns the next-older run in a newest-first list", () => {
+    const runs = [mkRun({ id: 3 }), mkRun({ id: 2 }), mkRun({ id: 1 })];
+    expect(previousRunId(runs, 3)).toBe(2);
+    expect(previousRunId(runs, 2)).toBe(1);
+  });
+  it("returns null for the oldest run and for an unknown id", () => {
+    const runs = [mkRun({ id: 3 }), mkRun({ id: 1 })];
+    expect(previousRunId(runs, 1)).toBeNull();
+    expect(previousRunId(runs, 99)).toBeNull();
+  });
+});
+
+describe("historyCompareHref", () => {
+  it("builds a same-target /compare URL", () => {
+    expect(historyCompareHref("M_42", 7, 3)).toBe("/compare?a=M_42:7&b=M_42:3");
   });
 });
 

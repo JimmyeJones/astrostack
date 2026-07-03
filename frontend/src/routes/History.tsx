@@ -5,7 +5,7 @@ import {
 } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
-import { IconAdjustments, IconCheck, IconCopy, IconDeviceFloppy, IconDownload, IconInfoCircle, IconPencil, IconSparkles, IconTrash, IconX } from "@tabler/icons-react";
+import { IconAdjustments, IconCheck, IconCopy, IconDeviceFloppy, IconDownload, IconGitCompare, IconInfoCircle, IconPencil, IconSparkles, IconTrash, IconX } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api, type StackRun } from "../api/client";
@@ -45,6 +45,25 @@ export function noiseDeltas(runs: StackRun[]): Map<number, number> {
     prev = sigma;
   }
   return deltas;
+}
+
+// Given the API's timestamp-DESC run list, return the id of the run that
+// immediately *precedes* `id` in time (the next-older stack of this target) —
+// the most common thing a user wants to compare against ("did adding subs /
+// changing κ actually help vs my last run?"). The previous run is the next
+// index in a newest-first list. Null when `id` is the oldest run or not found.
+// Pure/non-mutating so it's easy to test.
+export function previousRunId(runs: StackRun[], id: number): number | null {
+  const idx = runs.findIndex((r) => r.id === id);
+  if (idx < 0 || idx + 1 >= runs.length) return null;
+  return runs[idx + 1].id;
+}
+
+// Build the bookmarkable /compare URL for two runs of the *same* target. The
+// Compare view resolves each "<safe>:<run_id>" ref against the gallery (which
+// carries every run), so a same-target link works with no backend change.
+export function historyCompareHref(safe: string, aId: number, bId: number): string {
+  return `/compare?a=${safe}:${aId}&b=${safe}:${bId}`;
 }
 
 function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
@@ -164,9 +183,9 @@ function NotesEditor({ safe, run }: { safe: string; run: StackRun }) {
 const DEFAULT_STRETCH = 0.5;
 const DEFAULT_BLACK = 0.35;
 
-function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta }: {
+function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compareToId }: {
   safe: string; run: StackRun; onDelete: () => void; deleting?: boolean;
-  isCleanest?: boolean; noiseDelta?: number;
+  isCleanest?: boolean; noiseDelta?: number; compareToId?: number | null;
 }) {
   const qc = useQueryClient();
   const [adjust, setAdjust] = useState(false);
@@ -281,6 +300,16 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta }: {
                 component={Link} to={`/targets/${safe}/stack?from=${run.id}`}
               >
                 Reuse settings
+              </Button>
+            </Tooltip>
+          )}
+          {typeof compareToId === "number" && (
+            <Tooltip label="Compare this stack side-by-side with your previous run of this target">
+              <Button
+                size="xs" variant="light" color="grape" leftSection={<IconGitCompare size={14} />}
+                component={Link} to={historyCompareHref(safe, run.id, compareToId)}
+              >
+                Compare
               </Button>
             </Tooltip>
           )}
@@ -418,7 +447,8 @@ export function HistoryView() {
               onDelete={() => del.mutate(r.id)}
               deleting={del.isPending && del.variables === r.id}
               isCleanest={r.id === cleanestId}
-              noiseDelta={deltas.get(r.id)} />
+              noiseDelta={deltas.get(r.id)}
+              compareToId={previousRunId(list, r.id)} />
           ))}
         </SimpleGrid>
       )}
