@@ -633,6 +633,28 @@ def test_export_png_full_res_download(client, solved_library):
     assert img.size == (100, 80)
 
 
+def test_export_png_reports_failed_ops_in_result(client, solved_library, monkeypatch):
+    """The full-res PNG render (the download path) threads a dropped op's failure
+    into its job result (op_errors) too, so the editor can warn on download."""
+    from seestack.edit.registry import get_op
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe)
+
+    def boom(*_a, **_k):
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr(get_op("tone.saturation"), "apply", boom)
+    recipe = {"ops": [{"id": "tone.stretch", "params": {}},
+                      {"id": "tone.saturation", "params": {"amount": 1.2}}]}
+    r = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/export-png",
+                    json={"recipe": recipe})
+    assert r.status_code == 200
+    job = _wait_job(client, r.json()["job_id"])
+    assert job["state"] == "done", job
+    assert any("kaboom" in e for e in job["result"]["op_errors"])
+
+
 def test_histogram_reports_op_errors(client, solved_library, monkeypatch):
     from seestack.edit.registry import get_op
 

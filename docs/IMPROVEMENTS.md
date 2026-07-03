@@ -196,6 +196,12 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Test the PNG-render path also surfaces failed ops** — coverage follow-up to the
+  v0.61.11 export-error surfacing: added a webapp test that a full-res PNG render
+  (the download path, `submit_editor_png`) with a monkeypatched-to-fail op reports
+  the failure in its job `op_errors`, matching the export-run path already covered.
+  Test-only. (v0.61.14, this run)
+
 - **Warn about a degenerate Levels op (empty black↔white range)** — companion to
   the v0.61.12 engine guard: since a Levels op with `white ≤ black` is now silently
   treated as identity, the pipeline panel shows an orange advisory ("A Levels op has
