@@ -15,7 +15,10 @@ function toOps(preset: Preset): OpInstance[] {
 
 export function PresetMenu({ currentOps, onApply }: {
   currentOps: OpInstance[];
-  onApply: (ops: OpInstance[]) => void;
+  /** Apply a preset's ops. `source` lets the caller treat built-in presets
+   * (which carry generic default sizes) differently from user presets (which the
+   * user tuned deliberately) — e.g. seed built-in sizes from the target's data. */
+  onApply: (ops: OpInstance[], source: "builtin" | "user") => void;
 }) {
   const qc = useQueryClient();
   const presets = useQuery({ queryKey: ["presets"], queryFn: api.listPresets });
@@ -41,12 +44,12 @@ export function PresetMenu({ currentOps, onApply }: {
   const user = presets.data?.user ?? [];
 
   // Applying a preset replaces the whole pipeline — confirm if that throws away work.
-  const applyPreset = (p: Preset) => {
+  const applyPreset = (p: Preset, source: "builtin" | "user") => {
     if (currentOps.length && !window.confirm(
       `Apply "${p.label}"? This replaces your current ${currentOps.length}-operation pipeline.`)) {
       return;
     }
-    onApply(toOps(p));
+    onApply(toOps(p), source);
   };
 
   return (
@@ -59,11 +62,11 @@ export function PresetMenu({ currentOps, onApply }: {
         <Menu.Dropdown>
           <Menu.Label>Built-in</Menu.Label>
           {builtin.map((p) => (
-            <Menu.Item key={p.id} onClick={() => applyPreset(p)}>{p.label}</Menu.Item>
+            <Menu.Item key={p.id} onClick={() => applyPreset(p, "builtin")}>{p.label}</Menu.Item>
           ))}
           {user.length ? <Menu.Label>My presets</Menu.Label> : null}
           {user.map((p) => (
-            <Menu.Item key={p.id} onClick={() => applyPreset(p)}
+            <Menu.Item key={p.id} onClick={() => applyPreset(p, "user")}
               rightSection={
                 <ActionIcon size="xs" variant="subtle" color="red" component="div"
                   aria-label={`Delete preset ${p.label}`}

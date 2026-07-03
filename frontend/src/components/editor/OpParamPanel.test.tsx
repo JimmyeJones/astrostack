@@ -45,6 +45,19 @@ describe("OpParamPanel", () => {
     expect(onChange).toHaveBeenCalledWith({ amount: 2.2 });
   });
 
+  it("dims the suggestion button when the param already matches the suggestion", () => {
+    const onChange = vi.fn();
+    wrap(
+      <OpParamPanel
+        spec={SPEC} params={{ amount: 2.2 }} onChange={onChange}
+        suggestions={{ amount: { value: 2.2, label: "From your data (2.2)" } }}
+      />,
+    );
+    const btn = screen.getByLabelText("Set Amount from your data");
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveTextContent("✓ From your data (2.2)");
+  });
+
   it("omits the suggestion button when no suggestion is given for a param", () => {
     wrap(<OpParamPanel spec={SPEC} params={{ amount: 1.5 }} onChange={() => {}} />);
     expect(screen.queryByLabelText("Set Amount from your data")).not.toBeInTheDocument();

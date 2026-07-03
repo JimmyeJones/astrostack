@@ -4,6 +4,7 @@ import type { EditOp, Histogram, StackOptionField } from "../../api/client";
 import { dependencyMet } from "../../api/depends";
 import { HintLabel, StackOptionControl } from "../StackOptionControl";
 import { CurvesWidget } from "./CurvesWidget";
+import { matchesSuggestion } from "./suggestionMatch";
 
 /** Renders the parameter form for one operation instance. Scalars use the shared
  * StackOptionControl (as sliders here), curves use the CurvesWidget (with the
@@ -51,6 +52,10 @@ export function OpParamPanel({ spec, params, onChange, histogram, suggestions }:
 
   const row = (p: StackOptionField) => {
     const sug = suggestions?.[p.key];
+    // When the param already sits at the suggested value, dim the button and let
+    // it double as an "already set from your data" indicator instead of inviting
+    // a no-op click.
+    const atSuggestion = sug ? matchesSuggestion(params[p.key], sug.value, p.step) : false;
     return (
       <Stack key={p.key} gap={2}>
         <Group align="flex-end" wrap="nowrap" gap={6}>
@@ -63,12 +68,19 @@ export function OpParamPanel({ spec, params, onChange, histogram, suggestions }:
           </Tooltip>
         </Group>
         {sug ? (
-          <Button size="compact-xs" variant="subtle" color="grape"
-            style={{ alignSelf: "flex-start" }}
-            aria-label={`Set ${p.label} from your data`}
-            onClick={() => set(p.key, sug.value)}>
-            {sug.label}
-          </Button>
+          <Tooltip
+            label={atSuggestion
+              ? "Already set to the value measured from your data"
+              : "Set this from the value measured from your data"}
+            withArrow>
+            <Button size="compact-xs" variant="subtle" color="grape"
+              style={{ alignSelf: "flex-start" }}
+              disabled={atSuggestion}
+              aria-label={`Set ${p.label} from your data`}
+              onClick={() => set(p.key, sug.value)}>
+              {atSuggestion ? `✓ ${sug.label}` : sug.label}
+            </Button>
+          </Tooltip>
         ) : null}
       </Stack>
     );

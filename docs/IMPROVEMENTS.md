@@ -53,23 +53,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
 
 ### Editor — make it excellent (PRIORITY 1) — new ideas
-- **Dim the "From your data" button when the param already matches** — the editor
-  now has four data-driven suggestion buttons (PSF σ, sharpen radius, denoise
-  strength, star size). While tuning, a user can't tell whether the current value
-  *is* the suggestion or diverged from it. Disable/dim the button (with a "already
-  set from your data" tooltip) when the param already equals the suggested value,
-  so the button doubles as an "am I optimal?" indicator. Reuse the existing
-  `suggestions` prop on `OpParamPanel`; compare the param's current value to
-  `sug.value` with the op's step tolerance. Pure, frontend-only, additive.
-  (S, editor/friendliness)
-- **"Apply data-driven defaults" one-click on the editor** — a user building a
-  recipe by hand must open each of the four suggestion-carrying ops and click its
-  button individually. Add a single toolbar action that seeds every present op's
-  data-driven param (PSF σ, sharpen radius, denoise strength, star size) from the
-  already-fetched suggestions in one click, so hand-tuning starts from the
-  measured values instead of the generic defaults. Reuses the four existing
-  suggestion queries; frontend-only, additive, off-by-nothing (explicit button).
-  (S, editor/autonomy)
+- **Cancel superseded live-preview renders (responsiveness)** — the editor's live
+  preview refetches on every (debounced) param change, but the `fetch` in the
+  preview `useQuery` doesn't pass the query's `AbortSignal`, so while a user drags a
+  slider on a heavy op (deconvolution, denoise) each stale render runs to completion
+  server-side and the newest result queues behind them — the named "heavy ops on the
+  proxy can lag" hold-out of the live-preview backlog item. Thread the react-query
+  `signal` into `fetch(url, { signal })` for the preview, base, star-mask and
+  without-op queries so a superseded request is aborted the moment the recipe
+  changes, cutting proxy render backlog and latency. Also surfaces a cleaner
+  "rendering…" state. Frontend-only, additive, no API change. (S, editor)
+- **"Your data" context chip in the editor header** — the four data-driven
+  suggestion buttons quote the measured value inline ("FWHM 3.2px"), but there's no
+  single place a user sees what the editor measured about *this* stack. A small
+  dimmed chip near the title ("Measured: stars ≈ 3.2 px FWHM · background noise σ
+  0.021") — built from the already-fetched psf/sharpen/star-size (`fwhm_px`) and
+  denoise (`noise_sigma`) queries via a pure formatter — gives the data-driven
+  buttons visible provenance and builds trust, shown only when at least one measure
+  is available. Pure helper, frontend-only, additive. (S, editor/friendliness)
 
 ### Autonomy — "just works" (PRIORITY 2)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
@@ -187,6 +188,56 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Direct pixel-transform + NaN-safety tests for the tone/colour editor ops** —
+  `seestack/edit/ops/tone.py`'s ops (SCNR, saturation, white balance, curves,
+  levels) had no dedicated pixel-level test: the engine test only exercised a full
+  recipe end-to-end, so each op's own param-forwarding and NaN handling was
+  unguarded. Added `tests/test_edit_tone_ops.py` (11 cases) asserting each does the
+  transform its params ask for (SCNR caps excess green to the R/B neutral and never
+  *adds* green; saturation spreads channels around luminance with a true identity
+  at 1.0; white balance applies per-channel gain; curves/levels identity + midtone
+  lift) **and** leaves an uncovered NaN border as NaN — closing a coverage gap on
+  the priority-1 editor and locking in the "gaps never become a black wedge"
+  invariant. Confirmed all five are already correct; test-only, no code change.
+  (v0.57.12, this run)
+
+- **Built-in presets land sized to your data** — the built-in editor presets
+  (Galaxy / Nebula / Star cluster) carried *generic* default sizes for their
+  data-scalable ops (Galaxy's sharpen `radius=2.0`, Star-cluster's `stars.reduce
+  size=2`), the same fixed guesses the one-click Auto recipe already outgrew.
+  Applying a **built-in** preset now seeds those data-driven params (sharpen
+  radius, star size) from this target's own median star FWHM via the same
+  `applyDataDrivenDefaults` helper as the "Use data defaults" toolbar action, so a
+  preset lands sized to what you actually shot. **User-saved** presets are applied
+  exactly as the user tuned them (a new `source` arg on `PresetMenu.onApply`
+  distinguishes the two). Reuses the already-fetched suggestion queries;
+  frontend-only, additive. Vitest-covered end-to-end (applying the Galaxy preset
+  seeds its sharpen radius to the measured value). (v0.57.11, this run)
+
+- **"Apply data-driven defaults" one-click on the editor** — a user hand-building
+  a recipe previously had to open each of the four suggestion-carrying ops
+  (Deconvolution, Noise reduction, Sharpen, Star reduction) and click its "From
+  your data" button individually. The editor toolbar now shows a single "Use data
+  defaults (N)" button that seeds every *present* op's data-driven param (PSF σ,
+  denoise strength, sharpen radius, star size) from the already-fetched
+  suggestions in one click. It's shown only when at least one present op still
+  diverges from its measured value (so it never nags once everything's applied),
+  and N counts how many ops would change. Pure `applyDataDrivenDefaults` /
+  `countDataDrivenDefaults` helpers (no mutation) drive it; Vitest-covered (helper:
+  8 cases; editor: button appears, applying it makes it disappear). Frontend-only,
+  additive, explicit-button (off by nothing). (v0.57.10, this run)
+
+- **Dim the "From your data" suggestion button when the param already matches** —
+  the editor's four data-driven suggestion buttons (PSF σ, sharpen radius, denoise
+  strength, star size) always looked clickable, so while tuning a user couldn't
+  tell whether the current value *was* the suggestion or had diverged. The
+  `OpParamPanel` suggestion button now dims/disables and prefixes a "✓" (with an
+  "already set to the value measured from your data" tooltip) when the param's
+  current value already equals the suggested value within half the control's step,
+  via a pure `matchesSuggestion` helper — so the button doubles as an "am I
+  optimal?" indicator. Vitest-covered (helper: 5 cases; panel: disabled+✓ state);
+  frontend-only, additive. (v0.57.9, this run)
 
 - **Complete + enforce plain-language help on every editor control** — finished the
   help sweep by adding hints to the last bare params (geometry crop/rotate/resize,
