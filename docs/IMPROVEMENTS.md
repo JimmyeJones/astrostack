@@ -58,13 +58,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   this op" affordance (render the recipe up to but excluding the selected op vs
   including it) so the effect of the op being tuned is obvious. Reuses the existing
   preview path with a truncated recipe; frontend-mostly. (M, editor)
-- **Warn when a linear-stage op sits after the stretch (or vice-versa)** — ops
-  declare a `stage` (linear / nonlinear / any) but the UI lets a user drag e.g.
-  a background-gradient (linear) op below the stretch, where it operates on
-  display-space data and misbehaves. Surface a subtle per-op caution in the OpList
-  when an op's `stage` conflicts with its position relative to the single stretch,
-  with a one-click "move to the correct side". Reuses the `stage`/`is_stretch`
-  fields already on the ops schema; frontend-only, advisory. (S, editor)
+- **Auto-place a newly-added op on the correct side of the stretch** — builds on
+  this run's stage-conflict warning + `moveToCorrectSide`. Adding an op from the
+  menu always appends it at the end of the pipeline, so a linear op (background,
+  denoise, colour cal) added after a stretch immediately triggers the new "should
+  be before the stretch" caution. Instead, insert a new op on its correct side of
+  the (enabled) stretch by default — linear just before, nonlinear just after,
+  `any` at the end — so the conflict never arises for the common add-then-tune
+  flow. Reuses `moveToCorrectSide`; frontend-only. (S, editor)
+- **Progressive disclosure of the "Add operation" menu** — the menu lists all ~18
+  ops flat across four groups; a beginner scanning it is overwhelmed and doesn't
+  know which few matter. Surface a short curated "Common" section at the top
+  (Stretch, Curves, Saturation, Noise reduction, Sharpen, SCNR, Background) and
+  collapse the rest under a "More operations" expander, so the first-time path is
+  obvious without hiding power. Frontend-only; reuses the ops schema. (S, editor)
 
 ### Autonomy — "just works" (PRIORITY 2)
 - **One-click "process this target"** — after ingest, reach a good stack *and* a
@@ -172,6 +179,56 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **"No stretch step" nudge in the editor pipeline** — if a recipe has ops but no
+  *enabled* Stretch op, the pipeline silently auto-inserts a default asinh stretch
+  at the end so the preview isn't black — but the user's tone/colour ops then run
+  on un-stretched (linear) data and the result looks wrong, with no explanation.
+  The pipeline panel now shows a subtle yellow advisory in that case, with a
+  one-click "Add stretch" (or "Enable stretch" when a bypassed one exists) so a
+  beginner gets an explicit, controllable stretch. Complements this run's
+  stage-conflict warning. Pure `hasEnabledStretch` helper, unit-tested;
+  frontend-only, advisory. (v0.56.13, this run)
+
+- **Friendly names for enum dropdowns (editor + Stack/Settings forms)** — enum
+  params rendered their raw internal values ("asinh", "stf", "gray_star", "gaia",
+  "per_channel", "luminance", "average", "maximum") in the Select dropdowns, jargon
+  a beginner can't decode. Added an optional additive `option_labels` (value →
+  display name) to the shared param descriptor (`EditParam` + `StackOptionField`),
+  threaded through the editor-ops and stack-options schema endpoints, and rendered
+  by the shared `StackOptionControl` (falls back to the raw value for any option
+  without a mapping). Populated it for the Stretch curve (Asinh (manual) / Auto
+  (STF)), SCNR protect, editor + stack colour-calibration mode, and background /
+  final-gradient mode. Upgrade-safe: new optional field defaults null; recipes and
+  configs store values, not labels, so nothing changes on disk. Vitest-covered
+  (friendly label shown + raw-value fallback). (v0.56.12, this run)
+
+- **Grey out stretch params that don't apply to the chosen curve** — the Stretch op
+  exposes both the Asinh knobs (Strength, Black point) and the STF knob (STF sky
+  level), but only one set does anything for a given `mode`, so a beginner drags a
+  slider that silently has no effect. `depends_on` (the descriptor gating already
+  used across the Stack/Settings/editor forms) gained an optional `key=value` form
+  so a field can depend on a *specific* enum choice, not just a boolean; the Asinh
+  params now declare `depends_on="mode=asinh"` and STF sky level `depends_on="mode=stf"`,
+  so the irrelevant ones grey out as the user switches curve. STF sky level was also
+  promoted from Advanced to the main params so STF mode always shows its one active
+  control, and each param got a clearer help line. Backward-compatible: a bare
+  `depends_on` key stays a truthiness check, so every existing boolean dependency is
+  unchanged. Pure `dependencyMet` helper unit-tested (bare-key, `key=value`,
+  stringify) + a render test that the STF slider disables in Asinh mode. Frontend +
+  metadata-only. (v0.56.11, this run)
+
+- **Stage-conflict caution + one-click fix in the editor OpList** — ops declare a
+  `stage` (linear / nonlinear / any), and the pipeline runs them across a single
+  stretch boundary, but the op list lets a user drag e.g. a background-gradient
+  (linear) op below the stretch, where it silently operates on display-space data
+  and misbehaves. Each op row now shows a subtle orange caution ("should be
+  before/after the stretch", with an explanatory tooltip) when an *enabled* op
+  sits on the wrong side of the *enabled* stretch, plus a one-click "Fix" that
+  repositions it to the correct side (linear → just before the stretch, nonlinear
+  → just after). Pure, unit-tested `stageConflicts` / `moveToCorrectSide` helpers
+  (10 cases: both sides, `any`-stage neutrality, disabled-op / no-stretch
+  no-ops); frontend-only, advisory. (v0.56.10, this run)
 
 - **Combine-method facet on the Gallery** — a "All / Drizzle / Min-max / σ-clip /
   Mean" `SegmentedControl` (shown only when the set is *mixed* — >1 distinct

@@ -276,6 +276,7 @@ export interface StackOptionField {
   max: number | null;
   step: number | null;
   options: string[] | null;
+  option_labels?: Record<string, string> | null;
   help: string | null;
   depends_on: string | null;
 }

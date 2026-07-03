@@ -1,10 +1,18 @@
-import { ActionIcon, Badge, Group, Paper, Stack, Switch, Text, Tooltip } from "@mantine/core";
-import { IconChevronDown, IconChevronUp, IconX } from "@tabler/icons-react";
+import { ActionIcon, Anchor, Badge, Group, Paper, Stack, Switch, Text, Tooltip } from "@mantine/core";
+import { IconAlertTriangle, IconChevronDown, IconChevronUp, IconX } from "@tabler/icons-react";
 import type { EditOp, OpInstance } from "../../api/client";
+import { stageConflicts, type WrongStage } from "./stageConflicts";
+
+const CONFLICT_MSG: Record<WrongStage, string> = {
+  linear: "This runs best before the stretch (it expects linear, un-stretched data). "
+    + "Below the stretch it works on display-space pixels and can misbehave.",
+  nonlinear: "This runs best after the stretch (it works in display space). "
+    + "Above the stretch it operates on linear data and can misbehave.",
+};
 
 /** The ordered operation pipeline. Reorder with the arrows, toggle to bypass,
  * click to select for editing, ✕ to remove. (Dependency-free; no drag lib.) */
-export function OpList({ ops, specs, selected, onSelect, onMove, onToggle, onRemove }: {
+export function OpList({ ops, specs, selected, onSelect, onMove, onToggle, onRemove, onFix }: {
   ops: OpInstance[];
   specs: Record<string, EditOp>;
   selected: string | null;
@@ -12,7 +20,9 @@ export function OpList({ ops, specs, selected, onSelect, onMove, onToggle, onRem
   onMove: (uid: string, dir: -1 | 1) => void;
   onToggle: (uid: string) => void;
   onRemove: (uid: string) => void;
+  onFix?: (uid: string) => void;
 }) {
+  const conflicts = stageConflicts(ops, specs);
   if (!ops.length) {
     return <Text size="sm" c="dimmed">No operations yet — add one to start editing.</Text>;
   }
@@ -47,6 +57,26 @@ export function OpList({ ops, specs, selected, onSelect, onMove, onToggle, onRem
                   </Group>
                   {spec?.help ? (
                     <Text size="10px" c="dimmed" lineClamp={1}>{spec.help}</Text>
+                  ) : null}
+                  {conflicts[op.uid] ? (
+                    <Group gap={4} wrap="nowrap" mt={2}>
+                      <Tooltip label={CONFLICT_MSG[conflicts[op.uid]]} multiline w={240} withArrow>
+                        <Group gap={2} wrap="nowrap" style={{ cursor: "help" }}>
+                          <IconAlertTriangle size={12} color="var(--mantine-color-orange-6)" />
+                          <Text size="10px" c="orange.6">
+                            {conflicts[op.uid] === "linear"
+                              ? "should be before the stretch"
+                              : "should be after the stretch"}
+                          </Text>
+                        </Group>
+                      </Tooltip>
+                      {onFix ? (
+                        <Anchor component="button" type="button" size="10px" c="orange.6"
+                          onClick={(e) => { e.stopPropagation(); onFix(op.uid); }}>
+                          Fix
+                        </Anchor>
+                      ) : null}
+                    </Group>
                   ) : null}
                 </div>
               </Group>

@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
 import { api, type StackOptionField } from "../api/client";
+import { dependencyMet } from "../api/depends";
 import { StackOptionControl as FieldControl } from "../components/StackOptionControl";
 import { useJobEvents } from "../hooks/useJobEvents";
 
@@ -133,7 +134,7 @@ export function StackView() {
   const fields = schema.data ?? [];
   const set = (k: string, v: unknown) => setValues((p) => ({ ...p, [k]: v }));
   const isDisabled = (f: StackOptionField) =>
-    f.depends_on ? !values[f.depends_on] : false;
+    !dependencyMet(f.depends_on, (k) => values[k]);
 
   const simple = fields.filter((f) => f.group === "simple");
   const advanced = fields.filter((f) => f.group === "advanced");

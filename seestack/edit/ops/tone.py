@@ -104,7 +104,9 @@ register(OpSpec(
     id="tone.color_calibrate", label="Color calibration", group="tone",
     stage="linear", apply=_color_calibrate, proxy_safe=True,
     help="Photometric white balance from star colours (gray-star offline, Gaia on export).",
-    params=[EditParam("mode", "Mode", "enum", default="gray_star", options=_MODE_CC)],
+    params=[EditParam("mode", "Mode", "enum", default="gray_star", options=_MODE_CC,
+                      option_labels={"gray_star": "Gray-star (offline)",
+                                     "gaia": "Gaia catalogue (on export)"})],
 ))
 
 register(OpSpec(
@@ -123,13 +125,16 @@ register(OpSpec(
     apply=_stretch, proxy_safe=True,
     help="Tone-map linear data to display. Asinh reveals faint detail naturally.",
     params=[
-        EditParam("mode", "Curve", "enum", default="asinh", options=["asinh", "stf"]),
+        EditParam("mode", "Curve", "enum", default="asinh", options=["asinh", "stf"],
+                  option_labels={"asinh": "Asinh (manual)", "stf": "Auto (STF)"},
+                  help="Asinh: manual strength/black point. STF: auto-stretch to a target sky level."),
         EditParam("stretch", "Strength", "float", default=0.5, min=0.0, max=1.0, step=0.01,
-                  help="0 ≈ linear, 1 ≈ extreme faint lift."),
+                  help="0 ≈ linear, 1 ≈ extreme faint lift.", depends_on="mode=asinh"),
         EditParam("black", "Black point", "float", default=0.35, min=0.0, max=1.0, step=0.01,
-                  help="Higher darkens/cleans the sky."),
+                  help="Higher darkens/cleans the sky.", depends_on="mode=asinh"),
         EditParam("target_bg", "STF sky level", "float", default=0.20, min=0.02, max=0.6,
-                  step=0.01, group="advanced", depends_on=None),
+                  step=0.01, depends_on="mode=stf",
+                  help="Target background brightness for the auto-stretch (higher = brighter sky)."),
     ],
 ))
 
@@ -161,6 +166,9 @@ register(OpSpec(
     params=[
         EditParam("amount", "Amount", "float", default=0.8, min=0.0, max=1.0, step=0.05),
         EditParam("mode", "Protect", "enum", default="average", options=["average", "maximum"],
-                  group="advanced"),
+                  option_labels={"average": "Average of red & blue",
+                                 "maximum": "Maximum of red & blue"},
+                  group="advanced",
+                  help="How to cap green: to the average (gentler) or maximum (stronger) of red/blue."),
     ],
 ))

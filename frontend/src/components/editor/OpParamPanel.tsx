@@ -1,6 +1,7 @@
 import { Accordion, ActionIcon, Button, Group, Stack, Text, Tooltip } from "@mantine/core";
 import { IconRestore } from "@tabler/icons-react";
 import type { EditOp, Histogram, StackOptionField } from "../../api/client";
+import { dependencyMet } from "../../api/depends";
 import { HintLabel, StackOptionControl } from "../StackOptionControl";
 import { CurvesWidget } from "./CurvesWidget";
 
@@ -39,7 +40,7 @@ export function OpParamPanel({ spec, params, onChange, histogram, suggestions }:
         </div>
       );
     }
-    const disabled = p.depends_on ? !params[p.depends_on] : false;
+    const disabled = !dependencyMet(p.depends_on, (k) => params[k]);
     return (
       <StackOptionControl
         field={p} value={params[p.key]} disabled={disabled} preferSlider

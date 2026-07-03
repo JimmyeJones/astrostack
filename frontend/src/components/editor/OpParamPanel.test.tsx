@@ -49,4 +49,33 @@ describe("OpParamPanel", () => {
     wrap(<OpParamPanel spec={SPEC} params={{ amount: 1.5 }} onChange={() => {}} />);
     expect(screen.queryByLabelText("Set Amount from your data")).not.toBeInTheDocument();
   });
+
+  it("greys out a param whose depends_on value doesn't match the current choice", () => {
+    const spec: EditOp = {
+      id: "tone.stretch", label: "Stretch", group: "tone", stage: "any",
+      proxy_safe: true, is_stretch: true, help: null,
+      params: [
+        {
+          key: "mode", label: "Curve", type: "enum", group: "simple", default: "asinh",
+          min: null, max: null, step: null, options: ["asinh", "stf"], help: null, depends_on: null,
+        },
+        {
+          key: "target_bg", label: "STF sky level", type: "float", group: "simple",
+          default: 0.2, min: 0.02, max: 0.6, step: 0.01, options: null, help: null,
+          depends_on: "mode=stf",
+        },
+      ],
+    };
+    // In asinh mode the STF-only slider is disabled…
+    const asinh = wrap(
+      <OpParamPanel spec={spec} params={{ mode: "asinh", target_bg: 0.2 }} onChange={() => {}} />,
+    );
+    expect(asinh.getByRole("slider")).toHaveAttribute("data-disabled", "true");
+    asinh.unmount();
+    // …and enabled once STF is selected.
+    const stf = wrap(
+      <OpParamPanel spec={spec} params={{ mode: "stf", target_bg: 0.2 }} onChange={() => {}} />,
+    );
+    expect(stf.getByRole("slider")).not.toHaveAttribute("data-disabled", "true");
+  });
 });
