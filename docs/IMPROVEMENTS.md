@@ -169,6 +169,19 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Direct pixel-transform + NaN-safety tests for the tone/colour editor ops** —
+  `seestack/edit/ops/tone.py`'s ops (SCNR, saturation, white balance, curves,
+  levels) had no dedicated pixel-level test: the engine test only exercised a full
+  recipe end-to-end, so each op's own param-forwarding and NaN handling was
+  unguarded. Added `tests/test_edit_tone_ops.py` (11 cases) asserting each does the
+  transform its params ask for (SCNR caps excess green to the R/B neutral and never
+  *adds* green; saturation spreads channels around luminance with a true identity
+  at 1.0; white balance applies per-channel gain; curves/levels identity + midtone
+  lift) **and** leaves an uncovered NaN border as NaN — closing a coverage gap on
+  the priority-1 editor and locking in the "gaps never become a black wedge"
+  invariant. Confirmed all five are already correct; test-only, no code change.
+  (v0.57.12, this run)
+
 - **Built-in presets land sized to your data** — the built-in editor presets
   (Galaxy / Nebula / Star cluster) carried *generic* default sizes for their
   data-scalable ops (Galaxy's sharpen `radius=2.0`, Star-cluster's `stars.reduce
