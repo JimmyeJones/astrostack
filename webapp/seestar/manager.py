@@ -26,6 +26,18 @@ log = logging.getLogger(__name__)
 
 _IDLE_SLEEP = 5.0   # how often the loops re-check settings while disabled
 _POLL_TIMEOUT = 6.0  # per-call RPC timeout while polling (keeps the loop snappy)
+_RECONNECT_CAP_S = 300.0  # ceiling on the per-scope reconnect backoff
+
+
+def _reconnect_delay_s(fails: int, base: float, cap: float) -> float:
+    """Capped exponential backoff for reconnect attempts: ``base·2^(fails-1)``,
+    clamped to ``[base, cap]``. ``fails`` is the count of *consecutive* failed
+    reconnects (≥1); 0 or fewer means no wait. Keeps a genuinely-gone scope from
+    being hammered every poll cycle while a briefly-dropped one recovers fast."""
+    if fails <= 0:
+        return 0.0
+    delay = base * (2 ** (fails - 1))
+    return min(max(delay, base), cap)
 
 
 def collect_telemetry(client: SeestarClient) -> tuple[dict[str, Any] | None, list[str]]:
@@ -51,12 +63,22 @@ def collect_telemetry(client: SeestarClient) -> tuple[dict[str, Any] | None, lis
 
 
 class SeestarManager:
-    def __init__(self, get_settings: Callable[[], Settings]) -> None:
+    def __init__(
+        self,
+        get_settings: Callable[[], Settings],
+        now_fn: Callable[[], float] | None = None,
+    ) -> None:
         self._get_settings = get_settings
+        self._now = now_fn or time.monotonic
         self._lock = threading.Lock()
         self._devices: dict[str, dict[str, Any]] = {}
         self._clients: dict[str, SeestarClient] = {}
         self._last_ok: dict[str, bool] = {}  # per-ip telemetry state, for transition logs
+        # Per-ip reconnect backoff: consecutive failure count and the earliest
+        # monotonic time to try again, so a dropped scope isn't re-dialled every
+        # poll cycle (see ``_reconnect_delay_s``).
+        self._reconnect_fails: dict[str, int] = {}
+        self._reconnect_at: dict[str, float] = {}
         self._stop = threading.Event()
         self._scan_now = threading.Event()
         self._scan_thread: threading.Thread | None = None
@@ -98,9 +120,11 @@ class SeestarManager:
         with self._lock:
             client = self._clients.pop(ip, None)
             self._last_ok.pop(ip, None)
+            self._clear_backoff_locked(ip)
             dev = self._devices.get(ip)
             if dev is not None:
                 dev["connected"] = False
+                dev["reconnecting"] = False
         if client is not None:
             client.disconnect()
 
@@ -139,8 +163,42 @@ class SeestarManager:
         with self._lock:
             dev = self._devices.setdefault(ip, _new_device(ip))
             dev["connected"] = True
+            dev["reconnecting"] = False
             dev["error"] = None
+            self._clear_backoff_locked(ip)
         return client
+
+    def _poll_reconnect(self, ip: str, client: SeestarClient, base_s: float) -> bool:
+        """Reconnect a dropped client with capped exponential backoff. Returns
+        True when the client is live and telemetry should be collected this cycle;
+        False while backing off, or when the reconnect attempt just failed.
+
+        A live client clears any pending backoff; a fresh failure lengthens it
+        (up to :data:`_RECONNECT_CAP_S`) and surfaces a ``reconnecting…`` state so
+        a genuinely-gone scope isn't re-dialled every poll cycle."""
+        if client.is_connected:
+            with self._lock:
+                self._clear_backoff_locked(ip)
+            return True
+        now = self._now()
+        if now < self._reconnect_at.get(ip, 0.0):
+            return False  # still backing off — leave the scope alone this cycle
+        try:
+            client.connect()
+        except SeestarError as exc:
+            fails = self._reconnect_fails.get(ip, 0) + 1
+            self._reconnect_fails[ip] = fails
+            delay = _reconnect_delay_s(fails, base_s, _RECONNECT_CAP_S)
+            self._reconnect_at[ip] = now + delay
+            self._mark_reconnecting(ip, str(exc), delay)
+            return False
+        with self._lock:
+            self._clear_backoff_locked(ip)
+        return True
+
+    def _clear_backoff_locked(self, ip: str) -> None:
+        self._reconnect_fails.pop(ip, None)
+        self._reconnect_at.pop(ip, None)
 
     def _scan_loop(self) -> None:
         while not self._stop.is_set():
@@ -175,13 +233,10 @@ class SeestarManager:
                 continue
             with self._lock:
                 items = list(self._clients.items())
+            base = float(max(2, int(settings.seestar_poll_interval_s)))
             for ip, client in items:
-                if not client.is_connected:
-                    try:
-                        client.connect()
-                    except SeestarError as exc:
-                        self._mark_error(ip, str(exc))
-                        continue
+                if not self._poll_reconnect(ip, client, base):
+                    continue
                 tel, errors = collect_telemetry(client)
                 if tel is not None:
                     self._store_telemetry(ip, tel, error="; ".join(errors) or None)
@@ -205,8 +260,11 @@ class SeestarManager:
         with self._lock:
             clients = list(self._clients.values())
             self._clients.clear()
+            self._reconnect_fails.clear()
+            self._reconnect_at.clear()
             for dev in self._devices.values():
                 dev["connected"] = False
+                dev["reconnecting"] = False
         for client in clients:
             client.disconnect()
 
@@ -227,6 +285,7 @@ class SeestarManager:
             dev = self._devices.setdefault(ip, _new_device(ip))
             dev["telemetry"] = tel
             dev["connected"] = True
+            dev["reconnecting"] = False
             dev["error"] = error
             dev["last_seen_utc"] = _utc_iso()
             for key in ("device_name", "model", "firmware"):
@@ -239,12 +298,19 @@ class SeestarManager:
             dev["error"] = message
             dev["connected"] = False
 
+    def _mark_reconnecting(self, ip: str, message: str, delay_s: float) -> None:
+        with self._lock:
+            dev = self._devices.setdefault(ip, _new_device(ip))
+            dev["connected"] = False
+            dev["reconnecting"] = True
+            dev["error"] = f"reconnecting… ({message}); next attempt in {int(delay_s)}s"
+
 
 def _new_device(ip: str) -> dict[str, Any]:
     return {
         "id": ip, "ip": ip, "device_name": None, "model": None, "firmware": None,
-        "reachable": False, "connected": False, "last_seen_utc": None,
-        "telemetry": None, "error": None,
+        "reachable": False, "connected": False, "reconnecting": False,
+        "last_seen_utc": None, "telemetry": None, "error": None,
     }
 
 

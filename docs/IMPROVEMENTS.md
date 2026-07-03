@@ -64,13 +64,6 @@ _(none — claim an item here with your branch name)_
   Large but high value for the multi-night Seestar workflow. (L, correctness)
 - Channel combine: reproject stacks that don't share a canvas (via WCS) instead
   of erroring, so filters shot in separate sessions can be combined. (M–L)
-- Seestar client reconnect is now *hygienic* (v0.55.1: `connect()` tears down a
-  stale socket + pending replies before re-opening, so the manager's per-cycle
-  reconnect no longer leaks an fd per drop), but the retry cadence itself could
-  still be smarter: the poll loop reconnects on a fixed interval with no backoff,
-  so a scope that's genuinely gone gets hammered every cycle. A capped
-  exponential backoff per-ip (and a surfaced "reconnecting…" device state) would
-  be gentler and clearer. (S–M, correctness)
 
 ### Features that serve real workflows
 - Annotated sky overlay (label detected objects / show solved field). (M)
@@ -115,6 +108,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Capped exponential backoff for Seestar reconnects** — the poll loop
+  re-`connect()`ed a dropped scope on every cycle (default a few seconds) with no
+  backoff, so a scope that's genuinely gone got hammered indefinitely. Each ip now
+  carries a consecutive-failure count and a monotonic "next attempt" time; a
+  failed reconnect grows the delay `base·2^(fails-1)` up to a 300 s cap, a
+  successful one clears it (so a brief Wi-Fi blip still recovers fast), and the
+  device surfaces a "reconnecting…" state (orange badge) for the dashboard.
+  Reconnect logic factored into a testable `_poll_reconnect` + a pure
+  `_reconnect_delay_s`, unit-tested with an injected clock (no hardware).
+  Additive/upgrade-safe (new optional device field). (v0.55.5, this run)
 
 - **"You have calibration masters but aren't using them" nudge on the Stack
   form** — the single most common beginner mistake is stacking uncalibrated even
