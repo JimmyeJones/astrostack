@@ -169,6 +169,19 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Plain-language help on the remaining jargon-bare editor sliders** — v0.56.17
+  gave the detail/levels ops per-param help, but the commonly-used tone/star/
+  background sliders still showed *no* hint under the control: `tone.saturation`
+  amount, `tone.scnr` amount, `tone.color_calibrate` mode, `stars.reduce`
+  amount/size, `stars.boost_nebula` amount, and `background.subtract` /
+  `final_gradient` box_size/σ/dilate/mode. Added a one-line plain-language hint to
+  each (what it does + a sensible starting point), plus friendly `option_labels`
+  for the two background `mode` enums so the dropdowns read "Per channel" /
+  "Luminance" instead of raw ids — surfaced automatically in the op param panel via
+  the already-threaded `help`/`option_labels` fields. Metadata-only, additive; the
+  help-coverage test now asserts every one of these params carries a hint.
+  (v0.57.7, this run)
+
 - **Data-driven sharpen radius in the one-click Auto recipe** — when Auto-process
   sharpens a clean stack it used a *fixed* `radius=2.0`, the same for a tight-star
   and a bloated-star image, even though v0.57.4 already ships the exact FWHM→radius

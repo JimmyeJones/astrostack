@@ -45,6 +45,13 @@ def test_ops_and_key_params_carry_plain_help():
         "detail.deconvolve": ["iterations", "psf_sigma"],
         "detail.hot_pixels": ["sigma"],
         "tone.levels": ["black", "white", "gamma"],
+        "tone.saturation": ["amount"],
+        "tone.scnr": ["amount"],
+        "tone.color_calibrate": ["mode"],
+        "stars.reduce": ["amount", "size"],
+        "stars.boost_nebula": ["amount"],
+        "background.subtract": ["mode", "box_size"],
+        "background.final_gradient": ["mode", "box_size", "detect_sigma", "dilate_px"],
     }
     for op_id, keys in expected_param_help.items():
         params = {p.key: p for p in specs[op_id].params}
