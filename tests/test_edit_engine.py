@@ -7,7 +7,10 @@ import pytest
 from astropy.io import fits
 
 from seestack.edit.pipeline import apply_recipe, has_stretch
-from seestack.edit.proxy import PROXY_MAX_PX, build_proxy, clear_proxy, get_proxy
+from seestack.edit.proxy import (
+    PROXY_MAX_PX, build_proxy, clear_proxy, coverage_path_for, get_proxy,
+    load_coverage,
+)
 from seestack.edit.recipe import OpInstance, Recipe, recipe_from_dict, validate_ops
 from seestack.edit.registry import EditContext, all_specs, get_op
 
@@ -442,3 +445,55 @@ def test_final_gradient_box_and_dilate_scaled_to_proxy(monkeypatch):
     spec.apply(img, {"box_size": 256, "dilate_px": 16}, EditContext(proxy_scale=4.0))
     # export unchanged; a 4x proxy quarters both spatial measures.
     assert seen == [(256, 16), (64, 4)]
+
+
+def test_load_coverage_reads_sibling_and_strides_for_proxy(tmp_path):
+    """The per-pixel coverage map lives in a sibling {basename}_coverage.fits; the
+    editor loads it into EditContext so the Coverage-leveling op actually works,
+    striding it by the proxy step so it lines up with a decimated preview."""
+    cov = np.arange(80 * 60, dtype=np.float32).reshape(80, 60)
+    fits_path = tmp_path / "stack_M42.fits"
+    cov_path = coverage_path_for(fits_path)
+    assert cov_path.name == "stack_M42_coverage.fits"
+    fits.PrimaryHDU(data=cov).writeto(cov_path)
+
+    full = load_coverage(fits_path)
+    assert full is not None and full.shape == (80, 60)
+    assert np.array_equal(full, cov)
+
+    # Strided by the proxy step, exactly like build_proxy decimates the image.
+    proxied = load_coverage(fits_path, step=4)
+    assert proxied.shape == cov[::4, ::4].shape
+    assert np.array_equal(proxied, cov[::4, ::4])
+
+
+def test_load_coverage_returns_none_for_single_field_image(tmp_path):
+    # No coverage sibling → the op has nothing to level against, so None (the op's
+    # None-guard then makes it a clean no-op rather than a dead control).
+    assert load_coverage(tmp_path / "single_field.fits") is None
+
+
+def test_star_reduce_erosion_footprint_scaled_to_proxy(monkeypatch):
+    """The star-reduction erosion footprint is built from a full-res `size`, so on
+    the decimated preview proxy it must shrink by proxy_scale to match the full-res
+    export (the star-mask gate already does — preview↔export parity). We capture
+    the footprint side-length handed to grey_erosion. protect_nebula is off so the
+    star mask isn't involved and only the footprint scaling is under test."""
+    import scipy.ndimage as ndi
+
+    seen: list[int] = []
+
+    def fake_erosion(chan, *, footprint):
+        seen.append(int(footprint.shape[0]))
+        return chan  # identity — we only care about the footprint size
+
+    monkeypatch.setattr(ndi, "grey_erosion", fake_erosion)
+    spec = get_op("stars.reduce")
+    img = _img(20, 20, nan_band=0)
+
+    params = {"amount": 0.5, "size": 4, "protect_nebula": False}
+    spec.apply(img, params, EditContext(proxy_scale=1.0))   # size 4 → (2*4+1)=9
+    spec.apply(img, params, EditContext(proxy_scale=2.0))   # →2 → (2*2+1)=5
+    spec.apply(img, params, EditContext(proxy_scale=4.0))   # →1 → (2*1+1)=3
+    # grey_erosion runs once per channel (3×); the footprint side matches per scale.
+    assert seen == [9, 9, 9, 5, 5, 5, 3, 3, 3]

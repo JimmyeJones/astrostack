@@ -327,10 +327,15 @@ def _render_recipe_fullres(fits_path: str, recipe_dict: dict, progress) -> tuple
     from seestack.edit.recipe import recipe_from_dict
     from seestack.edit.registry import EditContext, as_rgb, get_op
 
+    from seestack.edit.proxy import load_coverage
+
     rgb, wcs = _load_full_rgb_wcs(fits_path)
     recipe = recipe_from_dict(recipe_dict)
     n = max(len([o for o in recipe.ops if o.enabled]), 1)
-    ctx = EditContext(wcs=wcs, is_proxy=False, proxy_scale=1.0)
+    # Load the run's per-pixel coverage map (if any) so the "Coverage leveling" op
+    # can equalise the sky across mosaic panels; None for a single-field image.
+    coverage = load_coverage(fits_path)
+    ctx = EditContext(wcs=wcs, is_proxy=False, proxy_scale=1.0, coverage=coverage)
     ctx.stage = "linear"
     out = as_rgb(np.asarray(rgb, dtype=np.float32))
     stretched = False

@@ -54,6 +54,16 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 
 ### Autonomy — "just works" (PRIORITY 2)
+- **Auto-add Coverage leveling to the Auto recipe for mosaics** — now that the
+  "Coverage leveling" op actually works (v0.58.6), the one-click Auto-process could
+  detect a mosaic — the run row already carries `coverage_min`/`coverage_max`, and a
+  mosaic has `coverage_max > coverage_min` (uneven panel overlap) — and insert
+  `background.level_coverage` before the stretch, so a Seestar mosaic gets flat,
+  step-free panels without the user ever discovering the op exists. Skip it entirely
+  on a single-field stack (uniform coverage), where it's a no-op. Thread the run's
+  coverage span into `auto_recipe` (mirroring how `median_fwhm` is already threaded
+  for the sharpen radius). Auto is an explicit button so there's no default flip.
+  (M, autonomy/editor)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
   different (per-channel vs luminance gradient, star reduction, saturation). The
@@ -71,28 +81,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   so the user rarely needs to touch the Stack form. (S–M, autonomy)
 
 ### Friendliness (PRIORITY 3)
+- **Tell the user when "Coverage leveling" will do nothing** — the op is only
+  meaningful on a multi-coverage mosaic; on a single-field stack (uniform coverage)
+  it's a deliberate no-op (v0.58.6 wired it, and it returns the input unchanged when
+  coverage is absent/uniform). A beginner who adds it to a single-field edit gets no
+  effect and no explanation. Surface the run's coverage span (the editor already has
+  the run; `coverage_min`/`coverage_max` are on the record) and show a subtle
+  "no effect on a single-field image — this equalises mosaic panels" note (or a
+  disabled/greyed op row) when coverage is uniform, so the control explains its own
+  applicability instead of silently doing nothing. Pairs with the auto-add-for-mosaics
+  autonomy idea above. (S, friendliness/editor)
 - Guided "getting started" / empty states that tell a first-timer exactly what to
   do next; audit every screen for jargon and add plain-language "why" tooltips;
   reduce visible option clutter (progressive disclosure). (M, friendliness)
 - Better long-job feedback and clearer error messages. (S, friendliness)
-- **Warn when the min/max reject k is too aggressive for the frame count** — the
-  top/bottom-k trim (v0.58.0) only applies its full k-drop where a pixel has ≥ 2k+1
-  frames; below that it *silently* degrades to a single min/max drop. A user who
-  sets `min_max_reject_count=3` on an 8-frame stack gets almost no benefit and no
-  signal why. Add a Stack-form advisory (mirroring the existing small-stack min/max
-  nudge) that fires when `2·k+1 > accepted+solved`, saying e.g. "k=3 needs 7+ frames
-  per pixel to fully apply; you have 8 — it'll mostly fall back to a single drop.
-  Lower k or add frames." Pure frontend, reuses the frame-count the form already
-  has; advisory-only. (S, friendliness/autonomy)
-
-### Autonomy — follow-ups
-- **Auto-suggest the min/max reject count (k) from the streaked-frame count** — the
-  Stack form already nudges a beginner to *turn on* min/max reject when a small stack
-  carries streaked frames (v0.56.2). Now that k is tunable (v0.58.0), extend the
-  nudge to also suggest a *count*: if QC flags N frames with satellite/plane streaks,
-  a k ≈ min(N, 5) drops all of them instead of just the worst one — with a one-click
-  "set k = N" on the advisory. Reuses the streak QC already computed per frame; keep
-  it a suggestion (never auto-applies). (S, autonomy)
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 - **Photometric (multiplicative) frame normalization before combine** — frames
@@ -173,6 +175,67 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Fix: "Coverage leveling" editor op was a permanent silent no-op** — the
+  Background-group "Coverage leveling" control (equalises sky across mosaic panels
+  with different frame coverage — a core Seestar mosaic case) read `ctx.coverage`,
+  but `EditContext.coverage` was *never* populated anywhere in production (preview,
+  histogram, or export), so the op returned its input unchanged for every user: a
+  guaranteed dead control. Each stack run already writes a sibling
+  `{basename}_coverage.fits`; a new `load_coverage` helper reads it (striding it to
+  the proxy step so the preview lines up with the full-res export), and the export
+  (`_render_recipe_fullres`), preview and histogram paths now feed it into
+  `EditContext.coverage`. Added a shape-mismatch guard so a prior geometry op
+  (crop/resize) makes the op skip cleanly instead of crashing the render. Engine +
+  webapp wiring, additive/upgrade-safe (no on-disk change; None → the existing
+  no-op for single-field images). Tested: `load_coverage` load/stride/None, the
+  webapp `_proxy_coverage` wiring, and the new shape-guard. (v0.58.6, this run)
+
+- **Fix: star-mask overlay ignored the op's star size (always the default 4 px)** —
+  the editor's "Star mask" overlay exists so a beginner can see what the star ops
+  (`stars.reduce` / `stars.boost_nebula`) treat as stars while tuning "Star size",
+  and the endpoint already accepts a matching `size_px` — but the frontend never
+  passed it and the query key had no size, so raising Star size never moved the
+  overlay: it silently misrepresented what the op would gate. The overlay is now
+  sized from the *selected* star op (`2·size` for reduce, `size` for boost-nebula,
+  matching the ops' own gate) via a pure `starMaskSizePx` helper, and the size is in
+  the query key so it refetches on change; a non-star (or no) selection falls back
+  to the endpoint default. Helper Vitest-covered (5 cases) + the overlay wiring
+  test; frontend-only, additive. (v0.58.5, this run)
+
+- **Fix: star-reduction over-shrank stars in the live preview vs export** — the
+  `stars.reduce` op scaled its star-mask *gate* for the decimated preview proxy
+  (via `star_mask(..., ctx)`) but built its grey-erosion footprint from the raw
+  full-res `size`, so on a big image (`proxy_scale`≈4) the footprint covered ~4×
+  more scene in the preview than the export delivered — the preview pulled star
+  cores down harder than the exported result, a WYSIWYG/parity violation (the same
+  class of bug fixed for sharpen/denoise/background in v0.56.19/v0.57.1). The
+  footprint now shrinks by `ctx.scaled_px(size)` exactly like the mask, a no-op on
+  export so the exported image is byte-for-byte unchanged. Engine-only, additive;
+  monkeypatched-footprint test proves the erosion side-length shrinks 9→5→3 as
+  proxy_scale goes 1→2→4. (v0.58.4, this run)
+
+- **Auto-suggest the min/max reject count (k) from the streaked-frame count** — with
+  min/max reject on, the default k=1 drops only the single worst extreme per pixel, so
+  a session with several satellite/plane trails leaves the rest in the result. The
+  Stack form now shows a blue advisory when ≥2 accepted frames are streaked and the
+  current k is below the streak count, suggesting `k = min(N_streaked, 5,
+  ⌊(n−1)/2⌋)` (capped so it never over-shoots the frame budget and trips the
+  too-high warning) with a one-click "Set k = N". Reuses the per-frame streak QC;
+  suggestion-only, frontend-only, additive. Vitest-covered (suggests at 3 streaks,
+  caps at the frame budget, no-fire for a single streak). (v0.58.3, this run)
+
+- **Warn when the min/max reject k is too aggressive for the frame count** — the
+  top/bottom-k trim (v0.58.0) applies its full k-drop only where a pixel is covered
+  by ≥ 2k+1 frames, silently degrading to a single min/max drop below that. The
+  Stack form now shows a yellow advisory (mirroring the small-stack min/max nudge)
+  when `min_max_reject` is on with `min_max_reject_count>1` and `2·k+1 >
+  accepted+solved`, explaining it needs at least `2k+1` frames per pixel and will
+  mostly fall back to a single drop, with a one-click "Lower k to N" that sets k to
+  the largest value the stack can fully apply (`⌊(n−1)/2⌋`). Reuses the frame-count
+  the form already has; advisory-only, frontend-only, additive. Vitest-covered
+  (fires at k=3/6-frames, one-click lower, no-fire at k=3/8-frames). (v0.58.2,
+  this run)
 
 - **Show the k-count in the rejection badge for a top/bottom-k trim** — follow-on to
   v0.58.0: the `RejectionBadge` on History/Gallery/Compare cards derives the combine

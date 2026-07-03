@@ -53,6 +53,11 @@ def _final_gradient(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarr
 def _level_coverage(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     if ctx.coverage is None:
         return rgb  # nothing to level against (single-field image)
+    # The coverage map is captured at the image's native geometry; if an earlier
+    # geometry op (crop/rotate/resize) already changed the frame shape, we can't
+    # align them, so skip rather than crash the whole render.
+    if ctx.coverage.shape[:2] != rgb.shape[:2]:
+        return rgb
     from seestack.bg.coverage_leveling import level_by_coverage
 
     return level_by_coverage(rgb, ctx.coverage,

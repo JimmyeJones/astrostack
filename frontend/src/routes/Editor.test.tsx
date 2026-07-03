@@ -167,7 +167,8 @@ describe("EditorView", () => {
     await waitFor(() => expect(btn).not.toBeDisabled());
     btn.click();
 
-    await waitFor(() => expect(maskUrl).toHaveBeenCalledWith("M_42", 3));
+    // No star op is selected, so the overlay uses the endpoint default (size undefined).
+    await waitFor(() => expect(maskUrl).toHaveBeenCalledWith("M_42", 3, undefined));
     // The overlay label switches to "Star mask" and the button flips to "Hide mask".
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Hide mask" })).toBeInTheDocument());

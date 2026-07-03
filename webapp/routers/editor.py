@@ -21,7 +21,7 @@ from pydantic import BaseModel
 
 from seestack.edit.histogram import compute_histogram
 from seestack.edit.pipeline import apply_recipe
-from seestack.edit.proxy import get_proxy
+from seestack.edit.proxy import get_proxy, load_coverage
 from seestack.edit.recipe import Recipe, recipe_from_dict
 from seestack.edit.registry import EditContext
 from seestack.edit import presets as presets_mod
@@ -74,13 +74,23 @@ def _load_saved_recipe(request: Request, safe: str, run_id: int) -> Recipe:
     return recipe_from_json(raw)
 
 
+def _proxy_coverage(fits_path: str, scale: float) -> np.ndarray | None:
+    """The run's per-pixel coverage map, strided to the live-preview proxy so the
+    "Coverage leveling" op works in preview and matches the full-res export. The
+    proxy is built by striding with ``step = round(proxy_scale)`` (see
+    ``build_proxy``), so we decimate the coverage the same way. None when the run
+    has no coverage sibling (a single-field image)."""
+    return load_coverage(fits_path, step=max(1, int(round(scale))))
+
+
 def _render_png(project_dir: Path, run, recipe: Recipe) -> bytes:
     import io
 
     from PIL import Image
 
     rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
-    ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None)
+    ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None,
+                      coverage=_proxy_coverage(run.fits_path, scale))
     out = apply_recipe(rgb, recipe, ctx, for_preview=True)
     u8 = (np.clip(np.nan_to_num(out), 0.0, 1.0) * 255).astype(np.uint8)
     buf = io.BytesIO()
@@ -350,7 +360,8 @@ async def edit_histogram(safe: str, run_id: int, request: Request,
         # Flag a stack whose proxy has no finite pixels (failed solve/stack), so
         # the UI can say "no image data" instead of showing a mystery black frame.
         empty = not bool(np.isfinite(rgb).any())
-        ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None)
+        ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None,
+                          coverage=_proxy_coverage(run.fits_path, scale))
         errors: list[str] = []
         out = apply_recipe(rgb, rec, ctx, for_preview=True, errors=errors)
         hist = compute_histogram(out)
