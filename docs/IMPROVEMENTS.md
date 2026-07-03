@@ -169,6 +169,19 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Built-in presets land sized to your data** — the built-in editor presets
+  (Galaxy / Nebula / Star cluster) carried *generic* default sizes for their
+  data-scalable ops (Galaxy's sharpen `radius=2.0`, Star-cluster's `stars.reduce
+  size=2`), the same fixed guesses the one-click Auto recipe already outgrew.
+  Applying a **built-in** preset now seeds those data-driven params (sharpen
+  radius, star size) from this target's own median star FWHM via the same
+  `applyDataDrivenDefaults` helper as the "Use data defaults" toolbar action, so a
+  preset lands sized to what you actually shot. **User-saved** presets are applied
+  exactly as the user tuned them (a new `source` arg on `PresetMenu.onApply`
+  distinguishes the two). Reuses the already-fetched suggestion queries;
+  frontend-only, additive. Vitest-covered end-to-end (applying the Galaxy preset
+  seeds its sharpen radius to the measured value). (v0.57.11, this run)
+
 - **"Apply data-driven defaults" one-click on the editor** — a user hand-building
   a recipe previously had to open each of the four suggestion-carrying ops
   (Deconvolution, Noise reduction, Sharpen, Star reduction) and click its "From

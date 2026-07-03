@@ -398,7 +398,13 @@ export function EditorView() {
               </Button>
             </Tooltip>
           ) : null}
-          <PresetMenu currentOps={ops} onApply={(o) => setOps(o)} />
+          {/* Built-in presets carry generic default sizes; seed their data-driven
+              params (sharpen radius, star size) from this target's own stars so a
+              preset lands sized to your data. User presets are applied as-tuned. */}
+          <PresetMenu currentOps={ops}
+            onApply={(o, source) =>
+              setOps(source === "builtin"
+                ? applyDataDrivenDefaults(o, dataDrivenSuggestions) : o)} />
           <Button variant="default" leftSection={<IconDeviceFloppy size={16} />}
             loading={saveRecipe.isPending} onClick={() => saveRecipe.mutate()}>Save</Button>
         </Group>

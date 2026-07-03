@@ -262,6 +262,39 @@ describe("EditorView", () => {
       expect(screen.queryByRole("button", { name: /Use data defaults/ })).not.toBeInTheDocument());
   });
 
+  it("seeds a built-in preset's sizes from the target's data on apply", async () => {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, SHARPEN]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({ ops: [], base_run_id: 3 });
+    // A built-in preset carrying the generic default sharpen radius (2.0)...
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({
+      builtin: [{
+        id: "galaxy", label: "Galaxy", group: "Built-in",
+        ops: [{ id: "detail.sharpen", enabled: true, params: { radius: 2.0 } }],
+      }],
+      user: [],
+    });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    // ...and a data-driven sharpen radius that differs from the preset default.
+    vi.spyOn(client.api, "sharpenSuggestion").mockResolvedValue({ fwhm_px: 8, radius: 3.5 });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    // Apply the built-in "Galaxy" preset (empty pipeline → no confirm).
+    fireEvent.click(await screen.findByRole("button", { name: /Presets/ }));
+    fireEvent.click(await screen.findByText("Galaxy"));
+
+    // Select the added Sharpen op; its radius should have been seeded to the
+    // measured 3.5, so the "From your data" button reads as already-applied.
+    fireEvent.click(await screen.findByText("Sharpen"));
+    const btn = await screen.findByLabelText("Set Radius (px) from your data");
+    await waitFor(() => expect(btn).toBeDisabled());
+    expect(btn).toHaveTextContent("✓");
+  });
+
   it("shows an error message when the preview render fails (not a blank panel)", async () => {
     mockEditorQueries();
     vi.stubGlobal("fetch", vi.fn(async () => ({
