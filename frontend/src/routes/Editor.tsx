@@ -9,7 +9,7 @@ import {
   IconRefresh, IconSparkles, IconWand, IconZoomScan,
 } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, type EditOp, type OpInstance, type Recipe } from "../api/client";
@@ -148,6 +148,10 @@ export function EditorView() {
   const preview = useQuery({
     queryKey: ["edit-preview", safe, rid, dKey, bust],
     enabled: !!opsSchema.data && !saved.isLoading,
+    // Keep the previous render visible while the next one loads (rather than
+    // flashing to a black Loader on every slider drag); the "Updating…" badge
+    // signals the shown image is momentarily stale.
+    placeholderData: keepPreviousData,
     queryFn: async ({ signal }) => {
       const res = await fetch(api.editPreviewUrl(safe, rid, dRecipe, bust), { signal });
       if (!res.ok) {
@@ -467,6 +471,17 @@ export function EditorView() {
                   {showMask ? "Star mask" : showBase ? "Original"
                     : `Without: ${specs[selForSolo!.id]?.label ?? selForSolo!.id}`}
                 </Text>
+              ) : null}
+              {/* While a superseded render is being replaced (the older result is
+                  aborted server-side), tell the user the shown image is stale and
+                  a fresh render is on the way — so a laggy heavy op doesn't read as
+                  "nothing happened". Only when an image is already showing. */}
+              {preview.isFetching && shownSrc && !preview.isError ? (
+                <Group gap={6} style={{ position: "absolute", left: 12, bottom: 10,
+                  background: "rgba(0,0,0,0.6)", padding: "2px 8px", borderRadius: 4 }}>
+                  <Loader size={12} color="gray" />
+                  <Text size="xs" c="white">Updating…</Text>
+                </Group>
               ) : null}
               <Group gap={6} style={{ position: "absolute", right: 8, top: 8 }}>
                 <Tooltip label="Show the soft mask that gates star ops (white = treated as a star)">

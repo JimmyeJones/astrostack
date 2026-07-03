@@ -192,6 +192,18 @@ _Newest first. One line each: what + commit/PR._
   Pure helpers Vitest-covered (8 cases) + an Editor render test; frontend-only,
   additive. (v0.57.14, this run)
 
+- **Keep the old preview + "Updating…" badge while re-rendering (editor
+  responsiveness)** — on every (debounced) edit the live-preview query key changes,
+  so react-query dropped `preview.data` to `undefined` and the panel flashed to a
+  black `<Loader>` before the new render arrived — a jarring blink on every slider
+  drag, and no signal that a render was underway. Added `placeholderData:
+  keepPreviousData` so the previous render stays visible while the next one loads,
+  plus a small "Updating…" overlay badge (shown only when a render is in flight and
+  an image is already up) so the momentarily-stale image reads as "refreshing", not
+  "stuck". Pairs with this run's superseded-render abort. Vitest-covered (the old
+  image persists and the badge appears while a render pends). Frontend-only,
+  additive. (v0.57.16, this run)
+
 - **Cancel superseded live-preview renders (editor responsiveness)** — the live
   preview refetches on every debounced param change, but the four blob `fetch`
   queries (preview, base, star-mask, without-op) and the histogram query never
