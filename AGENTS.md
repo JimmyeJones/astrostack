@@ -12,23 +12,50 @@ session, the user wins. Otherwise, follow this document exactly.
 
 ---
 
-## 1. Mission
+## 1. Mission & product vision (read this first — it governs everything)
 
-AstroStack is a headless, TrueNAS/Docker-deployable astrophotography web app that
-wraps the `seestack` stacking engine, aimed at ZWO Seestar owners (and, now,
-mono/filtered imagers) who want to stack thousands of subs and edit the result
-without being PixInsight experts.
+AstroStack is a headless, TrueNAS/Docker web app around the `seestack` engine for
+**one specific person: a ZWO Seestar owner shooting one-shot-colour (OSC), who has
+thousands of subs and wants a beautiful final image without becoming a PixInsight
+expert.** Everything is judged by whether it helps *that* person.
 
-Your job each run: **make the app meaningfully better for that user** — more
-capable, more correct, more pleasant to use — and leave the tree green, the
-history clean, and the backlog updated. Optimise for **many high-quality, fully
-tested changes over time**. Each individual change is small and safe; each hourly
-run lands a batch of them.
+**North Star:** drop your Seestar frames in → get a great-looking, trustworthy
+image out, with as little fuss as possible.
 
-> Note: `PLAN.md` is the *original* desktop-era design. It is historical. The app
-> has since grown a web layer, a non-destructive editor, dark/flat calibration,
-> mono + LRGB stacking, and optional auth. Trust the code and `docs/IMPROVEMENTS.md`
-> over `PLAN.md` when they disagree.
+**Priorities, in strict order (the owner set these).** When choosing what to do,
+higher on this list wins — always:
+
+1. **Make the editor excellent.** The non-destructive editor is where a good stack
+   becomes a good *picture*, and today it has real problems (live preview that
+   doesn't match/behave, clunky and confusing controls, and a weak default
+   result). **Go deep here: hunt and fix its bugs, make the controls obvious, and
+   make the out-of-the-box result genuinely good.** Fixing/polishing the editor
+   outranks any new feature.
+2. **"Just works" autonomy.** Drop files in and get a great result with minimal
+   clicks — smarter, well-defaulted auto-grade / auto-stack / auto-calibrate /
+   auto-edit. Reduce the number of decisions the user must make.
+3. **Overall user-friendliness.** Clearer screens, plain-language guidance,
+   sensible defaults, good empty/error states, less clutter. A beginner should
+   never be confused about what to do next.
+4. **Best-possible image quality** for the OSC Seestar workflow (clean, detailed
+   final images).
+
+**Depth over surface.** The app already has *plenty* of features. Your default
+should be to **fix, polish, simplify, and deepen what exists — not add new
+surface.** A new button/page needs a much higher bar than making an existing
+thing genuinely good. When in doubt, improve the editor or remove friction.
+
+**Deprioritised — do NOT invest more here** (these are niche for an OSC Seestar
+owner and have soaked up too much effort already): mono / LRGB / **channel
+combine**, narrowband, and other pro-astro features. Leave what exists working;
+don't extend or add to it. Anything that only helps filtered/mono imagers is the
+*lowest* priority, below everything above.
+
+Optimise for **many high-quality, fully tested changes over time**, but aimed at
+the priorities above — not a long tail of niche additions.
+
+> Note: `PLAN.md` is the *original* desktop-era design; it's historical. Trust the
+> code, this vision, and `docs/IMPROVEMENTS.md` over `PLAN.md`.
 
 ---
 
@@ -68,39 +95,55 @@ separate commits and one PR; put unrelated changes on their own branches/PRs so
 each stays reviewable and revertible. If a task turns out huge, ship the first
 safe slice and log the rest as a new backlog item — then move on.
 
+**Big-picture review (do this regularly — at least one run in three).** Don't
+*only* pick backlog items. Periodically step back and **dogfood the whole app as
+the target user (§1)**: actually trace `drop files → ingest → QC → stack →
+**edit** → export`, especially the editor, and ask "what's confusing, broken, ugly,
+or slow here?" Fix the biggest real friction you find — root causes, not
+symptoms — and write up anything you couldn't finish as a top-priority backlog
+item. This is how you find the *undocumented* editor problems the owner hasn't
+had time to report. A run that fixes one real editor/UX pain the owner would
+actually notice beats a run that ships three niche additions.
+
 ---
 
 ## 3. How to decide what to work on (choosing among known candidates)
 
-You are trusted to choose. Score each candidate on three axes:
+You are trusted to choose — but **the §1 priority order is the primary filter.**
+A task that advances priority 1 (editor) or 2 (autonomy) beats a lower-priority
+task even if the lower one scores better on effort/risk. Within a priority band,
+score each candidate on three axes:
 
-- **User value** — does a real Seestar/astro imager notice and benefit? Correct
-  results and "it finally does X" beat cosmetic tweaks.
+- **User value** — would *the target user (§1)* actually notice and appreciate
+  this? A fix to a thing they use every session beats a niche capability.
 - **Effort** — can you finish it *end-to-end with tests* within the run?
 - **Risk** — how likely to break existing behaviour, corrupt data, or destabilise
   the hot path (ingest/stack)? Lower is better.
 
-**Pick the highest `value ÷ (effort × risk)`.** When two are close, prefer:
-finishing/polishing something half-done > fixing a correctness bug > improving a
-hot path safely > new self-contained feature > cosmetic. Sequence a run to front-
-load safe, high-confidence wins, then attempt one riskier/bigger item if time
-allows.
+**Pick the highest-priority band with a good `value ÷ (effort × risk)` option.**
+Prefer: fixing/polishing/simplifying something that exists > removing user
+friction > a correctness fix a user would see > a *new* feature (high bar; must
+serve §1) > cosmetic. Front-load safe wins, then attempt one bigger item.
 
-### Where to find candidates (in priority order)
-1. **Anything broken or flaky** — failing/skipped tests, error logs, TODO/FIXME/
-   HACK/XXX comments, `# noqa`d smells, swallowed exceptions.
-2. **The backlog** — `docs/IMPROVEMENTS.md` "Ideas" section, roughly top-down.
-3. **Correctness gaps** — places the math, NaN handling, coverage handling, or
-   edge cases (empty input, single frame, mosaic edges, huge stacks) are wrong or
-   untested. Astro correctness matters more than features.
-4. **Coverage gaps** — modules/branches with thin or no tests; add tests *and*
-   fix what they reveal.
-5. **Real workflow needs** — what an imager actually does next: better previews,
-   sensible defaults, clearer errors, batch operations, export formats, docs.
-6. **Performance** — only with a measurement showing a real hot spot; never
-   trade correctness or memory-safety for speed (this app has OOM history).
-7. **Maintainability** — safe refactors that reduce duplication or clarify a
-   confusing module, *when* they enable upcoming work.
+### Where to find candidates (in priority order — mirrors §1)
+1. **Anything broken or flaky** — failing/skipped tests, error logs, TODO/FIXME,
+   swallowed exceptions, and **bugs a user hits** (start the editor and try to
+   break it).
+2. **Editor quality (priority 1)** — live-preview correctness/speed/parity with
+   export, confusing or missing controls, and a weak default/auto result.
+   Dogfood it; fix what annoys.
+3. **Autonomy & friendliness (priorities 2–3)** — a manual step that could be
+   automatic, a missing sane default, a confusing screen, a bad empty/error state.
+4. **The backlog** — `docs/IMPROVEMENTS.md`, roughly top-down (it's ordered by
+   these priorities).
+5. **Image quality (priority 4)** — correctness/NaN/coverage edge cases and
+   cleaner results *for the OSC workflow*.
+6. **Coverage gaps / performance / maintainability** — add tests and fix what they
+   reveal; optimise only a *measured* hot spot; refactor only in service of the
+   above. Never trade correctness or memory-safety for speed (OOM history).
+
+Do **not** pick niche/deprioritised work (mono/LRGB/channel-combine/narrowband)
+except to fix an outright bug in what already exists.
 
 ---
 
@@ -111,14 +154,16 @@ generating genuinely new, valuable ideas and record them (with a why, a rough
 size, and which pillar they serve). Aim to add at least a couple of well-reasoned
 ideas per run. Here's how to find good ones.
 
-### The three product pillars — every idea should push one
-1. **Scale** — handle 10k+ subs, mosaics, big canvases without falling over.
-2. **Correctness** — physically/photometrically right results (calibration,
-   alignment, coverage, colour, noise).
-3. **Approachability** — a non-expert gets a great result with sane defaults,
-   plain-language options, and a "why". This is the app's edge over PixInsight.
+### Ideas must serve the §1 priorities — in this order
+An idea is only worth logging if it clearly helps the target user via one of:
+1. **A better editor** — easier to get a great picture (the top priority).
+2. **More autonomy** — fewer manual steps, smarter defaults, "it just did it".
+3. **More approachable** — clearer, simpler, less confusing.
+4. **Better image quality / trust** for the OSC Seestar workflow.
 
-An idea that advances one pillar without hurting the others is a good idea.
+Ideas that only serve mono/LRGB/channel-combine/narrowband/pro workflows are
+**not** worth logging — that space is deprioritised (§1). Prefer ideas that
+*deepen or simplify* an existing feature over ideas that add new surface.
 
 ### Method A — walk the user's journey and find friction
 Trace the whole path and ask "what's missing, confusing, or manual here?":
