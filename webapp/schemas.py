@@ -224,6 +224,12 @@ _DESCRIPTORS: list[dict[str, Any]] = [
              "satellite/plane trail or hot/cold sample even in a small stack, "
              "where sigma clipping can't. Needs 3+ frames; takes precedence over "
              "sigma clipping and ignores quality weights."},
+    {"key": "min_max_reject_count", "label": "Extremes to drop (per side)", "type": "int",
+     "group": "advanced", "min": 1, "max": 5, "step": 1, "depends_on": "min_max_reject",
+     "help": "How many of the lowest and highest values to drop at each pixel. 1 = "
+             "the classic single min/max drop. Raise it to remove several trails "
+             "crossing one pixel across a session (3 → up to 3 trails). Only applied "
+             "where a pixel has at least 2×this+1 frames; costs a little more memory."},
     {"key": "background_flatten", "label": "Background flatten", "type": "bool", "group": "simple",
      "help": "Subtract a per-frame sky model to remove gradients."},
     {"key": "quality_weighted", "label": "Quality weighting", "type": "bool", "group": "simple",

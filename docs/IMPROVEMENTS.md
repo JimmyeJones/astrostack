@@ -87,22 +87,8 @@ problems. Dogfood it every big-picture run and fix root causes.
   most of it) and divide it out before accumulation. Needs care: robust to
   few-star frames, neutral fallback, off by default first. (M, correctness)
 - Follow-ups to min/max reject (shipped v0.56.0). (Item (2), the Stack-form
-  small-stack hint, shipped v0.56.2.) Remaining:
-  - **Top/bottom-k trimmed-mean reject** — generalise `MinMaxRejectAccumulator`
-    to drop the *k* smallest and *k* largest per pixel (opt-in
-    `min_max_reject_count`, default 1 = exactly today's behaviour). Handles
-    multiple satellite/plane trails crossing the same pixel across a session
-    (k=3 → up to 3 trails) that a single-extreme drop leaves behind. Stays
-    memory-bounded and single-pass by tracking the k smallest/largest as 2k
-    canvas planes (vectorised sorted insertion), applying the full k-trim only
-    where `count ≥ 2k+1` (so the two sides are disjoint) and degrading to the
-    proven single min/max drop for `3 ≤ count < 2k+1`. NB: the earlier
-    "percentile (drop p%)" and "median/MAD" framings are **not** streaming-
-    feasible — an exact per-pixel median/percentile needs *every* frame's value
-    held per pixel (tens of GB on a big canvas), which the OOM-bounded hot path
-    forbids; the k-extremes trim is the memory-safe realisation. Must extend
-    `_estimate_peak_bytes` / the memory guard to charge the extra 2k planes so
-    the pre-run estimate stays exact. (M, correctness)
+  small-stack hint, shipped v0.56.2; top/bottom-k trimmed-mean reject shipped
+  v0.58.0.) No remaining sub-items.
 - **Dark exposure-scaling** (slice (b), now that bias is wired for lights) —
   `scaled_dark = bias + (dark − bias)·(t_light/t_dark)` so a dark shot at a
   different exposure than the lights can still be used. Needs the per-frame
@@ -169,6 +155,23 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Top/bottom-k trimmed-mean reject** — generalised `MinMaxRejectAccumulator` to
+  drop the *k* smallest and *k* largest per pixel via an opt-in
+  `StackOptions.min_max_reject_count` (default 1 = exactly today's single min/max
+  drop), so multiple satellite/plane trails crossing one pixel across a session
+  (k=3 → up to 3 trails) are removed where a single-extreme drop left two behind.
+  Stays single-pass and memory-bounded: k sorted min-planes and k max-planes
+  (`2 + 2k` canvas planes) updated by a vectorised insertion (min/max bubble), the
+  full k-trim applied only where `count ≥ 2k+1` (the two sides are then disjoint
+  with a middle), degrading to the proven single min/max drop for `3 ≤ count < 2k+1`
+  and a plain mean below 3 — so k=1 is byte-identical to before. `_estimate_peak_bytes`
+  / the memory guard now charge the extra `2k` planes (`_min_max_reject_arrays`) so a
+  big k can't slip past the OOM guard. Descriptor-driven Stack-form control
+  (advanced, `depends_on=min_max_reject`, bounds 1–5) surfaces it automatically.
+  Unit-tested (k=3 trim / three-trail kill / <2k+1 degrade / NaN+tie / windowed /
+  k=1-identity), guard-tested (k=3 refused where k=1 fit), and end-to-end. Additive/
+  upgrade-safe (new field defaults 1). (v0.58.0, this run)
 
 - **"slower preview" chip in the Add-operation menu** — the `heavy` spec hint
   (v0.57.17) was only consumed by the preview debounce; now the Add-operation menu

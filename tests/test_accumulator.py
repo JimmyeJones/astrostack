@@ -136,6 +136,92 @@ def test_min_max_reject_nan_aware_extremes():
     assert acc.coverage[0, 0] == 4
 
 
+def test_min_max_reject_k3_drops_three_each_end():
+    # k=3: drop the 3 smallest and 3 largest, average the middle. Values
+    # {1,2,3, 10,11,12, 98,99,100} → drop {1,2,3} and {98,99,100} → mean{10,11,12}=11.
+    acc = MinMaxRejectAccumulator((1, 1), reject_count=3)
+    for v in (1.0, 2.0, 3.0, 10.0, 11.0, 12.0, 98.0, 99.0, 100.0):
+        acc.add(np.full((1, 1), v))
+    np.testing.assert_allclose(acc.result(), 11.0)
+    assert acc.coverage[0, 0] == 9
+
+
+def test_min_max_reject_k3_kills_three_trails():
+    # The motivating case: three separate satellite/plane trails cross one pixel
+    # across a session. Single min/max drop (k=1) leaves two of them inflating the
+    # mean; k=3 removes all three. {10×6, 500, 600, 700} → k=3 drops {500,600,700}
+    # and three of the 10s → mean of the remaining three 10s = 10.
+    vals = [10.0] * 6 + [500.0, 600.0, 700.0]
+    acc = MinMaxRejectAccumulator((1, 1), reject_count=3)
+    for v in vals:
+        acc.add(np.full((1, 1), v))
+    np.testing.assert_allclose(acc.result(), 10.0)
+    # Contrast: k=1 (today's behaviour) only clips the single worst trail, so two
+    # bright trails survive and badly inflate the mean.
+    acc1 = MinMaxRejectAccumulator((1, 1), reject_count=1)
+    for v in vals:
+        acc1.add(np.full((1, 1), v))
+    assert acc1.result()[0, 0] > 100.0
+
+
+def test_min_max_reject_k_degrades_to_single_drop_below_2k_plus_1():
+    # With k=3 but only 5 samples (< 2k+1=7), a full k-trim would leave nothing,
+    # so it degrades to the proven single min/max drop: {1,4,5,6,100} → drop 1 &
+    # 100 → mean{4,5,6}=5. (Tie-checked against a k=1 accumulator on the same data.)
+    vals = (1.0, 4.0, 5.0, 6.0, 100.0)
+    acc = MinMaxRejectAccumulator((1, 1), reject_count=3)
+    for v in vals:
+        acc.add(np.full((1, 1), v))
+    np.testing.assert_allclose(acc.result(), 5.0)
+    acc1 = MinMaxRejectAccumulator((1, 1), reject_count=1)
+    for v in vals:
+        acc1.add(np.full((1, 1), v))
+    np.testing.assert_allclose(acc.result(), acc1.result())
+
+
+def test_min_max_reject_k3_nan_aware_and_tie_safe():
+    # NaNs are skipped, and tied extremes lose only k contributions. Valid values
+    # {5,5,5, 20,20,20, 40} with two NaNs: 7 valid, count≥2k+1 so full k=3 trim →
+    # drop three lowest {5,5,5} and three highest {40,20,20} → middle {20} = 20.
+    acc = MinMaxRejectAccumulator((1, 1), reject_count=3)
+    for v in (5.0, np.nan, 5.0, 5.0, 20.0, 20.0, np.nan, 20.0, 40.0):
+        acc.add(np.full((1, 1), v))
+    assert acc.coverage[0, 0] == 7
+    np.testing.assert_allclose(acc.result(), 20.0)
+
+
+def test_min_max_reject_k3_windowed_matches_full():
+    rng = np.random.default_rng(11)
+    frames = [rng.normal(100, 5, size=(6, 6)).astype(np.float32) for _ in range(9)]
+    # Inject three hot outliers into three different frames at the same pixel.
+    for fi, hot in zip((2, 5, 7), (9000.0, 8000.0, 7000.0)):
+        frames[fi][2, 3] = hot
+
+    full = MinMaxRejectAccumulator((6, 6), reject_count=3)
+    for f in frames:
+        full.add(f)
+    win = MinMaxRejectAccumulator((6, 6), reject_count=3)
+    for f in frames:
+        win.add_window(f[1:5, 1:5], 1, 1)
+
+    fr, wr = full.result(), win.result()
+    np.testing.assert_allclose(fr[2, 3], wr[2, 3], rtol=1e-5)
+    assert fr[2, 3] < 200.0  # all three trails dropped
+    np.testing.assert_allclose(fr[1:5, 1:5], wr[1:5, 1:5], rtol=1e-5)
+    assert np.isnan(wr[0, 0])  # margin never touched
+
+
+def test_min_max_reject_k_default_is_one():
+    # Default reject_count preserves exactly the classic single min/max drop.
+    default = MinMaxRejectAccumulator((1, 1))
+    k1 = MinMaxRejectAccumulator((1, 1), reject_count=1)
+    for v in (1.0, 2.0, 3.0, 4.0, 100.0):
+        default.add(np.full((1, 1), v))
+        k1.add(np.full((1, 1), v))
+    np.testing.assert_allclose(default.result(), k1.result())
+    np.testing.assert_allclose(default.result(), 3.0)
+
+
 def test_min_max_reject_windowed_matches_full():
     rng = np.random.default_rng(7)
     frames = [rng.normal(100, 5, size=(6, 6)).astype(np.float32) for _ in range(5)]
