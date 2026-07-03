@@ -1053,10 +1053,10 @@ export function EditorView() {
                   onChange={(e) => setOutputName(e.currentTarget.value)} style={{ flex: 1 }} />
                 <Select w={150} value={tiffMode} allowDeselect={false}
                   label={<HintLabel label="TIFF"
-                    hint="Only affects the exported .tiff file. Linear keeps the raw
-                      unstretched data for editing in another tool (Photoshop, GIMP);
-                      Auto-stretched bakes in a display stretch so it looks right when
-                      opened directly. The FITS and PNG outputs are unaffected." />}
+                    hint="The exported .tiff (and its History thumbnail) saves the
+                      edited image exactly as shown here. It's already display-ready,
+                      so both options produce that same result; for the underlying
+                      unstretched data, use the separate FITS output." />}
                   data={[{ value: "linear", label: "Linear" },
                          { value: "autostretch", label: "Auto-stretched" }]}
                   onChange={(v) => setTiffMode(v ?? "linear")} />
