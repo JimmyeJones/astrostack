@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref } from "./History";
+import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries } from "./History";
 import { formatIntegration } from "../format";
 import * as client from "../api/client";
 import type { StackRun } from "../api/client";
@@ -284,6 +284,46 @@ describe("previousRunId", () => {
 describe("historyCompareHref", () => {
   it("builds a same-target /compare URL", () => {
     expect(historyCompareHref("M_42", 7, 3)).toBe("/compare?a=M_42:7&b=M_42:3");
+  });
+});
+
+describe("noiseTrendSeries", () => {
+  it("returns measured σ oldest→newest, skipping unmeasured runs", () => {
+    // API order is newest-first; the series must come out chronological.
+    const runs = [
+      mkRun({ id: 3, noise_sigma: 0.02 }),
+      mkRun({ id: 2, noise_sigma: null }),
+      mkRun({ id: 1, noise_sigma: 0.05 }),
+    ];
+    expect(noiseTrendSeries(runs)).toEqual([0.05, 0.02]);
+  });
+  it("returns an empty series when nothing is measured", () => {
+    expect(noiseTrendSeries([mkRun({ noise_sigma: null })])).toEqual([]);
+  });
+});
+
+describe("HistoryView noise trend card", () => {
+  it("shows a trend sparkline once at least two runs carry a measured σ", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ id: 2, output_basename: "run_b", noise_sigma: 0.03 }),
+      mkRun({ id: 1, output_basename: "run_a", noise_sigma: 0.05 }),
+    ]);
+    renderHistory();
+    await waitFor(() =>
+      expect(screen.getByLabelText(/Noise trend across 2 measured stacks/)).toBeInTheDocument());
+    expect(screen.getByText("Noise trend")).toBeInTheDocument();
+    // Latest σ (0.03) is below the first (0.05) → "Cleaner than" summary.
+    expect(screen.getByText(/Cleaner than your first measured stack/)).toBeInTheDocument();
+  });
+
+  it("hides the trend card when only one run is measured", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ id: 2, output_basename: "solo_measured", noise_sigma: 0.03 }),
+      mkRun({ id: 1, output_basename: "unmeasured_run", noise_sigma: null }),
+    ]);
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("solo_measured")).toBeInTheDocument());
+    expect(screen.queryByText("Noise trend")).not.toBeInTheDocument();
   });
 });
 

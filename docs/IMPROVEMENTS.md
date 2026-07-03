@@ -77,12 +77,6 @@ _(none — claim an item here with your branch name)_
 
 ### Features that serve real workflows
 - Annotated sky overlay (label detected objects / show solved field). (M)
-- **Per-target noise-σ trend sparkline** — the History page shows each run's
-  noise σ and its delta vs the previous run; a tiny time-series sparkline of a
-  target's stack σ across all its runs would let a user see the *trajectory*
-  (are my results getting cleaner as I add nights?) at a glance, not just the
-  last hop. Reuses the recorded `noise_sigma`; within-target; frontend-only.
-  (S/M, approachability)
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
@@ -124,6 +118,15 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Per-target noise-σ trend sparkline** — the History page now shows a small
+  "Noise trend" card (a reusable inline-SVG `Sparkline`) plotting each measured
+  stack's background-noise σ oldest→newest, so a user sees the *trajectory* (are
+  my results getting cleaner as I add nights?) at a glance, not just the last
+  hop — teal + "Cleaner than your first" when trending down, orange + "Noisier"
+  when up. Shown only with ≥2 measured runs. Pure `noiseTrendSeries` /
+  `sparklinePoints` helpers, tested; reuses the recorded `noise_sigma`;
+  within-target, frontend-only. (v0.52.1, this run)
 
 - **"Compare with previous run" action on the History page** — the Compare view
   (v0.51.0) was reachable only from the Gallery's multi-select, but the most

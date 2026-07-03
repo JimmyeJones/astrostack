@@ -13,6 +13,7 @@ import { formatIntegration } from "../format";
 import { HazyNightBadge } from "../components/HazyNightBadge";
 import { NoiseReadout, NoiseDelta, CleanestBadge, cleanestRunId, hasNoise } from "../components/NoiseBadge";
 import { ImageLightbox } from "../components/ImageLightbox";
+import { Sparkline } from "../components/Sparkline";
 
 export type RunSort = "newest" | "cleanest";
 
@@ -64,6 +65,19 @@ export function previousRunId(runs: StackRun[], id: number): number | null {
 // carries every run), so a same-target link works with no backend change.
 export function historyCompareHref(safe: string, aId: number, bId: number): string {
   return `/compare?a=${safe}:${aId}&b=${safe}:${bId}`;
+}
+
+// Extract this target's background-noise σ across runs in chronological order
+// (oldest→newest), keeping only runs that carry a measured σ. `runs` is the
+// API's timestamp-DESC order, so we reverse it. Drives the trend sparkline —
+// lets a user see whether their stacks are getting cleaner as they add nights,
+// not just the last hop. Pure/non-mutating.
+export function noiseTrendSeries(runs: StackRun[]): number[] {
+  const out: number[] = [];
+  for (let i = runs.length - 1; i >= 0; i--) {
+    if (hasNoise(runs[i].noise_sigma)) out.push(runs[i].noise_sigma as number);
+  }
+  return out;
 }
 
 function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
@@ -412,6 +426,7 @@ export function HistoryView() {
   const anyNoise = list.some((r) => hasNoise(r.noise_sigma));
   const deltas = noiseDeltas(list);
   const sorted = sortRuns(list, sort);
+  const trend = noiseTrendSeries(list);
 
   return (
     <Stack>
@@ -433,6 +448,36 @@ export function HistoryView() {
           <Button component={Link} to={`/targets/${safe}/stack`}>New stack</Button>
         </Group>
       </Group>
+      {trend.length >= 2 ? (
+        <Card withBorder padding="sm" radius="md">
+          <Group justify="space-between" wrap="nowrap" gap="md">
+            <div>
+              <Group gap={6}>
+                <Text size="sm" fw={600}>Noise trend</Text>
+                <Tooltip
+                  label="Background-noise σ of each measured stack, oldest → newest. Lower is cleaner; a downward line means your results are improving as you add nights."
+                  multiline w={260} withArrow>
+                  <Text span size="xs" c="dimmed" style={{ cursor: "help" }}
+                    td="underline dotted">what's this?</Text>
+                </Tooltip>
+              </Group>
+              <Text size="xs" c="dimmed">
+                {trend[trend.length - 1] < trend[0]
+                  ? `Cleaner than your first measured stack (σ ${trend[trend.length - 1].toFixed(3)} vs ${trend[0].toFixed(3)}).`
+                  : trend[trend.length - 1] > trend[0]
+                    ? `Noisier than your first measured stack (σ ${trend[trend.length - 1].toFixed(3)} vs ${trend[0].toFixed(3)}).`
+                    : `Steady around σ ${trend[0].toFixed(3)}.`}
+              </Text>
+            </div>
+            <Sparkline
+              values={trend}
+              color={trend[trend.length - 1] <= trend[0]
+                ? "var(--mantine-color-teal-5)" : "var(--mantine-color-orange-5)"}
+              aria-label={`Noise trend across ${trend.length} measured stacks`}
+            />
+          </Group>
+        </Card>
+      ) : null}
       {list.length === 0 ? (
         <Card withBorder padding="xl">
           <Stack align="center" gap="sm">
