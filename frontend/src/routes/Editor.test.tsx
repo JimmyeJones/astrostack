@@ -586,6 +586,34 @@ describe("EditorView", () => {
     expect(screen.getByLabelText("Set White point from your data")).toHaveTextContent("✓");
   });
 
+  it("shows black/white guide labels on the histogram when the Levels op is selected", async () => {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, LEVELS]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [
+        { uid: "s1", id: "tone.stretch", enabled: true, params: { stretch: 0.6 } },
+        { uid: "lv1", id: "tone.levels", enabled: true, params: { black: 0.1, white: 0.8 } },
+      ],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    vi.spyOn(client.api, "levelsSuggestion").mockResolvedValue({ black: 0.12, white: 0.85 });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    // No Levels op selected yet → no guide caption under the histogram.
+    await screen.findByText("Levels");
+    expect(screen.queryByText(/mark your black/)).not.toBeInTheDocument();
+    // Selecting the Levels op surfaces the B/W guide caption (the guide lines are
+    // SVG; the caption is the user-visible proof the overlay is active).
+    fireEvent.click(screen.getByText("Levels"));
+    expect(await screen.findByText(/mark your black/)).toBeInTheDocument();
+  });
+
   it("previews the proposed crop then adds a Crop op on Apply", async () => {
     vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CROP]);
     vi.spyOn(client.api, "getRecipe").mockResolvedValue({

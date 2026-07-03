@@ -51,14 +51,6 @@ problems. Dogfood it every big-picture run and fix root causes.
 - **Editor bug hunt (ongoing)** — there are undocumented issues. Each big-picture
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
-- **Show the Levels black/white points as guides on the op's histogram** — the Levels
-  op panel already renders the image histogram, but the black/white points a user is
-  setting (and the data-driven suggestion) are invisible on it, so it's hard to see
-  *where* on the tonal range they land. Overlay two vertical guide lines on the
-  panel histogram at the current `black`/`white` (and a faint marker at the suggested
-  values), so the beginner can see the points relative to the sky peak and the
-  highlights they're clipping. Reuses the histogram already in the panel; frontend-
-  only, additive, advisory. (S–M, editor/trust)
 - **Coverage overlay should follow the recipe's geometry ops** — the coverage-map
   overlay renders the run's *raw* full-frame coverage sibling, so once a crop/rotate/
   resize op is in the recipe it no longer lines up with the reshaped preview
@@ -210,6 +202,18 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Show the Levels black/white points as guides on the histogram** — while setting
+  the Levels op's black/white points a beginner couldn't see *where* on the tonal
+  range they land (relative to the sky peak / the highlights they clip). When a
+  `tone.levels` op is selected, the editor histogram now overlays two solid vertical
+  guides ("B"/"W") at the current black/white points, plus faint dashed blue markers
+  at the data-driven suggestion (only where it differs from the current value), with
+  a one-line caption explaining them. Pure, testable `levelsHistGuides` helper drives
+  it; the `Histogram` component grew an optional `guides` prop. Frontend-only,
+  additive, advisory. Vitest: helper (5 cases: none/non-Levels/current-only/
+  suggestion-diff/both-diff) + an Editor test that the caption appears only once the
+  Levels op is selected. (v0.65.0, this run)
 
 - **Single-click "Auto levels" on the Levels op** — the data-driven Levels buttons
   (v0.62.0) were per-point, so auto-levelling a beginner's image took *two* clicks
