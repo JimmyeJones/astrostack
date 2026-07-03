@@ -272,6 +272,54 @@ def test_auto_recipe_saturation_eases_off_on_noisy_stacks():
     assert float(op.params["amount"]) == 1.2
 
 
+def test_noise_fraction_crossfade_math():
+    """The crossfade weight is 0 at/below the clean end, 1 at/above the noisy end,
+    and monotone linear in between."""
+    from seestack.edit.presets import _NOISE_HI, _NOISE_LO, _noise_fraction
+
+    assert _noise_fraction(0.0) == 0.0
+    assert _noise_fraction(_NOISE_LO) == 0.0
+    assert _noise_fraction(_NOISE_HI) == 1.0
+    assert _noise_fraction(1.0) == 1.0
+    mid = _noise_fraction((_NOISE_LO + _NOISE_HI) / 2)
+    assert 0.4 < mid < 0.6
+    xs = [0.0, 0.005, _NOISE_LO, 0.016, 0.02, 0.024, _NOISE_HI, 0.04]
+    fracs = [_noise_fraction(x) for x in xs]
+    assert fracs == sorted(fracs)  # non-decreasing
+
+
+def test_auto_recipe_denoise_sharpen_crossfade():
+    """A mildly-noisy stack should get *both* a light denoise and a light sharpen
+    (the crossfade band), and as the noise rises the denoise strength increases
+    while the sharpen amount decreases — no abrupt one-or-the-other cliff."""
+    from seestack.edit.presets import auto_recipe
+
+    base = np.full((80, 100, 3), 0.05, np.float32)
+    base[30:50, 40:60] += 0.5
+
+    def ops_for(sig):
+        rng = np.random.default_rng(3)
+        img = base + rng.normal(0, sig, base.shape).astype("float32")
+        recipe = auto_recipe(img)
+        dn = next((o for o in recipe.ops if o.id == "detail.denoise"), None)
+        sh = next((o for o in recipe.ops if o.id == "detail.sharpen"), None)
+        return (None if dn is None else float(dn.params["strength"]),
+                None if sh is None else float(sh.params["amount"]))
+
+    # A mid-band stack carries BOTH ops (the whole point of the crossfade).
+    dn_mid, sh_mid = ops_for(0.03)
+    assert dn_mid is not None and sh_mid is not None
+    assert dn_mid > 0 and sh_mid > 0
+
+    # Sweep the band: denoise rises, sharpen falls (both monotone).
+    sigs = [0.025, 0.03, 0.035]
+    dns = [ops_for(s)[0] for s in sigs]
+    shs = [ops_for(s)[1] for s in sigs]
+    assert all(a is not None for a in dns) and all(a is not None for a in shs)
+    assert dns == sorted(dns)              # denoise strengthens with noise
+    assert shs == sorted(shs, reverse=True)  # sharpen weakens with noise
+
+
 def test_auto_recipe_levels_coverage_only_for_mosaics():
     """Auto prepends a coverage-leveling pass (before the gradient fit) only when
     the run is a mosaic (coverage_max > coverage_min); a single-field stack

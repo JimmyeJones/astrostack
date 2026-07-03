@@ -48,18 +48,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   gentle denoise/sharpen). Improve the auto recipe so "Auto" is a great one-click
   start. (Gentle SCNR green-cast removal added to the auto recipe in v0.56.6 —
   more of these incremental tweaks welcome.) (M, editor)
-- **One-click "Auto black/white points" for the Levels op** — the Levels op makes a
-  beginner hand-guess a black point and white point, when the natural values come
-  straight from the image histogram (which the editor already computes). Add a
-  "From your image" button on the Levels param panel (mirroring the data-driven
-  sharpen/denoise/star-size buttons) that sets `black` to a low percentile of the
-  finite sky (e.g. p1–p2, clamped so it never crushes visible signal) and `white`
-  to a high percentile (e.g. p99.5) — a safe auto-levels a beginner can then nudge.
-  Reuses the histogram endpoint; additive; needs a guard that it never returns
-  `white ≤ black` (the v0.61.12 degenerate case). (S–M, autonomy/editor)
 - **Editor bug hunt (ongoing)** — there are undocumented issues. Each big-picture
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
+- **Single-click combined "Auto levels" on the Levels op** — the new data-driven
+  Levels buttons (v0.62.0) are per-point: a beginner must click *two* buttons (black,
+  then white) to auto-level. Add one "Auto levels" button (on the op panel header,
+  next to the per-param buttons) that applies *both* suggested points at once from the
+  same `levels-suggestion` payload, so the common case is one click. The per-param
+  buttons stay for fine control. Reuses the existing endpoint + `setParams`; a pure
+  helper sets `{black, white}` together; frontend-only, additive. (S, autonomy/editor)
+- **Show the Levels black/white points as guides on the op's histogram** — the Levels
+  op panel already renders the image histogram, but the black/white points a user is
+  setting (and the data-driven suggestion) are invisible on it, so it's hard to see
+  *where* on the tonal range they land. Overlay two vertical guide lines on the
+  panel histogram at the current `black`/`white` (and a faint marker at the suggested
+  values), so the beginner can see the points relative to the sky peak and the
+  highlights they're clipping. Reuses the histogram already in the panel; frontend-
+  only, additive, advisory. (S–M, editor/trust)
 - **Coverage overlay should follow the recipe's geometry ops** — the coverage-map
   overlay renders the run's *raw* full-frame coverage sibling, so once a crop/rotate/
   resize op is in the recipe it no longer lines up with the reshaped preview
@@ -97,18 +103,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   proxy. Care: it's a behaviour change to Compare, so gate/validate the resolution
   swap doesn't jar the A/B. (S, editor/trust)
 ### Autonomy — "just works" (PRIORITY 2)
-- **Smooth the Auto recipe's noisy/clean cliff (denoise ↔ sharpen crossfade)** —
-  `auto_recipe` treats `analyze_proxy`'s `noisy` verdict as a hard boolean
-  (`sky_sigma > 0.02`): a stack just over the line gets denoise and *no* sharpen,
-  one just under gets sharpen and *no* denoise, so two near-identical stacks either
-  side of the threshold produce visibly different one-click results (a cliff). A
-  mildly-noisy stack could sensibly get *both* a light denoise and a light sharpen.
-  Replace the boolean branch with a continuous crossfade: scale the denoise strength
-  up and the sharpen amount down as `sky_sigma` rises across a band around the
-  threshold (e.g. 0.012–0.028), so the default result varies smoothly with the data
-  instead of snapping. Reuses the measured `sky_sigma`; Auto is an explicit button
-  so no default flips. Needs a test that the crossfade is monotonic and that the
-  clean/very-noisy ends still match today's recipe. (M, autonomy/editor)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
   different (per-channel vs luminance gradient, star reduction, saturation). The
@@ -223,6 +217,47 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Editor: accurate data-driven value labels (Levels buttons + Auto's crossfaded
+  sharpen strength)** — two small honesty fixes on data-driven readouts. (1) The new
+  Levels "From your image" buttons each set only their *own* point, but both showed
+  "From your image (black X, white Y)", implying each sets both; each now names just
+  the value it applies ("black X" / "white Y"). (2) Now that the Auto crossfade
+  (v0.63.0) eases the sharpen *amount* below its full 0.5 on noisier stacks, the
+  "Tuned to your data" note surfaces that strength alongside the radius ("sharpen
+  radius 1.4 px (strength 0.3)") when reduced — so the note reflects the crossfade's
+  new adaptivity. Frontend-only, additive. Vitest updated (distinct Levels labels;
+  the eased-sharpen value phrase; full-strength case unchanged). (v0.63.1, this run)
+
+- **Smooth the Auto recipe's noisy/clean cliff (denoise ↔ sharpen crossfade)** —
+  `auto_recipe` treated `analyze_proxy`'s `noisy` verdict as a hard boolean
+  (`sky_sigma > 0.02`), so a stack just over the line got denoise and *no* sharpen
+  while one just under got sharpen and *no* denoise — two near-identical stacks
+  producing visibly different one-click results. The two now *crossfade* across a
+  band around the old threshold (`_noise_fraction`, 0.012–0.028): denoise strength
+  (still data-driven from the measured noise) fades in and the sharpen amount fades
+  out as σ rises, so a mildly-noisy stack gets a light touch of *both*. The clean
+  end (sharpen only) and very-noisy end (denoise only) are unchanged, and an
+  unmeasurable image falls back to sharpen-only as before. Auto is an explicit
+  button, so no default flips. Engine-only, additive. Tested: `_noise_fraction`
+  endpoints + monotonicity, and that a mid-band stack carries both ops with denoise
+  rising / sharpen falling across the band; existing adapts-to-noise and
+  strength-scaling tests still green. (v0.63.0, this run)
+
+- **One-click "From your image" black/white points for the Levels op** — the Levels
+  op made a beginner hand-guess a black point and a white point, when the natural
+  values come straight from the image's own histogram. The Levels param panel now
+  offers a data-driven "From your image (black X, white Y)" button on both the
+  black and white sliders (mirroring the sharpen/denoise/star-size buttons), driven
+  by a new pure `seestack/edit/levels.py:suggest_levels_points` helper (p1 of the
+  finite sky → black, p99.5 → white, NaN-aware, clamped, and returns `None` when the
+  range would collapse — the v0.61.12 degenerate case) and a `…/editor/levels-suggestion`
+  endpoint that measures the percentiles on the display-space image *entering* that
+  op (all prior ops applied, so the values are correct post-stretch; falls back to
+  dropping the Levels op(s) when the uid is stale). Engine + one endpoint + frontend;
+  additive/upgrade-safe. Tested: engine helper (5 cases), webapp (valid pair on a
+  stretched image + unknown-uid fallback), Vitest (the black button shows the
+  measured value and reads as applied after a click). (v0.62.0, this run)
 
 - **Test the PNG-render path also surfaces failed ops** — coverage follow-up to the
   v0.61.11 export-error surfacing: added a webapp test that a full-res PNG render

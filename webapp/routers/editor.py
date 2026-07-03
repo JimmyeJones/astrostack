@@ -350,6 +350,55 @@ async def denoise_suggestion(safe: str, run_id: int, request: Request) -> Denois
     return await run_in_threadpool(work)
 
 
+class LevelsSuggestionOut(BaseModel):
+    """Data-driven black/white points for the ``tone.levels`` op, from low/high
+    percentiles of the image *as it enters the op*. Both are ``None`` when there's
+    no useful suggestion (too few finite pixels or a near-empty range)."""
+
+    black: float | None
+    white: float | None
+
+
+def _recipe_before_uid(rec: Recipe, uid: str | None) -> Recipe:
+    """A copy of ``rec`` truncated to the ops *before* the one with ``uid`` (so a
+    Levels suggestion measures the display-space image that op will receive). When
+    ``uid`` isn't present, drop every ``tone.levels`` op instead — the next-best
+    proxy for "the image without this Levels adjustment"."""
+    ops = rec.ops
+    idx = next((i for i, op in enumerate(ops) if op.uid == uid), None)
+    kept = ops[:idx] if idx is not None else [op for op in ops if op.id != "tone.levels"]
+    return Recipe(ops=list(kept), version=rec.version, base_run_id=rec.base_run_id)
+
+
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/editor/levels-suggestion",
+            response_model=LevelsSuggestionOut)
+async def levels_suggestion(safe: str, run_id: int, request: Request,
+                            recipe: str | None = None,
+                            uid: str | None = None) -> LevelsSuggestionOut:
+    """Suggest black & white points for the Levels op from the histogram of the
+    image *entering* that op (all ops before it in the recipe applied), so a
+    beginner gets a safe auto-levels they can then nudge instead of hand-guessing
+    the two 0..1 sliders. Mirrors the other data-driven "From your image" buttons.
+    """
+    from seestack.edit.levels import suggest_levels_points
+
+    project_dir, run = _run_info(request, safe, run_id)
+    rec = _decode_recipe_query(request, safe, run_id, recipe)
+    sub = _recipe_before_uid(rec, uid)
+
+    def work() -> LevelsSuggestionOut:
+        rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
+        ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None,
+                          coverage=_proxy_coverage(run.fits_path, scale))
+        out = apply_recipe(rgb, sub, ctx, for_preview=True)
+        pts = suggest_levels_points(out)
+        if pts is None:
+            return LevelsSuggestionOut(black=None, white=None)
+        return LevelsSuggestionOut(black=pts[0], white=pts[1])
+
+    return await run_in_threadpool(work)
+
+
 # Cap the coverage grid the O(h·w) largest-rectangle sweep runs on: a mosaic's
 # full-res coverage map can be >100 MP, but fractional crop bounds need nowhere
 # near that precision, so we stride it down first (mirrors the proxy decimation).

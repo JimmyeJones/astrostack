@@ -62,7 +62,13 @@ export function autoValuePhrases(ops: OpInstance[]): string[] {
     } else if (op.id === "tone.saturation" && typeof p.amount === "number") {
       out.push(`saturation ${fmt(p.amount)}×`);
     } else if (op.id === "detail.sharpen" && typeof p.radius === "number") {
-      out.push(`sharpen radius ${fmt(p.radius)} px`);
+      // The Auto crossfade eases the sharpen strength below its full 0.5 on
+      // noisier stacks, so surface it when reduced (it's data-driven then).
+      if (typeof p.amount === "number" && p.amount < 0.5) {
+        out.push(`sharpen radius ${fmt(p.radius)} px (strength ${fmt(p.amount)})`);
+      } else {
+        out.push(`sharpen radius ${fmt(p.radius)} px`);
+      }
     }
   }
   return out;

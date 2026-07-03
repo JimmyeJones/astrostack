@@ -196,6 +196,43 @@ def test_denoise_suggestion_from_image_noise(client, solved_library):
     assert 0.1 <= body["strength"] <= 1.0
 
 
+def test_levels_suggestion_from_image(client, solved_library):
+    # A stretch places the image into display space; the Levels suggestion then
+    # measures black/white from the image *entering* the Levels op (the stretch
+    # applied), so it returns a usable in-range pair with white > black.
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="levels_src")
+    recipe = {"ops": [
+        {"id": "tone.stretch", "uid": "s1", "params": {"stretch": 0.6, "black": 0.35}},
+        {"id": "tone.levels", "uid": "lv1", "params": {}},
+    ]}
+    q = _enc(recipe)
+    r = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/levels-suggestion?recipe={q}&uid=lv1")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["black"] is not None and body["white"] is not None
+    assert 0.0 <= body["black"] < body["white"] <= 1.0
+
+
+def test_levels_suggestion_unknown_uid_falls_back(client, solved_library):
+    # An absent uid drops the tone.levels op(s) and measures the rest, so a stale
+    # uid still yields a sensible (non-self-referential) suggestion rather than 404.
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="levels_fb")
+    recipe = {"ops": [
+        {"id": "tone.stretch", "uid": "s1", "params": {"stretch": 0.6, "black": 0.35}},
+        {"id": "tone.levels", "uid": "lv1", "params": {}},
+    ]}
+    q = _enc(recipe)
+    r = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/levels-suggestion?recipe={q}&uid=zzz")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["black"] is not None and body["white"] is not None
+    assert body["white"] > body["black"]
+
+
 def test_ops_schema(client):
     r = client.get("/api/editor/ops/schema")
     assert r.status_code == 200

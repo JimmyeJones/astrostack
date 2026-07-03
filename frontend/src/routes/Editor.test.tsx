@@ -515,6 +515,41 @@ describe("EditorView", () => {
     expect(screen.getByText("Sharpen")).toBeInTheDocument();
   });
 
+  it("offers 'From your image' black/white points on the Levels op", async () => {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, LEVELS]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [
+        { uid: "s1", id: "tone.stretch", enabled: true, params: { stretch: 0.6 } },
+        { uid: "lv1", id: "tone.levels", enabled: true, params: { black: 0, white: 1 } },
+      ],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    // Data-driven points measured from the image entering the Levels op.
+    vi.spyOn(client.api, "levelsSuggestion").mockResolvedValue({ black: 0.12, white: 0.85 });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    // Select the Levels op; its black-point suggestion diverges from the current 0.
+    fireEvent.click(await screen.findByText("Levels"));
+    const btn = await screen.findByLabelText("Set Black point from your data");
+    // Each button names only its own point (black here), matching what it sets.
+    expect(btn).toHaveTextContent("black 0.12");
+    expect(btn).not.toHaveTextContent("white");
+    const whiteBtn = await screen.findByLabelText("Set White point from your data");
+    expect(whiteBtn).toHaveTextContent("white 0.85");
+    fireEvent.click(btn);
+    // After applying, the black point matches the suggestion, so the button reads
+    // as already-applied (disabled + ✓).
+    await waitFor(() => expect(btn).toBeDisabled());
+    expect(btn).toHaveTextContent("✓");
+  });
+
   it("previews the proposed crop then adds a Crop op on Apply", async () => {
     vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CROP]);
     vi.spyOn(client.api, "getRecipe").mockResolvedValue({
