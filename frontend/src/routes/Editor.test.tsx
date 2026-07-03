@@ -91,6 +91,69 @@ describe("EditorView", () => {
     expect(screen.getByText("Download full-res PNG")).toBeInTheDocument();
   });
 
+  it("threads an AbortSignal into the live-preview fetch so stale renders can be cancelled", async () => {
+    mockEditorQueries();
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderEditor();
+
+    await screen.findByText("Stretch");
+    // The preview fetch must be called with an options object carrying an
+    // AbortSignal, so react-query can abort a superseded render when the recipe
+    // changes (the "heavy ops lag" hold-out) instead of running it to completion.
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const previewCall = fetchMock.mock.calls.find(
+      (c) => typeof c[0] === "string" && c[0].includes("/editor/preview"));
+    expect(previewCall).toBeDefined();
+    expect(previewCall![1]?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("shows a 'Measured' data-context chip built from the suggestion queries", async () => {
+    mockEditorQueries();
+    vi.spyOn(client.api, "psfSuggestion").mockResolvedValue({ fwhm_px: 3.2, psf_sigma: 1.36 });
+    vi.spyOn(client.api, "denoiseSuggestion")
+      .mockResolvedValue({ noise_sigma: 0.021, strength: 0.4 });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    await screen.findByText("Stretch");
+    expect(await screen.findByText(
+      "Measured: stars ≈ 3.2 px FWHM · background noise σ 0.021")).toBeInTheDocument();
+  });
+
+  it("keeps the old preview with an 'Updating…' badge while a fresh render is in flight", async () => {
+    mockEditorQueries();
+    // Start with a fetch that resolves so the editor settles to a shown image and
+    // no in-flight render; then swap to a never-resolving fetch and trigger a new
+    // render — keepPreviousData keeps the old image and the badge should appear.
+    const okResponse = () =>
+      ({ ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }) });
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => okResponse());
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderEditor();
+
+    await screen.findByText("Stretch");
+    await waitFor(() => expect(screen.getByAltText("preview")).toBeInTheDocument());
+    // Settled: nothing rendering, so no badge.
+    await waitFor(() => expect(screen.queryByText("Updating…")).not.toBeInTheDocument());
+
+    // Next render never resolves; an edit changes the recipe → new fetch pends.
+    fetchMock.mockImplementation(() => new Promise(() => {}) as never);
+    fireEvent.click(screen.getByText("Add operation"));
+    fireEvent.click(await screen.findByText("Curves"));
+
+    // The old image is still shown (not a black Loader) and the badge appears.
+    expect(await screen.findByText("Updating…")).toBeInTheDocument();
+    expect(screen.getByAltText("preview")).toBeInTheDocument();
+  });
+
   it("toggles the star-mask overlay and fetches the mask", async () => {
     mockEditorQueries();
     vi.stubGlobal("fetch", vi.fn(async () => ({

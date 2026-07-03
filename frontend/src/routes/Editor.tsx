@@ -9,7 +9,7 @@ import {
   IconRefresh, IconSparkles, IconWand, IconZoomScan,
 } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, type EditOp, type OpInstance, type Recipe } from "../api/client";
@@ -22,6 +22,7 @@ import { autoSummarySentence } from "../components/editor/autoSummary";
 import { applyDataDrivenDefaults, countDataDrivenDefaults, type OpSuggestion }
   from "../components/editor/dataDrivenDefaults";
 import { previewScaleCaption } from "../components/editor/previewScale";
+import { coalesceFwhm, measuredContextText } from "../components/editor/measuredContext";
 import { OpParamPanel } from "../components/editor/OpParamPanel";
 import { PresetMenu } from "../components/editor/PresetMenu";
 
@@ -85,6 +86,19 @@ export function EditorView() {
     staleTime: 60_000,
   });
 
+  // "Your data" context chip: a single dimmed line near the title showing what
+  // the editor measured about *this* stack (star FWHM, background noise), so the
+  // data-driven suggestion buttons have visible provenance. Reuses the already-
+  // fetched suggestion queries; shown only when at least one measure is available.
+  const measuredText = useMemo(
+    () => measuredContextText({
+      fwhm_px: coalesceFwhm(
+        psf.data?.fwhm_px, sharpen.data?.fwhm_px, starSize.data?.fwhm_px),
+      noise_sigma: denoise.data?.noise_sigma,
+    }),
+    [psf.data, sharpen.data, starSize.data, denoise.data],
+  );
+
   const { state: ops, set: setOps, reset: resetOps, undo, redo, canUndo, canRedo } =
     useUndoable<OpInstance[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -134,8 +148,12 @@ export function EditorView() {
   const preview = useQuery({
     queryKey: ["edit-preview", safe, rid, dKey, bust],
     enabled: !!opsSchema.data && !saved.isLoading,
-    queryFn: async () => {
-      const res = await fetch(api.editPreviewUrl(safe, rid, dRecipe, bust));
+    // Keep the previous render visible while the next one loads (rather than
+    // flashing to a black Loader on every slider drag); the "Updating…" badge
+    // signals the shown image is momentarily stale.
+    placeholderData: keepPreviousData,
+    queryFn: async ({ signal }) => {
+      const res = await fetch(api.editPreviewUrl(safe, rid, dRecipe, bust), { signal });
       if (!res.ok) {
         let detail = `HTTP ${res.status}`;
         try { detail = (await res.json()).detail ?? detail; } catch { /* ignore */ }
@@ -151,7 +169,7 @@ export function EditorView() {
 
   const hist = useQuery({
     queryKey: ["edit-hist", safe, rid, dKey],
-    queryFn: () => api.getHistogram(safe, rid, dRecipe),
+    queryFn: ({ signal }) => api.getHistogram(safe, rid, dRecipe, signal),
     enabled: !!opsSchema.data,
   });
   const refreshPreview = () => {
@@ -164,8 +182,8 @@ export function EditorView() {
   const basePreview = useQuery({
     queryKey: ["edit-base", safe, rid],
     enabled: showBase && !!opsSchema.data && !saved.isLoading,
-    queryFn: async () => {
-      const res = await fetch(api.editPreviewUrl(safe, rid, { ops: [], base_run_id: rid }));
+    queryFn: async ({ signal }) => {
+      const res = await fetch(api.editPreviewUrl(safe, rid, { ops: [], base_run_id: rid }), { signal });
       if (!res.ok) throw new Error("base preview failed");
       return URL.createObjectURL(await res.blob());
     },
@@ -181,8 +199,8 @@ export function EditorView() {
   const maskPreview = useQuery({
     queryKey: ["edit-mask", safe, rid],
     enabled: showMask && !!opsSchema.data && !saved.isLoading,
-    queryFn: async () => {
-      const res = await fetch(api.editStarMaskUrl(safe, rid));
+    queryFn: async ({ signal }) => {
+      const res = await fetch(api.editStarMaskUrl(safe, rid), { signal });
       if (!res.ok) throw new Error("star mask preview failed");
       return URL.createObjectURL(await res.blob());
     },
@@ -203,12 +221,12 @@ export function EditorView() {
   const withoutOpPreview = useQuery({
     queryKey: ["edit-without-op", safe, rid, dKey, selected, bust],
     enabled: soloActive && !!opsSchema.data && !saved.isLoading,
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const withoutRecipe: Recipe = {
         ops: dRecipe.ops.map((o) => (o.uid === selected ? { ...o, enabled: false } : o)),
         base_run_id: rid,
       };
-      const res = await fetch(api.editPreviewUrl(safe, rid, withoutRecipe, bust));
+      const res = await fetch(api.editPreviewUrl(safe, rid, withoutRecipe, bust), { signal });
       if (!res.ok) throw new Error("compare render failed");
       return URL.createObjectURL(await res.blob());
     },
@@ -380,7 +398,15 @@ export function EditorView() {
         <Group gap="xs">
           <Button component={Link} to={`/targets/${safe}/history`} variant="subtle"
             leftSection={<IconArrowLeft size={16} />}>History</Button>
-          <Title order={2}>Editor — {safe}</Title>
+          <div>
+            <Title order={2}>Editor — {safe}</Title>
+            {measuredText ? (
+              <Tooltip multiline w={260} withArrow
+                label="What the editor measured from this stack — the same values behind the 'From your data' suggestion buttons.">
+                <Text size="xs" c="dimmed">{measuredText}</Text>
+              </Tooltip>
+            ) : null}
+          </div>
         </Group>
         <Group gap="xs">
           <Tooltip label="Undo (Ctrl+Z)"><ActionIcon variant="default" disabled={!canUndo}
@@ -445,6 +471,17 @@ export function EditorView() {
                   {showMask ? "Star mask" : showBase ? "Original"
                     : `Without: ${specs[selForSolo!.id]?.label ?? selForSolo!.id}`}
                 </Text>
+              ) : null}
+              {/* While a superseded render is being replaced (the older result is
+                  aborted server-side), tell the user the shown image is stale and
+                  a fresh render is on the way — so a laggy heavy op doesn't read as
+                  "nothing happened". Only when an image is already showing. */}
+              {preview.isFetching && shownSrc && !preview.isError ? (
+                <Group gap={6} style={{ position: "absolute", left: 12, bottom: 10,
+                  background: "rgba(0,0,0,0.6)", padding: "2px 8px", borderRadius: 4 }}>
+                  <Loader size={12} color="gray" />
+                  <Text size="xs" c="white">Updating…</Text>
+                </Group>
               ) : null}
               <Group gap={6} style={{ position: "absolute", right: 8, top: 8 }}>
                 <Tooltip label="Show the soft mask that gates star ops (white = treated as a star)">

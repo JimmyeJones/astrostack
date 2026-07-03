@@ -609,9 +609,10 @@ export const api = {
   editStarMaskUrl: (safe: string, runId: number, sizePx?: number) =>
     `/api/targets/${safe}/stack-runs/${runId}/editor/star-mask`
     + (sizePx ? `?size_px=${sizePx}` : ""),
-  getHistogram: (safe: string, runId: number, recipe: Recipe) =>
+  getHistogram: (safe: string, runId: number, recipe: Recipe, signal?: AbortSignal) =>
     req<Histogram>(
-      `/api/targets/${safe}/stack-runs/${runId}/editor/histogram?recipe=${encodeRecipe(recipe)}`),
+      `/api/targets/${safe}/stack-runs/${runId}/editor/histogram?recipe=${encodeRecipe(recipe)}`,
+      { signal }),
   autoProcess: (safe: string, runId: number) =>
     req<Recipe>(`/api/targets/${safe}/stack-runs/${runId}/editor/auto`, { method: "POST" }),
   exportPng: (safe: string, runId: number, recipe: Recipe) =>

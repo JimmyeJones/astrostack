@@ -53,24 +53,27 @@ problems. Dogfood it every big-picture run and fix root causes.
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
 
 ### Editor — make it excellent (PRIORITY 1) — new ideas
-- **Cancel superseded live-preview renders (responsiveness)** — the editor's live
-  preview refetches on every (debounced) param change, but the `fetch` in the
-  preview `useQuery` doesn't pass the query's `AbortSignal`, so while a user drags a
-  slider on a heavy op (deconvolution, denoise) each stale render runs to completion
-  server-side and the newest result queues behind them — the named "heavy ops on the
-  proxy can lag" hold-out of the live-preview backlog item. Thread the react-query
-  `signal` into `fetch(url, { signal })` for the preview, base, star-mask and
-  without-op queries so a superseded request is aborted the moment the recipe
-  changes, cutting proxy render backlog and latency. Also surfaces a cleaner
-  "rendering…" state. Frontend-only, additive, no API change. (S, editor)
-- **"Your data" context chip in the editor header** — the four data-driven
-  suggestion buttons quote the measured value inline ("FWHM 3.2px"), but there's no
-  single place a user sees what the editor measured about *this* stack. A small
-  dimmed chip near the title ("Measured: stars ≈ 3.2 px FWHM · background noise σ
-  0.021") — built from the already-fetched psf/sharpen/star-size (`fwhm_px`) and
-  denoise (`noise_sigma`) queries via a pure formatter — gives the data-driven
-  buttons visible provenance and builds trust, shown only when at least one measure
-  is available. Pure helper, frontend-only, additive. (S, editor/friendliness)
+- **Per-op debounce so heavy ops render fewer intermediate frames** — now that
+  superseded preview renders abort mid-flight (v0.57.13), the remaining lag while
+  dragging a *heavy* op's slider (deconvolution, wavelet denoise) is that each
+  debounced step still kicks a full proxy render. A light op (levels, saturation)
+  can afford the current 250 ms debounce, but a heavy one wants a longer settle so
+  only the value you land on renders. Make the editor's preview debounce adaptive:
+  key it off whether any *enabled, expensive* op is present (the ops already carry
+  enough in their spec — e.g. a `proxy_safe=false` or a new `heavy` hint — to
+  classify) and stretch it to ~600 ms in that case. Pure "pick a debounce" helper,
+  frontend-only, additive. Cuts wasted heavy renders without making light edits feel
+  sluggish. (S, editor/responsiveness)
+- **Show Auto's chosen data-driven values in the "What Auto-process did" note** —
+  the dismissible note lists the ops Auto ran in plain language, but not the
+  *values* it picked from your data (denoise strength, sharpen radius, saturation,
+  STF sky level), which is exactly where the adaptivity lives. Appending them
+  ("eased saturation to 1.1 for a noisy stack; sharpened at radius 1.4 px sized to
+  your 3.2 px stars") would make the one-click result's data-driven reasoning
+  visible and build trust — turning "it did something" into "it did *this, because
+  of my data*". The auto endpoint already computes these; surface them on the note
+  via a pure formatter. Frontend + a couple of response fields, additive.
+  (S, editor/friendliness)
 
 ### Autonomy — "just works" (PRIORITY 2)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
@@ -188,6 +191,53 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Data-driven saturation in the one-click Auto recipe** — Auto's final
+  saturation boost was a fixed `1.2` for every stack, but chroma noise scales with
+  the boost, so on a noisy Seestar stack that fixed lift just amplified colour
+  speckle. Auto now scales the saturation to the measured background noise
+  (`analyze_proxy`'s `sky_sigma`) — a clean stack gets the full `1.25` lift, a
+  noisy one eases down toward `1.05` — with a neutral `1.2` fallback when the proxy
+  can't be measured. Completes the "adapt every knob to the data" pattern already
+  applied to Auto's denoise strength, sharpen radius and STF target. Engine-only,
+  additive; Auto is an explicit button so no default flips. Test asserts the boost
+  is gentler on a noisy stack than a clean one and falls back to 1.2. (v0.57.15,
+  this run)
+
+- **"Your data" context chip in the editor header** — the four data-driven
+  suggestion buttons quote their measured value inline ("FWHM 3.2px"), but there
+  was no single place a user could see what the editor measured about *this* stack.
+  A small dimmed chip under the title ("Measured: stars ≈ 3.2 px FWHM · background
+  noise σ 0.021") — built from the already-fetched psf/sharpen/star-size (`fwhm_px`)
+  and denoise (`noise_sigma`) queries via pure `coalesceFwhm` / `measuredContextText`
+  helpers — gives the data-driven buttons visible provenance and builds trust,
+  shown (with an explanatory tooltip) only when at least one measure is available.
+  Pure helpers Vitest-covered (8 cases) + an Editor render test; frontend-only,
+  additive. (v0.57.14, this run)
+
+- **Keep the old preview + "Updating…" badge while re-rendering (editor
+  responsiveness)** — on every (debounced) edit the live-preview query key changes,
+  so react-query dropped `preview.data` to `undefined` and the panel flashed to a
+  black `<Loader>` before the new render arrived — a jarring blink on every slider
+  drag, and no signal that a render was underway. Added `placeholderData:
+  keepPreviousData` so the previous render stays visible while the next one loads,
+  plus a small "Updating…" overlay badge (shown only when a render is in flight and
+  an image is already up) so the momentarily-stale image reads as "refreshing", not
+  "stuck". Pairs with this run's superseded-render abort. Vitest-covered (the old
+  image persists and the badge appears while a render pends). Frontend-only,
+  additive. (v0.57.16, this run)
+
+- **Cancel superseded live-preview renders (editor responsiveness)** — the live
+  preview refetches on every debounced param change, but the four blob `fetch`
+  queries (preview, base, star-mask, without-op) and the histogram query never
+  passed react-query's `AbortSignal`, so while a user dragged a slider on a heavy
+  op each stale render ran to completion server-side and the newest result queued
+  behind them — the named "heavy ops on the proxy can lag" hold-out of the
+  live-preview item. Threaded the query `signal` into every `fetch(url, { signal })`
+  and into `api.getHistogram(..., signal)` (which already accepted a `RequestInit`
+  via `req`), so a superseded request aborts the moment the recipe changes, cutting
+  proxy render backlog and latency. Vitest-covered (the preview fetch is called with
+  an `AbortSignal`). Frontend-only, additive, no API change. (v0.57.13, this run)
 
 - **Direct pixel-transform + NaN-safety tests for the tone/colour editor ops** —
   `seestack/edit/ops/tone.py`'s ops (SCNR, saturation, white balance, curves,
