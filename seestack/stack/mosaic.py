@@ -84,6 +84,19 @@ def _ang_sep_deg(ra1: float, dec1: float, ra2: float, dec2: float) -> float:
     return float(np.degrees(2 * np.arcsin(np.sqrt(np.clip(h, 0.0, 1.0)))))
 
 
+def _circ_mean_ra_deg(ra: np.ndarray) -> float:
+    """Circular mean of RA values (degrees), correct across the 0°/360° wrap.
+
+    A plain ``median``/``mean`` of a footprint's corner RAs is *wrong* for a frame
+    that straddles RA=0 — e.g. corners at 359.6° and 0.4° average to 180°, flinging
+    the frame's apparent centre to the opposite side of the sky and getting a good
+    frame flagged as a gross plate-solve outlier (and permanently rejected). The
+    circular mean via ``atan2(Σsin, Σcos)`` handles the wrap correctly.
+    """
+    r = np.radians(np.asarray(ra, dtype=np.float64))
+    return float(np.degrees(np.arctan2(np.sin(r).mean(), np.cos(r).mean())) % 360.0)
+
+
 def _footprint_outlier_indices(
     foot: list[tuple[object, np.ndarray, np.ndarray]],
 ) -> tuple[set[int], list[float]]:
@@ -95,7 +108,9 @@ def _footprint_outlier_indices(
     index set and each frame's separation from the group centre (for logging).
     """
     n = len(foot)
-    centers_ra = np.array([np.median(r) for _, r, _ in foot], dtype=np.float64)
+    # Wrap-safe per-frame centre RA (a plain median of corner RAs sends a frame
+    # straddling RA=0 to ~180° → good frame wrongly rejected as an outlier).
+    centers_ra = np.array([_circ_mean_ra_deg(r) for _, r, _ in foot], dtype=np.float64)
     centers_dec = np.array([np.median(d) for _, _, d in foot], dtype=np.float64)
     # Unwrap RA across centres in case the group straddles 0°.
     cr = centers_ra.copy()

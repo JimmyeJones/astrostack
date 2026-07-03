@@ -7,8 +7,45 @@ pytest.importorskip("astropy")
 
 from seestack.io.project import FrameRow
 from seestack.io.wcs_io import wcs_from_text
-from seestack.stack.mosaic import compute_mosaic_canvas
+from seestack.stack.mosaic import (
+    _circ_mean_ra_deg,
+    _footprint_outlier_indices,
+    compute_mosaic_canvas,
+)
 from tests.synth import make_synth_wcs_text
+
+
+def _fp(key, ra_c, dec_c=20.0, half=0.15):
+    """A synthetic footprint (key, ra_corners, dec_corners) centred at (ra_c, dec_c)."""
+    ra = np.array([ra_c - half, ra_c + half, ra_c + half, ra_c - half], float) % 360.0
+    dec = np.array([dec_c - half, dec_c - half, dec_c + half, dec_c + half], float)
+    return (key, ra, dec)
+
+
+def test_circ_mean_ra_handles_the_zero_wrap():
+    # Corners straddling 0° average to ~0°, not ~180° (the old median bug).
+    m = _circ_mean_ra_deg(np.array([359.7, 0.3, 359.6, 0.4]))
+    assert min(m, 360.0 - m) < 0.05
+    # A normal (non-wrapping) footprint is unaffected.
+    assert abs(_circ_mean_ra_deg(np.array([100.0, 100.5, 100.4, 100.1])) - 100.25) < 0.05
+
+
+def test_ra_zero_straddling_frames_not_flagged_as_outliers():
+    # A dithered cluster around RA≈0: frames whose footprints cross the 0°/360°
+    # wrap must NOT be flagged as gross plate-solve outliers (they used to be,
+    # via a median of corner RAs that sent them to ~180° → permanent rejection).
+    foot = [_fp(i, ra_c) for i, ra_c in
+            enumerate([359.6, 359.75, 359.9, 0.05, 0.2, 0.35])]
+    outliers, _ = _footprint_outlier_indices(foot)
+    assert outliers == set()
+
+
+def test_genuine_far_solve_still_flagged_near_ra_zero():
+    # The detector must still catch a real bad solve 90° from a near-RA=0 group.
+    foot = [_fp(i, ra_c) for i, ra_c in enumerate([359.7, 359.85, 0.0, 0.15, 0.3])]
+    foot.append(_fp(99, 90.0))
+    outliers, _ = _footprint_outlier_indices(foot)
+    assert 5 in outliers
 
 
 def _frame(ra: float, dec: float, *, w: int = 480, h: int = 320,
