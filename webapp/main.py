@@ -67,7 +67,8 @@ async def lifespan(app: FastAPI):
     store = SettingsStore()
     app.state.settings_store = store
 
-    jm = JobManager(store.get().jobs_db_path)
+    jm = JobManager(store.get().jobs_db_path,
+                    max_history=store.get().job_history_limit)
     jm.start()
     app.state.job_manager = jm
 

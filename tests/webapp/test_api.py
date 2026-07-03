@@ -325,6 +325,20 @@ def test_settings_rejects_out_of_bounds_values(client):
     assert client.get("/api/settings").json()["astap_timeout_s"] == 60.0
 
 
+def test_job_history_limit_defaults_and_syncs_to_the_running_manager(client):
+    # Defaults to the long-standing hard-coded cap, and the running JobManager
+    # was created with it.
+    assert client.get("/api/settings").json()["job_history_limit"] == 200
+    assert client.app.state.job_manager.max_history == 200
+    # Changing it takes effect live (no restart) on the running manager.
+    r = client.put("/api/settings", json={"job_history_limit": 500})
+    assert r.status_code == 200 and r.json()["job_history_limit"] == 500
+    assert client.app.state.job_manager.max_history == 500
+    # Out-of-bounds values are rejected and don't partially apply.
+    assert client.put("/api/settings", json={"job_history_limit": 0}).status_code == 422
+    assert client.app.state.job_manager.max_history == 500
+
+
 def test_settings_export_excludes_secrets_and_host_paths(client):
     r = client.get("/api/settings/export")
     assert r.status_code == 200

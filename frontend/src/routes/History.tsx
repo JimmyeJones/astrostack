@@ -11,7 +11,7 @@ import { Link, useParams } from "react-router-dom";
 import { api, type StackRun } from "../api/client";
 import { formatIntegration } from "../format";
 import { HazyNightBadge } from "../components/HazyNightBadge";
-import { NoiseReadout, CleanestBadge, cleanestRunId, hasNoise } from "../components/NoiseBadge";
+import { NoiseReadout, NoiseDelta, CleanestBadge, cleanestRunId, hasNoise } from "../components/NoiseBadge";
 import { ImageLightbox } from "../components/ImageLightbox";
 
 export type RunSort = "newest" | "cleanest";
@@ -26,6 +26,25 @@ export function sortRuns(runs: StackRun[], sort: RunSort): StackRun[] {
   const rest = runs.filter((r) => !hasNoise(r.noise_sigma));
   measured.sort((a, b) => (a.noise_sigma as number) - (b.noise_sigma as number));
   return [...measured, ...rest];
+}
+
+// Map each run id → the fractional change in its background-noise σ against the
+// same target's chronologically *previous* measured stack (the most recent older
+// run that carries a σ). Negative = cleaner than last time. `runs` is the API's
+// timestamp-DESC order; we walk it oldest→newest so "previous" means "earlier in
+// time", independent of the display sort. Runs with no earlier measured σ (the
+// first measured stack, or pre-v0.48 runs) get no entry. Pure/non-mutating.
+export function noiseDeltas(runs: StackRun[]): Map<number, number> {
+  const deltas = new Map<number, number>();
+  let prev: number | null = null;
+  for (let i = runs.length - 1; i >= 0; i--) {
+    const r = runs[i];
+    if (!hasNoise(r.noise_sigma)) continue;
+    const sigma = r.noise_sigma as number;
+    if (prev !== null && prev > 0) deltas.set(r.id, (sigma - prev) / prev);
+    prev = sigma;
+  }
+  return deltas;
 }
 
 function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
@@ -145,8 +164,9 @@ function NotesEditor({ safe, run }: { safe: string; run: StackRun }) {
 const DEFAULT_STRETCH = 0.5;
 const DEFAULT_BLACK = 0.35;
 
-function RunCard({ safe, run, onDelete, deleting, isCleanest }: {
-  safe: string; run: StackRun; onDelete: () => void; deleting?: boolean; isCleanest?: boolean;
+function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta }: {
+  safe: string; run: StackRun; onDelete: () => void; deleting?: boolean;
+  isCleanest?: boolean; noiseDelta?: number;
 }) {
   const qc = useQueryClient();
   const [adjust, setAdjust] = useState(false);
@@ -200,6 +220,9 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest }: {
         {run.total_exposure_s ? ` · ${formatIntegration(run.total_exposure_s)}` : ""}
         {hasNoise(run.noise_sigma) ? <> · <NoiseReadout sigma={run.noise_sigma} /></> : null}
       </Text>
+      {typeof noiseDelta === "number" ? (
+        <Text size="xs"><NoiseDelta delta={noiseDelta} /></Text>
+      ) : null}
       <NotesEditor safe={safe} run={run} />
 
       {adjust && run.has_fits ? (
@@ -358,6 +381,7 @@ export function HistoryView() {
   const list = runs.data ?? [];
   const cleanestId = cleanestRunId(list);
   const anyNoise = list.some((r) => hasNoise(r.noise_sigma));
+  const deltas = noiseDeltas(list);
   const sorted = sortRuns(list, sort);
 
   return (
@@ -393,7 +417,8 @@ export function HistoryView() {
             <RunCard key={r.id} safe={safe} run={r}
               onDelete={() => del.mutate(r.id)}
               deleting={del.isPending && del.variables === r.id}
-              isCleanest={r.id === cleanestId} />
+              isCleanest={r.id === cleanestId}
+              noiseDelta={deltas.get(r.id)} />
           ))}
         </SimpleGrid>
       )}

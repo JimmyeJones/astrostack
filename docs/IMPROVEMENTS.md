@@ -52,6 +52,15 @@ _(none — claim an item here with your branch name)_
 - Bias masters can be built but are never applied — `CalibrationMasters.load`
   only takes dark/flat/flat-dark. Wire bias in (and dark *scaling* by
   exposure ratio once bias exists) for mismatched-exposure dark workflows.
+  **Scoping note (from a run that looked at it):** the *correct* math needs
+  care — a master dark already contains the bias pedestal, so subtracting both a
+  bias *and* an unscaled dark double-subtracts bias. Two clean, unambiguous
+  slices: (a) **bias-only for lights when no dark is chosen** —
+  `(light − bias) / flat` — trivially correct and additive; (b) **dark
+  exposure-scaling** — `scaled_dark = bias + (dark − bias)·(t_light/t_dark)`,
+  which needs the per-frame light exposure threaded into `apply_raw` (the harder
+  part) and a neutral fallback when either exposure is unknown. Ship (a) first,
+  file (b) separately; keep both opt-in and guard shape/exposure mismatches.
   (M, correctness)
 - First-class session/night dimension in the project schema (frames only have
   `timestamp_utc`): per-session sky levelling before combine, per-session
@@ -67,19 +76,21 @@ _(none — claim an item here with your branch name)_
   testable in isolation from real hardware. (M, correctness)
 
 ### Features that serve real workflows
-- Compare-two-stacks web view (side-by-side / blink) to judge setting changes. (M)
 - Annotated sky overlay (label detected objects / show solved field). (M)
-- **Sort the Gallery by noise σ ("cleanest first")** — the History page now has
-  a Newest/Cleanest sort (v0.49.0); extend the same to the Gallery, where runs
-  span all targets, so the sort is a global "show me my cleanest results". Reuses
-  the recorded `noise_sigma`; the Gallery already has a search box to hang a sort
-  control next to. (S, approachability)
-- **Noise-improvement readout vs the previous stack** — on the History page,
-  show each run's noise σ as a delta against the same target's prior run
-  ("−18% noise vs your last stack"), so a user tuning settings/adding subs sees
-  whether a change actually helped, turning trial-and-error into feedback. Builds
-  directly on the recorded `noise_sigma`; within-target, advisory. (S,
-  approachability/correctness)
+- **"Compare with…" entry point on the History page** — the compare view
+  (v0.51.0) is currently reachable only from the Gallery's multi-select, but the
+  *most common* comparison is two stacks of the **same target** (did adding subs
+  / changing κ / turning on quality-weighting actually help?). The History page
+  already lists exactly those runs. Add a lightweight per-card "Compare" action
+  (e.g. "compare with the previous run", or a pick-two mode) that deep-links into
+  the existing `/compare?a=…&b=…` route via the shipped `compareHref` helper — no
+  backend, reuses everything. (S, approachability)
+- **Per-target noise-σ trend sparkline** — the History page shows each run's
+  noise σ and its delta vs the previous run; a tiny time-series sparkline of a
+  target's stack σ across all its runs would let a user see the *trajectory*
+  (are my results getting cleaner as I add nights?) at a glance, not just the
+  last hop. Reuses the recorded `noise_sigma`; within-target; frontend-only.
+  (S/M, approachability)
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
@@ -91,9 +102,9 @@ _(none — claim an item here with your branch name)_
 ### Infra / maintainability
 - Chip away at the ~127 pre-existing `ruff check .` findings (don't add new ones);
   consider wiring ruff into CI once the count is low. (L, correctness/maintainability)
-- ~~Add a retention/pruning policy for `jobs.sqlite`~~ — **already implemented**
-  (`JobManager._evict_old` prunes the DB to ~10× `max_history` after every job);
-  a future refinement could make the cap a configurable setting. (S, scale)
+- ~~Add a retention/pruning policy for `jobs.sqlite`~~ — **done, then made
+  configurable** (`JobManager._evict_old` + the `job_history_limit` setting,
+  v0.51.1). (S, scale)
 - Add a `SessionStart` hook (or a `scripts/setup.sh`) that provisions the venv +
   `npm ci` so every autonomous iteration starts from a known-green baseline. (S)
 - Expand `docs/` (webapp.md) to cover calibration, mono/LRGB, auth. (S)
@@ -121,6 +132,51 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **"Which stack is cleaner" verdict in the Compare view** — when both compared
+  stacks carry a measured noise σ, the Compare page now shows a plain-language
+  banner ("B has 20% lower background noise — it's the cleaner stack"), turning
+  the A/B comparison into a concrete answer for the "did this setting change
+  help?" question. Pure `noiseComparison` helper (guards missing/zero/equal σ);
+  frontend-only, additive. (v0.51.2, this run)
+
+- **Configurable job-history retention** — the job-history cap (how many finished
+  jobs the in-memory map keeps, and at ~10× how many rows `jobs.sqlite` retains)
+  was a hard-coded 200; it's now a `job_history_limit` setting (default 200,
+  bounds 10–100000) surfaced on the Settings page and threaded into the
+  `JobManager` at startup. A settings change applies to the running manager
+  immediately (no restart). Additive/upgrade-safe: the default equals the old
+  constant, so an existing install keeps exactly as much history as before.
+  (v0.51.1, this run)
+
+- **Compare-two-stacks web view** — a new `/compare?a=<safe>:<run>&b=<safe>:<run>`
+  route (bookmarkable) shows two stacks **side by side** or as a **blink**
+  comparator (auto-alternates the two images in one frame at ~0.7 s, with
+  play/pause + manual flip) so a subtle difference — less noise, a cleaned
+  satellite trail, sharper stars — pops out. Each panel carries the target,
+  settings-relevant metadata and the noise readout. Launched from the Gallery's
+  existing multi-select: selecting exactly two images reveals a "Compare" action.
+  Reuses the gallery query + preview URLs (no new endpoint); handles a
+  deleted/missing run gracefully. Pure `parseRef`/`compareHref` helpers tested;
+  frontend-only, additive. (v0.51.0, this run)
+
+- **Noise-improvement readout vs the previous stack** — each History card now
+  shows its background-noise σ as a delta against the same target's *previous*
+  measured stack ("−18% noise vs your last stack", teal for cleaner / orange for
+  a regression / dimmed when ≈unchanged), so a user tuning settings or adding
+  subs sees at a glance whether the change actually helped — trial-and-error
+  becomes feedback. Pure `noiseDeltas` helper walks the runs oldest→newest so
+  "previous" is chronological (independent of the display sort) and guards a
+  zero baseline; runs with no earlier measured σ get no readout. Reuses the
+  recorded `noise_sigma`; frontend-only, additive. (v0.50.0, this run)
+
+- **Newest/Cleanest sort on the Gallery** — extends the History-page noise sort
+  (v0.49.0) to the Gallery, where runs span every target: a `SegmentedControl`
+  (shown only with >1 image and at least one measured σ) reorders cards by
+  ascending `noise_sigma`, keeping unmeasured (pre-v0.48) runs last — a global
+  "show me my cleanest results" that reuses the recorded σ (normalized so it's
+  comparable across gain/exposure). Pure `sortGallery` helper; frontend-only,
+  additive. (v0.49.1, this run)
 
 - **Newest/Cleanest sort on the History page** — completes the noise series: the
   History view gained a Newest/Cleanest `SegmentedControl` (shown only with >1 run
