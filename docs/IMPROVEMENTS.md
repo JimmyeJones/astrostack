@@ -166,6 +166,21 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Grey out stretch params that don't apply to the chosen curve** — the Stretch op
+  exposes both the Asinh knobs (Strength, Black point) and the STF knob (STF sky
+  level), but only one set does anything for a given `mode`, so a beginner drags a
+  slider that silently has no effect. `depends_on` (the descriptor gating already
+  used across the Stack/Settings/editor forms) gained an optional `key=value` form
+  so a field can depend on a *specific* enum choice, not just a boolean; the Asinh
+  params now declare `depends_on="mode=asinh"` and STF sky level `depends_on="mode=stf"`,
+  so the irrelevant ones grey out as the user switches curve. STF sky level was also
+  promoted from Advanced to the main params so STF mode always shows its one active
+  control, and each param got a clearer help line. Backward-compatible: a bare
+  `depends_on` key stays a truthiness check, so every existing boolean dependency is
+  unchanged. Pure `dependencyMet` helper unit-tested (bare-key, `key=value`,
+  stringify) + a render test that the STF slider disables in Asinh mode. Frontend +
+  metadata-only. (v0.56.11, this run)
+
 - **Stage-conflict caution + one-click fix in the editor OpList** — ops declare a
   `stage` (linear / nonlinear / any), and the pipeline runs them across a single
   stretch boundary, but the op list lets a user drag e.g. a background-gradient

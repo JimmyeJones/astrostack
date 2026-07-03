@@ -123,13 +123,15 @@ register(OpSpec(
     apply=_stretch, proxy_safe=True,
     help="Tone-map linear data to display. Asinh reveals faint detail naturally.",
     params=[
-        EditParam("mode", "Curve", "enum", default="asinh", options=["asinh", "stf"]),
+        EditParam("mode", "Curve", "enum", default="asinh", options=["asinh", "stf"],
+                  help="Asinh: manual strength/black point. STF: auto-stretch to a target sky level."),
         EditParam("stretch", "Strength", "float", default=0.5, min=0.0, max=1.0, step=0.01,
-                  help="0 ≈ linear, 1 ≈ extreme faint lift."),
+                  help="0 ≈ linear, 1 ≈ extreme faint lift.", depends_on="mode=asinh"),
         EditParam("black", "Black point", "float", default=0.35, min=0.0, max=1.0, step=0.01,
-                  help="Higher darkens/cleans the sky."),
+                  help="Higher darkens/cleans the sky.", depends_on="mode=asinh"),
         EditParam("target_bg", "STF sky level", "float", default=0.20, min=0.02, max=0.6,
-                  step=0.01, group="advanced", depends_on=None),
+                  step=0.01, depends_on="mode=stf",
+                  help="Target background brightness for the auto-stretch (higher = brighter sky)."),
     ],
 ))
 

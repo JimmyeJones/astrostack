@@ -10,6 +10,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { notifications } from "@mantine/notifications";
 import { api } from "../api/client";
+import { dependencyMet } from "../api/depends";
 import { HintLabel, StackOptionControl } from "../components/StackOptionControl";
 
 // Hover hints for every setting (shown via an info icon next to the label).
@@ -457,7 +458,7 @@ export function SettingsView() {
               {simple.map((f) => (
                 <StackOptionControl
                   key={f.key} field={f} value={optVal(f.key)}
-                  disabled={f.depends_on ? !optVal(f.depends_on) : false}
+                  disabled={!dependencyMet(f.depends_on, optVal)}
                   onChange={(v) => setStackOpt(f.key, v)}
                 />
               ))}
@@ -469,7 +470,7 @@ export function SettingsView() {
                       {advanced.map((f) => (
                         <StackOptionControl
                           key={f.key} field={f} value={optVal(f.key)}
-                          disabled={f.depends_on ? !optVal(f.depends_on) : false}
+                          disabled={!dependencyMet(f.depends_on, optVal)}
                           onChange={(v) => setStackOpt(f.key, v)}
                         />
                       ))}
