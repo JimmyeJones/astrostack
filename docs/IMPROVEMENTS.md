@@ -156,6 +156,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Explain the editor's TIFF export mode** — the Export panel's "TIFF" dropdown
+  offered the raw values "linear" / "autostretch" with no explanation, so a
+  beginner couldn't tell which to pick or that it only affects the .tiff file. It
+  now shows friendly labels ("Linear" / "Auto-stretched") and an info-tooltip on
+  the label explaining Linear keeps raw unstretched data for editing elsewhere,
+  Auto-stretched bakes in a display stretch so the file looks right when opened
+  directly, and the FITS/PNG outputs are unaffected. The stored values are
+  unchanged (still "linear"/"autostretch"), so the export API is untouched.
+  Copy/label-only, frontend, additive. (v0.59.3, this run)
+
 - **Built-in presets prepend Coverage leveling on a mosaic** — a built-in preset
   (Galaxy / Nebula / Star cluster) carries a fixed op list that can't know whether
   *this* stack is a mosaic, so applying one on a Seestar mosaic left the panel steps

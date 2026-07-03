@@ -28,6 +28,7 @@ import { starMaskSizePx } from "../components/editor/starMaskSize";
 import { coalesceFwhm, measuredContextText } from "../components/editor/measuredContext";
 import { OpParamPanel } from "../components/editor/OpParamPanel";
 import { PresetMenu } from "../components/editor/PresetMenu";
+import { HintLabel } from "../components/StackOptionControl";
 
 const GROUP_LABELS: Record<string, string> = {
   background: "Background", tone: "Tone & color", detail: "Detail",
@@ -750,8 +751,15 @@ export function EditorView() {
               <Group align="flex-end" gap="xs">
                 <TextInput label="Output name" placeholder={`${safe}_edit`} value={outputName}
                   onChange={(e) => setOutputName(e.currentTarget.value)} style={{ flex: 1 }} />
-                <Select label="TIFF" w={130} data={["linear", "autostretch"]} value={tiffMode}
-                  allowDeselect={false} onChange={(v) => setTiffMode(v ?? "linear")} />
+                <Select w={150} value={tiffMode} allowDeselect={false}
+                  label={<HintLabel label="TIFF"
+                    hint="Only affects the exported .tiff file. Linear keeps the raw
+                      unstretched data for editing in another tool (Photoshop, GIMP);
+                      Auto-stretched bakes in a display stretch so it looks right when
+                      opened directly. The FITS and PNG outputs are unaffected." />}
+                  data={[{ value: "linear", label: "Linear" },
+                         { value: "autostretch", label: "Auto-stretched" }]}
+                  onChange={(v) => setTiffMode(v ?? "linear")} />
               </Group>
               <Button mt="sm" fullWidth leftSection={<IconDownload size={16} />}
                 loading={exportRun.isPending} onClick={() => exportRun.mutate()}>
