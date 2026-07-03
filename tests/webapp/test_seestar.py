@@ -10,7 +10,12 @@ import pytest
 
 from webapp.seestar import discovery, telemetry
 from webapp.seestar.client import SeestarClient, SeestarError
-from webapp.seestar.manager import collect_telemetry
+from webapp.seestar.manager import (
+    SeestarManager,
+    _RECONNECT_CAP_S,
+    _reconnect_delay_s,
+    collect_telemetry,
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -303,6 +308,93 @@ def test_collect_telemetry_total_failure_returns_none():
     tel, errors = collect_telemetry(_FakeClient({"ds", "vs", "eq"}))
     assert tel is None
     assert len(errors) == 3
+
+
+# --------------------------------------------------------------------------- #
+# reconnect backoff
+# --------------------------------------------------------------------------- #
+
+def test_reconnect_delay_is_capped_exponential():
+    # No wait before the first failure.
+    assert _reconnect_delay_s(0, 2.0, 300.0) == 0.0
+    # Doubles each consecutive failure, floored at the base…
+    assert _reconnect_delay_s(1, 2.0, 300.0) == 2.0
+    assert _reconnect_delay_s(2, 2.0, 300.0) == 4.0
+    assert _reconnect_delay_s(3, 2.0, 300.0) == 8.0
+    # …and clamped to the cap so it never runs away.
+    assert _reconnect_delay_s(20, 2.0, 300.0) == 300.0
+
+
+class _FakeReconnectClient:
+    """A client that's disconnected and whose connect() we can make fail/succeed."""
+
+    def __init__(self, connect_ok: bool = False):
+        self.is_connected = False
+        self.connect_ok = connect_ok
+        self.connect_calls = 0
+
+    def connect(self):
+        self.connect_calls += 1
+        if not self.connect_ok:
+            raise SeestarError("connection refused")
+        self.is_connected = True
+
+
+def _manager_with_clock(clock: dict) -> SeestarManager:
+    # A settings stub is never consulted by _poll_reconnect, so None is fine.
+    return SeestarManager(lambda: None, now_fn=lambda: clock["t"])
+
+
+def test_poll_reconnect_backs_off_and_does_not_hammer():
+    clock = {"t": 0.0}
+    mgr = _manager_with_clock(clock)
+    client = _FakeReconnectClient(connect_ok=False)
+
+    # First cycle: attempts a connect, it fails → backoff armed, telemetry skipped.
+    assert mgr._poll_reconnect("1.2.3.4", client, base_s=2.0) is False
+    assert client.connect_calls == 1
+    # Within the backoff window the scope is left alone (no further connect calls).
+    clock["t"] = 1.0
+    assert mgr._poll_reconnect("1.2.3.4", client, base_s=2.0) is False
+    assert client.connect_calls == 1
+    # After the (2 s) delay elapses it tries again, fails, and the delay grows.
+    clock["t"] = 2.0
+    assert mgr._poll_reconnect("1.2.3.4", client, base_s=2.0) is False
+    assert client.connect_calls == 2
+    # Second failure → 4 s delay: still quiet at t=5 (2 + 4 = 6 required).
+    clock["t"] = 5.0
+    assert mgr._poll_reconnect("1.2.3.4", client, base_s=2.0) is False
+    assert client.connect_calls == 2
+    # The device surfaces a "reconnecting…" state for the dashboard.
+    dev = next(d for d in mgr.snapshot() if d["ip"] == "1.2.3.4")
+    assert dev["reconnecting"] is True and dev["connected"] is False
+    assert "reconnecting" in dev["error"]
+
+
+def test_poll_reconnect_recovers_and_clears_backoff():
+    clock = {"t": 0.0}
+    mgr = _manager_with_clock(clock)
+    client = _FakeReconnectClient(connect_ok=False)
+
+    # Fail once to arm the backoff.
+    assert mgr._poll_reconnect("1.2.3.4", client, base_s=2.0) is False
+    assert mgr._reconnect_fails["1.2.3.4"] == 1
+    # The scope comes back: past the delay, connect now succeeds → telemetry runs.
+    client.connect_ok = True
+    clock["t"] = 2.0
+    assert mgr._poll_reconnect("1.2.3.4", client, base_s=2.0) is True
+    # Backoff state is fully cleared so the next drop starts fresh (fast) again.
+    assert "1.2.3.4" not in mgr._reconnect_fails
+    assert "1.2.3.4" not in mgr._reconnect_at
+
+    # A subsequently-connected client is a passthrough that also clears backoff.
+    assert mgr._poll_reconnect("1.2.3.4", client, base_s=2.0) is True
+    assert client.connect_calls == 2  # no extra dial while already connected
+
+
+def test_reconnect_cap_constant_sane():
+    # Sanity: the cap actually bounds a long outage's delay.
+    assert _reconnect_delay_s(64, 2.0, _RECONNECT_CAP_S) == _RECONNECT_CAP_S
 
 
 # --------------------------------------------------------------------------- #

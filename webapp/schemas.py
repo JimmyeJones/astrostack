@@ -211,6 +211,11 @@ _DESCRIPTORS: list[dict[str, Any]] = [
     {"key": "sigma_kappa", "label": "Sigma κ", "type": "float", "group": "simple",
      "min": 1.0, "max": 5.0, "step": 0.1, "depends_on": "sigma_clip",
      "help": "Lower = more aggressive rejection."},
+    {"key": "min_max_reject", "label": "Min/max rejection", "type": "bool", "group": "simple",
+     "help": "Drop one per-pixel min and max before averaging. Removes a lone "
+             "satellite/plane trail or hot/cold sample even in a small stack, "
+             "where sigma clipping can't. Needs 3+ frames; takes precedence over "
+             "sigma clipping and ignores quality weights."},
     {"key": "background_flatten", "label": "Background flatten", "type": "bool", "group": "simple",
      "help": "Subtract a per-frame sky model to remove gradients."},
     {"key": "quality_weighted", "label": "Quality weighting", "type": "bool", "group": "simple",

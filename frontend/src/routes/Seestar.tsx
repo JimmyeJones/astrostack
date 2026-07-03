@@ -70,8 +70,8 @@ function DeviceCard({ dev, controlEnabled }: { dev: SeestarDevice; controlEnable
           </div>
         </Group>
         <Group gap="xs" wrap="nowrap">
-          <Badge color={dev.connected ? "teal" : dev.reachable ? "yellow" : "gray"}>
-            {dev.connected ? "connected" : dev.reachable ? "reachable" : "offline"}
+          <Badge color={dev.connected ? "teal" : dev.reconnecting ? "orange" : dev.reachable ? "yellow" : "gray"}>
+            {dev.connected ? "connected" : dev.reconnecting ? "reconnecting…" : dev.reachable ? "reachable" : "offline"}
           </Badge>
           <Button size="xs" variant="light" loading={connect.isPending}
             color={dev.connected ? "gray" : "violet"}

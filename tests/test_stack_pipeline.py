@@ -240,6 +240,49 @@ def test_stack_sigma_clipped(tmp_path):
     assert result.n_frames_used == 6
 
 
+def test_stack_min_max_reject(tmp_path):
+    """The min/max-reject path runs end to end, stamps its method into the FITS
+    provenance, and produces a finite, positive result where covered."""
+    from astropy.io import fits
+
+    proj = _build_project(tmp_path, n=6, with_outlier=True)
+    try:
+        result = run_stack(
+            proj,
+            StackOptions(sigma_clip=False, min_max_reject=True, max_workers=2,
+                         output_name="minmax"),
+        )
+    finally:
+        proj.close()
+
+    assert result.n_frames_used == 6
+    assert result.fits_path.exists()
+    with fits.open(result.fits_path) as hdul:
+        data = np.asarray(hdul[0].data)
+        assert hdul[0].header["STACKER"] == "min-max-reject"
+    assert np.isfinite(data).any()
+    assert np.nanmax(data) > 0
+
+
+def test_min_max_reject_takes_precedence_over_sigma_clip(tmp_path):
+    """With both enabled on the standard path, min/max reject wins (it's the
+    stronger order-statistic rejection), reflected in the provenance card."""
+    from astropy.io import fits
+
+    proj = _build_project(tmp_path, n=5)
+    try:
+        result = run_stack(
+            proj,
+            StackOptions(sigma_clip=True, min_max_reject=True, max_workers=1,
+                         output_name="precedence"),
+        )
+    finally:
+        proj.close()
+
+    with fits.open(result.fits_path) as hdul:
+        assert hdul[0].header["STACKER"] == "min-max-reject"
+
+
 def test_stack_fails_with_no_solved_frames(tmp_path):
     proj = Project.create(tmp_path / "p", name="empty")
     try:

@@ -36,19 +36,13 @@ _(none — claim an item here with your branch name)_
   bright-star fluxes vs the reference (the `transparency_score` machinery is
   most of it) and divide it out before accumulation. Needs care: robust to
   few-star frames, neutral fallback, off by default first. (M, correctness)
-- Per-pixel extremes / percentile rejection for small stacks (the *robust*
-  fix for a lone satellite/plane trail below ~11 frames). **NB:** the previously
-  filed "iterated κ-σ" idea was investigated and dropped — re-estimation clips
-  against the *same* κ, and a lone outlier's deviation is `(n−1)/√n·σ` which is
-  already below κ for n<11 (κ=3), so it escapes the first clip *and* every
-  refinement round (verified: n=6→2.04, n=10→2.85, n=11→3.02). Mean/σ-based
-  methods (including Winsorising) all hit this wall because the outlier inflates
-  its own σ. The tools that actually reject a lone trail in a tiny stack are
-  **order-statistic**: reject the per-pixel max (min/max clipping) or a top
-  percentile before averaging, or use **median/MAD** as the location/scale.
-  Needs care for uniform/low-coverage pixels (don't reject the only sample) and
-  a streaming, memory-bounded implementation (the app deliberately avoids
-  holding all frames). (M, correctness)
+- Follow-ups to min/max reject (shipped v0.56.0): (1) a **top/bottom-percentile**
+  variant for big stacks (drop the top/bottom p% rather than a single extreme —
+  more aggressive trail removal when there are hundreds of frames); (2) a
+  Stack-form hint suggesting min/max reject over κ-σ when the accepted, solved
+  frame count is small (<~11) and streaked frames are present, since that's
+  exactly the regime κ-σ can't handle; (3) a **median/MAD** location/scale path
+  for the middle ground. All (S–M, correctness).
 - **Dark exposure-scaling** (slice (b), now that bias is wired for lights) —
   `scaled_dark = bias + (dark − bias)·(t_light/t_dark)` so a dark shot at a
   different exposure than the lights can still be used. Needs the per-frame
@@ -64,31 +58,18 @@ _(none — claim an item here with your branch name)_
   Large but high value for the multi-night Seestar workflow. (L, correctness)
 - Channel combine: reproject stacks that don't share a canvas (via WCS) instead
   of erroring, so filters shot in separate sessions can be combined. (M–L)
-- Seestar client reconnect is now *hygienic* (v0.55.1: `connect()` tears down a
-  stale socket + pending replies before re-opening, so the manager's per-cycle
-  reconnect no longer leaks an fd per drop), but the retry cadence itself could
-  still be smarter: the poll loop reconnects on a fixed interval with no backoff,
-  so a scope that's genuinely gone gets hammered every cycle. A capped
-  exponential backoff per-ip (and a surfaced "reconnecting…" device state) would
-  be gentler and clearer. (S–M, correctness)
 
 ### Features that serve real workflows
 - Annotated sky overlay (label detected objects / show solved field). (M)
-- **"You have calibration masters but aren't using them" nudge on the Stack
-  form** — a beginner often stacks uncalibrated even though the library holds a
-  matching master. The Stack form already calls `calibration-suggestions`
-  (`recommend_masters`); when it returns a recommended dark/flat/bias and the
-  form's selectors are all empty, show a friendly advisory ("You have a matching
-  master dark + flat — calibrating removes amp glow / dust shadows. [Use
-  recommended]") reusing the existing one-click. Advisory only, within-target,
-  frontend-only. Complements the recommender + the new calstat chip (which shows
-  *after* the fact). (S–M, approachability)
-- **Calibration-status filter chip on the Gallery** — now that `calstat` is on
-  each card and searchable (v0.55.2), a one-click "Calibrated / Uncalibrated"
-  `SegmentedControl` (shown only when the set is mixed) would let a user isolate
-  their uncalibrated stacks worth re-running, without typing. Pure filter helper,
-  frontend-only. (S, approachability)
 ### UX & polish
+- **Rejection-method badge on History/Gallery cards** — now that a stack can use
+  one of four methods (mean / sigma-clip / min-max reject / drizzle, recorded in
+  the `STACKER` FITS card and the run's stored options), a small badge ("min-max"
+  / "σ-clip κ3" / "drizzle ×2") on each card would let a user see at a glance how
+  each result was combined when comparing runs — complements the existing calstat
+  and noise chips. The Gallery already derives σ-clip/drizzle badges from
+  `options`; extend `highlightBadges` to include min-max and surface the same on
+  History cards. Frontend-only, additive. (S, approachability)
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
 
@@ -129,6 +110,50 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Min/max (extremes) rejection for small stacks** — the order-statistic fix
+  for a lone satellite/plane trail below ~11 frames that κ-σ mathematically can't
+  reject (a lone outlier's deviation stays below κ for n<11). A new single-pass,
+  NaN-aware `MinMaxRejectAccumulator` tracks per-pixel sum/count/min/max and
+  outputs `(sum − min − max)/(count − 2)` for count≥3 (plain mean below that), so
+  it drops exactly one per-pixel min and max before averaging — tie-safe (a
+  saturated core shared by several frames only loses one contribution) and
+  memory-bounded (four canvas planes, one pass, within the existing peak-array
+  budget). Wired as an opt-in `StackOptions.min_max_reject` (default off, takes
+  precedence over κ-σ on the standard path; descriptor-driven so it surfaces on
+  the Stack form automatically) and stamped into the `STACKER` provenance card.
+  Unit-tested (drop/tie/NaN/low-coverage/windowed) + end-to-end. Additive/
+  upgrade-safe. (v0.56.0, this run)
+
+- **Capped exponential backoff for Seestar reconnects** — the poll loop
+  re-`connect()`ed a dropped scope on every cycle (default a few seconds) with no
+  backoff, so a scope that's genuinely gone got hammered indefinitely. Each ip now
+  carries a consecutive-failure count and a monotonic "next attempt" time; a
+  failed reconnect grows the delay `base·2^(fails-1)` up to a 300 s cap, a
+  successful one clears it (so a brief Wi-Fi blip still recovers fast), and the
+  device surfaces a "reconnecting…" state (orange badge) for the dashboard.
+  Reconnect logic factored into a testable `_poll_reconnect` + a pure
+  `_reconnect_delay_s`, unit-tested with an injected clock (no hardware).
+  Additive/upgrade-safe (new optional device field). (v0.55.5, this run)
+
+- **"You have calibration masters but aren't using them" nudge on the Stack
+  form** — the single most common beginner mistake is stacking uncalibrated even
+  though the library holds a matching master. When `calibration-suggestions`
+  returns a recommended dark/flat/bias *and* no calibration selector is set yet,
+  the Stack form now shows a prominent teal advisory ("You have a matching master
+  dark + flat in your library, but this stack isn't calibrated — calibrating
+  removes amp glow, dust shadows and vignetting…") with the same one-click "Use
+  recommended". Once any selector is set it falls back to the existing subtle
+  hint, so it never badgers a user already engaging with calibration. Advisory
+  only, within-target, frontend-only. (v0.55.4, this run)
+
+- **Calibration-status filter chip on the Gallery** — building on the searchable
+  `calstat` column (v0.55.2), the Gallery gained an "All / Calibrated /
+  Uncalibrated" `SegmentedControl` (shown only when the set is *mixed* — some
+  calibrated, some not — so it's never a no-op chip) that isolates the
+  uncalibrated stacks worth re-running without typing. Pure, non-mutating
+  `filterByCalibration`/`isCalibrated` helpers, unit-tested plus a render test
+  for the mixed-vs-uniform gating. Frontend-only, additive. (v0.55.3, this run)
 
 - **Gallery search matches calibration status** — building on this run's
   `calstat` column, the Gallery free-text search now also matches a run's

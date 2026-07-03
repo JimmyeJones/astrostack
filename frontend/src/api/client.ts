@@ -92,6 +92,7 @@ export interface SeestarDevice {
   firmware: string | null;
   reachable: boolean;
   connected: boolean;
+  reconnecting?: boolean;
   last_seen_utc: string | null;
   telemetry: SeestarTelemetry | null;
   error: string | null;
