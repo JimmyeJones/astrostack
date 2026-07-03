@@ -149,6 +149,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+- **Flaky CI: `test_detail_ops_preserve_nan_on_partial_coverage[detail.sharpen-params1]`** —
+  this NaN-preservation test (v0.57.20) intermittently fails **on CI only** (it took
+  down `main`'s CI on the PR #66 merge, run 28671857844; passes 15/15 locally and on
+  the very next merge). The failure shows the *covered* region containing both a NaN
+  and huge finite garbage (`7.7e37`, denormals) after `detail.sharpen` — the
+  signature of uninitialized-memory / a platform-specific skimage/scipy quirk, not a
+  logic bug in `_with_nan_filled` (which is provably correct: it fills per-channel,
+  processes, then re-NaNs the border). **Do NOT "fix" it by scrubbing NaN in the
+  covered region** — the garbage finite values would remain, so that would mask the
+  corruption and ship a broken image to users. Investigate instead: pin/roll the CI
+  `scikit-image`/`scipy`/`numpy` versions and try to reproduce under CI's exact
+  build; if it's an skimage `unsharp_mask` float32+`channel_axis` bug, route the op
+  around it (e.g. per-channel gaussian unsharp in pure numpy). (M, correctness/infra)
 - Chip away at the ~127 pre-existing `ruff check .` findings (don't add new ones);
   consider wiring ruff into CI once the count is low. (L, correctness/maintainability)
 - ~~Add a retention/pruning policy for `jobs.sqlite`~~ — **done, then made
