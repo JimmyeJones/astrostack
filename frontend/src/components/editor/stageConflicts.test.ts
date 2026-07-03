@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  extraEnabledStretchUids, hasEnabledStretch, insertOnCorrectSide, moveToCorrectSide,
-  stageConflicts,
+  degenerateLevelsUids, extraEnabledStretchUids, hasEnabledStretch,
+  insertOnCorrectSide, moveToCorrectSide, stageConflicts,
 } from "./stageConflicts";
 import type { EditOp, OpInstance } from "../../api/client";
 
@@ -185,5 +185,32 @@ describe("hasEnabledStretch", () => {
   it("is false when no stretch op is present", () => {
     const ops = [op("background.subtract", "bg"), op("tone.saturation", "sat")];
     expect(hasEnabledStretch(ops, SPECS)).toBe(false);
+  });
+});
+
+describe("degenerateLevelsUids", () => {
+  const levels = (uid: string, black: number, white: number, enabled = true): OpInstance =>
+    ({ uid, id: "tone.levels", enabled, params: { black, white } });
+
+  it("flags a Levels op with white below black", () => {
+    expect(degenerateLevelsUids([levels("l", 0.6, 0.4)])).toEqual(["l"]);
+  });
+
+  it("flags a Levels op with white equal to black", () => {
+    expect(degenerateLevelsUids([levels("l", 0.5, 0.5)])).toEqual(["l"]);
+  });
+
+  it("does not flag a healthy Levels op", () => {
+    expect(degenerateLevelsUids([levels("l", 0.1, 0.9)])).toEqual([]);
+    expect(degenerateLevelsUids([levels("l", 0, 1)])).toEqual([]);
+  });
+
+  it("ignores a disabled degenerate Levels op", () => {
+    expect(degenerateLevelsUids([levels("l", 0.6, 0.4, false)])).toEqual([]);
+  });
+
+  it("ignores non-Levels ops and uses 0/1 defaults for missing params", () => {
+    const ops = [op("tone.saturation", "sat"), { uid: "l2", id: "tone.levels", enabled: true, params: {} }];
+    expect(degenerateLevelsUids(ops)).toEqual([]);  // defaults 0..1 are healthy
   });
 });

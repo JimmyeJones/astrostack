@@ -140,3 +140,17 @@ def test_levels_preserves_nan_gaps():
     out = get_op("tone.levels").apply(rgb, {"black": 0.1, "white": 0.9, "gamma": 1.2}, EditContext())
     assert np.all(np.isnan(out[:3, :, :]))
     assert np.all(np.isfinite(out[3:, :, :]))
+
+
+def test_levels_degenerate_white_le_black_is_identity_not_binarised():
+    """White at or below black collapses the range and would hard-threshold every
+    pixel to pure black/white (a beginner can drag the independent sliders there).
+    It must be treated as identity, not silently binarise the picture — and an
+    uncovered NaN border must stay NaN."""
+    rgb = _with_nan_border(_rgb(0.3, 0.5, 0.7))
+    op = get_op("tone.levels")
+    inverted = op.apply(rgb, {"black": 0.6, "white": 0.4}, EditContext())   # white < black
+    equal = op.apply(rgb, {"black": 0.5, "white": 0.5}, EditContext())      # white == black
+    for out in (inverted, equal):
+        assert np.all(np.isnan(out[:3, :, :]))                       # NaN border kept
+        assert np.allclose(out[3:, :, :], rgb[3:, :, :], atol=1e-5)  # covered = unchanged

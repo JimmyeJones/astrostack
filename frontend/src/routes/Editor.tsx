@@ -17,7 +17,7 @@ import { useUndoable } from "../hooks/useUndoable";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { Histogram } from "../components/editor/Histogram";
 import { OpList } from "../components/editor/OpList";
-import { extraEnabledStretchUids, hasEnabledStretch, insertOnCorrectSide, moveToCorrectSide }
+import { degenerateLevelsUids, extraEnabledStretchUids, hasEnabledStretch, insertOnCorrectSide, moveToCorrectSide }
   from "../components/editor/stageConflicts";
 import { autoSummarySentence, autoValueSentence } from "../components/editor/autoSummary";
 import { applyDataDrivenDefaults, countDataDrivenDefaults, type OpSuggestion }
@@ -27,6 +27,7 @@ import { prependCoverageLeveling } from "../components/editor/coverageLeveling";
 import { applyTrimCrop, trimRectStyle, trimKeptLabel, hasEnabledGeometryOp }
   from "../components/editor/mosaicTrim";
 import { pngProgressLabel } from "../components/editor/pngProgress";
+import { opErrorsMessage } from "../components/editor/opErrors";
 import { clippingCaption } from "../components/editor/clipping";
 import { previewDebounceMs } from "../components/editor/previewDebounce";
 import { starMaskSizePx } from "../components/editor/starMaskSize";
@@ -353,16 +354,38 @@ export function EditorView() {
   });
   const exportRun = useMutation({
     mutationFn: () => api.exportRun(safe, rid, recipe, outputName.trim() || `${safe}_edit`, tiffMode),
-    onSuccess: () => {
+    onSuccess: ({ job_id }) => {
       // Stay in the editor (don't bounce to Jobs); the navbar job badge tracks it.
       notifications.show({
         message: "Export running — the new image will appear in History when done.",
         color: "violet",
       });
       qc.invalidateQueries({ queryKey: ["jobs"] });
+      // Poll the job in the background purely to surface any ops that failed on the
+      // full-res data (dropped best-effort, so the export look changed silently).
+      void pollJobForOpErrors(job_id);
     },
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
+
+  // Watch an export/render job to completion and warn if any op was dropped on the
+  // full-res data. Best-effort and non-blocking; failures to poll are ignored.
+  const pollJobForOpErrors = async (jobId: string) => {
+    try {
+      for (;;) {
+        const j = await api.getJob(jobId);
+        if (["error", "cancelled", "interrupted"].includes(j.state)) return;
+        if (j.state === "done") {
+          const msg = opErrorsMessage(j.result?.op_errors);
+          if (msg) notifications.show({ message: msg, color: "orange", autoClose: 10000 });
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 800));
+      }
+    } catch {
+      /* advisory only — never surface a polling error */
+    }
+  };
 
   // Live progress of the full-res PNG render, shown under the button while it
   // polls (the slowest editor action — a bare spinner reads as "stuck").
@@ -374,7 +397,7 @@ export function EditorView() {
       // Full-res render can be slow on mosaics — poll the job to completion.
       for (;;) {
         const j = await api.getJob(job_id);
-        if (j.state === "done") return job_id;
+        if (j.state === "done") return { jobId: job_id, opErrors: opErrorsMessage(j.result?.op_errors) };
         if (["error", "cancelled", "interrupted"].includes(j.state)) {
           throw new Error(j.error || "PNG render failed");
         }
@@ -382,13 +405,14 @@ export function EditorView() {
         await new Promise((r) => setTimeout(r, 500));
       }
     },
-    onSuccess: (jobId) => {
+    onSuccess: ({ jobId, opErrors }) => {
       const a = document.createElement("a");
       a.href = api.editPngUrl(safe, rid, jobId);
       document.body.appendChild(a);
       a.click();
       a.remove();
       notifications.show({ message: "Full-resolution PNG ready", color: "teal" });
+      if (opErrors) notifications.show({ message: opErrors, color: "orange", autoClose: 10000 });
     },
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
     onSettled: () => setPngProgress(null),
@@ -437,6 +461,14 @@ export function EditorView() {
   const disableExtraStretches = () =>
     setOps((p) => p.map((o) =>
       extraStretchUids.includes(o.uid) ? { ...o, enabled: false } : o));
+  // A Levels op with its white point at or below its black point collapses the
+  // range: the engine treats it as identity (does nothing), which is confusing.
+  // Flag it and offer a one-click reset of black/white to the full 0..1 range.
+  const degenerateLevels = degenerateLevelsUids(ops);
+  const resetDegenerateLevels = () =>
+    setOps((p) => p.map((o) =>
+      degenerateLevels.includes(o.uid)
+        ? { ...o, params: { ...o.params, black: 0, white: 1 } } : o));
   const grouped = useMemo(() => {
     const g: Record<string, EditOp[]> = {};
     (opsSchema.data ?? []).forEach((s) => { (g[s.group] ??= []).push(s); });
@@ -843,6 +875,20 @@ export function EditorView() {
                   <Button size="compact-xs" variant="light" color="orange"
                     onClick={disableExtraStretches}>
                     Disable the extra stretch{extraStretchUids.length > 1 ? "es" : ""}
+                  </Button>
+                </Alert>
+              ) : null}
+              {degenerateLevels.length > 0 ? (
+                <Alert color="orange" variant="light" py={8} mt="xs"
+                  icon={<IconAlertTriangle size={16} />}>
+                  <Text size="xs" mb={6}>
+                    A <b>Levels</b> op has its white point at or below its black point,
+                    so its range is empty — it does nothing. Reset the black and white
+                    points to spread across the full range again.
+                  </Text>
+                  <Button size="compact-xs" variant="light" color="orange"
+                    onClick={resetDegenerateLevels}>
+                    Reset the black &amp; white points
                   </Button>
                 </Alert>
               ) : null}

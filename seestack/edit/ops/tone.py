@@ -52,7 +52,14 @@ def _levels(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     black = float(params.get("black", 0.0))
     white = float(params.get("white", 1.0))
     gamma = max(1e-3, float(params.get("gamma", 1.0)))
-    rng = max(white - black, 1e-6)
+    # The black/white sliders are independent, so a user can drag white down to or
+    # below black. That collapses the range to ~zero and hard-thresholds every
+    # pixel to pure black/white — silently binarising the picture with no error.
+    # Treat a degenerate/inverted (white <= black) range as identity, like the
+    # single-point Curves guard, so a mis-set slider can't destroy the image.
+    if white - black < 1e-3:
+        return as_rgb(rgb)
+    rng = white - black
     out = as_rgb(rgb).copy()
     mask = finite_mask(out)
     for c in range(3):

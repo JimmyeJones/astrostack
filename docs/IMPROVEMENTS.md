@@ -48,6 +48,15 @@ problems. Dogfood it every big-picture run and fix root causes.
   gentle denoise/sharpen). Improve the auto recipe so "Auto" is a great one-click
   start. (Gentle SCNR green-cast removal added to the auto recipe in v0.56.6 —
   more of these incremental tweaks welcome.) (M, editor)
+- **One-click "Auto black/white points" for the Levels op** — the Levels op makes a
+  beginner hand-guess a black point and white point, when the natural values come
+  straight from the image histogram (which the editor already computes). Add a
+  "From your image" button on the Levels param panel (mirroring the data-driven
+  sharpen/denoise/star-size buttons) that sets `black` to a low percentile of the
+  finite sky (e.g. p1–p2, clamped so it never crushes visible signal) and `white`
+  to a high percentile (e.g. p99.5) — a safe auto-levels a beginner can then nudge.
+  Reuses the histogram endpoint; additive; needs a guard that it never returns
+  `white ≤ black` (the v0.61.12 degenerate case). (S–M, autonomy/editor)
 - **Editor bug hunt (ongoing)** — there are undocumented issues. Each big-picture
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
@@ -73,22 +82,33 @@ problems. Dogfood it every big-picture run and fix root causes.
   (compare denoise on a full image vs its 2×/4× strided proxy). Off nothing (it's
   a correctness fix), but validate it doesn't weaken the clean-image case.
   (M, editor/correctness)
-- **Surface failed ops on export, not just in the live preview** — the preview and
-  histogram paths collect per-op failures into `errors` and show them under the
-  image (Editor.tsx), but the full-res export path (`_render_recipe_fullres`) only
-  *logs* a failed op and drops it silently — so an op that fails on the full-res
-  data (but worked on the proxy, or vice versa) changes the exported look with no
-  notice to the user. Thread the per-op errors into the export job result and show
-  them in the "Export running/done" notification (or the History card). Reuses the
-  same best-effort try/except; additive. (S–M, editor/trust)
 - **"Original" compare should match the stack's own baseline** — the editor's
   Compare ("Original") renders an *empty* recipe, which the backend tone-maps with
-  a hard-coded default asinh (stretch 0.5 / black 0.35). That can look different
-  from the stack thumbnail the user saw on History/Target before entering the
-  editor, so "before" isn't the baseline they expect. Render the Original with the
-  same default the run's own preview/thumbnail uses (or the run's saved recipe if
-  any) so the A/B is honest. (S, editor/trust)
+  a hard-coded default asinh (stretch 0.5 / black 0.35). **Analysis (2026-07):** that
+  default *matches* the `render_stack_run` endpoint's own defaults (`_STRETCH_DEFAULT
+  0.5 / _BLACK_DEFAULT 0.35`), so if the user saw the live adjustable render before
+  editing, "Original" already lines up. The real mismatch is against the run's
+  **stored** `preview_path` PNG (History/Target thumbnail), which `_write_preview_png`
+  renders with `_autostretch_for_export` (MTF/STF), *not* asinh — a different look —
+  and which `save_stack_preview` may have overwritten at a user-chosen stretch (whose
+  values aren't persisted on the run). The clean, fully-honest fix is to serve the
+  run's actual stored `preview_path` as the "Original" overlay (literally what the
+  user saw), accepting that it's the ≤1024 px preview rather than the ≤1500 px editor
+  proxy. Care: it's a behaviour change to Compare, so gate/validate the resolution
+  swap doesn't jar the A/B. (S, editor/trust)
 ### Autonomy — "just works" (PRIORITY 2)
+- **Smooth the Auto recipe's noisy/clean cliff (denoise ↔ sharpen crossfade)** —
+  `auto_recipe` treats `analyze_proxy`'s `noisy` verdict as a hard boolean
+  (`sky_sigma > 0.02`): a stack just over the line gets denoise and *no* sharpen,
+  one just under gets sharpen and *no* denoise, so two near-identical stacks either
+  side of the threshold produce visibly different one-click results (a cliff). A
+  mildly-noisy stack could sensibly get *both* a light denoise and a light sharpen.
+  Replace the boolean branch with a continuous crossfade: scale the denoise strength
+  up and the sharpen amount down as `sky_sigma` rises across a band around the
+  threshold (e.g. 0.012–0.028), so the default result varies smoothly with the data
+  instead of snapping. Reuses the measured `sky_sigma`; Auto is an explicit button
+  so no default flips. Needs a test that the crossfade is monotonic and that the
+  clean/very-noisy ends still match today's recipe. (M, autonomy/editor)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
   different (per-channel vs luminance gradient, star reduction, saturation). The
@@ -203,6 +223,49 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Test the PNG-render path also surfaces failed ops** — coverage follow-up to the
+  v0.61.11 export-error surfacing: added a webapp test that a full-res PNG render
+  (the download path, `submit_editor_png`) with a monkeypatched-to-fail op reports
+  the failure in its job `op_errors`, matching the export-run path already covered.
+  Test-only. (v0.61.14, this run)
+
+- **Warn about a degenerate Levels op (empty black↔white range)** — companion to
+  the v0.61.12 engine guard: since a Levels op with `white ≤ black` is now silently
+  treated as identity, the pipeline panel shows an orange advisory ("A Levels op has
+  its white point at or below its black point, so its range is empty — it does
+  nothing.") with a one-click "Reset the black & white points" that restores the
+  0..1 range — so the guard doesn't leave the user staring at a control that
+  quietly does nothing (mirrors the double-stretch advisory). Pure
+  `degenerateLevelsUids` helper drives it; frontend-only, additive. Vitest: helper
+  (5 cases: white<black / white==black / healthy / disabled / non-Levels) + an
+  Editor test that the warning shows and clicking the fix clears it. (v0.61.13,
+  this run)
+
+- **Guard the Levels op against a degenerate (white ≤ black) range** — the Levels
+  op's black-point and white-point are independent 0..1 sliders, so a beginner can
+  drag the white point down to or below the black point. That collapses the range
+  (`rng` was floored to `1e-6`) and hard-thresholds every pixel to pure black/white
+  — silently binarising the picture with no error, the same class of foot-gun as
+  the single-point Curves case (v0.61.10). `_levels` now returns the input
+  unchanged (identity) when `white - black < 1e-3`, so a mis-set slider can't
+  destroy the image. Engine-only, additive/upgrade-safe. Regression test covers the
+  inverted (white < black) and equal (white == black) cases (identity + NaN border
+  preserved). (v0.61.12, this run)
+
+- **Surface failed ops on export, not just in the live preview** — the preview /
+  histogram paths collect per-op failures into `errors` and show them under the
+  image, but the full-res export path (`_render_recipe_fullres`) only *logged* a
+  failed op and dropped it silently, so an op that fails on the full-res data (but
+  worked on the proxy, or vice versa) changed the exported look with no notice.
+  `_render_recipe_fullres` now appends each failure (same `label: Type: msg` format
+  as the preview) to an `errors` list threaded into both the export-run and PNG job
+  results as `op_errors`; the editor polls the job and shows an orange "N operations
+  failed and were skipped in the exported image: …" notification (pure
+  `opErrorsMessage` helper) on both the export and full-res-PNG paths. Reuses the
+  best-effort try/except; additive/upgrade-safe (new result field). Tested: webapp
+  (a monkeypatched-to-fail op surfaces in the export job's `op_errors`; a clean
+  recipe reports `[]`) + Vitest helper (4 cases). (v0.61.11, this run)
 
 - **Fix stale/misleading maintainer comments & docstrings** — three inaccuracies a
   future maintainer would trust: the `edit_coverage_map` endpoint docstring still

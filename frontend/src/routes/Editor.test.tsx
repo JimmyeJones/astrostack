@@ -37,6 +37,17 @@ const SHARPEN: EditOp = {
              depends_on: null }],
 };
 
+const LEVELS: EditOp = {
+  id: "tone.levels", label: "Levels", group: "tone", stage: "nonlinear",
+  proxy_safe: true, is_stretch: false, help: null,
+  params: [
+    { key: "black", label: "Black point", type: "float", group: "simple", default: 0,
+      min: 0, max: 1, step: 0.01, options: null, help: null, depends_on: null },
+    { key: "white", label: "White point", type: "float", group: "simple", default: 1,
+      min: 0, max: 1, step: 0.01, options: null, help: null, depends_on: null },
+  ],
+};
+
 const LEVEL_COVERAGE: EditOp = {
   id: "background.level_coverage", label: "Coverage leveling", group: "background",
   stage: "linear", proxy_safe: true, is_stretch: false,
@@ -563,6 +574,31 @@ describe("EditorView", () => {
     fireEvent.click(screen.getByRole("button", { name: /Disable the extra stretch/ }));
     await waitFor(() =>
       expect(screen.queryByText(/More than one/)).not.toBeInTheDocument());
+  });
+
+  it("warns about a degenerate Levels op and resets its range on click", async () => {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, LEVELS]);
+    // A Levels op with white below black — its range is empty (does nothing).
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [
+        { uid: "s1", id: "tone.stretch", enabled: true, params: { stretch: 0.5 } },
+        { uid: "lv1", id: "tone.levels", enabled: true, params: { black: 0.6, white: 0.4 } },
+      ],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    // The empty-range advisory shows...
+    expect(await screen.findByText(/white point at or below its black point/)).toBeInTheDocument();
+    // ...and clicking the fix resets black/white, clearing the warning.
+    fireEvent.click(screen.getByRole("button", { name: /Reset the black/ }));
+    await waitFor(() =>
+      expect(screen.queryByText(/white point at or below its black point/)).not.toBeInTheDocument());
   });
 
   it("shows the proposed crop over the coverage heatmap on a mosaic", async () => {
