@@ -53,15 +53,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
 
 ### Editor — make it excellent (PRIORITY 1) — new ideas
-- **Dim the "From your data" button when the param already matches** — the editor
-  now has four data-driven suggestion buttons (PSF σ, sharpen radius, denoise
-  strength, star size). While tuning, a user can't tell whether the current value
-  *is* the suggestion or diverged from it. Disable/dim the button (with a "already
-  set from your data" tooltip) when the param already equals the suggested value,
-  so the button doubles as an "am I optimal?" indicator. Reuse the existing
-  `suggestions` prop on `OpParamPanel`; compare the param's current value to
-  `sug.value` with the op's step tolerance. Pure, frontend-only, additive.
-  (S, editor/friendliness)
 - **"Apply data-driven defaults" one-click on the editor** — a user building a
   recipe by hand must open each of the four suggestion-carrying ops and click its
   button individually. Add a single toolbar action that seeds every present op's
@@ -187,6 +178,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Dim the "From your data" suggestion button when the param already matches** —
+  the editor's four data-driven suggestion buttons (PSF σ, sharpen radius, denoise
+  strength, star size) always looked clickable, so while tuning a user couldn't
+  tell whether the current value *was* the suggestion or had diverged. The
+  `OpParamPanel` suggestion button now dims/disables and prefixes a "✓" (with an
+  "already set to the value measured from your data" tooltip) when the param's
+  current value already equals the suggested value within half the control's step,
+  via a pure `matchesSuggestion` helper — so the button doubles as an "am I
+  optimal?" indicator. Vitest-covered (helper: 5 cases; panel: disabled+✓ state);
+  frontend-only, additive. (v0.57.9, this run)
 
 - **Complete + enforce plain-language help on every editor control** — finished the
   help sweep by adding hints to the last bare params (geometry crop/rotate/resize,
