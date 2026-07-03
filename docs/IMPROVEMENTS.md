@@ -27,6 +27,329 @@ _(none — claim an item here with your branch name)_
 
 ---
 
+## Bugs (fix these first)
+
+Verified findings from a dedicated QA audit (2026-07-03, branch
+`claude/astrostack-qa-audit-gonkds`). Every entry was traced through the code
+and, where marked *reproduced*, demonstrated by running it. Editor bugs first,
+then the rest of the app; within each group ordered by severity
+(wrong-result > broken-UX > cosmetic). Each is scoped to be fixable in one
+sitting; move an entry to **In progress**/**Shipped** as usual when you take it.
+
+### Editor — engine & backend (PRIORITY 1)
+
+- **BUG: "Wavelet (recommended)" denoise never runs wavelet — PyWavelets isn't
+  installed, silent TV fallback with strength applied twice** — `_denoise`'s
+  wavelet branch (`seestack/edit/ops/detail.py:63-71`) calls
+  `skimage.restoration.denoise_wavelet`, which needs PyWavelets — but `pywavelets`
+  is in neither `pyproject.toml`'s deps nor the Docker image (`pip install .[web]`,
+  `docker/Dockerfile:57`), so the call raises `ImportError` on every real install
+  (reproduced in this env). The `except (ImportError, ValueError)` silently
+  substitutes `denoise_tv_chambolle(weight=0.02+0.2*strength)` and then *also*
+  applies the wavelet branch's blend `norm + strength*(den-norm)` — so the default
+  method (also what Auto-process builds) is a mislabeled TV denoise with strength
+  double-applied, and differs from the explicit "Total-variation" option at the
+  same strength. **Fix:** add `PyWavelets` to the core dependencies (plain pip
+  wheel, no guardrail issue) + a regression test that `denoise_wavelet` actually
+  imports/runs; drop or rethink the strength-blend in the fallback path. Note the
+  existing "Wavelet-denoise preview↔export parity" backlog item assumes wavelet
+  runs at all — fix this first. Severity: wrong-result. Confidence: confirmed
+  (reproduced).
+
+- **BUG: editor exports are display-stretched data recorded as if linear — the
+  History thumbnail doesn't match the editor, and the "Linear" TIFF isn't
+  linear** — `_apply_editor_to_run` (`webapp/pipeline.py:395-426`) renders the
+  recipe to display space (a stretch is always applied) and passes that to
+  `write_stack_outputs`, which treats `rgb` as a linear stack: (a) the run's
+  `preview_path` PNG is re-tone-mapped by `_autostretch_for_export` (STF,
+  target_bg 0.06 — `seestack/stack/output.py:223-236`), so the History/Gallery
+  thumbnail of an edited run is visibly darker/different from what the editor
+  showed at export time; (b) `tiff_mode="linear"` packs the *stretched* data via
+  `_to_uint16_linear`, while the Export panel tooltip promises "Linear keeps the
+  raw unstretched data for editing in another tool"
+  (`frontend/src/routes/Editor.tsx:1056-1059`) — false for editor exports; (c)
+  re-opening the exported run in the editor stretches the already-stretched FITS
+  again. **Fix:** thread an "already display-space" flag into
+  `write_stack_outputs` for editor exports (preview PNG written without
+  re-stretch; TIFF written as-is; tooltip adjusted), and/or mark the run row so
+  downstream renderers skip their default stretch. Severity: wrong-result
+  (trust/export mismatch). Confidence: confirmed (traced).
+
+- **BUG: the stretch turns NaN (no-coverage) into 0.0, so every post-stretch
+  consumer treats uncovered mosaic pixels as real black data** — `asinh_stretch`
+  and `autostretch` (`seestack/render/thumbnail.py:210-225, 274-291`) write 0
+  into non-finite pixels, so after the stretch op the editor pipeline has no NaN
+  left. Consequences on any mosaic with uncovered canvas: (a) the histogram
+  (`seestack/edit/histogram.py`) piles all uncovered pixels into bin 0 —
+  reproduced: a 40 %-uncovered frame reports bin-0 fraction 0.42, tripping the
+  35 % "Shadows are clipping — raise the black point" caption
+  (`frontend/src/components/editor/clipping.ts`) even on a perfect stretch, and
+  the bin-0 spike sets the y-scale peak so the real histogram is squashed flat
+  (`Histogram.tsx:29`, `CurvesWidget.tsx:histPath`); (b) the Levels/gamma
+  suggestions (`seestack/edit/levels.py`) measure percentiles/medians over those
+  fake zeros, biasing black toward 0 and the median down. **Fix:** preserve NaN
+  through the stretch ops in the editor pipeline (fill at PNG-encode time only,
+  which already `nan_to_num`s), or thread the coverage mask into
+  `compute_histogram`/`suggest_levels_*` and exclude uncovered pixels. Keep the
+  "NaN = no coverage" invariant end-to-end. Severity: wrong-result (false
+  warnings, biased suggestions). Confidence: confirmed (reproduced).
+
+- **BUG: deconvolution's live preview is a near-no-op on large stacks — preview
+  shows almost nothing while the export changes a lot** — the proxy-corrected
+  PSF `max(0.4, ctx.scaled_px(psf_sigma))` (`seestack/edit/ops/detail.py:107`)
+  collapses at real proxy scales: default `psf_sigma=1.5` at `proxy_scale=4`
+  gives σ=0.4, and `rad = max(1, round(3σ)) = 1` builds a 3×3 near-delta kernel
+  that Richardson-Lucy barely acts on. Measured on synthetic star fields:
+  mean effect 0.0045 on the proxy vs 0.031 on the export (~7× weaker preview) —
+  the exact preview↔export mismatch class v0.57.0 was meant to close, on the op
+  it headlined. Trigger: any stack whose master is >~4500 px wide (mosaics,
+  drizzle) + Deconvolution. **Fix:** a sub-pixel PSF can't be represented on the
+  decimated grid — deconvolve a full-res centre crop/tile for the preview, or
+  run the deconv stage at reduced decimation, or (minimum) caption that the
+  preview understates deconvolution when `scaled_px(psf_sigma)` hits the floor.
+  Severity: wrong-result (preview misleads). Confidence: confirmed (measured).
+
+- **BUG: Gaia photometric colour calibration never works — per-detection and
+  per-catalog arrays are ANDed together** — in `_solve_gaia`
+  (`seestack/post/color_cal.py:297`), `matched` has length n_detections (from
+  `sky.match_to_catalog_sky`) while `color`/`g_mag` have length n_gaia_rows, so
+  `matched & np.isfinite(color) & …` raises `ValueError` (broadcast) virtually
+  always; the blanket `except Exception` at `color_cal.py:117` silently falls
+  back to gray-star. The editor's Color-calibration "Gaia catalogue (on export)"
+  mode and the stack option therefore never do what they claim (result metadata
+  does honestly record `gray_star`). Correct form: index the catalog arrays with
+  `idx` first (`color[idx]`, `g_mag[idx]`). No Gaia test exists. **Fix:** apply
+  the `idx` indexing, add a unit test with a fake Gaia table (lengths differing),
+  and verify `fluxes[use]` pairs stars with their own catalog colours. Severity:
+  wrong-result (silently inoperative advertised mode). Confidence: confirmed
+  (shape algebra reproduced).
+
+### Editor — frontend (PRIORITY 1)
+
+- **BUG: Save wipes the undo/redo history and can silently revert edits made
+  while the save is in flight** — the recipe-seeding effect
+  (`frontend/src/routes/Editor.tsx:153-155`) runs on every change of
+  `saved.data`, and `saveRecipe.onSuccess` invalidates `["recipe", safe, rid]`
+  (`Editor.tsx:350-353`); the PUT stamps a fresh `updated_utc`
+  (`webapp/routers/editor.py:477`) so the refetch never structurally matches →
+  `resetOps` clears `past`/`future` (`useUndoable.ts` reset) and replaces `ops`
+  with the server snapshot. Steps: edit → Save → Ctrl+Z does nothing; or Save
+  then keep dragging a slider — when the refetch lands the drag is reverted.
+  **Fix:** seed from `saved.data` only once (a `useRef` seeded flag, or only
+  when the working ops are still empty), and don't reset state on save success.
+  Severity: broken-UX (edit loss in the race; undo loss always). Confidence:
+  confirmed (traced).
+
+- **BUG: overlay fetch failures show the wrong image under the wrong label,
+  with no error** — `shownSrc` falls back to the main edited preview whenever an
+  overlay blob query errors (`Editor.tsx:314-322`), while the caption is driven
+  purely by the toggle flags (`Editor.tsx:661-670`), and none of
+  `basePreview`/`maskPreview`/`coveragePreview`/`withoutOpPreview` render their
+  `isError` anywhere. Steps: click "Compare"/"Star mask"/"Coverage"/"Without
+  this op" when that endpoint 404s/500s (e.g. coverage sibling deleted) — the
+  panel shows the *edited* image captioned "Original" (etc.). The user A/Bs the
+  image against itself. **Fix:** surface each overlay query's error (alert or
+  toast) and drop the silent `?? preview.data` fallback while the overlay toggle
+  is on. Severity: wrong-result (mislabeled comparison) / unsurfaced error.
+  Confidence: confirmed (traced).
+
+- **BUG: the star-mask overlay is computed on linear data but the star ops gate
+  on display-space data — it drastically under-represents what the ops touch** —
+  `_render_star_mask_png` (`webapp/routers/editor.py:130-145`) runs `star_mask`
+  on the raw linear proxy, but `stars.reduce`/`stars.boost_nebula` (both
+  stage="nonlinear") compute their gate from the *stretched* image at their
+  position in the pipeline (`seestack/edit/ops/stars.py:41,70`). On a synthetic
+  star field the linear-proxy mask marks 13× less area than the display-space
+  gate (3.9 k vs 51 k px > 0.2) — faint stars the op will visibly act on aren't
+  shown at all. **Fix:** render the mask from the recipe applied up to (but not
+  including) the selected star op — reuse the `_recipe_before_uid` sub-recipe
+  machinery the levels-suggestion endpoint already has. Severity: broken-UX
+  (misleading trust overlay). Confidence: confirmed (measured).
+
+- **BUG: dragging a curve point past its neighbour silently swaps which point
+  you're dragging** — `CurvesWidget.update()` sorts the points by x on every
+  move (`frontend/src/components/editor/CurvesWidget.tsx:54-60`) but
+  `drag.current` keeps the pre-sort index (`:108`), so when the dragged point
+  crosses another's x the pointer starts moving the *other* point. Steps: Curves
+  op → add interior points at x≈0.3 and x≈0.6 → drag the 0.3 point right past
+  0.6. **Fix:** track the dragged point's identity (recompute its index after
+  sort), or clamp an interior point's x between its neighbours while dragging.
+  Severity: broken-UX (core widget). Confidence: confirmed (traced).
+
+- **BUG: one slider drag floods the undo history with dozens of entries (and
+  can evict all earlier edits)** — editor sliders commit on every drag tick
+  (`Slider onChange`, no `onChangeEnd` —
+  `frontend/src/components/StackOptionControl.tsx:46-50`) and every curve
+  pointer-move does the same, each going through history-capturing `setOps`
+  (`useUndoable.ts` pushes per set, cap 100 with `shift()`). Steps: drag Stretch
+  strength 0.1→0.9, release, Ctrl+Z — it undoes one pixel-move of the drag; a
+  couple of long drags evict the pre-drag history entirely (added ops,
+  Auto-process). **Fix:** live-update params outside the history and commit one
+  history entry on `onChangeEnd` (Mantine supports both callbacks), same for
+  curve-drag pointer-up; or coalesce consecutive entries that touch the same
+  param. Severity: broken-UX (undo effectively unusable). Confidence: confirmed
+  (traced).
+
+- **BUG: background-op failures never reach the editor's error surfacing — the
+  op silently does nothing (or colour-shifts)** — `remove_final_gradient`
+  catches its Background2D fit failure internally and returns the input
+  (`seestack/bg/final_gradient.py:144-148`, per-channel variant `:126-132`), and
+  `subtract_background` skips a failed channel and continues
+  (`seestack/bg/per_frame.py:210-213`) — so the v0.61.11 "surface failed ops"
+  contract (preview `errors`, export `op_errors`) never sees the most likely
+  real failure of the two Background ops; a per-channel skip even subtracts
+  background from some channels and not others (colour cast) with no notice.
+  **Fix:** in the *editor* wrappers (`seestack/edit/ops/background.py`), detect
+  the no-op/partial result (e.g. have the bg functions return a status or raise
+  a dedicated exception the editor path doesn't swallow) so failures surface in
+  the existing UI; make per-channel failure all-or-nothing. Severity: broken-UX
+  (silent no-op control). Confidence: confirmed (reproduced log path).
+
+- **BUG: the star-mask overlay refetches un-debounced on every Star-size slider
+  tick** — `maskSizePx` is derived from the live (non-debounced) ops and sits in
+  the query key (`Editor.tsx:255-257`), unlike the preview which goes through
+  `useDebouncedValue`. Dragging Star size 2→8 with the overlay on fires a
+  server-side `star_mask` render per intermediate value; superseded renders
+  queue up and the overlay flickers. **Fix:** debounce the mask size (reuse the
+  recipe debounce or a `useDebouncedValue(maskSizePx, …)`). Severity: broken-UX/
+  perf. Confidence: confirmed (traced).
+
+- **BUG (cosmetic): "Use data defaults" and the per-param "✓ already set"
+  indicator disagree about the same value** — `applyDataDrivenDefaults`/
+  `countDataDrivenDefaults` compare with strict `!==`
+  (`frontend/src/components/editor/dataDrivenDefaults.ts`), the per-param button
+  uses `matchesSuggestion` with a step/2 tolerance
+  (`suggestionMatch.ts`). A value within half a step (e.g. slider lands on 1.4,
+  suggestion 1.36) shows "✓ already set" on the param while the toolbar still
+  offers "Use data defaults"; the count also includes *disabled* ops. **Fix:**
+  use `matchesSuggestion` (with each param's step) inside
+  `countDataDrivenDefaults`/`applyDataDrivenDefaults` and skip disabled ops.
+  Severity: cosmetic. Confidence: confirmed (traced).
+
+- **BUG (cosmetic): trim-crop preview rectangle misaligns on a letterboxed
+  preview** — the dashed "proposed crop" overlay maps fractional bounds to
+  percentages of the *container* (`trimRectStyle`,
+  `frontend/src/components/editor/mosaicTrim.ts`; drawn at
+  `Editor.tsx:676-687`), but the `<img>` uses `objectFit: "contain"` with
+  `maxHeight: 62vh` (`Editor.tsx:653-657`) — when the image is height-limited
+  (portrait framing, short window) it's pillarboxed inside the element and the
+  rectangle lands offset/mis-scaled relative to the visible image. **Fix:**
+  compute the overlay against the rendered image content box (natural aspect vs
+  element box), or constrain the container to the image's aspect ratio.
+  Severity: cosmetic (misleading in the letterboxed case). Confidence: confirmed
+  (traced CSS).
+
+- **BUG (cosmetic): the first editor render is the empty recipe** — on load
+  `dKey` starts as `"[]"` and the preview query is enabled as soon as the
+  schema/saved queries settle (`Editor.tsx:179-205`), so the first fetch renders
+  the un-edited image and is shown until the seeded recipe's debounced render
+  replaces it — a flash of the wrong image plus one wasted proxy render per
+  editor open (for any saved recipe). **Fix:** hold `enabled` until the ops have
+  been seeded from `saved.data` (seeded-flag state). Severity: cosmetic/perf.
+  Confidence: confirmed (traced).
+
+- **BUG (cosmetic/a11y): overlay zoom mislabels + keyboard access gaps** — the
+  lightbox titles whatever is shown as "edited" unless Compare is on, so zooming
+  the star-mask/coverage overlay shows the mask titled "edited"
+  (`Editor.tsx:1085-1087`). The Curves "reset" control is a `<Text>` with only
+  an `onClick` (not focusable, no role — `CurvesWidget.tsx:116-117`), curve
+  points are mouse-only SVG circles, and `OpList` rows are click-only `Paper`
+  divs (`OpList.tsx:35-38`) — op selection is impossible by keyboard. **Fix:**
+  title the lightbox from the active overlay; make reset a real button; add
+  keyboard selection (button/role+tabIndex) to op rows. Severity: cosmetic/a11y.
+  Confidence: confirmed (traced).
+
+### Rest of the app
+
+- **BUG: good frames near RA=0° are flagged as plate-solve outliers and
+  permanently rejected in the DB** — `_footprint_outlier_indices`
+  (`seestack/stack/mosaic.py:98-106`; same pattern in the worst-frame drop loop
+  `:271-279`) takes each frame's centre as `np.median(raw corner RAs)` *before*
+  the RA unwrap, so a footprint straddling the 0°/360° wrap (corners like
+  `[359.9, 0.7, …]`) gets a centre of ~180° and a ~160° separation. Reproduced:
+  7 synthetic dithered frames at RA≈0.4–0.9° → the 3 wrap-straddling frames
+  flagged with 160° separations. `run_stack` then excludes them **and writes
+  `accept=False, reject_reason="bad plate-solve…"`** to the project DB
+  (`seestack/stack/stacker.py:645-660`) — silent, persistent loss of good data
+  for any target within ~half a FOV of RA 0 (runs on every stack via the default
+  `mosaic_canvas="auto"`). Related, lower-stakes: `reference.py:49-58` medians
+  raw RAs the same way (suboptimal reference pick near the wrap, bogus
+  `span_deg` log). **Fix:** unwrap the raw corner RAs *per frame* before taking
+  medians (the `_bbox` helper at `mosaic.py:204` already does it correctly —
+  reuse it), add an RA≈0 regression test, and fix `reference.py` the same way.
+  Severity: wrong-result (persistent data loss). Confidence: confirmed
+  (reproduced).
+
+- **BUG: debayer edge interpolation wraps to the opposite sensor edge, and the
+  drizzle path stacks that contaminated ring** — `_shift` claims edge
+  replication but is `np.roll` (`seestack/io/fits_loader.py:199-201`), so the
+  outermost pixel ring of every debayered frame mixes in values from the
+  opposite edge (reproduced: a 60 000 ADU last-column pixel leaked 30 050/15 075
+  ADU into column 0). The align path masks it (`FRAME_EDGE_INSET_PX = 3`,
+  `align.py:67`) — but the drizzle path feeds the full frame to
+  `drizzler.add_frame` with no inset (`seestack/stack/stacker.py:1225-1244`), so
+  with `suppress_hot_pixels` off, or a bright star/trail at a frame edge,
+  drizzle stacks acquire spurious edge features the standard path never shows.
+  **Fix:** make `_shift` actually edge-replicate (`np.pad`+slice, or
+  `scipy.ndimage.shift(mode="nearest")`), or apply the same 3-px inset in the
+  drizzle `prepare()`. Severity: wrong-result (drizzle-only, localized).
+  Confidence: confirmed (reproduced leak; exposure traced).
+
+- **BUG: cancelling a running non-cancel-aware job discards its completed
+  result and mislabels it "cancelled"** — the worker checks
+  `job.cancel_requested()` *after* the body returns (`webapp/jobs.py:276-282`);
+  bodies that never poll the flag (`build_master`, `editor_export`,
+  `editor_png`, `channel_combine`) run to completion with side effects persisted
+  (master registered on disk, export run recorded), but the job is reported
+  `cancelled` with `result: null` — the UI says nothing happened while the
+  artifact exists. Steps: `POST /api/calibration/masters`, then cancel while
+  running. **Fix:** for non-cooperative kinds, either mark them uncancellable
+  while running, or store the result and state `done` when the body completed
+  despite a late cancel request (cancel then only affects queued jobs).
+  Severity: wrong-result (state inconsistency). Confidence: confirmed (traced).
+
+- **BUG: a hung Gaia query still hangs the stack despite the timeout** — the
+  guard around `_solve_gaia` (`seestack/post/color_cal.py:104-115`) calls
+  `fut.cancel()` (a no-op on a running future) and then exits the
+  `ThreadPoolExecutor` context manager, whose `shutdown(wait=True)` blocks until
+  the network call returns on its own — the "can't hang the whole stack" comment
+  is not honoured; only the eventual result changes. **Fix:** create the
+  executor without the `with` block and `ex.shutdown(wait=False)` on timeout (a
+  daemonized single worker), so the stack proceeds on gray-star immediately.
+  Severity: broken-UX (indefinite stall at "Photometric color calibration",
+  needs a slow/hung server + gaia mode). Confidence: confirmed (traced;
+  standard concurrent.futures semantics).
+
+- **BUG: PATCHing a frame with an invalid `bayer_pattern` is persisted and
+  permanently 500s that frame's preview** — `FramePatch.bayer_pattern` is an
+  unconstrained `str | None` (`webapp/schemas.py:70`) written verbatim
+  (`webapp/routers/frames.py:233-236`); `frame_preview` validates only the
+  *query* param and falls back to the stored value (`frames.py:337`), which
+  `bilinear_debayer` rejects with `ValueError` → unhandled 500 on every preview
+  until re-patched. Steps: `PATCH …/frames/{id}` `{"bayer_pattern": "XYZW"}` →
+  `GET …/frames/{id}/preview`. **Fix:** validate the patch value against
+  `_BAYER_PATTERNS` (422 on bad input), and defensively fall back to RGGB (or
+  400) when a stored pattern is invalid. Severity: broken-UX (persistent 500).
+  Confidence: confirmed (traced).
+
+- **BUG: non-numeric calibration master id in a stack request → 500** —
+  `trigger_stack` catches only `KeyError` from `resolve_master_paths`
+  (`webapp/routers/stack.py:108-112`), but `_one` does `int(mid)`
+  (`webapp/calibration.py:131`) which raises `ValueError` for
+  `{"dark_master_id": "abc"}` (raw dict body, no pydantic coercion) — unhandled
+  500 where the unknown-numeric-id case correctly 404s. **Fix:** catch
+  `(ValueError, TypeError)` alongside `KeyError` → 400/404. Severity: broken-UX
+  (500 on bad input). Confidence: confirmed (traced).
+
+- **BUG: non-numeric `stretch`/`black` in save-preview → 500** —
+  `save_stack_preview` does `float(body.get("stretch", …))` on a raw dict
+  (`webapp/routers/stack.py:315-316`); `{"stretch": "abc"}` raises `ValueError`
+  → 500. The sibling `build_master` endpoint wraps the same pattern in
+  `try/except (TypeError, ValueError)`. **Fix:** same guard → 400 (or a pydantic
+  body model). Severity: broken-UX (minor). Confidence: confirmed (traced).
+
+---
+
 ## Ideas (priority order — work top sections first; AGENTS.md §1)
 
 ### ⭐ Editor — make it excellent (PRIORITY 1)
