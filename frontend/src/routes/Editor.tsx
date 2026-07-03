@@ -463,11 +463,37 @@ export function EditorView() {
   // Show the proposed crop as a dashed outline on the preview first (a
   // lower-commitment step than applying immediately), with an explicit "Apply".
   const [trimPreview, setTrimPreview] = useState(false);
+  // Entering trim preview auto-shows the coverage heatmap so the proposed crop is
+  // drawn over exactly what it's addressing — you can see it lands on the
+  // well-covered interior. Remember the prior overlay state so Cancel/Apply
+  // restores it (null = we didn't change it, e.g. the histogram isn't a mosaic).
+  const [coverageBeforeTrim, setCoverageBeforeTrim] = useState<boolean | null>(null);
+  const enterTrimPreview = () => {
+    setTrimPreview(true);
+    if (hist.data?.is_mosaic) {
+      setCoverageBeforeTrim(showCoverage);
+      setShowCoverage(true);
+      setShowMask(false);
+      setShowBase(false);
+      setSoloExclude(false);
+    }
+  };
+  const restoreCoverageAfterTrim = () => {
+    if (coverageBeforeTrim !== null) {
+      setShowCoverage(coverageBeforeTrim);
+      setCoverageBeforeTrim(null);
+    }
+  };
+  const cancelTrim = () => {
+    setTrimPreview(false);
+    restoreCoverageAfterTrim();
+  };
   const applyTrim = () => {
     if (!trimCrop) return;
     const next = applyTrimCrop(ops, trimCrop, specs, uid);
     setOps(() => next);
     setTrimPreview(false);
+    restoreCoverageAfterTrim();
     // Select the crop op so its (adjustable) bounds are visible immediately — it's
     // a normal op the user can fine-tune or remove, not a baked-in change.
     const crop = next.find((o) => o.id === "geometry.crop");
@@ -522,13 +548,13 @@ export function EditorView() {
                   <Button variant="filled" color="grape" leftSection={<IconCrop size={16} />}
                     onClick={applyTrim}>Apply crop</Button>
                 </Tooltip>
-                <Button variant="default" onClick={() => setTrimPreview(false)}>Cancel</Button>
+                <Button variant="default" onClick={cancelTrim}>Cancel</Button>
               </Button.Group>
             ) : (
               <Tooltip multiline w={250} withArrow
-                label="This is a mosaic with ragged, low-coverage edges. Preview the largest well-covered rectangle as a dashed outline, then apply it as a Crop op you can fine-tune or remove.">
+                label="This is a mosaic with ragged, low-coverage edges. Preview the largest well-covered rectangle as a dashed outline over the coverage heatmap, then apply it as a Crop op you can fine-tune or remove.">
                 <Button variant="default" color="grape" leftSection={<IconCrop size={16} />}
-                  onClick={() => setTrimPreview(true)}>Trim border</Button>
+                  onClick={enterTrimPreview}>Trim border</Button>
               </Tooltip>
             )
           ) : null}
@@ -580,7 +606,7 @@ export function EditorView() {
               ) : (
                 <Center h={240}><Loader /></Center>
               )}
-              {showMask || showBase || soloActive || showCoverage ? (
+              {(showMask || showBase || soloActive || showCoverage) && !trimPreview ? (
                 <Text size="xs" c="white" style={{ position: "absolute", left: 12, top: 10,
                   background: "rgba(0,0,0,0.6)", padding: "2px 8px", borderRadius: 4 }}>
                   {showCoverage
@@ -603,7 +629,7 @@ export function EditorView() {
                     outline: "9999px solid rgba(0,0,0,0.35)" }} />
                   <Text size="xs" c="white" style={{ position: "absolute", left: 12, top: 10,
                     background: "rgba(0,0,0,0.6)", padding: "2px 8px", borderRadius: 4 }}>
-                    Proposed crop — {trimKeptLabel(trimCrop)}
+                    Proposed crop{showCoverage ? " over coverage" : ""} — {trimKeptLabel(trimCrop)}
                   </Text>
                 </>
               ) : null}

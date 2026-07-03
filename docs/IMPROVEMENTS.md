@@ -60,12 +60,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   crop/rotate math) before the PNG, so the overlay tracks the edited image. Reuses
   the existing geometry ops; additive. Care: keep NaN = uncovered through the
   transform, and only apply geometry (not tone) ops. (M, editor/trust)
-- **Show the proposed trim over the coverage heatmap** — when the user opens the
-  "Trim border" preview (v0.61.4) the dashed rectangle draws over whatever overlay
-  is shown; the *most* informative view is the crop over the coverage heatmap
-  (v0.61.3), where you can see it lands on the well-covered interior. Auto-enable
-  (or offer a one-click "show over coverage") when entering trim preview, and
-  de-conflict the two top-left captions. Small, purely advisory. (S, editor/trust)
 ### Autonomy — "just works" (PRIORITY 2)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
@@ -168,6 +162,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Show the proposed trim over the coverage heatmap** — when the user opened the
+  "Trim border" preview (v0.61.4) the dashed crop drew over whatever overlay
+  happened to be up (usually the plain edited image), so you couldn't see that it
+  lands on the well-covered interior. Entering trim preview now auto-shows the
+  coverage heatmap (v0.61.3) on a mosaic (remembering the prior overlay state so
+  Cancel/Apply restores it), and the two top-left captions are de-conflicted: the
+  generic overlay label is suppressed during trim preview and the crop caption
+  reads "Proposed crop over coverage — keeps the central W% × H%". Frontend-only,
+  additive, advisory. Vitest: entering trim preview flips the overlay to "Hide
+  coverage" + the over-coverage caption, and Cancel restores it. (v0.61.7, this run)
 
 - **Show render progress for the full-res PNG download** — "Download full-res PNG"
   polls the render job to completion but only spun the button, so on a large mosaic

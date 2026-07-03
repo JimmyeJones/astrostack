@@ -539,6 +539,41 @@ describe("EditorView", () => {
     expect(screen.queryByText(/Proposed crop/)).not.toBeInTheDocument();
   });
 
+  it("shows the proposed crop over the coverage heatmap on a mosaic", async () => {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CROP]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [{ uid: "s1", id: "tone.stretch", enabled: true, params: { stretch: 0.6 } }],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    // A mosaic (is_mosaic:true) so both the Coverage overlay and Trim border show.
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0],
+        b: [0, 0, 0, 0], is_mosaic: true });
+    vi.spyOn(client.api, "trimSuggestion").mockResolvedValue({
+      is_mosaic: true, crop: { x0: 0.2, y0: 0.1, x1: 0.8, y1: 0.9 },
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    // Coverage overlay starts hidden.
+    expect(await screen.findByRole("button", { name: "Coverage" })).toBeInTheDocument();
+    // Entering trim preview auto-enables the coverage heatmap (button flips to
+    // "Hide coverage") and the caption notes the crop is drawn over it.
+    fireEvent.click(await screen.findByRole("button", { name: /Trim border/ }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Hide coverage" })).toBeInTheDocument());
+    expect(screen.getByText(/Proposed crop over coverage — keeps the central 60% × 80%/))
+      .toBeInTheDocument();
+    // Cancel restores the prior overlay state (coverage hidden again).
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Coverage" })).toBeInTheDocument());
+  });
+
   it("hides the 'Trim border' button on a single-field stack (no crop)", async () => {
     mockEditorQueries();
     vi.spyOn(client.api, "trimSuggestion").mockResolvedValue({ is_mosaic: false, crop: null });
