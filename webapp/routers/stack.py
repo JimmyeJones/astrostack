@@ -223,8 +223,21 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
             transparency_ratio=r.transparency_ratio,
             noise_sigma=r.noise_sigma,
             calstat=r.calstat,
+            options=_parse_options(r.options_json),
         ))
     return out
+
+
+def _parse_options(options_json: str | None) -> dict:
+    """Parse a run's stored options_json into a dict for the UI (combine-method
+    badge). Returns an empty dict when unset or malformed."""
+    if not options_json:
+        return {}
+    try:
+        parsed = json.loads(options_json)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def _run_is_reusable(options_json: str | None) -> bool:

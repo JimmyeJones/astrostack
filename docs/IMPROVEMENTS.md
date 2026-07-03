@@ -62,14 +62,6 @@ _(none — claim an item here with your branch name)_
 ### Features that serve real workflows
 - Annotated sky overlay (label detected objects / show solved field). (M)
 ### UX & polish
-- **Rejection-method badge on History/Gallery cards** — now that a stack can use
-  one of four methods (mean / sigma-clip / min-max reject / drizzle, recorded in
-  the `STACKER` FITS card and the run's stored options), a small badge ("min-max"
-  / "σ-clip κ3" / "drizzle ×2") on each card would let a user see at a glance how
-  each result was combined when comparing runs — complements the existing calstat
-  and noise chips. The Gallery already derives σ-clip/drizzle badges from
-  `options`; extend `highlightBadges` to include min-max and surface the same on
-  History cards. Frontend-only, additive. (S, approachability)
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
 
@@ -110,6 +102,20 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Rejection-method badge on History/Gallery cards** — a stack can be combined
+  one of four ways (mean / σ-clip / min-max reject / drizzle), recorded in the
+  run's stored options. A shared, tooltip'd violet `RejectionBadge` now shows the
+  *effective* combine method ("min-max" / "σ-clip κ3" / "drizzle ×2", nothing for
+  a plain mean) on both Gallery and History cards, honouring the engine's method
+  precedence (drizzle > min-max > σ-clip). The Gallery's `highlightBadges` dropped
+  its ad-hoc σ-clip/drizzle chips in favour of the dedicated badge (which also
+  covers min-max and carries a plain-language tooltip); History gained a new
+  additive `options` field on `StackRunOut` (parsed from the run's `options_json`)
+  to derive it. Pure `rejectionBadge` helper unit-tested (precedence, kappa/scale
+  formatting, editor/channel-combine → null) plus backend tests that the
+  stack-runs list exposes options. Frontend + one additive API field;
+  upgrade-safe. (v0.56.1, this run)
 
 - **Min/max (extremes) rejection for small stacks** — the order-statistic fix
   for a lone satellite/plane trail below ~11 frames that κ-σ mathematically can't

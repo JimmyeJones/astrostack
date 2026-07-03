@@ -11,6 +11,7 @@ import { api, type GalleryItem, type StackOptionField } from "../api/client";
 import { formatIntegration } from "../format";
 import { HazyNightBadge } from "../components/HazyNightBadge";
 import { CalibrationBadge } from "../components/CalibrationBadge";
+import { RejectionBadge } from "../components/RejectionBadge";
 import { NoiseReadout, hasNoise } from "../components/NoiseBadge";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { QueryError } from "../components/QueryError";
@@ -68,13 +69,13 @@ function fmt(v: unknown): string {
   return String(v);
 }
 
-/** A few headline settings shown as badges on every card. */
+/** A few headline settings shown as badges on every card. The combine method
+ * (σ-clip / min-max / drizzle) is shown separately by <RejectionBadge>, which
+ * carries a plain-language tooltip and honours the engine's method precedence. */
 function highlightBadges(opts: Record<string, unknown>) {
   const badges: { label: string; on: boolean }[] = [];
-  if (opts.sigma_clip) badges.push({ label: `σ-clip κ${fmt(opts.sigma_kappa)}`, on: true });
   if (opts.quality_weighted) badges.push({ label: "Quality-weighted", on: true });
   if (opts.background_flatten) badges.push({ label: "BG flatten", on: true });
-  if (opts.drizzle) badges.push({ label: `Drizzle ×${fmt(opts.drizzle_scale)}`, on: true });
   if (opts.final_gradient_removal) badges.push({ label: "Gradient removal", on: true });
   if (typeof opts.lucky_fraction === "number" && opts.lucky_fraction < 1) {
     badges.push({ label: `Lucky ${Math.round(opts.lucky_fraction * 100)}%`, on: true });
@@ -126,6 +127,7 @@ function GalleryCard({ item, labels, onView, selected, onToggleSelect }: {
           {item.target_name}
         </Text>
         <Group gap={4} wrap="nowrap" style={{ flexShrink: 0 }}>
+          <RejectionBadge options={item.options} />
           <HazyNightBadge ratio={item.transparency_ratio} />
           <CalibrationBadge calstat={item.calstat} />
           <Badge variant="light">{item.n_frames_used} frames</Badge>
