@@ -52,6 +52,15 @@ _(none — claim an item here with your branch name)_
 - Bias masters can be built but are never applied — `CalibrationMasters.load`
   only takes dark/flat/flat-dark. Wire bias in (and dark *scaling* by
   exposure ratio once bias exists) for mismatched-exposure dark workflows.
+  **Scoping note (from a run that looked at it):** the *correct* math needs
+  care — a master dark already contains the bias pedestal, so subtracting both a
+  bias *and* an unscaled dark double-subtracts bias. Two clean, unambiguous
+  slices: (a) **bias-only for lights when no dark is chosen** —
+  `(light − bias) / flat` — trivially correct and additive; (b) **dark
+  exposure-scaling** — `scaled_dark = bias + (dark − bias)·(t_light/t_dark)`,
+  which needs the per-frame light exposure threaded into `apply_raw` (the harder
+  part) and a neutral fallback when either exposure is unknown. Ship (a) first,
+  file (b) separately; keep both opt-in and guard shape/exposure mismatches.
   (M, correctness)
 - First-class session/night dimension in the project schema (frames only have
   `timestamp_utc`): per-session sky levelling before combine, per-session
@@ -68,6 +77,20 @@ _(none — claim an item here with your branch name)_
 
 ### Features that serve real workflows
 - Annotated sky overlay (label detected objects / show solved field). (M)
+- **"Compare with…" entry point on the History page** — the compare view
+  (v0.51.0) is currently reachable only from the Gallery's multi-select, but the
+  *most common* comparison is two stacks of the **same target** (did adding subs
+  / changing κ / turning on quality-weighting actually help?). The History page
+  already lists exactly those runs. Add a lightweight per-card "Compare" action
+  (e.g. "compare with the previous run", or a pick-two mode) that deep-links into
+  the existing `/compare?a=…&b=…` route via the shipped `compareHref` helper — no
+  backend, reuses everything. (S, approachability)
+- **Per-target noise-σ trend sparkline** — the History page shows each run's
+  noise σ and its delta vs the previous run; a tiny time-series sparkline of a
+  target's stack σ across all its runs would let a user see the *trajectory*
+  (are my results getting cleaner as I add nights?) at a glance, not just the
+  last hop. Reuses the recorded `noise_sigma`; within-target; frontend-only.
+  (S/M, approachability)
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
