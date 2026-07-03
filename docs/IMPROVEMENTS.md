@@ -163,6 +163,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Expose the Rotate op's `expand` control (was a dead read)** — `geometry.rotate`
+  read `params.get("expand", True)` but never registered an `expand` param, so the
+  reshape-vs-crop behaviour was uncontrollable: every rotated export always grew
+  the canvas with black corners, with no way to keep the original size. Registered
+  an `expand` bool param (default True = current behaviour, surfaced automatically
+  in the op panel via the descriptor), so a user can now turn it off to keep the
+  frame size and let the rotated corners fall outside. Engine-only, additive/
+  upgrade-safe (default preserves old behaviour). Regression test asserts the param
+  is exposed and actually toggles the output canvas size. (v0.61.9, this run)
+
 - **Warn about a redundant second Stretch (double-stretch bug)** — `apply_recipe`
   marks the pipeline stretched on *every* `is_stretch` op and never dedupes, so two
   enabled Stretch ops both run — the second re-stretches already display-space data

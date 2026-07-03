@@ -396,6 +396,21 @@ def test_crop_fraction_consistent_across_scales():
     assert abs(cs.shape[0] / small.shape[0] - 0.5) < 0.05
 
 
+def test_rotate_expand_param_controls_canvas_size():
+    """The rotate op's ``expand`` param must actually control whether the canvas
+    grows to fit the rotated frame (default) or keeps the original size — it's a
+    registered param, not a dead read."""
+    spec = get_op("geometry.rotate")
+    assert any(p.key == "expand" for p in spec.params)  # the param is exposed
+    img = _img(80, 120, nan_band=0)
+    # Default (expand=True): a 30° rotation grows the canvas to fit the frame.
+    grown = spec.apply(img, {"angle": 30.0}, EditContext())
+    assert grown.shape[0] > img.shape[0] and grown.shape[1] > img.shape[1]
+    # expand=False keeps the original size (rotated corners fall outside).
+    same = spec.apply(img, {"angle": 30.0, "expand": False}, EditContext())
+    assert same.shape[:2] == img.shape[:2]
+
+
 def test_scaled_px_shrinks_on_proxy_only():
     """proxy_scale rescales full-res pixel measures for the preview, no-op on export."""
     assert EditContext(proxy_scale=1.0).scaled_px(4.0) == 4.0      # export: unchanged
