@@ -144,6 +144,15 @@ describe("EditorView", () => {
     // Clicking it (the in-panel one) kicks off auto-process.
     fireEvent.click(screen.getAllByRole("button", { name: /Auto-process/ })[1]);
     await waitFor(() => expect(autoProcess).toHaveBeenCalledWith("M_42", 3));
+    // ...and a plain-language note explains what Auto did.
+    expect(await screen.findByText("What Auto-process did")).toBeInTheDocument();
+    expect(screen.getByText("Applied a natural stretch.")).toBeInTheDocument();
+
+    // Editing the pipeline (removing the op) drops the note so it can't
+    // misdescribe the current recipe.
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await waitFor(() =>
+      expect(screen.queryByText("What Auto-process did")).not.toBeInTheDocument());
   });
 
   it("flags a preview-only (export-only) op so the user knows why the preview doesn't change", async () => {

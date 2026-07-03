@@ -6,7 +6,7 @@ import { useDebouncedValue } from "@mantine/hooks";
 import {
   IconAlertTriangle, IconArrowBackUp, IconArrowForwardUp, IconArrowLeft, IconChevronDown,
   IconChevronUp, IconDeviceFloppy, IconDownload, IconInfoCircle, IconPhotoDown, IconPlus,
-  IconRefresh, IconSparkles, IconZoomScan,
+  IconRefresh, IconSparkles, IconWand, IconZoomScan,
 } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -18,6 +18,7 @@ import { ImageLightbox } from "../components/ImageLightbox";
 import { Histogram } from "../components/editor/Histogram";
 import { OpList } from "../components/editor/OpList";
 import { hasEnabledStretch, insertOnCorrectSide, moveToCorrectSide } from "../components/editor/stageConflicts";
+import { autoSummarySentence } from "../components/editor/autoSummary";
 import { OpParamPanel } from "../components/editor/OpParamPanel";
 import { PresetMenu } from "../components/editor/PresetMenu";
 
@@ -74,6 +75,13 @@ export function EditorView() {
   const [outputName, setOutputName] = useState("");
   const [tiffMode, setTiffMode] = useState("linear");
   const [lightbox, setLightbox] = useState(false);
+  // Plain-language summary of what the last Auto-process run did, shown as a
+  // dismissible note so the one-click result isn't a black box (null = hidden).
+  // `autoKey` is the recipe signature right after Auto ran; once the pipeline
+  // diverges from it (manual edit, undo, redo) the note is cleared so it never
+  // misdescribes the current state.
+  const [autoSummary, setAutoSummary] = useState<string | null>(null);
+  const [autoKey, setAutoKey] = useState<string | null>(null);
 
   // Seed ops from the saved recipe once (clears undo history).
   useEffect(() => {
@@ -88,6 +96,14 @@ export function EditorView() {
 
   const recipe: Recipe = useMemo(() => ({ ops, base_run_id: rid }), [ops, rid]);
   const recipeKey = JSON.stringify(ops);
+  // Once the pipeline diverges from what Auto-process produced, drop the
+  // "What Auto-process did" note so it can't misdescribe the current recipe.
+  useEffect(() => {
+    if (autoKey !== null && recipeKey !== autoKey) {
+      setAutoSummary(null);
+      setAutoKey(null);
+    }
+  }, [recipeKey, autoKey]);
   const [dKey] = useDebouncedValue(recipeKey, 250);
   const [bust, setBust] = useState(0);
   const dRecipe: Recipe = useMemo(() => {
@@ -228,7 +244,10 @@ export function EditorView() {
   const auto = useMutation({
     mutationFn: () => api.autoProcess(safe, rid),
     onSuccess: (r) => {
-      setOps((r.ops ?? []).map((o) => ({ ...o, uid: o.uid || uid() })));
+      const built = (r.ops ?? []).map((o) => ({ ...o, uid: o.uid || uid() }));
+      setOps(built);
+      setAutoSummary(autoSummarySentence(built, specs));
+      setAutoKey(JSON.stringify(built));
       notifications.show({ message: "Auto-process applied — tweak from here", color: "violet" });
     },
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
@@ -462,6 +481,17 @@ export function EditorView() {
                   : null}
               </Menu.Dropdown>
             </Menu>
+
+            {autoSummary ? (
+              <Alert color="violet" variant="light" py={8} withCloseButton
+                icon={<IconWand size={16} />} title="What Auto-process did"
+                onClose={() => setAutoSummary(null)}>
+                <Text size="xs">{autoSummary}</Text>
+                <Text size="10px" c="dimmed" mt={4}>
+                  These steps were chosen from your image — tweak or remove any of them below.
+                </Text>
+              </Alert>
+            ) : null}
 
             <Paper withBorder p="sm">
               <Text fw={600} size="sm" mb={6}>Pipeline</Text>

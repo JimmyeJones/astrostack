@@ -37,7 +37,9 @@ problems. Dogfood it every big-picture run and fix root causes.
   the preview a fast, faithful representation of the final image. (The
   "make it obvious when an op is only preview-approximate" sub-part shipped in
   v0.56.5 — non-`proxy_safe` ops like Deconvolution now carry an "export only"
-  badge + an explanatory note.) (M, editor)
+  badge + an explanatory note. Spatial *detail* ops — sharpen radius,
+  bilateral-denoise spatial extent — are now `proxy_scale`-corrected so the
+  preview matches the export, v0.56.19.) (M, editor)
 - **Confusing / clunky controls** — too many ops with terse params and no obvious
   starting point. Add plain-language help, a simple/guided default layout, curated
   presets, and progressive disclosure of advanced ops so a beginner gets a good
@@ -52,20 +54,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
 
 ### Editor — make it excellent (PRIORITY 1) — new ideas
-- **Per-op "Reset to defaults" button** — while tuning an op a beginner drags
-  several sliders, dislikes the result, and has no quick way back to the sensible
-  starting point short of removing and re-adding the op (which loses its position).
-  Add a small "Reset" affordance in the selected-op param panel that restores every
-  param to its spec `default` (the values `newOp` seeds). Pure and frontend-only —
-  the ops schema already carries each param's default; reuses `setParams`. (S, editor)
-- **Explain what Auto-process did** — after Auto-process builds a recipe the user
-  sees a pipeline of op names but no sense of *why* those ops or what changed, so
-  the auto result is a black box they can't trust or learn from. Show a one-line
-  plain-language summary derived from the resulting ops + registry labels
-  ("Flattened the background, balanced colour, applied a natural stretch, removed
-  the green cast, lifted saturation, sharpened") in a dismissible note after Auto
-  runs. Builds trust in the one-click path and teaches the recommended order.
-  Reuses the ops schema labels; frontend-only, additive. (S, editor/friendliness)
+- **Extend proxy-scale parity to the background ops** — v0.56.19 corrected the
+  spatial *detail* ops (sharpen radius, bilateral-denoise extent) for the decimated
+  preview proxy, but `background.subtract` / `background.final_gradient` still use
+  full-resolution pixel measures (`box_size`, `dilate_px`) directly, so their
+  gradient model is estimated at a different physical mesh scale in the preview
+  than in the full-res export. Scale those px params by `EditContext.scaled_px()`
+  too — but carefully: `photutils.Background2D` needs a sane minimum box and a few
+  boxes across the (small) proxy, so floor the scaled `box_size` (and guard that
+  the mesh still tiles the proxy) rather than blindly dividing. Add a
+  monkeypatched-arg test like the sharpen one. Background is smooth so the visible
+  parity gap is smaller than sharpen's, hence a follow-up not a blocker.
+  (S–M, editor/correctness)
 
 ### Autonomy — "just works" (PRIORITY 2)
 - **One-click "process this target"** — after ingest, reach a good stack *and* a
@@ -79,6 +79,15 @@ problems. Dogfood it every big-picture run and fix root causes.
   do next; audit every screen for jargon and add plain-language "why" tooltips;
   reduce visible option clutter (progressive disclosure). (M, friendliness)
 - Better long-job feedback and clearer error messages. (S, friendliness)
+- **"Preview is downscaled" hint in the editor** — the live preview always runs on
+  a ≤1500 px proxy of what may be a 150 MP mosaic, so fine detail and sharpening
+  read differently than the exported full-res image even now that spatial ops are
+  proxy-corrected (v0.56.19). A small dimmed caption under the preview (e.g.
+  "Preview at 1500 px — export renders at full resolution") sets the right
+  expectation and reduces "why does my export look different?" confusion. The proxy
+  scale is already known server-side (`proxy_scale`); surface it via the existing
+  histogram/preview response or a tiny field. Frontend-mostly, additive.
+  (S, editor/friendliness)
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 - **Photometric (multiplicative) frame normalization before combine** — frames
@@ -173,6 +182,45 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Auto-process note clears when the recipe changes** — follow-up to v0.56.18's
+  "What Auto-process did" note: it previously persisted (until dismissed) even
+  after the user edited the pipeline, so it could describe ops that were no longer
+  there. The editor now records the recipe signature right after Auto runs and
+  drops the note the moment the pipeline diverges from it (manual edit, undo,
+  redo), so it only ever describes the current auto result. Frontend-only;
+  Vitest-covered (removing the auto op hides the note). (v0.56.20, this run)
+
+- **Preview↔export parity for spatial detail ops** — the live preview runs on a
+  striding-decimated proxy (≤1500 px), but the sharpen radius, bilateral-denoise
+  spatial extent, etc. are in *full-resolution* pixels and ignored `proxy_scale`,
+  so on a big image a `radius=2px` sharpen covered `proxy_scale`× more of the
+  proxy than of the full-res export — the preview over-sharpened/over-smoothed
+  relative to what you actually got. Added `EditContext.scaled_px()` (divides a
+  full-res pixel measure by `proxy_scale`, no-op on the export where scale=1) and
+  applied it to `detail.sharpen`'s radius and `detail.denoise`'s bilateral
+  `sigma_spatial`, so the preview now sharpens/smooths the same physical detail as
+  the export. Deconvolution is preview-skipped (`proxy_safe=False`) so it was
+  already export-only. Unit-tested: `scaled_px` scaling + a monkeypatched-radius
+  test proving the sharpen radius shrinks 4→2→1 as proxy_scale goes 1→2→4.
+  Engine-only, additive, export output unchanged. (v0.56.19, this run)
+
+- **Explain what Auto-process did** — after Auto-process builds a recipe the user
+  saw a pipeline of op names but no sense of *why* those ops, so the one-click
+  result was a black box. A new pure `autoSummarySentence` helper turns the built
+  recipe's *enabled* ops into a plain-language sentence via a phrase map keyed by
+  op id ("Flattened the background, balanced the colour, applied a natural stretch,
+  removed the green cast, boosted colour saturation, then sharpened detail."),
+  falling back to the registry label for any unmapped op. The Editor shows it in a
+  dismissible violet "What Auto-process did" note after Auto runs. Builds trust in
+  the one-click path and teaches the recommended order. Pure helper unit-tested
+  (9 cases) + an Editor wiring test; frontend-only, additive. (v0.56.18, this run)
+
+- **Per-op "Reset to defaults" (already shipped)** — the backlog listed this as an
+  Idea, but it was in fact already implemented (in `0c333bd`): the selected-op
+  param panel carries both a per-param reset icon and a "Reset op" button that
+  restore each param to its spec default. Moved to Shipped to correct the record;
+  no code change. (housekeeping, this run)
 
 - **Plain-language help on the jargon-heavy editor ops** — several detail/tone ops
   spoke in astro-jargon a beginner can't decode ("Wavelet / bilateral / TV

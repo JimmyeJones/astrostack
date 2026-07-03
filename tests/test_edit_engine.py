@@ -229,3 +229,34 @@ def test_crop_fraction_consistent_across_scales():
     # same aspect-relative selection (~half each dimension)
     assert abs(cb.shape[0] / big.shape[0] - 0.5) < 0.05
     assert abs(cs.shape[0] / small.shape[0] - 0.5) < 0.05
+
+
+def test_scaled_px_shrinks_on_proxy_only():
+    """proxy_scale rescales full-res pixel measures for the preview, no-op on export."""
+    assert EditContext(proxy_scale=1.0).scaled_px(4.0) == 4.0      # export: unchanged
+    assert EditContext(proxy_scale=4.0).scaled_px(4.0) == 1.0      # 4x proxy: 1/4
+    # A proxy_scale below 1 never *grows* a radius (guarded at 1.0).
+    assert EditContext(proxy_scale=0.5).scaled_px(4.0) == 4.0
+
+
+def test_sharpen_radius_scaled_to_proxy(monkeypatch):
+    """The sharpen radius is a full-res pixel measure; on the decimated preview
+    proxy it must be shrunk by proxy_scale so the preview matches the full-res
+    export (preview↔export parity). We capture the radius handed to unsharp_mask."""
+    import skimage.filters as skf
+
+    seen: list[float] = []
+
+    def fake_unsharp(img, *, radius, amount, channel_axis):
+        seen.append(float(radius))
+        return img  # identity — we only care about the radius here
+
+    monkeypatch.setattr(skf, "unsharp_mask", fake_unsharp)
+    spec = get_op("detail.sharpen")
+    img = _img(20, 20, nan_band=0)
+
+    spec.apply(img, {"amount": 1.0, "radius": 4.0}, EditContext(proxy_scale=1.0))
+    spec.apply(img, {"amount": 1.0, "radius": 4.0}, EditContext(proxy_scale=2.0))
+    spec.apply(img, {"amount": 1.0, "radius": 4.0}, EditContext(proxy_scale=4.0))
+    # full-res keeps radius 4; a 2x proxy halves it; a 4x proxy quarters it.
+    assert seen == [4.0, 2.0, 1.0]
