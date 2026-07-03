@@ -154,6 +154,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Note the coverage overlay is for the uncropped frame when a crop is applied** —
+  the coverage-map overlay (v0.61.0) renders the run's *raw* full-frame coverage
+  sibling, so once a `geometry.crop`/rotate/resize op is in the recipe (very likely
+  now that "Trim border" adds one) the overlay no longer lines up with the reshaped
+  preview — the coverage looked larger/offset vs the cropped image with no
+  explanation. The overlay label now reads "Coverage map — shown for the uncropped
+  frame" whenever an enabled geometry op is present, via a pure `hasEnabledGeometryOp`
+  helper. Honest, additive, frontend-only. Vitest: helper (enabled/disabled/
+  non-geometry) + the Editor caption with a crop in the recipe. (v0.61.5, this run)
+
 - **Preview the "Trim border" rectangle before committing** — the one-click "Trim
   border" (v0.60.0) applied a `geometry.crop` immediately, so a user who didn't like
   the auto-crop had to undo. "Trim border" now first draws the *proposed* crop as a

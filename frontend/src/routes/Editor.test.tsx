@@ -224,6 +224,32 @@ describe("EditorView", () => {
     expect(screen.getByText("fewer")).toBeInTheDocument();
   });
 
+  it("notes the coverage overlay is for the uncropped frame when a crop is applied", async () => {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CROP]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [{ uid: "c1", id: "geometry.crop", enabled: true,
+              params: { x0: 0.1, y0: 0.1, x1: 0.9, y1: 0.9 } }],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0],
+        b: [0, 0, 0, 0], is_mosaic: true });
+    vi.spyOn(client.api, "trimSuggestion").mockResolvedValue({ is_mosaic: false, crop: null });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    const btn = await screen.findByRole("button", { name: "Coverage" });
+    await waitFor(() => expect(btn).not.toBeDisabled());
+    btn.click();
+
+    await waitFor(() =>
+      expect(screen.getByText("Coverage map — shown for the uncropped frame")).toBeInTheDocument());
+  });
+
   it("hides the Coverage overlay button on a single-field stack", async () => {
     mockEditorQueries();  // histogram has no is_mosaic flag → single-field
     vi.stubGlobal("fetch", vi.fn(async () => ({

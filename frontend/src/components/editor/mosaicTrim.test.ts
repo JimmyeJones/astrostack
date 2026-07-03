@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { EditOp, OpInstance } from "../../api/client";
-import { applyTrimCrop, trimRectStyle, trimKeptLabel } from "./mosaicTrim";
+import { applyTrimCrop, trimRectStyle, trimKeptLabel, hasEnabledGeometryOp }
+  from "./mosaicTrim";
 
 const specs: Record<string, EditOp> = {
   "tone.stretch": { id: "tone.stretch", label: "Stretch", group: "tone",
@@ -79,5 +80,21 @@ describe("trimRectStyle", () => {
 describe("trimKeptLabel", () => {
   it("summarises the kept fraction in plain language", () => {
     expect(trimKeptLabel(crop)).toBe("keeps the central 60% × 80%");
+  });
+});
+
+describe("hasEnabledGeometryOp", () => {
+  const op = (id: string, enabled: boolean): OpInstance =>
+    ({ uid: id, id, enabled, params: {} });
+
+  it("detects an enabled crop/rotate/resize op", () => {
+    expect(hasEnabledGeometryOp([op("geometry.crop", true)])).toBe(true);
+    expect(hasEnabledGeometryOp([op("geometry.rotate", true)])).toBe(true);
+  });
+
+  it("ignores a disabled geometry op and non-geometry ops", () => {
+    expect(hasEnabledGeometryOp([op("geometry.crop", false)])).toBe(false);
+    expect(hasEnabledGeometryOp([op("tone.stretch", true)])).toBe(false);
+    expect(hasEnabledGeometryOp([])).toBe(false);
   });
 });

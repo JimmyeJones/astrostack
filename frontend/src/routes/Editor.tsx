@@ -23,7 +23,8 @@ import { applyDataDrivenDefaults, countDataDrivenDefaults, type OpSuggestion }
   from "../components/editor/dataDrivenDefaults";
 import { previewScaleCaption } from "../components/editor/previewScale";
 import { prependCoverageLeveling } from "../components/editor/coverageLeveling";
-import { applyTrimCrop, trimRectStyle, trimKeptLabel } from "../components/editor/mosaicTrim";
+import { applyTrimCrop, trimRectStyle, trimKeptLabel, hasEnabledGeometryOp }
+  from "../components/editor/mosaicTrim";
 import { clippingCaption } from "../components/editor/clipping";
 import { previewDebounceMs } from "../components/editor/previewDebounce";
 import { starMaskSizePx } from "../components/editor/starMaskSize";
@@ -575,7 +576,11 @@ export function EditorView() {
               {showMask || showBase || soloActive || showCoverage ? (
                 <Text size="xs" c="white" style={{ position: "absolute", left: 12, top: 10,
                   background: "rgba(0,0,0,0.6)", padding: "2px 8px", borderRadius: 4 }}>
-                  {showCoverage ? "Coverage map" : showMask ? "Star mask" : showBase ? "Original"
+                  {showCoverage
+                    ? (hasEnabledGeometryOp(ops)
+                        ? "Coverage map — shown for the uncropped frame"
+                        : "Coverage map")
+                    : showMask ? "Star mask" : showBase ? "Original"
                     : `Without: ${specs[selForSolo!.id]?.label ?? selForSolo!.id}`}
                 </Text>
               ) : null}

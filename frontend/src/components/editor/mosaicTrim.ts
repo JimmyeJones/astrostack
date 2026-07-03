@@ -9,6 +9,13 @@ export interface TrimCrop {
   y1: number;
 }
 
+/** True when the recipe has an *enabled* geometry op (crop/rotate/resize) that
+ * reshapes the frame — so the raw, full-frame coverage overlay no longer lines
+ * up with the (reshaped) edited preview. Pure. */
+export function hasEnabledGeometryOp(ops: OpInstance[]): boolean {
+  return ops.some((o) => o.enabled && o.id.startsWith("geometry."));
+}
+
 /** CSS `left/top/width/height` (percent strings) placing the proposed-crop
  * rectangle over the preview image, from the fractional bounds. Pure. */
 export function trimRectStyle(
