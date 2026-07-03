@@ -4,8 +4,9 @@ import {
 } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import {
-  IconAlertTriangle, IconArrowBackUp, IconArrowForwardUp, IconArrowLeft, IconDeviceFloppy,
-  IconDownload, IconInfoCircle, IconPhotoDown, IconPlus, IconRefresh, IconSparkles, IconZoomScan,
+  IconAlertTriangle, IconArrowBackUp, IconArrowForwardUp, IconArrowLeft, IconChevronDown,
+  IconChevronUp, IconDeviceFloppy, IconDownload, IconInfoCircle, IconPhotoDown, IconPlus,
+  IconRefresh, IconSparkles, IconZoomScan,
 } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -16,7 +17,7 @@ import { useUndoable } from "../hooks/useUndoable";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { Histogram } from "../components/editor/Histogram";
 import { OpList } from "../components/editor/OpList";
-import { hasEnabledStretch, moveToCorrectSide } from "../components/editor/stageConflicts";
+import { hasEnabledStretch, insertOnCorrectSide, moveToCorrectSide } from "../components/editor/stageConflicts";
 import { OpParamPanel } from "../components/editor/OpParamPanel";
 import { PresetMenu } from "../components/editor/PresetMenu";
 
@@ -25,6 +26,14 @@ const GROUP_LABELS: Record<string, string> = {
   stars_geometry: "Stars & geometry",
 };
 const GROUP_ORDER = ["background", "tone", "detail", "stars_geometry"];
+
+// The handful of ops a beginner actually reaches for, surfaced in a curated
+// "Common" section at the top of the Add-operation menu so the first-time path is
+// obvious; the full grouped list stays one click away under "More operations".
+const COMMON_OP_IDS = [
+  "tone.stretch", "tone.curves", "tone.saturation", "tone.scnr",
+  "detail.denoise", "detail.sharpen", "background.subtract",
+];
 
 function uid(): string {
   return (crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)).slice(0, 8);
@@ -61,6 +70,7 @@ export function EditorView() {
   const { state: ops, set: setOps, reset: resetOps, undo, redo, canUndo, canRedo } =
     useUndoable<OpInstance[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
+  const [showAllOps, setShowAllOps] = useState(false);
   const [outputName, setOutputName] = useState("");
   const [tiffMode, setTiffMode] = useState("linear");
   const [lightbox, setLightbox] = useState(false);
@@ -149,11 +159,39 @@ export function EditorView() {
     return () => { if (u) URL.revokeObjectURL(u); };
   }, [maskPreview.data]);
 
+  // Per-op "show without this op" compare: render the full recipe with just the
+  // selected op bypassed, so while tuning one op the user sees exactly *its*
+  // contribution (unlike Compare, which shows the whole recipe vs the raw base).
+  // Resets whenever the selection changes so each op starts from "showing with".
+  const [soloExclude, setSoloExclude] = useState(false);
+  useEffect(() => { setSoloExclude(false); }, [selected]);
+  const selForSolo = ops.find((o) => o.uid === selected) ?? null;
+  const soloActive = soloExclude && !!selForSolo && selForSolo.enabled;
+  const withoutOpPreview = useQuery({
+    queryKey: ["edit-without-op", safe, rid, dKey, selected, bust],
+    enabled: soloActive && !!opsSchema.data && !saved.isLoading,
+    queryFn: async () => {
+      const withoutRecipe: Recipe = {
+        ops: dRecipe.ops.map((o) => (o.uid === selected ? { ...o, enabled: false } : o)),
+        base_run_id: rid,
+      };
+      const res = await fetch(api.editPreviewUrl(safe, rid, withoutRecipe, bust));
+      if (!res.ok) throw new Error("compare render failed");
+      return URL.createObjectURL(await res.blob());
+    },
+  });
+  useEffect(() => {
+    const u = withoutOpPreview.data;
+    return () => { if (u) URL.revokeObjectURL(u); };
+  }, [withoutOpPreview.data]);
+
   const shownSrc = showMask
     ? (maskPreview.data ?? preview.data)
     : showBase
       ? (basePreview.data ?? preview.data)
-      : preview.data;
+      : soloActive
+        ? (withoutOpPreview.data ?? preview.data)
+        : preview.data;
 
   // Keyboard undo/redo for the op pipeline: Cmd/Ctrl+Z undoes, Cmd/Ctrl+Shift+Z
   // (or Ctrl+Y) redoes. Skipped while typing in a field so editing the output
@@ -235,7 +273,11 @@ export function EditorView() {
   // --- op list ops ---------------------------------------------------------
   const addOp = (spec: EditOp) => {
     const op = newOp(spec);
-    setOps((p) => [...p, op]);
+    // Insert on the correct side of the (enabled) stretch — linear ops just
+    // before it, nonlinear just after — so a newly-added op doesn't land at the
+    // end and immediately trip the stage-conflict caution. Falls back to
+    // appending when there's no stretch or the op fits either side.
+    setOps((p) => insertOnCorrectSide(p, op, specs));
     setSelected(op.uid);
   };
   const move = (u: string, dir: -1 | 1) => setOps((p) => {
@@ -270,6 +312,12 @@ export function EditorView() {
     (opsSchema.data ?? []).forEach((s) => { (g[s.group] ??= []).push(s); });
     return g;
   }, [opsSchema.data]);
+  // The curated common ops, in the order they're listed, restricted to ops the
+  // engine actually exposes (so it degrades gracefully if an op is removed).
+  const commonOps = useMemo(
+    () => COMMON_OP_IDS.map((id) => specs[id]).filter((s): s is EditOp => !!s),
+    [specs],
+  );
 
   if (opsSchema.isLoading || saved.isLoading) {
     return <Center h={300}><Loader /></Center>;
@@ -325,10 +373,11 @@ export function EditorView() {
               ) : (
                 <Center h={240}><Loader /></Center>
               )}
-              {showMask || showBase ? (
+              {showMask || showBase || soloActive ? (
                 <Text size="xs" c="white" style={{ position: "absolute", left: 12, top: 10,
                   background: "rgba(0,0,0,0.6)", padding: "2px 8px", borderRadius: 4 }}>
-                  {showMask ? "Star mask" : "Original"}
+                  {showMask ? "Star mask" : showBase ? "Original"
+                    : `Without: ${specs[selForSolo!.id]?.label ?? selForSolo!.id}`}
                 </Text>
               ) : null}
               <Group gap={6} style={{ position: "absolute", right: 8, top: 8 }}>
@@ -337,13 +386,15 @@ export function EditorView() {
                     color="grape"
                     disabled={!preview.data}
                     loading={showMask && maskPreview.isLoading}
-                    onClick={() => setShowMask((s) => { if (!s) setShowBase(false); return !s; })}>
+                    onClick={() => setShowMask((s) => {
+                      if (!s) { setShowBase(false); setSoloExclude(false); } return !s;
+                    })}>
                     {showMask ? "Hide mask" : "Star mask"}
                   </Button>
                 </Tooltip>
                 <Button size="xs" variant={showBase ? "filled" : "default"}
                   disabled={!preview.data || showMask}
-                  onClick={() => setShowBase((s) => !s)}>
+                  onClick={() => setShowBase((s) => { if (!s) setSoloExclude(false); return !s; })}>
                   {showBase ? "Edited" : "Compare"}
                 </Button>
                 <Button size="xs" variant="default" leftSection={<IconRefresh size={14} />}
@@ -371,10 +422,12 @@ export function EditorView() {
                 <Button leftSection={<IconPlus size={16} />} variant="light">Add operation</Button>
               </Menu.Target>
               <Menu.Dropdown mah={400} style={{ overflowY: "auto" }}>
-                {GROUP_ORDER.filter((g) => grouped[g]).map((g) => (
-                  <div key={g}>
-                    <Menu.Label>{GROUP_LABELS[g] ?? g}</Menu.Label>
-                    {grouped[g].map((s) => (
+                {/* Curated "Common" section first so a beginner isn't faced with
+                    all ~19 ops at once; the full list is one click away below. */}
+                {commonOps.length ? (
+                  <div>
+                    <Menu.Label>Common</Menu.Label>
+                    {commonOps.map((s) => (
                       <Menu.Item key={s.id} onClick={() => addOp(s)}>
                         <Text size="sm">{s.label}</Text>
                         {s.help ? (
@@ -383,7 +436,30 @@ export function EditorView() {
                       </Menu.Item>
                     ))}
                   </div>
-                ))}
+                ) : null}
+                <Menu.Item closeMenuOnClick={false}
+                  leftSection={showAllOps
+                    ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />}
+                  onClick={() => setShowAllOps((v) => !v)}>
+                  <Text size="sm" c="dimmed">
+                    {showAllOps ? "Fewer operations" : "More operations"}
+                  </Text>
+                </Menu.Item>
+                {showAllOps
+                  ? GROUP_ORDER.filter((g) => grouped[g]).map((g) => (
+                    <div key={g}>
+                      <Menu.Label>{GROUP_LABELS[g] ?? g}</Menu.Label>
+                      {grouped[g].map((s) => (
+                        <Menu.Item key={s.id} onClick={() => addOp(s)}>
+                          <Text size="sm">{s.label}</Text>
+                          {s.help ? (
+                            <Text size="10px" c="dimmed" lineClamp={2}>{s.help}</Text>
+                          ) : null}
+                        </Menu.Item>
+                      ))}
+                    </div>
+                  ))
+                  : null}
               </Menu.Dropdown>
             </Menu>
 
@@ -425,7 +501,24 @@ export function EditorView() {
 
             {selectedOp && specs[selectedOp.id] ? (
               <Paper withBorder p="sm">
-                <Text fw={600} size="sm" mb={6}>{specs[selectedOp.id].label}</Text>
+                <Group justify="space-between" wrap="nowrap" mb={6}>
+                  <Text fw={600} size="sm">{specs[selectedOp.id].label}</Text>
+                  {selectedOp.enabled ? (
+                    <Tooltip
+                      label="Preview the image with only this op bypassed, to see just its effect"
+                      multiline w={220} withArrow>
+                      <Button size="compact-xs"
+                        variant={soloActive ? "filled" : "default"} color="grape"
+                        loading={soloActive && withoutOpPreview.isLoading}
+                        disabled={!preview.data}
+                        onClick={() => setSoloExclude((s) => {
+                          if (!s) { setShowBase(false); setShowMask(false); } return !s;
+                        })}>
+                        {soloActive ? "Showing without" : "Without this op"}
+                      </Button>
+                    </Tooltip>
+                  ) : null}
+                </Group>
                 {specs[selectedOp.id].help ? (
                   <Text size="xs" c="dimmed" mb="xs">{specs[selectedOp.id].help}</Text>
                 ) : null}

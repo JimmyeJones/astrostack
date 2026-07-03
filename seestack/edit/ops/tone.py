@@ -146,11 +146,20 @@ register(OpSpec(
 
 register(OpSpec(
     id="tone.levels", label="Levels", group="tone", stage="nonlinear", apply=_levels,
-    proxy_safe=True, help="Black/white point + gamma.",
+    proxy_safe=True,
+    help="Set where black and white fall and adjust midtone brightness — the classic "
+         "black-point / white-point / gamma controls.",
     params=[
-        EditParam("black", "Black", "float", default=0.0, min=0.0, max=1.0, step=0.01),
-        EditParam("white", "White", "float", default=1.0, min=0.0, max=1.0, step=0.01),
-        EditParam("gamma", "Gamma", "float", default=1.0, min=0.1, max=5.0, step=0.05),
+        EditParam("black", "Black point", "float", default=0.0, min=0.0, max=1.0, step=0.01,
+                  help="Tones at or below this become pure black. Raise it to darken the "
+                       "sky background; too high clips faint detail."),
+        EditParam("white", "White point", "float", default=1.0, min=0.0, max=1.0, step=0.01,
+                  help="Tones at or above this become pure white. Lower it to brighten, "
+                       "but too low blows out star cores."),
+        EditParam("gamma", "Midtones (gamma)", "float", default=1.0, min=0.1, max=5.0,
+                  step=0.05,
+                  help="Brighten (>1) or darken (<1) the midtones without moving black "
+                       "or white. 1.0 = unchanged."),
     ],
 ))
 

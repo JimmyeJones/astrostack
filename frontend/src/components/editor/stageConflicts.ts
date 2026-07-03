@@ -42,6 +42,27 @@ export function stageConflicts(
   return out;
 }
 
+/** Return a new op list with a freshly-added `op` inserted on the correct side of
+ * the enabled stretch: `linear` ops just before it, `nonlinear` ops just after it.
+ * Falls back to appending at the end when there's no enabled stretch or the op's
+ * stage isn't a hard side (`any`), matching the plain "add at the end" behaviour —
+ * so the common add-then-tune flow never lands an op on the wrong side of the
+ * stretch (which would immediately trip the stage-conflict caution). */
+export function insertOnCorrectSide(
+  ops: OpInstance[],
+  op: OpInstance,
+  specs: Record<string, EditOp>,
+): OpInstance[] {
+  const stage = specs[op.id]?.stage;
+  if (stage !== "linear" && stage !== "nonlinear") return [...ops, op];
+  const s = ops.findIndex((o) => o.enabled && specs[o.id]?.is_stretch);
+  if (s < 0) return [...ops, op];
+  const at = stage === "linear" ? s : s + 1;
+  const next = [...ops];
+  next.splice(at, 0, op);
+  return next;
+}
+
 /** Return a new op list with `uid` moved to the correct side of the enabled
  * stretch: `linear` ops just before it, `nonlinear` ops just after it. A no-op
  * (returns the same array) when there's no enabled stretch, the op is missing, or

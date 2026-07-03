@@ -52,26 +52,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
 
 ### Editor — make it excellent (PRIORITY 1) — new ideas
-- **Per-op "before/after this op" preview toggle** — the editor's Compare button
-  shows the whole recipe vs the raw base, but when tuning one op a user wants to
-  see *just that op's* contribution. Add a small "bypass from here" or "isolate
-  this op" affordance (render the recipe up to but excluding the selected op vs
-  including it) so the effect of the op being tuned is obvious. Reuses the existing
-  preview path with a truncated recipe; frontend-mostly. (M, editor)
-- **Auto-place a newly-added op on the correct side of the stretch** — builds on
-  this run's stage-conflict warning + `moveToCorrectSide`. Adding an op from the
-  menu always appends it at the end of the pipeline, so a linear op (background,
-  denoise, colour cal) added after a stretch immediately triggers the new "should
-  be before the stretch" caution. Instead, insert a new op on its correct side of
-  the (enabled) stretch by default — linear just before, nonlinear just after,
-  `any` at the end — so the conflict never arises for the common add-then-tune
-  flow. Reuses `moveToCorrectSide`; frontend-only. (S, editor)
-- **Progressive disclosure of the "Add operation" menu** — the menu lists all ~18
-  ops flat across four groups; a beginner scanning it is overwhelmed and doesn't
-  know which few matter. Surface a short curated "Common" section at the top
-  (Stretch, Curves, Saturation, Noise reduction, Sharpen, SCNR, Background) and
-  collapse the rest under a "More operations" expander, so the first-time path is
-  obvious without hiding power. Frontend-only; reuses the ops schema. (S, editor)
+- **Per-op "Reset to defaults" button** — while tuning an op a beginner drags
+  several sliders, dislikes the result, and has no quick way back to the sensible
+  starting point short of removing and re-adding the op (which loses its position).
+  Add a small "Reset" affordance in the selected-op param panel that restores every
+  param to its spec `default` (the values `newOp` seeds). Pure and frontend-only —
+  the ops schema already carries each param's default; reuses `setParams`. (S, editor)
+- **Explain what Auto-process did** — after Auto-process builds a recipe the user
+  sees a pipeline of op names but no sense of *why* those ops or what changed, so
+  the auto result is a black box they can't trust or learn from. Show a one-line
+  plain-language summary derived from the resulting ops + registry labels
+  ("Flattened the background, balanced colour, applied a natural stretch, removed
+  the green cast, lifted saturation, sharpened") in a dismissible note after Auto
+  runs. Builds trust in the one-click path and teaches the recommended order.
+  Reuses the ops schema labels; frontend-only, additive. (S, editor/friendliness)
 
 ### Autonomy — "just works" (PRIORITY 2)
 - **One-click "process this target"** — after ingest, reach a good stack *and* a
@@ -179,6 +173,51 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Plain-language help on the jargon-heavy editor ops** — several detail/tone ops
+  spoke in astro-jargon a beginner can't decode ("Wavelet / bilateral / TV
+  denoise", "Unsharp mask", "Black/white point + gamma") and their sliders (denoise
+  method/strength, sharpen amount/radius, deconvolve iterations/PSF, hot-pixel σ,
+  levels black/white/gamma) carried *no* per-param help at all. Rewrote the op help
+  in plain language (what it does + when to use it) and added a one-line hint to
+  each of those sliders — surfaced automatically in the Add-operation menu and the
+  op param panel via the already-threaded `help` field. Also relabelled the
+  cryptic "PSF σ (px)" → "Blur width (px)" and "σ" → "Threshold (σ)". Metadata-only,
+  additive; a test asserts every op has help and the key detail/levels params now
+  carry hints. (v0.56.17, this run)
+
+- **Per-op "without this op" preview compare** — the editor's Compare button shows
+  the whole recipe vs the raw base, but while tuning one op a user wants to see
+  *just that op's* contribution. The selected op's panel now carries a "Without
+  this op" toggle that renders the full recipe with only that op bypassed (reusing
+  the existing preview path with a modified recipe), overlaying a "Without: <op>"
+  label so the isolated op's effect is obvious. Mutually exclusive with the
+  Compare/Star-mask overlays and resets when the selection changes, so each op
+  starts from "showing with". Vitest-covered (toggle flips label + button state);
+  frontend-only, additive. (v0.56.16, this run)
+
+- **Progressive disclosure of the "Add operation" menu** — the menu listed all ~19
+  editor ops flat across four groups, so a beginner opening it was faced with every
+  knob at once and no hint which few matter. The menu now leads with a curated
+  **Common** section (Stretch, Curves, Saturation, SCNR, Noise reduction, Sharpen,
+  Background subtract) and tucks the full grouped list behind a **More operations**
+  toggle (collapsed by default, `closeMenuOnClick={false}` so expanding it keeps the
+  menu open). The common list is restricted to ops the engine actually exposes, so
+  it degrades gracefully if an op id changes. Vitest-covered (Common shown, a
+  non-common op hidden until "More operations" is expanded); frontend-only.
+  (v0.56.15, this run)
+
+- **Auto-place a newly-added op on the correct side of the stretch** — adding an op
+  from the menu appended it at the end of the pipeline, so a linear op (background,
+  colour cal, denoise) added after the stretch immediately tripped the v0.56.10
+  "should be before the stretch" caution the user then had to Fix. A new pure
+  `insertOnCorrectSide` helper now inserts a freshly-added op on its correct side of
+  the *enabled* stretch by default — linear just before, nonlinear just after,
+  `any`-stage (and anything added with no enabled stretch) still appended at the
+  end exactly as before — so the common add-then-tune flow never lands on the wrong
+  side. Reuses the same side/stretch logic as `moveToCorrectSide`; unit-tested
+  (5 cases: linear-before, nonlinear-after, any-appends, no-stretch-appends,
+  empty-pipeline); frontend-only. (v0.56.14, this run)
 
 - **"No stretch step" nudge in the editor pipeline** — if a recipe has ops but no
   *enabled* Stretch op, the pipeline silently auto-inserts a default asinh stretch

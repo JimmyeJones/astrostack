@@ -121,35 +121,56 @@ def _deconvolve(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
 
 register(OpSpec(
     id="detail.hot_pixels", label="Hot-pixel removal", group="detail", stage="linear",
-    apply=_hot_pixels, proxy_safe=True, help="Suppress isolated hot/cold pixels.",
-    params=[EditParam("sigma", "σ", "float", default=5.0, min=2.0, max=10.0, step=0.5)],
+    apply=_hot_pixels, proxy_safe=True,
+    help="Remove stray single bright or dark pixels (stuck sensor pixels) that "
+         "calibration missed, without softening real stars.",
+    params=[EditParam("sigma", "Threshold (σ)", "float", default=5.0, min=2.0, max=10.0,
+                      step=0.5,
+                      help="How far a pixel must stand out from its neighbours to count "
+                           "as hot/cold. Higher = only the most extreme pixels.")],
 ))
 
 register(OpSpec(
     id="detail.denoise", label="Noise reduction", group="detail", stage="linear",
-    apply=_denoise, proxy_safe=True, help="Wavelet / bilateral / TV denoise.",
+    apply=_denoise, proxy_safe=True,
+    help="Smooth away background grain while keeping stars and detail. Tip: use the "
+         "'From your image' button to set a strength from your own noise level.",
     params=[
         EditParam("method", "Method", "enum", default="wavelet",
-                  options=["wavelet", "tv", "bilateral"]),
-        EditParam("strength", "Strength", "float", default=0.5, min=0.0, max=1.0, step=0.05),
+                  options=["wavelet", "tv", "bilateral"],
+                  help="Wavelet suits most stacks; TV and bilateral are alternatives "
+                       "worth trying on heavier noise."),
+        EditParam("strength", "Strength", "float", default=0.5, min=0.0, max=1.0, step=0.05,
+                  help="How hard to smooth. 0 = off; higher removes more noise but can "
+                       "blur faint detail if pushed too far."),
     ],
 ))
 
 register(OpSpec(
     id="detail.sharpen", label="Sharpen", group="detail", stage="nonlinear",
-    apply=_sharpen, proxy_safe=True, help="Unsharp mask.",
+    apply=_sharpen, proxy_safe=True,
+    help="Bring out fine detail and star cores by boosting local contrast. Use "
+         "gently — too much amplifies noise and rings bright stars.",
     params=[
-        EditParam("amount", "Amount", "float", default=1.0, min=0.0, max=3.0, step=0.1),
-        EditParam("radius", "Radius (px)", "float", default=2.0, min=0.5, max=10.0, step=0.5),
+        EditParam("amount", "Amount", "float", default=1.0, min=0.0, max=3.0, step=0.1,
+                  help="How strongly to sharpen. 0 = off; start low and increase."),
+        EditParam("radius", "Radius (px)", "float", default=2.0, min=0.5, max=10.0, step=0.5,
+                  help="Size of the detail to sharpen, in pixels. Smaller = fine detail, "
+                       "larger = broad structure."),
     ],
 ))
 
 register(OpSpec(
     id="detail.deconvolve", label="Deconvolution", group="detail", stage="linear",
     apply=_deconvolve, proxy_safe=False,  # heavy — apply on demand, not every drag
-    help="Richardson–Lucy deconvolution (Gaussian PSF). Heavy; runs on Apply/Export.",
+    help="Recover sharpness lost to seeing by reversing the star blur. Heavy, so it "
+         "only runs on Export / full-res PNG (not the live preview).",
     params=[
-        EditParam("iterations", "Iterations", "int", default=10, min=1, max=50, step=1),
-        EditParam("psf_sigma", "PSF σ (px)", "float", default=1.5, min=0.5, max=5.0, step=0.1),
+        EditParam("iterations", "Iterations", "int", default=10, min=1, max=50, step=1,
+                  help="More iterations sharpen harder but can add ringing and noise."),
+        EditParam("psf_sigma", "Blur width (px)", "float", default=1.5, min=0.5, max=5.0,
+                  step=0.1,
+                  help="The star-blur width to reverse, in pixels. Use 'From your stars' "
+                       "to set it from your measured star size."),
     ],
 ))

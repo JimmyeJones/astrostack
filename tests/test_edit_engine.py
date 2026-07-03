@@ -32,6 +32,26 @@ def test_registry_has_core_ops():
     assert get_op("tone.stretch").is_stretch is True
 
 
+def test_ops_and_key_params_carry_plain_help():
+    specs = {s.id: s for s in all_specs()}
+    # Every op carries user-facing help text (surfaced in the editor menu/panel).
+    for s in specs.values():
+        assert s.help and len(s.help) > 10, s.id
+    # The formerly-jargon detail/levels ops now explain their key sliders in plain
+    # language, so the param panel shows a hint under each control.
+    expected_param_help = {
+        "detail.denoise": ["method", "strength"],
+        "detail.sharpen": ["amount", "radius"],
+        "detail.deconvolve": ["iterations", "psf_sigma"],
+        "detail.hot_pixels": ["sigma"],
+        "tone.levels": ["black", "white", "gamma"],
+    }
+    for op_id, keys in expected_param_help.items():
+        params = {p.key: p for p in specs[op_id].params}
+        for k in keys:
+            assert params[k].help, f"{op_id}.{k} needs plain-language help"
+
+
 def test_curves_identity_is_noop():
     img = _img()
     spec = get_op("tone.curves")
