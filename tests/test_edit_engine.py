@@ -140,20 +140,41 @@ def test_pipeline_autoinserts_stretch_and_outputs_display_range():
     assert fin.max() > 0.0  # not blank
 
 
-def test_linear_op_preserves_nan_then_stretch_blacks_border():
+def test_uncovered_pixels_stay_nan_through_the_stretch():
+    # "NaN = no coverage" must survive the stretch (and the whole recipe), so the
+    # histogram and Levels suggestions exclude uncovered mosaic pixels instead of
+    # counting them as real black. The PNG/TIFF encoders fill NaN->black at the end.
     img = _img(nan_band=8)
     # background subtract is linear and must keep NaN where uncovered
     bg = get_op("background.subtract").apply(img, {"mode": "per_channel", "box_size": 32},
                                              EditContext())
     assert np.isnan(bg[:8]).any()
-    # after a full recipe (which ends in a stretch) the border renders black, not NaN
     rec = Recipe(ops=validate_ops([
         OpInstance(id="background.subtract", params={"box_size": 32}),
         OpInstance(id="tone.stretch", params={"stretch": 0.5}),
     ]))
     out = apply_recipe(img, rec, EditContext())
-    assert not np.isnan(out).any()
-    assert float(out[:8].max()) < 0.2  # border is dark
+    assert np.isnan(out[:8]).all()         # uncovered border stays NaN
+    assert np.isfinite(out[8:]).all()      # covered region is finite display data
+    # Same via the auto-stretch fallback (no explicit stretch op).
+    out2 = apply_recipe(img, Recipe(ops=validate_ops([
+        OpInstance(id="background.subtract", params={"box_size": 32})])), EditContext())
+    assert np.isnan(out2[:8]).all()
+
+
+def test_uncovered_pixels_excluded_from_histogram_after_stretch():
+    # Regression: uncovered pixels must be EXCLUDED from the post-stretch histogram
+    # (before the fix the stretch turned them into 0.0 and they piled into bin 0,
+    # tripping a false "shadows are clipping" warning). The count must equal the
+    # covered-pixel count, not the whole frame.
+    from seestack.edit.histogram import compute_histogram
+    h, w, band = 60, 80, 24            # top 24 of 60 rows uncovered = 40%
+    img = _img(h=h, w=w, nan_band=band)
+    covered = (h - band) * w
+    rec = Recipe(ops=validate_ops([OpInstance(id="tone.stretch", params={"stretch": 0.5})]))
+    out = apply_recipe(img, rec, EditContext())
+    hist = compute_histogram(out)
+    assert sum(hist["g"]) == covered   # would be h*w (all pixels) with the bug
 
 
 def test_recipe_validation_drops_unknown_and_clamps():

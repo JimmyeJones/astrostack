@@ -17,11 +17,21 @@ _MODE_CC = ["gray_star", "gaia"]
 def _stretch(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     from seestack.render.thumbnail import asinh_stretch, autostretch
 
+    src = as_rgb(rgb)
     mode = str(params.get("mode", "asinh"))
     if mode == "stf":
-        return autostretch(rgb, target_bg=float(params.get("target_bg", 0.20)))
-    return asinh_stretch(rgb, stretch=float(params.get("stretch", 0.5)),
-                         black=float(params.get("black", 0.35)))
+        out = autostretch(src, target_bg=float(params.get("target_bg", 0.20)))
+    else:
+        out = asinh_stretch(src, stretch=float(params.get("stretch", 0.5)),
+                            black=float(params.get("black", 0.35)))
+    # asinh_stretch/autostretch fill uncovered (NaN) pixels with 0. Restore the
+    # NaN so "no coverage" stays distinct from real black through the rest of the
+    # pipeline: the histogram and Levels/gamma suggestions exclude it (no false
+    # "shadows clipping" from a bin-0 spike, no biased black point on mosaics),
+    # and the PNG/TIFF encoders fill it to black at the very end.
+    out = as_rgb(out).copy()
+    out[~finite_mask(src)] = np.nan
+    return out
 
 
 # --- nonlinear tone shapers (operate in display space [0,1]) ----------------

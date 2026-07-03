@@ -67,8 +67,11 @@ def apply_recipe(
 
     if not stretched:
         # Auto-insert a default stretch so the output is viewable.
+        from seestack.edit.registry import finite_mask
         from seestack.render.thumbnail import asinh_stretch
-        out = asinh_stretch(out)
+        uncovered = ~finite_mask(out)
+        out = as_rgb(asinh_stretch(out)).copy()
+        out[uncovered] = np.nan  # keep "no coverage" out of the histogram/levels
         ctx.stage = "nonlinear"
 
     return out
