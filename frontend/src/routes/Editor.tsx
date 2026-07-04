@@ -249,6 +249,17 @@ export function EditorView() {
     enabled: !!opsSchema.data && !saved.isLoading && !!stretchSelUid,
     staleTime: 30_000,
   });
+  // Data-driven starting tone curve for the selected Curves op, measured from the
+  // display-space image *entering* that op (all prior ops applied). Enabled only
+  // when a Curves op is selected; keyed on the debounced recipe + uid so it
+  // refreshes as upstream ops change.
+  const curveSelUid = ops.find((o) => o.uid === selected && o.id === "tone.curves")?.uid;
+  const curve = useQuery({
+    queryKey: ["curve-suggestion", safe, rid, dKey, curveSelUid],
+    queryFn: () => api.curveSuggestion(safe, rid, dRecipe, curveSelUid!),
+    enabled: !!opsSchema.data && !saved.isLoading && !!curveSelUid,
+    staleTime: 30_000,
+  });
   const refreshPreview = () => {
     setBust(Date.now());
     qc.invalidateQueries({ queryKey: ["edit-hist", safe, rid] });
@@ -1066,6 +1077,23 @@ export function EditorView() {
                             black: stretch.data!.black,
                           })}>
                           Auto stretch ({stretch.data.stretch})
+                        </Button>
+                      </Tooltip>
+                    ) : null}
+                    {/* One-click "Auto curve" drops a gentle, monotone midtone-lift
+                        curve derived from this image's own histogram, so the Curves
+                        op gives a pleasant contrast start to nudge instead of a flat
+                        identity line. */}
+                    {selectedOp.id === "tone.curves" && curve.data?.points != null ? (
+                      <Tooltip
+                        label="Set a gentle starting curve from this image's histogram — lifts the midtones toward a pleasant grey, keeping the sky and star cores anchored"
+                        multiline w={240} withArrow>
+                        <Button size="compact-xs" variant="light" color="blue"
+                          onClick={() => setParams(selectedOp.uid, {
+                            ...selectedOp.params,
+                            points: curve.data!.points,
+                          })}>
+                          Auto curve
                         </Button>
                       </Tooltip>
                     ) : null}

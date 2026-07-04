@@ -96,21 +96,10 @@ problems. Dogfood it every big-picture run and fix root causes.
 - **Editor bug hunt (ongoing)** — there are undocumented issues. Each big-picture
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
-- **Data-driven "From your image" starting curve for the Curves op** — the Curves
-  op is now the *only* major tonal control with no data-driven starting point:
-  Levels (black/white/gamma), Stretch (strength/black, v0.71.0), Sharpen, Denoise,
-  Star-size and Deconv-PSF all have a one-click "From your image" button, but Curves
-  drops the beginner on a flat identity line to hand-shape. A gentle, well-anchored
-  S-curve derived from the display-space histogram entering the op — put a low
-  percentile (sky floor) near the identity, lift the midtones a touch toward a
-  pleasant grey, and roll off before the highlights so star cores don't blow — would
-  give a good contrast starting curve to tweak. Mirror the existing family: a pure
-  engine helper (measure the percentiles on the image entering the op, return an
-  ordered point list clamped to [0,1], `None` on degenerate/low-range data) + a
-  `…/editor/curve-suggestion` endpoint + a header "Auto curve" button. Off nothing
-  (explicit button), additive/upgrade-safe. Keep it *gentle* and monotone so it can
-  never posterise; validate the curve stays sorted and within bounds. (M,
-  editor/autonomy)
+- ~~**Data-driven "From your image" starting curve for the Curves op**~~ —
+  **shipped v0.72.0** (see Shipped). The Curves op now has a header "Auto curve"
+  button that drops a gentle, strictly-monotone midtone-lift curve derived from the
+  image's own histogram, completing the family of data-driven tonal defaults.
 - ~~**Wavelet-denoise preview↔export parity**~~ — **investigated & closed as a
   non-issue (2026-07-04, Builder).** The concern was that a BayesShrink multi-level
   DWT tuned on the ≤1500 px proxy would smooth visibly differently on the full-res
@@ -272,6 +261,33 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Data-driven "Auto curve" starting point for the Curves op (completes the
+  family of data-driven tonal defaults)** — the Curves op was the last major tonal
+  control that dropped a beginner on a flat identity line to hand-shape, while
+  Levels (black/white/gamma), Stretch (strength/black), Sharpen, Denoise, Star-size
+  and Deconv-PSF all offer a one-click "From your image" start. A new pure engine
+  helper `seestack/edit/curve.py:suggest_tone_curve` measures the display-space
+  histogram of the image *entering* the op and returns a gentle, strictly-monotone
+  midtone-lift curve: the sky floor (p1) and highlight shoulder (p99.5) sit on the
+  identity (background not crushed, star cores roll off rather than blow) while the
+  median is lifted a *fraction* of the way (`_LIFT_FRACTION` 0.5) toward the same
+  pleasant target grey (`CURVE_TARGET_BG` 0.25) the Levels gamma suggestion uses. It
+  returns `None` on degenerate/low-range data or when the typical tone already sits
+  at/above target (nothing to lift), merges a zero-valued sky anchor into the pinned
+  (0,0) endpoint (so a hard black clip doesn't force a duplicate point), and
+  validates the assembled points are strictly increasing in both axes so the LUT can
+  never invert or posterise. Exposed as a `…/editor/curve-suggestion` endpoint
+  (mirrors levels/stretch-suggestion; measures the image entering the op via
+  `_recipe_before_uid(..., drop_ids=("tone.curves",))`) plus a header "Auto curve"
+  one-click. Engine + one endpoint + frontend; additive/upgrade-safe (older clients
+  ignore the endpoint). Tested: engine (midtone lifted toward target / ends anchored
+  / monotone, clamp+round, NaN-ignored, degenerate & already-bright → None, and the
+  suggested curve round-trips through the real `_curves` op preserving NaN and
+  staying in range), webapp (a stretched stack yields a monotone endpoint-pinned
+  curve + target_bg; unknown-uid falls back to 200), Vitest (selecting the Curves op
+  surfaces "Auto curve" and one click propagates exactly the suggested points into
+  the recipe). (v0.72.0, this run — Builder)
 
 - **Every tonal control's landing shown on the histogram (Stretch/clip edges +
   Curves points, not just Levels)** — the `Histogram` `guides` prop (v0.65.0) only

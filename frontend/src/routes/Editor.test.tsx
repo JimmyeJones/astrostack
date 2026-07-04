@@ -796,6 +796,47 @@ describe("EditorView", () => {
     expect(sug).not.toHaveBeenCalled();
   });
 
+  it("sets a gentle starting curve via the header 'Auto curve'", async () => {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [
+        { uid: "s1", id: "tone.stretch", enabled: true, params: { stretch: 0.6 } },
+        { uid: "cv1", id: "tone.curves", enabled: true,
+          params: { points: [[0, 0], [1, 1]] } },
+      ],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    const SUGGESTED: [number, number][] = [[0, 0], [0.15, 0.2], [0.9, 0.9], [1, 1]];
+    vi.spyOn(client.api, "curveSuggestion").mockResolvedValue(
+      { points: SUGGESTED, target_bg: 0.25 });
+    const fetchMock = vi.fn(async (_url?: string) => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderEditor();
+
+    // Selecting the Curves op surfaces the data-driven "Auto curve" header button.
+    fireEvent.click(await screen.findByText("Curves"));
+    fireEvent.click(await screen.findByRole("button", { name: /Auto curve/ }));
+
+    // The suggested points reach the pipeline: a preview fetch fires with the
+    // curve op carrying exactly the suggested points in the encoded recipe.
+    await waitFor(() => {
+      const applied = fetchMock.mock.calls.some((call) => {
+        const q = new URL("http://x" + String(call[0])).searchParams.get("recipe");
+        if (!q) return false;
+        const decoded = JSON.parse(atob(q.replace(/-/g, "+").replace(/_/g, "/")));
+        const cv = decoded.ops.find((o: { id: string }) => o.id === "tone.curves");
+        return cv && JSON.stringify(cv.params.points) === JSON.stringify(SUGGESTED);
+      });
+      expect(applied).toBe(true);
+    });
+  });
+
   it("resets an over-dragged Levels op to neutral via the header 'Reset points'", async () => {
     vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, LEVELS]);
     vi.spyOn(client.api, "getRecipe").mockResolvedValue({

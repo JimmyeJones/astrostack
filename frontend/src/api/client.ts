@@ -412,6 +412,16 @@ export interface StretchSuggestion {
   target_bg?: number | null;
 }
 
+export interface CurveSuggestion {
+  /** Ordered [x, y] control points for a gentle starting tone curve, or null when
+   * there's no useful suggestion (too few finite pixels / degenerate range /
+   * typical tone already at or above the target grey). */
+  points: [number, number][] | null;
+  /** The display-space grey (0..1) the midtone lift aims for, so the UI can name
+   * the goal the curve solves for; null when there's no suggestion. */
+  target_bg?: number | null;
+}
+
 export interface TrimSuggestion {
   is_mosaic: boolean;
   /** Fractional (0..1) crop rectangle for the largest well-covered area, or null
@@ -647,6 +657,11 @@ export const api = {
   stretchSuggestion: (safe: string, runId: number, recipe: Recipe, uid: string) =>
     req<StretchSuggestion>(
       `/api/targets/${safe}/stack-runs/${runId}/editor/stretch-suggestion` +
+      `?recipe=${encodeRecipe(recipe)}&uid=${encodeURIComponent(uid)}`,
+    ),
+  curveSuggestion: (safe: string, runId: number, recipe: Recipe, uid: string) =>
+    req<CurveSuggestion>(
+      `/api/targets/${safe}/stack-runs/${runId}/editor/curve-suggestion` +
       `?recipe=${encodeRecipe(recipe)}&uid=${encodeURIComponent(uid)}`,
     ),
   getRecipe: (safe: string, runId: number) =>
