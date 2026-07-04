@@ -318,8 +318,12 @@ describe("EditorView", () => {
     await waitFor(() =>
       expect(screen.getByText(/star mask overlay failed to load/i)).toBeInTheDocument());
     // The button has flipped to "Hide mask" and the mislabeled "Star mask" caption
-    // is suppressed, so no "Star mask" text remains on the panel.
-    expect(screen.queryByText("Star mask")).not.toBeInTheDocument();
+    // is suppressed, so no "Star mask" text remains on the panel. The caption is
+    // torn down on a separate render tick from the error message, so wait for it
+    // to actually disappear rather than asserting synchronously (which raced the
+    // suppression under slow-CI load).
+    await waitFor(() =>
+      expect(screen.queryByText("Star mask")).not.toBeInTheDocument());
   });
 
   it("offers a Coverage overlay on a mosaic and toggles it", async () => {
