@@ -282,20 +282,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   user saw), accepting that it's the ≤1024 px preview rather than the ≤1500 px editor
   proxy. Care: it's a behaviour change to Compare, so gate/validate the resolution
   swap doesn't jar the A/B. (S, editor/trust)
-- **Split-slider before/after in the preview (drag a divider to reveal Original vs
-  Edited in one frame).** The editor's Compare today is a *toggle* — you flip the
-  whole preview between "Original" and "edited" and try to remember the difference.
-  Every mature photo editor (Lightroom, Photoshop, GraXpert) instead offers a
-  draggable vertical divider that shows the original on one side and the edit on the
-  other *in the same view*, so you judge exactly what a stretch/denoise/curve changed
-  at a glance — much better for the priority-1 "is my edit actually an improvement?"
-  question, and a natural trust win for a beginner. Purely a frontend composition over
-  the two images the editor already fetches (the live edited preview + the existing
-  "Original" empty-recipe render): overlay both, clip the top one with a
-  `clip-path`/width driven by a draggable handle, reuse the existing `previewBoxStyle`
-  image-box so it lines up under `objectFit: contain`. Additive, no engine/API change,
-  no default change (Compare stays; this is a second mode or a handle on it). Testable
-  with a Vitest handle-drag → clip-width helper. (S–M, editor/trust)
+- ~~**Split-slider before/after in the preview (drag a divider to reveal Original vs
+  Edited in one frame).**~~ — **shipped v0.78.0** (see Shipped). A new "Split" mode
+  button next to Compare overlays the Original on the edited preview and clips it with
+  a draggable vertical divider (left = Original, right = Edited), so the user judges
+  exactly what a change did in one frame. Frontend-only, additive, its own mode
+  (Compare stays a toggle).
 - ~~**"Cropped view — showing N% of the frame" indicator + one-click "remove crop".**~~
   — **shipped v0.74.3** (see Shipped). A dimmed advisory caption below the preview now
   fires whenever an *enabled* `geometry.crop` is in the recipe, naming how much of the
@@ -507,6 +499,26 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Split before/after compare — drag a divider to see Original vs Edited in one
+  frame (PRIORITY-1 editor/trust).** Compare was a *toggle*: you flipped the whole
+  preview between "Original" and "edited" and had to remember the difference. A new
+  "Split" mode button (next to Compare) overlays the Original empty-recipe render on
+  top of the edited preview and clips it with a draggable vertical divider — the left
+  of the divider shows the Original, the right shows the edit — so the user judges
+  exactly what a stretch/denoise/curve changed at a glance, the clearest answer to the
+  priority-1 "is my edit actually an improvement?" question. It reuses the two renders
+  the editor already fetches (live edited preview + the existing `basePreview`
+  empty-recipe "Original"), sits inside the existing `previewBoxStyle` image box so it
+  lines up under `objectFit: contain`, and is its own mode (mutually exclusive with the
+  mask/coverage/Compare overlays and suppressed during a trim preview). Frontend-only,
+  additive — no engine/API/schema change, no default change (Compare stays a toggle,
+  split is off until clicked). New pure helpers `splitFraction` / `splitClipLeft` /
+  `splitLeftPct` in `splitCompare.ts` (pointer-x → clamped divider fraction → clip-path
+  / offset). Tests: Vitest helper (pointer inside/past-edge clamping, unmeasured-box
+  centre fallback, clip/offset strings) + an Editor test that toggling Split shows the
+  clipped Original overlay + divider at the default 50%, disables Compare while on, and
+  clears cleanly when toggled off. (v0.78.0, this run — Builder)
 
 - **Reprocess-everything gains an "only outdated targets" filter (owner-requested
   slice c) — skips targets already stacked on the current version.** Building on the

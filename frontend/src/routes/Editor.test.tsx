@@ -326,6 +326,35 @@ describe("EditorView", () => {
       expect(screen.queryByText("Star mask")).not.toBeInTheDocument());
   });
 
+  it("reveals a before/after split overlay (Original clipped + divider) when toggled", async () => {
+    mockEditorQueries();
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    const btn = await screen.findByRole("button", { name: "Split" });
+    await waitFor(() => expect(btn).not.toBeDisabled());
+    btn.click();
+
+    // The button flips and the Original overlay appears over the edited preview,
+    // clipped to the left half by default (divider at 50%), with a draggable
+    // divider. The drag math itself is covered by splitCompare.test.ts.
+    await screen.findByRole("button", { name: "Hide split" });
+    const original = await screen.findByAltText("original");
+    expect((original as HTMLElement).style.clipPath).toBe("inset(0 50% 0 0)");
+    expect(screen.getByLabelText("split divider")).toBeInTheDocument();
+    // Split is its own mode: the plain Compare toggle is disabled while it's on.
+    expect(screen.getByRole("button", { name: "Compare" })).toBeDisabled();
+
+    // Toggling it off removes the overlay and re-enables Compare.
+    screen.getByRole("button", { name: "Hide split" }).click();
+    await waitFor(() =>
+      expect(screen.queryByAltText("original")).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Compare" })).not.toBeDisabled();
+  });
+
   it("offers a Coverage overlay on a mosaic and toggles it", async () => {
     mockEditorQueries();
     // is_mosaic:true → the coverage overlay button is offered.

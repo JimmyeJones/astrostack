@@ -10,7 +10,7 @@ import {
 } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, type EditOp, type OpInstance, type Recipe } from "../api/client";
 import { useUndoable } from "../hooks/useUndoable";
@@ -29,6 +29,7 @@ import { prependCoverageLeveling } from "../components/editor/coverageLeveling";
 import { applyTrimCrop, trimRectStyle, trimKeptLabel, geometryOpsKey, previewBoxStyle,
   cropCoveragePct, removeCropOps }
   from "../components/editor/mosaicTrim";
+import { splitFraction, splitClipLeft, splitLeftPct } from "../components/editor/splitCompare";
 import { pngProgressLabel } from "../components/editor/pngProgress";
 import { opErrorsMessage } from "../components/editor/opErrors";
 import { clippingCaption } from "../components/editor/clipping";
@@ -282,9 +283,18 @@ export function EditorView() {
 
   // Before/after: lazily fetch the base (no-ops) render to compare against.
   const [showBase, setShowBase] = useState(false);
+  // Split before/after: overlay the Original on the edited preview and clip it
+  // with a draggable vertical divider, so the user sees exactly what an edit
+  // changed in one frame (left = Original, right = edited) instead of flipping
+  // the whole image with the Compare toggle. The Original image is the same
+  // empty-recipe render Compare uses, so it needs `basePreview` loaded too.
+  const [splitCompare, setSplitCompare] = useState(false);
+  const [splitFrac, setSplitFrac] = useState(0.5);
+  const [splitDragging, setSplitDragging] = useState(false);
+  const previewBoxRef = useRef<HTMLDivElement>(null);
   const basePreview = useQuery({
     queryKey: ["edit-base", safe, rid],
-    enabled: showBase && !!opsSchema.data && !saved.isLoading,
+    enabled: (showBase || splitCompare) && !!opsSchema.data && !saved.isLoading,
     queryFn: async ({ signal }) => {
       const res = await fetch(api.editPreviewUrl(safe, rid, { ops: [], base_run_id: rid }), { signal });
       if (!res.ok) throw new Error("base preview failed");
@@ -623,6 +633,10 @@ export function EditorView() {
   const shownSrc = overlay
     ? (overlay.q.data ?? (trimPreview ? preview.data : undefined))
     : preview.data;
+  // Split before/after is its own mode: it renders over the edited preview
+  // (`preview.data`, i.e. no `overlay`), so it's only live when no other overlay
+  // and no trim preview owns the box.
+  const splitActive = splitCompare && !overlay && !trimPreview;
   // Entering trim preview auto-shows the coverage heatmap so the proposed crop is
   // drawn over exactly what it's addressing — you can see it lands on the
   // well-covered interior. Remember the prior overlay state so Cancel/Apply
@@ -630,6 +644,7 @@ export function EditorView() {
   const [coverageBeforeTrim, setCoverageBeforeTrim] = useState<boolean | null>(null);
   const enterTrimPreview = () => {
     setTrimPreview(true);
+    setSplitCompare(false);
     if (hist.data?.is_mosaic) {
       setCoverageBeforeTrim(showCoverage);
       setShowCoverage(true);
@@ -788,12 +803,60 @@ export function EditorView() {
                 // (its own aspect ratio, width-capped so the height never exceeds
                 // 62vh) so overlays positioned as a percentage of it line up even
                 // when a portrait frame / short window would otherwise letterbox.
-                <div style={{ position: "relative",
+                <div ref={previewBoxRef} style={{ position: "relative",
                   ...previewBoxStyle(hist.data?.proxy_width, hist.data?.proxy_height) }}>
                   <img src={shownSrc} alt="preview"
                     style={{ display: "block", width: "100%", height: "100%",
                              objectFit: "contain", cursor: "zoom-in" }}
                     onClick={() => setLightbox(true)} />
+                  {/* Split before/after: the Original clipped to the left of a
+                      draggable divider, over the edited image below. Only when
+                      split mode is on and both renders are ready; sits inside the
+                      image box so it lines up under objectFit:contain, and never
+                      during a trim preview (that owns the box). */}
+                  {splitActive && basePreview.data ? (
+                    <>
+                      <img src={basePreview.data} alt="original"
+                        style={{ position: "absolute", inset: 0, width: "100%",
+                                 height: "100%", objectFit: "contain",
+                                 clipPath: splitClipLeft(splitFrac),
+                                 pointerEvents: "none" }} />
+                      <div aria-label="split divider"
+                        onPointerDown={(e) => {
+                          e.currentTarget.setPointerCapture(e.pointerId);
+                          setSplitDragging(true);
+                        }}
+                        onPointerMove={(e) => {
+                          if (!splitDragging) return;
+                          const r = previewBoxRef.current?.getBoundingClientRect();
+                          if (r) setSplitFrac(splitFraction(e.clientX, r.left, r.width));
+                        }}
+                        onPointerUp={(e) => {
+                          setSplitDragging(false);
+                          try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+                        }}
+                        style={{ position: "absolute", top: 0, bottom: 0,
+                                 left: splitLeftPct(splitFrac), width: 24,
+                                 transform: "translateX(-50%)", cursor: "ew-resize",
+                                 touchAction: "none", zIndex: 3 }}>
+                        <div style={{ position: "absolute", top: 0, bottom: 0, left: "50%",
+                          width: 2, transform: "translateX(-50%)",
+                          background: "rgba(255,255,255,0.85)",
+                          boxShadow: "0 0 3px rgba(0,0,0,0.7)" }} />
+                        <div style={{ position: "absolute", top: "50%", left: "50%",
+                          width: 18, height: 18, borderRadius: "50%",
+                          transform: "translate(-50%,-50%)",
+                          background: "rgba(255,255,255,0.9)",
+                          boxShadow: "0 0 3px rgba(0,0,0,0.7)" }} />
+                      </div>
+                      <Text size="xs" c="white" style={{ position: "absolute", left: 12, top: 10,
+                        background: "rgba(0,0,0,0.6)", padding: "2px 8px", borderRadius: 4 }}>
+                        Original</Text>
+                      <Text size="xs" c="white" style={{ position: "absolute", right: 12, top: 10,
+                        background: "rgba(0,0,0,0.6)", padding: "2px 8px", borderRadius: 4 }}>
+                        Edited</Text>
+                    </>
+                  ) : null}
                   {/* Proposed "Trim border" crop, drawn as a dashed outline over
                       the image so the user sees exactly what would be kept before
                       it's applied. Inside the image box so it stays aligned when
@@ -858,7 +921,7 @@ export function EditorView() {
                       disabled={!preview.data}
                       loading={showCoverage && coveragePreview.isLoading}
                       onClick={() => setShowCoverage((s) => {
-                        if (!s) { setShowMask(false); setShowBase(false); setSoloExclude(false); }
+                        if (!s) { setShowMask(false); setShowBase(false); setSoloExclude(false); setSplitCompare(false); }
                         return !s;
                       })}>
                       {showCoverage ? "Hide coverage" : "Coverage"}
@@ -871,17 +934,29 @@ export function EditorView() {
                     disabled={!preview.data}
                     loading={showMask && maskPreview.isLoading}
                     onClick={() => setShowMask((s) => {
-                      if (!s) { setShowBase(false); setSoloExclude(false); setShowCoverage(false); }
+                      if (!s) { setShowBase(false); setSoloExclude(false); setShowCoverage(false); setSplitCompare(false); }
                       return !s;
                     })}>
                     {showMask ? "Hide mask" : "Star mask"}
                   </Button>
                 </Tooltip>
                 <Button size="xs" variant={showBase ? "filled" : "default"}
-                  disabled={!preview.data || showMask || showCoverage}
+                  disabled={!preview.data || showMask || showCoverage || splitCompare}
                   onClick={() => setShowBase((s) => { if (!s) setSoloExclude(false); return !s; })}>
                   {showBase ? "Edited" : "Compare"}
                 </Button>
+                <Tooltip multiline w={230} withArrow
+                  label="Drag a divider across the preview to reveal the Original on the left and your edit on the right in one frame — the clearest way to judge exactly what a change did.">
+                  <Button size="xs" variant={splitCompare ? "filled" : "default"}
+                    disabled={!preview.data || showMask || showCoverage || trimPreview}
+                    onClick={() => setSplitCompare((s) => {
+                      if (!s) { setShowBase(false); setShowMask(false);
+                        setShowCoverage(false); setSoloExclude(false); setSplitFrac(0.5); }
+                      return !s;
+                    })}>
+                    {splitCompare ? "Hide split" : "Split"}
+                  </Button>
+                </Tooltip>
                 <Button size="xs" variant="default" leftSection={<IconRefresh size={14} />}
                   loading={preview.isFetching} onClick={refreshPreview}>Refresh</Button>
                 <Button size="xs" variant="default" leftSection={<IconZoomScan size={14} />}
