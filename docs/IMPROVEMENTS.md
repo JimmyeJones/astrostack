@@ -74,6 +74,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   pipeline no longer skips any op. What remains here is *responsiveness* (heavy
   ops on the proxy can lag) and closing any remaining proxy↔export look
   differences — chase those, but never by hiding an action again. (S–M, editor)
+- **Give the Auto recipe a gentle contrast curve (as the presets already do)** —
+  the general `auto_recipe` (`seestack/edit/presets.py`) runs denoise → STF stretch
+  → SCNR → saturation → sharpen but, unlike the **built-in galaxy/nebula presets**
+  (which include a `tone.curves` S-curve like `[[0,0],[0.25,0.2],[0.75,0.82],[1,1]]`),
+  it applies **no contrast curve** — so the one-click "Auto" result is flatter than
+  the presets the same app ships. Now that a data-driven curve helper exists
+  (`seestack/edit/curve.py:suggest_tone_curve`, v0.72.0), Auto could append a gentle
+  contrast curve — ideally the *data-driven* one measured on the post-stretch
+  display-space image (so it adapts to the stack), falling back to a fixed gentle
+  S-curve. Auto is an explicit button (no default flip, upgrade-safe). **Scout,
+  please vet the visual result before shipping** — this changes the priority-1
+  one-click look, so it needs eyes on real stacks (galaxy / nebula / cluster /
+  mosaic) to confirm it *improves* the default rather than over-darkening the sky or
+  crushing faint signal; a headless Builder can't validate the look. (M, editor/autonomy)
 - **Confusing / clunky controls** — too many ops with terse params and no obvious
   starting point. Add plain-language help, a simple/guided default layout, curated
   presets, and progressive disclosure of advanced ops so a beginner gets a good
@@ -93,6 +107,16 @@ problems. Dogfood it every big-picture run and fix root causes.
   unless Saved) and confirmed it's clean and reversible — but it does change the
   editor's default first-open view and supersedes the current empty-pipeline nudge, so
   it needs the owner's explicit OK for the default-on flip. See the sign-off entry.
+- **Name the "Auto curve" button's goal + dim it when already applied** — small
+  consistency follow-up to v0.72.0: the new "Auto curve" header button is opaque
+  ("Auto curve") and always enabled, whereas the rest of the data-driven family
+  names what it does and dims when already applied — Auto levels shows its
+  black–white values, Auto stretch its strength, the gamma button names "~25% grey"
+  (v0.69.18), and per-param buttons flip to a disabled "✓" via `matchesSuggestion`.
+  The Curve button could name the target grey it lifts toward and dim (with a ✓)
+  when the current points already equal the suggestion (a structural point-list
+  compare, like `opModified`'s curve handling), so re-clicking a no-op isn't
+  invited. Frontend-only, additive, fully testable. (S, editor/friendliness)
 - **Editor bug hunt (ongoing)** — there are undocumented issues. Each big-picture
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
