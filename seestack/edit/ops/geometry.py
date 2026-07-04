@@ -44,7 +44,17 @@ def _resize(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     if abs(scale - 1.0) < 1e-3 or scale <= 0:
         return rgb
     img = as_rgb(rgb)
-    return zoom(img, (scale, scale, 1.0), order=1).astype(np.float32)
+    h, w = img.shape[:2]
+    # Keep each axis ≥ 1 px. A downscale of a thin frame (e.g. a sliver crop on
+    # the proxy, or a small proxy) can drive round(dim·scale) to 0, which yields
+    # an empty image that then crashes the PNG/export render ("cannot write empty
+    # image"). Derive exact per-axis zoom factors from the guaranteed-nonzero
+    # target shape so the output is always well-defined.
+    out_h = max(1, int(round(h * scale)))
+    out_w = max(1, int(round(w * scale)))
+    if out_h == h and out_w == w:
+        return rgb
+    return zoom(img, (out_h / h, out_w / w, 1.0), order=1).astype(np.float32)
 
 
 # The reshape-the-canvas ops. A recipe's *enabled* members of this set are the
