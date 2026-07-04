@@ -72,16 +72,13 @@ when you take it.
   Severity: cosmetic (misleading in the letterboxed case). Confidence: confirmed
   (traced CSS).
 
-- **BUG (cosmetic/a11y): overlay zoom mislabels + keyboard access gaps** — the
-  lightbox titles whatever is shown as "edited" unless Compare is on, so zooming
-  the star-mask/coverage overlay shows the mask titled "edited"
-  (`Editor.tsx:1085-1087`). The Curves "reset" control is a `<Text>` with only
-  an `onClick` (not focusable, no role — `CurvesWidget.tsx:116-117`), curve
-  points are mouse-only SVG circles, and `OpList` rows are click-only `Paper`
-  divs (`OpList.tsx:35-38`) — op selection is impossible by keyboard. **Fix:**
-  title the lightbox from the active overlay; make reset a real button; add
-  keyboard selection (button/role+tabIndex) to op rows. Severity: cosmetic/a11y.
-  Confidence: confirmed (traced).
+- **BUG (a11y, follow-up): editor curve points are mouse-only** — the remaining
+  keyboard-access gap after v0.69.12: the Curves op's control points are drag-only
+  SVG circles (`CurvesWidget.tsx`), so a keyboard user can't add/move/remove a curve
+  point (the "reset" button and op-row selection are now keyboard-accessible). A
+  proper fix needs a focusable point model (arrow-key nudge / a numeric fallback),
+  which is a larger interaction change than the rest of the batch. Severity:
+  a11y. Confidence: confirmed (traced).
 
 _(The v0.67–0.69 runs fixed a large batch of verified bugs — Gaia colour cal,
 RA≈0 frame rejection, debayer edge wrap, job-cancel result loss, hung-Gaia
@@ -312,6 +309,21 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Fix: editor overlay-zoom mislabel + keyboard access gaps (a11y)** — three
+  editor a11y fixes. (1) The zoom lightbox titled whatever was shown as "edited"
+  unless Compare was on, so zooming the Star-mask/Coverage overlay mislabelled the
+  overlay as "edited"; the title now reads from the active overlay's own label
+  ("Star mask"/"Coverage map"/"Original"), falling back to "edited" only when no
+  overlay is up. (2) The Curves "reset" control was a bare `<Text onClick>` (not
+  focusable, no role) → now a real `<Anchor component="button">`. (3) `OpList` rows
+  were click-only `<Paper>` divs, so selecting an op to edit was impossible by
+  keyboard; rows are now `role="button" tabIndex=0 aria-pressed` and activate on
+  Enter/Space (without hijacking a focused inner switch/arrow/✕). Frontend-only,
+  additive. Vitest: new OpList a11y suite (focusable rows, Enter/Space selects,
+  aria-pressed) + an Editor test that the lightbox titles from the overlay, not
+  "edited". Remaining gap (mouse-only curve points) filed as an a11y follow-up.
+  (v0.69.12, this run — Builder)
 
 - **Fix: background/gradient op failures now surface in the editor (were a silent
   no-op / colour-shift)** — `remove_final_gradient` swallowed its Background2D fit

@@ -1,4 +1,4 @@
-import { Box, Group, Text } from "@mantine/core";
+import { Anchor, Box, Group, Text } from "@mantine/core";
 import { useRef } from "react";
 import type { Histogram } from "../../api/client";
 import { moveCurvePoint, type Pt } from "./curveDrag";
@@ -110,8 +110,8 @@ export function CurvesWidget({ points, onChange, histogram }: {
       </svg>
       <Group justify="space-between">
         <Text size="xs" c="dimmed">double-click empty space to add · double-click a point to remove</Text>
-        <Text size="xs" c="violet" style={{ cursor: "pointer" }}
-          onClick={() => onChange([[0, 0], [1, 1]])}>reset</Text>
+        <Anchor component="button" type="button" size="xs" c="violet"
+          onClick={() => onChange([[0, 0], [1, 1]])}>reset</Anchor>
       </Group>
     </Box>
   );

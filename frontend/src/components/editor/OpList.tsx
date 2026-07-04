@@ -33,9 +33,20 @@ export function OpList({ ops, specs, selected, onSelect, onMove, onToggle, onRem
         const active = op.uid === selected;
         return (
           <Paper key={op.uid} withBorder p={6} radius="sm"
+            role="button" tabIndex={0} aria-pressed={active}
+            aria-label={`Select ${spec?.label ?? op.id}`}
             bg={active ? "var(--mantine-color-violet-light)" : undefined}
             style={{ cursor: "pointer", opacity: op.enabled ? 1 : 0.5 }}
-            onClick={() => onSelect(op.uid)}>
+            onClick={() => onSelect(op.uid)}
+            onKeyDown={(e) => {
+              // Keyboard users must be able to select an op to edit it; Enter/Space
+              // activate the row like a button (without hijacking Space while a
+              // focused inner control — switch/arrows/✕ — handles its own key).
+              if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) {
+                e.preventDefault();
+                onSelect(op.uid);
+              }
+            }}>
             <Group justify="space-between" wrap="nowrap" gap="xs">
               <Group gap={6} wrap="nowrap" style={{ minWidth: 0 }}>
                 <Text size="xs" c="dimmed" w={16} ta="right">{i + 1}</Text>
