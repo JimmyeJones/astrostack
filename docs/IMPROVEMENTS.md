@@ -293,6 +293,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   drags a divider to compare the image *with* vs *without* just the selected op
   (left = without, right = with), reusing the shipped `splitCompare.ts` helpers and the
   existing per-op `withoutOpPreview` render.
+- **A/B two saved looks with the split divider (recipe-A vs recipe-B).** The split
+  divider now compares Original-vs-Edited (v0.78.0) and with-op-vs-without-op (v0.80.0),
+  but a repeat imager's real question when picking a look is often "preset X vs preset Y"
+  or "my saved recipe vs the Auto result". Add a small "Compare a look…" picker (built-in
+  presets + user presets + Auto) that renders the chosen recipe on the proxy — reusing
+  the ordinary `…/editor/preview` endpoint with that recipe's ops — and feeds it into the
+  *same* split-divider overlay as the "before" image, so the user drags to judge their
+  current edit against any other look in one frame without committing to it. Reuses the
+  shipped `splitCompare.ts` geometry + the recipe-preview path; the only new work is the
+  picker, a second on-proxy render query, and wiring it as the split's left side. Higher
+  value than the raw Original split for someone choosing between presets. Additive,
+  frontend-only, no engine/API change. (S–M, editor/trust)
 - ~~**"Cropped view — showing N% of the frame" indicator + one-click "remove crop".**~~
   — **shipped v0.74.3** (see Shipped). A dimmed advisory caption below the preview now
   fires whenever an *enabled* `geometry.crop` is in the recipe, naming how much of the
