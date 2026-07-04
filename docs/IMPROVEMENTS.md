@@ -295,6 +295,24 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Fix: SCNR "Protect" tooltip had gentler/stronger reversed (misled the most
+  common OSC fix)** — Builder editor audit found the `tone.scnr` `mode` param's help
+  read "to the average (gentler) or maximum (stronger) of red/blue" — exactly
+  backwards. SCNR caps green with `min(g, neutral)`: `average` uses the *lower*
+  neutral `0.5·(r+b)` so it removes **more** green (stronger), `maximum` uses the
+  *higher* neutral `max(r,b)` so it removes **less** (gentler) — matching standard
+  (PixInsight "Average/Maximum Neutral") terminology. A beginner wanting a light
+  touch reads "average (gentler)", picks it, and gets the *most* aggressive green
+  removal — desaturating real teal/cyan nebulosity, the opposite of the promise.
+  Green-cast removal is the single most common OSC nebula fix and this tooltip is
+  the only guidance for the choice, so the label matters. Swapped the parentheticals
+  to "average (stronger) or maximum (gentler)". Metadata/text-only, additive,
+  upgrade-safe (no behaviour, API, or default change). Regression test in
+  `tests/test_edit_tone_ops.py` pins the *semantics* (average caps green to
+  `0.5·(r+b)`, maximum to `max(r,b)`, so average leaves less green — the stronger
+  effect) **and** asserts the help text labels them that way round, so the tooltip
+  can't drift back out of sync with the maths. (v0.72.4, this run — Builder)
+
 - **Fix: a thin crop + downscale no longer crashes the editor preview/export with
   an empty image** — Builder dogfood (fuzzing every edit op with adversarial
   inputs) found that `geometry.resize` computed its output shape via scipy `zoom`'s
