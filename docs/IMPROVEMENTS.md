@@ -40,20 +40,15 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
-### Editor — frontend (PRIORITY 1)
-
-- **BUG (a11y, follow-up): editor curve points are mouse-only** — the remaining
-  keyboard-access gap after v0.69.12: the Curves op's control points are drag-only
-  SVG circles (`CurvesWidget.tsx`), so a keyboard user can't add/move/remove a curve
-  point (the "reset" button and op-row selection are now keyboard-accessible). A
-  proper fix needs a focusable point model (arrow-key nudge / a numeric fallback),
-  which is a larger interaction change than the rest of the batch. Severity:
-  a11y. Confidence: confirmed (traced).
+_(none currently open — the traced editor bug backlog is drained. New verified
+bugs go here, editor first, ordered by severity.)_
 
 _(The v0.67–0.69 runs fixed a large batch of verified bugs — Gaia colour cal,
 RA≈0 frame rejection, debayer edge wrap, job-cancel result loss, hung-Gaia
 timeout, several input-validation 500s, the NaN-through-stretch invariant, the
-Save/undo-history race, and more. Their write-ups moved to **Shipped**.)_
+Save/undo-history race, the deconvolution preview understatement, the letterboxed
+trim-crop overlay, the mouse-only curve points, and more. Their write-ups moved
+to **Shipped**.)_
 
 ---
 
@@ -279,6 +274,21 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Fix (a11y): editor curve points are keyboard-operable** — the last open
+  editor bug. The Curves op's control points were drag-only SVG circles, so a
+  keyboard user couldn't add, move, or remove a curve point. Each point is now a
+  focusable `role="slider"` (`tabIndex=0`, descriptive `aria-label` +
+  `aria-valuetext`): arrow keys nudge it (Shift = coarse step), Delete/Backspace
+  removes an interior point, and a new keyboard-accessible "add point" button
+  inserts a point in the widest gap (on the current curve) and focuses it. Pure
+  `nudgeCurvePoint` / `removeCurvePoint` / `addCurvePointInLargestGap` helpers
+  (all reusing the existing ordering-safe `moveCurvePoint`) drive it; the mouse
+  drag/double-click paths are unchanged. Frontend-only, additive. Vitest: helper
+  suite (nudge clamps + endpoint-x-lock + no-mutate; remove keeps endpoints; add
+  in-largest-gap incl. identity) + a widget suite (points are focusable sliders,
+  ArrowUp/Shift-Arrow nudge, Delete removes, endpoint x stays locked, the button
+  adds a mid point). (v0.69.15, this run — Builder)
 
 - **Fix: trim-crop preview rectangle misaligned on a letterboxed preview** — the
   dashed "proposed crop" overlay mapped fractional bounds to percentages of the
