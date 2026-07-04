@@ -56,6 +56,28 @@ def test_scnr_preserves_nan_gaps():
     assert np.all(np.isfinite(out[3:, :, :]))
 
 
+def test_scnr_average_removes_at_least_as_much_green_as_maximum():
+    """Locks the 'Protect' modes' relative strength against tooltip drift.
+
+    ``average`` caps green to ``0.5*(r+b)`` and ``maximum`` to ``max(r,b)`` — so
+    when red≠blue the average cap is the *lower* one and removes *more* green: it
+    is the STRONGER protection, ``maximum`` the GENTLER. The help text on the
+    ``mode`` param must describe them that way round (it once had them reversed).
+    """
+    rgb = _rgb(0.2, 0.9, 0.4)  # green cast with unequal red/blue so the caps differ
+    op = get_op("tone.scnr")
+    avg = op.apply(rgb, {"amount": 1.0, "mode": "average"}, EditContext())
+    mx = op.apply(rgb, {"amount": 1.0, "mode": "maximum"}, EditContext())
+    # average caps green to 0.5*(0.2+0.4)=0.3; maximum to max(0.2,0.4)=0.4.
+    assert np.allclose(avg[..., 1], 0.3, atol=1e-5)
+    assert np.allclose(mx[..., 1], 0.4, atol=1e-5)
+    # So 'average' leaves *less* green behind — it is the stronger effect.
+    assert float(avg[..., 1].mean()) < float(mx[..., 1].mean())
+    # And the tooltip must label them accordingly (guards against re-reversal).
+    help_text = next(p.help for p in op.params if p.key == "mode")
+    assert "average (stronger)" in help_text and "maximum (gentler)" in help_text
+
+
 # ---- tone.saturation -------------------------------------------------------
 
 def test_saturation_boosts_channel_spread_around_luminance():

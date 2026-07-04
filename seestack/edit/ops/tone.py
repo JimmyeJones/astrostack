@@ -212,6 +212,6 @@ register(OpSpec(
                   option_labels={"average": "Average of red & blue",
                                  "maximum": "Maximum of red & blue"},
                   group="advanced",
-                  help="How to cap green: to the average (gentler) or maximum (stronger) of red/blue."),
+                  help="How to cap green: to the average (stronger) or maximum (gentler) of red/blue."),
     ],
 ))
