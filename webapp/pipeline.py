@@ -227,6 +227,111 @@ def submit_stack(
     return jm.submit("stack", body, target=safe)
 
 
+def _stack_options_from_run_json(options_json: str | None) -> dict[str, Any] | None:
+    """Parse a stack run's ``options_json`` back into a plain ``StackOptions``
+    dict, or ``None`` when the run isn't a genuine stack.
+
+    Editor-export and channel-combine runs are also recorded in ``stack_runs``
+    but store a different shape (``{"editor_recipe": …}`` / ``{"channel_combine":
+    …}``), so they're rejected — we only want to reuse the settings that produced
+    an actual integration. Empty/garbage/unknown-only JSON also yields ``None``
+    so the caller falls back to the target's saved defaults.
+    """
+    if not options_json:
+        return None
+    try:
+        data = json.loads(options_json)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+    if not isinstance(data, dict) or "editor_recipe" in data or "channel_combine" in data:
+        return None
+    import dataclasses
+
+    from seestack.stack.stacker import StackOptions
+
+    valid = {f.name for f in dataclasses.fields(StackOptions)}
+    clean = {k: v for k, v in data.items() if k in valid}
+    return clean or None
+
+
+def _last_stack_options_for_target(lib: Library, safe: str) -> dict[str, Any] | None:
+    """The most recent *genuine* stack run's options for a target, or ``None``.
+
+    Walks the target's runs newest-first and returns the first that parses as a
+    real ``StackOptions`` dict (skipping editor/combine runs), so a reprocess
+    reuses exactly the settings that made the target's current image.
+    """
+    proj = lib.open_target(safe)
+    try:
+        for run in proj.iter_stack_runs():  # newest first
+            opts = _stack_options_from_run_json(run.options_json)
+            if opts is not None:
+                return opts
+    finally:
+        proj.close()
+    return None
+
+
+def submit_reprocess_all(settings: Settings, jm: JobManager) -> Job:
+    """Restack *every* target with the current engine — the owner's one-click
+    "reprocess everything after an upgrade" maintenance action.
+
+    Each target is restacked reusing the settings that produced its current image
+    (its last genuine stack run's ``options_json``; falling back to its saved
+    stack defaults / global auto-defaults when it has none). The per-target stacks
+    run **serially** inside this single job — the stack hot path is memory-bounded
+    on purpose (OOM history), so exactly one runs at a time — and each is recorded
+    as a *new* ``stack_runs`` row **alongside** the existing output: nothing is
+    ever deleted or overwritten, so a worse restack can't lose a good result.
+
+    Cancellable between targets (and within each target's stack). A target that
+    fails to stack is isolated: its error is recorded and the batch carries on.
+    """
+    def body(job: Job) -> dict[str, Any]:
+        lib = Library.open_or_create(settings.resolved_library_root)
+        try:
+            targets = list(lib.list_targets())
+            total = len(targets)
+            job.set_progress("reprocess", 0, total, f"0/{total} targets")
+            jm.maybe_flush(job)
+            stacked = 0
+            failed: list[dict[str, str]] = []
+            cancelled = False
+            for i, entry in enumerate(targets):
+                if job.cancel_requested():
+                    cancelled = True
+                    break
+                safe = entry.safe_name
+                name = entry.name or safe
+                # Persistent label; the inner run_stack progress updates
+                # phase/done/total per frame but leaves detail untouched.
+                job.detail = f"Target {i + 1}/{total}: {name}"
+                jm.maybe_flush(job)
+                reuse = _last_stack_options_for_target(lib, safe)
+                try:
+                    res = _stack_target(settings, jm, job, lib, safe, options=reuse)
+                except Exception as exc:  # noqa: BLE001 — isolate one bad target
+                    log.exception("reprocess-all: target %s failed", safe)
+                    failed.append({"target": safe, "error": f"{type(exc).__name__}: {exc}"})
+                else:
+                    if res.get("cancelled"):
+                        cancelled = True
+                        break
+                    stacked += 1
+                job.set_progress("reprocess", i + 1, total, f"{i + 1}/{total} targets")
+                jm.maybe_flush(job)
+            return {
+                "total": total,
+                "stacked": stacked,
+                "failed": failed,
+                "cancelled": cancelled,
+            }
+        finally:
+            lib.close()
+
+    return jm.submit("reprocess_all", body)
+
+
 def _load_full_rgb_wcs(fits_path: str) -> tuple[Any, Any]:
     """Read a stack FITS to float32 (H,W,3) + an optional celestial WCS."""
     import numpy as np

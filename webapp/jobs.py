@@ -191,6 +191,18 @@ class JobManager:
         self._queue.put((job, fn))
         return job
 
+    def active_of_kind(self, kind: str) -> Job | None:
+        """The first non-terminal (queued/running) job of ``kind``, or ``None``.
+
+        Active jobs always live in the in-memory map, so this is a cheap way for
+        an endpoint to avoid enqueuing a duplicate long-running batch job.
+        """
+        with self._lock:
+            for j in self._jobs.values():
+                if j.kind == kind and j.state not in _TERMINAL:
+                    return j
+        return None
+
     def get(self, job_id: str) -> Job | None:
         with self._lock:
             job = self._jobs.get(job_id)

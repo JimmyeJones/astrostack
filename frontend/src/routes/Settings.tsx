@@ -4,10 +4,12 @@ import {
   Title,
 } from "@mantine/core";
 import {
-  IconDeviceFloppy, IconDownload, IconInfoCircle, IconTelescope, IconUpload,
+  IconDeviceFloppy, IconDownload, IconInfoCircle, IconRefresh, IconTelescope,
+  IconUpload,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
 import { api } from "../api/client";
 import { dependencyMet } from "../api/depends";
@@ -109,6 +111,64 @@ function BackupRestore() {
               </Button>
             )}
           </FileButton>
+        </Group>
+      </Stack>
+    </Paper>
+  );
+}
+
+export function Maintenance() {
+  const navigate = useNavigate();
+  const reprocess = useMutation({
+    mutationFn: () => api.reprocessAll(),
+    onSuccess: (res) => {
+      notifications.show({
+        color: "teal",
+        message: res.already_running
+          ? "A reprocess-everything batch is already running — watch it on the Jobs page."
+          : "Reprocessing every target — watch progress on the Jobs page.",
+      });
+      navigate("/jobs");
+    },
+    onError: (e: Error) =>
+      notifications.show({ color: "red", title: "Couldn't start reprocess", message: e.message }),
+  });
+
+  const onClick = () => {
+    if (
+      window.confirm(
+        "Restack every target with the current engine?\n\n"
+        + "Each target is reprocessed one at a time, reusing its last stack "
+        + "settings. This is non-destructive: every restack is saved as a NEW "
+        + "result alongside the existing one (nothing is deleted or overwritten), "
+        + "so you can compare them in History. A large library can take a while.",
+      )
+    ) {
+      reprocess.mutate();
+    }
+  };
+
+  return (
+    <Paper withBorder p="lg">
+      <Stack>
+        <Text fw={600}>Reprocess everything</Text>
+        <Text size="sm" c="dimmed">
+          Restack every target with the current engine, reusing each target's last
+          stack settings. Handy after an upgrade so all your final images benefit
+          from the newest stacking improvements. Targets are processed one at a
+          time; each restack is saved as a new result alongside the old one, so
+          nothing is ever lost.
+        </Text>
+        <Group>
+          <Button
+            color="grape"
+            variant="light"
+            leftSection={<IconRefresh size={16} />}
+            loading={reprocess.isPending}
+            onClick={onClick}
+          >
+            Reprocess all targets…
+          </Button>
         </Group>
       </Stack>
     </Paper>
@@ -488,6 +548,8 @@ export function SettingsView() {
           </Group>
         </Stack>
       </Paper>
+
+      <Maintenance />
 
       <BackupRestore />
 

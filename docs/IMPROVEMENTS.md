@@ -230,29 +230,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   is self-describing for Siril/PixInsight. Absence = today's linear behaviour, so
   old runs are unaffected.
 ### Autonomy — "just works" (PRIORITY 2)
-- **⭐ OWNER-REQUESTED — "Reprocess everything": rescan all data and restack every
-  target with the current engine.** The stacking engine keeps improving (better
-  rejection / alignment / calibration, bug fixes), but each target's existing stack
-  was produced by whatever engine version was current when it ran — so after an
-  upgrade the *final images stay stale* unless the user restacks each target by hand.
-  Add a single, confirm-gated maintenance action (a button on a Library or Settings
-  page + an API endpoint) that enqueues a fresh stack for **every** target through
-  the existing single-worker `JobManager`, reusing each target's last-used stack
-  settings (from the run's `options_json`; fall back to auto-defaults when a target
-  has none). One click after an upgrade then regenerates all final images with the
-  new engine. **Must be non-destructive and memory-safe:** run the per-target jobs
-  **serially** (the stack hot path is memory-bounded on purpose — OOM history);
-  write each restack as a *new* `stack_runs` row **alongside** the old output (never
-  delete or overwrite the prior image), so a worse/failed restack can't lose a good
-  result and the user can compare in History; and surface batch progress (N / total
-  targets) with cancel (reuses the JobManager cancel semantics). Ship it in slices:
-  (a) **restack-all reusing stored settings** — the core ask; (b) an optional deeper
-  **full rescan** that also re-runs QC / plate-solve / auto-grade over the existing
-  library frames before restacking, for when those steps improved too; (c) a "only
-  targets last stacked before version X" filter (record the engine version on each
-  stack run if not already, so a large library isn't reprocessed wholesale). Additive
-  / upgrade-safe — new endpoint + job kind + UI action, reusing `stack_runs`.
-  (L, autonomy/image-quality)
+- **⭐ OWNER-REQUESTED — "Reprocess everything" — slice (a) SHIPPED (v0.74.0);
+  slices (b)/(c) remain.** The stacking engine keeps improving (better rejection /
+  alignment / calibration, bug fixes), but each target's existing stack was produced
+  by whatever engine version was current when it ran — so after an upgrade the *final
+  images stay stale* unless the user restacks each target by hand. **Slice (a)
+  shipped v0.74.0:** a confirm-gated "Reprocess all targets" action on the Settings
+  page + a `POST /api/reprocess-all` endpoint enqueue one serial `reprocess_all` job
+  that restacks **every** target, reusing each target's last genuine stack run's
+  settings (falling back to its saved defaults / global auto-defaults). It's
+  non-destructive (each restack is a *new* `stack_runs` row alongside the old output)
+  and memory-safe (per-target stacks run serially inside the one job), with
+  between-target + within-target cancel and per-target failure isolation. **Remaining
+  slices for a future run:** (b) an optional deeper **full rescan** that also re-runs
+  QC / plate-solve / auto-grade over the existing library frames before restacking,
+  for when those steps improved too; (c) a "only targets last stacked before version
+  X" filter (record the engine version on each stack run so a large library isn't
+  reprocessed wholesale) — plus richer batch UI (a dedicated N/total batch progress
+  card rather than the per-target job progress + summary you get today). (M remaining,
+  autonomy/image-quality)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
   different (per-channel vs luminance gradient, star reduction, saturation). The
@@ -409,6 +405,34 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **⭐ OWNER-REQUESTED — "Reprocess everything" (slice a): one-click restack of
+  every target with the current engine** — after an engine upgrade a target's
+  final image stays stale until it's restacked by hand. A new confirm-gated
+  "Reprocess all targets" action on the Settings page (a `Maintenance` panel) hits
+  a new `POST /api/reprocess-all` endpoint that enqueues one serial `reprocess_all`
+  job. The job walks every target and restacks it **reusing the settings that made
+  its current image** — a new `_last_stack_options_for_target` helper reads each
+  target's newest *genuine* stack run's `options_json` (a companion
+  `_stack_options_from_run_json` rejects editor-export/channel-combine runs, which
+  share the `stack_runs` table, and empty/garbage JSON), falling back to the
+  target's saved stack defaults / global auto-defaults when it has none. It's
+  **non-destructive** (each restack is recorded as a *new* `stack_runs` row via the
+  normal `run_stack` path — old outputs are never touched, so a worse restack can't
+  lose a good result and both show up in History) and **memory-safe** (the
+  per-target stacks run serially inside the single job, so the memory-bounded stack
+  hot path is never oversubscribed — OOM history). Cancellable between targets *and*
+  within each target's stack; a target that fails to stack is isolated (its error is
+  recorded and the batch carries on). A duplicate-batch guard
+  (`JobManager.active_of_kind`) returns the running job instead of enqueuing a
+  second. Additive / upgrade-safe: new endpoint + job kind + UI action, reusing the
+  existing `stack_runs` schema and job manager (no config/DB/on-disk/API-shape
+  change). Tested: engine (helper accept/reject cases; the batch reuses each
+  target's last kappa, isolates a failing target, cancels between targets; the
+  guard is active only for queued/running jobs) + webapp end-to-end (the endpoint
+  enqueues a batch that restacks both targets and leaves the seeded prior run in
+  place — additive) + Vitest (the confirm gate, the start/already-running/error
+  notifications). (v0.74.0, this run — Builder)
 
 - **Auto-process now gives its one-click result a gentle, data-driven contrast
   curve (the top PRIORITY-1 item, Scout-vetted & unblocked)** — the built-in
