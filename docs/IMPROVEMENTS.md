@@ -230,6 +230,29 @@ problems. Dogfood it every big-picture run and fix root causes.
   is self-describing for Siril/PixInsight. Absence = today's linear behaviour, so
   old runs are unaffected.
 ### Autonomy — "just works" (PRIORITY 2)
+- **⭐ OWNER-REQUESTED — "Reprocess everything": rescan all data and restack every
+  target with the current engine.** The stacking engine keeps improving (better
+  rejection / alignment / calibration, bug fixes), but each target's existing stack
+  was produced by whatever engine version was current when it ran — so after an
+  upgrade the *final images stay stale* unless the user restacks each target by hand.
+  Add a single, confirm-gated maintenance action (a button on a Library or Settings
+  page + an API endpoint) that enqueues a fresh stack for **every** target through
+  the existing single-worker `JobManager`, reusing each target's last-used stack
+  settings (from the run's `options_json`; fall back to auto-defaults when a target
+  has none). One click after an upgrade then regenerates all final images with the
+  new engine. **Must be non-destructive and memory-safe:** run the per-target jobs
+  **serially** (the stack hot path is memory-bounded on purpose — OOM history);
+  write each restack as a *new* `stack_runs` row **alongside** the old output (never
+  delete or overwrite the prior image), so a worse/failed restack can't lose a good
+  result and the user can compare in History; and surface batch progress (N / total
+  targets) with cancel (reuses the JobManager cancel semantics). Ship it in slices:
+  (a) **restack-all reusing stored settings** — the core ask; (b) an optional deeper
+  **full rescan** that also re-runs QC / plate-solve / auto-grade over the existing
+  library frames before restacking, for when those steps improved too; (c) a "only
+  targets last stacked before version X" filter (record the engine version on each
+  stack run if not already, so a large library isn't reprocessed wholesale). Additive
+  / upgrade-safe — new endpoint + job kind + UI action, reusing `stack_runs`.
+  (L, autonomy/image-quality)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
   different (per-channel vs luminance gradient, star reduction, saturation). The
