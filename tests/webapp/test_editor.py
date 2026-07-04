@@ -555,6 +555,44 @@ def test_auto_process(client, solved_library):
     # pass before the gradient fit to flatten the panel steps.
     assert "background.level_coverage" in ops
     assert ops.index("background.level_coverage") < ops.index("tone.stretch")
+    # No coverage sibling written here → no meaningful trim → no crop appended.
+    assert "geometry.crop" not in ops
+
+
+def test_auto_process_trims_ragged_mosaic_border(client, solved_library):
+    """On a mosaic whose coverage sibling has a ragged low-coverage border, Auto
+    appends a final geometry.crop to the well-covered interior so the one-click
+    result is cleanly framed (reusing the Trim-border machinery)."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, h=80, w=100)  # coverage 1..5 → mosaic
+    cov = np.full((80, 100), 1.0, dtype=np.float32)
+    cov[15:65, 20:80] = 5.0  # a well-covered interior inside a low-coverage border
+    _write_coverage(solved_library, safe, cov)
+
+    r = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/auto")
+    assert r.status_code == 200
+    ops = r.json()["ops"]
+    ids = [o["id"] for o in ops]
+    assert ids[-1] == "geometry.crop"  # trim runs last
+    # The coverage-leveling op still runs before the crop (on the uncropped frame).
+    assert ids.index("background.level_coverage") < ids.index("geometry.crop")
+    crop = ops[-1]["params"]
+    # The crop tightens onto the interior (strictly inside the full 0..1 frame).
+    assert crop["x0"] > 0.0 and crop["y0"] > 0.0
+    assert crop["x1"] < 1.0 and crop["y1"] < 1.0
+
+
+def test_auto_process_single_field_not_cropped(client, solved_library):
+    """A single-field stack (uniform coverage) is never trimmed by Auto."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, h=80, w=100,
+                    coverage_min=3, coverage_max=3)
+    cov = np.full((80, 100), 3.0, dtype=np.float32)
+    _write_coverage(solved_library, safe, cov)
+
+    r = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/auto")
+    assert r.status_code == 200
+    assert "geometry.crop" not in [o["id"] for o in r.json()["ops"]]
 
 
 def test_export_creates_new_run_non_destructive(client, solved_library):

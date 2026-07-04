@@ -810,3 +810,31 @@ def test_apply_geometry_to_map_rotate_fills_corners_with_nan():
     out = apply_geometry_to_map(cov, rec, EditContext())
     assert out.shape[0] > 40 and out.shape[1] > 40  # expanded canvas
     assert not np.isfinite(out[0, 0])  # a corner exposed by the rotation is NaN
+
+
+# ---- auto_recipe mosaic border trim -----------------------------------------
+
+def test_auto_recipe_appends_trim_crop_last_on_a_mosaic():
+    """A meaningful trim rectangle (from a mosaic's coverage) is appended as a
+    final geometry.crop, so the one-click result is cleanly framed. The crop runs
+    last (after the tone/detail ops) and never before the coverage-leveling op."""
+    from seestack.edit.presets import auto_recipe
+
+    rec = auto_recipe(coverage_span=(1, 5), trim_crop=(0.1, 0.12, 0.9, 0.88))
+    ids = [op.id for op in rec.ops]
+    assert ids[-1] == "geometry.crop"        # trim runs last
+    assert ids.index("background.level_coverage") < ids.index("geometry.crop")
+    crop = rec.ops[-1]
+    assert crop.params["x0"] == 0.1 and crop.params["x1"] == 0.9
+    assert crop.params["y0"] == 0.12 and crop.params["y1"] == 0.88
+
+
+def test_auto_recipe_no_trim_crop_when_none():
+    """Without a supplied trim (single-field, or nothing worth trimming) Auto adds
+    no crop op — behaviour is unchanged from before the feature."""
+    from seestack.edit.presets import auto_recipe
+
+    mosaic_no_trim = auto_recipe(coverage_span=(1, 5), trim_crop=None)
+    single_field = auto_recipe(coverage_span=(3, 3), trim_crop=None)
+    assert "geometry.crop" not in [op.id for op in mosaic_no_trim.ops]
+    assert "geometry.crop" not in [op.id for op in single_field.ops]

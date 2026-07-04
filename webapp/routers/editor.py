@@ -85,6 +85,35 @@ def _proxy_coverage(fits_path: str, scale: float) -> np.ndarray | None:
     return load_coverage(fits_path, step=max(1, int(round(scale))))
 
 
+def _trim_rect_for_run(run, min_frac: float = 0.5
+                       ) -> tuple[float, float, float, float] | None:
+    """Fractional ``(x0, y0, x1, y1)`` bounds of the largest well-covered rectangle
+    of a run's coverage map (the ragged mosaic border trimmed away), or ``None``
+    when there's no coverage sibling or nothing worth trimming (a full-frame
+    result). Shared by the "Trim border" suggestion and Auto-process."""
+    cov_path = coverage_path_for(run.fits_path)
+    if not cov_path.exists():
+        return None
+    # Stride the (possibly huge) coverage map down before the rectangle sweep.
+    step = 1
+    try:
+        from astropy.io import fits as _fits
+
+        hdr = _fits.getheader(cov_path)
+        dim = max(int(hdr.get("NAXIS1", 0)), int(hdr.get("NAXIS2", 0)))
+        if dim > _TRIM_MAX_DIM:
+            step = -(-dim // _TRIM_MAX_DIM)  # ceil division
+    except (OSError, ValueError):
+        step = 1
+    cov = load_coverage(run.fits_path, step=step)
+    if cov is None:
+        return None
+    rect = largest_covered_rect(cov, min_frac=min_frac)
+    if rect is None:
+        return None
+    return (round(rect[0], 4), round(rect[1], 4), round(rect[2], 4), round(rect[3], 4))
+
+
 def _render_png(project_dir: Path, run, recipe: Recipe) -> bytes:
     import io
 
@@ -482,26 +511,9 @@ async def trim_suggestion(safe: str, run_id: int, request: Request,
         return TrimSuggestionOut(is_mosaic=False, crop=None)
 
     def work() -> TrimSuggestionOut:
-        cov_path = coverage_path_for(run.fits_path)
-        if not cov_path.exists():
-            return TrimSuggestionOut(is_mosaic=True, crop=None)
-        # Stride the (possibly huge) coverage map down before the rectangle sweep.
-        step = 1
-        try:
-            from astropy.io import fits as _fits
-
-            hdr = _fits.getheader(cov_path)
-            dim = max(int(hdr.get("NAXIS1", 0)), int(hdr.get("NAXIS2", 0)))
-            if dim > _TRIM_MAX_DIM:
-                step = -(-dim // _TRIM_MAX_DIM)  # ceil division
-        except (OSError, ValueError):
-            step = 1
-        cov = load_coverage(run.fits_path, step=step)
-        if cov is None:
-            return TrimSuggestionOut(is_mosaic=True, crop=None)
-        rect = largest_covered_rect(cov, min_frac=min_frac)
-        crop = None if rect is None else TrimCrop(x0=round(rect[0], 4), y0=round(rect[1], 4),
-                                                  x1=round(rect[2], 4), y1=round(rect[3], 4))
+        rect = _trim_rect_for_run(run, min_frac=min_frac)
+        crop = None if rect is None else TrimCrop(x0=rect[0], y0=rect[1],
+                                                  x1=rect[2], y1=rect[3])
         return TrimSuggestionOut(is_mosaic=True, crop=crop)
 
     return await run_in_threadpool(work)
@@ -641,11 +653,17 @@ async def auto_process(safe: str, run_id: int, request: Request) -> dict:
     # coverage-leveling pass prepended so its panel steps are flattened; a
     # single-field stack (uniform coverage) is unchanged.
     coverage_span = (int(run.coverage_min), int(run.coverage_max))
+    is_mosaic = coverage_span[1] > coverage_span[0]
 
     def work() -> dict:
         rgb, _scale = get_proxy(project_dir, run.id, run.fits_path)
+        # On a mosaic, also trim the ragged low-coverage border so the one-click
+        # result is cleanly framed (only when the trim is meaningful — the helper
+        # returns None on a full-frame result or a missing coverage sibling).
+        trim = _trim_rect_for_run(run) if is_mosaic else None
         return presets_mod.auto_recipe(
-            rgb, median_fwhm=median_fwhm, coverage_span=coverage_span).to_dict()
+            rgb, median_fwhm=median_fwhm, coverage_span=coverage_span,
+            trim_crop=trim).to_dict()
 
     return await run_in_threadpool(work)
 

@@ -126,18 +126,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   Additive/upgrade-safe (new card + optional flag; absence = today's behaviour).
   (M, editor/trust)
 ### Autonomy — "just works" (PRIORITY 2)
-- **Auto-process should trim (or offer to trim) a mosaic's ragged border** — on a
-  mosaic, `auto_recipe` prepends coverage-leveling but leaves the union canvas's
-  ragged, single-frame-coverage edges in the one-click result, so "Auto" frames the
-  picture with noisy low-coverage fringe. The `trim-suggestion` / `largest_covered_rect`
-  machinery already computes the largest well-covered rectangle. Auto could append a
-  `geometry.crop` to that rectangle for a mosaic (only when the trim is meaningful —
-  the suggestion already returns `None` on a full-frame result), so the default
-  result is cleanly framed without the user discovering the Trim tool. Care: geometry
-  changes the canvas, so keep it mosaic-only and conservative (the existing
-  `min_frac`/`_FULL_AREA_FRAC` guards), and it must run *after* the tone ops don't
-  depend on the full frame — a crop at the end is safe. Off-by-default risk is nil
-  (Auto is an explicit button). (S–M, autonomy/editor)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
   different (per-channel vs luminance gradient, star reduction, saturation). The
@@ -241,6 +229,25 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Auto-process trims a mosaic's ragged low-coverage border (cleanly framed
+  one-click result)** — on a mosaic, `auto_recipe` levelled the panel steps but
+  left the union canvas's ragged, single-frame-coverage fringe in the one-click
+  result, so "Auto" framed the picture with a noisy low-coverage border the user
+  had to discover the Trim tool to remove. Auto now appends a final `geometry.crop`
+  to the largest well-covered rectangle — reusing the exact `largest_covered_rect`
+  machinery behind the "Trim border" button (extracted into a shared
+  `_trim_rect_for_run` helper the trim-suggestion endpoint now also calls). The crop
+  runs *last* (after every tone/detail op) so the coverage-leveling op still sees the
+  native-geometry coverage map, and it's only added when the trim is *meaningful*
+  (`largest_covered_rect` returns `None` on a full-frame result) and only on a mosaic
+  — a single-field stack is never cropped. The crop is a normal, visible, removable
+  op (and the coverage overlay, per v0.69.20, now follows it). Off-by-default risk is
+  nil (Auto is an explicit button; no default flip). Engine (`auto_recipe` gains an
+  optional `trim_crop`) + webapp wiring; additive/upgrade-safe. Tested: engine (crop
+  appended last iff a trim is supplied; none for single-field/None), webapp (a mosaic
+  with a ragged coverage sibling gets a final interior crop; single-field and
+  no-sibling get none). (v0.70.0, this run — Builder)
 
 - **Coverage overlay now follows the recipe's geometry ops (was frozen on the
   uncropped frame)** — the editor's mosaic coverage-map overlay rendered the run's
