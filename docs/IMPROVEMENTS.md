@@ -43,6 +43,16 @@ when you take it.
 _(none currently open — the traced editor bug backlog is drained. New verified
 bugs go here, editor first, ordered by severity.)_
 
+_(Scout QA audit 2026-07-04: adversarial re-audit of the **editor** subsystem
+end-to-end — engine ops (`tone`/`detail`/`stars`/`geometry`/`background`),
+pipeline, proxy, registry, recipe/preset validation, the stretch functions, and
+the webapp editor router. Verified NaN/coverage preservation across every op after
+a stretch (no lost/spurious coverage, no fake-black), the degenerate-input guards
+(Levels/Curves/crop/params), and proxy↔export parity of the spatial ops
+(within the inherent ≤2% mean decimation sampling limit). **No new verified bug
+found** — the subsystem is well-hardened. Full Python suite green: 688 passed, 2
+skipped.)_
+
 _(The v0.67–0.69 runs fixed a large batch of verified bugs — Gaia colour cal,
 RA≈0 frame rejection, debayer edge wrap, job-cancel result loss, hung-Gaia
 timeout, several input-validation 500s, the NaN-through-stretch invariant, the
@@ -73,6 +83,34 @@ problems. Dogfood it every big-picture run and fix root causes.
   gentle denoise/sharpen). Improve the auto recipe so "Auto" is a great one-click
   start. (Gentle SCNR green-cast removal added to the auto recipe in v0.56.6 —
   more of these incremental tweaks welcome.) (M, editor)
+- **Seed the editor with the Auto recipe on first open (great out-of-box picture)**
+  — opening a run that has no saved recipe drops the user on the pipeline's *default*
+  asinh stretch (flat, weak — the "weak default result" problem, right at the entry
+  point). Meanwhile a genuinely good, data-driven starting point already exists:
+  `POST …/editor/auto` builds a tuned recipe from the run's own stars/noise. Have the
+  editor, when it loads a run with an empty/absent saved recipe, auto-populate the
+  working recipe with that Auto output (once, as the initial state) so the *first*
+  thing a beginner sees is a good image, not a flat one — with the existing Reset/Undo
+  as the escape hatch and the "What Auto did" note explaining it. Purely a
+  first-load default (never overwrites a saved recipe), so it's additive and
+  reversible; no engine change (reuses the Auto endpoint). Care: only seed when the
+  saved recipe is truly empty, and make the seeding a single undoable step. This
+  attacks the #1 "weak default" priority at the moment of highest leverage — the
+  editor's very first frame. (S–M, editor/autonomy — PRIORITY 1)
+- **Data-driven "From your image" for the asinh Stretch (Strength + Black point)**
+  — the Stretch op is the single most consequential editor control, yet it's the one
+  major tonal op *without* a data-driven suggestion button: Levels (black/white +
+  gamma), Sharpen, Denoise, Star-size, and Deconv-PSF all offer a one-click "From
+  your image/stars", but the asinh Strength/Black sliders are still hand-guessed. The
+  STF/`autostretch` maths already knows how to land a channel's robust sky median at
+  a pleasant target grey — reuse that (measure the linear proxy's sky median + MAD-σ,
+  solve for the asinh `stretch`/`black` that puts the sky at ~the same target the STF
+  aims for) and expose it as a `…/editor/stretch-suggestion` endpoint + per-slider
+  "From your image" buttons, exactly mirroring the Levels-suggestion pattern
+  (engine helper in `seestack/edit/`, one endpoint, one frontend button). Completes
+  the family of data-driven defaults on the most important control, so a beginner
+  gets a well-exposed stretch without understanding asinh. Additive/upgrade-safe
+  (older clients ignore the endpoint). (S–M, editor/autonomy — PRIORITY 1)
 - **Editor bug hunt (ongoing)** — there are undocumented issues. Each big-picture
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
@@ -186,15 +224,16 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
-- **Flaky CI `test_detail_ops_preserve_nan_on_partial_coverage[detail.sharpen-params1]`**
-  is now tracked as a single entry under **Bugs (fix these first)** — see there.
 - Chip away at the ~127 pre-existing `ruff check .` findings (don't add new ones);
   consider wiring ruff into CI once the count is low. (L, correctness/maintainability)
 - ~~Add a retention/pruning policy for `jobs.sqlite`~~ — **done, then made
   configurable** (`JobManager._evict_old` + the `job_history_limit` setting,
   v0.51.1). (S, scale)
-- Add a `SessionStart` hook (or a `scripts/setup.sh`) that provisions the venv +
-  `npm ci` so every autonomous iteration starts from a known-green baseline. (S)
+- ~~Add a `scripts/setup.sh` that provisions the venv + `npm ci` so every
+  autonomous iteration starts from a known-green baseline~~ — **done**
+  (`scripts/agent-setup.sh`, idempotent; run via `source scripts/agent-setup.sh`).
+  Remaining sliver: wire it into an actual `SessionStart` hook so setup is
+  zero-tax with no manual invocation. (S)
 - Expand `docs/` (webapp.md) to cover calibration, mono/LRGB, auth. (S)
 - `npm audit` still reports `esbuild`≤0.24.2/`vite`≤6.4.2/`vitest`≤3.2.5
   (moderate — dev server only, not the production build) after this run's
