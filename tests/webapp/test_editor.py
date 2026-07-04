@@ -397,6 +397,35 @@ def test_coverage_map_png(client, solved_library):
     assert r.content[:8] == b"\x89PNG\r\n\x1a\n"
 
 
+def test_coverage_map_follows_recipe_geometry(client, solved_library):
+    """With a crop op in the recipe, the coverage overlay is reshaped to match the
+    cropped preview (smaller PNG), not the raw full frame — so it stays aligned."""
+    import io as _io
+
+    from PIL import Image
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, h=80, w=100)
+    cov = np.full((80, 100), 1.0, dtype=np.float32)
+    cov[20:60, 25:75] = 5.0
+    _write_coverage(solved_library, safe, cov)
+
+    base = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/coverage-map")
+    assert base.status_code == 200
+    base_size = Image.open(_io.BytesIO(base.content)).size  # (w, h)
+
+    recipe = {"ops": [{"id": "geometry.crop", "enabled": True,
+                       "params": {"x0": 0.25, "y0": 0.25, "x1": 0.75, "y1": 0.75}}]}
+    enc = base64.urlsafe_b64encode(json.dumps(recipe).encode()).decode()
+    cropped = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/coverage-map?recipe={enc}")
+    assert cropped.status_code == 200
+    assert cropped.content[:8] == b"\x89PNG\r\n\x1a\n"
+    crop_size = Image.open(_io.BytesIO(cropped.content)).size
+    # The central 50%×50% crop yields a strictly smaller coverage map.
+    assert crop_size[0] < base_size[0] and crop_size[1] < base_size[1]
+
+
 def test_coverage_map_404_without_sibling(client, solved_library):
     """A run with no coverage sibling (single-field) has no coverage map → 404."""
     safe = client.get("/api/targets").json()[0]["safe_name"]

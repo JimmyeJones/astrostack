@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { EditOp, OpInstance } from "../../api/client";
-import { applyTrimCrop, trimRectStyle, trimKeptLabel, hasEnabledGeometryOp, previewBoxStyle }
-  from "./mosaicTrim";
+import { applyTrimCrop, trimRectStyle, trimKeptLabel, hasEnabledGeometryOp,
+  geometryOpsKey, previewBoxStyle } from "./mosaicTrim";
 
 const specs: Record<string, EditOp> = {
   "tone.stretch": { id: "tone.stretch", label: "Stretch", group: "tone",
@@ -120,5 +120,36 @@ describe("hasEnabledGeometryOp", () => {
     expect(hasEnabledGeometryOp([op("geometry.crop", false)])).toBe(false);
     expect(hasEnabledGeometryOp([op("tone.stretch", true)])).toBe(false);
     expect(hasEnabledGeometryOp([])).toBe(false);
+  });
+});
+
+describe("geometryOpsKey", () => {
+  const op = (id: string, enabled: boolean,
+              params: Record<string, unknown> = {}): OpInstance =>
+    ({ uid: id, id, enabled, params });
+
+  it("keys only on enabled geometry ops (id + params)", () => {
+    const k = geometryOpsKey([
+      op("tone.stretch", true, { stretch: 0.5 }),
+      op("geometry.crop", true, { x0: 0.1, x1: 0.9 }),
+    ]);
+    expect(k).toBe(JSON.stringify([{ id: "geometry.crop", params: { x0: 0.1, x1: 0.9 } }]));
+  });
+
+  it("changes when a geometry param changes but not when a tone op changes", () => {
+    const a = geometryOpsKey([op("geometry.crop", true, { x0: 0.1 }),
+                              op("tone.stretch", true, { stretch: 0.5 })]);
+    const b = geometryOpsKey([op("geometry.crop", true, { x0: 0.2 }),
+                              op("tone.stretch", true, { stretch: 0.5 })]);
+    const c = geometryOpsKey([op("geometry.crop", true, { x0: 0.1 }),
+                              op("tone.stretch", true, { stretch: 0.9 })]);
+    expect(a).not.toBe(b);   // geometry change → new key
+    expect(a).toBe(c);       // tone-only change → same key
+  });
+
+  it("ignores disabled geometry ops and is empty with none", () => {
+    expect(geometryOpsKey([op("geometry.crop", false, { x0: 0.1 })])).toBe("[]");
+    expect(geometryOpsKey([op("tone.stretch", true)])).toBe("[]");
+    expect(geometryOpsKey([])).toBe("[]");
   });
 });

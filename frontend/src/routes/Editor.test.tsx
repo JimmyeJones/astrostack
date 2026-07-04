@@ -343,7 +343,8 @@ describe("EditorView", () => {
     await waitFor(() => expect(btn).not.toBeDisabled());
     btn.click();
 
-    await waitFor(() => expect(covUrl).toHaveBeenCalledWith("M_42", 3));
+    await waitFor(() =>
+      expect(covUrl).toHaveBeenCalledWith("M_42", 3, expect.objectContaining({ ops: expect.any(Array) })));
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Hide coverage" })).toBeInTheDocument());
     expect(screen.getByText("Coverage map")).toBeInTheDocument();
@@ -352,7 +353,7 @@ describe("EditorView", () => {
     expect(screen.getByText("fewer")).toBeInTheDocument();
   });
 
-  it("notes the coverage overlay is for the uncropped frame when a crop is applied", async () => {
+  it("passes the recipe so the coverage overlay follows the crop geometry", async () => {
     vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CROP]);
     vi.spyOn(client.api, "getRecipe").mockResolvedValue({
       ops: [{ uid: "c1", id: "geometry.crop", enabled: true,
@@ -364,6 +365,7 @@ describe("EditorView", () => {
       { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0],
         b: [0, 0, 0, 0], is_mosaic: true });
     vi.spyOn(client.api, "trimSuggestion").mockResolvedValue({ is_mosaic: false, crop: null });
+    const covUrl = vi.spyOn(client.api, "editCoverageMapUrl");
     vi.stubGlobal("fetch", vi.fn(async () => ({
       ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
     })));
@@ -374,8 +376,17 @@ describe("EditorView", () => {
     await waitFor(() => expect(btn).not.toBeDisabled());
     btn.click();
 
+    // The overlay now tracks the recipe's geometry, so the URL carries the recipe
+    // (with the enabled crop op) — not a bare full-frame request — and the caption
+    // no longer disclaims "shown for the uncropped frame".
     await waitFor(() =>
-      expect(screen.getByText("Coverage map — shown for the uncropped frame")).toBeInTheDocument());
+      expect(covUrl).toHaveBeenCalledWith("M_42", 3, expect.objectContaining({
+        ops: expect.arrayContaining([expect.objectContaining({ id: "geometry.crop" })]),
+      })));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Hide coverage" })).toBeInTheDocument());
+    expect(screen.getByText("Coverage map")).toBeInTheDocument();
+    expect(screen.queryByText(/uncropped frame/)).not.toBeInTheDocument();
   });
 
   it("hides the Coverage overlay button on a single-field stack", async () => {

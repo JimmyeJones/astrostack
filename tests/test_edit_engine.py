@@ -760,3 +760,53 @@ def test_star_reduce_erosion_footprint_scaled_to_proxy(monkeypatch):
     spec.apply(img, params, EditContext(proxy_scale=4.0))   # →1 → (2*1+1)=3
     # grey_erosion runs once per channel (3×); the footprint side matches per scale.
     assert seen == [9, 9, 9, 5, 5, 5, 3, 3, 3]
+
+
+# ---- apply_geometry_to_map (coverage overlay follows the recipe geometry) ----
+
+def test_apply_geometry_to_map_crop_follows_recipe():
+    """A recipe's enabled crop op reshapes a 2-D coverage map to the same
+    fractional rectangle the edited image gets, preserving NaN = uncovered."""
+    from seestack.edit.ops.geometry import apply_geometry_to_map
+
+    cov = np.ones((80, 100), dtype=np.float32)
+    cov[0, 0] = np.nan  # an uncovered corner that the crop removes
+    rec = Recipe(ops=validate_ops([
+        OpInstance(id="geometry.crop",
+                   params={"x0": 0.25, "y0": 0.25, "x1": 0.75, "y1": 0.75}),
+    ]))
+    out = apply_geometry_to_map(cov, rec, EditContext())
+    # cropped to the central 50% × 50% of a 100×80 frame
+    assert out.shape == (40, 50)
+    assert np.isfinite(out).all()  # the NaN corner was cropped away
+    assert cov.shape == (80, 100)  # input not mutated
+
+
+def test_apply_geometry_to_map_ignores_tone_ops_and_disabled_geometry():
+    """Only *enabled geometry* ops move the map: tone ops and a disabled crop
+    leave it unchanged (same shape, same values)."""
+    from seestack.edit.ops.geometry import apply_geometry_to_map
+
+    cov = np.arange(20 * 30, dtype=np.float32).reshape(20, 30)
+    rec = Recipe(ops=validate_ops([
+        OpInstance(id="tone.stretch", params={"stretch": 0.5}),
+        OpInstance(id="geometry.crop", enabled=False,
+                   params={"x0": 0.1, "y0": 0.1, "x1": 0.9, "y1": 0.9}),
+    ]))
+    out = apply_geometry_to_map(cov, rec, EditContext())
+    assert out.shape == cov.shape
+    assert np.array_equal(out, cov)
+
+
+def test_apply_geometry_to_map_rotate_fills_corners_with_nan():
+    """A rotate op grows the canvas and fills exposed corners with NaN, so the
+    coverage overlay's rotated corners read as uncovered (like the image)."""
+    from seestack.edit.ops.geometry import apply_geometry_to_map
+
+    cov = np.full((40, 40), 3.0, dtype=np.float32)
+    rec = Recipe(ops=validate_ops([
+        OpInstance(id="geometry.rotate", params={"angle": 30.0, "expand": True}),
+    ]))
+    out = apply_geometry_to_map(cov, rec, EditContext())
+    assert out.shape[0] > 40 and out.shape[1] > 40  # expanded canvas
+    assert not np.isfinite(out[0, 0])  # a corner exposed by the rotation is NaN

@@ -654,8 +654,13 @@ export const api = {
     const s = q.toString();
     return `/api/targets/${safe}/stack-runs/${runId}/editor/star-mask${s ? `?${s}` : ""}`;
   },
-  editCoverageMapUrl: (safe: string, runId: number) =>
-    `/api/targets/${safe}/stack-runs/${runId}/editor/coverage-map`,
+  editCoverageMapUrl: (safe: string, runId: number, recipe?: Recipe) => {
+    // Pass the recipe so the backend applies its enabled geometry ops
+    // (crop/rotate/resize) to the coverage map — then the overlay tracks the
+    // reshaped preview instead of the raw full frame.
+    const s = recipe ? `?recipe=${encodeRecipe(recipe)}` : "";
+    return `/api/targets/${safe}/stack-runs/${runId}/editor/coverage-map${s}`;
+  },
   getHistogram: (safe: string, runId: number, recipe: Recipe, signal?: AbortSignal) =>
     req<Histogram>(
       `/api/targets/${safe}/stack-runs/${runId}/editor/histogram?recipe=${encodeRecipe(recipe)}`,

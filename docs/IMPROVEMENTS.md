@@ -76,15 +76,6 @@ problems. Dogfood it every big-picture run and fix root causes.
 - **Editor bug hunt (ongoing)** — there are undocumented issues. Each big-picture
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
-- **Coverage overlay should follow the recipe's geometry ops** — the coverage-map
-  overlay renders the run's *raw* full-frame coverage sibling, so once a crop/rotate/
-  resize op is in the recipe it no longer lines up with the reshaped preview
-  (v0.61.5 added an honest "shown for the uncropped frame" caption acknowledging
-  this). The proper fix is to run the recipe's *enabled geometry ops* over the
-  coverage map (via `apply_recipe` on a geometry-only sub-recipe, or reuse the same
-  crop/rotate math) before the PNG, so the overlay tracks the edited image. Reuses
-  the existing geometry ops; additive. Care: keep NaN = uncovered through the
-  transform, and only apply geometry (not tone) ops. (M, editor/trust)
 - **Wavelet-denoise preview↔export parity** — every other spatial op (sharpen
   radius, deconv PSF, bilateral spatial σ, background box) is corrected for the
   decimated preview proxy via `ctx.scaled_px`, but the **default** denoise method
@@ -250,6 +241,27 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Coverage overlay now follows the recipe's geometry ops (was frozen on the
+  uncropped frame)** — the editor's mosaic coverage-map overlay rendered the run's
+  *raw* full-frame coverage sibling, so once a `geometry.crop`/rotate/resize op was
+  in the recipe (very likely after "Trim border") the heatmap no longer lined up
+  with the reshaped preview — v0.61.5 could only *caption* the mismatch ("shown for
+  the uncropped frame"). Now a pure engine helper `apply_geometry_to_map(cov,
+  recipe, ctx)` (in `seestack/edit/ops/geometry.py`, keyed on a new `GEOMETRY_OP_IDS`
+  constant) runs the recipe's *enabled geometry ops only*, in recipe order, over the
+  2-D coverage map — feeding it through each op as three identical channels —
+  preserving NaN = uncovered (crop copies, rotate fills exposed corners with NaN,
+  resize interpolates). The `…/editor/coverage-map` endpoint takes an optional
+  `recipe` query param and applies it before colouring; the editor passes the
+  debounced recipe and keys the query on just the geometry ops (`geometryOpsKey`) so
+  a tone tweak doesn't refetch. The caption drops the "uncropped frame" disclaimer.
+  Engine + one endpoint param + frontend; additive/upgrade-safe (older clients omit
+  `recipe` → today's raw full-frame overlay). Tested: engine (crop reshapes + keeps
+  NaN, tone/disabled ops are no-ops, rotate NaN-corners), webapp (a crop recipe
+  yields a strictly smaller coverage PNG), Vitest (`geometryOpsKey` 3 cases + the
+  overlay passes the recipe and the caption no longer disclaims). (v0.69.20, this
+  run — Builder)
 
 - **Fix flaky frontend CI at the root: raise vitest `testTimeout` above
   `asyncUtilTimeout`** — three `Editor.test.tsx` tests kept reddening `main`'s

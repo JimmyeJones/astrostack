@@ -100,23 +100,33 @@ def _render_png(project_dir: Path, run, recipe: Recipe) -> bytes:
     return buf.getvalue()
 
 
-def _render_coverage_png(project_dir: Path, run) -> bytes | None:
+def _render_coverage_png(project_dir: Path, run, recipe: Recipe | None = None) -> bytes | None:
     """Render the run's per-pixel frame-coverage map (strided to the preview
     proxy so it lines up with the shown image) as a viridis-coloured PNG — dark
     blue where the fewest frames overlap (the ragged mosaic edges / gaps),
     yellow where the most do. A colour heatmap reads the coverage gradient at a
     glance and is visually distinct from the grayscale star mask. ``None`` when
-    the run has no coverage sibling (a single-field image)."""
+    the run has no coverage sibling (a single-field image).
+
+    When a ``recipe`` is supplied, its *enabled geometry ops* (crop/rotate/resize)
+    are applied to the coverage map first, so the overlay tracks the reshaped
+    preview instead of showing the raw full frame (which no longer lines up once a
+    crop/rotate is in the recipe). Only geometry ops move the map; tone ops are
+    ignored. NaN = uncovered is preserved through the transform."""
     import io
 
     from PIL import Image
 
+    from seestack.edit.ops.geometry import apply_geometry_to_map
     from seestack.render.colormap import apply_viridis
 
     rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
     cov = _proxy_coverage(run.fits_path, scale)
     if cov is None:
         return None
+    if recipe is not None:
+        ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None)
+        cov = apply_geometry_to_map(cov, recipe, ctx)
     finite = np.isfinite(cov)
     peak = float(cov[finite].max()) if finite.any() else 0.0
     norm = np.zeros(cov.shape, dtype=np.float32)
@@ -596,13 +606,19 @@ async def edit_star_mask(safe: str, run_id: int, request: Request,
 
 
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/editor/coverage-map")
-async def edit_coverage_map(safe: str, run_id: int, request: Request) -> Response:
+async def edit_coverage_map(safe: str, run_id: int, request: Request,
+                            recipe: str | None = None) -> Response:
     """Viridis-coloured heatmap of the run's frame-coverage map (yellow = most
     frames overlap, dark blue = uncovered), so a user can *see* the ragged,
     low-coverage mosaic edges the "Trim border" / "Coverage leveling" tools
-    address. 404 when the run has no coverage sibling (a single-field image)."""
+    address. 404 when the run has no coverage sibling (a single-field image).
+
+    When ``recipe`` is passed, its enabled geometry ops (crop/rotate/resize) are
+    applied to the coverage map so the overlay tracks the reshaped preview; older
+    clients omit it and get the raw full-frame coverage."""
     project_dir, run = _run_info(request, safe, run_id)
-    png = await run_in_threadpool(_render_coverage_png, project_dir, run)
+    rec = _decode_recipe_query(request, safe, run_id, recipe) if recipe else None
+    png = await run_in_threadpool(_render_coverage_png, project_dir, run, rec)
     if png is None:
         raise HTTPException(status_code=404, detail="No coverage map for this run")
     return Response(content=png, media_type="image/png",
