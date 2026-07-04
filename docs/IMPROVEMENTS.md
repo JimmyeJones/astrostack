@@ -47,8 +47,82 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
-_(none currently open — the traced editor bug backlog is drained. New verified
-bugs go here, editor first, ordered by severity.)_
+- **Single-field (non-mosaic) stacks are misclassified as mosaics → Auto silently
+  crops the frame + the whole editor shows mosaic-only tools.** *(reproduced
+  end-to-end, Scout 2026-07-04)*
+  - **Symptom.** For a perfectly normal **single-field** OSC stack (the primary
+    user's every-session case), the editor treats it as a mosaic: it shows a *"This
+    is a mosaic with ragged, low-coverage edges"* banner + **"Trim border"** button
+    (`frontend/src/routes/Editor.tsx:686`, gated on `hist.is_mosaic`/`trim.is_mosaic`),
+    offers the coverage-map heatmap overlay, and **one-click Auto appends a
+    `geometry.crop`** that trims ~2–3 px off *every* edge of the image plus prepends a
+    mosaic-only `background.level_coverage` pass — and the Auto summary tells the user
+    it *"trimmed the ragged mosaic border"* / *"evened out the mosaic panel
+    brightness"* on an image that is neither.
+  - **Root cause.** `is_mosaic` is derived from `coverage_max > coverage_min`
+    (`webapp/routers/editor.py:620,692,768`; `seestack/edit/presets.py:_is_mosaic`).
+    But **`coverage_min` is ~always 0 for *any* real stack** — reprojection leaves an
+    uncovered NaN border, so the stored `coverage_min` (`stacker.py:1058-1059,1079`,
+    `int(cov_2d.min())`) is 0 while `coverage_max` is the frame count. So
+    `coverage_max > coverage_min` is `True` for single-field stacks too. The design
+    intent (repeated across docstrings: *"single-field stack has uniform coverage,
+    max==min"*) is simply false in practice — and the existing tests never caught it
+    because they **fabricate** `StackRunRow` rows with hand-set `coverage_min ==
+    coverage_max` (`tests/webapp/test_editor.py` `_add_run`,
+    `test_trim_suggestion_single_field_is_noop` etc.) instead of running a real stack.
+  - **Repro (real webapp path, not fabricated).** Scan 6 same-field synthetic frames
+    → inject a shared WCS → `POST …/stack` → real `run_stack`. The run record comes
+    back `coverage_min=0, coverage_max=6`; `GET …/editor/histogram` → `is_mosaic:
+    true`; `POST …/editor/auto` → ops =
+    `[background.level_coverage, …, geometry.crop]`; `GET …/editor/trim-suggestion` →
+    `{is_mosaic:true, crop:{x0:0.0063,y0:0.0094,x1:0.9938,y1:0.9906}}`;
+    `GET …/editor/coverage-map` → 200. (Scout scratch repro script confirmed all five.)
+  - **Severity.** Broken-UX + mild wrong-result, on the **priority-1 editor** and
+    **priority-2 Auto**, hitting the **primary target user on every single-field
+    stack** — squarely above polish. The crop trims a few px of genuine (if
+    low-coverage) signal and changes the export dimensions unexpectedly; the
+    `level_coverage` pass is a measured **no-op** on single-field data (mean|Δ|=0, one
+    interior coverage level) so it's harmless-but-misleading, not a corruption. Not
+    catastrophic, but pervasive and trust-eroding (regression amplified by v0.70.0,
+    which added the Auto crop on top of the latent mislabel).
+  - **Fix direction (Builder-sized — needs care, not a rushed patch).** Replace the
+    `coverage_max > coverage_min` heuristic with the stacker's *actual* canvas
+    decision. Two clean options: **(a)** persist the real `is_mosaic_canvas` boolean
+    `run_stack` already computes — additive nullable column on `stack_runs`
+    (`SCHEMA_VERSION` bump + `_migrate_schema`, backfill `NULL`), editor reads it and
+    falls back to a smarter check for legacy `NULL` runs (add an upgrade test that an
+    old DB migrates); or **(b)** compute `is_mosaic` from the coverage sibling's
+    *distribution* — a genuine mosaic has ≥2 integer coverage levels each covering a
+    meaningful area, a single-field stack has one dominant interior level + a thin
+    border ramp (mind the histogram-endpoint hot path — cache it, don't re-read the
+    coverage FITS on every live-preview poll). Either way the regression test must run
+    a **real** stack (or build a realistic coverage sibling with a 0 border) so a
+    fabricated `coverage_min==coverage_max` can't hide it again. (severity: broken-UX
+    + mild-wrong-result; confidence: reproduced)
+
+_(none of the traced *editor-engine* op bugs are open — that backlog stayed drained;
+the entry above is a stacking/autonomy↔editor classification bug found by dogfooding
+the real webapp stack→edit path.)_
+
+_(Scout QA audit 2026-07-04 (v0.73.0 baseline): rotated the focused subsystem audit
+onto the **stacking accumulators + rejection + drizzle + mosaic + coverage-leveling**
+(`accumulator.py`, `stacker.py` rejection/pass-2, `drizzle_path.py`, `mosaic.py`,
+`bg/coverage_leveling.py`). Read adversarially — WeightedSum/Welford/MinMaxReject
+NaN-and-coverage semantics and the k-insertion order statistic, the κ-σ pass-2 tol
+(NaN-std → +inf keep-all), drizzle two-pass `clip_reference` (population variance +
+Bessel + neff gate) and the pixmap out-of-bounds masking, `compute_mosaic_canvas`
+RA-wrap + outlier rejection + size/area caps, and `level_by_coverage`'s per-level
+SExtractor-mode subtraction. **No new reachable wrong-result bug found in the
+combine maths** — the reductions, NaN=coverage, and memory guards are correct and
+well-tested. The one filed bug above (single-field↔mosaic misclassification) came
+from **dogfooding the real stack→edit journey**, not the maths. One low-severity
+robustness inconsistency logged to Infra (not shipped): the iterative canvas-shrink
+fallback in `compute_mosaic_canvas` (only reached when the union exceeds
+`MAX_CANVAS_PX`) picks its "worst" frame with a plain `np.median` of corner RA
+(`mosaic.py:287`), re-introducing the RA=0 wrap error that `_circ_mean_ra_deg` was
+added to fix in the primary outlier pass — so a group straddling RA=0 *and* over the
+16000 px cap could drop a good central frame. Baseline suite green: 731 passed, 2
+skipped.)_
 
 _(Scout run 2026-07-04 (v0.72.4 baseline): rotated the focused QA audit off the
 much-scrutinised editor onto the **calibration + stack alignment** subsystems and
@@ -221,6 +295,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   image-box so it lines up under `objectFit: contain`. Additive, no engine/API change,
   no default change (Compare stays; this is a second mode or a handle on it). Testable
   with a Vitest handle-drag → clip-width helper. (S–M, editor/trust)
+- **"Cropped view — showing N% of the frame" indicator + one-click "remove crop".**
+  A `geometry.crop` op silently shrinks the visible frame, but nothing tells the user
+  *that* they're looking at a crop or *how much* was removed — so an auto-applied crop
+  (see the mosaic-misclassification bug: Auto can append one unexpectedly) or a
+  forgotten manual trim just looks like "my image is smaller now". Add a small,
+  unobtrusive caption near the preview that fires whenever an *enabled* `geometry.crop`
+  is in the recipe — "Cropped: showing 94% of the frame" (from the crop op's own
+  fractional bounds, no new data) — with a one-click "remove crop" that disables/drops
+  the op. Purely a frontend composition over the recipe the editor already holds;
+  additive, advisory, no engine/API change. A clean trust win that makes any crop
+  obvious and instantly reversible. Vitest: a pure `cropCoveragePct(recipe)` helper +
+  the caption/remove wiring. (S, editor/trust)
 - ~~**Mark editor-export runs as display-space so re-editing doesn't
   double-stretch (and the FITS is honest)**~~ — **shipped v0.72.2** (see Shipped).
   Editor exports now stamp an `SSDISPLY` FITS card + honest `BUNIT` and a
@@ -279,6 +365,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   editor. (M, autonomy/editor)
 - Auto-suggest stack settings from the data (frame count, FWHM spread, streaks)
   so the user rarely needs to touch the Stack form. (S–M, autonomy)
+- **"Apply my last edit to the newest stack" — recipe carry-over across re-stacks.**
+  The Seestar user with thousands of subs re-stacks a target repeatedly as more nights
+  come in, and today each new run opens on the flat default (or bare Auto) — so the
+  look they carefully dialed in on last week's run is lost and must be redone. Add a
+  one-click "Use my previous run's edit" (and/or auto-seed it) that copies the most
+  recent *edited* run's recipe onto the new run, validated through `validate_ops` on
+  load so a stale op can't 500 the editor, applied as a single undoable step and never
+  persisted unless the user Saves. This is the repeatability win from Method D: it
+  keeps a growing multi-night project visually consistent with near-zero effort, and
+  it's **off until the user clicks** (no default flip, upgrade-safe — recipes already
+  live in project meta keyed by run id, so it's a copy, not a schema change). Pairs
+  naturally with the "personal default recipe" idea but is scoped to *this target's own
+  history*, which is often what the user actually wants. (S–M, autonomy/editor)
 
 ### Friendliness (PRIORITY 3)
 - Guided "getting started" / empty states that tell a first-timer exactly what to
@@ -324,6 +423,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+- **Low-priority robustness: mosaic canvas iterative-shrink picks its "worst"
+  frame with a wrap-unsafe RA median.** `compute_mosaic_canvas`'s primary outlier
+  pass uses `_circ_mean_ra_deg` (wrap-safe) to find gross plate-solve outliers, but
+  the *iterative canvas-shrink fallback* — only reached when the union would exceed
+  `MAX_CANVAS_PX` (16000 px) — recomputes each active frame's separation from a plain
+  `np.median(foot[i][1])` of its corner RAs (`mosaic.py:287`). For a group straddling
+  RA=0° that flings a good central frame's apparent centre to ~180°, so it could be
+  chosen as the "worst" and dropped instead of the real outlier (or the loop drops
+  good panels and still fails to fit). **Near-unreachable** — needs a genuinely huge
+  (>16000 px) mosaic *and* an RA≈0 straddle — so not worth a standalone ship. Cheap
+  fix if a future run is already in `mosaic.py`: reuse `_circ_mean_ra_deg` for the
+  fallback's per-frame centre RA too (mirroring the primary pass), with a regression
+  test that an RA≈0 group over the cap drops the actual outlier. (S, robustness)
 - **Low-priority robustness: `background.final_gradient` has no image-size box
   clamp (unlike `background.subtract`).** `background.subtract` runs its box_size
   through `BackgroundOptions.for_image_size` (floors it so the mesh always tiles a
