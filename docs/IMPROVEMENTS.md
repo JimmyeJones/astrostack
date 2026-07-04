@@ -40,50 +40,15 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
-### Editor — engine & backend (PRIORITY 1)
-
-- **BUG: deconvolution's live preview is a near-no-op on large stacks — preview
-  shows almost nothing while the export changes a lot** — the proxy-corrected
-  PSF `max(0.4, ctx.scaled_px(psf_sigma))` (`seestack/edit/ops/detail.py:107`)
-  collapses at real proxy scales: default `psf_sigma=1.5` at `proxy_scale=4`
-  gives σ=0.4, and `rad = max(1, round(3σ)) = 1` builds a 3×3 near-delta kernel
-  that Richardson-Lucy barely acts on. Measured on synthetic star fields:
-  mean effect 0.0045 on the proxy vs 0.031 on the export (~7× weaker preview) —
-  the exact preview↔export mismatch class v0.57.0 was meant to close, on the op
-  it headlined. Trigger: any stack whose master is >~4500 px wide (mosaics,
-  drizzle) + Deconvolution. **Fix:** a sub-pixel PSF can't be represented on the
-  decimated grid — deconvolve a full-res centre crop/tile for the preview, or
-  run the deconv stage at reduced decimation, or (minimum) caption that the
-  preview understates deconvolution when `scaled_px(psf_sigma)` hits the floor.
-  Severity: wrong-result (preview misleads). Confidence: confirmed (measured).
-
-### Editor — frontend (PRIORITY 1)
-
-- **BUG (cosmetic): trim-crop preview rectangle misaligns on a letterboxed
-  preview** — the dashed "proposed crop" overlay maps fractional bounds to
-  percentages of the *container* (`trimRectStyle`,
-  `frontend/src/components/editor/mosaicTrim.ts`; drawn at
-  `Editor.tsx:676-687`), but the `<img>` uses `objectFit: "contain"` with
-  `maxHeight: 62vh` (`Editor.tsx:653-657`) — when the image is height-limited
-  (portrait framing, short window) it's pillarboxed inside the element and the
-  rectangle lands offset/mis-scaled relative to the visible image. **Fix:**
-  compute the overlay against the rendered image content box (natural aspect vs
-  element box), or constrain the container to the image's aspect ratio.
-  Severity: cosmetic (misleading in the letterboxed case). Confidence: confirmed
-  (traced CSS).
-
-- **BUG (a11y, follow-up): editor curve points are mouse-only** — the remaining
-  keyboard-access gap after v0.69.12: the Curves op's control points are drag-only
-  SVG circles (`CurvesWidget.tsx`), so a keyboard user can't add/move/remove a curve
-  point (the "reset" button and op-row selection are now keyboard-accessible). A
-  proper fix needs a focusable point model (arrow-key nudge / a numeric fallback),
-  which is a larger interaction change than the rest of the batch. Severity:
-  a11y. Confidence: confirmed (traced).
+_(none currently open — the traced editor bug backlog is drained. New verified
+bugs go here, editor first, ordered by severity.)_
 
 _(The v0.67–0.69 runs fixed a large batch of verified bugs — Gaia colour cal,
 RA≈0 frame rejection, debayer edge wrap, job-cancel result loss, hung-Gaia
 timeout, several input-validation 500s, the NaN-through-stretch invariant, the
-Save/undo-history race, and more. Their write-ups moved to **Shipped**.)_
+Save/undo-history race, the deconvolution preview understatement, the letterboxed
+trim-crop overlay, the mouse-only curve points, and more. Their write-ups moved
+to **Shipped**.)_
 
 ---
 
@@ -309,6 +274,58 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Fix (a11y): editor curve points are keyboard-operable** — the last open
+  editor bug. The Curves op's control points were drag-only SVG circles, so a
+  keyboard user couldn't add, move, or remove a curve point. Each point is now a
+  focusable `role="slider"` (`tabIndex=0`, descriptive `aria-label` +
+  `aria-valuetext`): arrow keys nudge it (Shift = coarse step), Delete/Backspace
+  removes an interior point, and a new keyboard-accessible "add point" button
+  inserts a point in the widest gap (on the current curve) and focuses it. Pure
+  `nudgeCurvePoint` / `removeCurvePoint` / `addCurvePointInLargestGap` helpers
+  (all reusing the existing ordering-safe `moveCurvePoint`) drive it; the mouse
+  drag/double-click paths are unchanged. Frontend-only, additive. Vitest: helper
+  suite (nudge clamps + endpoint-x-lock + no-mutate; remove keeps endpoints; add
+  in-largest-gap incl. identity) + a widget suite (points are focusable sliders,
+  ArrowUp/Shift-Arrow nudge, Delete removes, endpoint x stays locked, the button
+  adds a mid point). (v0.69.15, this run — Builder)
+
+- **Fix: trim-crop preview rectangle misaligned on a letterboxed preview** — the
+  dashed "proposed crop" overlay mapped fractional bounds to percentages of the
+  *container*, but the preview `<img>` is width-100% capped at 62vh with
+  `objectFit: contain`, so on a portrait frame / short window it pillarboxes
+  inside its element and the rectangle landed offset/mis-scaled vs the visible
+  image. The preview image now lives in an *image box* wrapper sized to the shown
+  image's exact content box (a new pure `previewBoxStyle` helper gives the box the
+  image's own aspect ratio — from the already-reported `proxy_width`/`proxy_height`
+  — and caps its width so the aspect-preserved height never exceeds 62vh, so there's
+  no letterbox), and the proposed-crop rectangle is drawn inside that box, so its
+  percentage bounds line up in every framing. Falls back to plain full-width when
+  the proxy dims aren't loaded yet (old behaviour). Frontend-only, additive.
+  Vitest: `previewBoxStyle` (fallback / portrait aspect+width-cap / custom
+  max-height); existing trim-preview Editor tests still green. (v0.69.14, this
+  run — Builder)
+
+- **Fix: deconvolution's live preview silently understated the export on large
+  stacks — now captioned honestly** — the top editor bug. On a heavily-decimated
+  preview proxy (a ≤1500 px view of a wide mosaic/drizzle, `proxy_scale` ≥ ~4)
+  the proxy-corrected PSF `max(0.4, scaled_px(psf_sigma))` collapses to the floor
+  and Richardson-Lucy's near-delta 3×3 kernel barely acts, so the preview showed
+  a fraction of the star-sharpening the full-res export applies — a preview↔export
+  mismatch with *no notice* to the user. The sub-pixel blur genuinely isn't
+  representable on the decimated grid (no PSF tweak recovers it), so instead of
+  silently misleading we now surface an honest advisory: a pure
+  `deconv_understates_on_proxy(psf_sigma, proxy_scale)` engine helper (shared with
+  the backend and the `_DECONV_PSF_FLOOR` constant it keys on) flags exactly the
+  floored case; the histogram endpoint reports `deconv_preview_understates` for any
+  enabled Deconvolution op that collapses on the current proxy; and the editor
+  shows a dimmed "preview understates the effect — the export applies it at full
+  strength" caption under the preview. Engine + one endpoint field + frontend;
+  additive/upgrade-safe (older clients ignore the new field). Tested: engine
+  (the flag matches a *measured* weak preview — <½ the export's effect — and the
+  rule's boundary cases incl. degenerate inputs), webapp (the flag fires only for
+  an enabled, collapsing deconv op on a decimated proxy), Vitest (caption helper
+  3 cases). (v0.69.13, this run — Builder)
 
 - **Fix: editor overlay-zoom mislabel + keyboard access gaps (a11y)** — three
   editor a11y fixes. (1) The zoom lightbox titled whatever was shown as "edited"

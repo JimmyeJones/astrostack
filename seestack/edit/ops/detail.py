@@ -113,12 +113,43 @@ def _sharpen(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     return _with_nan_filled(rgb, run)
 
 
+# The smallest PSF sigma we'll represent on the (decimated) preview proxy. A
+# Gaussian narrower than this collapses to a near-delta 3x3 kernel that
+# Richardson-Lucy barely acts on, so we floor the proxy PSF here — and warn the
+# user (see ``deconv_understates_on_proxy``) that the preview then understates it.
+_DECONV_PSF_FLOOR = 0.4
+
+
+def deconv_understates_on_proxy(psf_sigma: float, proxy_scale: float) -> bool:
+    """True when a deconvolution's *live preview* will visibly understate the
+    full-res export.
+
+    On the decimated preview proxy the full-res PSF sigma shrinks by
+    ``proxy_scale`` (``scaled_px``). Once ``psf_sigma / proxy_scale`` falls below
+    ``_DECONV_PSF_FLOOR`` the proxy PSF is clamped up to the floor and its
+    Richardson-Lucy kernel becomes a near-delta 3x3 that barely sharpens — while
+    the full-res export deconvolves with a real, wider kernel. So the preview
+    shows far less star-sharpening than the export actually applies (the
+    preview↔export mismatch the editor otherwise tries hard to avoid). This is a
+    fundamental limit — the sub-pixel blur simply isn't representable on the
+    decimated grid — so instead of hiding it we surface an honest advisory.
+    Pure/side-effect free so the backend and tests can share the exact rule.
+    """
+    if not np.isfinite(psf_sigma) or not np.isfinite(proxy_scale):
+        return False
+    if proxy_scale <= 1.0 or psf_sigma <= 0.0:
+        return False
+    return (psf_sigma / proxy_scale) < _DECONV_PSF_FLOOR
+
+
 def _deconvolve(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     iterations = int(params.get("iterations", 10))
     # The PSF width is in full-res pixels; on the decimated live-preview proxy
     # shrink it by proxy_scale so the preview reverses the same physical blur as
     # the full-res export (parity), floored just above zero so it stays a real op.
-    psf_sigma = max(0.4, ctx.scaled_px(float(params.get("psf_sigma", 1.5))))
+    # When the floor bites the preview understates the export — see
+    # ``deconv_understates_on_proxy``, which the editor uses to caption it.
+    psf_sigma = max(_DECONV_PSF_FLOOR, ctx.scaled_px(float(params.get("psf_sigma", 1.5))))
     ring = max(0.1, ctx.scaled_px(0.4))  # ring-suppression blur, same scaling
 
     def run(img: np.ndarray) -> np.ndarray:

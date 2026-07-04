@@ -435,6 +435,62 @@ def test_deconvolve_preserves_colour_balance():
     assert max(means) - min(means) < 0.01                 # no colour shift
 
 
+def test_deconv_understates_flag_matches_the_weak_preview():
+    """The deconvolution live preview genuinely understates the full-res export
+    on a heavily-decimated proxy — its PSF collapses to the floor and the
+    Richardson-Lucy kernel barely acts. ``deconv_understates_on_proxy`` must
+    flag exactly that case so the editor can caption it honestly.
+
+    Regression for the top editor bug: preview shows almost nothing while the
+    export changes a lot, with no notice to the user.
+    """
+    from seestack.edit.ops.detail import deconv_understates_on_proxy
+
+    # A star field, so there's real sub-pixel structure for deconv to sharpen.
+    rng = np.random.default_rng(1)
+    full = np.full((60, 60, 3), 0.2, np.float32)
+    for _ in range(25):
+        y, x = rng.integers(3, 57, size=2)
+        full[y - 1:y + 2, x - 1:x + 2] += 0.5
+    spec = get_op("detail.deconvolve")
+    params = {"iterations": 10, "psf_sigma": 1.5}  # the defaults
+
+    # Export (proxy_scale=1): a real, visible deconvolution.
+    exported = spec.apply(full.copy(), params, EditContext(proxy_scale=1.0))
+    export_effect = float(np.nanmean(np.abs(exported - full)))
+
+    # Heavily-decimated preview proxy (proxy_scale=4, e.g. a wide mosaic): the
+    # PSF collapses and the effect is a fraction of the export's.
+    proxy = full[::4, ::4].copy()
+    previewed = spec.apply(
+        proxy, params, EditContext(proxy_scale=4.0, is_proxy=True))
+    preview_effect = float(np.nanmean(np.abs(previewed - proxy)))
+
+    assert export_effect > 0.005                       # export clearly deconvolves
+    assert preview_effect < export_effect * 0.5        # preview understates it a lot
+    # ...and the helper flags exactly this misleading case, but not the export.
+    assert deconv_understates_on_proxy(1.5, 4.0) is True
+    assert deconv_understates_on_proxy(1.5, 1.0) is False
+
+
+def test_deconv_understates_on_proxy_rule():
+    from seestack.edit.ops.detail import deconv_understates_on_proxy
+
+    # Export (scale <= 1) never understates.
+    assert deconv_understates_on_proxy(1.5, 1.0) is False
+    assert deconv_understates_on_proxy(0.5, 1.0) is False
+    # Default PSF on a 4x-decimated proxy collapses (1.5/4 = 0.375 < 0.4 floor).
+    assert deconv_understates_on_proxy(1.5, 4.0) is True
+    # A mild 2x proxy keeps the default PSF above the floor (1.5/2 = 0.75).
+    assert deconv_understates_on_proxy(1.5, 2.0) is False
+    # A wide PSF survives even heavy decimation (3.0/4 = 0.75 >= 0.4).
+    assert deconv_understates_on_proxy(3.0, 4.0) is False
+    # Degenerate inputs are safe (no false alarms).
+    assert deconv_understates_on_proxy(0.0, 4.0) is False
+    assert deconv_understates_on_proxy(float("nan"), 4.0) is False
+    assert deconv_understates_on_proxy(1.5, float("inf")) is False
+
+
 def test_hot_pixels_works_on_mosaic_nan_image():
     """The hot-pixel editor op must remove hot pixels even on a partial-coverage
     (NaN) mosaic — and preserve NaN. Regression: it used to derive its threshold

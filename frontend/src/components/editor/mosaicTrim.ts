@@ -30,6 +30,36 @@ export function trimRectStyle(
   };
 }
 
+/** Inline style for the preview *image box* — a wrapper sized to exactly the
+ * displayed image so a percentage overlay (the proposed-crop rectangle) lines
+ * up even when the preview is letterboxed.
+ *
+ * The preview `<img>` is width-100% but height-capped at ~62vh, so on a tall
+ * (portrait) frame or a short window it pillarboxes inside its element and a
+ * rectangle placed as a percentage of the *container* lands offset. Giving the
+ * wrapper the image's own aspect ratio and capping its width so the
+ * aspect-preserved height never exceeds the same cap makes the box equal the
+ * shown image (no letterbox), so `trimRectStyle` percentages map straight onto
+ * it. Falls back to plain full-width when the proxy dimensions are unknown
+ * (histogram not loaded yet) — same as the old behaviour. Pure.
+ */
+export function previewBoxStyle(
+  proxyWidth: number | undefined,
+  proxyHeight: number | undefined,
+  maxHeightVh = 62,
+): { width: string; maxHeight?: string; maxWidth?: string; aspectRatio?: string; margin?: string } {
+  if (!proxyWidth || !proxyHeight || proxyWidth <= 0 || proxyHeight <= 0
+      || !Number.isFinite(proxyWidth) || !Number.isFinite(proxyHeight)) {
+    return { width: "100%", maxHeight: `${maxHeightVh}vh` };
+  }
+  return {
+    width: "100%",
+    maxWidth: `calc(${maxHeightVh}vh * ${proxyWidth} / ${proxyHeight})`,
+    aspectRatio: `${proxyWidth} / ${proxyHeight}`,
+    margin: "0 auto",
+  };
+}
+
 /** Plain-language "keeps the central W% × H%" summary of a proposed crop. Pure. */
 export function trimKeptLabel(crop: TrimCrop): string {
   const pctW = Math.round((crop.x1 - crop.x0) * 100);

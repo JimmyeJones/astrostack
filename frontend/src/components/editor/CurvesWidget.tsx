@@ -1,7 +1,14 @@
 import { Anchor, Box, Group, Text } from "@mantine/core";
 import { useRef } from "react";
 import type { Histogram } from "../../api/client";
-import { moveCurvePoint, type Pt } from "./curveDrag";
+import {
+  addCurvePointInLargestGap, moveCurvePoint, nudgeCurvePoint, removeCurvePoint, type Pt,
+} from "./curveDrag";
+
+// Keyboard nudge step for a focused curve point (Shift = coarse). Small enough
+// for fine tone tweaks, large enough that a few presses are visible.
+const KEY_STEP = 0.02;
+const KEY_STEP_COARSE = 0.1;
 
 const SIZE = 220;
 const PAD = 10;
@@ -40,6 +47,7 @@ export function CurvesWidget({ points, onChange, histogram }: {
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const drag = useRef<number | null>(null);
+  const pointRefs = useRef<(SVGCircleElement | null)[]>([]);
   const pts = points.length ? points : [[0, 0], [1, 1]] as Pt[];
 
   const evtPt = (e: React.PointerEvent | React.MouseEvent): Pt => {
@@ -72,6 +80,27 @@ export function CurvesWidget({ points, onChange, histogram }: {
     onChange(pts.filter((_, j) => j !== i));
   };
 
+  const addPointKeyboard = () => {
+    // Keyboard users can't double-click empty space to add a point; add one in
+    // the widest gap (on the current curve) and focus it so it can be nudged.
+    const { points, index } = addCurvePointInLargestGap(pts);
+    onChange(points);
+    // Focus the new handle once React has re-rendered it.
+    requestAnimationFrame(() => pointRefs.current[index]?.focus());
+  };
+
+  const onPointKeyDown = (i: number) => (e: React.KeyboardEvent) => {
+    const step = e.shiftKey ? KEY_STEP_COARSE : KEY_STEP;
+    let handled = true;
+    if (e.key === "ArrowLeft") onChange(nudgeCurvePoint(pts, i, -step, 0));
+    else if (e.key === "ArrowRight") onChange(nudgeCurvePoint(pts, i, step, 0));
+    else if (e.key === "ArrowUp") onChange(nudgeCurvePoint(pts, i, 0, step));
+    else if (e.key === "ArrowDown") onChange(nudgeCurvePoint(pts, i, 0, -step));
+    else if (e.key === "Delete" || e.key === "Backspace") onChange(removeCurvePoint(pts, i));
+    else handled = false;
+    if (handled) { e.preventDefault(); e.stopPropagation(); }
+  };
+
   const path = pts.map((p) => toSvg(p[0], p[1]).join(",")).join(" ");
 
   return (
@@ -97,21 +126,37 @@ export function CurvesWidget({ points, onChange, histogram }: {
         <polyline points={path} fill="none" stroke="var(--mantine-color-violet-4)" strokeWidth={2} />
         {pts.map((p, i) => {
           const [cx, cy] = toSvg(p[0], p[1]);
+          const isEndpoint = i === 0 || i === pts.length - 1;
           return (
             <circle
               key={i} cx={cx} cy={cy} r={6}
+              ref={(el) => { pointRefs.current[i] = el; }}
               fill="var(--mantine-color-violet-3)" stroke="#fff" strokeWidth={1}
               style={{ cursor: "grab" }}
+              // Focusable so a keyboard user can move/remove points (arrow keys
+              // nudge, Delete removes an interior point) — the drag handles are
+              // otherwise mouse-only.
+              tabIndex={0}
+              role="slider"
+              aria-label={`Curve point ${i + 1} of ${pts.length}${isEndpoint ? " (endpoint)" : ""}`}
+              aria-valuetext={`input ${Math.round(p[0] * 100)}%, output ${Math.round(p[1] * 100)}%`}
               onPointerDown={(e) => { e.stopPropagation(); (e.target as Element).setPointerCapture?.(e.pointerId); drag.current = i; }}
               onDoubleClick={(e) => { e.stopPropagation(); removePoint(i); }}
+              onKeyDown={onPointKeyDown(i)}
             />
           );
         })}
       </svg>
       <Group justify="space-between">
-        <Text size="xs" c="dimmed">double-click empty space to add · double-click a point to remove</Text>
-        <Anchor component="button" type="button" size="xs" c="violet"
-          onClick={() => onChange([[0, 0], [1, 1]])}>reset</Anchor>
+        <Text size="xs" c="dimmed">
+          drag or focus a point &amp; use arrow keys · double-click (or Delete) to remove · double-click empty space to add
+        </Text>
+        <Group gap="sm">
+          <Anchor component="button" type="button" size="xs" c="violet"
+            onClick={addPointKeyboard}>add point</Anchor>
+          <Anchor component="button" type="button" size="xs" c="violet"
+            onClick={() => onChange([[0, 0], [1, 1]])}>reset</Anchor>
+        </Group>
       </Group>
     </Box>
   );
