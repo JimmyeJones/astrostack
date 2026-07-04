@@ -23,8 +23,9 @@ count.** Run the loop:
 1. **Set up** the environment — run `source scripts/agent-setup.sh` (see AGENTS.md
    §7) — and confirm the full test suite is green **before** changing anything. If
    it's red, fixing it is your first task.
-2. **Do 2–4 solid tasks this run** (fewer if one is large — a single big item can
-   legitimately be the whole run). For each, pick the highest-priority work:
+2. **Do up to 2–4 solid tasks this run** — but let value and quality gate the
+   count, not the other way round (fewer is fine; a single big item can be the
+   whole run). For each, pick the highest-priority *worthwhile* work:
    - **Bugs first:** anything in `docs/IMPROVEMENTS.md` → "Bugs (fix these first)",
      top-down. A regression test that fails before and passes after is mandatory.
    - then the highest `value ÷ (effort × risk)` item that serves the §1 priorities
@@ -33,9 +34,14 @@ count.** Run the loop:
    full suite green, commit it as its own independently-green commit, bump the
    version, and mark it **Shipped**. **Finish each task properly — never leave one
    half-done just to hit a count.**
-3. **Keep the backlog alive (fallback only).** The Scout normally refills it; but
-   if it's running thin on ready work, add a couple of well-reasoned ideas (§4) so
-   you never idle. Don't spend a whole run ideating — that's the Scout's job.
+3. **If the backlog is genuinely dry, STOP — do not manufacture work.** It is
+   completely fine for a run to complete zero tasks. This is a live install with
+   real data: shipping a marginal feature, a speculative refactor, or churn just to
+   "have done something" is *worse* than doing nothing. When you're out of clearly
+   worthwhile work, in order: (a) do a big-picture dogfood pass (§2) and file what
+   you find as backlog items for the Scout; (b) add one or two genuinely good ideas
+   (§4) only if you actually spot them; (c) **end the run.** Never invent low-value
+   work to stay busy — an idle run that leaves `main` green is a success.
 4. **Ship it yourself.** Base your work on the latest `origin/main` (ignore stale
    branches), sync, keep it green, then **merge into `main` yourself** — preferably
    by opening a PR and immediately merging it (so the branch auto-deletes). Nobody

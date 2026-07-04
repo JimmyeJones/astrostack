@@ -107,6 +107,14 @@ A healthy run lands **~3–6 tasks** (more if small, fewer if one is large — a
 single big feature can legitimately be the whole run). **Never trade the quality
 bar (§5) for task count.**
 
+**When you run out of clearly worthwhile work, STOP — do not manufacture busywork.**
+A run that completes zero tasks and leaves `main` green is a success. This is a
+live install with real data: shipping a marginal feature, a speculative refactor,
+or churn just to have shipped *something* is worse than doing nothing. The task
+count is a soft aim, never a quota — if the backlog is dry, do a dogfood pass (§2)
+and file what you find, add a genuinely good idea or two only if you spot one, and
+otherwise end the run.
+
 **Start of run (once):**
 1. `git fetch`; read `docs/IMPROVEMENTS.md` and skim the last ~20 commits and open
    PRs/branches so you don't redo or collide with in-flight work.
