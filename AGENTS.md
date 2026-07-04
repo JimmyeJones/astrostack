@@ -12,6 +12,46 @@ session, the user wins. Otherwise, follow this document exactly.
 
 ---
 
+## Agent roles — Builder & Scout (read this first)
+
+This project is developed by **two kinds of autonomous agent** that share this
+manual and one backlog (`docs/IMPROVEMENTS.md`). Each scheduled run is told which
+role it is by its kickoff prompt: [`docs/agent-prompt.md`](docs/agent-prompt.md)
+for the **Builder**, [`docs/agent-prompt-scout.md`](docs/agent-prompt-scout.md)
+for the **Scout**. Everything else in this file — the priorities (§1), the quality
+bar (§5), git/shipping (§8), upgrade-safety (§9), and the guardrails (§10) —
+applies to **both** roles.
+
+- **Builder** (the workhorse — schedule it often, e.g. hourly). *Drains* the
+  backlog: picks the highest-priority item, implements it **deeply** with tests,
+  and ships it to `main`. Bugs in "Bugs (fix these first)" outrank everything.
+  Favours a few well-finished tasks over many shallow ones. It does not spend a run
+  inventing features — that's the Scout's job — but it fixes bugs it trips over
+  and, if the backlog is running thin on ready work, tops it up so it never idles.
+
+- **Scout** (the planner + QA — schedule it a few times a day). *Fills* the backlog
+  with high-value, vetted work for the Builder. It mostly **thinks and writes to
+  the backlog rather than shipping code**: it dogfoods the whole app as the target
+  user (§1), runs a focused adversarial QA audit of one subsystem (editor first),
+  files **verified** bugs (repro + severity + confidence) into "Bugs (fix these
+  first)", and curates the backlog — reprioritising, pruning stale/duplicate/done
+  items, and adding a few well-reasoned feature ideas (§4). It may fix one small,
+  obviously-safe bug it finds, but leaves real building to the Builder.
+
+**Why two roles:** finding real bugs and planning good features is a different mode
+from writing code; doing all three in one rushed hour makes each shallow. A
+dedicated Scout keeps the Builder supplied with vetted, high-value work, so the
+Builder can go deep instead of context-switching. **Minimum viable setup: just run
+the Builder** — it self-tops-up the backlog. Add the Scout when you want markedly
+better bug-finding and planning; its output is what makes the Builder's runs count.
+
+**Staying out of each other's way:** the Builder edits code and moves items to
+**Shipped**; the Scout edits the backlog. Both obey the coordination rules in §11
+(claim an item by moving it to **In progress**; sync with `main` and re-run tests
+right before merging). Small, single-topic branches keep them from colliding.
+
+---
+
 ## 1. Mission & product vision (read this first — it governs everything)
 
 AstroStack is a headless, TrueNAS/Docker web app around the `seestack` engine for
@@ -305,8 +345,10 @@ Lint is not enforced in CI yet, but check before claiming quality-bar work:
 don't add to it. Put temp/scratch files under the session scratchpad, never in
 the repo.
 
-> Tip: a `SessionStart` hook that runs the above makes every run reliable. If one
-> doesn't exist yet, creating it is itself a good backlog item.
+> Tip: **`scripts/agent-setup.sh` does all of the above idempotently** — run it at
+> the start of every run (`source scripts/agent-setup.sh`) instead of hand-typing
+> the steps. Wiring it into a `SessionStart` hook makes every run start green with
+> no setup tax.
 
 ---
 

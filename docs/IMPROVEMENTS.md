@@ -5,17 +5,22 @@ The shared blackboard for autonomous development. Read
 framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 **Conventions**
-- Sections: **In progress** → **Ideas** (roughly prioritised) → **Shipped** →
-  **Needs owner sign-off**.
-- A new agent runs hourly and lands **several tasks per run**. Claim each item by
-  moving it to **In progress** with your branch name, in the same commit that
-  starts it. Move it to **Shipped** (with the commit/PR) when done, or back to
-  **Ideas** if you abandon it.
-- **Replenish the backlog every run.** Using AGENTS.md §4, add one or two
-  well-reasoned ideas per run — but only ones that serve the **§1 priorities**
-  (1 editor, 2 autonomy, 3 friendliness, 4 image quality). Tag each with a size
-  (S/M/L) and which priority it serves. Do **not** log niche mono/LRGB/
-  channel-combine/narrowband ideas.
+- Sections: **Bugs (fix these first)** → **In progress** → **Ideas** (roughly
+  prioritised) → **Shipped** → **Needs owner sign-off**.
+- Two kinds of agent share this list (see AGENTS.md "Agent roles"): the **Builder**
+  *drains* it (implements + ships the top items), and the **Scout** *fills* it
+  (files verified bugs, curates priorities, adds ideas). Claim any item you start by
+  moving it to **In progress** with your branch name, in the same commit that starts
+  it. Move it to **Shipped** (with the commit/PR) when done, or back to **Ideas** if
+  you abandon it.
+- **Scout — replenish and curate.** Each Scout run: file the bugs you verified into
+  "Bugs (fix these first)" (symptom + location + repro + severity + confidence),
+  reprioritise, prune done/stale/duplicate items, and add a few well-reasoned ideas
+  (AGENTS.md §4) — but only ones that serve the **§1 priorities** (1 editor,
+  2 autonomy, 3 friendliness, 4 image quality), each tagged with a size (S/M/L) and
+  its priority. Do **not** log niche mono/LRGB/channel-combine/narrowband ideas.
+- **Builder — fallback top-up.** If ready work is running thin, add an idea or two
+  so you never idle; otherwise leave ideation to the Scout and keep shipping.
 - **Priority order (from AGENTS.md §1) governs this list.** Work the top sections
   first. The editor is priority 1.
 
