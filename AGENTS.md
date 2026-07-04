@@ -503,18 +503,43 @@ add a test that an *old* config/DB upgrades cleanly.
 
 ## 11. Coordinating with other agents
 
-A new agent runs every hour, so runs overlap in time and history. Avoid
-collisions:
-- Read recent `git log` and open PRs/branches first; skip topics already in
-  flight.
+Multiple agents overlap in time — Builders run roughly hourly, and the Scout runs
+alongside them — and **both merge into `main`.** Two things make this safe by
+construction: each agent runs in its **own isolated container** (there is no shared
+working directory, so no file races), and **git serialises merges** (one lands, the
+next must sync before it can). Nothing here can touch the *deployed* install's data.
+Your job is just to keep the overlap harmless.
+
+**While working**
+- Read recent `git log` and open PRs/branches first; skip topics already in flight.
 - Keep branches small and single-topic so they rarely conflict.
 - `docs/IMPROVEMENTS.md` is the shared blackboard: claim an item by moving it to
   **In progress** with your branch name in the same commit that starts the work;
   release it (to **Shipped** or back to **Ideas**) when you finish or abandon it.
-- Prefer picking items *not* recently touched by another branch.
-- Because everyone merges into the same default branch, always sync with the
-  latest default and re-run tests right before you merge (§8) — another agent may
-  have merged while you were working.
+  Prefer items *not* recently touched by another branch.
+- **Roles reduce overlap by design:** the **Scout** mostly edits the backlog + QA
+  notes; the **Builder** mostly edits code + moves items to **Shipped**. Stay in
+  your lane unless you've checked the other work isn't already in flight.
+
+**Right before you merge — this is where concurrency actually bites**
+- **Sync first, then re-test.** Fetch `origin/main`, merge it into your branch, and
+  **re-run the full suite (§5) even if the merge auto-resolved cleanly** — another
+  agent may have landed a change that's green alone but breaks combined with yours.
+  Only ever merge from a green, up-to-date branch; CI is the backstop, not the gate.
+- **Version bump: choose the number at *merge time*, from `main`.**
+  `webapp/__init__.py` is a one-line hot spot two concurrent agents will both touch.
+  Set `__version__` by bumping whatever is on the *latest* `origin/main`, as the
+  last step before merging — not at task start. If you still conflict on that line,
+  take `main`'s value and bump again; **never leave two different changes sharing one
+  version number.**
+- **A `docs/IMPROVEMENTS.md` conflict is almost always a union — keep both sides.**
+  Each agent is usually *adding* different bugs/ideas/Shipped lines, so resolve by
+  keeping **both**; never delete or overwrite the other agent's entry just to clear
+  the conflict. If both changed the same item's status, keep the more-advanced one
+  (Shipped > In progress > Ideas).
+- If a conflict is non-trivial or you can't get green after syncing, **don't force
+  it** — leave your branch pushed, note it in the backlog, and stop (§8). A stuck
+  branch is fine; a clobbered or broken `main` is not.
 
 ---
 
@@ -535,7 +560,9 @@ Per task (repeat ~3–6×, or fewer if large):
 
 End of run:
 [ ] added ≥1–2 new ideas to IMPROVEMENTS.md (§4)
-[ ] synced branch with latest default; full suite still green
+[ ] synced branch with latest default; full suite still re-run and green (§11)
+[ ] version set by bumping the LATEST main; IMPROVEMENTS.md conflicts kept as a
+    union (never drop another agent's entry) (§11)
 [ ] merged into main yourself (PR-merge preferred so the branch auto-deletes);
     topic branch deleted/gone; only main + truly-in-progress branches remain
 ```
