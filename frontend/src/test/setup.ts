@@ -9,7 +9,10 @@ import { vi } from "vitest";
 // long `waitFor`/`findBy*` will keep retrying before giving up. (Fixes the
 // flaky "offers 'From your image' points" / "Auto levels" Editor tests, which
 // wait for a button to flip to its already-applied disabled+✓ state.)
-configure({ asyncUtilTimeout: 5000 });
+// 5000ms still flaked by a hair under a fully-saturated parallel run (observed
+// a 5039ms timeout), so give it a wider margin — the retry only stops early on
+// success, so a larger ceiling never slows a passing test.
+configure({ asyncUtilTimeout: 10000 });
 
 // Mantine relies on matchMedia / ResizeObserver, which jsdom doesn't implement.
 Object.defineProperty(window, "matchMedia", {
