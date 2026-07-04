@@ -81,12 +81,20 @@ def subtract_background(
     options: BackgroundOptions | None = None,
     *,
     use_gpu: bool | None = None,
+    errors: list[str] | None = None,
 ) -> np.ndarray:
     """
     Fit and subtract a 2D background per channel. Returns a new array.
 
     The output has zero-median sky (per channel). Stars and nebulosity stand
     above the new zero; noise straddles it.
+
+    ``errors`` (opt-in): pass a list to make a per-channel fit failure *surface*
+    instead of being silently skipped. The stack path leaves it ``None``
+    (best-effort: skip a failed channel), which is unchanged. The editor passes a
+    collector so a failed fit reaches the UI rather than the control looking like
+    a silent no-op (and a per-channel failure becomes all-or-nothing, so a
+    partial subtract can't leave a colour cast).
 
     GPU path
     --------
@@ -112,7 +120,7 @@ def subtract_background(
         use_gpu = GPU_AVAILABLE and (h * w >= 500_000)
 
     if options.mode == MODE_LUMINANCE:
-        return _subtract_background_luminance(rgb, options, use_gpu=use_gpu)
+        return _subtract_background_luminance(rgb, options, use_gpu=use_gpu, errors=errors)
 
     # MODE_PER_CHANNEL
     if use_gpu and not _gpu_bg_disabled:
@@ -128,7 +136,7 @@ def subtract_background(
                 "subsequent frames in this worker", exc,
             )
 
-    return _subtract_background_cpu(rgb, options)
+    return _subtract_background_cpu(rgb, options, errors=errors)
 
 
 def _subtract_background_luminance(
@@ -136,6 +144,7 @@ def _subtract_background_luminance(
     options: "BackgroundOptions",
     *,
     use_gpu: bool,
+    errors: list[str] | None = None,
 ) -> np.ndarray:
     """
     Fit ONE 2D gradient model from the luminance channel and subtract the
@@ -164,7 +173,7 @@ def _subtract_background_luminance(
     flat_fake = (
         _subtract_background_gpu(fake_rgb, options)
         if use_gpu
-        else _subtract_background_cpu(fake_rgb, options)
+        else _subtract_background_cpu(fake_rgb, options, errors=errors)
     )
     bg_luma = (luma - flat_fake[..., 0]).astype(np.float32)
 
@@ -177,7 +186,8 @@ def _subtract_background_luminance(
     return out
 
 
-def _subtract_background_cpu(rgb: np.ndarray, options: "BackgroundOptions") -> np.ndarray:
+def _subtract_background_cpu(rgb: np.ndarray, options: "BackgroundOptions",
+                             *, errors: list[str] | None = None) -> np.ndarray:
     from astropy.stats import SigmaClip
     from photutils.background import Background2D, MMMBackground
 
@@ -208,6 +218,11 @@ def _subtract_background_cpu(rgb: np.ndarray, options: "BackgroundOptions") -> n
                 exclude_percentile=80.0,
             )
         except Exception as exc:  # noqa: BLE001 — degenerate inputs (constant arrays)
+            if errors is not None:
+                # Editor path: surface the failure and don't leave a partial
+                # (per-channel) subtraction that would colour-shift the image.
+                errors.append(f"background fit failed: {exc}")
+                return rgb.astype(np.float32, copy=True)
             log.warning("background fit failed for channel %d: %s; skipping", c, exc)
             continue
         out[..., c] -= bkg.background.astype(np.float32, copy=False)

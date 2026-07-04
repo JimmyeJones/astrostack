@@ -59,21 +59,6 @@ when you take it.
 
 ### Editor — frontend (PRIORITY 1)
 
-- **BUG: background-op failures never reach the editor's error surfacing — the
-  op silently does nothing (or colour-shifts)** — `remove_final_gradient`
-  catches its Background2D fit failure internally and returns the input
-  (`seestack/bg/final_gradient.py:144-148`, per-channel variant `:126-132`), and
-  `subtract_background` skips a failed channel and continues
-  (`seestack/bg/per_frame.py:210-213`) — so the v0.61.11 "surface failed ops"
-  contract (preview `errors`, export `op_errors`) never sees the most likely
-  real failure of the two Background ops; a per-channel skip even subtracts
-  background from some channels and not others (colour cast) with no notice.
-  **Fix:** in the *editor* wrappers (`seestack/edit/ops/background.py`), detect
-  the no-op/partial result (e.g. have the bg functions return a status or raise
-  a dedicated exception the editor path doesn't swallow) so failures surface in
-  the existing UI; make per-channel failure all-or-nothing. Severity: broken-UX
-  (silent no-op control). Confidence: confirmed (reproduced log path).
-
 - **BUG (cosmetic): trim-crop preview rectangle misaligns on a letterboxed
   preview** — the dashed "proposed crop" overlay maps fractional bounds to
   percentages of the *container* (`trimRectStyle`,
@@ -327,6 +312,22 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Fix: background/gradient op failures now surface in the editor (were a silent
+  no-op / colour-shift)** — `remove_final_gradient` swallowed its Background2D fit
+  failure and returned the input, and `subtract_background` skipped a failed channel
+  and continued — so the v0.61.11 "surface failed ops" contract never saw the bg
+  ops' likeliest real failure, and a per-channel skip could subtract from some
+  channels but not others (colour cast) with no notice. Both functions grew an
+  opt-in `errors` collector: the stack path leaves it `None` (unchanged best-effort
+  skip-and-continue), but the editor wrappers (`seestack/edit/ops/background.py`)
+  pass a collector and `raise` when it's non-empty, so `apply_recipe` surfaces the
+  failure in the existing preview/export error UI — and a per-channel failure is now
+  all-or-nothing (return the input unchanged rather than a partial, colour-shifting
+  subtract). Engine + editor-wrapper, additive/upgrade-safe. Regression tests: a
+  monkeypatched-to-fail Background2D makes every editor bg op (both modes) raise and
+  the error reach `apply_recipe`'s collector, while the stack path stays
+  non-raising. (v0.69.11, this run — Builder)
 
 - **Fix flaky `detail.sharpen` NaN test (route unsharp mask around skimage)** — the
   `detail.sharpen` op called scikit-image's `unsharp_mask(..., channel_axis=-1)` on

@@ -32,7 +32,13 @@ def _subtract(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     )
     # for_image_size (called inside subtract_background) floors box_size further
     # for tiny images, so the mesh always tiles the proxy.
-    return subtract_background(rgb, opts, use_gpu=ctx.use_gpu)
+    # Pass an errors collector so a failed fit *surfaces* in the editor instead of
+    # silently returning the input (or partially subtracting and colour-shifting).
+    errors: list[str] = []
+    out = subtract_background(rgb, opts, use_gpu=ctx.use_gpu, errors=errors)
+    if errors:
+        raise RuntimeError("; ".join(errors))
+    return out
 
 
 def _final_gradient(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
@@ -47,7 +53,13 @@ def _final_gradient(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarr
         # small full-res dilation can legitimately vanish on a heavy proxy).
         dilate_px=_scaled_box(ctx, int(params.get("dilate_px", 16)), minimum=0),
     )
-    return remove_final_gradient(rgb, opts)
+    # Surface a failed gradient fit in the editor rather than silently returning
+    # the input (Background2D failure is this op's most likely real failure).
+    errors: list[str] = []
+    out = remove_final_gradient(rgb, opts, errors=errors)
+    if errors:
+        raise RuntimeError("; ".join(errors))
+    return out
 
 
 def _level_coverage(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
