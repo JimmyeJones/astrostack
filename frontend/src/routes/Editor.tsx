@@ -1163,7 +1163,7 @@ export function EditorView() {
       </Grid>
 
       <ImageLightbox src={lightbox ? (shownSrc ?? null) : null}
-        title={`${safe} — ${showBase ? "original" : "edited"}`
+        title={`${safe} — ${overlay ? overlay.label : "edited"}`
           + (previewScaleCaption(hist.data) ? ` · ${previewScaleCaption(hist.data)}` : "")}
         onClose={() => setLightbox(false)} />
     </Stack>

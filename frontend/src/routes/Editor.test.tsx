@@ -273,6 +273,30 @@ describe("EditorView", () => {
       expect(screen.getByRole("button", { name: "Hide mask" })).toBeInTheDocument());
   });
 
+  it("titles the zoom lightbox from the active overlay, not 'edited'", async () => {
+    // Regression: the lightbox titled whatever was shown as 'edited' unless
+    // Compare was on, so zooming the star-mask overlay mislabelled the mask.
+    mockEditorQueries();
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    const btn = await screen.findByRole("button", { name: "Star mask" });
+    await waitFor(() => expect(btn).not.toBeDisabled());
+    btn.click();
+    await screen.findByRole("button", { name: "Hide mask" });
+
+    // Open the zoom lightbox by clicking the shown (overlay) image.
+    const shown = await screen.findByAltText("preview");
+    shown.click();
+    // The lightbox image is titled from the overlay ("Star mask"), never "edited".
+    await waitFor(() =>
+      expect(screen.getByAltText(/Star mask/)).toBeInTheDocument());
+    expect(screen.queryByAltText(/— edited/)).not.toBeInTheDocument();
+  });
+
   it("surfaces an overlay fetch error instead of showing the edited image under the overlay's label", async () => {
     mockEditorQueries();
     // Preview succeeds, but the star-mask endpoint fails — previously the panel

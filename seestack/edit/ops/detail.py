@@ -1,7 +1,7 @@
 """Detail operations: hot-pixel removal, denoise, sharpen, deconvolution.
 
-skimage routines don't tolerate NaN, so the denoise/sharpen/deconvolve ops fill
-uncovered pixels with the finite median, process, then restore NaN.
+scipy/skimage routines don't tolerate NaN, so the denoise/sharpen/deconvolve ops
+fill uncovered pixels with the finite median, process, then restore NaN.
 """
 
 from __future__ import annotations
@@ -96,9 +96,19 @@ def _sharpen(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     radius = max(0.05, ctx.scaled_px(float(params.get("radius", 2.0))))
 
     def run(img: np.ndarray) -> np.ndarray:
-        from skimage.filters import unsharp_mask
-        return unsharp_mask(np.clip(img, 0.0, 1.0), radius=radius, amount=amount,
-                            channel_axis=-1).astype(np.float32)
+        # Unsharp mask in pure numpy/scipy (per-channel Gaussian), NOT skimage's
+        # unsharp_mask: on float32 + channel_axis that routine intermittently
+        # returned uninitialised garbage / stray NaN in the *covered* region on
+        # some scikit-image/scipy builds (took down CI — see IMPROVEMENTS.md). A
+        # per-channel Gaussian blur is deterministic and identical in effect:
+        # sharp = img + amount·(img − blur), matching skimage's mode="nearest".
+        from scipy.ndimage import gaussian_filter
+        src = np.clip(img, 0.0, 1.0)
+        out = np.empty_like(src)
+        for c in range(3):
+            blurred = gaussian_filter(src[..., c], sigma=radius, mode="nearest")
+            out[..., c] = src[..., c] + amount * (src[..., c] - blurred)
+        return np.clip(out, 0.0, 1.0).astype(np.float32)
 
     return _with_nan_filled(rgb, run)
 

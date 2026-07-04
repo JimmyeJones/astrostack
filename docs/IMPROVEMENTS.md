@@ -40,22 +40,6 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
-- **BUG (flaky test): `test_detail_ops_preserve_nan_on_partial_coverage[detail.sharpen-params1]`
-  intermittently fails in the full suite** — passes in isolation and in-file,
-  fails ~sometimes in full-suite order: the *covered* region comes back with a NaN
-  and/or huge finite garbage (`7.7e37`, denormals) after `detail.sharpen`. That
-  signature (garbage finite values, not just a stray NaN) points at an
-  uninitialised-memory / platform-specific skimage/scipy `unsharp_mask`
-  (`float32`+`channel_axis`) quirk rather than a logic bug in `_with_nan_filled`
-  (which provably fills per-channel, processes, then re-NaNs the border). It has
-  taken down `main`'s CI at least once (PR #66, run 28671857844). **Do NOT** "fix"
-  it by scrubbing NaN in the covered region — that would mask the finite garbage
-  and ship a broken image. Investigate instead: pin/repro the CI
-  scikit-image/scipy/numpy build, or route the op around skimage (per-channel
-  gaussian unsharp in pure numpy). Severity: broken-UX (CI noise). Confidence:
-  confirmed (observed). *(Merged the former duplicate "Infra / Flaky CI" entry
-  into this one.)*
-
 ### Editor — engine & backend (PRIORITY 1)
 
 - **BUG: deconvolution's live preview is a near-no-op on large stacks — preview
@@ -75,21 +59,6 @@ when you take it.
 
 ### Editor — frontend (PRIORITY 1)
 
-- **BUG: background-op failures never reach the editor's error surfacing — the
-  op silently does nothing (or colour-shifts)** — `remove_final_gradient`
-  catches its Background2D fit failure internally and returns the input
-  (`seestack/bg/final_gradient.py:144-148`, per-channel variant `:126-132`), and
-  `subtract_background` skips a failed channel and continues
-  (`seestack/bg/per_frame.py:210-213`) — so the v0.61.11 "surface failed ops"
-  contract (preview `errors`, export `op_errors`) never sees the most likely
-  real failure of the two Background ops; a per-channel skip even subtracts
-  background from some channels and not others (colour cast) with no notice.
-  **Fix:** in the *editor* wrappers (`seestack/edit/ops/background.py`), detect
-  the no-op/partial result (e.g. have the bg functions return a status or raise
-  a dedicated exception the editor path doesn't swallow) so failures surface in
-  the existing UI; make per-channel failure all-or-nothing. Severity: broken-UX
-  (silent no-op control). Confidence: confirmed (reproduced log path).
-
 - **BUG (cosmetic): trim-crop preview rectangle misaligns on a letterboxed
   preview** — the dashed "proposed crop" overlay maps fractional bounds to
   percentages of the *container* (`trimRectStyle`,
@@ -103,16 +72,13 @@ when you take it.
   Severity: cosmetic (misleading in the letterboxed case). Confidence: confirmed
   (traced CSS).
 
-- **BUG (cosmetic/a11y): overlay zoom mislabels + keyboard access gaps** — the
-  lightbox titles whatever is shown as "edited" unless Compare is on, so zooming
-  the star-mask/coverage overlay shows the mask titled "edited"
-  (`Editor.tsx:1085-1087`). The Curves "reset" control is a `<Text>` with only
-  an `onClick` (not focusable, no role — `CurvesWidget.tsx:116-117`), curve
-  points are mouse-only SVG circles, and `OpList` rows are click-only `Paper`
-  divs (`OpList.tsx:35-38`) — op selection is impossible by keyboard. **Fix:**
-  title the lightbox from the active overlay; make reset a real button; add
-  keyboard selection (button/role+tabIndex) to op rows. Severity: cosmetic/a11y.
-  Confidence: confirmed (traced).
+- **BUG (a11y, follow-up): editor curve points are mouse-only** — the remaining
+  keyboard-access gap after v0.69.12: the Curves op's control points are drag-only
+  SVG circles (`CurvesWidget.tsx`), so a keyboard user can't add/move/remove a curve
+  point (the "reset" button and op-row selection are now keyboard-accessible). A
+  proper fix needs a focusable point model (arrow-key nudge / a numeric fallback),
+  which is a larger interaction change than the rest of the batch. Severity:
+  a11y. Confidence: confirmed (traced).
 
 _(The v0.67–0.69 runs fixed a large batch of verified bugs — Gaia colour cal,
 RA≈0 frame rejection, debayer edge wrap, job-cancel result loss, hung-Gaia
@@ -343,6 +309,50 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Fix: editor overlay-zoom mislabel + keyboard access gaps (a11y)** — three
+  editor a11y fixes. (1) The zoom lightbox titled whatever was shown as "edited"
+  unless Compare was on, so zooming the Star-mask/Coverage overlay mislabelled the
+  overlay as "edited"; the title now reads from the active overlay's own label
+  ("Star mask"/"Coverage map"/"Original"), falling back to "edited" only when no
+  overlay is up. (2) The Curves "reset" control was a bare `<Text onClick>` (not
+  focusable, no role) → now a real `<Anchor component="button">`. (3) `OpList` rows
+  were click-only `<Paper>` divs, so selecting an op to edit was impossible by
+  keyboard; rows are now `role="button" tabIndex=0 aria-pressed` and activate on
+  Enter/Space (without hijacking a focused inner switch/arrow/✕). Frontend-only,
+  additive. Vitest: new OpList a11y suite (focusable rows, Enter/Space selects,
+  aria-pressed) + an Editor test that the lightbox titles from the overlay, not
+  "edited". Remaining gap (mouse-only curve points) filed as an a11y follow-up.
+  (v0.69.12, this run — Builder)
+
+- **Fix: background/gradient op failures now surface in the editor (were a silent
+  no-op / colour-shift)** — `remove_final_gradient` swallowed its Background2D fit
+  failure and returned the input, and `subtract_background` skipped a failed channel
+  and continued — so the v0.61.11 "surface failed ops" contract never saw the bg
+  ops' likeliest real failure, and a per-channel skip could subtract from some
+  channels but not others (colour cast) with no notice. Both functions grew an
+  opt-in `errors` collector: the stack path leaves it `None` (unchanged best-effort
+  skip-and-continue), but the editor wrappers (`seestack/edit/ops/background.py`)
+  pass a collector and `raise` when it's non-empty, so `apply_recipe` surfaces the
+  failure in the existing preview/export error UI — and a per-channel failure is now
+  all-or-nothing (return the input unchanged rather than a partial, colour-shifting
+  subtract). Engine + editor-wrapper, additive/upgrade-safe. Regression tests: a
+  monkeypatched-to-fail Background2D makes every editor bg op (both modes) raise and
+  the error reach `apply_recipe`'s collector, while the stack path stays
+  non-raising. (v0.69.11, this run — Builder)
+
+- **Fix flaky `detail.sharpen` NaN test (route unsharp mask around skimage)** — the
+  `detail.sharpen` op called scikit-image's `unsharp_mask(..., channel_axis=-1)` on
+  `float32`, which on some scikit-image/scipy builds intermittently returned
+  uninitialised finite garbage (`7.7e37`, denormals) or a stray NaN in the *covered*
+  region — reddening `main`'s CI (took down PR #66) via
+  `test_detail_ops_preserve_nan_on_partial_coverage[detail.sharpen-params1]` in
+  full-suite order. Replaced it with a deterministic per-channel unsharp mask in
+  pure numpy/scipy (`sharp = img + amount·(img − gaussian_filter(img, sigma,
+  mode="nearest"))`), which fully initialises the output and matches skimage's
+  effect. Stress-tested 200× (zero garbage). Engine-only, additive; the effect is
+  unchanged for users. Updated the proxy-scale parity test to capture the Gaussian
+  sigma instead of the (now-unused) `unsharp_mask` radius. (v0.69.10, this run — Builder)
 
 - **Fix: "Use data defaults" toolbar and the per-param "✓ already set" indicator
   now agree** — `applyDataDrivenDefaults`/`countDataDrivenDefaults` compared the

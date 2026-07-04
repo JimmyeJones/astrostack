@@ -493,6 +493,57 @@ def test_pipeline_collects_op_errors(monkeypatch):
     assert any("kaboom" in e for e in errors)              # failure surfaced, not swallowed
 
 
+def test_background_ops_surface_fit_failure_in_editor(monkeypatch):
+    """A failed Background2D fit must surface as an editor op error, not a silent
+    no-op. Regression: the editor bg wrappers used to return the input unchanged
+    (or partially subtract, colour-shifting) when the fit failed, so the
+    v0.61.11 "surface failed ops" contract never saw the bg ops' likeliest
+    failure."""
+    import photutils.background as pb
+
+    class _Boom:
+        def __init__(self, *a, **k):
+            raise RuntimeError("degenerate tile")
+
+    monkeypatch.setattr(pb, "Background2D", _Boom)
+    img = _img(nan_band=0)
+
+    # Every editor bg op (both modes) raises so apply_recipe collects the failure.
+    for op_id, params in (
+        ("background.subtract", {"mode": "per_channel"}),
+        ("background.subtract", {"mode": "luminance"}),
+        ("background.final_gradient", {"mode": "per_channel"}),
+        ("background.final_gradient", {"mode": "luminance"}),
+    ):
+        with pytest.raises(RuntimeError):
+            get_op(op_id).apply(img.copy(), params, EditContext(use_gpu=False))
+
+    # Surfaced through the pipeline's error collector, not swallowed.
+    rec = Recipe(ops=validate_ops([OpInstance(id="background.subtract", params={})]))
+    errors: list[str] = []
+    apply_recipe(img.copy(), rec, EditContext(use_gpu=False), errors=errors)
+    assert any("fit failed" in e.lower() for e in errors)
+
+
+def test_background_stack_path_stays_best_effort_on_fit_failure(monkeypatch):
+    """The stack path (no errors collector) keeps its resilient skip-and-continue
+    behaviour when a fit fails — the opt-in surfacing must not change it."""
+    import photutils.background as pb
+
+    from seestack.bg.per_frame import BackgroundOptions, subtract_background
+
+    class _Boom:
+        def __init__(self, *a, **k):
+            raise RuntimeError("degenerate tile")
+
+    monkeypatch.setattr(pb, "Background2D", _Boom)
+    img = _img(nan_band=0)
+    # No errors= → returns an array without raising (best-effort, unchanged).
+    out = subtract_background(
+        img.copy(), BackgroundOptions(mode="per_channel", enabled=True), use_gpu=False)
+    assert out.shape == img.shape and np.isfinite(out).any()
+
+
 def test_white_balance_is_linear_stage():
     assert get_op("tone.white_balance").stage == "linear"
 
@@ -536,16 +587,18 @@ def test_scaled_px_shrinks_on_proxy_only():
 def test_sharpen_radius_scaled_to_proxy(monkeypatch):
     """The sharpen radius is a full-res pixel measure; on the decimated preview
     proxy it must be shrunk by proxy_scale so the preview matches the full-res
-    export (preview↔export parity). We capture the radius handed to unsharp_mask."""
-    import skimage.filters as skf
+    export (preview↔export parity). We capture the sigma handed to the Gaussian
+    (sharpen is a per-channel unsharp mask, so it blurs each channel once)."""
+    import scipy.ndimage as ndi
 
     seen: list[float] = []
+    real_gaussian = ndi.gaussian_filter
 
-    def fake_unsharp(img, *, radius, amount, channel_axis):
-        seen.append(float(radius))
-        return img  # identity — we only care about the radius here
+    def fake_gaussian(img, *, sigma, **kw):
+        seen.append(float(sigma))
+        return real_gaussian(img, sigma=sigma, **kw)
 
-    monkeypatch.setattr(skf, "unsharp_mask", fake_unsharp)
+    monkeypatch.setattr(ndi, "gaussian_filter", fake_gaussian)
     spec = get_op("detail.sharpen")
     img = _img(20, 20, nan_band=0)
 
@@ -553,7 +606,8 @@ def test_sharpen_radius_scaled_to_proxy(monkeypatch):
     spec.apply(img, {"amount": 1.0, "radius": 4.0}, EditContext(proxy_scale=2.0))
     spec.apply(img, {"amount": 1.0, "radius": 4.0}, EditContext(proxy_scale=4.0))
     # full-res keeps radius 4; a 2x proxy halves it; a 4x proxy quarters it.
-    assert seen == [4.0, 2.0, 1.0]
+    # Three channels per apply → the same sigma three times each.
+    assert seen == [4.0] * 3 + [2.0] * 3 + [1.0] * 3
 
 
 def test_background_subtract_box_scaled_to_proxy(monkeypatch):
@@ -564,7 +618,7 @@ def test_background_subtract_box_scaled_to_proxy(monkeypatch):
 
     seen: list[int] = []
 
-    def fake_subtract(rgb, opts, *, use_gpu=None):
+    def fake_subtract(rgb, opts, *, use_gpu=None, errors=None):
         seen.append(int(opts.box_size))
         return rgb
 
@@ -586,7 +640,7 @@ def test_final_gradient_box_and_dilate_scaled_to_proxy(monkeypatch):
 
     seen: list[tuple[int, int]] = []
 
-    def fake_remove(rgb, opts):
+    def fake_remove(rgb, opts, *, errors=None):
         seen.append((int(opts.box_size), int(opts.dilate_px)))
         return rgb
 

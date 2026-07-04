@@ -45,12 +45,21 @@ class FinalGradientOptions:
 def remove_final_gradient(
     rgb: np.ndarray,
     options: FinalGradientOptions | None = None,
+    *,
+    errors: list[str] | None = None,
 ) -> np.ndarray:
     """
     Subtract a sky-gradient model from the final stack.
 
     Builds a mask of the bright structure (sigma-clip + dilation), then fits
     a 2D background through the unmasked pixels and subtracts it.
+
+    ``errors`` (opt-in): pass a list to make a fit failure *surface* instead of
+    being silently swallowed. The stack path leaves it ``None`` (best-effort:
+    skip a failed channel / return the input), which is unchanged. The editor
+    passes a collector so a failed Background2D fit reaches the UI rather than
+    the op looking like a silent no-op; a per-channel failure is then treated as
+    all-or-nothing (no partial subtract that would colour-shift the image).
     """
     if options is None:
         options = FinalGradientOptions(enabled=True)
@@ -60,8 +69,8 @@ def remove_final_gradient(
     mask = _build_object_mask(rgb, options)
 
     if options.mode == "luminance":
-        return _subtract_luminance_with_mask(rgb, mask, options)
-    return _subtract_per_channel_with_mask(rgb, mask, options)
+        return _subtract_luminance_with_mask(rgb, mask, options, errors=errors)
+    return _subtract_per_channel_with_mask(rgb, mask, options, errors=errors)
 
 
 def _build_object_mask(rgb: np.ndarray, options: FinalGradientOptions) -> np.ndarray:
@@ -121,6 +130,7 @@ def _fit_background_2d(channel: np.ndarray, mask: np.ndarray, box_size: int) -> 
 
 def _subtract_per_channel_with_mask(
     rgb: np.ndarray, mask: np.ndarray, options: FinalGradientOptions,
+    *, errors: list[str] | None = None,
 ) -> np.ndarray:
     """Independent fit per channel."""
     out = rgb.astype(np.float32, copy=True)
@@ -128,6 +138,11 @@ def _subtract_per_channel_with_mask(
         try:
             bg = _fit_background_2d(out[..., c], mask, options.box_size)
         except Exception as exc:  # noqa: BLE001 — degenerate cases
+            if errors is not None:
+                # Editor path: surface the failure and don't apply a partial
+                # (per-channel) subtraction that would colour-shift the image.
+                errors.append(f"gradient fit failed: {exc}")
+                return rgb.astype(np.float32, copy=True)
             log.warning("final gradient fit failed for c=%d: %s; skipping", c, exc)
             continue
         # Only subtract where finite — preserve NaN regions.
@@ -138,12 +153,15 @@ def _subtract_per_channel_with_mask(
 
 def _subtract_luminance_with_mask(
     rgb: np.ndarray, mask: np.ndarray, options: FinalGradientOptions,
+    *, errors: list[str] | None = None,
 ) -> np.ndarray:
     """Fit one gradient on luminance, subtract from all three channels."""
     luma = 0.299 * rgb[..., 0] + 0.587 * rgb[..., 1] + 0.114 * rgb[..., 2]
     try:
         bg_luma = _fit_background_2d(luma, mask, options.box_size)
     except Exception as exc:  # noqa: BLE001
+        if errors is not None:
+            errors.append(f"luminance gradient fit failed: {exc}")
         log.warning("final luminance gradient fit failed: %s; returning input", exc)
         return rgb
     from astropy.stats import sigma_clipped_stats
