@@ -402,6 +402,16 @@ export interface LevelsSuggestion {
   gamma_target?: number | null;
 }
 
+export interface StretchSuggestion {
+  /** Data-driven asinh Strength + Black point for the tone.stretch op, or null
+   * when there's no useful suggestion (too few finite pixels / no dynamic range). */
+  stretch: number | null;
+  black: number | null;
+  /** The display-space grey (0..1) the strength lands the sky median at, so the UI
+   * can name the goal the number solves for; null when there's no suggestion. */
+  target_bg?: number | null;
+}
+
 export interface TrimSuggestion {
   is_mosaic: boolean;
   /** Fractional (0..1) crop rectangle for the largest well-covered area, or null
@@ -632,6 +642,11 @@ export const api = {
   levelsSuggestion: (safe: string, runId: number, recipe: Recipe, uid: string) =>
     req<LevelsSuggestion>(
       `/api/targets/${safe}/stack-runs/${runId}/editor/levels-suggestion` +
+      `?recipe=${encodeRecipe(recipe)}&uid=${encodeURIComponent(uid)}`,
+    ),
+  stretchSuggestion: (safe: string, runId: number, recipe: Recipe, uid: string) =>
+    req<StretchSuggestion>(
+      `/api/targets/${safe}/stack-runs/${runId}/editor/stretch-suggestion` +
       `?recipe=${encodeRecipe(recipe)}&uid=${encodeURIComponent(uid)}`,
     ),
   getRecipe: (safe: string, runId: number) =>

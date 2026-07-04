@@ -237,6 +237,18 @@ export function EditorView() {
     enabled: !!opsSchema.data && !saved.isLoading && !!levelsSelUid,
     staleTime: 30_000,
   });
+  // Data-driven asinh Strength + Black point for the selected Stretch op, measured
+  // from the *linear* image entering it (any prior linear ops applied). Enabled only
+  // when an asinh Stretch op is selected; keyed on the debounced recipe + uid so it
+  // refreshes as upstream ops change.
+  const stretchSel = ops.find((o) => o.uid === selected && o.id === "tone.stretch");
+  const stretchSelUid = stretchSel?.params?.mode !== "stf" ? stretchSel?.uid : undefined;
+  const stretch = useQuery({
+    queryKey: ["stretch-suggestion", safe, rid, dKey, stretchSelUid],
+    queryFn: () => api.stretchSuggestion(safe, rid, dRecipe, stretchSelUid!),
+    enabled: !!opsSchema.data && !saved.isLoading && !!stretchSelUid,
+    staleTime: 30_000,
+  });
   const refreshPreview = () => {
     setBust(Date.now());
     qc.invalidateQueries({ queryKey: ["edit-hist", safe, rid] });
@@ -1031,6 +1043,27 @@ export function EditorView() {
                         </Button>
                       </Tooltip>
                     ) : null}
+                    {/* One-click "Auto stretch" sets the asinh Strength and Black
+                        point from the run's own linear data (sky floor → black, sky
+                        median lifted to a clean dark grey), so the most consequential
+                        tonal control gets a well-exposed start in a single click. The
+                        per-param "From your image" buttons stay for fine control. */}
+                    {selectedOp.id === "tone.stretch"
+                      && selectedOp.params?.mode !== "stf"
+                      && stretch.data?.stretch != null && stretch.data?.black != null ? (
+                      <Tooltip
+                        label="Set the asinh strength and black point from this image's own data"
+                        multiline w={220} withArrow>
+                        <Button size="compact-xs" variant="light" color="blue"
+                          onClick={() => setParams(selectedOp.uid, {
+                            ...selectedOp.params,
+                            stretch: stretch.data!.stretch,
+                            black: stretch.data!.black,
+                          })}>
+                          Auto stretch ({stretch.data.stretch})
+                        </Button>
+                      </Tooltip>
+                    ) : null}
                     {/* Escape hatch symmetric with "Auto levels": one click sets
                         the black/white/gamma points back to their neutral identity
                         so an over-dragged Levels op is easy to undo. Dimmed when
@@ -1123,6 +1156,24 @@ export function EditorView() {
                                 label: `From your stars (size ${starSize.data.size}, FWHM ${starSize.data.fwhm_px}px)`,
                               },
                             }
+                            : selectedOp.id === "tone.stretch"
+                              && selectedOp.params?.mode !== "stf"
+                              && stretch.data?.stretch != null && stretch.data?.black != null
+                              ? {
+                                // Each button sets only its own slider, so label it
+                                // with just that value. Strength names the goal it
+                                // solves for (the sky grey), like the gamma button.
+                                stretch: {
+                                  value: stretch.data.stretch,
+                                  label: stretch.data.target_bg != null
+                                    ? `From your image (strength ${stretch.data.stretch} — lands the sky at ~${Math.round(stretch.data.target_bg * 100)}% grey)`
+                                    : `From your image (strength ${stretch.data.stretch})`,
+                                },
+                                black: {
+                                  value: stretch.data.black,
+                                  label: `From your image (black ${stretch.data.black})`,
+                                },
+                              }
                             : selectedOp.id === "tone.levels"
                               && levels.data?.black != null && levels.data?.white != null
                               ? {

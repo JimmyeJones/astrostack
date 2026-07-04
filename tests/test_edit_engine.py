@@ -140,6 +140,23 @@ def test_pipeline_autoinserts_stretch_and_outputs_display_range():
     assert fin.max() > 0.0  # not blank
 
 
+def test_auto_stretch_false_returns_linear_ops_output():
+    # The Stretch suggestion needs the *linear* image the stretch op will receive,
+    # so auto_stretch=False must suppress the default-stretch fallback and leave a
+    # no-stretch recipe's output in its original (wide, un-tone-mapped) range.
+    rng = np.random.default_rng(0)
+    img = (rng.random((40, 50, 3)).astype("float32") * 200.0) + 1000.0  # linear ADU
+    rec = Recipe(ops=[])  # no ops → the only thing that could change the range is
+    assert not has_stretch(rec)  # the auto-stretch fallback
+    out = apply_recipe(img, rec, EditContext(), auto_stretch=False)
+    # No stretch applied → the data keeps its original linear scale, untouched.
+    assert np.allclose(out, img)
+    assert out[np.isfinite(out)].max() > 1.0
+    # The default (auto_stretch=True) still tone-maps into display range.
+    disp = apply_recipe(img, rec, EditContext())
+    assert disp[np.isfinite(disp)].max() <= 1.0
+
+
 def test_uncovered_pixels_stay_nan_through_the_stretch():
     # "NaN = no coverage" must survive the stretch (and the whole recipe), so the
     # histogram and Levels suggestions exclude uncovered mosaic pixels instead of

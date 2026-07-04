@@ -243,6 +243,45 @@ def test_levels_suggestion_unknown_uid_falls_back(client, solved_library):
     assert body["white"] > body["black"]
 
 
+def test_stretch_suggestion_from_image(client, solved_library):
+    # The Stretch op receives the run's *linear* proxy; the suggestion measures it
+    # (no stretch in the sub-recipe) and returns an in-range asinh strength/black
+    # plus the target grey it solves the sky median to.
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="stretch_src")
+    recipe = {"ops": [
+        {"id": "tone.stretch", "uid": "s1", "params": {"stretch": 0.5, "black": 0.35}},
+    ]}
+    q = _enc(recipe)
+    r = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/stretch-suggestion?recipe={q}&uid=s1")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["stretch"] is not None and body["black"] is not None
+    assert 0.0 <= body["stretch"] <= 1.0
+    assert 0.0 <= body["black"] <= 1.0
+    # target_bg names the goal the strength solves for; it's the engine's target.
+    from seestack.edit.stretch import STRETCH_TARGET_BG
+    assert body["target_bg"] == STRETCH_TARGET_BG
+
+
+def test_stretch_suggestion_unknown_uid_falls_back(client, solved_library):
+    # An absent uid drops the tone.stretch op(s) and measures the linear proxy, so
+    # a stale uid still yields a sensible suggestion (never the stretch's own
+    # output) rather than a 404.
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="stretch_fb")
+    recipe = {"ops": [
+        {"id": "tone.stretch", "uid": "s1", "params": {"stretch": 0.5, "black": 0.35}},
+    ]}
+    q = _enc(recipe)
+    r = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/stretch-suggestion?recipe={q}&uid=zzz")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["stretch"] is not None and body["black"] is not None
+
+
 def test_ops_schema(client):
     r = client.get("/api/editor/ops/schema")
     assert r.status_code == 200
