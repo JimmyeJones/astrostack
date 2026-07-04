@@ -28,8 +28,13 @@ count.** Run the loop:
    whole run). For each, pick the highest-priority *worthwhile* work:
    - **Bugs first:** anything in `docs/IMPROVEMENTS.md` → "Bugs (fix these first)",
      top-down. A regression test that fails before and passes after is mandatory.
-   - then the highest `value ÷ (effort × risk)` item that serves the §1 priorities
-     (editor first), or the top of the Ideas list.
+     A verified **stacking-engine** bug (`seestack/stack/*`, `seestack/calibrate/*`)
+     ranks alongside an editor bug — it silently corrupts the final image, so fix
+     it first (see AGENTS.md §1 "Current focus").
+   - then the highest `value ÷ (effort × risk)` item. The editor is now
+     well-hardened, so favour **stacking-engine correctness, autonomy,
+     friendliness, and image-quality** items from the Ideas list (still fix any
+     real editor regression first if one exists).
    Implement it across engine/webapp/frontend as needed, **add tests**, get the
    full suite green, commit it as its own independently-green commit, bump the
    version, and mark it **Shipped**. **Finish each task properly — never leave one

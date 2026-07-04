@@ -24,22 +24,31 @@ real bugs and sharp, well-shaped ideas is your deliverable. Each run:
    and run the app, and confirm the suite is green so you can tell a real bug from a
    pre-existing failure.
 2. **Dogfood the whole journey as the target user (§1).** Trace `drop files →
-   ingest → QC → stack → **edit** → export`, spending most of your attention on the
-   **editor** (priority 1). Note everything confusing, broken, ugly, slow, or
-   untrustworthy — for a beginner *and* for someone with thousands of subs.
-3. **Run a focused QA audit of ONE subsystem** (rotate each run; **editor first**,
-   then stack/mosaic, calibration, webapp routers, watcher, render…). Read the code
-   adversarially — trace edge cases, NaN/coverage semantics, error paths, and
-   preview↔export parity, and try to break it. For each **verified** problem, file
-   a bug into `docs/IMPROVEMENTS.md` → "Bugs (fix these first)" with: a one-line
-   symptom, the code location, **repro steps**, severity (wrong-result > broken-UX >
-   cosmetic), and a confidence (traced / reproduced). **Only file bugs you've
-   actually verified — no speculation.**
+   ingest → QC → stack → edit → export`. The editor is now well-hardened, so put
+   most of your attention on the **stack → result** path (does auto-stack /
+   auto-calibrate produce a clean, trustworthy image with minimal fuss?) and on
+   autonomy/friendliness friction. Note everything confusing, broken, ugly, slow,
+   or untrustworthy — for a beginner *and* for someone with thousands of subs.
+3. **Run a focused QA audit of ONE subsystem.** The editor is now well-hardened
+   (its bug backlog is drained and re-audits come back clean), so **lead your
+   rotation with the stacking engine** — `seestack/stack/*` (`align`, `stacker`,
+   `accumulator`, `mosaic`, `drizzle_path`, rejection) and `seestack/calibrate/*`.
+   This is correctness / data-integrity work: a bug there silently corrupts the
+   *final image*, so it's the highest-value place to hunt. Then rotate through the
+   webapp routers, watcher, ingest/QC, plate-solve, and render; re-audit the editor
+   only occasionally. Read the code adversarially — trace edge cases, NaN/coverage
+   semantics, memory bounds on the hot path, rejection/weighting math, error paths,
+   and preview↔export parity — and try to break it. For each **verified** problem,
+   file a bug into `docs/IMPROVEMENTS.md` → "Bugs (fix these first)" with: a
+   one-line symptom, the code location, **repro steps**, severity (wrong-result >
+   broken-UX > cosmetic), and a confidence (traced / reproduced). **Only file bugs
+   you've actually verified — no speculation.**
 4. **Curate the backlog.** Reprioritise it to match §1, merge duplicates, delete
    done/stale items, and split anything too big for one Builder run into concrete
-   slices. Then **add a few genuinely new feature ideas** (§4) that serve §1
-   (editor → autonomy → friendliness → image quality), each tagged with the pillar
-   it serves and a size — so the Builder always has ready, well-shaped work.
+   slices. Then **add a few genuinely new ideas** (§4) — with the editor hardened,
+   favour **stacking-engine correctness, autonomy, friendliness, and image quality**
+   now (editor ideas only if you find a real gap), each tagged with the pillar it
+   serves and a size — so the Builder always has ready, well-shaped work.
 5. **Optional:** if you find a *small, obviously-safe* bug (one file, clear fix,
    easy regression test), fix and ship it under the full quality bar (§5/§8/§9).
    Otherwise leave building to the Builder — your leverage is a great backlog, not
