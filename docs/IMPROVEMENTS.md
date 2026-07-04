@@ -288,6 +288,17 @@ problems. Dogfood it every big-picture run and fix root causes.
   a draggable vertical divider (left = Original, right = Edited), so the user judges
   exactly what a change did in one frame. Frontend-only, additive, its own mode
   (Compare stays a toggle).
+- **Split divider for the *per-op* "show without this op" compare too.** The v0.78.0
+  split divider only compares the whole edit vs the raw Original. The editor already
+  fetches a "without the selected op" render (`withoutOpPreview`, the `soloExclude`
+  toggle used while tuning one op) — feeding *that* image into the same split-divider
+  overlay would let the user drag a divider to see exactly what the **one op they're
+  tuning** does (e.g. how much this Sharpen/denoise/curve changed), not just the whole
+  recipe. Reuses the shipped `splitCompare.ts` helpers and the existing per-op render;
+  the only new work is wiring the solo image as the split overlay's left side and a
+  small mode toggle. Higher-precision trust win than the whole-recipe split, and it
+  answers the more common editing question ("is *this* slider helping?"). Additive,
+  frontend-only, no engine/API change. (S, editor/trust)
 - ~~**"Cropped view — showing N% of the frame" indicator + one-click "remove crop".**~~
   — **shipped v0.74.3** (see Shipped). A dimmed advisory caption below the preview now
   fires whenever an *enabled* `geometry.crop` is in the recipe, naming how much of the
