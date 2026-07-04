@@ -187,6 +187,17 @@ def test_recipe_validation_drops_unknown_and_clamps():
     assert rec.ops[0].params["stretch"] == 1.0
 
 
+@pytest.mark.parametrize("bad_params", [["x", "y", "z"], "abc", 123, None])
+def test_recipe_validation_tolerates_non_mapping_params(bad_params):
+    # A malformed body (or hand-built recipe) can send ``params`` as a list /
+    # string / number instead of an object. It must not raise (that was an
+    # unhandled 500 in put_recipe / create_preset / the export jobs) — the op is
+    # kept with its schema defaults, exactly as if params were omitted.
+    rec = recipe_from_dict({"ops": [{"id": "tone.curves", "params": bad_params}]})
+    assert [o.id for o in rec.ops] == ["tone.curves"]
+    assert rec.ops[0].params == get_op("tone.curves").defaults()
+
+
 def test_every_op_renders_in_preview():
     # A live preview must show EVERY enabled action — including the heavy
     # deconvolution op, which used to be skipped. What you see = what you export.
