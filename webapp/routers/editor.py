@@ -34,6 +34,11 @@ router = APIRouter(tags=["editor"])
 
 RECIPE_META_PREFIX = "editor_recipe:"
 USER_PRESETS_META_KEY = "editor_user_presets"
+# A single, user-designated "house style" recipe stored library-wide (not per
+# target). Once set, the editor offers it as a one-click seed on any run that has
+# no saved edit yet — so a repeat imager's default look is one click away on every
+# new target, without diving into the Presets menu. Off until the user sets it.
+DEFAULT_RECIPE_META_KEY = "editor_default_recipe"
 
 
 # ---- helpers ---------------------------------------------------------------
@@ -307,6 +312,73 @@ def delete_preset(preset_id: str, request: Request) -> dict:
     finally:
         lib.close()
     return {"deleted": preset_id}
+
+
+# ---- personal default recipe ("my house style") ---------------------------
+
+class DefaultRecipeOut(BaseModel):
+    """The user's library-wide default editor recipe, offered as a one-click seed
+    on any run with no saved edit. ``count`` is 0 (and ``ops`` empty) when the user
+    hasn't set one — the editor then simply doesn't offer it. The ops are validated
+    on load (stale ops dropped, params clamped), so applying them can never 500."""
+
+    ops: list[dict] = []
+    count: int = 0
+
+
+def _load_default_recipe(lib) -> DefaultRecipeOut:
+    """Read + validate the stored default recipe. A stale/garbage store degrades to
+    "no default" rather than erroring."""
+    raw = lib.get_meta(DEFAULT_RECIPE_META_KEY)
+    if not raw:
+        return DefaultRecipeOut(ops=[], count=0)
+    try:
+        rec = recipe_from_dict(json.loads(raw))
+    except (ValueError, TypeError):
+        return DefaultRecipeOut(ops=[], count=0)
+    ops = [op.to_dict() for op in rec.ops]
+    return DefaultRecipeOut(ops=ops, count=len(ops))
+
+
+@router.get("/api/editor/default-recipe", response_model=DefaultRecipeOut)
+def get_default_recipe(request: Request) -> DefaultRecipeOut:
+    """The user's saved default recipe (validated), or an empty one if unset."""
+    lib = deps.open_library(request)
+    try:
+        return _load_default_recipe(lib)
+    finally:
+        lib.close()
+
+
+class DefaultRecipeIn(BaseModel):
+    ops: list[dict] = []
+
+
+@router.put("/api/editor/default-recipe", response_model=DefaultRecipeOut)
+def put_default_recipe(body: DefaultRecipeIn, request: Request) -> DefaultRecipeOut:
+    """Save the current edit as the library-wide default. Ops are normalised through
+    the validator so only known ops/params persist; an empty list clears the
+    default (same as DELETE). Additive/opt-in — nothing changes for other runs until
+    the user chooses to apply it."""
+    recipe = recipe_from_dict({"ops": body.ops})
+    ops = [op.to_dict() for op in recipe.ops]
+    lib = deps.open_library(request)
+    try:
+        lib.set_meta(DEFAULT_RECIPE_META_KEY, json.dumps({"ops": ops}))
+    finally:
+        lib.close()
+    return DefaultRecipeOut(ops=ops, count=len(ops))
+
+
+@router.delete("/api/editor/default-recipe", response_model=DefaultRecipeOut)
+def delete_default_recipe(request: Request) -> DefaultRecipeOut:
+    """Clear the user's saved default recipe."""
+    lib = deps.open_library(request)
+    try:
+        lib.set_meta(DEFAULT_RECIPE_META_KEY, json.dumps({"ops": []}))
+    finally:
+        lib.close()
+    return DefaultRecipeOut(ops=[], count=0)
 
 
 # ---- recipe load/save ------------------------------------------------------

@@ -421,6 +421,45 @@ def test_previous_recipe_none_when_no_edits(client, solved_library):
     assert body["run_id"] is None and body["ops"] == []
 
 
+def test_default_recipe_unset_is_empty(client, built_library):
+    # No default saved yet → the editor is told there's nothing to offer.
+    body = client.get("/api/editor/default-recipe").json()
+    assert body["ops"] == [] and body["count"] == 0
+
+
+def test_default_recipe_set_get_and_clear(client, built_library):
+    # Saving the current edit as the default validates the ops (drops unknown ops)
+    # and stores it library-wide.
+    put = client.put("/api/editor/default-recipe", json={"ops": [
+        {"id": "tone.stretch", "params": {"stretch": 0.65}},
+        {"id": "bogus.op", "params": {}},                 # dropped by validation
+        {"id": "tone.saturation", "params": {"amount": 1.3}},
+    ]})
+    assert put.status_code == 200
+    assert [o["id"] for o in put.json()["ops"]] == ["tone.stretch", "tone.saturation"]
+    assert put.json()["count"] == 2
+
+    # A later GET returns the same validated recipe (params clamped/filled).
+    got = client.get("/api/editor/default-recipe").json()
+    assert [o["id"] for o in got["ops"]] == ["tone.stretch", "tone.saturation"]
+    assert got["ops"][0]["params"]["stretch"] == 0.65
+    assert got["count"] == 2
+
+    # DELETE clears it → back to "no default".
+    deleted = client.delete("/api/editor/default-recipe").json()
+    assert deleted["ops"] == [] and deleted["count"] == 0
+    assert client.get("/api/editor/default-recipe").json()["count"] == 0
+
+
+def test_default_recipe_empty_put_clears(client, built_library):
+    client.put("/api/editor/default-recipe",
+               json={"ops": [{"id": "tone.stretch", "params": {"stretch": 0.5}}]})
+    assert client.get("/api/editor/default-recipe").json()["count"] == 1
+    # Putting an empty op list is an explicit "clear", same as DELETE.
+    client.put("/api/editor/default-recipe", json={"ops": []})
+    assert client.get("/api/editor/default-recipe").json()["count"] == 0
+
+
 def test_edit_preview_and_histogram(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
     rid = _make_run(solved_library, safe, is_mosaic=True)

@@ -345,6 +345,13 @@ export interface PreviousRecipe {
   count: number;
 }
 
+/** The user's library-wide default editor recipe ("my house style"), offered as
+ * a one-click seed on any run with no saved edit. `count` is 0 when unset. */
+export interface DefaultRecipe {
+  ops: OpInstance[];
+  count: number;
+}
+
 export interface Preset {
   id: string;
   label: string;
@@ -725,6 +732,13 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ recipe, output_name: outputName, tiff_mode: tiffMode }),
     }),
+  getDefaultRecipe: () => req<DefaultRecipe>("/api/editor/default-recipe"),
+  putDefaultRecipe: (ops: OpInstance[]) =>
+    req<DefaultRecipe>("/api/editor/default-recipe", {
+      method: "PUT", body: JSON.stringify({ ops }),
+    }),
+  deleteDefaultRecipe: () =>
+    req<DefaultRecipe>("/api/editor/default-recipe", { method: "DELETE" }),
   listPresets: () => req<{ builtin: Preset[]; user: Preset[] }>("/api/editor/presets"),
   createPreset: (label: string, ops: OpInstance[]) =>
     req<Preset>("/api/editor/presets", { method: "POST", body: JSON.stringify({ label, ops }) }),

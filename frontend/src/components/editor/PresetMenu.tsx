@@ -1,5 +1,6 @@
 import { ActionIcon, Button, Group, Menu, Modal, TextInput } from "@mantine/core";
-import { IconBookmark, IconChevronDown, IconDeviceFloppy, IconTrash } from "@tabler/icons-react";
+import { IconBookmark, IconChevronDown, IconDeviceFloppy, IconStar, IconStarOff, IconTrash }
+  from "@tabler/icons-react";
 import { useDisclosure } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -40,6 +41,30 @@ export function PresetMenu({ currentOps, onApply }: {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["presets"] }),
   });
 
+  // The user's library-wide default recipe ("my house style"): setting it lets the
+  // editor offer it as a one-click seed on any run with no saved edit. Off until set.
+  const defaultRecipe = useQuery({
+    queryKey: ["default-recipe"], queryFn: api.getDefaultRecipe });
+  const setDefault = useMutation({
+    mutationFn: () => api.putDefaultRecipe(currentOps),
+    onSuccess: (d) => {
+      notifications.show({
+        message: `Saved as your default edit (${d.count} step${d.count === 1 ? "" : "s"}) `
+          + "— offered on new runs with no edit yet", color: "teal" });
+      qc.invalidateQueries({ queryKey: ["default-recipe"] });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
+  const clearDefault = useMutation({
+    mutationFn: () => api.deleteDefaultRecipe(),
+    onSuccess: () => {
+      notifications.show({ message: "Cleared your default edit", color: "gray" });
+      qc.invalidateQueries({ queryKey: ["default-recipe"] });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
+  const hasDefault = (defaultRecipe.data?.count ?? 0) > 0;
+
   const builtin = presets.data?.builtin ?? [];
   const user = presets.data?.user ?? [];
 
@@ -79,6 +104,18 @@ export function PresetMenu({ currentOps, onApply }: {
           <Menu.Item leftSection={<IconDeviceFloppy size={14} />} onClick={saveCtl.open}>
             Save current as preset…
           </Menu.Item>
+          <Menu.Item leftSection={<IconStar size={14} />}
+            disabled={!currentOps.length || setDefault.isPending}
+            onClick={() => setDefault.mutate()}>
+            Set current as my default
+          </Menu.Item>
+          {hasDefault ? (
+            <Menu.Item leftSection={<IconStarOff size={14} />} color="red"
+              disabled={clearDefault.isPending}
+              onClick={() => clearDefault.mutate()}>
+              Clear my default edit
+            </Menu.Item>
+          ) : null}
         </Menu.Dropdown>
       </Menu>
 
