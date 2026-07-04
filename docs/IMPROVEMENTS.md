@@ -53,6 +53,18 @@ a stretch (no lost/spurious coverage, no fake-black), the degenerate-input guard
 found** — the subsystem is well-hardened. Full Python suite green: 688 passed, 2
 skipped.)_
 
+_(Builder big-picture dogfood 2026-07-04: re-traced `stack → open editor → Auto →
+preview → export` end-to-end on realistic synthetic OSC stacks (sky + nebula +
+stars, green tint). Auto-process lands a balanced, well-exposed one-click result
+(median ≈0.24 display grey, R/G/B medians equal after gray-star + SCNR); the auto
+`detail.denoise ↔ detail.sharpen` crossfade and mosaic handling behave as
+documented; and proxy↔export parity for the whole auto recipe on a decimated
+proxy (`proxy_scale 2`) measured **0.93% mean** |preview−export| (p99 2.8%, max
+4.9% — localized star-edge sharpen/denoise on the decimated grid, the known limit)
+— confirming the "what you see is what you export" P1 promise holds. **No new bug
+or clear ready Builder task found; the editor + Stack-form autonomy are mature.**
+Full suite green: 721 passed, 2 skipped.)_
+
 _(The v0.67–0.69 runs fixed a large batch of verified bugs — Gaia colour cal,
 RA≈0 frame rejection, debayer edge wrap, job-cancel result loss, hung-Gaia
 timeout, several input-validation 500s, the NaN-through-stretch invariant, the
@@ -87,7 +99,17 @@ problems. Dogfood it every big-picture run and fix root causes.
   please vet the visual result before shipping** — this changes the priority-1
   one-click look, so it needs eyes on real stacks (galaxy / nebula / cluster /
   mosaic) to confirm it *improves* the default rather than over-darkening the sky or
-  crushing faint signal; a headless Builder can't validate the look. (M, editor/autonomy)
+  crushing faint signal; a headless Builder can't validate the look. **Builder
+  dogfood note (2026-07-04) to speed vetting:** `suggest_tone_curve` is a *pure
+  midtone lift* — it pins the sky floor (p1) and highlight shoulder (p99.5) on the
+  identity and only ever *raises* the median a fraction of the way to grey 0.25, so
+  the two failure modes the note worries about (darkening the sky / crushing faint
+  signal) are structurally impossible with the data-driven variant; the only residual
+  risk is gentle *over-brightening* on already-dim stacks. Measured on a realistic
+  auto result it returned `None` (median already ≈0.24, nothing to lift) — i.e. it is
+  a **no-op on well-exposed stacks** and only engages on under-exposed/dim ones, so
+  the Scout should vet specifically on *dim* stacks (a fixed gentle S-curve fallback,
+  by contrast, *does* darken the low-mids and needs the full visual check). (M, editor/autonomy)
 - **Confusing / clunky controls** — too many ops with terse params and no obvious
   starting point. Add plain-language help, a simple/guided default layout, curated
   presets, and progressive disclosure of advanced ops so a beginner gets a good
