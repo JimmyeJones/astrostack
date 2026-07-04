@@ -11,7 +11,10 @@ from __future__ import annotations
 import numpy as np
 from astropy.io import fits
 
-from seestack.stack.output import _merge_header_meta, write_stack_outputs
+from seestack.stack.output import (
+    DISPLAY_SPACE_CARD, _merge_header_meta, fits_is_display_space,
+    write_stack_outputs,
+)
 
 
 def _read_header(fits_path):
@@ -132,3 +135,32 @@ def test_editor_export_writes_display_data_verbatim(tmp_path):
                               out_basename="lin", already_display=False)
     png_lin = np.asarray(Image.open(lin["preview"]).convert("RGB"))
     assert abs(int(png_lin.mean()) - int(png.mean())) > 30
+
+
+def test_editor_export_fits_marked_display_space(tmp_path):
+    """An editor export (already_display) stamps the FITS as display-space so
+    renderers (and Siril/PixInsight) don't stretch it again; a linear stack keeps
+    the historical linear ADU header with no marker."""
+    rgb = np.clip(np.linspace(0, 1, 48, dtype=np.float32), 0, 1)
+    rgb = np.repeat(np.tile(rgb, (12, 1))[..., None], 3, axis=2)
+    cov = np.ones(rgb.shape[:2], dtype=np.float32)
+
+    disp = write_stack_outputs(tmp_path, rgb, cov, wcs_text=None,
+                               out_basename="edit", already_display=True)
+    hdr = _read_header(disp["fits"])
+    assert hdr[DISPLAY_SPACE_CARD] is True
+    assert "display" in str(hdr["BUNIT"]).lower()
+    assert fits_is_display_space(disp["fits"]) is True
+
+    lin = write_stack_outputs(tmp_path, rgb, cov, wcs_text=None,
+                              out_basename="lin", already_display=False)
+    hlin = _read_header(lin["fits"])
+    assert DISPLAY_SPACE_CARD not in hlin           # old/linear stacks carry no marker
+    assert str(hlin["BUNIT"]) == "ADU"
+    assert fits_is_display_space(lin["fits"]) is False
+
+
+def test_fits_is_display_space_tolerates_missing_file(tmp_path):
+    """A bad/missing path is 'not display space' (renderers fall back to linear),
+    never an exception on the hot render path."""
+    assert fits_is_display_space(tmp_path / "does-not-exist.fits") is False

@@ -49,6 +49,12 @@ def apply_recipe(
     *linear* result of the enabled ops unchanged (used by the Stretch suggestion,
     which needs to measure the linear image the stretch op will receive, not a
     tone-mapped one).
+
+    When ``ctx.already_display`` is set the input is *itself* a tone-mapped
+    display-space image (an editor export re-opened for editing), so the default
+    fallback stretch is suppressed too — otherwise an empty recipe would stretch
+    an already-stretched picture again (the re-edit double-stretch). An explicit
+    stretch op the user adds still runs.
     """
     ctx = ctx or EditContext()
     ctx.stage = "linear"
@@ -72,7 +78,7 @@ def apply_recipe(
             stretched = True
             ctx.stage = "nonlinear"
 
-    if not stretched and auto_stretch:
+    if not stretched and auto_stretch and not ctx.already_display:
         # Auto-insert a default stretch so the output is viewable.
         from seestack.edit.registry import finite_mask
         from seestack.render.thumbnail import asinh_stretch

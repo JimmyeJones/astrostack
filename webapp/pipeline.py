@@ -327,14 +327,21 @@ def _render_recipe_fullres(fits_path: str, recipe_dict: dict, progress,
     An op that raises on the full-res data is dropped (best-effort, like the live
     preview) but its failure message is appended to ``errors`` (when provided) —
     same format as ``apply_recipe`` — so the caller can surface it instead of the
-    export silently changing the look with no notice to the user."""
+    export silently changing the look with no notice to the user.
+
+    When ``fits_path`` is itself a tone-mapped display-space export (re-editing an
+    edited run), the default fallback stretch is suppressed so an empty/no-stretch
+    recipe doesn't double-stretch the already-stretched image — matching the live
+    preview's ``ctx.already_display`` behaviour."""
     import numpy as np
 
     from seestack.edit.recipe import recipe_from_dict
     from seestack.edit.registry import EditContext, as_rgb, get_op
 
     from seestack.edit.proxy import load_coverage
+    from seestack.stack.output import fits_is_display_space
 
+    display_space = fits_is_display_space(fits_path)
     rgb, wcs = _load_full_rgb_wcs(fits_path)
     recipe = recipe_from_dict(recipe_dict)
     n = max(len([o for o in recipe.ops if o.enabled]), 1)
@@ -362,7 +369,7 @@ def _render_recipe_fullres(fits_path: str, recipe_dict: dict, progress,
                 errors.append(msg)
         done += 1
         progress("render", done, n)
-    if not stretched:
+    if not stretched and not display_space:
         from seestack.render.thumbnail import asinh_stretch
         out = asinh_stretch(out)
     return out, recipe
@@ -423,7 +430,12 @@ def _apply_editor_to_run(lib: Library, safe: str, run_id: int, recipe_dict: dict
             canvas_h=out.shape[0], canvas_w=out.shape[1],
             coverage_min=1, coverage_max=1,
             options_json=_json.dumps({"editor_recipe": recipe.to_dict(),
-                                      "derived_from": run_id}),
+                                      "derived_from": run_id,
+                                      # The export is the recipe's tone-mapped
+                                      # result, not a linear stack — so re-opening
+                                      # it in the editor must not default-stretch
+                                      # it again (matches the FITS SSDISPLY card).
+                                      "display_space": True}),
             notes="edited",
         ))
     finally:

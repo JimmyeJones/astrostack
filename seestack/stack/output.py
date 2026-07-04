@@ -36,7 +36,29 @@ log = logging.getLogger(__name__)
 
 OUTPUT_DIRNAME = "output"
 
+#: FITS header keyword marking a written image as tone-mapped **display space**
+#: (roughly ``[0, 1]``, non-linear) rather than the usual linear ADU stack. An
+#: editor export is the recipe's already-stretched result, so it is *not* linear
+#: — stamping this lets both our renderers and external tools (Siril/PixInsight)
+#: know not to stretch it again. Absent = the historical assumption (linear).
+DISPLAY_SPACE_CARD = "SSDISPLY"
+
 _UNSAFE_BASENAME_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def fits_is_display_space(fits_path: str | Path) -> bool:
+    """True when a stack FITS is marked tone-mapped display-space (an editor
+    export), so renderers skip the default stretch that would double-process it.
+
+    Reads only the header (cheap) and treats any read error / missing card as
+    "not display space" — so old files and non-editor stacks keep the historical
+    linear behaviour. See :data:`DISPLAY_SPACE_CARD`."""
+    try:
+        from astropy.io import fits
+
+        return bool(fits.getheader(fits_path).get(DISPLAY_SPACE_CARD, False))
+    except Exception:  # noqa: BLE001 — a bad/missing header just means "not marked"
+        return False
 
 
 def _sanitize_basename(name: str) -> str:
@@ -101,7 +123,7 @@ def write_stack_outputs(
 
     _archive_if_exists([fits_path, tiff_path, preview_path, cov_fits_path])
 
-    _write_fits(fits_path, rgb, wcs_text, header_meta)
+    _write_fits(fits_path, rgb, wcs_text, header_meta, already_display=already_display)
     _write_coverage_fits(cov_fits_path, coverage)
     _write_tiff(tiff_path, rgb, mode=tiff_mode, already_display=already_display)
     # Preview PNG normally autostretches a linear stack. For an editor export the
@@ -125,8 +147,16 @@ def _write_fits(
     rgb: np.ndarray,
     wcs_text: str | None,
     header_meta: dict[str, Any] | None = None,
+    *,
+    already_display: bool = False,
 ) -> None:
-    """Write a 3-channel float32 FITS cube with WCS header."""
+    """Write a 3-channel float32 FITS cube with WCS header.
+
+    ``already_display`` (editor exports): the cube is the recipe's already
+    tone-mapped ``[0, 1]`` result, not a linear stack, so we stamp
+    :data:`DISPLAY_SPACE_CARD` and an honest ``BUNIT`` instead of claiming
+    ``ADU (linear)`` — otherwise re-opening the file (here or in Siril/
+    PixInsight) would stretch an already-stretched picture again."""
     from astropy.io import fits
 
     # FITS convention: data shape is (NAXIS3, NAXIS2, NAXIS1) = (channels, H, W).
@@ -136,7 +166,11 @@ def _write_fits(
     h["CREATOR"] = ("Seestack", "see PLAN.md")
     h["DATE"] = (datetime.now(timezone.utc).isoformat(), "UTC")
     h["NAXIS3"] = (3, "R, G, B")
-    h["BUNIT"] = ("ADU", "linear units (uncalibrated)")
+    if already_display:
+        h["BUNIT"] = ("display", "tone-mapped display-space [0,1] (non-linear)")
+        h[DISPLAY_SPACE_CARD] = (True, "tone-mapped display-space image, not linear")
+    else:
+        h["BUNIT"] = ("ADU", "linear units (uncalibrated)")
     if header_meta:
         _merge_header_meta(h, header_meta)
     if wcs_text:

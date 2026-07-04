@@ -54,6 +54,22 @@ def _run_info(request: Request, safe: str, run_id: int) -> tuple[Path, Any]:
     return pdir, run
 
 
+def _run_display_space(run: Any) -> bool:
+    """True when this run's stacked image is already tone-mapped display space (an
+    editor export), so the editor proxy must not default-stretch it again — the
+    re-edit double-stretch. Read from the run's own ``options_json`` (written by
+    the editor export), so it needs no FITS read on the hot preview path. Old
+    runs (no flag) return False → today's linear-stack behaviour."""
+    import json as _json
+
+    if not getattr(run, "options_json", None):
+        return False
+    try:
+        return bool(_json.loads(run.options_json).get("display_space", False))
+    except (ValueError, TypeError):
+        return False
+
+
 def _decode_recipe_query(request: Request, safe: str, run_id: int, recipe_q: str | None) -> Recipe:
     """Decode a base64url JSON recipe from the query, or fall back to the saved one."""
     if recipe_q:
@@ -121,7 +137,8 @@ def _render_png(project_dir: Path, run, recipe: Recipe) -> bytes:
 
     rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
     ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None,
-                      coverage=_proxy_coverage(run.fits_path, scale))
+                      coverage=_proxy_coverage(run.fits_path, scale),
+                      already_display=_run_display_space(run))
     out = apply_recipe(rgb, recipe, ctx, for_preview=True)
     u8 = (np.clip(np.nan_to_num(out), 0.0, 1.0) * 255).astype(np.uint8)
     buf = io.BytesIO()
@@ -188,7 +205,8 @@ def _render_star_mask_png(project_dir: Path, run, size_px: float, grow: float,
 
     rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
     ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None,
-                      coverage=_proxy_coverage(run.fits_path, scale))
+                      coverage=_proxy_coverage(run.fits_path, scale),
+                      already_display=_run_display_space(run))
     if recipe is not None:
         sub = _recipe_before_uid(recipe, uid,
                                  drop_ids=("stars.reduce", "stars.boost_nebula"))
@@ -458,7 +476,8 @@ async def levels_suggestion(safe: str, run_id: int, request: Request,
     def work() -> LevelsSuggestionOut:
         rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
         ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None,
-                          coverage=_proxy_coverage(run.fits_path, scale))
+                          coverage=_proxy_coverage(run.fits_path, scale),
+                          already_display=_run_display_space(run))
         out = apply_recipe(rgb, sub, ctx, for_preview=True)
         pts = suggest_levels_points(out)
         if pts is None:
@@ -553,7 +572,8 @@ async def curve_suggestion(safe: str, run_id: int, request: Request,
     def work() -> CurveSuggestionOut:
         rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
         ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None,
-                          coverage=_proxy_coverage(run.fits_path, scale))
+                          coverage=_proxy_coverage(run.fits_path, scale),
+                          already_display=_run_display_space(run))
         out = apply_recipe(rgb, sub, ctx, for_preview=True)
         pts = suggest_tone_curve(out)
         if pts is None:
@@ -650,7 +670,8 @@ async def edit_histogram(safe: str, run_id: int, request: Request,
         # the UI can say "no image data" instead of showing a mystery black frame.
         empty = not bool(np.isfinite(rgb).any())
         ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None,
-                          coverage=_proxy_coverage(run.fits_path, scale))
+                          coverage=_proxy_coverage(run.fits_path, scale),
+                          already_display=_run_display_space(run))
         errors: list[str] = []
         out = apply_recipe(rgb, rec, ctx, for_preview=True, errors=errors)
         hist = compute_histogram(out)

@@ -125,12 +125,20 @@ def render_stack_png(
     ``stretch`` (how hard to lift faint detail) and ``black`` (black point),
     both in ``[0, 1]``. Because it works from the full-dynamic-range FITS, faint
     detail that the baked 8-bit preview clipped comes back.
+
+    An editor-export FITS is already a tone-mapped display-space ``[0, 1]`` image
+    (marked with :data:`~seestack.stack.output.DISPLAY_SPACE_CARD`), so it is
+    rendered *verbatim* — a second asinh stretch would double-process it, and the
+    ``stretch``/``black`` sliders simply don't apply to such a run.
     """
     import io
 
     from astropy.io import fits as _fits
     from PIL import Image
 
+    from seestack.stack.output import fits_is_display_space
+
+    display_space = fits_is_display_space(fits_path)
     arr = np.asarray(_fits.getdata(fits_path), dtype=np.float32)
     if arr.ndim == 3:                       # (channels, H, W) → (H, W, channels)
         rgb = np.transpose(arr, (1, 2, 0))
@@ -151,7 +159,10 @@ def render_stack_png(
         step = int(np.ceil(w / max_width))
         rgb = rgb[::step, ::step]
 
-    stretched = asinh_stretch(rgb, stretch=stretch, black=black)
+    # A display-space export is shown as written (matches its stored preview PNG);
+    # a linear stack gets the adjustable asinh stretch. A second stretch on an
+    # already tone-mapped image would double-process it.
+    stretched = rgb if display_space else asinh_stretch(rgb, stretch=stretch, black=black)
     u8 = (np.clip(np.nan_to_num(stretched), 0.0, 1.0) * 255).astype(np.uint8)
     buf = io.BytesIO()
     Image.fromarray(u8, mode="RGB").save(buf, format="PNG")
