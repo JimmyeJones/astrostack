@@ -96,19 +96,20 @@ problems. Dogfood it every big-picture run and fix root causes.
 - **Editor bug hunt (ongoing)** — there are undocumented issues. Each big-picture
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
-- **Wavelet-denoise preview↔export parity** — every other spatial op (sharpen
-  radius, deconv PSF, bilateral spatial σ, background box) is corrected for the
-  decimated preview proxy via `ctx.scaled_px`, but the **default** denoise method
-  (`method="wavelet"`, also what Auto-process uses) has no size compensation: a
-  BayesShrink multi-level DWT's effect scales with image dimensions, so a strength
-  tuned on the ≤1500 px proxy smooths visibly differently on the full-res export.
-  The wavelet branch decomposes the whole image, so there's no single "radius" to
-  scale; a defensible fix is to cap the decomposition `wavelet_levels` to a
-  proxy-independent count (e.g. tie it to a physical scale via `proxy_scale`) or to
-  denoise the export on a matched-resolution pyramid. Needs care and a parity test
-  (compare denoise on a full image vs its 2×/4× strided proxy). Off nothing (it's
-  a correctness fix), but validate it doesn't weaken the clean-image case.
-  (M, editor/correctness)
+- ~~**Wavelet-denoise preview↔export parity**~~ — **investigated & closed as a
+  non-issue (2026-07-04, Builder).** The concern was that a BayesShrink multi-level
+  DWT tuned on the ≤1500 px proxy would smooth visibly differently on the full-res
+  export. Measured it directly: denoise a 2400² synthetic (smooth signal + stars +
+  white noise) at full-res, then compare that result *sampled to the proxy grid*
+  against denoising the strided proxy — the standard preview↔export parity check.
+  The mean |preview − export| is only **0.37 % of range at proxy_scale 2** and
+  **0.53 % at proxy_scale 4** — well within the inherent ≤2 % decimation-sampling
+  limit the Scout already documented for the other spatial ops. Explicitly capping
+  `wavelet_levels` to `max_level − log2(proxy_scale)` changed the parity by <0.001 %
+  (BayesShrink's per-subband threshold is estimated from the data, so it self-adapts
+  to the level count). There's no measurable mismatch to fix, so shipping a
+  `wavelet_levels` cap would be pure churn — dropped per AGENTS.md §2 ("don't
+  manufacture busywork").
 - **"Original" compare should match the stack's own baseline** — the editor's
   Compare ("Original") renders an *empty* recipe, which the backend tone-maps with
   a hard-coded default asinh (stretch 0.5 / black 0.35). **Analysis (2026-07):** that
@@ -123,12 +124,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   user saw), accepting that it's the ≤1024 px preview rather than the ≤1500 px editor
   proxy. Care: it's a behaviour change to Compare, so gate/validate the resolution
   swap doesn't jar the A/B. (S, editor/trust)
-- **Guide lines on the histogram for the Stretch/clipping too** — the new
-  `Histogram` `guides` prop (v0.65.0) draws the Levels black/white points; the same
-  mechanism could mark the pure-black (0) and pure-white (1) clipping edges whenever
-  the clipping caption fires, and the Curves op's endpoint handles, so *every* tonal
-  control shows where it lands on the graph. Small, reuses the guides prop;
-  frontend-only, advisory. (S, editor/trust)
 - **Mark editor-export runs as display-space so re-editing doesn't double-stretch
   (and the FITS is honest)** — an editor export writes its already-stretched
   `[0,1]` result to a FITS via `write_stack_outputs(..., already_display=True)`,
@@ -262,6 +257,25 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Every tonal control's landing shown on the histogram (Stretch/clip edges +
+  Curves points, not just Levels)** — the `Histogram` `guides` prop (v0.65.0) only
+  ever marked the Levels black/white points, so a beginner setting a Curves bend or
+  over-stretching into a clip had no visual cue of *where on the tonal range* it
+  landed. Now (a) whenever the clipping caption fires, an orange "clip" guide marks
+  the exact edge it warns about — value 0 (crushed shadows) and/or value 1 (blown
+  highlights) — driven by a new `clippingEdges` helper refactored out of
+  `clippingCaption` so the caption and the guide can never disagree; and (b) when a
+  `tone.curves` op is selected, faint dashed purple guides mark each *interior*
+  control point's input position (endpoints are pinned at 0/1 and already covered by
+  the clip edges), with a one-line caption, so the user can see whether a bend sits
+  on the sky peak, the midtones, or the highlights. A new pure `tonalHistGuides`
+  composes the Levels + Curves + clipping guide helpers into the single `guides`
+  prop. Frontend-only, additive, advisory (changes nothing about the image). Vitest:
+  `clippingEdges` (threshold parity with the caption), `curvesHistGuides` (interior
+  only / identity curve / malformed points), `clippingHistGuides` (each edge + both),
+  `tonalHistGuides` (composition), plus an Editor test that selecting a Curves op
+  surfaces the caption. (v0.71.2, this run — Builder)
 
 - **Fix flaky frontend CI at the root: run vitest test files sequentially
   (`fileParallelism: false`)** — `main`'s frontend CI had been intermittently red

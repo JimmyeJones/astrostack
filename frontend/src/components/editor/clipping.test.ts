@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clippingCaption } from "./clipping";
+import { clippingCaption, clippingEdges } from "./clipping";
 import type { Histogram } from "../../api/client";
 
 /** Build a 10-bin histogram with the given per-channel top/bottom-bin counts and
@@ -57,5 +57,17 @@ describe("clippingCaption", () => {
   it("is null-safe for missing/empty data", () => {
     expect(clippingCaption(undefined)).toBeNull();
     expect(clippingCaption({ bins: 0, edges: [], r: [], g: [], b: [] })).toBeNull();
+  });
+});
+
+describe("clippingEdges", () => {
+  it("mirrors the caption's thresholds", () => {
+    expect(clippingEdges(undefined)).toEqual({ high: false, low: false });
+    expect(clippingEdges(hist(0, 0))).toEqual({ high: false, low: false });
+    // ≈9% highlights trips high; a 29% shadow pile stays below the 35% floor.
+    expect(clippingEdges(hist(10, 40))).toEqual({ high: true, low: false });
+    // 50% shadows trips low.
+    expect(clippingEdges(hist(0, 100))).toEqual({ high: false, low: true });
+    expect(clippingEdges(hist(10, 100))).toEqual({ high: true, low: true });
   });
 });

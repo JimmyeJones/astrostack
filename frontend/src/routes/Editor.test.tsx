@@ -853,6 +853,33 @@ describe("EditorView", () => {
     expect(await screen.findByText(/mark your black/)).toBeInTheDocument();
   });
 
+  it("shows the curve-point guide caption when the Curves op is selected", async () => {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [
+        { uid: "s1", id: "tone.stretch", enabled: true, params: { stretch: 0.6 } },
+        { uid: "cv1", id: "tone.curves", enabled: true,
+          params: { points: [[0, 0], [0.3, 0.4], [1, 1]] } },
+      ],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    // Not selected yet → no curve-guide caption.
+    await screen.findByText("Curves");
+    expect(screen.queryByText(/where your curve's points sit/)).not.toBeInTheDocument();
+    // Selecting the Curves op surfaces the guide caption.
+    fireEvent.click(screen.getByText("Curves"));
+    expect(await screen.findByText(/where your curve's points sit/)).toBeInTheDocument();
+  });
+
   it("previews the proposed crop then adds a Crop op on Apply", async () => {
     vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CROP]);
     vi.spyOn(client.api, "getRecipe").mockResolvedValue({

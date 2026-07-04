@@ -24,6 +24,22 @@ function pct(frac: number): string {
   return p < 1 ? "<1%" : `${Math.round(p)}%`;
 }
 
+/** Which extreme(s) the current recipe is clipping into, from the live
+ * histogram: ``high`` = a damaging pile of pure-white pixels (blown star/nebula
+ * cores), ``low`` = the sky crushed to pure black. Uses the same thresholds as
+ * :func:`clippingCaption` so the caption and the histogram clip-edge guides can
+ * never disagree. Pure and side-effect free. */
+export function clippingEdges(
+  hist: Histogram | undefined,
+): { high: boolean; low: boolean } {
+  if (!hist) return { high: false, low: false };
+  const high = Math.max(
+    binFraction(hist.r, -1), binFraction(hist.g, -1), binFraction(hist.b, -1));
+  const low = Math.max(
+    binFraction(hist.r, 0), binFraction(hist.g, 0), binFraction(hist.b, 0));
+  return { high: high >= HIGHLIGHT_CLIP_FRAC, low: low >= SHADOW_CLIP_FRAC };
+}
+
 /** A plain-language warning when the current recipe clips highlights or shadows,
  * or ``null`` when the histogram looks healthy. Built from the already-fetched
  * live histogram — advisory only, it changes nothing. Highlights (blown white)
