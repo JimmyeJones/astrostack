@@ -23,6 +23,7 @@ import { degenerateLevelsUids, extraEnabledStretchUids, hasEnabledStretch, inser
 import { autoSummarySentence, autoValueSentence } from "../components/editor/autoSummary";
 import { applyDataDrivenDefaults, countDataDrivenDefaults, type OpSuggestion }
   from "../components/editor/dataDrivenDefaults";
+import { deconvUnderstatesCaption } from "../components/editor/deconvPreview";
 import { previewScaleCaption } from "../components/editor/previewScale";
 import { prependCoverageLeveling } from "../components/editor/coverageLeveling";
 import { applyTrimCrop, trimRectStyle, trimKeptLabel, hasEnabledGeometryOp }
@@ -834,6 +835,17 @@ export function EditorView() {
                 <IconAlertTriangle size={14} color="var(--mantine-color-orange-6)"
                   style={{ flexShrink: 0, marginTop: 2 }} />
                 <Text size="xs" c="orange.6">{clippingCaption(hist.data)}</Text>
+              </Group>
+            ) : null}
+            {/* Deconvolution reverses a sub-pixel blur that isn't representable
+                on the decimated preview proxy, so on a large mosaic/drizzle the
+                preview understates it. Say so honestly rather than let the
+                preview↔export look diverge silently. Advisory only. */}
+            {deconvUnderstatesCaption(hist.data) ? (
+              <Group gap={6} wrap="nowrap" align="flex-start" mt={4}>
+                <IconInfoCircle size={14} color="var(--mantine-color-dimmed)"
+                  style={{ flexShrink: 0, marginTop: 2 }} />
+                <Text size="xs" c="dimmed">{deconvUnderstatesCaption(hist.data)}</Text>
               </Group>
             ) : null}
             {hist.data?.errors?.length ? (

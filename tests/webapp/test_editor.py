@@ -297,6 +297,42 @@ def test_edit_preview_and_histogram(client, solved_library):
     assert hist["is_mosaic"] is True
 
 
+def test_histogram_flags_deconv_preview_understatement(client, solved_library):
+    """When the preview proxy is decimated enough that an enabled Deconvolution
+    op's PSF collapses to the floor, the histogram reports
+    ``deconv_preview_understates`` so the editor can honestly caption that the
+    preview shows less than the export applies. A PSF that survives the proxy,
+    or a disabled deconv op, must not raise the flag."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    # A wide master (1700 px) → proxy_scale 2, so psf_sigma 0.5 collapses
+    # (0.5 / 2 = 0.25 < the 0.4 floor) while psf_sigma 2.0 survives (2.0/2 = 1.0).
+    rid = _make_run(solved_library, safe, basename="wide", h=120, w=1700)
+
+    def hist_for(recipe):
+        q = _enc(recipe)
+        return client.get(
+            f"/api/targets/{safe}/stack-runs/{rid}/editor/histogram?recipe={q}").json()
+
+    weak = hist_for({"ops": [{"id": "detail.deconvolve",
+                              "params": {"iterations": 5, "psf_sigma": 0.5}}]})
+    assert weak["proxy_scale"] >= 2.0
+    assert weak["deconv_preview_understates"] is True
+
+    # A wide PSF is representable on the same proxy → no understatement.
+    strong = hist_for({"ops": [{"id": "detail.deconvolve",
+                                "params": {"iterations": 5, "psf_sigma": 2.0}}]})
+    assert strong["deconv_preview_understates"] is False
+
+    # A disabled deconv op doesn't count.
+    disabled = hist_for({"ops": [{"id": "detail.deconvolve", "enabled": False,
+                                  "params": {"iterations": 5, "psf_sigma": 0.5}}]})
+    assert disabled["deconv_preview_understates"] is False
+
+    # A recipe with no deconv op is never flagged.
+    none = hist_for({"ops": [{"id": "tone.stretch", "params": {}}]})
+    assert none["deconv_preview_understates"] is False
+
+
 def test_trim_suggestion_mosaic(client, solved_library):
     """On a mosaic, the trim endpoint returns a fractional crop to the largest
     well-covered rectangle, excluding the ragged low-coverage border."""

@@ -362,6 +362,11 @@ export interface Histogram {
   // range). The "Coverage leveling" op only does something on a mosaic, so the
   // editor uses this to tell the user when the control is a no-op here.
   is_mosaic?: boolean;
+  // True when an enabled Deconvolution op's PSF collapses on the decimated
+  // preview proxy, so the live preview understates the effect the full-res
+  // export applies. Surfaced as an honest advisory (the sub-pixel blur simply
+  // isn't representable on the proxy grid — see deconvUnderstatesCaption).
+  deconv_preview_understates?: boolean;
 }
 
 export interface PsfSuggestion {

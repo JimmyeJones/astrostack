@@ -40,23 +40,6 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
-### Editor — engine & backend (PRIORITY 1)
-
-- **BUG: deconvolution's live preview is a near-no-op on large stacks — preview
-  shows almost nothing while the export changes a lot** — the proxy-corrected
-  PSF `max(0.4, ctx.scaled_px(psf_sigma))` (`seestack/edit/ops/detail.py:107`)
-  collapses at real proxy scales: default `psf_sigma=1.5` at `proxy_scale=4`
-  gives σ=0.4, and `rad = max(1, round(3σ)) = 1` builds a 3×3 near-delta kernel
-  that Richardson-Lucy barely acts on. Measured on synthetic star fields:
-  mean effect 0.0045 on the proxy vs 0.031 on the export (~7× weaker preview) —
-  the exact preview↔export mismatch class v0.57.0 was meant to close, on the op
-  it headlined. Trigger: any stack whose master is >~4500 px wide (mosaics,
-  drizzle) + Deconvolution. **Fix:** a sub-pixel PSF can't be represented on the
-  decimated grid — deconvolve a full-res centre crop/tile for the preview, or
-  run the deconv stage at reduced decimation, or (minimum) caption that the
-  preview understates deconvolution when `scaled_px(psf_sigma)` hits the floor.
-  Severity: wrong-result (preview misleads). Confidence: confirmed (measured).
-
 ### Editor — frontend (PRIORITY 1)
 
 - **BUG (cosmetic): trim-crop preview rectangle misaligns on a letterboxed
@@ -309,6 +292,27 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Fix: deconvolution's live preview silently understated the export on large
+  stacks — now captioned honestly** — the top editor bug. On a heavily-decimated
+  preview proxy (a ≤1500 px view of a wide mosaic/drizzle, `proxy_scale` ≥ ~4)
+  the proxy-corrected PSF `max(0.4, scaled_px(psf_sigma))` collapses to the floor
+  and Richardson-Lucy's near-delta 3×3 kernel barely acts, so the preview showed
+  a fraction of the star-sharpening the full-res export applies — a preview↔export
+  mismatch with *no notice* to the user. The sub-pixel blur genuinely isn't
+  representable on the decimated grid (no PSF tweak recovers it), so instead of
+  silently misleading we now surface an honest advisory: a pure
+  `deconv_understates_on_proxy(psf_sigma, proxy_scale)` engine helper (shared with
+  the backend and the `_DECONV_PSF_FLOOR` constant it keys on) flags exactly the
+  floored case; the histogram endpoint reports `deconv_preview_understates` for any
+  enabled Deconvolution op that collapses on the current proxy; and the editor
+  shows a dimmed "preview understates the effect — the export applies it at full
+  strength" caption under the preview. Engine + one endpoint field + frontend;
+  additive/upgrade-safe (older clients ignore the new field). Tested: engine
+  (the flag matches a *measured* weak preview — <½ the export's effect — and the
+  rule's boundary cases incl. degenerate inputs), webapp (the flag fires only for
+  an enabled, collapsing deconv op on a decimated proxy), Vitest (caption helper
+  3 cases). (v0.69.13, this run — Builder)
 
 - **Fix: editor overlay-zoom mislabel + keyboard access gaps (a11y)** — three
   editor a11y fixes. (1) The zoom lightbox titled whatever was shown as "edited"

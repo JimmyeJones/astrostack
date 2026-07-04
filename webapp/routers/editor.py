@@ -21,6 +21,7 @@ from pydantic import BaseModel
 
 from seestack.edit.coverage_trim import largest_covered_rect
 from seestack.edit.histogram import compute_histogram
+from seestack.edit.ops.detail import deconv_understates_on_proxy
 from seestack.edit.pipeline import apply_recipe
 from seestack.edit.proxy import coverage_path_for, get_proxy, load_coverage
 from seestack.edit.recipe import Recipe, recipe_from_dict
@@ -545,6 +546,18 @@ async def edit_histogram(safe: str, run_id: int, request: Request,
         # single-field stack (uniform coverage) it's a deliberate no-op, so the
         # editor can tell the user the control won't do anything here.
         hist["is_mosaic"] = bool(int(run.coverage_max) > int(run.coverage_min))
+        # A deconvolution op's live preview understates the full-res export when
+        # the proxy is decimated enough that its PSF collapses to the floor (a
+        # near-no-op kernel) — a fundamental limit of the sub-pixel blur on the
+        # decimated grid. Flag it so the editor can honestly caption that the
+        # preview shows less deconvolution than the export applies, instead of
+        # silently misleading. Only enabled deconv ops count.
+        hist["deconv_preview_understates"] = any(
+            op.enabled and op.id == "detail.deconvolve"
+            and deconv_understates_on_proxy(
+                float(op.params.get("psf_sigma", 1.5)), float(scale))
+            for op in rec.ops
+        )
         return hist
 
     return await run_in_threadpool(work)
