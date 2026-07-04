@@ -5,8 +5,8 @@ import {
 import { useDebouncedValue } from "@mantine/hooks";
 import {
   IconAlertTriangle, IconArrowBackUp, IconArrowForwardUp, IconArrowLeft, IconChevronDown,
-  IconChevronUp, IconCrop, IconDeviceFloppy, IconDownload, IconInfoCircle, IconPhotoDown,
-  IconPlus, IconRefresh, IconSparkles, IconWand, IconZoomScan,
+  IconChevronUp, IconCrop, IconDeviceFloppy, IconDownload, IconHistory, IconInfoCircle,
+  IconPhotoDown, IconPlus, IconRefresh, IconSparkles, IconWand, IconZoomScan,
 } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -26,7 +26,8 @@ import { applyDataDrivenDefaults, countDataDrivenDefaults, type OpSuggestion }
 import { deconvUnderstatesCaption } from "../components/editor/deconvPreview";
 import { previewScaleCaption } from "../components/editor/previewScale";
 import { prependCoverageLeveling } from "../components/editor/coverageLeveling";
-import { applyTrimCrop, trimRectStyle, trimKeptLabel, geometryOpsKey, previewBoxStyle }
+import { applyTrimCrop, trimRectStyle, trimKeptLabel, geometryOpsKey, previewBoxStyle,
+  cropCoveragePct, removeCropOps }
   from "../components/editor/mosaicTrim";
 import { pngProgressLabel } from "../components/editor/pngProgress";
 import { opErrorsMessage } from "../components/editor/opErrors";
@@ -34,7 +35,7 @@ import { clippingCaption } from "../components/editor/clipping";
 import { previewDebounceMs } from "../components/editor/previewDebounce";
 import { starMaskSizePx } from "../components/editor/starMaskSize";
 import { levelsAtIdentity, resetLevelsPoints } from "../components/editor/levelsReset";
-import { curvePointsMatch } from "../components/editor/curveMatch";
+import { curvePointsMatch, isIdentityCurve } from "../components/editor/curveMatch";
 import { coalesceFwhm, measuredContextText } from "../components/editor/measuredContext";
 import { OpParamPanel } from "../components/editor/OpParamPanel";
 import { PresetMenu } from "../components/editor/PresetMenu";
@@ -83,6 +84,19 @@ export function EditorView() {
 
   const opsSchema = useQuery({ queryKey: ["editor-ops"], queryFn: api.editorOps, staleTime: 60_000 });
   const saved = useQuery({ queryKey: ["recipe", safe, rid], queryFn: () => api.getRecipe(safe, rid) });
+  // Carry-over: the newest *other* run's saved edit, offered as a one-click seed
+  // when *this* run has no saved recipe yet — so re-stacking a multi-night target
+  // keeps the look the user dialled in, instead of reopening on the flat default.
+  // Fetched only when the saved recipe is empty (never nags a run that has its own
+  // edit); applying it is an explicit, undoable step and isn't persisted unless
+  // the user Saves. The ops are server-validated on load, so a stale op can't 500.
+  const savedIsEmpty = !!saved.data && (saved.data.ops?.length ?? 0) === 0;
+  const prevRecipe = useQuery({
+    queryKey: ["previous-recipe", safe, rid],
+    queryFn: () => api.previousRecipe(safe, rid),
+    enabled: !!opsSchema.data && savedIsEmpty,
+    staleTime: 30_000,
+  });
   // Data-driven default for the deconvolution PSF width: the target's median
   // star FWHM converted to a Gaussian σ, offered as a one-click button.
   const psf = useQuery({
@@ -520,6 +534,21 @@ export function EditorView() {
   const fixStage = (u: string) => setOps((p) => moveToCorrectSide(p, u, specs));
 
   const selectedOp = ops.find((o) => o.uid === selected) ?? null;
+  // Auto-contrast on the Curves op derives its curve at *render* time from the
+  // image entering the op while the stored points stay a flat identity, so the
+  // widget would otherwise draw a straight line that contradicts the preview.
+  // When it's engaged (auto on + still identity) show the derived shape — the same
+  // one `…/editor/curve-suggestion` returns — as a read-only ghost, and offer to
+  // Bake it into editable points (clearing `auto`, so what you see is what you tune).
+  const curveGhost = selectedOp?.id === "tone.curves"
+    && selectedOp.params?.auto === true
+    && isIdentityCurve(selectedOp.params?.points)
+    && curve.data?.points != null && curve.data.points.length >= 2
+    ? (curve.data.points as [number, number][]) : undefined;
+  const bakeAutoCurve = () => {
+    if (!selectedOp || !curveGhost) return;
+    setParams(selectedOp.uid, { ...selectedOp.params, points: curveGhost, auto: false });
+  };
   // No enabled stretch → the pipeline silently applies a default asinh stretch at
   // the end. Nudge the user to add/enable an explicit, controllable one.
   const disabledStretch = ops.find((o) => !o.enabled && specs[o.id]?.is_stretch) ?? null;
@@ -618,6 +647,18 @@ export function EditorView() {
   const cancelTrim = () => {
     setTrimPreview(false);
     restoreCoverageAfterTrim();
+  };
+  const applyPreviousRecipe = () => {
+    const prev = prevRecipe.data;
+    if (!prev?.ops?.length) return;
+    // Replace the (empty) working recipe with a copy of the previous run's edit as
+    // a single undoable step. Not persisted until the user Saves.
+    setOps(() => prev.ops);
+    notifications.show({
+      message: `Applied your edit from the previous run (${prev.count} step`
+        + `${prev.count === 1 ? "" : "s"}) — Undo to revert, Save to keep`,
+      color: "violet",
+    });
   };
   const applyTrim = () => {
     if (!trimCrop) return;
@@ -867,6 +908,24 @@ export function EditorView() {
                 {previewScaleCaption(hist.data)}
               </Text>
             ) : null}
+            {/* A geometry.crop op silently shrinks the visible frame — an
+                auto-applied trim or a forgotten manual crop just looks like "my
+                image got smaller". Flag any *enabled* crop with how much is left
+                and a one-click way to undo it. Advisory; changes nothing unless
+                clicked. */}
+            {cropCoveragePct(ops) != null ? (
+              <Group gap={6} wrap="nowrap" align="center" mt={4}>
+                <IconCrop size={14} color="var(--mantine-color-dimmed)"
+                  style={{ flexShrink: 0 }} />
+                <Text size="xs" c="dimmed">
+                  Cropped view — showing {cropCoveragePct(ops)}% of the frame.
+                </Text>
+                <Button size="compact-xs" variant="subtle" color="grape"
+                  onClick={() => setOps((p) => removeCropOps(p))}>
+                  Remove crop
+                </Button>
+              </Group>
+            ) : null}
             {/* Over-stretching blows out star cores (a spike at pure white) or
                 crushes the sky (a spike at pure black), losing detail on export.
                 Surface it from the live histogram so a beginner eases off before
@@ -980,11 +1039,27 @@ export function EditorView() {
                     your image (background &amp; colour balance, a natural stretch, gentle
                     denoise/sharpen) — then tweak from there. Or add operations one at a time.
                   </Text>
-                  <Button size="compact-xs" variant="light" color="grape"
-                    leftSection={<IconSparkles size={14} />}
-                    loading={auto.isPending} onClick={() => auto.mutate()}>
-                    Auto-process
-                  </Button>
+                  <Group gap={6}>
+                    <Button size="compact-xs" variant="light" color="grape"
+                      leftSection={<IconSparkles size={14} />}
+                      loading={auto.isPending} onClick={() => auto.mutate()}>
+                      Auto-process
+                    </Button>
+                    {/* Carry-over: if this target has a previous run you edited, offer to
+                        reuse that look in one click, so a multi-night project stays
+                        consistent without redoing the edit. Undoable; not saved unless
+                        the user Saves. */}
+                    {prevRecipe.data?.run_id != null && prevRecipe.data.count > 0 ? (
+                      <Tooltip multiline w={240} withArrow
+                        label="Copy the edit you saved on this target's previous stack onto this one (as an undoable step you can tweak, then Save).">
+                        <Button size="compact-xs" variant="default" color="grape"
+                          leftSection={<IconHistory size={14} />}
+                          onClick={applyPreviousRecipe}>
+                          Use my previous edit ({prevRecipe.data.count})
+                        </Button>
+                      </Tooltip>
+                    ) : null}
+                  </Group>
                 </Alert>
               ) : null}
               {noStretch ? (
@@ -1084,8 +1159,10 @@ export function EditorView() {
                     {/* One-click "Auto curve" drops a gentle, monotone midtone-lift
                         curve derived from this image's own histogram, so the Curves
                         op gives a pleasant contrast start to nudge instead of a flat
-                        identity line. */}
-                    {selectedOp.id === "tone.curves" && curve.data?.points != null ? (
+                        identity line. Hidden while Auto-contrast is already engaged
+                        (the ghost + "Bake to edit" below is the control then). */}
+                    {selectedOp.id === "tone.curves" && curve.data?.points != null
+                      && !curveGhost ? (
                       (() => {
                         const applied = curvePointsMatch(
                           selectedOp.params?.points, curve.data.points);
@@ -1173,6 +1250,7 @@ export function EditorView() {
                 ) : null}
                 <OpParamPanel spec={specs[selectedOp.id]} params={selectedOp.params}
                   histogram={hist.data}
+                  curveGhost={curveGhost} onBakeCurve={bakeAutoCurve}
                   onChange={(p, coalesceKey) => setParams(selectedOp.uid, p, coalesceKey)}
                   suggestions={
                     selectedOp.id === "detail.deconvolve" && psf.data?.psf_sigma != null

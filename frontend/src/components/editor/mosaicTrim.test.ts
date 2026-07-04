@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { EditOp, OpInstance } from "../../api/client";
 import { applyTrimCrop, trimRectStyle, trimKeptLabel, hasEnabledGeometryOp,
-  geometryOpsKey, previewBoxStyle } from "./mosaicTrim";
+  geometryOpsKey, previewBoxStyle, cropCoveragePct, cropCoverageFraction,
+  removeCropOps } from "./mosaicTrim";
 
 const specs: Record<string, EditOp> = {
   "tone.stretch": { id: "tone.stretch", label: "Stretch", group: "tone",
@@ -120,6 +121,73 @@ describe("hasEnabledGeometryOp", () => {
     expect(hasEnabledGeometryOp([op("geometry.crop", false)])).toBe(false);
     expect(hasEnabledGeometryOp([op("tone.stretch", true)])).toBe(false);
     expect(hasEnabledGeometryOp([])).toBe(false);
+  });
+});
+
+describe("cropCoveragePct / cropCoverageFraction", () => {
+  const op = (id: string, enabled: boolean,
+              params: Record<string, unknown> = {}): OpInstance =>
+    ({ uid: id, id, enabled, params });
+
+  it("returns null when there's no enabled crop", () => {
+    expect(cropCoveragePct([])).toBeNull();
+    expect(cropCoveragePct([op("tone.stretch", true, { stretch: 0.5 })])).toBeNull();
+    // A disabled crop isn't shrinking the view.
+    expect(cropCoveragePct([op("geometry.crop", false, { x0: 0.2, x1: 0.8 })])).toBeNull();
+  });
+
+  it("returns null when the crop keeps the whole frame (nothing to flag)", () => {
+    expect(cropCoveragePct([op("geometry.crop", true, { x0: 0, y0: 0, x1: 1, y1: 1 })]))
+      .toBeNull();
+  });
+
+  it("reports the kept percentage of a single crop", () => {
+    // keeps 60% × 80% = 48%
+    expect(cropCoveragePct([op("geometry.crop", true, crop)])).toBe(48);
+    expect(cropCoverageFraction([op("geometry.crop", true, crop)]))
+      .toBeCloseTo(0.48, 6);
+  });
+
+  it("multiplies successive crops (each relative to its input)", () => {
+    const half = { x0: 0.25, y0: 0.25, x1: 0.75, y1: 0.75 }; // 25% area each
+    const out = cropCoveragePct([op("geometry.crop", true, half),
+                                 op("geometry.crop", true, half)]);
+    expect(out).toBe(6); // 0.25 * 0.25 = 0.0625 → 6%
+  });
+
+  it("mirrors the engine's clamp + sort of out-of-order / out-of-range bounds", () => {
+    // x's reversed and beyond [0,1] → clamps then sorts to keep 0..0.8 × 0..1
+    const out = cropCoverageFraction(
+      [op("geometry.crop", true, { x0: 0.8, x1: -0.5, y0: 0, y1: 2 })]);
+    expect(out).toBeCloseTo(0.8, 6);
+  });
+
+  it("treats a missing/garbage bound as its default (no crop on that axis)", () => {
+    // only y is cropped to 50%; x defaults to full frame
+    expect(cropCoveragePct([op("geometry.crop", true, { y0: 0.25, y1: 0.75 })])).toBe(50);
+    expect(cropCoveragePct([op("geometry.crop", true, { x0: "oops" as unknown as number,
+      x1: 0.5 })])).toBe(50);
+  });
+});
+
+describe("removeCropOps", () => {
+  const op = (id: string, enabled: boolean,
+              params: Record<string, unknown> = {}): OpInstance =>
+    ({ uid: id, id, enabled, params });
+
+  it("drops enabled crop ops but keeps everything else (incl. a disabled crop)", () => {
+    const ops = [
+      op("tone.stretch", true, { stretch: 0.5 }),
+      op("geometry.crop", true, crop),
+      op("geometry.crop", false, crop),
+      op("geometry.rotate", true, { angle: 5 }),
+    ];
+    const out = removeCropOps(ops);
+    expect(out.map((o) => `${o.id}:${o.enabled}`)).toEqual([
+      "tone.stretch:true", "geometry.crop:false", "geometry.rotate:true",
+    ]);
+    // pure — input untouched
+    expect(ops).toHaveLength(4);
   });
 });
 

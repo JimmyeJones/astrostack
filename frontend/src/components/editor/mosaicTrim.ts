@@ -70,6 +70,50 @@ export function previewBoxStyle(
   };
 }
 
+/** Fraction (0..1) of the *original* frame still shown after all *enabled*
+ * `geometry.crop` ops in the recipe are applied, or `null` when there is no
+ * enabled crop (or the crops together keep the whole frame — nothing visibly
+ * removed). Each crop's fractional bounds are relative to the image entering
+ * that op, so successive crops multiply. Mirrors the engine's clamp-to-[0,1] +
+ * sort semantics (`_crop`) so the reported area matches what's actually shown.
+ * Pure. */
+export function cropCoverageFraction(ops: OpInstance[]): number | null {
+  const crops = ops.filter((o) => o.enabled && o.id === "geometry.crop");
+  if (crops.length === 0) return null;
+  const clamp = (v: unknown, dflt: number): number => {
+    const n = Number(v);
+    return Math.min(Math.max(Number.isFinite(n) ? n : dflt, 0), 1);
+  };
+  let frac = 1;
+  for (const o of crops) {
+    const p = (o.params ?? {}) as Record<string, unknown>;
+    let x0 = clamp(p.x0, 0), x1 = clamp(p.x1, 1);
+    let y0 = clamp(p.y0, 0), y1 = clamp(p.y1, 1);
+    if (x1 < x0) [x0, x1] = [x1, x0];
+    if (y1 < y0) [y0, y1] = [y1, y0];
+    frac *= (x1 - x0) * (y1 - y0);
+  }
+  return frac;
+}
+
+/** The integer percentage of the frame still shown after enabled crops, or
+ * `null` when there's no crop or it rounds to the full frame (nothing to flag).
+ * Pure. */
+export function cropCoveragePct(ops: OpInstance[]): number | null {
+  const frac = cropCoverageFraction(ops);
+  if (frac == null) return null;
+  const pct = Math.round(frac * 100);
+  if (pct >= 100) return null; // no visible crop — don't nag
+  return Math.max(pct, 0);
+}
+
+/** Drop every *enabled* `geometry.crop` op — the one-click "remove crop" action.
+ * Pure: returns a new array, never mutates the input. Leaves a *disabled* crop
+ * op alone (it isn't shrinking the view). */
+export function removeCropOps(ops: OpInstance[]): OpInstance[] {
+  return ops.filter((o) => !(o.enabled && o.id === "geometry.crop"));
+}
+
 /** Plain-language "keeps the central W% × H%" summary of a proposed crop. Pure. */
 export function trimKeptLabel(crop: TrimCrop): string {
   const pctW = Math.round((crop.x1 - crop.x0) * 100);

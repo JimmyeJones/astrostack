@@ -316,6 +316,49 @@ def get_recipe(safe: str, run_id: int, request: Request) -> dict:
     return _load_saved_recipe(request, safe, run_id).to_dict()
 
 
+class PreviousRecipeOut(BaseModel):
+    """The most recent *other* stack run's saved editor recipe, offered as a
+    one-click carry-over so a re-stacked target keeps the look the user dialled in
+    on an earlier run. ``run_id`` is ``None`` when no earlier run has a saved
+    (non-empty) edit. The ops are validated on load (stale ops dropped, params
+    clamped), so applying them can never 500 the editor."""
+
+    run_id: int | None = None
+    ops: list[dict] = []
+    count: int = 0
+
+
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/editor/previous-recipe",
+            response_model=PreviousRecipeOut)
+def previous_recipe(safe: str, run_id: int, request: Request) -> PreviousRecipeOut:
+    """Find the newest *other* run of this target that carries a non-empty saved
+    recipe, so the editor can offer "use my previous run's edit" when the current
+    run has none — keeping a multi-night project visually consistent across
+    re-stacks with one click. Read-only; nothing is written or seeded server-side."""
+    from seestack.edit.recipe import recipe_from_json
+
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        runs = list(proj.iter_stack_runs())  # newest first (timestamp DESC)
+        for run in runs:
+            if run.id == run_id:
+                continue
+            raw = proj.get_meta(f"{RECIPE_META_PREFIX}{run.id}")
+            if not raw:
+                continue
+            rec = recipe_from_json(raw)
+            if rec.ops:
+                return PreviousRecipeOut(
+                    run_id=run.id,
+                    ops=[op.to_dict() for op in rec.ops],
+                    count=len(rec.ops),
+                )
+    finally:
+        proj.close()
+        lib.close()
+    return PreviousRecipeOut(run_id=None, ops=[], count=0)
+
+
 # Gaussian FWHM → σ, and the bounds the deconvolution op's ``psf_sigma`` accepts
 # (kept in step with the EditParam definition in seestack/edit/ops/detail.py).
 _FWHM_TO_SIGMA = 1.0 / (2.0 * math.sqrt(2.0 * math.log(2.0)))  # ≈ 0.4247

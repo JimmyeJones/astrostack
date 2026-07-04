@@ -6,9 +6,11 @@ import { CurvesWidget } from "./CurvesWidget";
 import type { Pt } from "./curveDrag";
 
 /** Render the widget with a controlled point list and capture onChange calls. */
-function setup(initial: Pt[]) {
+function setup(initial: Pt[], ghost?: Pt[]) {
   const onChange = vi.fn();
-  render(<MantineProvider><CurvesWidget points={initial} onChange={onChange} /></MantineProvider>);
+  render(<MantineProvider>
+    <CurvesWidget points={initial} onChange={onChange} ghost={ghost} />
+  </MantineProvider>);
   return { onChange };
 }
 
@@ -52,5 +54,21 @@ describe("CurvesWidget keyboard access (a11y)", () => {
     const { onChange } = setup([[0, 0], [1, 1]]);
     fireEvent.click(screen.getByRole("button", { name: /add point/i }));
     expect(onChange).toHaveBeenCalledWith([[0, 0], [0.5, 0.5], [1, 1]]);
+  });
+});
+
+describe("CurvesWidget auto-contrast ghost", () => {
+  it("draws a read-only dashed ghost curve when given a ghost shape", () => {
+    setup([[0, 0], [1, 1]], [[0, 0], [0.25, 0.2], [0.75, 0.82], [1, 1]]);
+    const ghost = screen.getByLabelText("auto contrast preview curve");
+    expect(ghost.tagName.toLowerCase()).toBe("polyline");
+    expect(ghost).toHaveAttribute("stroke-dasharray");
+    // The ghost is not a draggable handle — no extra sliders beyond the 2 endpoints.
+    expect(screen.getAllByRole("slider")).toHaveLength(2);
+  });
+
+  it("draws no ghost when none is supplied", () => {
+    setup([[0, 0], [1, 1]]);
+    expect(screen.queryByLabelText("auto contrast preview curve")).toBeNull();
   });
 });

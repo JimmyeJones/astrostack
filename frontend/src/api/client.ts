@@ -336,6 +336,14 @@ export interface Recipe {
   ops: OpInstance[];
 }
 
+/** The most recent *other* run's saved editor recipe, offered for one-click
+ * carry-over onto a re-stacked run. `run_id` is null when none exists. */
+export interface PreviousRecipe {
+  run_id: number | null;
+  ops: OpInstance[];
+  count: number;
+}
+
 export interface Preset {
   id: string;
   label: string;
@@ -670,6 +678,9 @@ export const api = {
     ),
   getRecipe: (safe: string, runId: number) =>
     req<Recipe>(`/api/targets/${safe}/stack-runs/${runId}/editor/recipe`),
+  previousRecipe: (safe: string, runId: number) =>
+    req<PreviousRecipe>(
+      `/api/targets/${safe}/stack-runs/${runId}/editor/previous-recipe`),
   putRecipe: (safe: string, runId: number, recipe: Recipe) =>
     req<Recipe>(`/api/targets/${safe}/stack-runs/${runId}/editor/recipe`, {
       method: "PUT", body: JSON.stringify(recipe),

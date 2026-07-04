@@ -16,7 +16,8 @@ from seestack.io.project import StackRunRow
 
 
 def _make_run(data_root, safe, basename="master", h=80, w=100,
-              coverage_min=1, coverage_max=5, is_mosaic=None):
+              coverage_min=1, coverage_max=5, is_mosaic=None,
+              ts="2026-05-02T00:00:00Z"):
     lib = Library.open_or_create(data_root / "library")
     try:
         proj = lib.open_target(safe)
@@ -31,7 +32,7 @@ def _make_run(data_root, safe, basename="master", h=80, w=100,
             fp = outdir / f"{basename}.fits"
             fits.writeto(fp, cube, overwrite=True)
             return proj.add_stack_run(StackRunRow(
-                id=None, timestamp_utc="2026-05-02T00:00:00Z", output_basename=basename,
+                id=None, timestamp_utc=ts, output_basename=basename,
                 fits_path=str(fp), tiff_path=None, preview_path=None, n_frames_used=5,
                 canvas_h=h, canvas_w=w, coverage_min=coverage_min,
                 coverage_max=coverage_max, options_json="{}", is_mosaic=is_mosaic,
@@ -363,6 +364,61 @@ def test_recipe_round_trip_and_validation(client, solved_library):
     saved = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/recipe").json()
     assert [o["id"] for o in saved["ops"]] == ["tone.stretch", "tone.saturation"]
     assert saved["base_run_id"] == rid
+
+
+def test_previous_recipe_carry_over(client, solved_library):
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    # An older run the user edited...
+    old = _make_run(solved_library, safe, basename="run_old",
+                    ts="2026-05-01T00:00:00Z")
+    client.put(f"/api/targets/{safe}/stack-runs/{old}/editor/recipe",
+               json={"ops": [{"id": "tone.stretch", "params": {"stretch": 0.7}},
+                             {"id": "tone.saturation", "params": {"amount": 1.3}}]})
+    # ...and a newer run with no saved edit yet.
+    new = _make_run(solved_library, safe, basename="run_new",
+                    ts="2026-05-03T00:00:00Z")
+
+    body = client.get(
+        f"/api/targets/{safe}/stack-runs/{new}/editor/previous-recipe").json()
+    assert body["run_id"] == old
+    assert body["count"] == 2
+    assert [o["id"] for o in body["ops"]] == ["tone.stretch", "tone.saturation"]
+    # The ops are validated on load (each param clamped/filled), so they're safe to
+    # apply straight into the working recipe.
+    assert body["ops"][0]["params"]["stretch"] == 0.7
+
+    # Asked from the *only* edited run, there's no other edited run → None.
+    none = client.get(
+        f"/api/targets/{safe}/stack-runs/{old}/editor/previous-recipe").json()
+    assert none["run_id"] is None
+    assert none["ops"] == [] and none["count"] == 0
+
+
+def test_previous_recipe_prefers_the_newest_edited_run(client, solved_library):
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    a = _make_run(solved_library, safe, basename="run_a", ts="2026-05-01T00:00:00Z")
+    b = _make_run(solved_library, safe, basename="run_b", ts="2026-05-02T00:00:00Z")
+    client.put(f"/api/targets/{safe}/stack-runs/{a}/editor/recipe",
+               json={"ops": [{"id": "tone.stretch", "params": {"stretch": 0.5}}]})
+    client.put(f"/api/targets/{safe}/stack-runs/{b}/editor/recipe",
+               json={"ops": [{"id": "tone.curves", "params": {}},
+                             {"id": "tone.saturation", "params": {"amount": 1.2}}]})
+    # A brand-new run gets the *most recent* edited run (b), not the oldest.
+    new = _make_run(solved_library, safe, basename="run_c", ts="2026-05-03T00:00:00Z")
+    body = client.get(
+        f"/api/targets/{safe}/stack-runs/{new}/editor/previous-recipe").json()
+    assert body["run_id"] == b
+    assert [o["id"] for o in body["ops"]] == ["tone.curves", "tone.saturation"]
+
+
+def test_previous_recipe_none_when_no_edits(client, solved_library):
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    r1 = _make_run(solved_library, safe, basename="run1", ts="2026-05-01T00:00:00Z")
+    _make_run(solved_library, safe, basename="run2", ts="2026-05-02T00:00:00Z")
+    # Neither run has a saved recipe → nothing to carry over.
+    body = client.get(
+        f"/api/targets/{safe}/stack-runs/{r1}/editor/previous-recipe").json()
+    assert body["run_id"] is None and body["ops"] == []
 
 
 def test_edit_preview_and_histogram(client, solved_library):

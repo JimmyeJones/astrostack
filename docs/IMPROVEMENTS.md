@@ -217,19 +217,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   ops on the proxy can lag) and closing any remaining proxy↔export look
   differences — chase those, but never by hiding an action again. (S–M, editor)
 - ~~**Give the Auto recipe a gentle contrast curve (as the presets already do)**~~ — **shipped v0.73.0** (see Shipped). The one-click Auto recipe now appends a data-driven `tone.curves` (auto contrast) after the saturation boost, matching the built-in galaxy/nebula presets.
-- **Reflect the auto-contrast curve's shape in the Curves widget (v0.73.0 follow-up).**
-  The new `tone.curves` `auto` mode (shipped v0.73.0) computes its curve *at apply
-  time* from the op's own input, so when a user selects Auto's curve op the **preview
-  shows contrast but the Curves editor widget still draws a flat identity line** (the
-  recipe stores the identity points; the derived shape lives only in the render) — a
-  small preview↔control mismatch and a missed chance to teach what Auto did. Two clean
-  options, both frontend-only/additive: (a) when `auto` is on and points are identity,
-  fetch the shape from the existing `…/editor/curve-suggestion` endpoint (the manual
-  "Auto curve" button already uses it) and draw it read-only in the widget; or (b) add
-  a one-click "Bake" that writes the current auto-derived points into the recipe and
-  clears the `auto` flag, so the user can then hand-tune from the real shape. Prefer
-  (a) for honesty + (b) as the tweak path. Spotted while shipping the auto curve.
-  (S, editor/trust)
+- ~~**Reflect the auto-contrast curve's shape in the Curves widget (v0.73.0 follow-up).**~~
+  — **shipped v0.74.4** (see Shipped). Both options landed: (a) when `auto` is on and the
+  points are still identity the Curves widget now draws the derived shape (from the
+  `…/editor/curve-suggestion` endpoint) as a read-only dashed ghost so it matches the
+  preview, and (b) a "Bake to edit" button materialises those points into the recipe and
+  clears `auto` so the user can hand-tune from the real shape.
 - **Confusing / clunky controls** — too many ops with terse params and no obvious
   starting point. Add plain-language help, a simple/guided default layout, curated
   presets, and progressive disclosure of advanced ops so a beginner gets a good
@@ -303,18 +296,10 @@ problems. Dogfood it every big-picture run and fix root causes.
   image-box so it lines up under `objectFit: contain`. Additive, no engine/API change,
   no default change (Compare stays; this is a second mode or a handle on it). Testable
   with a Vitest handle-drag → clip-width helper. (S–M, editor/trust)
-- **"Cropped view — showing N% of the frame" indicator + one-click "remove crop".**
-  A `geometry.crop` op silently shrinks the visible frame, but nothing tells the user
-  *that* they're looking at a crop or *how much* was removed — so an auto-applied crop
-  (see the mosaic-misclassification bug: Auto can append one unexpectedly) or a
-  forgotten manual trim just looks like "my image is smaller now". Add a small,
-  unobtrusive caption near the preview that fires whenever an *enabled* `geometry.crop`
-  is in the recipe — "Cropped: showing 94% of the frame" (from the crop op's own
-  fractional bounds, no new data) — with a one-click "remove crop" that disables/drops
-  the op. Purely a frontend composition over the recipe the editor already holds;
-  additive, advisory, no engine/API change. A clean trust win that makes any crop
-  obvious and instantly reversible. Vitest: a pure `cropCoveragePct(recipe)` helper +
-  the caption/remove wiring. (S, editor/trust)
+- ~~**"Cropped view — showing N% of the frame" indicator + one-click "remove crop".**~~
+  — **shipped v0.74.3** (see Shipped). A dimmed advisory caption below the preview now
+  fires whenever an *enabled* `geometry.crop` is in the recipe, naming how much of the
+  frame is still shown, with a one-click "Remove crop".
 - ~~**Mark editor-export runs as display-space so re-editing doesn't
   double-stretch (and the FITS is honest)**~~ — **shipped v0.72.2** (see Shipped).
   Editor exports now stamp an `SSDISPLY` FITS card + honest `BUNIT` and a
@@ -373,19 +358,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   editor. (M, autonomy/editor)
 - Auto-suggest stack settings from the data (frame count, FWHM spread, streaks)
   so the user rarely needs to touch the Stack form. (S–M, autonomy)
-- **"Apply my last edit to the newest stack" — recipe carry-over across re-stacks.**
-  The Seestar user with thousands of subs re-stacks a target repeatedly as more nights
-  come in, and today each new run opens on the flat default (or bare Auto) — so the
-  look they carefully dialed in on last week's run is lost and must be redone. Add a
-  one-click "Use my previous run's edit" (and/or auto-seed it) that copies the most
-  recent *edited* run's recipe onto the new run, validated through `validate_ops` on
-  load so a stale op can't 500 the editor, applied as a single undoable step and never
-  persisted unless the user Saves. This is the repeatability win from Method D: it
-  keeps a growing multi-night project visually consistent with near-zero effort, and
-  it's **off until the user clicks** (no default flip, upgrade-safe — recipes already
-  live in project meta keyed by run id, so it's a copy, not a schema change). Pairs
-  naturally with the "personal default recipe" idea but is scoped to *this target's own
-  history*, which is often what the user actually wants. (S–M, autonomy/editor)
+- ~~**"Apply my last edit to the newest stack" — recipe carry-over across re-stacks.**~~
+  — **shipped v0.75.0** (see Shipped). When a re-stacked run opens with no saved edit,
+  the empty-pipeline nudge now offers a one-click "Use my previous edit (N)" that copies
+  the newest *other* edited run's recipe onto this run (server-validated on load, applied
+  as a single undoable step, not persisted unless Saved). The related "personal default
+  recipe" idea (a target-independent default) is still open below.
 
 ### Friendliness (PRIORITY 3)
 - Guided "getting started" / empty states that tell a first-timer exactly what to
@@ -525,6 +503,61 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Recipe carry-over across re-stacks: one-click "Use my previous edit"** — the Seestar
+  user re-stacks a target repeatedly as more nights come in, and each new run opened on
+  the flat default, losing the look they'd dialled in. A new read-only
+  `GET …/editor/previous-recipe` endpoint returns the newest *other* stack run of the
+  target that carries a non-empty saved recipe (walking `stack_runs` newest-first,
+  probing `editor_recipe:{id}` meta; the recipe is validated on load so stale ops are
+  dropped). When the current run has no saved edit, the editor's empty-pipeline nudge now
+  shows a "Use my previous edit (N)" button that copies those ops into the working recipe
+  as a single **undoable** step (a violet notification says Undo to revert / Save to
+  keep); nothing is persisted unless the user Saves, and the query only fires when the
+  run's saved recipe is empty (never nags a run with its own edit). **Off until clicked**
+  — no default flip, no schema change (recipes already live in project meta keyed by run
+  id, so it's a copy), upgrade-safe/additive. Tests: webapp (returns the newest edited
+  run's ops with validated params / prefers the most recent of several / None when no
+  other run is edited / None when nothing's edited) + Vitest (the button names the step
+  count, applying it lands the ops in the pipeline and fires a preview carrying exactly
+  those ops, and the nudge disappears once non-empty). (v0.75.0, this run — Builder)
+
+- **Curves widget now previews the auto-contrast curve (read-only ghost) + "Bake to
+  edit"** — the v0.73.0 auto-contrast (`tone.curves` `auto`) derives its curve at
+  *render* time from the image entering the op while the stored points stay a flat
+  identity, so selecting Auto's curve op showed **contrast in the preview but a flat
+  identity line in the Curves widget** — a preview↔control mismatch and a missed teaching
+  moment. Now when auto is engaged (on + points still identity) the widget draws the
+  derived shape — the same one `…/editor/curve-suggestion` returns — as a read-only
+  dashed ghost behind the (still-identity) editable curve, with a caption explaining
+  what's happening, and a one-click **"Bake to edit"** that writes those points into the
+  recipe and clears `auto` so the user can hand-tune from the real shape (a single
+  undoable step). The redundant header "Auto curve" button is hidden while auto is
+  engaged, so Bake is the single control. Frontend-only, additive, no API/behaviour
+  change (the ghost is advisory; nothing is written until Bake or a manual edit). New
+  pure `isIdentityCurve` helper (mirrors the engine `_points_are_identity`); a `ghost`
+  prop on `CurvesWidget`; `curveGhost`/`onBakeCurve` on `OpParamPanel`. Vitest:
+  `isIdentityCurve` (identity/moved/malformed), the widget ghost (dashed read-only
+  polyline, not a draggable handle; absent when no ghost), and an Editor test that an
+  auto+identity curve shows the ghost/caption, hides the header button, and Bake writes
+  the suggested points with `auto:false`. (v0.74.4, this run — Builder)
+
+- **"Cropped view — showing N% of the frame" indicator + one-click "Remove crop"** —
+  a `geometry.crop` op silently shrinks the visible frame, so an auto-applied trim or a
+  forgotten manual crop just looked like "my image got smaller" with nothing to say so.
+  A dimmed advisory caption now renders below the editor preview whenever the recipe has
+  an *enabled* `geometry.crop`, naming how much of the frame is still shown ("Cropped
+  view — showing 64% of the frame."), with a one-click "Remove crop" that drops the
+  crop op(s) as a single undoable step. The kept fraction is derived purely from the
+  crop ops' own fractional bounds (mirroring the engine `_crop`'s clamp-to-[0,1] + sort
+  semantics, and *multiplying* successive crops since each is relative to its input), so
+  no new data/endpoint is needed. A disabled crop op is ignored (it isn't shrinking the
+  view), and a crop that keeps the whole frame doesn't nag. Frontend-only, additive,
+  advisory — no engine/API/behaviour change. New pure helpers `cropCoveragePct` /
+  `cropCoverageFraction` / `removeCropOps` in `mosaicTrim.ts`. Vitest: the helpers
+  (no-crop / full-frame / single & multiplied crops / clamp+sort of out-of-range bounds
+  / garbage-tolerant / disabled-crop-kept) + an Editor test that a loaded crop shows the
+  64% caption and "Remove crop" clears it. (v0.74.3, this run — Builder)
 
 - **Fix: single-field stacks were misclassified as mosaics (Scout-verified
   wrong-result/broken-UX bug on the primary user's every-session case)** — the
