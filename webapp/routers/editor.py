@@ -127,9 +127,19 @@ def _render_coverage_png(project_dir: Path, run) -> bytes | None:
     return buf.getvalue()
 
 
-def _render_star_mask_png(project_dir: Path, run, size_px: float, grow: float) -> bytes:
+def _render_star_mask_png(project_dir: Path, run, size_px: float, grow: float,
+                          recipe: Recipe | None = None, uid: str | None = None) -> bytes:
     """Render the soft star mask (the same map that gates star ops) as a grayscale
-    PNG, so the user can *see* what the editor treats as stars vs background."""
+    PNG, so the user can *see* what the editor treats as stars vs background.
+
+    The star ops (``stars.reduce`` / ``stars.boost_nebula``) run in display space
+    (post-stretch) and gate on the *stretched* image at their position in the
+    pipeline — where faint stars pop out of the noise. Computing the overlay on the
+    raw **linear** proxy instead drastically under-represents what the ops touch
+    (faint stars sit in the noise floor there). So when a recipe is supplied, apply
+    it up to (but not including) the selected star op and mask the resulting
+    display-space image; fall back to the linear proxy only when no recipe is given
+    (e.g. an old client)."""
     import io
 
     from PIL import Image
@@ -137,8 +147,15 @@ def _render_star_mask_png(project_dir: Path, run, size_px: float, grow: float) -
     from seestack.edit.starmask import star_mask
 
     rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
-    ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None)
-    mask = star_mask(rgb, size_px=size_px, grow=grow, ctx=ctx)
+    ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None,
+                      coverage=_proxy_coverage(run.fits_path, scale))
+    if recipe is not None:
+        sub = _recipe_before_uid(recipe, uid,
+                                 drop_ids=("stars.reduce", "stars.boost_nebula"))
+        img = apply_recipe(rgb, sub, ctx, for_preview=True)
+    else:
+        img = rgb
+    mask = star_mask(img, size_px=size_px, grow=grow, ctx=ctx)
     u8 = (np.clip(np.nan_to_num(mask), 0.0, 1.0) * 255).astype(np.uint8)
     buf = io.BytesIO()
     Image.fromarray(u8, mode="L").save(buf, format="PNG")
@@ -363,14 +380,15 @@ class LevelsSuggestionOut(BaseModel):
     gamma: float | None = None
 
 
-def _recipe_before_uid(rec: Recipe, uid: str | None) -> Recipe:
+def _recipe_before_uid(rec: Recipe, uid: str | None,
+                       drop_ids: tuple[str, ...] = ("tone.levels",)) -> Recipe:
     """A copy of ``rec`` truncated to the ops *before* the one with ``uid`` (so a
-    Levels suggestion measures the display-space image that op will receive). When
-    ``uid`` isn't present, drop every ``tone.levels`` op instead — the next-best
-    proxy for "the image without this Levels adjustment"."""
+    suggestion/overlay measures the display-space image that op will receive). When
+    ``uid`` isn't present, drop every op whose id is in ``drop_ids`` instead — the
+    next-best proxy for "the image without this adjustment"."""
     ops = rec.ops
     idx = next((i for i, op in enumerate(ops) if op.uid == uid), None)
-    kept = ops[:idx] if idx is not None else [op for op in ops if op.id != "tone.levels"]
+    kept = ops[:idx] if idx is not None else [op for op in ops if op.id not in drop_ids]
     return Recipe(ops=list(kept), version=rec.version, base_run_id=rec.base_run_id)
 
 
@@ -534,14 +552,22 @@ async def edit_histogram(safe: str, run_id: int, request: Request,
 
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/editor/star-mask")
 async def edit_star_mask(safe: str, run_id: int, request: Request,
-                         size_px: float = 4.0, grow: float = 0.5) -> Response:
+                         size_px: float = 4.0, grow: float = 0.5,
+                         recipe: str | None = None, uid: str | None = None) -> Response:
     """Grayscale preview of the star mask (~white on stars, black elsewhere) that
     drives the star-reduce / boost-nebula ops. `size_px` matches the ops' star
-    size (reduce uses 2× its `size`; boost-nebula uses `size` directly)."""
+    size (reduce uses 2× its `size`; boost-nebula uses `size` directly).
+
+    `recipe`/`uid` (the current edit recipe and the selected star op) make the
+    overlay reflect the *display-space* image the op actually gates on — the ops
+    run post-stretch, so masking the raw linear proxy badly under-counts faint
+    stars. Omitting them falls back to the linear proxy (old-client behaviour)."""
     size_px = max(0.5, min(50.0, size_px))
     grow = max(0.0, min(3.0, grow))
     project_dir, run = _run_info(request, safe, run_id)
-    png = await run_in_threadpool(_render_star_mask_png, project_dir, run, size_px, grow)
+    rec = _decode_recipe_query(request, safe, run_id, recipe) if recipe else None
+    png = await run_in_threadpool(_render_star_mask_png, project_dir, run,
+                                  size_px, grow, rec, uid)
     return Response(content=png, media_type="image/png",
                     headers={"Cache-Control": "no-store"})
 

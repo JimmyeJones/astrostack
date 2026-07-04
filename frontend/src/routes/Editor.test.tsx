@@ -259,8 +259,15 @@ describe("EditorView", () => {
     await waitFor(() => expect(btn).not.toBeDisabled());
     btn.click();
 
-    // No star op is selected, so the overlay uses the endpoint default (size undefined).
-    await waitFor(() => expect(maskUrl).toHaveBeenCalledWith("M_42", 3, undefined));
+    // No star op is selected, so the overlay uses the endpoint default size (undefined)
+    // and no star-op uid — but it now passes the recipe so the mask is computed on the
+    // display-space image the ops gate on, not the raw linear proxy.
+    await waitFor(() => expect(maskUrl).toHaveBeenCalled());
+    const calls = maskUrl.mock.calls;
+    const call = calls[calls.length - 1];
+    expect(call.slice(0, 3)).toEqual(["M_42", 3, undefined]);
+    expect(call[3]).toBeTypeOf("object");   // the current recipe
+    expect(call[4]).toBeUndefined();          // no star op selected → no uid
     // The overlay label switches to "Star mask" and the button flips to "Hide mask".
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Hide mask" })).toBeInTheDocument());

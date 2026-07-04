@@ -378,6 +378,100 @@ def test_star_mask_preview(client, solved_library):
     assert r2.content[:8] == b"\x89PNG\r\n\x1a\n"
 
 
+# Faint stars live in the bottom band (rows ≥ this); the two bright stars sit in
+# the top corners. Measuring the mask only in the bottom band isolates the
+# faint-star signal from the bright stars (whose mask saturates either way).
+_FAINT_BAND_Y0 = 50
+
+
+def _write_star_field_run(data_root, safe, basename="starfield", h=80, w=100):
+    """A run whose master has two bright stars (top corners) and several faint ones
+    (bottom band) on a low background — so the linear image buries the faint stars
+    near the noise floor but a stretch reveals them (exactly the case the mask
+    overlay must reflect)."""
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            outdir = Path(proj.project_dir) / "output"
+            outdir.mkdir(parents=True, exist_ok=True)
+            rng = np.random.default_rng(1)
+            cube = (rng.random((3, h, w)) * 0.008).astype("float32")  # dim sky
+            yy, xx = np.mgrid[0:h, 0:w]
+
+            def add_star(cx, cy, amp):
+                blob = amp * np.exp(-(((xx - cx) / 1.2) ** 2 + ((yy - cy) / 1.2) ** 2))
+                for c in range(3):
+                    cube[c] += blob
+
+            add_star(20, 20, 0.7)   # bright (top-left)
+            add_star(85, 15, 0.6)   # bright (top-right)
+            for cx, cy in [(40, 55), (55, 60), (30, 68), (65, 58), (48, 72), (70, 68)]:
+                add_star(cx, cy, 0.09)  # faint — buried in linear noise, lifted by stretch
+            fp = outdir / f"{basename}.fits"
+            fits.writeto(fp, cube, overwrite=True)
+            return proj.add_stack_run(StackRunRow(
+                id=None, timestamp_utc="2026-05-02T00:00:00Z", output_basename=basename,
+                fits_path=str(fp), tiff_path=None, preview_path=None, n_frames_used=5,
+                canvas_h=h, canvas_w=w, coverage_min=1, coverage_max=1,
+                options_json="{}",
+            ))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def _faint_band_mask_weight(png_bytes):
+    """Total mask weight (0..1 per px) in the faint-star band of the mask PNG."""
+    import io as _io
+
+    from PIL import Image
+    arr = np.asarray(Image.open(_io.BytesIO(png_bytes)).convert("L")).astype(np.float32)
+    return float(arr[_FAINT_BAND_Y0:].sum()) / 255.0
+
+
+def test_star_mask_display_space_reveals_more_than_linear(client, solved_library):
+    """Regression: the overlay must mask the display-space image the star ops gate
+    on, not the raw linear proxy — where faint stars sit in the noise floor and are
+    drastically under-represented. Passing a recipe (a stretch) must mark
+    meaningfully more faint-star area than the recipe-less (linear) render."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _write_star_field_run(solved_library, safe)
+    base = f"/api/targets/{safe}/stack-runs/{rid}/editor/star-mask"
+
+    linear = client.get(base)
+    assert linear.status_code == 200
+    # An empty recipe still triggers the display-space path: apply_recipe auto-adds
+    # the default asinh stretch, so this is the post-stretch image the ops see.
+    display = client.get(base, params={"recipe": _enc({"ops": [], "base_run_id": rid})})
+    assert display.status_code == 200
+
+    w_lin = _faint_band_mask_weight(linear.content)
+    w_disp = _faint_band_mask_weight(display.content)
+    # The stretch lifts the faint stars out of the noise, so the display-space mask
+    # carries materially more weight over them than the linear one.
+    assert w_disp > w_lin * 2.5
+
+
+def test_star_mask_recipe_stops_before_selected_star_op(client, solved_library):
+    """When a star op is selected (its uid passed), the mask is computed on the
+    image *entering* that op — so a boost_nebula op after the stretch doesn't feed
+    back into its own gate. The endpoint accepts recipe+uid and still renders."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _write_star_field_run(solved_library, safe)
+    recipe = {"ops": [
+        {"id": "tone.stretch", "params": {}, "enabled": True},
+        {"id": "stars.boost_nebula", "uid": "star1", "params": {"size": 4}, "enabled": True},
+    ], "base_run_id": rid}
+    r = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/star-mask",
+        params={"recipe": _enc(recipe), "uid": "star1", "size_px": 4},
+    )
+    assert r.status_code == 200
+    assert r.content[:8] == b"\x89PNG\r\n\x1a\n"
+
+
 def test_auto_process(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
     rid = _make_run(solved_library, safe)

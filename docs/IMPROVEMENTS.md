@@ -75,33 +75,6 @@ when you take it.
 
 ### Editor — frontend (PRIORITY 1)
 
-- **BUG: the star-mask overlay is computed on linear data but the star ops gate
-  on display-space data — it drastically under-represents what the ops touch** —
-  `_render_star_mask_png` (`webapp/routers/editor.py:130-145`) runs `star_mask`
-  on the raw linear proxy, but `stars.reduce`/`stars.boost_nebula` (both
-  stage="nonlinear") compute their gate from the *stretched* image at their
-  position in the pipeline (`seestack/edit/ops/stars.py:41,70`). On a synthetic
-  star field the linear-proxy mask marks 13× less area than the display-space
-  gate (3.9 k vs 51 k px > 0.2) — faint stars the op will visibly act on aren't
-  shown at all. **Fix:** render the mask from the recipe applied up to (but not
-  including) the selected star op — reuse the `_recipe_before_uid` sub-recipe
-  machinery the levels-suggestion endpoint already has. Severity: broken-UX
-  (misleading trust overlay). Confidence: confirmed (measured).
-
-- **BUG: one slider drag floods the undo history with dozens of entries (and
-  can evict all earlier edits)** — editor sliders commit on every drag tick
-  (`Slider onChange`, no `onChangeEnd` —
-  `frontend/src/components/StackOptionControl.tsx:46-50`) and every curve
-  pointer-move does the same, each going through history-capturing `setOps`
-  (`useUndoable.ts` pushes per set, cap 100 with `shift()`). Steps: drag Stretch
-  strength 0.1→0.9, release, Ctrl+Z — it undoes one pixel-move of the drag; a
-  couple of long drags evict the pre-drag history entirely (added ops,
-  Auto-process). **Fix:** live-update params outside the history and commit one
-  history entry on `onChangeEnd` (Mantine supports both callbacks), same for
-  curve-drag pointer-up; or coalesce consecutive entries that touch the same
-  param. Severity: broken-UX (undo effectively unusable). Confidence: confirmed
-  (traced).
-
 - **BUG: background-op failures never reach the editor's error surfacing — the
   op silently does nothing (or colour-shifts)** — `remove_final_gradient`
   catches its Background2D fit failure internally and returns the input
@@ -116,27 +89,6 @@ when you take it.
   a dedicated exception the editor path doesn't swallow) so failures surface in
   the existing UI; make per-channel failure all-or-nothing. Severity: broken-UX
   (silent no-op control). Confidence: confirmed (reproduced log path).
-
-- **BUG: the star-mask overlay refetches un-debounced on every Star-size slider
-  tick** — `maskSizePx` is derived from the live (non-debounced) ops and sits in
-  the query key (`Editor.tsx:255-257`), unlike the preview which goes through
-  `useDebouncedValue`. Dragging Star size 2→8 with the overlay on fires a
-  server-side `star_mask` render per intermediate value; superseded renders
-  queue up and the overlay flickers. **Fix:** debounce the mask size (reuse the
-  recipe debounce or a `useDebouncedValue(maskSizePx, …)`). Severity: broken-UX/
-  perf. Confidence: confirmed (traced).
-
-- **BUG (cosmetic): "Use data defaults" and the per-param "✓ already set"
-  indicator disagree about the same value** — `applyDataDrivenDefaults`/
-  `countDataDrivenDefaults` compare with strict `!==`
-  (`frontend/src/components/editor/dataDrivenDefaults.ts`), the per-param button
-  uses `matchesSuggestion` with a step/2 tolerance
-  (`suggestionMatch.ts`). A value within half a step (e.g. slider lands on 1.4,
-  suggestion 1.36) shows "✓ already set" on the param while the toolbar still
-  offers "Use data defaults"; the count also includes *disabled* ops. **Fix:**
-  use `matchesSuggestion` (with each param's step) inside
-  `countDataDrivenDefaults`/`applyDataDrivenDefaults` and skip disabled ops.
-  Severity: cosmetic. Confidence: confirmed (traced).
 
 - **BUG (cosmetic): trim-crop preview rectangle misaligns on a letterboxed
   preview** — the dashed "proposed crop" overlay maps fractional bounds to
@@ -391,6 +343,56 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Fix: "Use data defaults" toolbar and the per-param "✓ already set" indicator
+  now agree** — `applyDataDrivenDefaults`/`countDataDrivenDefaults` compared the
+  current value to the suggestion with strict `!==`, while the per-param "From your
+  data" button uses `matchesSuggestion` (half-step tolerance) — so a value within
+  half a step of the suggestion (slider lands on 1.4, suggestion 1.36) read "✓
+  already set" on the param yet the toolbar still offered "Use data defaults"; the
+  count also included *disabled* ops. Both functions now share a `wouldChange`
+  helper that uses `matchesSuggestion` with each param's step (threaded into the
+  suggestion from the op schema) and skips disabled ops, so the toolbar count, the
+  apply action, and the per-param indicator are consistent. Frontend-only,
+  additive. Vitest: added within-half-step-is-already-set and disabled-op-skipped
+  cases to the existing helper suite. (v0.69.9, this run — Builder)
+
+- **Fix: star-mask overlay now reflects the display-space image the ops gate on
+  (was computed on the raw linear proxy)** — the "Star mask" trust overlay ran
+  `star_mask` on the *linear* proxy, but `stars.reduce`/`stars.boost_nebula` (both
+  `stage="nonlinear"`) gate on the **stretched** image at their pipeline position,
+  where faint stars pop out of the noise — so the overlay drastically
+  under-represented what the ops actually touch (faint stars simply weren't shown).
+  `edit_star_mask` now accepts the current `recipe` + selected star-op `uid`,
+  applies the recipe up to (but not including) that op via a generalized
+  `_recipe_before_uid(..., drop_ids=("stars.reduce","stars.boost_nebula"))`, and
+  masks the resulting display-space image (empty recipe → the pipeline's default
+  asinh stretch, matching the ops). Falls back to the linear proxy when no recipe
+  is passed (old clients). Same run also **debounces** the overlay: `maskSizePx`
+  and the recipe are now debounced and in the query key, so dragging "Star size"
+  no longer fires a `star_mask` render per tick. Engine/webapp + frontend;
+  additive/upgrade-safe (new optional query params, response unchanged). Tested:
+  webapp (a stretched recipe marks ≥2.5× more faint-star mask weight than the
+  linear render; recipe+uid stops before the selected op) + Vitest
+  (`editStarMaskUrl` carries size/recipe/uid; the overlay passes the recipe with no
+  uid when no star op is selected). (v0.69.8, this run — Builder)
+
+- **Fix: one slider/curve drag no longer floods (and evicts) the editor's undo
+  history** — every editor slider tick and every curve pointer-move went through
+  the history-capturing `setOps`, so a single drag pushed dozens of entries and a
+  couple of long drags evicted all earlier edits (added ops, Auto-process) past the
+  100-entry cap; Ctrl+Z then undid one sub-pixel of a drag instead of the whole
+  edit. `useUndoable.set` now takes an optional `coalesceKey`: consecutive sets
+  sharing a key update in place *without* a new history entry, so a continuous drag
+  collapses to one undoable step. `OpParamPanel` passes a per-param key
+  (`param:<key>`, namespaced by op uid in `Editor.setParams`) for the continuous
+  slider/curve controls and *omits* it for discrete button edits (reset,
+  suggestions), so each of those stays its own step. Different params and different
+  ops never merge (distinct keys); a keyed set right after an undo starts a fresh
+  entry. Frontend-only, additive; no API/behaviour change beyond history grouping.
+  Vitest: `useUndoable` coalescing (4 cases: collapse-a-drag / no-merge-across-keys
+  / discrete-keyless / fresh-after-undo) + `OpParamPanel` (slider carries
+  `param:amount`, buttons are single-arg keyless). (v0.69.7, this run — Builder)
 
 - **Fix flaky frontend CI (Editor Levels "From your image" / "Auto levels" tests)** —
   these tests click a data-driven button and `waitFor` it to flip to its
