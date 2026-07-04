@@ -47,7 +47,15 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
-- **Single-field (non-mosaic) stacks are misclassified as mosaics → Auto silently
+- ~~**Single-field (non-mosaic) stacks are misclassified as mosaics → Auto silently
+  crops the frame + the whole editor shows mosaic-only tools.**~~ — **FIXED
+  v0.74.2** (see Shipped). The editor now uses the stacker's *authoritative* mosaic
+  verdict (a persisted nullable `is_mosaic` column on `stack_runs`, schema 7→8
+  additive migration) instead of the broken `coverage_max > coverage_min` heuristic;
+  legacy runs (NULL) fall back to a coverage-distribution check, never the old test.
+  Original write-up kept below for provenance.
+
+- **[FIXED v0.74.2] Single-field (non-mosaic) stacks are misclassified as mosaics → Auto silently
   crops the frame + the whole editor shows mosaic-only tools.** *(reproduced
   end-to-end, Scout 2026-07-04)*
   - **Symptom.** For a perfectly normal **single-field** OSC stack (the primary
@@ -316,29 +324,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   is self-describing for Siril/PixInsight. Absence = today's linear behaviour, so
   old runs are unaffected.
 ### Autonomy — "just works" (PRIORITY 2)
-- **⭐ OWNER-REQUESTED — "Reprocess everything": rescan all data and restack every
-  target with the current engine.** The stacking engine keeps improving (better
-  rejection / alignment / calibration, bug fixes), but each target's existing stack
-  was produced by whatever engine version was current when it ran — so after an
-  upgrade the *final images stay stale* unless the user restacks each target by hand.
-  Add a single, confirm-gated maintenance action (a button on a Library or Settings
-  page + an API endpoint) that enqueues a fresh stack for **every** target through
-  the existing single-worker `JobManager`, reusing each target's last-used stack
-  settings (from the run's `options_json`; fall back to auto-defaults when a target
-  has none). One click after an upgrade then regenerates all final images with the
-  new engine. **Must be non-destructive and memory-safe:** run the per-target jobs
-  **serially** (the stack hot path is memory-bounded on purpose — OOM history);
-  write each restack as a *new* `stack_runs` row **alongside** the old output (never
-  delete or overwrite the prior image), so a worse/failed restack can't lose a good
-  result and the user can compare in History; and surface batch progress (N / total
-  targets) with cancel (reuses the JobManager cancel semantics). Ship it in slices:
-  (a) **restack-all reusing stored settings** — the core ask; (b) an optional deeper
-  **full rescan** that also re-runs QC / plate-solve / auto-grade over the existing
-  library frames before restacking, for when those steps improved too; (c) a "only
-  targets last stacked before version X" filter (record the engine version on each
-  stack run if not already, so a large library isn't reprocessed wholesale). Additive
-  / upgrade-safe — new endpoint + job kind + UI action, reusing `stack_runs`.
-  (L, autonomy/image-quality)
+- **⭐ OWNER-REQUESTED — "Reprocess everything" — slice (a) SHIPPED (v0.74.0);
+  slices (b)/(c) remain.** The stacking engine keeps improving (better rejection /
+  alignment / calibration, bug fixes), but each target's existing stack was produced
+  by whatever engine version was current when it ran — so after an upgrade the *final
+  images stay stale* unless the user restacks each target by hand. **Slice (a)
+  shipped v0.74.0:** a confirm-gated "Reprocess all targets" action on the Settings
+  page + a `POST /api/reprocess-all` endpoint enqueue one serial `reprocess_all` job
+  that restacks **every** target, reusing each target's last genuine stack run's
+  settings (falling back to its saved defaults / global auto-defaults). It's
+  non-destructive (each restack is a *new* `stack_runs` row alongside the old output)
+  and memory-safe (per-target stacks run serially inside the one job), with
+  between-target + within-target cancel and per-target failure isolation. **Remaining
+  slices for a future run:** (b) an optional deeper **full rescan** that also re-runs
+  QC / plate-solve / auto-grade over the existing library frames before restacking,
+  for when those steps improved too; (c) a "only targets last stacked before version
+  X" filter (record the engine version on each stack run so a large library isn't
+  reprocessed wholesale) — plus richer batch UI (a dedicated N/total batch progress
+  card rather than the per-target job progress + summary you get today). (M remaining,
+  autonomy/image-quality)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
   different (per-channel vs luminance gradient, star reduction, saturation). The
@@ -521,6 +525,78 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Fix: single-field stacks were misclassified as mosaics (Scout-verified
+  wrong-result/broken-UX bug on the primary user's every-session case)** — the
+  editor decided "is this a mosaic?" from `coverage_max > coverage_min`, but a real
+  reprojected stack *always* has an uncovered NaN/zero border, so `coverage_min` is
+  ~always 0 and the test was ~always True — mislabelling **single-field** stacks as
+  mosaics. Consequence: one-click Auto prepended a no-op `background.level_coverage`
+  *and* appended a spurious `geometry.crop` that trimmed a few px off every edge (and
+  changed the export dimensions), plus the editor showed the mosaic banner, the
+  "Trim border" button and the coverage-map overlay — all on a plain single-field
+  OSC frame. Root fix: persist the stacker's **authoritative** union-canvas decision
+  (`run_stack`'s own `is_mosaic_canvas`) as a new nullable `is_mosaic` column on
+  `stack_runs` (schema `SCHEMA_VERSION` 7→8, additive `ALTER TABLE` migration,
+  backfilling NULL — old DBs migrate cleanly, old runs read None). The three editor
+  sites (histogram `is_mosaic`, trim-suggestion, Auto) now resolve the verdict via a
+  shared `_run_is_mosaic` helper: the persisted flag when present, else — for legacy
+  NULL runs — a **coverage-distribution** check (`coverage_is_mosaic`: a genuine
+  mosaic has ≥2 large coverage plateaus at distinct levels; a single-field stack has
+  one dominant interior level + a thin border ramp), *never* the old
+  `max>min` test. `auto_recipe` now takes an explicit `is_mosaic: bool` (the buggy
+  `coverage_span`→`_is_mosaic` heuristic is removed from the engine entirely). The
+  histogram hot path reuses the coverage array it already loads (no extra I/O);
+  legacy trim/auto load a strided coverage map. Additive/upgrade-safe (nullable
+  column, no default/API-shape change; `is_mosaic` is a new response *value*, not a
+  new field). Tests: engine (`coverage_is_mosaic` single-field-with-ramp→False /
+  two-plateaus→True / empty / 3-D), schema (v7→v8 migrates, old run reads None, new
+  inserts round-trip True/False), end-to-end (a real single-field `run_stack` records
+  `is_mosaic=False`), and webapp regression (a **legacy** single-field run with a
+  realistic coverage sibling now reports `is_mosaic:false` where the old heuristic
+  said true; a legacy mosaic still classifies true). The fabricated
+  `coverage_min==coverage_max` editor tests were updated to set the authoritative
+  flag so a fabricated span can't hide the bug again. (v0.74.2, this run — Builder)
+
+- **Jobs page surfaces the reprocess-all batch outcome in plain language** —
+  companion to the v0.74.0 reprocess-everything feature: a finished `reprocess_all`
+  job carries a `{total, stacked, failed, cancelled}` summary that the Jobs page
+  previously didn't render, so the user couldn't see how many targets restacked or
+  which failed. The job row now shows "Restacked N/M targets [(cancelled early)]
+  [— K failed]." plus a red "Failed: …" line naming the targets that errored,
+  driven by a pure, tested `reprocessSummary` helper (singularises one target;
+  tolerates missing/garbage `failed` entries). Frontend-only, additive, advisory
+  (no API/behaviour change). Vitest: helper (clean run / cancel+failures /
+  singular+garbage-tolerant) + a Jobs row test that a batch result renders the
+  summary and the failed-target list. (v0.74.1, this run — Builder)
+
+- **⭐ OWNER-REQUESTED — "Reprocess everything" (slice a): one-click restack of
+  every target with the current engine** — after an engine upgrade a target's
+  final image stays stale until it's restacked by hand. A new confirm-gated
+  "Reprocess all targets" action on the Settings page (a `Maintenance` panel) hits
+  a new `POST /api/reprocess-all` endpoint that enqueues one serial `reprocess_all`
+  job. The job walks every target and restacks it **reusing the settings that made
+  its current image** — a new `_last_stack_options_for_target` helper reads each
+  target's newest *genuine* stack run's `options_json` (a companion
+  `_stack_options_from_run_json` rejects editor-export/channel-combine runs, which
+  share the `stack_runs` table, and empty/garbage JSON), falling back to the
+  target's saved stack defaults / global auto-defaults when it has none. It's
+  **non-destructive** (each restack is recorded as a *new* `stack_runs` row via the
+  normal `run_stack` path — old outputs are never touched, so a worse restack can't
+  lose a good result and both show up in History) and **memory-safe** (the
+  per-target stacks run serially inside the single job, so the memory-bounded stack
+  hot path is never oversubscribed — OOM history). Cancellable between targets *and*
+  within each target's stack; a target that fails to stack is isolated (its error is
+  recorded and the batch carries on). A duplicate-batch guard
+  (`JobManager.active_of_kind`) returns the running job instead of enqueuing a
+  second. Additive / upgrade-safe: new endpoint + job kind + UI action, reusing the
+  existing `stack_runs` schema and job manager (no config/DB/on-disk/API-shape
+  change). Tested: engine (helper accept/reject cases; the batch reuses each
+  target's last kappa, isolates a failing target, cancels between targets; the
+  guard is active only for queued/running jobs) + webapp end-to-end (the endpoint
+  enqueues a batch that restacks both targets and leaves the seeded prior run in
+  place — additive) + Vitest (the confirm gate, the start/already-running/error
+  notifications). (v0.74.0, this run — Builder)
 
 - **Auto-process now gives its one-click result a gentle, data-driven contrast
   curve (the top PRIORITY-1 item, Scout-vetted & unblocked)** — the built-in

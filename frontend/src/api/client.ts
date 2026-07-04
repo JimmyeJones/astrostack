@@ -597,6 +597,10 @@ export const api = {
     ok: boolean; detail?: string | null; solved?: boolean; target?: string;
     frame?: string; ra_deg?: number | null; dec_deg?: number | null; elapsed_s?: number;
   }>("/api/system/astap-test", { method: "POST" }),
+  reprocessAll: () =>
+    req<{ job_id: string; already_running: boolean }>("/api/reprocess-all", {
+      method: "POST",
+    }),
 
   // sky viewer
   getSky: () => req<SkyData>("/api/sky"),

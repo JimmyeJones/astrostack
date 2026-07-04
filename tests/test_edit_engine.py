@@ -473,19 +473,18 @@ def test_auto_recipe_levels_coverage_only_for_mosaics():
     clean = np.full((80, 100, 3), 0.05, np.float32)
     clean[30:50, 40:60] += 0.5
 
-    def ids(span):
-        return [o.id for o in auto_recipe(clean, coverage_span=span).ops]
+    def ids(is_mosaic):
+        return [o.id for o in auto_recipe(clean, is_mosaic=is_mosaic).ops]
 
     # Mosaic: the pass is present and runs on linear data, before the gradient
     # removal and the stretch.
-    mosaic_ids = ids((1, 6))
+    mosaic_ids = ids(True)
     assert "background.level_coverage" in mosaic_ids
     assert mosaic_ids.index("background.level_coverage") < mosaic_ids.index("background.final_gradient")
     assert mosaic_ids.index("background.level_coverage") < mosaic_ids.index("tone.stretch")
 
-    # Single-field (uniform coverage) and unknown span → unchanged (no leveling).
-    assert "background.level_coverage" not in ids((3, 3))
-    assert "background.level_coverage" not in ids(None)
+    # Single-field → unchanged (no leveling).
+    assert "background.level_coverage" not in ids(False)
 
 
 def test_denoise_identity_at_zero_and_preserves_colour():
@@ -898,7 +897,7 @@ def test_auto_recipe_appends_trim_crop_last_on_a_mosaic():
     last (after the tone/detail ops) and never before the coverage-leveling op."""
     from seestack.edit.presets import auto_recipe
 
-    rec = auto_recipe(coverage_span=(1, 5), trim_crop=(0.1, 0.12, 0.9, 0.88))
+    rec = auto_recipe(is_mosaic=True, trim_crop=(0.1, 0.12, 0.9, 0.88))
     ids = [op.id for op in rec.ops]
     assert ids[-1] == "geometry.crop"        # trim runs last
     assert ids.index("background.level_coverage") < ids.index("geometry.crop")
@@ -912,7 +911,7 @@ def test_auto_recipe_no_trim_crop_when_none():
     no crop op — behaviour is unchanged from before the feature."""
     from seestack.edit.presets import auto_recipe
 
-    mosaic_no_trim = auto_recipe(coverage_span=(1, 5), trim_crop=None)
-    single_field = auto_recipe(coverage_span=(3, 3), trim_crop=None)
+    mosaic_no_trim = auto_recipe(is_mosaic=True, trim_crop=None)
+    single_field = auto_recipe(is_mosaic=False, trim_crop=None)
     assert "geometry.crop" not in [op.id for op in mosaic_no_trim.ops]
     assert "geometry.crop" not in [op.id for op in single_field.ops]

@@ -3,7 +3,7 @@ import { Notifications } from "@mantine/notifications";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { JobsView } from "./Jobs";
+import { JobsView, reprocessSummary } from "./Jobs";
 import * as client from "../api/client";
 import type { Job } from "../api/client";
 
@@ -43,6 +43,19 @@ describe("JobsView", () => {
     await waitFor(() => expect(screen.getByText("job already finished")).toBeInTheDocument());
   });
 
+  it("summarises a reprocess-all batch, listing failed targets", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "rp-1", kind: "reprocess_all", target: null, state: "done",
+        result: { total: 3, stacked: 2, failed: [{ target: "NGC_7000" }], cancelled: false },
+      }),
+    ]);
+    renderJobs();
+    await waitFor(() =>
+      expect(screen.getByText("Restacked 2/3 targets — 1 failed.")).toBeInTheDocument());
+    expect(screen.getByText("Failed: NGC_7000")).toBeInTheDocument();
+  });
+
   it("cancels a job and refreshes the list on success", async () => {
     vi.spyOn(client.api, "listJobs")
       .mockResolvedValueOnce([mkJob()])
@@ -56,5 +69,25 @@ describe("JobsView", () => {
 
     await waitFor(() => expect(cancel).toHaveBeenCalledWith("job-1"));
     await waitFor(() => expect(screen.getByText("cancelled")).toBeInTheDocument());
+  });
+});
+
+describe("reprocessSummary", () => {
+  it("reports a clean full run", () => {
+    expect(reprocessSummary({ total: 5, stacked: 5, failed: [], cancelled: false }))
+      .toEqual({ line: "Restacked 5/5 targets.", failed: [] });
+  });
+  it("notes cancellation and failures", () => {
+    expect(reprocessSummary({
+      total: 4, stacked: 2, failed: [{ target: "A" }, { target: "B" }], cancelled: true,
+    })).toEqual({ line: "Restacked 2/4 targets (cancelled early) — 2 failed.", failed: ["A", "B"] });
+  });
+  it("singularises one target and tolerates missing/garbage fields", () => {
+    expect(reprocessSummary({ total: 1, stacked: 1 }))
+      .toEqual({ line: "Restacked 1/1 target.", failed: [] });
+    expect(reprocessSummary({}))
+      .toEqual({ line: "Restacked 0/0 targets.", failed: [] });
+    expect(reprocessSummary({ total: 2, stacked: 1, failed: [{ target: "X" }, {}, "junk"] }))
+      .toEqual({ line: "Restacked 1/2 targets — 1 failed.", failed: ["X"] });
   });
 });

@@ -19,7 +19,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from seestack.edit.coverage_trim import largest_covered_rect
+from seestack.edit.coverage_trim import coverage_is_mosaic, largest_covered_rect
 from seestack.edit.histogram import compute_histogram
 from seestack.edit.ops.detail import deconv_understates_on_proxy
 from seestack.edit.pipeline import apply_recipe
@@ -101,16 +101,13 @@ def _proxy_coverage(fits_path: str, scale: float) -> np.ndarray | None:
     return load_coverage(fits_path, step=max(1, int(round(scale))))
 
 
-def _trim_rect_for_run(run, min_frac: float = 0.5
-                       ) -> tuple[float, float, float, float] | None:
-    """Fractional ``(x0, y0, x1, y1)`` bounds of the largest well-covered rectangle
-    of a run's coverage map (the ragged mosaic border trimmed away), or ``None``
-    when there's no coverage sibling or nothing worth trimming (a full-frame
-    result). Shared by the "Trim border" suggestion and Auto-process."""
+def _load_run_coverage_strided(run):
+    """The run's per-pixel coverage map, strided down if huge so the O(h·w) sweeps
+    and distribution checks stay cheap. ``None`` when there's no coverage sibling
+    (a single-field image whose stack wrote no coverage FITS)."""
     cov_path = coverage_path_for(run.fits_path)
     if not cov_path.exists():
         return None
-    # Stride the (possibly huge) coverage map down before the rectangle sweep.
     step = 1
     try:
         from astropy.io import fits as _fits
@@ -121,7 +118,34 @@ def _trim_rect_for_run(run, min_frac: float = 0.5
             step = -(-dim // _TRIM_MAX_DIM)  # ceil division
     except (OSError, ValueError):
         step = 1
-    cov = load_coverage(run.fits_path, step=step)
+    return load_coverage(run.fits_path, step=step)
+
+
+def _run_is_mosaic(run, coverage=None, *, load: bool = False) -> bool:
+    """Whether a run is a mosaic (union canvas). Uses the stacker's *authoritative*
+    persisted ``is_mosaic`` flag when present; for legacy runs recorded before that
+    flag existed, falls back to the coverage map's distribution (``coverage_is_mosaic``).
+    Never the old ``coverage_max > coverage_min`` test — the reprojection border is
+    uncovered, so that minimum is ~always 0 and it mislabels single-field stacks.
+
+    ``coverage`` may be a coverage array already loaded by the caller (no extra
+    I/O); when it's ``None`` and ``load`` is set, the coverage map is loaded here."""
+    if run.is_mosaic is not None:
+        return bool(run.is_mosaic)
+    if coverage is None and load:
+        coverage = _load_run_coverage_strided(run)
+    if coverage is not None:
+        return bool(coverage_is_mosaic(coverage))
+    return False
+
+
+def _trim_rect_for_run(run, min_frac: float = 0.5
+                       ) -> tuple[float, float, float, float] | None:
+    """Fractional ``(x0, y0, x1, y1)`` bounds of the largest well-covered rectangle
+    of a run's coverage map (the ragged mosaic border trimmed away), or ``None``
+    when there's no coverage sibling or nothing worth trimming (a full-frame
+    result). Shared by the "Trim border" suggestion and Auto-process."""
+    cov = _load_run_coverage_strided(run)
     if cov is None:
         return None
     rect = largest_covered_rect(cov, min_frac=min_frac)
@@ -612,16 +636,18 @@ async def trim_suggestion(safe: str, run_id: int, request: Request,
                           min_frac: float = 0.5) -> TrimSuggestionOut:
     """Suggest a crop to the largest well-covered rectangle of a mosaic, so a
     user can trim the ragged, low-coverage union-canvas edges in one click
-    instead of hand-dragging the crop bounds. Only offered on a mosaic (uneven
-    panel overlap → ``coverage_max > coverage_min``); a single-field stack is
-    left untouched. The coverage map already written next to the stack drives it.
+    instead of hand-dragging the crop bounds. Only offered on a mosaic (the
+    stacker's persisted verdict, or the coverage distribution for legacy runs); a
+    single-field stack is left untouched. The coverage map already written next to
+    the stack drives it.
     """
     project_dir, run = _run_info(request, safe, run_id)
-    is_mosaic = bool(int(run.coverage_max) > int(run.coverage_min))
-    if not is_mosaic:
+    if run.is_mosaic is False:  # authoritative single-field — no coverage I/O
         return TrimSuggestionOut(is_mosaic=False, crop=None)
 
     def work() -> TrimSuggestionOut:
+        if not _run_is_mosaic(run, load=True):
+            return TrimSuggestionOut(is_mosaic=False, crop=None)
         rect = _trim_rect_for_run(run, min_frac=min_frac)
         crop = None if rect is None else TrimCrop(x0=rect[0], y0=rect[1],
                                                   x1=rect[2], y1=rect[3])
@@ -685,11 +711,12 @@ async def edit_histogram(safe: str, run_id: int, request: Request,
         hist["proxy_scale"] = round(float(scale), 3)
         hist["proxy_width"] = int(w)
         hist["proxy_height"] = int(h)
-        # Whether this run is a mosaic (uneven panel overlap → coverage spans a
-        # range). The "Coverage leveling" op is only meaningful on a mosaic; on a
-        # single-field stack (uniform coverage) it's a deliberate no-op, so the
-        # editor can tell the user the control won't do anything here.
-        hist["is_mosaic"] = bool(int(run.coverage_max) > int(run.coverage_min))
+        # Whether this run is a mosaic (union canvas). The "Coverage leveling" op,
+        # the trim/coverage-overlay tools and the mosaic banner are only meaningful
+        # on a mosaic; on a single-field stack they're a deliberate no-op. Uses the
+        # stacker's persisted verdict (or the already-loaded coverage distribution
+        # for legacy runs) — not coverage_max>min, which is ~always true.
+        hist["is_mosaic"] = _run_is_mosaic(run, ctx.coverage)
         # A deconvolution op's live preview understates the full-res export when
         # the proxy is decimated enough that its PSF collapses to the floor (a
         # near-no-op kernel) — a fundamental limit of the sub-pixel blur on the
@@ -761,20 +788,21 @@ async def auto_process(safe: str, run_id: int, request: Request) -> dict:
         proj.close()
         lib.close()
 
-    # A mosaic stack (uneven panel overlap → coverage_max > coverage_min) gets a
-    # coverage-leveling pass prepended so its panel steps are flattened; a
-    # single-field stack (uniform coverage) is unchanged.
-    coverage_span = (int(run.coverage_min), int(run.coverage_max))
-    is_mosaic = coverage_span[1] > coverage_span[0]
-
     def work() -> dict:
         rgb, _scale = get_proxy(project_dir, run.id, run.fits_path)
+        # A mosaic stack gets a coverage-leveling pass prepended so its panel steps
+        # are flattened; a single-field stack is unchanged. Use the stacker's
+        # authoritative verdict (or the coverage distribution for legacy runs) —
+        # not coverage_max>min, which is ~always true and would wrongly treat every
+        # single-field stack as a mosaic (prepending a no-op leveling + a spurious
+        # border crop).
+        is_mosaic = _run_is_mosaic(run, load=True)
         # On a mosaic, also trim the ragged low-coverage border so the one-click
         # result is cleanly framed (only when the trim is meaningful — the helper
         # returns None on a full-frame result or a missing coverage sibling).
         trim = _trim_rect_for_run(run) if is_mosaic else None
         return presets_mod.auto_recipe(
-            rgb, median_fwhm=median_fwhm, coverage_span=coverage_span,
+            rgb, median_fwhm=median_fwhm, is_mosaic=is_mosaic,
             trim_crop=trim).to_dict()
 
     return await run_in_threadpool(work)

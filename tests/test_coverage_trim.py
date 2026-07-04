@@ -4,7 +4,40 @@ from __future__ import annotations
 
 import numpy as np
 
-from seestack.edit.coverage_trim import largest_covered_rect
+from seestack.edit.coverage_trim import coverage_is_mosaic, largest_covered_rect
+
+
+def test_coverage_is_mosaic_single_field_with_border_ramp():
+    # A single-field stack: one dominant interior plateau (every frame covers it)
+    # plus a thin reprojection-border ramp of lower values. This is the case the
+    # old coverage_max>min heuristic wrongly flagged as a mosaic (min is 0 at the
+    # uncovered border). The distribution check must return False.
+    h, w = 200, 260
+    cov = np.zeros((h, w), dtype=np.float32)
+    cov[2:-2, 2:-2] = 6.0           # interior: all 6 frames
+    cov[1, :] = cov[-2, :] = 3.0    # a thin 1-px ramp step around the edge
+    cov[:, 1] = cov[:, -2] = 3.0
+    assert coverage_is_mosaic(cov) is False
+
+
+def test_coverage_is_mosaic_true_for_two_plateaus():
+    # A genuine mosaic: two large panel regions at distinct coverage levels
+    # (plus their overlap), each spanning a meaningful fraction of the area.
+    h, w = 200, 260
+    cov = np.zeros((h, w), dtype=np.float32)
+    cov[:, : w // 2] = 4.0          # panel A
+    cov[:, w // 2:] = 8.0           # panel B (more overlap)
+    assert coverage_is_mosaic(cov) is True
+
+
+def test_coverage_is_mosaic_handles_empty_and_3d():
+    assert coverage_is_mosaic(np.zeros((10, 10), dtype=np.float32)) is False
+    assert coverage_is_mosaic(np.full((10, 10), np.nan, dtype=np.float32)) is False
+    # 3-D (H,W,3) coverage is reduced to its first plane.
+    cov = np.zeros((40, 40, 3), dtype=np.float32)
+    cov[:, :20, :] = 4.0
+    cov[:, 20:, :] = 9.0
+    assert coverage_is_mosaic(cov) is True
 
 
 def test_uniform_coverage_returns_none():

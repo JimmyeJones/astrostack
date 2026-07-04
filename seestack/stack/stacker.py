@@ -1063,6 +1063,7 @@ def run_stack(
             transparency_ratio=_compute_transparency_ratio(project, frames),
             noise_sigma=noise_sigma,
             calstat=applied_cal,
+            is_mosaic=bool(is_mosaic_canvas),
         ))
     except Exception as exc:  # noqa: BLE001 — history is non-critical
         log.warning("Could not record stack run in history: %s", exc)

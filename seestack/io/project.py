@@ -30,7 +30,7 @@ from typing import Any, Iterator
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 SCHEMA_SQL = f"""
 PRAGMA user_version = {SCHEMA_VERSION};
@@ -59,7 +59,8 @@ CREATE TABLE IF NOT EXISTS stack_runs (
     total_exposure_s REAL,
     transparency_ratio REAL,
     noise_sigma REAL,
-    calstat TEXT
+    calstat TEXT,
+    is_mosaic INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_stack_runs_ts ON stack_runs(timestamp_utc);
@@ -297,6 +298,17 @@ class Project:
                     "ALTER TABLE stack_runs ADD COLUMN calstat TEXT")
             except sqlite3.OperationalError:
                 pass  # already present
+        if from_version < 8:
+            # Recorded whether the run used a union/mosaic canvas (the stacker's
+            # authoritative decision), so the editor no longer has to infer it
+            # from coverage_min/max — which is ~always a range (the reprojection
+            # border is uncovered), mislabelling single-field stacks as mosaics.
+            # Additive; older runs stay NULL and fall back to a coverage-map check.
+            try:
+                self._conn.execute(
+                    "ALTER TABLE stack_runs ADD COLUMN is_mosaic INTEGER")
+            except sqlite3.OperationalError:
+                pass  # already present
         self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @contextmanager
@@ -422,14 +434,15 @@ class Project:
             "  timestamp_utc, output_basename, fits_path, tiff_path, preview_path,"
             "  n_frames_used, canvas_h, canvas_w, coverage_min, coverage_max,"
             "  options_json, notes, total_exposure_s, transparency_ratio,"
-            "  noise_sigma, calstat"
-            ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "  noise_sigma, calstat, is_mosaic"
+            ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 run.timestamp_utc, run.output_basename, run.fits_path,
                 run.tiff_path, run.preview_path, run.n_frames_used,
                 run.canvas_h, run.canvas_w, run.coverage_min, run.coverage_max,
                 run.options_json, run.notes, run.total_exposure_s,
                 run.transparency_ratio, run.noise_sigma, run.calstat,
+                None if run.is_mosaic is None else int(bool(run.is_mosaic)),
             ),
         )
         return cur.lastrowid  # type: ignore[return-value]
@@ -468,6 +481,10 @@ class Project:
                 calstat=(
                     row["calstat"]
                     if "calstat" in row.keys() else None
+                ),
+                is_mosaic=(
+                    (None if row["is_mosaic"] is None else bool(row["is_mosaic"]))
+                    if "is_mosaic" in row.keys() else None
                 ),
             )
 
@@ -516,6 +533,11 @@ class StackRunRow:
     # "bias+flat", "flat", …), or None when nothing was applied / for runs
     # recorded before this column existed (schema < 7).
     calstat: str | None = None
+    # Whether this run used a union/mosaic canvas — the stacker's authoritative
+    # decision (True mosaic, False single-field). None for runs recorded before
+    # this column existed (schema < 8), where the editor falls back to inspecting
+    # the coverage map's distribution rather than the coverage_min/max heuristic.
+    is_mosaic: bool | None = None
 
 
 def _to_db(value: Any) -> Any:

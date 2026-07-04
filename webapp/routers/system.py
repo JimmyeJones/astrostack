@@ -6,11 +6,12 @@ import os
 import shutil
 import time
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.concurrency import run_in_threadpool
 
-from webapp import deps
+from webapp import deps, pipeline
 
 router = APIRouter(tags=["system"])
 
@@ -155,6 +156,24 @@ def _gpu_available() -> bool:
         return bool(GPU_AVAILABLE)
     except Exception:  # noqa: BLE001
         return False
+
+
+@router.post("/api/reprocess-all")
+def reprocess_all(request: Request) -> dict[str, Any]:
+    """Restack every target with the current engine (owner-requested maintenance
+    action). Non-destructive: each restack is a new run alongside the old one,
+    run serially so the memory-bounded stack hot path is never oversubscribed.
+
+    Idempotent-ish: if a reprocess-all batch is already queued/running, return
+    that job instead of enqueuing a duplicate.
+    """
+    settings = deps.get_settings(request)
+    jm = deps.get_job_manager(request)
+    existing = jm.active_of_kind("reprocess_all")
+    if existing is not None:
+        return {"job_id": existing.id, "already_running": True}
+    job = pipeline.submit_reprocess_all(settings, jm)
+    return {"job_id": job.id, "already_running": False}
 
 
 @router.get("/api/health")
