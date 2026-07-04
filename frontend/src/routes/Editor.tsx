@@ -16,7 +16,7 @@ import { api, type EditOp, type OpInstance, type Recipe } from "../api/client";
 import { useUndoable } from "../hooks/useUndoable";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { Histogram } from "../components/editor/Histogram";
-import { levelsHistGuides } from "../components/editor/levelsGuides";
+import { tonalHistGuides } from "../components/editor/tonalGuides";
 import { OpList } from "../components/editor/OpList";
 import { degenerateLevelsUids, extraEnabledStretchUids, hasEnabledStretch, insertOnCorrectSide, moveToCorrectSide }
   from "../components/editor/stageConflicts";
@@ -836,13 +836,18 @@ export function EditorView() {
               </Group>
             </div>
             <Histogram data={hist.data}
-              guides={levelsHistGuides(selectedOp,
+              guides={tonalHistGuides(selectedOp,
                 levels.data?.black != null && levels.data?.white != null
-                  ? { black: levels.data.black, white: levels.data.white } : null)} />
+                  ? { black: levels.data.black, white: levels.data.white } : null,
+                hist.data)} />
             {selectedOp?.id === "tone.levels" ? (
               <Text size="xs" c="dimmed" mt={4}>
                 <b>B</b>/<b>W</b> mark your black &amp; white points on the histogram
                 {levels.data?.black != null ? "; the dashed blue lines are the suggested points" : ""}.
+              </Text>
+            ) : selectedOp?.id === "tone.curves" ? (
+              <Text size="xs" c="dimmed" mt={4}>
+                The dashed purple lines mark where your curve's points sit on the tonal range.
               </Text>
             ) : null}
             {previewScaleCaption(hist.data) ? (
