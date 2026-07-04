@@ -109,6 +109,7 @@ function mockEditorQueries() {
     base_run_id: 3,
   });
   vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+  vi.spyOn(client.api, "getDefaultRecipe").mockResolvedValue({ ops: [], count: 0 });
   vi.spyOn(client.api, "getHistogram").mockResolvedValue(
     { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
 }
@@ -481,6 +482,7 @@ describe("EditorView", () => {
     vi.spyOn(client.api, "getRecipe").mockResolvedValue({ ops: [], base_run_id: 3 });
     vi.spyOn(client.api, "previousRecipe").mockResolvedValue(
       { run_id: null, ops: [], count: 0 });
+    vi.spyOn(client.api, "getDefaultRecipe").mockResolvedValue({ ops: [], count: 0 });
     vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
     vi.spyOn(client.api, "getHistogram").mockResolvedValue(
       { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
@@ -523,6 +525,7 @@ describe("EditorView", () => {
         { uid: "p2", id: "tone.curves", enabled: true, params: { points: [[0, 0], [1, 1]] } },
       ],
     });
+    vi.spyOn(client.api, "getDefaultRecipe").mockResolvedValue({ ops: [], count: 0 });
     vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
     vi.spyOn(client.api, "getHistogram").mockResolvedValue(
       { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
@@ -553,6 +556,51 @@ describe("EditorView", () => {
     });
     // The nudge (and its carry-over button) is gone now the pipeline is non-empty.
     expect(screen.queryByRole("button", { name: /Use my previous edit/ })).toBeNull();
+  });
+
+  it("offers the user's saved default recipe as a one-click seed on an empty run", async () => {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({ ops: [], base_run_id: 3 });
+    vi.spyOn(client.api, "previousRecipe").mockResolvedValue(
+      { run_id: null, ops: [], count: 0 });
+    // The user has set a library-wide default of two ops.
+    vi.spyOn(client.api, "getDefaultRecipe").mockResolvedValue({
+      count: 2,
+      ops: [
+        { uid: "d1", id: "tone.stretch", enabled: true, params: { stretch: 0.6 } },
+        { uid: "d2", id: "tone.curves", enabled: true, params: { points: [[0, 0], [1, 1]] } },
+      ],
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    const fetchMock = vi.fn(async (_url?: string) => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderEditor();
+
+    // The empty pipeline offers the default-seed button naming its step count.
+    const seed = await screen.findByRole("button", { name: /Use my default \(2\)/ });
+    fireEvent.click(seed);
+
+    // Both ops land in the working pipeline...
+    expect(await screen.findByText("Stretch")).toBeInTheDocument();
+    expect(screen.getByText("Curves")).toBeInTheDocument();
+    // ...and a preview fetch fires carrying exactly those ops.
+    await waitFor(() => {
+      const applied = fetchMock.mock.calls.some((call) => {
+        const q = new URL("http://x" + String(call[0])).searchParams.get("recipe");
+        if (!q) return false;
+        const decoded = JSON.parse(atob(q.replace(/-/g, "+").replace(/_/g, "/")));
+        return decoded.ops.map((o: { id: string }) => o.id).join(",")
+          === "tone.stretch,tone.curves";
+      });
+      expect(applied).toBe(true);
+    });
+    // The nudge (and its seed button) is gone now the pipeline is non-empty.
+    expect(screen.queryByRole("button", { name: /Use my default/ })).toBeNull();
   });
 
   it("flags a heavy op so the user knows the preview updates after a pause", async () => {

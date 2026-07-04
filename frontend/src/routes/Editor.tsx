@@ -6,7 +6,7 @@ import { useDebouncedValue } from "@mantine/hooks";
 import {
   IconAlertTriangle, IconArrowBackUp, IconArrowForwardUp, IconArrowLeft, IconChevronDown,
   IconChevronUp, IconCrop, IconDeviceFloppy, IconDownload, IconHistory, IconInfoCircle,
-  IconPhotoDown, IconPlus, IconRefresh, IconSparkles, IconWand, IconZoomScan,
+  IconPhotoDown, IconPlus, IconRefresh, IconSparkles, IconStar, IconWand, IconZoomScan,
 } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -95,6 +95,16 @@ export function EditorView() {
   const prevRecipe = useQuery({
     queryKey: ["previous-recipe", safe, rid],
     queryFn: () => api.previousRecipe(safe, rid),
+    enabled: !!opsSchema.data && savedIsEmpty,
+    staleTime: 30_000,
+  });
+  // The user's library-wide default recipe ("my house style"), set via the Presets
+  // menu. Offered as a one-click seed on any run with no saved edit yet, so a repeat
+  // imager's default look is one click away on every new target. Off until they set
+  // one (count 0 → the button simply doesn't appear). Server-validated on load.
+  const defaultRecipe = useQuery({
+    queryKey: ["default-recipe"],
+    queryFn: () => api.getDefaultRecipe(),
     enabled: !!opsSchema.data && savedIsEmpty,
     staleTime: 30_000,
   });
@@ -675,6 +685,18 @@ export function EditorView() {
       color: "violet",
     });
   };
+  const applyDefaultRecipe = () => {
+    const def = defaultRecipe.data;
+    if (!def?.ops?.length) return;
+    // Seed the (empty) working recipe from the user's saved default as a single
+    // undoable step. Not persisted until the user Saves.
+    setOps(() => def.ops);
+    notifications.show({
+      message: `Started from your default edit (${def.count} step`
+        + `${def.count === 1 ? "" : "s"}) — Undo to revert, Save to keep`,
+      color: "violet",
+    });
+  };
   const applyTrim = () => {
     if (!trimCrop) return;
     const next = applyTrimCrop(ops, trimCrop, specs, uid);
@@ -1131,6 +1153,20 @@ export function EditorView() {
                           leftSection={<IconHistory size={14} />}
                           onClick={applyPreviousRecipe}>
                           Use my previous edit ({prevRecipe.data.count})
+                        </Button>
+                      </Tooltip>
+                    ) : null}
+                    {/* Personal "house style": if the user set a default recipe (via
+                        the Presets menu), offer it as a one-click seed here too, so
+                        their preferred look is one click away on every new target.
+                        Undoable; not saved unless the user Saves. */}
+                    {(defaultRecipe.data?.count ?? 0) > 0 ? (
+                      <Tooltip multiline w={240} withArrow
+                        label="Start from the default edit you saved in the Presets menu (as an undoable step you can tweak, then Save).">
+                        <Button size="compact-xs" variant="default" color="grape"
+                          leftSection={<IconStar size={14} />}
+                          onClick={applyDefaultRecipe}>
+                          Use my default ({defaultRecipe.data!.count})
                         </Button>
                       </Tooltip>
                     ) : null}

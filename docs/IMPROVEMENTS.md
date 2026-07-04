@@ -337,21 +337,15 @@ problems. Dogfood it every big-picture run and fix root causes.
 - **One-click "process this target"** — after ingest, reach a good stack *and* a
   good auto-edited preview with zero manual steps: QC → solve → auto-grade →
   stack → auto-edit, well-defaulted and safe. (M, autonomy)
-- **Personal default recipe: "save this edit as my default", auto-applied on open
-  (opt-in).** A user-initiated reshaping of the sign-off-blocked "auto-seed the Auto
-  recipe on first open (default-on)" idea that sidesteps the guardrail. Add a "Set as
-  my default" action in the editor that stores the *current* recipe in library meta;
-  once a user has saved one, opening a run with **no** saved recipe seeds the working
-  recipe from their personal default (applied as a single undoable step, clearly
-  labelled, never persisted unless they Save, never overwriting an existing saved
-  recipe). This delivers the same "my first frame is already a good picture" benefit
-  as the blocked auto-seed — but it is **off until the user opts in** by saving a
-  default, so it changes nothing on a live install until they ask for it (no
-  default-flip, no sign-off needed; upgrade-safe and additive — a new nullable
-  `default_recipe` in library meta). Bonus: it's *their* look, not a fixed one, which
-  is more useful than a hardcoded seed for a repeat user with thousands of subs. Care:
-  validate the stored recipe through `validate_ops` on load so a stale op can't 500 the
-  editor. (M, autonomy/editor)
+- ~~**Personal default recipe: "save this edit as my default", offered on open
+  (opt-in).**~~ — **shipped v0.79.0** (see Shipped). A "Set current as my default" /
+  "Clear my default edit" action in the editor's Presets menu stores one library-wide
+  recipe; a run opened with no saved edit now offers a one-click "Use my default (N)"
+  seed in the empty-pipeline nudge (validated on load, applied as a single undoable
+  step, not persisted unless Saved). Off until the user sets one. *(Follow-up if ever
+  wanted: auto-apply it on open with zero clicks instead of a nudge button — deferred
+  to keep first-open behaviour unchanged and consistent with the "previous edit" nudge;
+  the button already delivers the one-click house-style value.)*
 - Auto-suggest stack settings from the data (frame count, FWHM spread, streaks)
   so the user rarely needs to touch the Stack form. (S–M, autonomy)
 - ~~**"Apply my last edit to the newest stack" — recipe carry-over across re-stacks.**~~
@@ -499,6 +493,28 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Personal default recipe — "my house style" one click away on every new run
+  (PRIORITY-2 autonomy).** User presets already let you save a recipe, but you had to
+  name it and dig into the Presets menu to reuse it on each new target. Now the editor
+  keeps one designated **default** recipe library-wide: a "Set current as my default" /
+  "Clear my default edit" action in the Presets menu (`PUT`/`GET`/`DELETE
+  /api/editor/default-recipe`, stored as a validated `editor_default_recipe` library-
+  meta key alongside user presets), and any run opened with **no** saved edit now
+  offers a one-click "Use my default (N)" button in the empty-pipeline nudge (next to
+  the existing "Use my previous edit"), so a repeat imager's preferred look seeds a new
+  target in one click. The seed is applied as a single **undoable** step and is not
+  persisted unless the user Saves; the stored recipe is validated on load (unknown ops
+  dropped, params clamped) so a stale op can never 500 the editor. **Off until the user
+  sets a default** — nothing changes on a live install until they opt in (no default
+  flip, no schema change — reuses the existing library-meta KV store; additive,
+  upgrade-safe). Tests: webapp (unset → empty; set→get round-trips validated ops and
+  drops unknown ones; DELETE and empty-PUT both clear) + Vitest (PresetMenu Set calls
+  `putDefaultRecipe` with the current ops, Clear appears only once a default exists and
+  calls `deleteDefaultRecipe`; an Editor test that a saved default surfaces the "Use my
+  default (2)" seed, applying it lands exactly those ops in the pipeline and fires a
+  preview carrying them, and the nudge clears once non-empty). (v0.79.0, this run —
+  Builder)
 
 - **Split before/after compare — drag a divider to see Original vs Edited in one
   frame (PRIORITY-1 editor/trust).** Compare was a *toggle*: you flipped the whole
