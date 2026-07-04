@@ -47,6 +47,39 @@ def _resize(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     return zoom(img, (scale, scale, 1.0), order=1).astype(np.float32)
 
 
+# The reshape-the-canvas ops. A recipe's *enabled* members of this set are the
+# only ops that move the coverage map (crop/rotate/resize); tone ops leave the
+# geometry alone. Kept as a module constant so overlays can filter for them.
+GEOMETRY_OP_IDS = ("geometry.crop", "geometry.rotate", "geometry.resize")
+
+
+def apply_geometry_to_map(m: np.ndarray, recipe, ctx: EditContext) -> np.ndarray:
+    """Apply a recipe's *enabled geometry ops* (crop/rotate/resize, in recipe
+    order) to a 2-D single-channel map — e.g. the frame-coverage map — so an
+    overlay of that map tracks the same crop/rotate/resize the edited image got.
+
+    NaN = "uncovered" is preserved through the transform (crop copies, rotate fills
+    exposed corners with NaN, resize interpolates), so gaps stay gaps. Non-geometry
+    ops are ignored — only these three reshape the canvas. Returns a 2-D array whose
+    shape matches the geometry-edited image's; the input is never mutated.
+    """
+    from seestack.edit.registry import get_op
+
+    out = np.asarray(m, dtype=np.float32)
+    for op in recipe.ops:
+        if not op.enabled or op.id not in GEOMETRY_OP_IDS:
+            continue
+        spec = get_op(op.id)
+        if spec is None:
+            continue
+        # The geometry ops operate on RGB; feed the map as three identical
+        # channels, run the op, then take one channel back.
+        rgb = np.stack([out, out, out], axis=-1)
+        rgb = spec.apply(rgb, op.params, ctx)
+        out = np.asarray(rgb, dtype=np.float32)[..., 0]
+    return out
+
+
 register(OpSpec(
     id="geometry.crop", label="Crop", group="stars_geometry", stage="nonlinear",
     apply=_crop, proxy_safe=True, help="Crop to a fractional rectangle (0..1).",

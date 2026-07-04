@@ -85,6 +85,35 @@ def _proxy_coverage(fits_path: str, scale: float) -> np.ndarray | None:
     return load_coverage(fits_path, step=max(1, int(round(scale))))
 
 
+def _trim_rect_for_run(run, min_frac: float = 0.5
+                       ) -> tuple[float, float, float, float] | None:
+    """Fractional ``(x0, y0, x1, y1)`` bounds of the largest well-covered rectangle
+    of a run's coverage map (the ragged mosaic border trimmed away), or ``None``
+    when there's no coverage sibling or nothing worth trimming (a full-frame
+    result). Shared by the "Trim border" suggestion and Auto-process."""
+    cov_path = coverage_path_for(run.fits_path)
+    if not cov_path.exists():
+        return None
+    # Stride the (possibly huge) coverage map down before the rectangle sweep.
+    step = 1
+    try:
+        from astropy.io import fits as _fits
+
+        hdr = _fits.getheader(cov_path)
+        dim = max(int(hdr.get("NAXIS1", 0)), int(hdr.get("NAXIS2", 0)))
+        if dim > _TRIM_MAX_DIM:
+            step = -(-dim // _TRIM_MAX_DIM)  # ceil division
+    except (OSError, ValueError):
+        step = 1
+    cov = load_coverage(run.fits_path, step=step)
+    if cov is None:
+        return None
+    rect = largest_covered_rect(cov, min_frac=min_frac)
+    if rect is None:
+        return None
+    return (round(rect[0], 4), round(rect[1], 4), round(rect[2], 4), round(rect[3], 4))
+
+
 def _render_png(project_dir: Path, run, recipe: Recipe) -> bytes:
     import io
 
@@ -100,23 +129,33 @@ def _render_png(project_dir: Path, run, recipe: Recipe) -> bytes:
     return buf.getvalue()
 
 
-def _render_coverage_png(project_dir: Path, run) -> bytes | None:
+def _render_coverage_png(project_dir: Path, run, recipe: Recipe | None = None) -> bytes | None:
     """Render the run's per-pixel frame-coverage map (strided to the preview
     proxy so it lines up with the shown image) as a viridis-coloured PNG — dark
     blue where the fewest frames overlap (the ragged mosaic edges / gaps),
     yellow where the most do. A colour heatmap reads the coverage gradient at a
     glance and is visually distinct from the grayscale star mask. ``None`` when
-    the run has no coverage sibling (a single-field image)."""
+    the run has no coverage sibling (a single-field image).
+
+    When a ``recipe`` is supplied, its *enabled geometry ops* (crop/rotate/resize)
+    are applied to the coverage map first, so the overlay tracks the reshaped
+    preview instead of showing the raw full frame (which no longer lines up once a
+    crop/rotate is in the recipe). Only geometry ops move the map; tone ops are
+    ignored. NaN = uncovered is preserved through the transform."""
     import io
 
     from PIL import Image
 
+    from seestack.edit.ops.geometry import apply_geometry_to_map
     from seestack.render.colormap import apply_viridis
 
     rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
     cov = _proxy_coverage(run.fits_path, scale)
     if cov is None:
         return None
+    if recipe is not None:
+        ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None)
+        cov = apply_geometry_to_map(cov, recipe, ctx)
     finite = np.isfinite(cov)
     peak = float(cov[finite].max()) if finite.any() else 0.0
     norm = np.zeros(cov.shape, dtype=np.float32)
@@ -472,26 +511,9 @@ async def trim_suggestion(safe: str, run_id: int, request: Request,
         return TrimSuggestionOut(is_mosaic=False, crop=None)
 
     def work() -> TrimSuggestionOut:
-        cov_path = coverage_path_for(run.fits_path)
-        if not cov_path.exists():
-            return TrimSuggestionOut(is_mosaic=True, crop=None)
-        # Stride the (possibly huge) coverage map down before the rectangle sweep.
-        step = 1
-        try:
-            from astropy.io import fits as _fits
-
-            hdr = _fits.getheader(cov_path)
-            dim = max(int(hdr.get("NAXIS1", 0)), int(hdr.get("NAXIS2", 0)))
-            if dim > _TRIM_MAX_DIM:
-                step = -(-dim // _TRIM_MAX_DIM)  # ceil division
-        except (OSError, ValueError):
-            step = 1
-        cov = load_coverage(run.fits_path, step=step)
-        if cov is None:
-            return TrimSuggestionOut(is_mosaic=True, crop=None)
-        rect = largest_covered_rect(cov, min_frac=min_frac)
-        crop = None if rect is None else TrimCrop(x0=round(rect[0], 4), y0=round(rect[1], 4),
-                                                  x1=round(rect[2], 4), y1=round(rect[3], 4))
+        rect = _trim_rect_for_run(run, min_frac=min_frac)
+        crop = None if rect is None else TrimCrop(x0=rect[0], y0=rect[1],
+                                                  x1=rect[2], y1=rect[3])
         return TrimSuggestionOut(is_mosaic=True, crop=crop)
 
     return await run_in_threadpool(work)
@@ -596,13 +618,19 @@ async def edit_star_mask(safe: str, run_id: int, request: Request,
 
 
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/editor/coverage-map")
-async def edit_coverage_map(safe: str, run_id: int, request: Request) -> Response:
+async def edit_coverage_map(safe: str, run_id: int, request: Request,
+                            recipe: str | None = None) -> Response:
     """Viridis-coloured heatmap of the run's frame-coverage map (yellow = most
     frames overlap, dark blue = uncovered), so a user can *see* the ragged,
     low-coverage mosaic edges the "Trim border" / "Coverage leveling" tools
-    address. 404 when the run has no coverage sibling (a single-field image)."""
+    address. 404 when the run has no coverage sibling (a single-field image).
+
+    When ``recipe`` is passed, its enabled geometry ops (crop/rotate/resize) are
+    applied to the coverage map so the overlay tracks the reshaped preview; older
+    clients omit it and get the raw full-frame coverage."""
     project_dir, run = _run_info(request, safe, run_id)
-    png = await run_in_threadpool(_render_coverage_png, project_dir, run)
+    rec = _decode_recipe_query(request, safe, run_id, recipe) if recipe else None
+    png = await run_in_threadpool(_render_coverage_png, project_dir, run, rec)
     if png is None:
         raise HTTPException(status_code=404, detail="No coverage map for this run")
     return Response(content=png, media_type="image/png",
@@ -625,11 +653,17 @@ async def auto_process(safe: str, run_id: int, request: Request) -> dict:
     # coverage-leveling pass prepended so its panel steps are flattened; a
     # single-field stack (uniform coverage) is unchanged.
     coverage_span = (int(run.coverage_min), int(run.coverage_max))
+    is_mosaic = coverage_span[1] > coverage_span[0]
 
     def work() -> dict:
         rgb, _scale = get_proxy(project_dir, run.id, run.fits_path)
+        # On a mosaic, also trim the ragged low-coverage border so the one-click
+        # result is cleanly framed (only when the trim is meaningful — the helper
+        # returns None on a full-frame result or a missing coverage sibling).
+        trim = _trim_rect_for_run(run) if is_mosaic else None
         return presets_mod.auto_recipe(
-            rgb, median_fwhm=median_fwhm, coverage_span=coverage_span).to_dict()
+            rgb, median_fwhm=median_fwhm, coverage_span=coverage_span,
+            trim_crop=trim).to_dict()
 
     return await run_in_threadpool(work)
 

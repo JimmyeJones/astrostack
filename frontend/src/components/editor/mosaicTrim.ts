@@ -10,10 +10,20 @@ export interface TrimCrop {
 }
 
 /** True when the recipe has an *enabled* geometry op (crop/rotate/resize) that
- * reshapes the frame — so the raw, full-frame coverage overlay no longer lines
- * up with the (reshaped) edited preview. Pure. */
+ * reshapes the frame. Pure. */
 export function hasEnabledGeometryOp(ops: OpInstance[]): boolean {
   return ops.some((o) => o.enabled && o.id.startsWith("geometry."));
+}
+
+/** A stable key of just the *enabled geometry ops* (id + params, in order), so a
+ * consumer (the coverage overlay) can refetch only when the geometry that reshapes
+ * the frame actually changes — not on every tone-op tweak. Pure. */
+export function geometryOpsKey(ops: OpInstance[]): string {
+  return JSON.stringify(
+    ops
+      .filter((o) => o.enabled && o.id.startsWith("geometry."))
+      .map((o) => ({ id: o.id, params: o.params })),
+  );
 }
 
 /** CSS `left/top/width/height` (percent strings) placing the proposed-crop

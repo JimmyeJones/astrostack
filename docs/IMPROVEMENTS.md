@@ -76,15 +76,6 @@ problems. Dogfood it every big-picture run and fix root causes.
 - **Editor bug hunt (ongoing)** — there are undocumented issues. Each big-picture
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
-- **Coverage overlay should follow the recipe's geometry ops** — the coverage-map
-  overlay renders the run's *raw* full-frame coverage sibling, so once a crop/rotate/
-  resize op is in the recipe it no longer lines up with the reshaped preview
-  (v0.61.5 added an honest "shown for the uncropped frame" caption acknowledging
-  this). The proper fix is to run the recipe's *enabled geometry ops* over the
-  coverage map (via `apply_recipe` on a geometry-only sub-recipe, or reuse the same
-  crop/rotate math) before the PNG, so the overlay tracks the edited image. Reuses
-  the existing geometry ops; additive. Care: keep NaN = uncovered through the
-  transform, and only apply geometry (not tone) ops. (M, editor/trust)
 - **Wavelet-denoise preview↔export parity** — every other spatial op (sharpen
   radius, deconv PSF, bilateral spatial σ, background box) is corrected for the
   decimated preview proxy via `ctx.scaled_px`, but the **default** denoise method
@@ -135,18 +126,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   Additive/upgrade-safe (new card + optional flag; absence = today's behaviour).
   (M, editor/trust)
 ### Autonomy — "just works" (PRIORITY 2)
-- **Auto-process should trim (or offer to trim) a mosaic's ragged border** — on a
-  mosaic, `auto_recipe` prepends coverage-leveling but leaves the union canvas's
-  ragged, single-frame-coverage edges in the one-click result, so "Auto" frames the
-  picture with noisy low-coverage fringe. The `trim-suggestion` / `largest_covered_rect`
-  machinery already computes the largest well-covered rectangle. Auto could append a
-  `geometry.crop` to that rectangle for a mosaic (only when the trim is meaningful —
-  the suggestion already returns `None` on a full-frame result), so the default
-  result is cleanly framed without the user discovering the Trim tool. Care: geometry
-  changes the canvas, so keep it mosaic-only and conservative (the existing
-  `min_frac`/`_FULL_AREA_FRAC` guards), and it must run *after* the tone ops don't
-  depend on the full frame — a crop at the end is safe. Off-by-default risk is nil
-  (Auto is an explicit button). (S–M, autonomy/editor)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
   different (per-channel vs luminance gradient, star reduction, saturation). The
@@ -250,6 +229,54 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Auto-process summary names the mosaic border trim in plain language** — small
+  companion to v0.70.0: now that Auto can append a `geometry.crop`, the "What
+  Auto-process did" note would have fallen back to a bare "…then crop." (the op's
+  registry label). Added a plain-language phrase for `geometry.crop` ("trimmed the
+  ragged mosaic border") so the one-click summary reads honestly and a beginner
+  understands the frame shrank on purpose. Frontend-only, additive. Vitest: the
+  phrase appears in `autoSummaryPhrases`. (v0.70.1, this run — Builder)
+
+- **Auto-process trims a mosaic's ragged low-coverage border (cleanly framed
+  one-click result)** — on a mosaic, `auto_recipe` levelled the panel steps but
+  left the union canvas's ragged, single-frame-coverage fringe in the one-click
+  result, so "Auto" framed the picture with a noisy low-coverage border the user
+  had to discover the Trim tool to remove. Auto now appends a final `geometry.crop`
+  to the largest well-covered rectangle — reusing the exact `largest_covered_rect`
+  machinery behind the "Trim border" button (extracted into a shared
+  `_trim_rect_for_run` helper the trim-suggestion endpoint now also calls). The crop
+  runs *last* (after every tone/detail op) so the coverage-leveling op still sees the
+  native-geometry coverage map, and it's only added when the trim is *meaningful*
+  (`largest_covered_rect` returns `None` on a full-frame result) and only on a mosaic
+  — a single-field stack is never cropped. The crop is a normal, visible, removable
+  op (and the coverage overlay, per v0.69.20, now follows it). Off-by-default risk is
+  nil (Auto is an explicit button; no default flip). Engine (`auto_recipe` gains an
+  optional `trim_crop`) + webapp wiring; additive/upgrade-safe. Tested: engine (crop
+  appended last iff a trim is supplied; none for single-field/None), webapp (a mosaic
+  with a ragged coverage sibling gets a final interior crop; single-field and
+  no-sibling get none). (v0.70.0, this run — Builder)
+
+- **Coverage overlay now follows the recipe's geometry ops (was frozen on the
+  uncropped frame)** — the editor's mosaic coverage-map overlay rendered the run's
+  *raw* full-frame coverage sibling, so once a `geometry.crop`/rotate/resize op was
+  in the recipe (very likely after "Trim border") the heatmap no longer lined up
+  with the reshaped preview — v0.61.5 could only *caption* the mismatch ("shown for
+  the uncropped frame"). Now a pure engine helper `apply_geometry_to_map(cov,
+  recipe, ctx)` (in `seestack/edit/ops/geometry.py`, keyed on a new `GEOMETRY_OP_IDS`
+  constant) runs the recipe's *enabled geometry ops only*, in recipe order, over the
+  2-D coverage map — feeding it through each op as three identical channels —
+  preserving NaN = uncovered (crop copies, rotate fills exposed corners with NaN,
+  resize interpolates). The `…/editor/coverage-map` endpoint takes an optional
+  `recipe` query param and applies it before colouring; the editor passes the
+  debounced recipe and keys the query on just the geometry ops (`geometryOpsKey`) so
+  a tone tweak doesn't refetch. The caption drops the "uncropped frame" disclaimer.
+  Engine + one endpoint param + frontend; additive/upgrade-safe (older clients omit
+  `recipe` → today's raw full-frame overlay). Tested: engine (crop reshapes + keeps
+  NaN, tone/disabled ops are no-ops, rotate NaN-corners), webapp (a crop recipe
+  yields a strictly smaller coverage PNG), Vitest (`geometryOpsKey` 3 cases + the
+  overlay passes the recipe and the caption no longer disclaims). (v0.69.20, this
+  run — Builder)
 
 - **Fix flaky frontend CI at the root: raise vitest `testTimeout` above
   `asyncUtilTimeout`** — three `Editor.test.tsx` tests kept reddening `main`'s

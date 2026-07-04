@@ -149,7 +149,8 @@ def _noise_fraction(sky_sigma: float) -> float:
 
 def auto_recipe(rgb: np.ndarray | None = None,
                 median_fwhm: float | None = None,
-                coverage_span: tuple[int, int] | None = None) -> Recipe:
+                coverage_span: tuple[int, int] | None = None,
+                trim_crop: tuple[float, float, float, float] | None = None) -> Recipe:
     """One-click auto-process built from the image, not hardcoded.
 
     Always: background/gradient removal → photometric colour balance → a proper
@@ -176,6 +177,17 @@ def auto_recipe(rgb: np.ndarray | None = None,
     else — the Seestar mosaic case, fixed without the user discovering the op.
     On a single-field stack (uniform coverage) it's skipped entirely, where it
     would be a no-op anyway.
+
+    When ``trim_crop`` (fractional ``(x0, y0, x1, y1)`` bounds) is supplied — the
+    largest well-covered rectangle of a mosaic's coverage map, from the same
+    ``largest_covered_rect`` machinery the "Trim border" button uses — a
+    ``geometry.crop`` to that rectangle is appended at the *end*, so the one-click
+    result is cleanly framed instead of leaving the ragged, noisy low-coverage
+    fringe of the union canvas. The caller passes it only for a mosaic where the
+    trim is meaningful (``largest_covered_rect`` returns ``None`` on a full-frame
+    result), so a single-field stack is never cropped. The crop runs last (after
+    all tone/detail ops), which is safe and keeps the coverage-leveling op — which
+    needs the native-geometry coverage map — operating on the uncropped frame.
     """
     target_bg = 0.20
     saturation = 1.2          # neutral fallback when the image can't be measured
@@ -232,4 +244,9 @@ def auto_recipe(rgb: np.ndarray | None = None,
     if sharpen_amount >= 0.05:  # sharpening clean data helps; noisy data hurts
         radius = _sharpen_radius_from_fwhm(median_fwhm)
         ops.append(("detail.sharpen", {"amount": sharpen_amount, "radius": radius}))
+    # Trim the ragged, low-coverage mosaic border last (after tone/detail ops), so
+    # the auto result is cleanly framed. Only supplied when the trim is meaningful.
+    if trim_crop is not None:
+        x0, y0, x1, y1 = trim_crop
+        ops.append(("geometry.crop", {"x0": x0, "y0": y0, "x1": x1, "y1": y1}))
     return Recipe(ops=_ops(*ops))

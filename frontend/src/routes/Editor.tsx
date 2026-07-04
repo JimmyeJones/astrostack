@@ -26,7 +26,7 @@ import { applyDataDrivenDefaults, countDataDrivenDefaults, type OpSuggestion }
 import { deconvUnderstatesCaption } from "../components/editor/deconvPreview";
 import { previewScaleCaption } from "../components/editor/previewScale";
 import { prependCoverageLeveling } from "../components/editor/coverageLeveling";
-import { applyTrimCrop, trimRectStyle, trimKeptLabel, hasEnabledGeometryOp, previewBoxStyle }
+import { applyTrimCrop, trimRectStyle, trimKeptLabel, geometryOpsKey, previewBoxStyle }
   from "../components/editor/mosaicTrim";
 import { pngProgressLabel } from "../components/editor/pngProgress";
 import { opErrorsMessage } from "../components/editor/opErrors";
@@ -292,11 +292,15 @@ export function EditorView() {
   // most frames overlapped, black = uncovered ragged edges/gaps) so the user can
   // see what the "Trim border" and "Coverage leveling" tools are acting on.
   const [showCoverage, setShowCoverage] = useState(false);
+  // The overlay follows the recipe's enabled geometry ops (crop/rotate/resize) so
+  // it tracks the reshaped preview; key on just those ops (via geometryOpsKey) so a
+  // tone-op tweak doesn't refetch the coverage map, only a geometry change does.
+  const geomKey = useMemo(() => geometryOpsKey(dRecipe.ops), [dRecipe]);
   const coveragePreview = useQuery({
-    queryKey: ["edit-coverage", safe, rid],
+    queryKey: ["edit-coverage", safe, rid, geomKey],
     enabled: showCoverage && !!opsSchema.data && !saved.isLoading,
     queryFn: async ({ signal }) => {
-      const res = await fetch(api.editCoverageMapUrl(safe, rid), { signal });
+      const res = await fetch(api.editCoverageMapUrl(safe, rid, dRecipe), { signal });
       if (!res.ok) throw new Error("coverage map failed");
       return URL.createObjectURL(await res.blob());
     },
@@ -743,9 +747,7 @@ export function EditorView() {
                 <Text size="xs" c="white" style={{ position: "absolute", left: 12, top: 10,
                   background: "rgba(0,0,0,0.6)", padding: "2px 8px", borderRadius: 4 }}>
                   {showCoverage
-                    ? (hasEnabledGeometryOp(ops)
-                        ? "Coverage map — shown for the uncropped frame"
-                        : "Coverage map")
+                    ? "Coverage map"
                     : showMask ? "Star mask" : showBase ? "Original"
                     : `Without: ${specs[selForSolo!.id]?.label ?? selForSolo!.id}`}
                 </Text>
