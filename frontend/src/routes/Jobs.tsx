@@ -18,10 +18,38 @@ const COLOR: Record<string, string> = {
   interrupted: "orange",
 };
 
+/** Plain-language outcome of a finished reprocess-all batch (pure, tested). */
+export function reprocessSummary(r: Record<string, unknown>): {
+  line: string; failed: string[];
+} {
+  const total = Number(r.total ?? 0);
+  const stacked = Number(r.stacked ?? 0);
+  const failedArr = Array.isArray(r.failed) ? r.failed : [];
+  const failed = failedArr
+    .map((f) => (f && typeof f === "object"
+      ? String((f as Record<string, unknown>).target ?? "") : ""))
+    .filter(Boolean);
+  let line = `Restacked ${stacked}/${total} target${total === 1 ? "" : "s"}`;
+  if (r.cancelled) line += " (cancelled early)";
+  if (failed.length) line += ` — ${failed.length} failed`;
+  return { line: `${line}.`, failed };
+}
+
 /** Result-specific actions for finished editor jobs (download / view). */
 function JobResultActions({ job }: { job: Job }) {
   if (job.state !== "done" || !job.result) return null;
   const r = job.result as Record<string, unknown>;
+  if (job.kind === "reprocess_all") {
+    const { line, failed } = reprocessSummary(r);
+    return (
+      <Stack gap={2} mt="xs">
+        <Text size="sm">{line}</Text>
+        {failed.length ? (
+          <Text size="xs" c="red">Failed: {failed.join(", ")}</Text>
+        ) : null}
+      </Stack>
+    );
+  }
   let action: ReactNode = null;
   if (job.kind === "editor_png" && r.png_path && r.safe && r.run_id != null) {
     action = (

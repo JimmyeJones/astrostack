@@ -406,6 +406,18 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Jobs page surfaces the reprocess-all batch outcome in plain language** —
+  companion to the v0.74.0 reprocess-everything feature: a finished `reprocess_all`
+  job carries a `{total, stacked, failed, cancelled}` summary that the Jobs page
+  previously didn't render, so the user couldn't see how many targets restacked or
+  which failed. The job row now shows "Restacked N/M targets [(cancelled early)]
+  [— K failed]." plus a red "Failed: …" line naming the targets that errored,
+  driven by a pure, tested `reprocessSummary` helper (singularises one target;
+  tolerates missing/garbage `failed` entries). Frontend-only, additive, advisory
+  (no API/behaviour change). Vitest: helper (clean run / cancel+failures /
+  singular+garbage-tolerant) + a Jobs row test that a batch result renders the
+  summary and the failed-target list. (v0.74.1, this run — Builder)
+
 - **⭐ OWNER-REQUESTED — "Reprocess everything" (slice a): one-click restack of
   every target with the current engine** — after an engine upgrade a target's
   final image stays stale until it's restacked by hand. A new confirm-gated
