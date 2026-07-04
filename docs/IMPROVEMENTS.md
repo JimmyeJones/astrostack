@@ -392,6 +392,15 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Fix flaky frontend CI (Editor Levels "From your image" / "Auto levels" tests)** —
+  these tests click a data-driven button and `waitFor` it to flip to its
+  already-applied (disabled + ✓) state, which only settles after a debounced recipe
+  re-render / re-fetched suggestion. Testing Library's default 1000ms async timeout
+  was too tight for the slower CI runner, so the suite passed locally (332/332) but
+  reddened `main`'s CI on unrelated merges (#74, #75). Raised `asyncUtilTimeout` to
+  5000ms globally in `src/test/setup.ts` — no assertion changed, only how long
+  `waitFor`/`findBy*` retry. Restores the CI safety net. (v0.69.6, this run)
+
 - **Editor recipe with a non-mapping `params` no longer 500s** — a recipe body
   whose op carried `params` as a list/string/number (a malformed client body or a
   hand-built recipe) hit `dict(o.get("params"))` in `recipe_from_dict`, which
