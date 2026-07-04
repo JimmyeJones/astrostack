@@ -107,16 +107,11 @@ problems. Dogfood it every big-picture run and fix root causes.
   unless Saved) and confirmed it's clean and reversible — but it does change the
   editor's default first-open view and supersedes the current empty-pipeline nudge, so
   it needs the owner's explicit OK for the default-on flip. See the sign-off entry.
-- **Name the "Auto curve" button's goal + dim it when already applied** — small
-  consistency follow-up to v0.72.0: the new "Auto curve" header button is opaque
-  ("Auto curve") and always enabled, whereas the rest of the data-driven family
-  names what it does and dims when already applied — Auto levels shows its
-  black–white values, Auto stretch its strength, the gamma button names "~25% grey"
-  (v0.69.18), and per-param buttons flip to a disabled "✓" via `matchesSuggestion`.
-  The Curve button could name the target grey it lifts toward and dim (with a ✓)
-  when the current points already equal the suggestion (a structural point-list
-  compare, like `opModified`'s curve handling), so re-clicking a no-op isn't
-  invited. Frontend-only, additive, fully testable. (S, editor/friendliness)
+- ~~**Name the "Auto curve" button's goal + dim it when already applied**~~ —
+  **shipped v0.72.1** (see Shipped). The Curves header "Auto curve" button now
+  names the grey it lifts the midtones toward and dims to a disabled "✓" once the
+  current points already equal the suggestion, completing the data-driven family's
+  name-the-goal + dim-when-applied consistency.
 - **Editor bug hunt (ongoing)** — there are undocumented issues. Each big-picture
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
@@ -152,22 +147,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   user saw), accepting that it's the ≤1024 px preview rather than the ≤1500 px editor
   proxy. Care: it's a behaviour change to Compare, so gate/validate the resolution
   swap doesn't jar the A/B. (S, editor/trust)
-- **Mark editor-export runs as display-space so re-editing doesn't double-stretch
-  (and the FITS is honest)** — an editor export writes its already-stretched
-  `[0,1]` result to a FITS via `write_stack_outputs(..., already_display=True)`,
-  but `_write_fits` still stamps `BUNIT = "ADU (linear, uncalibrated)"` and the
-  run row carries no "this is display-space" marker. Two consequences: (a)
-  re-opening that run in the editor loads it through the proxy and applies the
-  default asinh stretch *again* — the known open double-stretch on re-edit; (b) a
-  user opening the FITS in Siril/PixInsight is told it's linear ADU when it's a
-  tone-mapped picture. **Fix:** stamp an honest marker on editor exports — a FITS
-  header card (e.g. `SSDISPLY = T` / a `PROCLVL` card) and a run-row/`options_json`
-  flag — and have the editor proxy + `render_stack_run` read it to *skip* their
-  default stretch for an already-display-space run (fall back to current behaviour
-  when the marker is absent, so old runs are unaffected). Unblocks the re-edit
-  double-stretch bug at the root and makes the exported FITS self-describing.
-  Additive/upgrade-safe (new card + optional flag; absence = today's behaviour).
-  (M, editor/trust)
+- ~~**Mark editor-export runs as display-space so re-editing doesn't
+  double-stretch (and the FITS is honest)**~~ — **shipped v0.72.2** (see Shipped).
+  Editor exports now stamp an `SSDISPLY` FITS card + honest `BUNIT` and a
+  `display_space` options_json flag; the editor proxy, `render_stack_run` and the
+  full-res export all skip their default asinh stretch for a display-space run, so
+  re-opening/re-rendering an edited run no longer double-stretches it and the FITS
+  is self-describing for Siril/PixInsight. Absence = today's linear behaviour, so
+  old runs are unaffected.
 ### Autonomy — "just works" (PRIORITY 2)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
@@ -285,6 +272,49 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Editor exports are marked display-space — no more re-edit double-stretch, and
+  the FITS is honest** — an editor export writes its already tone-mapped `[0,1]`
+  result to a FITS, but it was stamped `BUNIT = "ADU (linear)"` and carried no
+  "this is display-space" marker, so (a) re-opening the edited run in the editor
+  (empty recipe) ran the default asinh stretch *again* — the re-edit
+  double-stretch — and (b) the FITS told Siril/PixInsight it was linear ADU when
+  it's a picture. Now `_write_fits` stamps an `SSDISPLY = T` card + honest
+  `BUNIT = "display"` on editor exports, the export run's `options_json` carries a
+  `display_space` flag, and a new engine helper `fits_is_display_space` +
+  `EditContext.already_display` let the render/edit paths *skip* the default
+  fallback stretch for a display-space image: `render_stack_png` (used by
+  `render_stack_run`/save-preview) renders it verbatim, the editor proxy preview/
+  histogram/star-mask/levels+curve suggestions build the context with
+  `already_display`, and `_render_recipe_fullres` (re-edit → export) suppresses its
+  fallback too. An explicit stretch op the user adds still runs. Absence of the
+  card/flag = today's linear behaviour, so old runs and non-editor stacks are
+  unaffected (upgrade-safe, additive). Engine (`output.py`, `registry.py`,
+  `pipeline.py`, `thumbnail.py`) + webapp (`pipeline.py`, editor router). Tested:
+  engine (`already_display` suppresses the fallback but an explicit stretch still
+  runs; `SSDISPLY`/BUNIT stamped for display exports and absent for linear;
+  `fits_is_display_space` incl. missing-file), render (display-space FITS renders
+  verbatim, sliders a no-op, vs a linear stack), webapp (export marks the new run
+  in options_json + FITS, source unaffected; re-opening a display-space run's
+  editor preview doesn't double-stretch while the same data without the flag
+  does). (v0.72.2, this run — Builder)
+
+- **"Auto curve" button names its goal + dims when already applied (data-driven
+  family consistency)** — small follow-up to v0.72.0: the new Curves-op "Auto
+  curve" header button was opaque ("Auto curve") and always enabled, unlike the
+  rest of the data-driven tonal family (Auto levels shows its black–white values,
+  Auto stretch its strength, the gamma button names "~25% grey", per-param buttons
+  flip to a disabled ✓). It now reads "Auto curve (lifts to ~N% grey)" — the grey
+  the midtone lift solves for, served honestly from the suggestion's existing
+  `target_bg` — and dims to a disabled "Auto curve ✓" once the current control
+  points already equal the suggestion, so re-clicking a no-op isn't invited. A pure
+  `curvePointsMatch` helper does the structural point-list compare (same length,
+  each `[x,y]` within a tiny epsilon; a missing/malformed list or absent suggestion
+  never matches). Frontend-only, additive; no API or behaviour change beyond the
+  label/disabled state. Vitest: helper (identical / within-epsilon / moved /
+  different-length / absent suggestion / malformed) + the existing Editor "Auto
+  curve" test extended to assert the goal-naming label and the disabled ✓ after a
+  click. (v0.72.1, this run — Builder)
 
 - **Data-driven "Auto curve" starting point for the Curves op (completes the
   family of data-driven tonal defaults)** — the Curves op was the last major tonal

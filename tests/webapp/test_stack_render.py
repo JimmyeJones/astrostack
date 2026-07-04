@@ -96,6 +96,36 @@ def test_render_with_nan_borders_is_not_blank(tmp_path):
     assert arr.mean() > 1.0       # the blob/sky actually rendered
 
 
+def test_render_display_space_fits_is_verbatim(tmp_path):
+    """An editor-export FITS is already tone-mapped display space, so render is
+    verbatim: the stretch/black sliders don't apply (identical bytes at any
+    setting) and a mid-grey ramp renders as mid-grey (no second stretch)."""
+    from seestack.stack.output import write_stack_outputs
+
+    ramp = np.clip(np.linspace(0.0, 1.0, 64, dtype=np.float32), 0, 1)
+    rgb = np.repeat(np.tile(ramp, (16, 1))[..., None], 3, axis=2)
+    cov = np.ones(rgb.shape[:2], dtype=np.float32)
+    paths = write_stack_outputs(tmp_path, rgb, cov, wcs_text=None,
+                                out_basename="edit", already_display=True)
+
+    a = render_stack_png(paths["fits"], stretch=0.15, black=0.35, max_width=64)
+    b = render_stack_png(paths["fits"], stretch=0.85, black=0.9, max_width=64)
+    assert a == b                                   # sliders are a no-op on display data
+
+    from io import BytesIO
+
+    from PIL import Image
+    mean = np.asarray(Image.open(BytesIO(a))).mean()
+    assert abs(mean - 127) <= 4                     # ~0.5 ramp, not re-stretched
+
+    # The identical data written as a *linear* stack renders differently (asinh).
+    lin = write_stack_outputs(tmp_path, rgb, cov, wcs_text=None,
+                              out_basename="lin", already_display=False)
+    lin_mean = np.asarray(Image.open(BytesIO(
+        render_stack_png(lin["fits"], stretch=0.5, black=0.35, max_width=64)))).mean()
+    assert abs(lin_mean - mean) > 20
+
+
 def test_render_endpoint_returns_png(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
     _, run_id = _make_run_with_fits(solved_library, safe)

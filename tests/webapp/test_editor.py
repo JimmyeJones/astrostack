@@ -698,6 +698,94 @@ def test_export_creates_new_run_non_destructive(client, solved_library):
     assert edited["has_fits"] and edited["notes"] == "edited"
 
 
+def test_export_marks_run_display_space(client, solved_library):
+    """An editor export is a tone-mapped display-space image, so the new run is
+    marked both in its options_json (display_space) and in its FITS (SSDISPLY) —
+    so re-opening it doesn't double-stretch and external tools know it's not
+    linear ADU. Regression for the re-edit double-stretch / dishonest-FITS bug."""
+    from seestack.stack.output import fits_is_display_space
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="disp_src")
+    recipe = {"ops": [{"id": "tone.stretch", "params": {"stretch": 0.6}}]}
+    r = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/export",
+                    json={"recipe": recipe, "output_name": "disp_edit"})
+    assert _wait_job(client, r.json()["job_id"])["state"] == "done"
+
+    runs = client.get(f"/api/targets/{safe}/stack-runs").json()
+    edited = next(x for x in runs if x["output_basename"] == "disp_edit")
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            new_run = next(r for r in proj.iter_stack_runs() if r.id == edited["id"])
+            opts = json.loads(new_run.options_json)
+            assert opts["display_space"] is True
+            assert fits_is_display_space(new_run.fits_path) is True
+            # The source (linear) run is unaffected.
+            src = next(r for r in proj.iter_stack_runs() if r.id == rid)
+            assert fits_is_display_space(src.fits_path) is False
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def _register_display_space_run(data_root, safe, basename, options_json):
+    """Write a mid-grey [0,1] display-space FITS and register a run pointing at it
+    with the given options_json (so the editor's display-space handling can be
+    exercised without a real export)."""
+    from seestack.stack.output import write_stack_outputs
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            ramp = np.clip(np.linspace(0.0, 1.0, 100, dtype=np.float32), 0, 1)
+            rgb = np.repeat(np.tile(ramp, (80, 1))[..., None], 3, axis=2)  # mean ~0.5
+            cov = np.ones(rgb.shape[:2], dtype=np.float32)
+            paths = write_stack_outputs(Path(proj.project_dir), rgb, cov, wcs_text=None,
+                                        out_basename=basename, already_display=True)
+            return proj.add_stack_run(StackRunRow(
+                id=None, timestamp_utc="2026-05-02T00:00:00Z", output_basename=basename,
+                fits_path=str(paths["fits"]), tiff_path=None, preview_path=None,
+                n_frames_used=5, canvas_h=80, canvas_w=100, coverage_min=1,
+                coverage_max=1, options_json=options_json,
+            ))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def test_reopening_display_space_run_does_not_double_stretch(client, solved_library):
+    """The editor preview of a display-space run with an empty recipe renders it
+    verbatim (mean ~0.5 grey), not double-stretched. The SAME data registered
+    WITHOUT the display_space flag falls back to the default asinh (a materially
+    different look) — proving the flag drives the fix, and old runs are
+    unaffected."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    disp_id = _register_display_space_run(solved_library, safe, "dd_disp",
+                                          json.dumps({"display_space": True}))
+    lin_id = _register_display_space_run(solved_library, safe, "dd_lin",
+                                         json.dumps({}))
+
+    empty = _enc({"ops": []})
+    disp_png = client.get(
+        f"/api/targets/{safe}/stack-runs/{disp_id}/editor/preview?recipe={empty}").content
+    lin_png = client.get(
+        f"/api/targets/{safe}/stack-runs/{lin_id}/editor/preview?recipe={empty}").content
+
+    disp_mean = np.asarray(Image.open(BytesIO(disp_png)).convert("RGB")).mean()
+    lin_mean = np.asarray(Image.open(BytesIO(lin_png)).convert("RGB")).mean()
+    assert abs(disp_mean - 127) <= 8            # verbatim ~0.5 ramp, not re-stretched
+    assert abs(lin_mean - disp_mean) > 20       # the fallback asinh changes the look
+
+
 def test_export_reports_failed_ops_in_result(client, solved_library, monkeypatch):
     """An op that raises on the full-res data is dropped best-effort, but its
     failure is threaded into the export job result (op_errors) so the editor can

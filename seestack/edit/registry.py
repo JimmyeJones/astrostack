@@ -62,6 +62,9 @@ class EditContext:
     is_proxy: bool = False            # True for the live preview proxy
     use_gpu: bool | None = None
     stage: Stage = "linear"           # updated by the pipeline as it crosses stretch
+    already_display: bool = False     # input is a tone-mapped display-space image
+    #   (an editor export re-opened for editing): suppress the pipeline's default
+    #   asinh fallback so an empty recipe doesn't double-stretch it.
 
     def scaled_px(self, px: float) -> float:
         """Convert a *full-resolution* pixel measure to this render's pixel scale.

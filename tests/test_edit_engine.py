@@ -157,6 +157,25 @@ def test_auto_stretch_false_returns_linear_ops_output():
     assert disp[np.isfinite(disp)].max() <= 1.0
 
 
+def test_already_display_ctx_suppresses_the_default_stretch():
+    # Re-opening an editor export (a tone-mapped display-space image) with an empty
+    # recipe must NOT default-stretch it again — the re-edit double-stretch. With
+    # ctx.already_display the pipeline leaves an already-display-space image alone.
+    rng = np.random.default_rng(1)
+    disp_img = np.clip(rng.random((40, 50, 3)).astype("float32"), 0.0, 1.0)  # [0,1]
+    rec = Recipe(ops=[])
+    assert not has_stretch(rec)
+    same = apply_recipe(disp_img, rec, EditContext(already_display=True))
+    assert np.allclose(same, disp_img)                       # verbatim, no re-stretch
+    # Without the flag the fallback asinh fires and materially changes the image.
+    stretched = apply_recipe(disp_img, rec, EditContext())
+    assert not np.allclose(stretched, disp_img)
+    # An explicit stretch op the user adds still runs even when already_display.
+    rec2 = Recipe(ops=validate_ops([OpInstance(id="tone.stretch", params={"stretch": 0.8})]))
+    out2 = apply_recipe(disp_img, rec2, EditContext(already_display=True))
+    assert not np.allclose(out2, disp_img)
+
+
 def test_uncovered_pixels_stay_nan_through_the_stretch():
     # "NaN = no coverage" must survive the stretch (and the whole recipe), so the
     # histogram and Levels suggestions exclude uncovered mosaic pixels instead of
