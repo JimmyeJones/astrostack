@@ -12,14 +12,24 @@ import { matchesSuggestion } from "./suggestionMatch";
 export function OpParamPanel({ spec, params, onChange, histogram, suggestions }: {
   spec: EditOp;
   params: Record<string, unknown>;
-  onChange: (params: Record<string, unknown>) => void;
+  /** Applies a param change. `coalesceKey` (passed for continuous slider/curve
+   * drags) lets the caller collapse a burst of drag ticks into one undo step;
+   * discrete edits (button clicks, resets) omit it and get their own entry. */
+  onChange: (params: Record<string, unknown>, coalesceKey?: string) => void;
   histogram?: Histogram;
   /** Optional data-driven defaults, keyed by param key: a one-click "use this
    * value measured from your data" button (e.g. deconvolution PSF σ from the
    * target's median star FWHM). */
   suggestions?: Record<string, { value: number; label: string }>;
 }) {
-  const set = (key: string, v: unknown) => onChange({ ...params, [key]: v });
+  // `coalesce` is set only for the continuous controls (slider/curve drags), whose
+  // onChange fires per drag tick; button-driven edits leave it off so each is its
+  // own undo step.
+  const set = (key: string, v: unknown, coalesce = false) => {
+    const next = { ...params, [key]: v };
+    if (coalesce) onChange(next, `param:${key}`);
+    else onChange(next);
+  };
   const simple = spec.params.filter((p) => p.group !== "advanced");
   const advanced = spec.params.filter((p) => p.group === "advanced");
 
@@ -36,7 +46,7 @@ export function OpParamPanel({ spec, params, onChange, histogram, suggestions }:
           <CurvesWidget
             points={(params[p.key] as [number, number][]) ?? [[0, 0], [1, 1]]}
             histogram={histogram}
-            onChange={(pts) => set(p.key, pts)}
+            onChange={(pts) => set(p.key, pts, true)}
           />
         </div>
       );
@@ -45,7 +55,7 @@ export function OpParamPanel({ spec, params, onChange, histogram, suggestions }:
     return (
       <StackOptionControl
         field={p} value={params[p.key]} disabled={disabled} preferSlider
-        onChange={(v) => set(p.key, v)}
+        onChange={(v) => set(p.key, v, true)}
       />
     );
   };

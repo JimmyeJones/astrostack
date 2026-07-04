@@ -471,8 +471,14 @@ export function EditorView() {
     setOps((p) => p.filter((o) => o.uid !== u));
     setSelected((s) => (s === u ? null : s));
   };
-  const setParams = (u: string, params: Record<string, unknown>) =>
-    setOps((p) => p.map((o) => (o.uid === u ? { ...o, params } : o)));
+  const setParams = (u: string, params: Record<string, unknown>, coalesceKey?: string) =>
+    setOps(
+      (p) => p.map((o) => (o.uid === u ? { ...o, params } : o)),
+      // Namespace the coalesce key by op uid so dragging the same-named param on a
+      // different op (after selecting it) starts a fresh undo step rather than
+      // merging across ops.
+      coalesceKey ? `${u}:${coalesceKey}` : undefined,
+    );
   const fixStage = (u: string) => setOps((p) => moveToCorrectSide(p, u, specs));
 
   const selectedOp = ops.find((o) => o.uid === selected) ?? null;
@@ -1044,7 +1050,8 @@ export function EditorView() {
                   </Alert>
                 ) : null}
                 <OpParamPanel spec={specs[selectedOp.id]} params={selectedOp.params}
-                  histogram={hist.data} onChange={(p) => setParams(selectedOp.uid, p)}
+                  histogram={hist.data}
+                  onChange={(p, coalesceKey) => setParams(selectedOp.uid, p, coalesceKey)}
                   suggestions={
                     selectedOp.id === "detail.deconvolve" && psf.data?.psf_sigma != null
                       ? {

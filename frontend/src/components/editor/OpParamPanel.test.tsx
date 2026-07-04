@@ -63,6 +63,26 @@ describe("OpParamPanel", () => {
     expect(screen.queryByLabelText("Set Amount from your data")).not.toBeInTheDocument();
   });
 
+  it("passes a coalesce key on slider drags but not on button-driven edits", () => {
+    const onChange = vi.fn();
+    wrap(
+      <OpParamPanel
+        spec={SPEC} params={{ amount: 1.5 }} onChange={onChange}
+        suggestions={{ amount: { value: 2.2, label: "From your data (2.2)" } }}
+      />,
+    );
+    // A slider drag tick carries a per-param coalesce key so a burst collapses to
+    // one undo step.
+    fireEvent.keyDown(screen.getByRole("slider"), { key: "ArrowRight" });
+    const dragCall = onChange.mock.calls.find((c) => typeof c[1] === "string");
+    expect(dragCall?.[1]).toBe("param:amount");
+    // The suggestion button is a discrete edit — no coalesce key (single-arg call).
+    onChange.mockClear();
+    fireEvent.click(screen.getByText("From your data (2.2)"));
+    expect(onChange).toHaveBeenCalledWith({ amount: 2.2 });
+    expect(onChange.mock.calls[0]).toHaveLength(1);
+  });
+
   it("greys out a param whose depends_on value doesn't match the current choice", () => {
     const spec: EditOp = {
       id: "tone.stretch", label: "Stretch", group: "tone", stage: "any",

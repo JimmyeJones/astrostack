@@ -88,20 +88,6 @@ when you take it.
   machinery the levels-suggestion endpoint already has. Severity: broken-UX
   (misleading trust overlay). Confidence: confirmed (measured).
 
-- **BUG: one slider drag floods the undo history with dozens of entries (and
-  can evict all earlier edits)** — editor sliders commit on every drag tick
-  (`Slider onChange`, no `onChangeEnd` —
-  `frontend/src/components/StackOptionControl.tsx:46-50`) and every curve
-  pointer-move does the same, each going through history-capturing `setOps`
-  (`useUndoable.ts` pushes per set, cap 100 with `shift()`). Steps: drag Stretch
-  strength 0.1→0.9, release, Ctrl+Z — it undoes one pixel-move of the drag; a
-  couple of long drags evict the pre-drag history entirely (added ops,
-  Auto-process). **Fix:** live-update params outside the history and commit one
-  history entry on `onChangeEnd` (Mantine supports both callbacks), same for
-  curve-drag pointer-up; or coalesce consecutive entries that touch the same
-  param. Severity: broken-UX (undo effectively unusable). Confidence: confirmed
-  (traced).
-
 - **BUG: background-op failures never reach the editor's error surfacing — the
   op silently does nothing (or colour-shifts)** — `remove_final_gradient`
   catches its Background2D fit failure internally and returns the input
@@ -391,6 +377,23 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Fix: one slider/curve drag no longer floods (and evicts) the editor's undo
+  history** — every editor slider tick and every curve pointer-move went through
+  the history-capturing `setOps`, so a single drag pushed dozens of entries and a
+  couple of long drags evicted all earlier edits (added ops, Auto-process) past the
+  100-entry cap; Ctrl+Z then undid one sub-pixel of a drag instead of the whole
+  edit. `useUndoable.set` now takes an optional `coalesceKey`: consecutive sets
+  sharing a key update in place *without* a new history entry, so a continuous drag
+  collapses to one undoable step. `OpParamPanel` passes a per-param key
+  (`param:<key>`, namespaced by op uid in `Editor.setParams`) for the continuous
+  slider/curve controls and *omits* it for discrete button edits (reset,
+  suggestions), so each of those stays its own step. Different params and different
+  ops never merge (distinct keys); a keyed set right after an undo starts a fresh
+  entry. Frontend-only, additive; no API/behaviour change beyond history grouping.
+  Vitest: `useUndoable` coalescing (4 cases: collapse-a-drag / no-merge-across-keys
+  / discrete-keyless / fresh-after-undo) + `OpParamPanel` (slider carries
+  `param:amount`, buttons are single-arg keyless). (v0.69.6, this run — Builder)
 
 - **Editor recipe with a non-mapping `params` no longer 500s** — a recipe body
   whose op carried `params` as a list/string/number (a malformed client body or a
