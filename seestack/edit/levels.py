@@ -15,6 +15,12 @@ from __future__ import annotations
 
 import numpy as np
 
+#: The display-space grey the midtone (gamma) suggestion aims the image's typical
+#: tone at, after the black/white points are applied. Exposed so the webapp can
+#: tell the user *what goal* the suggested gamma solves for ("lands the sky at
+#: ~25% grey") rather than showing a bare number.
+GAMMA_TARGET = 0.25
+
 
 def suggest_levels_points(
     rgb: np.ndarray,
@@ -50,7 +56,7 @@ def suggest_levels_gamma(
     rgb: np.ndarray,
     black: float,
     white: float,
-    target: float = 0.25,
+    target: float = GAMMA_TARGET,
     min_lift: float = 1.05,
 ) -> float | None:
     """Suggest a midtone ``gamma`` for the Levels op so the image's typical tone

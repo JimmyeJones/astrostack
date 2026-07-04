@@ -168,13 +168,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   do next; audit every screen for jargon and add plain-language "why" tooltips;
   reduce visible option clutter (progressive disclosure). (M, friendliness)
 - Better long-job feedback and clearer error messages. (S, friendliness)
-- **Surface the measured midtone target on the gamma suggestion** — the new
-  data-driven gamma button (v0.66.0) reads "From your image (midtones 1.6)"; like the
-  sharpen/denoise buttons that name *why* (FWHM, noise σ), it could name the goal it
-  solves for ("lands the sky at ~25% grey"), so the number has visible provenance and
-  the beginner understands it's brightening the typical tone, not a magic value. Pure
-  label change on the existing suggestion; frontend-only, additive. (S,
-  editor/trust)
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 - **Photometric (multiplicative) frame normalization before combine** — frames
@@ -257,6 +250,20 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Gamma suggestion names the goal it solves for (not just a bare number)** — the
+  data-driven midtone button (v0.66.0) read "From your image (midtones 1.6)"; like
+  the sharpen/denoise buttons that name *why* (FWHM, noise σ), it now reads "From
+  your image (midtones 1.6 — lands the sky at ~25% grey)", so the number has visible
+  provenance and the beginner sees it's brightening the typical tone to a target, not
+  a magic value. The target grey is served honestly from the engine constant
+  (`GAMMA_TARGET`, the value `suggest_levels_gamma` actually solves for) as a new
+  optional `gamma_target` field on the `levels-suggestion` payload, so the label
+  can't drift from the maths. Engine constant + one API field + label; additive/
+  upgrade-safe (older clients ignore the field, fall back to the bare label).
+  Tested: webapp (`gamma_target` present iff a gamma is suggested and equals the
+  constant), Vitest (the gamma button names "~25% grey"). (v0.69.18, this run —
+  Builder)
 
 - **"Edited" dot on tuned op rows in the pipeline list** — after Auto-process or a
   preset drops a dozen ops in, a user couldn't tell at a glance which ops they'd
