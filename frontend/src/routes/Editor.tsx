@@ -5,8 +5,8 @@ import {
 import { useDebouncedValue } from "@mantine/hooks";
 import {
   IconAlertTriangle, IconArrowBackUp, IconArrowForwardUp, IconArrowLeft, IconChevronDown,
-  IconChevronUp, IconCrop, IconDeviceFloppy, IconDownload, IconInfoCircle, IconPhotoDown,
-  IconPlus, IconRefresh, IconSparkles, IconWand, IconZoomScan,
+  IconChevronUp, IconCrop, IconDeviceFloppy, IconDownload, IconHistory, IconInfoCircle,
+  IconPhotoDown, IconPlus, IconRefresh, IconSparkles, IconWand, IconZoomScan,
 } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -84,6 +84,19 @@ export function EditorView() {
 
   const opsSchema = useQuery({ queryKey: ["editor-ops"], queryFn: api.editorOps, staleTime: 60_000 });
   const saved = useQuery({ queryKey: ["recipe", safe, rid], queryFn: () => api.getRecipe(safe, rid) });
+  // Carry-over: the newest *other* run's saved edit, offered as a one-click seed
+  // when *this* run has no saved recipe yet — so re-stacking a multi-night target
+  // keeps the look the user dialled in, instead of reopening on the flat default.
+  // Fetched only when the saved recipe is empty (never nags a run that has its own
+  // edit); applying it is an explicit, undoable step and isn't persisted unless
+  // the user Saves. The ops are server-validated on load, so a stale op can't 500.
+  const savedIsEmpty = !!saved.data && (saved.data.ops?.length ?? 0) === 0;
+  const prevRecipe = useQuery({
+    queryKey: ["previous-recipe", safe, rid],
+    queryFn: () => api.previousRecipe(safe, rid),
+    enabled: !!opsSchema.data && savedIsEmpty,
+    staleTime: 30_000,
+  });
   // Data-driven default for the deconvolution PSF width: the target's median
   // star FWHM converted to a Gaussian σ, offered as a one-click button.
   const psf = useQuery({
@@ -635,6 +648,18 @@ export function EditorView() {
     setTrimPreview(false);
     restoreCoverageAfterTrim();
   };
+  const applyPreviousRecipe = () => {
+    const prev = prevRecipe.data;
+    if (!prev?.ops?.length) return;
+    // Replace the (empty) working recipe with a copy of the previous run's edit as
+    // a single undoable step. Not persisted until the user Saves.
+    setOps(() => prev.ops);
+    notifications.show({
+      message: `Applied your edit from the previous run (${prev.count} step`
+        + `${prev.count === 1 ? "" : "s"}) — Undo to revert, Save to keep`,
+      color: "violet",
+    });
+  };
   const applyTrim = () => {
     if (!trimCrop) return;
     const next = applyTrimCrop(ops, trimCrop, specs, uid);
@@ -1014,11 +1039,27 @@ export function EditorView() {
                     your image (background &amp; colour balance, a natural stretch, gentle
                     denoise/sharpen) — then tweak from there. Or add operations one at a time.
                   </Text>
-                  <Button size="compact-xs" variant="light" color="grape"
-                    leftSection={<IconSparkles size={14} />}
-                    loading={auto.isPending} onClick={() => auto.mutate()}>
-                    Auto-process
-                  </Button>
+                  <Group gap={6}>
+                    <Button size="compact-xs" variant="light" color="grape"
+                      leftSection={<IconSparkles size={14} />}
+                      loading={auto.isPending} onClick={() => auto.mutate()}>
+                      Auto-process
+                    </Button>
+                    {/* Carry-over: if this target has a previous run you edited, offer to
+                        reuse that look in one click, so a multi-night project stays
+                        consistent without redoing the edit. Undoable; not saved unless
+                        the user Saves. */}
+                    {prevRecipe.data?.run_id != null && prevRecipe.data.count > 0 ? (
+                      <Tooltip multiline w={240} withArrow
+                        label="Copy the edit you saved on this target's previous stack onto this one (as an undoable step you can tweak, then Save).">
+                        <Button size="compact-xs" variant="default" color="grape"
+                          leftSection={<IconHistory size={14} />}
+                          onClick={applyPreviousRecipe}>
+                          Use my previous edit ({prevRecipe.data.count})
+                        </Button>
+                      </Tooltip>
+                    ) : null}
+                  </Group>
                 </Alert>
               ) : null}
               {noStretch ? (

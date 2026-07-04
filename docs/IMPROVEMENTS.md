@@ -358,19 +358,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   editor. (M, autonomy/editor)
 - Auto-suggest stack settings from the data (frame count, FWHM spread, streaks)
   so the user rarely needs to touch the Stack form. (S–M, autonomy)
-- **"Apply my last edit to the newest stack" — recipe carry-over across re-stacks.**
-  The Seestar user with thousands of subs re-stacks a target repeatedly as more nights
-  come in, and today each new run opens on the flat default (or bare Auto) — so the
-  look they carefully dialed in on last week's run is lost and must be redone. Add a
-  one-click "Use my previous run's edit" (and/or auto-seed it) that copies the most
-  recent *edited* run's recipe onto the new run, validated through `validate_ops` on
-  load so a stale op can't 500 the editor, applied as a single undoable step and never
-  persisted unless the user Saves. This is the repeatability win from Method D: it
-  keeps a growing multi-night project visually consistent with near-zero effort, and
-  it's **off until the user clicks** (no default flip, upgrade-safe — recipes already
-  live in project meta keyed by run id, so it's a copy, not a schema change). Pairs
-  naturally with the "personal default recipe" idea but is scoped to *this target's own
-  history*, which is often what the user actually wants. (S–M, autonomy/editor)
+- ~~**"Apply my last edit to the newest stack" — recipe carry-over across re-stacks.**~~
+  — **shipped v0.75.0** (see Shipped). When a re-stacked run opens with no saved edit,
+  the empty-pipeline nudge now offers a one-click "Use my previous edit (N)" that copies
+  the newest *other* edited run's recipe onto this run (server-validated on load, applied
+  as a single undoable step, not persisted unless Saved). The related "personal default
+  recipe" idea (a target-independent default) is still open below.
 
 ### Friendliness (PRIORITY 3)
 - Guided "getting started" / empty states that tell a first-timer exactly what to
@@ -510,6 +503,24 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Recipe carry-over across re-stacks: one-click "Use my previous edit"** — the Seestar
+  user re-stacks a target repeatedly as more nights come in, and each new run opened on
+  the flat default, losing the look they'd dialled in. A new read-only
+  `GET …/editor/previous-recipe` endpoint returns the newest *other* stack run of the
+  target that carries a non-empty saved recipe (walking `stack_runs` newest-first,
+  probing `editor_recipe:{id}` meta; the recipe is validated on load so stale ops are
+  dropped). When the current run has no saved edit, the editor's empty-pipeline nudge now
+  shows a "Use my previous edit (N)" button that copies those ops into the working recipe
+  as a single **undoable** step (a violet notification says Undo to revert / Save to
+  keep); nothing is persisted unless the user Saves, and the query only fires when the
+  run's saved recipe is empty (never nags a run with its own edit). **Off until clicked**
+  — no default flip, no schema change (recipes already live in project meta keyed by run
+  id, so it's a copy), upgrade-safe/additive. Tests: webapp (returns the newest edited
+  run's ops with validated params / prefers the most recent of several / None when no
+  other run is edited / None when nothing's edited) + Vitest (the button names the step
+  count, applying it lands the ops in the pipeline and fires a preview carrying exactly
+  those ops, and the nudge disappears once non-empty). (v0.75.0, this run — Builder)
 
 - **Curves widget now previews the auto-contrast curve (read-only ghost) + "Bake to
   edit"** — the v0.73.0 auto-contrast (`tone.curves` `auto`) derives its curve at

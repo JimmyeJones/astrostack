@@ -450,6 +450,8 @@ describe("EditorView", () => {
   it("nudges a first-timer with an empty pipeline toward Auto-process", async () => {
     vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES]);
     vi.spyOn(client.api, "getRecipe").mockResolvedValue({ ops: [], base_run_id: 3 });
+    vi.spyOn(client.api, "previousRecipe").mockResolvedValue(
+      { run_id: null, ops: [], count: 0 });
     vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
     vi.spyOn(client.api, "getHistogram").mockResolvedValue(
       { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
@@ -480,6 +482,48 @@ describe("EditorView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove" }));
     await waitFor(() =>
       expect(screen.queryByText("What Auto-process did")).not.toBeInTheDocument());
+  });
+
+  it("offers to carry over a previous run's edit when this run has none", async () => {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({ ops: [], base_run_id: 3 });
+    vi.spyOn(client.api, "previousRecipe").mockResolvedValue({
+      run_id: 2, count: 2,
+      ops: [
+        { uid: "p1", id: "tone.stretch", enabled: true, params: { stretch: 0.7 } },
+        { uid: "p2", id: "tone.curves", enabled: true, params: { points: [[0, 0], [1, 1]] } },
+      ],
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    const fetchMock = vi.fn(async (_url?: string) => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderEditor();
+
+    // The empty pipeline offers a one-click carry-over naming the step count.
+    const carry = await screen.findByRole("button", { name: /Use my previous edit \(2\)/ });
+    fireEvent.click(carry);
+
+    // Both ops land in the working pipeline...
+    expect(await screen.findByText("Stretch")).toBeInTheDocument();
+    expect(screen.getByText("Curves")).toBeInTheDocument();
+    // ...and a preview fetch fires carrying exactly those ops.
+    await waitFor(() => {
+      const applied = fetchMock.mock.calls.some((call) => {
+        const q = new URL("http://x" + String(call[0])).searchParams.get("recipe");
+        if (!q) return false;
+        const decoded = JSON.parse(atob(q.replace(/-/g, "+").replace(/_/g, "/")));
+        return decoded.ops.map((o: { id: string }) => o.id).join(",")
+          === "tone.stretch,tone.curves";
+      });
+      expect(applied).toBe(true);
+    });
+    // The nudge (and its carry-over button) is gone now the pipeline is non-empty.
+    expect(screen.queryByRole("button", { name: /Use my previous edit/ })).toBeNull();
   });
 
   it("flags a heavy op so the user knows the preview updates after a pause", async () => {
