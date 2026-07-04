@@ -4,6 +4,7 @@ import type { EditOp, OpInstance } from "../../api/client";
  * so a user sees *what Auto did* (and in what order) instead of a bare list of op
  * names. Keyed by op id; any op not listed falls back to its registry label. */
 const OP_PHRASES: Record<string, string> = {
+  "background.level_coverage": "evened out the mosaic panel brightness",
   "background.final_gradient": "flattened the background",
   "background.subtract": "removed the background gradient",
   "tone.color_calibrate": "balanced the colour",

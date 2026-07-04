@@ -65,6 +65,16 @@ describe("autoSummaryPhrases", () => {
       "applied a natural stretch", "trimmed the ragged mosaic border",
     ]);
   });
+
+  it("names the mosaic coverage-leveling step in plain language", () => {
+    // Auto prepends background.level_coverage as its *first* step on a mosaic, so
+    // without a phrase the whole summary opens with the jargon label "coverage
+    // leveling" — the same gap the geometry.crop phrase closes at the other end.
+    const ops = [op("background.level_coverage"), op("tone.stretch")];
+    expect(autoSummaryPhrases(ops, SPECS)).toEqual([
+      "evened out the mosaic panel brightness", "applied a natural stretch",
+    ]);
+  });
 });
 
 describe("autoSummarySentence", () => {

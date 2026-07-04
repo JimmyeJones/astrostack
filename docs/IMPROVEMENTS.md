@@ -325,6 +325,18 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Auto-process summary names the mosaic coverage-leveling step in plain language** —
+  the "What Auto-process did" summary maps each Auto op to a plain-language phrase
+  (v0.70.1 added `geometry.crop`), but `background.level_coverage` — which
+  `auto_recipe` prepends as the *first* step on a mosaic to even out uneven-overlap
+  panel brightness — had no phrase, so on a Seestar mosaic the whole one-click
+  summary opened with the bare jargon registry label "Coverage leveling" while
+  every other step read cleanly. Added a phrase ("evened out the mosaic panel
+  brightness") to `OP_PHRASES`, completing plain-language coverage of every op Auto
+  can emit. Frontend-only, additive, advisory (no image/behaviour/API change).
+  Vitest: a regression case that a `background.level_coverage`-led recipe summarises
+  with the plain phrase, not the jargon label. (v0.72.5, this run — Builder)
+
 - **Fix: SCNR "Protect" tooltip had gentler/stronger reversed (misled the most
   common OSC fix)** — Builder editor audit found the `tone.scnr` `mode` param's help
   read "to the average (gentler) or maximum (stronger) of red/blue" — exactly
