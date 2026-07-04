@@ -65,6 +65,28 @@ proxy (`proxy_scale 2`) measured **0.93% mean** |preview−export| (p99 2.8%, ma
 or clear ready Builder task found; the editor + Stack-form autonomy are mature.**
 Full suite green: 721 passed, 2 skipped.)_
 
+_(Builder big-picture dogfood 2026-07-04 (v0.72.4 baseline): adversarial fuzz of
+the **whole editor engine** — every op + all four built-in presets + the `auto`
+recipe run through `apply_recipe` across proxy scales 1–8× on realistic OSC stacks
+(sky+stars+green-tint) *and* mosaic-gap (NaN) inputs, checking for exceptions,
+spurious NaN in the covered region, and out-of-[0,1] display output. **No
+reachable bug found** — the only invariant violations surface exclusively on
+degenerate **1-px-thin** images (a 1×N / N×1 array makes `detail.denoise`
+wavelet emit all-NaN and `bilateral` raise `IndexError`), which cannot occur for
+a real ≤1500 px Seestar proxy (a linear-stage op always sees the full proxy, never
+a sliver — crop is nonlinear/after it, and no aspect ratio collapses an axis to
+1 px at ≤1500 px). Logged as a low-priority robustness note (Infra) rather than
+shipped, since a guard for an unreachable input is exactly the busywork AGENTS.md
+§2 warns against. Also reviewed the full editor UI (1298-line `Editor.tsx`) and the
+Stack form: every consequential control already carries a data-driven "from your
+image" suggestion with provenance-naming labels, escape hatches, and footgun
+guards; the Stack form already has streak/κ-σ/transparency/quality-weight hints +
+auto-grade preview + memory estimates. **Backlog is genuinely dry of ready Builder
+work** — the top item (Auto contrast curve) is legitimately blocked pending Scout
+visual vetting on dim stacks, which a headless Builder can't do on a live install.
+This run files findings for the Scout rather than manufacture marginal work.
+Baseline suite green: 725 passed, 2 skipped.)_
+
 _(The v0.67–0.69 runs fixed a large batch of verified bugs — Gaia colour cal,
 RA≈0 frame rejection, debayer edge wrap, job-cancel result loss, hung-Gaia
 timeout, several input-validation 500s, the NaN-through-stretch invariant, the
@@ -238,6 +260,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+- **Low-priority robustness: `detail.denoise` on a 1-px-thin image.** A 1×N / N×1
+  RGB array makes the wavelet path emit all-NaN in the covered region (violating
+  the NaN=coverage invariant) and the `bilateral` path raise `IndexError`. Found by
+  the 2026-07-04 engine fuzz; **near-unreachable** (a linear-stage op always sees
+  the full ≤1500 px proxy, never a sliver — crop is nonlinear/after it), so not
+  worth a standalone ship. If a future run is already in `detail.py`, a cheap guard
+  (return the input unchanged when either axis is <2 px, mirroring the `geometry`
+  ops' degenerate-size guards) closes it with a one-line regression test. (S, robustness)
 - Chip away at the ~127 pre-existing `ruff check .` findings (don't add new ones);
   consider wiring ruff into CI once the count is low. (L, correctness/maintainability)
 - ~~Add a retention/pruning policy for `jobs.sqlite`~~ — **done, then made
