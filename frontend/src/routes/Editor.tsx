@@ -530,12 +530,21 @@ export function EditorView() {
   // one click. Only present, still-diverging ops are counted/changed.
   const dataDrivenSuggestions = useMemo(() => {
     const m: Record<string, OpSuggestion> = {};
-    if (psf.data?.psf_sigma != null) m["detail.deconvolve"] = { param: "psf_sigma", value: psf.data.psf_sigma };
-    if (denoise.data?.strength != null) m["detail.denoise"] = { param: "strength", value: denoise.data.strength };
-    if (sharpen.data?.radius != null) m["detail.sharpen"] = { param: "radius", value: sharpen.data.radius };
-    if (starSize.data?.size != null) m["stars.reduce"] = { param: "size", value: starSize.data.size };
+    // Carry each param's step so "already set" is judged with the same half-step
+    // tolerance as the per-param "From your data" button — otherwise the toolbar
+    // and the button disagree for a value within half a step of the suggestion.
+    const step = (opId: string, param: string) =>
+      specs[opId]?.params.find((p) => p.key === param)?.step ?? null;
+    if (psf.data?.psf_sigma != null)
+      m["detail.deconvolve"] = { param: "psf_sigma", value: psf.data.psf_sigma, step: step("detail.deconvolve", "psf_sigma") };
+    if (denoise.data?.strength != null)
+      m["detail.denoise"] = { param: "strength", value: denoise.data.strength, step: step("detail.denoise", "strength") };
+    if (sharpen.data?.radius != null)
+      m["detail.sharpen"] = { param: "radius", value: sharpen.data.radius, step: step("detail.sharpen", "radius") };
+    if (starSize.data?.size != null)
+      m["stars.reduce"] = { param: "size", value: starSize.data.size, step: step("stars.reduce", "size") };
     return m;
-  }, [psf.data, denoise.data, sharpen.data, starSize.data]);
+  }, [psf.data, denoise.data, sharpen.data, starSize.data, specs]);
   const nDataDriven = countDataDrivenDefaults(ops, dataDrivenSuggestions);
   const applyDataDefaults = () =>
     setOps((p) => applyDataDrivenDefaults(p, dataDrivenSuggestions));

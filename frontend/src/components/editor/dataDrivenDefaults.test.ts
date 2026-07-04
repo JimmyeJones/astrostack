@@ -53,4 +53,21 @@ describe("countDataDrivenDefaults", () => {
   it("is zero when no suggestion applies to any present op", () => {
     expect(countDataDrivenDefaults(ops(), { "stars.reduce": { param: "size", value: 4 } })).toBe(0);
   });
+
+  it("treats a value within half the step as already-set (matches the per-param button)", () => {
+    // radius 3.4 vs suggestion 3.5 with step 0.5 is within step/2 → already set:
+    // the toolbar count must agree with the param's "✓ already set" indicator.
+    const input = ops();
+    input[0].params.radius = 3.4;
+    const sug = { ...SUG, "detail.sharpen": { param: "radius", value: 3.5, step: 0.5 } };
+    expect(countDataDrivenDefaults(input, sug)).toBe(1); // only denoise diverges now
+    expect(applyDataDrivenDefaults(input, sug)[0]).toBe(input[0]); // untouched
+  });
+
+  it("skips disabled ops (not counted, not changed)", () => {
+    const input = ops();
+    input[0] = { ...input[0], enabled: false }; // sharpen disabled
+    expect(countDataDrivenDefaults(input, SUG)).toBe(1); // only the enabled denoise
+    expect(applyDataDrivenDefaults(input, SUG)[0]).toBe(input[0]); // disabled op untouched
+  });
 });

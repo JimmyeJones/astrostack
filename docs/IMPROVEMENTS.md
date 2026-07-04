@@ -90,18 +90,6 @@ when you take it.
   the existing UI; make per-channel failure all-or-nothing. Severity: broken-UX
   (silent no-op control). Confidence: confirmed (reproduced log path).
 
-- **BUG (cosmetic): "Use data defaults" and the per-param "✓ already set"
-  indicator disagree about the same value** — `applyDataDrivenDefaults`/
-  `countDataDrivenDefaults` compare with strict `!==`
-  (`frontend/src/components/editor/dataDrivenDefaults.ts`), the per-param button
-  uses `matchesSuggestion` with a step/2 tolerance
-  (`suggestionMatch.ts`). A value within half a step (e.g. slider lands on 1.4,
-  suggestion 1.36) shows "✓ already set" on the param while the toolbar still
-  offers "Use data defaults"; the count also includes *disabled* ops. **Fix:**
-  use `matchesSuggestion` (with each param's step) inside
-  `countDataDrivenDefaults`/`applyDataDrivenDefaults` and skip disabled ops.
-  Severity: cosmetic. Confidence: confirmed (traced).
-
 - **BUG (cosmetic): trim-crop preview rectangle misaligns on a letterboxed
   preview** — the dashed "proposed crop" overlay maps fractional bounds to
   percentages of the *container* (`trimRectStyle`,
@@ -355,6 +343,19 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Fix: "Use data defaults" toolbar and the per-param "✓ already set" indicator
+  now agree** — `applyDataDrivenDefaults`/`countDataDrivenDefaults` compared the
+  current value to the suggestion with strict `!==`, while the per-param "From your
+  data" button uses `matchesSuggestion` (half-step tolerance) — so a value within
+  half a step of the suggestion (slider lands on 1.4, suggestion 1.36) read "✓
+  already set" on the param yet the toolbar still offered "Use data defaults"; the
+  count also included *disabled* ops. Both functions now share a `wouldChange`
+  helper that uses `matchesSuggestion` with each param's step (threaded into the
+  suggestion from the op schema) and skips disabled ops, so the toolbar count, the
+  apply action, and the per-param indicator are consistent. Frontend-only,
+  additive. Vitest: added within-half-step-is-already-set and disabled-op-skipped
+  cases to the existing helper suite. (v0.69.8, this run — Builder)
 
 - **Fix: star-mask overlay now reflects the display-space image the ops gate on
   (was computed on the raw linear proxy)** — the "Star mask" trust overlay ran
