@@ -282,6 +282,51 @@ def test_stretch_suggestion_unknown_uid_falls_back(client, solved_library):
     assert body["stretch"] is not None and body["black"] is not None
 
 
+def test_curve_suggestion_from_image(client, solved_library):
+    # A stretch places the image into display space; the Curve suggestion then
+    # measures the histogram *entering* the Curves op and returns a gentle,
+    # strictly-monotone starting curve (endpoints pinned, midtone lifted).
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="curve_src")
+    recipe = {"ops": [
+        {"id": "tone.stretch", "uid": "s1", "params": {"stretch": 0.7, "black": 0.3}},
+        {"id": "tone.curves", "uid": "cv1", "params": {}},
+    ]}
+    q = _enc(recipe)
+    r = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/curve-suggestion?recipe={q}&uid=cv1")
+    assert r.status_code == 200
+    body = r.json()
+    pts = body["points"]
+    assert pts is not None, "a stretched Seestar stack should yield a starting curve"
+    # Endpoints pinned; strictly monotone in both axes (never inverts/posterises).
+    assert pts[0] == [0.0, 0.0] and pts[-1] == [1.0, 1.0]
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    assert all(b > a for a, b in zip(xs, xs[1:]))
+    assert all(b > a for a, b in zip(ys, ys[1:]))
+    # target_bg names the goal the lift solves for; it's the engine's target grey.
+    from seestack.edit.curve import CURVE_TARGET_BG
+    assert body["target_bg"] == CURVE_TARGET_BG
+
+
+def test_curve_suggestion_unknown_uid_falls_back(client, solved_library):
+    # An absent uid drops the tone.curves op(s) and measures the rest, so a stale
+    # uid still yields a sensible suggestion (200, not 404).
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="curve_fb")
+    recipe = {"ops": [
+        {"id": "tone.stretch", "uid": "s1", "params": {"stretch": 0.7, "black": 0.3}},
+        {"id": "tone.curves", "uid": "cv1", "params": {}},
+    ]}
+    q = _enc(recipe)
+    r = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/curve-suggestion?recipe={q}&uid=zzz")
+    assert r.status_code == 200
+    # points may be a valid curve or null on degenerate data, but never an error.
+    assert "points" in r.json()
+
+
 def test_ops_schema(client):
     r = client.get("/api/editor/ops/schema")
     assert r.status_code == 200

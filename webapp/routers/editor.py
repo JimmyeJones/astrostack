@@ -521,6 +521,48 @@ async def stretch_suggestion(safe: str, run_id: int, request: Request,
     return await run_in_threadpool(work)
 
 
+class CurveSuggestionOut(BaseModel):
+    """Data-driven starting tone curve for the ``tone.curves`` op — a gentle,
+    strictly-monotone midtone-lift curve derived from the display-space histogram
+    of the image entering the op. ``points`` is an ordered list of ``[x, y]``
+    control points (endpoints pinned at 0/1), or ``None`` when there's no useful
+    suggestion (too few finite pixels, a degenerate range, or a typical tone
+    already at/above the target). ``target_bg`` is the display-space grey the
+    midtone lift aims for, so the UI can name the goal; ``None`` when there's no
+    suggestion."""
+
+    points: list[list[float]] | None
+    target_bg: float | None = None
+
+
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/editor/curve-suggestion",
+            response_model=CurveSuggestionOut)
+async def curve_suggestion(safe: str, run_id: int, request: Request,
+                           recipe: str | None = None,
+                           uid: str | None = None) -> CurveSuggestionOut:
+    """Suggest a gentle starting tone curve for the Curves op from the histogram of
+    the display-space image *entering* that op (all ops before it applied), so a
+    beginner gets a pleasant contrast start to nudge instead of a flat identity
+    line. Mirrors the other data-driven "From your image" buttons."""
+    from seestack.edit.curve import CURVE_TARGET_BG, suggest_tone_curve
+
+    project_dir, run = _run_info(request, safe, run_id)
+    rec = _decode_recipe_query(request, safe, run_id, recipe)
+    sub = _recipe_before_uid(rec, uid, drop_ids=("tone.curves",))
+
+    def work() -> CurveSuggestionOut:
+        rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
+        ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None,
+                          coverage=_proxy_coverage(run.fits_path, scale))
+        out = apply_recipe(rgb, sub, ctx, for_preview=True)
+        pts = suggest_tone_curve(out)
+        if pts is None:
+            return CurveSuggestionOut(points=None)
+        return CurveSuggestionOut(points=pts, target_bg=CURVE_TARGET_BG)
+
+    return await run_in_threadpool(work)
+
+
 # Cap the coverage grid the O(h·w) largest-rectangle sweep runs on: a mosaic's
 # full-res coverage map can be >100 MP, but fractional crop bounds need nowhere
 # near that precision, so we stride it down first (mirrors the proxy decimation).
