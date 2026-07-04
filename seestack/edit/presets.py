@@ -118,17 +118,6 @@ def analyze_proxy(rgb: np.ndarray) -> dict[str, Any]:
     return {"sky": med, "sky_sigma": sky_sigma, "noisy": sky_sigma > 0.02}
 
 
-def _is_mosaic(coverage_span: tuple[int, int] | None) -> bool:
-    """A mosaic stack has uneven panel overlap, so its per-pixel frame coverage
-    spans a range (``coverage_max > coverage_min``); a single-field stack has
-    uniform coverage (max == min), where coverage-leveling is a deliberate no-op.
-    ``None`` (unknown) is treated as single-field so the recipe is unchanged."""
-    if coverage_span is None:
-        return False
-    lo, hi = coverage_span
-    return hi > lo
-
-
 # The noisy↔clean crossfade band (in the normalized sky-σ units analyze_proxy
 # reports, centred on its 0.02 "noisy" verdict). Below _NOISE_LO the stack is
 # treated as clean (sharpen only); above _NOISE_HI as noisy (denoise only); in
@@ -149,7 +138,7 @@ def _noise_fraction(sky_sigma: float) -> float:
 
 def auto_recipe(rgb: np.ndarray | None = None,
                 median_fwhm: float | None = None,
-                coverage_span: tuple[int, int] | None = None,
+                is_mosaic: bool = False,
                 trim_crop: tuple[float, float, float, float] | None = None) -> Recipe:
     """One-click auto-process built from the image, not hardcoded.
 
@@ -176,12 +165,12 @@ def auto_recipe(rgb: np.ndarray | None = None,
     highlight shoulder pinned on the identity, so it only gently lifts faint midtone
     structure without brightening the sky or blowing star cores).
 
-    When ``coverage_span`` marks a mosaic (``coverage_max > coverage_min``), a
-    ``background.level_coverage`` pass is prepended (on linear data, before the
-    gradient fit) so uneven-overlap panel steps are equalised before anything
-    else — the Seestar mosaic case, fixed without the user discovering the op.
-    On a single-field stack (uniform coverage) it's skipped entirely, where it
-    would be a no-op anyway.
+    When ``is_mosaic`` is set (the stacker's authoritative union-canvas verdict,
+    resolved by the caller), a ``background.level_coverage`` pass is prepended (on
+    linear data, before the gradient fit) so uneven-overlap panel steps are
+    equalised before anything else — the Seestar mosaic case, fixed without the
+    user discovering the op. On a single-field stack it's skipped entirely, where
+    it would be a no-op anyway.
 
     When ``trim_crop`` (fractional ``(x0, y0, x1, y1)`` bounds) is supplied — the
     largest well-covered rectangle of a mosaic's coverage map, from the same
@@ -226,7 +215,7 @@ def auto_recipe(rgb: np.ndarray | None = None,
             denoise_strength = round(base * noise_frac, 3)
 
     ops: list[tuple[str, dict]] = []
-    if _is_mosaic(coverage_span):
+    if is_mosaic:
         # Equalise per-panel sky steps before the gradient fit — the coverage map
         # is loaded into the render context downstream, so on a single-field
         # export (no coverage) this op is a harmless no-op even if it slips in.

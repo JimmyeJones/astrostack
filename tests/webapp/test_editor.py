@@ -16,7 +16,7 @@ from seestack.io.project import StackRunRow
 
 
 def _make_run(data_root, safe, basename="master", h=80, w=100,
-              coverage_min=1, coverage_max=5):
+              coverage_min=1, coverage_max=5, is_mosaic=None):
     lib = Library.open_or_create(data_root / "library")
     try:
         proj = lib.open_target(safe)
@@ -34,7 +34,7 @@ def _make_run(data_root, safe, basename="master", h=80, w=100,
                 id=None, timestamp_utc="2026-05-02T00:00:00Z", output_basename=basename,
                 fits_path=str(fp), tiff_path=None, preview_path=None, n_frames_used=5,
                 canvas_h=h, canvas_w=w, coverage_min=coverage_min,
-                coverage_max=coverage_max, options_json="{}",
+                coverage_max=coverage_max, options_json="{}", is_mosaic=is_mosaic,
             ))
         finally:
             proj.close()
@@ -367,7 +367,7 @@ def test_recipe_round_trip_and_validation(client, solved_library):
 
 def test_edit_preview_and_histogram(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
-    rid = _make_run(solved_library, safe)
+    rid = _make_run(solved_library, safe, is_mosaic=True)
     recipe = {"ops": [{"id": "tone.stretch", "params": {"stretch": 0.6, "black": 0.35}},
                       {"id": "tone.curves", "params": {"points": [[0, 0], [0.5, 0.6], [1, 1]]}}]}
     q = _enc(recipe)
@@ -383,7 +383,7 @@ def test_edit_preview_and_histogram(client, solved_library):
     # Proxy geometry is surfaced so the editor can warn "preview is downscaled".
     assert hist["proxy_scale"] >= 1.0
     assert hist["proxy_width"] > 0 and hist["proxy_height"] > 0
-    # This run spans coverage 1..5 (a mosaic), so the editor can enable the
+    # This run is a mosaic (persisted is_mosaic flag), so the editor can enable the
     # Coverage-leveling op instead of warning it's a no-op.
     assert hist["is_mosaic"] is True
 
@@ -453,7 +453,7 @@ def test_trim_suggestion_mosaic(client, solved_library):
     """On a mosaic, the trim endpoint returns a fractional crop to the largest
     well-covered rectangle, excluding the ragged low-coverage border."""
     safe = client.get("/api/targets").json()[0]["safe_name"]
-    rid = _make_run(solved_library, safe, h=80, w=100)  # coverage 1..5 → mosaic
+    rid = _make_run(solved_library, safe, h=80, w=100, is_mosaic=True)  # mosaic
     cov = np.full((80, 100), 1.0, dtype=np.float32)      # thin single-frame fringe
     cov[15:65, 20:80] = 5.0                              # well-covered interior
     _write_coverage(solved_library, safe, cov)
@@ -473,8 +473,7 @@ def test_trim_suggestion_mosaic(client, solved_library):
 def test_trim_suggestion_single_field_is_noop(client, solved_library):
     """A single-field stack (uniform coverage) is not a mosaic → no crop offered."""
     safe = client.get("/api/targets").json()[0]["safe_name"]
-    rid = _make_run(solved_library, safe, basename="single",
-                    coverage_min=3, coverage_max=3)
+    rid = _make_run(solved_library, safe, basename="single", is_mosaic=False)
     r = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/trim-suggestion")
     assert r.status_code == 200
     body = r.json()
@@ -482,10 +481,47 @@ def test_trim_suggestion_single_field_is_noop(client, solved_library):
     assert body["crop"] is None
 
 
+def test_histogram_single_field_legacy_run_is_not_mosaic(client, solved_library):
+    """Regression: a *legacy* single-field run (no persisted is_mosaic flag) whose
+    coverage sibling is one interior plateau + a thin uncovered border must be
+    classified single-field. The old ``coverage_max > coverage_min`` heuristic said
+    mosaic (min is 0 at the uncovered border, max is the frame count), wrongly
+    enabling the mosaic tools + a spurious Auto crop on the primary user's every
+    single-field stack."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    # is_mosaic=None → forces the coverage-distribution fallback; a real
+    # single-field stack stores coverage_min=0 (uncovered border), max=frames.
+    rid = _make_run(solved_library, safe, h=120, w=160,
+                    coverage_min=0, coverage_max=6, is_mosaic=None)
+    cov = np.zeros((120, 160), dtype=np.float32)
+    cov[2:-2, 2:-2] = 6.0            # interior: all frames
+    cov[1, :] = cov[-2, :] = 3.0     # thin reprojection-border ramp
+    cov[:, 1] = cov[:, -2] = 3.0
+    _write_coverage(solved_library, safe, cov)
+
+    hist = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/histogram").json()
+    assert hist["is_mosaic"] is False
+
+
+def test_histogram_legacy_mosaic_run_from_coverage_distribution(client, solved_library):
+    """A legacy mosaic run (no persisted flag) is still recognised as a mosaic via
+    its coverage distribution — two large plateaus at distinct levels."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, h=120, w=160,
+                    coverage_min=0, coverage_max=8, is_mosaic=None)
+    cov = np.zeros((120, 160), dtype=np.float32)
+    cov[:, :80] = 4.0
+    cov[:, 80:] = 8.0
+    _write_coverage(solved_library, safe, cov)
+
+    hist = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/histogram").json()
+    assert hist["is_mosaic"] is True
+
+
 def test_trim_suggestion_mosaic_without_coverage_sibling(client, solved_library):
     """A mosaic run whose coverage sibling is missing yields no crop, not an error."""
     safe = client.get("/api/targets").json()[0]["safe_name"]
-    rid = _make_run(solved_library, safe, basename="nocov")  # mosaic, no sibling
+    rid = _make_run(solved_library, safe, basename="nocov", is_mosaic=True)  # mosaic, no sibling
     r = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/trim-suggestion")
     assert r.status_code == 200
     body = r.json()
@@ -655,14 +691,14 @@ def test_star_mask_recipe_stops_before_selected_star_op(client, solved_library):
 
 def test_auto_process(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
-    rid = _make_run(solved_library, safe)
+    rid = _make_run(solved_library, safe, is_mosaic=True)
     r = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/auto")
     assert r.status_code == 200
     op_objs = r.json()["ops"]
     ops = [o["id"] for o in op_objs]
     assert "tone.stretch" in ops
-    # This run is a mosaic (coverage 1..5), so Auto prepends a coverage-leveling
-    # pass before the gradient fit to flatten the panel steps.
+    # This run is a mosaic (persisted is_mosaic flag), so Auto prepends a
+    # coverage-leveling pass before the gradient fit to flatten the panel steps.
     assert "background.level_coverage" in ops
     assert ops.index("background.level_coverage") < ops.index("tone.stretch")
     # No coverage sibling written here → no meaningful trim → no crop appended.
@@ -680,7 +716,7 @@ def test_auto_process_trims_ragged_mosaic_border(client, solved_library):
     appends a final geometry.crop to the well-covered interior so the one-click
     result is cleanly framed (reusing the Trim-border machinery)."""
     safe = client.get("/api/targets").json()[0]["safe_name"]
-    rid = _make_run(solved_library, safe, h=80, w=100)  # coverage 1..5 → mosaic
+    rid = _make_run(solved_library, safe, h=80, w=100, is_mosaic=True)  # mosaic
     cov = np.full((80, 100), 1.0, dtype=np.float32)
     cov[15:65, 20:80] = 5.0  # a well-covered interior inside a low-coverage border
     _write_coverage(solved_library, safe, cov)
@@ -701,8 +737,7 @@ def test_auto_process_trims_ragged_mosaic_border(client, solved_library):
 def test_auto_process_single_field_not_cropped(client, solved_library):
     """A single-field stack (uniform coverage) is never trimmed by Auto."""
     safe = client.get("/api/targets").json()[0]["safe_name"]
-    rid = _make_run(solved_library, safe, h=80, w=100,
-                    coverage_min=3, coverage_max=3)
+    rid = _make_run(solved_library, safe, h=80, w=100, is_mosaic=False)
     cov = np.full((80, 100), 3.0, dtype=np.float32)
     _write_coverage(solved_library, safe, cov)
 

@@ -16,6 +16,40 @@ import numpy as np
 
 # Below this coverage fraction of the peak a pixel is treated as fringe/uncovered.
 DEFAULT_MIN_FRAC = 0.5
+# A coverage level must span at least this fraction of the covered area to count
+# as a genuine panel plateau (rather than a thin reprojection-border ramp step)
+# when classifying a run as a mosaic from its coverage distribution.
+MOSAIC_LEVEL_MIN_FRAC = 0.08
+
+
+def coverage_is_mosaic(coverage: np.ndarray,
+                       min_frac: float = MOSAIC_LEVEL_MIN_FRAC) -> bool:
+    """Whether a per-pixel frame-coverage map came from a *mosaic* stack.
+
+    A single-field stack has essentially one interior coverage plateau (every
+    frame covers the whole field), with only a thin ramp of lower values along the
+    reprojection border. A mosaic's panels overlap unevenly, so its coverage map
+    has **two or more** large plateaus at distinct integer levels. We call it a
+    mosaic when at least two distinct *covered* levels each span ``min_frac`` of
+    the covered area — robust to the thin border ramp (each ramp step is tiny) and
+    to NaN/uncovered pixels.
+
+    This is the fallback the editor uses for legacy runs recorded before the
+    stacker's authoritative ``is_mosaic`` flag was persisted. It replaces the old
+    ``coverage_max > coverage_min`` test, which is ~always true (the reprojection
+    border is uncovered, so the minimum is 0) and so mislabelled single-field
+    stacks as mosaics.
+    """
+    cov = np.asarray(coverage)
+    if cov.ndim == 3:
+        cov = cov[..., 0]
+    cov = cov[np.isfinite(cov)]
+    covered = cov[cov > 0]
+    if covered.size == 0:
+        return False
+    _levels, counts = np.unique(np.rint(covered).astype(np.int64), return_counts=True)
+    fracs = counts / float(covered.size)
+    return int(np.count_nonzero(fracs >= min_frac)) >= 2
 # If the best rectangle already spans essentially the whole frame there's nothing
 # worth trimming, so we return None (no crop) rather than a no-op crop.
 _FULL_AREA_FRAC = 0.985

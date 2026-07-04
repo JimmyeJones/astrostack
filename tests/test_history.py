@@ -118,6 +118,76 @@ def test_v3_schema_migrates_to_v4_adds_total_exposure(tmp_path):
         proj.close()
 
 
+def test_v7_schema_migrates_to_v8_adds_is_mosaic(tmp_path):
+    """A v7 stack_runs table (no is_mosaic) must migrate additively: old rows read
+    as None (unknown → editor falls back to the coverage distribution), and new
+    inserts persist the stacker's authoritative mosaic verdict."""
+    import sqlite3
+
+    db_path = tmp_path / "old.sqlite"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        PRAGMA user_version = 7;
+        CREATE TABLE project_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE frames (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_path TEXT NOT NULL UNIQUE,
+            accept INTEGER NOT NULL DEFAULT 1,
+            ra_hint_deg REAL, dec_hint_deg REAL
+        );
+        CREATE TABLE stack_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp_utc TEXT NOT NULL, output_basename TEXT NOT NULL,
+            fits_path TEXT, tiff_path TEXT, preview_path TEXT,
+            n_frames_used INTEGER NOT NULL, canvas_h INTEGER NOT NULL,
+            canvas_w INTEGER NOT NULL, coverage_min INTEGER NOT NULL DEFAULT 0,
+            coverage_max INTEGER NOT NULL DEFAULT 0, options_json TEXT NOT NULL,
+            notes TEXT, total_exposure_s REAL, transparency_ratio REAL,
+            noise_sigma REAL, calstat TEXT
+        );
+        INSERT INTO project_meta(key, value) VALUES('name', 'OldProject');
+        INSERT INTO stack_runs(timestamp_utc, output_basename, n_frames_used,
+            canvas_h, canvas_w, coverage_min, coverage_max, options_json)
+            VALUES('2026-01-01T00:00:00+00:00', 'old_run', 42, 320, 480, 0, 6, '{}');
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    proj = Project(tmp_path)
+    proj.db_path = db_path
+    proj._open()
+    proj._check_schema()
+    try:
+        from seestack.io.project import SCHEMA_VERSION
+        assert proj._conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        cols = {r[1] for r in proj._conn.execute("PRAGMA table_info(stack_runs)")}
+        assert "is_mosaic" in cols
+        # The pre-existing run survives and reads its new column as None (unknown).
+        rows = {r.output_basename: r for r in proj.iter_stack_runs()}
+        assert rows["old_run"].n_frames_used == 42
+        assert rows["old_run"].is_mosaic is None
+        # New inserts persist the authoritative mosaic verdict (as 0/1, read as bool).
+        proj.add_stack_run(StackRunRow(
+            id=None, timestamp_utc="2026-02-01T00:00:00+00:00",
+            output_basename="mosaic_run", fits_path=None, tiff_path=None,
+            preview_path=None, n_frames_used=10, canvas_h=10, canvas_w=10,
+            coverage_min=0, coverage_max=10, options_json="{}", is_mosaic=True,
+        ))
+        proj.add_stack_run(StackRunRow(
+            id=None, timestamp_utc="2026-02-02T00:00:00+00:00",
+            output_basename="single_run", fits_path=None, tiff_path=None,
+            preview_path=None, n_frames_used=10, canvas_h=10, canvas_w=10,
+            coverage_min=0, coverage_max=10, options_json="{}", is_mosaic=False,
+        ))
+        rows = {r.output_basename: r for r in proj.iter_stack_runs()}
+        assert rows["mosaic_run"].is_mosaic is True
+        assert rows["single_run"].is_mosaic is False
+    finally:
+        proj.close()
+
+
 def test_v4_schema_migrates_to_v5_adds_transparency_ratio(tmp_path):
     """A v4 stack_runs table (no transparency_ratio) must migrate additively: old
     rows read as None, new inserts carry the column, and no data is lost."""

@@ -63,6 +63,20 @@ def test_stack_records_integration_time(tmp_path):
         proj.close()
 
 
+def test_stack_records_is_mosaic_false_for_single_field(tmp_path):
+    """run_stack persists its authoritative mosaic verdict. A single-field stack
+    (all frames the same pointing) is recorded is_mosaic=False, so the editor no
+    longer misclassifies it as a mosaic from the uncovered reprojection border."""
+    proj = _build_project(tmp_path, n=4)
+    try:
+        run_stack(proj, StackOptions(sigma_clip=False, max_workers=2,
+                                     output_name="single"))
+        run = next(iter(proj.iter_stack_runs()))
+        assert run.is_mosaic is False
+    finally:
+        proj.close()
+
+
 def test_stack_records_noise_sigma(tmp_path):
     """run_stack stamps the run record with the stacked image's normalized
     background-noise σ, so the history/gallery can flag the cleanest stack."""

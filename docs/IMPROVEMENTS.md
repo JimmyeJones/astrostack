@@ -47,7 +47,15 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
-- **Single-field (non-mosaic) stacks are misclassified as mosaics → Auto silently
+- ~~**Single-field (non-mosaic) stacks are misclassified as mosaics → Auto silently
+  crops the frame + the whole editor shows mosaic-only tools.**~~ — **FIXED
+  v0.74.2** (see Shipped). The editor now uses the stacker's *authoritative* mosaic
+  verdict (a persisted nullable `is_mosaic` column on `stack_runs`, schema 7→8
+  additive migration) instead of the broken `coverage_max > coverage_min` heuristic;
+  legacy runs (NULL) fall back to a coverage-distribution check, never the old test.
+  Original write-up kept below for provenance.
+
+- **[FIXED v0.74.2] Single-field (non-mosaic) stacks are misclassified as mosaics → Auto silently
   crops the frame + the whole editor shows mosaic-only tools.** *(reproduced
   end-to-end, Scout 2026-07-04)*
   - **Symptom.** For a perfectly normal **single-field** OSC stack (the primary
@@ -517,6 +525,38 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Fix: single-field stacks were misclassified as mosaics (Scout-verified
+  wrong-result/broken-UX bug on the primary user's every-session case)** — the
+  editor decided "is this a mosaic?" from `coverage_max > coverage_min`, but a real
+  reprojected stack *always* has an uncovered NaN/zero border, so `coverage_min` is
+  ~always 0 and the test was ~always True — mislabelling **single-field** stacks as
+  mosaics. Consequence: one-click Auto prepended a no-op `background.level_coverage`
+  *and* appended a spurious `geometry.crop` that trimmed a few px off every edge (and
+  changed the export dimensions), plus the editor showed the mosaic banner, the
+  "Trim border" button and the coverage-map overlay — all on a plain single-field
+  OSC frame. Root fix: persist the stacker's **authoritative** union-canvas decision
+  (`run_stack`'s own `is_mosaic_canvas`) as a new nullable `is_mosaic` column on
+  `stack_runs` (schema `SCHEMA_VERSION` 7→8, additive `ALTER TABLE` migration,
+  backfilling NULL — old DBs migrate cleanly, old runs read None). The three editor
+  sites (histogram `is_mosaic`, trim-suggestion, Auto) now resolve the verdict via a
+  shared `_run_is_mosaic` helper: the persisted flag when present, else — for legacy
+  NULL runs — a **coverage-distribution** check (`coverage_is_mosaic`: a genuine
+  mosaic has ≥2 large coverage plateaus at distinct levels; a single-field stack has
+  one dominant interior level + a thin border ramp), *never* the old
+  `max>min` test. `auto_recipe` now takes an explicit `is_mosaic: bool` (the buggy
+  `coverage_span`→`_is_mosaic` heuristic is removed from the engine entirely). The
+  histogram hot path reuses the coverage array it already loads (no extra I/O);
+  legacy trim/auto load a strided coverage map. Additive/upgrade-safe (nullable
+  column, no default/API-shape change; `is_mosaic` is a new response *value*, not a
+  new field). Tests: engine (`coverage_is_mosaic` single-field-with-ramp→False /
+  two-plateaus→True / empty / 3-D), schema (v7→v8 migrates, old run reads None, new
+  inserts round-trip True/False), end-to-end (a real single-field `run_stack` records
+  `is_mosaic=False`), and webapp regression (a **legacy** single-field run with a
+  realistic coverage sibling now reports `is_mosaic:false` where the old heuristic
+  said true; a legacy mosaic still classifies true). The fabricated
+  `coverage_min==coverage_max` editor tests were updated to set the authoritative
+  flag so a fabricated span can't hide the bug again. (v0.74.2, this run — Builder)
 
 - **Jobs page surfaces the reprocess-all batch outcome in plain language** —
   companion to the v0.74.0 reprocess-everything feature: a finished `reprocess_all`
