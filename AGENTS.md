@@ -80,6 +80,25 @@ higher on this list wins — always:
 4. **Best-possible image quality** for the OSC Seestar workflow (clean, detailed
    final images).
 
+**Current focus (2026-07 — set by the owner).** The editor (priority 1) is now
+**well-hardened**: its traced bug backlog is drained and repeated adversarial
+re-audits come back clean. That rule still stands — if a *real* editor regression
+appears, fixing it comes first — but the editor no longer needs feature-piling,
+and the highest *marginal* value has moved to:
+  1. **QA and harden the stacking engine itself.** Deeply audit and fix the
+     `seestack/stack/` path (`align.py`, `stacker.py`, `accumulator.py`,
+     `mosaic.py`, `drizzle_path.py`, rejection) and `seestack/calibrate/`. A bug
+     here silently corrupts the *final image* on a live install — this is
+     correctness / data-integrity work, so **treat a verified stacking-engine bug
+     like an editor bug: fix it first**, ahead of any polish.
+  2. **Autonomy, friendliness, and image quality (priorities 2–4).** Smarter,
+     better-defaulted auto-stack / auto-calibrate / auto-grade; clearer screens,
+     guidance, and empty/error states; and cleaner final images for the OSC
+     workflow. When picking from the Ideas list, favour these now.
+Do **not** invent new editor surface just to stay in priority 1 — a real
+stacking-engine bug or a genuine autonomy/friendliness/image-quality win now beats
+another editor tweak.
+
 **Depth over surface.** The app already has *plenty* of features. Your default
 should be to **fix, polish, simplify, and deepen what exists — not add new
 surface.** A new button/page needs a much higher bar than making an existing

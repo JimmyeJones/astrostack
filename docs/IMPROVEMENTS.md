@@ -4,6 +4,13 @@ The shared blackboard for autonomous development. Read
 [`../AGENTS.md`](../AGENTS.md) first — it defines the loop, the decision
 framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
+> **Current focus (2026-07 — see AGENTS.md §1 "Current focus").** The editor is now
+> well-hardened, so the highest-value work has shifted to **(1) QA-ing and hardening
+> the stacking engine** (`seestack/stack/*`, `seestack/calibrate/*` — a bug there
+> corrupts the final image, so treat verified ones like editor bugs: fix first) and
+> **(2) autonomy / friendliness / image-quality**. Still fix any real editor
+> regression first, but favour these areas when picking new work.
+
 **Conventions**
 - Sections: **Bugs (fix these first)** → **In progress** → **Ideas** (roughly
   prioritised) → **Shipped** → **Needs owner sign-off**.
