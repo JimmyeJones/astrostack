@@ -119,14 +119,17 @@ function BackupRestore() {
 
 export function Maintenance() {
   const navigate = useNavigate();
+  // Default to "only outdated" — after an upgrade the user wants to reprocess just
+  // the images that would actually change, not restack the whole library wholesale.
+  const [staleOnly, setStaleOnly] = useState(true);
   const reprocess = useMutation({
-    mutationFn: () => api.reprocessAll(),
+    mutationFn: (opts: { staleOnly: boolean }) => api.reprocessAll(opts.staleOnly),
     onSuccess: (res) => {
       notifications.show({
         color: "teal",
         message: res.already_running
           ? "A reprocess-everything batch is already running — watch it on the Jobs page."
-          : "Reprocessing every target — watch progress on the Jobs page.",
+          : "Reprocessing targets — watch progress on the Jobs page.",
       });
       navigate("/jobs");
     },
@@ -135,16 +138,20 @@ export function Maintenance() {
   });
 
   const onClick = () => {
+    const scope = staleOnly
+      ? "Restack every target that hasn't already been stacked with the current "
+        + "version?\n\n(Targets already up to date on this version are skipped.)\n\n"
+      : "Restack EVERY target with the current engine?\n\n";
     if (
       window.confirm(
-        "Restack every target with the current engine?\n\n"
+        scope
         + "Each target is reprocessed one at a time, reusing its last stack "
         + "settings. This is non-destructive: every restack is saved as a NEW "
         + "result alongside the existing one (nothing is deleted or overwritten), "
         + "so you can compare them in History. A large library can take a while.",
       )
     ) {
-      reprocess.mutate();
+      reprocess.mutate({ staleOnly });
     }
   };
 
@@ -159,6 +166,12 @@ export function Maintenance() {
           time; each restack is saved as a new result alongside the old one, so
           nothing is ever lost.
         </Text>
+        <Switch
+          checked={staleOnly}
+          onChange={(e) => setStaleOnly(e.currentTarget.checked)}
+          label="Only targets not already stacked on this version"
+          description="Skips targets whose latest stack was already made with the current version, so a large library isn't reprocessed wholesale."
+        />
         <Group>
           <Button
             color="grape"
@@ -167,7 +180,7 @@ export function Maintenance() {
             loading={reprocess.isPending}
             onClick={onClick}
           >
-            Reprocess all targets…
+            {staleOnly ? "Reprocess outdated targets…" : "Reprocess all targets…"}
           </Button>
         </Group>
       </Stack>

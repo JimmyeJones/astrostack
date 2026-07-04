@@ -17,6 +17,7 @@ from typing import Any
 
 from seestack.io.library import Library
 from seestack.io.scanner import run_qc_and_solve, scan_and_organize
+from webapp import __version__ as APP_VERSION
 from webapp.config import Settings
 from webapp.jobs import Job, JobManager
 from webapp.schemas import STACK_DEFAULTS_META_KEY, coerce_stack_options
@@ -272,7 +273,24 @@ def _last_stack_options_for_target(lib: Library, safe: str) -> dict[str, Any] | 
     return None
 
 
-def submit_reprocess_all(settings: Settings, jm: JobManager) -> Job:
+def _last_stack_version_for_target(lib: Library, safe: str) -> str | None:
+    """The ``engine_version`` of the target's most recent *genuine* stack run
+    (skipping editor/combine runs), or ``None`` when it has no genuine stack or
+    that run predates version tracking. Used by the "reprocess only stale targets"
+    filter to skip targets already stacked on the current build.
+    """
+    proj = lib.open_target(safe)
+    try:
+        for run in proj.iter_stack_runs():  # newest first
+            if _stack_options_from_run_json(run.options_json) is not None:
+                return run.engine_version
+    finally:
+        proj.close()
+    return None
+
+
+def submit_reprocess_all(settings: Settings, jm: JobManager, *,
+                         stale_only: bool = False) -> Job:
     """Restack *every* target with the current engine — the owner's one-click
     "reprocess everything after an upgrade" maintenance action.
 
@@ -286,6 +304,12 @@ def submit_reprocess_all(settings: Settings, jm: JobManager) -> Job:
 
     Cancellable between targets (and within each target's stack). A target that
     fails to stack is isolated: its error is recorded and the batch carries on.
+
+    ``stale_only`` skips targets whose most recent *genuine* stack was already
+    produced by the current app version — so after an upgrade the user reprocesses
+    only the images that would actually change, not the whole library. A target
+    with no genuine stack (or one that predates version tracking) is treated as
+    stale and reprocessed.
     """
     def body(job: Job) -> dict[str, Any]:
         lib = Library.open_or_create(settings.resolved_library_root)
@@ -295,6 +319,7 @@ def submit_reprocess_all(settings: Settings, jm: JobManager) -> Job:
             job.set_progress("reprocess", 0, total, f"0/{total} targets")
             jm.maybe_flush(job)
             stacked = 0
+            skipped = 0
             failed: list[dict[str, str]] = []
             cancelled = False
             for i, entry in enumerate(targets):
@@ -303,6 +328,12 @@ def submit_reprocess_all(settings: Settings, jm: JobManager) -> Job:
                     break
                 safe = entry.safe_name
                 name = entry.name or safe
+                if stale_only and _last_stack_version_for_target(lib, safe) == APP_VERSION:
+                    # Up to date on the current build — nothing would change, skip it.
+                    skipped += 1
+                    job.set_progress("reprocess", i + 1, total, f"{i + 1}/{total} targets")
+                    jm.maybe_flush(job)
+                    continue
                 # Persistent label; the inner run_stack progress updates
                 # phase/done/total per frame but leaves detail untouched.
                 job.detail = f"Target {i + 1}/{total}: {name}"
@@ -323,6 +354,7 @@ def submit_reprocess_all(settings: Settings, jm: JobManager) -> Job:
             return {
                 "total": total,
                 "stacked": stacked,
+                "skipped": skipped,
                 "failed": failed,
                 "cancelled": cancelled,
             }
@@ -542,6 +574,7 @@ def _apply_editor_to_run(lib: Library, safe: str, run_id: int, recipe_dict: dict
                                       # it again (matches the FITS SSDISPLY card).
                                       "display_space": True}),
             notes="edited",
+            engine_version=APP_VERSION,
         ))
     finally:
         proj.close()
@@ -717,6 +750,7 @@ def _channel_combine(
             coverage_min=1, coverage_max=1,
             options_json=_json.dumps({"channel_combine": items, "weights": weights or {}}),
             notes="channel combine",
+            engine_version=APP_VERSION,
         ))
     finally:
         dst.close()
@@ -819,6 +853,7 @@ def _stack_target(
             )[0],
             cancel=job.cancel_requested,
             memory_budget_gb=settings.max_stack_memory_gb,
+            app_version=APP_VERSION,
         )
     finally:
         proj.close()

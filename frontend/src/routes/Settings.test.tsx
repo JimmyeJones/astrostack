@@ -29,23 +29,37 @@ describe("Maintenance — reprocess everything", () => {
     const call = vi.spyOn(client.api, "reprocessAll");
 
     renderMaintenance();
-    fireEvent.click(screen.getByRole("button", { name: /Reprocess all targets/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Reprocess .* targets/ }));
 
     expect(call).not.toHaveBeenCalled();
   });
 
-  it("starts a batch and notifies when confirmed", async () => {
+  it("defaults to reprocessing only outdated targets (stale_only=true)", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     const call = vi
       .spyOn(client.api, "reprocessAll")
       .mockResolvedValue({ job_id: "job-9", already_running: false });
 
     renderMaintenance();
+    // The default button names the "outdated" scope, matching the default toggle.
+    fireEvent.click(screen.getByRole("button", { name: /Reprocess outdated targets/ }));
+
+    await waitFor(() => expect(call).toHaveBeenCalledWith(true));
+    await waitFor(() =>
+      expect(screen.getByText(/Reprocessing targets/)).toBeInTheDocument());
+  });
+
+  it("reprocesses every target when the outdated-only toggle is turned off", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const call = vi
+      .spyOn(client.api, "reprocessAll")
+      .mockResolvedValue({ job_id: "job-9", already_running: false });
+
+    renderMaintenance();
+    fireEvent.click(screen.getByLabelText(/Only targets not already stacked on this version/));
     fireEvent.click(screen.getByRole("button", { name: /Reprocess all targets/ }));
 
-    await waitFor(() => expect(call).toHaveBeenCalled());
-    await waitFor(() =>
-      expect(screen.getByText(/Reprocessing every target/)).toBeInTheDocument());
+    await waitFor(() => expect(call).toHaveBeenCalledWith(false));
   });
 
   it("surfaces the already-running case", async () => {
@@ -54,7 +68,7 @@ describe("Maintenance — reprocess everything", () => {
       .mockResolvedValue({ job_id: "job-9", already_running: true });
 
     renderMaintenance();
-    fireEvent.click(screen.getByRole("button", { name: /Reprocess all targets/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Reprocess .* targets/ }));
 
     await waitFor(() =>
       expect(screen.getByText(/already running/)).toBeInTheDocument());
@@ -65,7 +79,7 @@ describe("Maintenance — reprocess everything", () => {
     vi.spyOn(client.api, "reprocessAll").mockRejectedValue(new Error("boom"));
 
     renderMaintenance();
-    fireEvent.click(screen.getByRole("button", { name: /Reprocess all targets/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Reprocess .* targets/ }));
 
     await waitFor(() => expect(screen.getByText("boom")).toBeInTheDocument());
   });

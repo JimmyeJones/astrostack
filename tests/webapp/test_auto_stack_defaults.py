@@ -17,7 +17,7 @@ def _capture_opts(monkeypatch):
     captured = {}
 
     def fake_run_stack(proj, opts, *, progress=None, cancel=None,
-                       memory_budget_gb=None):  # noqa: ANN001
+                       memory_budget_gb=None, app_version=None):  # noqa: ANN001
         captured["opts"] = opts
         captured["memory_budget_gb"] = memory_budget_gb
         return SimpleNamespace(

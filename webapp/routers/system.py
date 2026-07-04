@@ -10,6 +10,7 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.concurrency import run_in_threadpool
+from pydantic import BaseModel
 
 from webapp import deps, pipeline
 
@@ -158,11 +159,22 @@ def _gpu_available() -> bool:
         return False
 
 
+class ReprocessAllBody(BaseModel):
+    # When True, skip targets whose most recent genuine stack was already produced
+    # by the current app version — reprocess only what an upgrade would change,
+    # not the whole library. Defaults False so the endpoint's existing behaviour
+    # (restack everything) is unchanged for any caller that omits it.
+    stale_only: bool = False
+
+
 @router.post("/api/reprocess-all")
-def reprocess_all(request: Request) -> dict[str, Any]:
+def reprocess_all(request: Request, body: ReprocessAllBody | None = None) -> dict[str, Any]:
     """Restack every target with the current engine (owner-requested maintenance
     action). Non-destructive: each restack is a new run alongside the old one,
     run serially so the memory-bounded stack hot path is never oversubscribed.
+
+    With ``stale_only`` set, targets already stacked on the current version are
+    skipped, so an upgrade reprocesses only the images that would actually change.
 
     Idempotent-ish: if a reprocess-all batch is already queued/running, return
     that job instead of enqueuing a duplicate.
@@ -172,7 +184,8 @@ def reprocess_all(request: Request) -> dict[str, Any]:
     existing = jm.active_of_kind("reprocess_all")
     if existing is not None:
         return {"job_id": existing.id, "already_running": True}
-    job = pipeline.submit_reprocess_all(settings, jm)
+    stale_only = bool(body.stale_only) if body is not None else False
+    job = pipeline.submit_reprocess_all(settings, jm, stale_only=stale_only)
     return {"job_id": job.id, "already_running": False}
 
 

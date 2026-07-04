@@ -227,6 +227,7 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
             noise_sigma=r.noise_sigma,
             calstat=r.calstat,
             options=_parse_options(r.options_json),
+            engine_version=r.engine_version,
         ))
     return out
 
