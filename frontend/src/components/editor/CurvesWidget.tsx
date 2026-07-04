@@ -39,11 +39,17 @@ function fromSvg(px: number, py: number): Pt {
 
 /** A small draggable tone-curve editor. Endpoints keep their x (0 and 1); inner
  * points move freely; double-click empty space to add a point, double-click a
- * point to remove it. */
-export function CurvesWidget({ points, onChange, histogram }: {
+ * point to remove it.
+ *
+ * `ghost` draws a read-only dashed curve behind the editable one — used to show
+ * the shape the Auto-contrast (`auto`) mode is applying at render time while the
+ * stored points are still a flat identity, so the widget no longer contradicts
+ * the preview. It's advisory: the user can't drag it (they Bake it to edit). */
+export function CurvesWidget({ points, onChange, histogram, ghost }: {
   points: Pt[];
   onChange: (pts: Pt[]) => void;
   histogram?: Histogram;
+  ghost?: Pt[];
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const drag = useRef<number | null>(null);
@@ -102,6 +108,9 @@ export function CurvesWidget({ points, onChange, histogram }: {
   };
 
   const path = pts.map((p) => toSvg(p[0], p[1]).join(",")).join(" ");
+  const ghostPath = ghost && ghost.length >= 2
+    ? ghost.map((p) => toSvg(p[0], p[1]).join(",")).join(" ")
+    : null;
 
   return (
     <Box>
@@ -123,6 +132,11 @@ export function CurvesWidget({ points, onChange, histogram }: {
             <line x1={PAD} y1={toSvg(0, g)[1]} x2={SIZE - PAD} y2={toSvg(0, g)[1]} />
           </g>
         ))}
+        {ghostPath ? (
+          <polyline points={ghostPath} fill="none" aria-label="auto contrast preview curve"
+            stroke="var(--mantine-color-violet-4)" strokeOpacity={0.55}
+            strokeWidth={2} strokeDasharray="5 4" />
+        ) : null}
         <polyline points={path} fill="none" stroke="var(--mantine-color-violet-4)" strokeWidth={2} />
         {pts.map((p, i) => {
           const [cx, cy] = toSvg(p[0], p[1]);

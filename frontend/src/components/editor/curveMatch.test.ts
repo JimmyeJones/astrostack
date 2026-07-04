@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { curvePointsMatch } from "./curveMatch";
+import { curvePointsMatch, isIdentityCurve } from "./curveMatch";
 import type { Pt } from "./curveDrag";
 
 const SUGGESTION: Pt[] = [
@@ -42,5 +42,26 @@ describe("curvePointsMatch", () => {
     const bad = SUGGESTION.map((p) => [...p]) as unknown[];
     bad[2] = ["x", "y"];
     expect(curvePointsMatch(bad, SUGGESTION)).toBe(false);
+  });
+});
+
+describe("isIdentityCurve", () => {
+  it("is true only for the untouched [[0,0],[1,1]] default", () => {
+    expect(isIdentityCurve([[0, 0], [1, 1]])).toBe(true);
+    expect(isIdentityCurve([[0.0, 0.0], [1.0, 1.0]])).toBe(true);
+  });
+
+  it("is false once a point is moved or an interior point is added", () => {
+    expect(isIdentityCurve([[0, 0], [0.5, 0.6], [1, 1]])).toBe(false);
+    expect(isIdentityCurve([[0, 0], [1, 0.9]])).toBe(false);
+    expect(isIdentityCurve(SUGGESTION)).toBe(false);
+  });
+
+  it("is false for a missing or malformed list", () => {
+    expect(isIdentityCurve(undefined)).toBe(false);
+    expect(isIdentityCurve([])).toBe(false);
+    expect(isIdentityCurve([[0, 0]])).toBe(false);
+    expect(isIdentityCurve("nope")).toBe(false);
+    expect(isIdentityCurve([["a", "b"], [1, 1]])).toBe(false);
   });
 });

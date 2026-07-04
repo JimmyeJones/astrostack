@@ -12,6 +12,18 @@ import type { Pt } from "./curveDrag";
  * the rounding step) keeps the match exact in practice while tolerating float
  * round-tripping. A missing/malformed current list, or an empty/absent
  * suggestion, never matches — so the button stays active. */
+/** True iff `pts` is exactly the untouched identity default `[[0,0],[1,1]]` —
+ * mirrors the engine's `_points_are_identity` (tone.py), which is the condition
+ * under which the Curves op's `auto` contrast engages (a hand-edited curve is
+ * never overridden). Defensive against a malformed/absent list. */
+export function isIdentityCurve(pts: unknown): boolean {
+  if (!Array.isArray(pts) || pts.length !== 2) return false;
+  const [a, b] = pts as unknown[];
+  if (!Array.isArray(a) || !Array.isArray(b)) return false;
+  const near = (v: unknown, t: number) => typeof v === "number" && Math.abs(v - t) < 1e-6;
+  return near(a[0], 0) && near(a[1], 0) && near(b[0], 1) && near(b[1], 1);
+}
+
 export function curvePointsMatch(
   current: unknown,
   suggested: readonly Pt[] | null | undefined,

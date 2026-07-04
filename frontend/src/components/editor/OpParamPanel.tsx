@@ -9,7 +9,8 @@ import { matchesSuggestion } from "./suggestionMatch";
 /** Renders the parameter form for one operation instance. Scalars use the shared
  * StackOptionControl (as sliders here), curves use the CurvesWidget (with the
  * histogram behind it), and every param can be reset to its schema default. */
-export function OpParamPanel({ spec, params, onChange, histogram, suggestions }: {
+export function OpParamPanel({ spec, params, onChange, histogram, suggestions,
+  curveGhost, onBakeCurve }: {
   spec: EditOp;
   params: Record<string, unknown>;
   /** Applies a param change. `coalesceKey` (passed for continuous slider/curve
@@ -21,6 +22,12 @@ export function OpParamPanel({ spec, params, onChange, histogram, suggestions }:
    * value measured from your data" button (e.g. deconvolution PSF σ from the
    * target's median star FWHM). */
   suggestions?: Record<string, { value: number; label: string }>;
+  /** When the Curves op's Auto-contrast is deriving a curve at render time (its
+   * stored points are still identity), the derived shape to draw read-only behind
+   * the editable curve so the widget matches the preview, plus a one-click "Bake"
+   * that turns it into editable points. */
+  curveGhost?: [number, number][];
+  onBakeCurve?: () => void;
 }) {
   // `coalesce` is set only for the continuous controls (slider/curve drags), whose
   // onChange fires per drag tick; button-driven edits leave it off so each is its
@@ -46,8 +53,24 @@ export function OpParamPanel({ spec, params, onChange, histogram, suggestions }:
           <CurvesWidget
             points={(params[p.key] as [number, number][]) ?? [[0, 0], [1, 1]]}
             histogram={histogram}
+            ghost={curveGhost}
             onChange={(pts) => set(p.key, pts, true)}
           />
+          {curveGhost ? (
+            <Group gap={8} align="center" wrap="nowrap" mt={4}>
+              <Text size="xs" c="dimmed" style={{ flex: 1, minWidth: 0 }}>
+                Auto contrast is on — the dashed line is the curve derived from your
+                image at render time. Bake it to fine-tune the points.
+              </Text>
+              {onBakeCurve ? (
+                <Tooltip label="Turn the auto curve into editable points you can adjust"
+                  multiline w={220} withArrow>
+                  <Button size="compact-xs" variant="light" color="violet"
+                    onClick={onBakeCurve}>Bake to edit</Button>
+                </Tooltip>
+              ) : null}
+            </Group>
+          ) : null}
         </div>
       );
     }

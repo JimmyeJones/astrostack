@@ -217,19 +217,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   ops on the proxy can lag) and closing any remaining proxy↔export look
   differences — chase those, but never by hiding an action again. (S–M, editor)
 - ~~**Give the Auto recipe a gentle contrast curve (as the presets already do)**~~ — **shipped v0.73.0** (see Shipped). The one-click Auto recipe now appends a data-driven `tone.curves` (auto contrast) after the saturation boost, matching the built-in galaxy/nebula presets.
-- **Reflect the auto-contrast curve's shape in the Curves widget (v0.73.0 follow-up).**
-  The new `tone.curves` `auto` mode (shipped v0.73.0) computes its curve *at apply
-  time* from the op's own input, so when a user selects Auto's curve op the **preview
-  shows contrast but the Curves editor widget still draws a flat identity line** (the
-  recipe stores the identity points; the derived shape lives only in the render) — a
-  small preview↔control mismatch and a missed chance to teach what Auto did. Two clean
-  options, both frontend-only/additive: (a) when `auto` is on and points are identity,
-  fetch the shape from the existing `…/editor/curve-suggestion` endpoint (the manual
-  "Auto curve" button already uses it) and draw it read-only in the widget; or (b) add
-  a one-click "Bake" that writes the current auto-derived points into the recipe and
-  clears the `auto` flag, so the user can then hand-tune from the real shape. Prefer
-  (a) for honesty + (b) as the tweak path. Spotted while shipping the auto curve.
-  (S, editor/trust)
+- ~~**Reflect the auto-contrast curve's shape in the Curves widget (v0.73.0 follow-up).**~~
+  — **shipped v0.74.4** (see Shipped). Both options landed: (a) when `auto` is on and the
+  points are still identity the Curves widget now draws the derived shape (from the
+  `…/editor/curve-suggestion` endpoint) as a read-only dashed ghost so it matches the
+  preview, and (b) a "Bake to edit" button materialises those points into the recipe and
+  clears `auto` so the user can hand-tune from the real shape.
 - **Confusing / clunky controls** — too many ops with terse params and no obvious
   starting point. Add plain-language help, a simple/guided default layout, curated
   presets, and progressive disclosure of advanced ops so a beginner gets a good
@@ -517,6 +510,26 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Curves widget now previews the auto-contrast curve (read-only ghost) + "Bake to
+  edit"** — the v0.73.0 auto-contrast (`tone.curves` `auto`) derives its curve at
+  *render* time from the image entering the op while the stored points stay a flat
+  identity, so selecting Auto's curve op showed **contrast in the preview but a flat
+  identity line in the Curves widget** — a preview↔control mismatch and a missed teaching
+  moment. Now when auto is engaged (on + points still identity) the widget draws the
+  derived shape — the same one `…/editor/curve-suggestion` returns — as a read-only
+  dashed ghost behind the (still-identity) editable curve, with a caption explaining
+  what's happening, and a one-click **"Bake to edit"** that writes those points into the
+  recipe and clears `auto` so the user can hand-tune from the real shape (a single
+  undoable step). The redundant header "Auto curve" button is hidden while auto is
+  engaged, so Bake is the single control. Frontend-only, additive, no API/behaviour
+  change (the ghost is advisory; nothing is written until Bake or a manual edit). New
+  pure `isIdentityCurve` helper (mirrors the engine `_points_are_identity`); a `ghost`
+  prop on `CurvesWidget`; `curveGhost`/`onBakeCurve` on `OpParamPanel`. Vitest:
+  `isIdentityCurve` (identity/moved/malformed), the widget ghost (dashed read-only
+  polyline, not a draggable handle; absent when no ghost), and an Editor test that an
+  auto+identity curve shows the ghost/caption, hides the header button, and Bake writes
+  the suggested points with `auto:false`. (v0.74.4, this run — Builder)
 
 - **"Cropped view — showing N% of the frame" indicator + one-click "Remove crop"** —
   a `geometry.crop` op silently shrinks the visible frame, so an auto-applied trim or a

@@ -35,7 +35,7 @@ import { clippingCaption } from "../components/editor/clipping";
 import { previewDebounceMs } from "../components/editor/previewDebounce";
 import { starMaskSizePx } from "../components/editor/starMaskSize";
 import { levelsAtIdentity, resetLevelsPoints } from "../components/editor/levelsReset";
-import { curvePointsMatch } from "../components/editor/curveMatch";
+import { curvePointsMatch, isIdentityCurve } from "../components/editor/curveMatch";
 import { coalesceFwhm, measuredContextText } from "../components/editor/measuredContext";
 import { OpParamPanel } from "../components/editor/OpParamPanel";
 import { PresetMenu } from "../components/editor/PresetMenu";
@@ -521,6 +521,21 @@ export function EditorView() {
   const fixStage = (u: string) => setOps((p) => moveToCorrectSide(p, u, specs));
 
   const selectedOp = ops.find((o) => o.uid === selected) ?? null;
+  // Auto-contrast on the Curves op derives its curve at *render* time from the
+  // image entering the op while the stored points stay a flat identity, so the
+  // widget would otherwise draw a straight line that contradicts the preview.
+  // When it's engaged (auto on + still identity) show the derived shape — the same
+  // one `…/editor/curve-suggestion` returns — as a read-only ghost, and offer to
+  // Bake it into editable points (clearing `auto`, so what you see is what you tune).
+  const curveGhost = selectedOp?.id === "tone.curves"
+    && selectedOp.params?.auto === true
+    && isIdentityCurve(selectedOp.params?.points)
+    && curve.data?.points != null && curve.data.points.length >= 2
+    ? (curve.data.points as [number, number][]) : undefined;
+  const bakeAutoCurve = () => {
+    if (!selectedOp || !curveGhost) return;
+    setParams(selectedOp.uid, { ...selectedOp.params, points: curveGhost, auto: false });
+  };
   // No enabled stretch → the pipeline silently applies a default asinh stretch at
   // the end. Nudge the user to add/enable an explicit, controllable one.
   const disabledStretch = ops.find((o) => !o.enabled && specs[o.id]?.is_stretch) ?? null;
@@ -1103,8 +1118,10 @@ export function EditorView() {
                     {/* One-click "Auto curve" drops a gentle, monotone midtone-lift
                         curve derived from this image's own histogram, so the Curves
                         op gives a pleasant contrast start to nudge instead of a flat
-                        identity line. */}
-                    {selectedOp.id === "tone.curves" && curve.data?.points != null ? (
+                        identity line. Hidden while Auto-contrast is already engaged
+                        (the ghost + "Bake to edit" below is the control then). */}
+                    {selectedOp.id === "tone.curves" && curve.data?.points != null
+                      && !curveGhost ? (
                       (() => {
                         const applied = curvePointsMatch(
                           selectedOp.params?.points, curve.data.points);
@@ -1192,6 +1209,7 @@ export function EditorView() {
                 ) : null}
                 <OpParamPanel spec={specs[selectedOp.id]} params={selectedOp.params}
                   histogram={hist.data}
+                  curveGhost={curveGhost} onBakeCurve={bakeAutoCurve}
                   onChange={(p, coalesceKey) => setParams(selectedOp.uid, p, coalesceKey)}
                   suggestions={
                     selectedOp.id === "detail.deconvolve" && psf.data?.psf_sigma != null

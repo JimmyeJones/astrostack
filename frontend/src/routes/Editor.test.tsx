@@ -872,6 +872,57 @@ describe("EditorView", () => {
     });
   });
 
+  it("shows the auto-contrast ghost curve + Bake, hides the header 'Auto curve', and bakes on click", async () => {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [
+        { uid: "s1", id: "tone.stretch", enabled: true, params: { stretch: 0.6 } },
+        // Auto-contrast on, points still identity → the derived curve is applied at
+        // render time and the widget should preview it as a ghost.
+        { uid: "cv1", id: "tone.curves", enabled: true,
+          params: { points: [[0, 0], [1, 1]], auto: true } },
+      ],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    const SUGGESTED: [number, number][] = [[0, 0], [0.15, 0.2], [0.9, 0.9], [1, 1]];
+    vi.spyOn(client.api, "curveSuggestion").mockResolvedValue(
+      { points: SUGGESTED, target_bg: 0.25 });
+    const fetchMock = vi.fn(async (_url?: string) => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderEditor();
+
+    fireEvent.click(await screen.findByText("Curves"));
+    // The ghost curve + its caption appear; the redundant header "Auto curve" button
+    // is hidden while auto is engaged (Bake is the single control).
+    expect(await screen.findByLabelText("auto contrast preview curve")).toBeInTheDocument();
+    expect(screen.getByText(/Auto contrast is on/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Auto curve/ })).toBeNull();
+
+    // Baking writes the derived points into the recipe and clears `auto`, so a
+    // preview fetch fires with the curve carrying exactly the suggested points.
+    fireEvent.click(screen.getByRole("button", { name: /Bake to edit/ }));
+    await waitFor(() => {
+      const applied = fetchMock.mock.calls.some((call) => {
+        const q = new URL("http://x" + String(call[0])).searchParams.get("recipe");
+        if (!q) return false;
+        const decoded = JSON.parse(atob(q.replace(/-/g, "+").replace(/_/g, "/")));
+        const cv = decoded.ops.find((o: { id: string }) => o.id === "tone.curves");
+        return cv && JSON.stringify(cv.params.points) === JSON.stringify(SUGGESTED)
+          && cv.params.auto === false;
+      });
+      expect(applied).toBe(true);
+    });
+    // Ghost is gone now that points are non-identity (auto no longer engaged).
+    await waitFor(() =>
+      expect(screen.queryByLabelText("auto contrast preview curve")).toBeNull());
+  });
+
   it("resets an over-dragged Levels op to neutral via the header 'Reset points'", async () => {
     vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, LEVELS]);
     vi.spyOn(client.api, "getRecipe").mockResolvedValue({
