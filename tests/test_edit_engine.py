@@ -536,16 +536,18 @@ def test_scaled_px_shrinks_on_proxy_only():
 def test_sharpen_radius_scaled_to_proxy(monkeypatch):
     """The sharpen radius is a full-res pixel measure; on the decimated preview
     proxy it must be shrunk by proxy_scale so the preview matches the full-res
-    export (preview↔export parity). We capture the radius handed to unsharp_mask."""
-    import skimage.filters as skf
+    export (preview↔export parity). We capture the sigma handed to the Gaussian
+    (sharpen is a per-channel unsharp mask, so it blurs each channel once)."""
+    import scipy.ndimage as ndi
 
     seen: list[float] = []
+    real_gaussian = ndi.gaussian_filter
 
-    def fake_unsharp(img, *, radius, amount, channel_axis):
-        seen.append(float(radius))
-        return img  # identity — we only care about the radius here
+    def fake_gaussian(img, *, sigma, **kw):
+        seen.append(float(sigma))
+        return real_gaussian(img, sigma=sigma, **kw)
 
-    monkeypatch.setattr(skf, "unsharp_mask", fake_unsharp)
+    monkeypatch.setattr(ndi, "gaussian_filter", fake_gaussian)
     spec = get_op("detail.sharpen")
     img = _img(20, 20, nan_band=0)
 
@@ -553,7 +555,8 @@ def test_sharpen_radius_scaled_to_proxy(monkeypatch):
     spec.apply(img, {"amount": 1.0, "radius": 4.0}, EditContext(proxy_scale=2.0))
     spec.apply(img, {"amount": 1.0, "radius": 4.0}, EditContext(proxy_scale=4.0))
     # full-res keeps radius 4; a 2x proxy halves it; a 4x proxy quarters it.
-    assert seen == [4.0, 2.0, 1.0]
+    # Three channels per apply → the same sigma three times each.
+    assert seen == [4.0] * 3 + [2.0] * 3 + [1.0] * 3
 
 
 def test_background_subtract_box_scaled_to_proxy(monkeypatch):

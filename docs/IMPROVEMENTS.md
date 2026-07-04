@@ -40,22 +40,6 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
-- **BUG (flaky test): `test_detail_ops_preserve_nan_on_partial_coverage[detail.sharpen-params1]`
-  intermittently fails in the full suite** — passes in isolation and in-file,
-  fails ~sometimes in full-suite order: the *covered* region comes back with a NaN
-  and/or huge finite garbage (`7.7e37`, denormals) after `detail.sharpen`. That
-  signature (garbage finite values, not just a stray NaN) points at an
-  uninitialised-memory / platform-specific skimage/scipy `unsharp_mask`
-  (`float32`+`channel_axis`) quirk rather than a logic bug in `_with_nan_filled`
-  (which provably fills per-channel, processes, then re-NaNs the border). It has
-  taken down `main`'s CI at least once (PR #66, run 28671857844). **Do NOT** "fix"
-  it by scrubbing NaN in the covered region — that would mask the finite garbage
-  and ship a broken image. Investigate instead: pin/repro the CI
-  scikit-image/scipy/numpy build, or route the op around skimage (per-channel
-  gaussian unsharp in pure numpy). Severity: broken-UX (CI noise). Confidence:
-  confirmed (observed). *(Merged the former duplicate "Infra / Flaky CI" entry
-  into this one.)*
-
 ### Editor — engine & backend (PRIORITY 1)
 
 - **BUG: deconvolution's live preview is a near-no-op on large stacks — preview
@@ -343,6 +327,19 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Fix flaky `detail.sharpen` NaN test (route unsharp mask around skimage)** — the
+  `detail.sharpen` op called scikit-image's `unsharp_mask(..., channel_axis=-1)` on
+  `float32`, which on some scikit-image/scipy builds intermittently returned
+  uninitialised finite garbage (`7.7e37`, denormals) or a stray NaN in the *covered*
+  region — reddening `main`'s CI (took down PR #66) via
+  `test_detail_ops_preserve_nan_on_partial_coverage[detail.sharpen-params1]` in
+  full-suite order. Replaced it with a deterministic per-channel unsharp mask in
+  pure numpy/scipy (`sharp = img + amount·(img − gaussian_filter(img, sigma,
+  mode="nearest"))`), which fully initialises the output and matches skimage's
+  effect. Stress-tested 200× (zero garbage). Engine-only, additive; the effect is
+  unchanged for users. Updated the proxy-scale parity test to capture the Gaussian
+  sigma instead of the (now-unused) `unsharp_mask` radius. (v0.69.10, this run — Builder)
 
 - **Fix: "Use data defaults" toolbar and the per-param "✓ already set" indicator
   now agree** — `applyDataDrivenDefaults`/`countDataDrivenDefaults` compared the
