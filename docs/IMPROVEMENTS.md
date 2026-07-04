@@ -263,6 +263,22 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Fix flaky frontend CI at the root: run vitest test files sequentially
+  (`fileParallelism: false`)** — `main`'s frontend CI had been intermittently red
+  (it was already failing on the commit this run branched from) with "unable to find
+  element" timeouts in `Editor.test.tsx`, despite the code being fine and the suite
+  passing locally. Root cause (as v0.69.19 diagnosed but only mitigated with
+  timeouts): the heavy Editor tests spin up many full-app renders, and when several
+  test-file workers run in parallel on a small CI runner the Editor worker is
+  CPU-starved — a `findBy*`/`waitFor` that settles sub-second when scheduled instead
+  drags past 10s, and any *synchronous* assertion right after it races the lagging
+  render. Raising timeouts repeatedly didn't stop it. Serialising the test files
+  (each gets the full CPU; whole suite ~65s vs ~27s parallel — a fine trade for a
+  reliably green gate) removes the starvation so the timeouts are never approached.
+  Also hardened this run's new Stretch-suggestion test to click the header button via
+  `findByRole` (waits for its render) rather than a synchronous `getByRole`.
+  Test-infra only; no product code or assertion weakened. (v0.71.1, this run — Builder)
+
 - **Data-driven "From your image" Strength + Black point for the asinh Stretch
   (completes the family of data-driven tonal defaults)** — the Stretch op was the
   single most consequential editor control yet the only major tonal op *without* a
