@@ -17,6 +17,7 @@ from typing import Any
 
 from seestack.io.library import Library
 from seestack.io.scanner import run_qc_and_solve, scan_and_organize
+from webapp import __version__ as APP_VERSION
 from webapp.config import Settings
 from webapp.jobs import Job, JobManager
 from webapp.schemas import STACK_DEFAULTS_META_KEY, coerce_stack_options
@@ -542,6 +543,7 @@ def _apply_editor_to_run(lib: Library, safe: str, run_id: int, recipe_dict: dict
                                       # it again (matches the FITS SSDISPLY card).
                                       "display_space": True}),
             notes="edited",
+            engine_version=APP_VERSION,
         ))
     finally:
         proj.close()
@@ -717,6 +719,7 @@ def _channel_combine(
             coverage_min=1, coverage_max=1,
             options_json=_json.dumps({"channel_combine": items, "weights": weights or {}}),
             notes="channel combine",
+            engine_version=APP_VERSION,
         ))
     finally:
         dst.close()
@@ -819,6 +822,7 @@ def _stack_target(
             )[0],
             cancel=job.cancel_requested,
             memory_budget_gb=settings.max_stack_memory_gb,
+            app_version=APP_VERSION,
         )
     finally:
         proj.close()

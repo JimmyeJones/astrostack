@@ -563,10 +563,16 @@ def run_stack(
     progress: ProgressFn | None = None,
     cancel: CancelFn | None = None,
     memory_budget_gb: float | None = None,
+    app_version: str | None = None,
 ) -> StackResult:
     """
     Execute a stacking run end-to-end. Synchronous — call this from a worker
     thread if you want a responsive GUI.
+
+    ``app_version`` (optional) is recorded on the resulting ``stack_runs`` row for
+    provenance — the webapp passes its ``__version__`` so History can show which
+    build produced each image. The engine never imports the webapp, so it's passed
+    in rather than looked up; ``None`` leaves the run's version unrecorded.
     """
     progress = progress or (lambda *a: None)
     cancel = cancel or (lambda: False)
@@ -1064,6 +1070,7 @@ def run_stack(
             noise_sigma=noise_sigma,
             calstat=applied_cal,
             is_mosaic=bool(is_mosaic_canvas),
+            engine_version=app_version,
         ))
     except Exception as exc:  # noqa: BLE001 — history is non-critical
         log.warning("Could not record stack run in history: %s", exc)

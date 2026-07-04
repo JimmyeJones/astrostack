@@ -173,6 +173,7 @@ export interface StackRun {
   noise_sigma?: number | null;
   calstat?: string | null;
   options?: Record<string, unknown>;
+  engine_version?: string | null;
 }
 
 export interface StackInfoCard {

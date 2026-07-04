@@ -324,9 +324,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   slices for a future run:** (b) an optional deeper **full rescan** that also re-runs
   QC / plate-solve / auto-grade over the existing library frames before restacking,
   for when those steps improved too; (c) a "only targets last stacked before version
-  X" filter (record the engine version on each stack run so a large library isn't
-  reprocessed wholesale) — plus richer batch UI (a dedicated N/total batch progress
-  card rather than the per-target job progress + summary you get today). (M remaining,
+  X" filter — **its foundation shipped v0.76.0**: every stack run now records the
+  producing app version (`engine_version` column, schema 8→9), surfaced on the
+  History card ("made with vX"). What remains for (c) is the *filter* itself — skip
+  targets whose newest genuine stack was already made on the current version, so a
+  large library isn't reprocessed wholesale (a `stale_only` flag on `reprocess_all`
+  comparing each target's last `engine_version` to `webapp.__version__`) — plus
+  richer batch UI (a dedicated N/total batch progress
+  card rather than the per-target job progress + summary you get today). (S–M remaining,
   autonomy/image-quality)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
@@ -503,6 +508,26 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Stack runs record the producing app version ("made with vX") — provenance +
+  foundation for stale-target reprocessing (owner-requested slice c).** After an
+  in-place upgrade a target's stack stays stale until restacked, and there was no way
+  to tell *which* engine build produced a given image — so the "Reprocess everything"
+  feature could only restack the whole library wholesale. Every stack run now stamps
+  the AstroStack version that made it: a new nullable `engine_version TEXT` column on
+  `stack_runs` (schema `SCHEMA_VERSION` 8→9, additive `ALTER TABLE`, backfilling NULL —
+  old DBs migrate cleanly, pre-existing runs read None), populated from
+  `webapp.__version__`. The engine stays webapp-free: `run_stack` gained an optional
+  `app_version` param the webapp passes (`None` for direct engine callers); the two
+  webapp-layer run records (editor export, channel combine) stamp it directly. The
+  version rides through `StackRunOut` to the History card's metadata line ("… · v0.76.0"),
+  omitted for legacy runs. Additive / upgrade-safe (new nullable column + new response
+  value, no default/API-shape change). Tests: schema (v8→v9 migrates, old run reads
+  None, new insert round-trips a version), engine end-to-end (`run_stack` records the
+  passed version; `None` when unset), webapp (the stack-runs endpoint surfaces
+  `webapp.__version__`), and Vitest (`formatEngineVersion` v-prefix/blank cases + the
+  History card shows the version for a versioned run and omits it for a legacy one).
+  (v0.76.0, this run — Builder)
 
 - **Recipe carry-over across re-stacks: one-click "Use my previous edit"** — the Seestar
   user re-stacks a target repeatedly as more nights come in, and each new run opened on

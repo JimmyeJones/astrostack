@@ -153,6 +153,9 @@ class StackRunOut(BaseModel):
     # the History card can show *how* the result was combined (σ-clip / min-max /
     # drizzle) — the same badge the Gallery derives. Empty dict when unrecorded.
     options: dict[str, object] = {}
+    # The AstroStack version that produced this run, for provenance ("made with
+    # v0.75.0"). None for runs recorded before this was tracked (schema < 9).
+    engine_version: str | None = None
 
 
 class JobOut(BaseModel):

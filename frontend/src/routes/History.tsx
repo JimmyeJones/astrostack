@@ -102,6 +102,16 @@ export function combineMethodLabel(
   return labels[method] ?? null;
 }
 
+// Provenance label for a run's producing app version — "v0.75.0", or "" when
+// the run predates version tracking (schema < 9) or carries a blank value. Kept
+// pure so the History card can show which build made each image without the
+// caller re-deriving the "v" prefix / empty-guard each time.
+export function formatEngineVersion(v: string | null | undefined): string {
+  const s = (v ?? "").trim();
+  if (!s) return "";
+  return s.startsWith("v") ? s : `v${s}`;
+}
+
 function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
   const info = useQuery({
     queryKey: ["stack-info", safe, runId],
@@ -281,6 +291,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
         {run.timestamp_utc.replace("T", " ").slice(0, 19)} · {run.canvas_w}×{run.canvas_h}
         {run.total_exposure_s ? ` · ${formatIntegration(run.total_exposure_s)}` : ""}
         {hasNoise(run.noise_sigma) ? <> · <NoiseReadout sigma={run.noise_sigma} /></> : null}
+        {formatEngineVersion(run.engine_version) ? ` · ${formatEngineVersion(run.engine_version)}` : ""}
       </Text>
       {typeof noiseDelta === "number" ? (
         <Text size="xs"><NoiseDelta delta={noiseDelta} /></Text>

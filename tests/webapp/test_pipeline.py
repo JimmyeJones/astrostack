@@ -63,6 +63,10 @@ def test_stack_end_to_end(client, solved_library):
     assert len(runs) >= 1
     run = runs[0]
     assert run["n_frames_used"] >= 1
+    # The run records the producing app version for provenance (surfaced on the
+    # History card as "made with vX"). The webapp passes its own __version__.
+    from webapp import __version__ as app_version
+    assert run["engine_version"] == app_version
     # Download the preview PNG.
     rid = run["id"]
     if run["has_preview"]:

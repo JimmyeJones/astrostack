@@ -58,7 +58,7 @@ def test_stack_options_from_run_json_rejects(bad):
 
 def _patch_run_stack(monkeypatch, *, capture: list | None = None):
     """Fake run_stack that records the opts it was called with."""
-    def fake(proj, opts, *, progress=None, cancel=None, memory_budget_gb=None):  # noqa: ANN001
+    def fake(proj, opts, *, progress=None, cancel=None, memory_budget_gb=None, app_version=None):  # noqa: ANN001
         if capture is not None:
             capture.append(opts)
         # emit a little progress so the phase/detail interplay is exercised
@@ -107,7 +107,7 @@ def test_reprocess_all_restacks_every_target_reusing_last_options(solved_library
 def test_reprocess_all_isolates_a_failing_target(solved_library, monkeypatch):
     seen: list[str] = []
 
-    def fake(proj, opts, *, progress=None, cancel=None, memory_budget_gb=None):  # noqa: ANN001
+    def fake(proj, opts, *, progress=None, cancel=None, memory_budget_gb=None, app_version=None):  # noqa: ANN001
         seen.append(getattr(proj, "safe_name", "?"))
         if len(seen) == 1:
             raise ValueError("boom on first target")
@@ -129,7 +129,7 @@ def test_reprocess_all_isolates_a_failing_target(solved_library, monkeypatch):
 def test_reprocess_all_cancels_between_targets(solved_library, monkeypatch):
     calls: list = []
 
-    def fake(proj, opts, *, progress=None, cancel=None, memory_budget_gb=None):  # noqa: ANN001
+    def fake(proj, opts, *, progress=None, cancel=None, memory_budget_gb=None, app_version=None):  # noqa: ANN001
         calls.append(1)
         return SimpleNamespace(output_dir="/tmp/x", n_frames_used=3,
                                canvas_shape=(1, 1, 3), cancelled=False,

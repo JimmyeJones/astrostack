@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel } from "./History";
+import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion } from "./History";
 import { formatIntegration } from "../format";
 import * as client from "../api/client";
 import type { StackRun } from "../api/client";
@@ -373,5 +373,39 @@ describe("formatIntegration", () => {
     expect(formatIntegration(0)).toBe("—");
     expect(formatIntegration(-5)).toBe("—");
     expect(formatIntegration(36000)).toBe("10 h");
+  });
+});
+
+describe("formatEngineVersion", () => {
+  it("prefixes a bare version with v", () => {
+    expect(formatEngineVersion("0.75.0")).toBe("v0.75.0");
+  });
+  it("does not double-prefix an already-v-prefixed version", () => {
+    expect(formatEngineVersion("v1.2.3")).toBe("v1.2.3");
+  });
+  it("returns empty for unknown/blank versions (pre-schema-9 runs)", () => {
+    expect(formatEngineVersion(null)).toBe("");
+    expect(formatEngineVersion(undefined)).toBe("");
+    expect(formatEngineVersion("  ")).toBe("");
+  });
+});
+
+describe("HistoryView provenance", () => {
+  it("shows the producing app version on the run card", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ engine_version: "0.75.0" }),
+    ]);
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    expect(screen.getByText(/v0\.75\.0/)).toBeInTheDocument();
+  });
+
+  it("omits the version for a legacy run that never recorded one", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ engine_version: null }),
+    ]);
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    expect(screen.queryByText(/·\s*v\d/)).toBeNull();
   });
 });

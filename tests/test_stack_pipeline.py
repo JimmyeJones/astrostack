@@ -77,6 +77,32 @@ def test_stack_records_is_mosaic_false_for_single_field(tmp_path):
         proj.close()
 
 
+def test_stack_records_engine_version(tmp_path):
+    """run_stack stamps the run record with the app version passed by the caller,
+    for provenance ("made with vX") and stale-target reprocessing. Unset
+    (app_version=None) leaves it None, so direct engine callers aren't forced to
+    supply one."""
+    proj = _build_project(tmp_path, n=4)
+    try:
+        run_stack(proj, StackOptions(sigma_clip=False, max_workers=2,
+                                     output_name="ver"), app_version="9.9.9")
+        run = next(iter(proj.iter_stack_runs()))
+        assert run.engine_version == "9.9.9"
+    finally:
+        proj.close()
+
+    subdir = tmp_path / "b"
+    subdir.mkdir()
+    proj2 = _build_project(subdir, n=4)
+    try:
+        run_stack(proj2, StackOptions(sigma_clip=False, max_workers=2,
+                                      output_name="nover"))
+        run = next(iter(proj2.iter_stack_runs()))
+        assert run.engine_version is None
+    finally:
+        proj2.close()
+
+
 def test_stack_records_noise_sigma(tmp_path):
     """run_stack stamps the run record with the stacked image's normalized
     background-noise σ, so the history/gallery can flag the cleanest stack."""
