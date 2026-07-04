@@ -42,19 +42,6 @@ when you take it.
 
 ### Editor — frontend (PRIORITY 1)
 
-- **BUG (cosmetic): trim-crop preview rectangle misaligns on a letterboxed
-  preview** — the dashed "proposed crop" overlay maps fractional bounds to
-  percentages of the *container* (`trimRectStyle`,
-  `frontend/src/components/editor/mosaicTrim.ts`; drawn at
-  `Editor.tsx:676-687`), but the `<img>` uses `objectFit: "contain"` with
-  `maxHeight: 62vh` (`Editor.tsx:653-657`) — when the image is height-limited
-  (portrait framing, short window) it's pillarboxed inside the element and the
-  rectangle lands offset/mis-scaled relative to the visible image. **Fix:**
-  compute the overlay against the rendered image content box (natural aspect vs
-  element box), or constrain the container to the image's aspect ratio.
-  Severity: cosmetic (misleading in the letterboxed case). Confidence: confirmed
-  (traced CSS).
-
 - **BUG (a11y, follow-up): editor curve points are mouse-only** — the remaining
   keyboard-access gap after v0.69.12: the Curves op's control points are drag-only
   SVG circles (`CurvesWidget.tsx`), so a keyboard user can't add/move/remove a curve
@@ -292,6 +279,22 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Fix: trim-crop preview rectangle misaligned on a letterboxed preview** — the
+  dashed "proposed crop" overlay mapped fractional bounds to percentages of the
+  *container*, but the preview `<img>` is width-100% capped at 62vh with
+  `objectFit: contain`, so on a portrait frame / short window it pillarboxes
+  inside its element and the rectangle landed offset/mis-scaled vs the visible
+  image. The preview image now lives in an *image box* wrapper sized to the shown
+  image's exact content box (a new pure `previewBoxStyle` helper gives the box the
+  image's own aspect ratio — from the already-reported `proxy_width`/`proxy_height`
+  — and caps its width so the aspect-preserved height never exceeds 62vh, so there's
+  no letterbox), and the proposed-crop rectangle is drawn inside that box, so its
+  percentage bounds line up in every framing. Falls back to plain full-width when
+  the proxy dims aren't loaded yet (old behaviour). Frontend-only, additive.
+  Vitest: `previewBoxStyle` (fallback / portrait aspect+width-cap / custom
+  max-height); existing trim-preview Editor tests still green. (v0.69.14, this
+  run — Builder)
 
 - **Fix: deconvolution's live preview silently understated the export on large
   stacks — now captioned honestly** — the top editor bug. On a heavily-decimated

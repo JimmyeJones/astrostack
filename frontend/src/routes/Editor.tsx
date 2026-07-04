@@ -26,7 +26,7 @@ import { applyDataDrivenDefaults, countDataDrivenDefaults, type OpSuggestion }
 import { deconvUnderstatesCaption } from "../components/editor/deconvPreview";
 import { previewScaleCaption } from "../components/editor/previewScale";
 import { prependCoverageLeveling } from "../components/editor/coverageLeveling";
-import { applyTrimCrop, trimRectStyle, trimKeptLabel, hasEnabledGeometryOp }
+import { applyTrimCrop, trimRectStyle, trimKeptLabel, hasEnabledGeometryOp, previewBoxStyle }
   from "../components/editor/mosaicTrim";
 import { pngProgressLabel } from "../components/editor/pngProgress";
 import { opErrorsMessage } from "../components/editor/opErrors";
@@ -715,10 +715,27 @@ export function EditorView() {
                   </div>
                 </Alert>
               ) : shownSrc ? (
-                <img src={shownSrc} alt="preview"
-                  style={{ display: "block", width: "100%", maxHeight: "62vh",
-                           objectFit: "contain", cursor: "zoom-in" }}
-                  onClick={() => setLightbox(true)} />
+                // The image box is sized to the shown image's exact content box
+                // (its own aspect ratio, width-capped so the height never exceeds
+                // 62vh) so overlays positioned as a percentage of it line up even
+                // when a portrait frame / short window would otherwise letterbox.
+                <div style={{ position: "relative",
+                  ...previewBoxStyle(hist.data?.proxy_width, hist.data?.proxy_height) }}>
+                  <img src={shownSrc} alt="preview"
+                    style={{ display: "block", width: "100%", height: "100%",
+                             objectFit: "contain", cursor: "zoom-in" }}
+                    onClick={() => setLightbox(true)} />
+                  {/* Proposed "Trim border" crop, drawn as a dashed outline over
+                      the image so the user sees exactly what would be kept before
+                      it's applied. Inside the image box so it stays aligned when
+                      the preview is letterboxed. */}
+                  {trimPreview && trimCrop ? (
+                    <div aria-label="proposed crop" style={{ position: "absolute",
+                      ...trimRectStyle(trimCrop), boxSizing: "border-box",
+                      border: "2px dashed #f0e", pointerEvents: "none",
+                      outline: "9999px solid rgba(0,0,0,0.35)" }} />
+                  ) : null}
+                </div>
               ) : (
                 <Center h={240}><Loader /></Center>
               )}
@@ -733,21 +750,14 @@ export function EditorView() {
                     : `Without: ${specs[selForSolo!.id]?.label ?? selForSolo!.id}`}
                 </Text>
               ) : null}
-              {/* Proposed "Trim border" crop, drawn as a dashed outline over the
-                  preview so the user sees exactly what would be kept before it's
-                  applied. Fractional bounds map straight to image-space percentages
-                  (the preview fills the container width, so this lines up). */}
+              {/* Caption for the proposed "Trim border" crop (the dashed rectangle
+                  itself is drawn inside the image box above so it stays aligned
+                  on a letterboxed preview). */}
               {trimPreview && trimCrop && shownSrc ? (
-                <>
-                  <div aria-label="proposed crop" style={{ position: "absolute",
-                    ...trimRectStyle(trimCrop), boxSizing: "border-box",
-                    border: "2px dashed #f0e", pointerEvents: "none",
-                    outline: "9999px solid rgba(0,0,0,0.35)" }} />
-                  <Text size="xs" c="white" style={{ position: "absolute", left: 12, top: 10,
-                    background: "rgba(0,0,0,0.6)", padding: "2px 8px", borderRadius: 4 }}>
-                    Proposed crop{showCoverage ? " over coverage" : ""} — {trimKeptLabel(trimCrop)}
-                  </Text>
-                </>
+                <Text size="xs" c="white" style={{ position: "absolute", left: 12, top: 10,
+                  background: "rgba(0,0,0,0.6)", padding: "2px 8px", borderRadius: 4 }}>
+                  Proposed crop{showCoverage ? " over coverage" : ""} — {trimKeptLabel(trimCrop)}
+                </Text>
               ) : null}
               {/* Coverage heatmap legend: the overlay is a viridis map (dark blue =
                   fewest frames → yellow = most), so a small gradient bar with a

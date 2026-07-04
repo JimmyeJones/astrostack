@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { EditOp, OpInstance } from "../../api/client";
-import { applyTrimCrop, trimRectStyle, trimKeptLabel, hasEnabledGeometryOp }
+import { applyTrimCrop, trimRectStyle, trimKeptLabel, hasEnabledGeometryOp, previewBoxStyle }
   from "./mosaicTrim";
 
 const specs: Record<string, EditOp> = {
@@ -74,6 +74,30 @@ describe("trimRectStyle", () => {
     expect(trimRectStyle({ x0: 0, y0: 0, x1: 1, y1: 1 })).toEqual({
       left: "0.00%", top: "0.00%", width: "100.00%", height: "100.00%",
     });
+  });
+});
+
+describe("previewBoxStyle", () => {
+  it("falls back to plain full-width when proxy dims are unknown", () => {
+    expect(previewBoxStyle(undefined, undefined))
+      .toEqual({ width: "100%", maxHeight: "62vh" });
+    expect(previewBoxStyle(0, 100)).toEqual({ width: "100%", maxHeight: "62vh" });
+    expect(previewBoxStyle(NaN, 100)).toEqual({ width: "100%", maxHeight: "62vh" });
+  });
+
+  it("sizes the box to the image aspect ratio and caps its width by height", () => {
+    // A portrait frame (3:4) — the box carries the image's own aspect ratio and
+    // a width cap so the aspect-preserved height never exceeds 62vh; no maxHeight
+    // (and thus no letterbox) so a percentage overlay lines up.
+    const s = previewBoxStyle(600, 800);
+    expect(s.aspectRatio).toBe("600 / 800");
+    expect(s.maxWidth).toBe("calc(62vh * 600 / 800)");
+    expect(s.margin).toBe("0 auto");
+    expect(s.maxHeight).toBeUndefined();
+  });
+
+  it("honours a custom max-height", () => {
+    expect(previewBoxStyle(1000, 500, 50).maxWidth).toBe("calc(50vh * 1000 / 500)");
   });
 });
 
