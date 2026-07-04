@@ -251,6 +251,24 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Fix flaky frontend CI at the root: raise vitest `testTimeout` above
+  `asyncUtilTimeout`** — three `Editor.test.tsx` tests kept reddening `main`'s
+  frontend CI ("Test timed out in 5000ms") on *unrelated* merges (took down the
+  push CI for #79). Root cause: v0.69.6 raised Testing Library's `asyncUtilTimeout`
+  to 10000ms so `waitFor`/`findBy*` could ride out a slow-CI debounce/re-fetch
+  settle, but vitest's per-test `testTimeout` was left at its 5000ms default — so a
+  10s async retry was *killed at 5s* before it could ever succeed; the raised
+  async ceiling was dead. Set `testTimeout`/`hookTimeout` to 30000ms (comfortably
+  above the async ceiling) in `vite.config.ts` and raised `asyncUtilTimeout` to
+  20000ms after a full local parallel run starved the heavy Editor worker to a
+  10534ms `waitFor`; the settle it waits on is sub-second when scheduled, so the
+  headroom covers scheduling starvation without slowing passing tests (the retry
+  stops early on success — verified: two back-to-back full runs 378/378, duration
+  unchanged). Also wrapped one post-error "Star mask" caption assertion in
+  `waitFor` (it's torn down a render tick after the error message, so the bare
+  synchronous check raced the suppression under load). Test-infra only; no product
+  code or assertion weakened. (v0.69.19, this run — Builder)
+
 - **Gamma suggestion names the goal it solves for (not just a bare number)** — the
   data-driven midtone button (v0.66.0) read "From your image (midtones 1.6)"; like
   the sharpen/denoise buttons that name *why* (FWHM, noise σ), it now reads "From

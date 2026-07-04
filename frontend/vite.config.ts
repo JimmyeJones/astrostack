@@ -31,5 +31,17 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: "./src/test/setup.ts",
+    // The default per-test timeout is 5000ms, but setup.ts raises Testing
+    // Library's asyncUtilTimeout (to 20000ms) so `waitFor`/`findBy*` can keep
+    // retrying through a slow-CI debounce/re-fetch settle when the heavy Editor
+    // test worker is CPU-starved by the parallel run. Those two must not fight:
+    // an async retry inside a shorter test timeout is killed first ("Test timed
+    // out in 5000ms") before it can succeed — exactly the flake that reddened
+    // main's frontend CI on unrelated merges. Keep the per-test/hook ceiling a
+    // comfortable margin above asyncUtilTimeout so the retry can run to its
+    // budget; the retry still stops early on success, so a passing test is
+    // never slowed.
+    testTimeout: 30000,
+    hookTimeout: 30000,
   },
 });
