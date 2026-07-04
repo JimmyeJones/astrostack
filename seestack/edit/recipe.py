@@ -99,9 +99,16 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
     for o in raw_ops:
         if not isinstance(o, dict) or "id" not in o:
             continue
+        # ``params`` must be a mapping; a malformed client body (or hand-built
+        # recipe) can send a list/string/number here, which ``dict()`` would
+        # raise on — an unhandled 500 in ``put_recipe``/``create_preset`` and a
+        # failed export/PNG/batch job. Treat any non-mapping as empty params so
+        # ``validate_ops`` fills each key from the op's defaults instead.
+        raw_params = o.get("params")
+        params = dict(raw_params) if isinstance(raw_params, dict) else {}
         ops.append(OpInstance(
             id=str(o["id"]),
-            params=dict(o.get("params") or {}),
+            params=params,
             enabled=bool(o.get("enabled", True)),
             uid=str(o.get("uid") or uuid.uuid4().hex[:8]),
         ))
