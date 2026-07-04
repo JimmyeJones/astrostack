@@ -43,6 +43,25 @@ when you take it.
 _(none currently open — the traced editor bug backlog is drained. New verified
 bugs go here, editor first, ordered by severity.)_
 
+_(Scout run 2026-07-04 (v0.72.4 baseline): rotated the focused QA audit off the
+much-scrutinised editor onto the **calibration + stack alignment** subsystems and
+read them adversarially — `CalibrationMasters.load`/`apply_raw` (dark/bias
+double-subtract guard, flat floor+normalisation, flat-dark subtraction, shape
+guards), `build_master`/`_sigma_clip_mean` (NaN-fallback, even-sampling cap,
+mode/median/mean paths), the library master store + `recommend_masters`/
+`_match_distance`/`_recommend_flat_dark`, and `align.py`'s per-frame
+load→calibrate→debayer→reproject (windowed footprint bbox, NaN/valid-mask
+semantics, sub-pixel shift NaN propagation, CPU/GPU cval parity). **No reachable
+wrong-result bug found** — the pedestal-selection, NaN=coverage, and shape
+validation are all correct and well-tested. One low-severity robustness asymmetry
+logged to Infra (not a shippable bug): `background.final_gradient` lacks the
+image-size box clamp that `background.subtract` has, so on a sub-box (<~768 px)
+image its editor wrapper *raises* ("edit op failed: Gradient removal") instead of
+gracefully no-op'ing — reproduced on a 200×220 array, but near-unreachable for a
+real ≥1080 px Seestar stack. Also **visually vetted the top P1 idea** (the Auto
+contrast curve) on rendered dim stacks and marked it ✅ unblocked/ready — see Ideas.
+Baseline suite green: 725 passed, 2 skipped.)_
+
 _(Scout QA audit 2026-07-04: adversarial re-audit of the **editor** subsystem
 end-to-end — engine ops (`tone`/`detail`/`stars`/`geometry`/`background`),
 pipeline, proxy, registry, recipe/preset validation, the stretch functions, and
@@ -114,24 +133,36 @@ problems. Dogfood it every big-picture run and fix root causes.
   (which include a `tone.curves` S-curve like `[[0,0],[0.25,0.2],[0.75,0.82],[1,1]]`),
   it applies **no contrast curve** — so the one-click "Auto" result is flatter than
   the presets the same app ships. Now that a data-driven curve helper exists
-  (`seestack/edit/curve.py:suggest_tone_curve`, v0.72.0), Auto could append a gentle
-  contrast curve — ideally the *data-driven* one measured on the post-stretch
-  display-space image (so it adapts to the stack), falling back to a fixed gentle
-  S-curve. Auto is an explicit button (no default flip, upgrade-safe). **Scout,
-  please vet the visual result before shipping** — this changes the priority-1
-  one-click look, so it needs eyes on real stacks (galaxy / nebula / cluster /
-  mosaic) to confirm it *improves* the default rather than over-darkening the sky or
-  crushing faint signal; a headless Builder can't validate the look. **Builder
-  dogfood note (2026-07-04) to speed vetting:** `suggest_tone_curve` is a *pure
-  midtone lift* — it pins the sky floor (p1) and highlight shoulder (p99.5) on the
-  identity and only ever *raises* the median a fraction of the way to grey 0.25, so
-  the two failure modes the note worries about (darkening the sky / crushing faint
-  signal) are structurally impossible with the data-driven variant; the only residual
-  risk is gentle *over-brightening* on already-dim stacks. Measured on a realistic
-  auto result it returned `None` (median already ≈0.24, nothing to lift) — i.e. it is
-  a **no-op on well-exposed stacks** and only engages on under-exposed/dim ones, so
-  the Scout should vet specifically on *dim* stacks (a fixed gentle S-curve fallback,
-  by contrast, *does* darken the low-mids and needs the full visual check). (M, editor/autonomy)
+  (`seestack/edit/curve.py:suggest_tone_curve`, v0.72.0), Auto should append the
+  *data-driven* curve measured on the post-stretch display-space image (so it adapts
+  to the stack), falling back to a fixed gentle S-curve only when the suggestion is
+  `None`. Auto is an explicit button (no default flip, upgrade-safe).
+  **✅ SCOUT-VETTED & UNBLOCKED (2026-07-04) — ready for a Builder to ship.** I
+  rendered the data-driven curve on realistic *dim* synthetic OSC stacks (nebula,
+  galaxy, cluster, and a very-dim nebula) end-to-end (`auto_recipe → apply_recipe →
+  suggest_tone_curve on the display output → tone.curves → re-render`) and *looked at
+  the before/after PNGs*. Verdict: on every dim stack the curve **gently lifts faint
+  nebula/galaxy midtone structure** (median e.g. 0.14→0.19, 0.16→0.21) while the sky
+  floor stays dark (p1 anchored on the identity — no sky brightening, no chroma-noise
+  amplification) and star cores roll off (p99.5 anchored — no blown highlights). It
+  is a clear, subtle *improvement* to the priority-1 one-click look, and the Builder's
+  structural argument holds (pure midtone lift; can't crush sky or blow stars).
+  **One correction to the Builder's note:** it is **not** a strict no-op on
+  well-exposed stacks. Because `auto_recipe`'s STF lands the median around ~0.20–0.22
+  (target_bg clips to 0.14–0.24), the curve engages *almost always* — but the lift
+  scales with how far below 0.25 the median sits, so a well-exposed stack gets an
+  **imperceptible** nudge (0.219→0.234, +0.015) and a dim one a **gentle** lift. That
+  is the desired behaviour (a consistent, adaptive contrast start), just not "no-op
+  when bright." **Implementation guidance for the Builder:** the recipe is a static op
+  list built *before* rendering, but the data-driven curve needs the *post-stretch*
+  image — so wire it as an apply-time computation, e.g. give `tone.curves` an optional
+  `auto: bool` param (default False; add to `NON_FORM_KEYS` or a descriptor) that, when
+  set and the points are still the identity, computes `suggest_tone_curve` on the op's
+  own input at apply time; `auto_recipe` then appends `("tone.curves", {"auto": True})`
+  after `tone.saturation`. Fall back to the fixed gentle S-curve
+  `[[0,0],[0.25,0.2],[0.75,0.82],[1,1]]` when the suggestion is `None`. Add engine
+  tests (auto-mode curves lifts the midtone / no-ops the identity when suggestion is
+  None / preserves NaN) and a webapp test that an Auto recipe carries the curve. (M, editor/autonomy)
 - **Confusing / clunky controls** — too many ops with terse params and no obvious
   starting point. Add plain-language help, a simple/guided default layout, curated
   presets, and progressive disclosure of advanced ops so a beginner gets a good
@@ -191,6 +222,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   user saw), accepting that it's the ≤1024 px preview rather than the ≤1500 px editor
   proxy. Care: it's a behaviour change to Compare, so gate/validate the resolution
   swap doesn't jar the A/B. (S, editor/trust)
+- **Split-slider before/after in the preview (drag a divider to reveal Original vs
+  Edited in one frame).** The editor's Compare today is a *toggle* — you flip the
+  whole preview between "Original" and "edited" and try to remember the difference.
+  Every mature photo editor (Lightroom, Photoshop, GraXpert) instead offers a
+  draggable vertical divider that shows the original on one side and the edit on the
+  other *in the same view*, so you judge exactly what a stretch/denoise/curve changed
+  at a glance — much better for the priority-1 "is my edit actually an improvement?"
+  question, and a natural trust win for a beginner. Purely a frontend composition over
+  the two images the editor already fetches (the live edited preview + the existing
+  "Original" empty-recipe render): overlay both, clip the top one with a
+  `clip-path`/width driven by a draggable handle, reuse the existing `previewBoxStyle`
+  image-box so it lines up under `objectFit: contain`. Additive, no engine/API change,
+  no default change (Compare stays; this is a second mode or a handle on it). Testable
+  with a Vitest handle-drag → clip-width helper. (S–M, editor/trust)
 - ~~**Mark editor-export runs as display-space so re-editing doesn't
   double-stretch (and the FITS is honest)**~~ — **shipped v0.72.2** (see Shipped).
   Editor exports now stamp an `SSDISPLY` FITS card + honest `BUNIT` and a
@@ -213,6 +258,21 @@ problems. Dogfood it every big-picture run and fix root causes.
 - **One-click "process this target"** — after ingest, reach a good stack *and* a
   good auto-edited preview with zero manual steps: QC → solve → auto-grade →
   stack → auto-edit, well-defaulted and safe. (M, autonomy)
+- **Personal default recipe: "save this edit as my default", auto-applied on open
+  (opt-in).** A user-initiated reshaping of the sign-off-blocked "auto-seed the Auto
+  recipe on first open (default-on)" idea that sidesteps the guardrail. Add a "Set as
+  my default" action in the editor that stores the *current* recipe in library meta;
+  once a user has saved one, opening a run with **no** saved recipe seeds the working
+  recipe from their personal default (applied as a single undoable step, clearly
+  labelled, never persisted unless they Save, never overwriting an existing saved
+  recipe). This delivers the same "my first frame is already a good picture" benefit
+  as the blocked auto-seed — but it is **off until the user opts in** by saving a
+  default, so it changes nothing on a live install until they ask for it (no
+  default-flip, no sign-off needed; upgrade-safe and additive — a new nullable
+  `default_recipe` in library meta). Bonus: it's *their* look, not a fixed one, which
+  is more useful than a hardcoded seed for a repeat user with thousands of subs. Care:
+  validate the stored recipe through `validate_ops` on load so a stale op can't 500 the
+  editor. (M, autonomy/editor)
 - Auto-suggest stack settings from the data (frame count, FWHM spread, streaks)
   so the user rarely needs to touch the Stack form. (S–M, autonomy)
 
@@ -260,6 +320,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+- **Low-priority robustness: `background.final_gradient` has no image-size box
+  clamp (unlike `background.subtract`).** `background.subtract` runs its box_size
+  through `BackgroundOptions.for_image_size` (floors it so the mesh always tiles a
+  tiny image), but `remove_final_gradient`/`_fit_background_2d` pass `box_size`
+  (default 256, scaled by `proxy_scale`) straight to `photutils.Background2D`. On an
+  image smaller than roughly 3× the box (~768 px) too few boxes survive
+  `exclude_percentile`, so the fit raises and the editor wrapper turns that into a
+  hard `RuntimeError: edit op failed: Gradient removal` — which would break the whole
+  Auto preview/export (Auto includes `final_gradient`). **Reproduced** on a 200×220
+  array at export scale (`background.subtract` handles the same input fine). But
+  **near-unreachable** for the target user: a real Seestar stack is ≥1080 px, where
+  256 px boxes tile 4×7 and the fit succeeds; `final_gradient` is a linear-stage op
+  so it always sees the full ≤1500 px proxy (crop is nonlinear/after it). Cheap fix
+  if a future run is already in `final_gradient.py`: clamp `box_size` to the image
+  dims (mirroring `for_image_size`) and, when even one box can't be formed, return the
+  input unchanged (graceful no-op) rather than raising — with a one-line regression
+  test that a sub-box image no longer raises. (S, robustness)
 - **Low-priority robustness: `detail.denoise` on a 1-px-thin image.** A 1×N / N×1
   RGB array makes the wavelet path emit all-NaN in the covered region (violating
   the NaN=coverage invariant) and the `bilateral` path raise `IndexError`. Found by
