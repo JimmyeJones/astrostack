@@ -678,6 +678,46 @@ describe("EditorView", () => {
     expect(screen.getByRole("button", { name: "Showing without" })).toBeInTheDocument();
   });
 
+  it("splits the preview with vs without the selected op via 'Split this op'", async () => {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [
+        { uid: "s1", id: "tone.stretch", enabled: true, params: { stretch: 0.5 } },
+        { uid: "c1", id: "tone.curves", enabled: true, params: { points: [[0, 0], [1, 1]] } },
+      ],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    // Select the Curves op, then toggle the per-op split compare.
+    fireEvent.click(await screen.findByText("Curves"));
+    const btn = await screen.findByRole("button", { name: "Split this op" });
+    fireEvent.click(btn);
+
+    // The without-op render overlays the edited preview clipped to the left half
+    // (divider at 50%) with a draggable divider, and the panels name it "Without
+    // Curves" (left) vs "With" (right) — the whole-recipe Split's "Original"/"Edited"
+    // labels are re-used for the per-op comparison. Button flips to the active label.
+    await screen.findByRole("button", { name: "Hide op split" });
+    const before = await screen.findByAltText("original");
+    expect((before as HTMLElement).style.clipPath).toBe("inset(0 50% 0 0)");
+    expect(screen.getByLabelText("split divider")).toBeInTheDocument();
+    expect(screen.getByText("Without Curves")).toBeInTheDocument();
+    expect(screen.getByText("With")).toBeInTheDocument();
+
+    // Toggling it off removes the split overlay.
+    screen.getByRole("button", { name: "Hide op split" }).click();
+    await waitFor(() =>
+      expect(screen.queryByAltText("original")).not.toBeInTheDocument());
+  });
+
   it("applies data-driven defaults across the pipeline in one click", async () => {
     vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, SHARPEN]);
     vi.spyOn(client.api, "getRecipe").mockResolvedValue({

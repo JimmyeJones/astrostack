@@ -288,17 +288,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   a draggable vertical divider (left = Original, right = Edited), so the user judges
   exactly what a change did in one frame. Frontend-only, additive, its own mode
   (Compare stays a toggle).
-- **Split divider for the *per-op* "show without this op" compare too.** The v0.78.0
-  split divider only compares the whole edit vs the raw Original. The editor already
-  fetches a "without the selected op" render (`withoutOpPreview`, the `soloExclude`
-  toggle used while tuning one op) — feeding *that* image into the same split-divider
-  overlay would let the user drag a divider to see exactly what the **one op they're
-  tuning** does (e.g. how much this Sharpen/denoise/curve changed), not just the whole
-  recipe. Reuses the shipped `splitCompare.ts` helpers and the existing per-op render;
-  the only new work is wiring the solo image as the split overlay's left side and a
-  small mode toggle. Higher-precision trust win than the whole-recipe split, and it
-  answers the more common editing question ("is *this* slider helping?"). Additive,
-  frontend-only, no engine/API change. (S, editor/trust)
+- ~~**Split divider for the *per-op* "show without this op" compare too.**~~ —
+  **shipped v0.80.0** (see Shipped). A "Split this op" button next to "Without this op"
+  drags a divider to compare the image *with* vs *without* just the selected op
+  (left = without, right = with), reusing the shipped `splitCompare.ts` helpers and the
+  existing per-op `withoutOpPreview` render.
+- **A/B two saved looks with the split divider (recipe-A vs recipe-B).** The split
+  divider now compares Original-vs-Edited (v0.78.0) and with-op-vs-without-op (v0.80.0),
+  but a repeat imager's real question when picking a look is often "preset X vs preset Y"
+  or "my saved recipe vs the Auto result". Add a small "Compare a look…" picker (built-in
+  presets + user presets + Auto) that renders the chosen recipe on the proxy — reusing
+  the ordinary `…/editor/preview` endpoint with that recipe's ops — and feeds it into the
+  *same* split-divider overlay as the "before" image, so the user drags to judge their
+  current edit against any other look in one frame without committing to it. Reuses the
+  shipped `splitCompare.ts` geometry + the recipe-preview path; the only new work is the
+  picker, a second on-proxy render query, and wiring it as the split's left side. Higher
+  value than the raw Original split for someone choosing between presets. Additive,
+  frontend-only, no engine/API change. (S–M, editor/trust)
 - ~~**"Cropped view — showing N% of the frame" indicator + one-click "remove crop".**~~
   — **shipped v0.74.3** (see Shipped). A dimmed advisory caption below the preview now
   fires whenever an *enabled* `geometry.crop` is in the recipe, naming how much of the
@@ -504,6 +510,26 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Per-op split before/after — drag a divider to see the image with vs without just
+  the op you're tuning (PRIORITY-1 editor/trust).** v0.78.0 added a whole-recipe split
+  divider (Original vs Edited); this extends it to the more common editing question,
+  "is *this* slider actually helping?". A new "Split this op" button next to the
+  existing "Without this op" per-op compare overlays the editor's already-fetched
+  *without-this-op* render (`withoutOpPreview`) on the edited preview and clips it with
+  the same draggable vertical divider — left of the divider shows the image **without**
+  the selected op, right shows it **with** — so the user judges exactly what one
+  Sharpen/denoise/curve did at a glance, not just the whole recipe vs the raw base. It
+  reuses the shipped `splitCompare.ts` geometry helpers and the shared `splitFrac`/
+  divider drag state (one render block now serves both splits, choosing its "before"
+  image + labels from which mode is active), so the only new state is a per-op
+  `soloSplit` toggle (reset on selection change like the existing `soloExclude`, and
+  mutually exclusive with every other overlay/trim/compare mode). Frontend-only,
+  additive — no engine/API/schema change, off until clicked, no default change.
+  Tests: Vitest (an Editor test that toggling "Split this op" on a selected Curves op
+  overlays the clipped without-op render + divider at the default 50%, labels the sides
+  "Without Curves" / "With", and clears when toggled off) on top of the existing
+  `splitCompare.ts` helper coverage. (v0.80.0, this run — Builder)
 
 - **Personal default recipe — "my house style" one click away on every new run
   (PRIORITY-2 autonomy).** User presets already let you save a recipe, but you had to

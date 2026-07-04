@@ -373,12 +373,22 @@ export function EditorView() {
   // contribution (unlike Compare, which shows the whole recipe vs the raw base).
   // Resets whenever the selection changes so each op starts from "showing with".
   const [soloExclude, setSoloExclude] = useState(false);
-  useEffect(() => { setSoloExclude(false); }, [selected]);
+  // Split variant of the per-op compare: instead of swapping the whole preview to
+  // "without this op", clip the without-this-op render to the left of a draggable
+  // divider over the edited (with-this-op) preview — so the user drags to see
+  // exactly what the *one op they're tuning* did, the per-op analogue of the
+  // whole-recipe Split. Reuses the same `withoutOpPreview` render and the shared
+  // `splitFrac`/divider drag machinery.
+  const [soloSplit, setSoloSplit] = useState(false);
+  useEffect(() => { setSoloExclude(false); setSoloSplit(false); }, [selected]);
   const selForSolo = ops.find((o) => o.uid === selected) ?? null;
   const soloActive = soloExclude && !!selForSolo && selForSolo.enabled;
+  // Whether the without-op render is wanted by either per-op compare mode (full
+  // swap or split), so the query fetches for both.
+  const soloWanted = (soloExclude || soloSplit) && !!selForSolo && selForSolo.enabled;
   const withoutOpPreview = useQuery({
     queryKey: ["edit-without-op", safe, rid, dKey, selected, bust],
-    enabled: soloActive && !!opsSchema.data && !saved.isLoading,
+    enabled: soloWanted && !!opsSchema.data && !saved.isLoading,
     queryFn: async ({ signal }) => {
       const withoutRecipe: Recipe = {
         ops: dRecipe.ops.map((o) => (o.uid === selected ? { ...o, enabled: false } : o)),
@@ -647,6 +657,22 @@ export function EditorView() {
   // (`preview.data`, i.e. no `overlay`), so it's only live when no other overlay
   // and no trim preview owns the box.
   const splitActive = splitCompare && !overlay && !trimPreview;
+  // Per-op split: only when its mode is on, the selected op is enabled, and no
+  // other overlay/trim owns the box (the toggles keep these mutually exclusive,
+  // but guard defensively). Shares the whole-recipe split's divider/drag state.
+  const soloSplitActive = soloSplit && !!selForSolo && selForSolo.enabled
+    && !overlay && !trimPreview;
+  // The split overlay's left ("before") image + labels, so one render block serves
+  // both the whole-recipe split (Original vs Edited) and the per-op split
+  // (without-this-op vs with-this-op).
+  const splitLeftSrc = splitActive
+    ? basePreview.data
+    : soloSplitActive ? withoutOpPreview.data : undefined;
+  const splitLeftLabel = soloSplitActive && selForSolo
+    ? `Without ${specs[selForSolo.id]?.label ?? selForSolo.id}`
+    : "Original";
+  const splitRightLabel = soloSplitActive ? "With" : "Edited";
+  const anySplitActive = splitActive || soloSplitActive;
   // Entering trim preview auto-shows the coverage heatmap so the proposed crop is
   // drawn over exactly what it's addressing — you can see it lands on the
   // well-covered interior. Remember the prior overlay state so Cancel/Apply
@@ -655,6 +681,7 @@ export function EditorView() {
   const enterTrimPreview = () => {
     setTrimPreview(true);
     setSplitCompare(false);
+    setSoloSplit(false);
     if (hist.data?.is_mosaic) {
       setCoverageBeforeTrim(showCoverage);
       setShowCoverage(true);
@@ -831,14 +858,16 @@ export function EditorView() {
                     style={{ display: "block", width: "100%", height: "100%",
                              objectFit: "contain", cursor: "zoom-in" }}
                     onClick={() => setLightbox(true)} />
-                  {/* Split before/after: the Original clipped to the left of a
-                      draggable divider, over the edited image below. Only when
-                      split mode is on and both renders are ready; sits inside the
-                      image box so it lines up under objectFit:contain, and never
-                      during a trim preview (that owns the box). */}
-                  {splitActive && basePreview.data ? (
+                  {/* Split before/after: the "before" image (the Original for the
+                      whole-recipe split, or the without-this-op render for the
+                      per-op split) clipped to the left of a draggable divider, over
+                      the edited/with-op image below. Only when a split mode is on and
+                      both renders are ready; sits inside the image box so it lines up
+                      under objectFit:contain, and never during a trim preview (that
+                      owns the box). */}
+                  {anySplitActive && splitLeftSrc ? (
                     <>
-                      <img src={basePreview.data} alt="original"
+                      <img src={splitLeftSrc} alt="original"
                         style={{ position: "absolute", inset: 0, width: "100%",
                                  height: "100%", objectFit: "contain",
                                  clipPath: splitClipLeft(splitFrac),
@@ -873,10 +902,10 @@ export function EditorView() {
                       </div>
                       <Text size="xs" c="white" style={{ position: "absolute", left: 12, top: 10,
                         background: "rgba(0,0,0,0.6)", padding: "2px 8px", borderRadius: 4 }}>
-                        Original</Text>
+                        {splitLeftLabel}</Text>
                       <Text size="xs" c="white" style={{ position: "absolute", right: 12, top: 10,
                         background: "rgba(0,0,0,0.6)", padding: "2px 8px", borderRadius: 4 }}>
-                        Edited</Text>
+                        {splitRightLabel}</Text>
                     </>
                   ) : null}
                   {/* Proposed "Trim border" crop, drawn as a dashed outline over
@@ -943,7 +972,7 @@ export function EditorView() {
                       disabled={!preview.data}
                       loading={showCoverage && coveragePreview.isLoading}
                       onClick={() => setShowCoverage((s) => {
-                        if (!s) { setShowMask(false); setShowBase(false); setSoloExclude(false); setSplitCompare(false); }
+                        if (!s) { setShowMask(false); setShowBase(false); setSoloExclude(false); setSoloSplit(false); setSplitCompare(false); }
                         return !s;
                       })}>
                       {showCoverage ? "Hide coverage" : "Coverage"}
@@ -956,7 +985,7 @@ export function EditorView() {
                     disabled={!preview.data}
                     loading={showMask && maskPreview.isLoading}
                     onClick={() => setShowMask((s) => {
-                      if (!s) { setShowBase(false); setSoloExclude(false); setShowCoverage(false); setSplitCompare(false); }
+                      if (!s) { setShowBase(false); setSoloExclude(false); setSoloSplit(false); setShowCoverage(false); setSplitCompare(false); }
                       return !s;
                     })}>
                     {showMask ? "Hide mask" : "Star mask"}
@@ -964,7 +993,7 @@ export function EditorView() {
                 </Tooltip>
                 <Button size="xs" variant={showBase ? "filled" : "default"}
                   disabled={!preview.data || showMask || showCoverage || splitCompare}
-                  onClick={() => setShowBase((s) => { if (!s) setSoloExclude(false); return !s; })}>
+                  onClick={() => setShowBase((s) => { if (!s) { setSoloExclude(false); setSoloSplit(false); } return !s; })}>
                   {showBase ? "Edited" : "Compare"}
                 </Button>
                 <Tooltip multiline w={230} withArrow
@@ -973,7 +1002,7 @@ export function EditorView() {
                     disabled={!preview.data || showMask || showCoverage || trimPreview}
                     onClick={() => setSplitCompare((s) => {
                       if (!s) { setShowBase(false); setShowMask(false);
-                        setShowCoverage(false); setSoloExclude(false); setSplitFrac(0.5); }
+                        setShowCoverage(false); setSoloExclude(false); setSoloSplit(false); setSplitFrac(0.5); }
                       return !s;
                     })}>
                     {splitCompare ? "Hide split" : "Split"}
@@ -1324,10 +1353,30 @@ export function EditorView() {
                           loading={soloActive && withoutOpPreview.isLoading}
                           disabled={!preview.data}
                           onClick={() => setSoloExclude((s) => {
-                            if (!s) { setShowBase(false); setShowMask(false); setShowCoverage(false); }
+                            if (!s) { setShowBase(false); setShowMask(false); setShowCoverage(false); setSoloSplit(false); setSplitCompare(false); }
                             return !s;
                           })}>
                           {soloActive ? "Showing without" : "Without this op"}
+                        </Button>
+                      </Tooltip>
+                    ) : null}
+                    {/* Split analogue of "Without this op": drag a divider to compare
+                        the image with vs without just this op in one frame, the most
+                        precise answer to "is this slider actually helping?". */}
+                    {selectedOp.enabled ? (
+                      <Tooltip
+                        label="Drag a divider across the preview to reveal the image without this op on the left and with it on the right — see exactly what just this op did"
+                        multiline w={240} withArrow>
+                        <Button size="compact-xs"
+                          variant={soloSplitActive ? "filled" : "default"} color="grape"
+                          loading={soloSplitActive && withoutOpPreview.isLoading}
+                          disabled={!preview.data}
+                          onClick={() => setSoloSplit((s) => {
+                            if (!s) { setShowBase(false); setShowMask(false); setShowCoverage(false);
+                              setSoloExclude(false); setSplitCompare(false); setSplitFrac(0.5); }
+                            return !s;
+                          })}>
+                          {soloSplitActive ? "Hide op split" : "Split this op"}
                         </Button>
                       </Tooltip>
                     ) : null}
