@@ -35,17 +35,30 @@ export function StackOptionControl({
   if (preferSlider && (field.type === "int" || field.type === "float")
       && field.min != null && field.max != null) {
     const isInt = field.type === "int";
+    const step = field.step ?? (isInt ? 1 : 0.01);
     const fallback = (field.default as number) ?? field.min;
     const num = value === null || value === undefined ? fallback : (value as number);
     return (
       <Stack gap={2}>
-        <Group justify="space-between" gap="xs" wrap="nowrap">
+        <Group justify="space-between" gap="xs" wrap="nowrap" align="center">
           {label}
-          <Text size="xs" c="dimmed">{isInt ? Math.round(num) : Number(num).toFixed(2)}</Text>
+          {/* Editable readout: drag the slider for a coarse value, or type an exact
+           * one here. Both share the field's value/min/max/step and clamp on blur. */}
+          <NumberInput
+            size="xs" hideControls w={72} aria-label={`${field.label} value`}
+            value={Number(num)} min={field.min} max={field.max} step={step}
+            decimalScale={isInt ? 0 : 2} clampBehavior="blur" disabled={disabled}
+            styles={{ input: { textAlign: "right" } }}
+            onChange={(v) => {
+              if (v === "" || v === null) return;
+              const n = Number(v);
+              if (!Number.isFinite(n)) return;
+              onChange(isInt ? Math.round(n) : n);
+            }}
+          />
         </Group>
         <Slider
-          min={field.min} max={field.max}
-          step={field.step ?? (isInt ? 1 : 0.01)}
+          min={field.min} max={field.max} step={step}
           value={Number(num)} disabled={disabled} label={null}
           onChange={(v) => onChange(isInt ? Math.round(v) : v)}
         />

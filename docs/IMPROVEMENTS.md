@@ -118,16 +118,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   the clipping caption fires, and the Curves op's endpoint handles, so *every* tonal
   control shows where it lands on the graph. Small, reuses the guides prop;
   frontend-only, advisory. (S, editor/trust)
-- **Optional numeric entry next to editor sliders** — the editor renders every
-  bounded param as a slider only (`StackOptionControl` `preferSlider`), so a user
-  who knows the exact value they want (gamma 1.35, PSF σ 1.8, black 0.07) can only
-  approximate it by dragging and reading the dimmed readout — and a fine value is
-  hard to hit on a touch/trackpad drag. Add a small `NumberInput` beside the slider
-  (or make the readout an editable field) that shares the same value/min/max/step,
-  so precise entry and coarse dragging both work. Reuses the existing field schema;
-  frontend-only, additive, no default change. Care: keep the two in sync and
-  respect `disabled`/`depends_on`. Serves precision without adding a knob. (S,
-  editor/friendliness)
 - **"Modified from default" indicator on op rows** — in the pipeline list a user
   can't tell at a glance which ops they've tuned vs which sit at stock defaults
   (relevant after Auto-process or a preset drops in a dozen ops). Show a small dot
@@ -274,6 +264,19 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Editable numeric readout beside every editor slider** — the editor rendered
+  each bounded param (`StackOptionControl` `preferSlider`) as a slider with a
+  *dimmed, read-only* value, so a user who knew the exact value they wanted
+  (gamma 1.35, PSF σ 1.8, black 0.07) could only approximate it by dragging — hard
+  to hit precisely on a touch/trackpad. The readout is now a small editable
+  `NumberInput` sharing the field's value/min/max/step (right-aligned, no spinner,
+  clamp-on-blur, int fields round), so coarse dragging and exact typing both work
+  and stay in sync. Respects `disabled`; feeds the same `onChange` (so drag/undo
+  coalescing is unchanged). Frontend-only, additive, no default change; only the
+  editor uses `preferSlider` (the Stack/Settings forms already had number inputs).
+  Vitest: readout shows the current value, typing emits the number, int rounds,
+  empty is ignored. (v0.69.16, this run — Builder)
 
 - **Fix (a11y): editor curve points are keyboard-operable** — the last open
   editor bug. The Curves op's control points were drag-only SVG circles, so a
