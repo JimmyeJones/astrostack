@@ -1,6 +1,7 @@
 import { ActionIcon, Anchor, Badge, Group, Paper, Stack, Switch, Text, Tooltip } from "@mantine/core";
 import { IconAlertTriangle, IconChevronDown, IconChevronUp, IconX } from "@tabler/icons-react";
 import type { EditOp, OpInstance } from "../../api/client";
+import { opModified } from "./opModified";
 import { stageConflicts, type WrongStage } from "./stageConflicts";
 
 const CONFLICT_MSG: Record<WrongStage, string> = {
@@ -55,6 +56,16 @@ export function OpList({ ops, specs, selected, onSelect, onMove, onToggle, onRem
                     <Text size="sm" fw={active ? 600 : 400} lineClamp={1}>
                       {spec?.label ?? op.id}
                     </Text>
+                    {opModified(op, spec) ? (
+                      <Tooltip
+                        label="Edited — one or more settings differ from this op's defaults."
+                        withArrow>
+                        <Text component="span" c="grape.6" fw={700} lh={1}
+                          aria-label="Edited from defaults" style={{ cursor: "help" }}>
+                          •
+                        </Text>
+                      </Tooltip>
+                    ) : null}
                     {spec?.heavy ? (
                       <Tooltip
                         label="This op is slow to render, so the live preview updates after a short pause when you change its settings — it's not stuck."

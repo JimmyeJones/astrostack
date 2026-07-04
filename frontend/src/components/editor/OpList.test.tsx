@@ -45,3 +45,36 @@ describe("OpList a11y", () => {
     expect(rows[1]).toHaveAttribute("aria-pressed", "false");
   });
 });
+
+describe("OpList edited-from-defaults indicator", () => {
+  const SPEC_P: EditOp = {
+    id: "detail.sharpen", label: "Sharpen", group: "detail", stage: "nonlinear",
+    proxy_safe: true, is_stretch: false, help: null,
+    params: [{
+      key: "amount", label: "Amount", type: "float", group: "simple", default: 0.5,
+      min: 0, max: 1, step: 0.1, options: null, option_labels: undefined,
+      help: null, depends_on: null,
+    }],
+  };
+  const SPECS_P = { "detail.sharpen": SPEC_P };
+
+  it("shows the dot only on rows whose params differ from the op defaults", () => {
+    const ops: OpInstance[] = [
+      { uid: "a", id: "detail.sharpen", params: { amount: 0.5 }, enabled: true },
+      { uid: "b", id: "detail.sharpen", params: { amount: 0.9 }, enabled: true },
+    ];
+    wrap(<OpList ops={ops} specs={SPECS_P} selected={null} onSelect={() => {}}
+      onMove={() => {}} onToggle={() => {}} onRemove={() => {}} />);
+    const dots = screen.getAllByLabelText("Edited from defaults");
+    expect(dots).toHaveLength(1);
+  });
+
+  it("shows no dot when every op sits at its defaults", () => {
+    const ops: OpInstance[] = [
+      { uid: "a", id: "detail.sharpen", params: {}, enabled: true },
+    ];
+    wrap(<OpList ops={ops} specs={SPECS_P} selected={null} onSelect={() => {}}
+      onMove={() => {}} onToggle={() => {}} onRemove={() => {}} />);
+    expect(screen.queryByLabelText("Edited from defaults")).toBeNull();
+  });
+});

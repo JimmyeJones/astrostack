@@ -118,13 +118,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   the clipping caption fires, and the Curves op's endpoint handles, so *every* tonal
   control shows where it lands on the graph. Small, reuses the guides prop;
   frontend-only, advisory. (S, editor/trust)
-- **"Modified from default" indicator on op rows** — in the pipeline list a user
-  can't tell at a glance which ops they've tuned vs which sit at stock defaults
-  (relevant after Auto-process or a preset drops in a dozen ops). Show a small dot
-  / "edited" badge on each `OpList` row whose params differ from the op's schema
-  defaults (reuse the `isDefault` comparison already in `OpParamPanel`), so the
-  user sees what they've changed and where to look. Pure, frontend-only, additive,
-  advisory. (S, editor/trust)
 - **Mark editor-export runs as display-space so re-editing doesn't double-stretch
   (and the FITS is honest)** — an editor export writes its already-stretched
   `[0,1]` result to a FITS via `write_stack_outputs(..., already_display=True)`,
@@ -264,6 +257,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **"Edited" dot on tuned op rows in the pipeline list** — after Auto-process or a
+  preset drops a dozen ops in, a user couldn't tell at a glance which ops they'd
+  tuned vs which sat at stock defaults. Each `OpList` row whose params differ from
+  the op's schema defaults now shows a small grape "•" with an "Edited — one or
+  more settings differ from this op's defaults." tooltip. Driven by a pure
+  `opModified` helper (mirrors the `isDefault` comparison in `OpParamPanel`:
+  missing/null = default, stale keys ignored, structured curve params compared by
+  value). Frontend-only, additive, advisory. Vitest: helper (8 cases) + OpList
+  (dot shows only on the tuned row, absent when all at defaults). (v0.69.17, this
+  run — Builder)
 
 - **Editable numeric readout beside every editor slider** — the editor rendered
   each bounded param (`StackOptionControl` `preferSlider`) as a slider with a
