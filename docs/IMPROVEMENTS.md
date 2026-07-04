@@ -96,6 +96,21 @@ problems. Dogfood it every big-picture run and fix root causes.
 - **Editor bug hunt (ongoing)** — there are undocumented issues. Each big-picture
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
+- **Data-driven "From your image" starting curve for the Curves op** — the Curves
+  op is now the *only* major tonal control with no data-driven starting point:
+  Levels (black/white/gamma), Stretch (strength/black, v0.71.0), Sharpen, Denoise,
+  Star-size and Deconv-PSF all have a one-click "From your image" button, but Curves
+  drops the beginner on a flat identity line to hand-shape. A gentle, well-anchored
+  S-curve derived from the display-space histogram entering the op — put a low
+  percentile (sky floor) near the identity, lift the midtones a touch toward a
+  pleasant grey, and roll off before the highlights so star cores don't blow — would
+  give a good contrast starting curve to tweak. Mirror the existing family: a pure
+  engine helper (measure the percentiles on the image entering the op, return an
+  ordered point list clamped to [0,1], `None` on degenerate/low-range data) + a
+  `…/editor/curve-suggestion` endpoint + a header "Auto curve" button. Off nothing
+  (explicit button), additive/upgrade-safe. Keep it *gentle* and monotone so it can
+  never posterise; validate the curve stays sorted and within bounds. (M,
+  editor/autonomy)
 - ~~**Wavelet-denoise preview↔export parity**~~ — **investigated & closed as a
   non-issue (2026-07-04, Builder).** The concern was that a BayesShrink multi-level
   DWT tuned on the ≤1500 px proxy would smooth visibly differently on the full-res
