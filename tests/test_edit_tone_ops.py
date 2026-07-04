@@ -148,6 +148,60 @@ def test_curves_degenerate_single_point_is_identity_not_blank():
         assert np.allclose(out[3:, :, :], rgb[3:, :, :], atol=1e-3)  # covered = unchanged
 
 
+def _dim_ramp(h: int = 60, w: int = 60) -> np.ndarray:
+    """A dim grayscale ramp (p50 ≈ 0.125 < the 0.25 target) so the data-driven
+    auto-contrast curve has a real midtone to lift."""
+    ramp = np.linspace(0.05, 0.20, h, dtype=np.float32)
+    plane = np.repeat(ramp[:, None], w, axis=1)
+    return np.stack([plane, plane, plane], axis=-1)
+
+
+def test_curves_auto_lifts_midtones_from_identity():
+    """With auto=True and the untouched identity points, the Curves op derives a
+    gentle data-driven contrast curve from its (display-space) input — lifting the
+    midtones above the plain identity while keeping the image finite and in range."""
+    rgb = _dim_ramp()
+    op = get_op("tone.curves")
+    identity = op.apply(rgb, {"points": [[0.0, 0.0], [1.0, 1.0]], "auto": False}, EditContext())
+    auto = op.apply(rgb, {"points": [[0.0, 0.0], [1.0, 1.0]], "auto": True}, EditContext())
+    assert np.all(np.isfinite(auto))
+    assert auto.mean() > identity.mean() + 1e-3          # a real midtone lift
+    assert float(auto.min()) == pytest.approx(float(rgb.min()), abs=0.02)  # sky floor pinned
+    assert float(auto.max()) <= 1.0 + 1e-6               # highlights not blown out of range
+
+
+def test_curves_auto_falls_back_to_fixed_scurve_when_no_suggestion():
+    """On an already-bright image suggest_tone_curve declines (nothing to lift), so
+    auto must fall back to the fixed gentle S-curve, not silently no-op."""
+    from seestack.edit.ops.tone import _AUTO_CONTRAST_FALLBACK
+
+    rgb = _rgb(0.6, 0.6, 0.6)
+    op = get_op("tone.curves")
+    auto = op.apply(rgb, {"points": [[0.0, 0.0], [1.0, 1.0]], "auto": True}, EditContext())
+    fixed = op.apply(rgb, {"points": _AUTO_CONTRAST_FALLBACK, "auto": False}, EditContext())
+    assert np.allclose(auto, fixed, atol=1e-4)
+    assert not np.allclose(auto, rgb, atol=1e-3)          # the fallback actually shaped it
+
+
+def test_curves_auto_ignored_when_points_manually_set():
+    """A hand-edited (non-identity) curve always wins — toggling auto must never
+    discard manual work by overriding it with the data-driven curve."""
+    rgb = _dim_ramp()
+    op = get_op("tone.curves")
+    manual = [[0.0, 0.0], [0.5, 0.9], [1.0, 1.0]]
+    with_auto = op.apply(rgb, {"points": manual, "auto": True}, EditContext())
+    without_auto = op.apply(rgb, {"points": manual, "auto": False}, EditContext())
+    assert np.allclose(with_auto, without_auto, atol=1e-5)
+
+
+def test_curves_auto_preserves_nan_gaps():
+    rgb = _with_nan_border(_dim_ramp())
+    out = get_op("tone.curves").apply(
+        rgb, {"points": [[0.0, 0.0], [1.0, 1.0]], "auto": True}, EditContext())
+    assert np.all(np.isnan(out[:3, :, :]))
+    assert np.all(np.isfinite(out[3:, :, :]))
+
+
 def test_levels_default_is_noop_and_gamma_brightens():
     rgb = _rgb(0.4, 0.4, 0.4)
     op = get_op("tone.levels")

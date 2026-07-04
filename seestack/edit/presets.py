@@ -169,7 +169,12 @@ def auto_recipe(rgb: np.ndarray | None = None,
     ``_noise_fraction``). Saturation lifts colour a touch at the end (after the
     green cast is gone, so it doesn't amplify it) — *scaled to the measured noise*
     so a noisy stack gets a gentler boost (less amplified chroma speckle) and a
-    clean one the full lift.
+    clean one the full lift. Finally a gentle **contrast curve** (``tone.curves``
+    with ``auto=True``) is appended: like the built-in galaxy/nebula presets — but
+    unlike the previously-flat general Auto recipe — it shapes the midtones, deriving
+    a *data-driven* lift from its own stretched input at apply time (sky floor and
+    highlight shoulder pinned on the identity, so it only gently lifts faint midtone
+    structure without brightening the sky or blowing star cores).
 
     When ``coverage_span`` marks a mosaic (``coverage_max > coverage_min``), a
     ``background.level_coverage`` pass is prepended (on linear data, before the
@@ -241,6 +246,16 @@ def auto_recipe(rgb: np.ndarray | None = None,
     # (0.7) and monotone — it can only *reduce* excess green, never invent colour.
     ops.append(("tone.scnr", {"amount": 0.7}))
     ops.append(("tone.saturation", {"amount": round(saturation, 3)}))
+    # A gentle contrast curve — the built-in galaxy/nebula presets ship an S-curve,
+    # but the general Auto recipe was the flat exception (denoise → stretch → SCNR →
+    # saturation → sharpen, no contrast shaping). `auto=True` + the identity default
+    # points make tone.curves derive a *data-driven* midtone lift from its own
+    # (stretched) input at apply time — so it adapts to the actual stack rather than
+    # a fixed shape — and fall back to a fixed gentle S-curve when the data offers no
+    # useful suggestion. It keeps the sky floor and highlight shoulder on the identity
+    # (no sky brightening, no blown star cores), so it only ever *gently* lifts faint
+    # midtone structure. Scout-vetted on realistic dim OSC stacks (2026-07-04).
+    ops.append(("tone.curves", {"auto": True}))
     if sharpen_amount >= 0.05:  # sharpening clean data helps; noisy data hurts
         radius = _sharpen_radius_from_fwhm(median_fwhm)
         ops.append(("detail.sharpen", {"amount": sharpen_amount, "radius": radius}))

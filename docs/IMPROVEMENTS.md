@@ -127,42 +127,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   pipeline no longer skips any op. What remains here is *responsiveness* (heavy
   ops on the proxy can lag) and closing any remaining proxy↔export look
   differences — chase those, but never by hiding an action again. (S–M, editor)
-- **Give the Auto recipe a gentle contrast curve (as the presets already do)** —
-  the general `auto_recipe` (`seestack/edit/presets.py`) runs denoise → STF stretch
-  → SCNR → saturation → sharpen but, unlike the **built-in galaxy/nebula presets**
-  (which include a `tone.curves` S-curve like `[[0,0],[0.25,0.2],[0.75,0.82],[1,1]]`),
-  it applies **no contrast curve** — so the one-click "Auto" result is flatter than
-  the presets the same app ships. Now that a data-driven curve helper exists
-  (`seestack/edit/curve.py:suggest_tone_curve`, v0.72.0), Auto should append the
-  *data-driven* curve measured on the post-stretch display-space image (so it adapts
-  to the stack), falling back to a fixed gentle S-curve only when the suggestion is
-  `None`. Auto is an explicit button (no default flip, upgrade-safe).
-  **✅ SCOUT-VETTED & UNBLOCKED (2026-07-04) — ready for a Builder to ship.** I
-  rendered the data-driven curve on realistic *dim* synthetic OSC stacks (nebula,
-  galaxy, cluster, and a very-dim nebula) end-to-end (`auto_recipe → apply_recipe →
-  suggest_tone_curve on the display output → tone.curves → re-render`) and *looked at
-  the before/after PNGs*. Verdict: on every dim stack the curve **gently lifts faint
-  nebula/galaxy midtone structure** (median e.g. 0.14→0.19, 0.16→0.21) while the sky
-  floor stays dark (p1 anchored on the identity — no sky brightening, no chroma-noise
-  amplification) and star cores roll off (p99.5 anchored — no blown highlights). It
-  is a clear, subtle *improvement* to the priority-1 one-click look, and the Builder's
-  structural argument holds (pure midtone lift; can't crush sky or blow stars).
-  **One correction to the Builder's note:** it is **not** a strict no-op on
-  well-exposed stacks. Because `auto_recipe`'s STF lands the median around ~0.20–0.22
-  (target_bg clips to 0.14–0.24), the curve engages *almost always* — but the lift
-  scales with how far below 0.25 the median sits, so a well-exposed stack gets an
-  **imperceptible** nudge (0.219→0.234, +0.015) and a dim one a **gentle** lift. That
-  is the desired behaviour (a consistent, adaptive contrast start), just not "no-op
-  when bright." **Implementation guidance for the Builder:** the recipe is a static op
-  list built *before* rendering, but the data-driven curve needs the *post-stretch*
-  image — so wire it as an apply-time computation, e.g. give `tone.curves` an optional
-  `auto: bool` param (default False; add to `NON_FORM_KEYS` or a descriptor) that, when
-  set and the points are still the identity, computes `suggest_tone_curve` on the op's
-  own input at apply time; `auto_recipe` then appends `("tone.curves", {"auto": True})`
-  after `tone.saturation`. Fall back to the fixed gentle S-curve
-  `[[0,0],[0.25,0.2],[0.75,0.82],[1,1]]` when the suggestion is `None`. Add engine
-  tests (auto-mode curves lifts the midtone / no-ops the identity when suggestion is
-  None / preserves NaN) and a webapp test that an Auto recipe carries the curve. (M, editor/autonomy)
+- ~~**Give the Auto recipe a gentle contrast curve (as the presets already do)**~~ — **shipped v0.73.0** (see Shipped). The one-click Auto recipe now appends a data-driven `tone.curves` (auto contrast) after the saturation boost, matching the built-in galaxy/nebula presets.
 - **Confusing / clunky controls** — too many ops with terse params and no obvious
   starting point. Add plain-language help, a simple/guided default layout, curated
   presets, and progressive disclosure of advanced ops so a beginner gets a good
@@ -401,6 +366,45 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Auto-process now gives its one-click result a gentle, data-driven contrast
+  curve (the top PRIORITY-1 item, Scout-vetted & unblocked)** — the built-in
+  galaxy/nebula presets ship a `tone.curves` S-curve, but the general `auto_recipe`
+  was the flat exception (denoise → stretch → SCNR → saturation → sharpen, *no*
+  contrast shaping), so the one-click "Auto" result was flatter than the presets the
+  same app ships. `tone.curves` gained an `auto` bool param (default False): when set
+  *and* the points are still the untouched identity, the op derives a gentle
+  midtone-lift curve from its own (display-space) input **at apply time** via
+  `suggest_tone_curve` — pinning the sky floor (p1) and highlight shoulder (p99.5) on
+  the identity so it only *gently* lifts faint midtone structure (no sky brightening,
+  no blown star cores), falling back to the presets' fixed gentle S-curve when the
+  data offers no useful suggestion. `auto_recipe` appends `("tone.curves",
+  {"auto": True})` after the saturation boost. Because it's computed at apply time
+  from robust global percentiles it adapts to the actual stack *and* holds
+  proxy↔export parity (measured mean |diff| ~0 for the curve itself). A hand-edited
+  (non-identity) curve always wins, so toggling auto never discards manual work; Auto
+  is an explicit button (no default flip, upgrade-safe/additive — older recipes
+  simply lack the op/param). Verified empirically on a dim synthetic OSC stack
+  (p50 0.191→0.221, sky/highlight deltas ≤0.0001), matching the Scout's visual
+  vetting. Tests: engine (auto lifts the midtone from identity / falls back to the
+  fixed S-curve when the suggestion is None / manual points win / NaN preserved),
+  auto_recipe (curve appended after saturation with `auto=True` + identity points;
+  end-to-end the rendered result's median rises), webapp (the `/editor/auto` recipe
+  carries the curve). Frontend: the Auto-summary names it "added a gentle contrast
+  curve"; the `auto` toggle surfaces as an advanced control on the Curves op.
+  (v0.73.0, this run — Builder)
+
+- **Auto-process summary names the mosaic coverage-leveling step in plain language** —
+  the "What Auto-process did" summary maps each Auto op to a plain-language phrase
+  (v0.70.1 added `geometry.crop`), but `background.level_coverage` — which
+  `auto_recipe` prepends as the *first* step on a mosaic to even out uneven-overlap
+  panel brightness — had no phrase, so on a Seestar mosaic the whole one-click
+  summary opened with the bare jargon registry label "Coverage leveling" while
+  every other step read cleanly. Added a phrase ("evened out the mosaic panel
+  brightness") to `OP_PHRASES`, completing plain-language coverage of every op Auto
+  can emit. Frontend-only, additive, advisory (no image/behaviour/API change).
+  Vitest: a regression case that a `background.level_coverage`-led recipe summarises
+  with the plain phrase, not the jargon label. (v0.72.5, this run — Builder)
 
 - **Fix: SCNR "Protect" tooltip had gentler/stronger reversed (misled the most
   common OSC fix)** — Builder editor audit found the `tone.scnr` `mode` param's help

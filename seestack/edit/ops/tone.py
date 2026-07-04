@@ -36,8 +36,42 @@ def _stretch(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
 
 # --- nonlinear tone shapers (operate in display space [0,1]) ----------------
 
+# A gentle fixed S-curve (the same one the built-in galaxy/nebula presets ship)
+# used as the auto-contrast fallback when the data-driven suggestion declines — a
+# stack already bright enough to have nothing to lift, or too degenerate to
+# measure. It slightly steepens the midtones (0.25→0.20, 0.75→0.82) for a pleasant
+# contrast start; strictly monotone, so it can't invert or posterise.
+_AUTO_CONTRAST_FALLBACK = [[0.0, 0.0], [0.25, 0.2], [0.75, 0.82], [1.0, 1.0]]
+
+
+def _points_are_identity(pts) -> bool:
+    """True iff ``pts`` is exactly the untouched identity default ``[[0,0],[1,1]]``.
+    Auto-contrast only engages while the curve is still the identity line, so a
+    hand-edited curve is never overridden. Defensive against a malformed list."""
+    try:
+        if len(pts) != 2:
+            return False
+        (x0, y0), (x1, y1) = pts[0], pts[1]
+        return (abs(float(x0)) < 1e-6 and abs(float(y0)) < 1e-6
+                and abs(float(x1) - 1.0) < 1e-6 and abs(float(y1) - 1.0) < 1e-6)
+    except (TypeError, ValueError):
+        return False
+
+
 def _curves(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     pts = params.get("points") or [[0.0, 0.0], [1.0, 1.0]]
+    # Auto-contrast: when enabled *and* the curve is still the untouched identity,
+    # derive a gentle data-driven contrast curve from the image entering the op —
+    # which is already display-space at this (nonlinear) pipeline position, exactly
+    # what ``suggest_tone_curve`` expects. This lets the one-click Auto recipe (which
+    # is a static op list built *before* the image is rendered) carry a contrast
+    # curve that adapts to the actual stack at apply time, falling back to a fixed
+    # gentle S-curve when the data offers no useful suggestion. A hand-edited curve
+    # (non-identity points) always wins, so toggling auto never discards manual work.
+    if params.get("auto") and _points_are_identity(pts):
+        from seestack.edit.curve import suggest_tone_curve
+        suggested = suggest_tone_curve(as_rgb(rgb))
+        pts = suggested if suggested is not None else _AUTO_CONTRAST_FALLBACK
     xs = np.array([p[0] for p in pts], dtype=np.float64)
     ys = np.array([p[1] for p in pts], dtype=np.float64)
     # A tone curve needs at least two control points spanning a range of x. A
@@ -171,7 +205,14 @@ register(OpSpec(
 register(OpSpec(
     id="tone.curves", label="Curves", group="tone", stage="nonlinear", apply=_curves,
     proxy_safe=True, help="Freeform tone curve over all channels.",
-    params=[EditParam("points", "Curve", "curve", default=[[0.0, 0.0], [1.0, 1.0]])],
+    params=[
+        EditParam("points", "Curve", "curve", default=[[0.0, 0.0], [1.0, 1.0]]),
+        EditParam("auto", "Auto contrast", "bool", default=False, group="advanced",
+                  help="Derive a gentle contrast curve from your image — a subtle "
+                       "midtone lift that keeps the sky dark and star cores intact. "
+                       "Applies only while the curve is still the default straight "
+                       "line; edit any point to take manual control."),
+    ],
 ))
 
 register(OpSpec(
