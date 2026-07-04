@@ -66,6 +66,15 @@ describe("autoSummaryPhrases", () => {
     ]);
   });
 
+  it("names the gentle contrast curve (tone.curves) in plain language", () => {
+    // Auto now appends a tone.curves op (auto contrast) after saturation, so the
+    // summary must describe it as a contrast curve, not a bare label.
+    const ops = [op("tone.saturation"), op("tone.curves")];
+    expect(autoSummaryPhrases(ops, SPECS)).toEqual([
+      "boosted colour saturation", "added a gentle contrast curve",
+    ]);
+  });
+
   it("names the mosaic coverage-leveling step in plain language", () => {
     // Auto prepends background.level_coverage as its *first* step on a mosaic, so
     // without a phrase the whole summary opens with the jargon label "coverage

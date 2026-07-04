@@ -10,7 +10,7 @@ const OP_PHRASES: Record<string, string> = {
   "tone.color_calibrate": "balanced the colour",
   "detail.denoise": "reduced noise",
   "tone.stretch": "applied a natural stretch",
-  "tone.curves": "adjusted the tone curve",
+  "tone.curves": "added a gentle contrast curve",
   "tone.scnr": "removed the green cast",
   "tone.saturation": "boosted colour saturation",
   "detail.sharpen": "sharpened detail",

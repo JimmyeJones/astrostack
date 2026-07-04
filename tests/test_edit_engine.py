@@ -374,6 +374,48 @@ def test_auto_recipe_saturation_eases_off_on_noisy_stacks():
     assert float(op.params["amount"]) == 1.2
 
 
+def test_auto_recipe_appends_contrast_curve():
+    """Auto must append a gentle contrast curve (tone.curves, auto=True) after the
+    saturation boost — matching the built-in presets, which the previously-flat
+    general Auto recipe alone lacked."""
+    from seestack.edit.presets import auto_recipe
+
+    for rgb in (None,
+                np.full((80, 100, 3), 0.05, np.float32),
+                np.full((80, 100, 3), 0.05, np.float32) + 0.1):
+        ids = [o.id for o in auto_recipe(rgb).ops]
+        assert "tone.curves" in ids
+        # the contrast curve shapes tone after the colour boost
+        assert ids.index("tone.saturation") < ids.index("tone.curves")
+        curve = next(o for o in auto_recipe(rgb).ops if o.id == "tone.curves")
+        assert curve.params["auto"] is True
+        # left at the identity default so the apply-time auto derivation engages
+        assert curve.params["points"] == [[0.0, 0.0], [1.0, 1.0]]
+
+
+def test_auto_recipe_contrast_curve_lifts_the_rendered_result():
+    """End-to-end: rendering the full Auto recipe with its auto-contrast curve
+    yields a higher-midtone result than the same recipe with the curve removed —
+    i.e. the curve genuinely adds contrast to the one-click output (not a no-op)."""
+    from seestack.edit.presets import auto_recipe
+
+    rng = np.random.default_rng(3)
+    # A dim-ish OSC-like stack: dark sky + a faint extended blob + a few stars.
+    rgb = np.full((90, 110, 3), 0.02, np.float32)
+    rgb[30:60, 40:80] += 0.06
+    rgb[45, 55] = rgb[20, 20] = 0.8
+    rgb += rng.normal(0, 0.005, rgb.shape).astype("float32")
+    rgb = np.clip(rgb, 0.0, None)
+
+    full = auto_recipe(rgb)
+    without_curve = Recipe(ops=[o for o in full.ops if o.id != "tone.curves"])
+    out_full = apply_recipe(rgb.copy(), full)
+    out_plain = apply_recipe(rgb.copy(), without_curve)
+    assert np.all(np.isfinite(out_full))
+    # The curve lifts the faint midtone structure — the finite median rises.
+    assert float(np.nanmedian(out_full)) > float(np.nanmedian(out_plain)) + 1e-3
+
+
 def test_noise_fraction_crossfade_math():
     """The crossfade weight is 0 at/below the clean end, 1 at/above the noisy end,
     and monotone linear in between."""

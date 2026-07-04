@@ -658,7 +658,8 @@ def test_auto_process(client, solved_library):
     rid = _make_run(solved_library, safe)
     r = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/auto")
     assert r.status_code == 200
-    ops = [o["id"] for o in r.json()["ops"]]
+    op_objs = r.json()["ops"]
+    ops = [o["id"] for o in op_objs]
     assert "tone.stretch" in ops
     # This run is a mosaic (coverage 1..5), so Auto prepends a coverage-leveling
     # pass before the gradient fit to flatten the panel steps.
@@ -666,6 +667,12 @@ def test_auto_process(client, solved_library):
     assert ops.index("background.level_coverage") < ops.index("tone.stretch")
     # No coverage sibling written here → no meaningful trim → no crop appended.
     assert "geometry.crop" not in ops
+    # Auto carries a gentle contrast curve (auto-derived at apply time) after the
+    # saturation boost, matching the built-in presets.
+    assert "tone.curves" in ops
+    assert ops.index("tone.saturation") < ops.index("tone.curves")
+    curve = next(o for o in op_objs if o["id"] == "tone.curves")
+    assert curve["params"]["auto"] is True
 
 
 def test_auto_process_trims_ragged_mosaic_border(client, solved_library):
