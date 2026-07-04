@@ -90,4 +90,11 @@ describe("reprocessSummary", () => {
     expect(reprocessSummary({ total: 2, stacked: 1, failed: [{ target: "X" }, {}, "junk"] }))
       .toEqual({ line: "Restacked 1/2 targets — 1 failed.", failed: ["X"] });
   });
+  it("reports how many targets were skipped as already up to date", () => {
+    expect(reprocessSummary({ total: 5, stacked: 2, skipped: 3, failed: [] }))
+      .toEqual({ line: "Restacked 2/5 targets — 3 already up to date.", failed: [] });
+    // Zero skipped is omitted; failures still appended after the skip note.
+    expect(reprocessSummary({ total: 3, stacked: 1, skipped: 1, failed: [{ target: "Z" }] }))
+      .toEqual({ line: "Restacked 1/3 targets — 1 already up to date — 1 failed.", failed: ["Z"] });
+  });
 });

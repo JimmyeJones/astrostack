@@ -309,8 +309,8 @@ problems. Dogfood it every big-picture run and fix root causes.
   is self-describing for Siril/PixInsight. Absence = today's linear behaviour, so
   old runs are unaffected.
 ### Autonomy — "just works" (PRIORITY 2)
-- **⭐ OWNER-REQUESTED — "Reprocess everything" — slice (a) SHIPPED (v0.74.0);
-  slices (b)/(c) remain.** The stacking engine keeps improving (better rejection /
+- **⭐ OWNER-REQUESTED — "Reprocess everything" — slices (a) SHIPPED (v0.74.0) &
+  (c) SHIPPED (v0.76.0–0.77.0); slice (b) remains.** The stacking engine keeps improving (better rejection /
   alignment / calibration, bug fixes), but each target's existing stack was produced
   by whatever engine version was current when it ran — so after an upgrade the *final
   images stay stale* unless the user restacks each target by hand. **Slice (a)
@@ -323,16 +323,15 @@ problems. Dogfood it every big-picture run and fix root causes.
   between-target + within-target cancel and per-target failure isolation. **Remaining
   slices for a future run:** (b) an optional deeper **full rescan** that also re-runs
   QC / plate-solve / auto-grade over the existing library frames before restacking,
-  for when those steps improved too; (c) a "only targets last stacked before version
-  X" filter — **its foundation shipped v0.76.0**: every stack run now records the
-  producing app version (`engine_version` column, schema 8→9), surfaced on the
-  History card ("made with vX"). What remains for (c) is the *filter* itself — skip
-  targets whose newest genuine stack was already made on the current version, so a
-  large library isn't reprocessed wholesale (a `stale_only` flag on `reprocess_all`
-  comparing each target's last `engine_version` to `webapp.__version__`) — plus
-  richer batch UI (a dedicated N/total batch progress
-  card rather than the per-target job progress + summary you get today). (S–M remaining,
-  autonomy/image-quality)
+  for when those steps improved too. **Slice (c) shipped:** every stack run records
+  the producing app version (`engine_version` column, schema 8→9, v0.76.0, surfaced
+  on the History card as "made with vX"), and the reprocess action now has an
+  **"only outdated targets"** toggle (v0.77.0, default on) — a `stale_only` flag on
+  `POST /api/reprocess-all` that skips targets whose newest *genuine* stack was
+  already made on the current version, so a large library isn't reprocessed
+  wholesale. What remains is a nicety only: a richer dedicated N/total batch progress
+  card (the Jobs summary already reports "restacked N/M — K already up to date").
+  (S remaining — polish only, autonomy/image-quality)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
   different (per-channel vs luminance gradient, star reduction, saturation). The
@@ -508,6 +507,26 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Reprocess-everything gains an "only outdated targets" filter (owner-requested
+  slice c) — skips targets already stacked on the current version.** Building on the
+  v0.76.0 per-run version stamp, the reprocess maintenance action no longer has to
+  restack the *whole* library after an upgrade: a new `stale_only` flag on
+  `POST /api/reprocess-all` (Settings toggle, **default on**) skips any target whose
+  most recent *genuine* stack (a `_last_stack_version_for_target` helper walks
+  newest-first, skipping editor/combine runs) already carries the current
+  `webapp.__version__` — so only the images an upgrade would actually change get
+  reprocessed. The batch summary now reports `skipped`, surfaced on the Jobs card as
+  "… — K already up to date". Strictly opt-in and backward-compatible: the endpoint
+  defaults `stale_only=False` for any caller that omits it (so the plain "reprocess
+  everything" behaviour is unchanged), a target with no genuine stack / no recorded
+  version is treated as stale and reprocessed, and nothing is ever deleted. The
+  Settings toggle defaults to the more useful "outdated only" and relabels the button
+  accordingly. Tests: engine (stale_only skips a current-version target and stacks a
+  stale one; default reprocesses even current-version targets) + webapp end-to-end
+  (POST `{stale_only:true}` skips up-to-date targets and adds no new runs) + Vitest
+  (`reprocessSummary` skipped line; the Settings toggle drives the button label and
+  passes the flag). (v0.77.0, this run — Builder)
 
 - **Stack runs record the producing app version ("made with vX") — provenance +
   foundation for stale-target reprocessing (owner-requested slice c).** After an

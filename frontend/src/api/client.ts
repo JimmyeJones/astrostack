@@ -606,9 +606,10 @@ export const api = {
     ok: boolean; detail?: string | null; solved?: boolean; target?: string;
     frame?: string; ra_deg?: number | null; dec_deg?: number | null; elapsed_s?: number;
   }>("/api/system/astap-test", { method: "POST" }),
-  reprocessAll: () =>
+  reprocessAll: (staleOnly = false) =>
     req<{ job_id: string; already_running: boolean }>("/api/reprocess-all", {
       method: "POST",
+      body: JSON.stringify({ stale_only: staleOnly }),
     }),
 
   // sky viewer
