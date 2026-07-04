@@ -653,7 +653,8 @@ describe("EditorView", () => {
     vi.spyOn(client.api, "getHistogram").mockResolvedValue(
       { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
     // Suggestion carries a midtone gamma lift too; Auto levels applies all three.
-    vi.spyOn(client.api, "levelsSuggestion").mockResolvedValue({ black: 0.12, white: 0.85, gamma: 1.6 });
+    vi.spyOn(client.api, "levelsSuggestion").mockResolvedValue(
+      { black: 0.12, white: 0.85, gamma: 1.6, gamma_target: 0.25 });
     vi.stubGlobal("fetch", vi.fn(async () => ({
       ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
     })));
@@ -665,7 +666,10 @@ describe("EditorView", () => {
     // (draining the pending renders so the header button node stays live).
     await screen.findByLabelText("Set Black point from your data");
     await screen.findByLabelText("Set White point from your data");
-    await screen.findByLabelText("Set Midtones (gamma) from your data");
+    // The gamma button names the goal it solves for (the target grey), not just
+    // the bare number, so the provenance is visible.
+    expect(screen.getByLabelText("Set Midtones (gamma) from your data"))
+      .toHaveTextContent("~25% grey");
     // One click on the header "Auto levels" button applies black, white and gamma.
     fireEvent.click(screen.getByRole("button", { name: /Auto levels/ }));
     // All three per-param buttons now read as already-applied (disabled + ✓),

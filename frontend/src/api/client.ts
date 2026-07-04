@@ -397,6 +397,9 @@ export interface LevelsSuggestion {
   /** Optional midtone (gamma) lift that lands the typical tone at a pleasant grey
    * after the black/white points; null when no meaningful lift exists. */
   gamma?: number | null;
+  /** The display-space grey (0..1) the gamma lift aims for, so the UI can name the
+   * goal the number solves for; null when there's no gamma suggestion. */
+  gamma_target?: number | null;
 }
 
 export interface TrimSuggestion {

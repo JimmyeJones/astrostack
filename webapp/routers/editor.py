@@ -374,11 +374,14 @@ class LevelsSuggestionOut(BaseModel):
     when there's no useful suggestion (too few finite pixels or a near-empty range).
     ``gamma`` is an optional midtone lift that lands the image's typical tone at a
     pleasant target grey after those points are applied; ``None`` when no meaningful
-    lift exists (older clients simply ignore the field)."""
+    lift exists (older clients simply ignore the field). ``gamma_target`` is the
+    display-space grey (0..1) that lift aims for, so the UI can name the goal the
+    number solves for; ``None`` when there's no gamma suggestion."""
 
     black: float | None
     white: float | None
     gamma: float | None = None
+    gamma_target: float | None = None
 
 
 def _recipe_before_uid(rec: Recipe, uid: str | None,
@@ -403,7 +406,11 @@ async def levels_suggestion(safe: str, run_id: int, request: Request,
     beginner gets a safe auto-levels they can then nudge instead of hand-guessing
     the two 0..1 sliders. Mirrors the other data-driven "From your image" buttons.
     """
-    from seestack.edit.levels import suggest_levels_gamma, suggest_levels_points
+    from seestack.edit.levels import (
+        GAMMA_TARGET,
+        suggest_levels_gamma,
+        suggest_levels_points,
+    )
 
     project_dir, run = _run_info(request, safe, run_id)
     rec = _decode_recipe_query(request, safe, run_id, recipe)
@@ -418,7 +425,10 @@ async def levels_suggestion(safe: str, run_id: int, request: Request,
         if pts is None:
             return LevelsSuggestionOut(black=None, white=None)
         gamma = suggest_levels_gamma(out, pts[0], pts[1])
-        return LevelsSuggestionOut(black=pts[0], white=pts[1], gamma=gamma)
+        return LevelsSuggestionOut(
+            black=pts[0], white=pts[1], gamma=gamma,
+            gamma_target=GAMMA_TARGET if gamma is not None else None,
+        )
 
     return await run_in_threadpool(work)
 

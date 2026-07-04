@@ -216,6 +216,13 @@ def test_levels_suggestion_from_image(client, solved_library):
     # The payload carries the optional midtone gamma field (a float lift or null).
     assert "gamma" in body
     assert body["gamma"] is None or (0.1 <= body["gamma"] <= 5.0)
+    # gamma_target names the goal the lift solves for; present iff a gamma is
+    # suggested, and it's the engine's target grey (0..1).
+    if body["gamma"] is None:
+        assert body["gamma_target"] is None
+    else:
+        from seestack.edit.levels import GAMMA_TARGET
+        assert body["gamma_target"] == GAMMA_TARGET
 
 
 def test_levels_suggestion_unknown_uid_falls_back(client, solved_library):

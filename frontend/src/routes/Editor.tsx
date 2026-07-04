@@ -1139,7 +1139,12 @@ export function EditorView() {
                                 ...(levels.data.gamma != null ? {
                                   gamma: {
                                     value: levels.data.gamma,
-                                    label: `From your image (midtones ${levels.data.gamma})`,
+                                    // Name the goal the lift solves for (like the
+                                    // sharpen/denoise buttons naming FWHM/σ), so the
+                                    // number has visible provenance for a beginner.
+                                    label: levels.data.gamma_target != null
+                                      ? `From your image (midtones ${levels.data.gamma} — lands the sky at ~${Math.round(levels.data.gamma_target * 100)}% grey)`
+                                      : `From your image (midtones ${levels.data.gamma})`,
                                   },
                                 } : {}),
                               }

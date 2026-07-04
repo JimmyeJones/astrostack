@@ -118,23 +118,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   the clipping caption fires, and the Curves op's endpoint handles, so *every* tonal
   control shows where it lands on the graph. Small, reuses the guides prop;
   frontend-only, advisory. (S, editor/trust)
-- **Optional numeric entry next to editor sliders** — the editor renders every
-  bounded param as a slider only (`StackOptionControl` `preferSlider`), so a user
-  who knows the exact value they want (gamma 1.35, PSF σ 1.8, black 0.07) can only
-  approximate it by dragging and reading the dimmed readout — and a fine value is
-  hard to hit on a touch/trackpad drag. Add a small `NumberInput` beside the slider
-  (or make the readout an editable field) that shares the same value/min/max/step,
-  so precise entry and coarse dragging both work. Reuses the existing field schema;
-  frontend-only, additive, no default change. Care: keep the two in sync and
-  respect `disabled`/`depends_on`. Serves precision without adding a knob. (S,
-  editor/friendliness)
-- **"Modified from default" indicator on op rows** — in the pipeline list a user
-  can't tell at a glance which ops they've tuned vs which sit at stock defaults
-  (relevant after Auto-process or a preset drops in a dozen ops). Show a small dot
-  / "edited" badge on each `OpList` row whose params differ from the op's schema
-  defaults (reuse the `isDefault` comparison already in `OpParamPanel`), so the
-  user sees what they've changed and where to look. Pure, frontend-only, additive,
-  advisory. (S, editor/trust)
 - **Mark editor-export runs as display-space so re-editing doesn't double-stretch
   (and the FITS is honest)** — an editor export writes its already-stretched
   `[0,1]` result to a FITS via `write_stack_outputs(..., already_display=True)`,
@@ -185,13 +168,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   do next; audit every screen for jargon and add plain-language "why" tooltips;
   reduce visible option clutter (progressive disclosure). (M, friendliness)
 - Better long-job feedback and clearer error messages. (S, friendliness)
-- **Surface the measured midtone target on the gamma suggestion** — the new
-  data-driven gamma button (v0.66.0) reads "From your image (midtones 1.6)"; like the
-  sharpen/denoise buttons that name *why* (FWHM, noise σ), it could name the goal it
-  solves for ("lands the sky at ~25% grey"), so the number has visible provenance and
-  the beginner understands it's brightening the typical tone, not a magic value. Pure
-  label change on the existing suggestion; frontend-only, additive. (S,
-  editor/trust)
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 - **Photometric (multiplicative) frame normalization before combine** — frames
@@ -274,6 +250,44 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Gamma suggestion names the goal it solves for (not just a bare number)** — the
+  data-driven midtone button (v0.66.0) read "From your image (midtones 1.6)"; like
+  the sharpen/denoise buttons that name *why* (FWHM, noise σ), it now reads "From
+  your image (midtones 1.6 — lands the sky at ~25% grey)", so the number has visible
+  provenance and the beginner sees it's brightening the typical tone to a target, not
+  a magic value. The target grey is served honestly from the engine constant
+  (`GAMMA_TARGET`, the value `suggest_levels_gamma` actually solves for) as a new
+  optional `gamma_target` field on the `levels-suggestion` payload, so the label
+  can't drift from the maths. Engine constant + one API field + label; additive/
+  upgrade-safe (older clients ignore the field, fall back to the bare label).
+  Tested: webapp (`gamma_target` present iff a gamma is suggested and equals the
+  constant), Vitest (the gamma button names "~25% grey"). (v0.69.18, this run —
+  Builder)
+
+- **"Edited" dot on tuned op rows in the pipeline list** — after Auto-process or a
+  preset drops a dozen ops in, a user couldn't tell at a glance which ops they'd
+  tuned vs which sat at stock defaults. Each `OpList` row whose params differ from
+  the op's schema defaults now shows a small grape "•" with an "Edited — one or
+  more settings differ from this op's defaults." tooltip. Driven by a pure
+  `opModified` helper (mirrors the `isDefault` comparison in `OpParamPanel`:
+  missing/null = default, stale keys ignored, structured curve params compared by
+  value). Frontend-only, additive, advisory. Vitest: helper (8 cases) + OpList
+  (dot shows only on the tuned row, absent when all at defaults). (v0.69.17, this
+  run — Builder)
+
+- **Editable numeric readout beside every editor slider** — the editor rendered
+  each bounded param (`StackOptionControl` `preferSlider`) as a slider with a
+  *dimmed, read-only* value, so a user who knew the exact value they wanted
+  (gamma 1.35, PSF σ 1.8, black 0.07) could only approximate it by dragging — hard
+  to hit precisely on a touch/trackpad. The readout is now a small editable
+  `NumberInput` sharing the field's value/min/max/step (right-aligned, no spinner,
+  clamp-on-blur, int fields round), so coarse dragging and exact typing both work
+  and stay in sync. Respects `disabled`; feeds the same `onChange` (so drag/undo
+  coalescing is unchanged). Frontend-only, additive, no default change; only the
+  editor uses `preferSlider` (the Stack/Settings forms already had number inputs).
+  Vitest: readout shows the current value, typing emits the number, int rounds,
+  empty is ignored. (v0.69.16, this run — Builder)
 
 - **Fix (a11y): editor curve points are keyboard-operable** — the last open
   editor bug. The Curves op's control points were drag-only SVG circles, so a
