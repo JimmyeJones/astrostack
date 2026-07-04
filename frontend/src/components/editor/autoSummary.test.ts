@@ -56,6 +56,15 @@ describe("autoSummaryPhrases", () => {
     const ops = [op("tone.scnr"), op("tone.scnr")];
     expect(autoSummaryPhrases(ops, SPECS)).toEqual(["removed the green cast"]);
   });
+
+  it("names the mosaic border trim (geometry.crop) in plain language", () => {
+    // Auto appends a final crop on a mosaic; the summary must read cleanly, not
+    // fall back to a bare "crop".
+    const ops = [op("tone.stretch"), op("geometry.crop")];
+    expect(autoSummaryPhrases(ops, SPECS)).toEqual([
+      "applied a natural stretch", "trimmed the ragged mosaic border",
+    ]);
+  });
 });
 
 describe("autoSummarySentence", () => {

@@ -14,6 +14,7 @@ const OP_PHRASES: Record<string, string> = {
   "tone.saturation": "boosted colour saturation",
   "detail.sharpen": "sharpened detail",
   "detail.deconvolve": "deconvolved to recover sharpness",
+  "geometry.crop": "trimmed the ragged mosaic border",
 };
 
 /** Ordered plain-language phrases for the *enabled* ops in a recipe, in pipeline

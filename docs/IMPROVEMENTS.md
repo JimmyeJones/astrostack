@@ -230,6 +230,14 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Auto-process summary names the mosaic border trim in plain language** — small
+  companion to v0.70.0: now that Auto can append a `geometry.crop`, the "What
+  Auto-process did" note would have fallen back to a bare "…then crop." (the op's
+  registry label). Added a plain-language phrase for `geometry.crop` ("trimmed the
+  ragged mosaic border") so the one-click summary reads honestly and a beginner
+  understands the frame shrank on purpose. Frontend-only, additive. Vitest: the
+  phrase appears in `autoSummaryPhrases`. (v0.70.1, this run — Builder)
+
 - **Auto-process trims a mosaic's ragged low-coverage border (cleanly framed
   one-click result)** — on a mosaic, `auto_recipe` levelled the panel steps but
   left the union canvas's ragged, single-frame-coverage fringe in the one-click
