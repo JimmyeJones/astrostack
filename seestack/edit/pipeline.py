@@ -34,6 +34,7 @@ def apply_recipe(
     *,
     for_preview: bool = False,
     errors: list[str] | None = None,
+    auto_stretch: bool = True,
 ) -> np.ndarray:
     """Return the edited RGB in display space ``[0, 1]``.
 
@@ -42,6 +43,12 @@ def apply_recipe(
     small proxy (and size their pixel-scaled effects via ``ctx.scaled_px`` so the
     proxy result matches the full-res export). ``for_preview`` is kept for API
     symmetry but no longer skips anything.
+
+    ``auto_stretch`` (default ``True``) inserts the default asinh stretch when no
+    stretch op is enabled, so a preview is never black. Pass ``False`` to get the
+    *linear* result of the enabled ops unchanged (used by the Stretch suggestion,
+    which needs to measure the linear image the stretch op will receive, not a
+    tone-mapped one).
     """
     ctx = ctx or EditContext()
     ctx.stage = "linear"
@@ -65,7 +72,7 @@ def apply_recipe(
             stretched = True
             ctx.stage = "nonlinear"
 
-    if not stretched:
+    if not stretched and auto_stretch:
         # Auto-insert a default stretch so the output is viewable.
         from seestack.edit.registry import finite_mask
         from seestack.render.thumbnail import asinh_stretch

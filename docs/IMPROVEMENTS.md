@@ -97,20 +97,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   saved recipe is truly empty, and make the seeding a single undoable step. This
   attacks the #1 "weak default" priority at the moment of highest leverage — the
   editor's very first frame. (S–M, editor/autonomy — PRIORITY 1)
-- **Data-driven "From your image" for the asinh Stretch (Strength + Black point)**
-  — the Stretch op is the single most consequential editor control, yet it's the one
-  major tonal op *without* a data-driven suggestion button: Levels (black/white +
-  gamma), Sharpen, Denoise, Star-size, and Deconv-PSF all offer a one-click "From
-  your image/stars", but the asinh Strength/Black sliders are still hand-guessed. The
-  STF/`autostretch` maths already knows how to land a channel's robust sky median at
-  a pleasant target grey — reuse that (measure the linear proxy's sky median + MAD-σ,
-  solve for the asinh `stretch`/`black` that puts the sky at ~the same target the STF
-  aims for) and expose it as a `…/editor/stretch-suggestion` endpoint + per-slider
-  "From your image" buttons, exactly mirroring the Levels-suggestion pattern
-  (engine helper in `seestack/edit/`, one endpoint, one frontend button). Completes
-  the family of data-driven defaults on the most important control, so a beginner
-  gets a well-exposed stretch without understanding asinh. Additive/upgrade-safe
-  (older clients ignore the endpoint). (S–M, editor/autonomy — PRIORITY 1)
 - **Editor bug hunt (ongoing)** — there are undocumented issues. Each big-picture
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
@@ -268,6 +254,34 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Data-driven "From your image" Strength + Black point for the asinh Stretch
+  (completes the family of data-driven tonal defaults)** — the Stretch op was the
+  single most consequential editor control yet the only major tonal op *without* a
+  data-driven suggestion button (Levels/Sharpen/Denoise/Star-size/Deconv-PSF all
+  have one), so a beginner hand-guessed its two asinh sliders. A new pure engine
+  helper `seestack/edit/stretch.py:suggest_asinh_stretch` measures the *linear*
+  image entering the op and solves for a good pair: the **black point** puts the
+  sky floor (a low percentile) at black — exactly as the Levels suggestion does —
+  by inverting asinh's `shadows = median + (6·black − 2)·σ`; the **strength** is
+  solved (bisection; the asinh response is monotone in stretch) so the sky median
+  lands at a clean dark-sky grey (`STRETCH_TARGET_BG`, 0.10 — deliberately below
+  the STF's 0.20 because asinh's gentler curve can't reach it on a bright-star
+  stack, so the suggestion lands on a meaningful intermediate value instead of
+  always maxing out). Exposed as a `…/editor/stretch-suggestion` endpoint (mirrors
+  levels-suggestion; measures the linear proxy via a new opt-in
+  `apply_recipe(..., auto_stretch=False)` that suppresses the default-stretch
+  fallback so we never measure a tone-mapped image) plus a header "Auto stretch"
+  one-click and per-slider "From your image" buttons (only in asinh mode; the
+  Strength button names the target grey it solves for). Engine + one endpoint +
+  frontend; additive/upgrade-safe (older clients ignore the endpoint; the new
+  `auto_stretch` flag defaults to today's behaviour). Tested: engine (target-grey
+  landing verified against the real `asinh_stretch`, higher-DR-needs-more-strength,
+  clamp-on-extreme-DR, NaN/degenerate/rounding guards), pipeline
+  (`auto_stretch=False` returns the linear ops output), webapp (in-range
+  strength/black + target_bg, unknown-uid fallback), Vitest (Auto stretch sets both,
+  the buttons name the values/goal, and the suggestion is hidden in STF mode).
+  (v0.71.0, this run — Builder)
 
 - **Auto-process summary names the mosaic border trim in plain language** — small
   companion to v0.70.0: now that Auto can append a `geometry.crop`, the "What

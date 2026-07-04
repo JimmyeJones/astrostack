@@ -472,6 +472,55 @@ async def levels_suggestion(safe: str, run_id: int, request: Request,
     return await run_in_threadpool(work)
 
 
+class StretchSuggestionOut(BaseModel):
+    """Data-driven Strength + Black point for the asinh ``tone.stretch`` op,
+    solved from the run's own linear data (sky floor → black; sky median lifted
+    to a pleasant dark-sky grey). ``stretch``/``black`` are ``None`` when there's
+    no useful suggestion (too few finite pixels or no dynamic range). ``target_bg``
+    is the display-space grey (0..1) the strength aims the sky at, so the UI can
+    name the goal the number solves for; ``None`` when there's no suggestion."""
+
+    stretch: float | None
+    black: float | None
+    target_bg: float | None = None
+
+
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/editor/stretch-suggestion",
+            response_model=StretchSuggestionOut)
+async def stretch_suggestion(safe: str, run_id: int, request: Request,
+                             recipe: str | None = None,
+                             uid: str | None = None) -> StretchSuggestionOut:
+    """Suggest asinh Strength + Black point for the Stretch op from the run's own
+    linear data — the one major tonal control still without a "From your image"
+    button. The image *entering* the Stretch op (any prior linear ops applied) is
+    measured, the sky floor put at black and the sky median solved to a clean
+    dark-sky grey, so a beginner gets a well-exposed asinh stretch to nudge from
+    instead of hand-guessing the two sliders. Mirrors the Levels suggestion."""
+    from seestack.edit.stretch import STRETCH_TARGET_BG, suggest_asinh_stretch
+
+    project_dir, run = _run_info(request, safe, run_id)
+    rec = _decode_recipe_query(request, safe, run_id, recipe)
+    # Drop the stretch op(s) when the uid is absent, so the measurement sees the
+    # linear image the stretch will receive (never the stretch's own output).
+    sub = _recipe_before_uid(rec, uid, drop_ids=("tone.stretch",))
+
+    def work() -> StretchSuggestionOut:
+        rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
+        ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None,
+                          coverage=_proxy_coverage(run.fits_path, scale))
+        # Measure the *linear* image the stretch op will receive: apply the prior
+        # (linear) ops but suppress the default-stretch fallback, so we never
+        # measure a tone-mapped image.
+        out = apply_recipe(rgb, sub, ctx, for_preview=True, auto_stretch=False)
+        sug = suggest_asinh_stretch(out)
+        if sug is None:
+            return StretchSuggestionOut(stretch=None, black=None)
+        return StretchSuggestionOut(
+            stretch=sug[0], black=sug[1], target_bg=STRETCH_TARGET_BG)
+
+    return await run_in_threadpool(work)
+
+
 # Cap the coverage grid the O(h·w) largest-rectangle sweep runs on: a mosaic's
 # full-res coverage map can be >100 MP, but fractional crop bounds need nowhere
 # near that precision, so we stride it down first (mirrors the proxy decimation).

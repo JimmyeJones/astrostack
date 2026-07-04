@@ -699,6 +699,102 @@ describe("EditorView", () => {
     expect(screen.getByLabelText("Set Midtones (gamma) from your data")).toHaveTextContent("✓");
   });
 
+  it("offers data-driven Strength + Black point on the asinh Stretch op", async () => {
+    // A fuller Stretch op with the asinh strength/black sliders + the mode enum.
+    const STRETCH_FULL: EditOp = {
+      id: "tone.stretch", label: "Stretch", group: "tone", stage: "any",
+      proxy_safe: true, is_stretch: true, help: "tone map",
+      params: [
+        { key: "mode", label: "Curve", type: "enum", group: "simple", default: "asinh",
+          min: null, max: null, step: null, options: ["asinh", "stf"], help: null,
+          depends_on: null },
+        { key: "stretch", label: "Strength", type: "float", group: "simple", default: 0.5,
+          min: 0, max: 1, step: 0.01, options: null, help: null, depends_on: "mode=asinh" },
+        { key: "black", label: "Black point", type: "float", group: "simple", default: 0.35,
+          min: 0, max: 1, step: 0.01, options: null, help: null, depends_on: "mode=asinh" },
+      ],
+    };
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH_FULL, LEVELS]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [
+        { uid: "s1", id: "tone.stretch", enabled: true,
+          params: { mode: "asinh", stretch: 0.5, black: 0.35 } },
+      ],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    // Data-driven asinh values measured from the linear image entering the op.
+    vi.spyOn(client.api, "stretchSuggestion").mockResolvedValue(
+      { stretch: 0.8, black: 0.05, target_bg: 0.1 });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    fireEvent.click(await screen.findByText("Stretch"));
+    // The Strength button names the goal it solves for (the target sky grey).
+    const strengthBtn = await screen.findByLabelText("Set Strength from your data");
+    expect(strengthBtn).toHaveTextContent("strength 0.8");
+    expect(strengthBtn).toHaveTextContent("~10% grey");
+    // The Black-point button names just its own value.
+    const blackBtn = await screen.findByLabelText("Set Black point from your data");
+    expect(blackBtn).toHaveTextContent("black 0.05");
+    // One click on the header "Auto stretch" applies both strength and black, so
+    // both per-param buttons read as already-applied (disabled + ✓).
+    fireEvent.click(screen.getByRole("button", { name: /Auto stretch/ }));
+    await waitFor(() => {
+      expect(screen.getByLabelText("Set Strength from your data")).toBeDisabled();
+      expect(screen.getByLabelText("Set Black point from your data")).toBeDisabled();
+    });
+    expect(screen.getByLabelText("Set Strength from your data")).toHaveTextContent("✓");
+    expect(screen.getByLabelText("Set Black point from your data")).toHaveTextContent("✓");
+  });
+
+  it("hides the Stretch suggestion when the op is in STF (auto) mode", async () => {
+    const STRETCH_FULL: EditOp = {
+      id: "tone.stretch", label: "Stretch", group: "tone", stage: "any",
+      proxy_safe: true, is_stretch: true, help: "tone map",
+      params: [
+        { key: "mode", label: "Curve", type: "enum", group: "simple", default: "asinh",
+          min: null, max: null, step: null, options: ["asinh", "stf"], help: null,
+          depends_on: null },
+        { key: "stretch", label: "Strength", type: "float", group: "simple", default: 0.5,
+          min: 0, max: 1, step: 0.01, options: null, help: null, depends_on: "mode=asinh" },
+        { key: "black", label: "Black point", type: "float", group: "simple", default: 0.35,
+          min: 0, max: 1, step: 0.01, options: null, help: null, depends_on: "mode=asinh" },
+      ],
+    };
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH_FULL, LEVELS]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [
+        { uid: "s1", id: "tone.stretch", enabled: true,
+          params: { mode: "stf", stretch: 0.5, black: 0.35 } },
+      ],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    const sug = vi.spyOn(client.api, "stretchSuggestion").mockResolvedValue(
+      { stretch: 0.8, black: 0.05, target_bg: 0.1 });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    fireEvent.click(await screen.findByText("Stretch"));
+    // In STF (auto) mode there's no manual strength/black to suggest, so neither the
+    // header button nor the per-param buttons appear, and the endpoint isn't hit.
+    await screen.findByText("Export full resolution");
+    expect(screen.queryByRole("button", { name: /Auto stretch/ })).toBeNull();
+    expect(screen.queryByLabelText("Set Strength from your data")).toBeNull();
+    expect(sug).not.toHaveBeenCalled();
+  });
+
   it("resets an over-dragged Levels op to neutral via the header 'Reset points'", async () => {
     vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, LEVELS]);
     vi.spyOn(client.api, "getRecipe").mockResolvedValue({
