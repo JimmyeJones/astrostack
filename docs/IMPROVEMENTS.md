@@ -128,6 +128,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   ops on the proxy can lag) and closing any remaining proxy↔export look
   differences — chase those, but never by hiding an action again. (S–M, editor)
 - ~~**Give the Auto recipe a gentle contrast curve (as the presets already do)**~~ — **shipped v0.73.0** (see Shipped). The one-click Auto recipe now appends a data-driven `tone.curves` (auto contrast) after the saturation boost, matching the built-in galaxy/nebula presets.
+- **Reflect the auto-contrast curve's shape in the Curves widget (v0.73.0 follow-up).**
+  The new `tone.curves` `auto` mode (shipped v0.73.0) computes its curve *at apply
+  time* from the op's own input, so when a user selects Auto's curve op the **preview
+  shows contrast but the Curves editor widget still draws a flat identity line** (the
+  recipe stores the identity points; the derived shape lives only in the render) — a
+  small preview↔control mismatch and a missed chance to teach what Auto did. Two clean
+  options, both frontend-only/additive: (a) when `auto` is on and points are identity,
+  fetch the shape from the existing `…/editor/curve-suggestion` endpoint (the manual
+  "Auto curve" button already uses it) and draw it read-only in the widget; or (b) add
+  a one-click "Bake" that writes the current auto-derived points into the recipe and
+  clears the `auto` flag, so the user can then hand-tune from the real shape. Prefer
+  (a) for honesty + (b) as the tweak path. Spotted while shipping the auto curve.
+  (S, editor/trust)
 - **Confusing / clunky controls** — too many ops with terse params and no obvious
   starting point. Add plain-language help, a simple/guided default layout, curated
   presets, and progressive disclosure of advanced ops so a beginner gets a good
