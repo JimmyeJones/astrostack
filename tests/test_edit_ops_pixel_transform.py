@@ -144,3 +144,41 @@ def test_level_coverage_skips_on_shape_mismatch_instead_of_crashing():
     op = get_op("background.level_coverage")
     out = op.apply(rgb, {}, EditContext(coverage=coverage))
     assert np.array_equal(out, rgb)
+
+
+# ---- geometry.resize degenerate-shape guard -------------------------------
+
+def test_resize_never_collapses_an_axis_to_zero():
+    # A heavy downscale of a thin frame (a sliver crop on the proxy, or a small
+    # proxy) used to drive round(dim*scale) to 0, yielding an empty image that
+    # then crashed the PNG/export render ("cannot write empty image"). Every axis
+    # must stay >= 1 px regardless of how extreme the downscale is.
+    op = get_op("geometry.resize")
+    for shape, scale in [((2, 50, 3), 0.1), ((8, 8, 3), 0.1), ((3, 3, 3), 0.1)]:
+        out = np.asarray(op.apply(np.ones(shape, np.float32), {"scale": scale},
+                                  EditContext()))
+        assert out.ndim == 3 and 0 not in out.shape, (shape, scale, out.shape)
+
+
+def test_crop_then_resize_stays_renderable():
+    # The end-to-end path that produced the empty image: stretch → thin crop
+    # (survives the crop's >=2px guard) → downscale. The pipeline output must be a
+    # non-empty display-space image that PIL can encode to a PNG.
+    import io
+
+    from PIL import Image
+
+    from seestack.edit.pipeline import apply_recipe
+    from seestack.edit.recipe import OpInstance, Recipe, validate_ops
+
+    rng = np.random.default_rng(3)
+    img = (rng.random((200, 200, 3)) * 0.4).astype(np.float32)
+    ops = validate_ops([
+        OpInstance(id="tone.stretch", params={"mode": "stf"}),
+        OpInstance(id="geometry.crop", params={"x0": 0.0, "y0": 0.5, "x1": 1.0, "y1": 0.51}),
+        OpInstance(id="geometry.resize", params={"scale": 0.1}),
+    ])
+    out = np.asarray(apply_recipe(img.copy(), Recipe(ops=ops), EditContext()))
+    assert 0 not in out.shape
+    u8 = (np.clip(np.nan_to_num(out), 0.0, 1.0) * 255).astype(np.uint8)
+    Image.fromarray(u8, mode="RGB").save(io.BytesIO(), format="PNG")  # must not raise

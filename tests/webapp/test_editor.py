@@ -388,6 +388,31 @@ def test_edit_preview_and_histogram(client, solved_library):
     assert hist["is_mosaic"] is True
 
 
+def test_preview_survives_thin_crop_plus_downscale(client, solved_library):
+    """A thin crop (a 2px strip on the proxy) followed by a downscale used to
+    collapse an axis to 0 px, producing an empty image that crashed the PNG render
+    with an unhandled 500. The preview must now return a valid PNG instead."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe)  # 80x100, proxy_scale 1
+    recipe = {"ops": [
+        {"id": "tone.stretch", "params": {"mode": "stf"}},
+        # rows 40..42 → a 2px-tall strip that survives the crop's >=2px guard
+        {"id": "geometry.crop", "params": {"x0": 0.0, "y0": 0.5, "x1": 1.0, "y1": 0.525}},
+        {"id": "geometry.resize", "params": {"scale": 0.1}},
+    ]}
+    q = _enc(recipe)
+
+    img = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/preview?recipe={q}")
+    assert img.status_code == 200
+    assert img.headers["content-type"].startswith("image/png")
+    # A valid (if tiny) PNG — the collapse produced a 1px-tall strip, not an empty
+    # image; anything with the PNG signature and an IEND chunk is well-formed.
+    assert img.content.startswith(b"\x89PNG") and img.content.endswith(b"IEND\xaeB`\x82")
+    # The histogram endpoint (same proxy render) must also survive.
+    hist = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/histogram?recipe={q}")
+    assert hist.status_code == 200
+
+
 def test_histogram_flags_deconv_preview_understatement(client, solved_library):
     """When the preview proxy is decimated enough that an enabled Deconvolution
     op's PSF collapses to the floor, the histogram reports

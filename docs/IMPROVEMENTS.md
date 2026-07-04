@@ -295,6 +295,26 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Fix: a thin crop + downscale no longer crashes the editor preview/export with
+  an empty image** — Builder dogfood (fuzzing every edit op with adversarial
+  inputs) found that `geometry.resize` computed its output shape via scipy `zoom`'s
+  `round(dim·scale)`, so a heavy downscale of a thin frame (a ≤2px sliver crop on
+  the proxy — which survives the crop op's own `>=2px` guard — or a small proxy)
+  drove an axis to **0 px**, yielding a `(0, N, 3)` empty image that then raised
+  `ValueError: cannot write empty image` in the PNG/TIFF render — an unhandled
+  **500** in `GET …/editor/preview`, `…/editor/histogram`, `POST …/editor/export`
+  and `…/editor/export-png`, plus a failed batch job (same input-hardening class as
+  the v0.69.0/v0.69.5 malformed-recipe 500 fixes). `_resize` now derives exact
+  per-axis zoom factors from a guaranteed-`>=1px` target shape, so an extreme
+  downscale lands on a valid 1px strip instead of an empty array (and the coverage
+  overlay's `apply_geometry_to_map`, which reuses the same op, is covered too).
+  Engine-only, additive/upgrade-safe (the effect is unchanged for any resize that
+  didn't previously collapse). Regression tests: engine (`geometry.resize` never
+  returns a zero-size axis on collapsing scales; a stretch→thin-crop→downscale
+  recipe stays PNG-encodable) + webapp (the preview & histogram endpoints return a
+  valid PNG/200 for that recipe instead of a 500) — all three fail before the fix.
+  (v0.72.3, this run — Builder)
+
 - **Editor exports are marked display-space — no more re-edit double-stretch, and
   the FITS is honest** — an editor export writes its already tone-mapped `[0,1]`
   result to a FITS, but it was stamped `BUNIT = "ADU (linear)"` and carried no
