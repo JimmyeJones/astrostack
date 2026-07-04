@@ -34,6 +34,7 @@ import { clippingCaption } from "../components/editor/clipping";
 import { previewDebounceMs } from "../components/editor/previewDebounce";
 import { starMaskSizePx } from "../components/editor/starMaskSize";
 import { levelsAtIdentity, resetLevelsPoints } from "../components/editor/levelsReset";
+import { curvePointsMatch } from "../components/editor/curveMatch";
 import { coalesceFwhm, measuredContextText } from "../components/editor/measuredContext";
 import { OpParamPanel } from "../components/editor/OpParamPanel";
 import { PresetMenu } from "../components/editor/PresetMenu";
@@ -1085,17 +1086,30 @@ export function EditorView() {
                         op gives a pleasant contrast start to nudge instead of a flat
                         identity line. */}
                     {selectedOp.id === "tone.curves" && curve.data?.points != null ? (
-                      <Tooltip
-                        label="Set a gentle starting curve from this image's histogram — lifts the midtones toward a pleasant grey, keeping the sky and star cores anchored"
-                        multiline w={240} withArrow>
-                        <Button size="compact-xs" variant="light" color="blue"
-                          onClick={() => setParams(selectedOp.uid, {
-                            ...selectedOp.params,
-                            points: curve.data!.points,
-                          })}>
-                          Auto curve
-                        </Button>
-                      </Tooltip>
+                      (() => {
+                        const applied = curvePointsMatch(
+                          selectedOp.params?.points, curve.data.points);
+                        const greyPct = curve.data.target_bg != null
+                          ? Math.round(curve.data.target_bg * 100) : null;
+                        return (
+                          <Tooltip
+                            label="Set a gentle starting curve from this image's histogram — lifts the midtones toward a pleasant grey, keeping the sky and star cores anchored"
+                            multiline w={240} withArrow>
+                            <Button size="compact-xs" variant="light" color="blue"
+                              disabled={applied}
+                              onClick={() => setParams(selectedOp.uid, {
+                                ...selectedOp.params,
+                                points: curve.data!.points,
+                              })}>
+                              {applied
+                                ? "Auto curve ✓"
+                                : greyPct != null
+                                  ? `Auto curve (lifts to ~${greyPct}% grey)`
+                                  : "Auto curve"}
+                            </Button>
+                          </Tooltip>
+                        );
+                      })()
                     ) : null}
                     {/* Escape hatch symmetric with "Auto levels": one click sets
                         the black/white/gamma points back to their neutral identity

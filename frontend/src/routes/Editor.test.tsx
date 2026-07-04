@@ -819,9 +819,12 @@ describe("EditorView", () => {
 
     renderEditor();
 
-    // Selecting the Curves op surfaces the data-driven "Auto curve" header button.
+    // Selecting the Curves op surfaces the data-driven "Auto curve" header button,
+    // which names the grey it lifts the midtones toward (from the suggestion's
+    // target_bg) rather than being an opaque "Auto curve".
     fireEvent.click(await screen.findByText("Curves"));
-    fireEvent.click(await screen.findByRole("button", { name: /Auto curve/ }));
+    const autoCurve = await screen.findByRole("button", { name: /Auto curve \(lifts to ~25% grey\)/ });
+    fireEvent.click(autoCurve);
 
     // The suggested points reach the pipeline: a preview fetch fires with the
     // curve op carrying exactly the suggested points in the encoded recipe.
@@ -834,6 +837,13 @@ describe("EditorView", () => {
         return cv && JSON.stringify(cv.params.points) === JSON.stringify(SUGGESTED);
       });
       expect(applied).toBe(true);
+    });
+
+    // Once applied, the button dims to a "✓" so re-clicking a no-op isn't invited,
+    // consistent with the rest of the data-driven family.
+    await waitFor(() => {
+      const done = screen.getByRole("button", { name: /Auto curve ✓/ });
+      expect(done).toBeDisabled();
     });
   });
 

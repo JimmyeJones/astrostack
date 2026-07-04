@@ -107,16 +107,11 @@ problems. Dogfood it every big-picture run and fix root causes.
   unless Saved) and confirmed it's clean and reversible — but it does change the
   editor's default first-open view and supersedes the current empty-pipeline nudge, so
   it needs the owner's explicit OK for the default-on flip. See the sign-off entry.
-- **Name the "Auto curve" button's goal + dim it when already applied** — small
-  consistency follow-up to v0.72.0: the new "Auto curve" header button is opaque
-  ("Auto curve") and always enabled, whereas the rest of the data-driven family
-  names what it does and dims when already applied — Auto levels shows its
-  black–white values, Auto stretch its strength, the gamma button names "~25% grey"
-  (v0.69.18), and per-param buttons flip to a disabled "✓" via `matchesSuggestion`.
-  The Curve button could name the target grey it lifts toward and dim (with a ✓)
-  when the current points already equal the suggestion (a structural point-list
-  compare, like `opModified`'s curve handling), so re-clicking a no-op isn't
-  invited. Frontend-only, additive, fully testable. (S, editor/friendliness)
+- ~~**Name the "Auto curve" button's goal + dim it when already applied**~~ —
+  **shipped v0.72.1** (see Shipped). The Curves header "Auto curve" button now
+  names the grey it lifts the midtones toward and dims to a disabled "✓" once the
+  current points already equal the suggestion, completing the data-driven family's
+  name-the-goal + dim-when-applied consistency.
 - **Editor bug hunt (ongoing)** — there are undocumented issues. Each big-picture
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
@@ -285,6 +280,23 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **"Auto curve" button names its goal + dims when already applied (data-driven
+  family consistency)** — small follow-up to v0.72.0: the new Curves-op "Auto
+  curve" header button was opaque ("Auto curve") and always enabled, unlike the
+  rest of the data-driven tonal family (Auto levels shows its black–white values,
+  Auto stretch its strength, the gamma button names "~25% grey", per-param buttons
+  flip to a disabled ✓). It now reads "Auto curve (lifts to ~N% grey)" — the grey
+  the midtone lift solves for, served honestly from the suggestion's existing
+  `target_bg` — and dims to a disabled "Auto curve ✓" once the current control
+  points already equal the suggestion, so re-clicking a no-op isn't invited. A pure
+  `curvePointsMatch` helper does the structural point-list compare (same length,
+  each `[x,y]` within a tiny epsilon; a missing/malformed list or absent suggestion
+  never matches). Frontend-only, additive; no API or behaviour change beyond the
+  label/disabled state. Vitest: helper (identical / within-epsilon / moved /
+  different-length / absent suggestion / malformed) + the existing Editor "Auto
+  curve" test extended to assert the goal-naming label and the disabled ✓ after a
+  click. (v0.72.1, this run — Builder)
 
 - **Data-driven "Auto curve" starting point for the Curves op (completes the
   family of data-driven tonal defaults)** — the Curves op was the last major tonal
