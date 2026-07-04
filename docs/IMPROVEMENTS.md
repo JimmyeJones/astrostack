@@ -83,20 +83,16 @@ problems. Dogfood it every big-picture run and fix root causes.
   gentle denoise/sharpen). Improve the auto recipe so "Auto" is a great one-click
   start. (Gentle SCNR green-cast removal added to the auto recipe in v0.56.6 —
   more of these incremental tweaks welcome.) (M, editor)
-- **Seed the editor with the Auto recipe on first open (great out-of-box picture)**
-  — opening a run that has no saved recipe drops the user on the pipeline's *default*
-  asinh stretch (flat, weak — the "weak default result" problem, right at the entry
-  point). Meanwhile a genuinely good, data-driven starting point already exists:
-  `POST …/editor/auto` builds a tuned recipe from the run's own stars/noise. Have the
-  editor, when it loads a run with an empty/absent saved recipe, auto-populate the
-  working recipe with that Auto output (once, as the initial state) so the *first*
-  thing a beginner sees is a good image, not a flat one — with the existing Reset/Undo
-  as the escape hatch and the "What Auto did" note explaining it. Purely a
-  first-load default (never overwrites a saved recipe), so it's additive and
-  reversible; no engine change (reuses the Auto endpoint). Care: only seed when the
-  saved recipe is truly empty, and make the seeding a single undoable step. This
-  attacks the #1 "weak default" priority at the moment of highest leverage — the
-  editor's very first frame. (S–M, editor/autonomy — PRIORITY 1)
+- **Seed the editor with the Auto recipe on first open** — moved to **Needs owner
+  sign-off** (2026-07-04): it's high-value PRIORITY-1 work, but its value *requires*
+  it to be **on by default** (an off-by-default first-open seed helps no beginner),
+  which trips the non-negotiable "new features off by default / defaults don't change
+  behaviour on a live install" guardrail (AGENTS.md §9/§10). A Builder prototyped it
+  (holds the editor on a loader while the one-time Auto build resolves, applies it as
+  a single undoable step, only when the saved recipe is truly empty, never persisted
+  unless Saved) and confirmed it's clean and reversible — but it does change the
+  editor's default first-open view and supersedes the current empty-pipeline nudge, so
+  it needs the owner's explicit OK for the default-on flip. See the sign-off entry.
 - **Editor bug hunt (ongoing)** — there are undocumented issues. Each big-picture
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
@@ -246,6 +242,18 @@ outright bug in existing behaviour, never to add capability.
 - Anything that exposes the app publicly, changes auth defaults (e.g. turning auth
   on by default), or is otherwise hard to reverse.
 - Live capture / real-time Seestar streaming integrations (explicitly de-scoped).
+- **Auto-seed the editor with the Auto recipe on first open (default-on).** When a
+  run is opened with no saved recipe, auto-populate the working recipe with the
+  `…/editor/auto` output so a beginner's first frame is a good image, not the flat
+  default asinh stretch. Directly serves PRIORITY 1 ("out-of-the-box result genuinely
+  good") and is fully reversible (Undo/Reset, single undoable step) and non-persistent
+  (nothing is saved unless the user hits Save; never overwrites a saved recipe). The
+  **only** reason it's here rather than shipped: it's on-by-default (that's the whole
+  point — an opt-in seed helps no beginner), so it changes the editor's default
+  first-open behaviour on the live install and replaces the current empty-pipeline
+  "nudge toward Auto-process" first view. Rollback is trivial and total (UI-only, no
+  data/config/schema touched — revert the frontend change). **Owner: OK to turn this
+  on by default?** A Builder has a clean prototype ready to finish + test.
 
 _(Normal, tested changes merge to the default branch automatically — see
 AGENTS.md §8. Only the items above need a human's OK first.)_
