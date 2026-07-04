@@ -26,7 +26,8 @@ import { applyDataDrivenDefaults, countDataDrivenDefaults, type OpSuggestion }
 import { deconvUnderstatesCaption } from "../components/editor/deconvPreview";
 import { previewScaleCaption } from "../components/editor/previewScale";
 import { prependCoverageLeveling } from "../components/editor/coverageLeveling";
-import { applyTrimCrop, trimRectStyle, trimKeptLabel, geometryOpsKey, previewBoxStyle }
+import { applyTrimCrop, trimRectStyle, trimKeptLabel, geometryOpsKey, previewBoxStyle,
+  cropCoveragePct, removeCropOps }
   from "../components/editor/mosaicTrim";
 import { pngProgressLabel } from "../components/editor/pngProgress";
 import { opErrorsMessage } from "../components/editor/opErrors";
@@ -866,6 +867,24 @@ export function EditorView() {
               <Text size="xs" c="dimmed" mt={4}>
                 {previewScaleCaption(hist.data)}
               </Text>
+            ) : null}
+            {/* A geometry.crop op silently shrinks the visible frame — an
+                auto-applied trim or a forgotten manual crop just looks like "my
+                image got smaller". Flag any *enabled* crop with how much is left
+                and a one-click way to undo it. Advisory; changes nothing unless
+                clicked. */}
+            {cropCoveragePct(ops) != null ? (
+              <Group gap={6} wrap="nowrap" align="center" mt={4}>
+                <IconCrop size={14} color="var(--mantine-color-dimmed)"
+                  style={{ flexShrink: 0 }} />
+                <Text size="xs" c="dimmed">
+                  Cropped view — showing {cropCoveragePct(ops)}% of the frame.
+                </Text>
+                <Button size="compact-xs" variant="subtle" color="grape"
+                  onClick={() => setOps((p) => removeCropOps(p))}>
+                  Remove crop
+                </Button>
+              </Group>
             ) : null}
             {/* Over-stretching blows out star cores (a spike at pure white) or
                 crushes the sky (a spike at pure black), losing detail on export.

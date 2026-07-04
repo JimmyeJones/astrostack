@@ -303,18 +303,10 @@ problems. Dogfood it every big-picture run and fix root causes.
   image-box so it lines up under `objectFit: contain`. Additive, no engine/API change,
   no default change (Compare stays; this is a second mode or a handle on it). Testable
   with a Vitest handle-drag → clip-width helper. (S–M, editor/trust)
-- **"Cropped view — showing N% of the frame" indicator + one-click "remove crop".**
-  A `geometry.crop` op silently shrinks the visible frame, but nothing tells the user
-  *that* they're looking at a crop or *how much* was removed — so an auto-applied crop
-  (see the mosaic-misclassification bug: Auto can append one unexpectedly) or a
-  forgotten manual trim just looks like "my image is smaller now". Add a small,
-  unobtrusive caption near the preview that fires whenever an *enabled* `geometry.crop`
-  is in the recipe — "Cropped: showing 94% of the frame" (from the crop op's own
-  fractional bounds, no new data) — with a one-click "remove crop" that disables/drops
-  the op. Purely a frontend composition over the recipe the editor already holds;
-  additive, advisory, no engine/API change. A clean trust win that makes any crop
-  obvious and instantly reversible. Vitest: a pure `cropCoveragePct(recipe)` helper +
-  the caption/remove wiring. (S, editor/trust)
+- ~~**"Cropped view — showing N% of the frame" indicator + one-click "remove crop".**~~
+  — **shipped v0.74.3** (see Shipped). A dimmed advisory caption below the preview now
+  fires whenever an *enabled* `geometry.crop` is in the recipe, naming how much of the
+  frame is still shown, with a one-click "Remove crop".
 - ~~**Mark editor-export runs as display-space so re-editing doesn't
   double-stretch (and the FITS is honest)**~~ — **shipped v0.72.2** (see Shipped).
   Editor exports now stamp an `SSDISPLY` FITS card + honest `BUNIT` and a
@@ -525,6 +517,23 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **"Cropped view — showing N% of the frame" indicator + one-click "Remove crop"** —
+  a `geometry.crop` op silently shrinks the visible frame, so an auto-applied trim or a
+  forgotten manual crop just looked like "my image got smaller" with nothing to say so.
+  A dimmed advisory caption now renders below the editor preview whenever the recipe has
+  an *enabled* `geometry.crop`, naming how much of the frame is still shown ("Cropped
+  view — showing 64% of the frame."), with a one-click "Remove crop" that drops the
+  crop op(s) as a single undoable step. The kept fraction is derived purely from the
+  crop ops' own fractional bounds (mirroring the engine `_crop`'s clamp-to-[0,1] + sort
+  semantics, and *multiplying* successive crops since each is relative to its input), so
+  no new data/endpoint is needed. A disabled crop op is ignored (it isn't shrinking the
+  view), and a crop that keeps the whole frame doesn't nag. Frontend-only, additive,
+  advisory — no engine/API/behaviour change. New pure helpers `cropCoveragePct` /
+  `cropCoverageFraction` / `removeCropOps` in `mosaicTrim.ts`. Vitest: the helpers
+  (no-crop / full-frame / single & multiplied crops / clamp+sort of out-of-range bounds
+  / garbage-tolerant / disabled-crop-kept) + an Editor test that a loaded crop shows the
+  64% caption and "Remove crop" clears it. (v0.74.3, this run — Builder)
 
 - **Fix: single-field stacks were misclassified as mosaics (Scout-verified
   wrong-result/broken-UX bug on the primary user's every-session case)** — the
