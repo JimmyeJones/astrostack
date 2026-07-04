@@ -635,9 +635,17 @@ export const api = {
   editPreviewUrl: (safe: string, runId: number, recipe: Recipe, bust = 0) =>
     `/api/targets/${safe}/stack-runs/${runId}/editor/preview?recipe=${encodeRecipe(recipe)}`
     + (bust ? `&v=${bust}` : ""),
-  editStarMaskUrl: (safe: string, runId: number, sizePx?: number) =>
-    `/api/targets/${safe}/stack-runs/${runId}/editor/star-mask`
-    + (sizePx ? `?size_px=${sizePx}` : ""),
+  editStarMaskUrl: (safe: string, runId: number, sizePx?: number,
+                    recipe?: Recipe, uid?: string) => {
+    const q = new URLSearchParams();
+    if (sizePx) q.set("size_px", String(sizePx));
+    // The star ops gate on the display-space image at their pipeline position, so
+    // pass the recipe + selected star op uid to mask that (not the linear proxy).
+    if (recipe) q.set("recipe", encodeRecipe(recipe));
+    if (uid) q.set("uid", uid);
+    const s = q.toString();
+    return `/api/targets/${safe}/stack-runs/${runId}/editor/star-mask${s ? `?${s}` : ""}`;
+  },
   editCoverageMapUrl: (safe: string, runId: number) =>
     `/api/targets/${safe}/stack-runs/${runId}/editor/coverage-map`,
   getHistogram: (safe: string, runId: number, recipe: Recipe, signal?: AbortSignal) =>

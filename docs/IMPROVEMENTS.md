@@ -75,19 +75,6 @@ when you take it.
 
 ### Editor — frontend (PRIORITY 1)
 
-- **BUG: the star-mask overlay is computed on linear data but the star ops gate
-  on display-space data — it drastically under-represents what the ops touch** —
-  `_render_star_mask_png` (`webapp/routers/editor.py:130-145`) runs `star_mask`
-  on the raw linear proxy, but `stars.reduce`/`stars.boost_nebula` (both
-  stage="nonlinear") compute their gate from the *stretched* image at their
-  position in the pipeline (`seestack/edit/ops/stars.py:41,70`). On a synthetic
-  star field the linear-proxy mask marks 13× less area than the display-space
-  gate (3.9 k vs 51 k px > 0.2) — faint stars the op will visibly act on aren't
-  shown at all. **Fix:** render the mask from the recipe applied up to (but not
-  including) the selected star op — reuse the `_recipe_before_uid` sub-recipe
-  machinery the levels-suggestion endpoint already has. Severity: broken-UX
-  (misleading trust overlay). Confidence: confirmed (measured).
-
 - **BUG: background-op failures never reach the editor's error surfacing — the
   op silently does nothing (or colour-shifts)** — `remove_final_gradient`
   catches its Background2D fit failure internally and returns the input
@@ -102,15 +89,6 @@ when you take it.
   a dedicated exception the editor path doesn't swallow) so failures surface in
   the existing UI; make per-channel failure all-or-nothing. Severity: broken-UX
   (silent no-op control). Confidence: confirmed (reproduced log path).
-
-- **BUG: the star-mask overlay refetches un-debounced on every Star-size slider
-  tick** — `maskSizePx` is derived from the live (non-debounced) ops and sits in
-  the query key (`Editor.tsx:255-257`), unlike the preview which goes through
-  `useDebouncedValue`. Dragging Star size 2→8 with the overlay on fires a
-  server-side `star_mask` render per intermediate value; superseded renders
-  queue up and the overlay flickers. **Fix:** debounce the mask size (reuse the
-  recipe debounce or a `useDebouncedValue(maskSizePx, …)`). Severity: broken-UX/
-  perf. Confidence: confirmed (traced).
 
 - **BUG (cosmetic): "Use data defaults" and the per-param "✓ already set"
   indicator disagree about the same value** — `applyDataDrivenDefaults`/
@@ -377,6 +355,26 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Fix: star-mask overlay now reflects the display-space image the ops gate on
+  (was computed on the raw linear proxy)** — the "Star mask" trust overlay ran
+  `star_mask` on the *linear* proxy, but `stars.reduce`/`stars.boost_nebula` (both
+  `stage="nonlinear"`) gate on the **stretched** image at their pipeline position,
+  where faint stars pop out of the noise — so the overlay drastically
+  under-represented what the ops actually touch (faint stars simply weren't shown).
+  `edit_star_mask` now accepts the current `recipe` + selected star-op `uid`,
+  applies the recipe up to (but not including) that op via a generalized
+  `_recipe_before_uid(..., drop_ids=("stars.reduce","stars.boost_nebula"))`, and
+  masks the resulting display-space image (empty recipe → the pipeline's default
+  asinh stretch, matching the ops). Falls back to the linear proxy when no recipe
+  is passed (old clients). Same run also **debounces** the overlay: `maskSizePx`
+  and the recipe are now debounced and in the query key, so dragging "Star size"
+  no longer fires a `star_mask` render per tick. Engine/webapp + frontend;
+  additive/upgrade-safe (new optional query params, response unchanged). Tested:
+  webapp (a stretched recipe marks ≥2.5× more faint-star mask weight than the
+  linear render; recipe+uid stops before the selected op) + Vitest
+  (`editStarMaskUrl` carries size/recipe/uid; the overlay passes the recipe with no
+  uid when no star op is selected). (v0.69.7, this run — Builder)
 
 - **Fix: one slider/curve drag no longer floods (and evicts) the editor's undo
   history** — every editor slider tick and every curve pointer-move went through

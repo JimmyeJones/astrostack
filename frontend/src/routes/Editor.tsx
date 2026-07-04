@@ -263,12 +263,21 @@ export function EditorView() {
   // boost-nebula → size) so tuning "Star size" moves the overlay to match what the
   // op actually gates — otherwise it's frozen at the endpoint's default 4 px.
   const [showMask, setShowMask] = useState(false);
+  // The selected star op (if any): its uid tells the endpoint where in the pipeline
+  // to stop so the mask reflects the display-space image the op actually gates on,
+  // and its star size sizes the mask footprint. Both are debounced (via dKey/the
+  // debounced size below) so a slider drag doesn't fire a mask render per tick.
+  const starSelUid = ops.find(
+    (o) => o.uid === selected && (o.id === "stars.reduce" || o.id === "stars.boost_nebula"),
+  )?.uid;
   const maskSizePx = starMaskSizePx(ops.find((o) => o.uid === selected));
+  const [dMaskSizePx] = useDebouncedValue(maskSizePx, debounceMs);
   const maskPreview = useQuery({
-    queryKey: ["edit-mask", safe, rid, maskSizePx ?? "default"],
+    queryKey: ["edit-mask", safe, rid, dMaskSizePx ?? "default", dKey, starSelUid ?? ""],
     enabled: showMask && !!opsSchema.data && !saved.isLoading,
     queryFn: async ({ signal }) => {
-      const res = await fetch(api.editStarMaskUrl(safe, rid, maskSizePx), { signal });
+      const res = await fetch(
+        api.editStarMaskUrl(safe, rid, dMaskSizePx, dRecipe, starSelUid), { signal });
       if (!res.ok) throw new Error("star mask preview failed");
       return URL.createObjectURL(await res.blob());
     },
