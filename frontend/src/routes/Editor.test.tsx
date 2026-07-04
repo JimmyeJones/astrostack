@@ -743,8 +743,9 @@ describe("EditorView", () => {
     const blackBtn = await screen.findByLabelText("Set Black point from your data");
     expect(blackBtn).toHaveTextContent("black 0.05");
     // One click on the header "Auto stretch" applies both strength and black, so
-    // both per-param buttons read as already-applied (disabled + ✓).
-    fireEvent.click(screen.getByRole("button", { name: /Auto stretch/ }));
+    // both per-param buttons read as already-applied (disabled + ✓). Use findBy so
+    // the click waits for the header button's render rather than racing it.
+    fireEvent.click(await screen.findByRole("button", { name: /Auto stretch/ }));
     await waitFor(() => {
       expect(screen.getByLabelText("Set Strength from your data")).toBeDisabled();
       expect(screen.getByLabelText("Set Black point from your data")).toBeDisabled();
