@@ -355,7 +355,7 @@ _Newest first. One line each: what + commit/PR._
   suggestion from the op schema) and skips disabled ops, so the toolbar count, the
   apply action, and the per-param indicator are consistent. Frontend-only,
   additive. Vitest: added within-half-step-is-already-set and disabled-op-skipped
-  cases to the existing helper suite. (v0.69.8, this run — Builder)
+  cases to the existing helper suite. (v0.69.9, this run — Builder)
 
 - **Fix: star-mask overlay now reflects the display-space image the ops gate on
   (was computed on the raw linear proxy)** — the "Star mask" trust overlay ran
@@ -375,7 +375,7 @@ _Newest first. One line each: what + commit/PR._
   webapp (a stretched recipe marks ≥2.5× more faint-star mask weight than the
   linear render; recipe+uid stops before the selected op) + Vitest
   (`editStarMaskUrl` carries size/recipe/uid; the overlay passes the recipe with no
-  uid when no star op is selected). (v0.69.7, this run — Builder)
+  uid when no star op is selected). (v0.69.8, this run — Builder)
 
 - **Fix: one slider/curve drag no longer floods (and evicts) the editor's undo
   history** — every editor slider tick and every curve pointer-move went through
@@ -392,7 +392,16 @@ _Newest first. One line each: what + commit/PR._
   entry. Frontend-only, additive; no API/behaviour change beyond history grouping.
   Vitest: `useUndoable` coalescing (4 cases: collapse-a-drag / no-merge-across-keys
   / discrete-keyless / fresh-after-undo) + `OpParamPanel` (slider carries
-  `param:amount`, buttons are single-arg keyless). (v0.69.6, this run — Builder)
+  `param:amount`, buttons are single-arg keyless). (v0.69.7, this run — Builder)
+
+- **Fix flaky frontend CI (Editor Levels "From your image" / "Auto levels" tests)** —
+  these tests click a data-driven button and `waitFor` it to flip to its
+  already-applied (disabled + ✓) state, which only settles after a debounced recipe
+  re-render / re-fetched suggestion. Testing Library's default 1000ms async timeout
+  was too tight for the slower CI runner, so the suite passed locally (332/332) but
+  reddened `main`'s CI on unrelated merges (#74, #75). Raised `asyncUtilTimeout` to
+  5000ms globally in `src/test/setup.ts` — no assertion changed, only how long
+  `waitFor`/`findBy*` retry. Restores the CI safety net. (v0.69.6, this run)
 
 - **Editor recipe with a non-mapping `params` no longer 500s** — a recipe body
   whose op carried `params` as a list/string/number (a malformed client body or a
