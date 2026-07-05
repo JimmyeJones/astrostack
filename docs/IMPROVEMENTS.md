@@ -72,6 +72,19 @@ _(none of the traced *editor-engine* op bugs are open — that backlog stayed dr
 the entry above is a stacking/autonomy↔editor classification bug found by dogfooding
 the real webapp stack→edit path.)_
 
+_(Builder engine-hardening audit 2026-07-05 (v0.84.7 baseline): adversarial read of the
+current-focus stacking/calibration path — `stacker.py`'s κ-σ pass-2 clip
+(`valid & (|aligned − mean| ≤ κ·std)`, NaN-std → +inf keep-all), the min/max-reject and
+drizzle two-pass gates, the per-frame `weights`/`photometric_scales` application, and
+`calibrate/apply.py` (`_effective_dark` bias+exposure guards, the never-double-subtract
+pedestal, flat floor/normalise). **One genuine latent correctness bug found and fixed
+(v0.84.8):** the two stacking passes looked up per-frame weight/scale with
+`mapping.get(f.id or -1, 1.0)`, which drops a frame with `id == 0` to the neutral default
+even though the maps are keyed by the real `f.id` — a store/lookup key mismatch (unreachable
+today since SQLite ids start at 1, but a real data-integrity fragility in the final-image
+path). Everything else — NaN=coverage, the rejection maths, the neutral calibration
+fallbacks — is correct and well-tested, consistent with the prior clean audits.)_
+
 _(Scout QA audit 2026-07-05 (v0.83.0 baseline): rotated the focused subsystem audit
 onto **render + QC + the newest engine additions** — `render/thumbnail.py`
 (`asinh_stretch`/`autostretch` MTF, the NaN-aware normalize, the striding
@@ -461,6 +474,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   calibration binding, per-night QC roll-ups. Coverage-levelling's docstring
   already names "between sessions" as motivation but keys on coverage count.
   Large but high value for the multi-night Seestar workflow. (L, correctness)
+- **Surface how much the stack's rejection actually clipped (trust).** When κ-σ or
+  min/max reject runs, the user has no visibility into whether it quietly removed
+  satellites/planes (good) or over-clipped real signal (bad) — they just get an image
+  and have to trust it. Track a single aggregate during pass-2 (a fraction-of-samples-
+  rejected, e.g. the mean over covered pixels of `rejected / contributed`), stamp it as
+  a FITS provenance card + `stack_runs`/options_json field like `PHOTNADJ` already does,
+  and render one plain line on the History **Info** panel ("Rejection removed ~0.4% of
+  samples — mostly transient outliers"). Gives the OSC user a trust signal that the
+  rejection did its job without over-clipping, and a red flag when a too-tight κ is
+  eating signal. Care: the accumulators are memory-bounded on purpose — the counter is
+  one extra small canvas (int32/float32), so gauge the added footprint against the OOM
+  guard, or derive it cheaply from the Welford `count` vs contributed tally rather than a
+  new full-canvas array. Additive, off-nothing (pure reporting), testable on a synthetic
+  stack with a planted outlier. (M, image-quality/trust — priority 4)
 
 ### Features that serve real workflows
 - Annotated sky overlay (label detected objects / show solved field). (M)
@@ -505,12 +532,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   stretch, that's usually the right domain — but if a user puts a linear background/gradient op
   before denoise, the suggested strength ignores it. Minor; only worth aligning if a future run
   is already in that endpoint. Found by a Builder editor-UI audit 2026-07-05. (S, editor)
-- **Low-priority (engine/robustness, unreachable today): per-frame weight/scale lookups use
-  `weights.get(f.id or -1, 1.0)`.** In `stacker.py` (~L1274/1280) and the drizzle path
-  (~L1346/1375) a frame whose `id == 0` would fall through to the default `1.0` instead of its
-  real weight/photometric scale (`0 or -1 == -1`). SQLite autoincrement ids start at 1, so it's
-  **unreachable** — but a latent fragility if the id source ever changes; prefer
-  `f.id if f.id is not None else -1`. Found by a Builder engine audit 2026-07-05. (S, robustness)
+- ~~**Low-priority (engine/robustness, unreachable today): per-frame weight/scale lookups use
+  `weights.get(f.id or -1, 1.0)`.**~~ — **FIXED v0.84.8** (see Shipped). All four hot-path sites
+  (`stacker.py` `_pass` weight+scale, `_drizzle_pass` weight+scale) now key with
+  `f.id if f.id is not None else -1`, matching how the maps are built, so a frame with `id == 0`
+  reads its real weight/scale instead of the neutral default. Regression test
+  `tests/test_stack_frame_id_zero.py` (fails before / passes after).
 - **Low-priority robustness: `background.final_gradient` has no image-size box
   clamp (unlike `background.subtract`).** `background.subtract` runs its box_size
   through `BackgroundOptions.for_image_size` (floors it so the mesh always tiles a
@@ -592,6 +619,22 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Stacking hot path: per-frame weight/scale lookups honour a frame whose DB id is 0
+  (current-focus engine hardening).** The quality-weight and photometric-scale maps are keyed by
+  the frame's real `id` (frames with `id is None` are skipped when the maps are built), but the
+  two stacking passes read them with `mapping.get(f.id or -1, 1.0)` — which silently drops a
+  frame with `id == 0` (`0 or -1 == -1`) to the neutral `1.0` default instead of its real value,
+  a store-key/lookup-key mismatch that would corrupt that frame's contribution to the *final
+  image*. Unreachable today (SQLite autoincrement ids start at 1) but a genuine latent
+  correctness bug in the hot path, in the current-focus stacking-engine area. All four sites
+  (`_pass` weight + photometric scale, `_drizzle_pass` weight + photometric scale) now key with
+  `f.id if f.id is not None else -1`, keeping store- and lookup-keys identical. Engine-only,
+  additive, upgrade-safe — no config/schema/API/default change; a value that was already correct
+  for every real id stays correct, and the id-0 case now reads its real value. Test: pytest
+  (`tests/test_stack_frame_id_zero.py` — a `_pass` over a frame with `id == 0` applies its real
+  weight and photometric scale, not the 1.0 defaults; fails before / passes after). (v0.84.8,
+  this run — Builder)
 
 - **Target page: recoverable error state instead of a broken shell when the target 404s
   (PRIORITY-3 friendliness).** Found by a Builder friendliness dogfood: the Target route — the

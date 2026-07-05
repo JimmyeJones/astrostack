@@ -1271,13 +1271,13 @@ def _pass(
                 continue
             win_rgb, y0, x0 = aligned
             if photometric_scales is not None:
-                scale = photometric_scales.get(f.id or -1, 1.0)
+                scale = photometric_scales.get(f.id if f.id is not None else -1, 1.0)
                 if scale != 1.0:
                     # ``win_rgb`` is this frame's own freshly-reprojected array,
                     # so scale it in place (no extra allocation on the hot path);
                     # NaN gaps stay NaN, preserving coverage.
                     win_rgb *= np.float32(scale)
-            w = weights.get(f.id or -1, 1.0)
+            w = weights.get(f.id if f.id is not None else -1, 1.0)
             with consumer_lock:
                 consumer(win_rgb, y0, x0, w)
             used += 1
@@ -1343,7 +1343,7 @@ def _drizzle_pass(
         # Photometric gain-match (in place — ``rgb`` is this frame's own array),
         # applied after the sky is zeroed so it scales signal, not the pedestal.
         if photometric_scales is not None:
-            scale = photometric_scales.get(frame.id or -1, 1.0)
+            scale = photometric_scales.get(frame.id if frame.id is not None else -1, 1.0)
             if scale != 1.0:
                 rgb = rgb * np.float32(scale)
         in_wcs = wcs_from_text(frame.wcs_json)
@@ -1372,7 +1372,8 @@ def _drizzle_pass(
             rgb, in_wcs = payload
             try:
                 drizzler.add_frame(rgb, in_wcs,
-                                   weight=weights.get(f.id or -1, 1.0), clip=clip)
+                                   weight=weights.get(f.id if f.id is not None else -1, 1.0),
+                                   clip=clip)
                 used += 1
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"{Path(f.source_path).name}: drizzle add_image: {exc}")
