@@ -113,6 +113,16 @@ class DrizzleStacker:
         # for propagating input variance maps — so it can't be reused here.)
         self._sq_drizzlers = _make_drizzlers() if compute_stats else None
         self._n_added = 0
+        # Memory-free rejection tally for the two-pass reject path (mirrors the
+        # κ-σ and min/max accumulators): while pass 2 zero-weights outlier
+        # contributions we sum two scalars — the covered samples that would have
+        # contributed (in-bounds & finite) and the subset the clip actually
+        # dropped. Only accumulated when a ``clip`` is supplied to
+        # :meth:`add_frame`; ``rejection_counts`` reports them so the stacker can
+        # surface a data-driven "rejection clipped ~X% of samples" trust line for
+        # drizzle too.
+        self._n_contributed = 0
+        self._n_rejected = 0
 
     @property
     def output_canvas_shape(self) -> tuple[int, int]:
@@ -167,6 +177,13 @@ class DrizzleStacker:
                 # i.e. keep — so only a *finite* excursion above tol rejects.
                 rejected = np.abs(vals - mean[yi, xi, c]) > tol[yi, xi, c]
                 wmap[rejected] = 0.0
+                # Trust tally: count only samples that *would* have contributed
+                # (in bounds & finite). ``rejected`` can be True for an
+                # out-of-bounds pixel whose clamped mean happens to differ, but
+                # its weight was already 0, so it never counts.
+                contributing = in_bounds & finite
+                self._n_contributed += int(contributing.sum())
+                self._n_rejected += int(np.count_nonzero(contributing & rejected))
             ch = np.where(finite, vals, 0.0).astype(np.float32, copy=False)
             self._drizzlers[c].add_image(
                 data=ch,
@@ -257,6 +274,16 @@ class DrizzleStacker:
     @property
     def n_added(self) -> int:
         return self._n_added
+
+    def rejection_counts(self) -> tuple[int, int]:
+        """``(n_contributed, n_rejected)`` — how many covered samples the
+        reject pass saw and how many its κ-σ clip dropped, summed while pass 2
+        ran (no per-frame tracking, no extra canvas). Both zero when this
+        drizzler was fed no ``clip`` (single-pass drizzle). The fraction is
+        *data-driven* like the standard κ-σ path (contributions outside
+        ``mean ± κ·σ``), so the stacker surfaces it with the sigma-clip trust
+        wording, not min/max's structural one."""
+        return self._n_contributed, self._n_rejected
 
 
 def _compute_output_canvas(ref_wcs, ref_shape: tuple[int, int], scale: float):

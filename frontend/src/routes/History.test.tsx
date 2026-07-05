@@ -465,6 +465,17 @@ describe("rejectionSummaryText", () => {
     expect(small).toBe("Rejection dropped the ~2.0% most-extreme samples (min/max reject)");
     expect(small).not.toContain("κ");
   });
+  it("words drizzle-reject with the data-driven sigma-clip wording, not min/max's", () => {
+    // Two-pass drizzle rejection is a genuine κ-σ clip (contributions outside
+    // mean ± κ·σ), so its fraction is data-driven and reuses the sigma-clip
+    // phrasing — a small share reads as transient outliers, a large one keeps
+    // the too-tight-κ caution (unlike min/max's structural drop).
+    expect(
+      rejectionSummaryText({ mode: "drizzle-reject", fraction: 0.004, n_rejected: 40, n_contributed: 10000 }),
+    ).toBe("Rejection clipped ~0.4% of samples (transient outliers)");
+    const high = rejectionSummaryText({ mode: "drizzle-reject", fraction: 0.15 });
+    expect(high).toContain("check that κ isn't clipping real signal");
+  });
 });
 
 describe("HistoryView provenance", () => {

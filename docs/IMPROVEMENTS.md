@@ -488,16 +488,15 @@ problems. Dogfood it every big-picture run and fix root causes.
   min/max's fraction is *structural* (≈ 2k / frames), so it reads "Rejection dropped the ~X%
   most-extreme samples (min/max reject)" with **no** over-clipping caution (a big number at a
   short stack is by design, not a too-tight κ). Drizzle-reject still remaining below.
-- **Extend the rejection-clipped trust metric to drizzle-reject.** The "Rejection …%" History
-  line now covers κ-σ (v0.84.9) and min/max (v0.84.10) but not the two-pass drizzle-reject
-  path, whose rejection happens *inside* `DrizzleStacker` (pass 1 accumulates value+value² for
-  per-output-pixel mean/σ, pass 2 zero-weights contributions outside `mean ± sigma_kappa·σ`).
-  Surfacing it means having the pass-2 drizzler tally `(n_contributed, n_rejected)` as it
-  zero-weights and returning a `RejectionStats(mode="drizzle-reject", …)` — a genuine
-  *data-driven* fraction (like κ-σ, so it reuses the sigma-clip wording, not min/max's
-  structural one). Additive, pure reporting, reuses the shipped `RejectionStats` + FITS-card +
-  info-endpoint + History wiring. Off-by-default path, so lower marginal value than the shipped
-  two. (S–M, image-quality/trust — priority 4)
+- ~~**Extend the rejection-clipped trust metric to drizzle-reject.**~~ — **shipped v0.84.11**
+  (see Shipped). Completes the rejection-trust family: `DrizzleStacker` now tallies
+  `(n_contributed, n_rejected)` memory-free while pass 2 zero-weights outlier contributions
+  (`rejection_counts()`), and the stacker's drizzle branch emits a
+  `RejectionStats(mode="drizzle-reject", …)` whenever the two-pass reject ran. The fraction is
+  *data-driven* (contributions outside `mean ± κ·σ`), so it reuses the shipped FITS-card +
+  info-endpoint + History wiring and renders with the sigma-clip trust wording — a small share
+  reads "transient outliers", a large one keeps the too-tight-κ caution (unlike min/max's
+  structural drop). Plain single-pass drizzle stamps no provenance.
 
 ### Features that serve real workflows
 - Annotated sky overlay (label detected objects / show solved field). (M)
@@ -629,6 +628,20 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Extend the rejection-clipped trust line to the drizzle-reject path (v0.84.11, PRIORITY-4
+  image-quality/trust; completes the rejection-trust family started v0.84.9).** The
+  "Rejection …%" History line covered κ-σ (v0.84.9) and min/max (v0.84.10) but not the two-pass
+  drizzle-reject path. `DrizzleStacker` now tallies `(n_contributed, n_rejected)` memory-free
+  as pass 2 zero-weights outlier contributions (`rejection_counts()` — only samples that would
+  have contributed, in-bounds & finite), and the stacker's drizzle branch emits a
+  `RejectionStats(mode="drizzle-reject", …)` when the reject pass ran. Data-driven fraction
+  (contributions outside `mean ± κ·σ`), so it reuses the shipped FITS-card/info-endpoint/History
+  wiring and the sigma-clip trust wording (transient-outliers vs too-tight-κ caution), not
+  min/max's structural one; plain single-pass drizzle stamps nothing. Tests:
+  `test_rejection_counts_tallies_the_clip`, `test_rejection_counts_zero_without_clip`,
+  `test_e2e_drizzle_reject_stamps_rejection_provenance`, plus a `rejectionSummaryText`
+  drizzle-reject case.
 
 - **Extend the rejection-clipped trust line to the min/max-reject path (PRIORITY-4
   image-quality/trust; completes the v0.84.9 feature for a path real users hit).** The
