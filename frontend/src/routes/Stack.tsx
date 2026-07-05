@@ -209,8 +209,18 @@ export function StackView() {
     a != null && b != null && b > 0 && Math.abs(a - b) / b > 0.25;
   const subExp = sug?.params.exposure_s ?? null;
   const darkM = masterById(values.dark_master_id);
-  const darkWarning = expMismatch(darkM?.exposure_s, subExp)
-    ? `This dark was shot at ${darkM?.exposure_s}s but your subs are ${subExp}s — a mismatched dark leaves residual thermal signal or over-subtracts. A ${subExp}s dark matches better.`
+  // A dark shot at a different exposure than the subs can be rescaled to match —
+  // dark = bias + (dark − bias)×(sub ÷ dark exposure) — but only with a master
+  // bias selected to hold the readout pedestal fixed. When that's opted in the
+  // mismatch is handled, so show a reassurance instead of the warning.
+  const darkExpMismatch = expMismatch(darkM?.exposure_s, subExp);
+  const darkScalingActive =
+    darkExpMismatch && !!values.scale_dark_to_light && !!values.bias_master_id;
+  const darkWarning = darkExpMismatch && !darkScalingActive
+    ? `This dark was shot at ${darkM?.exposure_s}s but your subs are ${subExp}s — a mismatched dark leaves residual thermal signal or over-subtracts. ${values.bias_master_id ? "Scale it to your sub exposure, or use" : "Add a master bias to scale it to your subs, or use"} a ${subExp}s dark.`
+    : null;
+  const darkScaledNote = darkScalingActive
+    ? `Dark exposure-scaling is on — this ${darkM?.exposure_s}s dark will be scaled to match your ${subExp}s subs.`
     : null;
   const flatM = masterById(values.flat_master_id);
   const flatDarkM = masterById(values.flat_dark_master_id);
@@ -219,8 +229,11 @@ export function StackView() {
     : null;
   // A master dark already contains the bias pedestal, so a bias picked alongside
   // a dark is *not* subtracted from the lights again (the engine ignores it to
-  // avoid double-subtraction). Tell the user rather than silently dropping it.
-  const biasIgnoredForLights = Boolean(values.bias_master_id && values.dark_master_id);
+  // avoid double-subtraction). Tell the user rather than silently dropping it —
+  // unless dark exposure-scaling is on, where the bias *is* used (to hold the
+  // pedestal fixed while the dark current is rescaled), so it isn't inert.
+  const biasIgnoredForLights =
+    Boolean(values.bias_master_id && values.dark_master_id) && !darkScalingActive;
   const running = job && (job.state === "running" || job.state === "queued");
   const pct = job && job.total ? Math.round((job.done / job.total) * 100) : 0;
 
@@ -529,6 +542,17 @@ export function StackView() {
                 {darkWarning ? (
                   <Alert color="yellow" variant="light" py={6} px="sm">
                     <Text size="xs">{darkWarning}</Text>
+                    {values.bias_master_id && !values.scale_dark_to_light ? (
+                      <Button size="compact-xs" variant="light" color="yellow" mt={6}
+                        onClick={() => set("scale_dark_to_light", true)}>
+                        Scale this dark to your subs' exposure
+                      </Button>
+                    ) : null}
+                  </Alert>
+                ) : null}
+                {darkScaledNote ? (
+                  <Alert color="teal" variant="light" py={6} px="sm">
+                    <Text size="xs">{darkScaledNote}</Text>
                   </Alert>
                 ) : null}
                 {values.flat_master_id && darkOpts.length > 0 ? (

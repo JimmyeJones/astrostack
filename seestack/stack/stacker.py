@@ -289,6 +289,12 @@ class StackOptions:
     # when ``dark_path`` is set (a dark already contains the bias, so both would
     # double-subtract it). Server-resolved path, never client input.
     bias_path: str | None = None
+    # Exposure-scale a master dark whose exposure differs from the lights:
+    # ``dark = bias + (dark − bias)·(t_light / t_dark)``. Needs a master bias
+    # (to hold the readout pedestal fixed) and known exposures; falls back to the
+    # unscaled dark otherwise. Off by default. Lets a dark library shot at one
+    # exposure still calibrate subs at another.
+    scale_dark_to_light: bool = False
 
     def background_options(self) -> BackgroundOptions:
         return BackgroundOptions(
@@ -633,6 +639,7 @@ def run_stack(
         calibration = CalibrationMasters.load(
             options.dark_path, options.flat_path, options.flat_dark_path,
             options.bias_path,
+            scale_dark_to_light=options.scale_dark_to_light,
         )
         if calibration.is_empty:
             calibration = None
@@ -1298,7 +1305,7 @@ def _drizzle_pass(
 
         raw, info = load_seestar_raw(path, debayer=False, out_dtype=np.float32)
         if calibration is not None:
-            raw = calibration.apply_raw(raw)
+            raw = calibration.apply_raw(raw, light_exposure_s=info.exposure_s)
         if mono:
             rgb = np.repeat(raw[..., None], 3, axis=2)
         else:
