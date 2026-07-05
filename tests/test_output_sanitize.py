@@ -58,6 +58,7 @@ def test_write_stack_outputs_confines_files_to_project_output_dir(tmp_path):
 
     # Nothing was written outside project_dir/output/.
     assert not outside.exists()
-    for p in paths.values():
+    for key in ("fits", "tiff", "preview", "coverage"):
+        p = paths[key]
         assert p.is_relative_to(project_dir / "output")
         assert p.exists()

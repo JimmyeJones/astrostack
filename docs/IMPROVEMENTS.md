@@ -429,18 +429,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
-- **Low-priority: manual re-stacks (not just reprocess) still overwrite the target's
-  `master` output.** The v0.81.4 fix gave *reprocess-all* runs a fresh version-tagged
-  basename, but a plain re-stack from the Stack form still defaults to `output_name="master"`
-  (the frontend sends no name), so a second manual stack of a target archives the first
-  `master.*` to an orphaned timestamped file and its old `stack_runs` row starts serving the
-  new image — the same mechanic, just user-initiated one-at-a-time. The "reuse these
-  settings" endpoint already `pop`s `output_name` intending "a fresh run gets a fresh name",
-  but that falls back to `master` too, so the intent isn't realised. Consider giving every
-  re-stack of an already-stacked target a fresh unique basename (or an explicit
-  overwrite-vs-new choice in the form), so History genuinely keeps both. Weigh against the
-  expectation that `master.fits` is "the" canonical output; may want the newest run to stay
-  named `master` and the *older* one to be renamed+rerowed instead. (S–M, correctness/trust)
+- ~~**Low-priority: manual re-stacks (not just reprocess) still overwrite the target's
+  `master` output.**~~ — **FIXED v0.81.8** (see Shipped). Took the "newest run stays
+  `master`, older run renamed+rerowed" direction the note preferred: `write_stack_outputs`
+  now archives an existing output set to a single consistent `{base}_{stamp}` basename
+  (keeping the coverage/preview siblings resolvable) and returns the `{old→archived}` map;
+  the stacker (and editor-export / channel-combine paths) repoint the previous run's history
+  row at its archived files before recording the new run. History now genuinely keeps both,
+  and no `stack_runs` row silently serves another run's image.
 - **Low-priority (editor): the whole-recipe Split/Compare divider misaligns when an
   enabled geometry op reshapes the frame.** The "Original" overlay is the full
   empty-recipe render (`Editor.tsx` base fetch `{ops: []}`), but the preview box is sized to
@@ -546,6 +542,33 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Fix: a manual re-stack (or re-export/re-combine) under an existing basename silently
+  made the *previous* run's history row serve the new image (data-integrity/trust).** A
+  plain re-stack from the Stack form defaults to `output_name="master"` (the frontend sends
+  no name), so `write_stack_outputs` archived the existing `master.*` to a timestamped file
+  that **no** `stack_runs` row referenced, then wrote the new pixels back at `master.fits` —
+  and the *old* run's row (still pointing at `master.fits`) began serving the new image while
+  the true old image was orphaned. History showed two runs but both resolved to the newest
+  image, defeating before/after comparison (the same mechanic the v0.81.4 reprocess fix
+  addressed, but user-initiated). Fix takes the note's preferred "newest stays `master`,
+  older is renamed+rerowed" direction: `_archive_existing_outputs` now moves an existing set
+  aside under a single consistent `{base}_{stamp}` basename (so the `_coverage`/`_preview`
+  siblings stay siblings of the archived FITS — `coverage_path_for` resolves them from the
+  FITS basename) and returns a `{original→archived}` map; `write_stack_outputs` surfaces it
+  as a new additive `"archived"` result key; and the stacker (plus the editor-export and
+  channel-combine paths) call a new `Project.repoint_stack_runs` to point the previous run's
+  `fits/tiff/preview` columns at the archived files *before* recording the new run. Net:
+  `master.*` is always the newest image, the previous run keeps resolving to its own
+  (byte-for-byte preserved) image + coverage, and nothing is orphaned. Reprocess-all is
+  unaffected (it already uses fresh version-tagged basenames, so it archives nothing).
+  Additive/upgrade-safe: no schema/API/default change — a new nullable-ish result key and a
+  history repoint (no run added/deleted/content-changed); direct engine callers that ignore
+  the new key are unaffected. Tests: engine unit (archive to one basename + coverage sibling
+  resolvable; repoint moves the old row to distinct existing files; no-op on empty map) +
+  end-to-end (two real `run_stack`s under `master` — old row repointed to a distinct file
+  holding its original bytes, new run keeps `master.fits`; fails before / passes after).
+  (v0.81.8, this run — Builder)
 
 - **Fix: watcher could permanently drop a batch from auto-ingest when a file stabilised
   during a running pipeline (PRIORITY-2 autonomy / data-completeness).** Frames dropped

@@ -121,7 +121,7 @@ def write_stack_outputs(
     preview_path = out_dir / f"{out_basename}_preview.png"
     cov_fits_path = out_dir / f"{out_basename}_coverage.fits"
 
-    _archive_if_exists([fits_path, tiff_path, preview_path, cov_fits_path])
+    archived = _archive_existing_outputs(out_dir, out_basename)
 
     _write_fits(fits_path, rgb, wcs_text, header_meta, already_display=already_display)
     _write_coverage_fits(cov_fits_path, coverage)
@@ -137,6 +137,11 @@ def write_stack_outputs(
         "tiff": tiff_path,
         "preview": preview_path,
         "coverage": cov_fits_path,
+        # {original_path: archived_path} for outputs that already existed and were
+        # moved aside. The caller uses this to repoint the *previous* run's history
+        # row at its archived files, so a re-stack keeps ``master`` as the newest
+        # image without silently making the old run's row serve the new pixels.
+        "archived": archived,
     }
 
 
@@ -347,15 +352,54 @@ def _autostretch_for_export(rgb: np.ndarray) -> np.ndarray:
 
 # ---- file management -----------------------------------------------------
 
-def _archive_if_exists(paths: list[Path]) -> None:
-    """Rename existing outputs with a timestamp suffix instead of overwriting."""
+def _archive_existing_outputs(out_dir: Path, out_basename: str) -> dict[str, str]:
+    """Move an existing output set aside under a single timestamped *basename*.
+
+    Rather than overwriting (people get attached to their stacks), a previous
+    ``{base}.fits`` / ``.tif`` / ``_preview.png`` / ``_coverage.fits`` set is
+    renamed to ``{base}_{stamp}.*``. Critically, all four move to the **same**
+    new basename so the coverage/preview siblings stay siblings of the archived
+    FITS (``coverage_path_for`` derives ``{stem}_coverage.fits`` from the FITS
+    path) — repointing a history row at the archived FITS then keeps its
+    coverage map resolvable.
+
+    Returns ``{original_path: archived_path}`` for the ``fits``/``tiff``/
+    ``preview`` artefacts (the ones recorded in ``stack_runs``), so the caller
+    can repoint the previous run's row. The coverage sibling is archived too but
+    isn't in the returned map (it has no dedicated history column — it's resolved
+    from the FITS basename).
+    """
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    for p in paths:
-        if not p.exists():
+    archived_basename = f"{out_basename}_{stamp}"
+    # Avoid clobbering an already-archived set from the same second (near-
+    # impossible for real multi-minute stacks, but rename() overwrites silently).
+    n = 2
+    while any(
+        (out_dir / f"{archived_basename}{suffix}").exists()
+        for suffix in (".fits", ".tif", "_preview.png", "_coverage.fits")
+    ):
+        archived_basename = f"{out_basename}_{stamp}_{n}"
+        n += 1
+
+    # (original suffix, archived suffix) — same for all, but explicit so the
+    # compound _preview / _coverage names rebuild from the new basename cleanly.
+    artefacts = {
+        "fits": ".fits",
+        "tiff": ".tif",
+        "preview": "_preview.png",
+        "coverage": "_coverage.fits",
+    }
+    mapping: dict[str, str] = {}
+    for kind, suffix in artefacts.items():
+        orig = out_dir / f"{out_basename}{suffix}"
+        if not orig.exists():
             continue
-        archived = p.with_name(f"{p.stem}_{stamp}{p.suffix}")
+        dst = out_dir / f"{archived_basename}{suffix}"
         try:
-            p.rename(archived)
-            log.info("archived previous %s → %s", p.name, archived.name)
+            orig.rename(dst)
+            log.info("archived previous %s → %s", orig.name, dst.name)
+            if kind != "coverage":
+                mapping[str(orig)] = str(dst)
         except OSError as exc:
-            log.warning("could not archive %s: %s", p, exc)
+            log.warning("could not archive %s: %s", orig, exc)
+    return mapping
