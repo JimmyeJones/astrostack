@@ -505,11 +505,34 @@ def _compute_noise_sigma(rgb: np.ndarray) -> float | None:
         return None
 
 
+@dataclass
+class RejectionStats:
+    """How much a rejection pass actually clipped, measured while it ran.
+
+    A memory-free trust signal: the standard κ-σ pass-2 already computes a
+    per-pixel ``keep`` mask, so we sum two scalars over it — the total samples
+    that contributed (finite/covered) and the subset that failed the κ-σ test —
+    without allocating any extra canvas. ``fraction`` is the share of covered
+    samples the rejection removed; a healthy value is small (transient outliers
+    — satellites, planes, cosmic rays), while a large one flags a too-tight κ
+    that may be eating real signal. Stamped into the FITS header + surfaced on
+    the History Info panel so the user can trust the rejection did its job."""
+
+    mode: str
+    n_contributed: int
+    n_rejected: int
+
+    @property
+    def fraction(self) -> float:
+        return self.n_rejected / self.n_contributed if self.n_contributed else 0.0
+
+
 def _build_output_header_meta(
     project: Project, frames: list, options: StackOptions, n_used: int,
     wstats: WeightingStats | None = None,
     calibration: "Any | None" = None,
     pstats: PhotometricStats | None = None,
+    rstats: "RejectionStats | None" = None,
 ) -> dict[str, Any]:
     """Collect provenance for the output FITS header.
 
@@ -598,6 +621,16 @@ def _build_output_header_meta(
         meta["PHOTMIN"] = (round(float(pstats.min_scale), 3), "min frame scale")
         meta["PHOTMAX"] = (round(float(pstats.max_scale), 3), "max frame scale")
         meta["PHOTMED"] = (round(float(pstats.median_scale), 3), "median frame scale")
+    # Rejection provenance: how much the κ-σ pass actually clipped, so the user
+    # can trust the rejection removed transient outliers (satellites/planes)
+    # without over-clipping real signal. Stamped whenever a rejection pass ran
+    # (n_contributed > 0), even at 0% — "clipped nothing" is itself a signal.
+    if rstats is not None and rstats.n_contributed > 0:
+        meta["REJMODE"] = (rstats.mode, "outlier rejection method")
+        meta["REJFRAC"] = (round(float(rstats.fraction), 6),
+                           "fraction of samples rejected")
+        meta["REJNREJ"] = (int(rstats.n_rejected), "samples rejected")
+        meta["REJNTOT"] = (int(rstats.n_contributed), "samples contributed")
     return meta
 
 
@@ -838,6 +871,10 @@ def run_stack(
                                        else 0),
                         memory_budget_gb=memory_budget_gb)
     errors: list[str] = []
+    # Set by the κ-σ pass-2 branch to record how much rejection actually clipped
+    # (a memory-free trust signal stamped into the output header). None on paths
+    # that don't run a data-driven κ-σ pass (mean / min-max / drizzle).
+    rej_stats: RejectionStats | None = None
 
     # ---- 3a. Drizzle path (alternate accumulator) --------------------------
     if options.drizzle:
@@ -969,6 +1006,12 @@ def run_stack(
         mean = wel.mean()
         std = wel.std()
         wsum = WeightedSumAccumulator(canvas_3)
+        # Memory-free rejection tally: sum two scalars over the per-pixel keep
+        # mask this pass already computes (no extra canvas). "contributed" = the
+        # covered samples seen; "rejected" = those clipped by the κ-σ test. Where
+        # σ is unknown (NaN → +inf tol) nothing is clipped, so it's excluded from
+        # rejected but still counted as contributed — the honest denominator.
+        clip_counts = {"contributed": 0, "rejected": 0}
 
         def consume_clipped(aligned: np.ndarray, y0: int, x0: int, weight: float) -> None:
             wh, ww = aligned.shape[:2]
@@ -977,6 +1020,8 @@ def run_stack(
             valid = np.isfinite(aligned)
             tol = options.sigma_kappa * np.where(np.isfinite(std_win), std_win, np.inf)
             keep = valid & (np.abs(aligned - mean_win) <= tol)
+            clip_counts["contributed"] += int(valid.sum())
+            clip_counts["rejected"] += int(np.count_nonzero(valid & ~keep))
             wsum.add_window(np.where(keep, aligned, np.nan), y0, x0, weight=weight)
 
         n_used_p2 = _pass(
@@ -994,6 +1039,11 @@ def run_stack(
         n_used = min(n_used_p1, n_used_p2)
         result_image = wsum.result()
         coverage = wsum.coverage
+        rej_stats = RejectionStats(
+            mode="sigma-clip",
+            n_contributed=clip_counts["contributed"],
+            n_rejected=clip_counts["rejected"],
+        )
     else:
         # Single-pass weighted mean.
         wsum = WeightedSumAccumulator(canvas_3)
@@ -1096,7 +1146,8 @@ def run_stack(
     # self-documenting FITS header and the run record, so the two never disagree.
     noise_sigma = _compute_noise_sigma(result_image)
     header_meta = _build_output_header_meta(project, frames, options, n_used, wstats,
-                                            calibration=calibration, pstats=pstats)
+                                            calibration=calibration, pstats=pstats,
+                                            rstats=rej_stats)
     if noise_sigma is not None:
         header_meta["BKGSIGMA"] = (noise_sigma, "normalized background noise sigma")
     paths = write_stack_outputs(

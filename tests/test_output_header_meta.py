@@ -214,3 +214,41 @@ def test_dark_scaling_provenance_absent_without_bias_or_exposure():
     assert "DARKSCAL" not in _meta_for(scale=True, dark_exp=30.0, light_exp=10.0,
                                        has_bias=False)
     assert "DARKSCAL" not in _meta_for(scale=True, dark_exp=None, light_exp=10.0)
+
+
+# --- Rejection provenance (companion to the "surface rejection clipping" feature) --
+# When a κ-σ pass ran, _build_output_header_meta stamps REJMODE/REJFRAC/REJNREJ/
+# REJNTOT so the run Info / History can show a "Rejection clipped ~X% of samples"
+# trust line. Mirrors the PHOTNORM provenance: present only when the pass ran.
+from seestack.stack.stacker import RejectionStats  # noqa: E402
+
+
+def _rej_meta_for(rstats):
+    proj = SimpleNamespace(get_meta=lambda k: "M42" if k == "name" else None)
+    frames = [SimpleNamespace(exposure_s=10.0) for _ in range(6)]
+    return _build_output_header_meta(proj, frames, StackOptions(), 6, rstats=rstats)
+
+
+def test_rejection_provenance_stamped_when_pass_ran():
+    meta = _rej_meta_for(RejectionStats("sigma-clip", n_contributed=1000, n_rejected=4))
+    assert meta["REJMODE"][0] == "sigma-clip"
+    assert meta["REJFRAC"][0] == 0.004
+    assert meta["REJNREJ"][0] == 4
+    assert meta["REJNTOT"][0] == 1000
+
+
+def test_rejection_provenance_stamped_even_at_zero_rejected():
+    # A pass that clipped nothing is still worth advertising ("0% — clean data"),
+    # so the cards are present with a 0 fraction.
+    meta = _rej_meta_for(RejectionStats("sigma-clip", n_contributed=500, n_rejected=0))
+    assert meta["REJMODE"][0] == "sigma-clip"
+    assert meta["REJFRAC"][0] == 0.0
+    assert meta["REJNREJ"][0] == 0
+
+
+def test_rejection_provenance_absent_when_no_pass():
+    # No rejection pass ran (mean / min-max / drizzle path) → nothing to advertise.
+    assert "REJMODE" not in _rej_meta_for(None)
+    # A degenerate "contributed nothing" tally is also omitted (never a 0/0 stamp).
+    assert "REJMODE" not in _rej_meta_for(
+        RejectionStats("sigma-clip", n_contributed=0, n_rejected=0))

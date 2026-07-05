@@ -306,6 +306,43 @@ def test_stack_info_dark_scaling_absent_for_unscaled_stack(client, solved_librar
     assert body["dark_scaling"] is None
 
 
+def test_stack_info_surfaces_rejection_summary(client, solved_library):
+    """A κ-σ stack stamps REJMODE/REJFRAC/REJN* cards; the info endpoint parses
+    them into a friendly summary the History panel shows as a trust line."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            with fits.open(run.fits_path, mode="update") as hdul:
+                hdul[0].header["REJMODE"] = "sigma-clip"
+                hdul[0].header["REJFRAC"] = 0.004
+                hdul[0].header["REJNREJ"] = 40
+                hdul[0].header["REJNTOT"] = 10000
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/info").json()
+    rej = body["rejection"]
+    assert rej is not None
+    assert rej["mode"] == "sigma-clip"
+    assert rej["fraction"] == 0.004
+    assert rej["n_rejected"] == 40
+    assert rej["n_contributed"] == 10000
+
+
+def test_stack_info_rejection_absent_for_unclipped_stack(client, solved_library):
+    """A plain stack has no REJMODE cards, so rejection is None."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/info").json()
+    assert body["rejection"] is None
+
+
 def test_transparency_ratio_surfaces_on_runs_and_gallery(client, solved_library):
     """A run's persisted transparency verdict rides along on both the runs list
     and the gallery so the frontend can badge a hazy night at a glance."""

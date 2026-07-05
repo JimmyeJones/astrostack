@@ -323,6 +323,56 @@ def test_stack_sigma_clipped(tmp_path):
     assert result.n_frames_used == 6
 
 
+def test_sigma_clip_stamps_rejection_fraction_provenance(tmp_path):
+    """A κ-σ stack with a planted outlier (a satellite streak in one frame)
+    records how much rejection actually clipped — REJMODE + a positive REJFRAC —
+    so the History Info panel can show the "rejection removed ~X% of samples"
+    trust line. The counter is memory-free (two scalars, no extra canvas).
+
+    Uses ≥11 frames: κ-σ mathematically can't reject a lone outlier in a tiny
+    stack (its own deviation inflates σ enough to survive — the reason min/max
+    reject exists), so a 6-frame stack would legitimately clip nothing here."""
+    from astropy.io import fits
+
+    proj = _build_project(tmp_path, n=12, with_outlier=True)
+    try:
+        result = run_stack(
+            proj,
+            StackOptions(sigma_clip=True, sigma_kappa=2.5, max_workers=2,
+                         output_name="rejprov"),
+        )
+    finally:
+        proj.close()
+
+    hdr = fits.getheader(result.fits_path)
+    assert hdr["REJMODE"] == "sigma-clip"
+    assert hdr["REJNTOT"] > 0                 # samples were contributed
+    assert hdr["REJNREJ"] > 0                 # the planted streak was clipped
+    # Fraction is a share in [0, 1] consistent with the raw counts.
+    assert 0.0 < hdr["REJFRAC"] <= 1.0
+    assert abs(hdr["REJFRAC"] - hdr["REJNREJ"] / hdr["REJNTOT"]) < 1e-4
+
+
+def test_non_clipped_stack_records_no_rejection_provenance(tmp_path):
+    """A plain-mean stack (sigma_clip off) runs no κ-σ pass, so it must not stamp
+    the rejection cards — the History line is omitted, mirroring PHOTNORM/DARKSCAL
+    only appearing when the relevant pass actually ran."""
+    from astropy.io import fits
+
+    proj = _build_project(tmp_path, n=5)
+    try:
+        result = run_stack(
+            proj,
+            StackOptions(sigma_clip=False, max_workers=2, output_name="norej"),
+        )
+    finally:
+        proj.close()
+
+    hdr = fits.getheader(result.fits_path)
+    assert "REJMODE" not in hdr
+    assert "REJFRAC" not in hdr
+
+
 def test_stack_min_max_reject(tmp_path):
     """The min/max-reject path runs end to end, stamps its method into the FITS
     provenance, and produces a finite, positive result where covered."""
