@@ -555,6 +555,14 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Surface the deep-rescan count on the finished reprocess-all job summary (follow-up to
+  v0.83.0; PRIORITY-3 friendliness).** The Jobs page's plain-language reprocess outcome now
+  reads "Restacked N/M targets — re-ran QC/solve/grade on K …" when the deep_rescan option
+  was used (the new `rescanned` summary field), closing the feedback loop so the user can
+  confirm the (slower) rescan actually ran. Omitted entirely for a plain restack
+  (`rescanned` 0). Pure `reprocessSummary` helper + Vitest (rescan clause present/omitted and
+  ordered before the skip/failure notes). Frontend-only, additive. (v0.83.1, this run — Builder)
+
 - **Reprocess-everything slice (b): optional deep full rescan (re-QC / re-solve / re-grade
   before restacking) — completes the ⭐ owner-requested "reprocess everything" feature
   (PRIORITY-2 autonomy).** The slice-(a) reprocess restacks each target with the current
