@@ -8,7 +8,7 @@ import { notifications } from "@mantine/notifications";
 import { IconAdjustments, IconCheck, IconCopy, IconDeviceFloppy, IconDownload, IconGitCompare, IconInfoCircle, IconPencil, IconSparkles, IconTrash, IconX } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
-import { api, type StackRun, type StackPhotometricSummary } from "../api/client";
+import { api, type StackRun, type StackPhotometricSummary, type StackDarkScalingSummary } from "../api/client";
 import { formatIntegration } from "../format";
 import { HazyNightBadge } from "../components/HazyNightBadge";
 import { CalibrationBadge } from "../components/CalibrationBadge";
@@ -133,6 +133,27 @@ export function photometricSummaryText(
   return s;
 }
 
+// One-line provenance for dark exposure-scaling — "Dark scaled to sub exposure ·
+// 30s → 10s". Returns null when the run didn't scale its dark (so the card omits
+// the line). Pure so it can be unit-tested and mirrors photometricSummaryText.
+export function darkScalingSummaryText(
+  darkScaling: StackDarkScalingSummary | null | undefined,
+): string | null {
+  if (!darkScaling) return null;
+  let s = "Dark scaled to sub exposure";
+  const { dark_exposure: de, light_exposure: le } = darkScaling;
+  if (typeof de === "number" && typeof le === "number") {
+    s += ` · ${formatExposure(de)} → ${formatExposure(le)}`;
+  }
+  return s;
+}
+
+// Compact seconds label for exposures — "30s", "2.5s" — trimming a trailing ".0".
+function formatExposure(s: number): string {
+  const r = Math.round(s * 10) / 10;
+  return `${Number.isInteger(r) ? r.toFixed(0) : r.toFixed(1)}s`;
+}
+
 function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
   const info = useQuery({
     queryKey: ["stack-info", safe, runId],
@@ -171,6 +192,11 @@ function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
       {photometricSummaryText(data.photometric) ? (
         <Text size="xs" c="dimmed">
           {photometricSummaryText(data.photometric)}
+        </Text>
+      ) : null}
+      {darkScalingSummaryText(data.dark_scaling) ? (
+        <Text size="xs" c="dimmed">
+          {darkScalingSummaryText(data.dark_scaling)}
         </Text>
       ) : null}
       {combineMethodLabel(data.cards) ? (

@@ -205,6 +205,12 @@ export interface StackPhotometricSummary {
   median?: number;
 }
 
+export interface StackDarkScalingSummary {
+  mode: string;
+  dark_exposure?: number;
+  light_exposure?: number;
+}
+
 export interface StackProcessingStep {
   op: string;
   label: string;
@@ -216,6 +222,7 @@ export interface StackRunInfo {
   n_frames: number | null;
   weighting: StackWeightingSummary | null;
   photometric?: StackPhotometricSummary | null;
+  dark_scaling?: StackDarkScalingSummary | null;
   processing?: StackProcessingStep[];
   cards: StackInfoCard[];
 }

@@ -423,6 +423,17 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
             with contextlib.suppress(KeyError, TypeError, ValueError):
                 photometric[k] = float(header[hk])
 
+    # Dark exposure-scaling summary (present only when a master dark was actually
+    # scaled to the subs' exposure), parsed the same way so the panel can show a
+    # single "Dark scaled to sub exposure · 30s → 10s" line — the user can trust
+    # the off-by-default scale_dark_to_light option did something.
+    dark_scaling: dict[str, Any] | None = None
+    if "DARKSCAL" in header:
+        dark_scaling = {"mode": str(header["DARKSCAL"])}
+        for hk, k in (("DARKDEXP", "dark_exposure"), ("DARKLEXP", "light_exposure")):
+            with contextlib.suppress(KeyError, TypeError, ValueError):
+                dark_scaling[k] = float(header[hk])
+
     for key in _INFO_CARDS:
         if key not in header:
             continue
@@ -445,7 +456,7 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
     processing = _parse_processing_chain(header)
     return {"run_id": run_id, "integration_s": integration_s,
             "n_frames": n_frames, "weighting": weighting,
-            "photometric": photometric,
+            "photometric": photometric, "dark_scaling": dark_scaling,
             "processing": processing, "cards": cards}
 
 

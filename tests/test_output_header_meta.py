@@ -164,3 +164,53 @@ def test_fits_is_display_space_tolerates_missing_file(tmp_path):
     """A bad/missing path is 'not display space' (renderers fall back to linear),
     never an exception on the hot render path."""
     assert fits_is_display_space(tmp_path / "does-not-exist.fits") is False
+
+
+# --- Dark exposure-scaling provenance (companion to the v0.82.0 feature) --------
+# When scale_dark_to_light actually scaled a master dark to the subs' exposure,
+# _build_output_header_meta must stamp DARKSCAL/DARKDEXP/DARKLEXP so the run Info /
+# History can show "Dark scaled to sub exposure · 30s → 10s". Mirrors the PHOTNORM
+# provenance: present only when scaling really happened, omitted otherwise.
+from types import SimpleNamespace  # noqa: E402
+
+from seestack.stack.stacker import StackOptions, _build_output_header_meta  # noqa: E402
+
+
+def _meta_for(*, scale, dark_exp, light_exp, has_bias=True, has_dark=True):
+    proj = SimpleNamespace(get_meta=lambda k: "M42" if k == "name" else None)
+    frames = [SimpleNamespace(exposure_s=light_exp) for _ in range(5)]
+    cal = SimpleNamespace(
+        scale_dark_to_light=scale,
+        dark_exposure_s=dark_exp,
+        bias=np.zeros((4, 4), dtype=np.float32) if has_bias else None,
+        dark=np.zeros((4, 4), dtype=np.float32) if has_dark else None,
+        describe=lambda: "dark+bias",
+    )
+    return _build_output_header_meta(proj, frames, StackOptions(), 5, calibration=cal)
+
+
+def test_dark_scaling_provenance_stamped_when_scaled():
+    meta = _meta_for(scale=True, dark_exp=30.0, light_exp=10.0)
+    assert meta["DARKSCAL"][0] == "exposure"
+    assert meta["DARKDEXP"][0] == 30.0
+    assert meta["DARKLEXP"][0] == 10.0
+
+
+def test_dark_scaling_provenance_absent_when_option_off():
+    meta = _meta_for(scale=False, dark_exp=30.0, light_exp=10.0)
+    assert "DARKSCAL" not in meta
+
+
+def test_dark_scaling_provenance_absent_for_matched_exposure():
+    # A matched exposure leaves the dark unscaled (see _effective_dark), so no
+    # scaling actually happened → nothing to advertise.
+    meta = _meta_for(scale=True, dark_exp=30.0, light_exp=30.0)
+    assert "DARKSCAL" not in meta
+
+
+def test_dark_scaling_provenance_absent_without_bias_or_exposure():
+    # No bias to hold the pedestal, or an unknown dark exposure → the dark was
+    # used unscaled, so the stamp is omitted.
+    assert "DARKSCAL" not in _meta_for(scale=True, dark_exp=30.0, light_exp=10.0,
+                                       has_bias=False)
+    assert "DARKSCAL" not in _meta_for(scale=True, dark_exp=None, light_exp=10.0)
