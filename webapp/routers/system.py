@@ -189,6 +189,28 @@ def reprocess_all(request: Request, body: ReprocessAllBody | None = None) -> dic
     return {"job_id": job.id, "already_running": False}
 
 
+@router.get("/api/reprocess-status")
+def reprocess_status(request: Request) -> dict[str, Any]:
+    """How many targets' current images were made by an older engine version than
+    the running build — so the UI can *proactively* nudge the user to reprocess
+    after an in-place upgrade instead of hoping they remember to. Read-only.
+
+    Returns ``{current_version, outdated, up_to_date, total_targets}``; ``outdated``
+    counts only targets that already have a genuine stack on a different version
+    (a never-stacked target is neither), i.e. exactly the images a reprocess would
+    change. FastAPI runs this sync endpoint in a threadpool, so the per-target
+    SQLite reads don't block the event loop.
+    """
+    from seestack.io.library import Library
+
+    settings = deps.get_settings(request)
+    lib = Library.open_or_create(settings.resolved_library_root)
+    try:
+        return pipeline.reprocess_status(lib)
+    finally:
+        lib.close()
+
+
 @router.get("/api/health")
 async def health() -> dict:
     """Liveness probe. Deliberately trivial — no subprocess, no disk, no locks.

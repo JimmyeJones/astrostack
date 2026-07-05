@@ -11,7 +11,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
-import { api } from "../api/client";
+import { api, type ReprocessStatus } from "../api/client";
 import { dependencyMet } from "../api/depends";
 import { HintLabel, StackOptionControl } from "../components/StackOptionControl";
 
@@ -117,11 +117,32 @@ function BackupRestore() {
   );
 }
 
+// Proactive nudge text: after an in-place upgrade, tell the user how many targets'
+// images are stale so they don't have to remember to reprocess. Null when nothing
+// is outdated (or the status hasn't loaded), so no nudge is shown.
+export function reprocessNudgeText(status: ReprocessStatus | undefined): string | null {
+  if (!status || status.outdated <= 0) return null;
+  const n = status.outdated;
+  const subj = n === 1 ? "1 target was" : `${n} targets were`;
+  return (
+    `${subj} last stacked with an older AstroStack version than the one now `
+    + `running (v${status.current_version}). Reprocess ${n === 1 ? "it" : "them"} `
+    + `to apply the latest stacking improvements — it's non-destructive, so your `
+    + `existing images aren't overwritten.`
+  );
+}
+
 export function Maintenance() {
   const navigate = useNavigate();
   // Default to "only outdated" — after an upgrade the user wants to reprocess just
   // the images that would actually change, not restack the whole library wholesale.
   const [staleOnly, setStaleOnly] = useState(true);
+  const status = useQuery({
+    queryKey: ["reprocess-status"],
+    queryFn: api.reprocessStatus,
+    staleTime: 60_000,
+  });
+  const nudge = reprocessNudgeText(status.data);
   const reprocess = useMutation({
     mutationFn: (opts: { staleOnly: boolean }) => api.reprocessAll(opts.staleOnly),
     onSuccess: (res) => {
@@ -166,6 +187,16 @@ export function Maintenance() {
           time; each restack is saved as a new result alongside the old one, so
           nothing is ever lost.
         </Text>
+        {nudge && (
+          <Alert
+            color="grape"
+            variant="light"
+            icon={<IconRefresh size={16} />}
+            title="Some images are out of date"
+          >
+            {nudge}
+          </Alert>
+        )}
         <Switch
           checked={staleOnly}
           onChange={(e) => setStaleOnly(e.currentTarget.checked)}

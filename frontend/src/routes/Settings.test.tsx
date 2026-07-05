@@ -3,8 +3,8 @@ import { Notifications } from "@mantine/notifications";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { Maintenance } from "./Settings";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Maintenance, reprocessNudgeText } from "./Settings";
 import * as client from "../api/client";
 
 function renderMaintenance() {
@@ -21,7 +21,64 @@ function renderMaintenance() {
   );
 }
 
+// Maintenance now queries reprocess-status on mount; default it to "nothing
+// outdated" so the existing button tests don't hit an unmocked fetch. Individual
+// tests override it.
+beforeEach(() => {
+  vi.spyOn(client.api, "reprocessStatus").mockResolvedValue({
+    current_version: "0.81.3", outdated: 0, up_to_date: 3, total_targets: 3,
+  });
+});
+
 afterEach(() => vi.restoreAllMocks());
+
+describe("reprocessNudgeText", () => {
+  it("returns null when nothing is outdated or status is missing", () => {
+    expect(reprocessNudgeText(undefined)).toBeNull();
+    expect(reprocessNudgeText({
+      current_version: "0.81.3", outdated: 0, up_to_date: 4, total_targets: 4,
+    })).toBeNull();
+  });
+
+  it("names a single outdated target with the running version", () => {
+    const msg = reprocessNudgeText({
+      current_version: "0.81.3", outdated: 1, up_to_date: 2, total_targets: 3,
+    });
+    expect(msg).toContain("1 target was");
+    expect(msg).toContain("v0.81.3");
+    expect(msg).toContain("non-destructive");
+  });
+
+  it("pluralises multiple outdated targets", () => {
+    const msg = reprocessNudgeText({
+      current_version: "0.81.3", outdated: 3, up_to_date: 0, total_targets: 3,
+    });
+    expect(msg).toContain("3 targets were");
+    expect(msg).toContain("Reprocess them");
+  });
+});
+
+describe("Maintenance — outdated-images nudge", () => {
+  it("shows the nudge Alert when targets are outdated", async () => {
+    vi.spyOn(client.api, "reprocessStatus").mockResolvedValue({
+      current_version: "0.81.3", outdated: 2, up_to_date: 1, total_targets: 3,
+    });
+    renderMaintenance();
+    await waitFor(() =>
+      expect(screen.getByText(/2 targets were last stacked with an older/))
+        .toBeInTheDocument());
+    expect(screen.getByText("Some images are out of date")).toBeInTheDocument();
+  });
+
+  it("shows no nudge when everything is up to date", async () => {
+    renderMaintenance();
+    // Let the (mocked) status query settle, then assert the nudge is absent.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Reprocess .* targets/ }))
+        .toBeInTheDocument());
+    expect(screen.queryByText("Some images are out of date")).toBeNull();
+  });
+});
 
 describe("Maintenance — reprocess everything", () => {
   it("does nothing when the confirm is declined", () => {

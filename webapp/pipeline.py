@@ -13,7 +13,7 @@ import contextlib
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from seestack.io.library import Library
 from seestack.io.scanner import run_qc_and_solve, scan_and_organize
@@ -21,6 +21,9 @@ from webapp import __version__ as APP_VERSION
 from webapp.config import Settings
 from webapp.jobs import Job, JobManager
 from webapp.schemas import STACK_DEFAULTS_META_KEY, coerce_stack_options
+
+if TYPE_CHECKING:
+    from seestack.io.project import StackRunRow
 
 log = logging.getLogger(__name__)
 
@@ -273,6 +276,18 @@ def _last_stack_options_for_target(lib: Library, safe: str) -> dict[str, Any] | 
     return None
 
 
+def _newest_genuine_stack_run(proj) -> StackRunRow | None:
+    """The target's most recent *genuine* stack run (the first, newest-first, whose
+    options parse as a real ``StackOptions`` — skipping editor-export/combine runs),
+    or ``None`` when it has none. Shared by the reprocess reuse/stale logic and the
+    stale-target count so they agree on what "the current image's stack" is.
+    """
+    for run in proj.iter_stack_runs():  # newest first
+        if _stack_options_from_run_json(run.options_json) is not None:
+            return run
+    return None
+
+
 def _last_stack_version_for_target(lib: Library, safe: str) -> str | None:
     """The ``engine_version`` of the target's most recent *genuine* stack run
     (skipping editor/combine runs), or ``None`` when it has no genuine stack or
@@ -281,12 +296,48 @@ def _last_stack_version_for_target(lib: Library, safe: str) -> str | None:
     """
     proj = lib.open_target(safe)
     try:
-        for run in proj.iter_stack_runs():  # newest first
-            if _stack_options_from_run_json(run.options_json) is not None:
-                return run.engine_version
+        run = _newest_genuine_stack_run(proj)
+        return run.engine_version if run is not None else None
     finally:
         proj.close()
-    return None
+
+
+def reprocess_status(lib: Library) -> dict[str, Any]:
+    """Count targets whose current image is stale relative to the running build.
+
+    A target is **outdated** when its most recent *genuine* stack was produced by
+    a different app version than the one now running (including a run that predates
+    version tracking, ``engine_version`` ``None`` — it was made by some older
+    build). A target with no genuine stack yet is neither outdated nor up to date:
+    there's no existing image to refresh, so it's excluded from both counts (it
+    isn't "stale", it just hasn't been stacked). This drives the proactive
+    "N targets were made with an older version — reprocess" nudge, so it counts
+    only images a reprocess would actually change.
+
+    Returns ``{current_version, outdated, up_to_date, total_targets}``.
+    """
+    outdated = 0
+    up_to_date = 0
+    total = 0
+    for entry in lib.list_targets():
+        total += 1
+        proj = lib.open_target(entry.safe_name)
+        try:
+            run = _newest_genuine_stack_run(proj)
+        finally:
+            proj.close()
+        if run is None:
+            continue  # never stacked — not an out-of-date existing image
+        if run.engine_version == APP_VERSION:
+            up_to_date += 1
+        else:
+            outdated += 1
+    return {
+        "current_version": APP_VERSION,
+        "outdated": outdated,
+        "up_to_date": up_to_date,
+        "total_targets": total,
+    }
 
 
 def submit_reprocess_all(settings: Settings, jm: JobManager, *,
@@ -310,6 +361,15 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
     only the images that would actually change, not the whole library. A target
     with no genuine stack (or one that predates version tracking) is treated as
     stale and reprocessed.
+
+    Each reprocessed run is written to a **fresh, version-tagged basename** (see
+    :func:`_reprocess_output_basename`) rather than the target's existing
+    ``master`` — otherwise the reused ``options_json`` (which carries the old run's
+    ``output_name="master"``) would make the stacker *archive* the current
+    ``master.fits`` to an orphaned timestamped file and write the new pixels in its
+    place, so the old run's DB row would silently start serving the *new* image.
+    A distinct basename keeps the old output on disk and reachable, making the
+    "nothing is deleted or overwritten — compare them in History" promise true.
     """
     def body(job: Job) -> dict[str, Any]:
         lib = Library.open_or_create(settings.resolved_library_root)
@@ -339,8 +399,21 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
                 job.detail = f"Target {i + 1}/{total}: {name}"
                 jm.maybe_flush(job)
                 reuse = _last_stack_options_for_target(lib, safe)
+                # Write to a fresh, version-tagged basename so the reprocessed run
+                # lands *alongside* the target's existing output instead of
+                # archiving/orphaning its ``master`` (the reused options carry the
+                # old run's output_name). This is what makes the batch genuinely
+                # non-destructive.
+                proj = lib.open_target(safe)
                 try:
-                    res = _stack_target(settings, jm, job, lib, safe, options=reuse)
+                    existing = {r.output_basename for r in proj.iter_stack_runs()
+                                if r.output_basename}
+                finally:
+                    proj.close()
+                fresh_name = _reprocess_output_basename(existing, APP_VERSION)
+                try:
+                    res = _stack_target(settings, jm, job, lib, safe,
+                                        options=reuse, output_name=fresh_name)
                 except Exception as exc:  # noqa: BLE001 — isolate one bad target
                     log.exception("reprocess-all: target %s failed", safe)
                     failed.append({"target": safe, "error": f"{type(exc).__name__}: {exc}"})
@@ -816,6 +889,28 @@ def _mark_auto_stack_attempt(lib: Library, safe: str, frame_count: int) -> None:
         proj.close()
 
 
+def _reprocess_output_basename(existing: set[str], version: str) -> str:
+    """A fresh, non-colliding output basename for a reprocessed run.
+
+    Base is ``master_v<version>`` (self-documenting: the build that produced it),
+    sanitised to safe filename chars. If a run already carries that basename (e.g.
+    the user reprocessed twice on the same version), a ``_2``/``_3``/… suffix is
+    appended so the new run never archives/overwrites the earlier one — the
+    reprocess feature's non-destructive guarantee holds even in that edge case.
+
+    ``existing`` is the set of the target's current ``output_basename`` values.
+    """
+    from seestack.stack.output import _sanitize_basename
+
+    base = _sanitize_basename(f"master_v{version}")
+    if base not in existing:
+        return base
+    n = 2
+    while f"{base}_{n}" in existing:
+        n += 1
+    return f"{base}_{n}"
+
+
 def _stack_target(
     settings: Settings,
     jm: JobManager,
@@ -824,8 +919,14 @@ def _stack_target(
     safe: str,
     *,
     options: dict[str, Any] | None = None,
+    output_name: str | None = None,
 ) -> dict[str, Any]:
-    """Run a stack for one target and record it. Returns a small summary."""
+    """Run a stack for one target and record it. Returns a small summary.
+
+    ``output_name``, when given, overrides the output basename *after* the option
+    merge — used by reprocess-all to force a fresh, non-colliding name so a
+    restack doesn't archive/overwrite the target's existing output.
+    """
     from seestack.stack.stacker import run_stack
 
     # Option precedence:
@@ -842,6 +943,8 @@ def _stack_target(
                     opts_dict.update(json.loads(raw))
         else:
             opts_dict.update(options)
+        if output_name is not None:
+            opts_dict["output_name"] = output_name
         if opts_dict.get("max_workers") is None and settings.cpu_workers:
             opts_dict["max_workers"] = settings.cpu_workers
         opts = coerce_stack_options(opts_dict)
