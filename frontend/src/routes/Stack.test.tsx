@@ -590,6 +590,55 @@ describe("StackView", () => {
     expect(screen.queryByText(/mixed-quality set is exactly where/)).not.toBeInTheDocument();
   });
 
+  it("nudges photometric normalization when transparency varies a lot, then hides once on", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ photometric_normalize: false });
+    // A wide transparency spread across the frames-to-be-stacked (2000 … 9000),
+    // so p90/p10 ≫ 1.5 — haze / airmass varying across nights.
+    const frames = Array.from({ length: 8 }, (_, i) =>
+      ({ ...mkFrame(i + 1), transparency_score: 2000 + i * 1000 }));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    const btn = await screen.findByRole("button", { name: "Turn on photometric normalization" });
+    expect(screen.getByText(/vary a lot in transparency/)).toBeInTheDocument();
+    // One click turns the option on and the nudge disappears.
+    fireEvent.click(btn);
+    await waitFor(() =>
+      expect(screen.queryByText(/vary a lot in transparency/)).not.toBeInTheDocument());
+  });
+
+  it("does not nudge photometric normalization when transparency is uniform", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ photometric_normalize: false });
+    // Tight transparency (all ~5000) → p90/p10 ≈ 1, well under the 1.5 trigger.
+    const frames = Array.from({ length: 8 }, (_, i) =>
+      ({ ...mkFrame(i + 1), transparency_score: 5000 + i * 10 }));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    await waitFor(() => expect(screen.getByText("Start stacking")).toBeInTheDocument());
+    expect(screen.queryByText(/vary a lot in transparency/)).not.toBeInTheDocument();
+  });
+
+  it("does not nudge photometric normalization when it is already on", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ photometric_normalize: true });
+    const frames = Array.from({ length: 8 }, (_, i) =>
+      ({ ...mkFrame(i + 1), transparency_score: 2000 + i * 1000 }));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    await waitFor(() => expect(screen.getByText("Start stacking")).toBeInTheDocument());
+    expect(screen.queryByText(/vary a lot in transparency/)).not.toBeInTheDocument();
+  });
+
   it("hints to review auto-grade when accepted frames look like outliers", async () => {
     vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});

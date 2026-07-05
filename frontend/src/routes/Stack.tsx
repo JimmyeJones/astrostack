@@ -371,6 +371,34 @@ export function StackView() {
     return `Your ${run.length} accepted frames vary a lot in ${which} — a mixed-quality set is exactly where quality weighting helps, letting the best subs count for more than the worst instead of every frame counting equally. Turn on Quality weighting in the options above.`;
   })();
 
+  // Photometric-normalization nudge: when the frames to be stacked vary a lot in
+  // transparency (haze / airmass changing across nights), their recorded signal is
+  // scaled differently frame-to-frame. That widens the per-pixel spread rejection
+  // clips against — so real outliers on bright structure can survive — and lets the
+  // haziest subs quietly dim the combined result. Photometric normalization
+  // (v0.81.0, off by default) gain-matches every frame to the run's median
+  // transparency before combine, which fixes both, but a beginner won't know to
+  // reach for it. Fire when the spread across the frames-to-be-stacked is wide
+  // (p90/p10 ≳ 1.5) and it's off. Distinct from quality weighting (which
+  // down-weights the worst subs' *contribution* rather than gain-matching their
+  // *values* — they compose). Reuses the transparency scores already fetched for
+  // the hints above. Advisory only.
+  const photometricNudge = (() => {
+    if (frames.isLoading || values.photometric_normalize) return null;
+    const run = (frames.data ?? [])
+      .filter((f) => f.accept && f.solved)
+      .map((f) => f.transparency_score)
+      .filter((t): t is number => t != null && t > 0);
+    // The engine needs ≥3 measured frames to normalize at all; require a few more
+    // so a p90/p10 spread is trustworthy rather than driven by one or two subs.
+    if (run.length < 5) return null;
+    const lo = pctile(run, 10);
+    const hi = pctile(run, 90);
+    if (lo <= 0 || hi / lo < 1.5) return null;
+    const ratio = hi / lo;
+    return `Your ${run.length} frames vary a lot in transparency — the clearest sit about ${ratio.toFixed(1)}× brighter than the haziest (haze or airmass changing across nights). Turn on Photometric normalization to gain-match every frame to the run's median before combining, so the hazy subs don't weaken rejection or dim the result.`;
+  })();
+
   // Auto-grade hint: if the grader flags some accepted frames as likely
   // outliers, nudge the user to review them on the Target page before stacking
   // junk. Advisory only; it never rejects anything from here.
@@ -627,6 +655,20 @@ export function StackView() {
           {qualityWeightNudge ? (
             <Alert color="blue" variant="light" py={6} px="sm">
               <Text size="xs">{qualityWeightNudge}</Text>
+            </Alert>
+          ) : null}
+
+          {photometricNudge ? (
+            <Alert color="blue" variant="light" py={6} px="sm">
+              <Text size="xs">{photometricNudge}</Text>
+              <Button
+                mt={6}
+                size="xs"
+                variant="light"
+                onClick={() => set("photometric_normalize", true)}
+              >
+                Turn on photometric normalization
+              </Button>
             </Alert>
           ) : null}
 
