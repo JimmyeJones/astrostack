@@ -366,10 +366,11 @@ export function StackView() {
   // nudging κ down for very large stacks. Advisory only; the pick stands.
   const SIGMA_CLIP_LARGE_FRAMES = 200;
   const kappa = Number(values.sigma_kappa ?? 3);
+  const SIGMA_KAPPA_TIGHTER = 2.5;
   const sigmaKappaLargeHint =
     values.sigma_clip && !frames.isLoading
     && solvedAccepted >= SIGMA_CLIP_LARGE_FRAMES && kappa >= 3
-      ? `With ${solvedAccepted} accepted frames the per-pixel spread is very well measured, so a tighter sigma-clip (κ≈2.5) can safely reject more satellites, planes and cosmic rays than the default κ=${kappa % 1 === 0 ? kappa.toFixed(0) : kappa}. Lower the Sigma kappa in Advanced options if you see trails survive.`
+      ? `With ${solvedAccepted} accepted frames the per-pixel spread is very well measured, so a tighter sigma-clip (κ≈2.5) can safely reject more satellites, planes and cosmic rays than the default κ=${kappa % 1 === 0 ? kappa.toFixed(0) : kappa}.`
       : null;
 
   // Transparency-night hint: compare the median transparency of the frames that
@@ -690,12 +691,20 @@ export function StackView() {
           {sigmaKappaLargeHint ? (
             <Alert color="blue" variant="light" py={6} px="sm">
               <Text size="xs">{sigmaKappaLargeHint}</Text>
+              <Button size="compact-xs" variant="light" mt={6}
+                onClick={() => set("sigma_kappa", SIGMA_KAPPA_TIGHTER)}>
+                Tighten κ to {SIGMA_KAPPA_TIGHTER}
+              </Button>
             </Alert>
           ) : null}
 
           {streakNoRejectionWarning ? (
             <Alert color="yellow" variant="light" py={6} px="sm">
               <Text size="xs">{streakNoRejectionWarning}</Text>
+              <Button size="compact-xs" variant="light" color="yellow" mt={6}
+                onClick={() => set(values.drizzle ? "drizzle_reject" : "sigma_clip", true)}>
+                {values.drizzle ? "Turn on drizzle outlier rejection" : "Turn on sigma clipping"}
+              </Button>
             </Alert>
           ) : null}
 
@@ -732,6 +741,10 @@ export function StackView() {
           {drizzleClipHint ? (
             <Alert color="blue" variant="light" py={6} px="sm">
               <Text size="xs">{drizzleClipHint}</Text>
+              <Button size="compact-xs" variant="light" mt={6}
+                onClick={() => set("drizzle_reject", true)}>
+                Turn on drizzle outlier rejection
+              </Button>
             </Alert>
           ) : null}
 
