@@ -351,6 +351,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   shot. Keep the current general recipe as the fallback when classification is
   low-confidence. Off-by-default risk is nil (Auto is an explicit button). Needs a
   careful, well-tested classifier so it never mis-picks confidently. (M, autonomy/editor)
+- **Chain the auto-edit onto "Reprocess everything" too (finished pictures after an
+  upgrade).** The one-click *Process target* result is now a finished picture (v0.86.0
+  saves the Auto recipe on the run + re-renders its thumbnail via `_auto_edit_process_run`).
+  The library-wide *Reprocess all targets* action (v0.74.0) still produces flat linear
+  masters, so after an upgrade the user gets fresh stacks but must hand-edit each one. Reuse
+  the same `_auto_edit_process_run` helper on each restacked run so a reprocess yields
+  finished pictures across the whole library in one action — completing the owner-requested
+  "reprocess everything → great images" story. It's within the explicit, confirm-gated
+  Reprocess opt-in and only touches the *new* runs' own recipe/preview (never an existing
+  run's saved edit). **Scout to weigh:** unlike single-target Process, this sets editor
+  recipes on many runs at once — decide whether that bulk auto-seed is desirable by default
+  or should be a "also auto-edit" toggle on the Reprocess panel. (S, autonomy/image-quality)
 - **One-click "process this target"** — **core chain shipped v0.85.0** (see Shipped).
   A prominent "Process target" button on the Target page (+ `POST
   /api/targets/{safe}/process` → `process_target` job) now runs QC → plate-solve →
