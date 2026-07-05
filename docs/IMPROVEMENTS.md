@@ -638,6 +638,15 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Surface the one-click "Process target" job's outcome + a "View result" link on Jobs
+  (v0.85.2, friendliness/PRIORITY 3).** The new `process_target` job (v0.85.0) finished with a
+  bare "done" and no action — unlike `reprocess_all`/`editor_export`, the user was left not
+  knowing whether a master was produced or where it is. `JobResultActions` now renders a
+  plain-language `processTargetSummary` line ("Stacked N frames into a new master", or, when the
+  stack was skipped, why — nothing plate-solved yet / cancelled) plus a "View result" button to
+  the target's History (or "Open target" when nothing stacked, so the user can fix solving).
+  Pure tested helper `processTargetSummary` (5 cases); frontend-only, additive.
+
 - **"Ready to process?" getting-started callout for a fresh target (v0.85.1,
   friendliness/PRIORITY 3).** A dimmed violet callout on the Target page now highlights the
   one-click "Process target" (QC + solve + stack) as the next step whenever the target has
