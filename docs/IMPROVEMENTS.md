@@ -352,6 +352,13 @@ problems. Dogfood it every big-picture run and fix root causes.
   the button already delivers the one-click house-style value.)*
 - Auto-suggest stack settings from the data (frame count, FWHM spread, streaks)
   so the user rarely needs to touch the Stack form. (S–M, autonomy)
+  _(Progress: the Stack form already carries a rich set of data-driven nudges
+  (calibration picks, sigma/min-max frame-count guards, streak→min-max-k, transparency
+  → quality-weight, transparency-spread → photometric-normalize, auto-grade drop-outliers,
+  memory sizing). As of v0.84.6 every one of them is now one-click. Remaining genuine gaps a
+  future run could pick up, each needing a careful classifier: proactive **drizzle on/off**
+  from frame count + dither spread; **lucky_fraction** from FWHM spread; a background/gradient
+  flatten nudge from a measured sky gradient. None are currently offered.)_
 - ~~**One-click "Drop N outlier frames" on the Stack-form auto-grade hint.**~~ —
   **shipped v0.83.2** (see Shipped). The auto-grade hint now carries a "Drop N outlier
   frames" button (beside the retained "Review Auto-grade" link) that calls
@@ -585,6 +592,22 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **One-click actions on the three remaining advisory-only Stack-form rejection nudges
+  (PRIORITY-2/3 autonomy/friendliness; completes the "every nudge is one-click" pattern).**
+  Nearly every Stack-form nudge already carries a one-click action (turn on sigma/min-max/
+  quality-weight/photometric, drop outliers, use recommended masters…), but three rejection
+  hints were still advisory-only text: the large-stack **sigma-κ tighten** hint (told the user
+  to "lower the Sigma kappa in Advanced options"), the **streak-with-no-rejection** warning, and
+  the **drizzle+sigma-clip mismatch** hint. Each now has a button that applies exactly the
+  suggested change in place, matching the v0.83.2 auto-grade one-click work that closed the last
+  *other* un-one-clicked nudge: "Tighten κ to 2.5" (`sigma_kappa` → 2.5, so the hint self-clears
+  as κ drops below 3), a context-aware "Turn on sigma clipping" / "Turn on drizzle outlier
+  rejection" on the streak warning (picks the field that fits the current path), and "Turn on
+  drizzle outlier rejection" on the drizzle mismatch. Frontend-only, additive, upgrade-safe — no
+  engine/API/schema/default change; each button flips a setting the user could already toggle by
+  hand. Tests: Vitest (each button appears, applies the change, and the nudge disappears once its
+  condition is resolved). (v0.84.6, this run — Builder)
 
 - **Plain-language "Build master" empty-folder failure (PRIORITY-3 friendliness; follow-up to
   v0.84.4).** The calibration Build-master job raised a bare `FileNotFoundError: No FITS files

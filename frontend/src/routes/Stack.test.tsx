@@ -359,6 +359,75 @@ describe("StackView", () => {
     expect(screen.queryByText(/tighter sigma-clip/)).not.toBeInTheDocument();
   });
 
+  it("tightens kappa in one click from the large-stack hint, then hides it", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+      { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
+        default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+      { key: "sigma_kappa", label: "Sigma κ", type: "float", group: "simple",
+        default: 3, min: 1, max: 5, step: 0.1, options: null, help: null, depends_on: "sigma_clip" },
+    ]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: true, sigma_kappa: 3 });
+    const frames = Array.from({ length: 250 }, (_, i) => mkFrame(i + 1));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    const btn = await screen.findByRole("button", { name: "Tighten κ to 2.5" });
+    fireEvent.click(btn);
+    // Once κ is at 2.5 (< 3) the hint no longer applies and disappears.
+    await waitFor(() =>
+      expect(screen.queryByText(/tighter sigma-clip/)).not.toBeInTheDocument());
+  });
+
+  it("turns on sigma clipping in one click from the streak-no-rejection warning", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+      { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
+        default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+    ]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: false });
+    // ≥11 frames so the generic "turn on sigma clipping" advice (not the min/max
+    // hint) is the right one, with one streaked frame and no rejection on.
+    const frames = Array.from({ length: 12 }, (_, i) =>
+      ({ ...mkFrame(i + 1), streak_detected: i === 0 }));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    const btn = await screen.findByRole("button", { name: "Turn on sigma clipping" });
+    fireEvent.click(btn);
+    // With sigma clipping on the stack now has per-pixel rejection → warning hides.
+    await waitFor(() =>
+      expect(screen.queryByText(/detected satellite\/plane streak/)).not.toBeInTheDocument());
+  });
+
+  it("turns on drizzle outlier rejection in one click from the drizzle+sigma-clip hint", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+      { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
+        default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+      { key: "drizzle", label: "Drizzle", type: "bool", group: "simple",
+        default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+      { key: "drizzle_reject", label: "Drizzle outlier rejection", type: "bool", group: "advanced",
+        default: false, min: null, max: null, step: null, options: null, help: null, depends_on: "drizzle" },
+    ]);
+    // drizzle + sigma_clip on, drizzle_reject off → the mismatch hint fires.
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({
+      sigma_clip: true, drizzle: true, drizzle_reject: false,
+    });
+    const frames = Array.from({ length: 8 }, (_, i) => mkFrame(i + 1));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    const btn = await screen.findByRole("button", { name: "Turn on drizzle outlier rejection" });
+    fireEvent.click(btn);
+    // Enabling drizzle rejection resolves the mismatch → the hint disappears.
+    await waitFor(() =>
+      expect(screen.queryByText(/Sigma clipping doesn't apply to drizzle/)).not.toBeInTheDocument());
+  });
+
   it("warns when accepted streaked frames are stacked without rejection", async () => {
     vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
       { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
