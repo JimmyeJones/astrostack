@@ -115,6 +115,43 @@ def test_min_max_reject_tie_safe_on_saturated_core():
     np.testing.assert_allclose(acc.result(), (90.0 + 100.0 + 100.0) / 3.0)
 
 
+def test_min_max_reject_rejection_counts_full_trim():
+    # 5 samples at one pixel, k=1 → full trim drops exactly 2 (one min, one max);
+    # all 5 contributed. Powers the "rejection dropped ~X%" History trust line.
+    acc = MinMaxRejectAccumulator((1, 1))
+    for v in (1.0, 2.0, 3.0, 4.0, 100.0):
+        acc.add(np.full((1, 1), v))
+    contributed, rejected = acc.rejection_counts()
+    assert contributed == 5
+    assert rejected == 2
+
+
+def test_min_max_reject_rejection_counts_k3_and_bands():
+    # A row of three pixels with different coverage, k=3:
+    #   col0: 7 samples (≥2k+1) → full trim drops 2k=6
+    #   col1: 4 samples (3≤n<2k+1) → degrades to a single min/max drop = 2
+    #   col2: 2 samples (<3) → can't spare two → 0 dropped
+    acc = MinMaxRejectAccumulator((1, 3), reject_count=3)
+    cols0 = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]
+    cols1 = [1.0, 2.0, 3.0, 4.0]
+    cols2 = [1.0, 2.0]
+    for i in range(7):
+        row = np.array([[
+            cols0[i],
+            cols1[i] if i < len(cols1) else np.nan,
+            cols2[i] if i < len(cols2) else np.nan,
+        ]])
+        acc.add(row)
+    contributed, rejected = acc.rejection_counts()
+    assert contributed == 7 + 4 + 2
+    assert rejected == 6 + 2 + 0
+
+
+def test_min_max_reject_rejection_counts_empty_is_zero():
+    acc = MinMaxRejectAccumulator((2, 2))
+    assert acc.rejection_counts() == (0, 0)
+
+
 def test_min_max_reject_small_coverage_falls_back_to_mean():
     acc = MinMaxRejectAccumulator((1, 3))
     # col0: one sample → mean=7; col1: two samples → mean; col2: none → NaN.
