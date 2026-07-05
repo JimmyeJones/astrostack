@@ -340,8 +340,50 @@ def reprocess_status(lib: Library) -> dict[str, Any]:
     }
 
 
+def _refresh_target(settings: Settings, jm: JobManager, job: Job,
+                    lib: Library, safe: str) -> None:
+    """Deep-rescan one target before it's restacked: re-run QC + plate-solve over
+    *all* its existing library frames (not just new ones) and re-apply auto-grade,
+    so a "reprocess everything" after an in-place upgrade also picks up QC / solve /
+    grading improvements — not only the stacker's.
+
+    ``run_qc_and_solve`` is called with ``only_new_qc=False`` so the metrics are
+    re-derived for every frame with the current engine; ``apply_qc_result_to_db``
+    still honours a user's manual accept/reject (``user_override``), so re-QC never
+    clobbers a hand-made decision. Solving is best-effort — with no ASTAP available
+    it simply solves nothing. Auto-grade is applied only when the user has grading
+    enabled (``auto_grade_frames``), matching the ordinary ingest pipeline.
+
+    Best-effort and self-contained: a refresh failure is logged and swallowed so it
+    can never sink the target's restack (the whole point of reprocess is the new
+    stack; a flaky re-QC must not cost the user that)."""
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run_qc_and_solve(
+                proj,
+                astap_path=settings.astap_path,
+                max_workers=settings.cpu_workers,
+                run_qc=True,
+                run_solve=True,
+                only_new_qc=False,  # re-derive QC for *every* frame with the new engine
+                use_solve_hints=settings.astap_use_solve_hints,
+                auto_reject_streaks=not settings.keep_streaked_frames,
+                progress=_progress(jm, job),
+                should_stop=job.cancel_requested,
+            )
+            if settings.auto_grade_frames:
+                _auto_grade_target(proj, settings)
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+    except Exception as exc:  # noqa: BLE001 — refresh is advisory, never fatal
+        log.warning("reprocess-all deep-rescan failed for %s: %s", safe, exc)
+
+
 def submit_reprocess_all(settings: Settings, jm: JobManager, *,
-                         stale_only: bool = False) -> Job:
+                         stale_only: bool = False,
+                         deep_rescan: bool = False) -> Job:
     """Restack *every* target with the current engine — the owner's one-click
     "reprocess everything after an upgrade" maintenance action.
 
@@ -362,6 +404,14 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
     with no genuine stack (or one that predates version tracking) is treated as
     stale and reprocessed.
 
+    ``deep_rescan`` additionally re-runs QC / plate-solve / auto-grade over each
+    target's existing frames *before* its restack (see :func:`_refresh_target`), so
+    the reprocess also benefits from QC/solve/grading improvements, not just the
+    stacker. Off by default (the plain restack is the common case and a full rescan
+    is much slower); the refresh is best-effort per target and honours manual frame
+    decisions. It runs only for targets that are going to be restacked, so a
+    ``stale_only`` skip skips the rescan too.
+
     Each reprocessed run is written to a **fresh, version-tagged basename** (see
     :func:`_reprocess_output_basename`) rather than the target's existing
     ``master`` — otherwise the reused ``options_json`` (which carries the old run's
@@ -380,6 +430,7 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
             jm.maybe_flush(job)
             stacked = 0
             skipped = 0
+            rescanned = 0
             failed: list[dict[str, str]] = []
             cancelled = False
             for i, entry in enumerate(targets):
@@ -398,6 +449,14 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
                 # phase/done/total per frame but leaves detail untouched.
                 job.detail = f"Target {i + 1}/{total}: {name}"
                 jm.maybe_flush(job)
+                if deep_rescan and not job.cancel_requested():
+                    # Re-derive QC/solve/grade with the current engine first, so the
+                    # restack below stacks the freshly-graded frame set.
+                    _refresh_target(settings, jm, job, lib, safe)
+                    rescanned += 1
+                    if job.cancel_requested():
+                        cancelled = True
+                        break
                 reuse = _last_stack_options_for_target(lib, safe)
                 # Write to a fresh, version-tagged basename so the reprocessed run
                 # lands *alongside* the target's existing output instead of
@@ -428,6 +487,7 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
                 "total": total,
                 "stacked": stacked,
                 "skipped": skipped,
+                "rescanned": rescanned,
                 "failed": failed,
                 "cancelled": cancelled,
             }

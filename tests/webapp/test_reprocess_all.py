@@ -363,6 +363,127 @@ def test_reprocess_status_ignores_editor_and_combine_runs(solved_library):
     assert status["total_targets"] == 2
 
 
+def test_reprocess_all_deep_rescan_reruns_qc_solve_grade_before_each_stack(
+        solved_library, monkeypatch):
+    """With deep_rescan, each target is re-QC'd/re-solved/re-graded *before* it's
+    restacked; the default (off) skips the refresh entirely."""
+    _patch_run_stack(monkeypatch)
+    rescanned: list[str] = []
+
+    def fake_qc_solve(proj, **kw):  # noqa: ANN001
+        rescanned.append(getattr(proj, "safe_name", "?"))
+        # The refresh must re-derive *all* frames, not just new ones.
+        assert kw.get("only_new_qc") is False
+        assert kw.get("run_qc") is True and kw.get("run_solve") is True
+        return {"qc_done": 0, "qc_total": 0, "solve_done": 0, "solve_total": 0}
+    # Patch where pipeline looks it up (imported into the module namespace).
+    monkeypatch.setattr("webapp.pipeline.run_qc_and_solve", fake_qc_solve)
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        for entry in lib.list_targets():
+            proj = lib.open_target(entry.safe_name)
+            try:
+                _seed_run(proj, version="0.0.1")
+            finally:
+                proj.close()
+        job = Job(kind="reprocess_all")
+        summary = _run_body(pipeline.submit_reprocess_all,
+                            _settings(solved_library), job, deep_rescan=True)
+    finally:
+        lib.close()
+
+    assert summary["stacked"] == 2
+    assert summary["rescanned"] == 2
+    assert len(rescanned) == 2          # QC/solve ran once per target
+
+
+def test_reprocess_all_default_does_not_rescan(solved_library, monkeypatch):
+    """Without deep_rescan (the default), the QC/solve refresh never runs."""
+    _patch_run_stack(monkeypatch)
+    calls: list = []
+    monkeypatch.setattr("webapp.pipeline.run_qc_and_solve",
+                        lambda proj, **kw: calls.append(1))  # noqa: ANN001
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        for entry in lib.list_targets():
+            proj = lib.open_target(entry.safe_name)
+            try:
+                _seed_run(proj, version="0.0.1")
+            finally:
+                proj.close()
+        job = Job(kind="reprocess_all")
+        summary = _run_body(pipeline.submit_reprocess_all,
+                            _settings(solved_library), job)
+    finally:
+        lib.close()
+
+    assert summary["stacked"] == 2
+    assert summary["rescanned"] == 0
+    assert calls == []                  # refresh never invoked
+
+
+def test_reprocess_all_deep_rescan_isolates_a_failing_refresh(solved_library, monkeypatch):
+    """A refresh that blows up is best-effort: the target is still restacked."""
+    _patch_run_stack(monkeypatch)
+
+    def boom(proj, **kw):  # noqa: ANN001
+        raise RuntimeError("QC exploded")
+    monkeypatch.setattr("webapp.pipeline.run_qc_and_solve", boom)
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        for entry in lib.list_targets():
+            proj = lib.open_target(entry.safe_name)
+            try:
+                _seed_run(proj, version="0.0.1")
+            finally:
+                proj.close()
+        job = Job(kind="reprocess_all")
+        summary = _run_body(pipeline.submit_reprocess_all,
+                            _settings(solved_library), job, deep_rescan=True)
+    finally:
+        lib.close()
+
+    # The failing refresh didn't sink the restack — both targets still stacked.
+    assert summary["stacked"] == 2
+    assert summary["rescanned"] == 2
+    assert summary["failed"] == []
+
+
+def test_reprocess_all_deep_rescan_skips_rescan_for_stale_only_skipped(
+        solved_library, monkeypatch):
+    """deep_rescan + stale_only: a target already current on this version is
+    skipped, so its (expensive) refresh is skipped too."""
+    _patch_run_stack(monkeypatch)
+    rescanned: list[str] = []
+    monkeypatch.setattr("webapp.pipeline.run_qc_and_solve",
+                        lambda proj, **kw: rescanned.append(getattr(proj, "safe_name", "?")))  # noqa: ANN001
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        targets = [e.safe_name for e in lib.list_targets()]
+        vers = {targets[0]: pipeline.APP_VERSION, targets[1]: "0.0.1"}
+        for safe in targets:
+            proj = lib.open_target(safe)
+            try:
+                _seed_run(proj, version=vers[safe])
+            finally:
+                proj.close()
+        job = Job(kind="reprocess_all")
+        summary = _run_body(pipeline.submit_reprocess_all,
+                            _settings(solved_library), job,
+                            stale_only=True, deep_rescan=True)
+    finally:
+        lib.close()
+
+    assert summary["stacked"] == 1      # only the stale target
+    assert summary["skipped"] == 1
+    assert summary["rescanned"] == 1    # only the reprocessed target was rescanned
+    assert len(rescanned) == 1
+
+
 def test_reprocess_all_cancels_between_targets(solved_library, monkeypatch):
     calls: list = []
 

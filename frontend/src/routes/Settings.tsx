@@ -137,6 +137,10 @@ export function Maintenance() {
   // Default to "only outdated" — after an upgrade the user wants to reprocess just
   // the images that would actually change, not restack the whole library wholesale.
   const [staleOnly, setStaleOnly] = useState(true);
+  // Off by default: the common case is a plain restack with the new engine. A deep
+  // rescan (re-QC / re-solve / re-grade every frame first) is much slower and only
+  // pays off when QC/solving/grading improved too, so make it an explicit opt-in.
+  const [deepRescan, setDeepRescan] = useState(false);
   const status = useQuery({
     queryKey: ["reprocess-status"],
     queryFn: api.reprocessStatus,
@@ -144,7 +148,8 @@ export function Maintenance() {
   });
   const nudge = reprocessNudgeText(status.data);
   const reprocess = useMutation({
-    mutationFn: (opts: { staleOnly: boolean }) => api.reprocessAll(opts.staleOnly),
+    mutationFn: (opts: { staleOnly: boolean; deepRescan: boolean }) =>
+      api.reprocessAll(opts.staleOnly, opts.deepRescan),
     onSuccess: (res) => {
       notifications.show({
         color: "teal",
@@ -163,16 +168,22 @@ export function Maintenance() {
       ? "Restack every target that hasn't already been stacked with the current "
         + "version?\n\n(Targets already up to date on this version are skipped.)\n\n"
       : "Restack EVERY target with the current engine?\n\n";
+    const rescanNote = deepRescan
+      ? "Each target's frames are also re-checked (QC), re-plate-solved and "
+        + "re-graded before restacking — slower, but picks up quality/solving "
+        + "improvements too. Your manual accept/reject choices are kept.\n\n"
+      : "";
     if (
       window.confirm(
         scope
+        + rescanNote
         + "Each target is reprocessed one at a time, reusing its last stack "
         + "settings. This is non-destructive: every restack is saved as a NEW "
         + "result alongside the existing one (nothing is deleted or overwritten), "
         + "so you can compare them in History. A large library can take a while.",
       )
     ) {
-      reprocess.mutate({ staleOnly });
+      reprocess.mutate({ staleOnly, deepRescan });
     }
   };
 
@@ -202,6 +213,12 @@ export function Maintenance() {
           onChange={(e) => setStaleOnly(e.currentTarget.checked)}
           label="Only targets not already stacked on this version"
           description="Skips targets whose latest stack was already made with the current version, so a large library isn't reprocessed wholesale."
+        />
+        <Switch
+          checked={deepRescan}
+          onChange={(e) => setDeepRescan(e.currentTarget.checked)}
+          label="Also re-run QC, plate-solving & grading first"
+          description="Re-checks every frame (quality, plate-solve, auto-grade) before restacking, so improvements to those steps apply too — not just the stacker. Slower, and keeps your manual accept/reject choices."
         />
         <Group>
           <Button
