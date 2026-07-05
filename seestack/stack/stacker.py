@@ -46,6 +46,7 @@ from seestack.stack.accumulator import (
 from seestack.stack.align import align_one, extract_reference_patch
 from seestack.stack.output import _sanitize_basename
 from seestack.stack.reference import ReferenceChoice, pick_reference_frame
+from seestack.stack.photometric import PhotometricStats, compute_photometric_scales
 from seestack.stack.weighting import WeightingStats, compute_frame_weights, unit_weights
 
 if TYPE_CHECKING:
@@ -225,6 +226,13 @@ class StackOptions:
     hot_pixel_sigma: float = 5.0
     # Quality-weighted stack: weight each frame by FWHM / star_count / sky.
     quality_weighted: bool = False
+    # Photometric (multiplicative) normalization: gain-match each frame's signal
+    # to the run's median transparency before combining, so haze/airmass flux
+    # variation across a multi-night session doesn't inflate the rejection spread
+    # or let hazy nights dim the result. Derived from each frame's own
+    # ``transparency_score``, bounded, neutral fallback, off by default.
+    # Independent of (and composes with) ``quality_weighted``.
+    photometric_normalize: bool = False
     # Lucky imaging: keep only the top X% of frames by FWHM. 1.0 = keep all.
     lucky_fraction: float = 1.0
     # Final-stack gradient removal with object masking (post-stack pass).
@@ -495,6 +503,7 @@ def _build_output_header_meta(
     project: Project, frames: list, options: StackOptions, n_used: int,
     wstats: WeightingStats | None = None,
     calibration: "Any | None" = None,
+    pstats: PhotometricStats | None = None,
 ) -> dict[str, Any]:
     """Collect provenance for the output FITS header.
 
@@ -553,6 +562,15 @@ def _build_output_header_meta(
         meta["WGTMIN"] = (round(float(wstats.min_weight), 3), "min frame weight")
         meta["WGTMAX"] = (round(float(wstats.max_weight), 3), "max frame weight")
         meta["WGTMED"] = (round(float(wstats.median_weight), 3), "median frame weight")
+    # Photometric-normalization provenance: records that frames were gain-matched
+    # and over what scale range, so a normalised stack self-documents (mirrors the
+    # WGT* keys). Omitted when nothing was actually scaled.
+    if pstats is not None and pstats.n_scaled:
+        meta["PHOTNORM"] = ("transparency", "photometric normalization mode")
+        meta["PHOTNADJ"] = (int(pstats.n_adjusted), "frames photometrically scaled")
+        meta["PHOTMIN"] = (round(float(pstats.min_scale), 3), "min frame scale")
+        meta["PHOTMAX"] = (round(float(pstats.max_scale), 3), "max frame scale")
+        meta["PHOTMED"] = (round(float(pstats.median_scale), 3), "median frame scale")
     return meta
 
 
@@ -714,6 +732,24 @@ def run_stack(
     else:
         weights = unit_weights(frames)
 
+    # Build the per-frame photometric scale map (all-1.0 unless enabled). Applied
+    # to each frame's pixels *before* accumulation so it flows consistently
+    # through every accumulator and rejection path (κ-σ, min/max, drizzle).
+    pscales: dict[int, float] | None = None
+    pstats: PhotometricStats | None = None
+    if options.photometric_normalize:
+        pscales, pstats = compute_photometric_scales(frames)
+        log.info(
+            "Photometric normalization: %d scaled (median=%.3f range=[%.3f, %.3f]), "
+            "%d adjusted, %d neutral",
+            pstats.n_scaled, pstats.median_scale, pstats.min_scale,
+            pstats.max_scale, pstats.n_adjusted, pstats.n_neutral,
+        )
+        # Nothing measurable → don't carry a no-op scale map (keeps the hot path
+        # and the provenance honest).
+        if pstats.n_scaled == 0:
+            pscales = None
+
     # Pre-compute the reference patch for sub-pixel alignment, by aligning
     # the reference frame to itself once and extracting a central luminance
     # window. This happens before the parallel passes so every worker can
@@ -806,6 +842,7 @@ def run_stack(
                 errors=errors,
                 calibration=calibration,
                 mono=options.mono,
+                photometric_scales=pscales,
             )
             if n_stats == 0 and not cancel():
                 raise ValueError("drizzle: no usable frames")
@@ -826,6 +863,7 @@ def run_stack(
             errors=errors,
             calibration=calibration,
             mono=options.mono,
+            photometric_scales=pscales,
         )
         if n_used == 0 and not cancel():
             raise ValueError("drizzle: no usable frames")
@@ -862,6 +900,7 @@ def run_stack(
             ref_patch=ref_patch, ref_patch_origin=ref_patch_origin,
             calibration=calibration,
             mono=options.mono,
+            photometric_scales=pscales,
         )
         if n_used == 0:
             raise ValueError("no frames could be aligned")
@@ -893,6 +932,7 @@ def run_stack(
             ref_patch=ref_patch, ref_patch_origin=ref_patch_origin,
             calibration=calibration,
             mono=options.mono,
+            photometric_scales=pscales,
         )
         if n_used_p1 == 0:
             raise ValueError("pass 1 produced no usable frames")
@@ -921,6 +961,7 @@ def run_stack(
             ref_patch=ref_patch, ref_patch_origin=ref_patch_origin,
             calibration=calibration,
             mono=options.mono,
+            photometric_scales=pscales,
         )
         n_used = min(n_used_p1, n_used_p2)
         result_image = wsum.result()
@@ -948,6 +989,7 @@ def run_stack(
             ref_patch=ref_patch, ref_patch_origin=ref_patch_origin,
             calibration=calibration,
             mono=options.mono,
+            photometric_scales=pscales,
         )
         if n_used == 0:
             raise ValueError("no frames could be aligned")
@@ -1026,7 +1068,7 @@ def run_stack(
     # self-documenting FITS header and the run record, so the two never disagree.
     noise_sigma = _compute_noise_sigma(result_image)
     header_meta = _build_output_header_meta(project, frames, options, n_used, wstats,
-                                            calibration=calibration)
+                                            calibration=calibration, pstats=pstats)
     if noise_sigma is not None:
         header_meta["BKGSIGMA"] = (noise_sigma, "normalized background noise sigma")
     paths = write_stack_outputs(
@@ -1136,12 +1178,17 @@ def _pass(
     ref_patch_origin: tuple[int, int] | None = None,
     calibration: "CalibrationMasters | None" = None,
     mono: bool = False,
+    photometric_scales: dict[int, float] | None = None,
 ) -> int:
     """
     Run one pass over ``frames``, feeding each windowed aligned image plus its
     canvas offset and per-frame quality weight into
     ``consumer(window_rgb, y0, x0, weight)``. Returns the number of frames
     that contributed (post-error).
+
+    ``photometric_scales`` (optional) gain-matches each frame's *pixels* by an
+    in-place multiply before the consumer sees them, so the scaling is applied
+    identically in every pass and every accumulator/rejection path.
     """
     total = len(frames)
     progress(phase_label, 0, total)
@@ -1184,6 +1231,13 @@ def _pass(
                 progress(phase_label, done, total)
                 continue
             win_rgb, y0, x0 = aligned
+            if photometric_scales is not None:
+                scale = photometric_scales.get(f.id or -1, 1.0)
+                if scale != 1.0:
+                    # ``win_rgb`` is this frame's own freshly-reprojected array,
+                    # so scale it in place (no extra allocation on the hot path);
+                    # NaN gaps stay NaN, preserving coverage.
+                    win_rgb *= np.float32(scale)
             w = weights.get(f.id or -1, 1.0)
             with consumer_lock:
                 consumer(win_rgb, y0, x0, w)
@@ -1206,6 +1260,7 @@ def _drizzle_pass(
     clip: tuple[np.ndarray, np.ndarray] | None = None,
     calibration: "CalibrationMasters | None" = None,
     mono: bool = False,
+    photometric_scales: dict[int, float] | None = None,
 ) -> int:
     """
     One-shot drizzle accumulation. Drizzle's ``add_image`` mutates internal
@@ -1246,6 +1301,12 @@ def _drizzle_pass(
             )
         if bg_opts.enabled:
             rgb = subtract_background(rgb, bg_opts, use_gpu=options.use_gpu)
+        # Photometric gain-match (in place — ``rgb`` is this frame's own array),
+        # applied after the sky is zeroed so it scales signal, not the pedestal.
+        if photometric_scales is not None:
+            scale = photometric_scales.get(frame.id or -1, 1.0)
+            if scale != 1.0:
+                rgb = rgb * np.float32(scale)
         in_wcs = wcs_from_text(frame.wcs_json)
         if in_wcs is None:
             return None
