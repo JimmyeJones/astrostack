@@ -185,6 +185,50 @@ def test_area_budget_raises_even_under_dimension_cap():
         )
 
 
+def _frame_id(fid: int, ra: float, dec: float, *, w: int = 480, h: int = 320,
+              pixscale: float = 0.75) -> FrameRow:
+    """A FrameRow with an explicit id (so it's identifiable in excluded lists)
+    and a small FOV (fine pixscale) so only a footprint centred within ~0.05°
+    of RA=0 straddles the wrap."""
+    wcs_text = make_synth_wcs_text(
+        width=w, height=h, ra_center_deg=ra, dec_center_deg=dec,
+        pixscale_arcsec=pixscale,
+    )
+    return FrameRow(
+        id=fid, source_path=f"{fid}.fit",
+        width_px=w, height_px=h, bayer_pattern="RGGB",
+        wcs_json=wcs_text, ra_center_deg=ra, dec_center_deg=dec,
+        pixscale_arcsec=pixscale,
+    )
+
+
+def test_canvas_shrink_loop_drops_the_real_outlier_near_ra_zero():
+    """Regression: the iterative canvas-shrink fallback must pick its "worst"
+    frame with a wrap-safe centre RA.
+
+    Four frames straddle/surround RA=0 with fewer than OUTLIER_MIN_FRAMES so the
+    proactive outlier pass drops nothing and the size-cap loop does the dropping.
+    Frame 10 is the *central* frame (RA≈0, its corners cross the 0°/360° wrap);
+    frame 13 is the genuine far frame (0.5° away in RA). With a plain median of
+    corner RAs the central frame's apparent centre flings to ~180°, so it looked
+    like the worst outlier and was dropped instead of frame 13. The wrap-safe
+    circular mean keeps the central frame and drops the real outlier."""
+    frames = [
+        _frame_id(10, 0.02, 10.0),   # central, straddles RA=0 → median→~180 (bug)
+        _frame_id(11, 359.9, 10.0),  # near, no straddle
+        _frame_id(12, 0.15, 10.0),   # near, no straddle
+        _frame_id(13, 359.5, 10.0),  # the real far frame (0.5° off) → should drop
+    ]
+    canvas = compute_mosaic_canvas(
+        frames, reference_shape=(320, 480), max_canvas_px=2000,
+    )
+    assert canvas is not None
+    # The genuine far frame is the one dropped; the central straddler is kept.
+    assert 13 in canvas.excluded_frame_ids
+    assert 10 not in canvas.excluded_frame_ids
+    assert canvas.n_footprints == 3
+
+
 def test_unsalvageable_canvas_raises():
     """If dropping outliers can't salvage it, raise — with web guidance.
 
