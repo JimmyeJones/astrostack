@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
 import { api, type Frame } from "../api/client";
+import { QueryError } from "../components/QueryError";
 import { detectSolveSetupProblem } from "../components/target/solveSetup";
 
 const NUM = (v: number | null, digits = 2) =>
@@ -406,6 +407,15 @@ export function TargetView() {
         <Loader />
       </Center>
     );
+  }
+
+  // A missing target (deleted, or a stale bookmark/shared link) 404s from
+  // api.getTarget. Without this branch the page still renders via the optional
+  // chaining below — a blank title, a "/accepted" badge and an empty table — a
+  // confusing dead-end. Show the same recoverable error the sibling routes do;
+  // gated on !target.data so a background-refetch blip never blanks a working page.
+  if (target.isError && !target.data) {
+    return <QueryError error={target.error} onRetry={() => target.refetch()} />;
   }
 
   const cols: { key: SortKey; label: string; hint?: string }[] = [

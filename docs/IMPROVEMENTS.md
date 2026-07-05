@@ -593,6 +593,20 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Target page: recoverable error state instead of a broken shell when the target 404s
+  (PRIORITY-3 friendliness).** Found by a Builder friendliness dogfood: the Target route — the
+  app's most-visited screen — handled `isLoading` but had **no** error branch, while all five
+  sibling data routes (Dashboard/Library/Gallery/Jobs via `QueryError`, History via an Alert)
+  already do. Because every field access is optional-chained, a 404 from `api.getTarget` (a
+  deleted target, or a stale bookmark / shared link to a removed one — `deps.open_target_project`
+  raises `HTTPException(404)`) didn't crash but rendered a *broken shell*: a blank title, a
+  "`/accepted`" badge and an empty frame table, with no explanation and no recovery. It now shows
+  the shared `QueryError` ("Couldn't load this page" + Retry), gated on `!target.data` so a
+  background-refetch blip never blanks a working page. Frontend-only, additive, upgrade-safe — no
+  engine/API/schema/default change, reuses the existing component the siblings use. Tests: Vitest
+  (a rejected `getTarget` renders the error + Retry instead of the empty table). (v0.84.7,
+  this run — Builder)
+
 - **One-click actions on the three remaining advisory-only Stack-form rejection nudges
   (PRIORITY-2/3 autonomy/friendliness; completes the "every nudge is one-click" pattern).**
   Nearly every Stack-form nudge already carries a one-click action (turn on sigma/min-max/

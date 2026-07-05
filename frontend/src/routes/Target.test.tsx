@@ -29,8 +29,7 @@ function mkTarget(overrides: Partial<Target> = {}): Target {
   };
 }
 
-function renderTarget() {
-  const qc = new QueryClient();
+function renderTarget(qc = new QueryClient()) {
   return render(
     <MantineProvider>
       <Notifications />
@@ -417,5 +416,22 @@ describe("TargetView reject breakdown + undo", () => {
 
     await waitFor(() =>
       expect(bulk).toHaveBeenCalledWith("M_42", { action: "accept", ids: [1, 2] }));
+  });
+});
+
+describe("TargetView error state", () => {
+  it("shows a recoverable error (not a broken shell) when the target 404s", async () => {
+    // A deleted target / stale bookmark: api.getTarget rejects with the 404.
+    vi.spyOn(client.api, "getTarget").mockRejectedValue(new Error("No target 'M_42'"));
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
+
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderTarget(qc);
+
+    // The shared QueryError surfaces instead of a blank title + empty table.
+    await waitFor(() =>
+      expect(screen.getByText("Couldn't load this page")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 });
