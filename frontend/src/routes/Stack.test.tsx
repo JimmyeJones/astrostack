@@ -837,6 +837,71 @@ describe("StackView", () => {
     expect(screen.queryByText(/look like quality outliers/)).not.toBeInTheDocument();
   });
 
+  it("drops the auto-grade outliers in one click and offers an undo", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
+    const frames = Array.from({ length: 12 }, (_, i) => mkFrame(i + 1));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+    vi.spyOn(client.api, "autoGradePreview").mockResolvedValue({
+      sensitivity: "normal", n_accepted: 12, n_considered: 12,
+      recommendations: [
+        { frame_id: 1, name: "f1.fits", reasons: [
+          { metric: "star_count", label: "far fewer stars than typical", value: 20, typical: 300, z: 8 },
+        ] },
+        { frame_id: 2, name: "f2.fits", reasons: [
+          { metric: "fwhm_px", label: "much softer than typical", value: 6, typical: 2.5, z: 7 },
+        ] },
+      ],
+      metrics_used: ["fwhm_px", "star_count"], metrics_skipped: {},
+      capped: false, changed_ids: null,
+    });
+    const apply = vi.spyOn(client.api, "autoGradeApply").mockResolvedValue({
+      sensitivity: "normal", n_accepted: 12, n_considered: 12,
+      recommendations: [], metrics_used: ["fwhm_px", "star_count"], metrics_skipped: {},
+      capped: false, changed_ids: [1, 2],
+    });
+    const bulk = vi.spyOn(client.api, "bulkFrames").mockResolvedValue({ changed: 2, changed_ids: [1, 2] });
+
+    renderStack();
+
+    const drop = await screen.findByRole("button", { name: "Drop 2 outlier frames" });
+    fireEvent.click(drop);
+
+    // After applying, the yellow nudge is replaced by a green confirmation + undo.
+    await waitFor(() => expect(screen.getByText(/Dropped 2 outlier frames/)).toBeInTheDocument());
+    expect(apply).toHaveBeenCalledWith("M_42");
+    expect(screen.queryByRole("button", { name: "Drop 2 outlier frames" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Undo — re-accept 2 frames" }));
+    await waitFor(() =>
+      expect(bulk).toHaveBeenCalledWith("M_42", { action: "accept", ids: [1, 2] }));
+  });
+
+  it("surfaces the auto-grade safety cap in the Stack-form hint", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
+    const frames = Array.from({ length: 20 }, (_, i) => mkFrame(i + 1));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+    vi.spyOn(client.api, "autoGradePreview").mockResolvedValue({
+      sensitivity: "normal", n_accepted: 20, n_considered: 20,
+      recommendations: [
+        { frame_id: 1, name: "f1.fits", reasons: [
+          { metric: "sky_level", label: "much brighter sky than typical", value: 900, typical: 200, z: 9 },
+        ] },
+      ],
+      metrics_used: ["sky_level"], metrics_skipped: {},
+      capped: true, changed_ids: null,
+    });
+
+    renderStack();
+
+    await waitFor(() =>
+      expect(screen.getByText(/only the worst are recommended; review before stacking/))
+        .toBeInTheDocument());
+  });
+
   it("shows the pre-run output canvas + peak-memory estimate line", async () => {
     vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: true });

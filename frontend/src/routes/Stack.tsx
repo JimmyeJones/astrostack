@@ -113,6 +113,42 @@ export function StackView() {
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
 
+  // One-click "Drop N outlier frames" from the auto-grade hint. It mutates
+  // target-wide accept state (unlike the sibling option-flip nudges), so it's
+  // undoable: we remember which frames it rejected and offer to re-accept them.
+  // Auto-grade never sets user_override, so re-accepting is a clean revert.
+  const [gradeDropped, setGradeDropped] = useState<number[] | null>(null);
+  const applyGrade = useMutation({
+    mutationFn: () => api.autoGradeApply(safe),
+    onSuccess: (r) => {
+      const ids = r.changed_ids ?? [];
+      if (ids.length) {
+        setGradeDropped(ids);
+        notifications.show({
+          message: `Dropped ${ids.length} outlier frame${ids.length === 1 ? "" : "s"}`,
+          color: "violet",
+        });
+      } else {
+        notifications.show({ message: "Nothing to drop — frames already graded", color: "gray" });
+      }
+      qc.invalidateQueries({ queryKey: ["frames", safe] });
+      qc.invalidateQueries({ queryKey: ["auto-grade-preview", safe] });
+      qc.invalidateQueries({ queryKey: ["stack-estimate", safe] });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
+  const undoGrade = useMutation({
+    mutationFn: (ids: number[]) => api.bulkFrames(safe, { action: "accept", ids }),
+    onSuccess: () => {
+      setGradeDropped(null);
+      notifications.show({ message: "Re-accepted the dropped frames", color: "violet" });
+      qc.invalidateQueries({ queryKey: ["frames", safe] });
+      qc.invalidateQueries({ queryKey: ["auto-grade-preview", safe] });
+      qc.invalidateQueries({ queryKey: ["stack-estimate", safe] });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
+
   const saveDefaults = useMutation({
     mutationFn: () => api.putStackDefaults(safe, values),
     onSuccess: () => notifications.show({
@@ -422,13 +458,21 @@ export function StackView() {
   })();
 
   // Auto-grade hint: if the grader flags some accepted frames as likely
-  // outliers, nudge the user to review them on the Target page before stacking
-  // junk. Advisory only; it never rejects anything from here.
+  // outliers, nudge the user to drop them (one click, right here) before
+  // stacking junk. Advisory only; nothing is rejected until the user acts.
+  const autoGradeCount = autoGrade.data?.recommendations.length ?? 0;
   const autoGradeHint = (() => {
     const rep = autoGrade.data;
     if (!rep || rep.recommendations.length === 0) return null;
     const n = rep.recommendations.length;
-    return `Auto-grade thinks ${n} of your ${rep.n_accepted} accepted frame${n === 1 ? "" : "s"} look like quality outliers (clouds, poor focus or tracking). Review Auto-grade on the Target page to drop ${n === 1 ? "it" : "them"} in one click before you stack.`;
+    const base = `Auto-grade thinks ${n} of your ${rep.n_accepted} accepted frame${n === 1 ? "" : "s"} look like quality outliers (clouds, poor focus or tracking).`;
+    // When a whole session is rough, the grader caps its recommendation at the
+    // worst 25% (MAX_REJECT_FRACTION) so it never nukes half a library — tell
+    // the user that here, since they may skip the Target page's fuller notice.
+    const capped = rep.capped
+      ? " This looks like a rough session — more were flagged than the 25% safety cap allows, so only the worst are recommended; review before stacking."
+      : "";
+    return `${base}${capped} Drop ${n === 1 ? "it" : "them"} in one click, or review on the Target page.`;
   })();
 
   // Drizzle accumulates in a single pass, so the sigma-clip toggle doesn't
@@ -727,19 +771,46 @@ export function StackView() {
             </Alert>
           ) : null}
 
-          {autoGradeHint ? (
-            <Alert color="yellow" variant="light" py={6} px="sm">
-              <Text size="xs">{autoGradeHint}</Text>
+          {gradeDropped !== null ? (
+            <Alert color="teal" variant="light" py={6} px="sm">
+              <Text size="xs">
+                Dropped {gradeDropped.length} outlier frame{gradeDropped.length === 1 ? "" : "s"} — they
+                won't be stacked.
+              </Text>
               <Button
                 mt={6}
                 size="xs"
                 variant="light"
-                color="yellow"
-                component={Link}
-                to={`/targets/${safe}`}
+                color="teal"
+                loading={undoGrade.isPending}
+                onClick={() => undoGrade.mutate(gradeDropped)}
               >
-                Review Auto-grade
+                Undo — re-accept {gradeDropped.length} frame{gradeDropped.length === 1 ? "" : "s"}
               </Button>
+            </Alert>
+          ) : autoGradeHint ? (
+            <Alert color="yellow" variant="light" py={6} px="sm">
+              <Text size="xs">{autoGradeHint}</Text>
+              <Group gap="xs" mt={6}>
+                <Button
+                  size="xs"
+                  variant="light"
+                  color="yellow"
+                  loading={applyGrade.isPending}
+                  onClick={() => applyGrade.mutate()}
+                >
+                  Drop {autoGradeCount} outlier frame{autoGradeCount === 1 ? "" : "s"}
+                </Button>
+                <Button
+                  size="xs"
+                  variant="subtle"
+                  color="yellow"
+                  component={Link}
+                  to={`/targets/${safe}`}
+                >
+                  Review Auto-grade
+                </Button>
+              </Group>
             </Alert>
           ) : null}
 
