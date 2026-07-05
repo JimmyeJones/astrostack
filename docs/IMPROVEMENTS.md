@@ -416,6 +416,15 @@ problems. Dogfood it every big-picture run and fix root causes.
   v0.84.2. A Builder dogfood of the other five routes (Dashboard/Library/Target/
   History/Editor) found them already well-handled with icon+prose+next-step empty
   states, beginner tooltips, and translated reject/combine labels.)_
+- **Make the new "Process target" one-click the guided next step for a fresh target.**
+  With the v0.85.0 one-click Process chain shipped, a beginner who just ingested frames
+  into a target (nothing QC'd/solved/stacked yet) still has to know to click "Process
+  target" among several toolbar buttons. Surface it as the highlighted next-step in a
+  small getting-started callout on a Target whose newest frames haven't been processed
+  (e.g. no stack run yet, or accepted-but-unsolved frames present) — "Ready to process?
+  One click runs quality-check, plate-solve & stacking." Reuses the shipped
+  `api.processTarget` mutation; purely a discoverability/friendliness add, no engine/API
+  change. (S, friendliness — completes the one-click autonomy story)
 - Better long-job feedback and clearer error messages. (S, friendliness)
   _(~~Idea: map the handful of known fatal `job.error` messages to plain language~~ —
   **shipped v0.84.3** (see Shipped). A `friendlyJobError` helper now translates the
