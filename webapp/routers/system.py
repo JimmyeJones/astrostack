@@ -165,6 +165,12 @@ class ReprocessAllBody(BaseModel):
     # not the whole library. Defaults False so the endpoint's existing behaviour
     # (restack everything) is unchanged for any caller that omits it.
     stale_only: bool = False
+    # When True, re-run QC / plate-solve / auto-grade over each target's existing
+    # frames *before* restacking it, so the reprocess also picks up QC/solve/grading
+    # improvements — not just the stacker's. Much slower (a full rescan), so it's an
+    # explicit opt-in; defaults False (plain restack) to keep existing callers'
+    # behaviour unchanged.
+    deep_rescan: bool = False
 
 
 @router.post("/api/reprocess-all")
@@ -175,6 +181,9 @@ def reprocess_all(request: Request, body: ReprocessAllBody | None = None) -> dic
 
     With ``stale_only`` set, targets already stacked on the current version are
     skipped, so an upgrade reprocesses only the images that would actually change.
+    With ``deep_rescan`` set, each target's frames are re-QC'd / re-solved /
+    re-graded before its restack (slower; picks up QC/solve/grading improvements
+    too, not just the stacker's).
 
     Idempotent-ish: if a reprocess-all batch is already queued/running, return
     that job instead of enqueuing a duplicate.
@@ -185,7 +194,9 @@ def reprocess_all(request: Request, body: ReprocessAllBody | None = None) -> dic
     if existing is not None:
         return {"job_id": existing.id, "already_running": True}
     stale_only = bool(body.stale_only) if body is not None else False
-    job = pipeline.submit_reprocess_all(settings, jm, stale_only=stale_only)
+    deep_rescan = bool(body.deep_rescan) if body is not None else False
+    job = pipeline.submit_reprocess_all(settings, jm, stale_only=stale_only,
+                                        deep_rescan=deep_rescan)
     return {"job_id": job.id, "already_running": False}
 
 

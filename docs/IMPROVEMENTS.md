@@ -326,8 +326,8 @@ problems. Dogfood it every big-picture run and fix root causes.
   is self-describing for Siril/PixInsight. Absence = today's linear behaviour, so
   old runs are unaffected.
 ### Autonomy — "just works" (PRIORITY 2)
-- **⭐ OWNER-REQUESTED — "Reprocess everything" — slices (a) SHIPPED (v0.74.0) &
-  (c) SHIPPED (v0.76.0–0.77.0); slice (b) remains.** The stacking engine keeps improving (better rejection /
+- **⭐ OWNER-REQUESTED — "Reprocess everything" — ALL SLICES SHIPPED: (a) v0.74.0,
+  (c) v0.76.0–0.77.0, (b) v0.83.0.** The stacking engine keeps improving (better rejection /
   alignment / calibration, bug fixes), but each target's existing stack was produced
   by whatever engine version was current when it ran — so after an upgrade the *final
   images stay stale* unless the user restacks each target by hand. **Slice (a)
@@ -338,9 +338,13 @@ problems. Dogfood it every big-picture run and fix root causes.
   non-destructive (each restack is a *new* `stack_runs` row alongside the old output)
   and memory-safe (per-target stacks run serially inside the one job), with
   between-target + within-target cancel and per-target failure isolation. **Remaining
-  slices for a future run:** (b) an optional deeper **full rescan** that also re-runs
-  QC / plate-solve / auto-grade over the existing library frames before restacking,
-  for when those steps improved too. **Slice (c) shipped:** every stack run records
+  slices for a future run:** _(none — slice (b) shipped v0.83.0: an optional off-by-default
+  `deep_rescan` flag on `POST /api/reprocess-all` re-runs QC / plate-solve / auto-grade over
+  each target's existing frames before its restack, so a reprocess after an upgrade picks up
+  QC/solve/grading improvements too, not just the stacker's. Best-effort per target, honours
+  manual accept/reject (`user_override`), skips the rescan for `stale_only`-skipped targets.
+  Settings → "Also re-run QC, plate-solving & grading first" toggle.)_ **Slice (c) shipped:**
+  every stack run records
   the producing app version (`engine_version` column, schema 8→9, v0.76.0, surfaced
   on the History card as "made with vX"), and the reprocess action now has an
   **"only outdated targets"** toggle (v0.77.0, default on) — a `stale_only` flag on
@@ -548,6 +552,31 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Reprocess-everything slice (b): optional deep full rescan (re-QC / re-solve / re-grade
+  before restacking) — completes the ⭐ owner-requested "reprocess everything" feature
+  (PRIORITY-2 autonomy).** The slice-(a) reprocess restacks each target with the current
+  engine, but reused the target's existing QC/solve/grade decisions — so improvements to
+  *those* steps (not just the stacker) didn't reach the reprocessed image. A new
+  off-by-default `deep_rescan` flag on `POST /api/reprocess-all` re-runs QC + plate-solve
+  (`run_qc_and_solve` with `only_new_qc=False`, so every frame is re-derived with the new
+  engine) and, when the user has grading enabled, re-applies auto-grade over each target's
+  existing frames *before* that target's restack. A new `_refresh_target` helper does the
+  refresh best-effort per target (a flaky re-QC is logged and swallowed, never sinking the
+  restack) and honours manual accept/reject decisions (`apply_qc_result_to_db` respects
+  `user_override`, so re-QC can't clobber a hand-made choice); solving is best-effort (no
+  ASTAP → nothing solved). It runs only for targets that will actually be restacked, so a
+  `stale_only` skip skips the (expensive) rescan too, and the batch stays cancellable between
+  targets. The job summary gains a `rescanned` count. Settings → Reprocess panel adds an
+  off-by-default "Also re-run QC, plate-solving & grading first" switch (with a confirm-dialog
+  note and manual-choices reassurance) wired through `api.reprocessAll(staleOnly, deepRescan)`.
+  Additive/upgrade-safe: a new opt-in flag on an existing endpoint + one new job-summary field
+  + one UI switch — no schema/default/API-shape change; an omitted flag is exactly today's
+  plain restack. Tests: webapp (deep_rescan re-runs QC/solve with `only_new_qc=False` before
+  each stack + reports `rescanned`; default off never rescans; a failing refresh is isolated
+  and the restack still happens; a `stale_only`-skipped target isn't rescanned) + Vitest (the
+  toggle passes `deep_rescan=true`; the two existing scope tests updated to the two-arg call).
+  (v0.83.0, this run — Builder)
 
 - **Proactively nudge dark exposure-scaling from the calibration store (PRIORITY-2 autonomy;
   follow-up to the v0.82.0 `scale_dark_to_light` feature).** The one-click "Scale this dark to

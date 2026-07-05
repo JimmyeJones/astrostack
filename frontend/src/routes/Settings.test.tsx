@@ -101,7 +101,8 @@ describe("Maintenance — reprocess everything", () => {
     // The default button names the "outdated" scope, matching the default toggle.
     fireEvent.click(screen.getByRole("button", { name: /Reprocess outdated targets/ }));
 
-    await waitFor(() => expect(call).toHaveBeenCalledWith(true));
+    // Default: outdated-only on, deep rescan off.
+    await waitFor(() => expect(call).toHaveBeenCalledWith(true, false));
     await waitFor(() =>
       expect(screen.getByText(/Reprocessing targets/)).toBeInTheDocument());
   });
@@ -116,7 +117,21 @@ describe("Maintenance — reprocess everything", () => {
     fireEvent.click(screen.getByLabelText(/Only targets not already stacked on this version/));
     fireEvent.click(screen.getByRole("button", { name: /Reprocess all targets/ }));
 
-    await waitFor(() => expect(call).toHaveBeenCalledWith(false));
+    await waitFor(() => expect(call).toHaveBeenCalledWith(false, false));
+  });
+
+  it("passes deep_rescan when the QC/solve/grade toggle is turned on", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const call = vi
+      .spyOn(client.api, "reprocessAll")
+      .mockResolvedValue({ job_id: "job-9", already_running: false });
+
+    renderMaintenance();
+    fireEvent.click(screen.getByLabelText(/re-run QC, plate-solving & grading/));
+    fireEvent.click(screen.getByRole("button", { name: /Reprocess .* targets/ }));
+
+    // Still outdated-only by default, now with the deep rescan opted in.
+    await waitFor(() => expect(call).toHaveBeenCalledWith(true, true));
   });
 
   it("surfaces the already-running case", async () => {
