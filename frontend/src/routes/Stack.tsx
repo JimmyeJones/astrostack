@@ -29,6 +29,12 @@ export function StackView() {
   const reuseRunId = searchParams.get("from");
   const qc = useQueryClient();
   const [values, setValues] = useState<Record<string, unknown>>({});
+  // True once `values` has been seeded from the loaded defaults (see the sync
+  // effect below). The loading guard waits on it so the form body never renders
+  // for the one frame between defaults resolving and the effect committing —
+  // otherwise data-driven nudges that read `values` (e.g. the transparency /
+  // photometric-normalize hint) briefly flash against the empty initial state.
+  const [initialized, setInitialized] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
   const job = useJobEvents(jobId);
 
@@ -92,11 +98,15 @@ export function StackView() {
   useEffect(() => {
     if (!defaults.data) return;
     // Base on this target's defaults, then overlay a reused run's settings (if
-    // any) once they've loaded, so "Reuse settings" wins over the defaults.
-    if (reuseRunId && !reuse.data) return;  // wait for the reuse payload first
+    // any) once they've loaded, so "Reuse settings" wins over the defaults. Wait
+    // until the reuse fetch *settles* (not just for its data) — otherwise a
+    // reuse-fetch error would leave the effect returning forever and, now that
+    // the loader gates on `initialized`, hang the form on the spinner.
+    if (reuseRunId && reuse.isLoading) return;
     const reused = reuseRunId && reuse.data ? reuse.data.options : {};
     setValues({ ...defaults.data, ...reused });
-  }, [defaults.data, reuseRunId, reuse.data]);
+    setInitialized(true);
+  }, [defaults.data, reuseRunId, reuse.data, reuse.isLoading]);
 
   // When a stack finishes it may have auto-rejected outlier frames — refresh
   // the frame list so the solved/accepted counts (and this page's guard) update.
@@ -159,7 +169,13 @@ export function StackView() {
     onError: (e: Error) => notifications.show({ message: `Save failed: ${e.message}`, color: "red" }),
   });
 
-  if (schema.isLoading || defaults.isLoading || (!!reuseRunId && reuse.isLoading)) {
+  // Also wait for `initialized` (the values seed) — but never block on it if the
+  // defaults fetch errored, or the sync effect would never run and the form would
+  // hang on the loader; in that case fall through and render with empty defaults.
+  if (
+    schema.isLoading || defaults.isLoading || (!!reuseRunId && reuse.isLoading) ||
+    (!initialized && !defaults.isError)
+  ) {
     return (
       <Center h={300}>
         <Loader />

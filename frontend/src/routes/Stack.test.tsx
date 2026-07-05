@@ -6,12 +6,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { StackView } from "./Stack";
 import * as client from "../api/client";
 
-function renderStack() {
-  const qc = new QueryClient();
+function renderStackAt(path: string) {
+  // Retries off so a deliberately-rejected query fails fast (no exponential
+  // backoff) in tests that exercise error paths.
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <MantineProvider>
       <QueryClientProvider client={qc}>
-        <MemoryRouter initialEntries={["/targets/M_42/stack"]}>
+        <MemoryRouter initialEntries={[path]}>
           <Routes>
             <Route path="/targets/:safe/stack" element={<StackView />} />
           </Routes>
@@ -19,6 +21,10 @@ function renderStack() {
       </QueryClientProvider>
     </MantineProvider>,
   );
+}
+
+function renderStack() {
+  return renderStackAt("/targets/M_42/stack");
 }
 
 afterEach(() => vi.restoreAllMocks());
@@ -857,6 +863,23 @@ describe("StackView", () => {
 
     await waitFor(() => expect(screen.getByText("Start stacking")).toBeInTheDocument());
     expect(screen.queryByText(/vary a lot in transparency/)).not.toBeInTheDocument();
+  });
+
+  it("still renders the form (never hangs the loader) when the reuse fetch errors", async () => {
+    // The form body is gated on the values being seeded from defaults (so
+    // data-driven nudges don't flash against the empty initial state). The seed
+    // effect must therefore settle even when the ?from= reuse fetch *errors* —
+    // otherwise it would return forever and hang the page on the spinner.
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: true });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+    vi.spyOn(client.api, "stackRunOptions").mockRejectedValue(new Error("run gone"));
+
+    renderStackAt("/targets/M_42/stack?from=5");
+
+    // Falls through to the defaults-seeded form instead of hanging.
+    await waitFor(() => expect(screen.getByText("Start stacking")).toBeInTheDocument());
   });
 
   it("hints to review auto-grade when accepted frames look like outliers", async () => {

@@ -624,6 +624,19 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **De-flake the Stack-form photometric-nudge test that reddened main CI + fix the underlying
+  nudge flash (v0.84.13, bug/friendliness).** Main CI was red at this run's start (v0.84.10):
+  `Stack.test.tsx > does not nudge photometric normalization when it is already on` flaked
+  because the form body rendered for one frame after `getStackDefaults` resolved but *before*
+  the effect that seeds `values` committed — so `values.photometric_normalize` was still the
+  empty-state `undefined` and the transparency nudge briefly flashed even when the default was
+  on. Root-caused (not just retried): the loading guard now also waits on an `initialized` flag
+  set once `values` is seeded, so no data-driven nudge renders against the empty initial state.
+  Hardened the seed effect to settle on the reuse (`?from=`) fetch succeeding *or erroring*
+  (the new gate would otherwise hang the loader on a reuse error) — deterministic regression
+  test `still renders the form (never hangs the loader) when the reuse fetch errors`
+  (fails before / passes after).
+
 - **Clamp `background.final_gradient`'s box to the image size so Auto can't hard-fail on a
   small frame (v0.84.12, robustness).** `_fit_background_2d` clamps `box_size` to tile the
   image (`min(box, max(8, min(h//4, w//4)))`, mirroring `BackgroundOptions.for_image_size`) —
