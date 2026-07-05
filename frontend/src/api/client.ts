@@ -397,6 +397,14 @@ export interface Histogram {
   proxy_scale?: number;
   proxy_width?: number;
   proxy_height?: number;
+  // Dims of the *rendered* preview after the recipe's geometry ops (crop/rotate/
+  // resize) reshape the frame — what the preview PNG actually measures. The editor
+  // sizes its image box from these so a cropped preview fills the box instead of
+  // letterboxing inside the un-cropped aspect (which mis-aligns overlays). Equal to
+  // proxy_width/height when the recipe has no reshaping geometry op; absent on an
+  // older backend (fall back to the proxy dims).
+  render_width?: number;
+  render_height?: number;
   // True when this run is a mosaic (uneven panel overlap → coverage spans a
   // range). The "Coverage leveling" op only does something on a mosaic, so the
   // editor uses this to tell the user when the control is a no-op here.

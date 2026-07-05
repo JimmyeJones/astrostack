@@ -437,17 +437,15 @@ problems. Dogfood it every big-picture run and fix root causes.
   the stacker (and editor-export / channel-combine paths) repoint the previous run's history
   row at its archived files before recording the new run. History now genuinely keeps both,
   and no `stack_runs` row silently serves another run's image.
-- **Low-priority (editor): the whole-recipe Split/Compare divider misaligns when an
-  enabled geometry op reshapes the frame.** The "Original" overlay is the full
-  empty-recipe render (`Editor.tsx` base fetch `{ops: []}`), but the preview box is sized to
-  the *edited* histogram's proxy dims; when the recipe has an enabled `geometry.crop`/rotate/
-  resize, the box aspect differs, so the Original is `objectFit:contain`-letterboxed and the
-  same screen-x maps to a different sky position on each side of the divider. Affects the
-  whole-recipe Split and the plain Compare toggle equally (long-standing, inherent to
-  "Original vs edited-with-a-crop"); the per-op "Split this op" is unaffected except when
-  splitting the geometry op itself. Borderline by-design; if fixed, render the Original
-  through the same geometry ops (or size the box from the base render). Found by a Builder
-  frontend audit 2026-07-05. (S, editor/trust)
+- ~~**Low-priority (editor): the whole-recipe Split/Compare divider misaligns when an
+  enabled geometry op reshapes the frame.**~~ — **FIXED v0.83.3** (see Shipped; upgraded from
+  "low-priority" once a Builder editor-UI dogfood traced the more visible half — a cropped
+  live preview letterboxing with spurious black bars right after the one-click mosaic "Trim
+  border"). Both root causes are fixed: (1) the histogram endpoint now reports the *rendered*
+  post-geometry dims (`render_width`/`render_height`) and the preview box is sized from them,
+  so a cropped/rotated preview fills the box; (2) the Split/Compare "Original" (and the star-
+  mask overlay) are now rendered through the recipe's enabled geometry ops, so both divider
+  layers share the edit's framing and line up.
 - ~~**Low-priority robustness: mosaic canvas iterative-shrink picks its "worst"
   frame with a wrap-unsafe RA median.**~~ — **FIXED v0.81.9** (see Shipped). The
   iterative canvas-shrink fallback now computes each active frame's centre RA with
@@ -456,6 +454,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   the actual far outlier rather than a good central (wrap-straddling) frame. Regression
   test `test_canvas_shrink_loop_drops_the_real_outlier_near_ra_zero` (fails before /
   passes after).
+- **Low-priority (editor/consistency): the `denoise-suggestion` endpoint measures the *raw*
+  proxy, not the recipe-aware display image.** Unlike the levels/stretch/curve suggestions
+  (which apply the ops before the selected op via `_recipe_before_uid`), `denoise-suggestion`
+  estimates noise on the bare linear proxy. Since denoise runs as a *linear* op before the
+  stretch, that's usually the right domain — but if a user puts a linear background/gradient op
+  before denoise, the suggested strength ignores it. Minor; only worth aligning if a future run
+  is already in that endpoint. Found by a Builder editor-UI audit 2026-07-05. (S, editor)
+- **Low-priority (engine/robustness, unreachable today): per-frame weight/scale lookups use
+  `weights.get(f.id or -1, 1.0)`.** In `stacker.py` (~L1274/1280) and the drizzle path
+  (~L1346/1375) a frame whose `id == 0` would fall through to the default `1.0` instead of its
+  real weight/photometric scale (`0 or -1 == -1`). SQLite autoincrement ids start at 1, so it's
+  **unreachable** — but a latent fragility if the id source ever changes; prefer
+  `f.id if f.id is not None else -1`. Found by a Builder engine audit 2026-07-05. (S, robustness)
 - **Low-priority robustness: `background.final_gradient` has no image-size box
   clamp (unlike `background.subtract`).** `background.subtract` runs its box_size
   through `BackgroundOptions.for_image_size` (floors it so the mesh always tiles a
@@ -537,6 +548,37 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Fix (PRIORITY-1 editor): a cropped/geometry-edited live preview letterboxed with spurious
+  black bars, and the Split/Compare divider mis-aligned, whenever a reshaping geometry op was
+  in the recipe.** Found by a Builder editor-UI dogfood: the histogram endpoint reported
+  `proxy_width`/`proxy_height` from the *raw* proxy (measured before `apply_recipe`), but the
+  preview PNG is the *post-recipe* image — so after any enabled `geometry.crop`/rotate/resize
+  (the headline case: one-click mosaic **Trim border → Apply**) the editor sized its image box
+  to the un-cropped aspect and `objectFit:contain` pillarboxed the cropped preview inside it —
+  unexplained black bars that read as "the crop broke something" — while the Split/Compare
+  "Original" (a full un-cropped render) and the divider no longer lined up with the edited
+  frame. Export was unaffected (it never reads these dims). Fix, additive/upgrade-safe: (a) the
+  histogram endpoint now also returns `render_width`/`render_height` from the rendered `out`
+  shape (equal to the raw proxy dims when there's no reshaping op; the raw `proxy_*` stay put
+  for the "downscaled ×N" caption), and the editor sizes its box from those (fallback to
+  `proxy_*` on an older backend); (b) the Split/Compare "Original"/base render and the star-mask
+  overlay are now rendered through the recipe's enabled geometry ops (reusing `apply_geometry_to_map`,
+  the same path the coverage overlay already uses), so every overlay shares the edit's framing
+  and the divider aligns. No schema/API-shape/default change — new response fields + a
+  frontend box-sizing/overlay change. Tests: webapp (histogram reports rendered dims matching
+  the cropped preview PNG and < the raw proxy dims; the star-mask width tracks a recipe crop) +
+  Vitest (the box aspect follows `render_*`, falls back to `proxy_*` when absent, and the split
+  "Original" fetch carries only the geometry ops). (v0.83.3, this run — Builder)
+
+- **Engine hardening (PRIORITY-1 stacking-engine QA): correct a stale `WelfordAccumulator`
+  docstring that claimed population variance `M2/n`.** A Builder adversarial audit of the
+  combine maths found the class docstring stated it uses population variance "not the sample
+  variance", directly contradicting `variance()`, which deliberately returns the *unbiased
+  sample* variance `M2/(n-1)` (NaN for `n<2`, so the sigma-clip pass keeps single-coverage
+  mosaic-edge pixels). The lie briefly misled the auditor itself; the docstring now matches
+  the code. Docs-only, zero behaviour change (no version-visible effect; rides the v0.83.3
+  bump). (this run — Builder)
 
 - **One-click "Drop N outlier frames" + safety-cap notice on the Stack-form auto-grade hint
   (PRIORITY-2/3 autonomy + friendliness).** The auto-grade hint was the last Stack-form
