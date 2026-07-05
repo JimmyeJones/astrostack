@@ -148,17 +148,29 @@ export function darkScalingSummaryText(
   return s;
 }
 
-// One-line provenance for how much the κ-σ rejection actually clipped —
-// "Rejection clipped ~0.4% of samples (transient outliers)". A trust signal:
-// a small fraction means it removed satellites/planes/cosmic rays without
-// eating real signal, an unusually large one (≳ 8%) hints a too-tight κ, and
-// 0% means the data was already clean. Returns null when the run ran no κ-σ
-// pass (so the card omits the line). Pure so it can be unit-tested and mirrors
-// photometricSummaryText / darkScalingSummaryText.
+// One-line provenance for how much the outlier rejection actually removed. A
+// trust signal so the user can see the rejection did its job without being told
+// "trust me". Mode-aware because the two rejection kinds mean different things:
+//
+//  * κ-σ ("sigma-clip") — the fraction is *data-driven*: a small share means it
+//    removed satellites/planes/cosmic rays without eating real signal, ~0% means
+//    the data was already clean, and an unusually large one (≳ 8%) hints a
+//    too-tight κ eating signal → "Rejection clipped ~0.4% of samples (…)".
+//  * min/max reject ("min-max-reject") — it *always* drops the per-pixel extremes
+//    by design, so the fraction is *structural* (≈ 2k / frames): small at high
+//    frame counts, large-by-design at low ones. No over-clipping caution — a big
+//    number just means a short stack → "Rejection dropped the ~50% most-extreme
+//    samples (min/max reject)".
+//
+// Returns null when the run ran no rejection pass (so the card omits the line).
+// Pure so it can be unit-tested and mirrors photometricSummaryText.
 export function rejectionSummaryText(
   rejection: StackRejectionSummary | null | undefined,
 ): string | null {
   if (!rejection) return null;
+  const isMinMax = rejection.mode === "min-max-reject";
+  const verb = isMinMax ? "dropped the" : "clipped";
+  const label = isMinMax ? "min/max reject" : "sigma-clip";
   const frac = rejection.fraction;
   if (typeof frac !== "number" || !Number.isFinite(frac) || frac < 0) {
     return "Outlier rejection applied";
@@ -169,11 +181,19 @@ export function rejectionSummaryText(
   else if (pct < 0.1) pctText = "<0.1%";
   else if (pct < 10) pctText = `${pct.toFixed(1)}%`;
   else pctText = `${Math.round(pct)}%`;
+  const noun = isMinMax ? "most-extreme samples" : "of samples";
   let note: string;
-  if (pct === 0) note = "data was already clean";
-  else if (pct < 8) note = "transient outliers";
-  else note = "high — check that κ isn't clipping real signal";
-  return `Rejection clipped ~${pctText} of samples (${note})`;
+  if (isMinMax) {
+    // Structural, by design — never a caution; just name the method.
+    note = label;
+  } else if (pct === 0) {
+    note = "data was already clean";
+  } else if (pct < 8) {
+    note = "transient outliers";
+  } else {
+    note = "high — check that κ isn't clipping real signal";
+  }
+  return `Rejection ${verb} ~${pctText} ${noun} (${note})`;
 }
 
 // Compact seconds label for exposures — "30s", "2.5s" — trimming a trailing ".0".

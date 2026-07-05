@@ -428,7 +428,7 @@ describe("darkScalingSummaryText", () => {
 });
 
 describe("rejectionSummaryText", () => {
-  it("returns null when the run ran no κ-σ rejection", () => {
+  it("returns null when the run ran no rejection pass", () => {
     expect(rejectionSummaryText(null)).toBeNull();
     expect(rejectionSummaryText(undefined)).toBeNull();
   });
@@ -454,6 +454,16 @@ describe("rejectionSummaryText", () => {
   });
   it("falls back to a plain label when the fraction is missing", () => {
     expect(rejectionSummaryText({ mode: "sigma-clip" })).toBe("Outlier rejection applied");
+  });
+  it("words min/max reject as a by-design extreme drop, with no κ caution", () => {
+    // A structural fraction (2k/frames) — large at a short stack is by design,
+    // so it must NOT show the "too-tight κ" over-clipping warning.
+    expect(
+      rejectionSummaryText({ mode: "min-max-reject", fraction: 0.5, n_rejected: 2, n_contributed: 4 }),
+    ).toBe("Rejection dropped the ~50% most-extreme samples (min/max reject)");
+    const small = rejectionSummaryText({ mode: "min-max-reject", fraction: 0.02 });
+    expect(small).toBe("Rejection dropped the ~2.0% most-extreme samples (min/max reject)");
+    expect(small).not.toContain("κ");
   });
 });
 

@@ -248,6 +248,26 @@ class MinMaxRejectAccumulator:
         accumulators' coverage semantics)."""
         return self._count.astype(self._sum.dtype)
 
+    def rejection_counts(self) -> tuple[int, int]:
+        """``(n_contributed, n_rejected)`` — how many covered samples this
+        accumulator saw and how many it dropped as per-pixel extremes.
+
+        Derived from the final ``_count`` map (no per-frame tracking, no extra
+        canvas), matching the exact drop schedule ``result()`` applies: ``2k``
+        samples where a pixel had ≥ 2k+1 contributions, ``2`` where 3 ≤ count <
+        2k+1, and 0 below that. ``n_contributed`` sums every covered sample
+        (per channel, mirroring the κ-σ tally). Lets the stacker surface a
+        "rejection dropped ~X% of samples" trust line for the min/max path too.
+        Note the fraction here is *structural* (≈ 2k / count), unlike κ-σ's
+        data-driven one — small at high frame counts, large by design at low."""
+        cnt = self._count.astype(np.int64)
+        k = self._k
+        contributed = int(cnt.sum())
+        full = cnt >= (2 * k + 1)
+        single = (cnt >= 3) & (cnt < (2 * k + 1))
+        rejected = int(2 * k * np.count_nonzero(full) + 2 * np.count_nonzero(single))
+        return contributed, rejected
+
 
 class WelfordAccumulator:
     """

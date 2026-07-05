@@ -480,19 +480,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   canvas), stamps `REJMODE`/`REJFRAC`/`REJNREJ`/`REJNTOT` FITS cards, the run `…/info`
   endpoint parses them into a `rejection` summary, and the History Info panel renders one
   plain trust line ("Rejection clipped ~0.4% of samples (transient outliers)"; "data was
-  already clean" at 0%; a caution once the fraction is unusually high). Follow-up below:
-  min/max-reject and drizzle-reject don't yet report the metric (their rejection is internal
-  to the accumulator), so the line appears only for κ-σ runs — consistent with PHOTNORM/DARKSCAL.
-- **Extend the rejection-clipped trust metric to min/max-reject and drizzle-reject.** The
-  v0.84.9 "Rejection clipped ~X%" line only appears for the default κ-σ path, because that
-  pass exposes a per-pixel `keep` mask in `consume_clipped` where two scalars can be summed
-  for free. `MinMaxRejectAccumulator.add_window` and `DrizzleStacker` do their rejection
-  *inside* the accumulator, so surfacing the same metric there means having each report a
-  small `(n_contributed, n_rejected)` tally (min/max's is near-deterministic — 2k drops per
-  covered pixel with ≥2k+1 samples; drizzle-reject's mirrors the κ-σ two-pass gate). Additive,
-  pure reporting, reuses the shipped `RejectionStats` + FITS-card + info-endpoint + History
-  wiring — the only new work is threading a counter out of each accumulator. (S–M,
-  image-quality/trust — priority 4)
+  already clean" at 0%; a caution once the fraction is unusually high).
+- ~~**Extend the rejection-clipped trust metric to min/max-reject**~~ — **shipped v0.84.10**
+  (see Shipped). `MinMaxRejectAccumulator.rejection_counts()` derives `(n_contributed,
+  n_rejected)` from its final `_count` map (memory-free, no streaming change), the min/max
+  branch stamps `REJMODE="min-max-reject"`, and `rejectionSummaryText` is now mode-aware —
+  min/max's fraction is *structural* (≈ 2k / frames), so it reads "Rejection dropped the ~X%
+  most-extreme samples (min/max reject)" with **no** over-clipping caution (a big number at a
+  short stack is by design, not a too-tight κ). Drizzle-reject still remaining below.
+- **Extend the rejection-clipped trust metric to drizzle-reject.** The "Rejection …%" History
+  line now covers κ-σ (v0.84.9) and min/max (v0.84.10) but not the two-pass drizzle-reject
+  path, whose rejection happens *inside* `DrizzleStacker` (pass 1 accumulates value+value² for
+  per-output-pixel mean/σ, pass 2 zero-weights contributions outside `mean ± sigma_kappa·σ`).
+  Surfacing it means having the pass-2 drizzler tally `(n_contributed, n_rejected)` as it
+  zero-weights and returning a `RejectionStats(mode="drizzle-reject", …)` — a genuine
+  *data-driven* fraction (like κ-σ, so it reuses the sigma-clip wording, not min/max's
+  structural one). Additive, pure reporting, reuses the shipped `RejectionStats` + FITS-card +
+  info-endpoint + History wiring. Off-by-default path, so lower marginal value than the shipped
+  two. (S–M, image-quality/trust — priority 4)
 
 ### Features that serve real workflows
 - Annotated sky overlay (label detected objects / show solved field). (M)
@@ -624,6 +629,26 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Extend the rejection-clipped trust line to the min/max-reject path (PRIORITY-4
+  image-quality/trust; completes the v0.84.9 feature for a path real users hit).** The
+  v0.84.9 "Rejection clipped ~X% of samples" History line only appeared for the default κ-σ
+  path — but the Stack form actively *nudges* users toward min/max reject when a streak is
+  detected, so a user who took that nudge saw no rejection line at all and couldn't tell it
+  did anything. `MinMaxRejectAccumulator` now exposes `rejection_counts() → (n_contributed,
+  n_rejected)`, derived from its final `_count` map at reduce time (no per-frame tracking, no
+  extra canvas — matching the exact 2k/2/0-per-pixel drop schedule `result()` applies), and
+  the min/max branch stamps the same `REJMODE`/`REJFRAC`/`REJNREJ`/`REJNTOT` cards tagged
+  `mode="min-max-reject"`. Because min/max's fraction is *structural* (≈ 2k / frames — small
+  at a long stack, large-by-design at a short one), `rejectionSummaryText` is now mode-aware:
+  min/max reads "Rejection dropped the ~X% most-extreme samples (min/max reject)" with **no**
+  "too-tight κ" over-clipping caution (which would misfire on a 4-frame stack's structural
+  50%), while κ-σ keeps its data-driven wording. Engine-only counting + additive FITS cards +
+  a display-only frontend branch — no config/schema/API/default change, upgrade-safe. Tests:
+  pytest (`rejection_counts` full-trim / k=3 multi-band / empty cases; a real min/max stack
+  stamps `REJMODE="min-max-reject"` with a positive `REJFRAC == REJNREJ/REJNTOT`) + Vitest
+  (`rejectionSummaryText` words min/max as a by-design drop and never shows the κ caution).
+  Drizzle-reject logged as the remaining follow-up. (v0.84.10, this run — Builder)
 
 - **Surface how much the stack's rejection actually clipped — a trust line on History
   (PRIORITY-4 image-quality/trust; current-focus stacking-engine area).** When the default

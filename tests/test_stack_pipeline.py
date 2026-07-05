@@ -392,7 +392,17 @@ def test_stack_min_max_reject(tmp_path):
     assert result.fits_path.exists()
     with fits.open(result.fits_path) as hdul:
         data = np.asarray(hdul[0].data)
-        assert hdul[0].header["STACKER"] == "min-max-reject"
+        hdr = hdul[0].header
+        assert hdr["STACKER"] == "min-max-reject"
+        # Rejection trust provenance is stamped for the min/max path too, tagged
+        # with its own mode so the History line can word it as a by-design drop
+        # (not a κ-σ over-clipping caution). Every covered pixel with ≥3 samples
+        # drops 2, so the fraction is positive and consistent with the counts.
+        assert hdr["REJMODE"] == "min-max-reject"
+        assert hdr["REJNTOT"] > 0
+        assert hdr["REJNREJ"] > 0
+        assert 0.0 < hdr["REJFRAC"] <= 1.0
+        assert abs(hdr["REJFRAC"] - hdr["REJNREJ"] / hdr["REJNTOT"]) < 1e-4
     assert np.isfinite(data).any()
     assert np.nanmax(data) > 0
 

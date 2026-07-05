@@ -971,6 +971,12 @@ def run_stack(
             raise ValueError("no frames could be aligned")
         result_image = mmr.result()
         coverage = mmr.coverage
+        _mmr_contrib, _mmr_rej = mmr.rejection_counts()
+        rej_stats = RejectionStats(
+            mode="min-max-reject",
+            n_contributed=_mmr_contrib,
+            n_rejected=_mmr_rej,
+        )
 
     # ---- 3b. Standard path: pass 1 streaming mean + std --------------------
     # If sigma-clipping is off we go directly to the weighted sum and we're
