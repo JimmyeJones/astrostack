@@ -389,13 +389,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   History/Editor) found them already well-handled with icon+prose+next-step empty
   states, beginner tooltips, and translated reject/combine labels.)_
 - Better long-job feedback and clearer error messages. (S, friendliness)
-  _(Idea, found by a Builder friendliness dogfood 2026-07-05: raw `job.error`
-  strings — often a bare Python exception — still surface verbatim on the Jobs page
-  (`Jobs.tsx`, the `job.error` render). A small, safe win: map the handful of known
-  fatal messages (no plate-solve setup, OOM-refused stack, no accepted frames) to a
-  plain-language sentence + next step, falling back to the raw text for anything
-  unrecognised, mirroring the `jobKindLabel`/`rejectReasonLabel` translation pattern.
-  (S, friendliness))_
+  _(~~Idea: map the handful of known fatal `job.error` messages to plain language~~ —
+  **shipped v0.84.3** (see Shipped). A `friendlyJobError` helper now translates the
+  memory-budget refusal, "nothing plate-solved to stack", empty-alignment, and
+  missing-reference-WCS failures into a plain sentence + next step, falling back to the
+  raw text verbatim for anything unrecognised. Remaining long-job-feedback ideas welcome.)_
+  _(Follow-up idea, found while shipping v0.84.3: `friendlyJobError` matches on the raw
+  exception *string*, which is brittle if an engine message is reworded. A more robust
+  approach — mirroring the v0.84.1 server-side solve-setup classification — would have the
+  backend stamp a stable canonical `error_kind` on a failed job (e.g. `memory_budget`,
+  `no_solved_frames`, `no_alignment`) at the point the exception is caught in
+  `JobManager` (webapp/jobs.py), where the exception *type* is known, and have the
+  frontend prefer that field over string-matching (falling back to the current matcher on
+  an older backend). Additive: a new nullable job field + a new response key, no
+  schema/API-shape break. (S, friendliness/robustness))_
 - ~~**Actionable "plate-solving isn't set up" banner when a whole target fails to solve**~~
   — **shipped v0.84.0** (see Shipped). When ASTAP (or, best-effort, its star database) is
   missing, every frame's solve fails identically and the Target page now shows one
@@ -573,6 +580,22 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Plain-language job failure messages on the Jobs page (PRIORITY-3 friendliness; follow-up to
+  v0.84.2).** A failed job previously surfaced its raw `job.error` string verbatim — stored as
+  `"{ExceptionType}: {message}"` (webapp/jobs.py), so a beginner's first stack failure read as a
+  bare Python exception like `MemoryError: stack output canvas 8000×6000 ×2 drizzle needs ~7.2 GB
+  …` or `ValueError: no accepted, plate-solved frames to stack`. A new pure `friendlyJobError`
+  helper (mirroring the `jobKindLabel`/`rejectReasonLabel` translation pattern) recognises the
+  handful of *known fatal* signatures — the memory-budget refusal (the OOM guard), nothing
+  accepted+plate-solved to stack, an empty-alignment failure (non-overlapping / different-field
+  frames), and a missing-reference-WCS — and renders a plain sentence in red plus a dimmed
+  next-step line, falling back to the raw text **verbatim** for anything unrecognised so no
+  information is ever hidden. Frontend-only, additive, upgrade-safe — no engine/API/schema/default
+  change, purely a display translation of an existing field. Tests: Vitest unit (each known
+  signature → plain message + next step; unrecognised → raw text unchanged) + JobsView (a
+  MemoryError job shows the plain message and never the `MemoryError:` prefix; an unknown
+  `OSError` falls back to raw). (v0.84.3, this run — Builder)
 
 - **Plain-language job names + a guided empty state on the Jobs page (PRIORITY-3 friendliness).**
   Found by a Builder friendliness dogfood: the Jobs page is the *very first screen a new Seestar
