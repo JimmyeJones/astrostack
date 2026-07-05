@@ -3,7 +3,7 @@ import { Notifications } from "@mantine/notifications";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { JobsView, jobKindLabel, reprocessSummary } from "./Jobs";
+import { JobsView, friendlyJobError, jobKindLabel, reprocessSummary } from "./Jobs";
 import * as client from "../api/client";
 import type { Job } from "../api/client";
 
@@ -68,6 +68,31 @@ describe("JobsView", () => {
     expect(screen.queryByText("pipeline")).not.toBeInTheDocument();
   });
 
+  it("shows a plain-language failure (not the raw Python exception) for a known fatal error", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "err-1", kind: "stack", state: "error",
+        error: "MemoryError: stack output canvas 8000×6000 ×2 drizzle needs ~7.2 GB "
+          + "of working memory, over the ~4.0 GB budget. Reduce drizzle scale, …",
+      }),
+    ]);
+    renderJobs();
+    await waitFor(() =>
+      expect(screen.getByText(/needs more memory than the budget allows/)).toBeInTheDocument());
+    // The raw Python "MemoryError:" prefix is never surfaced to the user.
+    expect(screen.queryByText(/MemoryError:/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Lower the drizzle scale/)).toBeInTheDocument();
+  });
+
+  it("falls back to the raw text for an unrecognised error", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({ id: "err-2", state: "error", error: "OSError: disk is full" }),
+    ]);
+    renderJobs();
+    await waitFor(() =>
+      expect(screen.getByText("OSError: disk is full")).toBeInTheDocument());
+  });
+
   it("guides the user to Scan incoming when there are no jobs", async () => {
     vi.spyOn(client.api, "listJobs").mockResolvedValue([]);
     renderJobs();
@@ -105,6 +130,34 @@ describe("jobKindLabel", () => {
   });
   it("falls back to the raw kind for an unknown job type", () => {
     expect(jobKindLabel("some_future_kind")).toBe("some_future_kind");
+  });
+});
+
+describe("friendlyJobError", () => {
+  it("translates the memory-budget refusal", () => {
+    const r = friendlyJobError("MemoryError: stack output canvas needs ~7 GB of working memory");
+    expect(r.message).toMatch(/more memory than the budget allows/);
+    expect(r.next).toMatch(/drizzle scale/);
+  });
+  it("translates 'nothing plate-solved to stack'", () => {
+    expect(friendlyJobError("ValueError: no accepted, plate-solved frames to stack").message)
+      .toMatch(/no accepted, plate-solved frames/);
+    expect(friendlyJobError(
+      "ValueError: No accepted frames are plate-solved yet. Run Plate Solve first.").next)
+      .toMatch(/Quality check & plate-solve/);
+  });
+  it("translates an empty-alignment failure", () => {
+    expect(friendlyJobError("ValueError: no frames could be aligned").message)
+      .toMatch(/None of the frames could be aligned/);
+    expect(friendlyJobError("ValueError: drizzle: no usable frames").message)
+      .toMatch(/None of the frames could be aligned/);
+  });
+  it("translates a missing-WCS reference failure", () => {
+    expect(friendlyJobError("ValueError: reference frame is missing WCS or dimensions").message)
+      .toMatch(/reference frame isn/);
+  });
+  it("returns the raw text verbatim for anything unrecognised", () => {
+    expect(friendlyJobError("OSError: disk is full")).toEqual({ message: "OSError: disk is full" });
   });
 });
 

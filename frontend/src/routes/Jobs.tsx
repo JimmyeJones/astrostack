@@ -42,6 +42,59 @@ export function jobKindLabel(kind: string): string {
   return KIND_LABEL[kind] ?? kind;
 }
 
+// Translate the handful of *known fatal* job-failure messages into a plain
+// sentence + a next step. `job.error` is stored as `"{ExceptionType}: {message}"`
+// (webapp/jobs.py), so a beginner otherwise sees a bare Python exception like
+// `MemoryError: stack output canvas 8000×6000 …` or `ValueError: no accepted,
+// plate-solved frames to stack`. This mirrors the jobKindLabel / rejectReasonLabel
+// translation pattern: match conservatively on stable signatures, and fall back to
+// the raw text verbatim for anything unrecognised so no information is ever hidden.
+export function friendlyJobError(raw: string): { message: string; next?: string } {
+  const s = raw.toLowerCase();
+  // Stack refused *before running* because the output canvas would exceed the
+  // memory budget (the OOM guard in stacker.py, raised as MemoryError).
+  if (s.includes("memoryerror") || s.includes("working memory")) {
+    return {
+      message:
+        "This stack needs more memory than the budget allows, so it was refused "
+        + "before running rather than risk crashing the app.",
+      next:
+        "Lower the drizzle scale, set Canvas mode to “reference”, reject off-target "
+        + "frames, or raise the memory limit in Settings, then stack again.",
+    };
+  }
+  // Nothing accepted + plate-solved to stack.
+  if (s.includes("plate-solve") || s.includes("plate solved")
+      || s.includes("plate-solved")) {
+    return {
+      message: "There are no accepted, plate-solved frames to stack yet.",
+      next:
+        "Run Quality check & plate-solve first, and make sure at least one accepted "
+        + "frame solved successfully.",
+    };
+  }
+  // Alignment produced nothing usable (non-overlapping / different fields).
+  if (s.includes("no frames could be aligned") || s.includes("no usable frames")
+      || s.includes("did not intersect the canvas")
+      || s.includes("produced no usable frames")) {
+    return {
+      message: "None of the frames could be aligned into a stack.",
+      next:
+        "This usually means the frames don’t overlap or solved to different fields — "
+        + "check they’re all the same target, then re-run plate-solve and stack again.",
+    };
+  }
+  // Reference frame has no usable WCS to align the others against.
+  if (s.includes("missing wcs") || s.includes("wcs could not be parsed")
+      || s.includes("reference wcs")) {
+    return {
+      message: "The reference frame isn’t plate-solved, so the stack has nothing to align to.",
+      next: "Re-run Quality check & plate-solve, then stack again.",
+    };
+  }
+  return { message: raw };
+}
+
 /** Plain-language outcome of a finished reprocess-all batch (pure, tested). */
 export function reprocessSummary(r: Record<string, unknown>): {
   line: string; failed: string[];
@@ -106,6 +159,17 @@ function JobResultActions({ job }: { job: Job }) {
   return action ? <Group mt="xs">{action}</Group> : null;
 }
 
+/** A failed job's error, translated to plain language where we recognise it. */
+function JobError({ raw }: { raw: string }) {
+  const { message, next } = friendlyJobError(raw);
+  return (
+    <>
+      <Text c="red" size="sm" mt="xs">{message}</Text>
+      {next ? <Text c="dimmed" size="xs" mt={2}>{next}</Text> : null}
+    </>
+  );
+}
+
 function JobRow({ job, onCancel }: { job: Job; onCancel: () => void }) {
   const pct = job.total ? Math.round((job.done / job.total) * 100) : 0;
   const active = job.state === "running" || job.state === "queued";
@@ -129,7 +193,7 @@ function JobRow({ job, onCancel }: { job: Job; onCancel: () => void }) {
         </Group>
       </Group>
       {active ? <Progress value={job.state === "queued" ? 0 : pct} animated mt="xs" /> : null}
-      {job.error ? <Text c="red" size="sm" mt="xs">{job.error}</Text> : null}
+      {job.error ? <JobError raw={job.error} /> : null}
       {job.detail ? <Text c="dimmed" size="xs" mt={4}>{job.detail}</Text> : null}
       <JobResultActions job={job} />
     </Paper>
