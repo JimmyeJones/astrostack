@@ -1009,12 +1009,15 @@ describe("EditorView", () => {
     // which names the grey it lifts the midtones toward (from the suggestion's
     // target_bg) rather than being an opaque "Auto curve".
     fireEvent.click(await screen.findByText("Curves"));
-    const autoCurve = await screen.findByRole("button", { name: /Auto curve \(lifts to ~25% grey\)/ });
-    fireEvent.click(autoCurve);
-
-    // The suggested points reach the pipeline: a preview fetch fires with the
-    // curve op carrying exactly the suggested points in the encoded recipe.
+    await screen.findByRole("button", { name: /Auto curve \(lifts to ~25% grey\)/ });
+    // The suggestion / default-recipe queries settling briefly remount this toolbar
+    // subtree, so a single captured click can land on an orphaned node (whose React
+    // onClick never fires) or race the button out of the DOM. Re-find and click each
+    // poll — the click is idempotent (it sets the same suggested points) — until
+    // those points reach a preview fetch, the durable effect we actually care about.
     await waitFor(() => {
+      const btn = screen.queryByRole("button", { name: /Auto curve \(lifts to ~25% grey\)/ });
+      if (btn) fireEvent.click(btn);
       const applied = fetchMock.mock.calls.some((call) => {
         const q = new URL("http://x" + String(call[0])).searchParams.get("recipe");
         if (!q) return false;

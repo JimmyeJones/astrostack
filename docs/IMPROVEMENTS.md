@@ -365,18 +365,11 @@ problems. Dogfood it every big-picture run and fix root causes.
   the button already delivers the one-click house-style value.)*
 - Auto-suggest stack settings from the data (frame count, FWHM spread, streaks)
   so the user rarely needs to touch the Stack form. (S–M, autonomy)
-- **Nudge to turn on Photometric normalization when the run's transparency varies a
-  lot.** v0.81.0 shipped `photometric_normalize` (off by default), which gain-matches
-  hazy vs clear subs before combine — but a beginner won't know to reach for it. The
-  Stack form already computes each accepted frame's `transparency_score` and shows a
-  hazy-night banner + a quality-weighting nudge (`Stack.tsx`); add a sibling nudge that
-  fires when the spread of transparency across the frames-to-be-stacked is wide (e.g.
-  p90/p10 ratio ≳ 1.5) *and* `photometric_normalize` is off, explaining in plain
-  language that the frames vary a lot in brightness (haze/airmass across nights) and that
-  turning it on gain-matches them so rejection stays strong and hazy nights don't dim the
-  result. Pure frontend (reuse the transparency values already fetched for the existing
-  nudges); additive, advisory, no engine/API change. Pairs the new feature with the
-  autonomy/friendliness pillars so it actually gets used. (S, autonomy/friendliness)
+- ~~**Nudge to turn on Photometric normalization when the run's transparency varies a
+  lot.**~~ — **shipped v0.81.3** (see Shipped). The Stack form now fires a sibling nudge
+  when the p90/p10 transparency spread across the frames-to-be-stacked is wide (≳ 1.5×)
+  and `photometric_normalize` is off, with a one-click "Turn on photometric
+  normalization" button.
 - ~~**"Apply my last edit to the newest stack" — recipe carry-over across re-stacks.**~~
   — **shipped v0.75.0** (see Shipped). When a re-stacked run opens with no saved edit,
   the empty-pipeline nudge now offers a one-click "Use my previous edit (N)" that copies
@@ -519,6 +512,40 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Stack form nudges to enable Photometric normalization when transparency varies a lot
+  (PRIORITY-2/3 autonomy + friendliness, companion to v0.81.0).** v0.81.0 shipped the
+  off-by-default `photometric_normalize` option that gain-matches hazy vs clear subs
+  before combine, but a beginner won't know to reach for it. The Stack form now fires a
+  sibling advisory nudge (alongside the existing hazy-night and quality-weighting hints)
+  when the transparency spread across the frames-to-be-stacked is wide — p90/p10 ≳ 1.5×,
+  computed from the `transparency_score` values already fetched — *and* the option is off:
+  it explains in plain language that the frames vary a lot in brightness (haze/airmass
+  across nights) and offers a one-click **"Turn on photometric normalization"** button.
+  Requires ≥5 measured frames so a couple of subs can't trigger it (the engine itself
+  needs ≥3 to normalize at all). Distinct from the quality-weighting nudge (that
+  down-weights the worst subs' *contribution*; this gain-matches their *values* — they
+  compose). Frontend-only, additive, advisory — no engine/API/schema change and nothing
+  changes until the user opts in. Tests: Vitest (fires on a wide 2000…9000 spread and the
+  button turns the option on + clears the nudge; silent on a tight spread; silent when
+  already on). (v0.81.3, this run — Builder)
+
+- **Fix flaky Editor "Auto curve" test that was intermittently reddening main's CI.**
+  The frontend CI job failed on several recent `main` pushes (including a docs-only
+  commit, `#108`), always in `Editor.test.tsx > sets a gentle starting curve via the
+  header 'Auto curve'`. Root cause (traced with an instrumented repro): the test
+  captured the "Auto curve" `<button>` reference across an `await`, but the toolbar
+  subtree **remounts** while the per-op suggestion / `default-recipe` (v0.79.0) queries
+  settle — so the captured node is detached (`isConnected === false`) by click time and
+  its React `onClick` never fires (a native listener still fires, which is the tell).
+  The added async queries shifted render timing so the remount now reliably lands right
+  after the button first appears. Fix is **test-only** and does not weaken the assertion:
+  re-find and click the button *inside* the existing `waitFor`, polling until the
+  suggested points reach a preview fetch (the durable effect) — the click is idempotent
+  (sets the same points), so retrying across the remount flicker is safe. Verified the
+  test now passes fast (≈1.4 s vs the prior 20 s `asyncUtilTimeout`) and stably (5/5
+  reruns); full frontend suite green (454 passed). No source/behaviour change. (v0.81.2,
+  this run — Builder)
 
 - **Surface photometric-normalization provenance on the run Info / History card
   (PRIORITY-4 trust, companion to v0.81.0).** The stack run's `…/info` endpoint now
