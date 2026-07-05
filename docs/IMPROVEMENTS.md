@@ -61,64 +61,36 @@ when you take it.
   verdict (a persisted nullable `is_mosaic` column on `stack_runs`, schema 7→8
   additive migration) instead of the broken `coverage_max > coverage_min` heuristic;
   legacy runs (NULL) fall back to a coverage-distribution check, never the old test.
-  Original write-up kept below for provenance.
-
-- **[FIXED v0.74.2] Single-field (non-mosaic) stacks are misclassified as mosaics → Auto silently
-  crops the frame + the whole editor shows mosaic-only tools.** *(reproduced
-  end-to-end, Scout 2026-07-04)*
-  - **Symptom.** For a perfectly normal **single-field** OSC stack (the primary
-    user's every-session case), the editor treats it as a mosaic: it shows a *"This
-    is a mosaic with ragged, low-coverage edges"* banner + **"Trim border"** button
-    (`frontend/src/routes/Editor.tsx:686`, gated on `hist.is_mosaic`/`trim.is_mosaic`),
-    offers the coverage-map heatmap overlay, and **one-click Auto appends a
-    `geometry.crop`** that trims ~2–3 px off *every* edge of the image plus prepends a
-    mosaic-only `background.level_coverage` pass — and the Auto summary tells the user
-    it *"trimmed the ragged mosaic border"* / *"evened out the mosaic panel
-    brightness"* on an image that is neither.
-  - **Root cause.** `is_mosaic` is derived from `coverage_max > coverage_min`
-    (`webapp/routers/editor.py:620,692,768`; `seestack/edit/presets.py:_is_mosaic`).
-    But **`coverage_min` is ~always 0 for *any* real stack** — reprojection leaves an
-    uncovered NaN border, so the stored `coverage_min` (`stacker.py:1058-1059,1079`,
-    `int(cov_2d.min())`) is 0 while `coverage_max` is the frame count. So
-    `coverage_max > coverage_min` is `True` for single-field stacks too. The design
-    intent (repeated across docstrings: *"single-field stack has uniform coverage,
-    max==min"*) is simply false in practice — and the existing tests never caught it
-    because they **fabricate** `StackRunRow` rows with hand-set `coverage_min ==
-    coverage_max` (`tests/webapp/test_editor.py` `_add_run`,
-    `test_trim_suggestion_single_field_is_noop` etc.) instead of running a real stack.
-  - **Repro (real webapp path, not fabricated).** Scan 6 same-field synthetic frames
-    → inject a shared WCS → `POST …/stack` → real `run_stack`. The run record comes
-    back `coverage_min=0, coverage_max=6`; `GET …/editor/histogram` → `is_mosaic:
-    true`; `POST …/editor/auto` → ops =
-    `[background.level_coverage, …, geometry.crop]`; `GET …/editor/trim-suggestion` →
-    `{is_mosaic:true, crop:{x0:0.0063,y0:0.0094,x1:0.9938,y1:0.9906}}`;
-    `GET …/editor/coverage-map` → 200. (Scout scratch repro script confirmed all five.)
-  - **Severity.** Broken-UX + mild wrong-result, on the **priority-1 editor** and
-    **priority-2 Auto**, hitting the **primary target user on every single-field
-    stack** — squarely above polish. The crop trims a few px of genuine (if
-    low-coverage) signal and changes the export dimensions unexpectedly; the
-    `level_coverage` pass is a measured **no-op** on single-field data (mean|Δ|=0, one
-    interior coverage level) so it's harmless-but-misleading, not a corruption. Not
-    catastrophic, but pervasive and trust-eroding (regression amplified by v0.70.0,
-    which added the Auto crop on top of the latent mislabel).
-  - **Fix direction (Builder-sized — needs care, not a rushed patch).** Replace the
-    `coverage_max > coverage_min` heuristic with the stacker's *actual* canvas
-    decision. Two clean options: **(a)** persist the real `is_mosaic_canvas` boolean
-    `run_stack` already computes — additive nullable column on `stack_runs`
-    (`SCHEMA_VERSION` bump + `_migrate_schema`, backfill `NULL`), editor reads it and
-    falls back to a smarter check for legacy `NULL` runs (add an upgrade test that an
-    old DB migrates); or **(b)** compute `is_mosaic` from the coverage sibling's
-    *distribution* — a genuine mosaic has ≥2 integer coverage levels each covering a
-    meaningful area, a single-field stack has one dominant interior level + a thin
-    border ramp (mind the histogram-endpoint hot path — cache it, don't re-read the
-    coverage FITS on every live-preview poll). Either way the regression test must run
-    a **real** stack (or build a realistic coverage sibling with a 0 border) so a
-    fabricated `coverage_min==coverage_max` can't hide it again. (severity: broken-UX
-    + mild-wrong-result; confidence: reproduced)
+  **Scout 2026-07-05 re-verified the fix is live end-to-end:** a real 8-sub
+  single-field stack (`POST …/stack` → `run_stack`) persists `is_mosaic=0` in the
+  `stack_runs` row, `GET …/editor/histogram` returns `is_mosaic:false`, and `POST
+  …/editor/auto` no longer prepends `background.level_coverage` or appends a
+  `geometry.crop`. Fully closed; the verbose original write-up was pruned (it lived in
+  the Shipped section) to keep the active bugs list a list of *open* bugs.
 
 _(none of the traced *editor-engine* op bugs are open — that backlog stayed drained;
 the entry above is a stacking/autonomy↔editor classification bug found by dogfooding
 the real webapp stack→edit path.)_
+
+_(Scout QA audit 2026-07-05 (v0.83.0 baseline): rotated the focused subsystem audit
+onto **render + QC + the newest engine additions** — `render/thumbnail.py`
+(`asinh_stretch`/`autostretch` MTF, the NaN-aware normalize, the striding
+decimation that preserves NaN=coverage, `render_stack_png`'s display-space
+verbatim path) and `render/colormap.py`; `qc/grading.py` (the modified-z /
+MAD-fallback / practical-significance floors, the `MAX_REJECT_FRACTION` rail, the
+log-domain non-positive handling); and the freshest final-image-affecting code:
+`stack/photometric.py` + its two application sites in `stacker.py`
+(`ref/transparency_score` direction, `win_rgb *= scale` / drizzle `rgb * scale`)
+and `calibrate/apply.py::_effective_dark` (dark exposure-scaling `bias + (dark −
+bias)·ratio`, bias-shape + exposure guards). **No new reachable wrong-result bug
+found** — scale directions, NaN=coverage, robust-scale fallbacks and neutral
+calibration fallbacks are all correct and well-tested. Also **dogfooded the real
+stack→edit→export journey** end-to-end through the FastAPI app on an 8-sub
+single-field target: `is_mosaic` persists correctly (`=0`), the Auto recipe is
+sane, and **preview↔export parity measured 0.00%** on the full auto recipe (the
+`background.final_gradient` op gracefully skips identically on both preview and
+export for the tiny synthetic frame — the known, already-logged near-unreachable
+sub-768 px robustness item). Baseline suite green: 804 passed, 2 skipped.)_
 
 _(Scout QA audit 2026-07-04 (v0.73.0 baseline): rotated the focused subsystem audit
 onto the **stacking accumulators + rejection + drizzle + mosaic + coverage-leveling**
@@ -380,6 +352,36 @@ problems. Dogfood it every big-picture run and fix root causes.
   the button already delivers the one-click house-style value.)*
 - Auto-suggest stack settings from the data (frame count, FWHM spread, streaks)
   so the user rarely needs to touch the Stack form. (S–M, autonomy)
+- **One-click "Drop N outlier frames" on the Stack-form auto-grade hint.** *(Scout
+  2026-07-05 — verified gap.)* Every other Stack-form advisory nudge got a one-click
+  action in v0.81.10 (photometric-normalize, quality-weighting, sigma-clip, min/max
+  reject) — but the **auto-grade** hint (`Stack.tsx:730`, "Auto-grade thinks N of
+  your accepted frames look like quality outliers…") still only offers a *"Review
+  Auto-grade"* link that navigates the user away to the Target page to do it there.
+  That's the last un-one-clicked nudge and the friction is real: the beginner has to
+  leave the stack they're setting up, find the apply button on another screen, then
+  come back. Add a *"Drop N outlier frames"* button beside the link that calls the
+  **already-shipped** `api.autoGradeApply(safe)` (`/frames/auto-grade/apply` →
+  `apply_grade_report`, which returns `changed_ids`), invalidates the frame/estimate
+  queries, and swaps the yellow hint to a green *"Dropped N — Undo"* confirmation
+  (re-accept the `changed_ids` on Undo, since auto-grade never sets `user_override`).
+  Because this **mutates target-wide frame accept-state** (unlike the sibling
+  one-clicks, which only flip a stack option), it needs the confirm/undo affordance —
+  so it's a Builder task, not a Scout patch. Frontend-only, additive; endpoint +
+  client method already exist. (S–M, autonomy/friendliness — PRIORITY 2/3)
+- **Surface auto-grade's `capped` safety-rail in the *Stack-form* hint too.** *(Scout
+  2026-07-05 — small companion to the above.)* When a whole session is cloudy/hazy,
+  `grade_frames` flags more than `MAX_REJECT_FRACTION` (25%) of frames and sets
+  `GradeReport.capped=True`, recommending only the worst 25% so auto-grade never
+  nukes half a library. The **Target page already surfaces this** (`Target.tsx:149`),
+  but a user who goes straight to the Stack form sees only *"N look like outliers"*
+  with no signal that many more were suppressed by the cap — so they can't tell a
+  rough night from a couple of bad subs before stacking. The `capped` flag is already
+  on `GradeReportOut` (and the Stack form already fetches the preview via
+  `autoGradePreview`); just read it and, when set, append one plain-language sentence
+  to `autoGradeHint` ("…this looks like a rough session — only the worst 25% are
+  recommended; review before stacking"). Frontend-only, additive, no API/engine
+  change. (S, friendliness/trust — PRIORITY 3)
 - ~~**Nudge to turn on Photometric normalization when the run's transparency varies a
   lot.**~~ — **shipped v0.81.3** (see Shipped). The Stack form now fires a sibling nudge
   when the p90/p10 transparency spread across the frames-to-be-stacked is wide (≳ 1.5×)
