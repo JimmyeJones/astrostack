@@ -337,7 +337,7 @@ export function StackView() {
     const runMed = pctile(run, 50);
     if (baseline <= 0 || runMed / baseline >= 0.6) return null;
     const pct = Math.round((1 - runMed / baseline) * 100);
-    return `The frames in this stack sit about ${pct}% below this target's clearest nights (median transparency ${Math.round(runMed)} vs a ~${Math.round(baseline)} baseline) — they were likely shot through haze or thin cloud. Turn on quality weighting to down-weight the haziest subs, or reject them on the Frames page.`;
+    return `The frames in this stack sit about ${pct}% below this target's clearest nights (median transparency ${Math.round(runMed)} vs a ~${Math.round(baseline)} baseline) — they were likely shot through haze or thin cloud. Down-weight the haziest subs with quality weighting, or reject them on the Frames page.`;
   })();
 
   // Quality-weighting nudge: when the frames that will be stacked vary a lot in
@@ -368,7 +368,7 @@ export function StackView() {
     if (!wideFwhm && !wideStars) return null;
     const which = wideFwhm && wideStars ? "sharpness and star count"
       : wideFwhm ? "sharpness (FWHM)" : "star count";
-    return `Your ${run.length} accepted frames vary a lot in ${which} — a mixed-quality set is exactly where quality weighting helps, letting the best subs count for more than the worst instead of every frame counting equally. Turn on Quality weighting in the options above.`;
+    return `Your ${run.length} accepted frames vary a lot in ${which} — a mixed-quality set is exactly where quality weighting helps, letting the best subs count for more than the worst instead of every frame counting equally.`;
   })();
 
   // Photometric-normalization nudge: when the frames to be stacked vary a lot in
@@ -595,6 +595,10 @@ export function StackView() {
           {sigmaClipWarning ? (
             <Alert color="yellow" variant="light" py={6} px="sm">
               <Text size="xs">{sigmaClipWarning}</Text>
+              <Button size="compact-xs" variant="light" color="yellow" mt={6}
+                onClick={() => set("sigma_clip", false)}>
+                Turn off sigma clipping
+              </Button>
             </Alert>
           ) : null}
 
@@ -649,12 +653,22 @@ export function StackView() {
           {transparencyHint ? (
             <Alert color="blue" variant="light" py={6} px="sm">
               <Text size="xs">{transparencyHint}</Text>
+              {!values.quality_weighted ? (
+                <Button size="compact-xs" variant="light" mt={6}
+                  onClick={() => set("quality_weighted", true)}>
+                  Turn on quality weighting
+                </Button>
+              ) : null}
             </Alert>
           ) : null}
 
           {qualityWeightNudge ? (
             <Alert color="blue" variant="light" py={6} px="sm">
               <Text size="xs">{qualityWeightNudge}</Text>
+              <Button size="compact-xs" variant="light" mt={6}
+                onClick={() => set("quality_weighted", true)}>
+                Turn on quality weighting
+              </Button>
             </Alert>
           ) : null}
 

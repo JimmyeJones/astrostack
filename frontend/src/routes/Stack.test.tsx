@@ -199,6 +199,23 @@ describe("StackView", () => {
       expect(screen.getByText(/only have 3 accepted, solved frames/)).toBeInTheDocument());
   });
 
+  it("turns off sigma-clip in one click from the low-frame caution, then hides it", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+      { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
+        default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+    ]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: true });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1), mkFrame(2), mkFrame(3)]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    const btn = await screen.findByRole("button", { name: "Turn off sigma clipping" });
+    fireEvent.click(btn);
+    await waitFor(() =>
+      expect(screen.queryByText(/only have 3 accepted, solved frames/)).not.toBeInTheDocument());
+  });
+
   it("does not caution when enough frames are accepted for sigma-clip", async () => {
     vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
       { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
@@ -574,6 +591,46 @@ describe("StackView", () => {
     await waitFor(() =>
       expect(screen.getByText(/mixed-quality set is exactly where quality weighting helps/))
         .toBeInTheDocument());
+  });
+
+  it("turns on quality weighting in one click from the mixed-quality nudge, then hides it", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ quality_weighted: false });
+    const frames = Array.from({ length: 8 }, (_, i) =>
+      ({ ...mkFrame(i + 1), fwhm_px: 2.0 + i * 0.4 }));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    const btn = await screen.findByRole("button", { name: "Turn on quality weighting" });
+    fireEvent.click(btn);
+    await waitFor(() =>
+      expect(screen.queryByText(/mixed-quality set is exactly where/)).not.toBeInTheDocument());
+  });
+
+  it("offers a one-click quality-weighting button on the hazy-transparency hint", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ quality_weighted: false });
+    const clear = Array.from({ length: 5 }, (_, i) =>
+      ({ ...mkFrame(100 + i), accept: false, transparency_score: 10000 }));
+    const hazy = Array.from({ length: 5 }, (_, i) =>
+      ({ ...mkFrame(i + 1), transparency_score: 3000 }));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([...clear, ...hazy]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    // The hint carries a one-click button; clicking it turns quality weighting on,
+    // so the (quality_weighted-guarded) button disappears while the hint text stays.
+    const btn = await screen.findByRole("button", { name: "Turn on quality weighting" });
+    expect(screen.getByText(/likely shot through haze or thin cloud/)).toBeInTheDocument();
+    fireEvent.click(btn);
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Turn on quality weighting" }))
+        .not.toBeInTheDocument());
+    // The advisory itself remains — turning on weighting doesn't un-haze the data.
+    expect(screen.getByText(/likely shot through haze or thin cloud/)).toBeInTheDocument();
   });
 
   it("does not nudge quality weighting when the set is uniform", async () => {

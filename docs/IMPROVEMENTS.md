@@ -538,6 +538,24 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Make the remaining advisory Stack-form nudges one-click actionable (PRIORITY-2/3
+  autonomy + friendliness).** Three Stack-form advisory hints told the user to change a
+  setting but made them hunt for it, while their siblings (photometric-normalization,
+  min/max-reject) already offered a one-click button — an inconsistency a beginner feels
+  as friction. Now: the **quality-weighting** nudge (fires on a wide FWHM/star-count
+  spread) and the **hazy-transparency** hint (run median well below the target's clear-sky
+  baseline) each carry a one-click **"Turn on quality weighting"** button, and the
+  **sigma-clip-low-frame** caution (sigma clip on with <5 accepted+solved frames) carries a
+  one-click **"Turn off sigma clipping"** — each doing exactly the safe action the hint's
+  own text recommends. The transparency-hint button is guarded on `!quality_weighted` (so it
+  vanishes once weighting is on while the "you were shot through haze" advisory stays), and
+  the quality-weighting nudge already only renders while weighting is off. Prose reworded so
+  it reads naturally beside a button ("Turn on Quality weighting in the options above" →
+  the button carries the action). Frontend-only, additive, advisory — no engine/API/schema
+  change, nothing happens until the user clicks. Tests: Vitest (each button turns its option
+  on and clears/updates the nudge; the transparency button leaves the advisory text in
+  place). (v0.81.10, this run — Builder)
+
 - **Fix: mosaic canvas iterative-shrink dropped a good central frame instead of the real
   outlier when the group straddled RA=0° (stacking-engine data-integrity).** The primary
   plate-solve-outlier pass computes each frame's centre RA wrap-safely with
