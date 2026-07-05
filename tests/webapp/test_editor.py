@@ -481,6 +481,46 @@ def test_edit_preview_and_histogram(client, solved_library):
     # This run is a mosaic (persisted is_mosaic flag), so the editor can enable the
     # Coverage-leveling op instead of warning it's a no-op.
     assert hist["is_mosaic"] is True
+    # With no reshaping geometry op the rendered dims equal the raw proxy dims.
+    assert hist["render_width"] == hist["proxy_width"]
+    assert hist["render_height"] == hist["proxy_height"]
+
+
+def test_histogram_reports_rendered_dims_after_crop(client, solved_library):
+    """Regression: a recipe with a reshaping geometry op (crop) must report the
+    *rendered* dims (``render_width``/``render_height``), matching the preview PNG,
+    so the editor sizes its image box to the cropped image instead of letterboxing
+    it inside the un-cropped aspect (which mis-aligns the Split divider / trim
+    rectangle). The raw ``proxy_width``/``height`` stay the un-cropped source dims
+    (for the "downscaled" caption)."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe)  # 100x80 proxy, scale 1
+    # Crop to the central half-width, full height → the rendered frame is ~half as
+    # wide as the source proxy but the same height.
+    recipe = {"ops": [
+        {"id": "tone.stretch", "params": {"mode": "stf"}},
+        {"id": "geometry.crop", "params": {"x0": 0.25, "y0": 0.0, "x1": 0.75, "y1": 1.0}},
+    ]}
+    q = _enc(recipe)
+
+    img = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/preview?recipe={q}")
+    assert img.status_code == 200
+    png = np.asarray(Image.open(BytesIO(img.content)))
+    png_h, png_w = png.shape[:2]
+
+    hist = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/histogram?recipe={q}").json()
+    # Rendered dims track the crop and match the actual preview PNG exactly.
+    assert hist["render_width"] == png_w
+    assert hist["render_height"] == png_h
+    # The crop halves the width, so the rendered frame is narrower than the raw
+    # proxy while the height is unchanged.
+    assert hist["render_width"] < hist["proxy_width"]
+    assert hist["render_height"] == hist["proxy_height"]
 
 
 def test_preview_survives_thin_crop_plus_downscale(client, solved_library):
@@ -782,6 +822,35 @@ def test_star_mask_recipe_stops_before_selected_star_op(client, solved_library):
     )
     assert r.status_code == 200
     assert r.content[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_star_mask_follows_recipe_crop(client, solved_library):
+    """The star-mask overlay must be reshaped by the recipe's geometry ops (like
+    the coverage overlay), so it lands in the same cropped frame as the edited
+    preview / image box. Otherwise, shown in the cropped box, a full-frame mask
+    squishes and its stars no longer line up with the edit."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _write_star_field_run(solved_library, safe)  # 100x80
+    base = f"/api/targets/{safe}/stack-runs/{rid}/editor/star-mask"
+
+    full = client.get(base, params={"recipe": _enc({"ops": [
+        {"id": "tone.stretch", "params": {"mode": "stf"}, "enabled": True},
+    ], "base_run_id": rid})})
+    cropped = client.get(base, params={"recipe": _enc({"ops": [
+        {"id": "tone.stretch", "params": {"mode": "stf"}, "enabled": True},
+        {"id": "geometry.crop",
+         "params": {"x0": 0.25, "y0": 0.0, "x1": 0.75, "y1": 1.0}, "enabled": True},
+    ], "base_run_id": rid})})
+    assert full.status_code == 200 and cropped.status_code == 200
+
+    w_full = np.asarray(Image.open(BytesIO(full.content))).shape[1]
+    w_crop = np.asarray(Image.open(BytesIO(cropped.content))).shape[1]
+    # The half-width crop halves the mask's width so it tracks the cropped preview.
+    assert w_crop < w_full
 
 
 def test_auto_process(client, solved_library):

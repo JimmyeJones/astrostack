@@ -302,11 +302,25 @@ export function EditorView() {
   const [splitFrac, setSplitFrac] = useState(0.5);
   const [splitDragging, setSplitDragging] = useState(false);
   const previewBoxRef = useRef<HTMLDivElement>(null);
+  // The "Original" is the raw stack with *only* the recipe's enabled geometry ops
+  // (crop/rotate/resize) applied — not a full empty-recipe render. Reason: the
+  // edited preview is reshaped by those ops, so an un-cropped Original would be a
+  // different frame shape and letterbox/mis-align under the Split divider (and the
+  // whole Compare would zoom out to the un-cropped frame). Sharing the edit's
+  // framing keeps the divider aligned and makes Compare an honest "your processing
+  // vs none" on the *same* view. With no geometry op this is exactly the old
+  // empty-recipe render. Derived from the debounced recipe and keyed on just the
+  // geometry ops so it only refetches when the framing actually changes.
+  const baseGeometryOps = useMemo(
+    () => dRecipe.ops.filter((o) => o.enabled && o.id.startsWith("geometry.")),
+    [dRecipe],
+  );
   const basePreview = useQuery({
-    queryKey: ["edit-base", safe, rid],
+    queryKey: ["edit-base", safe, rid, geometryOpsKey(dRecipe.ops)],
     enabled: (showBase || splitCompare) && !!opsSchema.data && !saved.isLoading,
     queryFn: async ({ signal }) => {
-      const res = await fetch(api.editPreviewUrl(safe, rid, { ops: [], base_run_id: rid }), { signal });
+      const res = await fetch(
+        api.editPreviewUrl(safe, rid, { ops: baseGeometryOps, base_run_id: rid }), { signal });
       if (!res.ok) throw new Error("base preview failed");
       return URL.createObjectURL(await res.blob());
     },
@@ -853,7 +867,14 @@ export function EditorView() {
                 // 62vh) so overlays positioned as a percentage of it line up even
                 // when a portrait frame / short window would otherwise letterbox.
                 <div ref={previewBoxRef} style={{ position: "relative",
-                  ...previewBoxStyle(hist.data?.proxy_width, hist.data?.proxy_height) }}>
+                  // Size to the *rendered* dims (post-geometry, what the preview
+                  // PNG actually is) so a cropped/rotated frame fills the box
+                  // instead of letterboxing inside the un-cropped aspect — which
+                  // would put black bars around the trimmed preview and mis-align
+                  // the Split divider / trim rectangle. Fall back to the raw proxy
+                  // dims on an older backend that doesn't send render_* yet.
+                  ...previewBoxStyle(hist.data?.render_width ?? hist.data?.proxy_width,
+                                     hist.data?.render_height ?? hist.data?.proxy_height) }}>
                   <img src={shownSrc} alt="preview"
                     style={{ display: "block", width: "100%", height: "100%",
                              objectFit: "contain", cursor: "zoom-in" }}

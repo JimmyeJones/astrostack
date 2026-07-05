@@ -239,10 +239,22 @@ def _render_star_mask_png(project_dir: Path, run, size_px: float, grow: float,
     if recipe is not None:
         sub = _recipe_before_uid(recipe, uid,
                                  drop_ids=("stars.reduce", "stars.boost_nebula"))
+        # Mask the display-space image the op gates on, but in the *un-reshaped*
+        # frame (geometry ops stripped) — then reshape the mask with the recipe's
+        # geometry below, so the overlay lands in the same crop/rotate/resize frame
+        # as the edited preview and the coverage map (matching the sized image box).
+        # Otherwise a mask computed before a trailing crop is full-frame and, shown
+        # in the cropped box, squishes so its stars no longer sit where they do in
+        # the edit. No-op when the recipe has no geometry op (the common case).
+        sub = Recipe(ops=[o for o in sub.ops if not o.id.startswith("geometry.")],
+                     version=sub.version, base_run_id=sub.base_run_id)
         img = apply_recipe(rgb, sub, ctx, for_preview=True)
     else:
         img = rgb
     mask = star_mask(img, size_px=size_px, grow=grow, ctx=ctx)
+    if recipe is not None:
+        from seestack.edit.ops.geometry import apply_geometry_to_map
+        mask = apply_geometry_to_map(mask, recipe, ctx)
     u8 = (np.clip(np.nan_to_num(mask), 0.0, 1.0) * 255).astype(np.uint8)
     buf = io.BytesIO()
     Image.fromarray(u8, mode="L").save(buf, format="PNG")
@@ -821,11 +833,22 @@ async def edit_histogram(safe: str, run_id: int, request: Request,
         # Surface the proxy geometry so the editor can tell the user the live
         # preview is downscaled (a ≤1500 px proxy of what may be a 150 MP mosaic),
         # which sets expectations for why fine detail reads differently than the
-        # full-res export. proxy_scale = full_width / proxy_width (>=1).
+        # full-res export. proxy_scale = full_width / proxy_width (>=1). These are
+        # the *raw* proxy dims (before the recipe), so the "downscaled ×N" caption
+        # keeps describing the true decimation of the source.
         h, w = rgb.shape[:2]
         hist["proxy_scale"] = round(float(scale), 3)
         hist["proxy_width"] = int(w)
         hist["proxy_height"] = int(h)
+        # The dims of the *rendered* preview (after the recipe's geometry ops —
+        # crop/rotate/resize — reshape the frame). The preview PNG has this shape,
+        # so the editor must size its image box from these (not the raw proxy dims)
+        # or a cropped preview gets letterboxed inside the un-cropped aspect and
+        # every percentage overlay (Split divider, trim rectangle) mis-aligns.
+        # Equal to proxy_width/height when the recipe has no reshaping geometry op.
+        oh, ow = out.shape[:2]
+        hist["render_width"] = int(ow)
+        hist["render_height"] = int(oh)
         # Whether this run is a mosaic (union canvas). The "Coverage leveling" op,
         # the trim/coverage-overlay tools and the mosaic banner are only meaningful
         # on a mosaic; on a single-field stack they're a deliberate no-op. Uses the
