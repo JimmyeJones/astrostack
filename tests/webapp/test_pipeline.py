@@ -73,3 +73,41 @@ def test_stack_end_to_end(client, solved_library):
         pr = client.get(f"/api/targets/M_42/stack-runs/{rid}/preview")
         assert pr.status_code == 200
         assert pr.content[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_process_target_stacks_end_to_end(client, solved_library):
+    # One-click "process this target": QC + solve, then stack — in a single job.
+    # solved_library already carries a synthetic WCS, so the chained stack runs
+    # even without ASTAP.
+    r = client.post("/api/targets/M_42/process")
+    assert r.status_code == 200
+    body = _wait_job(client, r.json()["job_id"], timeout=120)
+    assert body["state"] == "done", body
+    # QC ran as part of the chain.
+    frames = client.get("/api/targets/M_42/frames").json()
+    assert any(f["fwhm_px"] is not None for f in frames)
+    # And the stack step produced a real run.
+    result = body["result"]
+    assert result["stacked"] is True
+    assert result["solved_accepted"] >= 1
+    runs = client.get("/api/targets/M_42/stack-runs").json()
+    assert len(runs) >= 1
+    assert runs[0]["n_frames_used"] >= 1
+
+
+def test_process_target_skips_stack_when_nothing_solved(client, built_library):
+    # No ASTAP in CI and no injected WCS → nothing is plate-solved, so the chained
+    # stack is skipped with a clear reason rather than failing the whole job.
+    r = client.post("/api/targets/M_42/process")
+    assert r.status_code == 200
+    body = _wait_job(client, r.json()["job_id"])
+    assert body["state"] == "done", body
+    result = body["result"]
+    assert result["stacked"] is False
+    assert result["stack_skipped_reason"] == "no_solved_frames"
+    # QC still ran even though the stack was skipped.
+    frames = client.get("/api/targets/M_42/frames").json()
+    assert any(f["fwhm_px"] is not None for f in frames)
+    # No stack run was created.
+    runs = client.get("/api/targets/M_42/stack-runs").json()
+    assert len(runs) == 0

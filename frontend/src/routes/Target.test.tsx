@@ -46,6 +46,24 @@ function renderTarget(qc = new QueryClient()) {
 
 afterEach(() => vi.restoreAllMocks());
 
+describe("TargetView process action", () => {
+  it("kicks off the one-click process job from the Process target button", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    const process = vi
+      .spyOn(client.api, "processTarget")
+      .mockResolvedValue({ job_id: "j1" });
+
+    renderTarget();
+
+    const btn = await screen.findByRole("button", { name: "Process this target" });
+    btn.click();
+
+    await waitFor(() => expect(process).toHaveBeenCalledWith("M_42"));
+  });
+});
+
 describe("TargetView streaked badge", () => {
   it("shows a streaked-frame count for accepted frames carrying a trail", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());

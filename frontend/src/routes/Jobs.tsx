@@ -28,6 +28,7 @@ const COLOR: Record<string, string> = {
 const KIND_LABEL: Record<string, string> = {
   pipeline: "Importing & processing new frames",
   qc_solve: "Quality check & plate-solve",
+  process_target: "Processing target (check, solve & stack)",
   stack: "Stacking",
   reprocess_all: "Reprocessing all targets",
   editor_png: "Rendering full-resolution PNG",

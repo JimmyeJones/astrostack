@@ -351,9 +351,17 @@ problems. Dogfood it every big-picture run and fix root causes.
   shot. Keep the current general recipe as the fallback when classification is
   low-confidence. Off-by-default risk is nil (Auto is an explicit button). Needs a
   careful, well-tested classifier so it never mis-picks confidently. (M, autonomy/editor)
-- **One-click "process this target"** — after ingest, reach a good stack *and* a
-  good auto-edited preview with zero manual steps: QC → solve → auto-grade →
-  stack → auto-edit, well-defaulted and safe. (M, autonomy)
+- **One-click "process this target"** — **core chain shipped v0.85.0** (see Shipped).
+  A prominent "Process target" button on the Target page (+ `POST
+  /api/targets/{safe}/process` → `process_target` job) now runs QC → plate-solve →
+  auto-grade (when enabled) → stack in a single job, using the target's saved stack
+  defaults, so the user reaches a finished master with no form to fill. Additive,
+  opt-in, non-destructive (a new run alongside any existing), and independent of the
+  global `auto_*` toggles. The stack step is skipped with a clear reason when nothing
+  is plate-solved yet. **Remaining slice (S, autonomy/editor):** optionally chain an
+  *auto-edit* onto the new run (apply the Auto recipe + render a preview) so the
+  one-click result is a finished *picture*, not just a linear master — deferred to keep
+  this slice small and low-risk (the editor already offers one-click Auto on open).
 - ~~**Personal default recipe: "save this edit as my default", offered on open
   (opt-in).**~~ — **shipped v0.79.0** (see Shipped). A "Set current as my default" /
   "Clear my default edit" action in the editor's Presets menu stores one library-wide
@@ -408,6 +416,15 @@ problems. Dogfood it every big-picture run and fix root causes.
   v0.84.2. A Builder dogfood of the other five routes (Dashboard/Library/Target/
   History/Editor) found them already well-handled with icon+prose+next-step empty
   states, beginner tooltips, and translated reject/combine labels.)_
+- **Make the new "Process target" one-click the guided next step for a fresh target.**
+  With the v0.85.0 one-click Process chain shipped, a beginner who just ingested frames
+  into a target (nothing QC'd/solved/stacked yet) still has to know to click "Process
+  target" among several toolbar buttons. Surface it as the highlighted next-step in a
+  small getting-started callout on a Target whose newest frames haven't been processed
+  (e.g. no stack run yet, or accepted-but-unsolved frames present) — "Ready to process?
+  One click runs quality-check, plate-solve & stacking." Reuses the shipped
+  `api.processTarget` mutation; purely a discoverability/friendliness add, no engine/API
+  change. (S, friendliness — completes the one-click autonomy story)
 - Better long-job feedback and clearer error messages. (S, friendliness)
   _(~~Idea: map the handful of known fatal `job.error` messages to plain language~~ —
   **shipped v0.84.3** (see Shipped). A `friendlyJobError` helper now translates the
@@ -623,6 +640,20 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **One-click "Process target" — QC + solve + auto-grade + stack in one job (v0.85.0,
+  autonomy/PRIORITY 2).** A prominent "Process target" button on the Target page and a new
+  `POST /api/targets/{safe}/process` endpoint enqueue one `process_target` job that runs QC →
+  plate-solve → auto-grade (when `auto_grade_frames` is on) → stack, reusing the same tested
+  primitives as the auto pipeline (`run_qc_and_solve` → `_auto_grade_target` → `_stack_target`)
+  but scoped to one target, on demand, independent of the global `auto_*` toggles. The stack
+  uses the target's saved defaults (falling back to the global defaults) and is non-destructive
+  (a new `stack_runs` row); the stack step is skipped with a `stack_skipped_reason`
+  (`no_solved_frames`/`cancelled`) instead of failing the whole job when there's nothing solved.
+  Plain-language Jobs label added. Tests: `test_process_target_stacks_end_to_end` (full chain on
+  a solved fixture → real run) and `test_process_target_skips_stack_when_nothing_solved`; a
+  frontend Target test drives the button; `jobKindLabel` test extended. Additive, opt-in,
+  changes no defaults (upgrade-safe).
 
 - **De-flake the Stack-form photometric-nudge test that reddened main CI + fix the underlying
   nudge flash (v0.84.13, bug/friendliness).** Main CI was red at this run's start (v0.84.10):

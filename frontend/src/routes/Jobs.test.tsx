@@ -135,6 +135,7 @@ describe("jobKindLabel", () => {
   it("translates every known engine job kind to plain language", () => {
     expect(jobKindLabel("pipeline")).toBe("Importing & processing new frames");
     expect(jobKindLabel("qc_solve")).toBe("Quality check & plate-solve");
+    expect(jobKindLabel("process_target")).toBe("Processing target (check, solve & stack)");
     expect(jobKindLabel("stack")).toBe("Stacking");
     expect(jobKindLabel("reprocess_all")).toBe("Reprocessing all targets");
     expect(jobKindLabel("editor_png")).toBe("Rendering full-resolution PNG");
