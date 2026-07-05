@@ -47,32 +47,13 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
-- **Watcher can permanently drop a batch from auto-ingest when it stabilises during a
-  running pipeline.** *(traced, Builder webapp audit 2026-07-05)*
-  - **Symptom.** Frames dropped into `incoming/` are silently never imported (no ingest,
-    no QC/solve, no stack) until *some later* new file happens to trigger a fresh pipeline
-    — or the user clicks "Scan" manually. Worst case: the last batch of a session (nothing
-    arrives afterwards) that finishes copying while the final pipeline job is still running
-    is never picked up at all.
-  - **Root cause.** `StabilityTracker.update` (`webapp/watcher.py:55-82`) reports each path
-    as "newly stable" **exactly once** (once in `self._stable` it's never returned again).
-    `_on_batch_ready` (`webapp/main.py:42-51`) skips enqueuing a pipeline when one is
-    already `queued`/`running` and sets **no** pending/re-trigger flag. So a file that
-    becomes stable *while a prior pipeline is mid-run* has its one-and-only trigger dropped:
-    the running pipeline scanned before the file existed, and the tracker never re-offers it.
-  - **Repro (simulated the tracker).** File A triggers a pipeline at poll 2; the pipeline
-    scans (A ingested) then spends minutes in QC/solve. File B finishes copying and becomes
-    stable at poll 4 → `_on_batch_ready` sees the running pipeline and skips. Polls 5/6
-    return `set()` — B is never re-offered, so B sits unimported in `incoming/`.
-  - **Severity.** Broken autonomy (PRIORITY 2 "just works") — the drop is silent and the
-    user has no signal; it undermines the core "drop files in and it processes automatically"
-    promise. Not data-corrupting (frames stay on disk), but trust-eroding. (confidence:
-    traced, not yet reproduced end-to-end against the live watcher loop.)
-  - **Fix direction.** In `_on_batch_ready`, when a pipeline is already active, set a
-    "rescan pending" flag instead of dropping; when the active pipeline finishes, enqueue
-    one follow-up pipeline (or have the worker re-scan once more on completion if the flag
-    is set). Add a regression test that a file stabilising during a running pipeline is
-    picked up after it completes. (severity: broken-autonomy; confidence: traced)
+- ~~**Watcher can permanently drop a batch from auto-ingest when it stabilises during a
+  running pipeline.**~~ — **FIXED v0.81.7** (see Shipped). `_on_batch_ready` now reports
+  whether it enqueued a pipeline; when it declines because one is already `queued`/`running`,
+  the watcher keeps the batch **pending** and re-offers it on later polls until accepted, so
+  a file that stabilises mid-pipeline is picked up once that pipeline finishes instead of
+  being silently dropped forever. Regression test in `tests/webapp/test_watcher.py`
+  (`test_batch_pending_when_pipeline_busy_is_reoffered`, fails before / passes after).
 
 - ~~**Single-field (non-mosaic) stacks are misclassified as mosaics → Auto silently
   crops the frame + the whole editor shows mosaic-only tools.**~~ — **FIXED
@@ -565,6 +546,26 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Fix: watcher could permanently drop a batch from auto-ingest when a file stabilised
+  during a running pipeline (PRIORITY-2 autonomy / data-completeness).** Frames dropped
+  into `incoming/` while a prior pipeline job was mid-run were silently never imported: the
+  `StabilityTracker` reports each file "newly stable" exactly once, and `_on_batch_ready`
+  skipped enqueuing (with no re-trigger flag) when a pipeline was already `queued`/`running`
+  — so the file's one-and-only trigger was lost and it sat unprocessed in `incoming/` until
+  some later new file happened to kick a fresh pipeline (or the user manually clicked Scan).
+  Worst case (the last batch of a session, nothing arriving after) it was never picked up at
+  all — undermining the core "drop files in and it just processes" promise. Fix:
+  `_on_batch_ready` now **returns** whether it enqueued a pipeline (`True`) or declined
+  because one was active (`False`); on a decline the watcher marks the batch **pending** and
+  re-offers it on every subsequent poll until it's accepted, so the deferred batch is picked
+  up on the first poll after the running pipeline finishes (bounded by the poll interval)
+  rather than being dropped forever. Self-contained to the watcher's poll loop — no schema,
+  API, config, or default change (additive/upgrade-safe; a callback returning `None`, as the
+  legacy signature did, is still treated as "consumed"). Regression test
+  (`test_batch_pending_when_pipeline_busy_is_reoffered`) simulates a busy-then-free pipeline
+  and asserts the pending batch is re-offered until accepted then not again — fails before,
+  passes after. (v0.81.7, this run — Builder)
 
 - **Fix four more flaky Editor "From your data" tests that reddened main's CI (test-only,
   same remount race #109 fixed).** The v0.81.5 merge's frontend CI job failed on

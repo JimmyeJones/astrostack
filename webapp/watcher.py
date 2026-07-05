@@ -87,7 +87,7 @@ class Watcher:
         self,
         *,
         get_settings: Callable[[], object],
-        on_batch_ready: Callable[[], None],
+        on_batch_ready: Callable[[], bool | None],
         time_fn: TimeFn | None = None,
         stat_fn: StatFn | None = None,
     ) -> None:
@@ -95,6 +95,10 @@ class Watcher:
 
         self._get_settings = get_settings
         self._on_batch_ready = on_batch_ready
+        # A batch we couldn't hand off yet because a pipeline was already
+        # running when it stabilised. Re-offered on later polls until accepted,
+        # so a file that stabilises mid-pipeline is never permanently dropped.
+        self._pending_batch = False
         # Wall-clock, not monotonic: we compare it against filesystem mtimes.
         self._time = time_fn or _time.time
         self._stat = stat_fn or self._default_stat
@@ -187,5 +191,14 @@ class Watcher:
         newly_stable = self._tracker.update(snapshot)
         if newly_stable:
             log.info("%d new file(s) stable in %s", len(newly_stable), incoming)
-            self._on_batch_ready()
+        # Fire the batch callback when there is newly-stable work OR a batch
+        # left pending because a prior poll couldn't hand it off (a pipeline was
+        # already running). The callback returns False when it declined to
+        # enqueue (a pipeline is still active); we keep the batch pending and
+        # re-offer it next poll until it's accepted, so a file that stabilises
+        # while a pipeline is mid-run is picked up once that pipeline finishes
+        # instead of being silently dropped forever.
+        if newly_stable or self._pending_batch:
+            accepted = self._on_batch_ready()
+            self._pending_batch = accepted is False
         return newly_stable
