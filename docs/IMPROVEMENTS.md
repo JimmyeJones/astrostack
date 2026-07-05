@@ -72,6 +72,19 @@ _(none of the traced *editor-engine* op bugs are open — that backlog stayed dr
 the entry above is a stacking/autonomy↔editor classification bug found by dogfooding
 the real webapp stack→edit path.)_
 
+_(Builder engine-hardening audit 2026-07-05 (v0.84.7 baseline): adversarial read of the
+current-focus stacking/calibration path — `stacker.py`'s κ-σ pass-2 clip
+(`valid & (|aligned − mean| ≤ κ·std)`, NaN-std → +inf keep-all), the min/max-reject and
+drizzle two-pass gates, the per-frame `weights`/`photometric_scales` application, and
+`calibrate/apply.py` (`_effective_dark` bias+exposure guards, the never-double-subtract
+pedestal, flat floor/normalise). **One genuine latent correctness bug found and fixed
+(v0.84.8):** the two stacking passes looked up per-frame weight/scale with
+`mapping.get(f.id or -1, 1.0)`, which drops a frame with `id == 0` to the neutral default
+even though the maps are keyed by the real `f.id` — a store/lookup key mismatch (unreachable
+today since SQLite ids start at 1, but a real data-integrity fragility in the final-image
+path). Everything else — NaN=coverage, the rejection maths, the neutral calibration
+fallbacks — is correct and well-tested, consistent with the prior clean audits.)_
+
 _(Scout QA audit 2026-07-05 (v0.83.0 baseline): rotated the focused subsystem audit
 onto **render + QC + the newest engine additions** — `render/thumbnail.py`
 (`asinh_stretch`/`autostretch` MTF, the NaN-aware normalize, the striding
@@ -461,6 +474,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   calibration binding, per-night QC roll-ups. Coverage-levelling's docstring
   already names "between sessions" as motivation but keys on coverage count.
   Large but high value for the multi-night Seestar workflow. (L, correctness)
+- **Surface how much the stack's rejection actually clipped (trust).** When κ-σ or
+  min/max reject runs, the user has no visibility into whether it quietly removed
+  satellites/planes (good) or over-clipped real signal (bad) — they just get an image
+  and have to trust it. Track a single aggregate during pass-2 (a fraction-of-samples-
+  rejected, e.g. the mean over covered pixels of `rejected / contributed`), stamp it as
+  a FITS provenance card + `stack_runs`/options_json field like `PHOTNADJ` already does,
+  and render one plain line on the History **Info** panel ("Rejection removed ~0.4% of
+  samples — mostly transient outliers"). Gives the OSC user a trust signal that the
+  rejection did its job without over-clipping, and a red flag when a too-tight κ is
+  eating signal. Care: the accumulators are memory-bounded on purpose — the counter is
+  one extra small canvas (int32/float32), so gauge the added footprint against the OOM
+  guard, or derive it cheaply from the Welford `count` vs contributed tally rather than a
+  new full-canvas array. Additive, off-nothing (pure reporting), testable on a synthetic
+  stack with a planted outlier. (M, image-quality/trust — priority 4)
 
 ### Features that serve real workflows
 - Annotated sky overlay (label detected objects / show solved field). (M)
