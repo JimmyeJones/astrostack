@@ -358,10 +358,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   defaults, so the user reaches a finished master with no form to fill. Additive,
   opt-in, non-destructive (a new run alongside any existing), and independent of the
   global `auto_*` toggles. The stack step is skipped with a clear reason when nothing
-  is plate-solved yet. **Remaining slice (S, autonomy/editor):** optionally chain an
-  *auto-edit* onto the new run (apply the Auto recipe + render a preview) so the
-  one-click result is a finished *picture*, not just a linear master — deferred to keep
-  this slice small and low-risk (the editor already offers one-click Auto on open).
+  is plate-solved yet. **Remaining slice — SHIPPED v0.86.0** (see Shipped): the Process
+  job now chains an *auto-edit* onto the fresh master — it persists the one-click Auto
+  recipe as the run's editor recipe (so the editor opens on the finished *picture*, not a
+  flat linear master) and re-renders the run's History/Target thumbnail through it. Runs
+  only for the explicit Process action (existing manual/auto stacks untouched), best-effort
+  (a failure never fails the Process job), and fully reversible in the editor (Reset/undo).
 - ~~**Personal default recipe: "save this edit as my default", offered on open
   (opt-in).**~~ — **shipped v0.79.0** (see Shipped). A "Set current as my default" /
   "Clear my default edit" action in the editor's Presets menu stores one library-wide
@@ -643,6 +645,18 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Chain a one-click auto-edit onto the "Process target" result (v0.86.0, autonomy/editor/
+  PRIORITY 2).** Completes the one-click autonomy story: after `process_target` stacks a
+  fresh master it now chains `_auto_edit_process_run`, which builds the run's own Auto recipe
+  (the shared `build_auto_recipe_for_run` helper factored out of the `…/editor/auto`
+  endpoint), persists it as the run's saved editor recipe (`editor_recipe:{run_id}` meta), and
+  re-renders the run's History/Target preview thumbnail through it (`render_run_display_array`
+  + `_write_preview_png`, display-space) — so the one-click Process lands the user on a
+  finished *picture*, not a flat linear master. Best-effort (a failure only skips the edit;
+  the master is already recorded), scoped to the explicit Process action (existing manual/auto
+  stacks and old runs untouched), additive (recipe meta + this run's own preview PNG only),
+  and fully reversible in the editor (Reset/undo restores linear). Regression test
+  `test_process_target_chains_auto_edit`.
 - **Deep-link the one-click "Process target" result to its editor in one hop (v0.85.3,
   friendliness/autonomy/PRIORITY 2–3).** `StackResult` now carries the produced `stack_runs`
   row id (`run_id`, captured from `add_stack_run`'s return, `None` on the cancel path), and

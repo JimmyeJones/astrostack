@@ -98,6 +98,41 @@ def test_process_target_stacks_end_to_end(client, solved_library):
     assert result["stack"]["run_id"] == runs[0]["id"]
 
 
+def test_process_target_chains_auto_edit(client, solved_library):
+    # The one-click "process this target" chains an auto-edit onto the fresh
+    # master so the result is a finished *picture*: the Auto recipe is persisted
+    # as the run's editor recipe (so the editor opens edited) and the run's
+    # preview thumbnail is re-rendered through it.
+    r = client.post("/api/targets/M_42/process")
+    assert r.status_code == 200
+    body = _wait_job(client, r.json()["job_id"], timeout=120)
+    assert body["state"] == "done", body
+    result = body["result"]
+    assert result["stacked"] is True
+    # The auto-edit ran and applied a non-empty recipe.
+    assert result.get("auto_edited", 0) >= 1
+
+    rid = result["stack"]["run_id"]
+    # The Auto recipe is saved as this run's editor recipe (the editor opens on
+    # the edited image, not a flat linear master).
+    recipe = client.get(
+        f"/api/targets/M_42/stack-runs/{rid}/editor/recipe").json()
+    saved_ops = [o for o in recipe["ops"] if o.get("enabled", True)]
+    assert len(saved_ops) == result["auto_edited"]
+    # The Auto recipe always includes a tone stretch — a genuine difference from
+    # a plain manual stack, which opens with an empty recipe.
+    assert any(o["id"] == "tone.stretch" for o in saved_ops)
+
+    # The run's preview thumbnail was re-rendered through the recipe and is a
+    # valid PNG.
+    run = next(x for x in client.get("/api/targets/M_42/stack-runs").json()
+               if x["id"] == rid)
+    if run["has_preview"]:
+        pr = client.get(f"/api/targets/M_42/stack-runs/{rid}/preview")
+        assert pr.status_code == 200
+        assert pr.content[:8] == b"\x89PNG\r\n\x1a\n"
+
+
 def test_process_target_skips_stack_when_nothing_solved(client, built_library):
     # No ASTAP in CI and no injected WCS → nothing is plate-solved, so the chained
     # stack is skipped with a clear reason rather than failing the whole job.

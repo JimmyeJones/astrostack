@@ -270,6 +270,17 @@ def submit_process_target(settings: Settings, jm: JobManager, safe: str) -> Job:
                 return summary
             summary["stack"] = _stack_target(settings, jm, job, lib, safe)
             summary["stacked"] = True
+            run_id = summary["stack"].get("run_id")
+            if run_id is not None and not job.cancel_requested():
+                # Chain a one-click auto-edit onto the fresh master so the result
+                # is a finished *picture*, not a flat linear stack: save the Auto
+                # recipe as the run's editor recipe (so it opens edited) and
+                # re-render its History/Target thumbnail through that recipe.
+                # Best-effort — a failure here never fails the whole Process job;
+                # the linear master is already recorded.
+                n_ops = _auto_edit_process_run(lib, safe, run_id)
+                if n_ops is not None:
+                    summary["auto_edited"] = n_ops
             return summary
         finally:
             lib.close()
@@ -1099,3 +1110,46 @@ def _stack_target(
         "errors": result.errors,
         "excluded_frames": result.excluded_frames,
     }
+
+
+def _auto_edit_process_run(lib: Library, safe: str, run_id: int) -> int | None:
+    """Chain the one-click Auto recipe onto a freshly-produced stack run so the
+    "Process target" result is a finished picture: persist the Auto recipe as the
+    run's editor recipe (the editor then opens on the edited image) and re-render
+    the run's preview thumbnail through it (History/Target show the picture, not a
+    flat linear master).
+
+    Additive and reversible — only runs the user explicitly asked to *Process* get
+    this; the recipe is a normal saved editor recipe (Reset/undo restores linear)
+    and only this run's own preview PNG is rewritten. Returns the number of enabled
+    ops applied, or ``None`` when it was skipped (no such run / no FITS) or failed
+    (best-effort — never fails the Process job)."""
+    from webapp.routers.editor import (
+        RECIPE_META_PREFIX,
+        build_auto_recipe_for_run,
+        render_run_display_array,
+    )
+    from seestack.io.project import Project
+    from seestack.stack.output import _write_preview_png
+
+    try:
+        entry = lib.find_target(safe)
+        if entry is None:
+            return None
+        proj = Project.open(lib.target_dir(entry))
+        try:
+            run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
+            if run is None or not run.fits_path or not Path(run.fits_path).exists():
+                return None
+            recipe = build_auto_recipe_for_run(
+                proj.project_dir, run, proj.median_fwhm())
+            proj.set_meta(f"{RECIPE_META_PREFIX}{run_id}", recipe.to_json())
+            if run.preview_path:
+                out = render_run_display_array(proj.project_dir, run, recipe)
+                _write_preview_png(Path(run.preview_path), out, already_display=True)
+        finally:
+            proj.close()
+        return len([o for o in recipe.ops if o.enabled])
+    except Exception as exc:  # noqa: BLE001 — auto-edit is a non-critical nicety
+        log.warning("Process-target auto-edit skipped for run %s: %s", run_id, exc)
+        return None

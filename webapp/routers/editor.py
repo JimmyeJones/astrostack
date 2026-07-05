@@ -159,16 +159,36 @@ def _trim_rect_for_run(run, min_frac: float = 0.5
     return (round(rect[0], 4), round(rect[1], 4), round(rect[2], 4), round(rect[3], 4))
 
 
+def build_auto_recipe_for_run(project_dir: Path, run, median_fwhm: float | None) -> Recipe:
+    """The one-click Auto recipe for a run, built from its own proxy — the same
+    logic the ``…/editor/auto`` endpoint serves, factored out so the one-click
+    "Process target" job can chain an auto-edit onto the stack it just produced
+    without re-implementing it. A mosaic stack gets a coverage-leveling pass (and,
+    when meaningful, a border trim) prepended; a single-field stack is unchanged."""
+    rgb, _scale = get_proxy(project_dir, run.id, run.fits_path)
+    is_mosaic = _run_is_mosaic(run, load=True)
+    trim = _trim_rect_for_run(run) if is_mosaic else None
+    return presets_mod.auto_recipe(
+        rgb, median_fwhm=median_fwhm, is_mosaic=is_mosaic, trim_crop=trim)
+
+
+def render_run_display_array(project_dir: Path, run, recipe: Recipe) -> np.ndarray:
+    """Render a recipe on the run's live-preview proxy and return the display-space
+    RGB array (values in 0..1, NaN = uncovered). Shared by the PNG preview endpoint
+    and the "Process target" auto-edit's thumbnail render."""
+    rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
+    ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None,
+                      coverage=_proxy_coverage(run.fits_path, scale),
+                      already_display=_run_display_space(run))
+    return apply_recipe(rgb, recipe, ctx, for_preview=True)
+
+
 def _render_png(project_dir: Path, run, recipe: Recipe) -> bytes:
     import io
 
     from PIL import Image
 
-    rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
-    ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None,
-                      coverage=_proxy_coverage(run.fits_path, scale),
-                      already_display=_run_display_space(run))
-    out = apply_recipe(rgb, recipe, ctx, for_preview=True)
+    out = render_run_display_array(project_dir, run, recipe)
     u8 = (np.clip(np.nan_to_num(out), 0.0, 1.0) * 255).astype(np.uint8)
     buf = io.BytesIO()
     Image.fromarray(u8, mode="RGB").save(buf, format="PNG")
@@ -927,21 +947,11 @@ async def auto_process(safe: str, run_id: int, request: Request) -> dict:
         lib.close()
 
     def work() -> dict:
-        rgb, _scale = get_proxy(project_dir, run.id, run.fits_path)
-        # A mosaic stack gets a coverage-leveling pass prepended so its panel steps
-        # are flattened; a single-field stack is unchanged. Use the stacker's
-        # authoritative verdict (or the coverage distribution for legacy runs) —
-        # not coverage_max>min, which is ~always true and would wrongly treat every
-        # single-field stack as a mosaic (prepending a no-op leveling + a spurious
-        # border crop).
-        is_mosaic = _run_is_mosaic(run, load=True)
-        # On a mosaic, also trim the ragged low-coverage border so the one-click
-        # result is cleanly framed (only when the trim is meaningful — the helper
-        # returns None on a full-frame result or a missing coverage sibling).
-        trim = _trim_rect_for_run(run) if is_mosaic else None
-        return presets_mod.auto_recipe(
-            rgb, median_fwhm=median_fwhm, is_mosaic=is_mosaic,
-            trim_crop=trim).to_dict()
+        # Shared with the "Process target" auto-edit chain: a mosaic stack gets a
+        # coverage-leveling pass (and a border trim when meaningful) prepended; a
+        # single-field stack is unchanged. Uses the stacker's authoritative
+        # is_mosaic verdict, never the old coverage_max>min heuristic.
+        return build_auto_recipe_for_run(project_dir, run, median_fwhm).to_dict()
 
     return await run_in_threadpool(work)
 
