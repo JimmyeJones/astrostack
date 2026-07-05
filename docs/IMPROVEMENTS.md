@@ -422,6 +422,11 @@ problems. Dogfood it every big-picture run and fix root causes.
   yet, or accepted-but-unsolved frames present), with a one-click "Process target" button.
   Suppressed while the plate-solve setup banner is showing and once the target is solved and
   stacked, so it fades out rather than nagging.
+- ~~**Deep-link the "Process target" result straight to its editor, not just History.**~~
+  — **shipped v0.85.3** (see Shipped). `StackResult`/`_stack_target` now carry the new
+  `stack_runs` row id, and the Jobs "View result" button points at `/targets/{safe}/edit/{run_id}`
+  when known (falling back to History on an older backend), so the one-click Process lands the
+  user *on the finished picture* in one hop.
 - Better long-job feedback and clearer error messages. (S, friendliness)
   _(~~Idea: map the handful of known fatal `job.error` messages to plain language~~ —
   **shipped v0.84.3** (see Shipped). A `friendlyJobError` helper now translates the
@@ -637,6 +642,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Deep-link the one-click "Process target" result to its editor in one hop (v0.85.3,
+  friendliness/autonomy/PRIORITY 2–3).** `StackResult` now carries the produced `stack_runs`
+  row id (`run_id`, captured from `add_stack_run`'s return, `None` on the cancel path), and
+  `_stack_target` exposes it in its job summary. The Jobs "View result" button now points at
+  `/targets/{safe}/edit/{run_id}` when known — landing the user *on the finished picture* to
+  edit — and falls back to the target's History on an older backend that didn't report the id.
+  Additive summary field, no schema/API-shape break. Tests: `test_process_target_stacks_end_to_end`
+  now asserts `result["stack"]["run_id"]` equals the created run; three Jobs.tsx integration
+  tests cover the edit deep-link, the History fallback, and the "Open target" no-stack case.
 
 - **Surface the one-click "Process target" job's outcome + a "View result" link on Jobs
   (v0.85.2, friendliness/PRIORITY 3).** The new `process_target` job (v0.85.0) finished with a

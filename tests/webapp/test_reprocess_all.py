@@ -138,7 +138,7 @@ def _patch_run_stack(monkeypatch, *, capture: list | None = None):
         # emit a little progress so the phase/detail interplay is exercised
         if progress:
             progress("combine", 1, 1)
-        return SimpleNamespace(output_dir="/tmp/x", n_frames_used=3,
+        return SimpleNamespace(output_dir="/tmp/x", run_id=1, n_frames_used=3,
                                canvas_shape=(1, 1, 3), cancelled=False,
                                errors=[], excluded_frames=[])
     monkeypatch.setattr("seestack.stack.stacker.run_stack", fake)
@@ -185,7 +185,7 @@ def test_reprocess_all_isolates_a_failing_target(solved_library, monkeypatch):
         seen.append(getattr(proj, "safe_name", "?"))
         if len(seen) == 1:
             raise ValueError("boom on first target")
-        return SimpleNamespace(output_dir="/tmp/x", n_frames_used=3,
+        return SimpleNamespace(output_dir="/tmp/x", run_id=1, n_frames_used=3,
                                canvas_shape=(1, 1, 3), cancelled=False,
                                errors=[], excluded_frames=[])
     monkeypatch.setattr("seestack.stack.stacker.run_stack", fake)
@@ -489,7 +489,7 @@ def test_reprocess_all_cancels_between_targets(solved_library, monkeypatch):
 
     def fake(proj, opts, *, progress=None, cancel=None, memory_budget_gb=None, app_version=None):  # noqa: ANN001
         calls.append(1)
-        return SimpleNamespace(output_dir="/tmp/x", n_frames_used=3,
+        return SimpleNamespace(output_dir="/tmp/x", run_id=1, n_frames_used=3,
                                canvas_shape=(1, 1, 3), cancelled=False,
                                errors=[], excluded_frames=[])
     monkeypatch.setattr("seestack.stack.stacker.run_stack", fake)

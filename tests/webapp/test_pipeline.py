@@ -93,6 +93,9 @@ def test_process_target_stacks_end_to_end(client, solved_library):
     runs = client.get("/api/targets/M_42/stack-runs").json()
     assert len(runs) >= 1
     assert runs[0]["n_frames_used"] >= 1
+    # The stack summary carries the new run's id so the finished-job UI can
+    # deep-link straight to that run's editor, not just the target's History.
+    assert result["stack"]["run_id"] == runs[0]["id"]
 
 
 def test_process_target_skips_stack_when_nothing_solved(client, built_library):

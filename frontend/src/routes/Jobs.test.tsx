@@ -2,6 +2,7 @@ import { MantineProvider } from "@mantine/core";
 import { Notifications } from "@mantine/notifications";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   JobsView, friendlyJobError, jobKindLabel, processTargetSummary, reprocessSummary,
@@ -130,6 +131,62 @@ describe("JobsView", () => {
 
     await waitFor(() => expect(cancel).toHaveBeenCalledWith("job-1"));
     await waitFor(() => expect(screen.getByText("cancelled")).toBeInTheDocument());
+  });
+});
+
+describe("JobsView process_target result actions", () => {
+  function renderJobsRouted() {
+    const qc = new QueryClient();
+    return render(
+      <MantineProvider>
+        <Notifications />
+        <QueryClientProvider client={qc}>
+          <MemoryRouter>
+            <JobsView />
+          </MemoryRouter>
+        </QueryClientProvider>
+      </MantineProvider>,
+    );
+  }
+
+  it("deep-links 'View result' to the finished run's editor when a run id is known", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "pt-1", kind: "process_target", target: "M_42", state: "done",
+        result: { stacked: true, solved_accepted: 8, stack: { n_frames_used: 8, run_id: 7 } },
+      }),
+    ]);
+    renderJobsRouted();
+    const link = await screen.findByRole("link", { name: "View result" });
+    expect(link).toHaveAttribute("href", "/targets/M_42/edit/7");
+    expect(screen.getByText("Stacked 8 frames into a new master.")).toBeInTheDocument();
+  });
+
+  it("falls back to History when the backend didn't report a run id", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "pt-2", kind: "process_target", target: "M_42", state: "done",
+        result: { stacked: true, solved_accepted: 5, stack: { n_frames_used: 5 } },
+      }),
+    ]);
+    renderJobsRouted();
+    const link = await screen.findByRole("link", { name: "View result" });
+    expect(link).toHaveAttribute("href", "/targets/M_42/history");
+  });
+
+  it("offers 'Open target' (not a result link) when nothing was stacked", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "pt-3", kind: "process_target", target: "M_42", state: "done",
+        result: { stacked: false, stack_skipped_reason: "no_solved_frames" },
+      }),
+    ]);
+    renderJobsRouted();
+    const link = await screen.findByRole("link", { name: "Open target" });
+    expect(link).toHaveAttribute("href", "/targets/M_42");
+    expect(
+      screen.getByText(/no frames could be plate-solved yet/),
+    ).toBeInTheDocument();
   });
 });
 

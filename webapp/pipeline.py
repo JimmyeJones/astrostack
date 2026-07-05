@@ -1092,6 +1092,7 @@ def _stack_target(
 
     return {
         "output_dir": str(result.output_dir),
+        "run_id": result.run_id,
         "n_frames_used": result.n_frames_used,
         "canvas_shape": list(result.canvas_shape),
         "cancelled": result.cancelled,

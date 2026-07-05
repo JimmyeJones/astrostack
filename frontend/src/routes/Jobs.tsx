@@ -179,16 +179,25 @@ function JobResultActions({ job }: { job: Job }) {
   const r = job.result as Record<string, unknown>;
   if (job.kind === "process_target") {
     const { line, stacked } = processTargetSummary(r);
+    // Deep-link straight to the finished run's editor when we know its id
+    // (v0.85.3+ backend); fall back to the target's History on an older backend.
+    const stack = r.stack && typeof r.stack === "object"
+      ? (r.stack as Record<string, unknown>) : {};
+    const runId = stacked && typeof stack.run_id === "number" ? stack.run_id : null;
+    const to = !job.target
+      ? null
+      : !stacked
+        ? `/targets/${job.target}`
+        : runId != null
+          ? `/targets/${job.target}/edit/${runId}`
+          : `/targets/${job.target}/history`;
     return (
       <Stack gap={4} mt="xs">
         <Text size="sm">{line}</Text>
-        {job.target ? (
+        {to ? (
           <Group>
             <Button size="xs" variant="light" leftSection={<IconPhoto size={14} />}
-              component={Link}
-              to={stacked
-                ? `/targets/${job.target}/history`
-                : `/targets/${job.target}`}>
+              component={Link} to={to}>
               {stacked ? "View result" : "Open target"}
             </Button>
           </Group>

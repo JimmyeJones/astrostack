@@ -21,7 +21,7 @@ def _capture_opts(monkeypatch):
         captured["opts"] = opts
         captured["memory_budget_gb"] = memory_budget_gb
         return SimpleNamespace(
-            output_dir="/tmp/x", n_frames_used=0, canvas_shape=(1, 1, 3),
+            output_dir="/tmp/x", run_id=1, n_frames_used=0, canvas_shape=(1, 1, 3),
             cancelled=False, errors=[], excluded_frames=[],
         )
 

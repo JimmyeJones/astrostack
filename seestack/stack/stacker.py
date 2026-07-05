@@ -322,6 +322,10 @@ class StackResult:
     # Frames dropped (and flagged rejected) for a bad plate-solve that would
     # have flung the mosaic canvas across the sky. Human-readable labels.
     excluded_frames: list[str] = field(default_factory=list)
+    # The new ``stack_runs`` row id for this run (None if history recording was
+    # skipped — e.g. a cancelled run — or failed). Lets callers deep-link the
+    # finished run's editor instead of just its target's History list.
+    run_id: int | None = None
 
 
 @dataclass
@@ -1188,6 +1192,7 @@ def run_stack(
             log.warning("Could not repoint previous stack run(s): %s", exc)
 
     # Record this run in the project history.
+    run_id: int | None = None
     try:
         from dataclasses import asdict
         from datetime import datetime, timezone
@@ -1198,7 +1203,7 @@ def run_stack(
         applied_cal = calibration.describe() if calibration is not None else None
         if applied_cal in (None, "", "none"):
             applied_cal = None
-        project.add_stack_run(StackRunRow(
+        run_id = project.add_stack_run(StackRunRow(
             id=None,
             timestamp_utc=datetime.now(timezone.utc).isoformat(),
             output_basename=options.output_name,
@@ -1236,6 +1241,7 @@ def run_stack(
         options=options,
         errors=errors,
         excluded_frames=excluded_frames,
+        run_id=run_id,
     )
 
 
