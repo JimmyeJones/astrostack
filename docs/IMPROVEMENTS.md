@@ -381,7 +381,21 @@ problems. Dogfood it every big-picture run and fix root causes.
 - Guided "getting started" / empty states that tell a first-timer exactly what to
   do next; audit every screen for jargon and add plain-language "why" tooltips;
   reduce visible option clutter (progressive disclosure). (M, friendliness)
+  _(Progress: the **Jobs page** — the very first screen a beginner lands on after
+  clicking "Scan incoming" — was the last route showing raw engine jargon; its
+  snake_case job kinds (`pipeline`, `qc_solve`, `editor_png`…) are now translated
+  to plain language and its empty state guides to "Scan incoming" — shipped
+  v0.84.2. A Builder dogfood of the other five routes (Dashboard/Library/Target/
+  History/Editor) found them already well-handled with icon+prose+next-step empty
+  states, beginner tooltips, and translated reject/combine labels.)_
 - Better long-job feedback and clearer error messages. (S, friendliness)
+  _(Idea, found by a Builder friendliness dogfood 2026-07-05: raw `job.error`
+  strings — often a bare Python exception — still surface verbatim on the Jobs page
+  (`Jobs.tsx`, the `job.error` render). A small, safe win: map the handful of known
+  fatal messages (no plate-solve setup, OOM-refused stack, no accepted frames) to a
+  plain-language sentence + next step, falling back to the raw text for anything
+  unrecognised, mirroring the `jobKindLabel`/`rejectReasonLabel` translation pattern.
+  (S, friendliness))_
 - ~~**Actionable "plate-solving isn't set up" banner when a whole target fails to solve**~~
   — **shipped v0.84.0** (see Shipped). When ASTAP (or, best-effort, its star database) is
   missing, every frame's solve fails identically and the Target page now shows one
@@ -559,6 +573,25 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Plain-language job names + a guided empty state on the Jobs page (PRIORITY-3 friendliness).**
+  Found by a Builder friendliness dogfood: the Jobs page is the *very first screen a new Seestar
+  owner lands on* — clicking the header's "Scan incoming" submits a job and navigates straight
+  here — yet it was the one route still showing the engine's raw snake_case job identifiers
+  (`pipeline`, `qc_solve`, `stack`, `reprocess_all`, `editor_png`, `editor_export`,
+  `editor_batch`, `build_master`, `channel_combine`) verbatim, so a beginner's first-ever action
+  produced a row that just said `pipeline`. Every other screen already translates engine jargon
+  (History's `combineMethodLabel`, Target's `rejectReasonLabel`); Jobs now matches with a pure,
+  tested `jobKindLabel` map ("Importing & processing new frames", "Quality check & plate-solve",
+  "Stacking", …) that falls back to the raw kind for any future job type. Its bare "No jobs yet."
+  empty state is also brought into the house style (icon + plain-language + a "click 'Scan
+  incoming'…" next-step, matching Dashboard/Library/Target/History). Frontend-only, additive,
+  upgrade-safe — no engine/API/schema/default change, purely a display translation. Tests: Vitest
+  (`jobKindLabel` maps every known kind + falls back for an unknown; the first `pipeline` job a
+  beginner sees renders as plain language and never as `pipeline`; the empty state guides to Scan
+  incoming; the two existing kind-label assertions updated to the new "Stacking" label). A dogfood
+  of the other five routes found them already well-handled (logged under Friendliness). (v0.84.2,
+  this run — Builder)
 
 - **Robust server-side plate-solve setup classification — makes the star-database "not set up"
   signal as reliable as the astap-missing one (PRIORITY-3 friendliness/robustness; follow-up
