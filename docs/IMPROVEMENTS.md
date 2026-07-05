@@ -411,25 +411,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   so a dark library shot at one exposure calibrates subs at another; neutral
   fallback (unscaled dark) when the bias or either exposure is unknown, and the
   existing dark-exposure-mismatch warning gained a one-click to enable it.
-- **Surface dark exposure-scaling provenance on the run Info / History card**
-  (companion to the v0.82.0 `scale_dark_to_light` feature, mirroring the v0.81.1
-  photometric-normalization provenance). When a stack actually scaled its dark to
-  the subs, the run should say so: stamp a FITS provenance card (e.g. `DARKSCAL` +
-  the dark/light exposures) in `write_stack_outputs` when the option was on *and*
-  a bias was present, parse it in the run `…/info` endpoint into a friendly
-  summary, and render one History line ("Dark scaled to sub exposure · 30s → 10s")
-  so the user can trust the off-by-default feature did something. Because the scale
-  is per-frame the stamp should record the option/exposures at run level, not a
-  per-pixel value. Additive/upgrade-safe (new nullable FITS card + response field +
-  advisory UI line). (S, image-quality/trust)
-- **Proactively nudge dark exposure-scaling from the calibration store** (autonomy
-  follow-up to v0.82.0). The one-click "Scale this dark to your subs' exposure"
-  only appears once the user has *manually* selected a master bias. When the
-  library holds a bias but the best-matching dark is at a mismatched exposure, the
-  `calibration-suggestions` / Stack form could proactively suggest "select your
-  master bias and scale the dark" — turning a two-step discovery into one nudge.
-  Needs the suggestions endpoint (or the form) to know a bias exists and the
-  recommended dark's exposure differs; keep it advisory. (S–M, autonomy)
+- ~~**Surface dark exposure-scaling provenance on the run Info / History card**~~
+  — **shipped v0.82.1** (see Shipped). When a stack actually scaled its dark to the
+  subs' exposure, `_build_output_header_meta` now stamps `DARKSCAL`/`DARKDEXP`/
+  `DARKLEXP` cards, the run `…/info` endpoint parses them into a `dark_scaling`
+  summary, and the History Info panel renders one line ("Dark scaled to sub
+  exposure · 30s → 10s"). Omitted (like `PHOTNORM`) whenever nothing was scaled.
+- ~~**Proactively nudge dark exposure-scaling from the calibration store**~~ —
+  **shipped v0.82.2** (see Shipped). When the dark's exposure is mismatched, no bias
+  is selected, *and* the library holds a master bias, the Stack form's dark-mismatch
+  Alert now carries a one-click "Select your master bias and scale the dark" (prefers
+  the recommended bias, else the first available) that selects the bias and enables
+  scaling in one step, replacing the two-step discovery.
 - First-class session/night dimension in the project schema (frames only have
   `timestamp_utc`): per-session sky levelling before combine, per-session
   calibration binding, per-night QC roll-ups. Coverage-levelling's docstring
@@ -555,6 +548,44 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Proactively nudge dark exposure-scaling from the calibration store (PRIORITY-2 autonomy;
+  follow-up to the v0.82.0 `scale_dark_to_light` feature).** The one-click "Scale this dark to
+  your subs' exposure" only appeared once the user had *manually* selected a master bias — so a
+  beginner with a mismatched dark and an unused bias in the library still faced a two-step
+  discovery (find and pick the bias, then flip the option). Now, when the dark's exposure is
+  mismatched, no bias is selected, *and* the library holds a master bias, the Stack form's
+  dark-mismatch Alert offers a single "Select your master bias and scale the dark" button that
+  selects the bias (the recommended one when it's among the available options, else the first)
+  and enables scaling in one click — replacing the yellow warning with the teal "scaling is on"
+  confirmation. Falls back to the existing prose ("Add a master bias to scale it…") when there's
+  genuinely no bias to select. Frontend-only, additive, advisory — no engine/API/schema change,
+  nothing happens until the user clicks. Tests: Vitest (the button appears with an available bias
+  and selecting it turns on scaling + swaps to the teal note; absent when the library has no
+  bias). (v0.82.2, this run — Builder)
+
+- **Surface dark exposure-scaling provenance on the run Info / History card (PRIORITY-4
+  image-quality/trust; companion to the v0.82.0 `scale_dark_to_light` feature, mirroring
+  the v0.81.1 photometric-normalization provenance).** The off-by-default dark
+  exposure-scaling shipped in v0.82.0, but a stack that used it said nothing — the user
+  couldn't tell from History whether the feature actually rescaled the dark. Now, when a
+  dark was genuinely scaled to the subs' exposure — the option was on, a master bias was
+  present to hold the pedestal fixed, a dark was set, and the dark's exposure differs from
+  the subs' — `_build_output_header_meta` stamps three provenance cards (`DARKSCAL`
+  "exposure" mode + `DARKDEXP`/`DARKLEXP`, the dark and sub exposures) alongside the
+  existing `PHOTNORM`/`WGT*`/`CALSTAT` keys. The scale is applied per-frame, so the stamp
+  records the run-level option + the (median) exposures, not a per-pixel value; it's
+  omitted (exactly like `PHOTNORM`) whenever nothing was actually scaled — a matched
+  exposure, no bias, or an unknown exposure all leave the dark unscaled. The run `…/info`
+  endpoint parses them into a `dark_scaling` `{mode, dark_exposure, light_exposure}`
+  summary, and the History Info panel renders one dimmed line ("Dark scaled to sub
+  exposure · 30s → 10s") via a pure `darkScalingSummaryText` helper. Additive/upgrade-safe:
+  new nullable FITS cards + a new response field + one advisory UI line — no schema/API-shape/
+  default change; an old run with no `DARKSCAL` card simply omits the line. Tests: engine
+  unit (stamped when scaled to a 10s sub from a 30s dark; absent when the option is off, the
+  exposures match, or the bias/exposure is missing) + webapp (the info endpoint parses the
+  cards into `dark_scaling` and reports `null` for a plain stack) + Vitest
+  (`darkScalingSummaryText` null/exposures/fractional/mode-only). (v0.82.1, this run — Builder)
 
 - **Dark exposure-scaling — reuse a dark library shot at one exposure to calibrate subs
   at another (PRIORITY-4 image-quality/correctness; slice (b) of the calibration item).**

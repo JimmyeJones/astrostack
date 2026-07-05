@@ -559,6 +559,27 @@ def _build_output_header_meta(
         applied = calibration.describe()
         if applied and applied != "none":
             meta["CALSTAT"] = (applied, "calibration masters applied")
+    # Dark exposure-scaling provenance: when the (off-by-default) scale_dark_to_light
+    # option actually scaled a master dark to the subs' integration time — i.e. the
+    # option was on, a master bias was present to hold the pedestal fixed, a dark
+    # was set, and the dark's exposure differs from the subs' — record both
+    # exposures so the run Info / History can show "Dark scaled to sub exposure ·
+    # 30s → 10s" and the user can trust the off-by-default feature did something.
+    # The scale is applied per-frame, so this stamps the run-level option + the
+    # (median) exposures, not a per-pixel value. Omitted (like PHOTNORM) whenever
+    # nothing was actually scaled — matched exposures leave the dark unscaled.
+    if calibration is not None and getattr(calibration, "scale_dark_to_light", False):
+        dark_exp = getattr(calibration, "dark_exposure_s", None)
+        has_bias = getattr(calibration, "bias", None) is not None
+        has_dark = getattr(calibration, "dark", None) is not None
+        light_exp = exposures[len(exposures) // 2] if exposures else None
+        if (has_bias and has_dark and dark_exp and light_exp
+                and dark_exp > 0 and light_exp > 0
+                and abs(float(light_exp) / float(dark_exp) - 1.0) > 1e-3):
+            meta["DARKSCAL"] = ("exposure", "dark exposure-scaling mode")
+            meta["DARKDEXP"] = (round(float(dark_exp), 3), "master dark exposure (s)")
+            meta["DARKLEXP"] = (round(float(light_exp), 3),
+                                "sub exposure dark scaled to (s)")
     # Quality-weighting provenance: lets the run Info panel report how many subs
     # weighting actually demoted and over what range, so the user can trust the
     # (off-by-default) weighting did something and gauge how aggressive it was.

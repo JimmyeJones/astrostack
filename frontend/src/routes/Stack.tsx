@@ -222,6 +222,15 @@ export function StackView() {
   const darkScaledNote = darkScalingActive
     ? `Dark exposure-scaling is on — this ${darkM?.exposure_s}s dark will be scaled to match your ${subExp}s subs.`
     : null;
+  // Proactive nudge: the dark's exposure is mismatched and no bias is selected,
+  // but the library *holds* a master bias — so scaling is one click away rather
+  // than a two-step discovery (pick the bias, then flip the option). Prefer the
+  // recommended bias when it's one of the available options, else the first.
+  const scaleNudgeBiasId = darkExpMismatch && !values.bias_master_id && biasOpts.length > 0
+    ? (recBiasId != null && biasOpts.some((o) => o.value === String(recBiasId))
+        ? String(recBiasId)
+        : biasOpts[0].value)
+    : null;
   const flatM = masterById(values.flat_master_id);
   const flatDarkM = masterById(values.flat_dark_master_id);
   const flatDarkWarning = flatDarkM && expMismatch(flatDarkM.exposure_s, flatM?.exposure_s)
@@ -546,6 +555,14 @@ export function StackView() {
                       <Button size="compact-xs" variant="light" color="yellow" mt={6}
                         onClick={() => set("scale_dark_to_light", true)}>
                         Scale this dark to your subs' exposure
+                      </Button>
+                    ) : scaleNudgeBiasId ? (
+                      <Button size="compact-xs" variant="light" color="yellow" mt={6}
+                        onClick={() => {
+                          set("bias_master_id", scaleNudgeBiasId);
+                          set("scale_dark_to_light", true);
+                        }}>
+                        Select your master bias and scale the dark
                       </Button>
                     ) : null}
                   </Alert>

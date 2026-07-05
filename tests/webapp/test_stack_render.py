@@ -271,6 +271,41 @@ def test_stack_info_photometric_absent_for_unnormalized_stack(client, solved_lib
     assert body["photometric"] is None
 
 
+def test_stack_info_surfaces_dark_scaling_summary(client, solved_library):
+    """A stack that scaled its dark to the subs' exposure stamps DARKSCAL/DARK*EXP
+    cards; the info endpoint parses them into a friendly summary the panel shows."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            with fits.open(run.fits_path, mode="update") as hdul:
+                hdul[0].header["DARKSCAL"] = "exposure"
+                hdul[0].header["DARKDEXP"] = 30.0
+                hdul[0].header["DARKLEXP"] = 10.0
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/info").json()
+    d = body["dark_scaling"]
+    assert d is not None
+    assert d["mode"] == "exposure"
+    assert d["dark_exposure"] == 30.0
+    assert d["light_exposure"] == 10.0
+
+
+def test_stack_info_dark_scaling_absent_for_unscaled_stack(client, solved_library):
+    """A plain stack has no DARKSCAL cards, so dark_scaling is None."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/info").json()
+    assert body["dark_scaling"] is None
+
+
 def test_transparency_ratio_surfaces_on_runs_and_gallery(client, solved_library):
     """A run's persisted transparency verdict rides along on both the runs list
     and the gallery so the frontend can badge a hazy night at a glance."""

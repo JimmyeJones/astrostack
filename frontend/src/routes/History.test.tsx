@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText } from "./History";
+import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, darkScalingSummaryText } from "./History";
 import { formatIntegration } from "../format";
 import * as client from "../api/client";
 import type { StackRun } from "../api/client";
@@ -404,6 +404,26 @@ describe("photometricSummaryText", () => {
     expect(photometricSummaryText({ mode: "transparency", n_adjusted: 1 })).toBe(
       "Photometrically normalized · 1 frame gain-matched",
     );
+  });
+});
+
+describe("darkScalingSummaryText", () => {
+  it("returns null when the run didn't scale its dark", () => {
+    expect(darkScalingSummaryText(null)).toBeNull();
+    expect(darkScalingSummaryText(undefined)).toBeNull();
+  });
+  it("names the two exposures the dark was scaled between", () => {
+    expect(
+      darkScalingSummaryText({ mode: "exposure", dark_exposure: 30, light_exposure: 10 }),
+    ).toBe("Dark scaled to sub exposure · 30s → 10s");
+  });
+  it("keeps a fractional exposure to one decimal", () => {
+    expect(
+      darkScalingSummaryText({ mode: "exposure", dark_exposure: 30, light_exposure: 2.5 }),
+    ).toBe("Dark scaled to sub exposure · 30s → 2.5s");
+  });
+  it("tolerates missing exposures (mode only)", () => {
+    expect(darkScalingSummaryText({ mode: "exposure" })).toBe("Dark scaled to sub exposure");
   });
 });
 

@@ -206,6 +206,66 @@ describe("StackView", () => {
     expect(screen.queryByText(/shot at 120s but your subs are 30s/)).not.toBeInTheDocument();
   });
 
+  it("proactively offers to select an available bias and scale the dark, then confirms", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    // A mismatched 120 s dark selected but NO bias selected yet — the library
+    // holds one, so scaling should be one click (pick the bias + flip the flag).
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ dark_master_id: 2 });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
+      { id: 2, name: "Dark 120s", kind: "dark", filename: "d2.fits", n_frames: 20,
+        method: "median", exposure_s: 120, gain: 80, sensor_temp_c: null,
+        bayer_pattern: "RGGB", width_px: 480, height_px: 320,
+        created_utc: "2026-01-01T00:00:00", exists: true },
+      { id: 3, name: "Bias", kind: "bias", filename: "b.fits", n_frames: 20,
+        method: "median", exposure_s: 0, gain: 80, sensor_temp_c: null,
+        bayer_pattern: "RGGB", width_px: 480, height_px: 320,
+        created_utc: "2026-01-01T00:00:00", exists: true },
+    ]);
+    vi.spyOn(client.api, "calibrationSuggestions").mockResolvedValue({
+      params: { exposure_s: 30, gain: 80, sensor_temp_c: null },
+      dark_master_id: null, flat_master_id: null, flat_dark_master_id: null, bias_master_id: 3,
+      scores: {}, n_frames: 12,
+    });
+
+    renderStack();
+
+    const btn = await screen.findByRole(
+      "button", { name: "Select your master bias and scale the dark" });
+    fireEvent.click(btn);
+    // Selecting the bias + enabling scaling replaces the yellow warning with the
+    // teal "scaling is on" confirmation.
+    await waitFor(() =>
+      expect(screen.getByText(/Dark exposure-scaling is on/)).toBeInTheDocument());
+    expect(screen.queryByText(/shot at 120s but your subs are 30s/)).not.toBeInTheDocument();
+  });
+
+  it("does not offer the bias-scaling nudge when the library has no bias", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ dark_master_id: 2 });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
+      { id: 2, name: "Dark 120s", kind: "dark", filename: "d2.fits", n_frames: 20,
+        method: "median", exposure_s: 120, gain: 80, sensor_temp_c: null,
+        bayer_pattern: "RGGB", width_px: 480, height_px: 320,
+        created_utc: "2026-01-01T00:00:00", exists: true },
+    ]);
+    vi.spyOn(client.api, "calibrationSuggestions").mockResolvedValue({
+      params: { exposure_s: 30, gain: 80, sensor_temp_c: null },
+      dark_master_id: null, flat_master_id: null, flat_dark_master_id: null, bias_master_id: null,
+      scores: {}, n_frames: 12,
+    });
+
+    renderStack();
+
+    // The mismatch warning still shows (with prose to add a bias), but there's no
+    // one-click nudge because there's no bias to select.
+    await waitFor(() =>
+      expect(screen.getByText(/shot at 120s but your subs are 30s/)).toBeInTheDocument());
+    expect(screen.queryByRole(
+      "button", { name: "Select your master bias and scale the dark" })).not.toBeInTheDocument();
+  });
+
   function mkFrame(id: number): client.Frame {
     return {
       id, name: `f${id}.fits`, timestamp_utc: null, exposure_s: 30, gain: 80,
