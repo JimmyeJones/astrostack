@@ -261,9 +261,11 @@ class WelfordAccumulator:
         m   ← m + d / n
         M2  ← M2 + d · (x - m_new)
 
-    Population variance is ``M2 / n``. We use that (not the sample variance)
-    because it converges to the true variance as ``n`` grows and works fine
-    when ``n == 1``.
+    ``variance()`` returns the *unbiased sample* variance ``M2 / (n - 1)`` and
+    ``NaN`` for ``n < 2`` (see that method for why: a NaN std is the signal the
+    sigma-clip pass uses to keep single-coverage mosaic-edge pixels instead of
+    spuriously rejecting them). ``M2`` itself is the same running sum of squared
+    deviations regardless of which normalisation is chosen.
     """
 
     def __init__(self, shape: tuple[int, ...], dtype: np.dtype | type = np.float32) -> None:
