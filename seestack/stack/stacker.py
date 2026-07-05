@@ -1082,6 +1082,17 @@ def run_stack(
     )
     progress("Saving", 1, 1)
 
+    # If this run archived a previous output set (a re-stack of an already-stacked
+    # target), repoint that previous run's history row at its archived files so it
+    # keeps serving *its* image — the new ``master.*`` belongs to this run. Done
+    # before recording this run so the freshly-written paths aren't repointed.
+    archived = paths.get("archived") or {}
+    if archived:
+        try:
+            project.repoint_stack_runs(archived)
+        except Exception as exc:  # noqa: BLE001 — history repoint is non-critical
+            log.warning("Could not repoint previous stack run(s): %s", exc)
+
     # Record this run in the project history.
     try:
         from dataclasses import asdict

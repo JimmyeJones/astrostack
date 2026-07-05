@@ -39,16 +39,25 @@ log = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).parent / "static"
 
 
-def _on_batch_ready(app: FastAPI) -> None:
-    """Watcher callback: enqueue a pipeline run unless one is already pending."""
+def _on_batch_ready(app: FastAPI) -> bool:
+    """Watcher callback: enqueue a pipeline run unless one is already active.
+
+    Returns ``True`` when a pipeline was enqueued (the batch was consumed), or
+    ``False`` when one is already queued/running. On ``False`` the watcher keeps
+    the batch pending and re-offers it on a later poll, so files that stabilise
+    while a prior pipeline is mid-run are still picked up once it finishes —
+    rather than being silently dropped forever (the running pipeline scanned
+    before they existed, and the stability tracker never re-offers them).
+    """
     jm: JobManager = app.state.job_manager
     store: SettingsStore = app.state.settings_store
     active = [j for j in jm.list(limit=20)
               if j.kind == "pipeline" and j.state in ("queued", "running")]
     if active:
-        log.info("pipeline already %s; skipping duplicate trigger", active[0].state)
-        return
+        log.info("pipeline already %s; deferring trigger", active[0].state)
+        return False
     pipeline.submit_pipeline(store.get(), jm)
+    return True
 
 
 @asynccontextmanager

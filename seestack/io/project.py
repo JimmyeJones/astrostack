@@ -505,6 +505,29 @@ class Project:
                 ),
             )
 
+    def repoint_stack_runs(self, path_map: dict[str, str]) -> int:
+        """Repoint history rows whose output files were moved aside on disk.
+
+        ``path_map`` maps an *old* output path to the path it was archived to
+        (see :func:`seestack.stack.output._archive_existing_outputs`). Any run
+        whose ``fits_path``/``tiff_path``/``preview_path`` equals an old path is
+        updated to its archived location, so after a re-stack (which keeps the
+        canonical ``master.*`` names for the *new* image) the previous run's row
+        still points at the previous image instead of silently serving the new
+        pixels. Returns the number of column values updated. Purely additive to
+        history — no run is added, deleted, or content-changed.
+        """
+        assert self._conn is not None
+        if not path_map:
+            return 0
+        updated = 0
+        for col in ("fits_path", "tiff_path", "preview_path"):
+            for old, new in path_map.items():
+                cur = self._conn.execute(
+                    f"UPDATE stack_runs SET {col} = ? WHERE {col} = ?", (new, old))
+                updated += cur.rowcount
+        return updated
+
     def delete_stack_run(self, run_id: int) -> None:
         assert self._conn is not None
         self._conn.execute("DELETE FROM stack_runs WHERE id = ?", (run_id,))

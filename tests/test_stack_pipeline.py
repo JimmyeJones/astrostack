@@ -77,6 +77,49 @@ def test_stack_records_is_mosaic_false_for_single_field(tmp_path):
         proj.close()
 
 
+def test_restack_same_basename_keeps_old_run_pointing_at_its_own_image(tmp_path):
+    """Re-stacking a target under the same basename (the Stack form's default
+    ``master``) must not make the *previous* run's history row serve the new
+    image. run_stack archives the old outputs and repoints the old run's row at
+    them, so both runs resolve to distinct, existing files.
+
+    Regression: before the fix, the second write archived ``master.fits`` to an
+    orphan and the old run's row (still ``master.fits``) silently served the new
+    pixels — History showed two runs but both resolved to the newest image.
+    """
+    from pathlib import Path
+
+    proj = _build_project(tmp_path, n=4)
+    try:
+        run_stack(proj, StackOptions(sigma_clip=False, max_workers=2,
+                                     output_name="master"))
+        old = next(iter(proj.iter_stack_runs()))
+        # Capture the original image's bytes before the re-stack moves it aside.
+        old_bytes = Path(old.fits_path).read_bytes()
+
+        # A second stack of the same target under the same default basename.
+        run_stack(proj, StackOptions(sigma_clip=True, max_workers=2,
+                                     output_name="master"))
+
+        runs = list(proj.iter_stack_runs())
+        assert len(runs) == 2
+        new = runs[0]  # newest first
+        old_after = next(r for r in runs if r.id == old.id)
+
+        # The new run keeps the canonical master.fits; the old run's row was
+        # repointed to a *different* path (this is what fails before the fix —
+        # the old row would still be master.fits, i.e. == new.fits_path).
+        assert new.fits_path.endswith("master.fits")
+        assert old_after.fits_path != new.fits_path
+        assert Path(old_after.fits_path).exists()
+        assert Path(new.fits_path).exists()
+        # The old run still resolves to *its own* original image, byte-for-byte —
+        # not the new pixels written to master.fits.
+        assert Path(old_after.fits_path).read_bytes() == old_bytes
+    finally:
+        proj.close()
+
+
 def test_stack_records_engine_version(tmp_path):
     """run_stack stamps the run record with the app version passed by the caller,
     for provenance ("made with vX") and stale-target reprocessing. Unset

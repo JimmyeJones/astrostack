@@ -630,6 +630,11 @@ def _apply_editor_to_run(lib: Library, safe: str, run_id: int, recipe_dict: dict
             wcs_text=None, out_basename=base, tiff_mode=tiff_mode,
             header_meta=edit_meta, already_display=True,
         )
+        # Re-exporting under an existing basename archives the prior export's
+        # files; repoint its history row at them so it keeps serving its own
+        # image rather than this new one (done before adding the new run).
+        if paths.get("archived"):
+            proj.repoint_stack_runs(paths["archived"])
         new_id = proj.add_stack_run(StackRunRow(
             id=None,
             timestamp_utc=datetime.now(timezone.utc).isoformat(),
@@ -812,6 +817,10 @@ def _channel_combine(
             wcs_text=wcs_text, out_basename=base, tiff_mode="linear",
             header_meta=combine_meta,
         )
+        # Re-combining under an existing basename archives the prior output;
+        # repoint its history row so it keeps serving its own image.
+        if paths.get("archived"):
+            dst.repoint_stack_runs(paths["archived"])
         new_id = dst.add_stack_run(StackRunRow(
             id=None,
             timestamp_utc=datetime.now(timezone.utc).isoformat(),

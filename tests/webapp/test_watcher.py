@@ -109,3 +109,62 @@ def test_poll_fires_batch_callback_once_per_stable_batch(tmp_path):
     clock.advance(31)
     assert w.poll_once() == set()
     assert fired == [1]
+
+
+def test_batch_pending_when_pipeline_busy_is_reoffered(tmp_path):
+    """A file stabilising while a pipeline is running is re-offered, not dropped.
+
+    Regression for the watcher silently dropping a batch: ``_on_batch_ready``
+    returns ``False`` when a pipeline is already active, and the watcher must
+    keep the batch pending and re-offer it on later polls until it's accepted
+    — otherwise the file's one-and-only "newly stable" trigger is lost and it
+    sits unimported in ``incoming/`` forever.
+    """
+    import os
+
+    incoming = tmp_path / "incoming"
+    incoming.mkdir()
+    f = incoming / "a.fit"
+    f.write_bytes(b"x" * 100)
+
+    clock = FakeClock()
+    os.utime(f, (clock.t, clock.t))
+
+    # A pipeline is "busy" (declines the batch) for the first two accept
+    # attempts, then frees up.
+    busy = {"v": True}
+    calls: list[float] = []
+
+    def on_batch_ready() -> bool:
+        calls.append(clock.t)
+        return not busy["v"]  # False while busy → declined; True once free
+
+    settings = SimpleNamespace(
+        resolved_incoming_dir=incoming, watch_quiet_period_s=30,
+        watch_poll_interval_s=300, watcher_enabled=True,
+    )
+    w = Watcher(
+        get_settings=lambda: settings,
+        on_batch_ready=on_batch_ready,
+        time_fn=clock,
+    )
+    # Not stable yet → no call.
+    assert w.poll_once() == set()
+    assert calls == []
+    # Stable now, but the pipeline is busy → declined; the batch stays pending.
+    clock.advance(31)
+    assert w.poll_once() == {str(f)}
+    assert len(calls) == 1
+    # No *new* files, but the pending batch is re-offered each poll while busy.
+    clock.advance(31)
+    assert w.poll_once() == set()
+    assert len(calls) == 2
+    # Pipeline finishes → the next re-offer is accepted and pending clears.
+    busy["v"] = False
+    clock.advance(31)
+    assert w.poll_once() == set()
+    assert len(calls) == 3
+    # Once accepted, the batch is no longer re-offered.
+    clock.advance(31)
+    assert w.poll_once() == set()
+    assert len(calls) == 3

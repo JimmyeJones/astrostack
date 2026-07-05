@@ -47,32 +47,13 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
-- **Watcher can permanently drop a batch from auto-ingest when it stabilises during a
-  running pipeline.** *(traced, Builder webapp audit 2026-07-05)*
-  - **Symptom.** Frames dropped into `incoming/` are silently never imported (no ingest,
-    no QC/solve, no stack) until *some later* new file happens to trigger a fresh pipeline
-    — or the user clicks "Scan" manually. Worst case: the last batch of a session (nothing
-    arrives afterwards) that finishes copying while the final pipeline job is still running
-    is never picked up at all.
-  - **Root cause.** `StabilityTracker.update` (`webapp/watcher.py:55-82`) reports each path
-    as "newly stable" **exactly once** (once in `self._stable` it's never returned again).
-    `_on_batch_ready` (`webapp/main.py:42-51`) skips enqueuing a pipeline when one is
-    already `queued`/`running` and sets **no** pending/re-trigger flag. So a file that
-    becomes stable *while a prior pipeline is mid-run* has its one-and-only trigger dropped:
-    the running pipeline scanned before the file existed, and the tracker never re-offers it.
-  - **Repro (simulated the tracker).** File A triggers a pipeline at poll 2; the pipeline
-    scans (A ingested) then spends minutes in QC/solve. File B finishes copying and becomes
-    stable at poll 4 → `_on_batch_ready` sees the running pipeline and skips. Polls 5/6
-    return `set()` — B is never re-offered, so B sits unimported in `incoming/`.
-  - **Severity.** Broken autonomy (PRIORITY 2 "just works") — the drop is silent and the
-    user has no signal; it undermines the core "drop files in and it processes automatically"
-    promise. Not data-corrupting (frames stay on disk), but trust-eroding. (confidence:
-    traced, not yet reproduced end-to-end against the live watcher loop.)
-  - **Fix direction.** In `_on_batch_ready`, when a pipeline is already active, set a
-    "rescan pending" flag instead of dropping; when the active pipeline finishes, enqueue
-    one follow-up pipeline (or have the worker re-scan once more on completion if the flag
-    is set). Add a regression test that a file stabilising during a running pipeline is
-    picked up after it completes. (severity: broken-autonomy; confidence: traced)
+- ~~**Watcher can permanently drop a batch from auto-ingest when it stabilises during a
+  running pipeline.**~~ — **FIXED v0.81.7** (see Shipped). `_on_batch_ready` now reports
+  whether it enqueued a pipeline; when it declines because one is already `queued`/`running`,
+  the watcher keeps the batch **pending** and re-offers it on later polls until accepted, so
+  a file that stabilises mid-pipeline is picked up once that pipeline finishes instead of
+  being silently dropped forever. Regression test in `tests/webapp/test_watcher.py`
+  (`test_batch_pending_when_pipeline_busy_is_reoffered`, fails before / passes after).
 
 - ~~**Single-field (non-mosaic) stacks are misclassified as mosaics → Auto silently
   crops the frame + the whole editor shows mosaic-only tools.**~~ — **FIXED
@@ -448,18 +429,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
-- **Low-priority: manual re-stacks (not just reprocess) still overwrite the target's
-  `master` output.** The v0.81.4 fix gave *reprocess-all* runs a fresh version-tagged
-  basename, but a plain re-stack from the Stack form still defaults to `output_name="master"`
-  (the frontend sends no name), so a second manual stack of a target archives the first
-  `master.*` to an orphaned timestamped file and its old `stack_runs` row starts serving the
-  new image — the same mechanic, just user-initiated one-at-a-time. The "reuse these
-  settings" endpoint already `pop`s `output_name` intending "a fresh run gets a fresh name",
-  but that falls back to `master` too, so the intent isn't realised. Consider giving every
-  re-stack of an already-stacked target a fresh unique basename (or an explicit
-  overwrite-vs-new choice in the form), so History genuinely keeps both. Weigh against the
-  expectation that `master.fits` is "the" canonical output; may want the newest run to stay
-  named `master` and the *older* one to be renamed+rerowed instead. (S–M, correctness/trust)
+- ~~**Low-priority: manual re-stacks (not just reprocess) still overwrite the target's
+  `master` output.**~~ — **FIXED v0.81.8** (see Shipped). Took the "newest run stays
+  `master`, older run renamed+rerowed" direction the note preferred: `write_stack_outputs`
+  now archives an existing output set to a single consistent `{base}_{stamp}` basename
+  (keeping the coverage/preview siblings resolvable) and returns the `{old→archived}` map;
+  the stacker (and editor-export / channel-combine paths) repoint the previous run's history
+  row at its archived files before recording the new run. History now genuinely keeps both,
+  and no `stack_runs` row silently serves another run's image.
 - **Low-priority (editor): the whole-recipe Split/Compare divider misaligns when an
   enabled geometry op reshapes the frame.** The "Original" overlay is the full
   empty-recipe render (`Editor.tsx` base fetch `{ops: []}`), but the preview box is sized to
@@ -565,6 +542,53 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Fix: a manual re-stack (or re-export/re-combine) under an existing basename silently
+  made the *previous* run's history row serve the new image (data-integrity/trust).** A
+  plain re-stack from the Stack form defaults to `output_name="master"` (the frontend sends
+  no name), so `write_stack_outputs` archived the existing `master.*` to a timestamped file
+  that **no** `stack_runs` row referenced, then wrote the new pixels back at `master.fits` —
+  and the *old* run's row (still pointing at `master.fits`) began serving the new image while
+  the true old image was orphaned. History showed two runs but both resolved to the newest
+  image, defeating before/after comparison (the same mechanic the v0.81.4 reprocess fix
+  addressed, but user-initiated). Fix takes the note's preferred "newest stays `master`,
+  older is renamed+rerowed" direction: `_archive_existing_outputs` now moves an existing set
+  aside under a single consistent `{base}_{stamp}` basename (so the `_coverage`/`_preview`
+  siblings stay siblings of the archived FITS — `coverage_path_for` resolves them from the
+  FITS basename) and returns a `{original→archived}` map; `write_stack_outputs` surfaces it
+  as a new additive `"archived"` result key; and the stacker (plus the editor-export and
+  channel-combine paths) call a new `Project.repoint_stack_runs` to point the previous run's
+  `fits/tiff/preview` columns at the archived files *before* recording the new run. Net:
+  `master.*` is always the newest image, the previous run keeps resolving to its own
+  (byte-for-byte preserved) image + coverage, and nothing is orphaned. Reprocess-all is
+  unaffected (it already uses fresh version-tagged basenames, so it archives nothing).
+  Additive/upgrade-safe: no schema/API/default change — a new nullable-ish result key and a
+  history repoint (no run added/deleted/content-changed); direct engine callers that ignore
+  the new key are unaffected. Tests: engine unit (archive to one basename + coverage sibling
+  resolvable; repoint moves the old row to distinct existing files; no-op on empty map) +
+  end-to-end (two real `run_stack`s under `master` — old row repointed to a distinct file
+  holding its original bytes, new run keeps `master.fits`; fails before / passes after).
+  (v0.81.8, this run — Builder)
+
+- **Fix: watcher could permanently drop a batch from auto-ingest when a file stabilised
+  during a running pipeline (PRIORITY-2 autonomy / data-completeness).** Frames dropped
+  into `incoming/` while a prior pipeline job was mid-run were silently never imported: the
+  `StabilityTracker` reports each file "newly stable" exactly once, and `_on_batch_ready`
+  skipped enqueuing (with no re-trigger flag) when a pipeline was already `queued`/`running`
+  — so the file's one-and-only trigger was lost and it sat unprocessed in `incoming/` until
+  some later new file happened to kick a fresh pipeline (or the user manually clicked Scan).
+  Worst case (the last batch of a session, nothing arriving after) it was never picked up at
+  all — undermining the core "drop files in and it just processes" promise. Fix:
+  `_on_batch_ready` now **returns** whether it enqueued a pipeline (`True`) or declined
+  because one was active (`False`); on a decline the watcher marks the batch **pending** and
+  re-offers it on every subsequent poll until it's accepted, so the deferred batch is picked
+  up on the first poll after the running pipeline finishes (bounded by the poll interval)
+  rather than being dropped forever. Self-contained to the watcher's poll loop — no schema,
+  API, config, or default change (additive/upgrade-safe; a callback returning `None`, as the
+  legacy signature did, is still treated as "consumed"). Regression test
+  (`test_batch_pending_when_pipeline_busy_is_reoffered`) simulates a busy-then-free pipeline
+  and asserts the pending batch is re-offered until accepted then not again — fails before,
+  passes after. (v0.81.7, this run — Builder)
 
 - **Fix four more flaky Editor "From your data" tests that reddened main's CI (test-only,
   same remount race #109 fixed).** The v0.81.5 merge's frontend CI job failed on
