@@ -505,12 +505,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   stretch, that's usually the right domain — but if a user puts a linear background/gradient op
   before denoise, the suggested strength ignores it. Minor; only worth aligning if a future run
   is already in that endpoint. Found by a Builder editor-UI audit 2026-07-05. (S, editor)
-- **Low-priority (engine/robustness, unreachable today): per-frame weight/scale lookups use
-  `weights.get(f.id or -1, 1.0)`.** In `stacker.py` (~L1274/1280) and the drizzle path
-  (~L1346/1375) a frame whose `id == 0` would fall through to the default `1.0` instead of its
-  real weight/photometric scale (`0 or -1 == -1`). SQLite autoincrement ids start at 1, so it's
-  **unreachable** — but a latent fragility if the id source ever changes; prefer
-  `f.id if f.id is not None else -1`. Found by a Builder engine audit 2026-07-05. (S, robustness)
+- ~~**Low-priority (engine/robustness, unreachable today): per-frame weight/scale lookups use
+  `weights.get(f.id or -1, 1.0)`.**~~ — **FIXED v0.84.8** (see Shipped). All four hot-path sites
+  (`stacker.py` `_pass` weight+scale, `_drizzle_pass` weight+scale) now key with
+  `f.id if f.id is not None else -1`, matching how the maps are built, so a frame with `id == 0`
+  reads its real weight/scale instead of the neutral default. Regression test
+  `tests/test_stack_frame_id_zero.py` (fails before / passes after).
 - **Low-priority robustness: `background.final_gradient` has no image-size box
   clamp (unlike `background.subtract`).** `background.subtract` runs its box_size
   through `BackgroundOptions.for_image_size` (floors it so the mesh always tiles a
@@ -592,6 +592,22 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Stacking hot path: per-frame weight/scale lookups honour a frame whose DB id is 0
+  (current-focus engine hardening).** The quality-weight and photometric-scale maps are keyed by
+  the frame's real `id` (frames with `id is None` are skipped when the maps are built), but the
+  two stacking passes read them with `mapping.get(f.id or -1, 1.0)` — which silently drops a
+  frame with `id == 0` (`0 or -1 == -1`) to the neutral `1.0` default instead of its real value,
+  a store-key/lookup-key mismatch that would corrupt that frame's contribution to the *final
+  image*. Unreachable today (SQLite autoincrement ids start at 1) but a genuine latent
+  correctness bug in the hot path, in the current-focus stacking-engine area. All four sites
+  (`_pass` weight + photometric scale, `_drizzle_pass` weight + photometric scale) now key with
+  `f.id if f.id is not None else -1`, keeping store- and lookup-keys identical. Engine-only,
+  additive, upgrade-safe — no config/schema/API/default change; a value that was already correct
+  for every real id stays correct, and the id-0 case now reads its real value. Test: pytest
+  (`tests/test_stack_frame_id_zero.py` — a `_pass` over a frame with `id == 0` applies its real
+  weight and photometric scale, not the 1.0 defaults; fails before / passes after). (v0.84.8,
+  this run — Builder)
 
 - **Target page: recoverable error state instead of a broken shell when the target 404s
   (PRIORITY-3 friendliness).** Found by a Builder friendliness dogfood: the Target route — the
