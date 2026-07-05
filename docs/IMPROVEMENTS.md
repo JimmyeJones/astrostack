@@ -411,6 +411,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   so a dark library shot at one exposure calibrates subs at another; neutral
   fallback (unscaled dark) when the bias or either exposure is unknown, and the
   existing dark-exposure-mismatch warning gained a one-click to enable it.
+- **Surface dark exposure-scaling provenance on the run Info / History card**
+  (companion to the v0.82.0 `scale_dark_to_light` feature, mirroring the v0.81.1
+  photometric-normalization provenance). When a stack actually scaled its dark to
+  the subs, the run should say so: stamp a FITS provenance card (e.g. `DARKSCAL` +
+  the dark/light exposures) in `write_stack_outputs` when the option was on *and*
+  a bias was present, parse it in the run `…/info` endpoint into a friendly
+  summary, and render one History line ("Dark scaled to sub exposure · 30s → 10s")
+  so the user can trust the off-by-default feature did something. Because the scale
+  is per-frame the stamp should record the option/exposures at run level, not a
+  per-pixel value. Additive/upgrade-safe (new nullable FITS card + response field +
+  advisory UI line). (S, image-quality/trust)
+- **Proactively nudge dark exposure-scaling from the calibration store** (autonomy
+  follow-up to v0.82.0). The one-click "Scale this dark to your subs' exposure"
+  only appears once the user has *manually* selected a master bias. When the
+  library holds a bias but the best-matching dark is at a mismatched exposure, the
+  `calibration-suggestions` / Stack form could proactively suggest "select your
+  master bias and scale the dark" — turning a two-step discovery into one nudge.
+  Needs the suggestions endpoint (or the form) to know a bias exists and the
+  recommended dark's exposure differs; keep it advisory. (S–M, autonomy)
 - First-class session/night dimension in the project schema (frames only have
   `timestamp_utc`): per-session sky levelling before combine, per-session
   calibration binding, per-night QC roll-ups. Coverage-levelling's docstring
