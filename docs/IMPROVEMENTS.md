@@ -394,6 +394,15 @@ problems. Dogfood it every big-picture run and fix root causes.
   memory-budget refusal, "nothing plate-solved to stack", empty-alignment, and
   missing-reference-WCS failures into a plain sentence + next step, falling back to the
   raw text verbatim for anything unrecognised. Remaining long-job-feedback ideas welcome.)_
+  _(Follow-up idea, found while shipping v0.84.3: `friendlyJobError` matches on the raw
+  exception *string*, which is brittle if an engine message is reworded. A more robust
+  approach — mirroring the v0.84.1 server-side solve-setup classification — would have the
+  backend stamp a stable canonical `error_kind` on a failed job (e.g. `memory_budget`,
+  `no_solved_frames`, `no_alignment`) at the point the exception is caught in
+  `JobManager` (webapp/jobs.py), where the exception *type* is known, and have the
+  frontend prefer that field over string-matching (falling back to the current matcher on
+  an older backend). Additive: a new nullable job field + a new response key, no
+  schema/API-shape break. (S, friendliness/robustness))_
 - ~~**Actionable "plate-solving isn't set up" banner when a whole target fails to solve**~~
   — **shipped v0.84.0** (see Shipped). When ASTAP (or, best-effort, its star database) is
   missing, every frame's solve fails identically and the Target page now shows one
