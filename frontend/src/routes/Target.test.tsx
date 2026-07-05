@@ -20,6 +20,15 @@ function mkFrame(id: number, overrides: Partial<Frame> = {}): Frame {
   };
 }
 
+function mkRun(overrides: Partial<client.StackRun> = {}): client.StackRun {
+  return {
+    id: 1, timestamp_utc: "2026-01-01T00:00:00", output_basename: "master",
+    n_frames_used: 3, canvas_w: 480, canvas_h: 320,
+    coverage_min: 3, coverage_max: 3, has_fits: true, has_tiff: false,
+    has_preview: true, notes: null, ...overrides,
+  };
+}
+
 function mkTarget(overrides: Partial<Target> = {}): Target {
   return {
     safe_name: "M_42", name: "M42", ra_deg: 10, dec_deg: 20,
@@ -61,6 +70,81 @@ describe("TargetView process action", () => {
     btn.click();
 
     await waitFor(() => expect(process).toHaveBeenCalledWith("M_42"));
+  });
+});
+
+describe("TargetView getting-started callout", () => {
+  it("nudges a fresh target (frames but no stack yet) toward one-click Process", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    const process = vi
+      .spyOn(client.api, "processTarget")
+      .mockResolvedValue({ job_id: "j1" });
+
+    renderTarget();
+
+    // The callout is its own button (distinct accessible name from the toolbar
+    // "Process this target"), so a beginner sees the highlighted next step.
+    const btn = await screen.findByRole("button", { name: "Process target" });
+    expect(screen.getByText("Ready to process?")).toBeInTheDocument();
+    btn.click();
+
+    await waitFor(() => expect(process).toHaveBeenCalledWith("M_42"));
+  });
+
+  it("nudges when accepted frames are still waiting to be plate-solved", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    // A stack exists, but a freshly-dropped accepted frame is still unsolved, so
+    // a restack would miss it — surface the Process nudge again.
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      mkFrame(1),
+      mkFrame(2, { solved: false }),
+    ]);
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(screen.getByText("Ready to process?")).toBeInTheDocument());
+  });
+
+  it("stays quiet once the target is solved and stacked", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1), mkFrame(2)]);
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(screen.getByText("3/3 accepted")).toBeInTheDocument());
+    expect(screen.queryByText("Ready to process?")).not.toBeInTheDocument();
+  });
+
+  it("stays quiet while the plate-solve setup banner is showing", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ n_frames: 3, n_frames_accepted: 0 }),
+    );
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "rejectSummary").mockResolvedValue({
+      counts: {
+        "solve_failed:astap.exe not found. Install ASTAP from https://www.hnsky.org/astap.htm":
+          3,
+      },
+      total: 3,
+    });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      mkFrame(1, { accept: false, solved: false }),
+    ]);
+
+    renderTarget();
+
+    // The setup banner takes precedence; the generic Process nudge is suppressed.
+    await waitFor(() =>
+      expect(
+        screen.getByText("Plate-solving isn't set up — ASTAP wasn't found"),
+      ).toBeInTheDocument());
+    expect(screen.queryByText("Ready to process?")).not.toBeInTheDocument();
   });
 });
 
