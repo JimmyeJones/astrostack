@@ -365,6 +365,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   the button already delivers the one-click house-style value.)*
 - Auto-suggest stack settings from the data (frame count, FWHM spread, streaks)
   so the user rarely needs to touch the Stack form. (S–M, autonomy)
+- **Nudge to turn on Photometric normalization when the run's transparency varies a
+  lot.** v0.81.0 shipped `photometric_normalize` (off by default), which gain-matches
+  hazy vs clear subs before combine — but a beginner won't know to reach for it. The
+  Stack form already computes each accepted frame's `transparency_score` and shows a
+  hazy-night banner + a quality-weighting nudge (`Stack.tsx`); add a sibling nudge that
+  fires when the spread of transparency across the frames-to-be-stacked is wide (e.g.
+  p90/p10 ratio ≳ 1.5) *and* `photometric_normalize` is off, explaining in plain
+  language that the frames vary a lot in brightness (haze/airmass across nights) and that
+  turning it on gain-matches them so rejection stays strong and hazy nights don't dim the
+  result. Pure frontend (reuse the transparency values already fetched for the existing
+  nudges); additive, advisory, no engine/API change. Pairs the new feature with the
+  autonomy/friendliness pillars so it actually gets used. (S, autonomy/friendliness)
 - ~~**"Apply my last edit to the newest stack" — recipe carry-over across re-stacks.**~~
   — **shipped v0.75.0** (see Shipped). When a re-stacked run opens with no saved edit,
   the empty-pipeline nudge now offers a one-click "Use my previous edit (N)" that copies
