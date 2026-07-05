@@ -190,6 +190,14 @@ export interface StackWeightingSummary {
   median?: number;
 }
 
+export interface StackPhotometricSummary {
+  mode: string;
+  n_adjusted?: number;
+  min?: number;
+  max?: number;
+  median?: number;
+}
+
 export interface StackProcessingStep {
   op: string;
   label: string;
@@ -200,6 +208,7 @@ export interface StackRunInfo {
   integration_s: number | null;
   n_frames: number | null;
   weighting: StackWeightingSummary | null;
+  photometric?: StackPhotometricSummary | null;
   processing?: StackProcessingStep[];
   cards: StackInfoCard[];
 }

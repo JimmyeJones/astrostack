@@ -8,7 +8,7 @@ import { notifications } from "@mantine/notifications";
 import { IconAdjustments, IconCheck, IconCopy, IconDeviceFloppy, IconDownload, IconGitCompare, IconInfoCircle, IconPencil, IconSparkles, IconTrash, IconX } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
-import { api, type StackRun } from "../api/client";
+import { api, type StackRun, type StackPhotometricSummary } from "../api/client";
 import { formatIntegration } from "../format";
 import { HazyNightBadge } from "../components/HazyNightBadge";
 import { CalibrationBadge } from "../components/CalibrationBadge";
@@ -112,6 +112,27 @@ export function formatEngineVersion(v: string | null | undefined): string {
   return s.startsWith("v") ? s : `v${s}`;
 }
 
+// One-line provenance for photometric (multiplicative) frame normalization —
+// "Photometrically normalized · N frames gain-matched · scales lo–hi (median m)".
+// Returns null when the run wasn't normalized (so the card omits the line). Pure
+// so it can be unit-tested and mirrors the inline quality-weighting summary.
+export function photometricSummaryText(
+  photometric: StackPhotometricSummary | null | undefined,
+): string | null {
+  if (!photometric) return null;
+  let s = "Photometrically normalized";
+  if (typeof photometric.n_adjusted === "number") {
+    s += ` · ${photometric.n_adjusted} frame${photometric.n_adjusted === 1 ? "" : "s"} gain-matched`;
+  }
+  if (typeof photometric.min === "number" && typeof photometric.max === "number") {
+    s += ` · scales ${photometric.min.toFixed(2)}–${photometric.max.toFixed(2)}`;
+  }
+  if (typeof photometric.median === "number") {
+    s += ` (median ${photometric.median.toFixed(2)})`;
+  }
+  return s;
+}
+
 function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
   const info = useQuery({
     queryKey: ["stack-info", safe, runId],
@@ -145,6 +166,11 @@ function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
           {typeof data.weighting.median === "number"
             ? ` (median ${data.weighting.median.toFixed(2)})`
             : ""}
+        </Text>
+      ) : null}
+      {photometricSummaryText(data.photometric) ? (
+        <Text size="xs" c="dimmed">
+          {photometricSummaryText(data.photometric)}
         </Text>
       ) : null}
       {combineMethodLabel(data.cards) ? (

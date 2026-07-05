@@ -379,15 +379,12 @@ problems. Dogfood it every big-picture run and fix root causes.
 - Better long-job feedback and clearer error messages. (S, friendliness)
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
-- **Photometric (multiplicative) frame normalization before combine** — frames
-  are additively sky-zeroed per frame, but nothing gain-matches them: haze/
-  airmass scale the *signal* (stars + nebula) frame-to-frame by tens of
-  percent across a multi-night stack, inflating the per-pixel σ that κ-σ
-  rejection clips against (weaker rejection on bright structure) and letting
-  hazy nights dim the weighted mean. Estimate a per-frame scale from matched
-  bright-star fluxes vs the reference (the `transparency_score` machinery is
-  most of it) and divide it out before accumulation. Needs care: robust to
-  few-star frames, neutral fallback, off by default first. (M, correctness)
+- ~~**Photometric (multiplicative) frame normalization before combine**~~ —
+  **shipped v0.81.0** (see Shipped). A `photometric_normalize` StackOptions flag
+  (off by default) gain-matches every frame's signal to the run's median
+  transparency before accumulation, so haze/airmass flux variation no longer
+  inflates the rejection spread or lets hazy nights dim the result. Bounded
+  scales, neutral fallback, applied consistently across every stacking path.
 - Follow-ups to min/max reject (shipped v0.56.0). (Item (2), the Stack-form
   small-stack hint, shipped v0.56.2; top/bottom-k trimmed-mean reject shipped
   v0.58.0.) No remaining sub-items.
@@ -510,6 +507,50 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Surface photometric-normalization provenance on the run Info / History card
+  (PRIORITY-4 trust, companion to v0.81.0).** The stack run's `…/info` endpoint now
+  parses the `PHOTNORM`/`PHOTN*` FITS keys into a friendly `photometric` summary
+  (mirroring the existing quality-`weighting` summary), and the History provenance
+  card renders a single line — "Photometrically normalized · N frames gain-matched ·
+  scales lo–hi (median m)" — so a user who turned normalization on can see it happened
+  and how many subs were actually scaled (and trust the off-by-default feature did
+  something). Present only on normalized stacks; absent otherwise. New pure
+  `photometricSummaryText` helper. Additive/upgrade-safe (new nullable response field +
+  advisory UI line, no schema/behaviour change). Tests: webapp (a stamped run surfaces
+  the parsed summary; a plain run reports `photometric: null`) + Vitest
+  (`photometricSummaryText`: null when un-normalized / full range / singular-frame +
+  missing-range tolerant). (v0.81.1, this run — Builder)
+
+- **Photometric (multiplicative) frame normalization before combine — gain-match the
+  signal so haze/airmass doesn't weaken rejection or dim the result (PRIORITY-4
+  image-quality/correctness).** Frames are additively sky-zeroed per frame, but nothing
+  gain-matched their *signal*: haze, airmass and thin cloud scale a sub's recorded star/
+  nebula flux by tens of percent across a multi-night session, which (a) inflates the
+  per-pixel spread κ-σ / min-max rejection clips against — so real outliers on bright
+  structure survive — and (b) lets hazy nights quietly dim the combined image. A new
+  `photometric_normalize` StackOptions flag (**off by default**) estimates a per-frame
+  multiplicative scale from the frame's own `transparency_score` (the median flux of its
+  brightest stars, already measured by QC) relative to the **median** transparency of the
+  stacked frames, and the stacker multiplies it into each frame's pixels *before*
+  accumulation — so it flows identically through every path (single-pass mean, κ-σ pass
+  1+2, min/max reject, and the drizzle prepare worker) and every accumulator. Normalising
+  to the median keeps overall brightness stable (half scale gently up, half down); scales
+  are bounded to `[0.5, 2×]` so one wild transparency estimate can't blow a frame up; a
+  frame with no usable score stays neutral (1.0), and if fewer than 3 frames carry a score
+  the whole run is neutral (a median off 1–2 frames isn't trustworthy). Orthogonal to and
+  composes with quality weighting (that down-weights the *contribution*; this gain-matches
+  the *values*). The run self-documents via `PHOTNORM`/`PHOTN*` FITS provenance keys
+  (mirroring the `WGT*` keys). New engine module `seestack/stack/photometric.py`
+  (`compute_photometric_scales` + `PhotometricStats`); surfaces in the Stack form as an
+  advanced checkbox (descriptor-driven, no frontend change). Additive/upgrade-safe: a new
+  off-by-default option field + new nullable FITS header keys, no schema/API/default change
+  — an existing install's stacks are unaffected until opted in. Tests: engine unit
+  (gain-match to median / clamp both sides / missing-score neutral / <3-measured fully
+  neutral / identical-transparency all-neutral / non-positive scores ignored / NaN
+  coverage preserved) + end-to-end (a hazy frame's boost lifts the combined bright-star
+  level ~1.1×+ and stamps PHOTNORM; off by default writes no PHOTNORM; enabled-but-no-
+  transparency stays neutral; runs on the drizzle path). (v0.81.0, this run — Builder)
 
 - **Per-op split before/after — drag a divider to see the image with vs without just
   the op you're tuning (PRIORITY-1 editor/trust).** v0.78.0 added a whole-recipe split

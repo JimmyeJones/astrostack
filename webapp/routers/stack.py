@@ -409,6 +409,20 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
             with contextlib.suppress(KeyError, TypeError, ValueError):
                 weighting[k] = float(header[hk])
 
+    # Photometric-normalization summary (present only on normalized stacks), parsed
+    # the same way so the panel can show a single "N frames gain-matched · scales
+    # lo–hi" line and the user can trust the (off-by-default) normalization did
+    # something.
+    photometric: dict[str, Any] | None = None
+    if "PHOTNORM" in header:
+        photometric = {"mode": str(header["PHOTNORM"])}
+        for hk, k in (("PHOTNADJ", "n_adjusted"),):
+            with contextlib.suppress(KeyError, TypeError, ValueError):
+                photometric[k] = int(header[hk])
+        for hk, k in (("PHOTMIN", "min"), ("PHOTMAX", "max"), ("PHOTMED", "median")):
+            with contextlib.suppress(KeyError, TypeError, ValueError):
+                photometric[k] = float(header[hk])
+
     for key in _INFO_CARDS:
         if key not in header:
             continue
@@ -431,6 +445,7 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
     processing = _parse_processing_chain(header)
     return {"run_id": run_id, "integration_s": integration_s,
             "n_frames": n_frames, "weighting": weighting,
+            "photometric": photometric,
             "processing": processing, "cards": cards}
 
 

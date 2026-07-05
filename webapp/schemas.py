@@ -237,6 +237,12 @@ _DESCRIPTORS: list[dict[str, Any]] = [
      "help": "Subtract a per-frame sky model to remove gradients."},
     {"key": "quality_weighted", "label": "Quality weighting", "type": "bool", "group": "simple",
      "help": "Weight sharper / clearer frames more heavily."},
+    {"key": "photometric_normalize", "label": "Photometric normalization", "type": "bool",
+     "group": "advanced",
+     "help": "Gain-match every frame's brightness to the run's median before combining, "
+             "so haze and airmass across a multi-night session don't weaken outlier "
+             "rejection or let hazy nights dim the result. Uses each frame's measured "
+             "transparency; leaves un-measured frames untouched."},
     {"key": "lucky_fraction", "label": "Lucky imaging (keep best %)", "type": "float",
      "group": "simple", "min": 0.05, "max": 1.0, "step": 0.05,
      "help": "Keep only the best fraction of frames by FWHM. 1.0 = keep all."},
