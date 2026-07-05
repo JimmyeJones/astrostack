@@ -277,6 +277,102 @@ def test_calibration_flows_through_align_one(tmp_path):
     np.testing.assert_allclose(np.mean(diff), offset, atol=1.0)
 
 
+def _save_dark_and_bias(tmp_path, *, dark_level, bias_level, dark_exp, shape=(4, 4)):
+    dark = np.full(shape, dark_level, dtype=np.float32)
+    bias = np.full(shape, bias_level, dtype=np.float32)
+    save_master(tmp_path / "d.fits", dark,
+                MasterMeta("dark", 5, shape[1], shape[0], "median", exposure_s=dark_exp))
+    save_master(tmp_path / "b.fits", bias,
+                MasterMeta("bias", 5, shape[1], shape[0], "median"))
+    return str(tmp_path / "d.fits"), str(tmp_path / "b.fits")
+
+
+def test_dark_exposure_scaling_scales_dark_current(tmp_path):
+    # Dark = bias(20) + dark-current(90) shot at 30s; subs are 10s → the dark
+    # current scales by 10/30 while the bias pedestal stays fixed:
+    # scaled dark = 20 + 90×(1/3) = 50.
+    d, b = _save_dark_and_bias(tmp_path, dark_level=110.0, bias_level=20.0, dark_exp=30.0)
+    cal = CalibrationMasters.load(dark_path=d, bias_path=b, scale_dark_to_light=True)
+    raw = np.full((4, 4), 200.0, dtype=np.float32)
+    np.testing.assert_allclose(cal.apply_raw(raw, light_exposure_s=10.0), 150.0)  # 200-50
+    # A matched exposure (ratio ~1) subtracts the full 110, same as no scaling.
+    np.testing.assert_allclose(cal.apply_raw(raw, light_exposure_s=30.0), 90.0)
+
+
+def test_dark_scaling_off_by_default(tmp_path):
+    # The flag defaults off, so a mismatched dark is subtracted unscaled (today's
+    # behaviour) — an upgrade doesn't change any existing stack.
+    d, b = _save_dark_and_bias(tmp_path, dark_level=110.0, bias_level=20.0, dark_exp=30.0)
+    cal = CalibrationMasters.load(dark_path=d, bias_path=b)
+    raw = np.full((4, 4), 200.0, dtype=np.float32)
+    np.testing.assert_allclose(cal.apply_raw(raw, light_exposure_s=10.0), 90.0)
+
+
+def test_dark_scaling_neutral_without_bias(tmp_path):
+    # Scaling needs the bias to hold the pedestal fixed; without one the dark is
+    # used unscaled even with the flag on.
+    dark = np.full((4, 4), 110.0, dtype=np.float32)
+    save_master(tmp_path / "d.fits", dark,
+                MasterMeta("dark", 5, 4, 4, "median", exposure_s=30.0))
+    cal = CalibrationMasters.load(dark_path=str(tmp_path / "d.fits"),
+                                  scale_dark_to_light=True)
+    raw = np.full((4, 4), 200.0, dtype=np.float32)
+    np.testing.assert_allclose(cal.apply_raw(raw, light_exposure_s=10.0), 90.0)
+
+
+def test_dark_scaling_neutral_when_exposure_unknown(tmp_path):
+    # Missing light exposure (direct callers) OR missing dark exposure → no ratio,
+    # so the dark is used unscaled in both cases.
+    d, b = _save_dark_and_bias(tmp_path, dark_level=110.0, bias_level=20.0, dark_exp=30.0)
+    cal = CalibrationMasters.load(dark_path=d, bias_path=b, scale_dark_to_light=True)
+    raw = np.full((4, 4), 200.0, dtype=np.float32)
+    np.testing.assert_allclose(cal.apply_raw(raw), 90.0)  # no light exposure passed
+
+    dark = np.full((4, 4), 110.0, dtype=np.float32)
+    bias = np.full((4, 4), 20.0, dtype=np.float32)
+    save_master(tmp_path / "dn.fits", dark, MasterMeta("dark", 5, 4, 4, "median"))  # no EXPTIME
+    save_master(tmp_path / "bn.fits", bias, MasterMeta("bias", 5, 4, 4, "median"))
+    cal2 = CalibrationMasters.load(dark_path=str(tmp_path / "dn.fits"),
+                                   bias_path=str(tmp_path / "bn.fits"),
+                                   scale_dark_to_light=True)
+    np.testing.assert_allclose(cal2.apply_raw(raw, light_exposure_s=10.0), 90.0)
+
+
+def test_dark_exposure_scaling_flows_through_align_one(tmp_path):
+    """The light frame's own exposure reaches apply_raw, so a 30s dark is scaled
+    to the synth sub's 10s: scaling subtracts less pedestal than the unscaled
+    dark, leaving the aligned output higher by the difference (50 vs 110 → +60)."""
+    pytest.importorskip("scipy")
+    from seestack.io.fits_loader import load_seestar_raw
+    from seestack.stack.align import align_one
+    from tests.synth import make_synth_wcs_text, write_seestar_fits
+
+    p = write_seestar_fits(tmp_path / "light.fit", add_wcs=True, n_stars=15, seed=7)  # 10s
+    raw, _ = load_seestar_raw(p, debayer=False)
+    shape = raw.shape
+    dark = np.full(shape, 110.0, dtype=np.float32)  # bias(20) + 90 dark-current @30s
+    bias = np.full(shape, 20.0, dtype=np.float32)
+    save_master(tmp_path / "d.fits", dark,
+                MasterMeta("dark", 5, shape[1], shape[0], "median", exposure_s=30.0))
+    save_master(tmp_path / "b.fits", bias,
+                MasterMeta("bias", 5, shape[1], shape[0], "median"))
+    scaled = CalibrationMasters.load(dark_path=str(tmp_path / "d.fits"),
+                                     bias_path=str(tmp_path / "b.fits"),
+                                     scale_dark_to_light=True)
+    unscaled = CalibrationMasters.load(dark_path=str(tmp_path / "d.fits"),
+                                       bias_path=str(tmp_path / "b.fits"))
+    wcs_text = make_synth_wcs_text()
+    common = dict(bayer_pattern="RGGB", src_wcs_text=wcs_text, dst_wcs_text=wcs_text,
+                  dst_shape=(320, 480), suppress_hot_pixels=False)
+    a = align_one(str(p), calibration=scaled, **common)
+    b_ = align_one(str(p), calibration=unscaled, **common)
+    assert a is not None and b_ is not None
+    ai = a[0][30:-30, 30:-30, :]
+    bi = b_[0][30:-30, 30:-30, :]
+    finite = np.isfinite(ai) & np.isfinite(bi)
+    np.testing.assert_allclose(np.mean((ai - bi)[finite]), 60.0, atol=1.0)
+
+
 def test_flat_floor_guards_divide(tmp_path):
     # A flat with a near-zero pixel must not explode the calibrated output.
     flat = np.full((3, 3), 100.0, dtype=np.float32)

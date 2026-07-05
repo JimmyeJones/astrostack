@@ -119,7 +119,7 @@ def align_one(
     # Dark/flat calibration happens on the raw Bayer mosaic, before debayering —
     # the masters are raw sensor readouts, so this is the correct domain.
     if calibration is not None:
-        raw = calibration.apply_raw(raw)
+        raw = calibration.apply_raw(raw, light_exposure_s=info.exposure_s)
     if mono:
         # Mono / filtered sub: no colour mosaic, so use the single channel as
         # luminance replicated across RGB (keeps the rest of the RGB pipeline).

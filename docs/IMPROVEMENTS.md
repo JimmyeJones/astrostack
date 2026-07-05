@@ -404,14 +404,32 @@ problems. Dogfood it every big-picture run and fix root causes.
 - Follow-ups to min/max reject (shipped v0.56.0). (Item (2), the Stack-form
   small-stack hint, shipped v0.56.2; top/bottom-k trimmed-mean reject shipped
   v0.58.0.) No remaining sub-items.
-- **Dark exposure-scaling** (slice (b), now that bias is wired for lights) —
-  `scaled_dark = bias + (dark − bias)·(t_light/t_dark)` so a dark shot at a
-  different exposure than the lights can still be used. Needs the per-frame
-  light exposure threaded into `apply_raw` (the harder part) and a neutral
-  fallback (unscaled dark) when either exposure or a bias is unknown. Keep it
-  opt-in and guard shape/exposure mismatches. Slice (a) — bias-only for lights
-  when no dark is chosen, `(light − bias) / flat` — shipped v0.53.0.
-  (M, correctness)
+- ~~**Dark exposure-scaling** (slice (b), now that bias is wired for lights)~~ —
+  **shipped v0.82.0** (see Shipped). An off-by-default `scale_dark_to_light`
+  StackOptions flag scales a master dark's dark current to the light's exposure
+  (`dark = bias + (dark − bias)·(t_light/t_dark)`) when a master bias is present,
+  so a dark library shot at one exposure calibrates subs at another; neutral
+  fallback (unscaled dark) when the bias or either exposure is unknown, and the
+  existing dark-exposure-mismatch warning gained a one-click to enable it.
+- **Surface dark exposure-scaling provenance on the run Info / History card**
+  (companion to the v0.82.0 `scale_dark_to_light` feature, mirroring the v0.81.1
+  photometric-normalization provenance). When a stack actually scaled its dark to
+  the subs, the run should say so: stamp a FITS provenance card (e.g. `DARKSCAL` +
+  the dark/light exposures) in `write_stack_outputs` when the option was on *and*
+  a bias was present, parse it in the run `…/info` endpoint into a friendly
+  summary, and render one History line ("Dark scaled to sub exposure · 30s → 10s")
+  so the user can trust the off-by-default feature did something. Because the scale
+  is per-frame the stamp should record the option/exposures at run level, not a
+  per-pixel value. Additive/upgrade-safe (new nullable FITS card + response field +
+  advisory UI line). (S, image-quality/trust)
+- **Proactively nudge dark exposure-scaling from the calibration store** (autonomy
+  follow-up to v0.82.0). The one-click "Scale this dark to your subs' exposure"
+  only appears once the user has *manually* selected a master bias. When the
+  library holds a bias but the best-matching dark is at a mismatched exposure, the
+  `calibration-suggestions` / Stack form could proactively suggest "select your
+  master bias and scale the dark" — turning a two-step discovery into one nudge.
+  Needs the suggestions endpoint (or the form) to know a bias exists and the
+  recommended dark's exposure differs; keep it advisory. (S–M, autonomy)
 - First-class session/night dimension in the project schema (frames only have
   `timestamp_utc`): per-session sky levelling before combine, per-session
   calibration binding, per-night QC roll-ups. Coverage-levelling's docstring
@@ -537,6 +555,51 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Dark exposure-scaling — reuse a dark library shot at one exposure to calibrate subs
+  at another (PRIORITY-4 image-quality/correctness; slice (b) of the calibration item).**
+  A master dark records thermal (dark-current) signal at a *specific* exposure, so a dark
+  shot at a different exposure than the lights either under- or over-subtracts — today
+  AstroStack only *warns* about the mismatch, leaving the user to re-shoot darks per
+  exposure. A new off-by-default `scale_dark_to_light` StackOptions flag scales the dark's
+  dark current to the light's integration time while holding the exposure-independent bias
+  pedestal fixed: `dark = bias + (dark − bias)·(t_light / t_dark)`. It needs a master bias
+  (to separate pedestal from dark current) and known exposures; without either — or when
+  the exposures match — it falls back to the unscaled dark, so nothing changes for the
+  common matched-dark case. The light's own exposure is threaded from `load_seestar_raw`
+  into `CalibrationMasters.apply_raw(raw, light_exposure_s=…)` at both hot-path call sites
+  (`align.py`, the drizzle prepare worker); direct callers that omit it get the unscaled
+  dark (backward-compatible). The Stack form's existing dark-exposure-mismatch warning now
+  carries a one-click **"Scale this dark to your subs' exposure"** (shown only when a master
+  bias is also selected) that flips the flag, replacing the yellow warning with a teal
+  "scaling is on" confirmation; the "bias ignored because a dark is present" note is
+  correctly suppressed while scaling is on (the bias *is* used then). Additive/upgrade-safe:
+  a new off-by-default option field with a descriptor (drift test satisfied) + an optional
+  `apply_raw` kwarg — no schema/API/default/on-disk change; an existing install's stacks are
+  identical until opted in. Tests: engine unit (scales the dark current to a 10 s sub from a
+  30 s dark / matched-exposure and off-by-default and missing-bias and missing-exposure all
+  neutral) + end-to-end through `align_one` (the synth sub's 10 s exposure reaches
+  `apply_raw` and scales the 30 s dark, the aligned output higher by the pedestal
+  difference) + Vitest (the warning's one-click enables scaling and swaps to the teal note).
+  (v0.82.0, this run — Builder)
+
+- **Make the remaining advisory Stack-form nudges one-click actionable (PRIORITY-2/3
+  autonomy + friendliness).** Three Stack-form advisory hints told the user to change a
+  setting but made them hunt for it, while their siblings (photometric-normalization,
+  min/max-reject) already offered a one-click button — an inconsistency a beginner feels
+  as friction. Now: the **quality-weighting** nudge (fires on a wide FWHM/star-count
+  spread) and the **hazy-transparency** hint (run median well below the target's clear-sky
+  baseline) each carry a one-click **"Turn on quality weighting"** button, and the
+  **sigma-clip-low-frame** caution (sigma clip on with <5 accepted+solved frames) carries a
+  one-click **"Turn off sigma clipping"** — each doing exactly the safe action the hint's
+  own text recommends. The transparency-hint button is guarded on `!quality_weighted` (so it
+  vanishes once weighting is on while the "you were shot through haze" advisory stays), and
+  the quality-weighting nudge already only renders while weighting is off. Prose reworded so
+  it reads naturally beside a button ("Turn on Quality weighting in the options above" →
+  the button carries the action). Frontend-only, additive, advisory — no engine/API/schema
+  change, nothing happens until the user clicks. Tests: Vitest (each button turns its option
+  on and clears/updates the nudge; the transparency button leaves the advisory text in
+  place). (v0.81.10, this run — Builder)
 
 - **Fix: mosaic canvas iterative-shrink dropped a good central frame instead of the real
   outlier when the group straddled RA=0° (stacking-engine data-integrity).** The primary

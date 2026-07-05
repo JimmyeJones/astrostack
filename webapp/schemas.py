@@ -278,6 +278,12 @@ _DESCRIPTORS: list[dict[str, Any]] = [
     {"key": "final_gradient_box_size", "label": "Final gradient box size", "type": "int",
      "group": "advanced", "min": 64, "max": 1024, "step": 32,
      "depends_on": "final_gradient_removal"},
+    {"key": "scale_dark_to_light", "label": "Scale dark to sub exposure", "type": "bool",
+     "group": "advanced",
+     "help": "When your master dark was shot at a different exposure than these subs, "
+             "scale its dark current to match: dark = bias + (dark − bias)×(sub ÷ dark "
+             "exposure). Needs a master bias selected too (to hold the readout pedestal "
+             "fixed); without one the dark is used unscaled."},
     {"key": "color_calibration", "label": "Color calibration", "type": "bool", "group": "advanced"},
     {"key": "color_calibration_mode", "label": "Color cal. mode", "type": "enum",
      "group": "advanced", "options": ["gray_star", "gaia"],

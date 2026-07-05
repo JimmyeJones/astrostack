@@ -36,6 +36,15 @@ class CalibrationMasters:
     dark_path: str | None = None
     flat_path: str | None = None
     bias_path: str | None = None
+    # Exposure of the master dark / bias in seconds (from their FITS headers),
+    # None when the header didn't carry it. Used only for optional dark
+    # exposure-scaling (see ``scale_dark_to_light`` / :meth:`_effective_dark`).
+    dark_exposure_s: float | None = None
+    bias_exposure_s: float | None = None
+    # When True *and* a master bias is available, a master dark shot at a
+    # different exposure than the light is scaled to the light's integration
+    # time before subtraction (see :meth:`_effective_dark`). Off by default.
+    scale_dark_to_light: bool = False
 
     @classmethod
     def load(
@@ -44,6 +53,8 @@ class CalibrationMasters:
         flat_path: str | None = None,
         flat_dark_path: str | None = None,
         bias_path: str | None = None,
+        *,
+        scale_dark_to_light: bool = False,
     ) -> "CalibrationMasters":
         """Load masters from disk. Any path may be ``None``.
 
@@ -61,18 +72,30 @@ class CalibrationMasters:
         provenance/shape reasons but never applied to the lights (see
         :meth:`apply_raw`). This gives a correct ``(light − bias) / flat``
         calibration for the common bias+flat (no dark) workflow.
+
+        ``scale_dark_to_light`` opts into exposure-scaling the dark: when a
+        master bias is also loaded and the dark's exposure differs from the
+        light's, the dark's *dark current* is scaled to the light's integration
+        time — ``dark = bias + (dark − bias)·(t_light / t_dark)`` — so a dark
+        library shot at one exposure can still calibrate subs at another. It
+        needs the bias to hold the exposure-independent readout pedestal fixed;
+        without a bias (or an unknown exposure) the dark is used unscaled.
         """
         from seestack.calibrate.masters import load_master
 
         dark = None
+        dark_exposure_s = None
         flat_norm = None
         bias = None
+        bias_exposure_s = None
         if dark_path:
-            dark, _ = load_master(dark_path)
+            dark, dark_meta = load_master(dark_path)
             dark = np.asarray(dark, dtype=np.float32)
+            dark_exposure_s = dark_meta.exposure_s
         if bias_path:
-            bias, _ = load_master(bias_path)
+            bias, bias_meta = load_master(bias_path)
             bias = np.asarray(bias, dtype=np.float32)
+            bias_exposure_s = bias_meta.exposure_s
         if flat_path:
             flat, _ = load_master(flat_path)
             flat = np.asarray(flat, dtype=np.float32)
@@ -96,7 +119,9 @@ class CalibrationMasters:
                 flat_norm = np.where(np.isfinite(fn) & (fn > _FLAT_FLOOR), fn, 1.0
                                      ).astype(np.float32, copy=False)
         return cls(dark=dark, flat_norm=flat_norm, bias=bias,
-                   dark_path=dark_path, flat_path=flat_path, bias_path=bias_path)
+                   dark_path=dark_path, flat_path=flat_path, bias_path=bias_path,
+                   dark_exposure_s=dark_exposure_s, bias_exposure_s=bias_exposure_s,
+                   scale_dark_to_light=scale_dark_to_light)
 
     @property
     def is_empty(self) -> bool:
@@ -135,19 +160,48 @@ class CalibrationMasters:
                     f"(same camera, binning and no debayering)."
                 )
 
-    def apply_raw(self, raw: np.ndarray) -> np.ndarray:
+    def _effective_dark(self, light_exposure_s: float | None) -> np.ndarray | None:
+        """The dark to subtract, exposure-scaled to the light when opted in.
+
+        Returns the stored dark unchanged unless ``scale_dark_to_light`` is on,
+        a master bias with the dark's shape is available, and both exposures are
+        known and positive. In that case it returns
+        ``bias + (dark − bias)·(t_light / t_dark)`` — the dark current scaled to
+        the light's integration time while the exposure-independent bias pedestal
+        stays fixed — so a dark shot at one exposure calibrates subs at another.
+        A ratio of ~1 (matched exposures) is left as the plain dark to avoid
+        needless float work and rounding.
+        """
+        dark = self.dark
+        if (self.scale_dark_to_light and dark is not None and self.bias is not None
+                and self.bias.shape == dark.shape
+                and self.dark_exposure_s and light_exposure_s
+                and self.dark_exposure_s > 0 and light_exposure_s > 0):
+            ratio = float(light_exposure_s) / float(self.dark_exposure_s)
+            if abs(ratio - 1.0) > 1e-3:
+                return (self.bias + (dark - self.bias) * ratio).astype(
+                    np.float32, copy=False)
+        return dark
+
+    def apply_raw(self, raw: np.ndarray,
+                  light_exposure_s: float | None = None) -> np.ndarray:
         """Return the calibrated raw mosaic: ``(raw − pedestal) / flat_norm``.
 
         The subtracted pedestal is the master dark when one is set, otherwise
         the master bias if one is set (``(light − bias) / flat``) — never both,
         so the bias is not double-subtracted through a dark that already
-        contains it. Masters whose shape doesn't match ``raw`` are skipped (this
-        is the defensive per-frame guard; :meth:`validate` is the up-front
-        check). Returns a new float32 array — the input is not modified.
+        contains it. When ``scale_dark_to_light`` is enabled and a bias is
+        available, the dark is first scaled to ``light_exposure_s`` (see
+        :meth:`_effective_dark`); passing ``None`` (the default, and what direct
+        callers use) simply leaves the dark unscaled. Masters whose shape
+        doesn't match ``raw`` are skipped (this is the defensive per-frame guard;
+        :meth:`validate` is the up-front check). Returns a new float32 array —
+        the input is not modified.
         """
         out = np.asarray(raw, dtype=np.float32)
-        if self.dark is not None and self.dark.shape == out.shape:
-            out = out - self.dark
+        dark = self._effective_dark(light_exposure_s)
+        if dark is not None and dark.shape == out.shape:
+            out = out - dark
         elif self._bias_applies and self.bias.shape == out.shape:
             out = out - self.bias
         if self.flat_norm is not None and self.flat_norm.shape == out.shape:

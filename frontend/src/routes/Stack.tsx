@@ -209,8 +209,18 @@ export function StackView() {
     a != null && b != null && b > 0 && Math.abs(a - b) / b > 0.25;
   const subExp = sug?.params.exposure_s ?? null;
   const darkM = masterById(values.dark_master_id);
-  const darkWarning = expMismatch(darkM?.exposure_s, subExp)
-    ? `This dark was shot at ${darkM?.exposure_s}s but your subs are ${subExp}s — a mismatched dark leaves residual thermal signal or over-subtracts. A ${subExp}s dark matches better.`
+  // A dark shot at a different exposure than the subs can be rescaled to match —
+  // dark = bias + (dark − bias)×(sub ÷ dark exposure) — but only with a master
+  // bias selected to hold the readout pedestal fixed. When that's opted in the
+  // mismatch is handled, so show a reassurance instead of the warning.
+  const darkExpMismatch = expMismatch(darkM?.exposure_s, subExp);
+  const darkScalingActive =
+    darkExpMismatch && !!values.scale_dark_to_light && !!values.bias_master_id;
+  const darkWarning = darkExpMismatch && !darkScalingActive
+    ? `This dark was shot at ${darkM?.exposure_s}s but your subs are ${subExp}s — a mismatched dark leaves residual thermal signal or over-subtracts. ${values.bias_master_id ? "Scale it to your sub exposure, or use" : "Add a master bias to scale it to your subs, or use"} a ${subExp}s dark.`
+    : null;
+  const darkScaledNote = darkScalingActive
+    ? `Dark exposure-scaling is on — this ${darkM?.exposure_s}s dark will be scaled to match your ${subExp}s subs.`
     : null;
   const flatM = masterById(values.flat_master_id);
   const flatDarkM = masterById(values.flat_dark_master_id);
@@ -219,8 +229,11 @@ export function StackView() {
     : null;
   // A master dark already contains the bias pedestal, so a bias picked alongside
   // a dark is *not* subtracted from the lights again (the engine ignores it to
-  // avoid double-subtraction). Tell the user rather than silently dropping it.
-  const biasIgnoredForLights = Boolean(values.bias_master_id && values.dark_master_id);
+  // avoid double-subtraction). Tell the user rather than silently dropping it —
+  // unless dark exposure-scaling is on, where the bias *is* used (to hold the
+  // pedestal fixed while the dark current is rescaled), so it isn't inert.
+  const biasIgnoredForLights =
+    Boolean(values.bias_master_id && values.dark_master_id) && !darkScalingActive;
   const running = job && (job.state === "running" || job.state === "queued");
   const pct = job && job.total ? Math.round((job.done / job.total) * 100) : 0;
 
@@ -337,7 +350,7 @@ export function StackView() {
     const runMed = pctile(run, 50);
     if (baseline <= 0 || runMed / baseline >= 0.6) return null;
     const pct = Math.round((1 - runMed / baseline) * 100);
-    return `The frames in this stack sit about ${pct}% below this target's clearest nights (median transparency ${Math.round(runMed)} vs a ~${Math.round(baseline)} baseline) — they were likely shot through haze or thin cloud. Turn on quality weighting to down-weight the haziest subs, or reject them on the Frames page.`;
+    return `The frames in this stack sit about ${pct}% below this target's clearest nights (median transparency ${Math.round(runMed)} vs a ~${Math.round(baseline)} baseline) — they were likely shot through haze or thin cloud. Down-weight the haziest subs with quality weighting, or reject them on the Frames page.`;
   })();
 
   // Quality-weighting nudge: when the frames that will be stacked vary a lot in
@@ -368,7 +381,7 @@ export function StackView() {
     if (!wideFwhm && !wideStars) return null;
     const which = wideFwhm && wideStars ? "sharpness and star count"
       : wideFwhm ? "sharpness (FWHM)" : "star count";
-    return `Your ${run.length} accepted frames vary a lot in ${which} — a mixed-quality set is exactly where quality weighting helps, letting the best subs count for more than the worst instead of every frame counting equally. Turn on Quality weighting in the options above.`;
+    return `Your ${run.length} accepted frames vary a lot in ${which} — a mixed-quality set is exactly where quality weighting helps, letting the best subs count for more than the worst instead of every frame counting equally.`;
   })();
 
   // Photometric-normalization nudge: when the frames to be stacked vary a lot in
@@ -529,6 +542,17 @@ export function StackView() {
                 {darkWarning ? (
                   <Alert color="yellow" variant="light" py={6} px="sm">
                     <Text size="xs">{darkWarning}</Text>
+                    {values.bias_master_id && !values.scale_dark_to_light ? (
+                      <Button size="compact-xs" variant="light" color="yellow" mt={6}
+                        onClick={() => set("scale_dark_to_light", true)}>
+                        Scale this dark to your subs' exposure
+                      </Button>
+                    ) : null}
+                  </Alert>
+                ) : null}
+                {darkScaledNote ? (
+                  <Alert color="teal" variant="light" py={6} px="sm">
+                    <Text size="xs">{darkScaledNote}</Text>
                   </Alert>
                 ) : null}
                 {values.flat_master_id && darkOpts.length > 0 ? (
@@ -595,6 +619,10 @@ export function StackView() {
           {sigmaClipWarning ? (
             <Alert color="yellow" variant="light" py={6} px="sm">
               <Text size="xs">{sigmaClipWarning}</Text>
+              <Button size="compact-xs" variant="light" color="yellow" mt={6}
+                onClick={() => set("sigma_clip", false)}>
+                Turn off sigma clipping
+              </Button>
             </Alert>
           ) : null}
 
@@ -649,12 +677,22 @@ export function StackView() {
           {transparencyHint ? (
             <Alert color="blue" variant="light" py={6} px="sm">
               <Text size="xs">{transparencyHint}</Text>
+              {!values.quality_weighted ? (
+                <Button size="compact-xs" variant="light" mt={6}
+                  onClick={() => set("quality_weighted", true)}>
+                  Turn on quality weighting
+                </Button>
+              ) : null}
             </Alert>
           ) : null}
 
           {qualityWeightNudge ? (
             <Alert color="blue" variant="light" py={6} px="sm">
               <Text size="xs">{qualityWeightNudge}</Text>
+              <Button size="compact-xs" variant="light" mt={6}
+                onClick={() => set("quality_weighted", true)}>
+                Turn on quality weighting
+              </Button>
             </Alert>
           ) : null}
 
