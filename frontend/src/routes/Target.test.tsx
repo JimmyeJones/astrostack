@@ -315,6 +315,57 @@ describe("TargetView reject breakdown + undo", () => {
     expect(screen.getByText("Plate-solve failed")).toBeInTheDocument();
   });
 
+  it("shows an actionable setup banner when ASTAP is missing for the whole target", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ n_frames: 3, n_frames_accepted: 0 }),
+    );
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "rejectSummary").mockResolvedValue({
+      counts: {
+        "solve_failed:astap.exe not found. Install ASTAP from https://www.hnsky.org/astap.htm":
+          3,
+      },
+      total: 3,
+    });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      mkFrame(1, { accept: false, solved: false }),
+    ]);
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Plate-solving isn't set up — ASTAP wasn't found"),
+      ).toBeInTheDocument());
+    // The banner offers the one-time fix, not per-frame drops.
+    expect(
+      screen.getByRole("button", { name: "Re-run QC + Solve" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Settings" })).toBeInTheDocument();
+  });
+
+  it("shows no setup banner for ordinary per-frame solve failures", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ n_frames: 3, n_frames_accepted: 2 }),
+    );
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "rejectSummary").mockResolvedValue({
+      counts: { "solve_failed:no solution": 1 }, total: 1,
+    });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      mkFrame(1),
+      mkFrame(2),
+      mkFrame(3, { accept: false, solved: false, reject_reason: "solve_failed:no solution" }),
+    ]);
+
+    renderTarget();
+
+    await waitFor(() => expect(screen.getByText("2/3 accepted")).toBeInTheDocument());
+    expect(
+      screen.queryByText(/Plate-solving isn't set up/),
+    ).not.toBeInTheDocument();
+  });
+
   it("offers Undo after a bulk reject and re-accepts exactly those ids", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);

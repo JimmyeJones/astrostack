@@ -4,14 +4,15 @@ import {
   TagsInput, Text, Textarea, Title, Tooltip,
 } from "@mantine/core";
 import {
-  IconArrowBackUp, IconCheck, IconDeviceFloppy, IconHistory, IconNotes, IconPhoto,
-  IconSparkles, IconStack2, IconTelescope, IconWand, IconX,
+  IconAlertTriangle, IconArrowBackUp, IconCheck, IconDeviceFloppy, IconHistory,
+  IconNotes, IconPhoto, IconSparkles, IconStack2, IconTelescope, IconWand, IconX,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
 import { api, type Frame } from "../api/client";
+import { detectSolveSetupProblem } from "../components/target/solveSetup";
 
 const NUM = (v: number | null, digits = 2) =>
   v === null || v === undefined ? "—" : v.toFixed(digits);
@@ -309,6 +310,16 @@ export function TargetView() {
     },
   });
 
+  // Plate-solve *setup* problem (ASTAP or its star database not available) —
+  // when present, every frame's solve fails identically, so the whole target's
+  // frames pile up as "Plate-solve failed" with no hint that the fix is a
+  // one-time setup step rather than dropping frames. Turn that into one
+  // actionable banner. Null (the common case) renders nothing.
+  const solveSetup = useMemo(
+    () => detectSolveSetupProblem(rejectSummary.data?.counts),
+    [rejectSummary.data],
+  );
+
   const list = frames.data ?? [];
   // Accepted frames still carrying a streak flag (satellite/plane trail). With
   // "keep streaked frames" on, QC flags rather than rejects these, so per-pixel
@@ -424,6 +435,34 @@ export function TargetView() {
 
   return (
     <Stack>
+      {solveSetup ? (
+        <Alert color="orange" icon={<IconAlertTriangle size={18} />}
+          title={solveSetup.kind === "astap"
+            ? "Plate-solving isn't set up — ASTAP wasn't found"
+            : "Plate-solving needs a star database"}>
+          <Text size="sm">
+            {solveSetup.kind === "astap"
+              ? `${solveSetup.frames} frame${solveSetup.frames === 1 ? "" : "s"} couldn't be `
+                + "plate-solved because ASTAP (the plate-solver) wasn't found. Frames need "
+                + "sky coordinates before they can be stacked, so this blocks the whole "
+                + "target. Install ASTAP and set its path in Settings, then re-run solving."
+              : `${solveSetup.frames} frame${solveSetup.frames === 1 ? "" : "s"} couldn't be `
+                + "plate-solved because ASTAP couldn't find a star database to match against. "
+                + "Download an ASTAP star database (e.g. the D50/H17/H18 catalog) into ASTAP's "
+                + "folder, then re-run solving."}
+          </Text>
+          <Group gap="xs" mt="xs">
+            <Button size="xs" variant="filled" color="orange"
+              loading={qcSolve.isPending} onClick={() => qcSolve.mutate()}>
+              Re-run QC + Solve
+            </Button>
+            <Button size="xs" variant="light" color="orange"
+              component={Link} to="/settings">
+              Open Settings
+            </Button>
+          </Group>
+        </Alert>
+      ) : null}
       <Group justify="space-between" gap="xs">
         <Group gap="xs" style={{ minWidth: 0 }}>
           <Title order={2} style={{ wordBreak: "break-word" }}>{target.data?.name}</Title>
