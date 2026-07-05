@@ -101,6 +101,52 @@ def test_reject_preserves_single_coverage_and_nan():
     assert np.nanmedian(result[10:70, 10:70, :]) == pytest.approx(100.0, rel=1e-3)
 
 
+def test_rejection_counts_tallies_the_clip():
+    """The pass-2 drizzler tallies exactly the covered samples it saw and the
+    subset its κ-σ clip dropped — a memory-free trust signal for the History
+    "rejection clipped ~X%" line, mirroring the κ-σ / min-max accumulators."""
+    wcs = _wcs()
+    clean = np.full((80, 100, 3), 100.0, dtype=np.float32)
+    dirty = clean.copy()
+    dirty[30:40, 40:60, :] = 5000.0  # a 10×20×3 = 600-sample outlier block
+    frames = [clean.copy() for _ in range(15)] + [dirty]
+
+    params = DrizzleParams(scale=1.0, pixfrac=1.0)
+    shape = frames[0].shape[:2]
+    stats = DrizzleStacker(wcs, shape, params, compute_stats=True)
+    for f in frames:
+        stats.add_frame(f, wcs)
+    clip = stats.clip_reference(3.0)
+
+    final = DrizzleStacker(wcs, shape, params)
+    for f in frames:
+        final.add_frame(f, wcs, clip=clip)
+
+    contributed, rejected = final.rejection_counts()
+    # Every frame is fully finite; only the far edge row/column falls outside the
+    # drizzle bounds mask (a tiny float overshoot past the canvas edge — those
+    # pixels genuinely get zero weight in the accumulation too), so the tally is
+    # ~all of 16 × 80×100×3, never more.
+    full = 16 * 80 * 100 * 3
+    assert 0.97 * full <= contributed <= full
+    # Only the dirty frame's outlier block (interior, unaffected by the edge
+    # mask) is clipped; the clean frames agree with the mean everywhere (σ=0 →
+    # tol=0, exact equality is kept), so exactly 10×20×3 samples are rejected.
+    assert rejected == 10 * 20 * 3
+    assert rejected / contributed == pytest.approx(600 / contributed)
+
+
+def test_rejection_counts_zero_without_clip():
+    """Single-pass drizzle (no clip) rejects nothing, so the tally stays zero —
+    the stacker then stamps no rejection provenance for a plain drizzle."""
+    wcs = _wcs()
+    frames = [np.full((80, 100, 3), 100.0, dtype=np.float32) for _ in range(5)]
+    final = DrizzleStacker(wcs, frames[0].shape[:2], DrizzleParams(scale=1.0, pixfrac=1.0))
+    for f in frames:
+        final.add_frame(f, wcs)  # clip=None
+    assert final.rejection_counts() == (0, 0)
+
+
 def _build_project(tmp_path, frames_spec) -> Project:
     """``frames_spec``: list of dicts passed to write_seestar_fits + wcs shift."""
     proj = Project.create(tmp_path / "p", name="reject_test")
@@ -201,6 +247,52 @@ def test_e2e_star_cores_survive_dithered_reject(tmp_path):
     ap_got = np.nansum(got[cy - 5:cy + 6, cx - 5:cx + 6])
     assert ap_got == pytest.approx(ap_ref, rel=0.02), "star aperture flux changed"
     assert got[cy, cx] == pytest.approx(ref[cy, cx], rel=0.02), "star peak clipped"
+
+
+def test_e2e_drizzle_reject_stamps_rejection_provenance(tmp_path):
+    """A real drizzle-reject stack records how much it clipped in the FITS
+    header (REJMODE/REJFRAC/REJNREJ/REJNTOT), so the run …/info endpoint and the
+    History trust line can surface it — data-driven, like the κ-σ path. A plain
+    drizzle (no rejection) stamps nothing."""
+    from astropy.io import fits
+
+    spec = [
+        {"seed": 7, "noise_seed": 400 + i, "n_stars": 10, "streak": (i == 8)}
+        for i in range(16)
+    ]
+
+    proj = _build_project(tmp_path / "prov_on", [dict(s) for s in spec])
+    try:
+        res = run_stack(proj, StackOptions(
+            drizzle=True, drizzle_scale=1.0, drizzle_pixfrac=1.0,
+            drizzle_reject=True, background_flatten=False,
+            suppress_hot_pixels=False, max_workers=2, output_name="prov",
+        ))
+        with fits.open(res.fits_path) as hdul:
+            hdr = hdul[0].header
+    finally:
+        proj.close()
+
+    assert hdr["REJMODE"] == "drizzle-reject"
+    assert hdr["REJNTOT"] > 0
+    assert hdr["REJNREJ"] >= 0
+    # A single streaked sub among 16 clean ones: the clip fires but only on a
+    # tiny fraction of samples (the trail), never a huge share.
+    assert 0.0 <= hdr["REJFRAC"] < 0.2
+    assert hdr["REJFRAC"] == pytest.approx(hdr["REJNREJ"] / hdr["REJNTOT"], rel=1e-3)
+
+    # Plain single-pass drizzle stamps no rejection provenance.
+    proj2 = _build_project(tmp_path / "prov_off", [dict(s) for s in spec])
+    try:
+        res2 = run_stack(proj2, StackOptions(
+            drizzle=True, drizzle_scale=1.0, drizzle_pixfrac=1.0,
+            drizzle_reject=False, background_flatten=False,
+            suppress_hot_pixels=False, max_workers=2, output_name="prov2",
+        ))
+        with fits.open(res2.fits_path) as hdul:
+            assert "REJMODE" not in hdul[0].header
+    finally:
+        proj2.close()
 
 
 def test_e2e_reject_skipped_below_four_frames(tmp_path):

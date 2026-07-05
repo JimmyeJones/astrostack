@@ -932,6 +932,15 @@ def run_stack(
         )
         if n_used == 0 and not cancel():
             raise ValueError("drizzle: no usable frames")
+        # Surface how much the two-pass drizzle rejection actually clipped
+        # (only when rejection ran — single-pass drizzle has no clip to tally).
+        if clip is not None:
+            _dz_contrib, _dz_rej = drizzler.rejection_counts()
+            rej_stats = RejectionStats(
+                mode="drizzle-reject",
+                n_contributed=_dz_contrib,
+                n_rejected=_dz_rej,
+            )
         result_image = drizzler.result()
         coverage = drizzler.coverage
         # Write outputs against the **drizzle** output canvas, not the
