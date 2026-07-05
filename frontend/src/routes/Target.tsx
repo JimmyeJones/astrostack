@@ -369,6 +369,22 @@ export function TargetView() {
     [list, selected],
   );
 
+  // Getting-started nudge: highlight the one-click "Process target" as the next
+  // step for a target whose newest frames haven't been turned into a stack yet.
+  // Fires when there are frames to work with *and* either no stack has ever run,
+  // or accepted frames are still waiting to be plate-solved (so a stack can't
+  // include them). Suppressed while the plate-solve *setup* banner is showing
+  // (that has to be fixed first, and Process would just re-fail the same way),
+  // and once every accepted frame is solved and a stack exists — so it fades
+  // out the moment the target has been processed rather than nagging. Purely a
+  // discoverability aid; the toolbar button does the same thing.
+  const needsProcessing = useMemo(() => {
+    if (solveSetup) return false;
+    if (list.length === 0) return false;
+    const acceptedUnsolved = list.some((f) => f.accept && !f.solved);
+    return !latestRun || acceptedUnsolved;
+  }, [solveSetup, list, latestRun]);
+
   // Keyboard grading: j/k or arrows to move, a to accept, r/x to reject. Skips
   // when typing in a field so notes/tags editing isn't hijacked.
   useEffect(() => {
@@ -489,6 +505,22 @@ export function TargetView() {
             <Button size="xs" variant="light" color="orange"
               component={Link} to="/settings">
               Open Settings
+            </Button>
+          </Group>
+        </Alert>
+      ) : null}
+      {needsProcessing ? (
+        <Alert color="violet" icon={<IconSparkles size={18} />}
+          title="Ready to process?">
+          <Text size="sm">
+            One click runs quality-check, plate-solving and stacking for this
+            target — no form to fill. You'll get a finished master image to edit.
+          </Text>
+          <Group gap="xs" mt="xs">
+            <Button size="xs" variant="filled" color="violet"
+              leftSection={<IconSparkles size={14} />}
+              loading={process.isPending} onClick={() => process.mutate()}>
+              Process target
             </Button>
           </Group>
         </Alert>

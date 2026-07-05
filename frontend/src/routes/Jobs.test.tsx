@@ -2,8 +2,11 @@ import { MantineProvider } from "@mantine/core";
 import { Notifications } from "@mantine/notifications";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { JobsView, friendlyJobError, jobKindLabel, reprocessSummary } from "./Jobs";
+import {
+  JobsView, friendlyJobError, jobKindLabel, processTargetSummary, reprocessSummary,
+} from "./Jobs";
 import * as client from "../api/client";
 import type { Job } from "../api/client";
 
@@ -131,6 +134,62 @@ describe("JobsView", () => {
   });
 });
 
+describe("JobsView process_target result actions", () => {
+  function renderJobsRouted() {
+    const qc = new QueryClient();
+    return render(
+      <MantineProvider>
+        <Notifications />
+        <QueryClientProvider client={qc}>
+          <MemoryRouter>
+            <JobsView />
+          </MemoryRouter>
+        </QueryClientProvider>
+      </MantineProvider>,
+    );
+  }
+
+  it("deep-links 'View result' to the finished run's editor when a run id is known", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "pt-1", kind: "process_target", target: "M_42", state: "done",
+        result: { stacked: true, solved_accepted: 8, stack: { n_frames_used: 8, run_id: 7 } },
+      }),
+    ]);
+    renderJobsRouted();
+    const link = await screen.findByRole("link", { name: "View result" });
+    expect(link).toHaveAttribute("href", "/targets/M_42/edit/7");
+    expect(screen.getByText("Stacked 8 frames into a new master.")).toBeInTheDocument();
+  });
+
+  it("falls back to History when the backend didn't report a run id", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "pt-2", kind: "process_target", target: "M_42", state: "done",
+        result: { stacked: true, solved_accepted: 5, stack: { n_frames_used: 5 } },
+      }),
+    ]);
+    renderJobsRouted();
+    const link = await screen.findByRole("link", { name: "View result" });
+    expect(link).toHaveAttribute("href", "/targets/M_42/history");
+  });
+
+  it("offers 'Open target' (not a result link) when nothing was stacked", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "pt-3", kind: "process_target", target: "M_42", state: "done",
+        result: { stacked: false, stack_skipped_reason: "no_solved_frames" },
+      }),
+    ]);
+    renderJobsRouted();
+    const link = await screen.findByRole("link", { name: "Open target" });
+    expect(link).toHaveAttribute("href", "/targets/M_42");
+    expect(
+      screen.getByText(/no frames could be plate-solved yet/),
+    ).toBeInTheDocument();
+  });
+});
+
 describe("jobKindLabel", () => {
   it("translates every known engine job kind to plain language", () => {
     expect(jobKindLabel("pipeline")).toBe("Importing & processing new frames");
@@ -240,5 +299,40 @@ describe("reprocessSummary", () => {
       line: "Restacked 2/4 targets — re-ran QC/solve/grade on 2 — 1 already up to date — 1 failed.",
       failed: ["Q"],
     });
+  });
+});
+
+describe("processTargetSummary", () => {
+  it("summarises a successful one-click process into a new master", () => {
+    expect(processTargetSummary({
+      stacked: true, solved_accepted: 8, stack: { n_frames_used: 8 },
+    })).toEqual({ line: "Stacked 8 frames into a new master.", stacked: true });
+  });
+  it("notes auto-graded drops and singularises one frame", () => {
+    expect(processTargetSummary({
+      stacked: true, solved_accepted: 1, auto_graded: 2, stack: { n_frames_used: 1 },
+    })).toEqual({
+      line: "Stacked 1 frame into a new master (auto-grade dropped 2).",
+      stacked: true,
+    });
+  });
+  it("falls back to solved_accepted when the stack count is missing", () => {
+    expect(processTargetSummary({ stacked: true, solved_accepted: 5 }))
+      .toEqual({ line: "Stacked 5 frames into a new master.", stacked: true });
+  });
+  it("explains a skip with nothing plate-solved to stack", () => {
+    expect(processTargetSummary({
+      stacked: false, stack_skipped_reason: "no_solved_frames",
+    })).toEqual({
+      line: "Checked and solved, but no frames could be plate-solved yet — "
+        + "so there was nothing to stack.",
+      stacked: false,
+    });
+  });
+  it("explains a cancellation and an unknown non-stacked outcome", () => {
+    expect(processTargetSummary({ stacked: false, stack_skipped_reason: "cancelled" }))
+      .toEqual({ line: "Cancelled before stacking.", stacked: false });
+    expect(processTargetSummary({ stacked: false }))
+      .toEqual({ line: "Finished, but no stack was produced.", stacked: false });
   });
 });

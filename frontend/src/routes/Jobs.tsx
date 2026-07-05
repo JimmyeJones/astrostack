@@ -141,10 +141,70 @@ export function reprocessSummary(r: Record<string, unknown>): {
   return { line: `${line}.`, failed };
 }
 
+/** Plain-language outcome of a finished one-click "Process target" job (pure,
+ * tested). Mirrors `reprocessSummary` for the single-target chain: says whether a
+ * master was produced and, when it wasn't, why — so the user isn't left with a
+ * bare "done" and no idea where the result is (or why there isn't one). */
+export function processTargetSummary(r: Record<string, unknown>): {
+  line: string; stacked: boolean;
+} {
+  const stacked = Boolean(r.stacked);
+  const solved = Number(r.solved_accepted ?? 0);
+  const graded = Number(r.auto_graded ?? 0);
+  if (stacked) {
+    const stack = r.stack && typeof r.stack === "object"
+      ? (r.stack as Record<string, unknown>) : {};
+    const used = Number(stack.n_frames_used ?? 0) || solved;
+    let line = `Stacked ${used} frame${used === 1 ? "" : "s"} into a new master`;
+    if (graded > 0) line += ` (auto-grade dropped ${graded})`;
+    return { line: `${line}.`, stacked };
+  }
+  const reason = typeof r.stack_skipped_reason === "string"
+    ? r.stack_skipped_reason : null;
+  let line: string;
+  if (reason === "cancelled") {
+    line = "Cancelled before stacking.";
+  } else if (reason === "no_solved_frames") {
+    line = "Checked and solved, but no frames could be plate-solved yet — "
+      + "so there was nothing to stack.";
+  } else {
+    line = "Finished, but no stack was produced.";
+  }
+  return { line, stacked };
+}
+
 /** Result-specific actions for finished editor jobs (download / view). */
 function JobResultActions({ job }: { job: Job }) {
   if (job.state !== "done" || !job.result) return null;
   const r = job.result as Record<string, unknown>;
+  if (job.kind === "process_target") {
+    const { line, stacked } = processTargetSummary(r);
+    // Deep-link straight to the finished run's editor when we know its id
+    // (v0.85.3+ backend); fall back to the target's History on an older backend.
+    const stack = r.stack && typeof r.stack === "object"
+      ? (r.stack as Record<string, unknown>) : {};
+    const runId = stacked && typeof stack.run_id === "number" ? stack.run_id : null;
+    const to = !job.target
+      ? null
+      : !stacked
+        ? `/targets/${job.target}`
+        : runId != null
+          ? `/targets/${job.target}/edit/${runId}`
+          : `/targets/${job.target}/history`;
+    return (
+      <Stack gap={4} mt="xs">
+        <Text size="sm">{line}</Text>
+        {to ? (
+          <Group>
+            <Button size="xs" variant="light" leftSection={<IconPhoto size={14} />}
+              component={Link} to={to}>
+              {stacked ? "View result" : "Open target"}
+            </Button>
+          </Group>
+        ) : null}
+      </Stack>
+    );
+  }
   if (job.kind === "reprocess_all") {
     const { line, failed } = reprocessSummary(r);
     return (

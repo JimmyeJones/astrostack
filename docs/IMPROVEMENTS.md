@@ -416,15 +416,17 @@ problems. Dogfood it every big-picture run and fix root causes.
   v0.84.2. A Builder dogfood of the other five routes (Dashboard/Library/Target/
   History/Editor) found them already well-handled with icon+prose+next-step empty
   states, beginner tooltips, and translated reject/combine labels.)_
-- **Make the new "Process target" one-click the guided next step for a fresh target.**
-  With the v0.85.0 one-click Process chain shipped, a beginner who just ingested frames
-  into a target (nothing QC'd/solved/stacked yet) still has to know to click "Process
-  target" among several toolbar buttons. Surface it as the highlighted next-step in a
-  small getting-started callout on a Target whose newest frames haven't been processed
-  (e.g. no stack run yet, or accepted-but-unsolved frames present) — "Ready to process?
-  One click runs quality-check, plate-solve & stacking." Reuses the shipped
-  `api.processTarget` mutation; purely a discoverability/friendliness add, no engine/API
-  change. (S, friendliness — completes the one-click autonomy story)
+- ~~**Make the new "Process target" one-click the guided next step for a fresh target.**~~
+  — **shipped v0.85.1** (see Shipped). A dimmed "Ready to process?" getting-started callout
+  now appears on a Target whose newest frames haven't been turned into a stack (no stack run
+  yet, or accepted-but-unsolved frames present), with a one-click "Process target" button.
+  Suppressed while the plate-solve setup banner is showing and once the target is solved and
+  stacked, so it fades out rather than nagging.
+- ~~**Deep-link the "Process target" result straight to its editor, not just History.**~~
+  — **shipped v0.85.3** (see Shipped). `StackResult`/`_stack_target` now carry the new
+  `stack_runs` row id, and the Jobs "View result" button points at `/targets/{safe}/edit/{run_id}`
+  when known (falling back to History on an older backend), so the one-click Process lands the
+  user *on the finished picture* in one hop.
 - Better long-job feedback and clearer error messages. (S, friendliness)
   _(~~Idea: map the handful of known fatal `job.error` messages to plain language~~ —
   **shipped v0.84.3** (see Shipped). A `friendlyJobError` helper now translates the
@@ -640,6 +642,36 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Deep-link the one-click "Process target" result to its editor in one hop (v0.85.3,
+  friendliness/autonomy/PRIORITY 2–3).** `StackResult` now carries the produced `stack_runs`
+  row id (`run_id`, captured from `add_stack_run`'s return, `None` on the cancel path), and
+  `_stack_target` exposes it in its job summary. The Jobs "View result" button now points at
+  `/targets/{safe}/edit/{run_id}` when known — landing the user *on the finished picture* to
+  edit — and falls back to the target's History on an older backend that didn't report the id.
+  Additive summary field, no schema/API-shape break. Tests: `test_process_target_stacks_end_to_end`
+  now asserts `result["stack"]["run_id"]` equals the created run; three Jobs.tsx integration
+  tests cover the edit deep-link, the History fallback, and the "Open target" no-stack case.
+
+- **Surface the one-click "Process target" job's outcome + a "View result" link on Jobs
+  (v0.85.2, friendliness/PRIORITY 3).** The new `process_target` job (v0.85.0) finished with a
+  bare "done" and no action — unlike `reprocess_all`/`editor_export`, the user was left not
+  knowing whether a master was produced or where it is. `JobResultActions` now renders a
+  plain-language `processTargetSummary` line ("Stacked N frames into a new master", or, when the
+  stack was skipped, why — nothing plate-solved yet / cancelled) plus a "View result" button to
+  the target's History (or "Open target" when nothing stacked, so the user can fix solving).
+  Pure tested helper `processTargetSummary` (5 cases); frontend-only, additive.
+
+- **"Ready to process?" getting-started callout for a fresh target (v0.85.1,
+  friendliness/PRIORITY 3).** A dimmed violet callout on the Target page now highlights the
+  one-click "Process target" (QC + solve + stack) as the next step whenever the target has
+  frames but no stack yet, or accepted frames still awaiting a plate-solve — so a beginner
+  who just ingested frames isn't left guessing which toolbar button to press. Suppressed
+  while the plate-solve *setup* banner is showing (that must be fixed first) and once every
+  accepted frame is solved and a stack exists, so it fades out instead of nagging. Reuses
+  the shipped `api.processTarget` mutation; frontend-only, additive, changes no defaults.
+  Tests in `Target.test.tsx` (fires on a fresh target / on accepted-but-unsolved frames;
+  stays quiet once processed / while the setup banner shows).
 
 - **One-click "Process target" — QC + solve + auto-grade + stack in one job (v0.85.0,
   autonomy/PRIORITY 2).** A prominent "Process target" button on the Target page and a new
