@@ -640,6 +640,8 @@ export const api = {
   scan: () => req<{ job_id: string }>("/api/scan", { method: "POST", body: "{}" }),
   qcSolve: (safe: string) =>
     req<{ job_id: string }>(`/api/targets/${safe}/qc-solve`, { method: "POST" }),
+  processTarget: (safe: string) =>
+    req<{ job_id: string }>(`/api/targets/${safe}/process`, { method: "POST" }),
 
   // jobs
   listJobs: () => req<Job[]>("/api/jobs"),

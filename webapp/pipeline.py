@@ -218,6 +218,65 @@ def submit_qc_solve(settings: Settings, jm: JobManager, safe: str) -> Job:
     return jm.submit("qc_solve", body, target=safe)
 
 
+def submit_process_target(settings: Settings, jm: JobManager, safe: str) -> Job:
+    """One-click "process this target": QC + plate-solve every frame, auto-grade
+    (when enabled), then stack — the whole ``drop files → good image`` middle in
+    one job, so the user reaches a finished stack without configuring the global
+    auto toggles or hand-filling the Stack form.
+
+    Reuses the same primitives as the auto pipeline (``run_qc_and_solve`` →
+    ``_auto_grade_target`` → ``_stack_target``) but scoped to one target and run
+    on demand regardless of the ``auto_*`` settings. The stack uses the target's
+    saved defaults (falling back to the global defaults), exactly like auto-stack,
+    and is **non-destructive** — a new ``stack_runs`` row alongside any existing
+    output. The stack step is skipped (with a reason) when nothing is
+    plate-solved yet or the job was cancelled during QC/solve.
+    """
+    def body(job: Job) -> dict[str, Any]:
+        lib = Library.open_or_create(settings.resolved_library_root)
+        try:
+            proj = lib.open_target(safe)
+            try:
+                summary = dict(run_qc_and_solve(
+                    proj,
+                    astap_path=settings.astap_path,
+                    max_workers=settings.cpu_workers,
+                    run_qc=True,
+                    run_solve=True,
+                    use_solve_hints=settings.astap_use_solve_hints,
+                    auto_reject_streaks=not settings.keep_streaked_frames,
+                    progress=_progress(jm, job),
+                    should_stop=job.cancel_requested,
+                ))
+                if settings.auto_grade_frames:
+                    n = _auto_grade_target(proj, settings)
+                    if n:
+                        summary["auto_graded"] = n
+                solved_accepted = _solved_accepted_count(proj)
+            finally:
+                proj.close()
+            lib.refresh_target_stats(safe)
+
+            summary["solved_accepted"] = solved_accepted
+            if job.cancel_requested():
+                summary["stacked"] = False
+                summary["stack_skipped_reason"] = "cancelled"
+                return summary
+            if solved_accepted == 0:
+                # Nothing to combine yet (e.g. ASTAP not set up, so no frame has a
+                # WCS). Leave a clear reason instead of failing the whole job.
+                summary["stacked"] = False
+                summary["stack_skipped_reason"] = "no_solved_frames"
+                return summary
+            summary["stack"] = _stack_target(settings, jm, job, lib, safe)
+            summary["stacked"] = True
+            return summary
+        finally:
+            lib.close()
+
+    return jm.submit("process_target", body, target=safe)
+
+
 def submit_stack(
     settings: Settings, jm: JobManager, safe: str, options: dict[str, Any]
 ) -> Job:

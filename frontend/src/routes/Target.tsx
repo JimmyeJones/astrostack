@@ -311,6 +311,20 @@ export function TargetView() {
     },
   });
 
+  // One-click "just do it": QC + plate-solve, auto-grade (when enabled) and stack
+  // this target in a single job — the whole middle of the workflow without a form.
+  const process = useMutation({
+    mutationFn: () => api.processTarget(safe),
+    onSuccess: () => {
+      notifications.show({
+        message: "Processing target — checking, solving & stacking. Watch Jobs for progress.",
+        color: "violet",
+      });
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
+
   // Plate-solve *setup* problem (ASTAP or its star database not available) —
   // when present, every frame's solve fails identically, so the whole target's
   // frames pile up as "Plate-solve failed" with no hint that the fix is a
@@ -590,6 +604,17 @@ export function TargetView() {
           ) : null}
         </Group>
         <Group gap="xs">
+          <Button
+            variant="filled"
+            color="violet"
+            leftSection={<IconSparkles size={16} />}
+            onClick={() => process.mutate()}
+            loading={process.isPending}
+            aria-label="Process this target"
+            title="Quality-check, plate-solve and stack this target in one step"
+          >
+            <Box visibleFrom="sm">Process target</Box>
+          </Button>
           <Button
             variant="default"
             leftSection={<IconTelescope size={16} />}
