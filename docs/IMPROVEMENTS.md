@@ -382,6 +382,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   do next; audit every screen for jargon and add plain-language "why" tooltips;
   reduce visible option clutter (progressive disclosure). (M, friendliness)
 - Better long-job feedback and clearer error messages. (S, friendliness)
+- ~~**Actionable "plate-solving isn't set up" banner when a whole target fails to solve**~~
+  — **shipped v0.84.0** (see Shipped). When ASTAP (or, best-effort, its star database) is
+  missing, every frame's solve fails identically and the Target page now shows one
+  actionable banner (with "Re-run QC + Solve" + "Open Settings") instead of a wall of
+  "Plate-solve failed" chips with no guidance.
+- **Make the star-database "not set up" signal robust (server-side classification).**
+  Follow-up to v0.84.0: the frontend detects the setup problem from the truncated
+  (120-char) `reject_reason` strings, which is reliable for the deterministic
+  "astap.exe not found" installer message but only best-effort for "no star database"
+  (ASTAP's phrase can fall outside the stored window). A small server-side classifier
+  (reusing `_is_fatal_solve_error`'s signatures at solve time, where the full log is
+  available) exposed as e.g. a `solve_setup_problem` field on the target/reject-summary
+  response would make the database case just as reliable. Additive; the frontend banner
+  already exists to consume it. (S, friendliness/robustness)
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 - ~~**Photometric (multiplicative) frame normalization before combine**~~ —
@@ -548,6 +562,46 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Actionable "plate-solving isn't set up" banner on the Target page (PRIORITY-3 friendliness +
+  "just works").** Found by a Builder friendliness pass: when ASTAP (the plate-solver) or its
+  star database isn't available, *every* frame's solve fails with the same fatal message, so a
+  fresh/misconfigured install piles up a whole target's frames as "Plate-solve failed" chips with
+  no hint that the fix is a one-time setup step (install/point at ASTAP, download a star database)
+  rather than dropping frames one by one — a total blocker at first use with zero guidance. The
+  Target page now shows one orange Alert when the target's rejected-reason tally carries a solve
+  *setup* signature, with the right plain-language guidance for the ASTAP-missing vs
+  star-database-missing case and one-click "Re-run QC + Solve" + "Open Settings" actions. Detection
+  is a pure, tested helper (`detectSolveSetupProblem`) that mirrors the engine's own
+  `_is_fatal_solve_error` signatures + the "astap.exe not found" installer hint, and is
+  deliberately conservative — a generic "could not open / error reading" (which can be one corrupt
+  frame) does **not** trigger it, so it never nags about setup when the real issue is a single bad
+  file. Frontend-only, additive, upgrade-safe — reads the existing `reject-summary` `counts`, no
+  schema/API/default change; renders nothing (today's behaviour) when there's no setup problem.
+  Tests: Vitest unit (setup vs per-frame vs corrupt-file vs empty; case-insensitive; ASTAP-missing
+  preferred over database) + Target route (banner + its actions render for a whole-target
+  ASTAP-missing failure; absent for an ordinary "no solution" per-frame failure). A robustness
+  follow-up (server-side classification so the star-database case is as reliable as ASTAP-missing)
+  is logged under Friendliness. (v0.84.0, this run — Builder)
+
+- **QA — stacking-engine adversarial audit + one-click Auto dogfood (top current-focus areas),
+  both clean; no code shipped.** Per the 2026-07 focus, ran a fresh adversarial correctness audit
+  of the stacking engine (`stacker.py` rejection/pass-2 + photometric-scale application,
+  `accumulator.py` WeightedSum/Welford/MinMaxReject NaN+order-statistics, `align.py` sub-pixel
+  shift/valid-mask, `drizzle_path.py` two-pass clip, `photometric.py` scale direction,
+  `calibrate/apply.py`+`build.py`, plus the always-on `coverage_leveling.py`). **No reachable
+  wrong-result bug found** — NaN=coverage preservation, k-min/k-max disjointness (`count≥2k+1`),
+  transparency-scale direction (`ref/score`, hazy→scale>1), Bessel corrections (Welford `M2/(n−1)`,
+  drizzle `neff/(neff−1)` gated ≥3), dark exposure-scaling pedestal math, and neutral calibration
+  fallbacks all verified correct. Near-misses explicitly ruled out (all non-bugs): pass-2 `tol=0`
+  on a bit-exact-constant pixel (Welford `delta=0` keeps it safe), `level_by_coverage` running on a
+  single-field stack (offset ≈0 for an already-bg-subtracted frame; object-masked), the stale
+  `win_valid` after a sub-pixel shift (never read — coverage derives from `isfinite`). Separately
+  **dogfooded the one-click Auto recipe** across five realistic proxies (typical / very-dim /
+  bright / heavy-green / noisy): no op errors, **zero NaN leak** in the covered region, sensible
+  display medians (~0.19–0.25), green cast removed (post-SCNR green below max(R,B) in every case),
+  and minimal clipping — the out-of-the-box result is solid. Recorded so future runs/Scout don't
+  re-tread these two well-hardened areas. (this run — Builder)
 
 - **Fix (PRIORITY-1 editor): a cropped/geometry-edited live preview letterboxed with spurious
   black bars, and the Split/Compare divider mis-aligned, whenever a reshaping geometry op was
