@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, darkScalingSummaryText } from "./History";
+import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, darkScalingSummaryText, rejectionSummaryText } from "./History";
 import { formatIntegration } from "../format";
 import * as client from "../api/client";
 import type { StackRun } from "../api/client";
@@ -424,6 +424,36 @@ describe("darkScalingSummaryText", () => {
   });
   it("tolerates missing exposures (mode only)", () => {
     expect(darkScalingSummaryText({ mode: "exposure" })).toBe("Dark scaled to sub exposure");
+  });
+});
+
+describe("rejectionSummaryText", () => {
+  it("returns null when the run ran no κ-σ rejection", () => {
+    expect(rejectionSummaryText(null)).toBeNull();
+    expect(rejectionSummaryText(undefined)).toBeNull();
+  });
+  it("reports a small fraction as transient outliers", () => {
+    expect(
+      rejectionSummaryText({ mode: "sigma-clip", fraction: 0.004, n_rejected: 40, n_contributed: 10000 }),
+    ).toBe("Rejection clipped ~0.4% of samples (transient outliers)");
+  });
+  it("calls out a clean stack that clipped nothing", () => {
+    expect(
+      rejectionSummaryText({ mode: "sigma-clip", fraction: 0, n_rejected: 0, n_contributed: 500 }),
+    ).toBe("Rejection clipped ~0% of samples (data was already clean)");
+  });
+  it("uses <0.1% for a tiny but nonzero fraction", () => {
+    expect(
+      rejectionSummaryText({ mode: "sigma-clip", fraction: 0.0003 }),
+    ).toBe("Rejection clipped ~<0.1% of samples (transient outliers)");
+  });
+  it("flags an unusually high fraction as a possible too-tight κ", () => {
+    const s = rejectionSummaryText({ mode: "sigma-clip", fraction: 0.15 });
+    expect(s).toContain("~15% of samples");
+    expect(s).toContain("check that κ isn't clipping real signal");
+  });
+  it("falls back to a plain label when the fraction is missing", () => {
+    expect(rejectionSummaryText({ mode: "sigma-clip" })).toBe("Outlier rejection applied");
   });
 });
 

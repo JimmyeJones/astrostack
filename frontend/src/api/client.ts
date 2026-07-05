@@ -211,6 +211,13 @@ export interface StackDarkScalingSummary {
   light_exposure?: number;
 }
 
+export interface StackRejectionSummary {
+  mode: string;
+  n_rejected?: number;
+  n_contributed?: number;
+  fraction?: number;
+}
+
 export interface StackProcessingStep {
   op: string;
   label: string;
@@ -223,6 +230,7 @@ export interface StackRunInfo {
   weighting: StackWeightingSummary | null;
   photometric?: StackPhotometricSummary | null;
   dark_scaling?: StackDarkScalingSummary | null;
+  rejection?: StackRejectionSummary | null;
   processing?: StackProcessingStep[];
   cards: StackInfoCard[];
 }

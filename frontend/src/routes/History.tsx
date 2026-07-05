@@ -8,7 +8,7 @@ import { notifications } from "@mantine/notifications";
 import { IconAdjustments, IconCheck, IconCopy, IconDeviceFloppy, IconDownload, IconGitCompare, IconInfoCircle, IconPencil, IconSparkles, IconTrash, IconX } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
-import { api, type StackRun, type StackPhotometricSummary, type StackDarkScalingSummary } from "../api/client";
+import { api, type StackRun, type StackPhotometricSummary, type StackDarkScalingSummary, type StackRejectionSummary } from "../api/client";
 import { formatIntegration } from "../format";
 import { HazyNightBadge } from "../components/HazyNightBadge";
 import { CalibrationBadge } from "../components/CalibrationBadge";
@@ -148,6 +148,34 @@ export function darkScalingSummaryText(
   return s;
 }
 
+// One-line provenance for how much the κ-σ rejection actually clipped —
+// "Rejection clipped ~0.4% of samples (transient outliers)". A trust signal:
+// a small fraction means it removed satellites/planes/cosmic rays without
+// eating real signal, an unusually large one (≳ 8%) hints a too-tight κ, and
+// 0% means the data was already clean. Returns null when the run ran no κ-σ
+// pass (so the card omits the line). Pure so it can be unit-tested and mirrors
+// photometricSummaryText / darkScalingSummaryText.
+export function rejectionSummaryText(
+  rejection: StackRejectionSummary | null | undefined,
+): string | null {
+  if (!rejection) return null;
+  const frac = rejection.fraction;
+  if (typeof frac !== "number" || !Number.isFinite(frac) || frac < 0) {
+    return "Outlier rejection applied";
+  }
+  const pct = frac * 100;
+  let pctText: string;
+  if (pct === 0) pctText = "0%";
+  else if (pct < 0.1) pctText = "<0.1%";
+  else if (pct < 10) pctText = `${pct.toFixed(1)}%`;
+  else pctText = `${Math.round(pct)}%`;
+  let note: string;
+  if (pct === 0) note = "data was already clean";
+  else if (pct < 8) note = "transient outliers";
+  else note = "high — check that κ isn't clipping real signal";
+  return `Rejection clipped ~${pctText} of samples (${note})`;
+}
+
 // Compact seconds label for exposures — "30s", "2.5s" — trimming a trailing ".0".
 function formatExposure(s: number): string {
   const r = Math.round(s * 10) / 10;
@@ -197,6 +225,11 @@ function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
       {darkScalingSummaryText(data.dark_scaling) ? (
         <Text size="xs" c="dimmed">
           {darkScalingSummaryText(data.dark_scaling)}
+        </Text>
+      ) : null}
+      {rejectionSummaryText(data.rejection) ? (
+        <Text size="xs" c="dimmed">
+          {rejectionSummaryText(data.rejection)}
         </Text>
       ) : null}
       {combineMethodLabel(data.cards) ? (

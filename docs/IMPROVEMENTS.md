@@ -474,20 +474,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   calibration binding, per-night QC roll-ups. Coverage-levelling's docstring
   already names "between sessions" as motivation but keys on coverage count.
   Large but high value for the multi-night Seestar workflow. (L, correctness)
-- **Surface how much the stack's rejection actually clipped (trust).** When κ-σ or
-  min/max reject runs, the user has no visibility into whether it quietly removed
-  satellites/planes (good) or over-clipped real signal (bad) — they just get an image
-  and have to trust it. Track a single aggregate during pass-2 (a fraction-of-samples-
-  rejected, e.g. the mean over covered pixels of `rejected / contributed`), stamp it as
-  a FITS provenance card + `stack_runs`/options_json field like `PHOTNADJ` already does,
-  and render one plain line on the History **Info** panel ("Rejection removed ~0.4% of
-  samples — mostly transient outliers"). Gives the OSC user a trust signal that the
-  rejection did its job without over-clipping, and a red flag when a too-tight κ is
-  eating signal. Care: the accumulators are memory-bounded on purpose — the counter is
-  one extra small canvas (int32/float32), so gauge the added footprint against the OOM
-  guard, or derive it cheaply from the Welford `count` vs contributed tally rather than a
-  new full-canvas array. Additive, off-nothing (pure reporting), testable on a synthetic
-  stack with a planted outlier. (M, image-quality/trust — priority 4)
+- ~~**Surface how much the stack's rejection actually clipped (trust).**~~ — **shipped
+  v0.84.9** (see Shipped). The default κ-σ pass-2 now tallies two scalars over the per-pixel
+  keep mask it already computes (contributed vs rejected samples — memory-free, no extra
+  canvas), stamps `REJMODE`/`REJFRAC`/`REJNREJ`/`REJNTOT` FITS cards, the run `…/info`
+  endpoint parses them into a `rejection` summary, and the History Info panel renders one
+  plain trust line ("Rejection clipped ~0.4% of samples (transient outliers)"; "data was
+  already clean" at 0%; a caution once the fraction is unusually high). Follow-up below:
+  min/max-reject and drizzle-reject don't yet report the metric (their rejection is internal
+  to the accumulator), so the line appears only for κ-σ runs — consistent with PHOTNORM/DARKSCAL.
+- **Extend the rejection-clipped trust metric to min/max-reject and drizzle-reject.** The
+  v0.84.9 "Rejection clipped ~X%" line only appears for the default κ-σ path, because that
+  pass exposes a per-pixel `keep` mask in `consume_clipped` where two scalars can be summed
+  for free. `MinMaxRejectAccumulator.add_window` and `DrizzleStacker` do their rejection
+  *inside* the accumulator, so surfacing the same metric there means having each report a
+  small `(n_contributed, n_rejected)` tally (min/max's is near-deterministic — 2k drops per
+  covered pixel with ≥2k+1 samples; drizzle-reject's mirrors the κ-σ two-pass gate). Additive,
+  pure reporting, reuses the shipped `RejectionStats` + FITS-card + info-endpoint + History
+  wiring — the only new work is threading a counter out of each accumulator. (S–M,
+  image-quality/trust — priority 4)
 
 ### Features that serve real workflows
 - Annotated sky overlay (label detected objects / show solved field). (M)
@@ -619,6 +624,30 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Surface how much the stack's rejection actually clipped — a trust line on History
+  (PRIORITY-4 image-quality/trust; current-focus stacking-engine area).** When the default
+  κ-σ rejection runs, the user previously had no visibility into whether it quietly removed
+  transient outliers (satellites/planes/cosmic rays — good) or over-clipped real signal (a
+  too-tight κ — bad); they just got an image and had to trust it. Pass-2 already computes a
+  per-pixel `keep` mask, so `run_stack` now sums two scalars over it — `contributed` (covered
+  samples seen) and `rejected` (those that failed the κ-σ test) — **memory-free, no extra
+  canvas** (respecting the OOM-bounded hot path). A new `RejectionStats` dataclass carries the
+  tally into `_build_output_header_meta`, which stamps `REJMODE`/`REJFRAC`/`REJNREJ`/`REJNTOT`
+  provenance cards (mirroring the `PHOTNORM`/`DARKSCAL` pattern — present only when a κ-σ pass
+  actually ran, even at 0% since "clipped nothing" is itself a clean-data signal). The run
+  `…/info` endpoint parses them into a `rejection` summary and the History Info panel renders
+  one plain line ("Rejection clipped ~0.4% of samples (transient outliers)", "…(data was
+  already clean)" at 0%, or a "check that κ isn't clipping real signal" caution once the
+  fraction is unusually high). Engine-only counting + additive FITS cards + one info field +
+  one History line — no config/schema/API/default change, upgrade-safe (old runs without the
+  cards simply omit the line). Only the default κ-σ path reports it for now (min/max &
+  drizzle reject logged as a follow-up idea). Tests: pytest (`_build_output_header_meta`
+  stamps/omits the cards incl. the 0%-rejected and no-pass cases; a real 12-frame κ-σ stack
+  with a planted streak stamps a positive `REJFRAC` == `REJNREJ`/`REJNTOT` while a plain-mean
+  stack stamps nothing; the `…/info` endpoint surfaces/omits the `rejection` summary) + Vitest
+  (`rejectionSummaryText` — transient-outlier / clean / <0.1% / too-tight-κ / missing-fraction
+  wording). (v0.84.9, this run — Builder)
 
 - **Stacking hot path: per-frame weight/scale lookups honour a frame whose DB id is 0
   (current-focus engine hardening).** The quality-weight and photometric-scale maps are keyed by

@@ -434,6 +434,20 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
             with contextlib.suppress(KeyError, TypeError, ValueError):
                 dark_scaling[k] = float(header[hk])
 
+    # Rejection summary (present only on κ-σ stacks), parsed the same way so the
+    # panel can show a single "Rejection clipped ~0.4% of samples" trust line —
+    # the user can see the rejection removed transient outliers without
+    # over-clipping real signal.
+    rejection: dict[str, Any] | None = None
+    if "REJMODE" in header:
+        rejection = {"mode": str(header["REJMODE"])}
+        for hk, k in (("REJNREJ", "n_rejected"), ("REJNTOT", "n_contributed")):
+            with contextlib.suppress(KeyError, TypeError, ValueError):
+                rejection[k] = int(header[hk])
+        for hk, k in (("REJFRAC", "fraction"),):
+            with contextlib.suppress(KeyError, TypeError, ValueError):
+                rejection[k] = float(header[hk])
+
     for key in _INFO_CARDS:
         if key not in header:
             continue
@@ -457,6 +471,7 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
     return {"run_id": run_id, "integration_s": integration_s,
             "n_frames": n_frames, "weighting": weighting,
             "photometric": photometric, "dark_scaling": dark_scaling,
+            "rejection": rejection,
             "processing": processing, "cards": cards}
 
 
