@@ -417,14 +417,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   `DARKLEXP` cards, the run `…/info` endpoint parses them into a `dark_scaling`
   summary, and the History Info panel renders one line ("Dark scaled to sub
   exposure · 30s → 10s"). Omitted (like `PHOTNORM`) whenever nothing was scaled.
-- **Proactively nudge dark exposure-scaling from the calibration store** (autonomy
-  follow-up to v0.82.0). The one-click "Scale this dark to your subs' exposure"
-  only appears once the user has *manually* selected a master bias. When the
-  library holds a bias but the best-matching dark is at a mismatched exposure, the
-  `calibration-suggestions` / Stack form could proactively suggest "select your
-  master bias and scale the dark" — turning a two-step discovery into one nudge.
-  Needs the suggestions endpoint (or the form) to know a bias exists and the
-  recommended dark's exposure differs; keep it advisory. (S–M, autonomy)
+- ~~**Proactively nudge dark exposure-scaling from the calibration store**~~ —
+  **shipped v0.82.2** (see Shipped). When the dark's exposure is mismatched, no bias
+  is selected, *and* the library holds a master bias, the Stack form's dark-mismatch
+  Alert now carries a one-click "Select your master bias and scale the dark" (prefers
+  the recommended bias, else the first available) that selects the bias and enables
+  scaling in one step, replacing the two-step discovery.
 - First-class session/night dimension in the project schema (frames only have
   `timestamp_utc`): per-session sky levelling before combine, per-session
   calibration binding, per-night QC roll-ups. Coverage-levelling's docstring
@@ -550,6 +548,21 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Proactively nudge dark exposure-scaling from the calibration store (PRIORITY-2 autonomy;
+  follow-up to the v0.82.0 `scale_dark_to_light` feature).** The one-click "Scale this dark to
+  your subs' exposure" only appeared once the user had *manually* selected a master bias — so a
+  beginner with a mismatched dark and an unused bias in the library still faced a two-step
+  discovery (find and pick the bias, then flip the option). Now, when the dark's exposure is
+  mismatched, no bias is selected, *and* the library holds a master bias, the Stack form's
+  dark-mismatch Alert offers a single "Select your master bias and scale the dark" button that
+  selects the bias (the recommended one when it's among the available options, else the first)
+  and enables scaling in one click — replacing the yellow warning with the teal "scaling is on"
+  confirmation. Falls back to the existing prose ("Add a master bias to scale it…") when there's
+  genuinely no bias to select. Frontend-only, additive, advisory — no engine/API/schema change,
+  nothing happens until the user clicks. Tests: Vitest (the button appears with an available bias
+  and selecting it turns on scaling + swaps to the teal note; absent when the library has no
+  bias). (v0.82.2, this run — Builder)
 
 - **Surface dark exposure-scaling provenance on the run Info / History card (PRIORITY-4
   image-quality/trust; companion to the v0.82.0 `scale_dark_to_light` feature, mirroring
