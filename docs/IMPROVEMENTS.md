@@ -47,6 +47,33 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- **Watcher can permanently drop a batch from auto-ingest when it stabilises during a
+  running pipeline.** *(traced, Builder webapp audit 2026-07-05)*
+  - **Symptom.** Frames dropped into `incoming/` are silently never imported (no ingest,
+    no QC/solve, no stack) until *some later* new file happens to trigger a fresh pipeline
+    — or the user clicks "Scan" manually. Worst case: the last batch of a session (nothing
+    arrives afterwards) that finishes copying while the final pipeline job is still running
+    is never picked up at all.
+  - **Root cause.** `StabilityTracker.update` (`webapp/watcher.py:55-82`) reports each path
+    as "newly stable" **exactly once** (once in `self._stable` it's never returned again).
+    `_on_batch_ready` (`webapp/main.py:42-51`) skips enqueuing a pipeline when one is
+    already `queued`/`running` and sets **no** pending/re-trigger flag. So a file that
+    becomes stable *while a prior pipeline is mid-run* has its one-and-only trigger dropped:
+    the running pipeline scanned before the file existed, and the tracker never re-offers it.
+  - **Repro (simulated the tracker).** File A triggers a pipeline at poll 2; the pipeline
+    scans (A ingested) then spends minutes in QC/solve. File B finishes copying and becomes
+    stable at poll 4 → `_on_batch_ready` sees the running pipeline and skips. Polls 5/6
+    return `set()` — B is never re-offered, so B sits unimported in `incoming/`.
+  - **Severity.** Broken autonomy (PRIORITY 2 "just works") — the drop is silent and the
+    user has no signal; it undermines the core "drop files in and it processes automatically"
+    promise. Not data-corrupting (frames stay on disk), but trust-eroding. (confidence:
+    traced, not yet reproduced end-to-end against the live watcher loop.)
+  - **Fix direction.** In `_on_batch_ready`, when a pipeline is already active, set a
+    "rescan pending" flag instead of dropping; when the active pipeline finishes, enqueue
+    one follow-up pipeline (or have the worker re-scan once more on completion if the flag
+    is set). Add a regression test that a file stabilising during a running pipeline is
+    picked up after it completes. (severity: broken-autonomy; confidence: traced)
+
 - ~~**Single-field (non-mosaic) stacks are misclassified as mosaics → Auto silently
   crops the frame + the whole editor shows mosaic-only tools.**~~ — **FIXED
   v0.74.2** (see Shipped). The editor now uses the stacker's *authoritative* mosaic
@@ -338,9 +365,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   **"only outdated targets"** toggle (v0.77.0, default on) — a `stale_only` flag on
   `POST /api/reprocess-all` that skips targets whose newest *genuine* stack was
   already made on the current version, so a large library isn't reprocessed
-  wholesale. What remains is a nicety only: a richer dedicated N/total batch progress
-  card (the Jobs summary already reports "restacked N/M — K already up to date").
-  (S remaining — polish only, autonomy/image-quality)
+  wholesale. A **proactive "N targets are out of date" nudge** (Settings nav badge +
+  Reprocess-panel Alert, backed by `GET /api/reprocess-status`) shipped v0.81.5, so the
+  user is told to reprocess after an upgrade instead of having to remember. What remains is
+  a nicety only: a richer dedicated N/total batch progress card (the Jobs summary already
+  reports "restacked N/M — K already up to date"). (S remaining — polish only,
+  autonomy/image-quality)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
   different (per-channel vs luminance gradient, star reduction, saturation). The
@@ -418,6 +448,29 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+- **Low-priority: manual re-stacks (not just reprocess) still overwrite the target's
+  `master` output.** The v0.81.4 fix gave *reprocess-all* runs a fresh version-tagged
+  basename, but a plain re-stack from the Stack form still defaults to `output_name="master"`
+  (the frontend sends no name), so a second manual stack of a target archives the first
+  `master.*` to an orphaned timestamped file and its old `stack_runs` row starts serving the
+  new image — the same mechanic, just user-initiated one-at-a-time. The "reuse these
+  settings" endpoint already `pop`s `output_name` intending "a fresh run gets a fresh name",
+  but that falls back to `master` too, so the intent isn't realised. Consider giving every
+  re-stack of an already-stacked target a fresh unique basename (or an explicit
+  overwrite-vs-new choice in the form), so History genuinely keeps both. Weigh against the
+  expectation that `master.fits` is "the" canonical output; may want the newest run to stay
+  named `master` and the *older* one to be renamed+rerowed instead. (S–M, correctness/trust)
+- **Low-priority (editor): the whole-recipe Split/Compare divider misaligns when an
+  enabled geometry op reshapes the frame.** The "Original" overlay is the full
+  empty-recipe render (`Editor.tsx` base fetch `{ops: []}`), but the preview box is sized to
+  the *edited* histogram's proxy dims; when the recipe has an enabled `geometry.crop`/rotate/
+  resize, the box aspect differs, so the Original is `objectFit:contain`-letterboxed and the
+  same screen-x maps to a different sky position on each side of the divider. Affects the
+  whole-recipe Split and the plain Compare toggle equally (long-standing, inherent to
+  "Original vs edited-with-a-crop"); the per-op "Split this op" is unaffected except when
+  splitting the geometry op itself. Borderline by-design; if fixed, render the Original
+  through the same geometry ops (or size the box from the base render). Found by a Builder
+  frontend audit 2026-07-05. (S, editor/trust)
 - **Low-priority robustness: mosaic canvas iterative-shrink picks its "worst"
   frame with a wrap-unsafe RA median.** `compute_mosaic_canvas`'s primary outlier
   pass uses `_circ_mean_ra_deg` (wrap-safe) to find gross plate-solve outliers, but
@@ -512,6 +565,28 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Proactive "N targets are out of date" nudge — reprocessing after an upgrade is no
+  longer purely reactive (PRIORITY-2 autonomy / PRIORITY-3 friendliness).** The
+  "Reprocess everything" feature (owner-requested) + per-run `engine_version` provenance
+  (v0.76) + the `stale_only` filter (v0.77) shipped, but nothing *told* the user their
+  images were stale — after an in-place upgrade they silently kept whatever engine build
+  made them unless the user remembered to visit Settings and reprocess. Now a read-only
+  `GET /api/reprocess-status` reports `{current_version, outdated, up_to_date,
+  total_targets}` (a target is *outdated* when its newest **genuine** stack — editor/combine
+  runs skipped, via a shared `_newest_genuine_stack_run` helper — was made by a different
+  version than the running build; a never-stacked target is neither, so the count is exactly
+  the images a reprocess would change). A small grape count badge on the Settings nav link
+  (`OutdatedTargetsBadge`) surfaces it app-wide, and the Settings → Reprocess panel shows a
+  plain-language advisory Alert ("N targets were last stacked with an older AstroStack
+  version… reprocess — it's non-destructive") built from a pure, unit-tested
+  `reprocessNudgeText` helper. Advisory only — no reprocess happens until the user clicks the
+  existing (default-on "outdated only") button. Additive/upgrade-safe: new read-only endpoint
+  + advisory UI, no schema/default/API-shape change; the badge/nudge simply don't show when
+  nothing is outdated. Tests: webapp (status counts outdated vs up-to-date vs never-stacked;
+  legacy `engine_version=None` counts as outdated; newest-run-wins; editor/combine runs
+  ignored; endpoint end-to-end) + Vitest (`reprocessNudgeText` null/singular/plural; the
+  Alert renders when outdated and is absent when up to date). (v0.81.5, this run — Builder)
 
 - **Fix: "Reprocess everything" silently overwrote each target's existing stack output
   (data-integrity bug on the owner-requested feature; found by a Builder webapp audit).**

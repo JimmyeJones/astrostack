@@ -182,6 +182,13 @@ export interface StackInfoCard {
   comment: string | null;
 }
 
+export interface ReprocessStatus {
+  current_version: string;
+  outdated: number;      // targets whose current image was made by an older version
+  up_to_date: number;    // targets already stacked on the running version
+  total_targets: number;
+}
+
 export interface StackWeightingSummary {
   mode: string;
   n_downweighted?: number;
@@ -627,6 +634,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ stale_only: staleOnly }),
     }),
+  reprocessStatus: () => req<ReprocessStatus>("/api/reprocess-status"),
 
   // sky viewer
   getSky: () => req<SkyData>("/api/sky"),

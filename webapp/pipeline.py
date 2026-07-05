@@ -13,7 +13,7 @@ import contextlib
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from seestack.io.library import Library
 from seestack.io.scanner import run_qc_and_solve, scan_and_organize
@@ -21,6 +21,9 @@ from webapp import __version__ as APP_VERSION
 from webapp.config import Settings
 from webapp.jobs import Job, JobManager
 from webapp.schemas import STACK_DEFAULTS_META_KEY, coerce_stack_options
+
+if TYPE_CHECKING:
+    from seestack.io.project import StackRunRow
 
 log = logging.getLogger(__name__)
 
@@ -273,6 +276,18 @@ def _last_stack_options_for_target(lib: Library, safe: str) -> dict[str, Any] | 
     return None
 
 
+def _newest_genuine_stack_run(proj) -> StackRunRow | None:
+    """The target's most recent *genuine* stack run (the first, newest-first, whose
+    options parse as a real ``StackOptions`` — skipping editor-export/combine runs),
+    or ``None`` when it has none. Shared by the reprocess reuse/stale logic and the
+    stale-target count so they agree on what "the current image's stack" is.
+    """
+    for run in proj.iter_stack_runs():  # newest first
+        if _stack_options_from_run_json(run.options_json) is not None:
+            return run
+    return None
+
+
 def _last_stack_version_for_target(lib: Library, safe: str) -> str | None:
     """The ``engine_version`` of the target's most recent *genuine* stack run
     (skipping editor/combine runs), or ``None`` when it has no genuine stack or
@@ -281,12 +296,48 @@ def _last_stack_version_for_target(lib: Library, safe: str) -> str | None:
     """
     proj = lib.open_target(safe)
     try:
-        for run in proj.iter_stack_runs():  # newest first
-            if _stack_options_from_run_json(run.options_json) is not None:
-                return run.engine_version
+        run = _newest_genuine_stack_run(proj)
+        return run.engine_version if run is not None else None
     finally:
         proj.close()
-    return None
+
+
+def reprocess_status(lib: Library) -> dict[str, Any]:
+    """Count targets whose current image is stale relative to the running build.
+
+    A target is **outdated** when its most recent *genuine* stack was produced by
+    a different app version than the one now running (including a run that predates
+    version tracking, ``engine_version`` ``None`` — it was made by some older
+    build). A target with no genuine stack yet is neither outdated nor up to date:
+    there's no existing image to refresh, so it's excluded from both counts (it
+    isn't "stale", it just hasn't been stacked). This drives the proactive
+    "N targets were made with an older version — reprocess" nudge, so it counts
+    only images a reprocess would actually change.
+
+    Returns ``{current_version, outdated, up_to_date, total_targets}``.
+    """
+    outdated = 0
+    up_to_date = 0
+    total = 0
+    for entry in lib.list_targets():
+        total += 1
+        proj = lib.open_target(entry.safe_name)
+        try:
+            run = _newest_genuine_stack_run(proj)
+        finally:
+            proj.close()
+        if run is None:
+            continue  # never stacked — not an out-of-date existing image
+        if run.engine_version == APP_VERSION:
+            up_to_date += 1
+        else:
+            outdated += 1
+    return {
+        "current_version": APP_VERSION,
+        "outdated": outdated,
+        "up_to_date": up_to_date,
+        "total_targets": total,
+    }
 
 
 def submit_reprocess_all(settings: Settings, jm: JobManager, *,

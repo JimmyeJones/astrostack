@@ -267,6 +267,102 @@ def test_reprocess_all_default_reprocesses_current_version_targets(solved_librar
     assert len(captured) == 2
 
 
+def _seed_run(proj, *, version, basename="master", options=None):
+    proj.add_stack_run(StackRunRow(
+        id=None, timestamp_utc="2026-05-01T00:00:00Z",
+        output_basename=basename, fits_path=None, tiff_path=None,
+        preview_path=None, n_frames_used=3, canvas_h=10, canvas_w=10,
+        coverage_min=1, coverage_max=3,
+        options_json=json.dumps(options or {"method": "sigma", "sigma_kappa": 4.25}),
+        engine_version=version,
+    ))
+
+
+def test_reprocess_status_counts_outdated_up_to_date_and_never_stacked(solved_library):
+    """A target on an older version is outdated; one on the current version is up to
+    date; a never-stacked target is neither (no existing image to refresh)."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        targets = [e.safe_name for e in lib.list_targets()]
+        assert len(targets) == 2
+        # First target: stale (old version). Second: leave un-stacked entirely.
+        proj = lib.open_target(targets[0])
+        try:
+            _seed_run(proj, version="0.0.1")
+        finally:
+            proj.close()
+        status = pipeline.reprocess_status(lib)
+    finally:
+        lib.close()
+
+    assert status["current_version"] == pipeline.APP_VERSION
+    assert status["total_targets"] == 2
+    assert status["outdated"] == 1       # the old-version target
+    assert status["up_to_date"] == 0     # none on the current version
+    # The never-stacked target is counted in neither bucket.
+    assert status["outdated"] + status["up_to_date"] == 1
+
+
+def test_reprocess_status_predates_version_tracking_is_outdated(solved_library):
+    """A genuine stack with no recorded engine_version (predates tracking) was made
+    by some older build, so it counts as outdated."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        for entry in lib.list_targets():
+            proj = lib.open_target(entry.safe_name)
+            try:
+                _seed_run(proj, version=None)  # legacy run, no version
+            finally:
+                proj.close()
+        status = pipeline.reprocess_status(lib)
+    finally:
+        lib.close()
+
+    assert status["outdated"] == 2
+    assert status["up_to_date"] == 0
+
+
+def test_reprocess_status_current_version_is_up_to_date(solved_library):
+    """A target whose newest genuine stack is on the current version is up to date,
+    not outdated — even if an *older* run also exists (newest wins)."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        for entry in lib.list_targets():
+            proj = lib.open_target(entry.safe_name)
+            try:
+                _seed_run(proj, version="0.0.1", basename="old")
+                _seed_run(proj, version=pipeline.APP_VERSION, basename="new")
+            finally:
+                proj.close()
+        status = pipeline.reprocess_status(lib)
+    finally:
+        lib.close()
+
+    assert status["outdated"] == 0
+    assert status["up_to_date"] == 2
+
+
+def test_reprocess_status_ignores_editor_and_combine_runs(solved_library):
+    """A target whose only runs are editor-export / combine (non-genuine) has no
+    real stack, so it's neither outdated nor up to date."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        for entry in lib.list_targets():
+            proj = lib.open_target(entry.safe_name)
+            try:
+                _seed_run(proj, version="0.0.1", basename="edit",
+                          options={"editor_recipe": {"ops": []}})
+            finally:
+                proj.close()
+        status = pipeline.reprocess_status(lib)
+    finally:
+        lib.close()
+
+    assert status["outdated"] == 0
+    assert status["up_to_date"] == 0
+    assert status["total_targets"] == 2
+
+
 def test_reprocess_all_cancels_between_targets(solved_library, monkeypatch):
     calls: list = []
 
@@ -423,3 +519,42 @@ def test_reprocess_all_endpoint_stale_only_skips_current_version(solved_client, 
     for s in targets:
         runs = solved_client.get(f"/api/targets/{s}/stack-runs").json()
         assert len(runs) == before[s]
+
+
+def test_reprocess_status_endpoint(solved_client, solved_library):
+    """GET /api/reprocess-status reports how many targets' images are outdated."""
+    from webapp import __version__ as app_version
+
+    # No genuine stacks yet → nothing outdated, nothing up to date.
+    r = solved_client.get("/api/reprocess-status")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["current_version"] == app_version
+    assert body["total_targets"] == 2
+    assert body["outdated"] == 0
+    assert body["up_to_date"] == 0
+
+    # Seed one stale target and one current-version target.
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        targets = [e.safe_name for e in lib.list_targets()]
+        for safe, ver in zip(targets, ("0.0.1", app_version), strict=True):
+            proj = lib.open_target(safe)
+            try:
+                proj.add_stack_run(StackRunRow(
+                    id=None, timestamp_utc="2026-05-01T00:00:00Z",
+                    output_basename="master", fits_path=None, tiff_path=None,
+                    preview_path=None, n_frames_used=3, canvas_h=10, canvas_w=10,
+                    coverage_min=1, coverage_max=3,
+                    options_json=json.dumps({"sigma_clip": True, "sigma_kappa": 3.0}),
+                    engine_version=ver,
+                ))
+            finally:
+                proj.close()
+    finally:
+        lib.close()
+
+    body = solved_client.get("/api/reprocess-status").json()
+    assert body["outdated"] == 1
+    assert body["up_to_date"] == 1
+    assert body["total_targets"] == 2

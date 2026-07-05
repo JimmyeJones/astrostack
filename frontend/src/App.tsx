@@ -33,6 +33,24 @@ function ActiveJobsBadge() {
   );
 }
 
+// After an in-place upgrade, some targets' images were made by an older engine
+// version. Surface a small count badge on the Settings link so the user is nudged
+// to reprocess without having to go looking — the reprocess control lives there.
+function OutdatedTargetsBadge() {
+  const { data } = useQuery({
+    queryKey: ["reprocess-status"],
+    queryFn: api.reprocessStatus,
+    staleTime: 60_000,
+  });
+  const outdated = data?.outdated ?? 0;
+  if (outdated <= 0) return null;
+  return (
+    <Badge color="grape" variant="light" size="sm" aria-label={`${outdated} targets out of date`}>
+      {outdated}
+    </Badge>
+  );
+}
+
 export function App() {
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -104,6 +122,7 @@ export function App() {
               end={l.end}
               label={l.label}
               leftSection={l.icon}
+              rightSection={l.to === "/settings" ? <OutdatedTargetsBadge /> : undefined}
               onClick={closeNav}
               active={l.end ? location.pathname === "/" : location.pathname.startsWith(l.to)}
             />
