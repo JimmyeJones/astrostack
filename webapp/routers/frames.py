@@ -12,6 +12,11 @@ from fastapi.responses import FileResponse
 
 from seestack.io.project import FrameRow
 from seestack.render.thumbnail import THUMB_VERSION, generate_thumbnail, thumbs_dir
+from seestack.solve.astap import (
+    SOLVE_SETUP_ASTAP_MISSING,
+    SOLVE_SETUP_NO_DATABASE,
+    classify_solve_setup_error,
+)
 from webapp import deps
 from webapp.schemas import (
     BulkFrameAction,
@@ -114,6 +119,33 @@ def list_frames(
     return [_to_out(f) for f in frames[offset : offset + limit]]
 
 
+def _solve_setup_problem(counts: dict[str, int]) -> dict | None:
+    """Classify the reject tally into a plate-solve *setup* problem, or ``None``.
+
+    ASTAP or its star database being unavailable fails every frame identically,
+    so the whole target piles up as ``solve_failed:…`` with no hint that the fix
+    is a one-time setup step. Since v0.84.1 those failures are stored with a
+    stable canonical reason (see :func:`classify_solve_setup_error`), so this
+    server-side tally is reliable for the star-database case too — not just the
+    deterministic "astap not found" message the frontend could already spot.
+    ASTAP-missing wins over no-database (the solver never ran, so a database
+    message can't also be present)."""
+    astap = db = 0
+    for reason, n in counts.items():
+        if not reason.startswith("solve_failed:"):
+            continue
+        kind = classify_solve_setup_error(reason)
+        if kind == SOLVE_SETUP_ASTAP_MISSING:
+            astap += n
+        elif kind == SOLVE_SETUP_NO_DATABASE:
+            db += n
+    if astap:
+        return {"kind": "astap", "frames": astap}
+    if db:
+        return {"kind": "database", "frames": db}
+    return None
+
+
 @router.get("/reject-summary")
 def reject_summary(safe: str, request: Request) -> dict:
     """Tally rejected frames by reason (``qc:fwhm``, ``bulk:streaked``,
@@ -125,7 +157,11 @@ def reject_summary(safe: str, request: Request) -> dict:
     finally:
         proj.close()
         lib.close()
-    return {"counts": counts, "total": sum(counts.values())}
+    return {
+        "counts": counts,
+        "total": sum(counts.values()),
+        "solve_setup_problem": _solve_setup_problem(counts),
+    }
 
 
 def _grade_report_out(report, changed_ids: list[int] | None = None) -> GradeReportOut:

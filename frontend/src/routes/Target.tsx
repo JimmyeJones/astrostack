@@ -315,8 +315,14 @@ export function TargetView() {
   // frames pile up as "Plate-solve failed" with no hint that the fix is a
   // one-time setup step rather than dropping frames. Turn that into one
   // actionable banner. Null (the common case) renders nothing.
+  // Prefer the server's classification (v0.84.1+) — it's reliable for the
+  // star-database case too, since those failures are now stored with a stable
+  // canonical reason. Fall back to detecting it from `counts` on an older
+  // backend (or if the field is absent).
   const solveSetup = useMemo(
-    () => detectSolveSetupProblem(rejectSummary.data?.counts),
+    () =>
+      rejectSummary.data?.solve_setup_problem ??
+      detectSolveSetupProblem(rejectSummary.data?.counts),
     [rejectSummary.data],
   );
 

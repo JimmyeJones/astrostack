@@ -7,7 +7,13 @@ import pytest
 pytest.importorskip("astropy")
 
 from seestack.io.project import FrameRow, Project  # noqa: E402
-from seestack.solve.astap import ASTAPResult, ASTAPSolver  # noqa: E402
+from seestack.solve.astap import (  # noqa: E402
+    SOLVE_SETUP_ASTAP_MISSING,
+    SOLVE_SETUP_NO_DATABASE,
+    ASTAPResult,
+    ASTAPSolver,
+    classify_solve_setup_error,
+)
 from seestack.solve.runner import (  # noqa: E402
     SolveResult,
     apply_solve_result_to_db,
@@ -123,5 +129,80 @@ def test_apply_solve_result_failure_doesnt_clobber_accept(tmp_path):
         # We don't auto-reject — solve failure is often transient.
         assert f.accept is True
         assert f.reject_reason and "solve_failed" in f.reject_reason
+    finally:
+        proj.close()
+
+
+def test_classify_solve_setup_error():
+    """The setup classifier spots ASTAP/database missing but not per-frame fails."""
+    # ASTAP binary missing — the installer message.
+    assert classify_solve_setup_error(
+        "astap.exe not found. Install ASTAP from https://www.hnsky.org/astap.htm"
+    ) == SOLVE_SETUP_ASTAP_MISSING
+    # Star database missing (ASTAP ran but had nothing to match against).
+    assert classify_solve_setup_error("Error: no star database found") == SOLVE_SETUP_NO_DATABASE
+    assert classify_solve_setup_error("star database not found") == SOLVE_SETUP_NO_DATABASE
+    # ASTAP missing wins even if a database phrase also appears somewhere.
+    assert classify_solve_setup_error(
+        "astap not found; no star database"
+    ) == SOLVE_SETUP_ASTAP_MISSING
+    # Ordinary per-frame failures are NOT setup problems (never nag about setup
+    # when the real issue is one bad/unsolvable frame).
+    assert classify_solve_setup_error("no solution") is None
+    assert classify_solve_setup_error("could not open file") is None
+    assert classify_solve_setup_error("error reading frame") is None
+    assert classify_solve_setup_error("") is None
+    assert classify_solve_setup_error(None) is None
+
+
+def test_apply_solve_result_canonicalises_setup_failure(tmp_path):
+    """A 'no star database' message buried past the 120-char storage window is
+    canonicalised so the setup signature is always reliably present.
+
+    Regression: before the fix the raw log was truncated to its first 120 chars,
+    dropping the 'no star database' phrase, so the Target page couldn't tell the
+    database-missing setup problem from an ordinary per-frame failure."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        fid = proj.add_frame(FrameRow(source_path="x.fit"))
+        # A realistic long ASTAP log where the setup phrase lands well past char 120.
+        buried = (
+            "Reading FITS header... image 1080x1920 loaded. Detecting stars... "
+            "found 214 stars. Searching solution radius 30 deg fov 1.3 deg. "
+            "Attempt failed: no star database found in the search path"
+        )
+        assert len("no star database") + buried.index("no star database") > 120
+        result = SolveResult(
+            frame_id=fid, fits_path="x.fit", solved=False,
+            wcs_text=None, ra_center_deg=None, dec_center_deg=None,
+            pixscale_arcsec=None, rotation_deg=None,
+            error=buried,
+        )
+        apply_solve_result_to_db(proj, result)
+        f = proj.get_frame(fid)
+        assert f is not None
+        assert f.reject_reason == f"solve_failed:{SOLVE_SETUP_NO_DATABASE}"
+        # And the canonical reason is still classifiable from the stored string.
+        assert classify_solve_setup_error(f.reject_reason) == SOLVE_SETUP_NO_DATABASE
+    finally:
+        proj.close()
+
+
+def test_apply_solve_result_keeps_raw_reason_for_per_frame_failure(tmp_path):
+    """An ordinary (non-setup) failure keeps its raw truncated message."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        fid = proj.add_frame(FrameRow(source_path="x.fit"))
+        result = SolveResult(
+            frame_id=fid, fits_path="x.fit", solved=False,
+            wcs_text=None, ra_center_deg=None, dec_center_deg=None,
+            pixscale_arcsec=None, rotation_deg=None,
+            error="no solution found (too few stars)",
+        )
+        apply_solve_result_to_db(proj, result)
+        f = proj.get_frame(fid)
+        assert f is not None
+        assert f.reject_reason == "solve_failed:no solution found (too few stars)"
+        assert classify_solve_setup_error(f.reject_reason) is None
     finally:
         proj.close()

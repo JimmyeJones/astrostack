@@ -344,6 +344,31 @@ describe("TargetView reject breakdown + undo", () => {
     expect(screen.getByRole("link", { name: "Open Settings" })).toBeInTheDocument();
   });
 
+  it("prefers the server's solve_setup_problem classification (reliable for the database case)", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ n_frames: 4, n_frames_accepted: 0 }),
+    );
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    // The stored `counts` key lacks the "no star database" phrase (the old
+    // unreliable truncation case), so client-side detection alone would miss it —
+    // but the server classified it, so the banner still fires.
+    vi.spyOn(client.api, "rejectSummary").mockResolvedValue({
+      counts: { "solve_failed:Reading FITS header... found 214 stars...": 4 },
+      total: 4,
+      solve_setup_problem: { kind: "database", frames: 4 },
+    });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      mkFrame(1, { accept: false, solved: false }),
+    ]);
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Plate-solving needs a star database"),
+      ).toBeInTheDocument());
+  });
+
   it("shows no setup banner for ordinary per-frame solve failures", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(
       mkTarget({ n_frames: 3, n_frames_accepted: 2 }),
