@@ -772,9 +772,13 @@ describe("EditorView", () => {
     // Select the added Sharpen op; its radius should have been seeded to the
     // measured 3.5, so the "From your data" button reads as already-applied.
     fireEvent.click(await screen.findByText("Sharpen"));
-    const btn = await screen.findByLabelText("Set Radius (px) from your data");
-    await waitFor(() => expect(btn).toBeDisabled());
-    expect(btn).toHaveTextContent("✓");
+    // Re-find inside waitFor: the toolbar subtree can remount while the per-op
+    // suggestion / default-recipe queries settle, detaching a button captured
+    // before that (the same race #109 fixed for the "Auto curve" button).
+    await screen.findByLabelText("Set Radius (px) from your data");
+    await waitFor(() =>
+      expect(screen.getByLabelText("Set Radius (px) from your data")).toBeDisabled());
+    expect(screen.getByLabelText("Set Radius (px) from your data")).toHaveTextContent("✓");
   });
 
   it("prepends Coverage leveling when a built-in preset is applied on a mosaic", async () => {
@@ -834,11 +838,14 @@ describe("EditorView", () => {
     expect(btn).not.toHaveTextContent("white");
     const whiteBtn = await screen.findByLabelText("Set White point from your data");
     expect(whiteBtn).toHaveTextContent("white 0.85");
-    fireEvent.click(btn);
-    // After applying, the black point matches the suggestion, so the button reads
-    // as already-applied (disabled + ✓).
-    await waitFor(() => expect(btn).toBeDisabled());
-    expect(btn).toHaveTextContent("✓");
+    // Click inside waitFor so a toolbar remount (while queries settle) that would
+    // drop the click's React handler is retried — the click is idempotent (sets the
+    // same suggested black point). After applying, the button reads disabled + ✓.
+    await waitFor(() => {
+      fireEvent.click(screen.getByLabelText("Set Black point from your data"));
+      expect(screen.getByLabelText("Set Black point from your data")).toBeDisabled();
+    });
+    expect(screen.getByLabelText("Set Black point from your data")).toHaveTextContent("✓");
   });
 
   it("sets both black and white points at once via 'Auto levels'", async () => {
@@ -872,10 +879,12 @@ describe("EditorView", () => {
     expect(screen.getByLabelText("Set Midtones (gamma) from your data"))
       .toHaveTextContent("~25% grey");
     // One click on the header "Auto levels" button applies black, white and gamma.
-    fireEvent.click(screen.getByRole("button", { name: /Auto levels/ }));
-    // All three per-param buttons now read as already-applied (disabled + ✓),
-    // proving black, white *and* the midtone gamma were set together.
+    // Click inside waitFor so a toolbar remount (while queries settle) that would
+    // drop the click's React handler is retried — the click is idempotent. All three
+    // per-param buttons then read as already-applied (disabled + ✓), proving black,
+    // white *and* the midtone gamma were set together.
     await waitFor(() => {
+      fireEvent.click(screen.getByRole("button", { name: /Auto levels/ }));
       expect(screen.getByLabelText("Set Black point from your data")).toBeDisabled();
       expect(screen.getByLabelText("Set White point from your data")).toBeDisabled();
       expect(screen.getByLabelText("Set Midtones (gamma) from your data")).toBeDisabled();
@@ -929,10 +938,12 @@ describe("EditorView", () => {
     const blackBtn = await screen.findByLabelText("Set Black point from your data");
     expect(blackBtn).toHaveTextContent("black 0.05");
     // One click on the header "Auto stretch" applies both strength and black, so
-    // both per-param buttons read as already-applied (disabled + ✓). Use findBy so
-    // the click waits for the header button's render rather than racing it.
-    fireEvent.click(await screen.findByRole("button", { name: /Auto stretch/ }));
+    // both per-param buttons read as already-applied (disabled + ✓). Click inside
+    // waitFor so a toolbar remount (while queries settle) that would drop the click's
+    // React handler is retried — the click is idempotent (sets the same values).
+    await screen.findByRole("button", { name: /Auto stretch/ });
     await waitFor(() => {
+      fireEvent.click(screen.getByRole("button", { name: /Auto stretch/ }));
       expect(screen.getByLabelText("Set Strength from your data")).toBeDisabled();
       expect(screen.getByLabelText("Set Black point from your data")).toBeDisabled();
     });

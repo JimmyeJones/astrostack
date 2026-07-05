@@ -566,6 +566,21 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Fix four more flaky Editor "From your data" tests that reddened main's CI (test-only,
+  same remount race #109 fixed).** The v0.81.5 merge's frontend CI job failed on
+  `Editor.test.tsx > 'sets both black+white points via Auto stretch'` (`Set Strength from
+  your data` not disabled). Root cause is the same toolbar-remount race #109 traced: the
+  per-op suggestion / default-recipe queries settle and remount the toolbar right after the
+  buttons first appear, so a `fireEvent.click` fired *before* the remount lands on a detached
+  node (its React `onClick` never runs) and the button never reaches its applied/disabled
+  state — or a button reference captured before the remount is stale by assertion time. Fix
+  is **test-only** and does not weaken any assertion: for the four sibling "From your data" /
+  "Auto stretch/levels" tests, re-find the button and (where a click is needed) re-click
+  *inside* the existing `waitFor` so the idempotent click retries across the remount flicker,
+  matching the durable pattern #109 introduced for the "Auto curve" test. Verified the
+  Editor suite passes 44/44 across 4 consecutive local runs. No source/behaviour change.
+  (v0.81.6, this run — Builder)
+
 - **Proactive "N targets are out of date" nudge — reprocessing after an upgrade is no
   longer purely reactive (PRIORITY-2 autonomy / PRIORITY-3 friendliness).** The
   "Reprocess everything" feature (owner-requested) + per-run `engine_version` provenance
