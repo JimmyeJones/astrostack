@@ -352,36 +352,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   the button already delivers the one-click house-style value.)*
 - Auto-suggest stack settings from the data (frame count, FWHM spread, streaks)
   so the user rarely needs to touch the Stack form. (S–M, autonomy)
-- **One-click "Drop N outlier frames" on the Stack-form auto-grade hint.** *(Scout
-  2026-07-05 — verified gap.)* Every other Stack-form advisory nudge got a one-click
-  action in v0.81.10 (photometric-normalize, quality-weighting, sigma-clip, min/max
-  reject) — but the **auto-grade** hint (`Stack.tsx:730`, "Auto-grade thinks N of
-  your accepted frames look like quality outliers…") still only offers a *"Review
-  Auto-grade"* link that navigates the user away to the Target page to do it there.
-  That's the last un-one-clicked nudge and the friction is real: the beginner has to
-  leave the stack they're setting up, find the apply button on another screen, then
-  come back. Add a *"Drop N outlier frames"* button beside the link that calls the
-  **already-shipped** `api.autoGradeApply(safe)` (`/frames/auto-grade/apply` →
-  `apply_grade_report`, which returns `changed_ids`), invalidates the frame/estimate
-  queries, and swaps the yellow hint to a green *"Dropped N — Undo"* confirmation
-  (re-accept the `changed_ids` on Undo, since auto-grade never sets `user_override`).
-  Because this **mutates target-wide frame accept-state** (unlike the sibling
-  one-clicks, which only flip a stack option), it needs the confirm/undo affordance —
-  so it's a Builder task, not a Scout patch. Frontend-only, additive; endpoint +
-  client method already exist. (S–M, autonomy/friendliness — PRIORITY 2/3)
-- **Surface auto-grade's `capped` safety-rail in the *Stack-form* hint too.** *(Scout
-  2026-07-05 — small companion to the above.)* When a whole session is cloudy/hazy,
-  `grade_frames` flags more than `MAX_REJECT_FRACTION` (25%) of frames and sets
-  `GradeReport.capped=True`, recommending only the worst 25% so auto-grade never
-  nukes half a library. The **Target page already surfaces this** (`Target.tsx:149`),
-  but a user who goes straight to the Stack form sees only *"N look like outliers"*
-  with no signal that many more were suppressed by the cap — so they can't tell a
-  rough night from a couple of bad subs before stacking. The `capped` flag is already
-  on `GradeReportOut` (and the Stack form already fetches the preview via
-  `autoGradePreview`); just read it and, when set, append one plain-language sentence
-  to `autoGradeHint` ("…this looks like a rough session — only the worst 25% are
-  recommended; review before stacking"). Frontend-only, additive, no API/engine
-  change. (S, friendliness/trust — PRIORITY 3)
+- ~~**One-click "Drop N outlier frames" on the Stack-form auto-grade hint.**~~ —
+  **shipped v0.83.2** (see Shipped). The auto-grade hint now carries a "Drop N outlier
+  frames" button (beside the retained "Review Auto-grade" link) that calls
+  `api.autoGradeApply(safe)` and swaps the yellow hint for a green "Dropped N — Undo"
+  confirmation; Undo re-accepts the returned `changed_ids`.
+  action in v0.81.10 — the auto-grade hint was the last un-one-clicked nudge, offering
+  only a "Review Auto-grade" link that navigated the user away.
+- ~~**Surface auto-grade's `capped` safety-rail in the *Stack-form* hint too.**~~ —
+  **shipped v0.83.2** (see Shipped). When `GradeReport.capped` is set (a whole rough
+  session where >25% of frames were flagged), the Stack-form auto-grade hint now appends
+  a plain-language "this looks like a rough session — only the worst are recommended;
+  review before stacking" sentence, matching the fuller notice the Target page already
+  shows.
 - ~~**Nudge to turn on Photometric normalization when the run's transparency varies a
   lot.**~~ — **shipped v0.81.3** (see Shipped). The Stack form now fires a sibling nudge
   when the p90/p10 transparency spread across the frames-to-be-stacked is wide (≳ 1.5×)
@@ -554,6 +537,23 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **One-click "Drop N outlier frames" + safety-cap notice on the Stack-form auto-grade hint
+  (PRIORITY-2/3 autonomy + friendliness).** The auto-grade hint was the last Stack-form
+  advisory nudge with no one-click action — it only offered a "Review Auto-grade" link that
+  sent the user to the Target page. It now carries a **"Drop N outlier frames"** button (beside
+  the retained link) that calls the already-shipped `api.autoGradeApply(safe)`; on success the
+  yellow hint is replaced by a green **"Dropped N — Undo"** confirmation whose Undo re-accepts
+  the returned `changed_ids` (auto-grade never sets `user_override`, so the revert is clean).
+  Because this mutates target-wide accept-state, the frame/auto-grade-preview/stack-estimate
+  queries are invalidated on both apply and undo. Companion change: when the grader hits its 25%
+  `MAX_REJECT_FRACTION` safety cap (`GradeReport.capped`), the hint now appends a plain-language
+  "this looks like a rough session — only the worst are recommended; review before stacking"
+  sentence, so a user who skips the Target page still learns many more frames were suppressed.
+  Frontend-only, additive, advisory — no engine/API/schema change; the endpoint + client method
+  already existed. Tests: Vitest (the Drop button applies + swaps to the green Undo confirmation
+  and Undo re-accepts the ids; the capped notice appears when `capped` is true). (v0.83.2, this
+  run — Builder)
 
 - **Surface the deep-rescan count on the finished reprocess-all job summary (follow-up to
   v0.83.0; PRIORITY-3 friendliness).** The Jobs page's plain-language reprocess outcome now
