@@ -402,6 +402,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   persists it (additive `error_kind` column, in-place migration), and exposes it on the job;
   `friendlyJobError(raw, kind)` prefers it and falls back to the string matcher on an older
   backend.)_
+  _(~~Follow-up, found while shipping v0.84.4: the calibration **Build-master** job raises a
+  bare `FileNotFoundError: No FITS files found in {dir}` when pointed at an empty/wrong
+  folder — a common beginner mistake in the darks/flats workflow that showed a raw Python
+  exception on Jobs.~~ — **shipped v0.84.5** (see Shipped). Added a `no_fits_in_folder` kind +
+  translation ("No FITS frames were found in that folder" + point-at-the-right-folder next
+  step), matched on the specific phrase so internal FileNotFoundErrors aren't mis-dressed.)_
 - ~~**Actionable "plate-solving isn't set up" banner when a whole target fails to solve**~~
   — **shipped v0.84.0** (see Shipped). When ASTAP (or, best-effort, its star database) is
   missing, every frame's solve fails identically and the Target page now shows one
@@ -579,6 +585,19 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Plain-language "Build master" empty-folder failure (PRIORITY-3 friendliness; follow-up to
+  v0.84.4).** The calibration Build-master job raised a bare `FileNotFoundError: No FITS files
+  found in {dir}` when a beginner pointed it at an empty or wrong folder (a real mistake in the
+  OSC darks/flats workflow), which surfaced verbatim on the Jobs page. Added a
+  `no_fits_in_folder` canonical `error_kind` (classified server-side on the specific
+  "no FITS files found" phrase, so internal missing-target/run FileNotFoundErrors aren't
+  mis-dressed as a folder problem) and its plain-language translation ("No FITS frames were
+  found in that folder." + a point-it-at-your-.fits-calibration-frames next step), extending
+  the v0.84.4 error-kind family. Additive/upgrade-safe — no schema/API/default change. Tests:
+  pytest (`classify_job_error` maps the folder phrase, leaves an internal `no target` FNF as
+  None) + Vitest (`friendlyJobError` translates it via both the raw phrase and the canonical
+  kind). (v0.84.5, this run — Builder)
 
 - **Robust server-side `error_kind` on failed jobs — makes the plain-language job-error
   translation reword-proof (PRIORITY-3 friendliness/robustness; follow-up to v0.84.3).** The
