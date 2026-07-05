@@ -3,7 +3,7 @@ import { Notifications } from "@mantine/notifications";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { JobsView, reprocessSummary } from "./Jobs";
+import { JobsView, jobKindLabel, reprocessSummary } from "./Jobs";
 import * as client from "../api/client";
 import type { Job } from "../api/client";
 
@@ -36,7 +36,7 @@ describe("JobsView", () => {
     vi.spyOn(client.api, "cancelJob").mockRejectedValue(new Error("job already finished"));
 
     renderJobs();
-    await waitFor(() => expect(screen.getByText("stack")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Stacking")).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel job" }));
 
@@ -56,6 +56,25 @@ describe("JobsView", () => {
     expect(screen.getByText("Failed: NGC_7000")).toBeInTheDocument();
   });
 
+  it("shows a plain-language name (not the raw engine kind) for the first job a beginner sees", async () => {
+    // "Scan incoming" submits a `pipeline` job and lands the user here — it must
+    // never read as the raw identifier `pipeline`.
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({ kind: "pipeline", target: null }),
+    ]);
+    renderJobs();
+    await waitFor(() =>
+      expect(screen.getByText("Importing & processing new frames")).toBeInTheDocument());
+    expect(screen.queryByText("pipeline")).not.toBeInTheDocument();
+  });
+
+  it("guides the user to Scan incoming when there are no jobs", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([]);
+    renderJobs();
+    await waitFor(() => expect(screen.getByText("No jobs running.")).toBeInTheDocument());
+    expect(screen.getByText(/Scan incoming/)).toBeInTheDocument();
+  });
+
   it("cancels a job and refreshes the list on success", async () => {
     vi.spyOn(client.api, "listJobs")
       .mockResolvedValueOnce([mkJob()])
@@ -63,12 +82,29 @@ describe("JobsView", () => {
     const cancel = vi.spyOn(client.api, "cancelJob").mockResolvedValue(undefined as never);
 
     renderJobs();
-    await waitFor(() => expect(screen.getByText("stack")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Stacking")).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel job" }));
 
     await waitFor(() => expect(cancel).toHaveBeenCalledWith("job-1"));
     await waitFor(() => expect(screen.getByText("cancelled")).toBeInTheDocument());
+  });
+});
+
+describe("jobKindLabel", () => {
+  it("translates every known engine job kind to plain language", () => {
+    expect(jobKindLabel("pipeline")).toBe("Importing & processing new frames");
+    expect(jobKindLabel("qc_solve")).toBe("Quality check & plate-solve");
+    expect(jobKindLabel("stack")).toBe("Stacking");
+    expect(jobKindLabel("reprocess_all")).toBe("Reprocessing all targets");
+    expect(jobKindLabel("editor_png")).toBe("Rendering full-resolution PNG");
+    expect(jobKindLabel("editor_export")).toBe("Exporting edited image");
+    expect(jobKindLabel("editor_batch")).toBe("Batch export");
+    expect(jobKindLabel("build_master")).toBe("Building calibration master");
+    expect(jobKindLabel("channel_combine")).toBe("Channel combine");
+  });
+  it("falls back to the raw kind for an unknown job type", () => {
+    expect(jobKindLabel("some_future_kind")).toBe("some_future_kind");
   });
 });
 

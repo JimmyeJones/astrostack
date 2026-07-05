@@ -2,7 +2,7 @@ import {
   ActionIcon, Badge, Button, Center, Group, Loader, Paper, Progress, Stack, Text, Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { IconDownload, IconPhoto, IconX } from "@tabler/icons-react";
+import { IconActivity, IconDownload, IconPhoto, IconX } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { type ReactNode } from "react";
@@ -17,6 +17,30 @@ const COLOR: Record<string, string> = {
   cancelled: "orange",
   interrupted: "orange",
 };
+
+// Plain-language names for the engine's internal job kinds. The backend submits
+// jobs under snake_case identifiers (webapp/pipeline.py) — `pipeline`, `qc_solve`,
+// `editor_png` … — which mean nothing to a Seestar beginner, and Jobs is the very
+// first screen a new user lands on (clicking "Scan incoming" navigates here). Every
+// other screen already translates engine jargon (History's combineMethodLabel,
+// Target's rejectReasonLabel); this brings Jobs into line. Unknown kinds fall back
+// to the raw identifier so a future job type is still shown, just untranslated.
+const KIND_LABEL: Record<string, string> = {
+  pipeline: "Importing & processing new frames",
+  qc_solve: "Quality check & plate-solve",
+  stack: "Stacking",
+  reprocess_all: "Reprocessing all targets",
+  editor_png: "Rendering full-resolution PNG",
+  editor_export: "Exporting edited image",
+  editor_batch: "Batch export",
+  build_master: "Building calibration master",
+  channel_combine: "Channel combine",
+};
+
+/** Human-readable name for an engine job kind (pure, tested). */
+export function jobKindLabel(kind: string): string {
+  return KIND_LABEL[kind] ?? kind;
+}
 
 /** Plain-language outcome of a finished reprocess-all batch (pure, tested). */
 export function reprocessSummary(r: Record<string, unknown>): {
@@ -90,7 +114,7 @@ function JobRow({ job, onCancel }: { job: Job; onCancel: () => void }) {
       <Group justify="space-between">
         <Group>
           <Badge color={COLOR[job.state] ?? "gray"}>{job.state}</Badge>
-          <Text fw={500}>{job.kind}</Text>
+          <Text fw={500}>{jobKindLabel(job.kind)}</Text>
           {job.target ? <Text c="dimmed" size="sm">{job.target}</Text> : null}
         </Group>
         <Group>
@@ -157,7 +181,16 @@ export function JobsView() {
         ) : null}
       </Group>
       {jobs.length === 0 ? (
-        <Text c="dimmed">No jobs yet.</Text>
+        <Paper withBorder p="xl">
+          <Stack align="center" gap="sm">
+            <IconActivity size={40} color="var(--mantine-color-dark-3)" />
+            <Text c="dimmed">No jobs running.</Text>
+            <Text c="dimmed" size="sm" ta="center" maw={420}>
+              Click “Scan incoming” in the header to import and process your Seestar
+              frames — ingest, quality check and plate-solve run here as jobs.
+            </Text>
+          </Stack>
+        </Paper>
       ) : (
         jobs.map((j) => <JobRow key={j.id} job={j} onCancel={() => cancel.mutate(j.id)} />)
       )}
