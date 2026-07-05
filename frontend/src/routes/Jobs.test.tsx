@@ -97,4 +97,18 @@ describe("reprocessSummary", () => {
     expect(reprocessSummary({ total: 3, stacked: 1, skipped: 1, failed: [{ target: "Z" }] }))
       .toEqual({ line: "Restacked 1/3 targets — 1 already up to date — 1 failed.", failed: ["Z"] });
   });
+  it("reports how many targets were deep-rescanned (QC/solve/grade) when the option was used", () => {
+    expect(reprocessSummary({ total: 3, stacked: 3, rescanned: 3, failed: [] }))
+      .toEqual({ line: "Restacked 3/3 targets — re-ran QC/solve/grade on 3.", failed: [] });
+    // Zero rescanned (the default plain restack) omits the clause entirely.
+    expect(reprocessSummary({ total: 3, stacked: 3, rescanned: 0, failed: [] }))
+      .toEqual({ line: "Restacked 3/3 targets.", failed: [] });
+    // Ordering: rescan note before the skip note before failures.
+    expect(reprocessSummary({
+      total: 4, stacked: 2, rescanned: 2, skipped: 1, failed: [{ target: "Q" }],
+    })).toEqual({
+      line: "Restacked 2/4 targets — re-ran QC/solve/grade on 2 — 1 already up to date — 1 failed.",
+      failed: ["Q"],
+    });
+  });
 });
