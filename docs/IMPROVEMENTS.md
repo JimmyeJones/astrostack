@@ -448,19 +448,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   splitting the geometry op itself. Borderline by-design; if fixed, render the Original
   through the same geometry ops (or size the box from the base render). Found by a Builder
   frontend audit 2026-07-05. (S, editor/trust)
-- **Low-priority robustness: mosaic canvas iterative-shrink picks its "worst"
-  frame with a wrap-unsafe RA median.** `compute_mosaic_canvas`'s primary outlier
-  pass uses `_circ_mean_ra_deg` (wrap-safe) to find gross plate-solve outliers, but
-  the *iterative canvas-shrink fallback* — only reached when the union would exceed
-  `MAX_CANVAS_PX` (16000 px) — recomputes each active frame's separation from a plain
-  `np.median(foot[i][1])` of its corner RAs (`mosaic.py:287`). For a group straddling
-  RA=0° that flings a good central frame's apparent centre to ~180°, so it could be
-  chosen as the "worst" and dropped instead of the real outlier (or the loop drops
-  good panels and still fails to fit). **Near-unreachable** — needs a genuinely huge
-  (>16000 px) mosaic *and* an RA≈0 straddle — so not worth a standalone ship. Cheap
-  fix if a future run is already in `mosaic.py`: reuse `_circ_mean_ra_deg` for the
-  fallback's per-frame centre RA too (mirroring the primary pass), with a regression
-  test that an RA≈0 group over the cap drops the actual outlier. (S, robustness)
+- ~~**Low-priority robustness: mosaic canvas iterative-shrink picks its "worst"
+  frame with a wrap-unsafe RA median.**~~ — **FIXED v0.81.9** (see Shipped). The
+  iterative canvas-shrink fallback now computes each active frame's centre RA with
+  the wrap-safe `_circ_mean_ra_deg` (mirroring the primary outlier pass) instead of a
+  plain `np.median` of corner RAs, so a group straddling RA=0° over the pixel cap drops
+  the actual far outlier rather than a good central (wrap-straddling) frame. Regression
+  test `test_canvas_shrink_loop_drops_the_real_outlier_near_ra_zero` (fails before /
+  passes after).
 - **Low-priority robustness: `background.final_gradient` has no image-size box
   clamp (unlike `background.subtract`).** `background.subtract` runs its box_size
   through `BackgroundOptions.for_image_size` (floors it so the mesh always tiles a
@@ -542,6 +537,27 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Fix: mosaic canvas iterative-shrink dropped a good central frame instead of the real
+  outlier when the group straddled RA=0° (stacking-engine data-integrity).** The primary
+  plate-solve-outlier pass computes each frame's centre RA wrap-safely with
+  `_circ_mean_ra_deg`, but the *iterative canvas-shrink fallback* — reached only when the
+  union footprint exceeds the pixel cap (`MAX_CANVAS_PX`, 16000 px) — picked the frame to
+  drop using a plain `np.median` of its corner RAs. For a frame whose footprint straddles
+  the 0°/360° wrap (corners at, say, 359.6° and 0.4°) that median is ~180°, flinging the
+  frame's apparent centre to the opposite side of the sky — so a perfectly good *central*
+  frame looked like the worst outlier and was dropped from the mosaic (silently losing a
+  real panel), while the actual far frame survived. Fix: the shrink loop now uses the same
+  wrap-safe `_circ_mean_ra_deg` for each frame's centre RA (Dec doesn't wrap, so its median
+  is unchanged), mirroring the primary pass. Reachable only for a genuinely huge (>16000 px)
+  mosaic *and* an RA≈0 straddle, but a real data-integrity path in the top-focus stacking
+  engine when it triggers. Engine-only, additive/upgrade-safe (no schema/API/default change;
+  a well-solved non-straddling stack is unaffected — the loop is a rarely-hit backstop).
+  Regression test `test_canvas_shrink_loop_drops_the_real_outlier_near_ra_zero`: four frames
+  around RA≈0 (below the proactive pass's frame threshold, so the size-cap loop does the
+  dropping) with a forced small `max_canvas_px` — before the fix the central straddler is
+  dropped (n_footprints=2), after it the real far frame is dropped and the central one kept
+  (n_footprints=3). (v0.81.9, this run — Builder)
 
 - **Fix: a manual re-stack (or re-export/re-combine) under an existing basename silently
   made the *previous* run's history row serve the new image (data-integrity/trust).** A

@@ -282,10 +282,14 @@ def compute_mosaic_canvas(
                 "is far from the rest (or re-solve them)."
             )
         # Drop the active frame whose footprint centre is farthest from the
-        # union centre — that's the one flinging the canvas.
+        # union centre — that's the one flinging the canvas. Use the wrap-safe
+        # circular mean for each frame's centre RA (mirroring the primary
+        # outlier pass): a plain median of a frame's corner RAs sends a frame
+        # straddling RA=0 to ~180°, so a good *central* frame would look like the
+        # worst outlier and get dropped instead of the real one.
         seps = {
             i: _ang_sep_deg(
-                float(np.median(foot[i][1])), float(np.median(foot[i][2])),
+                _circ_mean_ra_deg(foot[i][1]), float(np.median(foot[i][2])),
                 center_ra, center_dec,
             )
             for i in active
