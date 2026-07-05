@@ -231,7 +231,7 @@ def test_reject_summary_groups_by_reason(client, built_library, data_root):
     # Nothing rejected yet.
     r = client.get("/api/targets/M_42/frames/reject-summary")
     assert r.status_code == 200
-    assert r.json() == {"counts": {}, "total": 0}
+    assert r.json() == {"counts": {}, "total": 0, "solve_setup_problem": None}
 
     # A manual reject (reason "user")...
     client.post("/api/targets/M_42/frames/bulk",
@@ -251,8 +251,37 @@ def test_reject_summary_groups_by_reason(client, built_library, data_root):
     assert body["total"] == sum(body["counts"].values()) == 2
     assert body["counts"].get("user") == 1
     assert body["counts"].get("qc:fwhm") == 1
+    # Ordinary rejects are not a solve-setup problem.
+    assert body["solve_setup_problem"] is None
     # 'reject-summary' is a literal path, not captured as a frame id.
     assert client.get("/api/targets/M_42/frames/reject-summary").status_code == 200
+
+
+def test_reject_summary_flags_solve_setup_problem(client, built_library, data_root):
+    """When ASTAP's star database is missing, every frame's solve fails the same
+    way; the summary surfaces one server-side `solve_setup_problem` classification
+    (reliable for the database case, not just the deterministic astap-missing one)."""
+    from seestack.io.library import Library
+
+    frames = client.get("/api/targets/M_42/frames").json()
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target("M_42")
+        try:
+            # Reasons as written by apply_solve_result_to_db for a setup failure:
+            # a canonical, un-truncatable "no star database" token.
+            for f in frames[:2]:
+                proj.update_frame(f["id"], accept=False,
+                                  reject_reason="solve_failed:no star database")
+            # An unrelated per-frame reject shouldn't confuse the classifier.
+            proj.update_frame(frames[2]["id"], accept=False, reject_reason="qc:fwhm")
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    body = client.get("/api/targets/M_42/frames/reject-summary").json()
+    assert body["solve_setup_problem"] == {"kind": "database", "frames": 2}
 
 
 def test_frame_preview_renders_png(client, built_library):

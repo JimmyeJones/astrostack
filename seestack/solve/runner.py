@@ -20,7 +20,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-from seestack.solve.astap import ASTAPError, ASTAPSolver
+from seestack.solve.astap import ASTAPError, ASTAPSolver, classify_solve_setup_error
 
 log = logging.getLogger(__name__)
 
@@ -129,7 +129,20 @@ def apply_solve_result_to_db(project, result: SolveResult) -> None:
         # Don't touch accept/reject — a frame may be unsolved transiently
         # (clouds blocked the catalog match) but be perfectly fine for stacking
         # if it's similar to its neighbours.
-        project.update_frame(result.frame_id, reject_reason=f"solve_failed:{(result.error or 'unknown')[:120]}")
+        #
+        # For a *setup* failure (ASTAP or its star database missing — the same
+        # error on every frame, fixed by a one-time setup step), store a stable
+        # canonical reason instead of the raw log. The raw ASTAP message is
+        # truncated to 120 chars for storage, and the "no star database" line can
+        # land past that window — canonicalising here (where the full log is
+        # available) lets the Target page reliably show one actionable banner
+        # rather than a wall of un-classifiable "Plate-solve failed" chips.
+        # Ordinary per-frame failures keep their raw (truncated) message for
+        # debugging.
+        raw = result.error or "unknown"
+        setup = classify_solve_setup_error(raw)
+        reason = setup if setup is not None else raw[:120]
+        project.update_frame(result.frame_id, reject_reason=f"solve_failed:{reason}")
         return
     project.update_frame(
         result.frame_id,

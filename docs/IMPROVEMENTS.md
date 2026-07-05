@@ -387,15 +387,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   missing, every frame's solve fails identically and the Target page now shows one
   actionable banner (with "Re-run QC + Solve" + "Open Settings") instead of a wall of
   "Plate-solve failed" chips with no guidance.
-- **Make the star-database "not set up" signal robust (server-side classification).**
-  Follow-up to v0.84.0: the frontend detects the setup problem from the truncated
-  (120-char) `reject_reason` strings, which is reliable for the deterministic
-  "astap.exe not found" installer message but only best-effort for "no star database"
-  (ASTAP's phrase can fall outside the stored window). A small server-side classifier
-  (reusing `_is_fatal_solve_error`'s signatures at solve time, where the full log is
-  available) exposed as e.g. a `solve_setup_problem` field on the target/reject-summary
-  response would make the database case just as reliable. Additive; the frontend banner
-  already exists to consume it. (S, friendliness/robustness)
+- ~~**Make the star-database "not set up" signal robust (server-side classification).**~~
+  — **shipped v0.84.1** (see Shipped). Setup failures (ASTAP/star-database missing) are now
+  stored with a stable canonical `reject_reason` at solve time (where the full log is
+  available), and the reject-summary response carries a server-computed `solve_setup_problem`
+  field the Target banner prefers — so the database case is now as reliable as the
+  astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 - ~~**Photometric (multiplicative) frame normalization before combine**~~ —
@@ -562,6 +559,31 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Robust server-side plate-solve setup classification — makes the star-database "not set up"
+  signal as reliable as the astap-missing one (PRIORITY-3 friendliness/robustness; follow-up
+  to v0.84.0).** The v0.84.0 banner detected the setup problem from the stored (120-char
+  truncated) `reject_reason` strings — reliable for the deterministic "astap.exe not found"
+  installer message, but only best-effort for "no star database", whose ASTAP log line can
+  land past the truncation window (leaving the whole target's frames as un-classifiable
+  "Plate-solve failed" chips). Now: (1) a new engine helper `classify_solve_setup_error`
+  (in `seestack/solve/astap.py`, mirroring the frontend's conservative signatures — a generic
+  "could not open / error reading" is *not* a setup problem) classifies a failure at solve
+  time, where the *full* log is available; (2) `apply_solve_result_to_db` stores a **stable
+  canonical** `reject_reason` (`solve_failed:no star database` / `solve_failed:astap not found`)
+  for setup failures so the signature always survives truncation, keeping the raw truncated
+  message only for ordinary per-frame failures; (3) the `…/frames/reject-summary` response gains
+  a server-computed `solve_setup_problem` `{kind, frames}` field, and the Target banner prefers
+  it (falling back to the existing client-side `detectSolveSetupProblem(counts)` on an older
+  backend). Additive/upgrade-safe: no schema change (same `reject_reason` column, just canonical
+  values for *new* setup failures — old rows keep working via the client fallback), a new
+  response field (nothing removed/renamed), and the banner still renders nothing when there's no
+  setup problem. Tests: engine/runner (`classify_solve_setup_error` matrix; a "no star database"
+  message buried past char 120 is canonicalised so it's reliably classifiable — fails before /
+  passes after; a per-frame failure keeps its raw message) + webapp (reject-summary reports the
+  `solve_setup_problem` for a database-missing target, `None` for ordinary rejects) + Vitest
+  (the banner fires from the server field even when `counts` lacks the raw phrase). (v0.84.1,
+  this run — Builder)
 
 - **Actionable "plate-solving isn't set up" banner on the Target page (PRIORITY-3 friendliness +
   "just works").** Found by a Builder friendliness pass: when ASTAP (the plate-solver) or its

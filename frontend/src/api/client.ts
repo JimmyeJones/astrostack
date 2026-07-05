@@ -556,7 +556,14 @@ export const api = {
       body: JSON.stringify(body),
     }),
   rejectSummary: (safe: string) =>
-    req<{ counts: Record<string, number>; total: number }>(
+    req<{
+      counts: Record<string, number>;
+      total: number;
+      // Server-side plate-solve *setup* classification (v0.84.1+). Reliable for
+      // the star-database case too; older backends omit it and the frontend
+      // falls back to detecting it from `counts`.
+      solve_setup_problem?: { kind: "astap" | "database"; frames: number } | null;
+    }>(
       `/api/targets/${safe}/frames/reject-summary`,
     ),
   autoGradePreview: (safe: string, sensitivity?: string) =>

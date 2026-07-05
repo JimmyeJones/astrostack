@@ -296,6 +296,42 @@ def _is_fatal_solve_error(log_tail: str) -> bool:
     )
 
 
+# Stable canonical short reasons for plate-solve *setup* failures — problems that
+# fail *every* frame identically and are fixed by a one-time setup action
+# (install/point at ASTAP, download a star database), not by retrying or dropping
+# the frame. These are stored verbatim in ``reject_reason`` so the signature
+# survives the reason-string truncation and the UI can classify it reliably (the
+# raw ASTAP "no star database" line can otherwise land past the stored window).
+SOLVE_SETUP_ASTAP_MISSING = "astap not found"
+SOLVE_SETUP_NO_DATABASE = "no star database"
+
+
+def classify_solve_setup_error(error_text: str | None) -> str | None:
+    """Classify a plate-solve failure message as a *setup* problem, or ``None``.
+
+    Returns :data:`SOLVE_SETUP_ASTAP_MISSING` / :data:`SOLVE_SETUP_NO_DATABASE`
+    when the full failure text shows ASTAP or its star database isn't available —
+    a problem that fails every frame the same way and is fixed once, not per
+    frame. Returns ``None`` for an ordinary per-frame failure (no catalog match, a
+    single unreadable file, …), so those are never misreported as a setup problem.
+
+    Deliberately conservative and mirrors the frontend signatures: a generic
+    "could not open / error reading" (which :func:`_is_fatal_solve_error` also
+    treats as fatal, but which can be one corrupt frame) is **not** a setup
+    problem here.
+    """
+    if not error_text:
+        return None
+    low = error_text.lower()
+    # ASTAP binary itself missing — the most fundamental problem; the solver never
+    # ran, so a database message can't also be present. Check it first.
+    if "astap.exe not found" in low or "astap not found" in low:
+        return SOLVE_SETUP_ASTAP_MISSING
+    if "no star database" in low or "star database not found" in low:
+        return SOLVE_SETUP_NO_DATABASE
+    return None
+
+
 def _parse_astap_ini(ini_path: Path) -> tuple[float, float, float, float]:
     """
     Pull (ra_deg, dec_deg, pixscale_arcsec, rotation_deg) from an ASTAP .ini.
