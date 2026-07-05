@@ -52,6 +52,80 @@ def test_stack_options_from_run_json_rejects(bad):
     assert pipeline._stack_options_from_run_json(bad) is None
 
 
+def test_reprocess_output_basename_is_version_tagged_and_unique():
+    # Fresh, version-tagged name when nothing collides.
+    assert pipeline._reprocess_output_basename(set(), "0.81.3") == "master_v0.81.3"
+    # Never collides with the existing "master" (the bug this guards against).
+    assert pipeline._reprocess_output_basename({"master"}, "0.81.3") == "master_v0.81.3"
+    # Suffixes when the version-tagged name is already taken (double reprocess).
+    assert pipeline._reprocess_output_basename(
+        {"master", "master_v0.81.3"}, "0.81.3") == "master_v0.81.3_2"
+    assert pipeline._reprocess_output_basename(
+        {"master_v0.81.3", "master_v0.81.3_2"}, "0.81.3") == "master_v0.81.3_3"
+
+
+def test_reprocess_all_preserves_the_existing_master_output(solved_client, solved_library):
+    """Regression: reprocess-all must not archive/overwrite a target's existing
+    ``master`` output. Before the fix the reused options carried
+    ``output_name="master"``, so the restack renamed the original master.fits to a
+    timestamped orphan and wrote the new pixels in its place — the old run's row
+    then silently served the new image. Now each reprocess run gets a fresh,
+    version-tagged basename, so the original file is untouched and both runs are
+    reachable in History."""
+    import hashlib
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        targets = [e.safe_name for e in lib.list_targets()]
+    finally:
+        lib.close()
+    victim = targets[0]
+
+    # Produce a *real* first stack so master.fits exists on disk with known content.
+    r = solved_client.post(f"/api/targets/{victim}/stack", json={})
+    assert r.status_code == 200
+    _wait_job(solved_client, r.json()["job_id"])
+
+    runs_before = solved_client.get(f"/api/targets/{victim}/stack-runs").json()
+    assert len(runs_before) == 1
+    assert runs_before[0]["output_basename"] == "master"
+    # Resolve the master output path from the recorded run rather than assuming the
+    # on-disk layout.
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(victim)
+        try:
+            master = Path(next(iter(proj.iter_stack_runs())).fits_path)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    assert master.exists()
+    before_digest = hashlib.sha256(master.read_bytes()).hexdigest()
+
+    # Reprocess everything (no stale filter → the victim is restacked).
+    r = solved_client.post("/api/reprocess-all")
+    assert r.status_code == 200
+    body = _wait_job(solved_client, r.json()["job_id"])
+    assert body["state"] == "done"
+
+    # The original master.fits is byte-for-byte unchanged (not archived/overwritten).
+    assert master.exists()
+    assert hashlib.sha256(master.read_bytes()).hexdigest() == before_digest
+
+    # The reprocessed run is a NEW run with a distinct, version-tagged basename, and
+    # both runs' outputs exist and are reachable.
+    runs_after = solved_client.get(f"/api/targets/{victim}/stack-runs").json()
+    assert len(runs_after) == 2
+    basenames = {run["output_basename"] for run in runs_after}
+    assert "master" in basenames               # the original run is still there
+    new_names = basenames - {"master"}
+    assert len(new_names) == 1
+    assert next(iter(new_names)).startswith("master_v")  # fresh version-tagged name
+    for run in runs_after:
+        assert run["has_fits"], f"{run['output_basename']} lost its FITS output"
+
+
 # --------------------------------------------------------------------------- #
 # Batch body
 # --------------------------------------------------------------------------- #

@@ -513,6 +513,27 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Fix: "Reprocess everything" silently overwrote each target's existing stack output
+  (data-integrity bug on the owner-requested feature; found by a Builder webapp audit).**
+  `submit_reprocess_all` reused each target's last run's `options_json`, which carries the
+  original run's `output_name="master"`. So the restack wrote to the *same* basename:
+  `write_stack_outputs`→`_archive_if_exists` renamed the existing `master.fits`/`.tif`/
+  `_preview.png` to timestamped files that **no DB row references**, and wrote the new
+  pixels back at the original paths — so the *old* run's `stack_runs` row (still pointing
+  at `master.fits`) silently began serving the *new* image, and the original became an
+  orphan the UI never shows. This directly contradicted the feature's promise ("nothing is
+  deleted or overwritten — compare them in History") and defeated its safety guarantee (a
+  worse restack *could* lose a good result). Fix: reprocess now writes each run to a fresh,
+  version-tagged basename (`master_v<version>`, `_2`/`_3` suffixed if that already exists),
+  via a new `output_name` override threaded into `_stack_target` — so the reprocessed image
+  lands *alongside* the existing one, both reachable as separate runs. Nothing reads
+  `master.fits` by name (all reads go through the run row's `fits_path`), so the rename is
+  safe. Additive/upgrade-safe: no schema/API/default change; only the on-disk basename of
+  *new* reprocess outputs changes. Tests: pure (`_reprocess_output_basename` version-tag +
+  collision-suffix) + end-to-end regression (a real first stack's `master.fits` is
+  byte-for-byte unchanged after reprocess, and a second version-tagged run appears with its
+  own FITS — fails before the fix, passes after). (v0.81.4, this run — Builder)
+
 - **Stack form nudges to enable Photometric normalization when transparency varies a lot
   (PRIORITY-2/3 autonomy + friendliness, companion to v0.81.0).** v0.81.0 shipped the
   off-by-default `photometric_normalize` option that gain-matches hazy vs clear subs
