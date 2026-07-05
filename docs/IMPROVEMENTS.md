@@ -394,15 +394,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   memory-budget refusal, "nothing plate-solved to stack", empty-alignment, and
   missing-reference-WCS failures into a plain sentence + next step, falling back to the
   raw text verbatim for anything unrecognised. Remaining long-job-feedback ideas welcome.)_
-  _(Follow-up idea, found while shipping v0.84.3: `friendlyJobError` matches on the raw
-  exception *string*, which is brittle if an engine message is reworded. A more robust
-  approach — mirroring the v0.84.1 server-side solve-setup classification — would have the
-  backend stamp a stable canonical `error_kind` on a failed job (e.g. `memory_budget`,
-  `no_solved_frames`, `no_alignment`) at the point the exception is caught in
-  `JobManager` (webapp/jobs.py), where the exception *type* is known, and have the
-  frontend prefer that field over string-matching (falling back to the current matcher on
-  an older backend). Additive: a new nullable job field + a new response key, no
-  schema/API-shape break. (S, friendliness/robustness))_
+  _(~~Follow-up idea, found while shipping v0.84.3: `friendlyJobError` matches on the raw
+  exception *string*, which is brittle if an engine message is reworded. Stamp a stable
+  canonical `error_kind` server-side and prefer it in the frontend.~~ — **shipped v0.84.4**
+  (see Shipped). `JobManager` now classifies a fatal exception into a canonical `error_kind`
+  (`memory_budget`/`no_solved_frames`/`no_alignment`/`no_reference_wcs`) at the catch point,
+  persists it (additive `error_kind` column, in-place migration), and exposes it on the job;
+  `friendlyJobError(raw, kind)` prefers it and falls back to the string matcher on an older
+  backend.)_
 - ~~**Actionable "plate-solving isn't set up" banner when a whole target fails to solve**~~
   — **shipped v0.84.0** (see Shipped). When ASTAP (or, best-effort, its star database) is
   missing, every frame's solve fails identically and the Target page now shows one
@@ -580,6 +579,27 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Robust server-side `error_kind` on failed jobs — makes the plain-language job-error
+  translation reword-proof (PRIORITY-3 friendliness/robustness; follow-up to v0.84.3).** The
+  v0.84.3 `friendlyJobError` helper recognised known-fatal failures by string-matching the raw
+  `job.error` text — which silently breaks if an engine message is ever reworded. `JobManager`
+  now classifies a fatal exception into a **stable canonical** `error_kind` at the catch point
+  in `_run` (webapp/jobs.py), where the exception *type* and the full untruncated message are
+  both available: `memory_budget` (type-based — `MemoryError`, so it survives any message
+  wording), `no_solved_frames`, `no_alignment`, `no_reference_wcs` (message signatures), or
+  `None` for anything unrecognised so the raw text is still shown verbatim. The kind is
+  persisted (additive nullable `error_kind` column, added in place via `ALTER TABLE` so old
+  `jobs.sqlite` history migrates cleanly, never a reset) and exposed on the job dict; the
+  frontend `friendlyJobError(raw, kind)` prefers the kind and falls back to the existing string
+  matcher when it's absent (older backend) or unknown. Additive/upgrade-safe — new nullable
+  column + new response field + a text map moved into `JOB_ERROR_KIND`; no schema-version,
+  API-shape, or default change. Tests: pytest (`classify_job_error` matrix incl. type-based
+  memory + unrecognised→None; a MemoryError job's kind persists + reloads from disk; an old
+  pre-column DB migrates in place and keeps serving its rows) + Vitest (`friendlyJobError`
+  prefers a known kind over unrecognisable raw text and falls back when absent/unknown; a
+  JobsView job whose raw text is unmatchable still renders the plain message via its
+  `error_kind`). (v0.84.4, this run — Builder)
 
 - **Plain-language job failure messages on the Jobs page (PRIORITY-3 friendliness; follow-up to
   v0.84.2).** A failed job previously surfaced its raw `job.error` string verbatim — stored as

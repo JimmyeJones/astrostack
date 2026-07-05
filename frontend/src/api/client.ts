@@ -287,6 +287,9 @@ export interface Job {
   started_utc: string | null;
   finished_utc: string | null;
   error: string | null;
+  /** Stable canonical failure category set server-side (webapp/jobs.py), preferred
+   * over string-matching the raw `error`. Absent on an older backend. */
+  error_kind?: string | null;
   result: Record<string, unknown> | null;
 }
 
