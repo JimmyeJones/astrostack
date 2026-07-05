@@ -84,6 +84,21 @@ describe("JobsView", () => {
     expect(screen.getByText(/Lower the drizzle scale/)).toBeInTheDocument();
   });
 
+  it("uses the backend's error_kind even when the raw text is unrecognisable", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "err-kind", kind: "stack", state: "error",
+        // Raw text a string matcher wouldn't catch; the canonical kind still does.
+        error: "SomeReworded: allocation over the configured ceiling",
+        error_kind: "memory_budget",
+      }),
+    ]);
+    renderJobs();
+    await waitFor(() =>
+      expect(screen.getByText(/needs more memory than the budget allows/)).toBeInTheDocument());
+    expect(screen.queryByText(/SomeReworded:/)).not.toBeInTheDocument();
+  });
+
   it("falls back to the raw text for an unrecognised error", async () => {
     vi.spyOn(client.api, "listJobs").mockResolvedValue([
       mkJob({ id: "err-2", state: "error", error: "OSError: disk is full" }),
@@ -158,6 +173,23 @@ describe("friendlyJobError", () => {
   });
   it("returns the raw text verbatim for anything unrecognised", () => {
     expect(friendlyJobError("OSError: disk is full")).toEqual({ message: "OSError: disk is full" });
+  });
+  it("prefers the backend's canonical error_kind over string matching", () => {
+    // Even when the raw text is unrecognisable (e.g. reworded upstream), a known
+    // kind still yields the plain-language message — reword-proof.
+    const r = friendlyJobError("SomeReworded: allocation exceeded", "memory_budget");
+    expect(r.message).toMatch(/more memory than the budget allows/);
+    expect(r.next).toMatch(/drizzle scale/);
+    expect(friendlyJobError("whatever", "no_solved_frames").message)
+      .toMatch(/no accepted, plate-solved frames/);
+  });
+  it("falls back to string matching when error_kind is absent or unknown", () => {
+    // Older backend: no kind → match the raw text.
+    expect(friendlyJobError("MemoryError: needs working memory", null).message)
+      .toMatch(/more memory than the budget allows/);
+    // Unknown kind → still fall back to the raw text.
+    expect(friendlyJobError("OSError: disk is full", "future_kind"))
+      .toEqual({ message: "OSError: disk is full" });
   });
 });
 

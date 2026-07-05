@@ -39,6 +39,40 @@ def _utc() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def classify_job_error(exc: BaseException) -> str | None:
+    """Map a fatal job exception to a *stable canonical* ``error_kind`` string.
+
+    The frontend translates a failed job into a plain-language sentence. It used
+    to do so by string-matching the raw ``error`` text, which is brittle if an
+    engine message is ever reworded. Classifying here — at the point the exception
+    is caught, where the exception *type* and the full untruncated message are both
+    available — gives the frontend a stable key to prefer (falling back to its own
+    matcher on an older backend). Returns ``None`` for anything unrecognised, so
+    the raw text is still shown verbatim and no information is hidden.
+
+    The kinds mirror the frontend's known-fatal signatures:
+    ``memory_budget`` (the OOM guard refused the stack before running),
+    ``no_solved_frames`` (nothing accepted + plate-solved to stack),
+    ``no_alignment`` (frames didn't overlap / solved to different fields), and
+    ``no_reference_wcs`` (the reference frame isn't plate-solved).
+    """
+    # Type-based first — reword-proof. The stacker refuses an over-budget canvas
+    # by raising MemoryError (see stacker.py's memory guard).
+    msg = str(exc).lower()
+    if isinstance(exc, MemoryError) or "working memory" in msg:
+        return "memory_budget"
+    if ("plate-solve" in msg or "plate solved" in msg or "plate-solved" in msg):
+        return "no_solved_frames"
+    if ("no frames could be aligned" in msg or "no usable frames" in msg
+            or "did not intersect the canvas" in msg
+            or "produced no usable frames" in msg):
+        return "no_alignment"
+    if ("missing wcs" in msg or "wcs could not be parsed" in msg
+            or "reference wcs" in msg):
+        return "no_reference_wcs"
+    return None
+
+
 @dataclass
 class Job:
     kind: str
@@ -53,6 +87,7 @@ class Job:
     started_utc: str | None = None
     finished_utc: str | None = None
     error: str | None = None
+    error_kind: str | None = None
     result: dict[str, Any] | None = None
     _cancel: threading.Event = field(default_factory=threading.Event, repr=False)
     _last_flush: float = field(default=0.0, repr=False)
@@ -75,6 +110,7 @@ class Job:
             "total": self.total, "detail": self.detail,
             "created_utc": self.created_utc, "started_utc": self.started_utc,
             "finished_utc": self.finished_utc, "error": self.error,
+            "error_kind": self.error_kind,
             "result": self.result,
         }
 
@@ -130,6 +166,11 @@ class JobManager:
                 )
                 """
             )
+            # Additive migration: a DB created before v0.84.4 has no error_kind
+            # column. Add it in place (never a reset) so old job history survives.
+            cols = {r["name"] for r in conn.execute("PRAGMA table_info(jobs)")}
+            if "error_kind" not in cols:
+                conn.execute("ALTER TABLE jobs ADD COLUMN error_kind TEXT")
 
     _INTERRUPT_MSG = (
         "Container restarted while this job was running — likely an out-of-memory "
@@ -165,18 +206,20 @@ class JobManager:
             conn.execute(
                 """
                 INSERT INTO jobs(id, kind, target, state, phase, done, total, detail,
-                                 created_utc, started_utc, finished_utc, error, result_json)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+                                 created_utc, started_utc, finished_utc, error,
+                                 error_kind, result_json)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(id) DO UPDATE SET
                     state=excluded.state, phase=excluded.phase, done=excluded.done,
                     total=excluded.total, detail=excluded.detail,
                     started_utc=excluded.started_utc, finished_utc=excluded.finished_utc,
-                    error=excluded.error, result_json=excluded.result_json
+                    error=excluded.error, error_kind=excluded.error_kind,
+                    result_json=excluded.result_json
                 """,
                 (
                     job.id, job.kind, job.target, job.state, job.phase, job.done,
                     job.total, job.detail, job.created_utc, job.started_utc,
-                    job.finished_utc, job.error,
+                    job.finished_utc, job.error, job.error_kind,
                     json.dumps(job.result) if job.result is not None else None,
                 ),
             )
@@ -226,6 +269,7 @@ class JobManager:
         job.started_utc = row["started_utc"]
         job.finished_utc = row["finished_utc"]
         job.error = row["error"]
+        job.error_kind = row["error_kind"]
         job.result = json.loads(row["result_json"]) if row["result_json"] else None
         return job
 
@@ -248,6 +292,7 @@ class JobManager:
             job.detail = row["detail"] or ""
             job.created_utc, job.started_utc = row["created_utc"], row["started_utc"]
             job.finished_utc, job.error = row["finished_utc"], row["error"]
+            job.error_kind = row["error_kind"]
             job.result = json.loads(row["result_json"]) if row["result_json"] else None
             out.append(job)
         out.sort(key=lambda j: j.created_utc or "", reverse=True)
@@ -304,6 +349,7 @@ class JobManager:
                 log.exception("job %s (%s) failed", job.id, job.kind)
                 job.state = "error"
                 job.error = f"{type(exc).__name__}: {exc}"
+                job.error_kind = classify_job_error(exc)
             finally:
                 job.finished_utc = _utc()
                 self._persist(job)
