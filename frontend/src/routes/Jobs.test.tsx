@@ -171,6 +171,14 @@ describe("friendlyJobError", () => {
     expect(friendlyJobError("ValueError: reference frame is missing WCS or dimensions").message)
       .toMatch(/reference frame isn/);
   });
+  it("translates a Build-master empty-folder failure", () => {
+    const r = friendlyJobError("FileNotFoundError: No FITS files found in /mnt/darks");
+    expect(r.message).toMatch(/No FITS frames were found/);
+    expect(r.next).toMatch(/calibration frames/);
+    // Also reachable via the canonical kind.
+    expect(friendlyJobError("whatever", "no_fits_in_folder").message)
+      .toMatch(/No FITS frames were found/);
+  });
   it("returns the raw text verbatim for anything unrecognised", () => {
     expect(friendlyJobError("OSError: disk is full")).toEqual({ message: "OSError: disk is full" });
   });

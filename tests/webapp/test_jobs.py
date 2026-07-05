@@ -141,6 +141,12 @@ def test_classify_job_error_maps_known_signatures():
         ValueError("drizzle: no usable frames")) == "no_alignment"
     assert classify_job_error(
         ValueError("reference frame is missing WCS or dimensions")) == "no_reference_wcs"
+    # A Build-master job pointed at an empty/wrong folder.
+    assert classify_job_error(
+        FileNotFoundError("No FITS files found in /mnt/darks")) == "no_fits_in_folder"
+    # But an *internal* FileNotFoundError (missing target/run) is not dressed up
+    # as a folder problem.
+    assert classify_job_error(FileNotFoundError("no target 'M31'")) is None
     # Anything unrecognised stays None so the raw text is shown verbatim.
     assert classify_job_error(OSError("disk is full")) is None
 

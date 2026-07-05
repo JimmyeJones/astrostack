@@ -77,6 +77,13 @@ const JOB_ERROR_KIND: Record<string, { message: string; next?: string }> = {
     message: "The reference frame isn’t plate-solved, so the stack has nothing to align to.",
     next: "Re-run Quality check & plate-solve, then stack again.",
   },
+  // A "Build master" job was pointed at a folder with no FITS frames.
+  no_fits_in_folder: {
+    message: "No FITS frames were found in that folder.",
+    next:
+      "Point it at the folder that holds your calibration frames (the .fits darks, "
+      + "flats or bias subs) and build the master again.",
+  },
 };
 
 // Translate a failed job into a plain sentence + next step. Prefer the backend's
@@ -104,6 +111,9 @@ export function friendlyJobError(
   if (s.includes("missing wcs") || s.includes("wcs could not be parsed")
       || s.includes("reference wcs")) {
     return JOB_ERROR_KIND.no_reference_wcs;
+  }
+  if (s.includes("no fits files found")) {
+    return JOB_ERROR_KIND.no_fits_in_folder;
   }
   return { message: raw };
 }

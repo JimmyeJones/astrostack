@@ -53,8 +53,9 @@ def classify_job_error(exc: BaseException) -> str | None:
     The kinds mirror the frontend's known-fatal signatures:
     ``memory_budget`` (the OOM guard refused the stack before running),
     ``no_solved_frames`` (nothing accepted + plate-solved to stack),
-    ``no_alignment`` (frames didn't overlap / solved to different fields), and
-    ``no_reference_wcs`` (the reference frame isn't plate-solved).
+    ``no_alignment`` (frames didn't overlap / solved to different fields),
+    ``no_reference_wcs`` (the reference frame isn't plate-solved), and
+    ``no_fits_in_folder`` (a Build-master job pointed at a folder with no FITS).
     """
     # Type-based first — reword-proof. The stacker refuses an over-budget canvas
     # by raising MemoryError (see stacker.py's memory guard).
@@ -70,6 +71,12 @@ def classify_job_error(exc: BaseException) -> str | None:
     if ("missing wcs" in msg or "wcs could not be parsed" in msg
             or "reference wcs" in msg):
         return "no_reference_wcs"
+    # A calibration Build-master job pointed at an empty / wrong folder (a common
+    # beginner mistake). Match the specific "no FITS files found" phrase, not
+    # FileNotFoundError generally — other FileNotFoundErrors (missing target/run)
+    # are internal and shouldn't be dressed up as a folder problem.
+    if "no fits files found" in msg:
+        return "no_fits_in_folder"
     return None
 
 
