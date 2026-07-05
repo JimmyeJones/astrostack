@@ -520,6 +520,23 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Fix flaky Editor "Auto curve" test that was intermittently reddening main's CI.**
+  The frontend CI job failed on several recent `main` pushes (including a docs-only
+  commit, `#108`), always in `Editor.test.tsx > sets a gentle starting curve via the
+  header 'Auto curve'`. Root cause (traced with an instrumented repro): the test
+  captured the "Auto curve" `<button>` reference across an `await`, but the toolbar
+  subtree **remounts** while the per-op suggestion / `default-recipe` (v0.79.0) queries
+  settle — so the captured node is detached (`isConnected === false`) by click time and
+  its React `onClick` never fires (a native listener still fires, which is the tell).
+  The added async queries shifted render timing so the remount now reliably lands right
+  after the button first appears. Fix is **test-only** and does not weaken the assertion:
+  re-find and click the button *inside* the existing `waitFor`, polling until the
+  suggested points reach a preview fetch (the durable effect) — the click is idempotent
+  (sets the same points), so retrying across the remount flicker is safe. Verified the
+  test now passes fast (≈1.4 s vs the prior 20 s `asyncUtilTimeout`) and stably (5/5
+  reruns); full frontend suite green (454 passed). No source/behaviour change. (v0.81.2,
+  this run — Builder)
+
 - **Surface photometric-normalization provenance on the run Info / History card
   (PRIORITY-4 trust, companion to v0.81.0).** The stack run's `…/info` endpoint now
   parses the `PHOTNORM`/`PHOTN*` FITS keys into a friendly `photometric` summary
