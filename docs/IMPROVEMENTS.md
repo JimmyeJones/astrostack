@@ -547,23 +547,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   `f.id if f.id is not None else -1`, matching how the maps are built, so a frame with `id == 0`
   reads its real weight/scale instead of the neutral default. Regression test
   `tests/test_stack_frame_id_zero.py` (fails before / passes after).
-- **Low-priority robustness: `background.final_gradient` has no image-size box
-  clamp (unlike `background.subtract`).** `background.subtract` runs its box_size
-  through `BackgroundOptions.for_image_size` (floors it so the mesh always tiles a
-  tiny image), but `remove_final_gradient`/`_fit_background_2d` pass `box_size`
-  (default 256, scaled by `proxy_scale`) straight to `photutils.Background2D`. On an
-  image smaller than roughly 3× the box (~768 px) too few boxes survive
-  `exclude_percentile`, so the fit raises and the editor wrapper turns that into a
-  hard `RuntimeError: edit op failed: Gradient removal` — which would break the whole
-  Auto preview/export (Auto includes `final_gradient`). **Reproduced** on a 200×220
-  array at export scale (`background.subtract` handles the same input fine). But
-  **near-unreachable** for the target user: a real Seestar stack is ≥1080 px, where
-  256 px boxes tile 4×7 and the fit succeeds; `final_gradient` is a linear-stage op
-  so it always sees the full ≤1500 px proxy (crop is nonlinear/after it). Cheap fix
-  if a future run is already in `final_gradient.py`: clamp `box_size` to the image
-  dims (mirroring `for_image_size`) and, when even one box can't be formed, return the
-  input unchanged (graceful no-op) rather than raising — with a one-line regression
-  test that a sub-box image no longer raises. (S, robustness)
+- ~~**Low-priority robustness: `background.final_gradient` has no image-size box
+  clamp (unlike `background.subtract`).**~~ — **FIXED v0.84.12** (see Shipped).
+  `_fit_background_2d` now clamps `box_size` to tile the image
+  (`min(box, max(8, min(h//4, w//4)))`, mirroring `BackgroundOptions.for_image_size`
+  on the per-frame path) before handing it to `photutils.Background2D`, so a box wider
+  than a small frame no longer leaves too few unmasked boxes to survive
+  `exclude_percentile` (which raised and turned into a hard `RuntimeError: edit op
+  failed: Gradient removal`, breaking the whole Auto preview/export since Auto includes
+  `final_gradient`). On a real ≥1080 px Seestar stack the 256 px box already tiles ≥4×,
+  so the clamp is a no-op and exports are byte-for-byte unchanged. Regression tests
+  `test_small_image_does_not_raise_and_still_flattens` (fails before / passes after)
+  and `test_full_size_box_is_unchanged_by_the_clamp`.
 - **Low-priority robustness: `detail.denoise` on a 1-px-thin image.** A 1×N / N×1
   RGB array makes the wavelet path emit all-NaN in the covered region (violating
   the NaN=coverage invariant) and the `bilateral` path raise `IndexError`. Found by
@@ -628,6 +623,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Clamp `background.final_gradient`'s box to the image size so Auto can't hard-fail on a
+  small frame (v0.84.12, robustness).** `_fit_background_2d` clamps `box_size` to tile the
+  image (`min(box, max(8, min(h//4, w//4)))`, mirroring `BackgroundOptions.for_image_size`) —
+  a box wider than a small frame previously left too few unmasked boxes to survive
+  `exclude_percentile`, so `photutils.Background2D` raised and the editor turned it into a hard
+  `RuntimeError: edit op failed: Gradient removal`, breaking the whole Auto preview/export
+  (Auto includes `final_gradient`). On a real ≥1080 px stack the 256 px box already tiles ≥4×
+  so the clamp is a no-op (exports unchanged). Tests:
+  `test_small_image_does_not_raise_and_still_flattens`, `test_full_size_box_is_unchanged_by_the_clamp`.
 
 - **Extend the rejection-clipped trust line to the drizzle-reject path (v0.84.11, PRIORITY-4
   image-quality/trust; completes the rejection-trust family started v0.84.9).** The

@@ -111,6 +111,16 @@ def _fit_background_2d(channel: np.ndarray, mask: np.ndarray, box_size: int) -> 
     clean = np.where(finite, channel, 0.0).astype(np.float32, copy=False)
     full_mask = mask | ~finite
 
+    # Clamp the box so the grid always tiles the image. On a full-size stack
+    # (≥~1080 px, where a 256 px box already tiles 4×) this is a no-op, so the
+    # export result is unchanged; but on a small image a box wider than the
+    # frame leaves too few unmasked boxes to survive ``exclude_percentile`` and
+    # ``Background2D`` raises. Mirrors ``BackgroundOptions.for_image_size`` on
+    # the per-frame path so the gradient op degrades instead of failing.
+    h, w = clean.shape[:2]
+    box = min(int(box_size), max(8, min(h // 4, w // 4)))
+    box = max(1, min(box, h, w))
+
     # MMMBackground (mode ≈ 2.5·median − 1.5·mean) instead of MedianBackground:
     # the median is biased upward by faint diffuse signal in proportion to how
     # much of each tile lies inside that signal, and that bias varies tile by
@@ -118,7 +128,7 @@ def _fit_background_2d(channel: np.ndarray, mask: np.ndarray, box_size: int) -> 
     # stretching. Mode is robust to it. Matches the per-frame bg path.
     bkg = Background2D(
         clean,
-        box_size=(box_size, box_size),
+        box_size=(box, box),
         filter_size=(3, 3),
         sigma_clip=SigmaClip(sigma=3.0),
         bkg_estimator=MMMBackground(),
