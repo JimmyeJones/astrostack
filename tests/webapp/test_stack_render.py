@@ -232,6 +232,45 @@ def test_stack_info_weighting_absent_for_unweighted_stack(client, solved_library
     assert body["weighting"] is None
 
 
+def test_stack_info_surfaces_photometric_normalization_summary(client, solved_library):
+    """A photometrically-normalized stack stamps PHOTNORM/PHOTN* cards; the info
+    endpoint parses them into a friendly summary the panel can show."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            with fits.open(run.fits_path, mode="update") as hdul:
+                hdul[0].header["PHOTNORM"] = "transparency"
+                hdul[0].header["PHOTNADJ"] = 4
+                hdul[0].header["PHOTMIN"] = 0.62
+                hdul[0].header["PHOTMAX"] = 2.0
+                hdul[0].header["PHOTMED"] = 1.03
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/info").json()
+    p = body["photometric"]
+    assert p is not None
+    assert p["mode"] == "transparency"
+    assert p["n_adjusted"] == 4
+    assert p["min"] == 0.62
+    assert p["max"] == 2.0
+    assert p["median"] == 1.03
+
+
+def test_stack_info_photometric_absent_for_unnormalized_stack(client, solved_library):
+    """A plain stack has no PHOTNORM cards, so photometric is None."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/info").json()
+    assert body["photometric"] is None
+
+
 def test_transparency_ratio_surfaces_on_runs_and_gallery(client, solved_library):
     """A run's persisted transparency verdict rides along on both the runs list
     and the gallery so the frontend can badge a hazy night at a glance."""

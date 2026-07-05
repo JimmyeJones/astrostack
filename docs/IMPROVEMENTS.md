@@ -508,6 +508,20 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Surface photometric-normalization provenance on the run Info / History card
+  (PRIORITY-4 trust, companion to v0.81.0).** The stack run's `…/info` endpoint now
+  parses the `PHOTNORM`/`PHOTN*` FITS keys into a friendly `photometric` summary
+  (mirroring the existing quality-`weighting` summary), and the History provenance
+  card renders a single line — "Photometrically normalized · N frames gain-matched ·
+  scales lo–hi (median m)" — so a user who turned normalization on can see it happened
+  and how many subs were actually scaled (and trust the off-by-default feature did
+  something). Present only on normalized stacks; absent otherwise. New pure
+  `photometricSummaryText` helper. Additive/upgrade-safe (new nullable response field +
+  advisory UI line, no schema/behaviour change). Tests: webapp (a stamped run surfaces
+  the parsed summary; a plain run reports `photometric: null`) + Vitest
+  (`photometricSummaryText`: null when un-normalized / full range / singular-frame +
+  missing-range tolerant). (v0.81.1, this run — Builder)
+
 - **Photometric (multiplicative) frame normalization before combine — gain-match the
   signal so haze/airmass doesn't weaken rejection or dim the result (PRIORITY-4
   image-quality/correctness).** Frames are additively sky-zeroed per frame, but nothing

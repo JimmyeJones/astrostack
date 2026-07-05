@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion } from "./History";
+import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText } from "./History";
 import { formatIntegration } from "../format";
 import * as client from "../api/client";
 import type { StackRun } from "../api/client";
@@ -387,6 +387,23 @@ describe("formatEngineVersion", () => {
     expect(formatEngineVersion(null)).toBe("");
     expect(formatEngineVersion(undefined)).toBe("");
     expect(formatEngineVersion("  ")).toBe("");
+  });
+});
+
+describe("photometricSummaryText", () => {
+  it("returns null when the run wasn't normalized", () => {
+    expect(photometricSummaryText(null)).toBeNull();
+    expect(photometricSummaryText(undefined)).toBeNull();
+  });
+  it("summarises frames gain-matched and the scale range", () => {
+    expect(
+      photometricSummaryText({ mode: "transparency", n_adjusted: 3, min: 0.7, max: 2.0, median: 1.05 }),
+    ).toBe("Photometrically normalized · 3 frames gain-matched · scales 0.70–2.00 (median 1.05)");
+  });
+  it("singularises one frame and tolerates a missing scale range", () => {
+    expect(photometricSummaryText({ mode: "transparency", n_adjusted: 1 })).toBe(
+      "Photometrically normalized · 1 frame gain-matched",
+    );
   });
 });
 
