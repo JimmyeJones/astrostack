@@ -1,5 +1,5 @@
 import { Button, Menu } from "@mantine/core";
-import { IconChevronDown, IconArrowsHorizontal } from "@tabler/icons-react";
+import { IconChevronDown, IconArrowsHorizontal, IconCheck } from "@tabler/icons-react";
 import type { Preset } from "../../api/client";
 
 /** Which look the user wants to compare their current edit against under the
@@ -16,7 +16,7 @@ export type LookChoice =
  * committing to it. Sits next to the Split/Compare buttons in the preview
  * toolbar. */
 export function LookComparePicker({
-  builtin, user, disabled, active, activeLabel, loading, onPick, onStop,
+  builtin, user, disabled, active, activeLabel, loading, onPick, onStop, onAdopt,
 }: {
   builtin: Preset[];
   user: Preset[];
@@ -26,6 +26,9 @@ export function LookComparePicker({
   loading: boolean;
   onPick: (choice: LookChoice) => void;
   onStop: () => void;
+  /** Apply the look currently being compared as the working recipe (an undoable
+   * step). Lets the user go from "compare" straight to "adopt" in one click. */
+  onAdopt: () => void;
 }) {
   return (
     <Menu shadow="md" position="bottom-end" width={220}>
@@ -57,6 +60,9 @@ export function LookComparePicker({
         {active ? (
           <>
             <Menu.Divider />
+            <Menu.Item leftSection={<IconCheck size={14} />} color="teal" onClick={onAdopt}>
+              Switch to this look
+            </Menu.Item>
             <Menu.Item color="red" onClick={onStop}>Stop comparing</Menu.Item>
           </>
         ) : null}
