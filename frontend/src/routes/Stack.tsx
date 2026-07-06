@@ -528,6 +528,21 @@ export function StackView() {
       ? `Your ${solvedAccepted} accepted frames are a large, well-dithered set (a Seestar dithers automatically as it captures) — exactly where Drizzle pays off, reconstructing the fine detail a Bayer sensor and short focal length under-sample. It renders to a larger canvas, so it costs more memory and time (the sizing below shows how much) and is off by default, but on a set this big it's one of the biggest resolution wins available.`
       : null;
 
+  // Companion caution to the drizzle nudge: drizzle only pays off with *lots* of
+  // dithered frames (the engine recommends 200+). Spreading each sub across a
+  // finer output grid needs enough dither-phased samples to fill it — with few
+  // frames the result is slower for no gain and, at higher scales, noisier/
+  // gappier, whereas the ordinary weighted-mean path is "faster, equally clean"
+  // on Seestar data (drizzle_path.py). Drizzle is off by default, so this only
+  // fires when the user turned it on (manually or via "Reuse settings") on a
+  // small stack. Advisory; mirrors the sigma-clip-too-few-frames caution.
+  const DRIZZLE_TOO_FEW_FRAMES = 100;
+  const drizzleTooFewHint =
+    !frames.isLoading && !!values.drizzle && solvedAccepted > 0
+    && solvedAccepted < DRIZZLE_TOO_FEW_FRAMES
+      ? `Drizzle is on, but you only have ${solvedAccepted} accepted, solved frame${solvedAccepted === 1 ? "" : "s"}. Drizzle spreads each sub across a finer output grid, so it needs lots of dithered frames (typically 200+) to fill it — with this few it's slower and can leave a noisier, gappier result${drizzleScale > 1 ? ` (more so at ${drizzleScale % 1 === 0 ? drizzleScale.toFixed(0) : drizzleScale}× scale)` : ""}, while the ordinary stack path gives faster, equally clean results on Seestar data. Consider turning Drizzle off for this stack.`
+      : null;
+
   // Drizzle accumulates in a single pass, so the sigma-clip toggle doesn't
   // apply to it — a user who enabled both would reasonably expect satellite
   // trails to be rejected and be surprised when they aren't. Point them at
@@ -842,6 +857,16 @@ export function StackView() {
               <Button size="compact-xs" variant="light" mt={6}
                 onClick={() => set("drizzle", true)}>
                 Turn on Drizzle
+              </Button>
+            </Alert>
+          ) : null}
+
+          {drizzleTooFewHint ? (
+            <Alert color="yellow" variant="light" py={6} px="sm">
+              <Text size="xs">{drizzleTooFewHint}</Text>
+              <Button size="compact-xs" variant="light" color="yellow" mt={6}
+                onClick={() => set("drizzle", false)}>
+                Turn off Drizzle
               </Button>
             </Alert>
           ) : null}

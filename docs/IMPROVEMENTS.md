@@ -682,6 +682,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Companion caution: Drizzle on with too few frames (v0.87.1, image-quality/PRIORITY 4).**
+  The symmetric footgun to the v0.87.0 nudge: drizzle only pays off with *lots* of dithered
+  frames (the engine recommends 200+) — spreading each sub across a finer output grid needs
+  enough dither-phased samples to fill it, so with few frames it's slower for no gain and, at
+  higher scales, noisier/gappier, while the ordinary weighted-mean path is "faster, equally
+  clean" on Seestar data (`drizzle_path.py`). Since drizzle is off by default this only fires
+  when the user turned it on (manually or via "Reuse settings") on a small stack (<100
+  accepted+solved frames), with a one-click "Turn off Drizzle". Advisory; mirrors the existing
+  sigma-clip-too-few-frames caution. Frontend-only, additive. Tests in `Stack.test.tsx`
+  (cautions under the floor; silent on a large set / when drizzle off; one-click off then hides).
 - **Proactive Drizzle nudge on the Stack form (v0.87.0, autonomy/image-quality/PRIORITY 2–4).**
   Drizzle recovers the fine detail a Seestar's Bayer sensor + short focal length under-sample,
   but it lives in the advanced knobs and is off by default, so a beginner sitting on thousands

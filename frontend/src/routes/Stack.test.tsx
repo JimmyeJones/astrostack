@@ -1177,4 +1177,69 @@ describe("StackView", () => {
     await waitFor(() =>
       expect(screen.queryByText(/exactly where Drizzle pays off/)).not.toBeInTheDocument());
   });
+
+  it("cautions when Drizzle is on but too few frames are accepted", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+      { key: "drizzle", label: "Drizzle", type: "bool", group: "advanced",
+        default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+    ]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ drizzle: true });
+    // 30 accepted, solved frames — well under the 100-frame drizzle floor.
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(
+      Array.from({ length: 30 }, (_, i) => mkFrame(i + 1)));
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+    vi.spyOn(client.api, "stackEstimate").mockResolvedValue(estimateResult(false, false));
+
+    renderStack();
+
+    await waitFor(() =>
+      expect(screen.getByText(/needs lots of dithered frames/)).toBeInTheDocument());
+  });
+
+  it("does not caution Drizzle on a large set", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ drizzle: true });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(
+      Array.from({ length: 250 }, (_, i) => mkFrame(i + 1)));
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+    vi.spyOn(client.api, "stackEstimate").mockResolvedValue(estimateResult(false, false));
+
+    renderStack();
+
+    await screen.findByRole("button", { name: "Start stacking" });
+    expect(screen.queryByText(/needs lots of dithered frames/)).not.toBeInTheDocument();
+  });
+
+  it("does not caution Drizzle when it is off", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ drizzle: false });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(
+      Array.from({ length: 30 }, (_, i) => mkFrame(i + 1)));
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+    vi.spyOn(client.api, "stackEstimate").mockResolvedValue(estimateResult(false, false));
+
+    renderStack();
+
+    await screen.findByRole("button", { name: "Start stacking" });
+    expect(screen.queryByText(/needs lots of dithered frames/)).not.toBeInTheDocument();
+  });
+
+  it("turns off Drizzle in one click from the too-few-frames caution, then hides it", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+      { key: "drizzle", label: "Drizzle", type: "bool", group: "advanced",
+        default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+    ]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ drizzle: true });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(
+      Array.from({ length: 30 }, (_, i) => mkFrame(i + 1)));
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+    vi.spyOn(client.api, "stackEstimate").mockResolvedValue(estimateResult(false, false));
+
+    renderStack();
+
+    const btn = await screen.findByRole("button", { name: "Turn off Drizzle" });
+    fireEvent.click(btn);
+    await waitFor(() =>
+      expect(screen.queryByText(/needs lots of dithered frames/)).not.toBeInTheDocument());
+  });
 });
