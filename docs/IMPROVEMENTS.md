@@ -409,10 +409,16 @@ problems. Dogfood it every big-picture run and fix root causes.
   _(Progress: the Stack form already carries a rich set of data-driven nudges
   (calibration picks, sigma/min-max frame-count guards, streak→min-max-k, transparency
   → quality-weight, transparency-spread → photometric-normalize, auto-grade drop-outliers,
-  memory sizing). As of v0.84.6 every one of them is now one-click. Remaining genuine gaps a
-  future run could pick up, each needing a careful classifier: proactive **drizzle on/off**
-  from frame count + dither spread; **lucky_fraction** from FWHM spread; a background/gradient
-  flatten nudge from a measured sky gradient. None are currently offered.)_
+  memory sizing). As of v0.84.6 every one of them is now one-click. A proactive **drizzle**
+  nudge shipped v0.87.0 (see Shipped): on a large single-field set (≥200 accepted, solved
+  frames — matching the field help's "200+ dithered frames") whose drizzle-*on* dry-run sizing
+  fits the memory budget, the Stack form now suggests Drizzle with a one-click "Turn on
+  Drizzle", so a beginner sitting on thousands of subs reaches the biggest resolution win
+  without hunting the advanced knobs — gated on a feasibility estimate so it never nudges
+  toward an OOM-refused run. Remaining genuine gaps a future run could pick up, each needing a
+  careful classifier: **lucky_fraction** from FWHM spread (contentious — it drops signal, so
+  weigh against quality-weighting); a background/gradient flatten nudge from a measured sky
+  gradient.)_
 - ~~**One-click "Drop N outlier frames" on the Stack-form auto-grade hint.**~~ —
   **shipped v0.83.2** (see Shipped). The auto-grade hint now carries a "Drop N outlier
   frames" button (beside the retained "Review Auto-grade" link) that calls
@@ -676,6 +682,29 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Companion caution: Drizzle on with too few frames (v0.87.1, image-quality/PRIORITY 4).**
+  The symmetric footgun to the v0.87.0 nudge: drizzle only pays off with *lots* of dithered
+  frames (the engine recommends 200+) — spreading each sub across a finer output grid needs
+  enough dither-phased samples to fill it, so with few frames it's slower for no gain and, at
+  higher scales, noisier/gappier, while the ordinary weighted-mean path is "faster, equally
+  clean" on Seestar data (`drizzle_path.py`). Since drizzle is off by default this only fires
+  when the user turned it on (manually or via "Reuse settings") on a small stack (<100
+  accepted+solved frames), with a one-click "Turn off Drizzle". Advisory; mirrors the existing
+  sigma-clip-too-few-frames caution. Frontend-only, additive. Tests in `Stack.test.tsx`
+  (cautions under the floor; silent on a large set / when drizzle off; one-click off then hides).
+- **Proactive Drizzle nudge on the Stack form (v0.87.0, autonomy/image-quality/PRIORITY 2–4).**
+  Drizzle recovers the fine detail a Seestar's Bayer sensor + short focal length under-sample,
+  but it lives in the advanced knobs and is off by default, so a beginner sitting on thousands
+  of auto-dithered subs never reaches for one of the biggest resolution wins available. The
+  Stack form now fires an advisory blue nudge (with a one-click "Turn on Drizzle") when the
+  accepted+solved frame count is large enough to be worth it (≥200, matching the field help's
+  "200+ dithered frames"), drizzle is off, **and** a drizzle-*on* dry-run sizing (`stack-estimate`
+  with `drizzle=true`) confirms it fits the memory budget and isn't a giant mosaic canvas — so
+  it never nudges toward a run that'd be refused for OOM. Frontend-only (reuses the existing
+  `stack-estimate` endpoint), additive, advisory (nothing changes until the user clicks). The
+  feasibility query sits with the other hooks above the loading early-return (rules-of-hooks).
+  Tests in `frontend/src/routes/Stack.test.tsx` (nudges on a large fitting set; silent on a
+  small set / over-budget drizzle / mosaic canvas; one-click enable then hides).
 - **Don't claim quality weighting influenced a min/max-reject stack (v0.86.2, image-quality/
   trust/PRIORITY 4).** Found by the Builder's 2026-07-06 stacking-engine audit. The min/max
   order-statistic combine path (`min_max_reject` on a non-drizzle ≥3-frame stack) combines by
