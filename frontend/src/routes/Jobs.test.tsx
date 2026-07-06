@@ -300,6 +300,20 @@ describe("reprocessSummary", () => {
       failed: ["Q"],
     });
   });
+  it("reports how many results were auto-edited when the option was used", () => {
+    expect(reprocessSummary({ total: 3, stacked: 3, auto_edited: 3, failed: [] }))
+      .toEqual({ line: "Restacked 3/3 targets — auto-edited 3.", failed: [] });
+    // Zero auto-edited (the default) omits the clause entirely.
+    expect(reprocessSummary({ total: 3, stacked: 3, auto_edited: 0, failed: [] }))
+      .toEqual({ line: "Restacked 3/3 targets.", failed: [] });
+    // Ordering: rescan note before auto-edit note before the skip note.
+    expect(reprocessSummary({
+      total: 4, stacked: 3, rescanned: 3, auto_edited: 3, skipped: 1, failed: [],
+    })).toEqual({
+      line: "Restacked 3/4 targets — re-ran QC/solve/grade on 3 — auto-edited 3 — 1 already up to date.",
+      failed: [],
+    });
+  });
 });
 
 describe("processTargetSummary", () => {

@@ -453,7 +453,8 @@ def _refresh_target(settings: Settings, jm: JobManager, job: Job,
 
 def submit_reprocess_all(settings: Settings, jm: JobManager, *,
                          stale_only: bool = False,
-                         deep_rescan: bool = False) -> Job:
+                         deep_rescan: bool = False,
+                         auto_edit: bool = False) -> Job:
     """Restack *every* target with the current engine — the owner's one-click
     "reprocess everything after an upgrade" maintenance action.
 
@@ -490,6 +491,14 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
     place, so the old run's DB row would silently start serving the *new* image.
     A distinct basename keeps the old output on disk and reachable, making the
     "nothing is deleted or overwritten — compare them in History" promise true.
+
+    ``auto_edit`` chains the one-click Auto recipe onto every restacked run (see
+    :func:`_auto_edit_process_run`), so a reprocess after an upgrade yields finished
+    *pictures* across the whole library — not flat linear masters the user must
+    hand-edit one by one. Off by default: it seeds an editor recipe on many runs at
+    once, so it's an explicit opt-in. It only touches each *new* run's own recipe and
+    preview thumbnail (never an existing run's saved edit), is best-effort per run (a
+    failure never fails the batch), and is fully reversible in the editor (Reset/undo).
     """
     def body(job: Job) -> dict[str, Any]:
         lib = Library.open_or_create(settings.resolved_library_root)
@@ -501,6 +510,7 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
             stacked = 0
             skipped = 0
             rescanned = 0
+            auto_edited = 0
             failed: list[dict[str, str]] = []
             cancelled = False
             for i, entry in enumerate(targets):
@@ -551,6 +561,14 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
                         cancelled = True
                         break
                     stacked += 1
+                    run_id = res.get("run_id")
+                    if auto_edit and run_id is not None and not job.cancel_requested():
+                        # Chain the one-click Auto recipe onto the fresh master so the
+                        # reprocess yields a finished *picture*, not a flat linear
+                        # stack — same helper the single-target Process action uses.
+                        # Best-effort: a failure here never fails the batch.
+                        if _auto_edit_process_run(lib, safe, run_id) is not None:
+                            auto_edited += 1
                 job.set_progress("reprocess", i + 1, total, f"{i + 1}/{total} targets")
                 jm.maybe_flush(job)
             return {
@@ -558,6 +576,7 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
                 "stacked": stacked,
                 "skipped": skipped,
                 "rescanned": rescanned,
+                "auto_edited": auto_edited,
                 "failed": failed,
                 "cancelled": cancelled,
             }

@@ -127,6 +127,7 @@ export function reprocessSummary(r: Record<string, unknown>): {
   const stacked = Number(r.stacked ?? 0);
   const skipped = Number(r.skipped ?? 0);
   const rescanned = Number(r.rescanned ?? 0);
+  const autoEdited = Number(r.auto_edited ?? 0);
   const failedArr = Array.isArray(r.failed) ? r.failed : [];
   const failed = failedArr
     .map((f) => (f && typeof f === "object"
@@ -136,6 +137,8 @@ export function reprocessSummary(r: Record<string, unknown>): {
   if (r.cancelled) line += " (cancelled early)";
   // Only present when the deep-rescan option was used (re-ran QC/solve/grade first).
   if (rescanned > 0) line += ` — re-ran QC/solve/grade on ${rescanned}`;
+  // Only present when the auto-edit option was used (finished pictures, not linear).
+  if (autoEdited > 0) line += ` — auto-edited ${autoEdited}`;
   if (skipped > 0) line += ` — ${skipped} already up to date`;
   if (failed.length) line += ` — ${failed.length} failed`;
   return { line: `${line}.`, failed };

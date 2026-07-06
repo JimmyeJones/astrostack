@@ -351,18 +351,16 @@ problems. Dogfood it every big-picture run and fix root causes.
   shot. Keep the current general recipe as the fallback when classification is
   low-confidence. Off-by-default risk is nil (Auto is an explicit button). Needs a
   careful, well-tested classifier so it never mis-picks confidently. (M, autonomy/editor)
-- **Chain the auto-edit onto "Reprocess everything" too (finished pictures after an
-  upgrade).** The one-click *Process target* result is now a finished picture (v0.86.0
-  saves the Auto recipe on the run + re-renders its thumbnail via `_auto_edit_process_run`).
-  The library-wide *Reprocess all targets* action (v0.74.0) still produces flat linear
-  masters, so after an upgrade the user gets fresh stacks but must hand-edit each one. Reuse
-  the same `_auto_edit_process_run` helper on each restacked run so a reprocess yields
-  finished pictures across the whole library in one action — completing the owner-requested
-  "reprocess everything → great images" story. It's within the explicit, confirm-gated
-  Reprocess opt-in and only touches the *new* runs' own recipe/preview (never an existing
-  run's saved edit). **Scout to weigh:** unlike single-target Process, this sets editor
-  recipes on many runs at once — decide whether that bulk auto-seed is desirable by default
-  or should be a "also auto-edit" toggle on the Reprocess panel. (S, autonomy/image-quality)
+- ~~**Chain the auto-edit onto "Reprocess everything" too (finished pictures after an
+  upgrade).**~~ — **shipped v0.86.1** (see Shipped). Took the "toggle, off by default"
+  direction the Scout note flagged: a new **"Also auto-edit each result into a finished
+  picture"** switch on the Reprocess panel adds an `auto_edit` flag to `POST
+  /api/reprocess-all` that chains the same `_auto_edit_process_run` helper onto every
+  restacked run, so a library-wide reprocess can yield finished *pictures* (a saved editor
+  recipe + re-rendered thumbnail), not flat linear masters. Off by default (it seeds an
+  editor recipe on many runs at once), only touches each *new* run's own recipe/preview,
+  best-effort per run, and fully reversible in the editor — completing the owner-requested
+  "reprocess everything → great images" story. The Jobs summary reports "auto-edited N".
 - **One-click "process this target"** — **core chain shipped v0.85.0** (see Shipped).
   A prominent "Process target" button on the Target page (+ `POST
   /api/targets/{safe}/process` → `process_target` job) now runs QC → plate-solve →
@@ -657,6 +655,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR._
 
+- **Chain the auto-edit onto library-wide "Reprocess everything" (v0.86.1, autonomy/image-
+  quality/PRIORITY 2).** Completes the owner-requested "reprocess everything → great images"
+  story: a new off-by-default `auto_edit` flag on `POST /api/reprocess-all` (surfaced as an
+  "Also auto-edit each result into a finished picture" switch on the Settings Reprocess panel)
+  chains the shipped `_auto_edit_process_run` helper onto every restacked run, so a reprocess
+  can produce finished *pictures* (saved editor recipe + re-rendered thumbnail) across the
+  whole library, not flat linear masters. Only touches each new run's own recipe/preview
+  (never an existing run's saved edit), best-effort per run, reversible in the editor; the
+  Jobs summary reports "auto-edited N". Regression tests in `tests/webapp/test_reprocess_all.py`
+  (unit: chains per-run on / never on by default; e2e: recipe saved on each new run vs empty
+  by default) + `Settings.test.tsx`/`Jobs.test.tsx`.
 - **Chain a one-click auto-edit onto the "Process target" result (v0.86.0, autonomy/editor/
   PRIORITY 2).** Completes the one-click autonomy story: after `process_target` stacks a
   fresh master it now chains `_auto_edit_process_run`, which builds the run's own Auto recipe
