@@ -85,6 +85,30 @@ export function StackView() {
     enabled: Object.keys(values).length > 0,
     retry: false,
   });
+  // Proactive Drizzle feasibility check (see the nudge derivation below the other
+  // hints). A Seestar auto-dithers every capture, so a *large* accepted set is
+  // exactly where drizzle pays off — it reconstructs the fine detail a Bayer
+  // sensor + short focal length under-sample — but drizzle lives in the advanced
+  // knobs and is off by default, so a beginner sitting on thousands of subs never
+  // reaches for it. We only suggest it once the stack is big enough to be worth it
+  // (matching the field help's "200+ dithered frames") and drizzle is off, and we
+  // gate the *suggestion* on a drizzle-on dry-run sizing so we never nudge toward
+  // a run that'd be refused for OOM. This query must sit above the loading
+  // early-return with the other hooks (rules-of-hooks); the frame count is read
+  // straight off `frames.data` since `solvedAccepted` is derived further down.
+  const DRIZZLE_SUGGEST_MIN_FRAMES = 200;
+  const drizzleWorthChecking =
+    !frames.isLoading && !values.drizzle
+    && (frames.data ?? []).filter((f) => f.accept && f.solved).length
+       >= DRIZZLE_SUGGEST_MIN_FRAMES;
+  const drizzleEstimate = useQuery({
+    queryKey: ["stack-estimate-drizzle", safe, mosaicCanvas],
+    queryFn: () => api.stackEstimate(safe, {
+      drizzle: true, drizzle_scale: 1.5, drizzle_reject: false, mosaic_canvas: mosaicCanvas,
+    }),
+    enabled: drizzleWorthChecking && Object.keys(values).length > 0,
+    retry: false,
+  });
 
   const qcSolve = useMutation({
     mutationFn: () => api.qcSolve(safe),
@@ -492,6 +516,18 @@ export function StackView() {
     return `${base}${capped} Drop ${n === 1 ? "it" : "them"} in one click, or review on the Target page.`;
   })();
 
+  // Proactive Drizzle nudge (derivation — the feasibility query lives up with the
+  // other hooks, before the loading early-return). Fire when the stack is big
+  // enough for drizzle to pay off, it's off, and the drizzle-on dry-run sizing
+  // confirms it fits the memory budget and isn't a giant mosaic canvas, so we
+  // never nudge toward a run that'd be refused for OOM. Advisory; the sizing line
+  // below shows the real memory/time cost once it's on.
+  const drizzleNudge =
+    drizzleWorthChecking && drizzleEstimate.data
+    && !drizzleEstimate.data.would_exceed && !drizzleEstimate.data.is_mosaic
+      ? `Your ${solvedAccepted} accepted frames are a large, well-dithered set (a Seestar dithers automatically as it captures) — exactly where Drizzle pays off, reconstructing the fine detail a Bayer sensor and short focal length under-sample. It renders to a larger canvas, so it costs more memory and time (the sizing below shows how much) and is off by default, but on a set this big it's one of the biggest resolution wins available.`
+      : null;
+
   // Drizzle accumulates in a single pass, so the sigma-clip toggle doesn't
   // apply to it — a user who enabled both would reasonably expect satellite
   // trails to be rejected and be surprised when they aren't. Point them at
@@ -796,6 +832,16 @@ export function StackView() {
                 onClick={() => set("photometric_normalize", true)}
               >
                 Turn on photometric normalization
+              </Button>
+            </Alert>
+          ) : null}
+
+          {drizzleNudge ? (
+            <Alert color="blue" variant="light" py={6} px="sm">
+              <Text size="xs">{drizzleNudge}</Text>
+              <Button size="compact-xs" variant="light" mt={6}
+                onClick={() => set("drizzle", true)}>
+                Turn on Drizzle
               </Button>
             </Alert>
           ) : null}

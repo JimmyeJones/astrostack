@@ -1076,4 +1076,105 @@ describe("StackView", () => {
       expect(client.api.stackEstimate).toHaveBeenCalledWith(
         "M_42", expect.objectContaining({ mosaic_canvas: "reference" })));
   });
+
+  // A dry-run estimate the drizzle-on feasibility check resolves to. `is_mosaic`
+  // / `would_exceed` are what the nudge gates on.
+  function estimateResult(over: boolean, mosaic: boolean): client.StackEstimate {
+    return {
+      n_frames: 250, canvas_w: 480, canvas_h: 320, output_w: 720, output_h: 480,
+      is_mosaic: mosaic, peak_bytes: over ? 5.4e9 : 3e8, peak_gb: over ? 5.4 : 0.3,
+      budget_bytes: 1.4e9, budget_gb: 1.4, would_exceed: over,
+      suggested_drizzle_scale: null, suggested_reference_canvas: false,
+    };
+  }
+
+  it("nudges Drizzle on a large single-field set that fits the budget", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+      { key: "drizzle", label: "Drizzle", type: "bool", group: "advanced",
+        default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+    ]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ drizzle: false });
+    // 250 accepted, solved frames — above the 200-frame drizzle threshold.
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(
+      Array.from({ length: 250 }, (_, i) => mkFrame(i + 1)));
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+    vi.spyOn(client.api, "stackEstimate").mockResolvedValue(estimateResult(false, false));
+
+    renderStack();
+
+    await waitFor(() =>
+      expect(screen.getByText(/exactly where Drizzle pays off/)).toBeInTheDocument());
+  });
+
+  it("does not nudge Drizzle on a small set", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ drizzle: false });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(
+      Array.from({ length: 50 }, (_, i) => mkFrame(i + 1)));
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+    vi.spyOn(client.api, "stackEstimate").mockResolvedValue(estimateResult(false, false));
+
+    renderStack();
+
+    // Form ready; a 50-frame stack is below the threshold so the feasibility
+    // query never even fires and the nudge stays absent.
+    await screen.findByRole("button", { name: "Start stacking" });
+    expect(screen.queryByText(/exactly where Drizzle pays off/)).not.toBeInTheDocument();
+  });
+
+  it("does not nudge Drizzle when a drizzled run would exceed the memory budget", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ drizzle: false });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(
+      Array.from({ length: 250 }, (_, i) => mkFrame(i + 1)));
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+    // Base estimate fits; the drizzle-on feasibility estimate blows the budget.
+    vi.spyOn(client.api, "stackEstimate").mockImplementation((_safe, opts) =>
+      Promise.resolve(opts?.drizzle ? estimateResult(true, false) : estimateResult(false, false)));
+
+    renderStack();
+
+    await screen.findByRole("button", { name: "Start stacking" });
+    // The drizzle-on feasibility estimate resolves over-budget, so despite the
+    // large set the nudge is suppressed.
+    await waitFor(() => expect(client.api.stackEstimate).toHaveBeenCalledWith(
+      "M_42", expect.objectContaining({ drizzle: true })));
+    expect(screen.queryByText(/exactly where Drizzle pays off/)).not.toBeInTheDocument();
+  });
+
+  it("does not nudge Drizzle on a mosaic canvas", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ drizzle: false });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(
+      Array.from({ length: 250 }, (_, i) => mkFrame(i + 1)));
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+    vi.spyOn(client.api, "stackEstimate").mockResolvedValue(estimateResult(false, true));
+
+    renderStack();
+
+    await screen.findByRole("button", { name: "Start stacking" });
+    await waitFor(() => expect(client.api.stackEstimate).toHaveBeenCalledWith(
+      "M_42", expect.objectContaining({ drizzle: true })));
+    expect(screen.queryByText(/exactly where Drizzle pays off/)).not.toBeInTheDocument();
+  });
+
+  it("turns on Drizzle in one click from the nudge, then hides it", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+      { key: "drizzle", label: "Drizzle", type: "bool", group: "advanced",
+        default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+    ]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ drizzle: false });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(
+      Array.from({ length: 250 }, (_, i) => mkFrame(i + 1)));
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+    vi.spyOn(client.api, "stackEstimate").mockResolvedValue(estimateResult(false, false));
+
+    renderStack();
+
+    const btn = await screen.findByRole("button", { name: "Turn on Drizzle" });
+    fireEvent.click(btn);
+    // With drizzle now on the nudge no longer applies and disappears.
+    await waitFor(() =>
+      expect(screen.queryByText(/exactly where Drizzle pays off/)).not.toBeInTheDocument());
+  });
 });
