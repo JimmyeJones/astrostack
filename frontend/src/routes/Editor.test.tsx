@@ -364,7 +364,7 @@ describe("EditorView", () => {
         ops: [{ id: "tone.stretch", params: { stretch: 0.83 } }] }],
       user: [],
     });
-    const fetchMock = vi.fn(async () => ({
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => ({
       ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
     }));
     vi.stubGlobal("fetch", fetchMock);
@@ -395,6 +395,38 @@ describe("EditorView", () => {
           && decodeRecipe(c[0] as string).includes("0.83"));
       expect(lookCall).toBeDefined();
     });
+  });
+
+  it("switches the working recipe to the compared look in one click", async () => {
+    mockEditorQueries();
+    // Start from an empty pipeline (so adopting needs no confirm), and a built-in
+    // look built from a Curves op so adopting it visibly seeds the recipe.
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({ ops: [], base_run_id: 3 });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({
+      builtin: [{ id: "curvy", label: "Curvy", group: "builtin",
+        ops: [{ id: "tone.curves", params: { points: [[0, 0], [1, 1]] } }] }],
+      user: [],
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    const picker = await screen.findByRole("button", { name: "Compare a look" });
+    await waitFor(() => expect(picker).not.toBeDisabled());
+    picker.click();
+    (await screen.findByRole("menuitem", { name: "Curvy" })).click();
+
+    // Reopen the picker (now naming the active look) and adopt it.
+    (await screen.findByRole("button", { name: "Look: Curvy" })).click();
+    (await screen.findByRole("menuitem", { name: "Switch to this look" })).click();
+
+    // The working recipe is now the look — its Curves op is in the pipeline — and
+    // the look-compare split is dismissed (the picker button reverts to its label).
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Compare a look" })).toBeInTheDocument());
+    expect(await screen.findByText("Curves")).toBeInTheDocument();
   });
 
   it("offers a Coverage overlay on a mosaic and toggles it", async () => {

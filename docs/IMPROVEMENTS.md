@@ -316,6 +316,11 @@ problems. Dogfood it every big-picture run and fix root causes.
   made mosaic-aware exactly as *applying* them would be; Auto is fetched fresh (the
   endpoint only returns the recipe, never persists it); the look is rendered on the current
   edit's framing (`lookCompareOps`) so the divider lines up. Frontend-only, additive.
+  **Follow-up shipped v0.89.0:** a "Switch to this look" action on the picker (shown while
+  a look is being compared) adopts the compared look as the working recipe in one click —
+  an undoable step, confirm-gated when it would replace a non-empty edit — closing the
+  compare→adopt loop so a user who prefers the compared look switches to it without hunting
+  the Presets menu.
 - ~~**"Cropped view — showing N% of the frame" indicator + one-click "remove crop".**~~
   — **shipped v0.74.3** (see Shipped). A dimmed advisory caption below the preview now
   fires whenever an *enabled* `geometry.crop` is in the recipe, naming how much of the
@@ -678,6 +683,11 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.89.0** — Editor "Compare a look" follow-up: a "Switch to this look" action on the
+  picker adopts the currently-compared look (Auto / a preset) as the working recipe in one
+  click — an undoable step, confirm-gated when replacing a non-empty edit — so the user goes
+  from compare straight to adopt. Reuses the v0.88.0 resolved-look ops. Frontend-only.
+  Editor integration test.
 - **v0.88.0** — Editor "Compare a look" split: a picker (Auto + built-in + saved presets)
   next to Split/Compare renders the chosen look on the proxy and feeds it into the same
   split-divider overlay as the "before" image, so a repeat imager can drag to judge their

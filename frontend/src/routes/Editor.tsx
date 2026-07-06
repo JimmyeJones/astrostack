@@ -723,6 +723,27 @@ export function EditorView() {
     },
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
+  // Adopt the look currently being compared as the working recipe (an undoable
+  // step, not persisted until Save) — closes the compare→adopt loop so a user who
+  // prefers the compared look switches to it in one click. Replaces the whole
+  // pipeline, so confirm when that throws away a non-empty edit (mirrors applying
+  // a preset from the Presets menu).
+  const adoptLook = () => {
+    if (!lookSel) return;
+    if (ops.length && !window.confirm(
+      `Switch to "${lookSel.label}"? This replaces your current `
+      + `${ops.length}-operation edit (Undo to revert).`)) {
+      return;
+    }
+    const next = lookSel.ops;
+    setLookSplit(false);
+    setOps(() => next);
+    notifications.show({
+      message: `Switched to "${lookSel.label}" (${next.length} step`
+        + `${next.length === 1 ? "" : "s"}) — Undo to revert, Save to keep`,
+      color: "violet",
+    });
+  };
 
   // The trim-border crop is only offered when this run is a mosaic and a
   // well-covered rectangle worth cropping to was found.
@@ -1120,7 +1141,8 @@ export function EditorView() {
                   activeLabel={lookSel?.label ?? null}
                   loading={pickLook.isPending}
                   onPick={(choice) => pickLook.mutate(choice)}
-                  onStop={() => setLookSplit(false)} />
+                  onStop={() => setLookSplit(false)}
+                  onAdopt={adoptLook} />
                 <Button size="xs" variant="default" leftSection={<IconRefresh size={14} />}
                   loading={preview.isFetching} onClick={refreshPreview}>Refresh</Button>
                 <Button size="xs" variant="default" leftSection={<IconZoomScan size={14} />}
