@@ -29,7 +29,9 @@ import { prependCoverageLeveling } from "../components/editor/coverageLeveling";
 import { applyTrimCrop, trimRectStyle, trimKeptLabel, geometryOpsKey, previewBoxStyle,
   cropCoveragePct, removeCropOps }
   from "../components/editor/mosaicTrim";
-import { splitFraction, splitClipLeft, splitLeftPct } from "../components/editor/splitCompare";
+import { splitFraction, splitClipLeft, splitLeftPct, lookCompareOps }
+  from "../components/editor/splitCompare";
+import { LookComparePicker, type LookChoice } from "../components/editor/LookComparePicker";
 import { pngProgressLabel } from "../components/editor/pngProgress";
 import { opErrorsMessage } from "../components/editor/opErrors";
 import { clippingCaption } from "../components/editor/clipping";
@@ -58,6 +60,15 @@ const COMMON_OP_IDS = [
 
 function uid(): string {
   return (crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)).slice(0, 8);
+}
+
+/** Normalise a preset's (or the Auto recipe's) loosely-typed op list into full
+ * `OpInstance`s, minting a uid and defaulting `enabled` where absent — so a look
+ * can be sized/rendered through the same helpers as the working recipe. */
+function toOpInstances(
+  ops: { id: string; params: Record<string, unknown>; enabled?: boolean; uid?: string }[],
+): OpInstance[] {
+  return ops.map((o) => ({ uid: o.uid ?? uid(), id: o.id, enabled: o.enabled ?? true, params: o.params }));
 }
 
 /** A small "slower preview" chip for `heavy` ops, so a beginner knows before
@@ -418,6 +429,35 @@ export function EditorView() {
     return () => { if (u) URL.revokeObjectURL(u); };
   }, [withoutOpPreview.data]);
 
+  // "Compare a look" split: preview another look (Auto / a built-in or saved
+  // preset) as the "before" side of the divider, so the user can judge their
+  // current edit against any other look in one frame without committing to it.
+  // `lookSel` holds the chosen look's resolved ops + name (built-in presets are
+  // sized to this target's data exactly as applying them would be); it's rendered
+  // on the *current* edit's framing (see lookCompareOps) so the divider lines up.
+  const [lookSplit, setLookSplit] = useState(false);
+  const [lookSel, setLookSel] = useState<{ label: string; ops: OpInstance[] } | null>(null);
+  const lookPreviewRecipe = useMemo<Recipe | null>(
+    () => (lookSel
+      ? { ops: lookCompareOps(lookSel.ops, baseGeometryOps), base_run_id: rid }
+      : null),
+    [lookSel, baseGeometryOps, rid],
+  );
+  const lookPreview = useQuery({
+    queryKey: ["edit-look", safe, rid, lookSel?.label,
+      lookPreviewRecipe ? JSON.stringify(lookPreviewRecipe.ops) : ""],
+    enabled: lookSplit && !!lookPreviewRecipe && !!opsSchema.data && !saved.isLoading,
+    queryFn: async ({ signal }) => {
+      const res = await fetch(api.editPreviewUrl(safe, rid, lookPreviewRecipe!), { signal });
+      if (!res.ok) throw new Error("look preview failed");
+      return URL.createObjectURL(await res.blob());
+    },
+  });
+  useEffect(() => {
+    const u = lookPreview.data;
+    return () => { if (u) URL.revokeObjectURL(u); };
+  }, [lookPreview.data]);
+
   // The active overlay (if any) and its query, so the shown image, its caption,
   // and any error all come from the *same* source. Previously a failed overlay
   // fetch silently fell back to the edited preview while the caption still read
@@ -651,6 +691,39 @@ export function EditorView() {
   const applyDataDefaults = () =>
     setOps((p) => applyDataDrivenDefaults(p, dataDrivenSuggestions));
 
+  // Presets for the "Compare a look" picker (shares the ["presets"] cache with the
+  // Presets menu, so no extra fetch).
+  const lookPresets = useQuery({ queryKey: ["presets"], queryFn: api.listPresets });
+  // Resolve a chosen look into concrete ops and switch on the look-compare split.
+  // A built-in preset is sized to this target's data + made mosaic-aware exactly as
+  // *applying* it would be (so the comparison is honest); a saved preset is used
+  // verbatim; Auto is fetched fresh (the `…/editor/auto` endpoint only *returns* the
+  // recipe — it never persists it, so this doesn't touch the user's saved edit).
+  const pickLook = useMutation({
+    mutationFn: async (choice: LookChoice): Promise<{ label: string; ops: OpInstance[] }> => {
+      if (choice.kind === "auto") {
+        const r = await api.autoProcess(safe, rid);
+        return { label: "Auto", ops: toOpInstances(r.ops ?? []) };
+      }
+      const raw = toOpInstances(choice.preset.ops);
+      const ops = choice.source === "builtin"
+        ? prependCoverageLeveling(
+            applyDataDrivenDefaults(raw, dataDrivenSuggestions),
+            hist.data?.is_mosaic === true, specs, uid)
+        : raw;
+      return { label: choice.preset.label, ops };
+    },
+    onSuccess: (sel) => {
+      setLookSel(sel);
+      // Look-compare owns the preview box: turn off the other overlays/splits.
+      setShowBase(false); setShowMask(false); setShowCoverage(false);
+      setSoloExclude(false); setSoloSplit(false); setSplitCompare(false);
+      setTrimPreview(false); setSplitFrac(0.5);
+      setLookSplit(true);
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
+
   // The trim-border crop is only offered when this run is a mosaic and a
   // well-covered rectangle worth cropping to was found.
   const trimCrop = trim.data?.is_mosaic ? trim.data.crop : null;
@@ -676,17 +749,22 @@ export function EditorView() {
   // but guard defensively). Shares the whole-recipe split's divider/drag state.
   const soloSplitActive = soloSplit && !!selForSolo && selForSolo.enabled
     && !overlay && !trimPreview;
+  // "Compare a look" split: shows another look (Auto / a preset) as the "before"
+  // side, only when a look is chosen and no other overlay/trim owns the box.
+  const lookSplitActive = lookSplit && !!lookSel && !overlay && !trimPreview;
   // The split overlay's left ("before") image + labels, so one render block serves
-  // both the whole-recipe split (Original vs Edited) and the per-op split
-  // (without-this-op vs with-this-op).
+  // the whole-recipe split (Original vs Edited), the per-op split (without-this-op
+  // vs with-this-op) and the look split (a chosen look vs the current edit).
   const splitLeftSrc = splitActive
     ? basePreview.data
-    : soloSplitActive ? withoutOpPreview.data : undefined;
+    : soloSplitActive ? withoutOpPreview.data
+    : lookSplitActive ? lookPreview.data : undefined;
   const splitLeftLabel = soloSplitActive && selForSolo
     ? `Without ${specs[selForSolo.id]?.label ?? selForSolo.id}`
+    : lookSplitActive && lookSel ? lookSel.label
     : "Original";
   const splitRightLabel = soloSplitActive ? "With" : "Edited";
-  const anySplitActive = splitActive || soloSplitActive;
+  const anySplitActive = splitActive || soloSplitActive || lookSplitActive;
   // Entering trim preview auto-shows the coverage heatmap so the proposed crop is
   // drawn over exactly what it's addressing — you can see it lands on the
   // well-covered interior. Remember the prior overlay state so Cancel/Apply
@@ -696,6 +774,7 @@ export function EditorView() {
     setTrimPreview(true);
     setSplitCompare(false);
     setSoloSplit(false);
+    setLookSplit(false);
     if (hist.data?.is_mosaic) {
       setCoverageBeforeTrim(showCoverage);
       setShowCoverage(true);
@@ -993,7 +1072,7 @@ export function EditorView() {
                       disabled={!preview.data}
                       loading={showCoverage && coveragePreview.isLoading}
                       onClick={() => setShowCoverage((s) => {
-                        if (!s) { setShowMask(false); setShowBase(false); setSoloExclude(false); setSoloSplit(false); setSplitCompare(false); }
+                        if (!s) { setShowMask(false); setShowBase(false); setSoloExclude(false); setSoloSplit(false); setSplitCompare(false); setLookSplit(false); }
                         return !s;
                       })}>
                       {showCoverage ? "Hide coverage" : "Coverage"}
@@ -1006,15 +1085,15 @@ export function EditorView() {
                     disabled={!preview.data}
                     loading={showMask && maskPreview.isLoading}
                     onClick={() => setShowMask((s) => {
-                      if (!s) { setShowBase(false); setSoloExclude(false); setSoloSplit(false); setShowCoverage(false); setSplitCompare(false); }
+                      if (!s) { setShowBase(false); setSoloExclude(false); setSoloSplit(false); setShowCoverage(false); setSplitCompare(false); setLookSplit(false); }
                       return !s;
                     })}>
                     {showMask ? "Hide mask" : "Star mask"}
                   </Button>
                 </Tooltip>
                 <Button size="xs" variant={showBase ? "filled" : "default"}
-                  disabled={!preview.data || showMask || showCoverage || splitCompare}
-                  onClick={() => setShowBase((s) => { if (!s) { setSoloExclude(false); setSoloSplit(false); } return !s; })}>
+                  disabled={!preview.data || showMask || showCoverage || splitCompare || lookSplit}
+                  onClick={() => setShowBase((s) => { if (!s) { setSoloExclude(false); setSoloSplit(false); setLookSplit(false); } return !s; })}>
                   {showBase ? "Edited" : "Compare"}
                 </Button>
                 <Tooltip multiline w={230} withArrow
@@ -1023,12 +1102,25 @@ export function EditorView() {
                     disabled={!preview.data || showMask || showCoverage || trimPreview}
                     onClick={() => setSplitCompare((s) => {
                       if (!s) { setShowBase(false); setShowMask(false);
-                        setShowCoverage(false); setSoloExclude(false); setSoloSplit(false); setSplitFrac(0.5); }
+                        setShowCoverage(false); setSoloExclude(false); setSoloSplit(false);
+                        setLookSplit(false); setSplitFrac(0.5); }
                       return !s;
                     })}>
                     {splitCompare ? "Hide split" : "Split"}
                   </Button>
                 </Tooltip>
+                {/* Compare the current edit against another look (Auto / a preset)
+                    under the same split divider, so a repeat imager can judge
+                    "this look vs mine" in one frame before committing. */}
+                <LookComparePicker
+                  builtin={lookPresets.data?.builtin ?? []}
+                  user={lookPresets.data?.user ?? []}
+                  disabled={!preview.data || showMask || showCoverage || trimPreview}
+                  active={lookSplit}
+                  activeLabel={lookSel?.label ?? null}
+                  loading={pickLook.isPending}
+                  onPick={(choice) => pickLook.mutate(choice)}
+                  onStop={() => setLookSplit(false)} />
                 <Button size="xs" variant="default" leftSection={<IconRefresh size={14} />}
                   loading={preview.isFetching} onClick={refreshPreview}>Refresh</Button>
                 <Button size="xs" variant="default" leftSection={<IconZoomScan size={14} />}

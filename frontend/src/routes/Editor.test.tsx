@@ -356,6 +356,47 @@ describe("EditorView", () => {
     expect(screen.getByRole("button", { name: "Compare" })).not.toBeDisabled();
   });
 
+  it("compares another look against the current edit under the split divider", async () => {
+    mockEditorQueries();
+    // A built-in preset to compare against, carrying a distinctive stretch value.
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({
+      builtin: [{ id: "nebula", label: "Nebula", group: "builtin",
+        ops: [{ id: "tone.stretch", params: { stretch: 0.83 } }] }],
+      user: [],
+    });
+    const fetchMock = vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderEditor();
+
+    const picker = await screen.findByRole("button", { name: "Compare a look" });
+    await waitFor(() => expect(picker).not.toBeDisabled());
+    picker.click();
+    // Pick the built-in "Nebula" look from the dropdown.
+    (await screen.findByRole("menuitem", { name: "Nebula" })).click();
+
+    // The look renders as the "before" side (the clipped Original overlay + a
+    // divider) and the picker button names the active look.
+    await screen.findByAltText("original");
+    expect(await screen.findByRole("button", { name: "Look: Nebula" })).toBeInTheDocument();
+    expect(screen.getByLabelText("split divider")).toBeInTheDocument();
+
+    // A preview render fired carrying the *look's* ops (its distinctive stretch),
+    // proving the compared image is the chosen look, not the current edit.
+    const decodeRecipe = (path: string) => {
+      const q = new URL("http://x" + path).searchParams.get("recipe") ?? "";
+      return atob(q.replace(/-/g, "+").replace(/_/g, "/"));
+    };
+    await waitFor(() => {
+      const lookCall = fetchMock.mock.calls.find(
+        (c) => typeof c[0] === "string" && c[0].includes("/editor/preview")
+          && decodeRecipe(c[0] as string).includes("0.83"));
+      expect(lookCall).toBeDefined();
+    });
+  });
+
   it("offers a Coverage overlay on a mosaic and toggles it", async () => {
     mockEditorQueries();
     // is_mosaic:true → the coverage overlay button is offered.

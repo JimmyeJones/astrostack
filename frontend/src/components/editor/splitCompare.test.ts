@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { splitFraction, splitClipLeft, splitLeftPct } from "./splitCompare";
+import { splitFraction, splitClipLeft, splitLeftPct, lookCompareOps } from "./splitCompare";
 
 describe("splitFraction", () => {
   it("maps a pointer inside the box to its fractional x", () => {
@@ -43,5 +43,25 @@ describe("splitLeftPct", () => {
     expect(splitLeftPct(0.25)).toBe("25%");
     expect(splitLeftPct(1.5)).toBe("100%");
     expect(splitLeftPct(-1)).toBe("0%");
+  });
+});
+
+describe("lookCompareOps", () => {
+  it("drops the look's own geometry ops and appends the current edit's framing", () => {
+    const look = [
+      { id: "tone.stretch" }, { id: "geometry.crop" }, { id: "tone.curves" },
+    ];
+    const currentGeom = [{ id: "geometry.crop" }, { id: "geometry.rotate" }];
+    expect(lookCompareOps(look, currentGeom)).toEqual([
+      // the look's tonal ops, in order…
+      { id: "tone.stretch" }, { id: "tone.curves" },
+      // …then the current recipe's framing so both halves share a frame shape.
+      { id: "geometry.crop" }, { id: "geometry.rotate" },
+    ]);
+  });
+
+  it("is the look verbatim when neither side has geometry ops", () => {
+    const look = [{ id: "tone.stretch" }, { id: "detail.sharpen" }];
+    expect(lookCompareOps(look, [])).toEqual(look);
   });
 });
