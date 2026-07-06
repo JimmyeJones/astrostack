@@ -243,6 +243,52 @@ def test_stack_writes_provenance_header(tmp_path):
     assert float(hdr["BKGSIGMA"]) >= 0.0
 
 
+def test_weighting_provenance_omitted_when_min_max_reject_ignores_weights(tmp_path):
+    """Regression: min/max reject combines by rank and ignores per-frame weights,
+    so a stack run with both quality_weighted and min_max_reject on must NOT stamp
+    WGT* provenance (which the History Info card turns into a false "N frames
+    down-weighted" trust line). The κ-σ path, which DOES apply the weights in its
+    weighted-sum second pass, still records it — proving the gate is specific."""
+    from astropy.io import fits
+
+    def _weighted_project(name: str):
+        # Spread the frames' FWHM so quality weighting genuinely demotes some
+        # subs (n_downweighted > 0) — otherwise there'd be nothing to (falsely)
+        # advertise and the test couldn't tell the paths apart.
+        proj = _build_project(tmp_path / name, n=5)
+        for i, f in enumerate(proj.iter_frames()):
+            proj.update_frame(f.id, fwhm_px=2.5 + 0.6 * i, star_count=40 - 3 * i)
+        return proj
+
+    # Both flags on → min/max path wins and ignores the weights → no WGT* cards.
+    proj = _weighted_project("mmr")
+    try:
+        res = run_stack(proj, StackOptions(
+            quality_weighted=True, min_max_reject=True, sigma_clip=False,
+            max_workers=2, output_name="mmr"))
+    finally:
+        proj.close()
+    with fits.open(res.fits_path) as hdul:
+        hdr = hdul[0].header
+    assert hdr["STACKER"] == "min-max-reject"
+    assert "WGTMODE" not in hdr, "min/max reject ignores weights — must not claim weighting"
+    assert "WGTNDOWN" not in hdr
+
+    # Control: quality weighting on the κ-σ path DOES influence the result (pass-2
+    # weighted sum), so its provenance is still honestly recorded.
+    proj2 = _weighted_project("kappa")
+    try:
+        res2 = run_stack(proj2, StackOptions(
+            quality_weighted=True, sigma_clip=True,
+            max_workers=2, output_name="kappa"))
+    finally:
+        proj2.close()
+    with fits.open(res2.fits_path) as hdul:
+        hdr2 = hdul[0].header
+    assert hdr2["WGTMODE"] == "quality"
+    assert int(hdr2["WGTNDOWN"]) > 0
+
+
 def test_stack_records_calibration_provenance(tmp_path):
     """A calibrated stack self-documents which masters were applied via CALSTAT.
     Bias-only (no dark) → (light − bias) / flat, recorded as 'bias+flat'."""

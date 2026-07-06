@@ -537,6 +537,7 @@ def _build_output_header_meta(
     calibration: "Any | None" = None,
     pstats: PhotometricStats | None = None,
     rstats: "RejectionStats | None" = None,
+    weights_applied: bool = True,
 ) -> dict[str, Any]:
     """Collect provenance for the output FITS header.
 
@@ -610,7 +611,12 @@ def _build_output_header_meta(
     # Quality-weighting provenance: lets the run Info panel report how many subs
     # weighting actually demoted and over what range, so the user can trust the
     # (off-by-default) weighting did something and gauge how aggressive it was.
-    if wstats is not None and wstats.n_weighted:
+    # Only stamp it when the weights actually influenced the result: the min/max
+    # order-statistic path (min_max_reject on a ≥3-frame non-drizzle stack)
+    # combines by rank and *ignores* per-frame weights entirely, so a stack with
+    # both quality_weighted and min_max_reject on must not claim "N frames
+    # down-weighted" — the weights had no effect there (weights_applied=False).
+    if wstats is not None and wstats.n_weighted and weights_applied:
         meta["WGTMODE"] = ("quality", "frame weighting mode")
         meta["WGTNDOWN"] = (int(wstats.n_downweighted), "frames down-weighted")
         meta["WGTMIN"] = (round(float(wstats.min_weight), 3), "min frame weight")
@@ -1164,9 +1170,16 @@ def run_stack(
     # Measure the finished stack's background noise once and reuse it for both the
     # self-documenting FITS header and the run record, so the two never disagree.
     noise_sigma = _compute_noise_sigma(result_image)
+    # The min/max order-statistic path combines by rank and ignores per-frame
+    # weights, so weighting provenance must not be stamped when it ran (it's the
+    # active path only for a non-drizzle ≥3-frame min-max-reject stack). Every
+    # other path (drizzle, κ-σ pass 2, plain weighted sum, and the min/max
+    # fall-back-to-mean when n < 3) does apply the weights.
+    weights_applied = not (options.min_max_reject and not options.drizzle and n >= 3)
     header_meta = _build_output_header_meta(project, frames, options, n_used, wstats,
                                             calibration=calibration, pstats=pstats,
-                                            rstats=rej_stats)
+                                            rstats=rej_stats,
+                                            weights_applied=weights_applied)
     if noise_sigma is not None:
         header_meta["BKGSIGMA"] = (noise_sigma, "normalized background noise sigma")
     paths = write_stack_outputs(

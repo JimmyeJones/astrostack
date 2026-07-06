@@ -252,3 +252,39 @@ def test_rejection_provenance_absent_when_no_pass():
     # A degenerate "contributed nothing" tally is also omitted (never a 0/0 stamp).
     assert "REJMODE" not in _rej_meta_for(
         RejectionStats("sigma-clip", n_contributed=0, n_rejected=0))
+
+
+# --- Weighting provenance honesty when min/max reject ignores the weights -------
+# quality_weighted computes per-frame weights, but the min/max order-statistic
+# path (min_max_reject on a non-drizzle ≥3-frame stack) combines by rank and
+# ignores them. So the WGT* provenance — which the History Info card turns into a
+# "N frames down-weighted" trust line — must NOT be stamped when the weights had
+# no effect on the pixels (weights_applied=False), even though wstats exists.
+from seestack.stack.weighting import WeightingStats  # noqa: E402
+
+
+def _wgt_meta_for(*, weights_applied: bool):
+    proj = SimpleNamespace(get_meta=lambda k: "M42" if k == "name" else None)
+    frames = [SimpleNamespace(exposure_s=10.0) for _ in range(6)]
+    wstats = WeightingStats(
+        n_weighted=6, n_neutral=0, min_weight=0.4, max_weight=1.0,
+        median_weight=0.8, n_downweighted=3)
+    return _build_output_header_meta(
+        proj, frames, StackOptions(), 6, wstats=wstats,
+        weights_applied=weights_applied)
+
+
+def test_weighting_provenance_stamped_when_weights_applied():
+    meta = _wgt_meta_for(weights_applied=True)
+    assert meta["WGTMODE"][0] == "quality"
+    assert meta["WGTNDOWN"][0] == 3
+    assert meta["WGTMED"][0] == 0.8
+
+
+def test_weighting_provenance_absent_when_min_max_reject_ignored_the_weights():
+    # The regression: min/max reject ignores per-frame weights, so claiming
+    # "3 frames down-weighted" on such a stack is a false trust signal.
+    meta = _wgt_meta_for(weights_applied=False)
+    assert "WGTMODE" not in meta
+    assert "WGTNDOWN" not in meta
+    assert "WGTMED" not in meta
