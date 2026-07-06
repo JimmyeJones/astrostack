@@ -72,6 +72,27 @@ _(none of the traced *editor-engine* op bugs are open — that backlog stayed dr
 the entry above is a stacking/autonomy↔editor classification bug found by dogfooding
 the real webapp stack→edit path.)_
 
+_(Builder engine-hardening audit 2026-07-06 (v0.86.1 baseline): another adversarial read of
+the stacking/calibration path, going deeper on the areas prior audits didn't explicitly cover
+— the recently-added `MinMaxRejectAccumulator` k-insertion order statistic + its four
+coverage bands (verified numerically for k=1,2 incl. a satellite outlier), the two-pass κ-σ
+NaN=coverage survival at a single-coverage mosaic-edge pixel, the `weights`/`photometric_scales`
+application in *both* passes of every path (fresh per-frame `win_rgb`, so `*= scale` is safe
+and NaN-preserving), `DrizzleStacker.result()`/variance/reject, and `calibrate/apply.py`'s
+bias-vs-dark exclusivity + exposure-scaled dark. **No reachable image-corruption bug found** —
+the combine maths, NaN=coverage, and neutral fallbacks are correct, consistent with the prior
+clean audits. **One genuine provenance-honesty bug found and fixed (v0.86.2, see Shipped):** a
+`quality_weighted` + `min_max_reject` stack stamped WGT* provenance even though the order
+statistic ignores the weights. Also **dogfooded stack→auto-edit→export end-to-end** on both a
+single-field (parity 0.50% mean; median grey 0.238; R/G/B 0.252/0.217/0.253) and a 2-panel
+mosaic (coverage-level → gradient → stretch → crop; NaN gaps correctly trimmed; median grey
+0.242) — both healthy. Two low-severity provenance notes for the Scout (not shipped, near-
+unreachable): (1) the `STACKER` FITS card reads `min-max-reject` even when `min_max_reject` is
+on but the min/max path *didn't* run (n<3 falls back to sigma-clip/mean), a smaller sibling of
+the WGT* fix; (2) `final_gradient` still no-ops (op skipped, Auto completes) on a sub-~768px
+frame whose object mask covers >80% of every box — the already-logged near-unreachable
+small-image robustness item, unaffected by real ≥1080px Seestar stacks.)_
+
 _(Builder engine-hardening audit 2026-07-05 (v0.84.7 baseline): adversarial read of the
 current-focus stacking/calibration path — `stacker.py`'s κ-σ pass-2 clip
 (`valid & (|aligned − mean| ≤ κ·std)`, NaN-std → +inf keep-all), the min/max-reject and
@@ -654,6 +675,22 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+
+- **Don't claim quality weighting influenced a min/max-reject stack (v0.86.2, image-quality/
+  trust/PRIORITY 4).** Found by the Builder's 2026-07-06 stacking-engine audit. The min/max
+  order-statistic combine path (`min_max_reject` on a non-drizzle ≥3-frame stack) combines by
+  rank and *ignores* per-frame weights, but `_build_output_header_meta` still stamped
+  `WGTMODE=quality`/`WGTNDOWN`/… into the FITS header + `stack_runs` row whenever
+  `quality_weighted` computed a `wstats` — so a stack run with **both** flags on told the
+  History Info card "N frames down-weighted" when the weights had zero effect on the pixels: a
+  false trust signal. The fix threads a `weights_applied` flag into the provenance builder
+  (`False` only when the min/max path actually ran) and gates the WGT* stamping on it; every
+  other path (drizzle, κ-σ pass-2 weighted sum, plain weighted sum, min/max fall-back-to-mean
+  at n<3) still records it honestly. Not pixel corruption — the stacked image is correct either
+  way; this is a provenance-honesty fix in the same family as the rejection/dark-scaling/
+  photometric trust lines. Regression tests: unit `test_weighting_provenance_absent_when_min_max_
+  reject_ignored_the_weights` + e2e `test_weighting_provenance_omitted_when_min_max_reject_ignores_
+  weights` (both fail before / pass after; the e2e keeps a κ-σ control that still stamps WGT*).
 
 - **Chain the auto-edit onto library-wide "Reprocess everything" (v0.86.1, autonomy/image-
   quality/PRIORITY 2).** Completes the owner-requested "reprocess everything → great images"
