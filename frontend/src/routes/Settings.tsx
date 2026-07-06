@@ -141,6 +141,10 @@ export function Maintenance() {
   // rescan (re-QC / re-solve / re-grade every frame first) is much slower and only
   // pays off when QC/solving/grading improved too, so make it an explicit opt-in.
   const [deepRescan, setDeepRescan] = useState(false);
+  // Off by default: seeds an editor recipe on every restacked run at once, so it's
+  // an explicit opt-in. When on, each fresh master opens as a finished picture (the
+  // one-click Auto recipe) instead of a flat linear stack.
+  const [autoEdit, setAutoEdit] = useState(false);
   const status = useQuery({
     queryKey: ["reprocess-status"],
     queryFn: api.reprocessStatus,
@@ -148,8 +152,8 @@ export function Maintenance() {
   });
   const nudge = reprocessNudgeText(status.data);
   const reprocess = useMutation({
-    mutationFn: (opts: { staleOnly: boolean; deepRescan: boolean }) =>
-      api.reprocessAll(opts.staleOnly, opts.deepRescan),
+    mutationFn: (opts: { staleOnly: boolean; deepRescan: boolean; autoEdit: boolean }) =>
+      api.reprocessAll(opts.staleOnly, opts.deepRescan, opts.autoEdit),
     onSuccess: (res) => {
       notifications.show({
         color: "teal",
@@ -173,17 +177,24 @@ export function Maintenance() {
         + "re-graded before restacking — slower, but picks up quality/solving "
         + "improvements too. Your manual accept/reject choices are kept.\n\n"
       : "";
+    const editNote = autoEdit
+      ? "Each fresh result is also auto-edited (the one-click Auto look) so it "
+        + "opens as a finished picture, not a flat linear stack. This only sets "
+        + "the new results' edits — your existing edits are untouched, and every "
+        + "auto-edit is reversible in the editor.\n\n"
+      : "";
     if (
       window.confirm(
         scope
         + rescanNote
+        + editNote
         + "Each target is reprocessed one at a time, reusing its last stack "
         + "settings. This is non-destructive: every restack is saved as a NEW "
         + "result alongside the existing one (nothing is deleted or overwritten), "
         + "so you can compare them in History. A large library can take a while.",
       )
     ) {
-      reprocess.mutate({ staleOnly, deepRescan });
+      reprocess.mutate({ staleOnly, deepRescan, autoEdit });
     }
   };
 
@@ -219,6 +230,12 @@ export function Maintenance() {
           onChange={(e) => setDeepRescan(e.currentTarget.checked)}
           label="Also re-run QC, plate-solving & grading first"
           description="Re-checks every frame (quality, plate-solve, auto-grade) before restacking, so improvements to those steps apply too — not just the stacker. Slower, and keeps your manual accept/reject choices."
+        />
+        <Switch
+          checked={autoEdit}
+          onChange={(e) => setAutoEdit(e.currentTarget.checked)}
+          label="Also auto-edit each result into a finished picture"
+          description="Applies the one-click Auto look to every restacked result so it opens as a finished picture instead of a flat linear stack. Only sets the new results' edits; your existing edits are untouched and every auto-edit is reversible."
         />
         <Group>
           <Button

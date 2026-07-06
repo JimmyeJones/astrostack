@@ -171,6 +171,11 @@ class ReprocessAllBody(BaseModel):
     # explicit opt-in; defaults False (plain restack) to keep existing callers'
     # behaviour unchanged.
     deep_rescan: bool = False
+    # When True, chain the one-click Auto recipe onto each restacked run so the
+    # reprocess yields finished *pictures* (a saved editor recipe + re-rendered
+    # thumbnail), not flat linear masters. Only touches the new runs' own recipe;
+    # off by default (it seeds an editor recipe on many runs at once).
+    auto_edit: bool = False
 
 
 @router.post("/api/reprocess-all")
@@ -183,7 +188,9 @@ def reprocess_all(request: Request, body: ReprocessAllBody | None = None) -> dic
     skipped, so an upgrade reprocesses only the images that would actually change.
     With ``deep_rescan`` set, each target's frames are re-QC'd / re-solved /
     re-graded before its restack (slower; picks up QC/solve/grading improvements
-    too, not just the stacker's).
+    too, not just the stacker's). With ``auto_edit`` set, the one-click Auto recipe
+    is chained onto each restacked run so the batch produces finished pictures, not
+    flat linear masters.
 
     Idempotent-ish: if a reprocess-all batch is already queued/running, return
     that job instead of enqueuing a duplicate.
@@ -195,8 +202,9 @@ def reprocess_all(request: Request, body: ReprocessAllBody | None = None) -> dic
         return {"job_id": existing.id, "already_running": True}
     stale_only = bool(body.stale_only) if body is not None else False
     deep_rescan = bool(body.deep_rescan) if body is not None else False
+    auto_edit = bool(body.auto_edit) if body is not None else False
     job = pipeline.submit_reprocess_all(settings, jm, stale_only=stale_only,
-                                        deep_rescan=deep_rescan)
+                                        deep_rescan=deep_rescan, auto_edit=auto_edit)
     return {"job_id": job.id, "already_running": False}
 
 

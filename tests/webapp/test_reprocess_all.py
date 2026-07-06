@@ -484,6 +484,60 @@ def test_reprocess_all_deep_rescan_skips_rescan_for_stale_only_skipped(
     assert len(rescanned) == 1
 
 
+def test_reprocess_all_auto_edit_chains_on_each_restacked_run(solved_library, monkeypatch):
+    """With auto_edit, the one-click Auto recipe is chained onto every restacked run
+    (via _auto_edit_process_run), so a reprocess yields finished pictures. The
+    default (off) never auto-edits."""
+    _patch_run_stack(monkeypatch)
+    edited: list[tuple[str, int]] = []
+    monkeypatch.setattr("webapp.pipeline._auto_edit_process_run",
+                        lambda lib, safe, run_id: (edited.append((safe, run_id)), 3)[1])  # noqa: ANN001
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        for entry in lib.list_targets():
+            proj = lib.open_target(entry.safe_name)
+            try:
+                _seed_run(proj, version="0.0.1")
+            finally:
+                proj.close()
+        job = Job(kind="reprocess_all")
+        summary = _run_body(pipeline.submit_reprocess_all,
+                            _settings(solved_library), job, auto_edit=True)
+    finally:
+        lib.close()
+
+    assert summary["stacked"] == 2
+    assert summary["auto_edited"] == 2      # one per restacked run
+    assert len(edited) == 2
+
+
+def test_reprocess_all_default_does_not_auto_edit(solved_library, monkeypatch):
+    """Without auto_edit (the default), the auto-edit chain never runs."""
+    _patch_run_stack(monkeypatch)
+    calls: list = []
+    monkeypatch.setattr("webapp.pipeline._auto_edit_process_run",
+                        lambda lib, safe, run_id: calls.append(1))  # noqa: ANN001
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        for entry in lib.list_targets():
+            proj = lib.open_target(entry.safe_name)
+            try:
+                _seed_run(proj, version="0.0.1")
+            finally:
+                proj.close()
+        job = Job(kind="reprocess_all")
+        summary = _run_body(pipeline.submit_reprocess_all,
+                            _settings(solved_library), job)
+    finally:
+        lib.close()
+
+    assert summary["stacked"] == 2
+    assert summary["auto_edited"] == 0
+    assert calls == []                      # helper never invoked
+
+
 def test_reprocess_all_cancels_between_targets(solved_library, monkeypatch):
     calls: list = []
 
@@ -599,6 +653,59 @@ def test_reprocess_all_endpoint_is_additive(solved_client, solved_library):
         runs = solved_client.get(f"/api/targets/{s}/stack-runs").json()
         assert len(runs) == before[s] + 1
         assert any(r.get("output_basename") == "seed" for r in runs)
+
+
+def test_reprocess_all_endpoint_auto_edit_saves_a_recipe_on_each_new_run(
+        solved_client, solved_library):
+    """POST {auto_edit: true} chains the one-click Auto recipe onto each restacked
+    run: the new run opens with a non-empty saved editor recipe (a finished
+    picture), while the plain reprocess default leaves a flat linear master."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        targets = [e.safe_name for e in lib.list_targets()]
+    finally:
+        lib.close()
+
+    r = solved_client.post("/api/reprocess-all", json={"auto_edit": True})
+    assert r.status_code == 200
+    body = _wait_job(solved_client, r.json()["job_id"])
+    assert body["state"] == "done"
+    assert body["result"]["stacked"] == len(targets)
+    assert body["result"]["auto_edited"] == len(targets)
+
+    # Each target's newest run carries a non-empty Auto recipe (the tone stretch is
+    # always present), i.e. it opens as a finished picture rather than linear.
+    for s in targets:
+        runs = solved_client.get(f"/api/targets/{s}/stack-runs").json()
+        rid = runs[0]["id"]  # newest first — the reprocessed run
+        recipe = solved_client.get(
+            f"/api/targets/{s}/stack-runs/{rid}/editor/recipe").json()
+        ops = [o for o in recipe["ops"] if o.get("enabled", True)]
+        assert any(o["id"] == "tone.stretch" for o in ops)
+
+
+def test_reprocess_all_endpoint_default_leaves_a_linear_master(solved_client, solved_library):
+    """Without auto_edit (the default), a reprocessed run opens with an empty
+    recipe — the finished-picture seed is strictly opt-in."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        targets = [e.safe_name for e in lib.list_targets()]
+    finally:
+        lib.close()
+
+    r = solved_client.post("/api/reprocess-all")
+    assert r.status_code == 200
+    body = _wait_job(solved_client, r.json()["job_id"])
+    assert body["state"] == "done"
+    assert body["result"]["auto_edited"] == 0
+
+    for s in targets:
+        runs = solved_client.get(f"/api/targets/{s}/stack-runs").json()
+        rid = runs[0]["id"]
+        recipe = solved_client.get(
+            f"/api/targets/{s}/stack-runs/{rid}/editor/recipe").json()
+        ops = [o for o in recipe["ops"] if o.get("enabled", True)]
+        assert ops == []
 
 
 def test_reprocess_all_endpoint_stale_only_skips_current_version(solved_client, solved_library):
