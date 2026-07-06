@@ -34,3 +34,22 @@ export function splitLeftPct(fraction: number): string {
   const pct = Math.min(100, Math.max(0, fraction * 100));
   return `${pct}%`;
 }
+
+/** Build the op list that renders *another look* (a preset or the Auto recipe) as
+ * the "before" side of the split divider. The right side of the divider is the
+ * user's current edit, whose frame shape is fixed by *its* enabled geometry ops
+ * (crop/rotate/resize); so for the two halves to line up under the divider the
+ * look must be shown on the *same* frame. We therefore drop the look's own
+ * geometry ops and append the current recipe's enabled geometry ops instead — the
+ * comparison becomes "this look's tone/colour/detail vs mine, on the same view",
+ * which is exactly the useful question when choosing between looks (and mirrors
+ * how the Original split shares the edit's framing). With no geometry op on either
+ * side this is just the look's ops verbatim. Pure. */
+export function lookCompareOps<T extends { id: string }>(
+  lookOps: T[], currentGeometryOps: T[],
+): T[] {
+  return [
+    ...lookOps.filter((o) => !o.id.startsWith("geometry.")),
+    ...currentGeometryOps,
+  ];
+}

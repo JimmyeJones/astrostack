@@ -307,18 +307,15 @@ problems. Dogfood it every big-picture run and fix root causes.
   drags a divider to compare the image *with* vs *without* just the selected op
   (left = without, right = with), reusing the shipped `splitCompare.ts` helpers and the
   existing per-op `withoutOpPreview` render.
-- **A/B two saved looks with the split divider (recipe-A vs recipe-B).** The split
-  divider now compares Original-vs-Edited (v0.78.0) and with-op-vs-without-op (v0.80.0),
-  but a repeat imager's real question when picking a look is often "preset X vs preset Y"
-  or "my saved recipe vs the Auto result". Add a small "Compare a look…" picker (built-in
-  presets + user presets + Auto) that renders the chosen recipe on the proxy — reusing
-  the ordinary `…/editor/preview` endpoint with that recipe's ops — and feeds it into the
-  *same* split-divider overlay as the "before" image, so the user drags to judge their
-  current edit against any other look in one frame without committing to it. Reuses the
-  shipped `splitCompare.ts` geometry + the recipe-preview path; the only new work is the
-  picker, a second on-proxy render query, and wiring it as the split's left side. Higher
-  value than the raw Original split for someone choosing between presets. Additive,
-  frontend-only, no engine/API change. (S–M, editor/trust)
+- ~~**A/B two saved looks with the split divider (recipe-A vs recipe-B).**~~ —
+  **shipped v0.88.0** (see Shipped). A "Compare a look" picker (Auto + built-in + saved
+  presets) next to Split/Compare renders the chosen look on the proxy via the ordinary
+  `…/editor/preview` endpoint and feeds it into the *same* split-divider overlay as the
+  "before" image, so the user drags to judge their current edit against any other look in
+  one frame without committing to it. Built-in presets are sized to the target's data +
+  made mosaic-aware exactly as *applying* them would be; Auto is fetched fresh (the
+  endpoint only returns the recipe, never persists it); the look is rendered on the current
+  edit's framing (`lookCompareOps`) so the divider lines up. Frontend-only, additive.
 - ~~**"Cropped view — showing N% of the frame" indicator + one-click "remove crop".**~~
   — **shipped v0.74.3** (see Shipped). A dimmed advisory caption below the preview now
   fires whenever an *enabled* `geometry.crop` is in the recipe, naming how much of the
@@ -681,6 +678,13 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.88.0** — Editor "Compare a look" split: a picker (Auto + built-in + saved presets)
+  next to Split/Compare renders the chosen look on the proxy and feeds it into the same
+  split-divider overlay as the "before" image, so a repeat imager can drag to judge their
+  current edit against any other look in one frame. Built-in presets sized to the data +
+  mosaic-aware (as applying would be); Auto fetched fresh (never persisted); rendered on the
+  current edit's framing (`lookCompareOps`) so the divider aligns. Frontend-only, additive.
+  New `LookComparePicker` component + `lookCompareOps` helper; unit + Editor integration tests.
 
 - **Companion caution: Drizzle on with too few frames (v0.87.1, image-quality/PRIORITY 4).**
   The symmetric footgun to the v0.87.0 nudge: drizzle only pays off with *lots* of dithered
