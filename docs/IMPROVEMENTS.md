@@ -72,6 +72,28 @@ _(none of the traced *editor-engine* op bugs are open — that backlog stayed dr
 the entry above is a stacking/autonomy↔editor classification bug found by dogfooding
 the real webapp stack→edit path.)_
 
+_(Scout QA audit 2026-07-07 (v0.89.0 baseline): rotated the focused subsystem audit onto
+the **webapp routers** (editor / stack / frames / watcher, plus a fan-out adversarial read of
+system / storage / gallery / sky / stats / seestar / settings / calibration / targets). Read
+each for None/empty inputs, wrong error codes (500-where-4xx), off-by-one, path traversal,
+DB-handle leaks on error paths, and division guards. **Also dogfooded the real
+stack→auto→preview→export journey end-to-end through the FastAPI app** on both a single-field
+(800×600, proxy_scale 1.0 — preview↔export parity measured **0.00%** on the full Auto recipe)
+and a 2000×3000 **mosaic** (proxy_scale 2.0). The mosaic's full-Auto stride-parity read 5–9%
+mean, which I **traced to a benign sub-pixel `geometry.crop` origin-rounding artifact**, NOT a
+real look mismatch: `crop` rounds its fractional bounds independently on the proxy (×1500) and
+full-res (×3000) grids, so the export crop can be ±1 full-res px (½ proxy px) offset — e.g. the
+export came out 1599 px tall where 2×799=1598. Isolating the ops confirmed it: `tone.stretch`
+alone and `background.level_coverage`+stretch both parity-clean at **0.02%**; only recipes
+containing `geometry.crop` show the gap, and a bilinear (sub-pixel-tolerant) comparison keeps
+crop at the same ~3% as the no-crop decimation limit. Visually a ≤1px whole-image shift at the
+crop edge — imperceptible; "what you see is what you export" holds to within a pixel, so **not
+filed as a bug**. **Two genuine low-severity input-robustness bugs found and fixed (v0.89.1,
+see Shipped):** the unclamped `stats` `recent_limit` and the missing `sky` preview-exists guard.
+One near-unreachable note logged to Infra (calibration null-byte → 500). Baseline suite green:
+839 passed, 2 skipped. **No wrong-final-image bug found — the router layer is well-hardened**,
+consistent with the mature editor/engine audits.)_
+
 _(Builder engine-hardening audit 2026-07-06 (v0.86.1 baseline): another adversarial read of
 the stacking/calibration path, going deeper on the areas prior audits didn't explicitly cover
 — the recently-added `MinMaxRejectAccumulator` k-insertion order statistic + its four
@@ -445,8 +467,31 @@ problems. Dogfood it every big-picture run and fix root causes.
   the newest *other* edited run's recipe onto this run (server-validated on load, applied
   as a single undoable step, not persisted unless Saved). The related "personal default
   recipe" idea (a target-independent default) is still open below.
+- **"N new subs since your last stack — restack?" — proactively flag a master that's
+  stale vs the user's own newer data.** The existing "N targets are out of date" nudge
+  (v0.81.5) catches masters stale vs the *engine version*, but not the far more common
+  multi-night case: the owner drops another night's frames into an already-stacked target
+  and the master silently no longer reflects all their subs. Add a cheap check on the Target
+  page — the target's newest *accepted* frame `timestamp_utc` vs its latest genuine stack
+  run's `timestamp_utc` — and when newer accepted frames exist, show a dimmed "N new subs
+  since this stack — restack?" callout with a one-click that reuses the existing
+  `process_target` / stack-with-saved-defaults chain. Serves the exact "thousands of subs
+  arriving over many nights" workflow; additive, read-only detection, no default change. Care:
+  count only *accepted, solved* frames so a pile of rejected new subs doesn't nag. (S–M,
+  autonomy — PRIORITY 2)
 
 ### Friendliness (PRIORITY 3)
+- **"Why these steps?" — surface the Auto recipe's data-driven reasoning.** Auto already
+  derives every op from measured data (sky/noise → stretch & black; median FWHM → sharpen
+  radius & star size; coverage distribution → mosaic level + trim), but the user sees only an
+  opaque list of ops appear. Add a one-line, plain-language "why" under the Auto result —
+  e.g. "Stretched your ~0.10 sky to a dark grey · sharpened at r=2.0 from your 4.7 px stars ·
+  trimmed 12% of ragged mosaic edge". The numbers are already computed while building the
+  recipe (`build_auto_recipe_for_run` + the suggestion endpoints), so this is a
+  presentation/trust layer, not new maths. Turns "Auto did something" into "Auto did *this,
+  because of my data*", which is exactly the trust a beginner needs to accept the one-click
+  result. Deepens an existing feature rather than adding surface. (S–M, friendliness/trust —
+  PRIORITY 3)
 - Guided "getting started" / empty states that tell a first-timer exactly what to
   do next; audit every screen for jargon and add plain-language "why" tooltips;
   reduce visible option clutter (progressive disclosure). (M, friendliness)
@@ -627,6 +672,15 @@ problems. Dogfood it every big-picture run and fix root causes.
   worth a standalone ship. If a future run is already in `detail.py`, a cheap guard
   (return the input unchanged when either axis is <2 px, mirroring the `geometry`
   ops' degenerate-size guards) closes it with a one-line regression test. (S, robustness)
+- **Low-priority robustness (near-unreachable): calibration Build-master returns 500 (not
+  400) on a null-byte `source_dir`.** `POST /api/calibration/masters` with `source_dir`
+  containing an embedded null byte (`"a b"`) hits `Path(source_dir).is_dir()`, which
+  raises `ValueError: embedded null byte` (not `OSError`), and the handler only guards the
+  `is_dir()==False` case — so it 500s where every other bad input in that handler cleanly
+  400s. Found by the Scout 2026-07-07 router fan-out audit; near-unreachable (the UI supplies
+  a real folder), so not worth a standalone ship. If a future run is already in
+  `calibration.py`, wrapping the `is_dir()` in a `(OSError, ValueError)` guard closes it with a
+  one-line test. (S, robustness)
 - Chip away at the ~127 pre-existing `ruff check .` findings (don't add new ones);
   consider wiring ruff into CI once the count is low. (L, correctness/maintainability)
 - ~~Add a retention/pruning policy for `jobs.sqlite`~~ — **done, then made
@@ -683,6 +737,15 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.89.1** — Two verified low-severity webapp-router robustness fixes (Scout,
+  `agent/router-input-robustness`): (1) `GET /api/stats?recent_limit=…` now clamps the
+  user-supplied slice size to `[1,100]` like the other int query params (render `size`,
+  frame_preview `size`) — a negative value previously sliced `recent[:-n]` and silently
+  dropped the oldest stacks, and `0` returned an empty strip. (2) `GET /api/sky` now guards
+  `Path(run.preview_path).exists()` when picking the run to place (matching gallery.py /
+  stats.py and its own "actually has a preview on disk" comment), so a run whose preview PNG
+  was deleted isn't placed on the sphere with a 404-ing tile. Regression tests fail before /
+  pass after.
 - **v0.89.0** — Editor "Compare a look" follow-up: a "Switch to this look" action on the
   picker adopts the currently-compared look (Auto / a preset) as the working recipe in one
   click — an undoable step, confirm-gated when replacing a non-empty edit — so the user goes

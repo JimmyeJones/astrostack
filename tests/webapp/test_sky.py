@@ -35,6 +35,36 @@ def _add_stack_run_with_preview(data_root, safe: str) -> None:
         lib.close()
 
 
+def test_sky_skips_run_whose_preview_file_is_missing(client, solved_library):
+    """A run whose preview PNG was deleted on disk (but whose DB row survives)
+    must not be placed on the sky — its tile's image would 404. Mirrors the
+    ``Path(...).exists()`` guard gallery.py / stats.py already apply."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _add_stack_run_with_preview(solved_library, safe)
+    # It's placed while the preview exists.
+    assert len(client.get("/api/sky").json()["images"]) == 1
+
+    # Delete the preview file (leave the DB row) → the run is skipped, not shown
+    # with a broken preview_url.
+    from pathlib import Path
+    preview = Path(_preview_path_for(solved_library, safe))
+    preview.unlink()
+    assert len(client.get("/api/sky").json()["images"]) == 0
+
+
+def _preview_path_for(data_root, safe: str) -> str:
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.preview_path)
+            return run.preview_path
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
 def test_sky_returns_stars(client):
     r = client.get("/api/sky")
     assert r.status_code == 200

@@ -95,6 +95,11 @@ def _rollup_stacks(lib, targets) -> tuple[list[RecentStack], int, int]:
 def get_stats(request: Request, recent_limit: int = 8) -> StatsResponse:
     import shutil
 
+    # Clamp the user-supplied slice size like every other int query param in the
+    # routers (render `size`, frame_preview `size`): a negative value would slice
+    # `recent[:-n]` and silently drop stacks, and 0 would hand back an empty strip
+    # — both wrong for "the most recent N".
+    recent_limit = max(1, min(100, recent_limit))
     settings = deps.get_settings(request)
     jm = deps.get_job_manager(request)
 

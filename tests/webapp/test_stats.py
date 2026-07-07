@@ -66,6 +66,24 @@ def _add_stack_run(root, safe, ts="2026-05-02T00:00:00Z", preview="master_previe
         lib.close()
 
 
+def test_stats_recent_limit_is_clamped(client, solved_library):
+    """A negative/zero recent_limit must not silently drop the newest stacks.
+
+    ``recent`` is sorted newest-first, so an unclamped ``recent[:recent_limit]``
+    with a negative limit would return the wrong slice and 0 an empty strip.
+    The endpoint clamps to a sane range like the other int query params do.
+    """
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    for k in range(3):
+        _add_stack_run(solved_library, safe, ts=f"2026-05-0{k + 1}T00:00:00Z")
+
+    # 0 and negative both fall back to at least one recent stack, not an empty
+    # or reversed slice; a huge value is capped but still returns everything.
+    assert len(client.get("/api/stats", params={"recent_limit": 0}).json()["recent_stacks"]) == 1
+    assert len(client.get("/api/stats", params={"recent_limit": -5}).json()["recent_stacks"]) == 1
+    assert len(client.get("/api/stats", params={"recent_limit": 999}).json()["recent_stacks"]) == 3
+
+
 def test_stats_caches_rollup_until_activity_changes(client, solved_library, monkeypatch):
     import webapp.routers.stats as stats_mod
 
