@@ -721,6 +721,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   so the clamp is a no-op and exports are byte-for-byte unchanged. Regression tests
   `test_small_image_does_not_raise_and_still_flattens` (fails before / passes after)
   and `test_full_size_box_is_unchanged_by_the_clamp`.
+- **Low-priority (editor/consistency, spotted shipping v0.93.1): the bulk "Set all suggested
+  values" button still uses the *raw-proxy* denoise strength.** Now that the per-op denoise
+  "From your image" button is recipe-aware (v0.93.1), the bulk apply (`dataDrivenDefaults`, driven
+  by the eager recipe-independent `denoise` query) can set a denoise strength that differs from what
+  the per-op button suggests once a linear gradient/colour op precedes denoise. Defensible as-is —
+  bulk apply is a from-scratch "quick start from your data" convenience and the raw stack noise is a
+  reasonable seed there — so this is a consistency nicety, not a bug. Only worth aligning if a future
+  run is already in that button's wiring. (S, editor/consistency)
 - **Low-priority robustness: `detail.denoise` on a 1-px-thin image.** A 1×N / N×1
   RGB array makes the wavelet path emit all-NaN in the covered region (violating
   the NaN=coverage invariant) and the `bilateral` path raise `IndexError`. Found by
