@@ -626,18 +626,42 @@ class DenoiseSuggestionOut(BaseModel):
 
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/editor/denoise-suggestion",
             response_model=DenoiseSuggestionOut)
-async def denoise_suggestion(safe: str, run_id: int, request: Request) -> DenoiseSuggestionOut:
+async def denoise_suggestion(safe: str, run_id: int, request: Request,
+                             recipe: str | None = None,
+                             uid: str | None = None) -> DenoiseSuggestionOut:
     """Suggest a denoise strength from the run's measured background noise, so the
     user doesn't have to hand-tune the 0..1 knob — mirrors the PSF-from-stars
     button for deconvolution. Robust σ of adjacent-pixel differences, normalized
-    to the image's own signal range and mapped to the op's strength slider."""
+    to the image's own signal range and mapped to the op's strength slider.
+
+    Denoise is a *linear-stage* op, so the honest measurement is the **linear**
+    image entering it. When ``recipe``+``uid`` are supplied (the per-op "From your
+    image" button) the ops *before* this denoise op are applied first — with the
+    default stretch suppressed (``auto_stretch=False``) so the σ is measured on
+    linear data, never a tone-mapped one — before estimating the noise. This
+    mirrors the recipe-aware levels/stretch/curve suggestions, so a linear
+    background/gradient or colour-balance op ahead of denoise (the Auto recipe
+    puts both there) is reflected in the suggested strength instead of ignored.
+    With no ``recipe`` the raw proxy is measured exactly as before, so the "Your
+    data" noise chip and bulk apply (which want the stack's *inherent* noise) are
+    unchanged."""
     from seestack.edit.noise import suggest_denoise_strength
 
     project_dir, run = _run_info(request, safe, run_id)
+    sub: Recipe | None = None
+    if recipe is not None:
+        rec = _decode_recipe_query(request, safe, run_id, recipe)
+        sub = _recipe_before_uid(rec, uid, drop_ids=("detail.denoise",))
 
     def work() -> DenoiseSuggestionOut:
-        rgb, _scale = get_proxy(project_dir, run.id, run.fits_path)
-        sigma, strength = suggest_denoise_strength(rgb)
+        rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
+        measured = rgb
+        if sub is not None:
+            ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None,
+                              coverage=_proxy_coverage(run.fits_path, scale),
+                              already_display=_run_display_space(run))
+            measured = apply_recipe(rgb, sub, ctx, for_preview=True, auto_stretch=False)
+        sigma, strength = suggest_denoise_strength(measured)
         return DenoiseSuggestionOut(noise_sigma=sigma, strength=strength)
 
     return await run_in_threadpool(work)

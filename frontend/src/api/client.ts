@@ -740,8 +740,18 @@ export const api = {
     req<SharpenSuggestion>(`/api/targets/${safe}/editor/sharpen-suggestion`),
   starSizeSuggestion: (safe: string) =>
     req<StarSizeSuggestion>(`/api/targets/${safe}/editor/star-size-suggestion`),
-  denoiseSuggestion: (safe: string, runId: number) =>
-    req<DenoiseSuggestion>(`/api/targets/${safe}/stack-runs/${runId}/editor/denoise-suggestion`),
+  // With no recipe/uid the bare proxy is measured (the stack's inherent noise —
+  // used by the "Your data" chip + bulk apply). Passing the selected denoise op's
+  // recipe+uid measures the *linear image entering that op* (any prior linear ops
+  // applied), so the per-op "From your image" button reflects an upstream
+  // gradient/colour op instead of ignoring it — mirroring levels/stretch/curve.
+  denoiseSuggestion: (safe: string, runId: number, recipe?: Recipe, uid?: string) =>
+    req<DenoiseSuggestion>(
+      `/api/targets/${safe}/stack-runs/${runId}/editor/denoise-suggestion` +
+      (recipe && uid
+        ? `?recipe=${encodeRecipe(recipe)}&uid=${encodeURIComponent(uid)}`
+        : ""),
+    ),
   trimSuggestion: (safe: string, runId: number) =>
     req<TrimSuggestion>(`/api/targets/${safe}/stack-runs/${runId}/editor/trim-suggestion`),
   levelsSuggestion: (safe: string, runId: number, recipe: Recipe, uid: string) =>

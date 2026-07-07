@@ -695,13 +695,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   the actual far outlier rather than a good central (wrap-straddling) frame. Regression
   test `test_canvas_shrink_loop_drops_the_real_outlier_near_ra_zero` (fails before /
   passes after).
-- **Low-priority (editor/consistency): the `denoise-suggestion` endpoint measures the *raw*
-  proxy, not the recipe-aware display image.** Unlike the levels/stretch/curve suggestions
-  (which apply the ops before the selected op via `_recipe_before_uid`), `denoise-suggestion`
-  estimates noise on the bare linear proxy. Since denoise runs as a *linear* op before the
-  stretch, that's usually the right domain — but if a user puts a linear background/gradient op
-  before denoise, the suggested strength ignores it. Minor; only worth aligning if a future run
-  is already in that endpoint. Found by a Builder editor-UI audit 2026-07-05. (S, editor)
+- ~~**Low-priority (editor/consistency): the `denoise-suggestion` endpoint measures the *raw*
+  proxy, not the recipe-aware display image.**~~ — **FIXED v0.93.1** (see Shipped). The endpoint
+  now accepts optional `recipe`+`uid` and, when the per-op "From your image" button supplies them,
+  measures the *linear image entering* the denoise op (prior linear ops applied, default stretch
+  suppressed) via the same `_recipe_before_uid` machinery as levels/stretch/curve — so an upstream
+  gradient/colour-balance op (the Auto recipe places both ahead of denoise) is reflected instead of
+  ignored. With no recipe the bare proxy is measured exactly as before, so the "Your data" noise
+  chip + bulk apply (which want the stack's *inherent* noise) are byte-for-byte unchanged.
 - ~~**Low-priority (engine/robustness, unreachable today): per-frame weight/scale lookups use
   `weights.get(f.id or -1, 1.0)`.**~~ — **FIXED v0.84.8** (see Shipped). All four hot-path sites
   (`stacker.py` `_pass` weight+scale, `_drizzle_pass` weight+scale) now key with
@@ -720,6 +721,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   so the clamp is a no-op and exports are byte-for-byte unchanged. Regression tests
   `test_small_image_does_not_raise_and_still_flattens` (fails before / passes after)
   and `test_full_size_box_is_unchanged_by_the_clamp`.
+- **Low-priority (editor/consistency, spotted shipping v0.93.1): the bulk "Set all suggested
+  values" button still uses the *raw-proxy* denoise strength.** Now that the per-op denoise
+  "From your image" button is recipe-aware (v0.93.1), the bulk apply (`dataDrivenDefaults`, driven
+  by the eager recipe-independent `denoise` query) can set a denoise strength that differs from what
+  the per-op button suggests once a linear gradient/colour op precedes denoise. Defensible as-is —
+  bulk apply is a from-scratch "quick start from your data" convenience and the raw stack noise is a
+  reasonable seed there — so this is a consistency nicety, not a bug. Only worth aligning if a future
+  run is already in that button's wiring. (S, editor/consistency)
 - **Low-priority robustness: `detail.denoise` on a 1-px-thin image.** A 1×N / N×1
   RGB array makes the wavelet path emit all-NaN in the covered region (violating
   the NaN=coverage invariant) and the `bilateral` path raise `IndexError`. Found by
@@ -793,6 +802,18 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.93.1** — Make the editor's `denoise-suggestion` recipe-aware, matching its
+  levels/stretch/curve siblings (`claude/happy-franklin-a5ivvh`). The per-op "From your image"
+  denoise button now measures the *linear image entering* the denoise op (any prior linear ops —
+  the Auto recipe places `background.final_gradient` + `tone.color_calibrate` ahead of denoise —
+  applied, default stretch suppressed so σ stays in the linear domain) instead of the bare proxy,
+  so an upstream gradient/colour op is reflected in the suggested strength rather than ignored.
+  Backend `GET …/editor/denoise-suggestion` gained optional `recipe`+`uid` (via the shared
+  `_recipe_before_uid`); with neither it measures the raw proxy **byte-for-byte as before**, so the
+  recipe-independent "Your data" noise chip + bulk-apply (the stack's *inherent* noise) are
+  unchanged and old clients keep working. Frontend adds one gated recipe-aware query for the per-op
+  button only. Regression tests: backend (empty-recipe ≡ raw; a sharpen ahead of denoise raises the
+  measured σ) + frontend (the per-op button reads the recipe-aware strength, called with recipe+uid).
 - **v0.93.0** — Show the auto-edit "why" note in the *editor* when opening a run a background
   job auto-edited (`claude/happy-franklin-c8bh0j`). Process-target deep-links straight into the
   editor (v0.85.3) on a recipe the user didn't build; before this it opened with a non-empty
