@@ -36,6 +36,36 @@ function medianOf(xs: number[]): number {
   return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
 }
 
+// Parse an ISO timestamp to epoch ms, forcing a naive (no-offset) string to UTC
+// so a browser in a non-UTC zone doesn't shift it. Frame DATE-OBS and stack-run
+// timestamps are both stored timezone-aware ("…+00:00"), but a fits header can
+// fall back to a raw naive string, so normalise defensively. NaN on unparseable.
+function parseUtcMs(s: string): number {
+  const hasTz = /[Zz]$|[+-]\d{2}:?\d{2}$/.test(s);
+  return Date.parse(hasTz ? s : s + "Z");
+}
+
+// Count accepted, plate-solved frames captured *after* the target's most recent
+// genuine stack ran — i.e. subs the current master doesn't yet include. Powers
+// the "N new subs since your last stack — restack?" nudge for the multi-night
+// Seestar workflow (drop another night in, the old master silently no longer
+// reflects all your data). Only accepted+solved frames count, so a pile of
+// rejected/unsolved new subs never nags; returns 0 when there's no genuine
+// stack timestamp to compare against.
+export function countNewSubsSinceStack(
+  frames: Frame[],
+  latestStackUtc: string | null | undefined,
+): number {
+  if (!latestStackUtc) return 0;
+  const stackMs = parseUtcMs(latestStackUtc);
+  if (Number.isNaN(stackMs)) return 0;
+  return frames.filter((f) => {
+    if (!f.accept || !f.solved || !f.timestamp_utc) return false;
+    const t = parseUtcMs(f.timestamp_utc);
+    return !Number.isNaN(t) && t > stackMs;
+  }).length;
+}
+
 // Turn a raw `reject_reason` (qc:fwhm, bulk:streaked, user, …) into a plain-language
 // label so a beginner can see *why* frames were dropped, not just how many.
 const METRIC_LABEL: Record<string, string> = {
@@ -385,6 +415,19 @@ export function TargetView() {
     return !latestRun || acceptedUnsolved;
   }, [solveSetup, list, latestRun]);
 
+  // Multi-night nudge: the target already has a stack, but accepted+solved subs
+  // have arrived *since* it ran, so the current master no longer reflects all
+  // the user's data. Compare against the newest *genuine* stack run's timestamp
+  // (an editor-export/combine run — `reusable === false` — doesn't reset the
+  // clock). Only shown when there's nothing more pressing to do first
+  // (`needsProcessing`/`solveSetup` take precedence). Read-only detection; the
+  // one-click reuses the same Process chain.
+  const newSubsSinceStack = useMemo(() => {
+    if (needsProcessing || solveSetup) return 0;
+    const latestGenuine = runs.data?.find((r) => r.reusable);
+    return countNewSubsSinceStack(list, latestGenuine?.timestamp_utc);
+  }, [needsProcessing, solveSetup, runs.data, list]);
+
   // Keyboard grading: j/k or arrows to move, a to accept, r/x to reject. Skips
   // when typing in a field so notes/tags editing isn't hijacked.
   useEffect(() => {
@@ -521,6 +564,25 @@ export function TargetView() {
               leftSection={<IconSparkles size={14} />}
               loading={process.isPending} onClick={() => process.mutate()}>
               Process target
+            </Button>
+          </Group>
+        </Alert>
+      ) : null}
+      {newSubsSinceStack > 0 ? (
+        <Alert color="blue" variant="light" icon={<IconStack2 size={18} />}
+          title={`${newSubsSinceStack} new sub${newSubsSinceStack === 1 ? "" : "s"} since your last stack`}>
+          <Text size="sm">
+            {newSubsSinceStack === 1 ? "A frame has" : `${newSubsSinceStack} frames have`}{" "}
+            been accepted and solved since this target was last stacked, so the
+            current master doesn't include{" "}
+            {newSubsSinceStack === 1 ? "it" : "them"} yet. Restack to fold in the
+            new data.
+          </Text>
+          <Group gap="xs" mt="xs">
+            <Button size="xs" variant="filled" color="blue"
+              leftSection={<IconStack2 size={14} />}
+              loading={process.isPending} onClick={() => process.mutate()}>
+              Restack
             </Button>
           </Group>
         </Alert>
