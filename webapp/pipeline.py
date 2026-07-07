@@ -108,6 +108,7 @@ def _pipeline_body(
             stacked: list[str] = []
             skipped: list[str] = []
             stack_errors: dict[str, str] = {}
+            auto_edited = 0
             for entry in lib.list_targets():
                 if job.cancel_requested():
                     break
@@ -121,13 +122,24 @@ def _pipeline_body(
                 # identical stack on restart (crash-loop guard).
                 _mark_auto_stack_attempt(lib, safe, attempt_n)
                 try:
-                    _stack_target(settings, jm, job, lib, safe)
+                    res = _stack_target(settings, jm, job, lib, safe)
                     stacked.append(safe)
+                    # Optionally finish the fresh master into a picture (the same
+                    # Auto-recipe chain the one-click Process/Reprocess use), so
+                    # the fully-unattended path returns a finished image, not a
+                    # flat linear master. Best-effort: never sinks the batch.
+                    run_id = res.get("run_id")
+                    if (settings.auto_edit_on_autostack and run_id is not None
+                            and not job.cancel_requested()):
+                        if _auto_edit_process_run(lib, safe, run_id) is not None:
+                            auto_edited += 1
                 except Exception as exc:  # noqa: BLE001 — one target shouldn't sink the batch
                     log.warning("auto-stack failed for %s: %s", safe, exc)
                     stack_errors[safe] = str(exc)
             summary["auto_stacked"] = stacked
             summary["auto_stack_skipped"] = skipped
+            if auto_edited:
+                summary["auto_edited"] = auto_edited
             if stack_errors:
                 summary["stack_errors"] = stack_errors
         return summary

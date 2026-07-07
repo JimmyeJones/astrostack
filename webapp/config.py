@@ -67,6 +67,15 @@ class Settings(BaseModel):
     auto_qc: bool = True
     auto_solve: bool = True
     auto_stack: bool = False
+    # After a successful background auto-stack, also auto-edit the fresh master
+    # into a finished picture (persist the one-click Auto recipe as the run's
+    # editor recipe + re-render its thumbnail through it), the same chain the
+    # one-click "Process target" and "Reprocess everything" runs use. Off by
+    # default (it seeds an editor recipe on every unattended stack); when on, the
+    # "drop subs in, walk away, come back to a great image" path returns a
+    # finished picture instead of a flat linear master. Best-effort per target —
+    # a failed auto-edit never sinks the stack. Requires ``auto_stack``.
+    auto_edit_on_autostack: bool = False
     # QC auto-rejects a whole frame when it detects a satellite/plane streak,
     # discarding ~99% good pixels with it. With this on, streaked frames are
     # *flagged* but kept accepted, so a stack with per-pixel rejection

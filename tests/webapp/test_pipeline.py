@@ -133,6 +133,49 @@ def test_process_target_chains_auto_edit(client, solved_library):
         assert pr.content[:8] == b"\x89PNG\r\n\x1a\n"
 
 
+def _run_scan(client):
+    r = client.post("/api/scan", json={})
+    assert r.status_code == 200
+    body = _wait_job(client, r.json()["job_id"], timeout=120)
+    assert body["state"] == "done", body
+    return body
+
+
+def test_auto_stack_without_auto_edit_leaves_linear_master(client, solved_library):
+    # Auto-stack on, auto-edit-on-autostack OFF (the default): the unattended
+    # background stack produces a flat linear master with no saved editor recipe
+    # — the pre-existing behaviour is unchanged by the new opt-in.
+    client.put("/api/settings",
+               json={"auto_stack": True, "auto_edit_on_autostack": False})
+    body = _run_scan(client)
+    assert "auto_edited" not in body["result"]
+    runs = client.get("/api/targets/M_42/stack-runs").json()
+    assert runs, "auto-stack should have produced a run"
+    rid = runs[0]["id"]
+    recipe = client.get(
+        f"/api/targets/M_42/stack-runs/{rid}/editor/recipe").json()
+    assert [o for o in recipe["ops"] if o.get("enabled", True)] == []
+
+
+def test_auto_edit_on_autostack_finishes_the_picture(client, solved_library):
+    # With the opt-in on, the fully-unattended watcher path finishes the master
+    # into a picture: the Auto recipe is saved as the run's editor recipe, just
+    # like the one-click Process / Reprocess chains.
+    client.put("/api/settings",
+               json={"auto_stack": True, "auto_edit_on_autostack": True})
+    body = _run_scan(client)
+    assert body["result"].get("auto_edited", 0) >= 1
+    runs = client.get("/api/targets/M_42/stack-runs").json()
+    assert runs
+    rid = runs[0]["id"]
+    recipe = client.get(
+        f"/api/targets/M_42/stack-runs/{rid}/editor/recipe").json()
+    saved_ops = [o for o in recipe["ops"] if o.get("enabled", True)]
+    # The Auto recipe always includes a tone stretch — a genuine finished-picture
+    # recipe, not the empty recipe a plain auto-stack leaves.
+    assert any(o["id"] == "tone.stretch" for o in saved_ops)
+
+
 def test_process_target_skips_stack_when_nothing_solved(client, built_library):
     # No ASTAP in CI and no injected WCS → nothing is plate-solved, so the chained
     # stack is skipped with a clear reason rather than failing the whole job.

@@ -411,23 +411,15 @@ problems. Dogfood it every big-picture run and fix root causes.
   a nicety only: a richer dedicated N/total batch progress card (the Jobs summary already
   reports "restacked N/M — K already up to date"). (S remaining — polish only,
   autonomy/image-quality)
-- **Finish the *fully-autonomous* path too: chain the auto-edit onto watcher auto-stack.**
-  The one-click "Process target" (v0.86.0) and "Reprocess everything" (`auto_edit`, v0.86.1)
-  both chain `_auto_edit_process_run` so the result is a finished *picture*. But the **most**
-  autonomous path — the watcher's background auto-stack (`_pipeline_body`, `settings.auto_stack`)
-  — still stops at a flat linear `master.fits`: `_stack_target` is called at `pipeline.py:124`
-  with no auto-edit chain. So the exact "drop a night's subs in the incoming folder, walk away,
-  come back to a great image" workflow (the north star) currently comes back to an *unedited*
-  master the user must open and Auto-process by hand — while the manual one-click button gives a
-  finished picture. Add an off-by-default `auto_edit_on_autostack` setting (mirroring the
-  reprocess `auto_edit` opt-in and the §9 "new behaviour off by default" rule) that, when on,
-  runs the same best-effort `_auto_edit_process_run` after each successful watcher auto-stack.
-  Reuses the shipped helper (a saved editor recipe + re-rendered thumbnail, fully reversible in
-  the editor); best-effort per target so a failure never sinks the batch. This closes the last
-  gap in the "just works" story — the unattended path becomes as finished as the one-click one.
-  Care: keep it off by default (it seeds a recipe on every fresh auto-stack), and it must not
-  re-fire on a run that already has a saved edit (the helper only sets the recipe on the *new*
-  run, so it's safe). (S–M, autonomy — PRIORITY 2)
+- ~~**Finish the *fully-autonomous* path too: chain the auto-edit onto watcher auto-stack.**~~
+  — **shipped v0.89.3** (see Shipped). A new off-by-default `auto_edit_on_autostack` setting
+  (requires `auto_stack`; Settings → "Auto-edit the auto-stacked master into a finished picture")
+  chains the same best-effort `_auto_edit_process_run` helper onto every successful watcher
+  auto-stack, so the north-star "drop a night's subs in the incoming folder, walk away, come back
+  to a great image" path now returns a finished *picture* instead of a flat linear master. Reuses
+  the shipped helper (saved editor recipe + re-rendered thumbnail, fully reversible in the editor);
+  best-effort per target so a failed auto-edit never sinks the batch, and it only sets the recipe
+  on the *new* run. Off by default (§9). The pipeline summary reports "auto_edited N".
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
   different (per-channel vs luminance gradient, star reduction, saturation). The
@@ -785,6 +777,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.89.3** — Chain the auto-edit onto the watcher's background auto-stack
+  (`agent/auto-edit-on-autostack`), closing the last gap in the fully-unattended "just works"
+  story: the one-click Process (v0.86.0) and Reprocess-everything (v0.86.1) already finished their
+  masters into pictures, but the watcher auto-stack — the most autonomous path — stopped at a flat
+  linear `master.fits`. A new off-by-default `auto_edit_on_autostack` setting (requires
+  `auto_stack`) runs the same best-effort `_auto_edit_process_run` after each successful auto-stack,
+  so "drop subs in, walk away, come back to a great image" now returns a finished picture. Off by
+  default (§9 — it seeds an editor recipe on every unattended stack), best-effort per target, only
+  sets the recipe on the new run, fully reversible in the editor. Settings toggle + summary
+  "auto_edited N". Tests: `test_auto_edit_on_autostack_finishes_the_picture` /
+  `test_auto_stack_without_auto_edit_leaves_linear_master` + a config-upgrade default-off assertion.
 - **v0.89.2** — Graceful degradation for `background.final_gradient` on busy / dense-star
   fields (`agent/final-gradient-degrade`). The `Background2D` fit used to raise and the op
   vanish silently when the object mask covered >80% of every box (a dense cluster — the *cluster*

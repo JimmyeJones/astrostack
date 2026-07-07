@@ -34,6 +34,9 @@ def test_old_config_loads_keeps_values_and_defaults_new_fields(tmp_path):
     # own; the sensitivity default is the balanced middle.
     assert s.auto_grade_frames is False
     assert s.auto_grade_sensitivity == "balanced"
+    # New auto-edit-on-autostack flag defaults off → an upgrade never starts
+    # seeding editor recipes on unattended stacks on its own.
+    assert s.auto_edit_on_autostack is False
     # New job-history cap defaults to the long-standing hard-coded value, so an
     # upgraded install keeps exactly as much job history as before.
     assert s.job_history_limit == 200
