@@ -97,10 +97,26 @@ def _build_object_mask(rgb: np.ndarray, options: FinalGradientOptions) -> np.nda
     return obj_mask
 
 
+# exclude_percentile ladder: how much of a box may be masked before the box is
+# dropped. We start at the tuned-for-look 80 and, only if the fit *fails* (every
+# box is more masked than that — a dense star field or a very flat frame swells
+# the object mask past the threshold), degrade to progressively more tolerant
+# fits so a busy field still gets a coarse gradient subtract instead of none. A
+# succeeding fit at 80 is untouched, so a normal stack's export is unchanged.
+_EXCLUDE_PERCENTILE_LADDER = (80.0, 95.0, 100.0)
+
+
 def _fit_background_2d(channel: np.ndarray, mask: np.ndarray, box_size: int) -> np.ndarray:
     """
     photutils Background2D respecting an object mask. Returns the fitted
     background as a same-shape array.
+
+    On a busy/dense field the object mask can cover >80% of every box, which
+    makes ``Background2D`` raise at the default ``exclude_percentile``. Rather
+    than give up (which drops the op entirely and silently loses gradient
+    removal on clusters and very-flat frames), we retry with a more tolerant
+    ``exclude_percentile`` and, if still failing, a smaller box — degrading to a
+    coarse fit instead of none.
     """
     from astropy.stats import SigmaClip
     from photutils.background import Background2D, MMMBackground
@@ -126,16 +142,33 @@ def _fit_background_2d(channel: np.ndarray, mask: np.ndarray, box_size: int) -> 
     # much of each tile lies inside that signal, and that bias varies tile by
     # tile across the mosaic — which re-emerges as visible panel steps after
     # stretching. Mode is robust to it. Matches the per-frame bg path.
-    bkg = Background2D(
-        clean,
-        box_size=(box, box),
-        filter_size=(3, 3),
-        sigma_clip=SigmaClip(sigma=3.0),
-        bkg_estimator=MMMBackground(),
-        mask=full_mask,
-        exclude_percentile=80.0,  # tolerate tiles that are mostly object
-    )
-    return bkg.background.astype(np.float32, copy=False)
+    def _fit(fit_box: int, exclude_percentile: float) -> np.ndarray:
+        bkg = Background2D(
+            clean,
+            box_size=(fit_box, fit_box),
+            filter_size=(3, 3),
+            sigma_clip=SigmaClip(sigma=3.0),
+            bkg_estimator=MMMBackground(),
+            mask=full_mask,
+            exclude_percentile=exclude_percentile,
+        )
+        return bkg.background.astype(np.float32, copy=False)
+
+    # A smaller box is more likely to catch a pocket of sky between the objects,
+    # so pair the half-size box with the most tolerant percentile as a last try.
+    half = max(1, min(box // 2, h, w))
+    attempts: list[tuple[int, float]] = [(box, p) for p in _EXCLUDE_PERCENTILE_LADDER]
+    if half < box:
+        attempts.append((half, _EXCLUDE_PERCENTILE_LADDER[-1]))
+
+    last_exc: Exception | None = None
+    for fit_box, excl in attempts:
+        try:
+            return _fit(fit_box, excl)
+        except Exception as exc:  # noqa: BLE001 — degrade, then re-raise the last
+            last_exc = exc
+    assert last_exc is not None
+    raise last_exc
 
 
 def _subtract_per_channel_with_mask(
