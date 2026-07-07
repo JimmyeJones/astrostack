@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { TargetView } from "./Target";
+import { TargetView, countNewSubsSinceStack } from "./Target";
 import * as client from "../api/client";
 import type { Frame, Target } from "../api/client";
 
@@ -145,6 +145,90 @@ describe("TargetView getting-started callout", () => {
         screen.getByText("Plate-solving isn't set up — ASTAP wasn't found"),
       ).toBeInTheDocument());
     expect(screen.queryByText("Ready to process?")).not.toBeInTheDocument();
+  });
+});
+
+describe("countNewSubsSinceStack", () => {
+  const F = (o: Partial<Frame>) => mkFrame(1, o);
+  it("returns 0 without a stack timestamp to compare against", () => {
+    expect(countNewSubsSinceStack([F({})], null)).toBe(0);
+    expect(countNewSubsSinceStack([F({})], undefined)).toBe(0);
+  });
+  it("counts only accepted+solved frames captured after the stack", () => {
+    const stack = "2026-02-01T00:00:00+00:00";
+    const frames = [
+      F({ id: 1, timestamp_utc: "2026-02-02T00:00:00+00:00" }),                 // new: counts
+      F({ id: 2, timestamp_utc: "2026-01-31T00:00:00+00:00" }),                 // older: no
+      F({ id: 3, timestamp_utc: "2026-02-03T00:00:00+00:00", solved: false }),  // unsolved: no
+      F({ id: 4, timestamp_utc: "2026-02-03T00:00:00+00:00", accept: false }),  // rejected: no
+      F({ id: 5, timestamp_utc: null }),                                        // no time: no
+    ];
+    expect(countNewSubsSinceStack(frames, stack)).toBe(1);
+  });
+  it("normalises a naive frame timestamp to UTC (no timezone shift)", () => {
+    // Frame has no offset, stack does; both denote the same instant, so a frame
+    // one second later must count as exactly one new sub regardless of the
+    // runner's local timezone.
+    const frames = [F({ timestamp_utc: "2026-02-01T00:00:01" })];
+    expect(countNewSubsSinceStack(frames, "2026-02-01T00:00:00+00:00")).toBe(1);
+  });
+});
+
+describe("TargetView new-subs-since-stack nudge", () => {
+  it("nudges a restack when accepted+solved subs arrived after the last stack", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ reusable: true, timestamp_utc: "2026-01-01T00:00:00+00:00" }),
+    ]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      mkFrame(1, { timestamp_utc: "2026-01-01T00:00:00+00:00" }),
+      mkFrame(2, { timestamp_utc: "2026-02-05T00:00:00+00:00" }),  // a new night
+    ]);
+    const process = vi
+      .spyOn(client.api, "processTarget")
+      .mockResolvedValue({ job_id: "j1" });
+
+    renderTarget();
+
+    const btn = await screen.findByRole("button", { name: "Restack" });
+    expect(screen.getByText("1 new sub since your last stack")).toBeInTheDocument();
+    btn.click();
+    await waitFor(() => expect(process).toHaveBeenCalledWith("M_42"));
+  });
+
+  it("stays quiet when every accepted+solved frame predates the stack", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ reusable: true, timestamp_utc: "2026-03-01T00:00:00+00:00" }),
+    ]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      mkFrame(1, { timestamp_utc: "2026-01-01T00:00:00+00:00" }),
+      mkFrame(2, { timestamp_utc: "2026-02-01T00:00:00+00:00" }),
+    ]);
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(screen.getByText("3/3 accepted")).toBeInTheDocument());
+    expect(screen.queryByText(/new sub/)).not.toBeInTheDocument();
+  });
+
+  it("ignores an editor-export run (non-reusable) when finding the last stack", async () => {
+    // A later editor-export run must not reset the 'new subs' clock: the genuine
+    // stack is old, and a newer accepted+solved sub still counts.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ id: 2, reusable: false, timestamp_utc: "2026-02-10T00:00:00+00:00" }),
+      mkRun({ id: 1, reusable: true, timestamp_utc: "2026-01-01T00:00:00+00:00" }),
+    ]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      mkFrame(1, { timestamp_utc: "2026-02-05T00:00:00+00:00" }),
+    ]);
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(screen.getByText("1 new sub since your last stack")).toBeInTheDocument());
   });
 });
 

@@ -501,18 +501,16 @@ problems. Dogfood it every big-picture run and fix root causes.
   the newest *other* edited run's recipe onto this run (server-validated on load, applied
   as a single undoable step, not persisted unless Saved). The related "personal default
   recipe" idea (a target-independent default) is still open below.
-- **"N new subs since your last stack — restack?" — proactively flag a master that's
-  stale vs the user's own newer data.** The existing "N targets are out of date" nudge
-  (v0.81.5) catches masters stale vs the *engine version*, but not the far more common
-  multi-night case: the owner drops another night's frames into an already-stacked target
-  and the master silently no longer reflects all their subs. Add a cheap check on the Target
-  page — the target's newest *accepted* frame `timestamp_utc` vs its latest genuine stack
-  run's `timestamp_utc` — and when newer accepted frames exist, show a dimmed "N new subs
-  since this stack — restack?" callout with a one-click that reuses the existing
-  `process_target` / stack-with-saved-defaults chain. Serves the exact "thousands of subs
-  arriving over many nights" workflow; additive, read-only detection, no default change. Care:
-  count only *accepted, solved* frames so a pile of rejected new subs doesn't nag. (S–M,
-  autonomy — PRIORITY 2)
+- ~~**"N new subs since your last stack — restack?" — proactively flag a master that's
+  stale vs the user's own newer data.**~~ — **shipped v0.90.0** (see Shipped). The Target page
+  now counts accepted + plate-solved frames captured *after* the target's most recent *genuine*
+  stack run (an editor-export/combine run — `reusable === false` — doesn't reset the clock) and,
+  when any exist, shows a "N new subs since your last stack" callout with a one-click **Restack**
+  that reuses the existing `processTarget` chain. Frontend-only, additive, read-only detection
+  (no backend/schema change); only accepted+solved frames count so rejected/unsolved new subs
+  never nag, and the nudge is suppressed while the more-pressing "Ready to process?" /
+  plate-solve-setup banners are showing. Timestamps are UTC-normalised so a browser in a non-UTC
+  zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
 - **"Why these steps?" — surface the Auto recipe's data-driven reasoning.** Auto already
@@ -777,6 +775,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.90.0** — "N new subs since your last stack — restack?" nudge on the Target page
+  (`claude/happy-franklin-tz1lk5`). Serves the multi-night Seestar workflow: after a target is
+  stacked, the owner drops another night's frames in and the master silently no longer reflects
+  all their subs. The page now counts accepted + plate-solved frames captured *after* the target's
+  most recent *genuine* stack run (an editor-export/combine run — `reusable === false` — doesn't
+  reset the clock) and shows a "N new subs since your last stack" callout with a one-click
+  **Restack** reusing the existing `processTarget` chain. Frontend-only, additive, read-only
+  detection (no backend/schema change); only accepted+solved frames count so rejected/unsolved
+  new subs never nag; suppressed while the "Ready to process?" / plate-solve-setup banners take
+  precedence; UTC-normalised timestamps so a non-UTC browser can't shift the comparison. Pure
+  helper `countNewSubsSinceStack` + 3 unit + 3 component tests in `Target.test.tsx`.
 - **v0.89.3** — Chain the auto-edit onto the watcher's background auto-stack
   (`agent/auto-edit-on-autostack`), closing the last gap in the fully-unattended "just works"
   story: the one-click Process (v0.86.0) and Reprocess-everything (v0.86.1) already finished their
