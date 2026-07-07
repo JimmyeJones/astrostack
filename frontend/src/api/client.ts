@@ -764,6 +764,9 @@ export const api = {
   previousRecipe: (safe: string, runId: number) =>
     req<PreviousRecipe>(
       `/api/targets/${safe}/stack-runs/${runId}/editor/previous-recipe`),
+  autoNote: (safe: string, runId: number) =>
+    req<{ note: string | null }>(
+      `/api/targets/${safe}/stack-runs/${runId}/editor/auto-note`),
   putRecipe: (safe: string, runId: number, recipe: Recipe) =>
     req<Recipe>(`/api/targets/${safe}/stack-runs/${runId}/editor/recipe`, {
       method: "PUT", body: JSON.stringify(recipe),

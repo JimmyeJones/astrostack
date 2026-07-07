@@ -119,6 +119,20 @@ export function EditorView() {
     enabled: !!opsSchema.data && savedIsEmpty,
     staleTime: 30_000,
   });
+  // The "what Auto did (and why)" note a *background* job stamped when it auto-edited
+  // this run (Process-target / reprocess / watcher auto-stack — v0.92.0). The
+  // Process-target deep-link lands the user straight in the editor on a recipe they
+  // didn't build, so without this the editor opens with a non-empty pipeline and no
+  // explanation. Fetched only when the run has a saved (non-empty) recipe — a note is
+  // never stored for an empty or hand-built one — and surfaced read-only until the
+  // user hand-edits (see `pristine` below), so a recipe the user tweaks never keeps a
+  // stale explanation. Best-effort: null on an older backend without the endpoint.
+  const autoNote = useQuery({
+    queryKey: ["auto-note", safe, rid],
+    queryFn: () => api.autoNote(safe, rid).catch(() => ({ note: null })),
+    enabled: !!saved.data && !savedIsEmpty,
+    staleTime: 30_000,
+  });
   // Data-driven default for the deconvolution PSF width: the target's median
   // star FWHM converted to a Gaussian σ, offered as a one-click button.
   const psf = useQuery({
@@ -199,10 +213,18 @@ export function EditorView() {
   // gate also holds the live preview until the recipe is loaded, so the editor
   // never flashes the un-edited image (and wastes a proxy render) on open.
   const [seeded, setSeeded] = useState(false);
-  useEffect(() => { setSeeded(false); }, [rid]);
+  // Signature of the recipe the run opened with, captured once at seed time. The
+  // background auto-edit note (`autoNote`) is shown only while the live pipeline
+  // still equals this — i.e. the user hasn't hand-edited — so a note the user
+  // didn't build fades the moment they change anything, and never re-appears (even
+  // after a Save re-syncs `saved.data`) because this key stays frozen for the run.
+  const [seedKey, setSeedKey] = useState<string | null>(null);
+  useEffect(() => { setSeeded(false); setSeedKey(null); }, [rid]);
   useEffect(() => {
     if (saved.data && !seeded) {
-      resetOps(saved.data.ops ?? []);
+      const ops0 = saved.data.ops ?? [];
+      resetOps(ops0);
+      setSeedKey(JSON.stringify(ops0));
       setSeeded(true);
     }
   }, [saved.data, seeded, resetOps]);
@@ -1287,6 +1309,29 @@ export function EditorView() {
                   : null}
               </Menu.Dropdown>
             </Menu>
+
+            {/* A recipe a *background* job auto-edited (Process-target / reprocess /
+                watcher auto-stack): explain it — the user landed here on an edit
+                they didn't build. Shown only while the pipeline is still pristine
+                (unedited) and no interactive Auto note is up, and only when a note
+                was actually stored, so a hand-built recipe never surfaces it. */}
+            {!autoSummary && seedKey !== null && recipeKey === seedKey
+              && autoNote.data?.note ? (
+              <Alert color="violet" variant="light" py={8}
+                icon={<IconWand size={16} />} title="This picture was auto-edited">
+                <Text size="xs" c="dimmed">{autoNote.data.note}</Text>
+                {/* The pipeline is still pristine here, so it *is* the auto recipe:
+                    surface the same data-driven values the interactive Auto note
+                    shows, so a user who lands here via Process-target gets the same
+                    explanation as one who clicked Auto. */}
+                {autoValueSentence(ops) ? (
+                  <Text size="xs" c="dimmed" mt={4}>{autoValueSentence(ops)}</Text>
+                ) : null}
+                <Text size="10px" c="dimmed" mt={4}>
+                  These steps were chosen from your image — tweak or remove any of them below.
+                </Text>
+              </Alert>
+            ) : null}
 
             {autoSummary ? (
               <Alert color="violet" variant="light" py={8} withCloseButton
