@@ -254,3 +254,49 @@ def auto_recipe(rgb: np.ndarray | None = None,
         x0, y0, x1, y1 = trim_crop
         ops.append(("geometry.crop", {"x0": x0, "y0": y0, "x1": x1, "y1": y1}))
     return Recipe(ops=_ops(*ops))
+
+
+def analyze_auto_inputs(
+    rgb: np.ndarray | None = None,
+    median_fwhm: float | None = None,
+    is_mosaic: bool = False,
+    trim_crop: tuple[float, float, float, float] | None = None,
+) -> dict[str, Any]:
+    """The *measured cues* that drove the Auto recipe — the causal inputs behind
+    each op, surfaced so the user sees Auto tuned itself to *their* data (not a
+    fixed op list). Pure; reuses the exact same analysis ``auto_recipe`` consumes
+    (``analyze_proxy`` + ``_noise_fraction`` + the FWHM→radius map + the trim
+    rect), so the numbers reported here match the recipe it actually built.
+
+    Every field is optional/nullable so it degrades gracefully: ``sky``/noise are
+    ``None`` when the proxy can't be measured, ``median_fwhm`` is ``None`` when no
+    solved stars gave a FWHM, and ``trim_fraction`` is ``None`` on a single-field
+    (non-trimmed) stack. Values are rounded to the precision a UI would show.
+    """
+    out: dict[str, Any] = {
+        "sky": None,
+        "sky_sigma": None,
+        "noisy": None,
+        "noise_fraction": None,
+        "median_fwhm": (round(float(median_fwhm), 2)
+                        if median_fwhm is not None and median_fwhm > 0 else None),
+        "sharpen_radius": None,
+        "is_mosaic": bool(is_mosaic),
+        "trim_fraction": None,
+    }
+    if rgb is not None:
+        a = analyze_proxy(rgb)
+        sky_sigma = float(a["sky_sigma"])
+        out["sky"] = round(float(a["sky"]), 3)
+        out["sky_sigma"] = round(sky_sigma, 4)
+        out["noisy"] = bool(a["noisy"])
+        out["noise_fraction"] = round(_noise_fraction(sky_sigma), 3)
+    if median_fwhm is not None and median_fwhm > 0:
+        # Only meaningful when a sharpen actually runs (clean/mildly-noisy data);
+        # reported unconditionally here since it's the star size Auto *would* use.
+        out["sharpen_radius"] = _sharpen_radius_from_fwhm(median_fwhm)
+    if trim_crop is not None:
+        x0, y0, x1, y1 = trim_crop
+        kept = max(0.0, x1 - x0) * max(0.0, y1 - y0)
+        out["trim_fraction"] = round(max(0.0, 1.0 - kept), 3)
+    return out

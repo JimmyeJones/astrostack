@@ -20,7 +20,7 @@ import { tonalHistGuides } from "../components/editor/tonalGuides";
 import { OpList } from "../components/editor/OpList";
 import { degenerateLevelsUids, extraEnabledStretchUids, hasEnabledStretch, insertOnCorrectSide, moveToCorrectSide }
   from "../components/editor/stageConflicts";
-import { autoSummarySentence, autoValueSentence } from "../components/editor/autoSummary";
+import { autoCauseSentence, autoSummarySentence, autoValueSentence } from "../components/editor/autoSummary";
 import { applyDataDrivenDefaults, countDataDrivenDefaults, type OpSuggestion }
   from "../components/editor/dataDrivenDefaults";
 import { deconvUnderstatesCaption } from "../components/editor/deconvPreview";
@@ -186,6 +186,10 @@ export function EditorView() {
   // saturation, sharpen radius), shown under the summary so the note explains
   // *this, because of my data* — not just which ops ran.
   const [autoValues, setAutoValues] = useState<string | null>(null);
+  // The causal inputs Auto measured from the image (sky, star size, noise, mosaic
+  // trim) — the "why" behind the picks, shown above the values so the note reads
+  // cause → effect. Best-effort: null on an older backend without the endpoint.
+  const [autoCause, setAutoCause] = useState<string | null>(null);
   const [autoKey, setAutoKey] = useState<string | null>(null);
 
   // Seed ops from the saved recipe exactly once per run. Re-seeding on every
@@ -217,6 +221,7 @@ export function EditorView() {
     if (autoKey !== null && recipeKey !== autoKey) {
       setAutoSummary(null);
       setAutoValues(null);
+      setAutoCause(null);
       setAutoKey(null);
     }
   }, [recipeKey, autoKey]);
@@ -506,12 +511,21 @@ export function EditorView() {
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
   const auto = useMutation({
-    mutationFn: () => api.autoProcess(safe, rid),
-    onSuccess: (r) => {
-      const built = (r.ops ?? []).map((o) => ({ ...o, uid: o.uid || uid() }));
+    // Fetch the recipe and its causal analysis together; the analysis is
+    // best-effort (an older backend has no such endpoint) so it never blocks Auto.
+    mutationFn: async () => {
+      const [recipe, analysis] = await Promise.all([
+        api.autoProcess(safe, rid),
+        api.autoAnalysis(safe, rid).catch(() => null),
+      ]);
+      return { recipe, analysis };
+    },
+    onSuccess: ({ recipe, analysis }) => {
+      const built = (recipe.ops ?? []).map((o) => ({ ...o, uid: o.uid || uid() }));
       setOps(built);
       setAutoSummary(autoSummarySentence(built, specs));
       setAutoValues(autoValueSentence(built));
+      setAutoCause(autoCauseSentence(analysis));
       setAutoKey(JSON.stringify(built));
       notifications.show({ message: "Auto-process applied — tweak from here", color: "violet" });
     },
@@ -1277,8 +1291,11 @@ export function EditorView() {
             {autoSummary ? (
               <Alert color="violet" variant="light" py={8} withCloseButton
                 icon={<IconWand size={16} />} title="What Auto-process did"
-                onClose={() => { setAutoSummary(null); setAutoValues(null); }}>
+                onClose={() => { setAutoSummary(null); setAutoValues(null); setAutoCause(null); }}>
                 <Text size="xs">{autoSummary}</Text>
+                {autoCause ? (
+                  <Text size="xs" mt={4} c="dimmed">{autoCause}</Text>
+                ) : null}
                 {autoValues ? (
                   <Text size="xs" mt={4}>{autoValues}</Text>
                 ) : null}

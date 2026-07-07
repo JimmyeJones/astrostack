@@ -393,6 +393,22 @@ export interface Preset {
   ops: { id: string; params: Record<string, unknown>; enabled?: boolean; uid?: string }[];
 }
 
+/** The measured cues Auto-process read from a run's own data to build its recipe
+ * (the *causal inputs* behind the ops), served by `…/editor/auto-analysis`. Every
+ * field is nullable so it degrades gracefully: sky/noise are null when the proxy
+ * can't be measured, `median_fwhm`/`sharpen_radius` are null with no solved stars,
+ * and `trim_fraction` is null on a single-field (non-trimmed) stack. */
+export interface AutoAnalysis {
+  sky: number | null;            // measured normalized sky level (0..1)
+  sky_sigma: number | null;      // robust background noise σ
+  noisy: boolean | null;         // coarse noisy verdict
+  noise_fraction: number | null; // 0..1 denoise/sharpen crossfade weight
+  median_fwhm: number | null;    // target's median star FWHM (px)
+  sharpen_radius: number | null; // unsharp radius Auto sized from the stars (px)
+  is_mosaic: boolean;
+  trim_fraction: number | null;  // fraction of frame trimmed as ragged mosaic edge
+}
+
 export interface Histogram {
   bins: number;
   edges: number[];
@@ -775,6 +791,9 @@ export const api = {
       { signal }),
   autoProcess: (safe: string, runId: number) =>
     req<Recipe>(`/api/targets/${safe}/stack-runs/${runId}/editor/auto`, { method: "POST" }),
+  autoAnalysis: (safe: string, runId: number) =>
+    req<AutoAnalysis>(`/api/targets/${safe}/stack-runs/${runId}/editor/auto-analysis`,
+      { method: "POST" }),
   exportPng: (safe: string, runId: number, recipe: Recipe) =>
     req<{ job_id: string }>(`/api/targets/${safe}/stack-runs/${runId}/editor/export-png`, {
       method: "POST", body: JSON.stringify({ recipe }),

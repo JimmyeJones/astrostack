@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 
 import numpy as np
+import pytest
 from astropy.io import fits
 
 from seestack.io.library import Library
@@ -908,6 +909,43 @@ def test_auto_process_single_field_not_cropped(client, solved_library):
     r = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/auto")
     assert r.status_code == 200
     assert "geometry.crop" not in [o["id"] for o in r.json()["ops"]]
+
+
+def test_auto_analysis_reports_causal_cues(client, solved_library):
+    """The auto-analysis sibling endpoint returns the measured cues that drove the
+    Auto recipe (sky, noise, star size, mosaic trim) without changing the recipe
+    response, so the editor can explain *why* Auto chose its steps."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, h=80, w=100, is_mosaic=False)
+    r = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/auto-analysis")
+    assert r.status_code == 200
+    a = r.json()
+    # Sky/noise were measured from the proxy; the shape is the full nullable schema.
+    for key in ("sky", "sky_sigma", "noisy", "noise_fraction", "median_fwhm",
+                "sharpen_radius", "is_mosaic", "trim_fraction"):
+        assert key in a
+    assert a["sky"] is not None and 0.0 <= a["sky"] <= 1.0
+    assert a["noise_fraction"] is not None
+    assert a["is_mosaic"] is False
+    assert a["trim_fraction"] is None          # single-field → nothing trimmed
+
+
+def test_auto_analysis_trim_matches_the_auto_crop(client, solved_library):
+    """On a mosaic with a ragged coverage border, the analysis' reported trim
+    fraction matches the frame area the Auto recipe's geometry.crop removes."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, h=80, w=100, is_mosaic=True)
+    cov = np.full((80, 100), 1.0, dtype=np.float32)
+    cov[15:65, 20:80] = 5.0
+    _write_coverage(solved_library, safe, cov)
+
+    recipe = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/auto").json()
+    crop = next(o for o in recipe["ops"] if o["id"] == "geometry.crop")["params"]
+    kept = (crop["x1"] - crop["x0"]) * (crop["y1"] - crop["y0"])
+
+    a = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/auto-analysis").json()
+    assert a["is_mosaic"] is True
+    assert a["trim_fraction"] == pytest.approx(1.0 - kept, abs=1e-3)
 
 
 def test_export_creates_new_run_non_destructive(client, solved_library):
