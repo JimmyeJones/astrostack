@@ -802,6 +802,19 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.93.2** — Reference-frame selection is now RA 0°/360°-wrap-safe
+  (`claude/happy-franklin-te45e2`). `pick_reference_frame` (`seestack/stack/reference.py`) took a
+  naive `sorted()` median of candidate RAs and plain `(ra − med_ra)` distances, so for a target
+  imaged near RA=0h whose frames straddle the wrap (some ~359.9°, some ~0.1°) it scored the
+  wrapped frames as ~360° distant — picking a poorly-centred, *blurrier* edge frame as the output
+  canvas reference (defeating the sharpest-central-frame rule) and reporting a garbage ~360° span.
+  Verified: a single field with its sharpest frame at RA 0.0 and edges at 359.85–0.15 picked the
+  0.15° edge frame and reported span ~338° before; now picks the central frame and span < 1°. Fix
+  unwraps the candidate RAs into a continuous range (the same heuristic `compute_mosaic_canvas`
+  already uses) before the median/distance/span — a no-op when no wrap, so a normal target is
+  byte-for-byte unchanged. Affects both single-field (canvas = reference footprint) and mosaic
+  (reference seeds `ref_shape` + canvas). Regression test
+  `test_picks_central_frame_across_ra_zero_wrap` (fails before / passes after).
 - **v0.93.1** — Make the editor's `denoise-suggestion` recipe-aware, matching its
   levels/stretch/curve siblings (`claude/happy-franklin-a5ivvh`). The per-op "From your image"
   denoise button now measures the *linear image entering* the denoise op (any prior linear ops —
