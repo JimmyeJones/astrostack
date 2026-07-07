@@ -37,6 +37,14 @@ const SHARPEN: EditOp = {
              depends_on: null }],
 };
 
+const DENOISE: EditOp = {
+  id: "detail.denoise", label: "Noise reduction", group: "detail", stage: "linear",
+  proxy_safe: true, is_stretch: false, help: null,
+  params: [{ key: "strength", label: "Strength", type: "float", group: "simple",
+             default: 0.5, min: 0, max: 1, step: 0.05, options: null, help: null,
+             depends_on: null }],
+};
+
 const LEVELS: EditOp = {
   id: "tone.levels", label: "Levels", group: "tone", stage: "nonlinear",
   proxy_safe: true, is_stretch: false, help: null,
@@ -1005,6 +1013,45 @@ describe("EditorView", () => {
     // is a mosaic), ahead of the preset's own Sharpen op.
     expect(await screen.findByText("Coverage leveling")).toBeInTheDocument();
     expect(screen.getByText("Sharpen")).toBeInTheDocument();
+  });
+
+  it("measures the image entering the denoise op for the per-op strength button", async () => {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, DENOISE]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [
+        { uid: "s1", id: "tone.stretch", enabled: true, params: { stretch: 0.6 } },
+        { uid: "dn1", id: "detail.denoise", enabled: true, params: { strength: 0.5 } },
+      ],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    // The eager (recipe-independent) call feeds the "Your data" chip + bulk apply —
+    // the stack's *inherent* raw noise. The recipe-aware call (recipe+uid supplied)
+    // measures the image *entering* the denoise op, so the per-op button reflects
+    // any upstream linear op instead of the bare proxy.
+    const denoiseSug = vi.spyOn(client.api, "denoiseSuggestion").mockImplementation(
+      async (_safe: string, _rid: number, recipe?: unknown, uid?: string) =>
+        recipe && uid
+          ? { noise_sigma: 0.05, strength: 0.7 }
+          : { noise_sigma: 0.02, strength: 0.4 });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    // Select the denoise op → the per-op button uses the recipe-aware strength (0.7),
+    // not the eager raw one (0.4).
+    fireEvent.click(await screen.findByText("Noise reduction"));
+    // The recipe-aware query fires after the recipe debounce; once it resolves the
+    // per-op button reads its strength (0.7), not the eager raw one (0.4).
+    await waitFor(() => expect(
+      screen.getByLabelText("Set Strength from your data")).toHaveTextContent("strength 0.7"));
+    // The recipe-aware query was invoked with the working recipe + the op's own uid.
+    await waitFor(() => expect(denoiseSug).toHaveBeenCalledWith(
+      "M_42", 3, expect.objectContaining({ ops: expect.any(Array) }), "dn1"));
   });
 
   it("offers 'From your image' black/white points on the Levels op", async () => {

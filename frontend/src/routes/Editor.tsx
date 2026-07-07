@@ -324,6 +324,20 @@ export function EditorView() {
     enabled: !!opsSchema.data && !saved.isLoading && !!curveSelUid,
     staleTime: 30_000,
   });
+  // Recipe-aware denoise strength for the *selected* denoise op: measures the
+  // linear image entering it (any prior linear ops — e.g. a background/gradient or
+  // colour-balance op the Auto recipe places ahead of denoise — applied), so the
+  // per-op "From your image" button reflects them instead of the bare proxy. The
+  // eager `denoise` query above still feeds the recipe-independent "Your data"
+  // noise chip + bulk apply; this one refines only the per-op button. Keyed on the
+  // debounced recipe + uid so it refreshes as upstream ops change.
+  const denoiseSelUid = ops.find((o) => o.uid === selected && o.id === "detail.denoise")?.uid;
+  const denoiseOp = useQuery({
+    queryKey: ["denoise-suggestion", safe, rid, dKey, denoiseSelUid],
+    queryFn: () => api.denoiseSuggestion(safe, rid, dRecipe, denoiseSelUid!),
+    enabled: !!opsSchema.data && !saved.isLoading && !!denoiseSelUid,
+    staleTime: 30_000,
+  });
   const refreshPreview = () => {
     setBust(Date.now());
     qc.invalidateQueries({ queryKey: ["edit-hist", safe, rid] });
@@ -1617,11 +1631,12 @@ export function EditorView() {
                           label: `From your stars (σ≈${psf.data.psf_sigma}, FWHM ${psf.data.fwhm_px}px)`,
                         },
                       }
-                      : selectedOp.id === "detail.denoise" && denoise.data?.strength != null
+                      : selectedOp.id === "detail.denoise" &&
+                        (denoiseOp.data?.strength ?? denoise.data?.strength) != null
                         ? {
                           strength: {
-                            value: denoise.data.strength,
-                            label: `From your image (strength ${denoise.data.strength})`,
+                            value: (denoiseOp.data?.strength ?? denoise.data!.strength)!,
+                            label: `From your image (strength ${denoiseOp.data?.strength ?? denoise.data!.strength})`,
                           },
                         }
                         : selectedOp.id === "detail.sharpen" && sharpen.data?.radius != null

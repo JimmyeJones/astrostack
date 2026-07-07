@@ -198,6 +198,44 @@ def test_denoise_suggestion_from_image_noise(client, solved_library):
     assert 0.1 <= body["strength"] <= 1.0
 
 
+def test_denoise_suggestion_empty_recipe_matches_raw(client, solved_library):
+    # Backward compatibility: passing an (effectively empty) recipe measures the
+    # bare proxy exactly like passing no recipe at all — the per-op button and the
+    # "Your data" noise chip must agree when nothing precedes denoise.
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="denoise_bc")
+    raw = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/denoise-suggestion").json()
+    q = _enc({"ops": [{"id": "detail.denoise", "uid": "dn1", "params": {}}]})
+    withrec = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/denoise-suggestion"
+        f"?recipe={q}&uid=dn1").json()
+    assert withrec["noise_sigma"] == raw["noise_sigma"]
+    assert withrec["strength"] == raw["strength"]
+
+
+def test_denoise_suggestion_measures_image_entering_the_op(client, solved_library):
+    # Recipe-aware: a linear op ahead of denoise changes the noise the op will
+    # actually receive, so the suggestion must reflect it rather than the raw proxy.
+    # A strong sharpen before denoise amplifies high-frequency noise, so the
+    # measured σ entering denoise is strictly higher than the bare-proxy σ.
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="denoise_aware")
+    raw = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/denoise-suggestion").json()
+    recipe = {"ops": [
+        {"id": "detail.sharpen", "uid": "sh1", "params": {"amount": 1.0, "radius": 2.0}},
+        {"id": "detail.denoise", "uid": "dn1", "params": {}},
+    ]}
+    q = _enc(recipe)
+    aware = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/denoise-suggestion"
+        f"?recipe={q}&uid=dn1").json()
+    assert aware["noise_sigma"] is not None
+    assert aware["noise_sigma"] > raw["noise_sigma"]
+    assert 0.1 <= aware["strength"] <= 1.0
+
+
 def test_levels_suggestion_from_image(client, solved_library):
     # A stretch places the image into display space; the Levels suggestion then
     # measures black/white from the image *entering* the Levels op (the stretch
