@@ -300,3 +300,96 @@ def analyze_auto_inputs(
         kept = max(0.0, x1 - x0) * max(0.0, y1 - y0)
         out["trim_fraction"] = round(max(0.0, 1.0 - kept), 3)
     return out
+
+
+# Plain-language phrase for each editor op the Auto recipe can emit — the Python
+# mirror of the frontend's OP_PHRASES (autoSummary.ts), so an auto-edit applied by
+# an *unattended* job (Process-target / reprocess-everything / watcher auto-stack)
+# can stamp the same "what Auto did" note the interactive editor shows a user who
+# clicks Auto. Keyed by op id; an unlisted op falls back to its raw id so it
+# degrades gracefully as the op set changes.
+_AUTO_OP_PHRASES: dict[str, str] = {
+    "background.level_coverage": "evened out the mosaic panel brightness",
+    "background.final_gradient": "flattened the background",
+    "background.subtract": "removed the background gradient",
+    "tone.color_calibrate": "balanced the colour",
+    "detail.denoise": "reduced noise",
+    "tone.stretch": "applied a natural stretch",
+    "tone.curves": "added a gentle contrast curve",
+    "tone.scnr": "removed the green cast",
+    "tone.saturation": "boosted colour saturation",
+    "detail.sharpen": "sharpened detail",
+    "detail.deconvolve": "deconvolved to recover sharpness",
+    "geometry.crop": "trimmed the ragged mosaic border",
+}
+
+
+def _auto_num(n: float) -> str:
+    """Compact number for the note (mirrors the frontend's `fmt`): up to 2 decimals,
+    no trailing-zero padding (0.101 → "0.1", 4.7 → "4.7", 1.05 → "1.05")."""
+    r = round(float(n) * 100) / 100
+    return str(int(r)) if r == int(r) else str(r)
+
+
+def _auto_cause_clause(analysis: dict[str, Any] | None) -> str | None:
+    """The measured cues that drove the recipe, as a clause (no leading verb) —
+    the Python mirror of the frontend's `autoCauseSentence`. Reads the nullable
+    ``analyze_auto_inputs`` payload and lists only cues that were actually measured,
+    returning ``None`` when none were (e.g. an unmeasurable proxy, no solved stars,
+    a single-field stack)."""
+    if not analysis:
+        return None
+    parts: list[str] = []
+    sky = analysis.get("sky")
+    if isinstance(sky, (int, float)):
+        parts.append(f"a ~{_auto_num(sky)} sky")
+    fwhm = analysis.get("median_fwhm")
+    if isinstance(fwhm, (int, float)):
+        parts.append(f"{_auto_num(fwhm)} px stars")
+    noise = analysis.get("noise_fraction")
+    if isinstance(noise, (int, float)) and noise > 0:
+        parts.append("a noisy background" if noise >= 0.75 else "some background noise")
+    trim = analysis.get("trim_fraction")
+    if isinstance(trim, (int, float)) and trim >= 0.005:
+        parts.append(f"{round(trim * 100)}% of ragged mosaic edge to trim")
+    if not parts:
+        return None
+    if len(parts) == 1:
+        return parts[0]
+    return f"{', '.join(parts[:-1])}, {parts[-1]}"
+
+
+def auto_edit_summary(recipe: Recipe, analysis: dict[str, Any] | None = None) -> str | None:
+    """A single plain-language note describing what the Auto recipe did (and, when
+    measured, the data that drove it) — so an auto-edit applied silently by an
+    unattended job can be shown on the History Info panel, matching the reasoning
+    the interactive editor surfaces when a user clicks Auto themselves.
+
+    Pure. Returns ``None`` when the recipe has no enabled ops (nothing to explain),
+    so the caller simply stores nothing. e.g. "Auto-edited: flattened the
+    background, balanced the colour, then sharpened detail · measured a ~0.1 sky,
+    4.7 px stars, 12% of ragged mosaic edge to trim."
+    """
+    seen: set[str] = set()
+    phrases: list[str] = []
+    for op in recipe.ops:
+        if not op.enabled:
+            continue
+        phrase = _AUTO_OP_PHRASES.get(op.id, op.id)
+        if phrase in seen:
+            continue
+        seen.add(phrase)
+        phrases.append(phrase)
+    if not phrases:
+        return None
+    if len(phrases) == 1:
+        did = phrases[0]
+    elif len(phrases) == 2:
+        did = f"{phrases[0]}, then {phrases[1]}"
+    else:
+        did = f"{', '.join(phrases[:-1])}, then {phrases[-1]}"
+    note = f"Auto-edited: {did}"
+    cause = _auto_cause_clause(analysis)
+    if cause:
+        note += f" · measured {cause}"
+    return note + "."

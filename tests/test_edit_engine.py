@@ -454,6 +454,47 @@ def test_analyze_auto_inputs_reports_the_causal_cues():
     assert trimmed["trim_fraction"] == pytest.approx(0.1, abs=1e-6)
 
 
+def test_auto_edit_summary_note():
+    """The auto-edit note names, in pipeline order, what the Auto recipe did and the
+    measured cues that drove it — so an unattended auto-edit can be explained on the
+    History Info panel the way the interactive editor explains a clicked Auto."""
+    from seestack.edit.presets import auto_edit_summary
+    from seestack.edit.recipe import OpInstance, Recipe
+
+    recipe = Recipe(ops=[
+        OpInstance(id="background.final_gradient", params={}),
+        OpInstance(id="tone.color_calibrate", params={}),
+        OpInstance(id="detail.sharpen", params={}),
+    ])
+    note = auto_edit_summary(recipe, {"sky": 0.101, "median_fwhm": 4.7})
+    assert note == (
+        "Auto-edited: flattened the background, balanced the colour, then "
+        "sharpened detail · measured a ~0.1 sky, 4.7 px stars."
+    )
+
+    # A disabled op is skipped, and with no measurable cues the note omits the
+    # "measured …" clause entirely (degrades gracefully).
+    recipe2 = Recipe(ops=[
+        OpInstance(id="tone.stretch", params={}),
+        OpInstance(id="detail.sharpen", params={}, enabled=False),
+    ])
+    assert auto_edit_summary(recipe2, None) == "Auto-edited: applied a natural stretch."
+    assert auto_edit_summary(recipe2, {"sky": None}) == (
+        "Auto-edited: applied a natural stretch.")
+
+    # A noisy, trimmed mosaic surfaces the noise + trim cues too.
+    recipe3 = Recipe(ops=[OpInstance(id="geometry.crop", params={})])
+    note3 = auto_edit_summary(
+        recipe3, {"noise_fraction": 0.8, "trim_fraction": 0.12})
+    assert note3 == (
+        "Auto-edited: trimmed the ragged mosaic border · measured a noisy "
+        "background, 12% of ragged mosaic edge to trim."
+    )
+
+    # An empty (all-disabled / no-op) recipe has nothing to explain → None.
+    assert auto_edit_summary(Recipe(ops=[]), {"sky": 0.1}) is None
+
+
 def test_noise_fraction_crossfade_math():
     """The crossfade weight is 0 at/below the clean end, 1 at/above the noisy end,
     and monotone linear in between."""
