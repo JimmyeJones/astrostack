@@ -662,6 +662,56 @@ describe("EditorView", () => {
       expect(screen.queryByText("What Auto-process did")).not.toBeInTheDocument());
   });
 
+  it("explains a run a background job auto-edited, and hides it once the user edits", async () => {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES]);
+    // A run opened on a recipe the user didn't build (a background Process-target /
+    // reprocess / watcher auto-stack applied it).
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [{ uid: "x1", id: "tone.stretch", enabled: true,
+              params: { mode: "stf", target_bg: 0.2 } }],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "autoNote").mockResolvedValue({
+      note: "Auto-edited: flattened the background, then applied a natural stretch"
+        + " · measured a ~0.1 sky, 4.7 px stars.",
+    });
+    vi.spyOn(client.api, "getDefaultRecipe").mockResolvedValue({ ops: [], count: 0 });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    // The editor explains the auto-applied edit instead of opening on a silent recipe.
+    expect(await screen.findByText("This picture was auto-edited")).toBeInTheDocument();
+    expect(screen.getByText(/flattened the background, then applied a natural stretch/))
+      .toBeInTheDocument();
+    // ...and the same data-driven values line the interactive Auto note shows, so
+    // the Process-target lander gets an equally-complete explanation.
+    expect(screen.getByText("Tuned to your data: sky level 0.2.")).toBeInTheDocument();
+
+    // Hand-editing the pipeline drops the note so it can't misdescribe the recipe.
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await waitFor(() =>
+      expect(screen.queryByText("This picture was auto-edited")).not.toBeInTheDocument());
+  });
+
+  it("shows no auto-edit note for a run without one (a hand-built recipe)", async () => {
+    mockEditorQueries();  // getRecipe returns a non-empty recipe, no autoNote stored
+    vi.spyOn(client.api, "autoNote").mockResolvedValue({ note: null });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    expect(await screen.findByText("Stretch")).toBeInTheDocument();
+    expect(screen.queryByText("This picture was auto-edited")).not.toBeInTheDocument();
+  });
+
   it("offers to carry over a previous run's edit when this run has none", async () => {
     vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES]);
     vi.spyOn(client.api, "getRecipe").mockResolvedValue({ ops: [], base_run_id: 3 });

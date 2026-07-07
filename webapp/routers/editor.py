@@ -440,6 +440,33 @@ def get_recipe(safe: str, run_id: int, request: Request) -> dict:
     return _load_saved_recipe(request, safe, run_id).to_dict()
 
 
+class AutoNoteOut(BaseModel):
+    """The plain-language "what Auto did (and why)" note that an *unattended*
+    auto-edit job (Process-target / reprocess-everything / watcher auto-stack)
+    stamped on this run. ``note`` is ``None`` unless a background job auto-edited
+    the run — a hand-built or interactively-Auto'd recipe stores none — so the
+    editor only ever shows it for a recipe the user didn't build themselves, and a
+    hand-built recipe can never surface a stale explanation."""
+
+    note: str | None = None
+
+
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/editor/auto-note",
+            response_model=AutoNoteOut)
+def get_auto_note(safe: str, run_id: int, request: Request) -> AutoNoteOut:
+    """Return the stored auto-edit note for this run (or ``None``). Read-only;
+    lets the editor explain a recipe applied by a background job — the same
+    reasoning the History Info panel shows (v0.92.0) — on the surface the
+    Process-target deep-link actually lands the user on."""
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        note = proj.get_meta(f"{AUTO_EDIT_NOTE_PREFIX}{run_id}")
+    finally:
+        proj.close()
+        lib.close()
+    return AutoNoteOut(note=note or None)
+
+
 class PreviousRecipeOut(BaseModel):
     """The most recent *other* stack run's saved editor recipe, offered as a
     one-click carry-over so a re-stacked target keeps the look the user dialled in

@@ -395,6 +395,44 @@ def test_previous_recipe_carry_over(client, solved_library):
     assert none["ops"] == [] and none["count"] == 0
 
 
+def test_auto_note_endpoint_returns_stored_note_only(client, solved_library):
+    """The auto-note endpoint serves the plain-language note a background job
+    stamped when it auto-edited a run (so the editor can explain a recipe the user
+    didn't build), and returns None for a run no unattended job touched — so a
+    hand-built recipe never surfaces a stale explanation."""
+    from webapp.routers.editor import AUTO_EDIT_NOTE_PREFIX
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe)
+
+    # No note stored yet → None.
+    body = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/auto-note")
+    assert body.status_code == 200
+    assert body.json()["note"] is None
+
+    # A background auto-edit job stamps its note as project meta.
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            proj.set_meta(f"{AUTO_EDIT_NOTE_PREFIX}{rid}",
+                          "Auto-edited: flattened the background, then sharpened detail.")
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/auto-note").json()
+    assert body["note"].startswith("Auto-edited:")
+    assert "sharpened detail" in body["note"]
+
+    # A different run without a stamped note still returns None.
+    other = _make_run(solved_library, safe, basename="run_other",
+                      ts="2026-05-04T00:00:00Z")
+    assert client.get(
+        f"/api/targets/{safe}/stack-runs/{other}/editor/auto-note").json()["note"] is None
+
+
 def test_previous_recipe_prefers_the_newest_edited_run(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
     a = _make_run(solved_library, safe, basename="run_a", ts="2026-05-01T00:00:00Z")

@@ -140,6 +140,13 @@ def test_process_target_chains_auto_edit(client, solved_library):
     assert info["auto_edit"].startswith("Auto-edited:")
     assert "natural stretch" in info["auto_edit"]
 
+    # ...and the editor's auto-note endpoint serves that same note, so opening the
+    # run in the editor (where the Process deep-link lands the user) explains the
+    # recipe they didn't build — the same trust layer, on the surface they see.
+    note = client.get(
+        f"/api/targets/M_42/stack-runs/{rid}/editor/auto-note").json()
+    assert note["note"] == info["auto_edit"]
+
 
 def test_manual_stack_has_no_auto_edit_note(client, solved_library):
     # A plain manual stack (no auto-edit chain) leaves no auto-edit note, so the
