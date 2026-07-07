@@ -588,23 +588,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
-- **Graceful degradation for `final_gradient` on busy / dense-star fields (instead of
-  giving up).** The Auto recipe's gradient-removal op fits a `Background2D` through the
-  non-object pixels, and drops silently when its object mask covers >80% of every 256px box
-  (`exclude_percentile=80` → `RuntimeError`). Verified (Scout 2026-07-07): on a realistic
-  1080px nebula/gradient frame it flattens cleanly, but on a **dense star field** (≈8000+
-  point sources — exactly the built-in *cluster* preset's target) or a very-flat low-contrast
-  frame, `detect_sigma=2.5` + `dilate_px=16` swells the mask past the threshold and the op
-  **vanishes entirely** (consistently on both preview and export — so *not* a parity bug, and
-  `op_errors` surfaces it, but the beginner loses gradient removal on a cluster with no
-  fallback). Make the fit *degrade* rather than disappear: on a `Background2D`
-  too-many-masked-boxes failure, retry once with a relaxed `exclude_percentile` (e.g. 95) and/or
-  a smaller box, and only then give up — so a busy field still gets a coarse gradient subtract
-  instead of none. Off-by-default risk is nil (it only changes a currently-*failing* path from
-  "no-op" to "coarse fit"; a succeeding fit is untouched). Care: keep it all-or-nothing per the
-  existing colour-shift guard, and add a regression test that a dense-field frame flattens
-  instead of raising. **Verify the dense-cluster repro on a real stack first.** (S,
-  image-quality/robustness — PRIORITY 4)
+- ~~**Graceful degradation for `final_gradient` on busy / dense-star fields (instead of
+  giving up).**~~ — **shipped v0.89.2** (see Shipped). The `Background2D` fit now degrades
+  through an `exclude_percentile` ladder (80 → 95 → 100) and, as a last try, a half-size box,
+  instead of vanishing when the object mask covers >80% of every box — so a dense cluster / very
+  flat field still gets a coarse gradient subtract. The strict `exclude_percentile=80` fit is the
+  first rung, so a normal stack's export is byte-for-byte unchanged.
 - ~~**Photometric (multiplicative) frame normalization before combine**~~ —
   **shipped v0.81.0** (see Shipped). A `photometric_normalize` StackOptions flag
   (off by default) gain-matches every frame's signal to the run's median
@@ -796,6 +785,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.89.2** — Graceful degradation for `background.final_gradient` on busy / dense-star
+  fields (`agent/final-gradient-degrade`). The `Background2D` fit used to raise and the op
+  vanish silently when the object mask covered >80% of every box (a dense cluster — the *cluster*
+  preset's own target — or a very-flat frame), so the beginner lost gradient removal on exactly
+  those fields with no fallback. `_fit_background_2d` now retries through an `exclude_percentile`
+  ladder (80 → 95 → 100) and finally a half-size box before giving up, degrading to a coarse
+  gradient subtract instead of none. The strict `exclude_percentile=80` fit stays the first rung,
+  so any stack that already succeeded is byte-for-byte unchanged (full-res export parity holds).
+  Regression tests: `test_dense_field_degrades_instead_of_giving_up` (fails before / passes
+  after — a 6000-star field that raises at strict-80 now flattens with no surfaced error) and
+  `test_ladder_first_rung_matches_strict_fit` (a succeeding fit is identical to the old path).
 - **v0.89.1** — Two verified low-severity webapp-router robustness fixes (Scout,
   `agent/router-input-robustness`): (1) `GET /api/stats?recent_limit=…` now clamps the
   user-supplied slice size to `[1,100]` like the other int query params (render `size`,
