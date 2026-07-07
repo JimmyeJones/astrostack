@@ -534,6 +534,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   balanced the colour, then sharpened detail · measured a ~0.1 sky, 4.7 px stars."). Additive,
   off-nothing (only annotates runs the auto-edit already touched — manual/un-edited runs get no
   note), and it covers all three chains at once since they share the helper.
+- **Show the auto-edit "why" note in the *editor* when opening an already-auto-edited run.**
+  (Spotted 2026-07-07 while shipping v0.92.0.) The editor shows Auto's causal reasoning ("Measured
+  from your image: …" + what it did) only when a user *clicks* Auto this session (v0.91.0). But
+  Process-target deep-links straight into the editor (v0.85.3) on a run a background job already
+  auto-edited, so it opens with a non-empty recipe the user *didn't* build and **no** explanation
+  — the same trust gap v0.92.0 just closed on the History Info panel, but on the surface the user
+  actually lands on. The note is now available server-side (the `…/info` `auto_edit` field, or
+  recompute via `presets.auto_edit_summary`); surface it as a dimmed line in the editor's
+  empty-pipeline/loaded-recipe header when the working recipe matches a saved auto-edit note and
+  the user hasn't hand-edited yet. Care: it touches the editor (§1 "well-hardened, no feature-pile")
+  so keep it purely explanatory (no new op/control), dismiss/fade once the user edits, and gate on
+  the note actually existing so a hand-built recipe never shows it. (S, friendliness/trust —
+  PRIORITY 3, serves autonomy; Scout to vet the editor-surface concern.)
 - Guided "getting started" / empty states that tell a first-timer exactly what to
   do next; audit every screen for jargon and add plain-language "why" tooltips;
   reduce visible option clutter (progressive disclosure). (M, friendliness)
