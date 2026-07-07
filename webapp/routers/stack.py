@@ -46,6 +46,21 @@ def _run_fits_path(request: Request, safe: str, run_id: int) -> tuple[str, str |
     return run.output_basename, run.fits_path
 
 
+def _run_auto_edit_note(request: Request, safe: str, run_id: int) -> str | None:
+    """The plain-language "what the unattended auto-edit did" note for a run, or
+    ``None`` when the run wasn't auto-edited by a background job (a manual/un-edited
+    run). Read from project meta so the History Info panel can explain a result the
+    user didn't drive."""
+    from webapp.routers.editor import AUTO_EDIT_NOTE_PREFIX
+
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        return proj.get_meta(f"{AUTO_EDIT_NOTE_PREFIX}{run_id}")
+    finally:
+        proj.close()
+        lib.close()
+
+
 @router.get("/api/stack/options/schema", response_model=list[StackOptionField])
 def options_schema() -> list[StackOptionField]:
     return stack_option_fields()
@@ -468,10 +483,11 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
             with contextlib.suppress(TypeError, ValueError):
                 n_frames = int(value)
     processing = _parse_processing_chain(header)
+    auto_edit = _run_auto_edit_note(request, safe, run_id)
     return {"run_id": run_id, "integration_s": integration_s,
             "n_frames": n_frames, "weighting": weighting,
             "photometric": photometric, "dark_scaling": dark_scaling,
-            "rejection": rejection,
+            "rejection": rejection, "auto_edit": auto_edit,
             "processing": processing, "cards": cards}
 
 

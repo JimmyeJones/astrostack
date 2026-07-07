@@ -525,21 +525,15 @@ problems. Dogfood it every big-picture run and fix root causes.
   `autoCauseSentence` as a dimmed line above the values in the "What Auto-process did" note, so a
   beginner sees Auto tuned itself to *their* data. Every cue is nullable and degrades gracefully
   (an unmeasurable proxy / no solved stars / a single-field stack simply omits the line).
-- **Carry the Auto "why" note onto the *autonomous* auto-edit paths (Process target /
-  reprocess / watcher auto-stack).** The editor now shows Auto's causal reasoning
-  ("Measured from your image: a ~0.10 sky, 4.7 px stars…" + what it did) when a user clicks
-  Auto-process — but the "just works" chains that auto-*apply* the same recipe in a background
-  job (`_auto_edit_process_run` from Process-target, Reprocess-everything, and the watcher
-  auto-stack) produce the finished picture *silently*: the user opens History/the editor and
-  sees a good image with no explanation of what was done or why. Stamp a short plain-language
-  summary (the same `autoSummarySentence` + `autoCauseSentence` content, computed server-side
-  from the recipe + the already-served `analyze_auto_inputs`) onto the run — e.g. a
-  `stack_runs` metadata field or a FITS card parsed by the `…/info` endpoint — so the History
-  Info panel can show "Auto-edited: flattened the background, balanced the colour, sharpened
-  detail · measured a ~0.10 sky, 4.7 px stars". Extends the just-shipped trust layer to exactly
-  the unattended paths where the beginner *most* needs to trust a result they didn't drive.
-  Additive (a new nullable field + one Info line), off-nothing (it only annotates runs the
-  auto-edit already touched). (S–M, friendliness/trust — PRIORITY 3, serves autonomy too)
+- ~~**Carry the Auto "why" note onto the *autonomous* auto-edit paths (Process target /
+  reprocess / watcher auto-stack).**~~ — **shipped v0.92.0** (see Shipped). `_auto_edit_process_run`
+  now stamps a plain-language "what Auto did (and why)" note (new pure `presets.auto_edit_summary`,
+  the Python mirror of `autoSummarySentence` + `autoCauseSentence`) as a per-run project meta
+  whenever an unattended job auto-edits a run; the run `…/info` endpoint returns it as a nullable
+  `auto_edit` field and the History Info panel shows it ("Auto-edited: flattened the background,
+  balanced the colour, then sharpened detail · measured a ~0.1 sky, 4.7 px stars."). Additive,
+  off-nothing (only annotates runs the auto-edit already touched — manual/un-edited runs get no
+  note), and it covers all three chains at once since they share the helper.
 - Guided "getting started" / empty states that tell a first-timer exactly what to
   do next; audit every screen for jargon and add plain-language "why" tooltips;
   reduce visible option clutter (progressive disclosure). (M, friendliness)
@@ -791,6 +785,20 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.92.0** — Carry the Auto "why" note onto the *autonomous* auto-edit paths
+  (`claude/happy-franklin-yidmkh`). The interactive editor already explains a clicked Auto
+  (what → values → why), but the unattended chains that auto-apply the same recipe in a
+  background job (Process-target, Reprocess-everything, watcher auto-stack) produced the
+  finished picture *silently*. A new pure `presets.auto_edit_summary(recipe, analysis)` (the
+  Python mirror of the frontend `autoSummarySentence` + `autoCauseSentence`) builds a
+  plain-language note; `_auto_edit_process_run` stamps it as a per-run project meta
+  (`editor_auto_note:{id}`) alongside the recipe it already saves; the run `…/info` endpoint
+  returns it as a nullable `auto_edit` field and the History Info panel shows it ("Auto-edited:
+  flattened the background, balanced the colour, then sharpened detail · measured a ~0.1 sky,
+  4.7 px stars."). All three chains share the helper, so one change covers them all. Additive
+  and off-nothing (manual/un-edited runs get no note; absent field on older backends). Tests:
+  `auto_edit_summary` pure unit test, `_auto_edit_process_run`→`…/info` integration (note present
+  on Process, absent on a manual stack), and a History render test.
 - **v0.91.0** — "Why these steps?" — surface the Auto recipe's *causal inputs*
   (`claude/happy-franklin-fifsfa`). Completes the trust-note trilogy (what → chosen values →
   *why*): a new additive `POST …/editor/auto-analysis` sibling endpoint returns the measured

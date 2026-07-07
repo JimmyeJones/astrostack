@@ -33,6 +33,12 @@ from webapp.schemas import EditOpOut, editor_ops_schema
 router = APIRouter(tags=["editor"])
 
 RECIPE_META_PREFIX = "editor_recipe:"
+# Plain-language "what Auto did (and why)" note, stamped per run whenever an
+# *unattended* job auto-edits it (Process-target / reprocess-everything / watcher
+# auto-stack). Surfaced on the History Info panel so a beginner sees what the
+# silent auto-edit did to a result they didn't drive. Absent on manual/un-edited
+# runs, so it only ever annotates runs the auto-edit actually touched.
+AUTO_EDIT_NOTE_PREFIX = "editor_auto_note:"
 USER_PRESETS_META_KEY = "editor_user_presets"
 # A single, user-designated "house style" recipe stored library-wide (not per
 # target). Once set, the editor offers it as a one-click seed on any run that has

@@ -231,6 +231,10 @@ export interface StackRunInfo {
   photometric?: StackPhotometricSummary | null;
   dark_scaling?: StackDarkScalingSummary | null;
   rejection?: StackRejectionSummary | null;
+  // Plain-language "what the unattended auto-edit did (and why)" note, present
+  // only on runs an autonomous job auto-edited (Process-target / reprocess /
+  // watcher auto-stack). Absent on manual/un-edited runs.
+  auto_edit?: string | null;
   processing?: StackProcessingStep[];
   cards: StackInfoCard[];
 }

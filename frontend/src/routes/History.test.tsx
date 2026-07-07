@@ -90,6 +90,22 @@ describe("HistoryView", () => {
     expect(screen.getByText(/Combined: κ-σ \(sigma-clip\) outlier rejection/)).toBeInTheDocument();
   });
 
+  it("shows the auto-edit note for a silently auto-edited run", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({
+      run_id: 1, integration_s: 2520, n_frames: 840, weighting: null,
+      auto_edit:
+        "Auto-edited: flattened the background, then applied a natural stretch · measured a ~0.1 sky, 4.7 px stars.",
+      cards: [{ key: "STACKER", value: "sigma-clip", comment: "stacking method" }],
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Info" }));
+    await waitFor(() =>
+      expect(screen.getByText(/Auto-edited: flattened the background/)).toBeInTheDocument());
+  });
+
   it("shows the quality-weighting summary when present", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
     vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({

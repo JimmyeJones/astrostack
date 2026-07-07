@@ -132,6 +132,26 @@ def test_process_target_chains_auto_edit(client, solved_library):
         assert pr.status_code == 200
         assert pr.content[:8] == b"\x89PNG\r\n\x1a\n"
 
+    # The History Info panel gets a plain-language "what the auto-edit did" note
+    # for this silently-auto-edited run — the trust layer for a result the user
+    # didn't drive. It names the ops it applied and starts with "Auto-edited:".
+    info = client.get(f"/api/targets/M_42/stack-runs/{rid}/info").json()
+    assert isinstance(info.get("auto_edit"), str)
+    assert info["auto_edit"].startswith("Auto-edited:")
+    assert "natural stretch" in info["auto_edit"]
+
+
+def test_manual_stack_has_no_auto_edit_note(client, solved_library):
+    # A plain manual stack (no auto-edit chain) leaves no auto-edit note, so the
+    # Info panel only annotates runs an unattended job actually auto-edited.
+    r = client.post("/api/targets/M_42/stack", json={})
+    assert r.status_code == 200
+    body = _wait_job(client, r.json()["job_id"], timeout=120)
+    assert body["state"] == "done", body
+    rid = client.get("/api/targets/M_42/stack-runs").json()[0]["id"]
+    info = client.get(f"/api/targets/M_42/stack-runs/{rid}/info").json()
+    assert info.get("auto_edit") is None
+
 
 def _run_scan(client):
     r = client.post("/api/scan", json={})

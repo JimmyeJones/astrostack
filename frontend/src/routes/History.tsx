@@ -223,6 +223,11 @@ function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
           {data.n_frames ? ` · ${data.n_frames} subs` : ""}
         </Text>
       ) : null}
+      {data.auto_edit ? (
+        <Text size="xs" c="dimmed">
+          {data.auto_edit}
+        </Text>
+      ) : null}
       {data.weighting ? (
         <Text size="xs" c="dimmed">
           Quality-weighted

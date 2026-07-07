@@ -1156,10 +1156,13 @@ def _auto_edit_process_run(lib: Library, safe: str, run_id: int) -> int | None:
     ops applied, or ``None`` when it was skipped (no such run / no FITS) or failed
     (best-effort — never fails the Process job)."""
     from webapp.routers.editor import (
+        AUTO_EDIT_NOTE_PREFIX,
         RECIPE_META_PREFIX,
+        build_auto_analysis_for_run,
         build_auto_recipe_for_run,
         render_run_display_array,
     )
+    from seestack.edit import presets as presets_mod
     from seestack.io.project import Project
     from seestack.stack.output import _write_preview_png
 
@@ -1172,9 +1175,21 @@ def _auto_edit_process_run(lib: Library, safe: str, run_id: int) -> int | None:
             run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
             if run is None or not run.fits_path or not Path(run.fits_path).exists():
                 return None
+            median_fwhm = proj.median_fwhm()
             recipe = build_auto_recipe_for_run(
-                proj.project_dir, run, proj.median_fwhm())
+                proj.project_dir, run, median_fwhm)
             proj.set_meta(f"{RECIPE_META_PREFIX}{run_id}", recipe.to_json())
+            # Stamp a plain-language "what Auto did (and why)" note so the History
+            # Info panel can explain this silently-applied edit — the same reasoning
+            # the interactive editor shows when a user clicks Auto themselves.
+            try:
+                analysis = build_auto_analysis_for_run(
+                    proj.project_dir, run, median_fwhm)
+                note = presets_mod.auto_edit_summary(recipe, analysis)
+            except Exception:  # noqa: BLE001 — the note is a nicety, never fatal
+                note = presets_mod.auto_edit_summary(recipe, None)
+            if note:
+                proj.set_meta(f"{AUTO_EDIT_NOTE_PREFIX}{run_id}", note)
             if run.preview_path:
                 out = render_run_display_array(proj.project_dir, run, recipe)
                 _write_preview_png(Path(run.preview_path), out, already_display=True)
