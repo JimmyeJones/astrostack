@@ -1,8 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
-  autoSummaryPhrases, autoSummarySentence, autoValuePhrases, autoValueSentence,
+  autoCauseSentence, autoSummaryPhrases, autoSummarySentence,
+  autoValuePhrases, autoValueSentence,
 } from "./autoSummary";
-import type { EditOp, OpInstance } from "../../api/client";
+import type { AutoAnalysis, EditOp, OpInstance } from "../../api/client";
+
+/** A full AutoAnalysis payload with everything measured; override fields per test. */
+function analysis(over: Partial<AutoAnalysis> = {}): AutoAnalysis {
+  return {
+    sky: 0.1, sky_sigma: 0.01, noisy: false, noise_fraction: 0,
+    median_fwhm: 4.7, sharpen_radius: 2.0, is_mosaic: false, trim_fraction: null,
+    ...over,
+  };
+}
 
 function spec(id: string, label: string): EditOp {
   return {
@@ -167,6 +177,41 @@ describe("autoValueSentence", () => {
     ];
     expect(autoValueSentence(ops)).toBe(
       "Tuned to your data: sky level 0.2, saturation 1.05×, sharpen radius 1.4 px.",
+    );
+  });
+});
+
+describe("autoCauseSentence", () => {
+  it("returns null for a missing analysis", () => {
+    expect(autoCauseSentence(null)).toBeNull();
+    expect(autoCauseSentence(undefined)).toBeNull();
+  });
+
+  it("lists the measured cues that drove the recipe", () => {
+    expect(autoCauseSentence(analysis())).toBe(
+      "Measured from your image: a ~0.1 sky, 4.7 px stars.",
+    );
+  });
+
+  it("names background noise only when the crossfade engaged", () => {
+    expect(autoCauseSentence(analysis({ noise_fraction: 0.4 }))).toBe(
+      "Measured from your image: a ~0.1 sky, 4.7 px stars, some background noise.",
+    );
+    expect(autoCauseSentence(analysis({ noise_fraction: 0.9 }))).toBe(
+      "Measured from your image: a ~0.1 sky, 4.7 px stars, a noisy background.",
+    );
+  });
+
+  it("reports the mosaic trim as a whole-percent of the frame", () => {
+    expect(autoCauseSentence(analysis({ is_mosaic: true, trim_fraction: 0.12 }))).toBe(
+      "Measured from your image: a ~0.1 sky, 4.7 px stars, 12% of ragged mosaic edge to trim.",
+    );
+  });
+
+  it("omits cues that could not be measured, and returns null when none were", () => {
+    expect(autoCauseSentence(analysis({ sky: null, median_fwhm: null }))).toBeNull();
+    expect(autoCauseSentence(analysis({ sky: 0.08, median_fwhm: null }))).toBe(
+      "Measured from your image: a ~0.08 sky.",
     );
   });
 });

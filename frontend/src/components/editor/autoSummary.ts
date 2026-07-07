@@ -1,4 +1,4 @@
-import type { EditOp, OpInstance } from "../../api/client";
+import type { AutoAnalysis, EditOp, OpInstance } from "../../api/client";
 
 /** Plain-language phrase for each editor op id the Auto-process recipe can emit,
  * so a user sees *what Auto did* (and in what order) instead of a bare list of op
@@ -102,4 +102,35 @@ export function autoSummarySentence(
   else if (rest.length === 1) body = `${cap}, then ${rest[0]}`;
   else body = `${cap}, ${rest.slice(0, -1).join(", ")}, then ${rest[rest.length - 1]}`;
   return `${body}.`;
+}
+
+/** The *causal inputs* Auto measured from the image to drive its picks — the "why"
+ * layer that sits behind `autoSummarySentence` (what it did) and `autoValueSentence`
+ * (what values it chose). Turns "Auto did this" into "Auto did this *because your
+ * data looked like this*". Pure; reads the `…/editor/auto-analysis` payload, which
+ * is nullable field-by-field, so it lists only the cues that were actually
+ * measured and returns null when none were (e.g. an unmeasurable proxy with no
+ * FWHM), so the note simply omits the line rather than showing an empty one.
+ *
+ * e.g. "Measured from your image: a ~0.10 sky, 4.7 px stars, some background noise,
+ * 12% of ragged mosaic edge to trim."
+ */
+export function autoCauseSentence(a: AutoAnalysis | null | undefined): string | null {
+  if (!a) return null;
+  const parts: string[] = [];
+  if (typeof a.sky === "number") parts.push(`a ~${fmt(a.sky)} sky`);
+  if (typeof a.median_fwhm === "number") parts.push(`${fmt(a.median_fwhm)} px stars`);
+  // A qualitative noise read (the numeric σ is opaque to a beginner); only when
+  // it actually influenced the recipe (the denoise/sharpen crossfade is engaged).
+  if (typeof a.noise_fraction === "number" && a.noise_fraction > 0) {
+    parts.push(a.noise_fraction >= 0.75 ? "a noisy background" : "some background noise");
+  }
+  if (typeof a.trim_fraction === "number" && a.trim_fraction >= 0.005) {
+    parts.push(`${Math.round(a.trim_fraction * 100)}% of ragged mosaic edge to trim`);
+  }
+  if (parts.length === 0) return null;
+  const body = parts.length === 1
+    ? parts[0]
+    : `${parts.slice(0, -1).join(", ")}, ${parts[parts.length - 1]}`;
+  return `Measured from your image: ${body}.`;
 }

@@ -416,6 +416,44 @@ def test_auto_recipe_contrast_curve_lifts_the_rendered_result():
     assert float(np.nanmedian(out_full)) > float(np.nanmedian(out_plain)) + 1e-3
 
 
+def test_analyze_auto_inputs_reports_the_causal_cues():
+    """The causal-input analysis reports the *measured cues* that drove the Auto
+    recipe (sky, noise, star size, mosaic trim), matching what auto_recipe uses,
+    and every field degrades gracefully to None when it can't be measured."""
+    from seestack.edit.presets import analyze_auto_inputs, analyze_proxy
+
+    rng = np.random.default_rng(5)
+    noisy = np.full((80, 100, 3), 0.05, np.float32)
+    noisy[30:50, 40:60] += 0.5
+    noisy += rng.normal(0, 0.08, noisy.shape).astype("float32")
+
+    a = analyze_auto_inputs(noisy, median_fwhm=4.7)
+    # Sky + noise mirror analyze_proxy exactly (same numbers Auto consumed).
+    proxy = analyze_proxy(noisy)
+    assert a["sky"] == round(float(proxy["sky"]), 3)
+    assert a["noisy"] is True and a["noisy"] == proxy["noisy"]
+    assert a["noise_fraction"] is not None and a["noise_fraction"] > 0.0
+    # Star size is surfaced, and the reported sharpen radius equals what Auto sizes
+    # from that FWHM (the same helper, whether or not a very-noisy stack keeps the op).
+    assert a["median_fwhm"] == 4.7
+    from seestack.edit.presets import _sharpen_radius_from_fwhm
+    assert a["sharpen_radius"] == _sharpen_radius_from_fwhm(4.7)
+    assert a["is_mosaic"] is False
+    assert a["trim_fraction"] is None      # single-field → no trim
+
+    # Unmeasurable image + no FWHM → all cues None, but shape intact.
+    empty = analyze_auto_inputs(None, median_fwhm=None)
+    assert empty["sky"] is None and empty["noise_fraction"] is None
+    assert empty["median_fwhm"] is None and empty["sharpen_radius"] is None
+    assert empty["trim_fraction"] is None
+
+    # A mosaic trim rect → the fraction of the frame trimmed away (1 − kept area).
+    trimmed = analyze_auto_inputs(
+        noisy, median_fwhm=None, is_mosaic=True, trim_crop=(0.1, 0.0, 1.0, 1.0))
+    assert trimmed["is_mosaic"] is True
+    assert trimmed["trim_fraction"] == pytest.approx(0.1, abs=1e-6)
+
+
 def test_noise_fraction_crossfade_math():
     """The crossfade weight is 0 at/below the clean end, 1 at/above the noisy end,
     and monotone linear in between."""

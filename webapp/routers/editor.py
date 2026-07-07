@@ -172,6 +172,20 @@ def build_auto_recipe_for_run(project_dir: Path, run, median_fwhm: float | None)
         rgb, median_fwhm=median_fwhm, is_mosaic=is_mosaic, trim_crop=trim)
 
 
+def build_auto_analysis_for_run(project_dir: Path, run, median_fwhm: float | None) -> dict:
+    """The measured cues that *drove* the Auto recipe for a run — the causal
+    inputs behind the ops (sky level, background noise, star size, mosaic trim).
+    Mirrors ``build_auto_recipe_for_run`` exactly (same proxy, same mosaic verdict,
+    same trim rect) so the reported numbers match the recipe it would build, but
+    returns only the analysis so the ``…/editor/auto`` Recipe response shape stays
+    unchanged (a separate, additive sibling endpoint serves this)."""
+    rgb, _scale = get_proxy(project_dir, run.id, run.fits_path)
+    is_mosaic = _run_is_mosaic(run, load=True)
+    trim = _trim_rect_for_run(run) if is_mosaic else None
+    return presets_mod.analyze_auto_inputs(
+        rgb, median_fwhm=median_fwhm, is_mosaic=is_mosaic, trim_crop=trim)
+
+
 def render_run_display_array(project_dir: Path, run, recipe: Recipe) -> np.ndarray:
     """Render a recipe on the run's live-preview proxy and return the display-space
     RGB array (values in 0..1, NaN = uncovered). Shared by the PNG preview endpoint
@@ -952,6 +966,27 @@ async def auto_process(safe: str, run_id: int, request: Request) -> dict:
         # single-field stack is unchanged. Uses the stacker's authoritative
         # is_mosaic verdict, never the old coverage_max>min heuristic.
         return build_auto_recipe_for_run(project_dir, run, median_fwhm).to_dict()
+
+    return await run_in_threadpool(work)
+
+
+@router.post("/api/targets/{safe}/stack-runs/{run_id}/editor/auto-analysis")
+async def auto_analysis(safe: str, run_id: int, request: Request) -> dict:
+    """The *measured cues* Auto read from this run's own data — sky level,
+    background noise, median star size, and mosaic trim — so the editor can tell
+    the user *why* Auto chose the steps it did ("tuned to your ~0.10 sky and
+    4.7 px stars"), not just which ops ran. Additive sibling of ``…/editor/auto``;
+    it never persists anything and leaves the Recipe response shape untouched."""
+    project_dir, run = _run_info(request, safe, run_id)
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        median_fwhm = proj.median_fwhm()
+    finally:
+        proj.close()
+        lib.close()
+
+    def work() -> dict:
+        return build_auto_analysis_for_run(project_dir, run, median_fwhm)
 
     return await run_in_threadpool(work)
 

@@ -513,30 +513,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
-- **"Why these steps?" — surface the Auto recipe's data-driven reasoning.** Auto already
-  derives every op from measured data (sky/noise → stretch & black; median FWHM → sharpen
-  radius & star size; coverage distribution → mosaic level + trim), but the user sees only an
-  opaque list of ops appear. Add a one-line, plain-language "why" under the Auto result —
-  e.g. "Stretched your ~0.10 sky to a dark grey · sharpened at r=2.0 from your 4.7 px stars ·
-  trimmed 12% of ragged mosaic edge". The numbers are already computed while building the
-  recipe (`build_auto_recipe_for_run` + the suggestion endpoints), so this is a
-  presentation/trust layer, not new maths. Turns "Auto did something" into "Auto did *this,
-  because of my data*", which is exactly the trust a beginner needs to accept the one-click
-  result. Deepens an existing feature rather than adding surface. (S–M, friendliness/trust —
-  PRIORITY 3)
-  _(Builder note 2026-07-07: two of the three layers already ship, so the open scope is
-  narrower than first written. `frontend/src/components/editor/autoSummary.ts` already renders
-  (a) `autoSummarySentence` — the ordered plain-language **what** ("Flattened the background,
-  balanced the colour, then sharpened detail.") and (b) `autoValueSentence` — the **chosen
-  values** read from the built recipe's params ("Tuned to your data: sky level 0.2,
-  saturation 1.1×, sharpen radius 2.0 px."). What's genuinely **missing** is the *causal input*
-  layer: the measured cues that **drove** each pick — "from your ~0.10 measured sky", "from your
-  4.7 px stars", "trimmed 12% of the frame" — which live in `analyze_proxy`/`median_fwhm`, **not**
-  in the recipe params, so surfacing them needs the backend to return them (an additive sibling
-  endpoint, e.g. `…/editor/auto-analysis`, keeps the `…/editor/auto` Recipe response shape
-  backward-compatible — don't fold analysis into the Recipe dict). One frontend-only sliver is
-  free today: the mosaic **trim %** is derivable from the appended `geometry.crop` x0/y0/x1/y1
-  in `autoValuePhrases` with no backend change.)_
+- ~~**"Why these steps?" — surface the Auto recipe's data-driven reasoning.**~~ — **shipped
+  v0.91.0** (see Shipped). All three layers now ship: the *what* (`autoSummarySentence`) and
+  the *chosen values* (`autoValueSentence`) were already there, and this run added the missing
+  *causal-input* layer — the measured cues that **drove** each pick ("Measured from your image:
+  a ~0.10 sky, 4.7 px stars, some background noise, 12% of ragged mosaic edge to trim."). A new
+  additive `POST …/editor/auto-analysis` sibling endpoint returns those cues
+  (`presets.analyze_auto_inputs`, mirroring exactly what `auto_recipe` consumes: `analyze_proxy`
+  sky/noise, the FWHM→sharpen-radius map, the mosaic trim rect), keeping the `…/editor/auto`
+  Recipe response shape untouched. The editor fetches it best-effort alongside Auto and shows
+  `autoCauseSentence` as a dimmed line above the values in the "What Auto-process did" note, so a
+  beginner sees Auto tuned itself to *their* data. Every cue is nullable and degrades gracefully
+  (an unmeasurable proxy / no solved stars / a single-field stack simply omits the line).
 - Guided "getting started" / empty states that tell a first-timer exactly what to
   do next; audit every screen for jargon and add plain-language "why" tooltips;
   reduce visible option clutter (progressive disclosure). (M, friendliness)
@@ -788,6 +776,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.91.0** — "Why these steps?" — surface the Auto recipe's *causal inputs*
+  (`claude/happy-franklin-fifsfa`). Completes the trust-note trilogy (what → chosen values →
+  *why*): a new additive `POST …/editor/auto-analysis` sibling endpoint returns the measured
+  cues that drove the recipe (`presets.analyze_auto_inputs` — the same `analyze_proxy` sky/noise,
+  FWHM→sharpen-radius map, and mosaic trim rect `auto_recipe` consumes), and the editor shows
+  `autoCauseSentence` ("Measured from your image: a ~0.10 sky, 4.7 px stars, some background noise,
+  12% of ragged mosaic edge to trim.") as a dimmed line in the "What Auto-process did" note. Keeps
+  the `…/editor/auto` Recipe response shape untouched; fetched best-effort so an older backend just
+  omits the line; every cue nullable and degrades gracefully. Tests: `analyze_auto_inputs` +
+  endpoint (single-field & mosaic-trim) + `autoCauseSentence` unit tests.
 - **v0.90.0** — "N new subs since your last stack — restack?" nudge on the Target page
   (`claude/happy-franklin-tz1lk5`). Serves the multi-night Seestar workflow: after a target is
   stacked, the owner drops another night's frames in and the master silently no longer reflects
