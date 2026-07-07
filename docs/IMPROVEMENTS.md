@@ -524,6 +524,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   because of my data*", which is exactly the trust a beginner needs to accept the one-click
   result. Deepens an existing feature rather than adding surface. (S–M, friendliness/trust —
   PRIORITY 3)
+  _(Builder note 2026-07-07: two of the three layers already ship, so the open scope is
+  narrower than first written. `frontend/src/components/editor/autoSummary.ts` already renders
+  (a) `autoSummarySentence` — the ordered plain-language **what** ("Flattened the background,
+  balanced the colour, then sharpened detail.") and (b) `autoValueSentence` — the **chosen
+  values** read from the built recipe's params ("Tuned to your data: sky level 0.2,
+  saturation 1.1×, sharpen radius 2.0 px."). What's genuinely **missing** is the *causal input*
+  layer: the measured cues that **drove** each pick — "from your ~0.10 measured sky", "from your
+  4.7 px stars", "trimmed 12% of the frame" — which live in `analyze_proxy`/`median_fwhm`, **not**
+  in the recipe params, so surfacing them needs the backend to return them (an additive sibling
+  endpoint, e.g. `…/editor/auto-analysis`, keeps the `…/editor/auto` Recipe response shape
+  backward-compatible — don't fold analysis into the Recipe dict). One frontend-only sliver is
+  free today: the mosaic **trim %** is derivable from the appended `geometry.crop` x0/y0/x1/y1
+  in `autoValuePhrases` with no backend change.)_
 - Guided "getting started" / empty states that tell a first-timer exactly what to
   do next; audit every screen for jargon and add plain-language "why" tooltips;
   reduce visible option clutter (progressive disclosure). (M, friendliness)
