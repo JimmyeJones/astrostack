@@ -94,6 +94,31 @@ One near-unreachable note logged to Infra (calibration null-byte → 500). Basel
 839 passed, 2 skipped. **No wrong-final-image bug found — the router layer is well-hardened**,
 consistent with the mature editor/engine audits.)_
 
+_(Scout QA audit 2026-07-07 (v0.89.1 baseline): rotated the focused subsystem audit onto the
+**job-orchestration layer** — `webapp/jobs.py` (`JobManager` queue/worker/cancel/recover/prune,
+the `error_kind` classification, the `completed = result or job.result` done-vs-cancelled logic),
+`webapp/pipeline.py` (the watcher auto-pipeline, `process_target`, `reprocess_all`, the
+`_auto_stack_frame_count` crash-loop guard, the reprocess reuse/stale/fresh-basename logic, the
+editor export/PNG/batch bodies + `_render_recipe_fullres`), and `webapp/watcher.py` +
+`seestack/io/scanner.py` + `ingest.py` (the `StabilityTracker` debounce, the pending-batch
+re-offer, zero-byte/OSError ingest guards, cache-resume by size). Read adversarially for lost
+batches, duplicate/crash-loop stacks, cancel races, DB-handle leaks on error paths, and
+non-destructive-reprocess invariants. **No reachable orchestration bug found** — the single-worker
+serialisation, the crash-loop guard (mark-attempt-before-stack), the fresh version-tagged basename
+that stops a reused `output_name="master"` from archiving the current master, and the best-effort
+isolation of per-target failures are all correct and well-tested. **Also dogfooded the one-click
+"Process target" autonomy chain end-to-end** on a realistic 1920×1080 8-sub single-field stack
+(scan → solve → `run_stack` → `build_auto_recipe_for_run` → preview vs full-res export): `is_mosaic`
+persists `False`, the Auto recipe is sane, preview↔export parity **1.5% mean / 7.0% p99** (the known
+star-edge decimation limit on a proxy_scale-2 grid), median grey 0.19, R/G/B balanced (0.196/0.174/
+0.196). **One image-quality opportunity logged to Ideas (not a bug):** on a *busy or very-flat*
+1080px field the Auto recipe's `background.final_gradient` gives up entirely (its object mask covers
+>80% of every 256px box → `Background2D` raises → op dropped) — verified it fails **consistently on
+both preview and export** (so it is *not* a parity bug; op_errors surfaces it), but the beginner
+silently loses gradient removal on cluster/dense-star targets; a graceful-degradation idea filed
+below. Realistic gradient+nebula frames flatten cleanly (0.097 mean change, proxy==full-res).
+Baseline suite green: 841 passed, 2 skipped.)_
+
 _(Builder engine-hardening audit 2026-07-06 (v0.86.1 baseline): another adversarial read of
 the stacking/calibration path, going deeper on the areas prior audits didn't explicitly cover
 — the recently-added `MinMaxRejectAccumulator` k-insertion order statistic + its four
@@ -386,6 +411,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   a nicety only: a richer dedicated N/total batch progress card (the Jobs summary already
   reports "restacked N/M — K already up to date"). (S remaining — polish only,
   autonomy/image-quality)
+- **Finish the *fully-autonomous* path too: chain the auto-edit onto watcher auto-stack.**
+  The one-click "Process target" (v0.86.0) and "Reprocess everything" (`auto_edit`, v0.86.1)
+  both chain `_auto_edit_process_run` so the result is a finished *picture*. But the **most**
+  autonomous path — the watcher's background auto-stack (`_pipeline_body`, `settings.auto_stack`)
+  — still stops at a flat linear `master.fits`: `_stack_target` is called at `pipeline.py:124`
+  with no auto-edit chain. So the exact "drop a night's subs in the incoming folder, walk away,
+  come back to a great image" workflow (the north star) currently comes back to an *unedited*
+  master the user must open and Auto-process by hand — while the manual one-click button gives a
+  finished picture. Add an off-by-default `auto_edit_on_autostack` setting (mirroring the
+  reprocess `auto_edit` opt-in and the §9 "new behaviour off by default" rule) that, when on,
+  runs the same best-effort `_auto_edit_process_run` after each successful watcher auto-stack.
+  Reuses the shipped helper (a saved editor recipe + re-rendered thumbnail, fully reversible in
+  the editor); best-effort per target so a failure never sinks the batch. This closes the last
+  gap in the "just works" story — the unattended path becomes as finished as the one-click one.
+  Care: keep it off by default (it seeds a recipe on every fresh auto-stack), and it must not
+  re-fire on a run that already has a saved edit (the helper only sets the recipe on the *new*
+  run, so it's safe). (S–M, autonomy — PRIORITY 2)
 - **Auto-pick the object preset from the image** — Auto-process builds one general
   recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
   different (per-channel vs luminance gradient, star reduction, saturation). The
@@ -546,6 +588,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+- **Graceful degradation for `final_gradient` on busy / dense-star fields (instead of
+  giving up).** The Auto recipe's gradient-removal op fits a `Background2D` through the
+  non-object pixels, and drops silently when its object mask covers >80% of every 256px box
+  (`exclude_percentile=80` → `RuntimeError`). Verified (Scout 2026-07-07): on a realistic
+  1080px nebula/gradient frame it flattens cleanly, but on a **dense star field** (≈8000+
+  point sources — exactly the built-in *cluster* preset's target) or a very-flat low-contrast
+  frame, `detect_sigma=2.5` + `dilate_px=16` swells the mask past the threshold and the op
+  **vanishes entirely** (consistently on both preview and export — so *not* a parity bug, and
+  `op_errors` surfaces it, but the beginner loses gradient removal on a cluster with no
+  fallback). Make the fit *degrade* rather than disappear: on a `Background2D`
+  too-many-masked-boxes failure, retry once with a relaxed `exclude_percentile` (e.g. 95) and/or
+  a smaller box, and only then give up — so a busy field still gets a coarse gradient subtract
+  instead of none. Off-by-default risk is nil (it only changes a currently-*failing* path from
+  "no-op" to "coarse fit"; a succeeding fit is untouched). Care: keep it all-or-nothing per the
+  existing colour-shift guard, and add a regression test that a dense-field frame flattens
+  instead of raising. **Verify the dense-cluster repro on a real stack first.** (S,
+  image-quality/robustness — PRIORITY 4)
 - ~~**Photometric (multiplicative) frame normalization before combine**~~ —
   **shipped v0.81.0** (see Shipped). A `photometric_normalize` StackOptions flag
   (off by default) gain-matches every frame's signal to the run's median
