@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
@@ -107,10 +108,14 @@ def get_sky(request: Request) -> SkyResponse:
             try:
                 from seestack.io.project import Project
                 proj = Project.open(lib.target_dir(t))
-                # Latest stack run that actually has a preview on disk.
+                # Latest stack run that actually has a preview on disk. Guard the
+                # file's existence (like gallery.py / stats.py do) — a run whose
+                # preview PNG was deleted still carries a truthy preview_path, and
+                # emitting it would place a sky tile whose image 404s.
                 run = next(
                     (r for r in proj.iter_stack_runs()
-                     if r.preview_path and r.canvas_w and r.canvas_h),
+                     if r.preview_path and Path(r.preview_path).exists()
+                     and r.canvas_w and r.canvas_h),
                     None,
                 )
                 if run is None:
