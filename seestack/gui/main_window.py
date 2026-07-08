@@ -848,8 +848,8 @@ class MainWindow(QMainWindow):
             )
             return
         title = result.identifier or "(no name)"
-        otype = result.object_type or "(unknown type)"
-        body = f"<b>{title}</b> — type <code>{otype}</code>"
+        otype = result.object_type_name or result.object_type or "(unknown type)"
+        body = f"<b>{title}</b> — {otype}"
         if result.bg_mode_hint:
             body += (
                 f"<br><br><b>Suggested bg-flatten mode:</b> "

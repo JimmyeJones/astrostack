@@ -47,6 +47,57 @@ _TYPE_HINTS: dict[str, str] = {
     "EmO": "luminance",
 }
 
+# Plain-language names for SIMBAD's short OTYPE codes, so any surface that shows
+# the object type reads "Galaxy" rather than a bare "G". Covers the codes we map
+# for a bg-flatten hint plus the common OSC-Seestar targets. Unknown codes fall
+# back to the raw code (see ``friendly_object_type``), so this never hides data.
+# https://simbad.cds.unistra.fr/guide/otypes.htx
+_OTYPE_NAMES: dict[str, str] = {
+    # Galaxies
+    "G": "Galaxy",
+    "GiC": "Galaxy in cluster",
+    "GiG": "Galaxy in group",
+    "GiP": "Galaxy in pair",
+    "IG": "Interacting galaxies",
+    "Sy": "Seyfert galaxy",
+    "AGN": "Active galaxy nucleus",
+    "QSO": "Quasar",
+    # Star clusters
+    "OpC": "Open cluster",
+    "GlC": "Globular cluster",
+    "Cl*": "Star cluster",
+    "As*": "Stellar association",
+    # Nebulae
+    "PN": "Planetary nebula",
+    "HII": "HII region",
+    "RNe": "Reflection nebula",
+    "DNe": "Dark nebula",
+    "EmO": "Emission object",
+    "SNR": "Supernova remnant",
+    "MoC": "Molecular cloud",
+    "ISM": "Interstellar medium",
+    "GNe": "Galactic nebula",
+    "Cld": "Cloud",
+    # Stars (a plate-solve can land on a bright star, not a deep-sky object)
+    "*": "Star",
+    "**": "Double star",
+    "V*": "Variable star",
+    "Em*": "Emission-line star",
+}
+
+
+def friendly_object_type(code: str | None) -> str | None:
+    """Map a SIMBAD short OTYPE code to a plain-language name.
+
+    Falls back to the raw code for anything not in the table (so an
+    unrecognised type still shows *something* rather than nothing), and
+    returns ``None`` for a missing code.
+    """
+    if not code:
+        return None
+    return _OTYPE_NAMES.get(code, code)
+
+
 # Friendly descriptions of the recommendation, for the GUI tooltip.
 _REASONS: dict[str, str] = {
     "per_channel": "small target / star-dominated field",
@@ -115,7 +166,7 @@ def identify_target(ra_deg: float, dec_deg: float, *,
     reason = _REASONS.get(hint) if hint else None
     return TargetIdResult(
         identifier=name, object_type=otype,
-        object_type_name=otype,
+        object_type_name=friendly_object_type(otype),
         bg_mode_hint=hint, hint_reason=reason,
     )
 
