@@ -20,6 +20,29 @@ def test_health_and_system(client):
         for k in ("total_gb", "available_gb"):
             if k in mem:
                 assert mem[k] > 0
+    # Watched-folder readiness lets the Dashboard warn upfront when the incoming
+    # or library folder is missing/unwritable. In a healthy install (dirs created
+    # at boot) both report present + writable.
+    assert "folders" in body
+    fol = body["folders"]
+    for key in ("incoming", "library"):
+        assert key in fol
+        assert fol[key]["exists"] is True
+        assert fol[key]["writable"] is True
+        assert isinstance(fol[key]["path"], str)
+
+
+def test_folder_status_reports_a_missing_and_a_present_folder(tmp_path):
+    # Unit-test the helper directly: a healthy install always has its dirs (so the
+    # endpoint test above can't exercise the missing case), but a vanished/unmounted
+    # mount must report exists=False so the Dashboard banner can fire.
+    from webapp.routers.system import _folder_status
+
+    missing = _folder_status(tmp_path / "not_here")
+    assert missing["exists"] is False and missing["writable"] is False
+
+    present = _folder_status(tmp_path)
+    assert present["exists"] is True and present["writable"] is True
 
 
 def test_astap_test_no_frames_is_clean(client):

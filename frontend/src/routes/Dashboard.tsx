@@ -9,6 +9,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { astapReadiness } from "../components/dashboard/astapReadiness";
+import { folderReadiness } from "../components/dashboard/folderReadiness";
 import { QueryError } from "../components/QueryError";
 
 // One-time dismissal of the "plate-solving isn't set up" banner, so it never nags
@@ -29,6 +30,27 @@ function loadAstapDismissed(): boolean {
 function saveAstapDismissed(): void {
   try {
     localStorage.setItem(ASTAP_DISMISS_KEY, "1");
+  } catch {
+    /* storage unavailable — the banner just won't stay dismissed across reloads */
+  }
+}
+
+// Same one-time-dismissal pattern for the watched-folder banner. The banner
+// self-clears once the folder is fixed (readiness flips to ready), so the
+// dismissal only covers "acknowledged but not fixed yet".
+const FOLDER_DISMISS_KEY = "astrostack.dashboard.folderBannerDismissed";
+
+function loadFolderDismissed(): boolean {
+  try {
+    return localStorage.getItem(FOLDER_DISMISS_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function saveFolderDismissed(): void {
+  try {
+    localStorage.setItem(FOLDER_DISMISS_KEY, "1");
   } catch {
     /* storage unavailable — the banner just won't stay dismissed across reloads */
   }
@@ -59,8 +81,10 @@ export function Dashboard() {
   });
   const system = useQuery({ queryKey: ["system"], queryFn: api.getSystem, staleTime: 60_000 });
   const [astapDismissed, setAstapDismissed] = useState(loadAstapDismissed);
+  const [folderDismissed, setFolderDismissed] = useState(loadFolderDismissed);
 
   const solve = astapReadiness(system.data?.astap);
+  const folders = folderReadiness(system.data?.folders);
 
   if (isError && !data) {
     return <QueryError error={error} onRetry={() => refetch()} />;
@@ -92,6 +116,39 @@ export function Dashboard() {
               : "ASTAP was found, but it has no star database to match against — solving "
                 + "needs one, and solving is required before you can stack. Add a star "
                 + "database before you drop in frames."}
+          </Text>
+          <Button component={Link} to="/settings" size="xs" variant="light" color="yellow" mt="xs">
+            Fix in Settings
+          </Button>
+        </Alert>
+      ) : null}
+
+      {!folders.ready && !folderDismissed ? (
+        <Alert color="yellow" variant="light"
+          withCloseButton
+          onClose={() => { setFolderDismissed(true); saveFolderDismissed(); }}
+          title={folders.kind === "incoming"
+            ? (folders.problem === "missing"
+              ? "Your incoming folder doesn't exist yet"
+              : "Your incoming folder isn't writable")
+            : (folders.problem === "missing"
+              ? "Your library folder doesn't exist yet"
+              : "Your library folder isn't writable")}>
+          <Text size="sm">
+            {folders.kind === "incoming"
+              ? (folders.problem === "missing"
+                ? "The folder you drop frames into can't be found — \"Scan incoming\" will "
+                  + "find nothing until it exists. Check the folder is mounted and the path "
+                  + "is right."
+                : "The folder you drop frames into is read-only, so scanning it may fail. "
+                  + "Check the folder's permissions or the path.")
+              : (folders.problem === "missing"
+                ? "The folder your stacks and library are written to can't be found — "
+                  + "processing will fail until it exists. Check the folder is mounted and "
+                  + "the path is right."
+                : "The folder your stacks and library are written to is read-only, so "
+                  + "processing can't save its results. Check the folder's permissions or "
+                  + "the path.")}
           </Text>
           <Button component={Link} to="/settings" size="xs" variant="light" color="yellow" mt="xs">
             Fix in Settings

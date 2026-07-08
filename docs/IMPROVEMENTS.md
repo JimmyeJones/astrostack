@@ -681,19 +681,16 @@ problems. Dogfood it every big-picture run and fix root causes.
   `star_db_found === false` flags the database, so an older backend that omits the field never
   shows a spurious warning); dismissal is one-time via localStorage (guarded), and the banner
   self-clears once ASTAP is set up. Frontend-only, additive, no backend/schema/default change.
-- **Extend the Dashboard readiness banner to a missing/unwritable incoming or data folder.**
-  (S, friendliness) The v0.94.12 Dashboard banner catches an unconfigured *plate-solver* upfront,
-  but the *other* silent first-run blocker is the watched folders: if the resolved incoming/data
-  directory doesn't exist or isn't writable, "Scan incoming" finds nothing (or errors) with no
-  Dashboard cue — the beginner only learns after clicking Scan and getting an empty/failed job.
-  `GET /api/system` already returns `data_root`; the Settings page shows `resolved_incoming_dir`
-  / `resolved_library_root`. If the backend can cheaply report each resolved folder's
-  existence/writability (a small additive field on `/api/system` or a tiny read-only
-  `/api/system/folders` check), surface it in the same dismissible Dashboard Alert family as the
-  ASTAP one ("Your incoming folder doesn't exist yet — [Fix in Settings]"). Reuse the shipped
-  `astapReadiness`-style pure-helper + dismissible-Alert pattern. Additive, off-nothing, no default
-  change; needs one small backend field so scope it as S–M. (Serves priority 3, first-run
-  friendliness.)
+- ~~**Extend the Dashboard readiness banner to a missing/unwritable incoming or data folder.**~~
+  — **shipped v0.94.13** (see Shipped). `GET /api/system` now carries an additive `folders`
+  field reporting the resolved incoming + library directories' `exists`/`writable` state (new
+  `_folder_status` helper — cheap, never raises); the Dashboard shows a second dismissible yellow
+  Alert (its own localStorage key) when either folder is missing or read-only, distinguishing the
+  four cases (incoming/library × missing/unwritable) and linking to Settings. A pure
+  `folderReadiness(folders)` helper mirrors the shipped `astapReadiness` pattern (only a *definite*
+  `exists`/`writable` false fires, so an older backend without the field never nags; incoming is
+  checked before library). Frontend-only wiring + one small additive backend field; off-nothing,
+  no default/schema change.
   _(Builder note 2026-07-08: filed while shipping the ASTAP Dashboard banner (v0.94.12). Also
   noted a minor robustness nicety on that banner itself — its dismissal is a single global
   boolean, so a user who dismisses the "ASTAP missing" banner during setup won't see it again if
@@ -1071,6 +1068,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.94.13** — Friendliness (first-run): extended the Dashboard readiness banners to a
+  missing/unwritable **incoming or library folder** — the other silent first-run blocker after
+  the plate-solver. `GET /api/system` gained an additive `folders` field (`_folder_status` reports
+  each resolved directory's `exists`/`writable`, cheap + never raises), and the Dashboard shows a
+  second dismissible yellow Alert (own localStorage key) covering the four cases (incoming/library ×
+  missing/unwritable) with a "Fix in Settings" link, so a beginner learns upfront instead of after a
+  Scan finds nothing / a stack fails to write. Pure `folderReadiness(folders)` helper mirrors
+  `astapReadiness` (only a *definite* false fires → older backends never nag; incoming checked
+  first). Off-nothing, no default/schema change (`webapp/routers/system.py`,
+  `frontend/src/components/dashboard/folderReadiness.ts`, `frontend/src/routes/Dashboard.tsx`).
 - **v0.94.12** — Friendliness/autonomy: a proactive, dismissible "plate-solving isn't set up"
   banner on the **Dashboard** (the one screen a beginner always lands on first). A pure
   `astapReadiness(astap)` helper classifies `GET /api/system` into ready / ASTAP-missing /
