@@ -1091,6 +1091,19 @@ outright bug in existing behaviour, never to add capability.
 - Anything that exposes the app publicly, changes auth defaults (e.g. turning auth
   on by default), or is otherwise hard to reverse.
 - Live capture / real-time Seestar streaming integrations (explicitly de-scoped).
+- **Surface SIMBAD target identification in the headless webapp (opt-in).** The engine
+  already has `seestack/post/target_id.py` (`identify_target` → name + friendly object type +
+  bg-flatten hint from a target's median plate-solved RA/Dec), but it is **GUI-only** — the
+  headless webapp never calls it, so a beginner on the web app never learns "you're imaging
+  M42, an emission nebula → use luminance background flatten." Wiring it into the Target page
+  (show the identified object + friendly type, and pre-select the bg-mode hint / feed the
+  existing "nudge luminance for extended-emission" Stack-form idea) would directly serve
+  autonomy + friendliness + image quality. **Why sign-off, not a free build:** it makes an
+  **outward network call** from the live install to CDS/SIMBAD (via `astroquery`), which is an
+  outward-facing change the owner must OK against the deployment's network policy (guardrail
+  §10). If approved it should be **opt-in / off by default** with a cached result per target,
+  never blocking the pipeline. (S–M, autonomy/friendliness/image-quality — owner: OK to let the
+  server query SIMBAD?)
 - **Auto-seed the editor with the Auto recipe on first open (default-on).** When a
   run is opened with no saved recipe, auto-populate the working recipe with the
   `…/editor/auto` output so a beginner's first frame is a good image, not the flat
