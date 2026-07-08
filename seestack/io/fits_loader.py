@@ -197,19 +197,25 @@ def bilinear_debayer(mosaic: np.ndarray, pattern: str = "RGGB") -> np.ndarray:
 
 
 def _shift(a: np.ndarray, dy: int, dx: int) -> np.ndarray:
-    """Shift by (dy, dx) with **edge replication**.
+    """Shift by (dy, dx) with **zero fill** at the vacated edge.
 
-    Matches ``np.roll``'s element mapping (``out[i] = a[i - dy]``) but *clamps*
-    instead of wrapping. ``np.roll`` wrapped the opposite sensor edge into the
-    bilinear-debayer neighbour average, contaminating the outermost pixel ring of
-    every frame (a bright edge pixel/star/trail leaked to the far edge). The align
-    path insets 3 px so it never showed there, but the drizzle path stacks the
-    full frame, so drizzle results could acquire spurious edge features."""
+    Matches ``np.roll``'s element mapping (``out[i] = a[i - dy]``) but *drops*
+    the wrapped-around samples instead of replicating or wrapping them. ``np.roll``
+    wrapped the opposite sensor edge into the bilinear-debayer neighbour average,
+    contaminating the outermost pixel ring of every frame; edge replication (the
+    previous fix) was no better here, because the colour planes are *sparse* (zero
+    at every non-sample site), so replicating the border replicated a **zero line**
+    and a genuine edge sample got averaged against 0 — darkening the outermost ring
+    ~50% on edges and ~75% at the corners. Zero fill instead lets the interpolators
+    (which divide by a same-channel sample *count*, not a fixed factor) simply
+    exclude any contributor that falls off the frame, so the border averages only
+    real in-frame samples. The align path insets 3 px so it never showed there, but
+    the drizzle path stacks the full frame, so its results acquired a dark seam."""
     h, w = a.shape[:2]
     pad = [(max(dy, 0), max(-dy, 0)), (max(dx, 0), max(-dx, 0))]
     if a.ndim == 3:
         pad.append((0, 0))
-    padded = np.pad(a, pad, mode="edge")
+    padded = np.pad(a, pad, mode="constant")
     y0, x0 = max(-dy, 0), max(-dx, 0)
     return padded[y0:y0 + h, x0:x0 + w]
 
@@ -218,14 +224,22 @@ def _interp_g(g_plane: np.ndarray) -> np.ndarray:
     """
     Fill the missing G samples (R and B sites) by averaging the 4 cross
     neighbours of each missing site.
+
+    Uses *normalized convolution*: the average divides by how many of the 4 cross
+    neighbours are genuine in-frame G samples, not a fixed 4, so a missing site on
+    the frame edge (with a neighbour off the frame) averages only its real
+    neighbours instead of being pulled toward 0 by the zero-filled off-frame
+    contributor. Interior sites (all 4 neighbours present) are byte-for-byte
+    unchanged.
     """
     has_g = g_plane != 0
-    # Average up/down/left/right neighbours.
-    up = _shift(g_plane, 1, 0)
-    down = _shift(g_plane, -1, 0)
-    left = _shift(g_plane, 0, 1)
-    right = _shift(g_plane, 0, -1)
-    avg = (up + down + left + right) * 0.25
+    m = has_g.astype(np.float32)
+    # Sum of the 4 cross neighbours' values, and a matching count of how many were
+    # real in-frame samples (off-frame contributors are zero-filled in both).
+    num = _shift(g_plane, 1, 0) + _shift(g_plane, -1, 0) \
+        + _shift(g_plane, 0, 1) + _shift(g_plane, 0, -1)
+    den = _shift(m, 1, 0) + _shift(m, -1, 0) + _shift(m, 0, 1) + _shift(m, 0, -1)
+    avg = num / np.maximum(den, 1.0)
     return np.where(has_g, g_plane, avg)
 
 
@@ -242,17 +256,23 @@ def _interp_rb(plane: np.ndarray, layout: tuple, channel: str) -> np.ndarray:
       * Both row and column missing → average four diagonal neighbours.
 
     A naive average of all four axial neighbours (h+v+...)/4 is wrong: half of
-    those neighbours are zeros (the wrong-channel sites in the plane).
+    those neighbours are zeros (the wrong-channel sites in the plane). Each average
+    is *normalized* by the count of genuine in-frame samples it summed (not a fixed
+    0.5/0.25), so a site on the frame edge whose neighbour falls off the frame
+    averages only the real in-frame sample(s) rather than being darkened toward 0
+    by the zero-filled off-frame contributor. Interior sites are unchanged.
     """
     has = plane != 0
-    h_avg = (_shift(plane, 0, 1) + _shift(plane, 0, -1)) * 0.5
-    v_avg = (_shift(plane, 1, 0) + _shift(plane, -1, 0)) * 0.5
-    d_avg = (
-        _shift(plane, 1, 1)
-        + _shift(plane, 1, -1)
-        + _shift(plane, -1, 1)
-        + _shift(plane, -1, -1)
-    ) * 0.25
+    m = has.astype(np.float32)
+    h_avg = ((_shift(plane, 0, 1) + _shift(plane, 0, -1))
+             / np.maximum(_shift(m, 0, 1) + _shift(m, 0, -1), 1.0))
+    v_avg = ((_shift(plane, 1, 0) + _shift(plane, -1, 0))
+             / np.maximum(_shift(m, 1, 0) + _shift(m, -1, 0), 1.0))
+    d_num = (_shift(plane, 1, 1) + _shift(plane, 1, -1)
+             + _shift(plane, -1, 1) + _shift(plane, -1, -1))
+    d_den = (_shift(m, 1, 1) + _shift(m, 1, -1)
+             + _shift(m, -1, 1) + _shift(m, -1, -1))
+    d_avg = d_num / np.maximum(d_den, 1.0)
 
     h, w = plane.shape
     yy, xx = np.indices((h, w))

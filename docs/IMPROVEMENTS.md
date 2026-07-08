@@ -72,6 +72,31 @@ _(none of the traced *editor-engine* op bugs are open — that backlog stayed dr
 the entry above is a stacking/autonomy↔editor classification bug found by dogfooding
 the real webapp stack→edit path.)_
 
+- **Dead SExtractor skew-fallback guard in 4 background/leveling helpers (needs REAL-data
+  threshold validation before fixing — NOT a blind Builder change).** *(traced + reproduced,
+  Builder audit 2026-07-08; med confidence it produces a visibly-wrong result in practice.)*
+  All four sky-mode estimators — `bg/per_frame.py::_zero_sky_per_channel` (~L300), the GPU
+  `bg/per_frame.py::_subtract_background_gpu` tile branch (~L377), `bg/final_gradient.py::
+  _subtract_luminance_with_mask` (~L224), and `bg/coverage_leveling.py` per-level offset (~L131) —
+  compute `sky = 2.5·median − 1.5·mean` (SExtractor mode) and then guard `if abs(sky − median) >
+  5.0·abs(median − mean + 1e-9): sky = median`. **That guard is mathematically dead**: by
+  construction `abs(sky − median) = 1.5·abs(median − mean)`, and `1.5 < 5`, so the inequality is
+  *always False* (it degenerates to a pure `isfinite` check). The intended "revert to median when
+  the skew is implausibly extreme (bright-object contamination)" safety net therefore never fires,
+  so a negatively-skewed sky sample (median > mean) over-subtracts and leaves that region darker
+  than its neighbours — the coverage-/panel-shaped step these passes exist to remove. **Why it is
+  NOT a blind fix (Builder measured this):** the obvious "use the standard SExtractor criterion
+  `|mean − median| > 0.3·std → median`" is *wrong here* — a heavy diffuse **nebula** reads
+  `|mean − median|/std ≈ 0.32` (measured on a realistic synthetic), i.e. it would trip the 0.3 rail
+  and revert to median **exactly where `final_gradient`'s own comment says it deliberately wants the
+  mode** ("so faint diffuse signal doesn't pull the zero down"). So a naïve threshold would *regress
+  nebula images* (a core OSC target). Typical sky+stars reads `|mean − median|/std ≈ 0.001` (guard
+  irrelevant either way), so the common case is unaffected. **What's needed:** pick a genuinely-safe
+  revert threshold (well above the nebulosity regime, only catching truly-broken tiles) and validate
+  on **real** OSC stacks that (a) normal sky + nebula frames are unchanged and (b) a genuinely
+  pathological skew reverts — same real-data-gating as the SCNR / `sky_sigma` items in Image-quality
+  below. Fix all four sites together (they share the bug). (S code / M validation, image-quality/correctness)
+
 _(Scout QA audit 2026-07-08 (v0.94.7 baseline): with the stacking/calibration core saturated by
 a week of daily brute-force engine audits, rotated onto the **less-recently-covered final-image
 edges** — `seestack/solve/*` (ASTAP wrapper + runner), `seestack/bg/*` (`per_frame`, `final_gradient`,
@@ -951,6 +976,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   tiny-negative that `% 360.0` folds to exactly `360.0` (outside `[0, 360)`) — the helper now snaps
   that back to `0.0`. New `tests/test_coords.py` pins the boundary cases; the three existing
   per-site wrap regression tests still pass unchanged.
+- **Low-priority robustness (ingest, traced 2026-07-08): a transient copy error permanently leaves a
+  frame uncached.** `io/ingest.py` (~L120-133) inserts the frame row *before* `shutil.copy2` into the
+  Stage-1 cache; if the copy raises `OSError` (a NAS blip) `cached_path` stays NULL, and on any
+  re-scan the file is skipped (`s_str in existing`, because the row already exists) so the copy is
+  **never retried** — the size-check "resume" branch is effectively dead for this case. Not a
+  wrong-image bug (downstream falls back to `source_path`, e.g. `stacker.py`), but the Stage-1 cache
+  is silently never populated for that frame. Fix: on copy failure, either don't insert the row (so a
+  re-scan retries) or record the failure and re-attempt the copy on the next scan. (S, correctness/robustness)
+- **Low-priority robustness (traced 2026-07-08, near-unreachable): opening an empty/foreign
+  `project.sqlite` yields a DB with no `frames` table.** `io/project.py` `Project.open` on an existing
+  sqlite with `user_version==0` runs `_migrate_schema(0)`, which only `ALTER TABLE frames …` (each
+  wrapped in `except OperationalError: pass`) and never runs `SCHEMA_SQL`; with no `frames` table the
+  ALTERs no-op, `user_version` is stamped to the current version, and the next `add_frame` raises
+  "no such table: frames". Only reachable via a corrupt/foreign/empty DB (real projects always go
+  through `Project.create`, which runs the full schema), hence low severity. Fix: have `open` ensure
+  the base schema exists (or detect a missing `frames` table and run `SCHEMA_SQL`) before migrating. (S, robustness)
 - **Trivial (cosmetic): the ASTAP no-database *hint* still says "(*.290)" only.**
   (XS, friendliness) `webapp/routers/system.py::_astap_info` now correctly *counts* both
   `.290` and `.1476` databases, but the fallback hint shown when zero are found still reads
@@ -1014,6 +1055,22 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.94.8** — Stacking-engine data-integrity fix (current-focus §1): the bilinear debayer
+  (`seestack/io/fits_loader.py`) systematically **darkened the outermost 1-px ring of every
+  debayered frame** (~50% on edges, ~75% at the four corners). Root cause: the missing-sample
+  interpolators average same-channel neighbours, but the colour planes are *sparse* (zero at every
+  non-sample site), and when an edge pixel's interpolation reached off the frame the previous
+  edge-replicate `_shift` replicated a **zero line** — so a real edge sample got averaged against 0.
+  The align path insets 3 px so it never showed there, but the **drizzle stack path feeds the full
+  frame** (no inset) straight into the drizzler, so the dark seam reached the *final image*. Fix:
+  `_shift` now zero-fills the vacated edge and both `_interp_g`/`_interp_rb` use **normalized
+  convolution** — each average divides by the count of genuine in-frame same-channel samples it
+  summed, so an off-frame contributor is *excluded* rather than diluting toward 0. Interior sites
+  (all neighbours present) are **byte-for-byte unchanged** (verified on random data); only the border
+  is corrected. Found by a fresh adversarial audit of the FITS I/O layer + reproduced numerically (a
+  constant mosaic now debayers to that exact constant across all four Bayer patterns). Regression
+  tests `test_bilinear_debayer_constant_image` (strengthened to assert the full frame, all patterns —
+  fails before / passes after) and `test_bilinear_debayer_border_not_darkened`.
 - **v0.94.7** — Job-progress robustness (autonomy/friendliness): fixed two real `useJobEvents` SSE bugs
   found by a fresh adversarial audit of the job-events + export-polling surface. **(1)** `es.onerror`
   unconditionally called `es.close()`, defeating EventSource's built-in auto-reconnect — so any

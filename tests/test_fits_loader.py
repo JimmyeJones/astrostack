@@ -39,14 +39,31 @@ def test_load_raw_debayer(tmp_path):
 
 
 def test_bilinear_debayer_constant_image():
-    """Constant input should produce a roughly constant output in all channels."""
-    mosaic = np.full((40, 60), 1000.0, dtype=np.float32)
+    """A constant mosaic must debayer to that exact constant in every channel —
+    borders included. A missing-sample interpolation that reached off the frame
+    used to average a real edge sample against the sparse plane's zeros, darkening
+    the outermost ring (~50% on edges, ~75% at the corners); the drizzle stack path
+    feeds the full frame (no border inset), so that seam reached the final image."""
+    for pattern in ("RGGB", "BGGR", "GRBG", "GBRG"):
+        mosaic = np.full((40, 60), 1000.0, dtype=np.float32)
+        rgb = bilinear_debayer(mosaic, pattern=pattern)
+        assert rgb.shape == (40, 60, 3)
+        # Regression: no darkened border. Every pixel of every channel is exactly
+        # the input constant (the interior already was; this now holds on the ring).
+        assert np.allclose(rgb, 1000.0), (
+            pattern, float(rgb.min()), float(rgb.max()))
+
+
+def test_bilinear_debayer_border_not_darkened():
+    """The outermost ring of a bright-but-noisy field must not be systematically
+    darker than the interior (the sparse-plane zero-averaging border artefact)."""
+    rng = np.random.default_rng(1)
+    mosaic = rng.uniform(800.0, 1200.0, size=(64, 96)).astype(np.float32)
     rgb = bilinear_debayer(mosaic, pattern="RGGB")
-    assert rgb.shape == (40, 60, 3)
-    # Edge effects from np.roll mean exact constant isn't guaranteed at the
-    # borders, but the interior should be near 1000 in all channels.
-    interior = rgb[2:-2, 2:-2, :]
-    assert np.all(np.abs(interior - 1000.0) < 1.0)
+    interior_mean = float(np.mean(rgb[3:-3, 3:-3, :]))
+    # Each border strip's mean tracks the interior mean (no ~2-4× dilution).
+    for strip in (rgb[0, :, :], rgb[-1, :, :], rgb[:, 0, :], rgb[:, -1, :]):
+        assert abs(float(np.mean(strip)) - interior_mean) < 60.0, float(np.mean(strip))
 
 
 def test_bilinear_debayer_unsupported_pattern():
