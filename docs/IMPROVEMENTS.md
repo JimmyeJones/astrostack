@@ -200,6 +200,25 @@ otherwise genuinely dry of ready, safe, headless Builder work (recent v0.94.x co
 polish), so this run files findings rather than manufacture marginal work (AGENTS.md §2/§3). Baseline
 suite green: 887 passed, 2 skipped.)_
 
+_(Builder run 2026-07-08 (v0.94.17 baseline): confirmed both suites green (Python **896 passed, 2 skipped**;
+frontend **588 passed**, `tsc` clean) before touching anything. Surveyed for ready Builder code work and
+found the backlog **genuinely dry**: the one open Bugs entry (dead SExtractor skew guard) is explicitly a
+real-data-gated non-Builder change; the top open Ideas are real-data-gated (SCNR/`sky_sigma`), need owner
+sign-off (first-open Auto seed, `vite@8`), or need networked/classifier plumbing (luminance-bg nudge — see
+the feasibility note under that item). **Verified two things a Builder might have blindly grabbed are not
+ready:** (1) editor op **help text is already complete** (every OpSpec + every param has `help` except the
+`tone.curves` curve-widget, which is expected), so "add plain-language help" is done; (2) every Stack-form
+**nudge already has its one-click action** (transparency/quality-weight/photometric/drizzle/streak/min-max/
+auto-grade), so that family is complete. **Fresh in-process Auto dogfood** (realistic 1200×1600 nebula +
+400 stars + left→right gradient + NaN border, low σ=0.003 noise): Auto emitted the sane chain
+`final_gradient(luminance) → color_calibrate → denoise → stretch(stf) → scnr → saturation → curves`,
+**preview↔export parity 1.97% mean / 7.85% p99** (proxy_scale 2, within the documented star-edge decimation
+limit), full 0..1 range, 2.3% NaN border, medians R/G/B **0.197/0.179/0.197**. The green-low medians and the
+**no-sharpen** pick both *reproduce the two already-logged real-data-gated observations* (SCNR magenta
+background; gradient inflating `sky_sigma` → over-denoise/no-sharpen) — **no new bug**. Filed the SIMBAD-vs-local
+feasibility note on the luminance-bg item; no code shipped (idle run leaving `main` green is a success,
+AGENTS.md §2).)_
+
 _(Builder engine-hardening audit 2026-07-08 (v0.94.1 baseline): fresh adversarial audit of the
 stacking/calibration path with **numeric brute-force repros**, not just reading — the
 `MinMaxRejectAccumulator` order statistic (matched a brute-force top/bottom-k reference *exactly*
@@ -616,6 +635,17 @@ problems. Dogfood it every big-picture run and fix root causes.
   colour artefact) and autonomy (one fewer knob the user must know about). Testable on the classifier in
   isolation; validate the suggestion on real nebula vs cluster Seestar stacks before it graduates from
   a suggestion to anything stronger.
+  _(Builder feasibility note 2026-07-08: investigated which of the two candidate signals a Builder can
+  actually ship headlessly. **The Simbad-OTYPE route is NOT headless-ready:** `post/target_id.py::identify_target`
+  is wired **only** into the deprecated Qt GUI (`gui/main_window.py::_on_identify_target`) — nothing in
+  `webapp/` or the pipeline calls it, no `object_type` is persisted as project meta, and it is a **network
+  SIMBAD call**, so wiring it into the headless stack path adds a networked dependency → that route needs
+  owner sign-off (AGENTS.md §10), not a blind build. **So the shippable route is the second one:** a purely-local
+  extended-flux fraction on one accepted, debayered, background-subtracted reference frame (no network, testable
+  on synthetic archetypes in isolation, real-data-gated only for the graduation-to-suggestion threshold). A future
+  Builder should build the classifier as a local measurement and skip the SIMBAD idea unless the owner signs off on
+  the network call. `friendly_object_type`/OTYPE mapping (v0.94.17) already exists if the SIMBAD route is ever
+  approved.)_
 - ~~**One-click "Drop N outlier frames" on the Stack-form auto-grade hint.**~~ —
   **shipped v0.83.2** (see Shipped). The auto-grade hint now carries a "Drop N outlier
   frames" button (beside the retained "Review Auto-grade" link) that calls
