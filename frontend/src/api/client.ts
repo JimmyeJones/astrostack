@@ -37,6 +37,9 @@ export interface NightPlan {
   } | null;
   moon_illumination: number | null;
   min_altitude_deg: number;
+  // True when a horizon/tree mask (Settings → Observing site) shaped the usable
+  // windows, so the UI can note that low-sky obstructions were accounted for.
+  horizon_active?: boolean;
   targets: PlannedTarget[];
 }
 

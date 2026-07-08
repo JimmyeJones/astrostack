@@ -107,6 +107,9 @@ export function TonightView() {
         </Title>
         <Text c="dimmed" size="sm">
           The best deep-sky targets to point the scope at tonight — ranked, offline.
+          {data.horizon_active
+            ? " Time-up accounts for your horizon / tree mask."
+            : ""}
         </Text>
       </div>
       <Select

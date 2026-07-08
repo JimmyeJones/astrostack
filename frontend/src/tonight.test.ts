@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  formatMinutes, moonPhaseLabel, scoreColor, splitTargets,
+  compassPoint, formatMinutes, moonPhaseLabel, scoreColor, splitTargets,
 } from "./tonight";
 import type { PlannedTarget } from "./api/client";
 
@@ -39,6 +39,23 @@ describe("formatMinutes", () => {
     expect(formatMinutes(45)).toBe("45 min");
     expect(formatMinutes(0)).toBe("—");
     expect(formatMinutes(-5)).toBe("—");
+  });
+});
+
+describe("compassPoint", () => {
+  it("labels the cardinal and intercardinal directions", () => {
+    expect(compassPoint(0)).toBe("N");
+    expect(compassPoint(90)).toBe("E");
+    expect(compassPoint(180)).toBe("S");
+    expect(compassPoint(270)).toBe("W");
+    expect(compassPoint(45)).toBe("NE");
+  });
+  it("rounds to the nearest point and wraps past 360°", () => {
+    expect(compassPoint(20)).toBe("N");   // nearer N than NE
+    expect(compassPoint(30)).toBe("NE");  // nearer NE
+    expect(compassPoint(360)).toBe("N");  // wraps
+    expect(compassPoint(-90)).toBe("W");  // negative wraps
+    expect(compassPoint(NaN)).toBe("");
   });
 });
 

@@ -83,6 +83,44 @@ def test_tonight_min_alt_override_changes_usable_window(client, solved_library):
             assert t["minutes_above_min_alt"] <= low_by_id[t["id"]] + 1e-6
 
 
+def test_tonight_horizon_mask_trims_usable_windows(client, solved_library):
+    # A horizon/tree wall raised above the min-altitude floor (but reachable) can
+    # only shrink each target's usable window vs. the same plan with no mask, and
+    # the response advertises that the mask is active.
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    flat = client.get("/api/plan/tonight",
+                      params={"when": JAN_EVENING, "min_alt": 20}).json()
+    assert flat["horizon_active"] is False
+
+    # A 45° wall across the whole sky. The settings save round-trips the profile.
+    saved = client.put("/api/settings",
+                       json={"horizon_profile": [[0, 45], [180, 45]]}).json()
+    assert saved["horizon_profile"] == [[0.0, 45.0], [180.0, 45.0]]
+
+    walled = client.get("/api/plan/tonight",
+                        params={"when": JAN_EVENING, "min_alt": 20}).json()
+    assert walled["horizon_active"] is True
+    flat_by_id = {t["id"]: t["minutes_above_min_alt"] for t in flat["targets"]}
+    for t in walled["targets"]:
+        if t["id"] in flat_by_id:
+            assert t["minutes_above_min_alt"] <= flat_by_id[t["id"]] + 1e-6
+    # At least one target actually lost usable time to the wall (it isn't a no-op).
+    assert any(t["minutes_above_min_alt"] < flat_by_id.get(t["id"], 0.0) - 1e-6
+               for t in walled["targets"])
+
+
+def test_settings_sanitises_a_malformed_horizon_profile(client):
+    # Garbage points are dropped, azimuth wraps, altitude clamps — the save never
+    # 422s and stores a clean, ordered profile.
+    body = client.put("/api/settings", json={"horizon_profile": [
+        [370, 15], ["bad", "pair"], [90], [45, 200], [180, -3],
+    ]}).json()
+    assert body["horizon_profile"] == [[10.0, 15.0], [45.0, 90.0], [180.0, 0.0]]
+    # An empty profile is valid and inert (the default).
+    cleared = client.put("/api/settings", json={"horizon_profile": []}).json()
+    assert cleared["horizon_profile"] == []
+
+
 def test_tonight_rejects_bad_when(client, solved_library):
     client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
     r = client.get("/api/plan/tonight", params={"when": "not-a-timestamp"})

@@ -21,7 +21,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from seestack.nightplan import LibraryTarget, Observer, plan_tonight
+from seestack.nightplan import HorizonProfile, LibraryTarget, Observer, plan_tonight
 from webapp import deps
 
 log = logging.getLogger(__name__)
@@ -186,6 +186,7 @@ def get_tonight(
     plan = plan_tonight(
         observer, ref, min_altitude_deg=float(min_altitude),
         library_targets=_library_targets(request),
+        horizon=HorizonProfile.from_pairs(settings.horizon_profile),
     )
     payload = asdict(plan)
     payload["location_source"] = location_source

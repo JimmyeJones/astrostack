@@ -59,6 +59,28 @@ def test_observing_site_config_round_trips(tmp_path):
     assert s.site_elevation_m == 520.0 and s.min_target_altitude_deg == 40
 
 
+def test_horizon_profile_defaults_empty_and_round_trips(tmp_path):
+    # An old config without the field defaults to an empty (inert) horizon mask.
+    _write_cfg(tmp_path, {"site_lat": 48.2, "site_lon": 11.6})
+    s = SettingsStore(str(tmp_path)).get()
+    assert s.horizon_profile == []
+    # A config that sets one loads it back cleaned + ordered (never a whole reset).
+    _write_cfg(tmp_path, {"horizon_profile": [[180, 25], [0, 15]]})
+    s2 = SettingsStore(str(tmp_path)).get()
+    assert s2.horizon_profile == [[0.0, 15.0], [180.0, 25.0]]
+
+
+def test_malformed_horizon_profile_is_sanitised_not_wiped(tmp_path):
+    # A hand-edited profile with a couple of bad points keeps the good ones (the
+    # validator drops the junk) rather than resetting the whole config.
+    _write_cfg(tmp_path, {"auto_stack": True, "horizon_profile": [
+        [45, 30], ["junk"], [400, 50],
+    ]})
+    s = SettingsStore(str(tmp_path)).get()
+    assert s.auto_stack is True  # untouched
+    assert s.horizon_profile == [[40.0, 50.0], [45.0, 30.0]]  # cleaned + wrapped
+
+
 def test_bad_site_lat_resets_only_that_field(tmp_path):
     # An out-of-range latitude must reset just that field, not wipe the config.
     _write_cfg(tmp_path, {"auto_stack": True, "site_lat": 200.0, "site_lon": 11.6})

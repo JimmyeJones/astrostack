@@ -4,8 +4,8 @@ import {
   Title,
 } from "@mantine/core";
 import {
-  IconDeviceFloppy, IconDownload, IconInfoCircle, IconRefresh, IconTelescope,
-  IconUpload,
+  IconDeviceFloppy, IconDownload, IconInfoCircle, IconPlus, IconRefresh,
+  IconTelescope, IconTrash, IconUpload,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -13,6 +13,7 @@ import { useNavigate } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
 import { api, type ReprocessStatus } from "../api/client";
 import { dependencyMet } from "../api/depends";
+import { compassPoint } from "../tonight";
 import { HintLabel, StackOptionControl } from "../components/StackOptionControl";
 
 // Hover hints for every setting (shown via an info icon next to the label).
@@ -51,7 +52,63 @@ const HINTS: Record<string, string> = {
   site_lon: "Your observing longitude in degrees (east positive). Used by the Tonight planner. Leave blank to read it automatically from a plate-solved Seestar frame.",
   site_elevation_m: "Your elevation above sea level in metres (a small refinement to the Tonight planner; 0 is fine for most).",
   min_target_altitude_deg: "How high a target must climb to count as usable in the Tonight planner. 30° is a good default; lower it for an open horizon, raise it if trees/buildings block low altitudes.",
+  horizon_profile: "Optional: map where trees, buildings or the house block your low sky, so the Tonight planner only counts a target as usable while it's actually clear of them. Each point is a compass direction (azimuth: 0°=N, 90°=E, 180°=S, 270°=W) and the minimum altitude that's unobstructed there; the planner interpolates between points. Leave empty for a flat, open horizon.",
 };
+
+type HorizonPoint = [number, number];
+
+// Editor for the Tonight planner's horizon / tree-cover mask: a small list of
+// (azimuth, min-clear-altitude) points. Empty = a flat, unobstructed horizon.
+function HorizonProfileEditor(
+  { value, onChange }: { value: HorizonPoint[]; onChange: (v: HorizonPoint[]) => void },
+) {
+  const points = Array.isArray(value) ? value : [];
+  const setPoint = (i: number, j: 0 | 1, v: number) => {
+    const next = points.map((p) => [...p] as HorizonPoint);
+    next[i][j] = v;
+    onChange(next);
+  };
+  const addPoint = () => onChange([...points, [0, 20]]);
+  const removePoint = (i: number) => onChange(points.filter((_, k) => k !== i));
+
+  return (
+    <Stack gap="xs">
+      {points.length === 0 ? (
+        <Text size="xs" c="dimmed">
+          No horizon mask — the planner treats the whole sky above your minimum
+          altitude as open. Add points to mark where trees or buildings block it.
+        </Text>
+      ) : (
+        points.map((p, i) => (
+          <Group key={i} gap="xs" align="flex-end" wrap="nowrap">
+            <NumberInput label={i === 0 ? "Azimuth (°)" : undefined} value={p[0]}
+              min={0} max={360} step={5} clampBehavior="strict" w={130}
+              rightSection={<Text size="xs" c="dimmed" pr={6}>{compassPoint(p[0])}</Text>}
+              onChange={(v) => setPoint(i, 0, v === "" ? 0 : Number(v))} />
+            <NumberInput label={i === 0 ? "Min altitude (°)" : undefined} value={p[1]}
+              min={0} max={90} step={1} clampBehavior="strict" w={130}
+              onChange={(v) => setPoint(i, 1, v === "" ? 0 : Number(v))} />
+            <Button variant="subtle" color="red" size="compact-sm"
+              leftSection={<IconTrash size={14} />} onClick={() => removePoint(i)}>
+              Remove
+            </Button>
+          </Group>
+        ))
+      )}
+      <Group gap="xs">
+        <Button variant="light" size="compact-sm" leftSection={<IconPlus size={14} />}
+          onClick={addPoint}>
+          Add horizon point
+        </Button>
+        {points.length > 0 && (
+          <Button variant="subtle" color="gray" size="compact-sm" onClick={() => onChange([])}>
+            Clear mask
+          </Button>
+        )}
+      </Group>
+    </Stack>
+  );
+}
 
 function BackupRestore() {
   const qc = useQueryClient();
@@ -525,6 +582,18 @@ export function SettingsView() {
             value={num("min_target_altitude_deg")} min={0} max={80} step={5}
             allowDecimal={false} w={{ base: "100%", xs: 260 }}
             onChange={(v) => set("min_target_altitude_deg", v === "" ? 30 : Number(v))} />
+
+          <div>
+            <HintLabel label="Horizon / tree mask" hint={HINTS.horizon_profile} />
+            <Text size="xs" c="dimmed" mb="xs">
+              Mark where trees or buildings block your low sky so the planner only
+              counts a target while it's actually clear of them. Azimuth is a compass
+              bearing (0°=N, 90°=E, 180°=S, 270°=W).
+            </Text>
+            <HorizonProfileEditor
+              value={(form.horizon_profile as HorizonPoint[]) ?? []}
+              onChange={(v) => set("horizon_profile", v)} />
+          </div>
 
           <Divider label="Stacking" />
           <NumberInput label={lbl("max_stack_memory_gb", "Stack memory budget (GB)")}

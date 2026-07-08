@@ -948,12 +948,19 @@ problems. Dogfood it every big-picture run and fix root causes.
     ranked plan; a new read-only **Tonight** page shows the dark window, Moon phase,
     and two ranked tables ("add more to what you're shooting" vs "start something
     new"). Additive/read-only throughout; new config fields default to unset (§9).
-  - **(b) Horizon / tree-cover mask — local, small UI.** Let the user define a
-    horizon profile (azimuth → minimum unobstructed altitude) capturing trees /
-    buildings / the house, stored in Settings or library meta; the planner then
-    computes the *real* usable window (excludes a target while it's behind an
-    obstruction) instead of a flat min-altitude. Optional; flat fallback when unset.
-    Pure computation. (S–M)
+  - ~~**(b) Horizon / tree-cover mask — local, small UI.**~~ — **SHIPPED v0.96.0**
+    (see Shipped). A new off-by-empty `horizon_profile` setting (a list of
+    `[azimuth_deg, min_altitude_deg]` points) lets the user map where trees /
+    buildings / the house block the low sky; `nightplan.HorizonProfile` interpolates
+    between the points (wrapping at 360°) and the planner now counts a target as
+    usable only while it clears **both** the numeric min-altitude floor *and* the
+    obstruction at its azimuth — so an object that transits high but only briefly
+    clears the trees ranks below one lower in an open part of the sky. `max_altitude`
+    stays the honest physical peak; an empty profile (the default) is byte-for-byte
+    the old flat-floor behaviour. Settings → Observing site gets a compact point
+    editor (azimuth + compass label + min altitude), and the Tonight page notes when
+    the mask shaped the windows (`horizon_active`). Additive, opt-in, upgrade-safe
+    (old config → empty mask), pure offline computation.
   - **(c) Weather enrichment — OPTIONAL, needs owner sign-off (new outbound network
     dependency).** Enrich the plan with tonight's cloud cover / seeing / transparency
     from a weather/clear-sky API. This adds an **outbound network call**, which the
@@ -964,10 +971,10 @@ problems. Dogfood it every big-picture run and fix root causes.
     astronomy plan (a)+(b) must stand alone without it.
   Additive and read-only throughout (never touches stacks/data); the catalog is a
   static bundled file (no network, no heavy dependency); location/horizon are opt-in
-  with sane fallbacks. Overall L; **slice (a) shipped v0.95.0** — remaining: (b) the
-  horizon/tree-cover mask and (c) the sign-off-gated weather enrichment. A future
-  slice could also widen the bundled catalog beyond Messier (a curated Caldwell/NGC
-  set) — the loader + scorer already handle any number of objects. (L, autonomy/workflow)
+  with sane fallbacks. Overall L; **slice (a) shipped v0.95.0, slice (b) shipped
+  v0.96.0** — remaining: (c) the sign-off-gated weather enrichment. A future slice
+  could also widen the bundled catalog beyond Messier (a curated Caldwell/NGC set) —
+  the loader + scorer already handle any number of objects. (L, autonomy/workflow)
 - Annotated sky overlay (label detected objects / show solved field). (M) —
   related to the night planner above; the planner's "plot tonight's targets" view
   can reuse this.
@@ -1202,6 +1209,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.96.0** — ⭐ OWNER-REQUESTED "Tonight" night planner, slice (b) — horizon / tree-cover mask: an opt-in `horizon_profile` (azimuth→min-clear-altitude points) shapes each target's usable window past low obstructions; `HorizonProfile` interpolates with 360° wrap, Settings gets a point editor, Tonight flags `horizon_active`. Additive, upgrade-safe (empty default = old flat-floor behaviour).
 - **v0.95.0** — ⭐ OWNER-REQUESTED "Tonight" night planner, slice (a) — the offline astronomy core.
   New pure engine module `seestack/nightplan.py` (astropy, offline, deterministic): computes tonight's
   dark window (astronomical −18° with nautical/civil fallbacks; `None` for polar day), and per target
