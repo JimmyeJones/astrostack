@@ -54,7 +54,7 @@ export function OpParamPanel({ spec, params, onChange, histogram, suggestions,
             points={(params[p.key] as [number, number][]) ?? [[0, 0], [1, 1]]}
             histogram={histogram}
             ghost={curveGhost}
-            onChange={(pts) => set(p.key, pts, true)}
+            onChange={(pts, coalesce) => set(p.key, pts, coalesce)}
           />
           {curveGhost ? (
             <Group gap={8} align="center" wrap="nowrap" mt={4}>
