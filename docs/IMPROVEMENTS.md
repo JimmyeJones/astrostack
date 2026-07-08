@@ -72,6 +72,24 @@ _(none of the traced *editor-engine* op bugs are open — that backlog stayed dr
 the entry above is a stacking/autonomy↔editor classification bug found by dogfooding
 the real webapp stack→edit path.)_
 
+_(Scout QA audit 2026-07-08 (v0.94.7 baseline): with the stacking/calibration core saturated by
+a week of daily brute-force engine audits, rotated onto the **less-recently-covered final-image
+edges** — `seestack/solve/*` (ASTAP wrapper + runner), `seestack/bg/*` (`per_frame`, `final_gradient`,
+`coverage_leveling`), `seestack/post/color_cal.py` (gray-star + Gaia solvers), `seestack/render/thumbnail.py`
+(asinh/STF autostretch + `render_stack_png` NaN-preserving stride), and `webapp/routers/system.py`
+(`_astap_info`). Read adversarially for NaN=coverage violations, wrong-length array broadcasts, degenerate
+inputs, and setup-error misclassification. **No verified bug found** — the bg fits degrade through their
+`exclude_percentile`/box ladders, the Gaia solver's per-detection vs per-catalog indexing lines up (the
+documented broadcast-bug fix holds), gray-star guards zero medians, the stretch paths are NaN-aware and
+double-stretch-safe, and `_astap_info` already counts **both** `.290` and `.1476` databases (matching
+`find_star_db_dir`), so a newer D-series-only install is *not* falsely reported as "no database". **One
+trivial cosmetic wording nit logged to Infra** (the no-DB *hint* string still says "(*.290)" and only that,
+though it fires only in a genuine zero-DB state and its actionable advice — "add e.g. d05" — is correct).
+Confirmed the earlier `mosaic.py` iterative-shrink RA-median robustness note is **fixed** (v0.81.9 — the
+loop now uses `_circ_mean_ra_deg`). Two genuinely-new ideas filed (Dashboard ASTAP-readiness banner;
+Stack-form luminance-bg-mode nudge for extended-emission targets). Baseline suite green: 887 passed,
+2 skipped.)_
+
 _(Scout QA audit 2026-07-07 (v0.89.0 baseline): rotated the focused subsystem audit onto
 the **webapp routers** (editor / stack / frames / watcher, plus a fan-out adversarial read of
 system / storage / gallery / sky / stats / seestar / settings / calibration / targets). Read
@@ -536,6 +554,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   careful classifier: **lucky_fraction** from FWHM spread (contentious — it drops signal, so
   weigh against quality-weighting); a background/gradient flatten nudge from a measured sky
   gradient.)_
+- **Nudge `background_mode='luminance'` for extended-emission (nebula) targets.** (M,
+  autonomy/image-quality) `StackOptions.background_mode` defaults to `per_channel` and has **no**
+  data-driven nudge in the Stack form (unlike sigma/drizzle/quality-weight/etc.). `bg/per_frame.py`'s
+  own docstring is explicit that per-channel flatten is *wrong* on extended emission nebulae ("cyan
+  cores, red halos, black holes" — different channel morphology) and that luminance mode is "required"
+  there — yet a beginner stacking M42 / Lagoon / North America gets the artefact-prone default with no
+  guidance and no way to know the knob exists. Add a Stack-form nudge that suggests luminance mode when
+  the target looks like extended emission, with a one-click "Use luminance background flatten". **The
+  work is the classifier, and it must be pre-stack** (the editor's extended-vs-point-source classifier
+  runs on the *stacked* proxy, too late for a stack setting): candidate cheap signals are the target's
+  Simbad/`post/target_id.py` object type when known (galaxy/nebula vs cluster/star), or a quick
+  extended-flux fraction on one accepted, debayered, background-subtracted reference frame. Additive,
+  off-nothing (only *suggests*; a wrong guess costs a click, and per-channel stays the default), gated on
+  a confidence so it never nudges a star field. Serves image quality directly (removes a documented OSC
+  colour artefact) and autonomy (one fewer knob the user must know about). Testable on the classifier in
+  isolation; validate the suggestion on real nebula vs cluster Seestar stacks before it graduates from
+  a suggestion to anything stronger.
 - ~~**One-click "Drop N outlier frames" on the Stack-form auto-grade hint.**~~ —
   **shipped v0.83.2** (see Shipped). The auto-grade hint now carries a "Drop N outlier
   frames" button (beside the retained "Review Auto-grade" link) that calls
@@ -611,6 +646,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   v0.84.2. A Builder dogfood of the other five routes (Dashboard/Library/Target/
   History/Editor) found them already well-handled with icon+prose+next-step empty
   states, beginner tooltips, and translated reject/combine labels.)_
+- **Proactive "plate-solving isn't set up yet" banner on the Dashboard.** (S,
+  friendliness/autonomy) ASTAP readiness is surfaced today only *reactively*: on the
+  **Settings** page (badges) and on a **Target** page once a solve has already failed
+  (`solveSetup.ts`). A first-timer who lands on the **Dashboard** with no targets yet gets
+  **no** cue that plate-solving — which every stack requires — is unconfigured, so they only
+  discover it after scanning frames and hitting a wall mid-workflow. `GET /api/system`
+  already returns everything needed (`astap.found`, `astap.star_db_found`, `astap.runs`);
+  add a dismissible Alert on the Dashboard when ASTAP isn't ready ("Plate-solving isn't set
+  up — solving is required before you can stack. [Fix in Settings]"), so the setup problem is
+  caught once, upfront, in the one place a beginner always starts. Frontend-only, additive,
+  reuses the existing endpoint and the Settings hint text; dismissible so it never nags a user
+  who has ASTAP working. No backend/schema/default change.
 - ~~**Make the new "Process target" one-click the guided next step for a fresh target.**~~
   — **shipped v0.85.1** (see Shipped). A dimmed "Ready to process?" getting-started callout
   now appears on a Target whose newest frames haven't been turned into a stack (no stack run
@@ -904,6 +951,13 @@ problems. Dogfood it every big-picture run and fix root causes.
   tiny-negative that `% 360.0` folds to exactly `360.0` (outside `[0, 360)`) — the helper now snaps
   that back to `0.0`. New `tests/test_coords.py` pins the boundary cases; the three existing
   per-site wrap regression tests still pass unchanged.
+- **Trivial (cosmetic): the ASTAP no-database *hint* still says "(*.290)" only.**
+  (XS, friendliness) `webapp/routers/system.py::_astap_info` now correctly *counts* both
+  `.290` and `.1476` databases, but the fallback hint shown when zero are found still reads
+  "no star database (*.290) was found" — inaccurate now that D-series `.1476` files are
+  accepted (its own example "add e.g. d05" *is* a `.1476` file). Reword to "(*.290 or *.1476)".
+  Fires only in a genuine zero-database state, so it's purely cosmetic; fold into any run
+  already touching `system.py`. Found in the 2026-07-08 Scout audit.
 - Chip away at the ~127 pre-existing `ruff check .` findings (don't add new ones);
   consider wiring ruff into CI once the count is low. (L, correctness/maintainability)
 - ~~Add a retention/pruning policy for `jobs.sqlite`~~ — **done, then made
