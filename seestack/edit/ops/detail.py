@@ -46,6 +46,14 @@ def _denoise(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     if strength <= 0.0:
         return as_rgb(rgb)  # explicit no-op so the slider has a true identity at 0
 
+    arr = as_rgb(rgb)
+    if arr.shape[0] < 2 or arr.shape[1] < 2:
+        # Degenerate 1-px-thin image: the wavelet path emits all-NaN in the
+        # covered region (breaking the NaN=coverage invariant) and bilateral
+        # raises IndexError. Return it untouched, mirroring the geometry ops'
+        # degenerate-size guards — a sliver has no neighbourhood to denoise over.
+        return arr
+
     def run(img: np.ndarray) -> np.ndarray:
         from skimage import restoration
 
