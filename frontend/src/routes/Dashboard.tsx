@@ -1,13 +1,38 @@
 import {
-  Badge, Card, Center, Group, Image, Loader, Paper, SimpleGrid, Stack, Text, Title,
+  Alert, Badge, Button, Card, Center, Group, Image, Loader, Paper, SimpleGrid, Stack, Text, Title,
 } from "@mantine/core";
 import {
   IconActivity, IconClock, IconLayoutGrid, IconPhoto, IconStack2, IconStars,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
+import { astapReadiness } from "../components/dashboard/astapReadiness";
 import { QueryError } from "../components/QueryError";
+
+// One-time dismissal of the "plate-solving isn't set up" banner, so it never nags
+// a user who has already seen it. localStorage-only and defensively guarded so a
+// disabled/broken store never breaks the page; the banner naturally disappears
+// once ASTAP is set up (readiness flips to ready), so the dismiss is only for the
+// case where the user has acknowledged it but not fixed it yet.
+const ASTAP_DISMISS_KEY = "astrostack.dashboard.astapBannerDismissed";
+
+function loadAstapDismissed(): boolean {
+  try {
+    return localStorage.getItem(ASTAP_DISMISS_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function saveAstapDismissed(): void {
+  try {
+    localStorage.setItem(ASTAP_DISMISS_KEY, "1");
+  } catch {
+    /* storage unavailable — the banner just won't stay dismissed across reloads */
+  }
+}
 
 function StatCard({ icon, label, value, sub }: {
   icon: React.ReactNode; label: string; value: string; sub?: string;
@@ -32,6 +57,10 @@ export function Dashboard() {
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["stats"], queryFn: api.getStats, refetchInterval: 10_000,
   });
+  const system = useQuery({ queryKey: ["system"], queryFn: api.getSystem, staleTime: 60_000 });
+  const [astapDismissed, setAstapDismissed] = useState(loadAstapDismissed);
+
+  const solve = astapReadiness(system.data?.astap);
 
   if (isError && !data) {
     return <QueryError error={error} onRetry={() => refetch()} />;
@@ -47,6 +76,28 @@ export function Dashboard() {
   return (
     <Stack>
       <Title order={2}>Dashboard</Title>
+
+      {!solve.ready && !astapDismissed ? (
+        <Alert color="yellow" variant="light"
+          withCloseButton
+          onClose={() => { setAstapDismissed(true); saveAstapDismissed(); }}
+          title={solve.kind === "astap"
+            ? "Plate-solving isn't set up yet"
+            : "Plate-solving needs a star database"}>
+          <Text size="sm">
+            {solve.kind === "astap"
+              ? "Solving gives every frame sky coordinates, and it's required before you "
+                + "can stack anything. ASTAP (the plate-solver) wasn't found, so set it up "
+                + "before you drop in frames."
+              : "ASTAP was found, but it has no star database to match against — solving "
+                + "needs one, and solving is required before you can stack. Add a star "
+                + "database before you drop in frames."}
+          </Text>
+          <Button component={Link} to="/settings" size="xs" variant="light" color="yellow" mt="xs">
+            Fix in Settings
+          </Button>
+        </Alert>
+      ) : null}
 
       <SimpleGrid cols={{ base: 2, sm: 3, lg: 6 }}>
         <StatCard icon={<IconStars size={22} color="var(--mantine-color-violet-4)" />}

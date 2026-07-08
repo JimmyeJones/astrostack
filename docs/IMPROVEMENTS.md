@@ -671,18 +671,36 @@ problems. Dogfood it every big-picture run and fix root causes.
   v0.84.2. A Builder dogfood of the other five routes (Dashboard/Library/Target/
   History/Editor) found them already well-handled with icon+prose+next-step empty
   states, beginner tooltips, and translated reject/combine labels.)_
-- **Proactive "plate-solving isn't set up yet" banner on the Dashboard.** (S,
-  friendliness/autonomy) ASTAP readiness is surfaced today only *reactively*: on the
-  **Settings** page (badges) and on a **Target** page once a solve has already failed
-  (`solveSetup.ts`). A first-timer who lands on the **Dashboard** with no targets yet gets
-  **no** cue that plate-solving — which every stack requires — is unconfigured, so they only
-  discover it after scanning frames and hitting a wall mid-workflow. `GET /api/system`
-  already returns everything needed (`astap.found`, `astap.star_db_found`, `astap.runs`);
-  add a dismissible Alert on the Dashboard when ASTAP isn't ready ("Plate-solving isn't set
-  up — solving is required before you can stack. [Fix in Settings]"), so the setup problem is
-  caught once, upfront, in the one place a beginner always starts. Frontend-only, additive,
-  reuses the existing endpoint and the Settings hint text; dismissible so it never nags a user
-  who has ASTAP working. No backend/schema/default change.
+- ~~**Proactive "plate-solving isn't set up yet" banner on the Dashboard.**~~ — **shipped
+  v0.94.12** (see Shipped). A dismissible yellow Alert now shows on the Dashboard when
+  `GET /api/system` reports ASTAP isn't ready, distinguishing "ASTAP wasn't found" from
+  "ASTAP found but no star database" and linking to Settings ("Fix in Settings"), so a
+  first-timer catches the setup gap upfront in the one place a beginner always starts —
+  not after scanning frames and hitting a wall. A pure `astapReadiness(astap)` helper mirrors
+  the exact `astap.found` / `star_db_found` signals the Settings page reads (only a *definite*
+  `star_db_found === false` flags the database, so an older backend that omits the field never
+  shows a spurious warning); dismissal is one-time via localStorage (guarded), and the banner
+  self-clears once ASTAP is set up. Frontend-only, additive, no backend/schema/default change.
+- **Extend the Dashboard readiness banner to a missing/unwritable incoming or data folder.**
+  (S, friendliness) The v0.94.12 Dashboard banner catches an unconfigured *plate-solver* upfront,
+  but the *other* silent first-run blocker is the watched folders: if the resolved incoming/data
+  directory doesn't exist or isn't writable, "Scan incoming" finds nothing (or errors) with no
+  Dashboard cue — the beginner only learns after clicking Scan and getting an empty/failed job.
+  `GET /api/system` already returns `data_root`; the Settings page shows `resolved_incoming_dir`
+  / `resolved_library_root`. If the backend can cheaply report each resolved folder's
+  existence/writability (a small additive field on `/api/system` or a tiny read-only
+  `/api/system/folders` check), surface it in the same dismissible Dashboard Alert family as the
+  ASTAP one ("Your incoming folder doesn't exist yet — [Fix in Settings]"). Reuse the shipped
+  `astapReadiness`-style pure-helper + dismissible-Alert pattern. Additive, off-nothing, no default
+  change; needs one small backend field so scope it as S–M. (Serves priority 3, first-run
+  friendliness.)
+  _(Builder note 2026-07-08: filed while shipping the ASTAP Dashboard banner (v0.94.12). Also
+  noted a minor robustness nicety on that banner itself — its dismissal is a single global
+  boolean, so a user who dismisses the "ASTAP missing" banner during setup won't see it again if
+  ASTAP later *breaks* after having worked. The reactive Settings/Target backstops still cover
+  that case, so it's a low-priority polish, not a bug: keying the localStorage dismissal on the
+  readiness *kind* (or clearing it when readiness flips to ready) would make the banner re-surface
+  on a genuinely new/returning problem. Only worth doing if a run is already in that file.)_
 - ~~**Make the new "Process target" one-click the guided next step for a fresh target.**~~
   — **shipped v0.85.1** (see Shipped). A dimmed "Ready to process?" getting-started callout
   now appears on a Target whose newest frames haven't been turned into a stack (no stack run
@@ -1053,6 +1071,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.94.12** — Friendliness/autonomy: a proactive, dismissible "plate-solving isn't set up"
+  banner on the **Dashboard** (the one screen a beginner always lands on first). A pure
+  `astapReadiness(astap)` helper classifies `GET /api/system` into ready / ASTAP-missing /
+  star-database-missing (only a *definite* `star_db_found === false` flags the DB, so an older
+  backend that omits the field never nags), and the Dashboard shows a yellow Alert with a "Fix
+  in Settings" link when it isn't ready — caught upfront instead of after scanning frames and
+  hitting a mid-workflow wall. One-time localStorage dismissal (guarded); self-clears once
+  ASTAP is set up. Frontend-only, additive, no backend/schema/default change
+  (`frontend/src/components/dashboard/astapReadiness.ts`, `frontend/src/routes/Dashboard.tsx`
+  + tests).
 - **v0.94.11** — Friendliness (cosmetic): the ASTAP "no star database" hint on Settings now
   reads "(*.290 or *.1476)" instead of "(*.290)" only — the count already tallied both series
   and the hint's own `d05` example is a `.1476` file, so the old wording was misleading in a
