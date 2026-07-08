@@ -97,6 +97,26 @@ the real webapp stack→edit path.)_
   pathological skew reverts — same real-data-gating as the SCNR / `sky_sigma` items in Image-quality
   below. Fix all four sites together (they share the bug). (S code / M validation, image-quality/correctness)
 
+_(Builder engine-hardening audit 2026-07-08 (v0.94.16 baseline): fresh adversarial **numeric** audit of
+the mosaic/drizzle **geometry** path — `stack/mosaic.py` (union canvas, `_bbox`, footprint-outlier
+rejection, iterative canvas shrink), `stack/drizzle_path.py` (`_compute_output_canvas` CRPIX/CDELT scaling,
+two-pass reject, `result()` weighted-average), and `stack/accumulator.py` (Welford / WeightedSum /
+MinMaxReject NaN=coverage edges). Five standalone repro harnesses (in scratchpad): `MinMaxRejectAccumulator`
+matched a brute-force sorted-trim reference across **2000 randomized trials** (k∈{1,2,3}, 1–9 frames, ties,
+~25% NaN, all three count bands, `add`≡`add_window`); `WeightedSum`/`Welford` uphold NaN=gap (one-finite+one-NaN
+→ finite w/ coverage 1; all-NaN → NaN w/ coverage 0; std matches `np.nanstd(ddof=1)` to ~3e-6, single-coverage
+std NaN so pass-2 keeps it); `drizzle_path.result()` returns the weighted **mean** (not sum), the two-pass κ-σ
+reject yields the exact inlier mean at n=25, and the n=8 lone-outlier non-rejection is the documented
+`(n−1)/√n < κ` small-sample limit; `_compute_output_canvas` places corners at exactly 2× with the correct
++0.5 half-pixel offset under a **rotated CD-matrix** WCS and conserves flat-field surface brightness; every
+mosaic panel corner lands inside the canvas for a real 2×2 straddling RA=0, a single degenerate frame, and a
+4-panel run across the 0°/360° seam (wrap-safe `_circ_mean_ra_deg`). Both passes apply `photometric_scales`
++ per-frame `weight` identically, and quality weights are bounded [0.1, 1.0] so `neff = Σw ≤ count` keeps the
+reject gate conservative (can't over-reject). **No reachable image-corruption bug found** — the geometry and
+NaN=coverage semantics are correct, consistent with the prior clean audits. One negligible float-level drizzle
+kernel weight-leak (~1e-11) examined and dismissed as unreachable (true gaps carry exactly zero weight → NaN).
+Baseline suite green: 893 passed, 2 skipped.)_
+
 _(Scout QA audit 2026-07-08 (v0.94.7 baseline): with the stacking/calibration core saturated by
 a week of daily brute-force engine audits, rotated onto the **less-recently-covered final-image
 edges** — `seestack/solve/*` (ASTAP wrapper + runner), `seestack/bg/*` (`per_frame`, `final_gradient`,
