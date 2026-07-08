@@ -72,6 +72,31 @@ _(none of the traced *editor-engine* op bugs are open — that backlog stayed dr
 the entry above is a stacking/autonomy↔editor classification bug found by dogfooding
 the real webapp stack→edit path.)_
 
+- **Dead SExtractor skew-fallback guard in 4 background/leveling helpers (needs REAL-data
+  threshold validation before fixing — NOT a blind Builder change).** *(traced + reproduced,
+  Builder audit 2026-07-08; med confidence it produces a visibly-wrong result in practice.)*
+  All four sky-mode estimators — `bg/per_frame.py::_zero_sky_per_channel` (~L300), the GPU
+  `bg/per_frame.py::_subtract_background_gpu` tile branch (~L377), `bg/final_gradient.py::
+  _subtract_luminance_with_mask` (~L224), and `bg/coverage_leveling.py` per-level offset (~L131) —
+  compute `sky = 2.5·median − 1.5·mean` (SExtractor mode) and then guard `if abs(sky − median) >
+  5.0·abs(median − mean + 1e-9): sky = median`. **That guard is mathematically dead**: by
+  construction `abs(sky − median) = 1.5·abs(median − mean)`, and `1.5 < 5`, so the inequality is
+  *always False* (it degenerates to a pure `isfinite` check). The intended "revert to median when
+  the skew is implausibly extreme (bright-object contamination)" safety net therefore never fires,
+  so a negatively-skewed sky sample (median > mean) over-subtracts and leaves that region darker
+  than its neighbours — the coverage-/panel-shaped step these passes exist to remove. **Why it is
+  NOT a blind fix (Builder measured this):** the obvious "use the standard SExtractor criterion
+  `|mean − median| > 0.3·std → median`" is *wrong here* — a heavy diffuse **nebula** reads
+  `|mean − median|/std ≈ 0.32` (measured on a realistic synthetic), i.e. it would trip the 0.3 rail
+  and revert to median **exactly where `final_gradient`'s own comment says it deliberately wants the
+  mode** ("so faint diffuse signal doesn't pull the zero down"). So a naïve threshold would *regress
+  nebula images* (a core OSC target). Typical sky+stars reads `|mean − median|/std ≈ 0.001` (guard
+  irrelevant either way), so the common case is unaffected. **What's needed:** pick a genuinely-safe
+  revert threshold (well above the nebulosity regime, only catching truly-broken tiles) and validate
+  on **real** OSC stacks that (a) normal sky + nebula frames are unchanged and (b) a genuinely
+  pathological skew reverts — same real-data-gating as the SCNR / `sky_sigma` items in Image-quality
+  below. Fix all four sites together (they share the bug). (S code / M validation, image-quality/correctness)
+
 _(Scout QA audit 2026-07-07 (v0.89.0 baseline): rotated the focused subsystem audit onto
 the **webapp routers** (editor / stack / frames / watcher, plus a fan-out adversarial read of
 system / storage / gallery / sky / stats / seestar / settings / calibration / targets). Read
@@ -904,6 +929,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   tiny-negative that `% 360.0` folds to exactly `360.0` (outside `[0, 360)`) — the helper now snaps
   that back to `0.0`. New `tests/test_coords.py` pins the boundary cases; the three existing
   per-site wrap regression tests still pass unchanged.
+- **Low-priority robustness (ingest, traced 2026-07-08): a transient copy error permanently leaves a
+  frame uncached.** `io/ingest.py` (~L120-133) inserts the frame row *before* `shutil.copy2` into the
+  Stage-1 cache; if the copy raises `OSError` (a NAS blip) `cached_path` stays NULL, and on any
+  re-scan the file is skipped (`s_str in existing`, because the row already exists) so the copy is
+  **never retried** — the size-check "resume" branch is effectively dead for this case. Not a
+  wrong-image bug (downstream falls back to `source_path`, e.g. `stacker.py`), but the Stage-1 cache
+  is silently never populated for that frame. Fix: on copy failure, either don't insert the row (so a
+  re-scan retries) or record the failure and re-attempt the copy on the next scan. (S, correctness/robustness)
+- **Low-priority robustness (traced 2026-07-08, near-unreachable): opening an empty/foreign
+  `project.sqlite` yields a DB with no `frames` table.** `io/project.py` `Project.open` on an existing
+  sqlite with `user_version==0` runs `_migrate_schema(0)`, which only `ALTER TABLE frames …` (each
+  wrapped in `except OperationalError: pass`) and never runs `SCHEMA_SQL`; with no `frames` table the
+  ALTERs no-op, `user_version` is stamped to the current version, and the next `add_frame` raises
+  "no such table: frames". Only reachable via a corrupt/foreign/empty DB (real projects always go
+  through `Project.create`, which runs the full schema), hence low severity. Fix: have `open` ensure
+  the base schema exists (or detect a missing `frames` table and run `SCHEMA_SQL`) before migrating. (S, robustness)
 - Chip away at the ~127 pre-existing `ruff check .` findings (don't add new ones);
   consider wiring ruff into CI once the count is low. (L, correctness/maintainability)
 - ~~Add a retention/pruning policy for `jobs.sqlite`~~ — **done, then made
