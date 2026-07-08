@@ -221,6 +221,13 @@ def _aperture_photometry(rgb: np.ndarray, sources, radius: float) -> np.ndarray:
 # ---- solvers ---------------------------------------------------------------
 
 
+# Physical bounds on a per-channel calibration scale. Real OSC scales sit near
+# 1.0; anything outside this range is unphysical (a negative scale would invert
+# a channel, a near-zero one would blank it) and is clamped defensively.
+_MIN_CAL_SCALE = 0.05
+_MAX_CAL_SCALE = 20.0
+
+
 def _solve_gray_star(fluxes: np.ndarray) -> tuple[tuple[float, float, float], int, str]:
     """
     Per-channel scale = median(G_flux) / median(channel_flux), normalised so G=1.
@@ -333,12 +340,27 @@ def _solve_gaia(
     # with the median.
     scale_r = float(np.median(expected_rg / np.maximum(measured_rg, 1e-9)))
     scale_b = float(np.median(expected_bg / np.maximum(measured_bg, 1e-9)))
+
+    # The linear-in-colour model can predict a *non-positive* expected ratio on
+    # a pathologically-reddened field: expected_bg = a_b + b_b·(BP-RP) goes
+    # negative once the median matched-star colour exceeds ~2.44 (b_b < 0), which
+    # would make ``scale_b`` negative and, applied, *invert* the blue channel.
+    # Clamp both solved scales to a sane positive range so colour calibration can
+    # only ever rescale a channel, never flip or extinguish it. A no-op on any
+    # realistic OSC field (solved scales sit near 1.0).
+    n_clamped = 0
+    if not (_MIN_CAL_SCALE <= scale_r <= _MAX_CAL_SCALE):
+        scale_r = float(np.clip(scale_r, _MIN_CAL_SCALE, _MAX_CAL_SCALE))
+        n_clamped += 1
+    if not (_MIN_CAL_SCALE <= scale_b <= _MAX_CAL_SCALE):
+        scale_b = float(np.clip(scale_b, _MIN_CAL_SCALE, _MAX_CAL_SCALE))
+        n_clamped += 1
+
     n_used = int(len(f_match))
-    return (
-        (scale_r, 1.0, scale_b),
-        n_used,
-        f"matched {n_used} Gaia stars within {max_sep.value:.0f}\"",
-    )
+    note = f"matched {n_used} Gaia stars within {max_sep.value:.0f}\""
+    if n_clamped:
+        note += " (clamped an out-of-range channel scale)"
+    return ((scale_r, 1.0, scale_b), n_used, note)
 
 
 def _apply_scale(rgb: np.ndarray, scale: tuple[float, float, float]) -> np.ndarray:
