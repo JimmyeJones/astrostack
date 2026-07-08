@@ -652,6 +652,29 @@ problems. Dogfood it every big-picture run and fix root causes.
   proxy (a cheap large-box detrend, matching what `final_gradient` will remove anyway) so it reflects
   true pixel noise, not the gradient. Additive, testable on `analyze_proxy`/`auto_recipe` in isolation;
   changing Auto's output needs the usual real-data validation.
+  _(Builder measurement 2026-07-08, v0.94.5 baseline — sharpens the case but did **not** ship a change,
+  deferring to the two prior deferrals + the real-data requirement. Three findings: **(1) The mechanism
+  is real, not merely a low-dynamic-range synthetic artifact.** My earlier same-day probe used a synthetic
+  whose 99.5th percentile landed *in the sky* (too little bright signal), which by itself blows up
+  `sky_sigma`. With a **realistic** proxy (extended nebula + 400 varied stars → proper normalization span)
+  and **low** noise (σ≈0.003), a modest left→right gradient still pushes `sky_sigma` well over `_NOISE_HI`
+  (0.028): gradient 0.00→0.05→0.10→0.20 of range → `sky_sigma` 0.015→0.028→0.054→0.098, i.e. Auto flips
+  from `sharpen≈0.40` to **sharpen 0.0 / full denoise** by a gradient of only ~0.05. This is exactly the
+  light-polluted-but-well-stacked case (gradient present, pixel noise driven low by thousands of subs) —
+  arguably *common* for the target user, not an edge. **(2) Op-order proof it's measuring the wrong signal
+  by construction:** in `auto_recipe` `background.final_gradient` is the **first** tone/detail op, *before*
+  `detail.denoise` — so the noise the denoise op actually sees is the post-gradient-removal noise, yet
+  `analyze_proxy` measures `sky_sigma` on the raw (gradient-laden) proxy. **(3) A naïve detrend backfires
+  — the fix is non-trivial.** A quick block-median + nearest-neighbour-upsample detrend *increased*
+  `sky_sigma` on a flat proxy (0.015→0.058) via block-edge steps, i.e. a poorly-tuned detrend adds
+  structure that reads as noise. So the eventual fix must use a genuinely smooth background estimate
+  (photutils `Background2D`-style interpolation, or a true low-pass) that removes only the large-scale
+  gradient while leaving pixel noise intact — and be validated on a **real** light-polluted Seestar stack
+  that it (a) leaves a flat clean stack's `sky_sigma` ≈ unchanged (so clean stacks still sharpen) and
+  (b) reads a gradient-heavy-but-low-noise stack as *not* very noisy. Safety of the eventual change:
+  flat images ≈ byte-for-byte (detrend ≈ no-op), genuinely-noisy images unchanged (high-freq noise
+  survives a coarse detrend), only gradient-heavy-low-noise images shift toward sharpen — but it still
+  touches the most-used one-click path, so it stays a Scout/real-data item.)_
 - ~~**Graceful degradation for `final_gradient` on busy / dense-star fields (instead of
   giving up).**~~ — **shipped v0.89.2** (see Shipped). The `Background2D` fit now degrades
   through an `exclude_percentile` ladder (80 → 95 → 100) and, as a last try, a half-size box,
@@ -897,6 +920,22 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.94.6** — Editor/undo correctness (PRIORITY 1): fixed undo *over-reverting* a second use of the
+  same control. `useUndoable`'s coalescing keyed only off the previous set's key with **no
+  gesture-end signal** — and releasing a slider fires no event — so a second drag of the *same*
+  slider merged into the first history entry, making the value between the two gestures unreachable by
+  undo (e.g. drag strength 3→5, release, drag 5→7, Ctrl+Z → jumped back to 3, not 5). Root-cause fix:
+  coalesce a keyed set only when it lands within `COALESCE_WINDOW_MS` (500 ms) of the previous
+  same-key set, so the time gap between two gestures ends one (continuous drag ticks fire ms apart and
+  still collapse to one step). Also fixed a related contract violation the audit flagged: `CurvesWidget`
+  passed `coalesce=true` for **every** curve mutation, so a *discrete* structural edit (add/remove point,
+  keyboard Delete, the "reset" link) merged into the preceding drag — one Ctrl+Z then wiped a whole
+  curve-editing session. `CurvesWidget.onChange` now carries a `coalesce` flag (true only for a point
+  drag or an arrow-key nudge; false for add/remove/reset), threaded through `OpParamPanel`. Frontend-only,
+  additive. Regression tests: `useUndoable` gesture-boundary test (fails before / passes after) +
+  `CurvesWidget` discrete-vs-continuous flag assertions. Found by a fresh adversarial editor-logic audit
+  (which otherwise came back clean: preview races, split/compare geometry, suggestion wiring, recipe
+  immutability, history bounds all verified correct).
 - **v0.94.5** — Engine/NaN-coverage: `geometry.rotate` now guards degenerate sizes (`h < 3 or
   w < 3` → return the sliver untouched), the last op in the geometry/detail degenerate-guard family
   that lacked one. Rotation's ~1 px NaN border consumes a sub-3-px axis entirely, so a fully-covered

@@ -47,7 +47,11 @@ function fromSvg(px: number, py: number): Pt {
  * the preview. It's advisory: the user can't drag it (they Bake it to edit). */
 export function CurvesWidget({ points, onChange, histogram, ghost }: {
   points: Pt[];
-  onChange: (pts: Pt[]) => void;
+  /** `coalesce` is true only for *continuous* shaping (a point drag or a burst of
+   * arrow-key nudges), so those collapse into one undo step. Structural edits
+   * (add / remove / reset) pass false so each is its own undoable step and never
+   * merges into a preceding drag. */
+  onChange: (pts: Pt[], coalesce: boolean) => void;
   histogram?: Histogram;
   ghost?: Pt[];
 }) {
@@ -66,8 +70,9 @@ export function CurvesWidget({ points, onChange, histogram, ghost }: {
 
   const update = (i: number, p: Pt) => {
     // moveCurvePoint clamps interior points between their neighbours so the drag
-    // can't cross another point and swap which handle is being moved.
-    onChange(moveCurvePoint(pts, i, p));
+    // can't cross another point and swap which handle is being moved. A drag is a
+    // continuous gesture → coalesce its ticks into one undo step.
+    onChange(moveCurvePoint(pts, i, p), true);
   };
 
   const onMove = (e: React.PointerEvent) => {
@@ -78,19 +83,19 @@ export function CurvesWidget({ points, onChange, histogram, ghost }: {
   const addPoint = (e: React.MouseEvent) => {
     if (drag.current != null) return;
     const p = evtPt(e);
-    onChange([...pts, p].sort((a, b) => a[0] - b[0]) as Pt[]);
+    onChange([...pts, p].sort((a, b) => a[0] - b[0]) as Pt[], false);
   };
 
   const removePoint = (i: number) => {
     if (i === 0 || i === pts.length - 1) return;
-    onChange(pts.filter((_, j) => j !== i));
+    onChange(pts.filter((_, j) => j !== i), false);
   };
 
   const addPointKeyboard = () => {
     // Keyboard users can't double-click empty space to add a point; add one in
     // the widest gap (on the current curve) and focus it so it can be nudged.
     const { points, index } = addCurvePointInLargestGap(pts);
-    onChange(points);
+    onChange(points, false);
     // Focus the new handle once React has re-rendered it.
     requestAnimationFrame(() => pointRefs.current[index]?.focus());
   };
@@ -98,11 +103,13 @@ export function CurvesWidget({ points, onChange, histogram, ghost }: {
   const onPointKeyDown = (i: number) => (e: React.KeyboardEvent) => {
     const step = e.shiftKey ? KEY_STEP_COARSE : KEY_STEP;
     let handled = true;
-    if (e.key === "ArrowLeft") onChange(nudgeCurvePoint(pts, i, -step, 0));
-    else if (e.key === "ArrowRight") onChange(nudgeCurvePoint(pts, i, step, 0));
-    else if (e.key === "ArrowUp") onChange(nudgeCurvePoint(pts, i, 0, step));
-    else if (e.key === "ArrowDown") onChange(nudgeCurvePoint(pts, i, 0, -step));
-    else if (e.key === "Delete" || e.key === "Backspace") onChange(removeCurvePoint(pts, i));
+    // Arrow-key nudges shape a point continuously (a held/repeated key is one
+    // gesture) → coalesce; Delete/Backspace is a discrete structural edit → not.
+    if (e.key === "ArrowLeft") onChange(nudgeCurvePoint(pts, i, -step, 0), true);
+    else if (e.key === "ArrowRight") onChange(nudgeCurvePoint(pts, i, step, 0), true);
+    else if (e.key === "ArrowUp") onChange(nudgeCurvePoint(pts, i, 0, step), true);
+    else if (e.key === "ArrowDown") onChange(nudgeCurvePoint(pts, i, 0, -step), true);
+    else if (e.key === "Delete" || e.key === "Backspace") onChange(removeCurvePoint(pts, i), false);
     else handled = false;
     if (handled) { e.preventDefault(); e.stopPropagation(); }
   };
@@ -169,7 +176,7 @@ export function CurvesWidget({ points, onChange, histogram, ghost }: {
           <Anchor component="button" type="button" size="xs" c="violet"
             onClick={addPointKeyboard}>add point</Anchor>
           <Anchor component="button" type="button" size="xs" c="violet"
-            onClick={() => onChange([[0, 0], [1, 1]])}>reset</Anchor>
+            onClick={() => onChange([[0, 0], [1, 1]], false)}>reset</Anchor>
         </Group>
       </Group>
     </Box>

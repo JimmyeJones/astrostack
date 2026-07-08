@@ -27,7 +27,8 @@ describe("CurvesWidget keyboard access (a11y)", () => {
   it("nudges an interior point up with ArrowUp", () => {
     const { onChange } = setup([[0, 0], [0.5, 0.5], [1, 1]]);
     fireEvent.keyDown(screen.getAllByRole("slider")[1], { key: "ArrowUp" });
-    expect(onChange).toHaveBeenCalledWith([[0, 0], [0.5, 0.52], [1, 1]]);
+    // A nudge is continuous shaping → coalesce=true so a burst is one undo step.
+    expect(onChange).toHaveBeenCalledWith([[0, 0], [0.5, 0.52], [1, 1]], true);
   });
 
   it("uses a coarser step with Shift", () => {
@@ -40,20 +41,29 @@ describe("CurvesWidget keyboard access (a11y)", () => {
   it("removes an interior point with Delete", () => {
     const { onChange } = setup([[0, 0], [0.5, 0.5], [1, 1]]);
     fireEvent.keyDown(screen.getAllByRole("slider")[1], { key: "Delete" });
-    expect(onChange).toHaveBeenCalledWith([[0, 0], [1, 1]]);
+    // Removing a point is a discrete structural edit → its own undo step.
+    expect(onChange).toHaveBeenCalledWith([[0, 0], [1, 1]], false);
   });
 
   it("keeps an endpoint's x locked when nudged horizontally", () => {
     const { onChange } = setup([[0, 0], [1, 1]]);
     fireEvent.keyDown(screen.getAllByRole("slider")[0], { key: "ArrowRight" });
     // x stays 0; only y could change (ArrowRight adds to x, which is locked → no move).
-    expect(onChange).toHaveBeenCalledWith([[0, 0], [1, 1]]);
+    expect(onChange).toHaveBeenCalledWith([[0, 0], [1, 1]], true);
   });
 
   it("adds a point via the keyboard-accessible 'add point' button", () => {
     const { onChange } = setup([[0, 0], [1, 1]]);
     fireEvent.click(screen.getByRole("button", { name: /add point/i }));
-    expect(onChange).toHaveBeenCalledWith([[0, 0], [0.5, 0.5], [1, 1]]);
+    expect(onChange).toHaveBeenCalledWith([[0, 0], [0.5, 0.5], [1, 1]], false);
+  });
+});
+
+describe("CurvesWidget undo coalescing (discrete vs continuous)", () => {
+  it("flags a structural edit (reset) as non-coalescing so it starts a fresh undo step", () => {
+    const { onChange } = setup([[0, 0], [0.5, 0.7], [1, 1]]);
+    fireEvent.click(screen.getByRole("button", { name: /reset/i }));
+    expect(onChange).toHaveBeenCalledWith([[0, 0], [1, 1]], false);
   });
 });
 

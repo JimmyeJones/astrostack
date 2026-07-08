@@ -1,8 +1,10 @@
 import { act, renderHook } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { useUndoable } from "./useUndoable";
 
 describe("useUndoable", () => {
+  afterEach(() => { vi.useRealTimers(); });
+
   it("tracks history and undoes/redoes", () => {
     const { result } = renderHook(() => useUndoable<number[]>([]));
     expect(result.current.canUndo).toBe(false);
@@ -55,6 +57,31 @@ describe("useUndoable", () => {
     expect(result.current.state).toEqual([1]);
     act(() => result.current.undo());
     expect(result.current.state).toEqual([0]);
+  });
+
+  it("does not merge two separate drags of the same control (gesture boundary)", () => {
+    // Regression: coalescing keyed only off the previous set's key, with no
+    // gesture-end signal, silently merged a *second* drag of the same slider into
+    // the first — its intermediate value then unreachable by undo. Releasing a
+    // slider fires no event, so the time gap between gestures is what ends one.
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useUndoable<number[]>([3]));
+    // First drag of the "strength" slider: 3 → 5, several ticks close in time.
+    act(() => result.current.set([4], "strength"));
+    act(() => result.current.set([5], "strength"));
+    // The user releases the slider; time passes before a second, separate drag.
+    act(() => { vi.advanceTimersByTime(1000); });
+    // Second drag of the *same* slider: 5 → 7.
+    act(() => result.current.set([6], "strength"));
+    act(() => result.current.set([7], "strength"));
+    expect(result.current.state).toEqual([7]);
+    // One undo returns to the value *between* the gestures (5), not before the
+    // first drag (3) — each gesture is its own undoable step.
+    act(() => result.current.undo());
+    expect(result.current.state).toEqual([5]);
+    act(() => result.current.undo());
+    expect(result.current.state).toEqual([3]);
+    expect(result.current.canUndo).toBe(false);
   });
 
   it("starts a fresh entry for a keyed set right after an undo", () => {
