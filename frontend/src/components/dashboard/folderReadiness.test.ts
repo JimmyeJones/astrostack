@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { folderReadiness } from "./folderReadiness";
+import { folderReadiness, folderReadinessSignature } from "./folderReadiness";
 import type { SystemInfo } from "../../api/client";
 
 function folders(
@@ -50,5 +50,20 @@ describe("folderReadiness", () => {
 
   it("does not nag when the backend omits the folders field (older backend)", () => {
     expect(folderReadiness(undefined)).toEqual({ ready: true });
+  });
+});
+
+describe("folderReadinessSignature", () => {
+  it("is null when ready", () => {
+    expect(folderReadinessSignature({ ready: true })).toBeNull();
+  });
+
+  it("distinguishes each kind/problem pair so a different problem re-surfaces", () => {
+    expect(folderReadinessSignature({ ready: false, kind: "incoming", problem: "missing" }))
+      .toBe("incoming:missing");
+    expect(folderReadinessSignature({ ready: false, kind: "incoming", problem: "unwritable" }))
+      .toBe("incoming:unwritable");
+    expect(folderReadinessSignature({ ready: false, kind: "library", problem: "missing" }))
+      .toBe("library:missing");
   });
 });

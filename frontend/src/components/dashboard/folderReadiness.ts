@@ -26,3 +26,10 @@ export function folderReadiness(folders: SystemInfo["folders"] | undefined): Fol
   }
   return { ready: true };
 }
+
+// A stable string identifying the *specific* current folder problem (or null
+// when ready), so a dismissal keys to it — dismissing "incoming missing"
+// shouldn't suppress a later "library unwritable" or a problem that returns.
+export function folderReadinessSignature(r: FolderReadiness): string | null {
+  return r.ready ? null : `${r.kind}:${r.problem}`;
+}

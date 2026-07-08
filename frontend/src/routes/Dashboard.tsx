@@ -8,49 +8,31 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
-import { astapReadiness } from "../components/dashboard/astapReadiness";
-import { folderReadiness } from "../components/dashboard/folderReadiness";
+import { astapReadiness, astapReadinessSignature } from "../components/dashboard/astapReadiness";
+import { folderReadiness, folderReadinessSignature } from "../components/dashboard/folderReadiness";
 import { QueryError } from "../components/QueryError";
 
-// One-time dismissal of the "plate-solving isn't set up" banner, so it never nags
-// a user who has already seen it. localStorage-only and defensively guarded so a
-// disabled/broken store never breaks the page; the banner naturally disappears
-// once ASTAP is set up (readiness flips to ready), so the dismiss is only for the
-// case where the user has acknowledged it but not fixed it yet.
+// Dismissal of the first-run readiness banners, keyed to the *specific* problem
+// so dismissing one never suppresses a genuinely different (or returning) one:
+// we store the current readiness *signature* rather than a bare boolean, and a
+// banner reappears whenever the live signature differs from the dismissed one.
+// A banner also self-clears once the problem is fixed (readiness → ready → no
+// signature). localStorage-only and defensively guarded so a disabled/broken
+// store never breaks the page.
 const ASTAP_DISMISS_KEY = "astrostack.dashboard.astapBannerDismissed";
-
-function loadAstapDismissed(): boolean {
-  try {
-    return localStorage.getItem(ASTAP_DISMISS_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function saveAstapDismissed(): void {
-  try {
-    localStorage.setItem(ASTAP_DISMISS_KEY, "1");
-  } catch {
-    /* storage unavailable — the banner just won't stay dismissed across reloads */
-  }
-}
-
-// Same one-time-dismissal pattern for the watched-folder banner. The banner
-// self-clears once the folder is fixed (readiness flips to ready), so the
-// dismissal only covers "acknowledged but not fixed yet".
 const FOLDER_DISMISS_KEY = "astrostack.dashboard.folderBannerDismissed";
 
-function loadFolderDismissed(): boolean {
+function loadDismissedSig(key: string): string | null {
   try {
-    return localStorage.getItem(FOLDER_DISMISS_KEY) === "1";
+    return localStorage.getItem(key);
   } catch {
-    return false;
+    return null;
   }
 }
 
-function saveFolderDismissed(): void {
+function saveDismissedSig(key: string, sig: string): void {
   try {
-    localStorage.setItem(FOLDER_DISMISS_KEY, "1");
+    localStorage.setItem(key, sig);
   } catch {
     /* storage unavailable — the banner just won't stay dismissed across reloads */
   }
@@ -80,11 +62,13 @@ export function Dashboard() {
     queryKey: ["stats"], queryFn: api.getStats, refetchInterval: 10_000,
   });
   const system = useQuery({ queryKey: ["system"], queryFn: api.getSystem, staleTime: 60_000 });
-  const [astapDismissed, setAstapDismissed] = useState(loadAstapDismissed);
-  const [folderDismissed, setFolderDismissed] = useState(loadFolderDismissed);
+  const [astapDismissedSig, setAstapDismissedSig] = useState(() => loadDismissedSig(ASTAP_DISMISS_KEY));
+  const [folderDismissedSig, setFolderDismissedSig] = useState(() => loadDismissedSig(FOLDER_DISMISS_KEY));
 
   const solve = astapReadiness(system.data?.astap);
   const folders = folderReadiness(system.data?.folders);
+  const astapSig = astapReadinessSignature(solve);
+  const folderSig = folderReadinessSignature(folders);
 
   if (isError && !data) {
     return <QueryError error={error} onRetry={() => refetch()} />;
@@ -101,10 +85,12 @@ export function Dashboard() {
     <Stack>
       <Title order={2}>Dashboard</Title>
 
-      {!solve.ready && !astapDismissed ? (
+      {!solve.ready && astapSig !== astapDismissedSig ? (
         <Alert color="yellow" variant="light"
           withCloseButton
-          onClose={() => { setAstapDismissed(true); saveAstapDismissed(); }}
+          onClose={() => {
+            if (astapSig) { setAstapDismissedSig(astapSig); saveDismissedSig(ASTAP_DISMISS_KEY, astapSig); }
+          }}
           title={solve.kind === "astap"
             ? "Plate-solving isn't set up yet"
             : "Plate-solving needs a star database"}>
@@ -123,10 +109,12 @@ export function Dashboard() {
         </Alert>
       ) : null}
 
-      {!folders.ready && !folderDismissed ? (
+      {!folders.ready && folderSig !== folderDismissedSig ? (
         <Alert color="yellow" variant="light"
           withCloseButton
-          onClose={() => { setFolderDismissed(true); saveFolderDismissed(); }}
+          onClose={() => {
+            if (folderSig) { setFolderDismissedSig(folderSig); saveDismissedSig(FOLDER_DISMISS_KEY, folderSig); }
+          }}
           title={folders.kind === "incoming"
             ? (folders.problem === "missing"
               ? "Your incoming folder doesn't exist yet"

@@ -698,6 +698,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   that case, so it's a low-priority polish, not a bug: keying the localStorage dismissal on the
   readiness *kind* (or clearing it when readiness flips to ready) would make the banner re-surface
   on a genuinely new/returning problem. Only worth doing if a run is already in that file.)_
+  — **DONE v0.94.14** (both the ASTAP and the new folder banner): dismissal now stores the
+  readiness *signature* (`astapReadinessSignature` = `astap`|`database`; `folderReadinessSignature`
+  = `{kind}:{problem}`) instead of a bare boolean, so a banner reappears when the live problem
+  differs from the dismissed one (a different or returning fault), and still auto-hides once fixed.
+  Done as a follow-up while already in `Dashboard.tsx` for the folder banner. Pure signature helpers
+  + tests.
 - ~~**Make the new "Process target" one-click the guided next step for a fresh target.**~~
   — **shipped v0.85.1** (see Shipped). A dimmed "Ready to process?" getting-started callout
   now appears on a Target whose newest frames haven't been turned into a stack (no stack run
@@ -1068,6 +1074,13 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.94.14** — Friendliness polish: the Dashboard readiness banners' dismissal now keys on the
+  *specific* problem (readiness *signature*) instead of a global boolean, so dismissing one banner
+  no longer suppresses a genuinely different or returning problem (ASTAP→database, incoming→library,
+  or a fault that recurs after having worked). New pure `astapReadinessSignature` /
+  `folderReadinessSignature` helpers + a shared signature-keyed localStorage dismissal in the
+  Dashboard; both banners still self-hide once fixed. Closes the follow-up note filed with v0.94.12.
+  Frontend-only, additive (`astapReadiness.ts`, `folderReadiness.ts`, `routes/Dashboard.tsx`).
 - **v0.94.13** — Friendliness (first-run): extended the Dashboard readiness banners to a
   missing/unwritable **incoming or library folder** — the other silent first-run blocker after
   the plate-solver. `GET /api/system` gained an additive `folders` field (`_folder_status` reports
