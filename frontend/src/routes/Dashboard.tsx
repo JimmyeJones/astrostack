@@ -8,27 +8,31 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
-import { astapReadiness } from "../components/dashboard/astapReadiness";
+import { astapReadiness, astapReadinessSignature } from "../components/dashboard/astapReadiness";
+import { folderReadiness, folderReadinessSignature } from "../components/dashboard/folderReadiness";
 import { QueryError } from "../components/QueryError";
 
-// One-time dismissal of the "plate-solving isn't set up" banner, so it never nags
-// a user who has already seen it. localStorage-only and defensively guarded so a
-// disabled/broken store never breaks the page; the banner naturally disappears
-// once ASTAP is set up (readiness flips to ready), so the dismiss is only for the
-// case where the user has acknowledged it but not fixed it yet.
+// Dismissal of the first-run readiness banners, keyed to the *specific* problem
+// so dismissing one never suppresses a genuinely different (or returning) one:
+// we store the current readiness *signature* rather than a bare boolean, and a
+// banner reappears whenever the live signature differs from the dismissed one.
+// A banner also self-clears once the problem is fixed (readiness → ready → no
+// signature). localStorage-only and defensively guarded so a disabled/broken
+// store never breaks the page.
 const ASTAP_DISMISS_KEY = "astrostack.dashboard.astapBannerDismissed";
+const FOLDER_DISMISS_KEY = "astrostack.dashboard.folderBannerDismissed";
 
-function loadAstapDismissed(): boolean {
+function loadDismissedSig(key: string): string | null {
   try {
-    return localStorage.getItem(ASTAP_DISMISS_KEY) === "1";
+    return localStorage.getItem(key);
   } catch {
-    return false;
+    return null;
   }
 }
 
-function saveAstapDismissed(): void {
+function saveDismissedSig(key: string, sig: string): void {
   try {
-    localStorage.setItem(ASTAP_DISMISS_KEY, "1");
+    localStorage.setItem(key, sig);
   } catch {
     /* storage unavailable — the banner just won't stay dismissed across reloads */
   }
@@ -58,9 +62,13 @@ export function Dashboard() {
     queryKey: ["stats"], queryFn: api.getStats, refetchInterval: 10_000,
   });
   const system = useQuery({ queryKey: ["system"], queryFn: api.getSystem, staleTime: 60_000 });
-  const [astapDismissed, setAstapDismissed] = useState(loadAstapDismissed);
+  const [astapDismissedSig, setAstapDismissedSig] = useState(() => loadDismissedSig(ASTAP_DISMISS_KEY));
+  const [folderDismissedSig, setFolderDismissedSig] = useState(() => loadDismissedSig(FOLDER_DISMISS_KEY));
 
   const solve = astapReadiness(system.data?.astap);
+  const folders = folderReadiness(system.data?.folders);
+  const astapSig = astapReadinessSignature(solve);
+  const folderSig = folderReadinessSignature(folders);
 
   if (isError && !data) {
     return <QueryError error={error} onRetry={() => refetch()} />;
@@ -77,10 +85,12 @@ export function Dashboard() {
     <Stack>
       <Title order={2}>Dashboard</Title>
 
-      {!solve.ready && !astapDismissed ? (
+      {!solve.ready && astapSig !== astapDismissedSig ? (
         <Alert color="yellow" variant="light"
           withCloseButton
-          onClose={() => { setAstapDismissed(true); saveAstapDismissed(); }}
+          onClose={() => {
+            if (astapSig) { setAstapDismissedSig(astapSig); saveDismissedSig(ASTAP_DISMISS_KEY, astapSig); }
+          }}
           title={solve.kind === "astap"
             ? "Plate-solving isn't set up yet"
             : "Plate-solving needs a star database"}>
@@ -92,6 +102,41 @@ export function Dashboard() {
               : "ASTAP was found, but it has no star database to match against — solving "
                 + "needs one, and solving is required before you can stack. Add a star "
                 + "database before you drop in frames."}
+          </Text>
+          <Button component={Link} to="/settings" size="xs" variant="light" color="yellow" mt="xs">
+            Fix in Settings
+          </Button>
+        </Alert>
+      ) : null}
+
+      {!folders.ready && folderSig !== folderDismissedSig ? (
+        <Alert color="yellow" variant="light"
+          withCloseButton
+          onClose={() => {
+            if (folderSig) { setFolderDismissedSig(folderSig); saveDismissedSig(FOLDER_DISMISS_KEY, folderSig); }
+          }}
+          title={folders.kind === "incoming"
+            ? (folders.problem === "missing"
+              ? "Your incoming folder doesn't exist yet"
+              : "Your incoming folder isn't writable")
+            : (folders.problem === "missing"
+              ? "Your library folder doesn't exist yet"
+              : "Your library folder isn't writable")}>
+          <Text size="sm">
+            {folders.kind === "incoming"
+              ? (folders.problem === "missing"
+                ? "The folder you drop frames into can't be found — \"Scan incoming\" will "
+                  + "find nothing until it exists. Check the folder is mounted and the path "
+                  + "is right."
+                : "The folder you drop frames into is read-only, so scanning it may fail. "
+                  + "Check the folder's permissions or the path.")
+              : (folders.problem === "missing"
+                ? "The folder your stacks and library are written to can't be found — "
+                  + "processing will fail until it exists. Check the folder is mounted and "
+                  + "the path is right."
+                : "The folder your stacks and library are written to is read-only, so "
+                  + "processing can't save its results. Check the folder's permissions or "
+                  + "the path.")}
           </Text>
           <Button component={Link} to="/settings" size="xs" variant="light" color="yellow" mt="xs">
             Fix in Settings

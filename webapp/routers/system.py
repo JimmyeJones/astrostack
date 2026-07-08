@@ -127,6 +127,30 @@ def _astap_info(settings) -> dict:  # noqa: ANN001
         return {"found": False, "path": None, "error": str(exc)}
 
 
+def _folder_status(path: Path) -> dict:
+    """Existence + writability of a resolved data folder.
+
+    ``ensure_dirs()`` creates the incoming/library folders at boot, so in a
+    healthy install both exist and are writable and the UI shows nothing. But on
+    a TrueNAS/Docker box a watched folder can be a mount that later vanishes or
+    goes read-only (an unmounted dataset, a typo'd custom path, a read-only
+    share) — then "Scan incoming" silently finds nothing and a stack can't write
+    its output, with no cue as to why. Reporting the *current* state lets the
+    Dashboard warn upfront. Cheap and defensive: never raises.
+    """
+    try:
+        exists = path.is_dir()
+    except OSError:
+        exists = False
+    writable = False
+    if exists:
+        try:
+            writable = os.access(path, os.W_OK)
+        except OSError:
+            writable = False
+    return {"path": str(path), "exists": exists, "writable": writable}
+
+
 def _memory_info() -> dict:
     """Total + currently-available RAM in GB (Linux /proc/meminfo), so the UI can
     warn when the stack memory budget is set higher than the box can back. Empty
@@ -266,5 +290,9 @@ def system(request: Request) -> dict:
         "astap": astap,
         "disk": disk,
         "memory": _memory_info(),
+        "folders": {
+            "incoming": _folder_status(settings.resolved_incoming_dir),
+            "library": _folder_status(settings.resolved_library_root),
+        },
         "watcher_enabled": settings.watcher_enabled,
     }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { astapReadiness } from "./astapReadiness";
+import { astapReadiness, astapReadinessSignature } from "./astapReadiness";
 import type { SystemInfo } from "../../api/client";
 
 function astap(over: Partial<SystemInfo["astap"]> = {}): SystemInfo["astap"] {
@@ -31,5 +31,18 @@ describe("astapReadiness", () => {
 
   it("does not nag when system info hasn't loaded yet", () => {
     expect(astapReadiness(undefined)).toEqual({ ready: true });
+  });
+});
+
+describe("astapReadinessSignature", () => {
+  it("is null when ready (nothing to dismiss)", () => {
+    expect(astapReadinessSignature({ ready: true })).toBeNull();
+  });
+
+  it("distinguishes the astap and database problems", () => {
+    // A different signature is what lets a later/different problem re-surface
+    // after an earlier one was dismissed.
+    expect(astapReadinessSignature({ ready: false, kind: "astap" })).toBe("astap");
+    expect(astapReadinessSignature({ ready: false, kind: "database" })).toBe("database");
   });
 });

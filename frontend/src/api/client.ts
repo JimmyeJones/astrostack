@@ -339,6 +339,10 @@ export interface SystemInfo {
   };
   disk: { total_gb?: number; used_gb?: number; free_gb?: number };
   memory: { total_gb?: number; available_gb?: number };
+  folders?: {
+    incoming: { path: string; exists: boolean; writable: boolean };
+    library: { path: string; exists: boolean; writable: boolean };
+  };
   watcher_enabled: boolean;
 }
 

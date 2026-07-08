@@ -20,3 +20,11 @@ export function astapReadiness(astap: SystemInfo["astap"] | undefined): AstapRea
   if (astap.star_db_found === false) return { ready: false, kind: "database" };
   return { ready: true };
 }
+
+// A stable string identifying the *specific* current problem (or null when
+// ready), so a dismissal can be keyed to it: dismissing "ASTAP missing" then
+// shouldn't suppress a later *different* problem ("database missing", or a
+// problem that returns after ASTAP had been working and broke again).
+export function astapReadinessSignature(r: AstapReadiness): string | null {
+  return r.ready ? null : r.kind;
+}
