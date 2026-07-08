@@ -1,6 +1,10 @@
 """Target identification (graceful failure modes — no network in tests)."""
 
-from seestack.post.target_id import _TYPE_HINTS, identify_target
+from seestack.post.target_id import (
+    _TYPE_HINTS,
+    friendly_object_type,
+    identify_target,
+)
 
 
 def test_lookup_returns_error_when_offline_or_no_match():
@@ -22,3 +26,22 @@ def test_type_hints_cover_major_categories():
     assert _TYPE_HINTS["GlC"] == "per_channel"        # globular cluster
     assert _TYPE_HINTS["HII"] == "off"                # HII region (e.g. M42)
     assert _TYPE_HINTS["RNe"] == "luminance"          # reflection nebula
+
+
+def test_friendly_object_type_maps_known_codes_to_plain_words():
+    """A known SIMBAD OTYPE code reads as plain language, not the bare code."""
+    assert friendly_object_type("G") == "Galaxy"
+    assert friendly_object_type("GlC") == "Globular cluster"
+    assert friendly_object_type("HII") == "HII region"
+    assert friendly_object_type("PN") == "Planetary nebula"
+    # Every code we give a bg-flatten hint for must also have a plain name,
+    # so the identify surface never shows a raw code for a mapped target.
+    for code in _TYPE_HINTS:
+        assert friendly_object_type(code) != code
+
+
+def test_friendly_object_type_falls_back_to_the_raw_code():
+    """An unrecognised code still shows something rather than nothing."""
+    assert friendly_object_type("ZzZ") == "ZzZ"
+    assert friendly_object_type(None) is None
+    assert friendly_object_type("") is None

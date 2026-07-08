@@ -1057,10 +1057,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   OSC field (solved scales sit near 1.0). Regression test
   `test_solve_gaia_clamps_a_negative_channel_scale` (BP−RP=3.0 → would-be `scale_b ≈ −0.25`; fails
   before / passes after).
-- **Trivial (cosmetic): `post/target_id.py` sets `object_type_name` to the raw short code.** At
-  ~L117–118 `object_type_name` is assigned the same short OTYPE code as `object_type` (e.g. `"G"`),
-  so any "friendly name" surface just shows the code. Purely cosmetic; map the common Simbad OTYPE
-  codes to plain words ("G" → "Galaxy", …) if a run touches that file. (S, friendliness)
+- ~~**Trivial (cosmetic): `post/target_id.py` sets `object_type_name` to the raw short code.**~~ —
+  **FIXED v0.94.17** (see Shipped). A new `_OTYPE_NAMES` table + public `friendly_object_type(code)`
+  helper map the common Simbad OTYPE codes to plain words ("G" → "Galaxy", "GlC" → "Globular cluster",
+  "HII" → "HII region", …), covering every code we give a bg-flatten hint for plus the common OSC
+  targets; `identify_target` now sets `object_type_name` from it and the GUI identify dialog shows the
+  friendly name instead of the bare code. Unknown codes fall back to the raw code (never hide data),
+  and a missing code stays `None`. Regression tests `test_friendly_object_type_maps_known_codes_to_plain_words`
+  and `test_friendly_object_type_falls_back_to_the_raw_code`.
 - Expand `docs/` (webapp.md) to cover calibration, mono/LRGB, auth. (S)
 - `npm audit` still reports `esbuild`≤0.24.2/`vite`≤6.4.2/`vitest`≤3.2.5
   (moderate — dev server only, not the production build) after this run's
@@ -1107,6 +1111,10 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.94.17** — Friendliness: `post/target_id.py` now maps SIMBAD short OTYPE codes to plain words
+  via a new `_OTYPE_NAMES` table + `friendly_object_type()` helper, so `object_type_name` (and the GUI
+  identify dialog) reads "Galaxy"/"Globular cluster"/"HII region" instead of a bare "G"/"GlC"/"HII";
+  unknown codes fall back to the raw code. Tests `test_friendly_object_type_*`.
 - **v0.94.16** — Colour-calibration robustness: `post/color_cal.py::_solve_gaia` now clamps both solved
   per-channel scales to a physical positive range (`0.05`–`20.0`) before returning, so the linear-in-colour
   model's negative `expected_bg` on an extremely-reddened (`BP−RP > 2.44`) field can no longer produce a
