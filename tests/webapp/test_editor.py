@@ -433,6 +433,62 @@ def test_previous_recipe_carry_over(client, solved_library):
     assert none["ops"] == [] and none["count"] == 0
 
 
+def _overwrite_fits(data_root, safe, cube, basename="master"):
+    """Replace a run's output FITS with a custom ``(3, H, W)`` cube (before any
+    proxy is cached), so an endpoint test can control the classified content."""
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            fp = Path(proj.project_dir) / "output" / f"{basename}.fits"
+            fits.writeto(fp, np.asarray(cube, dtype="float32"), overwrite=True)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def test_preset_suggestion_endpoint_classifies_a_star_cluster(client, solved_library):
+    """The preset-suggestion endpoint classifies the run's own proxy and, on a clear
+    archetype, names the matching built-in preset — a read-only hint (it never changes
+    the Auto recipe). A star-dominated field → the Star-cluster preset."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="cluster_run", h=200, w=200)
+
+    rng = np.random.default_rng(11)
+    h, w = 200, 200
+    yy, xx = np.mgrid[0:h, 0:w]
+    lum = np.full((h, w), 0.02, np.float32)
+    for _ in range(180):
+        cy, cx = rng.uniform(3, h - 3), rng.uniform(3, w - 3)
+        lum += 0.8 * rng.uniform(0.5, 1.0) * np.exp(-((yy - cy) ** 2 + (xx - cx) ** 2) / 2.0)
+    lum += rng.normal(0, 0.004, (h, w)).astype("float32")
+    _overwrite_fits(solved_library, safe, np.stack([lum, lum, lum]), basename="cluster_run")
+
+    r = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/preset-suggestion")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["preset_id"] == "globular_cluster"
+    assert body["label"] and body["reason"]
+    assert set(body) == {"preset_id", "label", "reason", "confidence"}
+
+
+def test_preset_suggestion_endpoint_declines_on_a_blank_field(client, solved_library):
+    """A structureless field yields no suggestion (preset_id=None) — the chip stays
+    hidden and the general Auto recipe remains the fallback."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="blank_run", h=160, w=160)
+
+    rng = np.random.default_rng(12)
+    flat = np.full((160, 160), 0.1, np.float32) + rng.normal(0, 0.01, (160, 160)).astype("float32")
+    _overwrite_fits(solved_library, safe, np.stack([flat, flat, flat]), basename="blank_run")
+
+    body = client.post(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/preset-suggestion").json()
+    assert body["preset_id"] is None
+    assert body["label"] is None and body["reason"] is None
+
+
 def test_auto_note_endpoint_returns_stored_note_only(client, solved_library):
     """The auto-note endpoint serves the plain-language note a background job
     stamped when it auto-edited a run (so the editor can explain a recipe the user

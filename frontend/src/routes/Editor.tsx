@@ -744,6 +744,15 @@ export function EditorView() {
   // Presets for the "Compare a look" picker (shares the ["presets"] cache with the
   // Presets menu, so no extra fetch).
   const lookPresets = useQuery({ queryKey: ["presets"], queryFn: api.listPresets });
+  // A coarse content-classification *hint* — "this looks like a star cluster / nebula
+  // / galaxy — try the matching preset?". Read-only and best-effort (an older backend
+  // has no such endpoint): it never changes Auto, and `preset_id` is null when the
+  // content isn't clearly one archetype, so the chip simply stays hidden then.
+  const presetSuggest = useQuery({
+    queryKey: ["preset-suggestion", safe, rid],
+    queryFn: () => api.presetSuggestion(safe, rid).catch(() => null),
+    staleTime: Infinity,
+  });
   // Resolve a chosen look into concrete ops and switch on the look-compare split.
   // A built-in preset is sized to this target's data + made mosaic-aware exactly as
   // *applying* it would be (so the comparison is honest); a saved preset is used
@@ -885,6 +894,23 @@ export function EditorView() {
     notifications.show({
       message: `Started from your default edit (${def.count} step`
         + `${def.count === 1 ? "" : "s"}) — Undo to revert, Save to keep`,
+      color: "violet",
+    });
+  };
+  // Apply the suggested built-in preset (from the classification chip) exactly as
+  // the Presets menu would — sized to this target's data + made mosaic-aware — as a
+  // single undoable step. Not persisted until the user Saves. No confirm needed: the
+  // chip only shows on an empty pipeline, so there's no work to overwrite.
+  const applySuggestedPreset = () => {
+    const pid = presetSuggest.data?.preset_id;
+    const preset = lookPresets.data?.builtin.find((p) => p.id === pid);
+    if (!preset) return;
+    const sized = prependCoverageLeveling(
+      applyDataDrivenDefaults(toOpInstances(preset.ops), dataDrivenSuggestions),
+      hist.data?.is_mosaic === true, specs, uid);
+    setOps(() => sized);
+    notifications.show({
+      message: `Started from the ${preset.label} preset — Undo to revert, Save to keep`,
       color: "violet",
     });
   };
@@ -1411,6 +1437,27 @@ export function EditorView() {
                       </Tooltip>
                     ) : null}
                   </Group>
+                  {/* Coarse content classification: when this run's image clearly
+                      looks like one archetype, offer its matching built-in preset as
+                      an alternative starting point to the general Auto recipe. A hint
+                      only — a wrong guess costs a click, not an image — so it's hidden
+                      whenever the backend is unsure (preset_id null). */}
+                  {presetSuggest.data?.preset_id ? (
+                    <Group gap={6} mt={8} align="center" wrap="nowrap">
+                      <Text size="xs" c="dimmed">
+                        This looks like a <b>{presetSuggest.data.label}</b>
+                        {presetSuggest.data.reason ? ` — ${presetSuggest.data.reason}.` : "."}
+                      </Text>
+                      <Tooltip multiline w={240} withArrow
+                        label={`Start from the ${presetSuggest.data.label} preset (sized to your data), as an undoable step you can tweak, then Save.`}>
+                        <Button size="compact-xs" variant="default" color="grape"
+                          leftSection={<IconWand size={14} />}
+                          onClick={applySuggestedPreset}>
+                          Try the {presetSuggest.data.label} preset
+                        </Button>
+                      </Tooltip>
+                    </Group>
+                  ) : null}
                 </Alert>
               ) : null}
               {noStretch ? (

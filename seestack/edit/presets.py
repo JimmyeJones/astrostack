@@ -136,6 +136,148 @@ def _noise_fraction(sky_sigma: float) -> float:
     return float(np.clip((sky_sigma - _NOISE_LO) / (_NOISE_HI - _NOISE_LO), 0.0, 1.0))
 
 
+# --- coarse content classification → a starting-preset *suggestion* -----------
+# This is a hint only: the editor surfaces it as a one-click "this looks like a
+# star cluster — try the Star-cluster preset?" chip and never changes what the
+# one-click Auto recipe emits. So a mis-classification costs a wrong *suggestion*
+# (a click to dismiss), not a worse *image*, and the general Auto recipe stays the
+# safe fallback. It is deliberately tuned to **stay quiet unless one archetype is
+# clear**: an ambiguous or low-signal field returns ``preset_id=None`` (no chip).
+#
+# The three coarse classes map to the OSC-relevant broadband presets; the
+# narrowband nebula preset is never suggested to a one-shot-colour user.
+_CLASS_PRESET: dict[str, str] = {
+    "cluster": "globular_cluster",
+    "nebula": "nebula_broadband",
+    "galaxy": "galaxy_broadband",
+}
+_CLASS_REASON: dict[str, str] = {
+    "cluster": "mostly point-like stars with little diffuse nebulosity",
+    "nebula": "large areas of diffuse, coloured emission",
+    "galaxy": "a concentrated extended object on a mostly dark sky",
+}
+
+
+def _extended_chroma(ext_px: np.ndarray) -> float:
+    """Median per-pixel chroma ``(max−min)/mean`` over the extended-signal pixels.
+    Scale-invariant (works on the linear proxy), so a coloured emission nebula
+    reads high and a neutral galaxy reads low. ``ext_px`` is ``(N, 3)``."""
+    if ext_px.shape[0] < 50:
+        return 0.0
+    px = np.clip(ext_px.astype(np.float32), 0.0, None)
+    mx = px.max(axis=1)
+    mn = px.min(axis=1)
+    mean = px.mean(axis=1)
+    chroma = (mx - mn) / (mean + 1e-6)
+    return float(np.median(chroma))
+
+
+def classify_target(rgb: np.ndarray | None) -> dict[str, Any]:
+    """Coarsely classify a proxy as a *star cluster*, *nebula*, or *galaxy* and
+    suggest the matching built-in preset — or decline (``preset_id=None``) when the
+    content isn't clearly one archetype. A pure hint used by the editor's
+    preset-suggestion chip; it never changes the Auto recipe (§ AGENTS.md autonomy).
+
+    The cues are cheap and geometry-first (colour only refines the nebula/galaxy
+    margin, since the proxy is linear and OSC colour is uncalibrated here):
+
+    * ``star_share`` — how much of the above-sky *signal* is compact point sources
+      (from the same white-top-hat ``star_mask`` the editor uses). A field that is
+      almost all stars with negligible diffuse structure is a **cluster**.
+    * ``ext_frac`` — the fraction of the *frame* covered by extended (non-star)
+      signal. A large diffuse spread is a **nebula**; a small concentrated object
+      on a mostly dark sky is a **galaxy**.
+    * ``chroma`` — median colour of the extended region. Required for the nebula
+      call unless the diffuse spread is unmistakably large, so a big *neutral*
+      galaxy (e.g. M31) isn't confidently mis-labelled a nebula — it falls through
+      to "unsure" (no chip) instead.
+
+    Returns ``{"cls", "preset_id", "label", "reason", "confidence", "cues"}``. When
+    nothing is clear, ``cls``/``preset_id`` are ``None`` and no chip is shown.
+    """
+    none = {"cls": None, "preset_id": None, "label": None, "reason": None,
+            "confidence": 0.0, "cues": {}}
+    if rgb is None:
+        return none
+    arr = np.asarray(rgb, dtype=np.float32)
+    if arr.ndim != 3 or arr.shape[2] < 3:
+        return none  # need colour to tell nebula from galaxy
+    lum = arr[..., :3].mean(axis=2)
+    cover = np.isfinite(lum)
+    n_cov = int(cover.sum())
+    if n_cov < 1024:
+        return none  # too little covered area to classify meaningfully
+
+    lum_c = lum[cover]
+    lo, hi = float(np.percentile(lum_c, 0.5)), float(np.percentile(lum_c, 99.5))
+    if hi <= lo:
+        return none
+    norm = np.clip((lum - lo) / (hi - lo), 0.0, 1.0)
+    norm_c = norm[cover]
+    sky = float(np.median(norm_c))
+    sky_pop = norm_c[norm_c <= sky]
+    sky_sigma = (float(1.4826 * np.median(np.abs(sky_pop - np.median(sky_pop))))
+                 if sky_pop.size else 0.0)
+
+    # "Signal" = clearly above the sky floor (robust, noise-aware threshold).
+    thr = sky + max(0.06, 6.0 * sky_sigma)
+    signal = (norm > thr) & cover
+    n_sig = int(signal.sum())
+    sig_frac = n_sig / n_cov
+    if sig_frac < 0.0015:
+        return none  # essentially blank — no structured target to classify
+
+    # Separate *diffuse* structure from *compact* point sources with a grey-scale
+    # morphological opening: a footprint a few px wide erases stars (and their
+    # Gaussian wings) but leaves anything larger — nebulosity, a galaxy — intact.
+    # So the opened image, thresholded above sky, is the extended signal; whatever
+    # is bright in the raw image but *not* in the opened image is a point source.
+    from scipy.ndimage import grey_opening
+    filled = np.where(cover, norm, sky).astype(np.float32, copy=False)
+    opened = grey_opening(filled, footprint=np.ones((7, 7), dtype=bool))
+    ext_sig = (opened > thr) & cover
+    point_sig = signal & ~ext_sig
+    n_pt = int(point_sig.sum())
+    n_ext = int(ext_sig.sum())
+    pt_frac = n_pt / n_cov
+    ext_frac = n_ext / n_cov
+    star_share = n_pt / max(n_sig, 1)
+    chroma = _extended_chroma(arr[ext_sig]) if n_ext else 0.0
+
+    cues = {
+        "sig_frac": round(sig_frac, 4), "ext_frac": round(ext_frac, 4),
+        "pt_frac": round(pt_frac, 4), "star_share": round(star_share, 3),
+        "chroma": round(chroma, 3),
+    }
+
+    cls: str | None = None
+    confidence = 0.0
+    if star_share >= 0.75 and ext_frac <= 0.012 and pt_frac >= 0.0025:
+        # Signal is overwhelmingly point sources with negligible diffuse structure.
+        cls, confidence = "cluster", min(1.0, star_share)
+    elif star_share <= 0.6 and ext_frac >= 0.06 and chroma >= 0.06:
+        # Large diffuse *coloured* emission → nebula. The colour floor keeps a big
+        # neutral galaxy (e.g. M31) from a confident nebula mis-label — it falls
+        # through to "unsure" (no chip) instead.
+        cls, confidence = "nebula", min(1.0, ext_frac / 0.06)
+    elif (star_share <= 0.65 and 0.004 <= ext_frac <= 0.05
+          and sig_frac <= 0.10 and chroma < 0.08):
+        # A small, concentrated, neutral extended object on a dark sky → galaxy.
+        cls, confidence = "galaxy", min(1.0, 0.05 / max(ext_frac, 1e-3))
+
+    if cls is None:
+        return {**none, "cues": cues}
+    preset_id = _CLASS_PRESET[cls]
+    return {
+        "cls": cls,
+        "preset_id": preset_id,
+        "label": BUILTIN_PRESETS[preset_id]["label"],
+        "reason": _CLASS_REASON[cls],
+        "confidence": round(float(confidence), 3),
+        "cues": cues,
+    }
+
+
 def auto_recipe(rgb: np.ndarray | None = None,
                 median_fwhm: float | None = None,
                 is_mosaic: bool = False,
