@@ -681,6 +681,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   `star_db_found === false` flags the database, so an older backend that omits the field never
   shows a spurious warning); dismissal is one-time via localStorage (guarded), and the banner
   self-clears once ASTAP is set up. Frontend-only, additive, no backend/schema/default change.
+- **Extend the Dashboard readiness banner to a missing/unwritable incoming or data folder.**
+  (S, friendliness) The v0.94.12 Dashboard banner catches an unconfigured *plate-solver* upfront,
+  but the *other* silent first-run blocker is the watched folders: if the resolved incoming/data
+  directory doesn't exist or isn't writable, "Scan incoming" finds nothing (or errors) with no
+  Dashboard cue — the beginner only learns after clicking Scan and getting an empty/failed job.
+  `GET /api/system` already returns `data_root`; the Settings page shows `resolved_incoming_dir`
+  / `resolved_library_root`. If the backend can cheaply report each resolved folder's
+  existence/writability (a small additive field on `/api/system` or a tiny read-only
+  `/api/system/folders` check), surface it in the same dismissible Dashboard Alert family as the
+  ASTAP one ("Your incoming folder doesn't exist yet — [Fix in Settings]"). Reuse the shipped
+  `astapReadiness`-style pure-helper + dismissible-Alert pattern. Additive, off-nothing, no default
+  change; needs one small backend field so scope it as S–M. (Serves priority 3, first-run
+  friendliness.)
+  _(Builder note 2026-07-08: filed while shipping the ASTAP Dashboard banner (v0.94.12). Also
+  noted a minor robustness nicety on that banner itself — its dismissal is a single global
+  boolean, so a user who dismisses the "ASTAP missing" banner during setup won't see it again if
+  ASTAP later *breaks* after having worked. The reactive Settings/Target backstops still cover
+  that case, so it's a low-priority polish, not a bug: keying the localStorage dismissal on the
+  readiness *kind* (or clearing it when readiness flips to ready) would make the banner re-surface
+  on a genuinely new/returning problem. Only worth doing if a run is already in that file.)_
 - ~~**Make the new "Process target" one-click the guided next step for a fresh target.**~~
   — **shipped v0.85.1** (see Shipped). A dimmed "Ready to process?" getting-started callout
   now appears on a Target whose newest frames haven't been turned into a stack (no stack run
