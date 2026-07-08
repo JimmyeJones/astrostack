@@ -35,7 +35,14 @@ def build_master(body: dict[str, Any], request: Request) -> dict[str, str]:
     source_dir = str(body.get("source_dir", "")).strip()
     if not source_dir:
         raise HTTPException(status_code=400, detail="source_dir is required")
-    if not Path(source_dir).is_dir():
+    try:
+        is_dir = Path(source_dir).is_dir()
+    except (OSError, ValueError):
+        # e.g. an embedded null byte raises ValueError on some platforms
+        # rather than returning False — still a client-supplied bad path (400),
+        # not a server fault (500).
+        is_dir = False
+    if not is_dir:
         raise HTTPException(status_code=400,
                             detail=f"source_dir is not a folder: {source_dir}")
     try:

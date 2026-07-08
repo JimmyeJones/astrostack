@@ -31,6 +31,32 @@ def _write_darks(folder: Path, n=4, shape=(8, 8), level=100.0):
         hdu.writeto(folder / f"dark_{i}.fit", overwrite=True)
 
 
+def test_build_master_bad_source_dir_is_400(client):
+    """A non-folder ``source_dir`` is a client error (400), not a 500."""
+    r = client.post("/api/calibration/masters",
+                    json={"kind": "dark", "source_dir": "/no/such/folder/xyz"})
+    assert r.status_code == 400
+    assert "not a folder" in r.json()["detail"]
+
+
+def test_build_master_source_dir_that_raises_is_400_not_500(client, monkeypatch):
+    """On platforms where ``Path.is_dir()`` *raises* (e.g. an embedded null byte
+    → ValueError) rather than returning False, the handler must still answer
+    400, not surface a 500 server fault."""
+    real_is_dir = Path.is_dir
+
+    def raising_is_dir(self):
+        if "\x00" in str(self):
+            raise ValueError("embedded null byte")
+        return real_is_dir(self)
+
+    monkeypatch.setattr(Path, "is_dir", raising_is_dir)
+    r = client.post("/api/calibration/masters",
+                    json={"kind": "dark", "source_dir": "ab\x00cd"})
+    assert r.status_code == 400
+    assert "not a folder" in r.json()["detail"]
+
+
 def test_store_register_list_resolve_delete(tmp_path):
     from seestack.calibrate.masters import MasterMeta
 

@@ -794,21 +794,16 @@ problems. Dogfood it every big-picture run and fix root causes.
   (wavelet/bilateral/tv × 1×N/N×1; fails before / passes after). Reachability was near-nil in
   practice (the crop op's own `<2 px` guard prevents slivers upstream) but it's a reproduced
   violation of a documented invariant + a crash, so worth the cheap guard.
-- **Low-priority robustness (near-unreachable): calibration Build-master returns 500 (not
-  400) on a null-byte `source_dir`.** `POST /api/calibration/masters` with `source_dir`
-  containing an embedded null byte (`"ab"`) hits `Path(source_dir).is_dir()`, which
-  raises `ValueError: embedded null byte` (not `OSError`), and the handler only guards the
-  `is_dir()==False` case — so it 500s where every other bad input in that handler cleanly
-  400s. Found by the Scout 2026-07-07 router fan-out audit; near-unreachable (the UI supplies
-  a real folder), so not worth a standalone ship. If a future run is already in
-  `calibration.py`, wrapping the `is_dir()` in a `(OSError, ValueError)` guard closes it with a
-  one-line test. (S, robustness)
-  _(Builder 2026-07-08: attempted this alongside the denoise guard but **could not reproduce**
-  it on the CI container (Python 3.12.3) — `Path("/tmp/a<NUL>b").is_dir()` returns `False` there
-  rather than raising `ValueError`, so a fails-before regression test can't be written on this
-  platform and the fix would not meet the quality bar. Left open; the `(OSError, ValueError)`
-  guard is still correct defensively for platforms/Python builds that do raise — a future run
-  can ship it with a monkeypatched-`is_dir` test that forces the raise.)_
+- ~~**Low-priority robustness (near-unreachable): calibration Build-master returns 500 (not
+  400) on a null-byte `source_dir`.**~~ — **FIXED v0.94.4** (see Shipped). `POST
+  /api/calibration/masters` now wraps `Path(source_dir).is_dir()` in a `(OSError, ValueError)`
+  guard and treats a raise (e.g. an embedded null byte → `ValueError` on platforms that raise
+  rather than return `False`) as "not a folder" → 400, matching every other bad-input path in the
+  handler instead of surfacing a 500. The prior Builder couldn't reproduce the raise on the CI
+  container (Python 3.12.3 returns `False`), so the regression test **monkeypatches `Path.is_dir`
+  to raise `ValueError` on a null-byte path** (`test_build_master_source_dir_that_raises_is_400_not_500`,
+  fails before / passes after) — platform-independent — plus a plain `test_build_master_bad_source_dir_is_400`.
+  Defensive/additive; the guard is a no-op on platforms where `is_dir()` returns `False`.
 - ~~**Low-priority robustness (near-unreachable): sub-pixel shift fills vacated edges toward 0
   instead of NaN when a window is fully finite.**~~ — **FIXED v0.94.3** (see Shipped). Both
   `align.py::_apply_subpixel_shift` and `_apply_subpixel_shift_windowed` now run the NaN-restore
@@ -889,6 +884,12 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.94.4** — Robustness/friendliness: `POST /api/calibration/masters` now returns 400 (not 500)
+  when `Path(source_dir).is_dir()` *raises* (e.g. an embedded null byte → ValueError on platforms
+  that raise). Wrapped the check in a `(OSError, ValueError)` guard treating a raise as "not a
+  folder", matching every other bad-input path in the handler. Regression test monkeypatches
+  `Path.is_dir` to raise so it's platform-independent (the CI container returns False rather than
+  raising). Defensive/additive, no-op where `is_dir()` returns False.
 - **v0.94.3** — Engine/NaN-coverage: sub-pixel refine now marks the vacated edge NaN on a
   fully-finite window. `align.py::_apply_subpixel_shift` + `_apply_subpixel_shift_windowed` dropped
   the `if nan_mask.any()` guard so the `cval=1.0` NaN-mask shift always runs — the ~1 px strip vacated
