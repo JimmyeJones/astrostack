@@ -9,6 +9,7 @@ pytest.importorskip("skimage")
 
 from seestack.stack.align import (
     _apply_subpixel_shift,
+    _apply_subpixel_shift_windowed,
     extract_reference_patch,
 )
 
@@ -63,6 +64,64 @@ def test_subpixel_shift_corrects_known_offset():
     # Should be within 0.2 px of zero.
     assert abs(residual_shift[0]) < 0.3
     assert abs(residual_shift[1]) < 0.3
+
+
+def test_subpixel_shift_marks_vacated_edge_as_nan_on_a_fully_finite_frame():
+    """The ~1 px edge vacated by the shift must be NaN (no coverage), not a 0
+    fill — even when the input frame carries no NaN of its own.
+
+    NaN = "no coverage" is a hard invariant of the stack hot path; turning the
+    vacated strip into interpolated-toward-0 values (the old ``cval=0.0``
+    behaviour when ``nan_mask`` was empty) would silently dim a 1 px ring of
+    every refined frame.
+    """
+    from scipy.ndimage import shift as nd_shift
+
+    frame = _frame_with_stars(256, 256, seed=7)
+    assert np.isfinite(frame).all(), "input frame is fully finite"
+
+    patch, origin = extract_reference_patch(frame, size=128)
+    y0, x0 = origin
+    # A reference patch shifted by a known sub-pixel amount → a real non-zero
+    # correction shift, so an edge is genuinely vacated.
+    ref_shifted = nd_shift(patch, shift=(0.7, 0.4), order=1, mode="nearest")
+
+    out = _apply_subpixel_shift(frame, ref_shifted.astype(np.float32), origin)
+
+    assert np.isnan(out).any(), "vacated edge must be marked NaN, not 0-filled"
+    # The interior stays fully covered (no spurious NaN inside the frame).
+    assert np.isfinite(out[20:-20, 20:-20]).all()
+
+
+def test_subpixel_shift_zero_shift_adds_no_nan():
+    """A measured shift of ~0 vacates nothing, so it must not invent edge NaN."""
+    frame = _frame_with_stars(256, 256, seed=8)
+    patch, origin = extract_reference_patch(frame, size=128)
+    out = _apply_subpixel_shift(frame, patch, origin)
+    assert not np.isnan(out).any()
+
+
+def test_subpixel_shift_windowed_marks_vacated_edge_as_nan():
+    """Same NaN=coverage guarantee for the windowed (mosaic) refine path."""
+    from scipy.ndimage import shift as nd_shift
+
+    canvas = _frame_with_stars(256, 256, seed=9)
+    assert np.isfinite(canvas).all()
+
+    # Reference patch covering the canvas centre.
+    ph = pw = 128
+    ry0 = (256 - ph) // 2
+    rx0 = (256 - pw) // 2
+    luma = (0.299 * canvas[..., 0] + 0.587 * canvas[..., 1]
+            + 0.114 * canvas[..., 2])
+    ref_full = nd_shift(luma, shift=(0.7, 0.4), order=1, mode="nearest")
+    ref_patch = ref_full[ry0:ry0 + ph, rx0:rx0 + pw].astype(np.float32)
+
+    # The window is the whole (fully-finite) canvas at origin (0, 0).
+    out = _apply_subpixel_shift_windowed(canvas, 0, 0, ref_patch, (ry0, rx0))
+
+    assert np.isnan(out).any(), "vacated window edge must be NaN, not 0-filled"
+    assert np.isfinite(out[20:-20, 20:-20]).all()
 
 
 def test_subpixel_shift_ignores_large_shifts():
