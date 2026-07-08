@@ -746,6 +746,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   a real folder), so not worth a standalone ship. If a future run is already in
   `calibration.py`, wrapping the `is_dir()` in a `(OSError, ValueError)` guard closes it with a
   one-line test. (S, robustness)
+- **Extract the RA 0°/360° unwrap heuristic into one shared helper (regression-proofing).**
+  The `if span > 180: ra = where(ra>180, ra-360, ra)` unwrap now lives in **three** places —
+  `stack/mosaic.py::_bbox`, `stack/reference.py::pick_reference_frame` (v0.93.2), and
+  `io/library.py::_median_radec` (v0.93.3) — because each was found to reintroduce the same
+  wrap bug independently. A single `unwrap_ra_deg(ras)` / `circular_median_ra_deg(ras)` helper
+  (alongside the existing `_circ_mean_ra_deg`) that all three call would make a *fourth* site
+  hard to get wrong, and gives one place to unit-test the boundary cases. Pure refactor, additive,
+  fully covered by the three existing regression tests. (S, Infra/correctness)
 - Chip away at the ~127 pre-existing `ruff check .` findings (don't add new ones);
   consider wiring ruff into CI once the count is low. (L, correctness/maintainability)
 - ~~Add a retention/pruning policy for `jobs.sqlite`~~ — **done, then made
