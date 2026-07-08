@@ -985,14 +985,13 @@ problems. Dogfood it every big-picture run and fix root causes.
   already-cached frame is never re-copied (its skip touches nothing). Regression tests
   `test_ingest_retries_cache_after_a_transient_copy_failure` (fails before / passes after) and
   `test_ingest_does_not_recopy_an_already_cached_frame`.
-- **Low-priority robustness (traced 2026-07-08, near-unreachable): opening an empty/foreign
-  `project.sqlite` yields a DB with no `frames` table.** `io/project.py` `Project.open` on an existing
-  sqlite with `user_version==0` runs `_migrate_schema(0)`, which only `ALTER TABLE frames …` (each
-  wrapped in `except OperationalError: pass`) and never runs `SCHEMA_SQL`; with no `frames` table the
-  ALTERs no-op, `user_version` is stamped to the current version, and the next `add_frame` raises
-  "no such table: frames". Only reachable via a corrupt/foreign/empty DB (real projects always go
-  through `Project.create`, which runs the full schema), hence low severity. Fix: have `open` ensure
-  the base schema exists (or detect a missing `frames` table and run `SCHEMA_SQL`) before migrating. (S, robustness)
+- ~~**Low-priority robustness (traced 2026-07-08, near-unreachable): opening an empty/foreign
+  `project.sqlite` yields a DB with no `frames` table.**~~ — **FIXED v0.94.10** (see Shipped).
+  `_migrate_schema` now detects a missing `frames` table (an empty/foreign sqlite at `user_version==0`)
+  and runs `SCHEMA_SQL` to build the base schema before applying the additive ALTERs — every statement
+  in `SCHEMA_SQL` is `CREATE … IF NOT EXISTS`, so it's a no-op for a genuine older project (which
+  always went through `Project.create`) and byte-for-byte unchanged for real migrations. Regression
+  test `test_open_empty_sqlite_builds_the_base_schema` (fails before / passes after).
 - **Trivial (cosmetic): the ASTAP no-database *hint* still says "(*.290)" only.**
   (XS, friendliness) `webapp/routers/system.py::_astap_info` now correctly *counts* both
   `.290` and `.1476` databases, but the fallback hint shown when zero are found still reads
@@ -1056,6 +1055,15 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.94.10** — Project-DB robustness: opening an empty/foreign `project.sqlite` (a blank or
+  corrupt file sitting at `user_version==0` with no `frames` table) no longer produces a
+  structurally-broken DB. `_migrate_schema` ran only `ALTER TABLE frames …` (each swallowing
+  `OperationalError`) and never `SCHEMA_SQL`, so with no `frames` table the ALTERs no-op'd,
+  `user_version` was stamped current, and the next `add_frame` raised "no such table: frames".
+  It now builds the base schema (idempotent `CREATE … IF NOT EXISTS`) when the `frames` table is
+  missing, before migrating — a no-op for every genuine older project. Regression test in
+  `tests/test_project.py`. Near-unreachable (real projects go through `Project.create`) but a
+  reproduced structural break with a cheap, additive fix.
 - **v0.94.9** — Ingest robustness: a transient Stage-1 copy failure (a NAS blip during
   `shutil.copy2`) no longer leaves a frame **permanently** uncached. `ingest_files` keyed
   `existing` on the source-path string, so a re-scan skipped the already-registered row and
