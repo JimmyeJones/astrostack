@@ -20,7 +20,7 @@ import { tonalHistGuides } from "../components/editor/tonalGuides";
 import { OpList } from "../components/editor/OpList";
 import { degenerateLevelsUids, extraEnabledStretchUids, hasEnabledStretch, insertOnCorrectSide, moveToCorrectSide }
   from "../components/editor/stageConflicts";
-import { autoCauseSentence, autoSummarySentence, autoValueSentence } from "../components/editor/autoSummary";
+import { autoCauseSentence, autoSummarySentence, autoValueSentence, presetSuggestionSentence } from "../components/editor/autoSummary";
 import { applyDataDrivenDefaults, countDataDrivenDefaults, type OpSuggestion }
   from "../components/editor/dataDrivenDefaults";
 import { deconvUnderstatesCaption } from "../components/editor/deconvPreview";
@@ -1383,6 +1383,16 @@ export function EditorView() {
                 ) : null}
                 {autoValues ? (
                   <Text size="xs" mt={4}>{autoValues}</Text>
+                ) : null}
+                {/* Content classification: the "try this preset?" chip only shows on
+                    an empty pipeline, so a user who clicked Auto straight away never
+                    learns their image was classified. Surface the same hint here as a
+                    purely-informational line (another starting point to compare, never
+                    a claim Auto was wrong) — hidden when the classifier is unsure. */}
+                {presetSuggestionSentence(presetSuggest.data) ? (
+                  <Text size="xs" mt={4} c="dimmed">
+                    {presetSuggestionSentence(presetSuggest.data)}
+                  </Text>
                 ) : null}
                 <Text size="10px" c="dimmed" mt={4}>
                   These steps were chosen from your image — tweak or remove any of them below.

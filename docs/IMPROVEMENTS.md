@@ -119,6 +119,23 @@ silently loses gradient removal on cluster/dense-star targets; a graceful-degrad
 below. Realistic gradient+nebula frames flatten cleanly (0.097 mean change, proxy==full-res).
 Baseline suite green: 841 passed, 2 skipped.)_
 
+_(Builder engine-hardening audit 2026-07-08 (v0.94.1 baseline): fresh adversarial audit of the
+stacking/calibration path with **numeric brute-force repros**, not just reading — the
+`MinMaxRejectAccumulator` order statistic (matched a brute-force top/bottom-k reference *exactly*
+for k=1,2,3,5 across all four coverage bands, via both `add()` and windowed `add_window()` with
+random offsets/NaN), `WelfordAccumulator` mean/std (matched `np.nanmean`/`nanstd(ddof=1)` with 25%
+random NaN), `WeightedSumAccumulator` (weighted average + NaN=gap preserved), `DrizzleStacker.result()`
+(already a weighted average — not re-divided by coverage), and the two-pass drizzle reject (a 500-ADU
+spike over 20 frames is correctly rejected to ~100; the 6-frame no-fire is the documented
+`(n−1)/√n < κ` limit, not a bug). Close-read confirmed cross-pass weight/scale symmetry
+(`photometric_scales` applied before the consumer in **both** κ-σ passes and in drizzle stats+final;
+quality weights correctly in pass-2 combine only, provenance-gated to match), calibration
+(no double-subtract; `_effective_dark` single pedestal; flat direction/floor; `apply_raw` never mutates
+input; photometric scale direction hazy→up), NaN=coverage everywhere incl. `level_by_coverage`, and the
+`_imap_bounded` memory cap on both paths. **No reachable image-corruption bug found** — clean, consistent
+with the prior audits. One near-unreachable robustness note logged to Infra below (subpixel-shift edge
+`cval=0` vs NaN). Baseline suite green: 876 passed, 2 skipped.)_
+
 _(Builder engine-hardening audit 2026-07-06 (v0.86.1 baseline): another adversarial read of
 the stacking/calibration path, going deeper on the areas prior audits didn't explicitly cover
 — the recently-added `MinMaxRejectAccumulator` k-insertion order statistic + its four
@@ -430,14 +447,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   on a live install, so it should wait until the shipped suggestion chip has gathered real-world signal
   (which classifications the owner accepts on real galaxy/nebula/cluster Seestar stacks) and the
   classifier is validated against real data, not just synthetic archetypes. (M, autonomy/editor)
-  _(Follow-up idea, spotted shipping v0.94.0 — for the Scout to vet: the preset-suggestion chip
-  only shows on an **empty** pipeline, so a user who clicks Auto straight away never learns their
-  image was classified. A low-risk way to surface it more: add one dimmed line to the "What
-  Auto-process did" note — e.g. "Your image looks like a star cluster — the Star-cluster preset is
-  another good starting point." — reusing the same `…/editor/preset-suggestion` call. Keep it
-  purely informational (never second-guess the recipe the user just applied), and only when the
-  classifier is confident. S, autonomy/friendliness. Also worth considering once signal exists:
-  log which suggestions the owner accepts vs dismisses, to inform the graduation-to-seeding call.)_
+  _(~~Follow-up idea, spotted shipping v0.94.0: the preset-suggestion chip only shows on an
+  **empty** pipeline, so a user who clicks Auto straight away never learns their image was
+  classified. Add one dimmed line to the "What Auto-process did" note.~~ — **shipped v0.94.2**
+  (see Shipped). A new pure `presetSuggestionSentence` helper turns the (already-fetched,
+  always-enabled) `…/editor/preset-suggestion` payload into one dimmed informational line —
+  "Your image looks like a Star cluster — its preset is another good starting point to compare."
+  — rendered inside the "What Auto-process did" Alert. Purely informational (no button, never
+  implies Auto's recipe was wrong), hidden whenever the classifier declined (`preset_id`/`label`
+  null), and it surfaces exactly the same already-shipped classification the empty-pipeline chip
+  does, so it carries no new classifier-accuracy exposure. Frontend-only, additive.)_
+  _(Still open for the Scout once signal exists: log which suggestions the owner accepts vs
+  dismisses, to inform the graduation-to-seeding call.)_
   _(Builder note 2026-07-08: a fresh dogfood re-confirmed the current general Auto recipe is
   healthy and well-tuned (single-field: preview↔export parity 0.00%, median grey 0.24, balanced
   R/G/B), so the bar for **changing what Auto emits** is high — a confident classifier really does
@@ -788,6 +809,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   platform and the fix would not meet the quality bar. Left open; the `(OSError, ValueError)`
   guard is still correct defensively for platforms/Python builds that do raise — a future run
   can ship it with a monkeypatched-`is_dir` test that forces the raise.)_
+- **Low-priority robustness (near-unreachable): sub-pixel shift fills vacated edges toward 0
+  instead of NaN when a window is fully finite.** In `align.py`'s `_apply_subpixel_shift`
+  /`_apply_subpixel_shift_windowed` (~lines 378–391, 456–467) the `order=1` shift uses `cval=0.0`,
+  and the vacated ~1 px edge strip is only re-marked NaN inside `if nan_mask.any()`. So a window with
+  **no** NaN would leave its outermost 1 px ring interpolated toward 0 (a fractional dimming) rather
+  than NaN=uncovered. Near-unreachable: real reprojected frames always carry a NaN border from the
+  `FRAME_EDGE_INSET_PX=3` valid-mask inset + bbox pad (a same-size dithered frame can't fully contain
+  the canvas inside its 3 px-inset interior), the effect is a fractional dimming of a 1 px ring, and
+  `subpixel_refine` is **off by default**. Found by the Builder 2026-07-08 engine audit; not worth a
+  standalone ship (it fixes an input that essentially can't occur), but if a future run is already in
+  `align.py` the clean fix is to always seed vacated pixels as NaN (or re-mark the shifted edge
+  unconditionally, not only when `nan_mask.any()`), with a fully-finite-window regression test.
+  (S, robustness)
 - ~~**Extract the RA 0°/360° unwrap heuristic into one shared helper (regression-proofing).**~~
   — **shipped v0.93.4** (see Shipped). The `if span > 180: ra = where(ra>180, ra-360, ra)` unwrap
   is now a single dependency-free `seestack/coords.py` with `unwrap_ra_deg(ras)` +
@@ -854,6 +888,15 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.94.2** — Editor friendliness: surface the content classification in the "What Auto-process
+  did" note. The "try this preset?" chip only shows on an *empty* pipeline, so a user who clicked
+  Auto straight away never learned their image was classified; a new pure `presetSuggestionSentence`
+  helper now renders one dimmed informational line ("Your image looks like a Star cluster — its
+  preset is another good starting point to compare.") inside the Auto note, reusing the
+  already-fetched `…/editor/preset-suggestion` payload. Purely informational (no button, never
+  implies Auto was wrong), hidden when the classifier declined, and it exposes the same
+  already-shipped classification the chip does — no new classifier-accuracy risk. Frontend-only,
+  additive; unit tests on the helper + a component test that the line rides alongside the Auto note.
 - **v0.94.1** — Robustness: `detail.denoise` now guards a degenerate 1-px-thin image
   (`shape[0] < 2 or shape[1] < 2` → return untouched), mirroring the geometry ops' degenerate-size
   guards. Before the guard the wavelet path emitted all-NaN in the *covered* region (breaking the

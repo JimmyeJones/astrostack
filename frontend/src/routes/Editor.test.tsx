@@ -730,6 +730,43 @@ describe("EditorView", () => {
     expect(screen.queryByText(/This looks like a/i)).not.toBeInTheDocument();
   });
 
+  it("surfaces the classification in the 'What Auto-process did' note too", async () => {
+    // The classification chip only shows on an *empty* pipeline; a user who clicks
+    // Auto straight away would otherwise never learn their image was classified, so
+    // the same hint appears as an informational line in the Auto note.
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({ ops: [], base_run_id: 3 });
+    vi.spyOn(client.api, "previousRecipe").mockResolvedValue(
+      { run_id: null, ops: [], count: 0 });
+    vi.spyOn(client.api, "getDefaultRecipe").mockResolvedValue({ ops: [], count: 0 });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "presetSuggestion").mockResolvedValue({
+      preset_id: "globular_cluster", label: "Star cluster",
+      reason: "mostly point-like stars", confidence: 0.9,
+    });
+    const autoProcess = vi.spyOn(client.api, "autoProcess").mockResolvedValue({
+      ops: [{ uid: "a1", id: "tone.stretch", enabled: true,
+              params: { mode: "stf", target_bg: 0.2 } }], base_run_id: 3,
+    });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    // Wait for the empty-pipeline nudge (with its in-panel Auto-process button).
+    await screen.findByText(/build a good starting recipe from/i);
+    fireEvent.click(screen.getAllByRole("button", { name: /Auto-process/ })[1]);
+    await waitFor(() => expect(autoProcess).toHaveBeenCalledWith("M_42", 3));
+    expect(await screen.findByText("What Auto-process did")).toBeInTheDocument();
+    // The informational classification line rides alongside the recipe explanation.
+    expect(screen.getByText(
+      /Your image looks like a Star cluster — its preset is another good starting point/i,
+    )).toBeInTheDocument();
+  });
+
   it("explains a run a background job auto-edited, and hides it once the user edits", async () => {
     vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES]);
     // A run opened on a recipe the user didn't build (a background Process-target /
