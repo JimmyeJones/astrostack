@@ -920,6 +920,21 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.94.7** — Job-progress robustness (autonomy/friendliness): fixed two real `useJobEvents` SSE bugs
+  found by a fresh adversarial audit of the job-events + export-polling surface. **(1)** `es.onerror`
+  unconditionally called `es.close()`, defeating EventSource's built-in auto-reconnect — so any
+  *transient* mid-job drop (laptop sleep, proxy idle-timeout, a network blip during a multi-minute
+  stack) permanently froze the progress panel on its last snapshot: the job could finish while
+  disconnected and the UI never resolved (stuck spinner, frame list never refreshed, reload required).
+  The backend re-sends current state (plus `done` if already terminal) on *every* reconnect, so the fix
+  is to let EventSource reconnect and only close when it has permanently given up (`readyState ===
+  CLOSED`). **(2)** The hook reset its snapshot only when `jobId` became falsy, so on a job→job change
+  (e.g. starting a second stack without leaving the page) it returned the *previous* job's stale
+  (often `"done"`) snapshot — with its "View result" button — until the new stream emitted. Now it
+  clears on every id change. Frontend-only, additive. Regression tests for both (fail before / pass
+  after), using an extended EventSource mock (readyState + terminal constant). The editor's own
+  export/PNG polling loops were audited and found correct (terminal-state handling, no stale-job
+  closures, no blob leak, button-gated against progress races).
 - **v0.94.6** — Editor/undo correctness (PRIORITY 1): fixed undo *over-reverting* a second use of the
   same control. `useUndoable`'s coalescing keyed only off the previous set's key with **no
   gesture-end signal** — and releasing a slider fires no event — so a second drag of the *same*
