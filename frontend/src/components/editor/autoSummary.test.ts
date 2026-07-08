@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   autoCauseSentence, autoSummaryPhrases, autoSummarySentence,
-  autoValuePhrases, autoValueSentence,
+  autoValuePhrases, autoValueSentence, presetSuggestionSentence,
 } from "./autoSummary";
-import type { AutoAnalysis, EditOp, OpInstance } from "../../api/client";
+import type { AutoAnalysis, EditOp, OpInstance, PresetSuggestion } from "../../api/client";
 
 /** A full AutoAnalysis payload with everything measured; override fields per test. */
 function analysis(over: Partial<AutoAnalysis> = {}): AutoAnalysis {
@@ -212,6 +212,39 @@ describe("autoCauseSentence", () => {
     expect(autoCauseSentence(analysis({ sky: null, median_fwhm: null }))).toBeNull();
     expect(autoCauseSentence(analysis({ sky: 0.08, median_fwhm: null }))).toBe(
       "Measured from your image: a ~0.08 sky.",
+    );
+  });
+});
+
+describe("presetSuggestionSentence", () => {
+  function suggestion(over: Partial<PresetSuggestion> = {}): PresetSuggestion {
+    return {
+      preset_id: "cluster", label: "Star cluster",
+      reason: "mostly point-like stars", confidence: 0.8, ...over,
+    };
+  }
+
+  it("returns null for a missing suggestion", () => {
+    expect(presetSuggestionSentence(null)).toBeNull();
+    expect(presetSuggestionSentence(undefined)).toBeNull();
+  });
+
+  it("returns null when the classifier declined (no preset_id / label)", () => {
+    expect(presetSuggestionSentence(
+      suggestion({ preset_id: null, label: null, confidence: 0 }))).toBeNull();
+    // Guards each field independently so a half-populated payload can't crash.
+    expect(presetSuggestionSentence(suggestion({ preset_id: null }))).toBeNull();
+    expect(presetSuggestionSentence(suggestion({ label: null }))).toBeNull();
+  });
+
+  it("names the matched preset as another starting point when confident", () => {
+    expect(presetSuggestionSentence(suggestion())).toBe(
+      "Your image looks like a Star cluster — its preset is another good "
+      + "starting point to compare.",
+    );
+    expect(presetSuggestionSentence(suggestion({ preset_id: "nebula", label: "Nebula" }))).toBe(
+      "Your image looks like a Nebula — its preset is another good "
+      + "starting point to compare.",
     );
   });
 });

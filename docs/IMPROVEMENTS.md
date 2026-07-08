@@ -430,14 +430,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   on a live install, so it should wait until the shipped suggestion chip has gathered real-world signal
   (which classifications the owner accepts on real galaxy/nebula/cluster Seestar stacks) and the
   classifier is validated against real data, not just synthetic archetypes. (M, autonomy/editor)
-  _(Follow-up idea, spotted shipping v0.94.0 — for the Scout to vet: the preset-suggestion chip
-  only shows on an **empty** pipeline, so a user who clicks Auto straight away never learns their
-  image was classified. A low-risk way to surface it more: add one dimmed line to the "What
-  Auto-process did" note — e.g. "Your image looks like a star cluster — the Star-cluster preset is
-  another good starting point." — reusing the same `…/editor/preset-suggestion` call. Keep it
-  purely informational (never second-guess the recipe the user just applied), and only when the
-  classifier is confident. S, autonomy/friendliness. Also worth considering once signal exists:
-  log which suggestions the owner accepts vs dismisses, to inform the graduation-to-seeding call.)_
+  _(~~Follow-up idea, spotted shipping v0.94.0: the preset-suggestion chip only shows on an
+  **empty** pipeline, so a user who clicks Auto straight away never learns their image was
+  classified. Add one dimmed line to the "What Auto-process did" note.~~ — **shipped v0.94.2**
+  (see Shipped). A new pure `presetSuggestionSentence` helper turns the (already-fetched,
+  always-enabled) `…/editor/preset-suggestion` payload into one dimmed informational line —
+  "Your image looks like a Star cluster — its preset is another good starting point to compare."
+  — rendered inside the "What Auto-process did" Alert. Purely informational (no button, never
+  implies Auto's recipe was wrong), hidden whenever the classifier declined (`preset_id`/`label`
+  null), and it surfaces exactly the same already-shipped classification the empty-pipeline chip
+  does, so it carries no new classifier-accuracy exposure. Frontend-only, additive.)_
+  _(Still open for the Scout once signal exists: log which suggestions the owner accepts vs
+  dismisses, to inform the graduation-to-seeding call.)_
   _(Builder note 2026-07-08: a fresh dogfood re-confirmed the current general Auto recipe is
   healthy and well-tuned (single-field: preview↔export parity 0.00%, median grey 0.24, balanced
   R/G/B), so the bar for **changing what Auto emits** is high — a confident classifier really does
@@ -854,6 +858,15 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.94.2** — Editor friendliness: surface the content classification in the "What Auto-process
+  did" note. The "try this preset?" chip only shows on an *empty* pipeline, so a user who clicked
+  Auto straight away never learned their image was classified; a new pure `presetSuggestionSentence`
+  helper now renders one dimmed informational line ("Your image looks like a Star cluster — its
+  preset is another good starting point to compare.") inside the Auto note, reusing the
+  already-fetched `…/editor/preset-suggestion` payload. Purely informational (no button, never
+  implies Auto was wrong), hidden when the classifier declined, and it exposes the same
+  already-shipped classification the chip does — no new classifier-accuracy risk. Frontend-only,
+  additive; unit tests on the helper + a component test that the line rides alongside the Auto note.
 - **v0.94.1** — Robustness: `detail.denoise` now guards a degenerate 1-px-thin image
   (`shape[0] < 2 or shape[1] < 2` → return untouched), mirroring the geometry ops' degenerate-size
   guards. Before the guard the wavelet path emitted all-NaN in the *covered* region (breaking the

@@ -1,4 +1,4 @@
-import type { AutoAnalysis, EditOp, OpInstance } from "../../api/client";
+import type { AutoAnalysis, EditOp, OpInstance, PresetSuggestion } from "../../api/client";
 
 /** Plain-language phrase for each editor op id the Auto-process recipe can emit,
  * so a user sees *what Auto did* (and in what order) instead of a bare list of op
@@ -133,4 +133,24 @@ export function autoCauseSentence(a: AutoAnalysis | null | undefined): string | 
     ? parts[0]
     : `${parts.slice(0, -1).join(", ")}, ${parts[parts.length - 1]}`;
   return `Measured from your image: ${body}.`;
+}
+
+/** A single informational line pointing the user at the built-in preset that best
+ * matches the image's content, shown alongside the "What Auto-process did" note. The
+ * content-classification chip that offers this preset only appears on an *empty*
+ * pipeline, so a user who clicks Auto straight away never learns their image was
+ * classified — this surfaces the same hint on the surface they *do* land on. Purely a
+ * *suggestion of another starting point*; it never implies the Auto recipe was wrong.
+ * Returns null unless the classifier is confident (`preset_id` + `label` present — it
+ * declines to null on an ambiguous field), so an unsure classification omits the line.
+ *
+ * e.g. "Your image looks like a Star cluster — its preset is another good starting
+ * point to compare."
+ */
+export function presetSuggestionSentence(
+  s: PresetSuggestion | null | undefined,
+): string | null {
+  if (!s || !s.preset_id || !s.label) return null;
+  return `Your image looks like a ${s.label} — its preset is another good `
+    + `starting point to compare.`;
 }
