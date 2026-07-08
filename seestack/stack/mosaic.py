@@ -33,6 +33,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from seestack.coords import unwrap_ra_deg
+
 log = logging.getLogger(__name__)
 
 # Hard ceiling so a pathological frame set (one bad plate-solve flung across
@@ -113,9 +115,7 @@ def _footprint_outlier_indices(
     centers_ra = np.array([_circ_mean_ra_deg(r) for _, r, _ in foot], dtype=np.float64)
     centers_dec = np.array([np.median(d) for _, _, d in foot], dtype=np.float64)
     # Unwrap RA across centres in case the group straddles 0°.
-    cr = centers_ra.copy()
-    if cr.max() - cr.min() > 180.0:
-        cr = np.where(cr > 180.0, cr - 360.0, cr)
+    cr = unwrap_ra_deg(centers_ra)
     med_ra, med_dec = float(np.median(cr)), float(np.median(centers_dec))
     seps = [
         _ang_sep_deg(float(cr[i]) % 360.0, float(centers_dec[i]), med_ra % 360.0, med_dec)
@@ -216,8 +216,7 @@ def compute_mosaic_canvas(
         ra = np.concatenate([foot[i][1] for i in active])
         dec = np.concatenate([foot[i][2] for i in active])
         # RA wraparound: if the apparent spread is huge, the set straddles 0°.
-        if ra.max() - ra.min() > 180.0:
-            ra = np.where(ra > 180.0, ra - 360.0, ra)
+        ra = unwrap_ra_deg(ra)
         center_ra = float(np.median(ra))
         center_dec = float(np.median(dec))
 

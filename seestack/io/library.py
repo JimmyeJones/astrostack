@@ -590,17 +590,16 @@ def _median_radec(proj: Project) -> tuple[float | None, float | None]:
         return None, None
     import numpy as np
 
+    from seestack.coords import circular_median_ra_deg
+
     # RA wraps at 0°/360°: a target imaged near RA=0h has frames straddling the
     # boundary (some ~359.9°, some ~0.1°), and a plain median would land ~180° away
     # (a 50/50 split of 359.9°/0.1° medians to 180.0° — the opposite side of the
     # sky), placing the target's catalog position wrong for the sky-map plot and
-    # find_target_within matching. Unwrap into a continuous range before the median
-    # (the same fix compute_mosaic_canvas / pick_reference_frame use), then fold the
-    # result back to [0, 360). A no-op when nothing straddles the wrap.
-    ras_arr = np.asarray(ras, dtype=np.float64)
-    if float(ras_arr.max() - ras_arr.min()) > 180.0:
-        ras_arr = np.where(ras_arr > 180.0, ras_arr - 360.0, ras_arr)
-    return float(np.median(ras_arr) % 360.0), float(np.median(decs))
+    # find_target_within matching. circular_median_ra_deg unwraps into a continuous
+    # range before the median (shared with compute_mosaic_canvas / pick_reference_frame),
+    # then folds back to [0, 360). A no-op when nothing straddles the wrap.
+    return circular_median_ra_deg(ras), float(np.median(decs))
 
 
 def _angular_separation_deg(ra1: float, dec1: float,

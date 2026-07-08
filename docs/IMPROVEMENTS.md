@@ -746,14 +746,16 @@ problems. Dogfood it every big-picture run and fix root causes.
   a real folder), so not worth a standalone ship. If a future run is already in
   `calibration.py`, wrapping the `is_dir()` in a `(OSError, ValueError)` guard closes it with a
   one-line test. (S, robustness)
-- **Extract the RA 0°/360° unwrap heuristic into one shared helper (regression-proofing).**
-  The `if span > 180: ra = where(ra>180, ra-360, ra)` unwrap now lives in **three** places —
-  `stack/mosaic.py::_bbox`, `stack/reference.py::pick_reference_frame` (v0.93.2), and
-  `io/library.py::_median_radec` (v0.93.3) — because each was found to reintroduce the same
-  wrap bug independently. A single `unwrap_ra_deg(ras)` / `circular_median_ra_deg(ras)` helper
-  (alongside the existing `_circ_mean_ra_deg`) that all three call would make a *fourth* site
-  hard to get wrong, and gives one place to unit-test the boundary cases. Pure refactor, additive,
-  fully covered by the three existing regression tests. (S, Infra/correctness)
+- ~~**Extract the RA 0°/360° unwrap heuristic into one shared helper (regression-proofing).**~~
+  — **shipped v0.93.4** (see Shipped). The `if span > 180: ra = where(ra>180, ra-360, ra)` unwrap
+  is now a single dependency-free `seestack/coords.py` with `unwrap_ra_deg(ras)` +
+  `circular_median_ra_deg(ras)`; all three sites (`stack/mosaic.py` `_bbox` **and**
+  `_footprint_outlier_indices`, `stack/reference.py::pick_reference_frame`,
+  `io/library.py::_median_radec`) call it, so a *fourth* site is hard to get wrong. Centralising
+  surfaced + fixed a latent float-boundary edge: a target sitting exactly on the seam medianed to a
+  tiny-negative that `% 360.0` folds to exactly `360.0` (outside `[0, 360)`) — the helper now snaps
+  that back to `0.0`. New `tests/test_coords.py` pins the boundary cases; the three existing
+  per-site wrap regression tests still pass unchanged.
 - Chip away at the ~127 pre-existing `ruff check .` findings (don't add new ones);
   consider wiring ruff into CI once the count is low. (L, correctness/maintainability)
 - ~~Add a retention/pruning policy for `jobs.sqlite`~~ — **done, then made
@@ -810,6 +812,12 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.93.4** — Extracted the RA 0°/360° unwrap heuristic into one shared dependency-free
+  `seestack/coords.py` (`unwrap_ra_deg` + `circular_median_ra_deg`) and pointed all three sites at it
+  (`stack/mosaic.py` `_bbox`+`_footprint_outlier_indices`, `stack/reference.py::pick_reference_frame`,
+  `io/library.py::_median_radec`), so a fourth site can't reintroduce the wrap bug. Fixed a latent
+  float-boundary edge (a seam-centred target folding to exactly `360.0`). `tests/test_coords.py` pins
+  the boundary cases; the three existing per-site regression tests pass unchanged (`claude/happy-franklin-jlglfe`).
 - **v0.93.3** — Target aggregate RA is now 0°/360°-wrap-safe (`claude/happy-franklin-te45e2`).
   `_median_radec` (`seestack/io/library.py`) set a target's catalog `ra_deg`/`dec_deg` from a plain
   `np.median` of its accepted frames' RAs. For a target imaged near RA=0h whose frames straddle the

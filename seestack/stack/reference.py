@@ -19,6 +19,7 @@ import logging
 import math
 from dataclasses import dataclass
 
+from seestack.coords import unwrap_ra_deg
 from seestack.io.project import FrameRow, Project
 
 log = logging.getLogger(__name__)
@@ -55,10 +56,7 @@ def pick_reference_frame(project: Project) -> ReferenceChoice | None:
     # unwrapped space. With no wrap this leaves every value untouched, so a normal
     # target behaves exactly as before.
     raw_ras = [f.ra_center_deg for f in candidates]  # type: ignore[misc]
-    if max(raw_ras) - min(raw_ras) > 180.0:
-        uras = [r - 360.0 if r > 180.0 else r for r in raw_ras]  # type: ignore[operator]
-    else:
-        uras = list(raw_ras)
+    uras = unwrap_ra_deg(raw_ras)
     decs = [f.dec_center_deg for f in candidates]  # type: ignore[misc]
     med_ra = sorted(uras)[len(uras) // 2]
     med_dec = sorted(decs)[len(decs) // 2]
