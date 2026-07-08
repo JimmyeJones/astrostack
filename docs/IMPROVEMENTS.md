@@ -430,6 +430,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   on a live install, so it should wait until the shipped suggestion chip has gathered real-world signal
   (which classifications the owner accepts on real galaxy/nebula/cluster Seestar stacks) and the
   classifier is validated against real data, not just synthetic archetypes. (M, autonomy/editor)
+  _(Follow-up idea, spotted shipping v0.94.0 — for the Scout to vet: the preset-suggestion chip
+  only shows on an **empty** pipeline, so a user who clicks Auto straight away never learns their
+  image was classified. A low-risk way to surface it more: add one dimmed line to the "What
+  Auto-process did" note — e.g. "Your image looks like a star cluster — the Star-cluster preset is
+  another good starting point." — reusing the same `…/editor/preset-suggestion` call. Keep it
+  purely informational (never second-guess the recipe the user just applied), and only when the
+  classifier is confident. S, autonomy/friendliness. Also worth considering once signal exists:
+  log which suggestions the owner accepts vs dismisses, to inform the graduation-to-seeding call.)_
   _(Builder note 2026-07-08: a fresh dogfood re-confirmed the current general Auto recipe is
   healthy and well-tuned (single-field: preview↔export parity 0.00%, median grey 0.24, balanced
   R/G/B), so the bar for **changing what Auto emits** is high — a confident classifier really does
