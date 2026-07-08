@@ -7,6 +7,39 @@ export interface SkyData {
   images: SkyImage[];
 }
 
+export interface PlannedTarget {
+  id: string;
+  name: string;
+  ra_deg: number;
+  dec_deg: number;
+  type: string;
+  con: string;
+  already_targeted: boolean;
+  max_altitude_deg: number;
+  transit_utc: string | null;
+  minutes_above_min_alt: number;
+  moon_separation_deg: number;
+  score: number;
+  target_safe: string | null;
+  frames_accepted: number | null;
+  total_exposure_s: number | null;
+}
+
+export interface NightPlan {
+  location_source: "settings" | "fits" | "none";
+  observer: { lat_deg: number; lon_deg: number; elevation_m: number } | null;
+  generated_utc: string;
+  dark_window: {
+    start_utc: string;
+    end_utc: string;
+    duration_minutes: number;
+    sun_alt_threshold_deg: number;
+  } | null;
+  moon_illumination: number | null;
+  min_altitude_deg: number;
+  targets: PlannedTarget[];
+}
+
 export interface Target {
   safe_name: string;
   name: string;
@@ -709,6 +742,14 @@ export const api = {
 
   // sky viewer
   getSky: () => req<SkyData>("/api/sky"),
+
+  // tonight — night planner
+  getTonight: (opts?: { minAlt?: number }) => {
+    const qs = new URLSearchParams();
+    if (opts?.minAlt != null) qs.set("min_alt", String(opts.minAlt));
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return req<NightPlan>(`/api/plan/tonight${suffix}`);
+  },
 
   // gallery
   getGallery: () => req<{ items: GalleryItem[] }>("/api/gallery"),

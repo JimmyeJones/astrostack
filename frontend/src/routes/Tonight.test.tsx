@@ -1,0 +1,83 @@
+import { MantineProvider } from "@mantine/core";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { TonightView } from "./Tonight";
+import * as client from "../api/client";
+import type { NightPlan, PlannedTarget } from "../api/client";
+
+function target(over: Partial<PlannedTarget>): PlannedTarget {
+  return {
+    id: "M42", name: "Orion Nebula", ra_deg: 83.8, dec_deg: -5.4, type: "nebula",
+    con: "Ori", already_targeted: false, max_altitude_deg: 40,
+    transit_utc: "2026-01-15T22:00:00+00:00", minutes_above_min_alt: 180,
+    moon_separation_deg: 60, score: 55, target_safe: null,
+    frames_accepted: null, total_exposure_s: null, ...over,
+  };
+}
+
+function plan(over: Partial<NightPlan>): NightPlan {
+  return {
+    location_source: "settings",
+    observer: { lat_deg: 51.5, lon_deg: -0.13, elevation_m: 30 },
+    generated_utc: "2026-01-15T20:00:00+00:00",
+    dark_window: {
+      start_utc: "2026-01-15T18:23:00+00:00", end_utc: "2026-01-16T05:55:00+00:00",
+      duration_minutes: 692, sun_alt_threshold_deg: -18,
+    },
+    moon_illumination: 0.08, min_altitude_deg: 30, targets: [], ...over,
+  };
+}
+
+function renderTonight() {
+  const qc = new QueryClient();
+  return render(
+    <MantineProvider>
+      <QueryClientProvider client={qc}>
+        <MemoryRouter><TonightView /></MemoryRouter>
+      </QueryClientProvider>
+    </MantineProvider>,
+  );
+}
+
+afterEach(() => vi.restoreAllMocks());
+
+describe("TonightView", () => {
+  it("prompts for a location when none is known", async () => {
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(
+      plan({ location_source: "none", observer: null, dark_window: null, moon_illumination: null }));
+    renderTonight();
+    await waitFor(() =>
+      expect(screen.getByText("Set your observing location")).toBeInTheDocument());
+    expect(screen.getByRole("link", { name: /Settings/i }))
+      .toHaveAttribute("href", "/settings");
+  });
+
+  it("explains a polar-day night with no dark window", async () => {
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({ dark_window: null }));
+    renderTonight();
+    await waitFor(() =>
+      expect(screen.getByText("No darkness tonight")).toBeInTheDocument());
+  });
+
+  it("ranks library targets and fresh catalog suggestions separately", async () => {
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
+      targets: [
+        target({ id: "M31", name: "Andromeda Galaxy", already_targeted: true,
+                 target_safe: "M_31", frames_accepted: 42, total_exposure_s: 4200, score: 80 }),
+        target({ id: "M13", name: "Hercules Cluster", already_targeted: false, score: 65 }),
+      ],
+    }));
+    renderTonight();
+    await waitFor(() =>
+      expect(screen.getByText("Add more to what you're shooting")).toBeInTheDocument());
+    expect(screen.getByText("Start something new tonight")).toBeInTheDocument();
+    // Library target links to its target page; catalog one does not.
+    expect(screen.getByRole("link", { name: /M31 — Andromeda Galaxy/ }))
+      .toHaveAttribute("href", "/targets/M_31");
+    expect(screen.getByText(/M13 — Hercules Cluster/)).toBeInTheDocument();
+    // The dark-window summary card shows the twilight kind.
+    expect(screen.getByText(/astronomical/)).toBeInTheDocument();
+  });
+});
