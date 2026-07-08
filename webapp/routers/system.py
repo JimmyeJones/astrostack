@@ -118,7 +118,7 @@ def _astap_info(settings) -> dict:  # noqa: ANN001
             info["error"] = f"ASTAP failed to run: {exc}"
         if db_count == 0:
             info["hint"] = (
-                "ASTAP is installed but no star database (*.290) was found next "
+                "ASTAP is installed but no star database (*.290 or *.1476) was found next "
                 "to it — every solve will fail. Add one (e.g. d05) to "
                 f"{path.parent} or set SEESTACK_ASTAP_DATA."
             )

@@ -992,13 +992,11 @@ problems. Dogfood it every big-picture run and fix root causes.
   in `SCHEMA_SQL` is `CREATE … IF NOT EXISTS`, so it's a no-op for a genuine older project (which
   always went through `Project.create`) and byte-for-byte unchanged for real migrations. Regression
   test `test_open_empty_sqlite_builds_the_base_schema` (fails before / passes after).
-- **Trivial (cosmetic): the ASTAP no-database *hint* still says "(*.290)" only.**
-  (XS, friendliness) `webapp/routers/system.py::_astap_info` now correctly *counts* both
-  `.290` and `.1476` databases, but the fallback hint shown when zero are found still reads
-  "no star database (*.290) was found" — inaccurate now that D-series `.1476` files are
-  accepted (its own example "add e.g. d05" *is* a `.1476` file). Reword to "(*.290 or *.1476)".
-  Fires only in a genuine zero-database state, so it's purely cosmetic; fold into any run
-  already touching `system.py`. Found in the 2026-07-08 Scout audit.
+- ~~**Trivial (cosmetic): the ASTAP no-database *hint* still says "(*.290)" only.**~~ —
+  **FIXED v0.94.11** (see Shipped). The zero-database hint in `webapp/routers/system.py::_astap_info`
+  now reads "no star database (*.290 or *.1476) was found", matching the count (which already tallies
+  both) and its own D-series `d05` example (a `.1476` file). Purely cosmetic (fires only in a genuine
+  zero-database state); no behaviour or test change.
 - Chip away at the ~127 pre-existing `ruff check .` findings (don't add new ones);
   consider wiring ruff into CI once the count is low. (L, correctness/maintainability)
 - ~~Add a retention/pruning policy for `jobs.sqlite`~~ — **done, then made
@@ -1055,6 +1053,10 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.94.11** — Friendliness (cosmetic): the ASTAP "no star database" hint on Settings now
+  reads "(*.290 or *.1476)" instead of "(*.290)" only — the count already tallied both series
+  and the hint's own `d05` example is a `.1476` file, so the old wording was misleading in a
+  genuine zero-database state. Text-only; no behaviour or test change (`webapp/routers/system.py`).
 - **v0.94.10** — Project-DB robustness: opening an empty/foreign `project.sqlite` (a blank or
   corrupt file sitting at `user_version==0` with no `frames` table) no longer produces a
   structurally-broken DB. `_migrate_schema` ran only `ALTER TABLE frames …` (each swallowing
