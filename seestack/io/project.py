@@ -235,6 +235,18 @@ class Project:
         """
         assert self._conn is not None
         log.info("Migrating project schema %d → %d", from_version, SCHEMA_VERSION)
+        # A genuine older project always has the base tables (it went through
+        # Project.create). But an empty/foreign sqlite opened here can sit at
+        # user_version 0 with no `frames` table — the additive ALTERs below would
+        # then all silently no-op and stamp the version, leaving a DB that raises
+        # "no such table: frames" on first use. Recreate the base schema first
+        # (every statement is CREATE … IF NOT EXISTS, so it's a no-op for a real
+        # project) so migration never produces a structurally-broken DB.
+        has_frames = self._conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='frames'"
+        ).fetchone()
+        if has_frames is None:
+            self._conn.executescript(SCHEMA_SQL)
         if from_version < 2:
             self._conn.executescript(
                 """

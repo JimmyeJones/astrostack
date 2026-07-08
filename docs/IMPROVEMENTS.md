@@ -976,29 +976,27 @@ problems. Dogfood it every big-picture run and fix root causes.
   tiny-negative that `% 360.0` folds to exactly `360.0` (outside `[0, 360)`) — the helper now snaps
   that back to `0.0`. New `tests/test_coords.py` pins the boundary cases; the three existing
   per-site wrap regression tests still pass unchanged.
-- **Low-priority robustness (ingest, traced 2026-07-08): a transient copy error permanently leaves a
-  frame uncached.** `io/ingest.py` (~L120-133) inserts the frame row *before* `shutil.copy2` into the
-  Stage-1 cache; if the copy raises `OSError` (a NAS blip) `cached_path` stays NULL, and on any
-  re-scan the file is skipped (`s_str in existing`, because the row already exists) so the copy is
-  **never retried** — the size-check "resume" branch is effectively dead for this case. Not a
-  wrong-image bug (downstream falls back to `source_path`, e.g. `stacker.py`), but the Stage-1 cache
-  is silently never populated for that frame. Fix: on copy failure, either don't insert the row (so a
-  re-scan retries) or record the failure and re-attempt the copy on the next scan. (S, correctness/robustness)
-- **Low-priority robustness (traced 2026-07-08, near-unreachable): opening an empty/foreign
-  `project.sqlite` yields a DB with no `frames` table.** `io/project.py` `Project.open` on an existing
-  sqlite with `user_version==0` runs `_migrate_schema(0)`, which only `ALTER TABLE frames …` (each
-  wrapped in `except OperationalError: pass`) and never runs `SCHEMA_SQL`; with no `frames` table the
-  ALTERs no-op, `user_version` is stamped to the current version, and the next `add_frame` raises
-  "no such table: frames". Only reachable via a corrupt/foreign/empty DB (real projects always go
-  through `Project.create`, which runs the full schema), hence low severity. Fix: have `open` ensure
-  the base schema exists (or detect a missing `frames` table and run `SCHEMA_SQL`) before migrating. (S, robustness)
-- **Trivial (cosmetic): the ASTAP no-database *hint* still says "(*.290)" only.**
-  (XS, friendliness) `webapp/routers/system.py::_astap_info` now correctly *counts* both
-  `.290` and `.1476` databases, but the fallback hint shown when zero are found still reads
-  "no star database (*.290) was found" — inaccurate now that D-series `.1476` files are
-  accepted (its own example "add e.g. d05" *is* a `.1476` file). Reword to "(*.290 or *.1476)".
-  Fires only in a genuine zero-database state, so it's purely cosmetic; fold into any run
-  already touching `system.py`. Found in the 2026-07-08 Scout audit.
+- ~~**Low-priority robustness (ingest, traced 2026-07-08): a transient copy error permanently leaves a
+  frame uncached.**~~ — **FIXED v0.94.9** (see Shipped). `ingest_files` now keys `existing` on the
+  frame row (not just the source-path string) and, when an already-registered frame is still
+  uncached (`cached_path` NULL from an earlier `OSError`) and `copy_to_cache` is on, retries the
+  Stage-1 copy on the re-scan instead of skipping it forever. The copy logic is extracted into a
+  shared `_copy_to_stage1` helper so the first-ingest and retry paths behave identically; an
+  already-cached frame is never re-copied (its skip touches nothing). Regression tests
+  `test_ingest_retries_cache_after_a_transient_copy_failure` (fails before / passes after) and
+  `test_ingest_does_not_recopy_an_already_cached_frame`.
+- ~~**Low-priority robustness (traced 2026-07-08, near-unreachable): opening an empty/foreign
+  `project.sqlite` yields a DB with no `frames` table.**~~ — **FIXED v0.94.10** (see Shipped).
+  `_migrate_schema` now detects a missing `frames` table (an empty/foreign sqlite at `user_version==0`)
+  and runs `SCHEMA_SQL` to build the base schema before applying the additive ALTERs — every statement
+  in `SCHEMA_SQL` is `CREATE … IF NOT EXISTS`, so it's a no-op for a genuine older project (which
+  always went through `Project.create`) and byte-for-byte unchanged for real migrations. Regression
+  test `test_open_empty_sqlite_builds_the_base_schema` (fails before / passes after).
+- ~~**Trivial (cosmetic): the ASTAP no-database *hint* still says "(*.290)" only.**~~ —
+  **FIXED v0.94.11** (see Shipped). The zero-database hint in `webapp/routers/system.py::_astap_info`
+  now reads "no star database (*.290 or *.1476) was found", matching the count (which already tallies
+  both) and its own D-series `d05` example (a `.1476` file). Purely cosmetic (fires only in a genuine
+  zero-database state); no behaviour or test change.
 - Chip away at the ~127 pre-existing `ruff check .` findings (don't add new ones);
   consider wiring ruff into CI once the count is low. (L, correctness/maintainability)
 - ~~Add a retention/pruning policy for `jobs.sqlite`~~ — **done, then made
@@ -1055,6 +1053,27 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.94.11** — Friendliness (cosmetic): the ASTAP "no star database" hint on Settings now
+  reads "(*.290 or *.1476)" instead of "(*.290)" only — the count already tallied both series
+  and the hint's own `d05` example is a `.1476` file, so the old wording was misleading in a
+  genuine zero-database state. Text-only; no behaviour or test change (`webapp/routers/system.py`).
+- **v0.94.10** — Project-DB robustness: opening an empty/foreign `project.sqlite` (a blank or
+  corrupt file sitting at `user_version==0` with no `frames` table) no longer produces a
+  structurally-broken DB. `_migrate_schema` ran only `ALTER TABLE frames …` (each swallowing
+  `OperationalError`) and never `SCHEMA_SQL`, so with no `frames` table the ALTERs no-op'd,
+  `user_version` was stamped current, and the next `add_frame` raised "no such table: frames".
+  It now builds the base schema (idempotent `CREATE … IF NOT EXISTS`) when the `frames` table is
+  missing, before migrating — a no-op for every genuine older project. Regression test in
+  `tests/test_project.py`. Near-unreachable (real projects go through `Project.create`) but a
+  reproduced structural break with a cheap, additive fix.
+- **v0.94.9** — Ingest robustness: a transient Stage-1 copy failure (a NAS blip during
+  `shutil.copy2`) no longer leaves a frame **permanently** uncached. `ingest_files` keyed
+  `existing` on the source-path string, so a re-scan skipped the already-registered row and
+  never retried the copy — the size-check "resume" branch was dead for this case. It now keys
+  `existing` on the frame row and, when a registered frame is still uncached and caching is on,
+  retries the copy via a shared `_copy_to_stage1` helper; already-cached frames are never
+  re-copied. Not a wrong-image bug (downstream falls back to `source_path`), but the Stage-1
+  cache is now populated on the next scan instead of never. Regression tests in `tests/test_ingest.py`.
 - **v0.94.8** — Stacking-engine data-integrity fix (current-focus §1): the bilinear debayer
   (`seestack/io/fits_loader.py`) systematically **darkened the outermost 1-px ring of every
   debayered frame** (~50% on edges, ~75% at the four corners). Root cause: the missing-sample

@@ -97,3 +97,28 @@ def test_unique_source_path(proj):
     proj.add_frame(FrameRow(source_path="dup.fit"))
     with pytest.raises(sqlite3.IntegrityError):
         proj.add_frame(FrameRow(source_path="dup.fit"))
+
+
+def test_open_empty_sqlite_builds_the_base_schema(tmp_path):
+    """Opening a pre-existing but empty/foreign sqlite (user_version 0, no
+    `frames` table) must build the base schema during migration rather than
+    stamp the version and leave a DB that raises 'no such table: frames'."""
+    import sqlite3
+
+    project_dir = tmp_path / "foreign"
+    project_dir.mkdir()
+    db_path = project_dir / "project.sqlite"
+    # A bare, empty database file — as if a blank/corrupt sqlite were dropped in.
+    sqlite3.connect(db_path).close()
+
+    proj = Project.open(project_dir)
+    try:
+        # Migration built the schema, so the project is fully usable.
+        fid = proj.add_frame(FrameRow(source_path="a.fit"))
+        assert fid is not None
+        assert proj.count() == 1
+        from seestack.io.project import SCHEMA_VERSION
+        version = proj._conn.execute("PRAGMA user_version").fetchone()[0]
+        assert version == SCHEMA_VERSION
+    finally:
+        proj.close()
