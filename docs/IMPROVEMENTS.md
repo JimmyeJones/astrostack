@@ -976,14 +976,15 @@ problems. Dogfood it every big-picture run and fix root causes.
   tiny-negative that `% 360.0` folds to exactly `360.0` (outside `[0, 360)`) — the helper now snaps
   that back to `0.0`. New `tests/test_coords.py` pins the boundary cases; the three existing
   per-site wrap regression tests still pass unchanged.
-- **Low-priority robustness (ingest, traced 2026-07-08): a transient copy error permanently leaves a
-  frame uncached.** `io/ingest.py` (~L120-133) inserts the frame row *before* `shutil.copy2` into the
-  Stage-1 cache; if the copy raises `OSError` (a NAS blip) `cached_path` stays NULL, and on any
-  re-scan the file is skipped (`s_str in existing`, because the row already exists) so the copy is
-  **never retried** — the size-check "resume" branch is effectively dead for this case. Not a
-  wrong-image bug (downstream falls back to `source_path`, e.g. `stacker.py`), but the Stage-1 cache
-  is silently never populated for that frame. Fix: on copy failure, either don't insert the row (so a
-  re-scan retries) or record the failure and re-attempt the copy on the next scan. (S, correctness/robustness)
+- ~~**Low-priority robustness (ingest, traced 2026-07-08): a transient copy error permanently leaves a
+  frame uncached.**~~ — **FIXED v0.94.9** (see Shipped). `ingest_files` now keys `existing` on the
+  frame row (not just the source-path string) and, when an already-registered frame is still
+  uncached (`cached_path` NULL from an earlier `OSError`) and `copy_to_cache` is on, retries the
+  Stage-1 copy on the re-scan instead of skipping it forever. The copy logic is extracted into a
+  shared `_copy_to_stage1` helper so the first-ingest and retry paths behave identically; an
+  already-cached frame is never re-copied (its skip touches nothing). Regression tests
+  `test_ingest_retries_cache_after_a_transient_copy_failure` (fails before / passes after) and
+  `test_ingest_does_not_recopy_an_already_cached_frame`.
 - **Low-priority robustness (traced 2026-07-08, near-unreachable): opening an empty/foreign
   `project.sqlite` yields a DB with no `frames` table.** `io/project.py` `Project.open` on an existing
   sqlite with `user_version==0` runs `_migrate_schema(0)`, which only `ALTER TABLE frames …` (each
@@ -1055,6 +1056,14 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.94.9** — Ingest robustness: a transient Stage-1 copy failure (a NAS blip during
+  `shutil.copy2`) no longer leaves a frame **permanently** uncached. `ingest_files` keyed
+  `existing` on the source-path string, so a re-scan skipped the already-registered row and
+  never retried the copy — the size-check "resume" branch was dead for this case. It now keys
+  `existing` on the frame row and, when a registered frame is still uncached and caching is on,
+  retries the copy via a shared `_copy_to_stage1` helper; already-cached frames are never
+  re-copied. Not a wrong-image bug (downstream falls back to `source_path`), but the Stage-1
+  cache is now populated on the next scan instead of never. Regression tests in `tests/test_ingest.py`.
 - **v0.94.8** — Stacking-engine data-integrity fix (current-focus §1): the bilinear debayer
   (`seestack/io/fits_loader.py`) systematically **darkened the outermost 1-px ring of every
   debayered frame** (~50% on edges, ~75% at the four corners). Root cause: the missing-sample

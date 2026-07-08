@@ -59,6 +59,25 @@ def find_fits_files(root: str | Path, *, recursive: bool = True) -> list[Path]:
     return files
 
 
+def _copy_to_stage1(
+    project: Project, cache: CacheManager, src: Path, frame_id: int
+) -> Path | None:
+    """
+    Copy ``src`` into the Stage-1 cache under ``frame_id`` and record the path on
+    the frame row. Returns the cached path, or ``None`` if the copy failed (a NAS
+    blip): the frame stays usable via ``source_path``, and a later scan retries.
+    """
+    cached = cache.stage1_path_for(frame_id, src.name)
+    try:
+        if not cached.exists() or cached.stat().st_size != src.stat().st_size:
+            shutil.copy2(src, cached)
+    except OSError as exc:
+        log.warning("could not cache %s: %s", src, exc)
+        return None
+    project.update_frame(frame_id, cached_path=str(cached))
+    return cached
+
+
 def ingest_files(
     project: Project,
     cache: CacheManager,
@@ -70,16 +89,30 @@ def ingest_files(
     Register each source file in the project database, optionally copying it
     to Stage 1 first. Yields one ``IngestResult`` per file.
 
-    Already-ingested files (same ``source_path``) are skipped silently.
+    Already-ingested files (same ``source_path``) are skipped silently — but if a
+    previous ingest failed to cache one (a transient copy error left
+    ``cached_path`` NULL), the copy is retried here instead of being abandoned
+    forever.
     """
     cache.ensure_dirs()
-    existing: set[str] = {f.source_path for f in project.iter_frames()}
+    existing: dict[str, FrameRow] = {f.source_path: f for f in project.iter_frames()}
 
     for src in sources:
         src = Path(src)
         s_str = str(src)
-        if s_str in existing:
-            yield IngestResult(source_path=src, frame_id=None, cached_path=None, skipped=True)
+        prior = existing.get(s_str)
+        if prior is not None:
+            # Registered already → skip. But if a NAS blip during an earlier copy
+            # left this frame uncached, retry the Stage-1 copy now; otherwise the
+            # row is skipped on every future scan and the cache is never populated.
+            recovered: Path | None = None
+            if copy_to_cache and not prior.cached_path and prior.id is not None:
+                recovered = _copy_to_stage1(project, cache, src, prior.id)
+            # frame_id stays None on a skip (a registered frame is not "added"),
+            # so existing consumers that gate on frame_id don't re-list it.
+            yield IngestResult(
+                source_path=src, frame_id=None, cached_path=recovered, skipped=True
+            )
             continue
 
         # Zero-byte files are half-finished copies (or a stalled NAS transfer);
@@ -121,18 +154,11 @@ def ingest_files(
 
         cached: Path | None = None
         if copy_to_cache:
-            cached = cache.stage1_path_for(frame_id, src.name)
-            try:
-                if not cached.exists() or cached.stat().st_size != src.stat().st_size:
-                    shutil.copy2(src, cached)
-            except OSError as exc:
-                log.warning("could not cache %s: %s", src, exc)
-                cached = None
+            cached = _copy_to_stage1(project, cache, src, frame_id)
 
-        if cached is not None:
-            project.update_frame(frame_id, cached_path=str(cached))
-
-        existing.add(s_str)
+        row.id = frame_id
+        row.cached_path = str(cached) if cached is not None else None
+        existing[s_str] = row
         yield IngestResult(
             source_path=src, frame_id=frame_id, cached_path=cached, skipped=False
         )
