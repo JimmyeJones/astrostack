@@ -40,6 +40,31 @@ def test_old_config_loads_keeps_values_and_defaults_new_fields(tmp_path):
     # New job-history cap defaults to the long-standing hard-coded value, so an
     # upgraded install keeps exactly as much job history as before.
     assert s.job_history_limit == 200
+    # New observing-site fields default to "unset" so the Tonight planner is
+    # inert on upgrade (it falls back to reading a frame header) and never
+    # changes existing behaviour.
+    assert s.site_lat is None and s.site_lon is None
+    assert s.site_elevation_m == 0.0
+    assert s.min_target_altitude_deg == 30
+
+
+def test_observing_site_config_round_trips(tmp_path):
+    # A config that sets a site location must load it back unchanged.
+    _write_cfg(tmp_path, {
+        "site_lat": 48.2, "site_lon": 11.6, "site_elevation_m": 520.0,
+        "min_target_altitude_deg": 40,
+    })
+    s = SettingsStore(str(tmp_path)).get()
+    assert s.site_lat == 48.2 and s.site_lon == 11.6
+    assert s.site_elevation_m == 520.0 and s.min_target_altitude_deg == 40
+
+
+def test_bad_site_lat_resets_only_that_field(tmp_path):
+    # An out-of-range latitude must reset just that field, not wipe the config.
+    _write_cfg(tmp_path, {"auto_stack": True, "site_lat": 200.0, "site_lon": 11.6})
+    s = SettingsStore(str(tmp_path)).get()
+    assert s.auto_stack is True and s.site_lon == 11.6  # untouched
+    assert s.site_lat is None  # bad value reset to the "unset" default
 
 
 def test_bad_auto_grade_sensitivity_resets_only_that_field(tmp_path):

@@ -87,6 +87,8 @@ def write_seestar_fits(
     pixscale_arcsec: float = 5.0,
     star_shift: tuple[float, float] = (0.0, 0.0),
     noise_seed: int | None = None,
+    site_lat: float | None = None,
+    site_lon: float | None = None,
 ) -> Path:
     """Write a synth FITS file with Seestar-like headers. Requires astropy."""
     from astropy.io import fits
@@ -102,6 +104,10 @@ def write_seestar_fits(
     hdu.header["CCD-TEMP"] = -10.0
     hdu.header["DATE-OBS"] = "2024-09-12T03:14:55.123"
     hdu.header["INSTRUME"] = "Seestar S50"
+    if site_lat is not None:
+        hdu.header["SITELAT"] = site_lat
+    if site_lon is not None:
+        hdu.header["SITELONG"] = site_lon
     if add_wcs:
         # Simple TAN-projected WCS — enough for stacker tests to reproject.
         hdu.header["CTYPE1"] = "RA---TAN"

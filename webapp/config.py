@@ -129,6 +129,18 @@ class Settings(BaseModel):
     # from either OOM-ing the box or refusing every stack.
     max_stack_memory_gb: float | None = Field(default=None, ge=0.5, le=1024.0)
 
+    # --- observing site (Tonight night planner) ----------------------------
+    # Optional observer location for the offline 'Tonight' planner. When unset,
+    # the planner falls back to a site latitude/longitude read from a solved
+    # frame's FITS header (Seestar writes SITELAT/SITELONG), so a Seestar owner
+    # usually needs to set nothing. Kept nullable so an old config still loads
+    # and the feature is inert until a location is known. Longitude is +E.
+    site_lat: float | None = Field(default=None, ge=-90.0, le=90.0)
+    site_lon: float | None = Field(default=None, ge=-180.0, le=180.0)
+    site_elevation_m: float = Field(default=0.0, ge=-500.0, le=9000.0)
+    # Minimum altitude (deg) a target must clear to count as "usable" tonight.
+    min_target_altitude_deg: int = Field(default=30, ge=0, le=80)
+
     # --- jobs --------------------------------------------------------------
     # How many finished jobs the in-memory map keeps (and, at ~10×, how many
     # rows jobs.sqlite retains) before old history is pruned. Higher keeps more

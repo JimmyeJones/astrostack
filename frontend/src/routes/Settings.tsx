@@ -47,6 +47,10 @@ const HINTS: Record<string, string> = {
   seestar_known_ips: "Pin specific Seestar IPs that auto-discovery can't reach.",
   seestar_scan_interval_s: "How often to re-scan the network for devices.",
   seestar_poll_interval_s: "How often to poll each connected scope for telemetry.",
+  site_lat: "Your observing latitude in degrees (north positive). Used by the Tonight planner. Leave blank to read it automatically from a plate-solved Seestar frame.",
+  site_lon: "Your observing longitude in degrees (east positive). Used by the Tonight planner. Leave blank to read it automatically from a plate-solved Seestar frame.",
+  site_elevation_m: "Your elevation above sea level in metres (a small refinement to the Tonight planner; 0 is fine for most).",
+  min_target_altitude_deg: "How high a target must climb to count as usable in the Tonight planner. 30° is a good default; lower it for an open horizon, raise it if trees/buildings block low altitudes.",
 };
 
 function BackupRestore() {
@@ -500,6 +504,27 @@ export function SettingsView() {
           <Switch label={lbl("astap_use_solve_hints", "Use telescope target as solve hint")}
             checked={bool("astap_use_solve_hints")}
             onChange={(e) => set("astap_use_solve_hints", e.currentTarget.checked)} />
+
+          <Divider label="Observing site (Tonight planner)" />
+          <Text size="xs" c="dimmed">
+            Leave blank to read your location automatically from a plate-solved
+            Seestar frame. Only needed if you want to override it.
+          </Text>
+          <SimpleGrid cols={{ base: 1, xs: 3 }}>
+            <NumberInput label={lbl("site_lat", "Latitude (°N)")} value={num("site_lat")}
+              min={-90} max={90} step={0.1} decimalScale={4} placeholder="auto from frames"
+              onChange={(v) => set("site_lat", v === "" ? null : Number(v))} />
+            <NumberInput label={lbl("site_lon", "Longitude (°E)")} value={num("site_lon")}
+              min={-180} max={180} step={0.1} decimalScale={4} placeholder="auto from frames"
+              onChange={(v) => set("site_lon", v === "" ? null : Number(v))} />
+            <NumberInput label={lbl("site_elevation_m", "Elevation (m)")} value={num("site_elevation_m")}
+              min={-500} max={9000} step={10}
+              onChange={(v) => set("site_elevation_m", v === "" ? 0 : Number(v))} />
+          </SimpleGrid>
+          <NumberInput label={lbl("min_target_altitude_deg", "Minimum target altitude (°)")}
+            value={num("min_target_altitude_deg")} min={0} max={80} step={5}
+            allowDecimal={false} w={{ base: "100%", xs: 260 }}
+            onChange={(v) => set("min_target_altitude_deg", v === "" ? 30 : Number(v))} />
 
           <Divider label="Stacking" />
           <NumberInput label={lbl("max_stack_memory_gb", "Stack memory budget (GB)")}

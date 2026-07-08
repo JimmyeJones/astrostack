@@ -932,20 +932,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   add more) from **not-yet-targeted** ones worth starting. Build it in slices, and
   keep the astronomy core fully useful **offline** — only the weather enrichment
   touches the network:
-  - **(a) Offline astronomy core — the bulk of the value, no network.** Observer
-    location + tonight's dark window (astronomical dusk→dawn) drive, per candidate:
-    max altitude & transit time, the usable window above a configurable minimum
-    altitude, and moon phase + angular separation → a simple observability score,
-    ranked. Candidate set = **(1)** the user's existing library targets (annotate
-    each with total integration / sub count already captured — "already targeted"),
-    plus **(2)** a **bundled** deep-sky catalog (Messier + a curated NGC/Caldwell
-    set, shipped as a static data file — *no* network, no heavy dep) filtered to
-    what's up tonight ("not yet targeted"). Get the site's lat/lon from existing
-    plate-solved FITS headers (`SITELAT`/`SITELONG`) when present, else a new
-    opt-in `site_lat`/`site_lon`/`elevation`/`timezone` in Settings. Pure `astropy`
-    (already a dep); a new **read-only** page (reuse the existing Sky/Aladin view to
-    plot positions if useful). Deterministic + testable (fixed date + site → known
-    alt/moon). (M)
+  - ~~**(a) Offline astronomy core — the bulk of the value, no network.**~~ —
+    **SHIPPED v0.95.0** (see Shipped). A new engine module `seestack/nightplan.py`
+    (pure `astropy`, offline, deterministic) computes tonight's dark window
+    (astronomical −18° with nautical/civil fallbacks for short summer nights, and
+    `None` for polar day), and per candidate: max altitude, transit time, usable
+    minutes above a configurable min altitude, Moon separation + illumination → a
+    0–100 observability score. Candidate set = the user's library targets
+    ("already targeted", annotated with subs + integration) + a **bundled 110-object
+    Messier catalog** (`seestack/data/messier.json`, static, no network) with the
+    catalog copy of any already-targeted object deduped out. Observer location comes
+    from new opt-in `site_lat`/`site_lon`/`site_elevation_m` Settings, else it's read
+    best-effort from a solved frame's `SITELAT`/`SITELONG` FITS header (the Seestar
+    writes these, so it usually "just works"). `GET /api/plan/tonight` serves the
+    ranked plan; a new read-only **Tonight** page shows the dark window, Moon phase,
+    and two ranked tables ("add more to what you're shooting" vs "start something
+    new"). Additive/read-only throughout; new config fields default to unset (§9).
   - **(b) Horizon / tree-cover mask — local, small UI.** Let the user define a
     horizon profile (azimuth → minimum unobstructed altitude) capturing trees /
     buildings / the house, stored in Settings or library meta; the planner then
@@ -962,8 +964,10 @@ problems. Dogfood it every big-picture run and fix root causes.
     astronomy plan (a)+(b) must stand alone without it.
   Additive and read-only throughout (never touches stacks/data); the catalog is a
   static bundled file (no network, no heavy dependency); location/horizon are opt-in
-  with sane fallbacks. Overall L; slice (a) is the shippable first M and delivers
-  most of the ask. (L, autonomy/workflow)
+  with sane fallbacks. Overall L; **slice (a) shipped v0.95.0** — remaining: (b) the
+  horizon/tree-cover mask and (c) the sign-off-gated weather enrichment. A future
+  slice could also widen the bundled catalog beyond Messier (a curated Caldwell/NGC
+  set) — the loader + scorer already handle any number of objects. (L, autonomy/workflow)
 - Annotated sky overlay (label detected objects / show solved field). (M) —
   related to the night planner above; the planner's "plot tonight's targets" view
   can reuse this.
@@ -1198,6 +1202,18 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.95.0** — ⭐ OWNER-REQUESTED "Tonight" night planner, slice (a) — the offline astronomy core.
+  New pure engine module `seestack/nightplan.py` (astropy, offline, deterministic): computes tonight's
+  dark window (astronomical −18° with nautical/civil fallbacks; `None` for polar day), and per target
+  max altitude, transit, usable minutes above a configurable min altitude, Moon separation + phase → a
+  0–100 observability score. Combines the user's library targets ("already targeted", annotated with
+  subs + integration) with a **bundled 110-object Messier catalog** (`seestack/data/messier.json`,
+  static, no network), deduping the catalog copy of any already-shot target. New `GET /api/plan/tonight`
+  (observer location from new opt-in `site_lat`/`site_lon`/`site_elevation_m` Settings, else read
+  best-effort from a solved frame's `SITELAT`/`SITELONG` header) + a read-only **Tonight** frontend page
+  (dark-window/Moon summary, two ranked tables). Additive, read-only, off-by-default config (§9). Tests:
+  `tests/test_nightplan.py`, `tests/webapp/test_plan.py`, `test_config_upgrade` site cases, frontend
+  `tonight.test.ts` + `Tonight.test.tsx`.
 - **v0.94.17** — Friendliness: `post/target_id.py` now maps SIMBAD short OTYPE codes to plain words
   via a new `_OTYPE_NAMES` table + `friendly_object_type()` helper, so `object_type_name` (and the GUI
   identify dialog) reads "Galaxy"/"Globular cluster"/"HII region" instead of a bare "G"/"GlC"/"HII";
