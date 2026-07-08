@@ -804,6 +804,32 @@ def test_rotate_expand_param_controls_canvas_size():
     assert same.shape[:2] == img.shape[:2]
 
 
+@pytest.mark.parametrize("shape", [(2, 2), (1, 5), (5, 1), (2, 3), (3, 2)])
+def test_rotate_on_a_tiny_image_is_a_safe_noop(shape):
+    # Rotation's order-1 NaN border fill reaches ~1 px in from every edge, so a
+    # frame with <3 px on an axis has no interior to survive and — before the
+    # guard — came back *entirely* NaN, turning a fully-covered image into "no
+    # coverage" and breaking the NaN=coverage invariant (a <2 px crop upstream can
+    # feed exactly a 2×2). It must instead leave the sliver untouched, mirroring
+    # the degenerate-size guards on crop/resize/denoise.
+    spec = get_op("geometry.rotate")
+    img = np.full((*shape, 3), 0.5, dtype=np.float32)  # fully covered, finite
+    out = spec.apply(img.copy(), {"angle": 17.0, "expand": True}, EditContext())
+    assert out.shape == img.shape
+    assert np.isfinite(out).all()            # no covered pixel turned into NaN
+    assert np.allclose(out, img, atol=1e-6)  # a sliver is left exactly as-is
+
+
+def test_rotate_full_size_is_unchanged_by_the_tiny_guard():
+    # The guard must be a no-op for any real image: a normal-size rotate still
+    # grows the canvas and exposes NaN corners exactly as before.
+    spec = get_op("geometry.rotate")
+    img = _img(80, 120, nan_band=0)
+    out = spec.apply(img, {"angle": 30.0, "expand": True}, EditContext())
+    assert out.shape[0] > img.shape[0] and out.shape[1] > img.shape[1]
+    assert np.isnan(out).any()  # exposed corners are uncovered (NaN)
+
+
 def test_scaled_px_shrinks_on_proxy_only():
     """proxy_scale rescales full-res pixel measures for the preview, no-op on export."""
     assert EditContext(proxy_scale=1.0).scaled_px(4.0) == 4.0      # export: unchanged
