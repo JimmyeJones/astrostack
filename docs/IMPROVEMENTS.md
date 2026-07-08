@@ -785,6 +785,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   bulk apply is a from-scratch "quick start from your data" convenience and the raw stack noise is a
   reasonable seed there — so this is a consistency nicety, not a bug. Only worth aligning if a future
   run is already in that button's wiring. (S, editor/consistency)
+- ~~**Low-priority robustness (near-unreachable): `geometry.rotate` on a sub-3-px image blanks the
+  whole covered region (NaN=coverage violation).**~~ — **FIXED v0.94.5** (see Shipped). `_rotate`
+  was the odd one out of the geometry/detail degenerate-guard family — `_crop` (`<2`), `_resize`
+  (`max(1,…)`) and `_denoise` (`<2`) all guard tiny sizes, but rotate did not. Rotation's order-1
+  NaN border fill reaches ~1 px in from every edge, so a frame with `<3` px on an axis has no
+  interior to survive and came back **entirely NaN** — turning a fully-covered image into "no
+  coverage" (reproduced numerically at 2×2, 1×5, 2×3, … via `geometry.rotate`; a `<2` px crop
+  upstream can feed exactly a 2×2). `_rotate` now returns the sliver untouched when `h < 3 or w < 3`,
+  mirroring its siblings. A no-op on any real ≥3 px image (byte-for-byte unchanged — the full-size
+  rotate still grows the canvas and exposes NaN corners). Regression tests
+  `test_rotate_on_a_tiny_image_is_a_safe_noop` (2×2/1×5/5×1/2×3/3×2; fails before / passes after)
+  and `test_rotate_full_size_is_unchanged_by_the_tiny_guard`. Found by a fresh adversarial
+  numeric audit of the editor ops (2026-07-08), which otherwise came back clean.
 - ~~**Low-priority robustness: `detail.denoise` on a 1-px-thin image.**~~ — **FIXED v0.94.1**
   (see Shipped). A 1×N / N×1 RGB array made the wavelet path emit all-NaN in the covered region
   (violating the NaN=coverage hard guardrail) and the `bilateral` path raise `IndexError`. `_denoise`
@@ -884,6 +897,13 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.94.5** — Engine/NaN-coverage: `geometry.rotate` now guards degenerate sizes (`h < 3 or
+  w < 3` → return the sliver untouched), the last op in the geometry/detail degenerate-guard family
+  that lacked one. Rotation's ~1 px NaN border consumes a sub-3-px axis entirely, so a fully-covered
+  2×2/1×5/… came back all-NaN (a NaN=coverage violation; a `<2` px crop upstream can feed exactly a
+  2×2). No-op on any real ≥3 px image. Regression tests `test_rotate_on_a_tiny_image_is_a_safe_noop`
+  + `test_rotate_full_size_is_unchanged_by_the_tiny_guard`. Found by a fresh adversarial numeric
+  editor-ops audit that otherwise came back clean.
 - **v0.94.4** — Robustness/friendliness: `POST /api/calibration/masters` now returns 400 (not 500)
   when `Path(source_dir).is_dir()` *raises* (e.g. an embedded null byte → ValueError on platforms
   that raise). Wrapped the check in a `(OSError, ValueError)` guard treating a raise as "not a

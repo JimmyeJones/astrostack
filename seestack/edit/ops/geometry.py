@@ -33,6 +33,15 @@ def _rotate(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     if abs(angle) < 1e-3:
         return rgb
     img = as_rgb(rgb)
+    h, w = img.shape[:2]
+    if h < 3 or w < 3:
+        # Degenerate size: rotation's order-1 NaN border fill reaches ~1 px in from
+        # every edge, so a frame with fewer than 3 px on an axis has no interior to
+        # survive and comes back *entirely* NaN — turning a fully-covered image into
+        # "no coverage" and breaking the NaN=coverage invariant. A sliver has no
+        # meaningful orientation to change, so leave it untouched (mirroring the
+        # <2 px guards on crop/resize/denoise). A no-op on any real ≥3 px image.
+        return img
     return rotate(img, angle, axes=(0, 1), reshape=bool(params.get("expand", True)),
                   order=1, mode="constant", cval=np.nan).astype(np.float32)
 
