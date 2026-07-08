@@ -960,6 +960,22 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.94.8** — Stacking-engine data-integrity fix (current-focus §1): the bilinear debayer
+  (`seestack/io/fits_loader.py`) systematically **darkened the outermost 1-px ring of every
+  debayered frame** (~50% on edges, ~75% at the four corners). Root cause: the missing-sample
+  interpolators average same-channel neighbours, but the colour planes are *sparse* (zero at every
+  non-sample site), and when an edge pixel's interpolation reached off the frame the previous
+  edge-replicate `_shift` replicated a **zero line** — so a real edge sample got averaged against 0.
+  The align path insets 3 px so it never showed there, but the **drizzle stack path feeds the full
+  frame** (no inset) straight into the drizzler, so the dark seam reached the *final image*. Fix:
+  `_shift` now zero-fills the vacated edge and both `_interp_g`/`_interp_rb` use **normalized
+  convolution** — each average divides by the count of genuine in-frame same-channel samples it
+  summed, so an off-frame contributor is *excluded* rather than diluting toward 0. Interior sites
+  (all neighbours present) are **byte-for-byte unchanged** (verified on random data); only the border
+  is corrected. Found by a fresh adversarial audit of the FITS I/O layer + reproduced numerically (a
+  constant mosaic now debayers to that exact constant across all four Bayer patterns). Regression
+  tests `test_bilinear_debayer_constant_image` (strengthened to assert the full frame, all patterns —
+  fails before / passes after) and `test_bilinear_debayer_border_not_darkened`.
 - **v0.94.7** — Job-progress robustness (autonomy/friendliness): fixed two real `useJobEvents` SSE bugs
   found by a fresh adversarial audit of the job-events + export-polling surface. **(1)** `es.onerror`
   unconditionally called `es.close()`, defeating EventSource's built-in auto-reconnect — so any
