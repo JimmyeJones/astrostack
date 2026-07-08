@@ -741,8 +741,16 @@ def _render_recipe_fullres(fits_path: str, recipe_dict: dict, progress,
         done += 1
         progress("render", done, n)
     if not stretched and not display_space:
+        # Mirror the live preview's fallback (seestack/edit/pipeline.py): asinh
+        # renders uncovered (NaN) pixels as black 0, so restore NaN afterwards.
+        # Without this the export bakes mosaic-gap / reproject-border "no
+        # coverage" to real black in the float32 FITS — diverging from the
+        # preview and making a re-edit treat the gap as covered black.
+        from seestack.edit.registry import finite_mask
         from seestack.render.thumbnail import asinh_stretch
-        out = asinh_stretch(out)
+        uncovered = ~finite_mask(out)
+        out = as_rgb(asinh_stretch(out)).copy()
+        out[uncovered] = np.nan
     return out, recipe
 
 

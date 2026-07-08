@@ -84,6 +84,49 @@ def test_proxy_coverage_none_without_sibling(tmp_path):
     assert _proxy_coverage(str(tmp_path / "master.fits"), scale=1.0) is None
 
 
+def _write_linear_stack_fits(path, rgb):
+    """Write an (H, W, 3) float32 array as a linear stack FITS cube."""
+    cube = np.transpose(np.asarray(rgb, dtype=np.float32), (2, 0, 1))
+    hdu = fits.PrimaryHDU(data=cube)
+    hdu.header["BUNIT"] = "ADU"
+    hdu.writeto(path, overwrite=True)
+
+
+def test_fullres_export_keeps_nan_coverage_on_a_no_stretch_recipe(tmp_path):
+    """The full-res export must mirror the live preview: its fallback asinh
+    stretch renders uncovered (NaN) pixels as black 0, so it has to restore NaN
+    afterwards. Otherwise a no-stretch export (empty recipe, or a recipe with no
+    stretch op) bakes mosaic-gap / reproject-border "no coverage" to real black
+    in the float32 FITS — diverging from the preview and making a re-edit treat
+    the gap as covered black. Regression for the export path dropping the NaN
+    restore that ``seestack/edit/pipeline.apply_recipe`` performs."""
+    from webapp.pipeline import _render_recipe_fullres
+
+    rng = np.random.default_rng(0)
+    rgb = rng.uniform(0.01, 0.05, size=(64, 64, 3)).astype(np.float32)
+    rgb[:12, :12, :] = np.nan          # uncovered corner (mosaic gap / reproj border)
+    rgb[40:44, 40:44, :] = 0.8         # a bright star so the stretch has range
+    fp = tmp_path / "master.fits"
+    _write_linear_stack_fits(fp, rgb)
+
+    def _noop(*a, **k):
+        return None
+
+    # Empty recipe → the default asinh fallback runs. The gap must stay NaN.
+    out, _ = _render_recipe_fullres(str(fp), {"ops": []}, _noop)
+    out = np.asarray(out)
+    assert np.isnan(out[:12, :12, :]).all(), "no-coverage gap baked to black on export"
+    # The covered region is still finite and actually stretched (viewable).
+    assert np.isfinite(out[20:24, 20:24, :]).all()
+    assert float(np.nanmax(out)) > 0.5
+
+    # A recipe with an explicit stretch op already preserved NaN — keep it green.
+    stretch_recipe = {"ops": [{"id": "tone.stretch",
+                               "params": {"mode": "stf"}, "enabled": True}]}
+    out2, _ = _render_recipe_fullres(str(fp), stretch_recipe, _noop)
+    assert np.isnan(np.asarray(out2)[:12, :12, :]).all()
+
+
 def _wait_job(client, job_id, timeout=30.0):
     deadline = time.time() + timeout
     while time.time() < deadline:

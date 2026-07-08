@@ -1028,6 +1028,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   (`scripts/agent-setup.sh`, idempotent; run via `source scripts/agent-setup.sh`).
   Remaining sliver: wire it into an actual `SessionStart` hook so setup is
   zero-tax with no manual invocation. (S)
+- **Low-priority robustness (near-unreachable, traced 2026-07-08 engine audit): the Gaia colour solver
+  can compute a *negative* blue scale on an extremely-reddened field.** `post/color_cal.py::_solve_gaia`
+  models `expected_bg = 1.10 − 0.45·(BP−RP)` (≈L300/L327), which goes negative for `BP−RP > 2.44`, and
+  `scale_b = median(expected_bg / measured_bg)` (≈L335) then goes negative when the *median* matched-star
+  colour exceeds ~2.44 (reproduced: median colour ~2.6 → `scale_b ≈ −0.25`). A field where over half the
+  g<17 matched stars are that red is not something an OSC Seestar owner realistically images, and the
+  default colour mode is gray-star (Gaia needs network + is opt-in), so this is filed as a note, not
+  shipped — but a defensive `max(scale_b, small_floor)` clamp (one line + a test) would harden it if a
+  future run is already in that file. (S, image-quality/robustness)
+- **Trivial (cosmetic): `post/target_id.py` sets `object_type_name` to the raw short code.** At
+  ~L117–118 `object_type_name` is assigned the same short OTYPE code as `object_type` (e.g. `"G"`),
+  so any "friendly name" surface just shows the code. Purely cosmetic; map the common Simbad OTYPE
+  codes to plain words ("G" → "Galaxy", …) if a run touches that file. (S, friendliness)
 - Expand `docs/` (webapp.md) to cover calibration, mono/LRGB, auth. (S)
 - `npm audit` still reports `esbuild`≤0.24.2/`vite`≤6.4.2/`vitest`≤3.2.5
   (moderate — dev server only, not the production build) after this run's
@@ -1074,6 +1087,21 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.94.15** — Engine/data-integrity fix (found by a fresh adversarial editor-pipeline audit): the
+  full-res editor **export** dropped the NaN=coverage restore that the live preview performs. When a
+  recipe has **no explicit stretch op** (an empty recipe, or a custom/preset recipe relying on the
+  default), `_render_recipe_fullres` applied its fallback `asinh_stretch` — which renders uncovered
+  (NaN) pixels as black `0` — and returned it **without** re-marking those pixels NaN, unlike
+  `seestack/edit/pipeline.apply_recipe` (which does `out[uncovered] = np.nan`). Because `_write_fits`
+  writes the float32 cube verbatim (no `nan_to_num`), the exported **FITS** baked a mosaic-gap /
+  reproject-border "no coverage" region to *real black* — so the export diverged from the live preview
+  (which shows NaN) and a **re-edit** of that export saw the gap as covered black (`finite_mask` reports
+  it covered), mis-treating it in coverage-leveling / border-trim / histogram-levels. The image-only
+  PNG/TIFF looked identical (both `nan_to_num` to black), which is why prior image audits missed it.
+  Fix mirrors the preview exactly (`finite_mask` → asinh → restore NaN); a recipe *with* a stretch op
+  was already correct and stays byte-for-byte unchanged. Regression test
+  `test_fullres_export_keeps_nan_coverage_on_a_no_stretch_recipe` (fails before / passes after) plus a
+  guard that the explicit-stretch export is unchanged. (`webapp/pipeline.py`, `tests/webapp/test_editor.py`)
 - **v0.94.14** — Friendliness polish: the Dashboard readiness banners' dismissal now keys on the
   *specific* problem (readiness *signature*) instead of a global boolean, so dismissing one banner
   no longer suppresses a genuinely different or returning problem (ASTAP→database, incoming→library,
