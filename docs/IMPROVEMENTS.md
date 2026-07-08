@@ -802,6 +802,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.93.3** — Target aggregate RA is now 0°/360°-wrap-safe (`claude/happy-franklin-te45e2`).
+  `_median_radec` (`seestack/io/library.py`) set a target's catalog `ra_deg`/`dec_deg` from a plain
+  `np.median` of its accepted frames' RAs. For a target imaged near RA=0h whose frames straddle the
+  wrap that flipped the position ~180° to the opposite side of the sky (a 50/50 split of
+  359.9°/0.1° medians to **180.0°**), so the **sky-map plot** placed the target wrong and
+  `find_target_within` target-matching/dedup compared against a bogus centre. Fix unwraps the RAs
+  into a continuous range before the median (the same heuristic `compute_mosaic_canvas` /
+  `pick_reference_frame` use) and folds back to `[0, 360)`; a no-op when nothing straddles the wrap,
+  so a normal target's stored position is unchanged. Sibling of the v0.93.2 reference-frame fix.
+  Regression test `test_target_ra_is_wrap_safe_across_ra_zero` (fails before at 180.0° / passes
+  after near 0°).
 - **v0.93.2** — Reference-frame selection is now RA 0°/360°-wrap-safe
   (`claude/happy-franklin-te45e2`). `pick_reference_frame` (`seestack/stack/reference.py`) took a
   naive `sorted()` median of candidate RAs and plain `(ra − med_ra)` distances, so for a target

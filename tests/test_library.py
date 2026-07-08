@@ -103,6 +103,31 @@ def test_refresh_target_stats_pulls_from_per_project_db(tmp_path):
         lib.close()
 
 
+def test_target_ra_is_wrap_safe_across_ra_zero(tmp_path):
+    """A target imaged near RA=0h has frames straddling the 0°/360° boundary.
+    The registry RA must stay near 0°, not flip ~180° to the opposite side of the
+    sky (which would break the sky-map plot and find_target_within matching)."""
+    lib = Library.create(tmp_path / "lib")
+    try:
+        entry, proj = lib.create_target("RA-zero target")
+        try:
+            # 50/50 split across the wrap — a plain median lands at 180.0°.
+            _add_frame(proj, exposure_s=10.0, ra=359.9, dec=20.0)
+            _add_frame(proj, exposure_s=10.0, ra=0.1, dec=20.0)
+        finally:
+            proj.close()
+
+        refreshed = lib.refresh_target_stats(entry.safe_name)
+        assert refreshed is not None
+        ra = float(refreshed.ra_deg)
+        # Wrap-safe: within a hair of 0°/360°, on the correct side of the sky —
+        # not the buggy 180.0°.
+        assert min(ra, 360.0 - ra) < 0.5
+        assert abs(float(refreshed.dec_deg) - 20.0) < 1e-6
+    finally:
+        lib.close()
+
+
 def test_campaign_stats_sums_across_targets(tmp_path):
     lib = Library.create(tmp_path / "lib")
     try:
