@@ -430,6 +430,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   shot. Keep the current general recipe as the fallback when classification is
   low-confidence. Off-by-default risk is nil (Auto is an explicit button). Needs a
   careful, well-tested classifier so it never mis-picks confidently. (M, autonomy/editor)
+  _(Builder note 2026-07-08: a fresh dogfood re-confirmed the current general Auto recipe is
+  healthy and well-tuned (single-field: preview↔export parity 0.00%, median grey 0.24, balanced
+  R/G/B), so the bar for **changing what Auto emits** is high — a confident classifier really does
+  need validating against **real** galaxy/nebula/cluster Seestar stacks, not just synthetic fields,
+  before it touches the most-used one-click path on a live install. A **lower-risk first slice worth
+  considering**: keep Auto's output unchanged and instead surface the classification as a one-click
+  **preset suggestion** — e.g. a dimmed "This looks like a star cluster — try the Star-cluster
+  preset?" chip in the editor (and/or a line in the existing "Why these steps?" note) that the user
+  can accept or ignore. A mis-pick then costs a wrong *suggestion*, not a worse *image*, so it can
+  ship and gather real-world signal (which classifications the owner accepts) before graduating to
+  actually seeding Auto. Same cheap cues (extended-vs-point-source fraction, colour spread) computed
+  in `analyze_proxy`; additive; testable on the classifier in isolation.)_
 - ~~**Chain the auto-edit onto "Reprocess everything" too (finished pictures after an
   upgrade).**~~ — **shipped v0.86.1** (see Shipped). Took the "toggle, off by default"
   direction the Scout note flagged: a new **"Also auto-edit each result into a finished
