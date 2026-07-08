@@ -106,6 +106,22 @@ def test_wavelet_denoise_actually_runs_wavelet():
     assert not np.allclose(wav, tv, atol=1e-4)        # wavelet ≠ the TV fallback
 
 
+@pytest.mark.parametrize("shape", [(1, 40, 3), (40, 1, 3)])
+@pytest.mark.parametrize("method", ["wavelet", "bilateral", "tv"])
+def test_denoise_on_a_one_px_thin_image_is_a_safe_noop(shape, method):
+    # A 1-px-thin image has no neighbourhood to denoise over: before the guard,
+    # the wavelet path emitted all-NaN in the *covered* region (breaking the
+    # NaN=coverage invariant) and bilateral raised IndexError. It must instead
+    # return the image untouched, preserving finite coverage, like the geometry
+    # ops' degenerate-size guards.
+    op = get_op("detail.denoise")
+    img = (np.random.default_rng(0).random(shape).astype("float32") * 0.2) + 0.1
+    out = op.apply(img, {"method": method, "strength": 0.6}, EditContext())
+    assert out.shape == img.shape
+    assert np.isfinite(out).all()          # no NaN introduced into covered pixels
+    assert np.allclose(out, img, atol=1e-6)  # a sliver is left exactly as-is
+
+
 def test_curves_identity_is_noop():
     img = _img()
     spec = get_op("tone.curves")

@@ -616,6 +616,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+- **Scout to vet on REAL data: does the Auto denoise↔sharpen crossfade over-read a *sky
+  gradient* as noise?** (M, image-quality/autonomy) `presets.auto_recipe` picks its denoise
+  strength and whether to sharpen from `analyze_proxy`'s `sky_sigma`, measured on the **raw**
+  linear proxy — *before* Auto's own first op (`background.final_gradient`) removes the gradient.
+  A Builder dogfood (2026-07-08) found `sky_sigma` is materially sensitive to a smooth background
+  gradient and to dynamic range: on synthetic proxies, gradient 0.0→0.10 moved `sky_sigma`
+  0.071→0.184 at *fixed* noise (crossfade band is 0.012–0.028, so it saturates to "very noisy" →
+  full denoise, **no sharpen**). This is very likely just an unrepresentative synthetic (the Scout's
+  real-data dogfoods *do* get sharpen chosen, so real proxies read < 0.012), **not** a confirmed
+  bug — hence a Scout item, not a Builder change to the most-used one-click path. Worth checking on
+  a real light-polluted / strong-gradient Seestar stack whether Auto ever *wrongly* drops sharpen and
+  over-denoises. If real: measure the crossfade `sky_sigma` on a **coarsely background-subtracted**
+  proxy (a cheap large-box detrend, matching what `final_gradient` will remove anyway) so it reflects
+  true pixel noise, not the gradient. Additive, testable on `analyze_proxy`/`auto_recipe` in isolation;
+  changing Auto's output needs the usual real-data validation.
 - ~~**Graceful degradation for `final_gradient` on busy / dense-star fields (instead of
   giving up).**~~ — **shipped v0.89.2** (see Shipped). The `Background2D` fit now degrades
   through an `exclude_percentile` ladder (80 → 95 → 100) and, as a last try, a half-size box,
@@ -749,23 +764,30 @@ problems. Dogfood it every big-picture run and fix root causes.
   bulk apply is a from-scratch "quick start from your data" convenience and the raw stack noise is a
   reasonable seed there — so this is a consistency nicety, not a bug. Only worth aligning if a future
   run is already in that button's wiring. (S, editor/consistency)
-- **Low-priority robustness: `detail.denoise` on a 1-px-thin image.** A 1×N / N×1
-  RGB array makes the wavelet path emit all-NaN in the covered region (violating
-  the NaN=coverage invariant) and the `bilateral` path raise `IndexError`. Found by
-  the 2026-07-04 engine fuzz; **near-unreachable** (a linear-stage op always sees
-  the full ≤1500 px proxy, never a sliver — crop is nonlinear/after it), so not
-  worth a standalone ship. If a future run is already in `detail.py`, a cheap guard
-  (return the input unchanged when either axis is <2 px, mirroring the `geometry`
-  ops' degenerate-size guards) closes it with a one-line regression test. (S, robustness)
+- ~~**Low-priority robustness: `detail.denoise` on a 1-px-thin image.**~~ — **FIXED v0.94.1**
+  (see Shipped). A 1×N / N×1 RGB array made the wavelet path emit all-NaN in the covered region
+  (violating the NaN=coverage hard guardrail) and the `bilateral` path raise `IndexError`. `_denoise`
+  now guards the degenerate case (`shape[0] < 2 or shape[1] < 2` → return the image untouched),
+  mirroring the `geometry` ops' degenerate-size guards — a sliver has no neighbourhood to denoise
+  over. Parametrized regression test `test_denoise_on_a_one_px_thin_image_is_a_safe_noop`
+  (wavelet/bilateral/tv × 1×N/N×1; fails before / passes after). Reachability was near-nil in
+  practice (the crop op's own `<2 px` guard prevents slivers upstream) but it's a reproduced
+  violation of a documented invariant + a crash, so worth the cheap guard.
 - **Low-priority robustness (near-unreachable): calibration Build-master returns 500 (not
   400) on a null-byte `source_dir`.** `POST /api/calibration/masters` with `source_dir`
-  containing an embedded null byte (`"a b"`) hits `Path(source_dir).is_dir()`, which
+  containing an embedded null byte (`"ab"`) hits `Path(source_dir).is_dir()`, which
   raises `ValueError: embedded null byte` (not `OSError`), and the handler only guards the
   `is_dir()==False` case — so it 500s where every other bad input in that handler cleanly
   400s. Found by the Scout 2026-07-07 router fan-out audit; near-unreachable (the UI supplies
   a real folder), so not worth a standalone ship. If a future run is already in
   `calibration.py`, wrapping the `is_dir()` in a `(OSError, ValueError)` guard closes it with a
   one-line test. (S, robustness)
+  _(Builder 2026-07-08: attempted this alongside the denoise guard but **could not reproduce**
+  it on the CI container (Python 3.12.3) — `Path("/tmp/a<NUL>b").is_dir()` returns `False` there
+  rather than raising `ValueError`, so a fails-before regression test can't be written on this
+  platform and the fix would not meet the quality bar. Left open; the `(OSError, ValueError)`
+  guard is still correct defensively for platforms/Python builds that do raise — a future run
+  can ship it with a monkeypatched-`is_dir` test that forces the raise.)_
 - ~~**Extract the RA 0°/360° unwrap heuristic into one shared helper (regression-proofing).**~~
   — **shipped v0.93.4** (see Shipped). The `if span > 180: ra = where(ra>180, ra-360, ra)` unwrap
   is now a single dependency-free `seestack/coords.py` with `unwrap_ra_deg(ras)` +
@@ -832,6 +854,12 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.94.1** — Robustness: `detail.denoise` now guards a degenerate 1-px-thin image
+  (`shape[0] < 2 or shape[1] < 2` → return untouched), mirroring the geometry ops' degenerate-size
+  guards. Before the guard the wavelet path emitted all-NaN in the *covered* region (breaking the
+  NaN=coverage hard guardrail) and bilateral raised `IndexError`. Regression test
+  `test_denoise_on_a_one_px_thin_image_is_a_safe_noop` (wavelet/bilateral/tv × 1×N/N×1; fails
+  before / passes after).
 - **v0.94.0** — Auto-preset classifier — *safer-first slice* (a preset **suggestion**, not a change
   to Auto's output). New pure `presets.classify_target(rgb)` coarsely classifies a run's own proxy as a
   **star cluster / nebula / galaxy** from cheap geometry-first cues (`star_share` from a grey-opening
