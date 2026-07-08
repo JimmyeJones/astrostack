@@ -61,6 +61,37 @@ def test_tiebreak_by_fwhm(tmp_path):
         proj.close()
 
 
+def test_picks_central_frame_across_ra_zero_wrap(tmp_path):
+    """A target imaged near RA=0h has frames straddling the 0°/360° boundary.
+    The reference pick must not be fooled by the wrap: it should still choose the
+    most-central, sharpest frame (RA 0.0, the lowest FWHM) — not an edge frame —
+    and report a small span, not ~360°."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        # True centre RA 0.0 (sharpest); edge frames on both sides of the wrap.
+        frames = [
+            ("center", 0.0, 2.0),
+            ("e1", 359.85, 3.0),
+            ("e2", 359.9, 3.0),
+            ("e3", 0.1, 3.0),
+            ("e4", 0.15, 3.0),
+        ]
+        for name, ra, fwhm in frames:
+            proj.add_frame(FrameRow(
+                source_path=f"{name}.fit", wcs_json="x",
+                ra_center_deg=ra, dec_center_deg=20.0, fwhm_px=fwhm,
+            ))
+        choice = pick_reference_frame(proj)
+        assert choice is not None
+        # Before the wrap fix this picked an edge frame (RA 0.15, FWHM 3.0) and
+        # reported span ~338°.
+        assert choice.frame.source_path == "center.fit"
+        assert choice.frame.ra_center_deg == 0.0
+        assert choice.span_deg < 1.0
+    finally:
+        proj.close()
+
+
 def test_skips_rejected_frames(tmp_path):
     proj = Project.create(tmp_path / "p", name="t")
     try:

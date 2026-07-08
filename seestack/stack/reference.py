@@ -45,28 +45,41 @@ def pick_reference_frame(project: Project) -> ReferenceChoice | None:
     if not candidates:
         return None
 
-    # Median center.
-    ras = sorted(f.ra_center_deg for f in candidates)  # type: ignore[arg-type]
-    decs = sorted(f.dec_center_deg for f in candidates)  # type: ignore[arg-type]
-    med_ra = ras[len(ras) // 2]
-    med_dec = decs[len(decs) // 2]
+    # Median center. RA wraps at 0°/360°: a target imaged near RA=0h has frames
+    # straddling the boundary (some at ~359.9°, some at ~0.1°), and a naive
+    # median/subtraction would put the apparent centre ~180° away, score the
+    # wrapped frames as hugely distant, and report a ~360° span — so the sharpest
+    # central frame is passed over and the canvas ends up on an edge frame. Unwrap
+    # the candidate RAs into a continuous range first (the same fix
+    # ``compute_mosaic_canvas`` uses), then do the median/distance/span in that
+    # unwrapped space. With no wrap this leaves every value untouched, so a normal
+    # target behaves exactly as before.
+    raw_ras = [f.ra_center_deg for f in candidates]  # type: ignore[misc]
+    if max(raw_ras) - min(raw_ras) > 180.0:
+        uras = [r - 360.0 if r > 180.0 else r for r in raw_ras]  # type: ignore[operator]
+    else:
+        uras = list(raw_ras)
+    decs = [f.dec_center_deg for f in candidates]  # type: ignore[misc]
+    med_ra = sorted(uras)[len(uras) // 2]
+    med_dec = sorted(decs)[len(decs) // 2]
     cos_dec = math.cos(math.radians(med_dec))
 
     # Pick the frame with the smallest distance to median, breaking ties by
     # the lowest FWHM. Frames without a measured FWHM go last in tiebreaks.
-    def score(f: FrameRow) -> tuple[float, float]:
-        dx = (f.ra_center_deg - med_ra) * cos_dec  # type: ignore[operator]
-        dy = f.dec_center_deg - med_dec  # type: ignore[operator]
+    def score(idx: int) -> tuple[float, float]:
+        f = candidates[idx]
+        dx = (uras[idx] - med_ra) * cos_dec
+        dy = decs[idx] - med_dec
         dist = math.hypot(dx, dy)
         fwhm = f.fwhm_px if f.fwhm_px is not None else float("inf")
         return (dist, fwhm)
 
-    best = min(candidates, key=score)
+    best = candidates[min(range(len(candidates)), key=score)]
 
     # Diagnostic: angular span (max distance between any two centers).
     if len(candidates) > 1:
         # Approximate via bounding box; fine for rough Tip in Tips sidebar later.
-        ra_span = (max(ras) - min(ras)) * cos_dec
+        ra_span = (max(uras) - min(uras)) * cos_dec
         dec_span = max(decs) - min(decs)
         span_deg = math.hypot(ra_span, dec_span)
     else:

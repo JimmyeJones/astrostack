@@ -746,6 +746,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   a real folder), so not worth a standalone ship. If a future run is already in
   `calibration.py`, wrapping the `is_dir()` in a `(OSError, ValueError)` guard closes it with a
   one-line test. (S, robustness)
+- **Extract the RA 0°/360° unwrap heuristic into one shared helper (regression-proofing).**
+  The `if span > 180: ra = where(ra>180, ra-360, ra)` unwrap now lives in **three** places —
+  `stack/mosaic.py::_bbox`, `stack/reference.py::pick_reference_frame` (v0.93.2), and
+  `io/library.py::_median_radec` (v0.93.3) — because each was found to reintroduce the same
+  wrap bug independently. A single `unwrap_ra_deg(ras)` / `circular_median_ra_deg(ras)` helper
+  (alongside the existing `_circ_mean_ra_deg`) that all three call would make a *fourth* site
+  hard to get wrong, and gives one place to unit-test the boundary cases. Pure refactor, additive,
+  fully covered by the three existing regression tests. (S, Infra/correctness)
 - Chip away at the ~127 pre-existing `ruff check .` findings (don't add new ones);
   consider wiring ruff into CI once the count is low. (L, correctness/maintainability)
 - ~~Add a retention/pruning policy for `jobs.sqlite`~~ — **done, then made
@@ -802,6 +810,30 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.93.3** — Target aggregate RA is now 0°/360°-wrap-safe (`claude/happy-franklin-te45e2`).
+  `_median_radec` (`seestack/io/library.py`) set a target's catalog `ra_deg`/`dec_deg` from a plain
+  `np.median` of its accepted frames' RAs. For a target imaged near RA=0h whose frames straddle the
+  wrap that flipped the position ~180° to the opposite side of the sky (a 50/50 split of
+  359.9°/0.1° medians to **180.0°**), so the **sky-map plot** placed the target wrong and
+  `find_target_within` target-matching/dedup compared against a bogus centre. Fix unwraps the RAs
+  into a continuous range before the median (the same heuristic `compute_mosaic_canvas` /
+  `pick_reference_frame` use) and folds back to `[0, 360)`; a no-op when nothing straddles the wrap,
+  so a normal target's stored position is unchanged. Sibling of the v0.93.2 reference-frame fix.
+  Regression test `test_target_ra_is_wrap_safe_across_ra_zero` (fails before at 180.0° / passes
+  after near 0°).
+- **v0.93.2** — Reference-frame selection is now RA 0°/360°-wrap-safe
+  (`claude/happy-franklin-te45e2`). `pick_reference_frame` (`seestack/stack/reference.py`) took a
+  naive `sorted()` median of candidate RAs and plain `(ra − med_ra)` distances, so for a target
+  imaged near RA=0h whose frames straddle the wrap (some ~359.9°, some ~0.1°) it scored the
+  wrapped frames as ~360° distant — picking a poorly-centred, *blurrier* edge frame as the output
+  canvas reference (defeating the sharpest-central-frame rule) and reporting a garbage ~360° span.
+  Verified: a single field with its sharpest frame at RA 0.0 and edges at 359.85–0.15 picked the
+  0.15° edge frame and reported span ~338° before; now picks the central frame and span < 1°. Fix
+  unwraps the candidate RAs into a continuous range (the same heuristic `compute_mosaic_canvas`
+  already uses) before the median/distance/span — a no-op when no wrap, so a normal target is
+  byte-for-byte unchanged. Affects both single-field (canvas = reference footprint) and mosaic
+  (reference seeds `ref_shape` + canvas). Regression test
+  `test_picks_central_frame_across_ra_zero_wrap` (fails before / passes after).
 - **v0.93.1** — Make the editor's `denoise-suggestion` recipe-aware, matching its
   levels/stretch/curve siblings (`claude/happy-franklin-a5ivvh`). The per-op "From your image"
   denoise button now measures the *linear image entering* the denoise op (any prior linear ops —
