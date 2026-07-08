@@ -119,6 +119,24 @@ silently loses gradient removal on cluster/dense-star targets; a graceful-degrad
 below. Realistic gradient+nebula frames flatten cleanly (0.097 mean change, proxy==full-res).
 Baseline suite green: 841 passed, 2 skipped.)_
 
+_(Builder big-picture dogfood 2026-07-08 (v0.94.7 baseline): re-traced the real
+`build stack → one-click Auto → live-preview proxy → full-res export` journey end-to-end on a
+realistic **1920×1080, 12-sub dithered single-field** OSC stack (independent per-frame noise,
+shared stars, sub-pixel dither; κ-σ stack). Healthy: `is_mosaic` persists **False**, the Auto recipe
+is the full sane chain (`final_gradient → color_calibrate → denoise → stretch → scnr → saturation →
+curves → sharpen` — both denoise **and** sharpen present at `sky_sigma≈0.016`, mid-crossfade),
+**preview↔export parity 1.89% mean / 6.4% p99** (within the documented star-edge decimation limit at
+proxy_scale 2), full 0..1 range, ~0.9% NaN border. **No wrong-image bug found** — consistent with the
+mature engine/editor audits. Scanned the whole engine+webapp for TODO/FIXME/HACK (only one, in the
+deprecated Qt GUI) and confirmed no open PRs and no recent in-flight branches. **One genuine
+image-quality observation filed (not shipped — real-data-gated, most-used Auto path):** Auto's `tone.scnr`
+one-sided green clip rectifies background noise and biases an already-neutral background slightly magenta
+(export R/G/B 0.243/0.209/0.243; reproduced numerically on a neutral σ=0.03 background, green median
+−0.010). Logged to Image-quality Ideas for the Scout to vet on real green-cast OSC data. Backlog is
+otherwise genuinely dry of ready, safe, headless Builder work (recent v0.94.x commits are all small
+polish), so this run files findings rather than manufacture marginal work (AGENTS.md §2/§3). Baseline
+suite green: 887 passed, 2 skipped.)_
+
 _(Builder engine-hardening audit 2026-07-08 (v0.94.1 baseline): fresh adversarial audit of the
 stacking/calibration path with **numeric brute-force repros**, not just reading — the
 `MinMaxRejectAccumulator` order statistic (matched a brute-force top/bottom-k reference *exactly*
@@ -675,6 +693,28 @@ problems. Dogfood it every big-picture run and fix root causes.
   flat images ≈ byte-for-byte (detrend ≈ no-op), genuinely-noisy images unchanged (high-freq noise
   survives a coarse detrend), only gradient-heavy-low-noise images shift toward sharpen — but it still
   touches the most-used one-click path, so it stays a Scout/real-data item.)_
+- **Scout to vet on REAL data: does Auto's SCNR tint an already-neutral *background* magenta?**
+  (S–M, image-quality) `tone.scnr` (`seestack/edit/ops/tone.py::_scnr`) is a one-sided clip — it
+  can only ever pull green *down* toward the `0.5·(R+B)` neutral, never up. On data that already
+  carries a real green cast (light pollution, OSC green bias) that's exactly right and wanted. But
+  on a background that is already colour-balanced and noisy, the clip is asymmetric on the green
+  *noise*: positive green excursions get clipped, negative ones are kept, so it **rectifies the
+  noise and biases the background median magenta**. Auto applies it at `amount=0.8` after
+  `tone.color_calibrate` (gray-star, which has already neutralised the background), so the residual
+  it clips is largely noise. **Verified numerically (Builder dogfood 2026-07-08, no change shipped):**
+  on a perfectly neutral background (R=G=B=0.30, independent σ=0.03 per-channel noise), `_scnr(amount=0.8)`
+  shifts the green median −0.010 and the mean −0.012 (≈0.34σ) — R/B untouched — i.e. a faint magenta
+  cast. In the full stack→Auto→export dogfood (realistic 1920×1080 12-sub dithered stack) the export's
+  background medians came out R/G/B **0.243 / 0.209 / 0.243** (green ~14% low); a prior audit note
+  recorded the same signature (0.196 / 0.174 / 0.196) and read it as "balanced", so this has been live
+  and accepted for a while. **Why it's a Scout/real-data item, not a headless Builder change:** it
+  touches the most-used one-click Auto path, and whether the clip is a net win depends entirely on how
+  much *real* green cast a genuine Seestar background carries (which a headless synthetic can't stand in
+  for) — same reasoning as the `sky_sigma` item above. If it reproduces on real neutral-background OSC
+  stacks, candidate mitigations to weigh: lower Auto's SCNR `amount`; or protect the background (only apply
+  SCNR where signal is above a sky-relative threshold, so the noise floor isn't rectified); or run SCNR
+  on the post-denoise image only. Each must be validated so a real green-cast stack still gets its cast
+  removed. Testable on `_scnr` / `auto_recipe` in isolation; additive.
 - ~~**Graceful degradation for `final_gradient` on busy / dense-star fields (instead of
   giving up).**~~ — **shipped v0.89.2** (see Shipped). The `Background2D` fit now degrades
   through an `exclude_percentile` ladder (80 → 95 → 100) and, as a last try, a half-size box,
