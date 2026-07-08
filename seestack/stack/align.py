@@ -382,12 +382,15 @@ def _apply_subpixel_shift(
         ch_clean = np.where(np.isfinite(ch), ch, 0.0)
         out[..., c] = nd_shift(ch_clean, shift=(dy, dx), order=1,
                                mode="constant", cval=0.0)
-        # Restore NaN in pixels that were originally NaN.
+        # Restore NaN in pixels that were originally NaN, *and* mark the ~1 px
+        # edge strip vacated by the shift as uncovered (NaN) rather than the
+        # cval=0.0 fill above. cval=1.0 treats out-of-frame as NaN, so this
+        # runs unconditionally — a fully-finite window still gets its vacated
+        # ring marked NaN (NaN = no coverage; never turn a gap into a 0).
         nan_mask = ~np.isfinite(ch)
-        if nan_mask.any():
-            nan_shifted = nd_shift(nan_mask.astype(np.float32), shift=(dy, dx),
-                                   order=0, mode="constant", cval=1.0) > 0.5
-            out[..., c] = np.where(nan_shifted, np.nan, out[..., c])
+        nan_shifted = nd_shift(nan_mask.astype(np.float32), shift=(dy, dx),
+                               order=0, mode="constant", cval=1.0) > 0.5
+        out[..., c] = np.where(nan_shifted, np.nan, out[..., c])
     return out
 
 
@@ -459,11 +462,14 @@ def _apply_subpixel_shift_windowed(
         ch_clean = np.where(np.isfinite(ch), ch, 0.0)
         out[..., c] = nd_shift(ch_clean, shift=(dy, dx), order=1,
                                mode="constant", cval=0.0)
+        # As in _apply_subpixel_shift: mark both the originally-NaN pixels and
+        # the ~1 px edge vacated by the shift as uncovered (NaN), even when the
+        # window is fully finite — the strip that shifted in from outside the
+        # window is genuinely uncovered, not a 0.
         nan_mask = ~np.isfinite(ch)
-        if nan_mask.any():
-            nan_shifted = nd_shift(nan_mask.astype(np.float32), shift=(dy, dx),
-                                   order=0, mode="constant", cval=1.0) > 0.5
-            out[..., c] = np.where(nan_shifted, np.nan, out[..., c])
+        nan_shifted = nd_shift(nan_mask.astype(np.float32), shift=(dy, dx),
+                               order=0, mode="constant", cval=1.0) > 0.5
+        out[..., c] = np.where(nan_shifted, np.nan, out[..., c])
     return out
 
 

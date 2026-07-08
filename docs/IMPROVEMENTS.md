@@ -809,19 +809,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   platform and the fix would not meet the quality bar. Left open; the `(OSError, ValueError)`
   guard is still correct defensively for platforms/Python builds that do raise — a future run
   can ship it with a monkeypatched-`is_dir` test that forces the raise.)_
-- **Low-priority robustness (near-unreachable): sub-pixel shift fills vacated edges toward 0
-  instead of NaN when a window is fully finite.** In `align.py`'s `_apply_subpixel_shift`
-  /`_apply_subpixel_shift_windowed` (~lines 378–391, 456–467) the `order=1` shift uses `cval=0.0`,
-  and the vacated ~1 px edge strip is only re-marked NaN inside `if nan_mask.any()`. So a window with
-  **no** NaN would leave its outermost 1 px ring interpolated toward 0 (a fractional dimming) rather
-  than NaN=uncovered. Near-unreachable: real reprojected frames always carry a NaN border from the
-  `FRAME_EDGE_INSET_PX=3` valid-mask inset + bbox pad (a same-size dithered frame can't fully contain
-  the canvas inside its 3 px-inset interior), the effect is a fractional dimming of a 1 px ring, and
-  `subpixel_refine` is **off by default**. Found by the Builder 2026-07-08 engine audit; not worth a
-  standalone ship (it fixes an input that essentially can't occur), but if a future run is already in
-  `align.py` the clean fix is to always seed vacated pixels as NaN (or re-mark the shifted edge
-  unconditionally, not only when `nan_mask.any()`), with a fully-finite-window regression test.
-  (S, robustness)
+- ~~**Low-priority robustness (near-unreachable): sub-pixel shift fills vacated edges toward 0
+  instead of NaN when a window is fully finite.**~~ — **FIXED v0.94.3** (see Shipped). Both
+  `align.py::_apply_subpixel_shift` and `_apply_subpixel_shift_windowed` now run the NaN-restore
+  block **unconditionally** (dropped the `if nan_mask.any()` guard): the `cval=1.0` order-0 shift of
+  the NaN mask treats out-of-frame as uncovered, so the ~1 px edge vacated by the correction shift is
+  marked NaN even on a fully-finite window instead of being left as the `cval=0.0` fill (a fractional
+  dimming of the ring). A measured shift of ~0 vacates nothing, so it still adds no NaN. Reproduced
+  first (a fully-finite frame + a known sub-pixel correction left the vacated edge at 0.0, `isnan`
+  count 0), then fixed. Regression tests `test_subpixel_shift_marks_vacated_edge_as_nan_on_a_fully_finite_frame`,
+  `test_subpixel_shift_windowed_marks_vacated_edge_as_nan` (fail before / pass after) and
+  `test_subpixel_shift_zero_shift_adds_no_nan` (the no-spurious-NaN guard). Was near-unreachable in
+  practice (real reprojected frames carry a NaN border; `subpixel_refine` is off by default), but a
+  reproduced violation of the NaN=coverage hard invariant with a cheap, additive, byte-for-byte-safe
+  fix on real frames — so worth closing while in the file.
 - ~~**Extract the RA 0°/360° unwrap heuristic into one shared helper (regression-proofing).**~~
   — **shipped v0.93.4** (see Shipped). The `if span > 180: ra = where(ra>180, ra-360, ra)` unwrap
   is now a single dependency-free `seestack/coords.py` with `unwrap_ra_deg(ras)` +
@@ -888,6 +889,14 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.94.3** — Engine/NaN-coverage: sub-pixel refine now marks the vacated edge NaN on a
+  fully-finite window. `align.py::_apply_subpixel_shift` + `_apply_subpixel_shift_windowed` dropped
+  the `if nan_mask.any()` guard so the `cval=1.0` NaN-mask shift always runs — the ~1 px strip vacated
+  by the correction shift is NaN=uncovered, not the old `cval=0.0` fill (a fractional dimming of the
+  ring). A ~0 shift still adds no NaN. Reproduced first, then fixed; regression tests in
+  `tests/test_subpixel_align.py` (fail before / pass after). Near-unreachable in practice (real frames
+  carry a NaN border; `subpixel_refine` off by default) but a reproduced violation of the NaN=coverage
+  hard invariant, byte-for-byte-safe on real frames.
 - **v0.94.2** — Editor friendliness: surface the content classification in the "What Auto-process
   did" note. The "try this preset?" chip only shows on an *empty* pipeline, so a user who clicked
   Auto straight away never learned their image was classified; a new pure `presetSuggestionSentence`
