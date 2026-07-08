@@ -119,6 +119,23 @@ silently loses gradient removal on cluster/dense-star targets; a graceful-degrad
 below. Realistic gradient+nebula frames flatten cleanly (0.097 mean change, proxy==full-res).
 Baseline suite green: 841 passed, 2 skipped.)_
 
+_(Builder engine-hardening audit 2026-07-08 (v0.94.1 baseline): fresh adversarial audit of the
+stacking/calibration path with **numeric brute-force repros**, not just reading — the
+`MinMaxRejectAccumulator` order statistic (matched a brute-force top/bottom-k reference *exactly*
+for k=1,2,3,5 across all four coverage bands, via both `add()` and windowed `add_window()` with
+random offsets/NaN), `WelfordAccumulator` mean/std (matched `np.nanmean`/`nanstd(ddof=1)` with 25%
+random NaN), `WeightedSumAccumulator` (weighted average + NaN=gap preserved), `DrizzleStacker.result()`
+(already a weighted average — not re-divided by coverage), and the two-pass drizzle reject (a 500-ADU
+spike over 20 frames is correctly rejected to ~100; the 6-frame no-fire is the documented
+`(n−1)/√n < κ` limit, not a bug). Close-read confirmed cross-pass weight/scale symmetry
+(`photometric_scales` applied before the consumer in **both** κ-σ passes and in drizzle stats+final;
+quality weights correctly in pass-2 combine only, provenance-gated to match), calibration
+(no double-subtract; `_effective_dark` single pedestal; flat direction/floor; `apply_raw` never mutates
+input; photometric scale direction hazy→up), NaN=coverage everywhere incl. `level_by_coverage`, and the
+`_imap_bounded` memory cap on both paths. **No reachable image-corruption bug found** — clean, consistent
+with the prior audits. One near-unreachable robustness note logged to Infra below (subpixel-shift edge
+`cval=0` vs NaN). Baseline suite green: 876 passed, 2 skipped.)_
+
 _(Builder engine-hardening audit 2026-07-06 (v0.86.1 baseline): another adversarial read of
 the stacking/calibration path, going deeper on the areas prior audits didn't explicitly cover
 — the recently-added `MinMaxRejectAccumulator` k-insertion order statistic + its four
@@ -792,6 +809,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   platform and the fix would not meet the quality bar. Left open; the `(OSError, ValueError)`
   guard is still correct defensively for platforms/Python builds that do raise — a future run
   can ship it with a monkeypatched-`is_dir` test that forces the raise.)_
+- **Low-priority robustness (near-unreachable): sub-pixel shift fills vacated edges toward 0
+  instead of NaN when a window is fully finite.** In `align.py`'s `_apply_subpixel_shift`
+  /`_apply_subpixel_shift_windowed` (~lines 378–391, 456–467) the `order=1` shift uses `cval=0.0`,
+  and the vacated ~1 px edge strip is only re-marked NaN inside `if nan_mask.any()`. So a window with
+  **no** NaN would leave its outermost 1 px ring interpolated toward 0 (a fractional dimming) rather
+  than NaN=uncovered. Near-unreachable: real reprojected frames always carry a NaN border from the
+  `FRAME_EDGE_INSET_PX=3` valid-mask inset + bbox pad (a same-size dithered frame can't fully contain
+  the canvas inside its 3 px-inset interior), the effect is a fractional dimming of a 1 px ring, and
+  `subpixel_refine` is **off by default**. Found by the Builder 2026-07-08 engine audit; not worth a
+  standalone ship (it fixes an input that essentially can't occur), but if a future run is already in
+  `align.py` the clean fix is to always seed vacated pixels as NaN (or re-mark the shifted edge
+  unconditionally, not only when `nan_mask.any()`), with a fully-finite-window regression test.
+  (S, robustness)
 - ~~**Extract the RA 0°/360° unwrap heuristic into one shared helper (regression-proofing).**~~
   — **shipped v0.93.4** (see Shipped). The `if span > 180: ra = where(ra>180, ra-360, ra)` unwrap
   is now a single dependency-free `seestack/coords.py` with `unwrap_ra_deg(ras)` +
