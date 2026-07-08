@@ -160,6 +160,74 @@ def test_solve_gaia_matches_when_catalog_larger_than_detections(monkeypatch):
     assert abs(scale[2] - 1.10) < 0.05
 
 
+def test_solve_gaia_clamps_a_negative_channel_scale(monkeypatch):
+    """Regression: an extremely-reddened field must not invert the blue channel.
+
+    The linear-in-colour model predicts ``expected_bg = 1.10 - 0.45·(BP-RP)``,
+    which goes negative once the median matched-star colour exceeds ~2.44. Before
+    the clamp, ``scale_b = median(expected_bg / measured_bg)`` then went negative
+    and, applied, would *flip* the blue channel. The solver now clamps every
+    solved scale to a positive range.
+    """
+    from astropy.table import Table
+    from astropy.wcs import WCS
+    from seestack.post import color_cal  # noqa: F401
+    from seestack.post.color_cal import _MIN_CAL_SCALE, _solve_gaia
+
+    wcs = WCS(naxis=2)
+    wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+    wcs.wcs.crpix = [50.0, 50.0]
+    wcs.wcs.crval = [180.0, 0.0]
+    wcs.wcs.cdelt = [-1.0 / 3600.0, 1.0 / 3600.0]
+
+    n_det = 20
+    rng = np.random.default_rng(7)
+    xs = rng.uniform(5, 95, n_det)
+    ys = rng.uniform(5, 95, n_det)
+    sources = Table({"xcentroid": xs, "ycentroid": ys})
+    fluxes = np.full((n_det, 3), 1000.0, dtype=np.float32)
+
+    det_world = wcs.pixel_to_world(xs, ys)
+    cat_ra = list(det_world.ra.deg)
+    cat_dec = list(det_world.dec.deg)
+    n_cat = len(cat_ra)
+    # BP-RP = 3.0 → expected_bg = 1.10 - 0.45·3.0 = -0.25 (negative).
+    gaia_table = Table({
+        "ra": np.asarray(cat_ra),
+        "dec": np.asarray(cat_dec),
+        "phot_bp_mean_mag": np.full(n_cat, 14.0),
+        "phot_rp_mean_mag": np.full(n_cat, 11.0),   # BP-RP = 3.0
+        "phot_g_mean_mag": np.full(n_cat, 12.0),
+    })
+
+    class _FakeJob:
+        def get_results(self):
+            return gaia_table
+
+    class _FakeGaia:
+        ROW_LIMIT = 0
+
+        @staticmethod
+        def cone_search_async(coordinate, radius):
+            return _FakeJob()
+
+    import sys
+    import types
+    fake_mod = types.ModuleType("astroquery.gaia")
+    fake_mod.Gaia = _FakeGaia
+    monkeypatch.setitem(sys.modules, "astroquery.gaia", fake_mod)
+
+    rgb = np.zeros((100, 100, 3), dtype=np.float32)
+    opts = ColorCalibrationOptions(enabled=True, mode="gaia", min_stars=5)
+    scale, n, note = _solve_gaia(rgb, fluxes, sources, wcs, opts)
+
+    # Without the clamp scale_b would be ≈ -0.25; it must instead be a positive
+    # value at least the floor, so applying it can never invert the channel.
+    assert scale[2] >= _MIN_CAL_SCALE
+    assert scale[1] == 1.0
+    assert "clamped" in note
+
+
 def test_solve_gray_star_directly():
     fluxes = np.array([[100, 200, 150]] * 50, dtype=np.float32)
     scale, n, note = _solve_gray_star(fluxes)

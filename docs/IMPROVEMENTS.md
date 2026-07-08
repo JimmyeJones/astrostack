@@ -1028,15 +1028,15 @@ problems. Dogfood it every big-picture run and fix root causes.
   (`scripts/agent-setup.sh`, idempotent; run via `source scripts/agent-setup.sh`).
   Remaining sliver: wire it into an actual `SessionStart` hook so setup is
   zero-tax with no manual invocation. (S)
-- **Low-priority robustness (near-unreachable, traced 2026-07-08 engine audit): the Gaia colour solver
-  can compute a *negative* blue scale on an extremely-reddened field.** `post/color_cal.py::_solve_gaia`
-  models `expected_bg = 1.10 − 0.45·(BP−RP)` (≈L300/L327), which goes negative for `BP−RP > 2.44`, and
-  `scale_b = median(expected_bg / measured_bg)` (≈L335) then goes negative when the *median* matched-star
-  colour exceeds ~2.44 (reproduced: median colour ~2.6 → `scale_b ≈ −0.25`). A field where over half the
-  g<17 matched stars are that red is not something an OSC Seestar owner realistically images, and the
-  default colour mode is gray-star (Gaia needs network + is opt-in), so this is filed as a note, not
-  shipped — but a defensive `max(scale_b, small_floor)` clamp (one line + a test) would harden it if a
-  future run is already in that file. (S, image-quality/robustness)
+- ~~**Low-priority robustness (near-unreachable): the Gaia colour solver can compute a *negative*
+  blue scale on an extremely-reddened field.**~~ — **FIXED v0.94.16** (see Shipped). `_solve_gaia`
+  now clamps both solved channel scales to a physical positive range (`_MIN_CAL_SCALE 0.05` …
+  `_MAX_CAL_SCALE 20.0`) before returning, so the linear-in-colour model's negative `expected_bg`
+  on a `BP−RP > 2.44` field can no longer make `scale_b` negative and *invert* the blue channel;
+  the note records "(clamped an out-of-range channel scale)" when it fires. A no-op on any realistic
+  OSC field (solved scales sit near 1.0). Regression test
+  `test_solve_gaia_clamps_a_negative_channel_scale` (BP−RP=3.0 → would-be `scale_b ≈ −0.25`; fails
+  before / passes after).
 - **Trivial (cosmetic): `post/target_id.py` sets `object_type_name` to the raw short code.** At
   ~L117–118 `object_type_name` is assigned the same short OTYPE code as `object_type` (e.g. `"G"`),
   so any "friendly name" surface just shows the code. Purely cosmetic; map the common Simbad OTYPE
@@ -1087,6 +1087,11 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.94.16** — Colour-calibration robustness: `post/color_cal.py::_solve_gaia` now clamps both solved
+  per-channel scales to a physical positive range (`0.05`–`20.0`) before returning, so the linear-in-colour
+  model's negative `expected_bg` on an extremely-reddened (`BP−RP > 2.44`) field can no longer produce a
+  negative `scale_b` that would *invert* the blue channel; a no-op on realistic OSC fields. Regression test
+  `test_solve_gaia_clamps_a_negative_channel_scale`.
 - **v0.94.15** — Engine/data-integrity fix (found by a fresh adversarial editor-pipeline audit): the
   full-res editor **export** dropped the NaN=coverage restore that the live preview performs. When a
   recipe has **no explicit stretch op** (an empty recipe, or a custom/preset recipe relying on the
