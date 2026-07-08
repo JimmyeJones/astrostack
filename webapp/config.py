@@ -22,7 +22,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 log = logging.getLogger(__name__)
 
@@ -140,6 +140,44 @@ class Settings(BaseModel):
     site_elevation_m: float = Field(default=0.0, ge=-500.0, le=9000.0)
     # Minimum altitude (deg) a target must clear to count as "usable" tonight.
     min_target_altitude_deg: int = Field(default=30, ge=0, le=80)
+    # Optional horizon / tree-cover mask for the Tonight planner: a list of
+    # [azimuth_deg, min_altitude_deg] samples describing where trees, buildings or
+    # the house block the low sky. The planner interpolates between them (wrapping
+    # at 360°) and only counts a target as usable while it clears the obstruction
+    # at its azimuth. Empty (the default) = a flat, unobstructed horizon, so an old
+    # config is inert here. Kept lenient — malformed points are dropped rather than
+    # rejecting the whole save (see the validator).
+    horizon_profile: list[list[float]] = Field(default_factory=list)
+
+    @field_validator("horizon_profile", mode="before")
+    @classmethod
+    def _clean_horizon_profile(cls, v: Any) -> list[list[float]]:
+        """Coerce raw input into a clean, bounded list of [az, alt] pairs.
+
+        Wraps azimuth into [0, 360), clamps altitude into [0, 90], drops
+        malformed / non-finite entries, and caps the count. Deliberately forgiving
+        so a slightly-off value never 422s the settings save or wipes the profile.
+        """
+        import math
+
+        if not isinstance(v, (list, tuple)):
+            return []
+        out: list[list[float]] = []
+        for pair in v:
+            if not isinstance(pair, (list, tuple)) or len(pair) < 2:
+                continue
+            try:
+                az = float(pair[0])
+                alt = float(pair[1])
+            except (TypeError, ValueError):
+                continue
+            if not (math.isfinite(az) and math.isfinite(alt)):
+                continue
+            out.append([round(az % 360.0, 3), round(max(0.0, min(90.0, alt)), 3)])
+            if len(out) >= 360:
+                break
+        out.sort()
+        return out
 
     # --- jobs --------------------------------------------------------------
     # How many finished jobs the in-memory map keeps (and, at ~10×, how many

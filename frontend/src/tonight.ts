@@ -37,6 +37,14 @@ export function formatClock(iso: string | null): string {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+// The nearest 8-point compass label (N, NE, E, …) for an azimuth in degrees, so
+// the horizon-mask editor reads "S" rather than a bare "180°". Wraps at 360°.
+export function compassPoint(az: number): string {
+  if (!Number.isFinite(az)) return "";
+  const dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+  return dirs[Math.round((((az % 360) + 360) % 360) / 45) % 8];
+}
+
 export interface SplitTargets {
   already: PlannedTarget[];
   fresh: PlannedTarget[];

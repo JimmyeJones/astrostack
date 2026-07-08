@@ -79,6 +79,63 @@ class Observer:
 
 
 @dataclass(frozen=True)
+class HorizonProfile:
+    """An azimuth→minimum-unobstructed-altitude mask (trees / buildings / house).
+
+    ``points`` is a tuple of ``(azimuth_deg, min_altitude_deg)`` samples; the
+    lowest *clear* altitude at any azimuth is linear-interpolated between them,
+    wrapping around 360°. An **empty** profile means a flat, unobstructed horizon
+    — the planner then uses only the numeric ``min_altitude_deg`` floor, exactly
+    as before this feature existed. Build one from user input with
+    :meth:`from_pairs`, which sanitises and orders the points.
+    """
+
+    points: tuple[tuple[float, float], ...] = ()
+
+    @classmethod
+    def from_pairs(cls, pairs) -> HorizonProfile:  # noqa: ANN001
+        """Sanitise raw ``[[az, alt], …]`` input into a stable profile.
+
+        Drops malformed / non-finite entries, wraps azimuth into ``[0, 360)``,
+        clamps altitude into ``[0, 90]``, de-duplicates repeated azimuths (keeping
+        the *taller* obstruction — a tree is a tree), and sorts by azimuth so
+        :meth:`altitude_at` can interpolate.
+        """
+        import math
+
+        cleaned: dict[float, float] = {}
+        for pair in pairs or ():
+            try:
+                az = float(pair[0]) % 360.0
+                alt = float(pair[1])
+            except (TypeError, ValueError, IndexError):
+                continue
+            if not (math.isfinite(az) and math.isfinite(alt)):
+                continue
+            alt = max(0.0, min(90.0, alt))
+            az = round(az, 3)
+            cleaned[az] = max(alt, cleaned.get(az, 0.0))
+        return cls(points=tuple(sorted(cleaned.items())))
+
+    def is_empty(self) -> bool:
+        return not self.points
+
+    def altitude_at(self, az_deg):  # noqa: ANN001, ANN201
+        """Interpolated obstruction altitude(s) at the given azimuth(s), in deg.
+
+        Accepts a scalar or an array; returns the same shape. An empty profile
+        reports 0° everywhere (nothing blocks the sky).
+        """
+        az = np.asarray(az_deg, dtype=float) % 360.0
+        if not self.points:
+            return np.zeros_like(az)
+        azs = np.array([p[0] for p in self.points], dtype=float)
+        alts = np.array([p[1] for p in self.points], dtype=float)
+        # ``period`` makes np.interp wrap 350°→10° through the seam correctly.
+        return np.interp(az, azs, alts, period=360.0)
+
+
+@dataclass(frozen=True)
 class CatalogObject:
     """One bundled deep-sky target."""
 
@@ -147,6 +204,9 @@ class NightPlan:
     dark_window: dict | None
     moon_illumination: float
     min_altitude_deg: float
+    # True when a non-empty horizon/tree mask shaped the usable windows below, so
+    # the UI can explain that low-altitude obstructions were accounted for.
+    horizon_active: bool = False
     targets: list[PlannedTarget] = field(default_factory=list)
 
 
@@ -272,10 +332,15 @@ def _score(max_alt: float, minutes_above: float, dark_minutes: float,
 
 
 def _observability_batch(ras_deg, decs_deg, observer: Observer, window: DarkWindow,
-                         min_alt_deg: float, moon_illum: float):  # noqa: ANN001, ANN202
+                         min_alt_deg: float, moon_illum: float,
+                         horizon: HorizonProfile | None = None):  # noqa: ANN001, ANN202
     """Vectorised observability for many targets over one dark window.
 
-    Returns a list of :class:`Observability`, one per input coordinate.
+    Returns a list of :class:`Observability`, one per input coordinate. When a
+    non-empty ``horizon`` is given, a target only counts as *usable* at a moment
+    when it clears **both** the numeric ``min_alt_deg`` floor and the obstruction
+    altitude at its current azimuth — so a target hidden behind trees/buildings
+    for part (or all) of the night has its usable window (and score) reduced.
     """
     from astropy import units as u
     from astropy.coordinates import AltAz, SkyCoord, get_body
@@ -287,9 +352,11 @@ def _observability_batch(ras_deg, decs_deg, observer: Observer, window: DarkWind
 
     coords = SkyCoord(ra=np.asarray(ras_deg) * u.deg,
                       dec=np.asarray(decs_deg) * u.deg, frame="icrs")
-    # (n_targets, n_times) altitude grid.
-    alt = coords[:, None].transform_to(altaz_frame[None, :]).alt.deg
-    alt = np.atleast_2d(np.asarray(alt, dtype=float))
+    # (n_targets, n_times) altitude + azimuth grids.
+    altaz = coords[:, None].transform_to(altaz_frame[None, :])
+    alt = np.atleast_2d(np.asarray(altaz.alt.deg, dtype=float))
+    use_horizon = horizon is not None and not horizon.is_empty()
+    az = np.atleast_2d(np.asarray(altaz.az.deg, dtype=float)) if use_horizon else None
 
     # Moon separation at the darkest moment (mid-window) — one representative sep.
     mid = stamps[len(stamps) // 2]
@@ -306,8 +373,13 @@ def _observability_batch(ras_deg, decs_deg, observer: Observer, window: DarkWind
         row = alt[i]
         imax = int(np.argmax(row))
         max_alt = float(row[imax])
-        transit = stamps[imax].astimezone(timezone.utc) if max_alt >= min_alt_deg else None
-        minutes_above = float(np.count_nonzero(row >= min_alt_deg) * step_min)
+        # Effective usable floor per sample: the numeric min-altitude, raised to
+        # the tree/building obstruction at each moment's azimuth when a horizon
+        # mask is set. ``max_altitude_deg`` stays the honest physical peak.
+        floor = np.maximum(min_alt_deg, horizon.altitude_at(az[i])) if use_horizon else min_alt_deg
+        usable = row >= floor
+        minutes_above = float(np.count_nonzero(usable) * step_min)
+        transit = stamps[imax].astimezone(timezone.utc) if minutes_above > 0 else None
         sep = float(moon_sep[i])
         score = _score(max_alt, minutes_above, dark_minutes, sep, moon_illum, min_alt_deg)
         out.append(Observability(
@@ -335,7 +407,8 @@ class LibraryTarget:
 def plan_tonight(observer: Observer, when_utc: datetime, *,
                  min_altitude_deg: float = 30.0,
                  library_targets: list[LibraryTarget] | None = None,
-                 include_catalog: bool = True) -> NightPlan:
+                 include_catalog: bool = True,
+                 horizon: HorizonProfile | None = None) -> NightPlan:
     """Rank tonight's targets for ``observer`` at ``when_utc``.
 
     Combines the bundled catalog ("not yet targeted") with the user's library
@@ -344,18 +417,27 @@ def plan_tonight(observer: Observer, when_utc: datetime, *,
     already-targeted entry. Returns targets sorted best-first (score desc), then
     highest transit; targets that never clear ``min_altitude_deg`` tonight sort
     to the bottom with score 0.
+
+    When ``horizon`` is a non-empty :class:`HorizonProfile`, a target's usable
+    window (and hence its score) is trimmed to the times it is *above* the local
+    tree/building obstruction at its azimuth, not merely above ``min_altitude_deg``
+    — so an object that transits high but only clears the trees briefly ranks
+    below one that sits lower in an open part of the sky. An empty/absent horizon
+    keeps the flat-floor behaviour unchanged.
     """
     _configure_iers_offline()
     library_targets = library_targets or []
     window = _find_dark_window(observer, when_utc)
     illum = moon_illumination(when_utc)
 
+    horizon_active = horizon is not None and not horizon.is_empty()
     plan = NightPlan(
         generated_utc=when_utc.astimezone(timezone.utc).isoformat(),
         observer=asdict(observer),
         dark_window=None,
         moon_illumination=round(illum, 3),
         min_altitude_deg=min_altitude_deg,
+        horizon_active=horizon_active,
     )
     if window is None:
         return plan  # Sun never sets — nothing to plan.
@@ -394,7 +476,8 @@ def plan_tonight(observer: Observer, when_utc: datetime, *,
     if not ras:
         return plan
 
-    obs = _observability_batch(ras, decs, observer, window, min_altitude_deg, illum)
+    obs = _observability_batch(ras, decs, observer, window, min_altitude_deg, illum,
+                               horizon=horizon)
     for m, o in zip(meta, obs, strict=True):
         if m["kind"] == "library":
             t: LibraryTarget = m["target"]

@@ -13,6 +13,7 @@ import pytest
 
 from seestack import nightplan as np_plan
 from seestack.nightplan import (
+    HorizonProfile,
     LibraryTarget,
     Observer,
     load_catalog,
@@ -124,6 +125,93 @@ def test_plan_is_deterministic():
     b = plan_tonight(LONDON, JAN_EVENING)
     assert [(p.id, p.score, p.max_altitude_deg) for p in a.targets] == \
            [(p.id, p.score, p.max_altitude_deg) for p in b.targets]
+
+
+def test_horizon_profile_from_pairs_sanitises_input():
+    # Malformed / non-finite / short entries are dropped; azimuth wraps into
+    # [0, 360); altitude clamps into [0, 90]; a repeated azimuth keeps the taller
+    # obstruction; the survivors come out sorted by azimuth.
+    prof = HorizonProfile.from_pairs([
+        [370.0, 15.0],     # az wraps to 10
+        ["x", "y"],        # non-numeric → dropped
+        [90.0],            # too short → dropped
+        [45.0, 200.0],     # alt clamps to 90
+        [45.0, 30.0],      # same az → keep the taller (90)
+        [180.0, -5.0],     # alt clamps to 0
+        None,              # not a pair → dropped
+    ])
+    assert prof.points == ((10.0, 15.0), (45.0, 90.0), (180.0, 0.0))
+    assert not prof.is_empty()
+    assert HorizonProfile.from_pairs([]).is_empty()
+    assert HorizonProfile.from_pairs(None).is_empty()
+
+
+def test_horizon_profile_interpolates_with_wraparound():
+    prof = HorizonProfile.from_pairs([[0.0, 10.0], [180.0, 40.0]])
+    # Exact points, the linear midpoint, and the wrap-around seam (180→360≡0).
+    assert float(prof.altitude_at(0.0)) == pytest.approx(10.0)
+    assert float(prof.altitude_at(180.0)) == pytest.approx(40.0)
+    assert float(prof.altitude_at(90.0)) == pytest.approx(25.0)
+    assert float(prof.altitude_at(270.0)) == pytest.approx(25.0)
+    # Empty profile blocks nothing (0° everywhere), array in / array out.
+    empty = HorizonProfile.from_pairs([])
+    assert list(empty.altitude_at([12.0, 200.0])) == [0.0, 0.0]
+
+
+# Orion transits around 33° from London — high enough to clear a 20° floor for
+# hours, but a wall raised above its peak hides it entirely.
+_M42 = LibraryTarget(safe="M42", name="Orion Nebula", ra_deg=83.82, dec_deg=-5.39,
+                     frames_accepted=1, total_exposure_s=1.0)
+
+
+def _m42_entry(horizon, min_alt=20.0):
+    plan = plan_tonight(LONDON, JAN_EVENING, library_targets=[_M42],
+                        include_catalog=False, min_altitude_deg=min_alt,
+                        horizon=horizon)
+    return plan, next(p for p in plan.targets if p.id == "M42")
+
+
+def test_empty_horizon_matches_no_horizon():
+    # An empty / absent mask must leave the plan byte-for-byte unchanged.
+    base_plan, base = _m42_entry(None)
+    empty_plan, empty = _m42_entry(HorizonProfile.from_pairs([]))
+    assert base_plan.horizon_active is False
+    assert empty_plan.horizon_active is False
+    assert (empty.minutes_above_min_alt, empty.score, empty.max_altitude_deg) == \
+           (base.minutes_above_min_alt, base.score, base.max_altitude_deg)
+
+
+def test_horizon_below_min_altitude_changes_nothing():
+    # A wall lower than the numeric min-altitude floor is subsumed by it.
+    _, base = _m42_entry(None)
+    plan, low = _m42_entry(HorizonProfile.from_pairs([[0.0, 10.0]]))
+    assert plan.horizon_active is True  # a mask *is* set …
+    # … but it doesn't touch a target that already clears the min-altitude floor.
+    assert low.minutes_above_min_alt == base.minutes_above_min_alt
+    assert low.score == base.score
+
+
+def test_horizon_wall_trims_usable_window_and_score():
+    # A 30° wall (above the 20° floor, below Orion's ~33° peak) leaves only the
+    # slice of the night Orion spends above 30° — fewer minutes, lower score,
+    # but the honest physical peak altitude is unchanged.
+    _, base = _m42_entry(None)
+    _, walled = _m42_entry(HorizonProfile.from_pairs([[0.0, 30.0]]))
+    assert walled.max_altitude_deg == base.max_altitude_deg
+    assert 0.0 < walled.minutes_above_min_alt < base.minutes_above_min_alt
+    assert 0.0 < walled.score < base.score
+    assert walled.transit_utc is not None
+
+
+def test_horizon_wall_above_peak_hides_target():
+    # A 40° wall everywhere is above Orion's transit, so it never clears the
+    # trees tonight: no usable window, no transit, score 0.
+    plan, hidden = _m42_entry(HorizonProfile.from_pairs([[0.0, 40.0]]))
+    assert plan.horizon_active is True
+    assert hidden.minutes_above_min_alt == 0.0
+    assert hidden.score == 0.0
+    assert hidden.transit_utc is None
+    assert hidden.max_altitude_deg == pytest.approx(33.1, abs=1.0)
 
 
 def test_polar_day_returns_empty_plan_gracefully():
