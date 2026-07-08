@@ -922,7 +922,51 @@ problems. Dogfood it every big-picture run and fix root causes.
   structural drop). Plain single-pass drizzle stamps no provenance.
 
 ### Features that serve real workflows
-- Annotated sky overlay (label detected objects / show solved field). (M)
+- **⭐ OWNER-REQUESTED — "Tonight" night planner: rank the best targets to shoot
+  tonight, showing what you've already captured vs. what you haven't.** A
+  pre-capture planning view that complements the post-capture stack/edit pipeline:
+  for tonight at the owner's site it lists deep-sky targets ranked by how
+  *observable* they actually are (rises high enough, clears the trees, away from
+  the moon, inside the dark window) and clearly separates **already-targeted**
+  objects (badged with how much integration you already have, so you can decide to
+  add more) from **not-yet-targeted** ones worth starting. Build it in slices, and
+  keep the astronomy core fully useful **offline** — only the weather enrichment
+  touches the network:
+  - **(a) Offline astronomy core — the bulk of the value, no network.** Observer
+    location + tonight's dark window (astronomical dusk→dawn) drive, per candidate:
+    max altitude & transit time, the usable window above a configurable minimum
+    altitude, and moon phase + angular separation → a simple observability score,
+    ranked. Candidate set = **(1)** the user's existing library targets (annotate
+    each with total integration / sub count already captured — "already targeted"),
+    plus **(2)** a **bundled** deep-sky catalog (Messier + a curated NGC/Caldwell
+    set, shipped as a static data file — *no* network, no heavy dep) filtered to
+    what's up tonight ("not yet targeted"). Get the site's lat/lon from existing
+    plate-solved FITS headers (`SITELAT`/`SITELONG`) when present, else a new
+    opt-in `site_lat`/`site_lon`/`elevation`/`timezone` in Settings. Pure `astropy`
+    (already a dep); a new **read-only** page (reuse the existing Sky/Aladin view to
+    plot positions if useful). Deterministic + testable (fixed date + site → known
+    alt/moon). (M)
+  - **(b) Horizon / tree-cover mask — local, small UI.** Let the user define a
+    horizon profile (azimuth → minimum unobstructed altitude) capturing trees /
+    buildings / the house, stored in Settings or library meta; the planner then
+    computes the *real* usable window (excludes a target while it's behind an
+    obstruction) instead of a flat min-altitude. Optional; flat fallback when unset.
+    Pure computation. (S–M)
+  - **(c) Weather enrichment — OPTIONAL, needs owner sign-off (new outbound network
+    dependency).** Enrich the plan with tonight's cloud cover / seeing / transparency
+    from a weather/clear-sky API. This adds an **outbound network call**, which the
+    NAS network policy may block and which §9/§10 flag — so it must be **off by
+    default, behind a config toggle + user-supplied endpoint/key, degrade gracefully
+    to the offline plan on any failure, and is filed under Needs owner sign-off
+    before building** (confirm the specific API + that outbound is allowed). The
+    astronomy plan (a)+(b) must stand alone without it.
+  Additive and read-only throughout (never touches stacks/data); the catalog is a
+  static bundled file (no network, no heavy dependency); location/horizon are opt-in
+  with sane fallbacks. Overall L; slice (a) is the shippable first M and delivers
+  most of the ask. (L, autonomy/workflow)
+- Annotated sky overlay (label detected objects / show solved field). (M) —
+  related to the night planner above; the planner's "plot tonight's targets" view
+  can reuse this.
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
