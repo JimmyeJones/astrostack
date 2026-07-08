@@ -420,16 +420,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   the shipped helper (saved editor recipe + re-rendered thumbnail, fully reversible in the editor);
   best-effort per target so a failed auto-edit never sinks the batch, and it only sets the recipe
   on the *new* run. Off by default (§9). The pipeline summary reports "auto_edited N".
-- **Auto-pick the object preset from the image** — Auto-process builds one general
-  recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
-  different (per-channel vs luminance gradient, star reduction, saturation). The
-  proxy analysis already computes sky/noise; extend it with a couple of cheap
-  content cues (fraction of bright extended pixels vs point sources, colour spread)
-  to *classify* the target coarsely and have Auto start from the matching preset's
-  structure instead of a fixed op list — so "Auto" is tuned to what you actually
-  shot. Keep the current general recipe as the fallback when classification is
-  low-confidence. Off-by-default risk is nil (Auto is an explicit button). Needs a
-  careful, well-tested classifier so it never mis-picks confidently. (M, autonomy/editor)
+- **Auto-pick the object preset from the image** — **first (safer) slice SHIPPED v0.94.0**
+  (see Shipped): the classifier now runs and surfaces as a one-click *preset suggestion* chip in
+  the editor (a wrong guess costs a click, not an image) — Auto's output is unchanged. Auto-process
+  builds one general recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
+  different (per-channel vs luminance gradient, star reduction, saturation). **Remaining (higher-bar)
+  slice:** actually *seed Auto* from the classified preset's structure instead of the fixed op list,
+  keeping the general recipe as the low-confidence fallback. That changes the most-used one-click path
+  on a live install, so it should wait until the shipped suggestion chip has gathered real-world signal
+  (which classifications the owner accepts on real galaxy/nebula/cluster Seestar stacks) and the
+  classifier is validated against real data, not just synthetic archetypes. (M, autonomy/editor)
+  _(Follow-up idea, spotted shipping v0.94.0 — for the Scout to vet: the preset-suggestion chip
+  only shows on an **empty** pipeline, so a user who clicks Auto straight away never learns their
+  image was classified. A low-risk way to surface it more: add one dimmed line to the "What
+  Auto-process did" note — e.g. "Your image looks like a star cluster — the Star-cluster preset is
+  another good starting point." — reusing the same `…/editor/preset-suggestion` call. Keep it
+  purely informational (never second-guess the recipe the user just applied), and only when the
+  classifier is confident. S, autonomy/friendliness. Also worth considering once signal exists:
+  log which suggestions the owner accepts vs dismisses, to inform the graduation-to-seeding call.)_
   _(Builder note 2026-07-08: a fresh dogfood re-confirmed the current general Auto recipe is
   healthy and well-tuned (single-field: preview↔export parity 0.00%, median grey 0.24, balanced
   R/G/B), so the bar for **changing what Auto emits** is high — a confident classifier really does
@@ -824,6 +832,21 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.94.0** — Auto-preset classifier — *safer-first slice* (a preset **suggestion**, not a change
+  to Auto's output). New pure `presets.classify_target(rgb)` coarsely classifies a run's own proxy as a
+  **star cluster / nebula / galaxy** from cheap geometry-first cues (`star_share` from a grey-opening
+  compact-vs-diffuse split; `ext_frac` = frame fraction of extended signal; colour as a soft nebula
+  gate so a big *neutral* galaxy like M31 isn't confidently mis-labelled) and returns the matching
+  built-in preset — or **declines (`preset_id=None`)** on an ambiguous/blank field so it stays quiet
+  unless one archetype is clear. A read-only `POST …/editor/preset-suggestion` endpoint serves it; the
+  editor shows a dimmed *"This looks like a Star cluster — try the Star-cluster preset?"* chip in the
+  empty-pipeline nudge that applies the preset (sized to the target's data + mosaic-aware, as the
+  Presets menu does) in one undoable click. A mis-pick costs a *click*, not a worse image — Auto's
+  output is untouched — so it can ship and gather real-world signal before any graduation to seeding
+  Auto. Additive; nothing persisted; new suggestion is off-nothing (hidden when unsure).
+  `tests/test_target_classify.py` (6 archetype cases incl. the neutral-galaxy guard),
+  `tests/webapp/test_editor.py` (endpoint classifies a cluster / declines on a blank field),
+  `Editor.test.tsx` (chip shows + applies; hidden when declined) (`claude/happy-franklin-3zj9nk`).
 - **v0.93.4** — Extracted the RA 0°/360° unwrap heuristic into one shared dependency-free
   `seestack/coords.py` (`unwrap_ra_deg` + `circular_median_ra_deg`) and pointed all three sites at it
   (`stack/mosaic.py` `_bbox`+`_footprint_outlier_indices`, `stack/reference.py::pick_reference_frame`,

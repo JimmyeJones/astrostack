@@ -192,6 +192,19 @@ def build_auto_analysis_for_run(project_dir: Path, run, median_fwhm: float | Non
         rgb, median_fwhm=median_fwhm, is_mosaic=is_mosaic, trim_crop=trim)
 
 
+def build_preset_suggestion_for_run(project_dir: Path, run) -> dict:
+    """Coarsely classify a run's own proxy and, when one archetype is clear, suggest
+    the matching built-in preset (galaxy / nebula / star cluster) — a hint the editor
+    shows as a one-click "try this preset?" chip. Read-only: it never changes the Auto
+    recipe or persists anything, so a mis-suggestion costs a click, not an image.
+    Declines (``preset_id=None``) on an ambiguous or blank field."""
+    rgb, _scale = get_proxy(project_dir, run.id, run.fits_path)
+    out = presets_mod.classify_target(rgb)
+    # Only the user-facing fields; the raw cues stay server-side (debug/tests only).
+    return {"preset_id": out["preset_id"], "label": out["label"],
+            "reason": out["reason"], "confidence": out["confidence"]}
+
+
 def render_run_display_array(project_dir: Path, run, recipe: Recipe) -> np.ndarray:
     """Render a recipe on the run's live-preview proxy and return the display-space
     RGB array (values in 0..1, NaN = uncovered). Shared by the PNG preview endpoint
@@ -1044,6 +1057,22 @@ async def auto_analysis(safe: str, run_id: int, request: Request) -> dict:
 
     def work() -> dict:
         return build_auto_analysis_for_run(project_dir, run, median_fwhm)
+
+    return await run_in_threadpool(work)
+
+
+@router.post("/api/targets/{safe}/stack-runs/{run_id}/editor/preset-suggestion")
+async def preset_suggestion(safe: str, run_id: int, request: Request) -> dict:
+    """Suggest a starting *preset* from the run's own content — "this looks like a
+    star cluster / nebula / galaxy — try the matching preset?". A read-only hint the
+    editor offers alongside Auto-process; it classifies the proxy coarsely and returns
+    ``preset_id=None`` when nothing is clearly one archetype (the general Auto recipe
+    stays the safe fallback). Additive sibling of ``…/editor/auto``; it never persists
+    anything and doesn't change what Auto emits."""
+    project_dir, run = _run_info(request, safe, run_id)
+
+    def work() -> dict:
+        return build_preset_suggestion_for_run(project_dir, run)
 
     return await run_in_threadpool(work)
 

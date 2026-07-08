@@ -670,6 +670,66 @@ describe("EditorView", () => {
       expect(screen.queryByText("What Auto-process did")).not.toBeInTheDocument());
   });
 
+  it("offers the classified starting preset as a chip on an empty pipeline", async () => {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({ ops: [], base_run_id: 3 });
+    vi.spyOn(client.api, "previousRecipe").mockResolvedValue(
+      { run_id: null, ops: [], count: 0 });
+    vi.spyOn(client.api, "getDefaultRecipe").mockResolvedValue({ ops: [], count: 0 });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({
+      builtin: [{
+        id: "globular_cluster", label: "Star cluster", group: "Built-in",
+        ops: [{ id: "background.subtract", params: {} },
+              { id: "tone.stretch", params: { mode: "asinh" } }],
+      }],
+      user: [],
+    });
+    // The backend classified this run's proxy as a star cluster.
+    vi.spyOn(client.api, "presetSuggestion").mockResolvedValue({
+      preset_id: "globular_cluster", label: "Star cluster",
+      reason: "mostly point-like stars with little diffuse nebulosity", confidence: 0.9,
+    });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    // The empty-pipeline nudge surfaces the classification + a one-click preset chip.
+    expect(await screen.findByText(/This looks like a/i)).toBeInTheDocument();
+    expect(screen.getByText(/mostly point-like stars/i)).toBeInTheDocument();
+    const chip = screen.getByRole("button", { name: /Try the Star cluster preset/i });
+
+    // Clicking it applies the preset (pipeline is no longer empty → the nudge is gone).
+    fireEvent.click(chip);
+    await waitFor(() =>
+      expect(screen.queryByText(/build a good starting recipe from/i)).not.toBeInTheDocument());
+  });
+
+  it("hides the preset chip when the backend declines to classify", async () => {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({ ops: [], base_run_id: 3 });
+    vi.spyOn(client.api, "previousRecipe").mockResolvedValue(
+      { run_id: null, ops: [], count: 0 });
+    vi.spyOn(client.api, "getDefaultRecipe").mockResolvedValue({ ops: [], count: 0 });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "presetSuggestion").mockResolvedValue(
+      { preset_id: null, label: null, reason: null, confidence: 0 });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    // The general Auto nudge still shows, but no classification chip.
+    expect(await screen.findByText(/build a good starting recipe from/i)).toBeInTheDocument();
+    expect(screen.queryByText(/This looks like a/i)).not.toBeInTheDocument();
+  });
+
   it("explains a run a background job auto-edited, and hides it once the user edits", async () => {
     vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES]);
     // A run opened on a recipe the user didn't build (a background Process-target /

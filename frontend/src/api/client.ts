@@ -413,6 +413,16 @@ export interface AutoAnalysis {
   trim_fraction: number | null;  // fraction of frame trimmed as ragged mosaic edge
 }
 
+/** A coarse content-classification hint served by `…/editor/preset-suggestion`:
+ * "this looks like a star cluster / nebula / galaxy — try the matching preset?".
+ * `preset_id` is null when nothing is clearly one archetype (no chip shown). */
+export interface PresetSuggestion {
+  preset_id: string | null;  // a BUILTIN_PRESETS id, or null when unsure
+  label: string | null;      // that preset's display label
+  reason: string | null;     // short plain-language "why" (e.g. "mostly point-like stars…")
+  confidence: number;        // 0..1 (0 when declined)
+}
+
 export interface Histogram {
   bins: number;
   edges: number[];
@@ -810,6 +820,10 @@ export const api = {
     req<Recipe>(`/api/targets/${safe}/stack-runs/${runId}/editor/auto`, { method: "POST" }),
   autoAnalysis: (safe: string, runId: number) =>
     req<AutoAnalysis>(`/api/targets/${safe}/stack-runs/${runId}/editor/auto-analysis`,
+      { method: "POST" }),
+  presetSuggestion: (safe: string, runId: number) =>
+    req<PresetSuggestion>(
+      `/api/targets/${safe}/stack-runs/${runId}/editor/preset-suggestion`,
       { method: "POST" }),
   exportPng: (safe: string, runId: number, recipe: Recipe) =>
     req<{ job_id: string }>(`/api/targets/${safe}/stack-runs/${runId}/editor/export-png`, {
