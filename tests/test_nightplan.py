@@ -165,6 +165,24 @@ def test_never_rising_target_scores_zero():
     assert entry.transit_utc is None
 
 
+def test_high_min_altitude_does_not_crash_the_score():
+    # Regression: the score's altitude term divided by ``70 - min_alt``. With a
+    # ``min_altitude_deg`` of 70 (a legal Settings/query value, ge=0 le=80) and a
+    # target that transits above 70°, that denominator was zero → ZeroDivisionError
+    # → 500 on GET /api/plan/tonight?min_alt=70. A target near the zenith is common
+    # (dec ≈ observer latitude), so this was reachable.
+    high = LibraryTarget(safe="high", name="High", ra_deg=90.0, dec_deg=51.5,
+                         frames_accepted=0, total_exposure_s=0.0)
+    for min_alt in (70.0, 80.0):
+        plan = plan_tonight(LONDON, JAN_EVENING, library_targets=[high],
+                            include_catalog=False, min_altitude_deg=min_alt)
+        entry = next(p for p in plan.targets if p.id == "high")
+        # It clears the floor near the zenith, so it should score above zero, and
+        # the altitude term saturates to "plenty high" rather than blowing up.
+        assert entry.max_altitude_deg > min_alt
+        assert entry.score > 0.0
+
+
 def test_high_target_outranks_low_target():
     plan = plan_tonight(LONDON, JAN_EVENING)
     # Sorted best-first, and a near-zenith circumpolar target beats a low one.
