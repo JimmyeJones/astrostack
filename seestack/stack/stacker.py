@@ -960,6 +960,13 @@ def run_stack(
             )
         result_image = drizzler.result()
         coverage = drizzler.coverage
+        # Honest per-pixel *frame count* for the coverage_min/max diagnostics:
+        # drizzle's ``coverage`` (out_wht) is Σ of weighted footprint overlap —
+        # fractional under quality weighting / pixfrac<1 / scale≠1, so it is not
+        # a frame count. Read the accumulator's unweighted count instead (mirrors
+        # the standard weighted-sum path). ``coverage`` itself is unchanged, so
+        # the coverage map output / level_by_coverage are byte-for-byte identical.
+        frame_cov = drizzler.frame_coverage
         # Write outputs against the **drizzle** output canvas, not the
         # reference canvas. The drizzle WCS lives at drizzler.out_wcs.
         dst_wcs_text = wcs_to_text(drizzler.out_wcs)
@@ -1223,9 +1230,10 @@ def run_stack(
 
         # Frame-count map for the coverage_min/max diagnostics: the unweighted
         # per-pixel count when we have it (so "N frames per pixel" stays honest
-        # under quality weighting), else the coverage map itself (already a true
-        # count on the min/max path; Σweights on drizzle). Identical to the old
-        # coverage[...,0] for an unweighted stack.
+        # under quality weighting — the standard weighted-sum and drizzle paths
+        # both provide it), else the coverage map itself (already a true count on
+        # the min/max path). Identical to the old coverage[...,0] for an
+        # unweighted non-drizzle stack.
         cov_2d = frame_cov if frame_cov is not None else (
             coverage[..., 0] if coverage.ndim == 3 else coverage)
         applied_cal = calibration.describe() if calibration is not None else None

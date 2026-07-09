@@ -161,6 +161,110 @@ def test_drizzle_honors_per_frame_weight():
     assert np.nanmedian(result[5:-5, 5:-5, :]) == pytest.approx(175.0, rel=0.01)
 
 
+def test_drizzle_frame_coverage_counts_frames_not_weight_sum():
+    """``frame_coverage`` must be an integer *frame count*, independent of the
+    per-frame quality weight — unlike ``coverage`` (out_wht), which is Σ of the
+    weighted footprint overlap and understates the count once weights ≠ 1."""
+    wcs = wcs_from_text(make_synth_wcs_text(width=100, height=80))
+    drz = DrizzleStacker(wcs, (80, 100), DrizzleParams(scale=1.0, pixfrac=1.0))
+    rgb = np.full((80, 100, 3), 500.0, dtype=np.float32)
+    n = 4
+    for _ in range(n):
+        drz.add_frame(rgb, wcs, weight=0.25)  # heavily down-weighted frames
+    # coverage (Σ weights) collapses to ~n×0.25 = 1.0 — it is *not* a frame count.
+    cov = drz.coverage[5:-5, 5:-5, :]
+    assert np.nanmedian(cov) == pytest.approx(float(n) * 0.25, rel=0.05)
+    # frame_coverage counts the frames honestly: 4 per interior pixel.
+    fc = drz.frame_coverage
+    assert fc is not None
+    assert fc.dtype == np.uint32
+    assert fc.shape == (80, 100)
+    assert int(fc[5:-5, 5:-5].max()) == n
+    assert int(np.median(fc[5:-5, 5:-5])) == n
+
+
+def test_drizzle_frame_coverage_unweighted_matches_coverage():
+    """At unit weight (the default), the interior frame count equals both N and
+    the integer coverage — so an unweighted drizzle stack is unaffected by the
+    frame-count switch (parity with the standard weighted-sum path)."""
+    wcs = wcs_from_text(make_synth_wcs_text(width=100, height=80))
+    rgb = np.full((80, 100, 3), 500.0, dtype=np.float32)
+    n = 5
+    drz = DrizzleStacker(wcs, (80, 100), DrizzleParams(scale=1.0, pixfrac=1.0))
+    for _ in range(n):
+        drz.add_frame(rgb, wcs)
+    fc = drz.frame_coverage
+    cov0 = drz.coverage[..., 0]
+    assert int(fc[10:-10, 10:-10].max()) == n
+    # Byte-for-byte with the rounded coverage where every weight is 1.0.
+    np.testing.assert_array_equal(fc[10:-10, 10:-10], np.rint(cov0[10:-10, 10:-10]))
+
+
+def test_drizzle_frame_coverage_skips_uncovered_and_nan_pixels():
+    """A frame must only bump the count where it actually deposited signal — not
+    a NaN (no-data) block, and not where it never landed."""
+    wcs = wcs_from_text(make_synth_wcs_text(width=100, height=80))
+    drz = DrizzleStacker(wcs, (80, 100), DrizzleParams(scale=1.0, pixfrac=1.0))
+    a = np.full((80, 100, 3), 500.0, dtype=np.float32)
+    a[30:40, 40:50, :] = np.nan  # this frame has a hole here
+    b = np.full((80, 100, 3), 500.0, dtype=np.float32)  # this one is full
+    drz.add_frame(a, wcs)
+    drz.add_frame(b, wcs)
+    fc = drz.frame_coverage
+    # The hole in frame ``a`` means those pixels only got frame ``b`` → count 1.
+    assert int(fc[32:38, 42:48].max()) == 1
+    # A pixel both frames covered counts 2.
+    assert int(fc[5:25, 5:35].min()) == 2
+
+
+def test_drizzle_stats_accumulator_has_no_frame_coverage():
+    """The statistics-only accumulator (rejection pass 1) discards its output, so
+    it doesn't pay for frame-count tracking."""
+    wcs = wcs_from_text(make_synth_wcs_text(width=60, height=40))
+    stats = DrizzleStacker(
+        wcs, (40, 60), DrizzleParams(scale=1.0, pixfrac=1.0), compute_stats=True
+    )
+    stats.add_frame(np.full((40, 60, 3), 100.0, dtype=np.float32), wcs)
+    assert stats.frame_coverage is None
+
+
+def test_drizzle_quality_weighted_reports_frame_count_not_weight_sum(tmp_path):
+    """End-to-end: a quality-weighted drizzle run must persist coverage_max as
+    the true frame count, not the (smaller) sum of per-frame weights."""
+    proj = Project.create(tmp_path / "p", name="driz_qw")
+    wcs_text = make_synth_wcs_text()
+    raws = tmp_path / "raws"
+    raws.mkdir()
+    n = 4
+    for i in range(n):
+        path = write_seestar_fits(
+            raws / f"f{i}.fit", add_wcs=True, seed=30 + i, n_stars=20,
+        )
+        # Spread the FWHM so quality weighting demotes the softer frames well
+        # below 1.0 (so Σweights < n, which is what used to understate coverage).
+        proj.add_frame(FrameRow(
+            source_path=str(path), cached_path=str(path),
+            width_px=480, height_px=320, bayer_pattern="RGGB",
+            wcs_json=wcs_text, ra_center_deg=83.6, dec_center_deg=-5.4,
+            fwhm_px=2.0 + 1.5 * i, star_count=200 - 20 * i,
+        ))
+    try:
+        result = run_stack(
+            proj,
+            StackOptions(
+                drizzle=True, drizzle_scale=1.0, drizzle_pixfrac=1.0,
+                quality_weighted=True,
+                background_flatten=False, max_workers=1,
+                output_name="driz_qw",
+            ),
+        )
+    finally:
+        proj.close()
+    # All four frames fully overlap, so the honest peak coverage is n; the old
+    # Σweights peak would be < n (the down-weighted frames contribute < 1 each).
+    assert result.coverage_max == n
+
+
 def _poke_hot_pixel(path, x: int, y: int, value: int = 60000) -> None:
     """Write a static hot pixel into an on-disk synth FITS mosaic."""
     from astropy.io import fits
