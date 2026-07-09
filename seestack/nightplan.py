@@ -202,6 +202,15 @@ class Observability:
     # Moon was down while it was up). ``None`` when the target has no usable
     # window (score 0), so the UI shows no misleading cue.
     moon_up_fraction: float | None = None
+    # The clock bounds of the target's usable window tonight — the first and last
+    # sampled moment it clears the floor (and any horizon mask). These answer
+    # "*when* tonight can I actually shoot this?", which the single transit time
+    # can't: a target up for 7 h could clear the floor at 21:00 or not until 01:00.
+    # Both ``None`` when the target is never usable. With a horizon mask a window
+    # can have gaps; these are the *enclosing* bounds (``minutes_above_min_alt``
+    # stays the honest usable total), so the common no-mask case is exact.
+    usable_start_utc: datetime | None = None
+    usable_end_utc: datetime | None = None
 
 
 @dataclass
@@ -224,6 +233,11 @@ class PlannedTarget:
     # (see :attr:`Observability.moon_up_fraction`); ``None`` when the target has
     # no usable window. Old backends omit it, so the UI treats absent as unknown.
     moon_up_fraction: float | None = None
+    # Clock bounds (UTC ISO) of the usable window tonight — *when* the target is
+    # shootable, complementing the peak ``transit_utc``. Both ``None`` when it's
+    # never usable; old backends omit them. See :class:`Observability`.
+    usable_start_utc: str | None = None
+    usable_end_utc: str | None = None
     # Present only for library targets the user has already shot.
     target_safe: str | None = None
     frames_accepted: int | None = None
@@ -536,6 +550,14 @@ def _observability_batch(ras_deg, decs_deg, observer: Observer, window: DarkWind
         n_usable = int(np.count_nonzero(usable))
         minutes_above = float(n_usable * step_min)
         transit = stamps[imax].astimezone(timezone.utc) if minutes_above > 0 else None
+        # Enclosing clock bounds of the usable window (first→last sample above the
+        # floor) — "when tonight can I shoot this?". None when never usable.
+        usable_idx = np.flatnonzero(usable)
+        if usable_idx.size:
+            usable_start = stamps[int(usable_idx[0])].astimezone(timezone.utc)
+            usable_end = stamps[int(usable_idx[-1])].astimezone(timezone.utc)
+        else:
+            usable_start = usable_end = None
         sep = float(moon_sep[i])
         # Share of the target's usable samples during which the Moon is up. For
         # scoring, 1.0 (full penalty, as before) when it has no usable window —
@@ -553,6 +575,8 @@ def _observability_batch(ras_deg, decs_deg, observer: Observer, window: DarkWind
             score=score,
             moon_up_fraction=(None if moon_up_fraction is None
                               else round(moon_up_fraction, 3)),
+            usable_start_utc=usable_start,
+            usable_end_utc=usable_end,
         ))
     return out
 
@@ -656,6 +680,8 @@ def plan_tonight(observer: Observer, when_utc: datetime, *,
                 minutes_above_min_alt=o.minutes_above_min_alt,
                 moon_separation_deg=o.moon_separation_deg, score=o.score,
                 moon_up_fraction=o.moon_up_fraction,
+                usable_start_utc=o.usable_start_utc.isoformat() if o.usable_start_utc else None,
+                usable_end_utc=o.usable_end_utc.isoformat() if o.usable_end_utc else None,
                 target_safe=t.safe, frames_accepted=t.frames_accepted,
                 total_exposure_s=round(t.total_exposure_s, 1),
             ))
@@ -669,6 +695,8 @@ def plan_tonight(observer: Observer, when_utc: datetime, *,
                 minutes_above_min_alt=o.minutes_above_min_alt,
                 moon_separation_deg=o.moon_separation_deg, score=o.score,
                 moon_up_fraction=o.moon_up_fraction,
+                usable_start_utc=o.usable_start_utc.isoformat() if o.usable_start_utc else None,
+                usable_end_utc=o.usable_end_utc.isoformat() if o.usable_end_utc else None,
             ))
 
     plan.targets.sort(key=lambda p: (-p.score, -p.max_altitude_deg))

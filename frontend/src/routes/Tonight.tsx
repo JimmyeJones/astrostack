@@ -11,7 +11,7 @@ import { QueryError } from "../components/QueryError";
 import { formatIntegration } from "../format";
 import {
   formatClock, formatMinutes, minAltOptions, moonCueForTarget, moonPhaseLabel,
-  moonWindowNote, scoreColor, splitTargets,
+  moonWindowNote, scoreColor, splitTargets, usableWindowNote,
 } from "../tonight";
 
 function ScoreBadge({ score }: { score: number }) {
@@ -45,7 +45,12 @@ function TargetRow({ t }: { t: PlannedTarget }) {
       </Table.Td>
       <Table.Td>{t.max_altitude_deg.toFixed(0)}°</Table.Td>
       <Table.Td>{formatClock(t.transit_utc)}</Table.Td>
-      <Table.Td>{formatMinutes(t.minutes_above_min_alt)}</Table.Td>
+      <Table.Td>
+        {formatMinutes(t.minutes_above_min_alt)}
+        {usableWindowNote(t.usable_start_utc, t.usable_end_utc) ? (
+          <Text size="xs" c="dimmed">{usableWindowNote(t.usable_start_utc, t.usable_end_utc)}</Text>
+        ) : null}
+      </Table.Td>
       <Table.Td>
         {t.moon_separation_deg.toFixed(0)}°
         {moonCueForTarget(t.moon_up_fraction) ? (

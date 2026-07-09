@@ -436,6 +436,38 @@ def test_moon_up_fraction_is_none_for_a_never_usable_target():
     assert entry.moon_up_fraction is None
 
 
+def test_plan_reports_usable_window_bounds():
+    # An observable target carries the clock bounds of its usable window, so the
+    # UI can say *when* tonight to shoot it. The bounds enclose the transit and
+    # fall inside the dark window, and the span is consistent with the reported
+    # usable minutes (equal for the common contiguous, no-mask case).
+    m42 = LibraryTarget(safe="m42", name="Orion Nebula", ra_deg=83.82,
+                        dec_deg=-5.39, frames_accepted=10, total_exposure_s=100.0)
+    plan = plan_tonight(LONDON, JAN_EVENING, library_targets=[m42],
+                        include_catalog=False, min_altitude_deg=30.0)
+    entry = next(p for p in plan.targets if p.id == "m42")
+    assert entry.minutes_above_min_alt > 0
+    start = datetime.fromisoformat(entry.usable_start_utc)
+    end = datetime.fromisoformat(entry.usable_end_utc)
+    transit = datetime.fromisoformat(entry.transit_utc)
+    dw_start = datetime.fromisoformat(plan.dark_window["start_utc"])
+    dw_end = datetime.fromisoformat(plan.dark_window["end_utc"])
+    assert dw_start <= start <= transit <= end <= dw_end
+    # Contiguous window (no horizon mask): span + one 5-min step ≈ usable minutes.
+    span_min = (end - start).total_seconds() / 60.0
+    assert span_min == pytest.approx(entry.minutes_above_min_alt - 5.0, abs=0.1)
+
+
+def test_usable_window_is_none_for_a_never_usable_target():
+    south = LibraryTarget(safe="deep-south", name="Deep South", ra_deg=90.0,
+                          dec_deg=-70.0, frames_accepted=0, total_exposure_s=0.0)
+    plan = plan_tonight(LONDON, JAN_EVENING, library_targets=[south],
+                        include_catalog=False, min_altitude_deg=30.0)
+    entry = next(p for p in plan.targets if p.id == "deep-south")
+    assert entry.usable_start_utc is None
+    assert entry.usable_end_utc is None
+
+
 def test_plan_is_deterministic():
     a = plan_tonight(LONDON, JAN_EVENING)
     b = plan_tonight(LONDON, JAN_EVENING)

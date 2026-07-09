@@ -25,6 +25,11 @@ export interface PlannedTarget {
   // bright-Moon night still ranked a target well (the Moon was down while it was
   // up). null/absent when the target has no usable window or on an older backend.
   moon_up_fraction?: number | null;
+  // Clock bounds (UTC ISO) of when the target is actually shootable tonight — the
+  // first/last moment it clears the floor — complementing the peak transit time.
+  // null/absent when never usable or on an older backend.
+  usable_start_utc?: string | null;
+  usable_end_utc?: string | null;
   target_safe: string | null;
   frames_accepted: number | null;
   total_exposure_s: number | null;
