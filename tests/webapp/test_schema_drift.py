@@ -38,3 +38,11 @@ def test_coerce_ignores_unknown_keys():
     opts = coerce_stack_options({"sigma_kappa": 2.5, "bogus": 99, "output_name": "x"})
     assert opts.sigma_kappa == 2.5
     assert opts.output_name == "x"
+
+
+def test_every_form_field_has_plain_language_help():
+    # Friendliness bar (AGENTS.md §1 priority 3): every knob a beginner can see in
+    # the Stack form must carry a plain-language "what/why" tooltip — no bare jargon
+    # label with an empty hint. Guards against a new field shipping without help.
+    without_help = [f.key for f in stack_option_fields() if not (f.help or "").strip()]
+    assert not without_help, f"Stack-form fields missing help text: {without_help}"

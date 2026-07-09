@@ -260,45 +260,86 @@ _DESCRIPTORS: list[dict[str, Any]] = [
     {"key": "background_mode", "label": "Background mode", "type": "enum", "group": "advanced",
      "options": ["per_channel", "luminance"],
      "option_labels": {"per_channel": "Per channel", "luminance": "Luminance"},
-     "depends_on": "background_flatten"},
+     "depends_on": "background_flatten",
+     "help": "How the per-frame sky model is fitted. Per channel flattens R, G and B "
+             "separately — best for star fields and small targets. Luminance fits one "
+             "shared model and keeps colour on extended emission (nebulae like M42 / "
+             "Lagoon / North America), where per-channel can leave cyan cores and red "
+             "halos. Switch to Luminance for a big diffuse nebula."},
     {"key": "background_box_size", "label": "Background box size", "type": "int",
-     "group": "advanced", "min": 32, "max": 512, "step": 16, "depends_on": "background_flatten"},
+     "group": "advanced", "min": 32, "max": 512, "step": 16, "depends_on": "background_flatten",
+     "help": "Grid size (px) of the sky model. Smaller follows finer gradients but risks "
+             "eating real nebulosity; larger is gentler. 128 suits most Seestar frames."},
     {"key": "suppress_hot_pixels", "label": "Hot-pixel suppression", "type": "bool",
-     "group": "advanced"},
+     "group": "advanced",
+     "help": "Replace stuck hot/cold pixels with a local median before stacking. "
+             "Cheap (~10 ms/frame) and safe to leave on."},
     {"key": "hot_pixel_sigma", "label": "Hot-pixel σ", "type": "float", "group": "advanced",
-     "min": 2.0, "max": 10.0, "step": 0.5, "depends_on": "suppress_hot_pixels"},
+     "min": 2.0, "max": 10.0, "step": 0.5, "depends_on": "suppress_hot_pixels",
+     "help": "How far above the local median a pixel must sit to count as hot. Lower = "
+             "catches more (but can nibble faint stars); higher = only the worst."},
     {"key": "subpixel_refine", "label": "Sub-pixel alignment refine", "type": "bool",
-     "group": "advanced"},
+     "group": "advanced",
+     "help": "Add a phase-correlation pass that nudges each frame by a fraction of a "
+             "pixel after the plate-solve align, for slightly tighter stars. Costs a "
+             "little more time per frame; off by default."},
     {"key": "final_gradient_removal", "label": "Final gradient removal", "type": "bool",
      "group": "advanced", "help": "Post-stack gradient removal with object masking."},
     {"key": "final_gradient_mode", "label": "Final gradient mode", "type": "enum",
      "group": "advanced", "options": ["per_channel", "luminance"],
      "option_labels": {"per_channel": "Per channel", "luminance": "Luminance"},
-     "depends_on": "final_gradient_removal"},
+     "depends_on": "final_gradient_removal",
+     "help": "Same choice as Background mode, applied to the one post-stack gradient "
+             "pass. Use Luminance for extended nebulae to keep their colour; Per channel "
+             "for star fields."},
     {"key": "final_gradient_box_size", "label": "Final gradient box size", "type": "int",
      "group": "advanced", "min": 64, "max": 1024, "step": 32,
-     "depends_on": "final_gradient_removal"},
+     "depends_on": "final_gradient_removal",
+     "help": "Grid size (px) of the post-stack gradient model. Larger than the per-frame "
+             "box because it works on the full stacked image; 256 suits most stacks."},
     {"key": "scale_dark_to_light", "label": "Scale dark to sub exposure", "type": "bool",
      "group": "advanced",
      "help": "When your master dark was shot at a different exposure than these subs, "
              "scale its dark current to match: dark = bias + (dark − bias)×(sub ÷ dark "
              "exposure). Needs a master bias selected too (to hold the readout pedestal "
              "fixed); without one the dark is used unscaled."},
-    {"key": "color_calibration", "label": "Color calibration", "type": "bool", "group": "advanced"},
+    {"key": "color_calibration", "label": "Color calibration", "type": "bool", "group": "advanced",
+     "help": "Balance the stack's colour so a neutral background reads grey, at stack "
+             "time. The editor also offers colour calibration, so you can leave this off "
+             "and do it there with a live preview."},
     {"key": "color_calibration_mode", "label": "Color cal. mode", "type": "enum",
      "group": "advanced", "options": ["gray_star", "gaia"],
      "option_labels": {"gray_star": "Gray-star (offline)", "gaia": "Gaia catalogue"},
-     "depends_on": "color_calibration"},
+     "depends_on": "color_calibration",
+     "help": "Gray-star balances so the average star is neutral — fully offline and a "
+             "good default. Gaia matches your stars to catalogue colours for a more "
+             "physical result, but needs a plate-solved field and the Gaia data."},
     {"key": "mosaic_canvas", "label": "Canvas mode", "type": "enum", "group": "advanced",
-     "options": ["auto", "union", "reference"]},
+     "options": ["auto", "union", "reference"],
+     "help": "Output framing when frames don't all cover the same field. Auto uses a "
+             "union canvas only when the frames span more than one Seestar field (a "
+             "mosaic), else the reference frame. Union always keeps every frame's area; "
+             "Reference always crops to the first frame. Leave on Auto unless mosaicking."},
     {"key": "tiff_mode", "label": "TIFF mode", "type": "enum", "group": "advanced",
-     "options": ["linear", "autostretch"]},
+     "options": ["linear", "autostretch"],
+     "help": "How the exported TIFF is scaled. Linear keeps the raw stacked data (looks "
+             "dark on screen but is what you edit — like DeepSkyStacker). Autostretch "
+             "bakes in a gentle stretch so the TIFF is viewable straight away."},
     {"key": "drizzle_pixfrac", "label": "Drizzle pixfrac", "type": "float", "group": "advanced",
-     "min": 0.1, "max": 1.0, "step": 0.05, "depends_on": "drizzle"},
+     "min": 0.1, "max": 1.0, "step": 0.05, "depends_on": "drizzle",
+     "help": "How much each input pixel is shrunk before it's dropped onto the finer "
+             "grid. Smaller = sharper but needs more frames to fill gaps; 0.8 is a safe "
+             "middle. Only used when Drizzle is on."},
     {"key": "drizzle_scale", "label": "Drizzle scale", "type": "float", "group": "advanced",
-     "min": 1.0, "max": 4.0, "step": 0.1, "depends_on": "drizzle"},
+     "min": 1.0, "max": 4.0, "step": 0.1, "depends_on": "drizzle",
+     "help": "Output resolution multiplier. 2.0 = twice the reference resolution (full "
+             "super-res), 1.0 = same size. Higher needs many well-dithered frames to pay "
+             "off. Only used when Drizzle is on."},
     {"key": "drizzle_kernel", "label": "Drizzle kernel", "type": "enum", "group": "advanced",
-     "options": ["square", "gaussian", "turbo", "lanczos2", "lanczos3"], "depends_on": "drizzle"},
+     "options": ["square", "gaussian", "turbo", "lanczos2", "lanczos3"], "depends_on": "drizzle",
+     "help": "Shape used to spread each pixel onto the output grid. Square is the robust "
+             "default; Gaussian is smoother; Lanczos is sharpest but can ring around "
+             "bright stars. Only used when Drizzle is on."},
     {"key": "quick_look_interval", "label": "Quick-look every N frames", "type": "int",
      "group": "advanced", "min": 0, "max": 1000, "step": 10,
      "help": "Save a preview every N frames during pass 1. 0 = off."},

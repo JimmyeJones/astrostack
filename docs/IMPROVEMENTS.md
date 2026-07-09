@@ -701,7 +701,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   cores, red halos, black holes" — different channel morphology) and that luminance mode is "required"
   there — yet a beginner stacking M42 / Lagoon / North America gets the artefact-prone default with no
   guidance and no way to know the knob exists. Add a Stack-form nudge that suggests luminance mode when
-  the target looks like extended emission, with a one-click "Use luminance background flatten". **The
+  the target looks like extended emission, with a one-click "Use luminance background flatten".
+  _(Partial mitigation shipped v0.99.3: `background_mode`/`final_gradient_mode` now carry plain-language
+  help spelling out that per-channel leaves "cyan cores / red halos" on extended nebulae and to switch to
+  Luminance for a big diffuse nebula — so the knob is now **discoverable**. That's the safe, no-classifier
+  slice; the remaining work here is still the **data-driven auto-nudge**, which stays real-data-gated.)_
+  **The
   work is the classifier, and it must be pre-stack** (the editor's extended-vs-point-source classifier
   runs on the *stacked* proxy, too late for a stack setting): candidate cheap signals are the target's
   Simbad/`post/target_id.py` object type when known (galaxy/nebula vs cluster/star), or a quick
@@ -1431,6 +1436,21 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.99.3** — Plain-language help on every advanced Stack-form knob (friendliness — priority 3,
+  Builder 2026-07-09). The advanced group of the Stack form was a wall of bare jargon: 14 fields
+  (Background mode, Background/Final-gradient box size, Hot-pixel suppression + σ, Sub-pixel refine,
+  Final gradient mode, Color calibration + mode, Canvas mode, TIFF mode, Drizzle pixfrac/scale/kernel)
+  had no `help` tooltip at all, so a beginner opening "Advanced" got no idea what any of them did or when
+  to change them. Added a concise "what/why" tooltip to each in `webapp/schemas.py::_DESCRIPTORS` (they
+  flow to the tooltip via the existing `HintLabel`, so no frontend change — and the same help now also
+  appears on the Settings default-stack-options editor, which reuses `StackOptionControl`). In particular
+  `background_mode`/`final_gradient_mode` now spell out the documented OSC gap — per-channel flatten leaves
+  "cyan cores / red halos" on extended emission nebulae, so switch to Luminance for a big diffuse nebula —
+  a safe, no-classifier slice of the still-open luminance-bg nudge idea (surfaces the knob so a beginner
+  can find it, without touching Auto/defaults). New regression guard
+  `test_every_form_field_has_plain_language_help` (fails before / passes after) keeps future fields from
+  shipping without help. Purely additive descriptor text, zero behaviour/default/schema change,
+  upgrade-safe.
 - **v0.99.2** — Retry a transient QC error in the auto-pipeline (autonomy/robustness — priority 2,
   Builder 2026-07-09; Scout-traced, the QC analog of the v0.94.9 ingest cache-copy retry). When
   `compute_frame_metrics` raised on a frame (a transient read blip — NAS hiccup, a file still being
