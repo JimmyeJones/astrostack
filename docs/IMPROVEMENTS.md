@@ -110,6 +110,31 @@ the real webapp stack→edit path.)_
   pathological skew reverts — same real-data-gating as the SCNR / `sky_sigma` items in Image-quality
   below. Fix all four sites together (they share the bug). (S code / M validation, image-quality/correctness)
 
+_(Scout QA audit 2026-07-09 (v0.98.2 baseline, suite green 950 passed / 2 skipped): with the editor,
+stacking core, mosaic/drizzle geometry, calibration, bg, solve, render, routers, jobs and the newest
+nightplan path all saturated by recent clean audits, rotated the focused subsystem audit onto the
+**least-recently-covered ingest/data layer — `seestack/io/*` + `seestack/qc/*`** (fits_loader debayer +
+header parsing, project.py schema migrations, library.py registry + `_median_radec`, merge.py, scanner.py,
+ingest, and the QC metrics/grading/streaks + apply path). Read adversarially for wrong-colour debayer edges,
+NaN/degenerate-input handling, RA-wrap, migration data loss, and auto-reject correctness. **No reachable
+wrong-image bug found** — the debayer's normalized-convolution edge handling (zero-fill + per-channel sample
+count) is correct and the prior edge-wrap fixes hold; `_coord_to_deg` handles the `-00 MM SS` sexagesimal
+sign case and rejects out-of-range coords; project/library migrations are strictly additive and guarded
+(incl. the empty/foreign-sqlite base-schema rebuild, v0.94.10); `_median_radec` uses the wrap-safe
+`circular_median_ra_deg`; auto-grade's modified-z + practical-significance floors + MAX_REJECT rail + log-domain
+non-positive handling are sound; the streak detector only ever *adds* a rejection on a clear elongated Hough
+line (conservative); and merge/scanner idempotency + duplicate-skip are correct. **Two traced low-severity
+trust/robustness findings (NOT wrong-result — filed to Ideas, not Bugs):** (1) a frame whose QC pass *raises*
+(`compute_frame_metrics` → `apply_qc_result_to_db`, `metrics is None`) is stamped `reject_reason="qc_error:…"`
+but kept **`accept=1`**, so it's invisible in the reject-summary (which counts `accept=0` only) and inflates the
+accepted count; the stacker skips it gracefully at load (`stacker.py:1348-1356/1450-1456`, verified), so no
+image corruption, but the beginner gets no signal that N subs were unreadable — friendliness/trust idea filed.
+(2) `build_qc_arglist(only_new=True)` (the watcher auto-pipeline) treats a `qc_error` frame as "already done"
+forever, so a *transient* QC failure is never re-QC'd automatically — the exact shape of the ingest-cache-retry
+bug fixed in v0.94.9; a manual full re-QC recovers it, so low-severity — robustness idea filed. Three genuinely
+new ideas added (auto-bind recommended calibration masters in the autonomous stack chains; surface
+QC-uncheckable frames; auto-pipeline QC retry).)_
+
 _(Builder QA audit 2026-07-09 (v0.98.2 baseline): with the editor + stacking core saturated by weeks of
 clean audits, rotated onto the **newest, least-hardened subsystem — the "Tonight" night planner**
 (`seestack/nightplan.py`, `webapp/routers/plan.py`, `frontend/src/tonight.ts`, and the two bundled
@@ -683,6 +708,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   Builder should build the classifier as a local measurement and skip the SIMBAD idea unless the owner signs off on
   the network call. `friendly_object_type`/OTYPE mapping (v0.94.17) already exists if the SIMBAD route is ever
   approved.)_
+- **⭐ Auto-bind recommended calibration masters in the *autonomous* stack chains (Process target /
+  watcher auto-stack / reprocess-all).** (M, autonomy/image-quality) — *Scout-filed 2026-07-09, traced.*
+  `webapp/calibration.py::recommend_masters` already ranks the library's master darks/flats/bias against a
+  target's frames (exposure/gain/temp/dimensions match), but it is wired **only into the interactive Stack
+  form** as a one-click "use recommended masters" nudge — the user must open the form and click it. The
+  autonomous chains build their `StackOptions` purely from `settings.default_stack_options` → the target's
+  saved defaults → explicit options (`webapp/pipeline.py::_stack_target` L1110-1128) and **never consult
+  `recommend_masters`**. So a beginner who built masters once but reaches the finished image via the
+  one-click **Process target**, the walk-away **watcher auto-stack**, or a library-wide **reprocess-all**
+  gets an **uncalibrated** stack — even though a perfectly-matching master dark/flat is sitting in the
+  calibration store — unless they happened to save calibration into their per-target defaults. This directly
+  undercuts the north-star "drop subs, walk away, get a *great* image" promise (calibration is the single
+  biggest OSC image-quality lever after stacking). **Shape:** when a stack in an autonomous chain has no
+  explicit `dark_path`/`flat_path`/etc. set, call `recommend_masters` for that target and auto-bind any
+  **confident** match (unmatched → uncalibrated exactly as today, so it's off-nothing and never applies a
+  mismatched master); stamp the choice into the run's provenance (`CALSTAT` already exists) so the user can
+  see what was applied. Purely local (no network), additive, gated on the existing match-confidence logic,
+  and testable on `recommend_masters` + the chain in isolation. Serves autonomy (one fewer decision) *and*
+  image quality (calibrated frames) at once. Consider surfacing "auto-applied your master dark+flat" in the
+  auto-edit "why" note for trust.
 - ~~**One-click "Drop N outlier frames" on the Stack-form auto-grade hint.**~~ —
   **shipped v0.83.2** (see Shipped). The auto-grade hint now carries a "Drop N outlier
   frames" button (beside the retained "Review Auto-grade" link) that calls
@@ -758,6 +803,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   v0.84.2. A Builder dogfood of the other five routes (Dashboard/Library/Target/
   History/Editor) found them already well-handled with icon+prose+next-step empty
   states, beginner tooltips, and translated reject/combine labels.)_
+- **Surface "N frames couldn't be quality-checked" on the Target page.** (S, friendliness/trust) —
+  *Scout-filed 2026-07-09, traced.* When `compute_frame_metrics` raises on a frame (unreadable/corrupt/
+  truncated FITS), `apply_qc_result_to_db` stamps `reject_reason="qc_error:…"` but leaves the frame
+  **`accept=1`** (`webapp/routers/... / seestack/qc/runner.py:75-76`). The consequence: the frame is counted
+  as accepted (inflating the "N accepted" figure), it silently drops out of the stack (the stacker skips a
+  frame it can't load — verified, no corruption), and — because `reject_reason_counts()` / the `/reject-summary`
+  endpoint tally only `accept=0` rows — it **never appears in the "why frames were dropped" breakdown**. So a
+  beginner gets zero signal that some subs were unreadable. Add a small, separate Target-page count/callout —
+  "N frames couldn't be quality-checked" — computed from frames carrying a `qc_error` reject reason (regardless
+  of accept state), ideally with a one-click "Re-check these frames" that re-runs QC on just them (a full
+  `run_qc_and_solve` already retries them since `only_new=False`). Read-only detection, additive, no schema
+  change. (Note: whether such a frame *should* auto-reject is a separate call — a QC failure isn't always a
+  reason to exclude, since detection-only failures still stack fine — so this idea only makes them *visible*,
+  not rejected.)
 - ~~**Proactive "plate-solving isn't set up yet" banner on the Dashboard.**~~ — **shipped
   v0.94.12** (see Shipped). A dismissible yellow Alert now shows on the Dashboard when
   `GET /api/system` reports ASTAP isn't ready, distinguishing "ASTAP wasn't found" from
@@ -1220,6 +1279,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   already-cached frame is never re-copied (its skip touches nothing). Regression tests
   `test_ingest_retries_cache_after_a_transient_copy_failure` (fails before / passes after) and
   `test_ingest_does_not_recopy_an_already_cached_frame`.
+- **Low-priority robustness (QC, traced 2026-07-09): the watcher auto-pipeline never re-QCs a frame
+  that failed on a *transient* error.** (S, autonomy/robustness) — the exact analog of the ingest-cache
+  retry above (v0.94.9). `build_qc_arglist(project, only_new=True)` (used by the auto-pipeline) skips any
+  frame where `(f.reject_reason or "").startswith("qc_error")` (`seestack/qc/runner.py:60-61`), treating a
+  prior QC *error* as permanently "done". So if `compute_frame_metrics` raised on a transient read blip
+  (NAS hiccup, a file still being written), the frame is stamped `qc_error:…` and the auto-pipeline never
+  re-measures it — it stays uncheck-able forever until the user manually triggers a *full* re-QC
+  (`only_new=False`, which does retry). Near-unreachable for a local cached file, but the same shape the team
+  already chose to fix for ingest. Fix shape: on a re-scan, re-offer a frame whose only record is a
+  `qc_error` (bounded — e.g. retry once, or don't skip errored frames under `only_new` at all), so a genuine
+  new/transient failure gets a second chance automatically. Additive; testable in isolation (a frame with a
+  `qc_error` reject reason is re-included by `build_qc_arglist(only_new=True)`).
 - ~~**Low-priority robustness (traced 2026-07-08, near-unreachable): opening an empty/foreign
   `project.sqlite` yields a DB with no `frames` table.**~~ — **FIXED v0.94.10** (see Shipped).
   `_migrate_schema` now detects a missing `frames` table (an empty/foreign sqlite at `user_version==0`)
