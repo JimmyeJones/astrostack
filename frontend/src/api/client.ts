@@ -277,6 +277,14 @@ export interface StackRejectionSummary {
   fraction?: number;
 }
 
+export interface StackFrameAccounting {
+  // Subs the stacker attempted to combine (after lucky/mosaic-outlier filtering).
+  n_offered: number;
+  // Of those, how many couldn't be aligned (load failure or a footprint that
+  // missed the canvas — usually a stray sub or a bad plate-solve).
+  n_align_failed?: number;
+}
+
 export interface StackProcessingStep {
   op: string;
   label: string;
@@ -290,6 +298,9 @@ export interface StackRunInfo {
   photometric?: StackPhotometricSummary | null;
   dark_scaling?: StackDarkScalingSummary | null;
   rejection?: StackRejectionSummary | null;
+  // Honest per-run frame accounting — how many subs the stacker attempted to
+  // combine and how many couldn't be aligned. Absent on older masters.
+  frame_accounting?: StackFrameAccounting | null;
   // Plain-language "what the unattended auto-edit did (and why)" note, present
   // only on runs an autonomous job auto-edited (Process-target / reprocess /
   // watcher auto-stack). Absent on manual/un-edited runs.

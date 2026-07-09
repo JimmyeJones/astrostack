@@ -1003,7 +1003,15 @@ problems. Dogfood it every big-picture run and fix root causes.
   v0.84.2. A Builder dogfood of the other five routes (Dashboard/Library/Target/
   History/Editor) found them already well-handled with icon+prose+next-step empty
   states, beginner tooltips, and translated reject/combine labels.)_
-- **Persist & surface honest per-run frame accounting ("N of M solved subs actually contributed").**
+- ~~**Persist & surface honest per-run frame accounting ("N of M solved subs actually contributed").**~~
+  — **shipped v0.100.0** (see Shipped). Both slices landed via the FITS-header provenance route (the same
+  self-documenting pattern REJMODE/PHOTNORM/DARKSCAL use — durable on disk, read back by the `…/info`
+  endpoint, no schema migration, upgrade-safe by construction): the stacker stamps `NOFFERED` (subs it
+  attempted to combine, post lucky/mosaic-outlier filtering) and `NALIGNFL` (of those, how many couldn't be
+  aligned — a load failure or a footprint that missed the canvas, i.e. a stray sub / bad plate-solve), the
+  info endpoint parses them into a `frame_accounting` summary, and the History Info panel shows a dimmed
+  "1,850 of 2,000 subs combined · 150 couldn't be aligned" line **only when there's a gap**. The companion
+  diagnosis (next item) rides on the same counts. Original write-up kept below for provenance.
   (S–M, friendliness/trust) *Scout-filed 2026-07-09, traced.* `run_stack` already computes everything
   needed — `n_frames_used`, `excluded_frames` (gross plate-solve outliers dropped by
   `compute_mosaic_canvas`), and `errors` (per-frame load/align failures accumulated in `_pass`, e.g. a
@@ -1020,8 +1028,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   plain-language line on the History Info panel ("1,850 of 2,000 solved subs stacked; 150 couldn't be
   aligned"), only when the gap is non-trivial. Additive, off-nothing, no default/API-shape change; testable
   against a synthetic run where some frames fail to align.
-- **Proactively diagnose a *large* align-failure fraction ("many subs didn't line up — likely mixed
-  targets or bad plate-solves").** (S, autonomy/friendliness) *Scout-filed 2026-07-09.* A natural companion
+- ~~**Proactively diagnose a *large* align-failure fraction ("many subs didn't line up — likely mixed
+  targets or bad plate-solves").**~~ — **shipped v0.100.0** (see Shipped). Built on the frame-accounting
+  counts above: `frameAccountingNote` colours the History Info line amber and appends an actionable next
+  step ("Many subs didn't line up to the reference — this usually means two targets' frames are in one
+  folder, or some plate-solved to the wrong place. Open the Frames table, sort by RA/Dec, and reject or
+  re-solve the ones whose centre is far from the rest") when the align-failure share is materially large
+  (≥ 20% of a ≥10-sub stack — a tiny stack's lone dud never nags). Original write-up kept below for
+  provenance. (S, autonomy/friendliness) *Scout-filed 2026-07-09.* A natural companion
   to the frame-accounting idea above but distinct in value: not just *displaying* the gap but *guiding a
   fix*. When a big share of solved subs fail to align (`errors`/footprint-miss in `_pass`, or many
   `excluded_frames` from the mosaic outlier pass), it almost always means either two targets' frames landed
@@ -1678,6 +1692,23 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.100.0** — Honest per-run frame accounting + large-align-failure diagnosis (friendliness/trust,
+  priorities 2–3; Builder 2026-07-09). The stacker now records how many subs it *attempted* to combine
+  and how many couldn't be aligned, stamping `NOFFERED`/`NALIGNFL` into the master FITS header (the same
+  durable, self-documenting provenance route REJMODE/PHOTNORM/DARKSCAL use — no schema migration,
+  upgrade-safe: older masters simply lack the cards and degrade to nothing). `StackResult` gains
+  `n_offered`/`n_align_failed` (`n_offered − n_align_failed == n_frames_used`) and the pipeline surfaces
+  them on the job result. The `…/info` endpoint parses them into a `frame_accounting` summary, and the
+  History Info panel shows a dimmed "1,850 of 2,000 subs combined · 150 couldn't be aligned" line **only
+  when there's a gap** (a clean all-aligned stack stays quiet — the integration "· N subs" line already
+  tells that story). When the align-failure share is materially large (≥ 20% of a ≥ 10-sub stack) the line
+  turns amber and appends an actionable next step (mixed targets in one folder / bad plate-solves → open
+  the Frames table, sort by RA/Dec, reject/re-solve the outliers), reusing the guidance the mosaic-canvas
+  error already gives. Closes the trust hole where a user with thousands of subs who walked away had no way
+  to see that 150 of their 2,000 solved subs silently dropped out. Additive/off-nothing; regression tests:
+  engine (all-aligned → `n_align_failed==0` + `NOFFERED`/`NALIGNFL` cards; a stray far-pointing sub →
+  `n_align_failed==1`), backend (`frame_accounting` parsed / absent on older master), and frontend
+  (`frameAccountingNote` thresholds + Info-panel render). Closes two Scout-filed 2026-07-09 Ideas.
 - **v0.99.10** — Drizzle pre-run estimate reports the **real** output canvas size (stacking-engine
   trust — current focus, Builder 2026-07-09). `_estimate_peak_bytes` computed the post-drizzle output
   shape as `int(dim·s + 1)`, but the canvas the run actually allocates

@@ -8,7 +8,7 @@ import { notifications } from "@mantine/notifications";
 import { IconAdjustments, IconCheck, IconCopy, IconDeviceFloppy, IconDownload, IconGitCompare, IconInfoCircle, IconPencil, IconSparkles, IconTrash, IconX } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
-import { api, type StackRun, type StackPhotometricSummary, type StackDarkScalingSummary, type StackRejectionSummary } from "../api/client";
+import { api, type StackRun, type StackPhotometricSummary, type StackDarkScalingSummary, type StackRejectionSummary, type StackFrameAccounting } from "../api/client";
 import { formatIntegration } from "../format";
 import { HazyNightBadge } from "../components/HazyNightBadge";
 import { CalibrationBadge } from "../components/CalibrationBadge";
@@ -196,6 +196,55 @@ export function rejectionSummaryText(
   return `Rejection ${verb} ~${pctText} ${noun} (${note})`;
 }
 
+export interface FrameAccountingNote {
+  // The honest one-liner: "1,850 of 2,000 subs combined · 150 couldn't be aligned".
+  text: string;
+  // True when the align-failure share is large enough that it's probably a real
+  // problem worth guiding a fix for (mixed targets / bad plate-solves), not just
+  // the odd unreadable sub. Drives the amber colour + guidance line.
+  concern: boolean;
+  // Actionable next step, present only when `concern` — mirrors the guidance the
+  // stacker's own mosaic-canvas error already gives for wildly-off frames.
+  guidance: string | null;
+}
+
+// One-line honest frame accounting for a finished stack — how many of the subs
+// the stacker *tried* to combine actually made it in, and (when it's a lot) a
+// nudge toward the likely cause. For the target user (thousands of subs, walks
+// away) a silent "150 of your 2,000 subs couldn't be aligned" is a real trust
+// hole: a large align-failure fraction usually means two targets' frames landed
+// in one folder, or a cluster of frames plate-solved to the wrong place.
+//
+// Returns null when nothing's worth saying — no accounting recorded (older
+// master), or every attempted sub aligned (the "· N subs" integration line
+// already tells that happy story). Pure so it can be unit-tested.
+export function frameAccountingNote(
+  fa: StackFrameAccounting | null | undefined,
+): FrameAccountingNote | null {
+  if (!fa || typeof fa.n_offered !== "number" || fa.n_offered <= 0) return null;
+  const offered = fa.n_offered;
+  const failed = typeof fa.n_align_failed === "number" && fa.n_align_failed > 0
+    ? Math.min(fa.n_align_failed, offered)
+    : 0;
+  if (failed <= 0) return null;
+  const used = offered - failed;
+  const nf = (n: number) => n.toLocaleString();
+  const text =
+    `${nf(used)} of ${nf(offered)} subs combined · ` +
+    `${nf(failed)} couldn't be aligned`;
+  // Guide a fix only when it's a materially large share and not a tiny stack
+  // (one dud sub out of five is 20% but not worth a scary nudge).
+  const fraction = failed / offered;
+  const concern = offered >= 10 && fraction >= 0.2;
+  const guidance = concern
+    ? "Many subs didn't line up to the reference — this usually means two " +
+      "targets' frames are in one folder, or some plate-solved to the wrong " +
+      "place. Open the Frames table, sort by RA/Dec, and reject or re-solve the " +
+      "ones whose centre is far from the rest."
+    : null;
+  return { text, concern, guidance };
+}
+
 // Compact seconds label for exposures — "30s", "2.5s" — trimming a trailing ".0".
 function formatExposure(s: number): string {
   const r = Math.round(s * 10) / 10;
@@ -257,6 +306,20 @@ function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
           {rejectionSummaryText(data.rejection)}
         </Text>
       ) : null}
+      {(() => {
+        const fa = frameAccountingNote(data.frame_accounting);
+        if (!fa) return null;
+        return (
+          <Stack gap={2}>
+            <Text size="xs" c={fa.concern ? "yellow.7" : "dimmed"} fw={fa.concern ? 600 : undefined}>
+              {fa.text}
+            </Text>
+            {fa.guidance ? (
+              <Text size="xs" c="dimmed">{fa.guidance}</Text>
+            ) : null}
+          </Stack>
+        );
+      })()}
       {combineMethodLabel(data.cards) ? (
         <Text size="xs" c="dimmed">
           Combined: {combineMethodLabel(data.cards)}
