@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  compassPoint, formatClock, formatMinutes, minAltOptions, moonPhaseLabel, moonWindowNote,
-  scoreColor, splitTargets,
+  compassPoint, formatClock, formatMinutes, minAltOptions, moonCueForTarget,
+  moonPhaseLabel, moonWindowNote, scoreColor, splitTargets,
 } from "./tonight";
 import type { PlannedTarget } from "./api/client";
 
@@ -76,6 +76,35 @@ describe("moonWindowNote", () => {
     expect(moonWindowNote({
       rise_utc: null, set_utc: null, up_all_night: false, down_all_night: false,
     })).toBeNull();
+  });
+});
+
+describe("moonCueForTarget", () => {
+  it("reassures when the Moon is down for the target's window", () => {
+    expect(moonCueForTarget(0)).toBe("Moon down for its window");
+    expect(moonCueForTarget(0.04)).toBe("Moon down for its window");
+  });
+
+  it("quantifies a partial overlap", () => {
+    expect(moonCueForTarget(0.5)).toBe("Moon up 50% of its window");
+    expect(moonCueForTarget(0.3)).toBe("Moon up 30% of its window");
+  });
+
+  it("omits the cue when the Moon is up for essentially the whole window", () => {
+    // The separation column alone already tells the story there.
+    expect(moonCueForTarget(1)).toBeNull();
+    expect(moonCueForTarget(0.96)).toBeNull();
+  });
+
+  it("omits the cue when the fraction is unknown", () => {
+    expect(moonCueForTarget(null)).toBeNull();
+    expect(moonCueForTarget(undefined)).toBeNull();
+    expect(moonCueForTarget(NaN)).toBeNull();
+  });
+
+  it("clamps out-of-range fractions", () => {
+    expect(moonCueForTarget(-0.2)).toBe("Moon down for its window");
+    expect(moonCueForTarget(1.5)).toBeNull();
   });
 });
 

@@ -53,6 +53,22 @@ export function moonWindowNote(
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+// A short, dimmed per-row Moon cue from a target's `moon_up_fraction` (0..1) —
+// the share of its usable window the Moon is actually above the horizon. The
+// Moon column shows the separation at a single mid-window instant, which can
+// read scary ("12°") for a target the planner *didn't* penalise because the
+// Moon was down while it was up; this reconciles the number with the ranking.
+// `null` (omit the line) when the fraction is unknown — no usable window, or an
+// older backend — or when the Moon is up for essentially the whole window,
+// where the separation alone already tells the story.
+export function moonCueForTarget(frac: number | null | undefined): string | null {
+  if (frac == null || !Number.isFinite(frac)) return null;
+  const pct = Math.round(Math.max(0, Math.min(1, frac)) * 100);
+  if (pct <= 5) return "Moon down for its window";
+  if (pct >= 95) return null;
+  return `Moon up ${pct}% of its window`;
+}
+
 export interface MinAltOption {
   value: string;
   label: string;

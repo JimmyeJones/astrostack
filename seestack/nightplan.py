@@ -196,6 +196,12 @@ class Observability:
     minutes_above_min_alt: float
     moon_separation_deg: float
     score: float  # 0..100, higher = better tonight
+    # Share (0..1) of the target's *usable* window during which the Moon is above
+    # the horizon — the same overlap that weights the score's Moon penalty. Lets
+    # the UI explain *why* a bright-Moon night still ranked a target well (the
+    # Moon was down while it was up). ``None`` when the target has no usable
+    # window (score 0), so the UI shows no misleading cue.
+    moon_up_fraction: float | None = None
 
 
 @dataclass
@@ -214,6 +220,10 @@ class PlannedTarget:
     minutes_above_min_alt: float
     moon_separation_deg: float
     score: float
+    # Share (0..1) of this target's usable window the Moon is above the horizon
+    # (see :attr:`Observability.moon_up_fraction`); ``None`` when the target has
+    # no usable window. Old backends omit it, so the UI treats absent as unknown.
+    moon_up_fraction: float | None = None
     # Present only for library targets the user has already shot.
     target_safe: str | None = None
     frames_accepted: int | None = None
@@ -527,19 +537,22 @@ def _observability_batch(ras_deg, decs_deg, observer: Observer, window: DarkWind
         minutes_above = float(n_usable * step_min)
         transit = stamps[imax].astimezone(timezone.utc) if minutes_above > 0 else None
         sep = float(moon_sep[i])
-        # Share of the target's usable samples during which the Moon is up. 1.0
-        # (full penalty, as before) when it has no usable window — the score is 0
-        # there anyway, so it can't matter.
+        # Share of the target's usable samples during which the Moon is up. For
+        # scoring, 1.0 (full penalty, as before) when it has no usable window —
+        # the score is 0 there anyway, so it can't matter; for the reported field
+        # we surface ``None`` in that case so the UI shows no misleading cue.
         moon_up_fraction = (float(np.count_nonzero(usable & moon_up)) / n_usable
-                            if n_usable else 1.0)
+                            if n_usable else None)
         score = _score(max_alt, minutes_above, dark_minutes, sep, moon_illum,
-                       min_alt_deg, moon_up_fraction)
+                       min_alt_deg, 1.0 if moon_up_fraction is None else moon_up_fraction)
         out.append(Observability(
             max_altitude_deg=round(max_alt, 1),
             transit_utc=transit,
             minutes_above_min_alt=round(minutes_above, 1),
             moon_separation_deg=round(sep, 1),
             score=score,
+            moon_up_fraction=(None if moon_up_fraction is None
+                              else round(moon_up_fraction, 3)),
         ))
     return out
 
@@ -642,6 +655,7 @@ def plan_tonight(observer: Observer, when_utc: datetime, *,
                 transit_utc=o.transit_utc.isoformat() if o.transit_utc else None,
                 minutes_above_min_alt=o.minutes_above_min_alt,
                 moon_separation_deg=o.moon_separation_deg, score=o.score,
+                moon_up_fraction=o.moon_up_fraction,
                 target_safe=t.safe, frames_accepted=t.frames_accepted,
                 total_exposure_s=round(t.total_exposure_s, 1),
             ))
@@ -654,6 +668,7 @@ def plan_tonight(observer: Observer, when_utc: datetime, *,
                 transit_utc=o.transit_utc.isoformat() if o.transit_utc else None,
                 minutes_above_min_alt=o.minutes_above_min_alt,
                 moon_separation_deg=o.moon_separation_deg, score=o.score,
+                moon_up_fraction=o.moon_up_fraction,
             ))
 
     plan.targets.sort(key=lambda p: (-p.score, -p.max_altitude_deg))

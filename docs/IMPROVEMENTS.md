@@ -1031,18 +1031,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   the Moon is down get relief. Additive, offline, deterministic. Regression tests: the penalty scales
   0→full with overlap (and a zero-overlap score equals an unlit sky); a full-Moon-up-all-night night
   matches the old formula; a waxing-Moon-sets-partway night lifts the penalty on post-moonset targets.
-- **Tonight planner: surface *why* the Moon (didn't) hurt a target — a per-row Moon cue.** (S,
-  friendliness/trust — priority 3) Spotted shipping the Moon-up-overlap score (v0.97.6). The score now
-  correctly ignores a Moon that has set/not risen during a target's window, but the only Moon number the
-  UI shows per target is `moon_separation_deg` — and that's measured at a **single mid-window instant**,
-  so on a night where the Moon sets partway it can read "12° away" (scary) for a target the planner
-  *didn't* actually penalise because the Moon was down while it was up. That mismatch between the shown
-  separation and the (now more nuanced) score erodes trust in the ranking. Cheap, offline follow-up:
-  the planner already computes each target's Moon-up overlap — expose it as a nullable field on
-  `PlannedTarget` (e.g. `moon_overlap_fraction`, or a coarse "Moon down for your window" / "Moon up &
-  N° away" verdict) and render it as a dimmed per-row cue so the user sees *why* a bright-Moon night
-  still ranked a target well. Additive (new nullable field, old rows omit it), frontend cue only, no
-  score/ranking change. Testable on the endpoint payload + a pure TS label helper.
+- ~~**Tonight planner: surface *why* the Moon (didn't) hurt a target — a per-row Moon cue.**~~ —
+  **shipped v0.97.7** (see Shipped). The planner now exposes each target's Moon-up overlap as a nullable
+  `moon_up_fraction` on `PlannedTarget`/`Observability` (the same overlap that weights the score, surfaced
+  instead of discarded; `None` when the target has no usable window), and the Tonight page renders a dimmed
+  per-row cue from it via a pure `moonCueForTarget` helper — "Moon down for its window" when the overlap is
+  ~0 (reconciling a scary single-instant separation with the ranking), "Moon up N% of its window" for a
+  partial overlap, and nothing when the Moon is up throughout (the separation column already tells that
+  story). Additive/offline (new nullable field, old rows/backends omit it), no score/ranking change.
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
@@ -1274,6 +1270,15 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.97.7** — Tonight planner (friendliness/trust): a dimmed per-row Moon cue explains *why* a
+  bright-Moon night still ranked a target well. The planner now surfaces each target's Moon-up overlap
+  (`moon_up_fraction` on `PlannedTarget`/`Observability` — the same share the score already computes,
+  `None` when the target has no usable window) and the Tonight page renders it via a pure
+  `moonCueForTarget` helper: "Moon down for its window" when the overlap is ~0 (reconciling a scary
+  single-instant `moon_separation_deg` with the ranking), "Moon up N% of its window" for a partial
+  overlap, and nothing when the Moon is up throughout. Additive/offline, no score/ranking change. Tests:
+  `test_nightplan.py` (per-target fraction, relief-tracking, `None` for a never-usable target) + a
+  `moonCueForTarget` block in `tonight.test.ts`. (#PR)
 - **v0.97.6** — Tonight planner (autonomy/trust): the observability score now weights each target's Moon
   penalty by whether the Moon is *actually up* while the target is observable. `_observability_batch`
   samples topocentric Moon altitude over the dark-window grid and passes each target a `moon_up_fraction`
