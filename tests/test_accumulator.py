@@ -19,6 +19,49 @@ def test_weighted_sum_basic():
     assert (acc.coverage == 2).all()
 
 
+def test_weighted_sum_frame_coverage_is_an_unweighted_frame_count():
+    """``frame_coverage`` counts contributing frames regardless of weight, while
+    ``coverage`` stays the Σ-of-weights map. Regression: with quality weighting
+    the two diverge, and the coverage_min/max "N frames per pixel" diagnostic
+    must read the frame count, not the (smaller) weight sum."""
+    acc = WeightedSumAccumulator((3, 3, 3))
+    for _ in range(4):
+        acc.add(np.full((3, 3, 3), 10.0), weight=0.5)
+    # Four frames of weight 0.5 → Σweights = 2.0, but the true frame count is 4.
+    np.testing.assert_allclose(acc.coverage, 2.0)
+    assert acc.frame_coverage.shape == (3, 3)
+    assert (acc.frame_coverage == 4).all()
+    # Unweighted, the two agree exactly (drop-in for the old coverage[...,0]).
+    acc2 = WeightedSumAccumulator((3, 3, 3))
+    for _ in range(4):
+        acc2.add(np.full((3, 3, 3), 10.0))
+    np.testing.assert_array_equal(acc2.frame_coverage, acc2.coverage[..., 0].astype("uint32"))
+
+
+def test_weighted_sum_frame_coverage_respects_nan_gaps():
+    """A pixel no frame covered has frame count 0; partial coverage counts only
+    the frames that actually contributed (NaN = missing)."""
+    acc = WeightedSumAccumulator((2, 2, 3))
+    a = np.full((2, 2, 3), 5.0)
+    a[0, 1] = np.nan  # one pixel missing in frame a
+    b = np.full((2, 2, 3), 7.0)
+    acc.add(a, weight=0.3)
+    acc.add(b, weight=0.3)
+    fc = acc.frame_coverage
+    assert fc[0, 0] == 2 and fc[1, 0] == 2 and fc[1, 1] == 2
+    assert fc[0, 1] == 1  # only frame b covered it
+
+
+def test_weighted_sum_frame_coverage_windowed():
+    """The windowed add path tracks the same unweighted frame count."""
+    acc = WeightedSumAccumulator((4, 4, 3))
+    acc.add_window(np.full((2, 2, 3), 9.0), y0=1, x0=1, weight=0.4)
+    acc.add_window(np.full((2, 2, 3), 9.0), y0=1, x0=1, weight=0.4)
+    fc = acc.frame_coverage
+    assert (fc[1:3, 1:3] == 2).all()
+    assert fc[0, 0] == 0  # outside the window — untouched
+
+
 def test_weighted_sum_with_nans():
     acc = WeightedSumAccumulator((2, 2))
     a = np.array([[1.0, np.nan], [3.0, 4.0]])
