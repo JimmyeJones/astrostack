@@ -135,6 +135,20 @@ bug fixed in v0.94.9; a manual full re-QC recovers it, so low-severity — robus
 new ideas added (auto-bind recommended calibration masters in the autonomous stack chains; surface
 QC-uncheckable frames; auto-pipeline QC retry).)_
 
+_(Builder dogfood 2026-07-09 (v0.99.2 baseline, suite green 960 passed / 2 skipped — the 2 skips are the
+CuPy-only GPU-parity tests, expected on a CPU container). With the backlog drained of headless-shippable
+work (the one open Bugs entry — the dead SExtractor skew guard — and both Image-quality items are
+deliberately real-data-gated, twice-deferred), ran a big-picture dogfood of the **editor's one-click Auto
+path** (the priority-1 "weak default result" concern) end-to-end through the real `auto_recipe`→
+`apply_recipe` chain. **Auto's out-of-box result is healthy on a single-field OSC stack** (median grey 0.23,
+black-clip 0.05%, balanced R/G/B, star cores preserved, preview↔export unaffected). Also re-probed the
+deferred **SCNR-magenta** image-quality item and filed a genuinely new data point to it (see that entry):
+gray-star colour-cal balances on *stars* and leaves the *diffuse background* green cast in place, so SCNR
+is a measured **net win** on a real cast-carrying background (removes a +0.017 green excess for a −0.004
+magenta overshoot) — the −14% magenta failure mode needs an *already-truly-neutral* sky, which gray-star
+doesn't produce on cast data. Net: the twice-established deferral of the SCNR change is **correct**; no new
+bug found; no code shipped this run (an idle run leaving main green — AGENTS.md §2).)_
+
 _(Builder QA audit 2026-07-09 (v0.98.2 baseline): with the editor + stacking core saturated by weeks of
 clean audits, rotated onto the **newest, least-hardened subsystem — the "Tonight" night planner**
 (`seestack/nightplan.py`, `webapp/routers/plan.py`, `frontend/src/tonight.ts`, and the two bundled
@@ -965,6 +979,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   SCNR where signal is above a sky-relative threshold, so the noise floor isn't rectified); or run SCNR
   on the post-denoise image only. Each must be validated so a real green-cast stack still gets its cast
   removed. Testable on `_scnr` / `auto_recipe` in isolation; additive.
+  _(Builder dogfood 2026-07-09, v0.99.2 baseline — re-confirmed the artifact and, more usefully, gathered
+  a new data point that leans the disposition toward "leave Auto's SCNR as-is." Two synthetic runs through
+  the real `auto_recipe`→`apply_recipe` chain: **(1) truly-neutral noisy sky** (R=G=B=0.168 after STF
+  stretch, no cast) → `_scnr(amount=0.7)` drops the sky green median 0.168→0.145 (**−14%, a visible magenta
+  tint**) while leaving R/B untouched — the pure one-sided-clip-rectifies-noise mechanism, exactly as filed.
+  **(2) A green-cast sky** (OSC green bias + gradient), full Auto chain **with vs. without** the SCNR op,
+  measured on the background population: *without* SCNR the sky keeps a residual **green excess** (G 0.145 vs
+  R/B ~0.127, i.e. +0.017 green) — i.e. `tone.color_calibrate` (gray-star) balances on the *stars* and
+  leaves the *diffuse background* green cast **in place**; *with* SCNR the background lands near-neutral
+  (G 0.168 vs the 0.172 R/B neutral, only −0.004 magenta). So on a background that carries any real residual
+  cast — which post-gray-star OSC backgrounds typically do — SCNR is a **net win** (removes a +0.017 green
+  excess for a −0.004 magenta overshoot), and the −14% magenta failure mode needs a background that is
+  *already truly neutral*, which gray-star does **not** produce on cast data. This strengthens the existing
+  "net value depends on real cast magnitude" reasoning with direct evidence that the common case is
+  net-positive, so the safest read is still: **don't blind-change the most-used Auto path**; if a future
+  agent does touch it, prefer a **noise-symmetric** mitigation (a soft-clip whose transition width tracks
+  the measured background green-noise σ — removes a genuine cast ≫σ as fully as the hard clip while not
+  rectifying within-noise excursions) over uniformly lowering `amount` (which would under-remove real
+  casts), and gate on a real neutral-vs-cast OSC background sample. No change shipped — the deferral holds.)_
 - ~~**Graceful degradation for `final_gradient` on busy / dense-star fields (instead of
   giving up).**~~ — **shipped v0.89.2** (see Shipped). The `Background2D` fit now degrades
   through an `exclude_percentile` ladder (80 → 95 → 100) and, as a last try, a half-size box,
