@@ -76,6 +76,18 @@ class Settings(BaseModel):
     # finished picture instead of a flat linear master. Best-effort per target —
     # a failed auto-edit never sinks the stack. Requires ``auto_stack``.
     auto_edit_on_autostack: bool = False
+    # When an *unattended* stack (watcher auto-stack, one-click "Process target",
+    # or library-wide "Reprocess everything") has no calibration masters chosen,
+    # auto-bind the library's best *confidently-matching* master dark/flat/bias to
+    # it — so a beginner who built masters once still gets a calibrated result on
+    # the walk-away path, instead of an uncalibrated stack because they never
+    # opened the Stack form. Only a confident match is applied (a dark whose
+    # exposure matches the subs within 25%, the recommended flat, and a bias only
+    # when no dark matched); an ambiguous/mismatched library leaves the stack
+    # uncalibrated exactly as today. Off by default (it changes what the
+    # autonomous chains produce on a live install); the interactive Stack form is
+    # never affected — it keeps honouring exactly what the user picked (or didn't).
+    auto_bind_calibration: bool = False
     # QC auto-rejects a whole frame when it detects a satellite/plane streak,
     # discarding ~99% good pixels with it. With this on, streaked frames are
     # *flagged* but kept accepted, so a stack with per-pixel rejection

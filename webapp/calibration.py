@@ -216,6 +216,91 @@ def recommend_masters(
     }
 
 
+# The Stack form warns when a chosen dark's exposure is more than 25% off the
+# subs (`Stack.tsx` `expMismatch`); mirror that threshold as the confidence gate
+# for *unattended* auto-binding, where there is no human to see the warning.
+_AUTO_BIND_EXP_MISMATCH_FRAC = 0.25
+
+
+def auto_bind_master_paths(
+    library_root: str | Path,
+    masters: list[dict[str, Any]],
+    *,
+    exposure_s: float | None = None,
+    gain: float | None = None,
+    sensor_temp_c: float | None = None,
+) -> dict[str, str]:
+    """Calibration master *paths* safe to auto-apply in an *unattended* stack.
+
+    :func:`recommend_masters` always returns the best *available* master of each
+    kind and leaves the interactive Stack form to *warn* on a poor match. In an
+    autonomous chain there is no human to see that warning, so this is stricter —
+    it binds only a master we are *confident* about:
+
+    * a **dark** whose exposure matches the subs within 25% (the Stack form's own
+      mismatch threshold). A dark with an unknown or mismatched exposure is left
+      off, so the stack stays uncalibrated exactly as today rather than risking an
+      over-/under-subtraction from the wrong dark;
+    * the recommended **flat** and its **flat-dark** (flats are exposure
+      independent, and the flat-dark is already distance-gated inside
+      :func:`_recommend_flat_dark`);
+    * a **bias** only when no dark was bound (a dark already carries the bias).
+
+    Returns only the confident ``StackOptions`` path keys (``dark_path`` /
+    ``flat_path`` / ``flat_dark_path`` / ``bias_path``); an empty dict means
+    "leave the stack uncalibrated". Never raises — a master that can't be
+    resolved to an on-disk file is simply skipped.
+    """
+    rec = recommend_masters(masters, exposure_s=exposure_s, gain=gain,
+                            sensor_temp_c=sensor_temp_c)
+    by_id: dict[int, dict[str, Any]] = {}
+    for m in masters:
+        try:
+            by_id[int(m["id"])] = m
+        except (KeyError, TypeError, ValueError):
+            continue
+
+    def _path(mid: Any) -> str | None:
+        if mid is None:
+            return None
+        p = master_path(library_root, int(mid))
+        return str(p) if p is not None else None
+
+    out: dict[str, str] = {}
+
+    # Dark — only when its exposure confidently matches the subs.
+    dark_bound = False
+    dark_id = rec.get("dark_master_id")
+    if dark_id is not None and exposure_s:
+        dm = by_id.get(int(dark_id))
+        dexp = dm.get("exposure_s") if dm else None
+        if (dexp and float(dexp) > 0
+                and abs(float(dexp) - exposure_s) / exposure_s
+                <= _AUTO_BIND_EXP_MISMATCH_FRAC):
+            p = _path(dark_id)
+            if p:
+                out["dark_path"] = p
+                dark_bound = True
+
+    # Flat (+ its flat-dark) — exposure independent, safe to apply as recommended.
+    flat_id = rec.get("flat_master_id")
+    if flat_id is not None:
+        p = _path(flat_id)
+        if p:
+            out["flat_path"] = p
+            fd = _path(rec.get("flat_dark_master_id"))
+            if fd:
+                out["flat_dark_path"] = fd
+
+    # Bias — only meaningful for the lights when no dark was applied.
+    if not dark_bound:
+        bp = _path(rec.get("bias_master_id"))
+        if bp:
+            out["bias_path"] = bp
+
+    return out
+
+
 # A flat-dark must match the *flat's* exposure closely (it removes the flat's own
 # dark-current/bias pedestal). Only recommend one whose match distance clears
 # this bar, so we never suggest, say, a 300 s dark for a 2 s flat.

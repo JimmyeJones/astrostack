@@ -178,6 +178,99 @@ def test_reprocess_all_restacks_every_target_reusing_last_options(solved_library
     assert all(abs(o.sigma_kappa - 4.25) < 1e-6 for o in captured)
 
 
+def _seed_prior_runs_without_calibration(lib) -> None:
+    """Give each target a genuine prior stack run whose options carry no
+    calibration, so a reprocess reuses them and auto-bind has room to act."""
+    for entry in lib.list_targets():
+        proj = lib.open_target(entry.safe_name)
+        try:
+            proj.add_stack_run(StackRunRow(
+                id=None, timestamp_utc="2026-05-01T00:00:00Z",
+                output_basename="master", fits_path=None, tiff_path=None,
+                preview_path=None, n_frames_used=3, canvas_h=10, canvas_w=10,
+                coverage_min=1, coverage_max=3,
+                options_json=json.dumps({"method": "sigma", "sigma_kappa": 4.25}),
+            ))
+        finally:
+            proj.close()
+
+
+def _register_matching_dark(root):
+    import numpy as np
+
+    from seestack.calibrate.masters import MasterMeta
+    from webapp import calibration
+    # The synth subs are 10 s / gain 80 (tests/synth.py), so this dark matches.
+    return calibration.register_master(
+        root, name="Dark 10s",
+        array=np.full((4, 4), 1.0, dtype=np.float32),
+        meta=MasterMeta("dark", 5, 4, 4, "median", exposure_s=10.0, gain=80.0))
+
+
+def test_reprocess_all_auto_binds_calibration_when_enabled(solved_library, monkeypatch):
+    """With auto_bind_calibration on, an unattended restack that had no
+    calibration chosen picks up the library's matching master dark."""
+    captured: list = []
+    _patch_run_stack(monkeypatch, capture=captured)
+    root = solved_library / "library"
+    dark = _register_matching_dark(root)
+    lib = Library.open_or_create(root)
+    try:
+        _seed_prior_runs_without_calibration(lib)
+        settings = Settings(data_root=str(solved_library), auto_ingest=False,
+                            auto_qc=False, auto_solve=False, auto_stack=False,
+                            auto_bind_calibration=True)
+        job = Job(kind="reprocess_all")
+        summary = _run_body(pipeline.submit_reprocess_all, settings, job)
+    finally:
+        lib.close()
+
+    assert summary["stacked"] == 2
+    assert len(captured) == 2
+    dark_name = dark["filename"]
+    # Every restack bound the matching master dark as a server-side path.
+    assert all(o.dark_path and Path(o.dark_path).name == dark_name for o in captured)
+
+
+def test_reprocess_all_no_calibration_bind_when_disabled(solved_library, monkeypatch):
+    """Default (off) — the autonomous restack stays uncalibrated even when a
+    matching master exists, so the behaviour on a live install is unchanged."""
+    captured: list = []
+    _patch_run_stack(monkeypatch, capture=captured)
+    root = solved_library / "library"
+    _register_matching_dark(root)
+    lib = Library.open_or_create(root)
+    try:
+        _seed_prior_runs_without_calibration(lib)
+        job = Job(kind="reprocess_all")
+        summary = _run_body(pipeline.submit_reprocess_all, _settings(solved_library), job)
+    finally:
+        lib.close()
+
+    assert summary["stacked"] == 2
+    assert len(captured) == 2
+    assert all(not o.dark_path for o in captured)  # auto-bind is opt-in
+
+
+def test_interactive_stack_never_auto_binds_calibration(solved_library, monkeypatch):
+    """The interactive Stack form honours exactly what the user picked: even with
+    auto_bind_calibration on, a form-submitted stack with no masters chosen stays
+    uncalibrated (only the unattended chains auto-bind)."""
+    captured: list = []
+    _patch_run_stack(monkeypatch, capture=captured)
+    root = solved_library / "library"
+    _register_matching_dark(root)
+    settings = Settings(data_root=str(solved_library), auto_ingest=False,
+                        auto_qc=False, auto_solve=False, auto_stack=False,
+                        auto_bind_calibration=True)
+    job = Job(kind="stack")
+    # submit_stack is the form path; it passes explicit options and never the flag.
+    _run_body(pipeline.submit_stack, settings, job, safe="M_42", options={})
+
+    assert len(captured) == 1
+    assert not captured[0].dark_path  # form submissions are never auto-calibrated
+
+
 def test_reprocess_all_isolates_a_failing_target(solved_library, monkeypatch):
     seen: list[str] = []
 

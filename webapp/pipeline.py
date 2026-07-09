@@ -122,7 +122,9 @@ def _pipeline_body(
                 # identical stack on restart (crash-loop guard).
                 _mark_auto_stack_attempt(lib, safe, attempt_n)
                 try:
-                    res = _stack_target(settings, jm, job, lib, safe)
+                    res = _stack_target(
+                        settings, jm, job, lib, safe,
+                        auto_bind_calibration=settings.auto_bind_calibration)
                     stacked.append(safe)
                     # Optionally finish the fresh master into a picture (the same
                     # Auto-recipe chain the one-click Process/Reprocess use), so
@@ -280,7 +282,9 @@ def submit_process_target(settings: Settings, jm: JobManager, safe: str) -> Job:
                 summary["stacked"] = False
                 summary["stack_skipped_reason"] = "no_solved_frames"
                 return summary
-            summary["stack"] = _stack_target(settings, jm, job, lib, safe)
+            summary["stack"] = _stack_target(
+                settings, jm, job, lib, safe,
+                auto_bind_calibration=settings.auto_bind_calibration)
             summary["stacked"] = True
             run_id = summary["stack"].get("run_id")
             if run_id is not None and not job.cancel_requested():
@@ -563,8 +567,10 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
                     proj.close()
                 fresh_name = _reprocess_output_basename(existing, APP_VERSION)
                 try:
-                    res = _stack_target(settings, jm, job, lib, safe,
-                                        options=reuse, output_name=fresh_name)
+                    res = _stack_target(
+                        settings, jm, job, lib, safe,
+                        options=reuse, output_name=fresh_name,
+                        auto_bind_calibration=settings.auto_bind_calibration)
                 except Exception as exc:  # noqa: BLE001 — isolate one bad target
                     log.exception("reprocess-all: target %s failed", safe)
                     failed.append({"target": safe, "error": f"{type(exc).__name__}: {exc}"})
@@ -1089,6 +1095,48 @@ def _reprocess_output_basename(existing: set[str], version: str) -> str:
     return f"{base}_{n}"
 
 
+def _auto_bind_calibration(settings: Settings, proj: Any, opts_dict: dict[str, Any]) -> None:
+    """Best-effort: bind confidently-matching library master darks/flats/bias to
+    an unattended stack when it has no calibration chosen (mutates ``opts_dict``).
+
+    Skips entirely when the merged options already carry any calibration path (so
+    a per-target default or reused run's masters win), and never raises into the
+    stack — an unresolvable master or a bad frame set just leaves it uncalibrated,
+    exactly as today. The applied masters flow through the normal stack path, so
+    the run's ``CALSTAT`` provenance records what was calibrated."""
+    from webapp import calibration
+
+    if any(opts_dict.get(k) for k in
+           ("dark_path", "flat_path", "flat_dark_path", "bias_path")):
+        return
+    try:
+        frames = list(proj.iter_frames(accepted_only=True))
+        if not frames:
+            return
+
+        def _med(vals: list[Any]) -> float | None:
+            xs = sorted(v for v in vals if v is not None)
+            if not xs:
+                return None
+            n = len(xs)
+            return xs[n // 2] if n % 2 else (xs[n // 2 - 1] + xs[n // 2]) / 2.0
+
+        masters = calibration.list_masters(settings.resolved_library_root)
+        bound = calibration.auto_bind_master_paths(
+            settings.resolved_library_root, masters,
+            exposure_s=_med([f.exposure_s for f in frames]),
+            gain=_med([f.gain for f in frames]),
+            sensor_temp_c=_med([f.sensor_temp_c for f in frames]),
+        )
+    except Exception as exc:  # noqa: BLE001 — calibration binding is a best-effort nicety
+        log.warning("auto-bind calibration failed for %s: %s",
+                    opts_dict.get("output_name", "?"), exc)
+        return
+    if bound:
+        opts_dict.update(bound)
+        log.info("auto-bound calibration masters: %s", ", ".join(sorted(bound)))
+
+
 def _stack_target(
     settings: Settings,
     jm: JobManager,
@@ -1098,12 +1146,20 @@ def _stack_target(
     *,
     options: dict[str, Any] | None = None,
     output_name: str | None = None,
+    auto_bind_calibration: bool = False,
 ) -> dict[str, Any]:
     """Run a stack for one target and record it. Returns a small summary.
 
     ``output_name``, when given, overrides the output basename *after* the option
     merge — used by reprocess-all to force a fresh, non-colliding name so a
     restack doesn't archive/overwrite the target's existing output.
+
+    ``auto_bind_calibration`` (set by the *unattended* chains — watcher
+    auto-stack, Process target, reprocess-all — from ``settings.auto_bind_calibration``)
+    binds the library's best confidently-matching master dark/flat/bias when the
+    merged options carry no explicit calibration, so a walk-away stack is still
+    calibrated. The interactive Stack form never sets it — it honours exactly what
+    the user picked (or deliberately left blank).
     """
     from seestack.stack.stacker import run_stack
 
@@ -1123,6 +1179,8 @@ def _stack_target(
             opts_dict.update(options)
         if output_name is not None:
             opts_dict["output_name"] = output_name
+        if auto_bind_calibration:
+            _auto_bind_calibration(settings, proj, opts_dict)
         if opts_dict.get("max_workers") is None and settings.cpu_workers:
             opts_dict["max_workers"] = settings.cpu_workers
         opts = coerce_stack_options(opts_dict)

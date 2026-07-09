@@ -201,6 +201,71 @@ def test_recommend_masters_skips_missing_and_handles_empty():
     assert empty["dark_master_id"] is None and empty["scores"] == {}
 
 
+def _register(root, kind, exposure_s=None, gain=None, sensor_temp_c=None):
+    from seestack.calibrate.masters import MasterMeta
+    return calibration.register_master(
+        root, name=f"{kind} {exposure_s}",
+        array=np.full((4, 4), 1.0, dtype=np.float32),
+        meta=MasterMeta(kind, 5, 4, 4, "median", exposure_s=exposure_s,
+                        gain=gain, sensor_temp_c=sensor_temp_c))
+
+
+def test_auto_bind_binds_confident_dark_and_flat(tmp_path):
+    """A dark whose exposure matches the subs and a flat are both auto-bound to
+    an unattended stack — as on-disk paths, not ids."""
+    root = tmp_path / "lib"
+    dark = _register(root, "dark", exposure_s=30.0, gain=80.0)
+    flat = _register(root, "flat", exposure_s=2.0, gain=80.0)
+    masters = calibration.list_masters(root)
+
+    bound = calibration.auto_bind_master_paths(
+        root, masters, exposure_s=30.0, gain=80.0)
+    assert Path(bound["dark_path"]).name == dark["filename"]
+    assert Path(bound["flat_path"]).name == flat["filename"]
+    # A dark carries the bias, so no separate bias is bound alongside it.
+    assert "bias_path" not in bound
+
+
+def test_auto_bind_skips_exposure_mismatched_dark(tmp_path):
+    """The library's only dark is a wild exposure mismatch (300 s dark vs 30 s
+    subs) — auto-bind must leave it off rather than over-subtract, while still
+    binding the (exposure-independent) flat."""
+    root = tmp_path / "lib"
+    _register(root, "dark", exposure_s=300.0, gain=80.0)
+    flat = _register(root, "flat", exposure_s=2.0, gain=80.0)
+    masters = calibration.list_masters(root)
+
+    bound = calibration.auto_bind_master_paths(
+        root, masters, exposure_s=30.0, gain=80.0)
+    assert "dark_path" not in bound
+    assert Path(bound["flat_path"]).name == flat["filename"]
+
+
+def test_auto_bind_binds_bias_only_when_no_dark(tmp_path):
+    """A bias is only bound for the lights when no dark matched (a dark already
+    carries the bias)."""
+    root = tmp_path / "lib"
+    _register(root, "dark", exposure_s=300.0, gain=80.0)   # mismatched → dropped
+    bias = _register(root, "bias", exposure_s=0.0, gain=80.0)
+    masters = calibration.list_masters(root)
+
+    bound = calibration.auto_bind_master_paths(
+        root, masters, exposure_s=30.0, gain=80.0)
+    assert "dark_path" not in bound
+    assert Path(bound["bias_path"]).name == bias["filename"]
+
+    # Add a matching dark → the bias is no longer bound (the dark supersedes it).
+    _register(root, "dark", exposure_s=30.0, gain=80.0)
+    bound2 = calibration.auto_bind_master_paths(
+        root, calibration.list_masters(root), exposure_s=30.0, gain=80.0)
+    assert "dark_path" in bound2 and "bias_path" not in bound2
+
+
+def test_auto_bind_empty_when_no_masters(tmp_path):
+    assert calibration.auto_bind_master_paths(
+        tmp_path / "lib", [], exposure_s=30.0) == {}
+
+
 def test_calibration_suggestions_endpoint(client, solved_library):
     from seestack.calibrate.masters import MasterMeta
     from seestack.io.library import Library
