@@ -160,6 +160,25 @@ the real webapp stack→edit path.)_
   pathological skew reverts — same real-data-gating as the SCNR / `sky_sigma` items in Image-quality
   below. Fix all four sites together (they share the bug). (S code / M validation, image-quality/correctness)
 
+_(Scout QA audit 2026-07-09 (v0.99.10 baseline, suite green **978 passed / 2 skipped**): led the rotation
+with a fresh adversarial re-read of the **stacking engine + its final-image edges** —
+`stack/{weighting,photometric,reference,accumulator,align,mosaic,output,drizzle_path}.py`,
+`calibrate/{apply,masters}.py`, `render/thumbnail.py` (asinh/STF stretch, NaN-preserving stride),
+`edit/proxy.py`, and the coverage helpers in `webapp/routers/editor.py`. Read for NaN=coverage
+violations, wrong-frame-count/coverage semantics under quality weighting, photometric-scale/weight
+cross-pass symmetry, calibration double-subtract, RA-wrap, and **preview↔export parity**. **No new
+verified bug found** — the accumulators keep an honest unweighted `_count` (`frame_coverage`) distinct
+from Σweights so `coverage_min/max` stay a true frame count; the coverage output is always 3-D so the
+un-guarded `coverage[...,0]` at `stacker.py:1261` is safe; the two κ-σ passes and both drizzle passes
+apply `photometric_scales` **before** the consumer and quality `weight` only in the pass-2 combine
+(provenance-gated so a `min_max_reject` order-statistic stack never claims WGT*); `_proxy_coverage`
+strides the coverage map by `round(proxy_scale)` = the same integer `build_proxy` uses, so the
+coverage-leveling op lines up proxy↔full-res; calibration never double-subtracts the bias and
+`apply_raw` never mutates its input. Consistent with the ~15 prior clean engine/editor audits. **No
+code shipped** (an idle-but-green run is a success, AGENTS.md §2); filed two headless-shippable
+autonomy/friendliness ideas (honest per-run frame accounting + large-align-failure diagnosis — see
+Ideas) since the engine bug well is dry.)_
+
 _(Scout QA audit 2026-07-09 (v0.98.2 baseline, suite green 950 passed / 2 skipped): with the editor,
 stacking core, mosaic/drizzle geometry, calibration, bg, solve, render, routers, jobs and the newest
 nightplan path all saturated by recent clean audits, rotated the focused subsystem audit onto the
@@ -909,6 +928,33 @@ problems. Dogfood it every big-picture run and fix root causes.
   v0.84.2. A Builder dogfood of the other five routes (Dashboard/Library/Target/
   History/Editor) found them already well-handled with icon+prose+next-step empty
   states, beginner tooltips, and translated reject/combine labels.)_
+- **Persist & surface honest per-run frame accounting ("N of M solved subs actually contributed").**
+  (S–M, friendliness/trust) *Scout-filed 2026-07-09, traced.* `run_stack` already computes everything
+  needed — `n_frames_used`, `excluded_frames` (gross plate-solve outliers dropped by
+  `compute_mosaic_canvas`), and `errors` (per-frame load/align failures accumulated in `_pass`, e.g. a
+  frame whose footprint didn't intersect the canvas) — and the **fresh job result** returns them
+  (`webapp/pipeline.py:1204-1208`). But **only `n_frames_used` is persisted** to the `stack_runs` row, so
+  the moment the user leaves the Jobs page the "why fewer subs made it in" information is gone: the History
+  Info panel shows "N frames used" with no way to see that, say, only 1,850 of 2,000 solved subs actually
+  stacked and 150 couldn't be aligned. For the target user (thousands of subs, walks away and comes back)
+  that silent gap is a real trust hole — a large align-failure fraction usually means mixed targets or bad
+  plate-solves, and today nothing tells them. **Slice (a):** persist the counts alongside the run — either
+  additive `stack_runs` columns (`n_offered`, `n_align_failed`; schema bump + `_migrate_schema`, upgrade-safe)
+  **or**, lower-risk, a per-run project-meta blob keyed by run id (the exact pattern the auto-edit note
+  already uses, `AUTO_EDIT_NOTE_PREFIX{run_id}` — no schema change). **Slice (b):** show a dimmed
+  plain-language line on the History Info panel ("1,850 of 2,000 solved subs stacked; 150 couldn't be
+  aligned"), only when the gap is non-trivial. Additive, off-nothing, no default/API-shape change; testable
+  against a synthetic run where some frames fail to align.
+- **Proactively diagnose a *large* align-failure fraction ("many subs didn't line up — likely mixed
+  targets or bad plate-solves").** (S, autonomy/friendliness) *Scout-filed 2026-07-09.* A natural companion
+  to the frame-accounting idea above but distinct in value: not just *displaying* the gap but *guiding a
+  fix*. When a big share of solved subs fail to align (`errors`/footprint-miss in `_pass`, or many
+  `excluded_frames` from the mosaic outlier pass), it almost always means either two targets' frames landed
+  in one folder or a cluster of frames plate-solved to the wrong place. Surface a one-line actionable nudge
+  on the Target/History view ("42% of your solved subs couldn't be aligned to the reference — open the
+  Frames table, sort by RA/Dec, and reject/re-solve the ones whose centre is far from the rest"), reusing
+  the exact guidance `compute_mosaic_canvas`'s own `ValueError` already gives for the over-cap case. Reuses
+  the persisted counts from the idea above; additive; a pure threshold + copy, testable in isolation.
 - ~~**Surface "N frames couldn't be quality-checked" on the Target page.**~~ — **shipped v0.99.1**
   (see Shipped). Frontend-only, zero backend change: a new pure `countQcUncheckable(frames)` helper counts
   frames whose `reject_reason` starts with `qc_error` (from the already-fetched frames list, any accept
