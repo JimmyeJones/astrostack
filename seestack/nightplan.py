@@ -170,6 +170,24 @@ class DarkWindow:
 
 
 @dataclass
+class MoonWindow:
+    """When the Moon rises/sets *during* tonight's dark window (UTC ISO strings).
+
+    The illuminated fraction and waxing/waning direction say *how bright* the Moon
+    is and roughly *which half* of the night it disturbs; this pins the concrete
+    time. ``set_utc`` is a setting crossing inside the dark window (the sky clears
+    after it), ``rise_utc`` a rising crossing (the sky is clean before it). When
+    the Moon never crosses the horizon during the darkness, exactly one of
+    ``up_all_night`` / ``down_all_night`` is true and both times are ``None``.
+    """
+
+    rise_utc: str | None
+    set_utc: str | None
+    up_all_night: bool
+    down_all_night: bool
+
+
+@dataclass
 class Observability:
     """How observable one target is over a given dark window."""
 
@@ -215,6 +233,10 @@ class NightPlan:
     # ``None`` only when no location/plan could be computed.
     moon_waxing: bool | None
     min_altitude_deg: float
+    # When the Moon rises/sets during tonight's dark window (or that it stays up /
+    # down all night) — the concrete time to complement the phase. ``None`` only
+    # when no dark window could be computed. See :class:`MoonWindow`.
+    moon_window: dict | None = None
     # True when a non-empty horizon/tree mask shaped the usable windows below, so
     # the UI can explain that low-altitude obstructions were accounted for.
     horizon_active: bool = False
@@ -360,6 +382,57 @@ def moon_is_waxing(when_utc: datetime) -> bool:
     sun_lon = float(get_sun(t).transform_to(ecl).lon.deg)
     moon_lon = float(get_body("moon", t).transform_to(ecl).lon.deg)
     return 0.0 < (moon_lon - sun_lon) % 360.0 < 180.0
+
+
+def _moon_altitudes(stamps_time, location):  # noqa: ANN001, ANN202
+    """Topocentric Moon altitude (deg) at each sampled time, for this observer."""
+    from astropy.coordinates import AltAz, get_body
+
+    moon = get_body("moon", stamps_time, location)
+    altaz = moon.transform_to(AltAz(obstime=stamps_time, location=location))
+    return np.asarray(altaz.alt.deg, dtype=float)
+
+
+def _interp_crossing_iso(t0: datetime, t1: datetime, a0: float, a1: float) -> str:
+    """UTC ISO string of the horizon crossing linearly interpolated between two
+    samples (altitudes ``a0``→``a1`` straddling 0°), rounded to the nearest minute."""
+    frac = 0.0 if a1 == a0 else float(np.clip(-a0 / (a1 - a0), 0.0, 1.0))
+    cross = t0 + (t1 - t0) * frac
+    cross = cross.astimezone(timezone.utc)
+    # Round to the nearest whole minute — a "~23:40" cue needs no more precision.
+    cross = (cross + timedelta(seconds=30)).replace(second=0, microsecond=0)
+    return cross.isoformat()
+
+
+def moon_window(observer: Observer, window: DarkWindow) -> MoonWindow:
+    """Moon rise/set crossings *inside* tonight's dark window (see :class:`MoonWindow`).
+
+    Samples the topocentric Moon altitude across the dark window on a 5-minute
+    grid and reports the first setting and first rising crossing of the horizon
+    (altitude 0°) within it. If the Moon stays above (or below) the horizon for
+    the whole window it reports ``up_all_night`` (``down_all_night``) instead and
+    leaves both times ``None`` — so the UI shows no misleading time. Offline and
+    deterministic, like the rest of the planner.
+    """
+    _configure_iers_offline()
+    location = observer.earth_location()
+    stamps, times = _times_grid(window.start, window.end, 5.0)
+    alt = _moon_altitudes(times, location)
+    above = alt >= 0.0
+
+    rise_utc: str | None = None
+    set_utc: str | None = None
+    for i in range(len(alt) - 1):
+        a0, a1 = float(alt[i]), float(alt[i + 1])
+        if a0 < 0.0 <= a1 and rise_utc is None:  # rising through the horizon
+            rise_utc = _interp_crossing_iso(stamps[i], stamps[i + 1], a0, a1)
+        elif a0 >= 0.0 > a1 and set_utc is None:  # setting through the horizon
+            set_utc = _interp_crossing_iso(stamps[i], stamps[i + 1], a0, a1)
+
+    up_all = bool(above.all())
+    down_all = bool((~above).all())
+    return MoonWindow(rise_utc=rise_utc, set_utc=set_utc,
+                      up_all_night=up_all, down_all_night=down_all)
 
 
 def _score(max_alt: float, minutes_above: float, dark_minutes: float,
@@ -508,6 +581,7 @@ def plan_tonight(observer: Observer, when_utc: datetime, *,
         "duration_minutes": round(window.duration_minutes, 1),
         "sun_alt_threshold_deg": window.sun_alt_threshold_deg,
     }
+    plan.moon_window = asdict(moon_window(observer, window))
 
     # Build the candidate list: library targets first, then catalog objects not
     # already covered by a library target (matched within ~0.75° on the sky).

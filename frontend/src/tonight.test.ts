@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  compassPoint, formatMinutes, minAltOptions, moonPhaseLabel, scoreColor, splitTargets,
+  compassPoint, formatClock, formatMinutes, minAltOptions, moonPhaseLabel, moonWindowNote,
+  scoreColor, splitTargets,
 } from "./tonight";
 import type { PlannedTarget } from "./api/client";
 
@@ -36,6 +37,45 @@ describe("moonPhaseLabel", () => {
     expect(moonPhaseLabel(1, false)).toBe("Full Moon (100%)");
     // An unknown state falls back to the plain, direction-agnostic labels.
     expect(moonPhaseLabel(0.8, null)).toBe("Gibbous (80%)");
+  });
+});
+
+describe("moonWindowNote", () => {
+  it("names a setting Moon with its concrete time", () => {
+    const note = moonWindowNote({
+      rise_utc: null, set_utc: "2026-01-26T01:03:00+00:00",
+      up_all_night: false, down_all_night: false,
+    });
+    expect(note).toContain(`Sets ~${formatClock("2026-01-26T01:03:00+00:00")}`);
+    expect(note).toContain("dark after");
+    // The sentence is capitalised.
+    expect(note?.[0]).toBe(note?.[0]?.toUpperCase());
+  });
+
+  it("names a rising Moon with its concrete time", () => {
+    const note = moonWindowNote({
+      rise_utc: "2026-01-12T02:34:00+00:00", set_utc: null,
+      up_all_night: false, down_all_night: false,
+    });
+    expect(note).toContain(`~${formatClock("2026-01-12T02:34:00+00:00")}`);
+    expect(note).toContain("dark before");
+  });
+
+  it("reports an all-night Moon plainly and hides the time", () => {
+    expect(moonWindowNote({
+      rise_utc: null, set_utc: null, up_all_night: true, down_all_night: false,
+    })).toBe("Above the horizon all night");
+    expect(moonWindowNote({
+      rise_utc: null, set_utc: null, up_all_night: false, down_all_night: true,
+    })).toBe("Below the horizon all night");
+  });
+
+  it("returns null when there's no useful cue", () => {
+    expect(moonWindowNote(null)).toBeNull();
+    expect(moonWindowNote(undefined)).toBeNull();
+    expect(moonWindowNote({
+      rise_utc: null, set_utc: null, up_all_night: false, down_all_night: false,
+    })).toBeNull();
   });
 });
 

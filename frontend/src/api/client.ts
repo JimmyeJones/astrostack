@@ -40,6 +40,15 @@ export interface NightPlan {
   // midnight); null when no plan could be computed. Lets the UI say "Waxing
   // gibbous" vs "Waning gibbous" — the fraction alone can't tell them apart.
   moon_waxing?: boolean | null;
+  // When the Moon rises/sets during tonight's dark window (concrete UTC times),
+  // or that it stays up / down for the whole window. Absent/null when no dark
+  // window could be computed. Complements the phase with the actual clock time.
+  moon_window?: {
+    rise_utc: string | null;
+    set_utc: string | null;
+    up_all_night: boolean;
+    down_all_night: boolean;
+  } | null;
   min_altitude_deg: number;
   // True when a horizon/tree mask (Settings → Observing site) shaped the usable
   // windows, so the UI can note that low-sky obstructions were accounted for.

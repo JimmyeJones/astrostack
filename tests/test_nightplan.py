@@ -223,6 +223,106 @@ def test_plan_reports_moon_waxing_state():
     assert plan.moon_waxing is False
 
 
+def test_moon_window_full_moon_is_up_all_night():
+    # The ~2026-01-03 full Moon rides opposite the Sun, so it clears the horizon
+    # for the whole dark window — no rise/set inside it to report.
+    obs = LONDON
+    ref = datetime(2026, 1, 3, 22, 0, tzinfo=timezone.utc)
+    win = np_plan._find_dark_window(obs, ref)
+    mw = np_plan.moon_window(obs, win)
+    assert mw.up_all_night is True
+    assert mw.down_all_night is False
+    assert mw.rise_utc is None and mw.set_utc is None
+
+
+def test_moon_window_new_moon_is_down_all_night():
+    # The ~2026-01-18 new Moon sits near the Sun, so it is below the horizon
+    # through the entire (post-dusk) dark window — good, dark skies.
+    obs = LONDON
+    ref = datetime(2026, 1, 18, 22, 0, tzinfo=timezone.utc)
+    win = np_plan._find_dark_window(obs, ref)
+    mw = np_plan.moon_window(obs, win)
+    assert mw.down_all_night is True
+    assert mw.up_all_night is False
+    assert mw.rise_utc is None and mw.set_utc is None
+
+
+def test_moon_window_waxing_moon_sets_during_the_night():
+    # A waxing half-Moon (~2026-01-25) leads the Sun and sets partway through the
+    # night, clearing the sky for the later hours.
+    obs = LONDON
+    ref = datetime(2026, 1, 25, 22, 0, tzinfo=timezone.utc)
+    win = np_plan._find_dark_window(obs, ref)
+    mw = np_plan.moon_window(obs, win)
+    assert mw.set_utc is not None
+    assert mw.rise_utc is None
+    assert not mw.up_all_night and not mw.down_all_night
+    # The reported crossing lies inside the dark window and is a genuine
+    # above→below transition of the Moon's altitude.
+    cross = datetime.fromisoformat(mw.set_utc)
+    assert win.start <= cross <= win.end
+    _assert_is_setting_crossing(obs, cross)
+
+
+def test_moon_window_waning_moon_rises_during_the_night():
+    # A waning Moon (~2026-01-11) trails the Sun and rises after midnight, so it
+    # only spoils the later part of the night.
+    obs = LONDON
+    ref = datetime(2026, 1, 11, 22, 0, tzinfo=timezone.utc)
+    win = np_plan._find_dark_window(obs, ref)
+    mw = np_plan.moon_window(obs, win)
+    assert mw.rise_utc is not None
+    assert mw.set_utc is None
+    assert not mw.up_all_night and not mw.down_all_night
+    cross = datetime.fromisoformat(mw.rise_utc)
+    assert win.start <= cross <= win.end
+    _assert_is_rising_crossing(obs, cross)
+
+
+def _moon_alt(obs: Observer, when: datetime) -> float:
+    from astropy.time import Time
+
+    stamps_time = Time([when.replace(tzinfo=None)], scale="utc")
+    return float(np_plan._moon_altitudes(stamps_time, obs.earth_location())[0])
+
+
+def _assert_is_setting_crossing(obs: Observer, cross: datetime) -> None:
+    from datetime import timedelta
+
+    assert _moon_alt(obs, cross - timedelta(minutes=6)) > 0.0
+    assert _moon_alt(obs, cross + timedelta(minutes=6)) < 0.0
+
+
+def _assert_is_rising_crossing(obs: Observer, cross: datetime) -> None:
+    from datetime import timedelta
+
+    assert _moon_alt(obs, cross - timedelta(minutes=6)) < 0.0
+    assert _moon_alt(obs, cross + timedelta(minutes=6)) > 0.0
+
+
+def test_plan_reports_moon_window():
+    # A dated plan carries the same moon-window verdict the standalone helper
+    # computes, so the UI can show the concrete rise/set time under the phase.
+    ref = datetime(2026, 1, 25, 22, 0, tzinfo=timezone.utc)
+    plan = plan_tonight(LONDON, ref)
+    assert plan.moon_window is not None
+    win = np_plan._find_dark_window(LONDON, ref)
+    expected = np_plan.moon_window(LONDON, win)
+    assert plan.moon_window["set_utc"] == expected.set_utc
+    assert plan.moon_window["rise_utc"] == expected.rise_utc
+    assert plan.moon_window["up_all_night"] == expected.up_all_night
+    assert plan.moon_window["down_all_night"] == expected.down_all_night
+
+
+def test_plan_without_dark_window_has_no_moon_window():
+    # Polar day: no dark window, so no moon-window cue either (rather than a
+    # misleading all-night flag).
+    svalbard = Observer(lat_deg=78.2, lon_deg=15.6, elevation_m=0.0)
+    plan = plan_tonight(svalbard, datetime(2026, 6, 21, 12, 0, tzinfo=timezone.utc))
+    assert plan.dark_window is None
+    assert plan.moon_window is None
+
+
 def test_plan_is_deterministic():
     a = plan_tonight(LONDON, JAN_EVENING)
     b = plan_tonight(LONDON, JAN_EVENING)

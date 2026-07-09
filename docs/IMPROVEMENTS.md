@@ -1005,15 +1005,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   woven into `moonPhaseLabel(illum, waxing)`. New/Full never take a prefix; an absent state
   (older backend) falls back to the plain labels. The optional rise/set-time cue was left for a
   future run. Additive, offline, tested on the pure helpers (Python + TS) and the endpoint.
-- **Tonight planner: show tonight's Moon rise/set time on the Moon card.** (S, friendliness/workflow —
-  priority 3) Now that the card names the *phase direction* (waxing/waning, v0.97.4), the natural
-  follow-up is the concrete times: a waxing Moon that **sets ~23:40** leaves the second half of the
-  night dark, a waning Moon that **rises ~01:10** keeps the first half clean — far more actionable than
-  "waxing" alone. Offline and deterministic: sample the Moon's altitude over the night grid the planner
-  already builds (`_times_grid` noon→noon at the observer's `EarthLocation`) and report the horizon
-  crossings that bracket the dark window (handle "up all night" / "never up" gracefully → no cue).
-  Surface as one dimmed line under `moonPhaseLabel` ("sets ~23:40" / "rises ~01:10" / "up most of the
-  night"). Additive, testable on a pure helper against a known ephemeris date. Found shipping v0.97.4.
+- ~~**Tonight planner: show tonight's Moon rise/set time on the Moon card.**~~ — **shipped v0.97.5**
+  (see Shipped). A new offline `nightplan.moon_window(observer, window)` samples the topocentric Moon
+  altitude across tonight's dark window on a 5-minute grid and reports the first setting / rising
+  horizon crossing *inside* it (linearly interpolated, rounded to the nearest minute), or an
+  `up_all_night` / `down_all_night` flag when the Moon never crosses during the darkness. Surfaced as
+  an additive nullable `moon_window` field on the plan (null when no dark window could be computed) and
+  woven into the Moon card as one dimmed line under `moonPhaseLabel` via a pure `moonWindowNote` helper
+  ("Sets ~23:40, dark after" / "Rises ~01:10, dark before" / "Above the horizon all night" / "Below the
+  horizon all night"), replacing the generic "nearer + brighter" hint only when a concrete cue exists.
+  Offline, deterministic, upgrade-safe (an older backend without the field falls back to the plain
+  hint). Regression tests pin the full-Moon (up all night), new-Moon (down all night), waxing-sets and
+  waning-rises cases against real 2026 ephemeris dates with a crossing-direction check, plus the plan
+  wiring, the endpoint shape, and the pure TS helper.
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
@@ -1245,6 +1249,19 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.97.5** — Tonight planner (friendliness): the Moon card now shows *when* the Moon rises or sets
+  during tonight's dark window, complementing the phase with a concrete time. New offline
+  `nightplan.moon_window(observer, window)` samples the topocentric Moon altitude across the dark
+  window (5-min grid) and reports the first setting/rising horizon crossing inside it (interpolated,
+  rounded to the minute), or an `up_all_night` / `down_all_night` flag when it never crosses; surfaced
+  as an additive nullable `moon_window` field on the plan and rendered as one dimmed line under
+  `moonPhaseLabel` via a pure `moonWindowNote` helper ("Sets ~23:40, dark after" / "Rises ~01:10, dark
+  before" / "Above/Below the horizon all night"), which replaces the generic "nearer + brighter" hint
+  only when a concrete cue exists. Additive, offline, upgrade-safe (older backend → plain hint). Tests:
+  `test_nightplan.py` (full/new-Moon all-night, waxing-sets, waning-rises against real 2026 ephemeris
+  with a crossing-direction check, plan wiring, no-window case), `test_plan.py` (endpoint carries
+  `moon_window`), and TS (`tonight.test.ts` `moonWindowNote`, `Tonight.test.tsx` Moon card). Found
+  dogfooding the newest feature.
 - **v0.97.4** — Tonight planner (friendliness): the Moon card now distinguishes a **waxing** from a
   **waning** Moon ("Waxing gibbous (72%)" / "Waning gibbous"; "First Quarter" / "Last Quarter";
   "Waxing crescent" / "Waning crescent"), which tells the planner *when* the Moon is up — a waxing

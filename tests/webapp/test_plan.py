@@ -50,6 +50,13 @@ def test_tonight_with_settings_location(client, solved_library):
     assert 0.0 <= body["moon_illumination"] <= 1.0
     # 2026-01-15 is a waning crescent (days before the ~01-18 new Moon).
     assert body["moon_waxing"] is False
+    # The plan carries a moon-window cue alongside the dark window (concrete
+    # rise/set time or an all-night flag); shape-checked here, values pinned in
+    # the engine tests.
+    mw = body["moon_window"]
+    assert mw is not None
+    assert set(mw) == {"rise_utc", "set_utc", "up_all_night", "down_all_night"}
+    assert not (mw["up_all_night"] and mw["down_all_night"])
 
     targets = body["targets"]
     assert targets, "expected a ranked target list"

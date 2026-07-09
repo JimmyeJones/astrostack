@@ -70,6 +70,21 @@ describe("TonightView", () => {
       expect(screen.getByText("Waning gibbous (72%)")).toBeInTheDocument());
   });
 
+  it("shows the Moon's rise/set time under the phase when it crosses the night", async () => {
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
+      moon_illumination: 0.47, moon_waxing: true,
+      moon_window: {
+        rise_utc: null, set_utc: "2026-01-16T01:03:00+00:00",
+        up_all_night: false, down_all_night: false,
+      },
+    }));
+    renderTonight();
+    await waitFor(() =>
+      expect(screen.getByText(/sets ~/i)).toBeInTheDocument());
+    // The generic "nearer + brighter" hint is replaced by the concrete cue.
+    expect(screen.queryByText(/Nearer \+ brighter/i)).not.toBeInTheDocument();
+  });
+
   it("guides a first-timer with no library targets instead of blaming altitude", async () => {
     // No library targets => the "already targeted" table is empty, but the
     // reason is an empty library, not the altitude floor.
