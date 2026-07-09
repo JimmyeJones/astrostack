@@ -10,16 +10,8 @@ import { api, type PlannedTarget } from "../api/client";
 import { QueryError } from "../components/QueryError";
 import { formatIntegration } from "../format";
 import {
-  formatClock, formatMinutes, moonPhaseLabel, scoreColor, splitTargets,
+  formatClock, formatMinutes, minAltOptions, moonPhaseLabel, scoreColor, splitTargets,
 } from "../tonight";
-
-const MIN_ALT_OPTIONS = [
-  { value: "10", label: "10° (low)" },
-  { value: "20", label: "20°" },
-  { value: "30", label: "30° (default)" },
-  { value: "40", label: "40°" },
-  { value: "50", label: "50° (high only)" },
-];
 
 function ScoreBadge({ score }: { score: number }) {
   return (
@@ -114,7 +106,7 @@ export function TonightView() {
       </div>
       <Select
         label="Minimum altitude"
-        data={MIN_ALT_OPTIONS}
+        data={minAltOptions(minAlt ? Number(minAlt) : data.min_altitude_deg)}
         value={minAlt || String(data.min_altitude_deg)}
         onChange={(v) => setMinAlt(v ?? "")}
         w={180}

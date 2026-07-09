@@ -14,6 +14,35 @@ export function moonPhaseLabel(illum: number | null): string {
   return `Full Moon (${pct}%)`;
 }
 
+export interface MinAltOption {
+  value: string;
+  label: string;
+}
+
+// The round preset floors the Tonight "Minimum altitude" picker offers.
+const BASE_MIN_ALT: MinAltOption[] = [
+  { value: "10", label: "10° (low)" },
+  { value: "20", label: "20°" },
+  { value: "30", label: "30° (default)" },
+  { value: "40", label: "40°" },
+  { value: "50", label: "50° (high only)" },
+];
+
+// Build the "Minimum altitude" options, guaranteeing the currently-active floor
+// is always selectable. The user's `min_target_altitude_deg` setting is any
+// integer 0–80 (the Settings input steps by 5, so 15° / 45° / 55° are all
+// reachable), but this picker only lists round presets — so an active floor
+// that isn't one of them would otherwise leave the Select rendering blank. When
+// the active floor isn't already a preset, splice it in (numerically sorted) so
+// the control always shows the real floor the plan was computed for.
+export function minAltOptions(active: number | null | undefined): MinAltOption[] {
+  if (active == null || !Number.isFinite(active)) return BASE_MIN_ALT;
+  const rounded = Math.round(active);
+  if (BASE_MIN_ALT.some((o) => Number(o.value) === rounded)) return BASE_MIN_ALT;
+  const extra: MinAltOption = { value: String(rounded), label: `${rounded}°` };
+  return [...BASE_MIN_ALT, extra].sort((a, b) => Number(a.value) - Number(b.value));
+}
+
 // A Mantine colour bucketing an observability score (0..100) into
 // good / fair / poor, so the ranking reads at a glance.
 export function scoreColor(score: number): string {

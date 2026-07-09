@@ -1226,6 +1226,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.97.2** — Tonight planner (friendliness): the "Minimum altitude" picker no longer renders
+  **blank** when the user's `min_target_altitude_deg` setting isn't one of the round presets. The
+  Settings input steps by 5° (so 15° / 45° / 55° are all reachable) but the Tonight `Select` only
+  listed {10,20,30,40,50}, so an active floor like 45° left the control showing nothing (the plan was
+  still correct — only the control looked broken). New pure `minAltOptions(active)` helper (in
+  `tonight.ts`) splices the active floor into the options list, numerically sorted, whenever it isn't
+  already a preset, so the picker always shows the real floor the plan was computed for. Frontend-only,
+  additive, no backend/API change. Unit tests for the helper (`tonight.test.ts`: preset/non-preset/
+  rounded/null cases) + a component regression (`Tonight.test.tsx`: a 45° floor renders "45°", not
+  blank). Found by a big-picture dogfood of the newest feature (§2).
 - **v0.97.0** — ⭐ OWNER-REQUESTED "Tonight" night planner — widen the bundled catalog beyond Messier.
   A second static, offline file `seestack/data/deepsky_popular.json` (47 curated popular non-Messier
   NGC/IC targets — Double Cluster, Veil, North America/Pelican, Heart/Soul, Rosette, Iris, Cocoon,

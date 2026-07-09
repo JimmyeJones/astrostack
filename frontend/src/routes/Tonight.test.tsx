@@ -61,6 +61,18 @@ describe("TonightView", () => {
       expect(screen.getByText("No darkness tonight")).toBeInTheDocument());
   });
 
+  it("shows the active minimum-altitude floor even when it isn't a round preset", async () => {
+    // A 45° floor is reachable from the step-5 Settings input but isn't one of
+    // the picker's presets — the Select must still render it, not blank out.
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({ min_altitude_deg: 45 }));
+    renderTonight();
+    await waitFor(() =>
+      expect(screen.getByText("Add more to what you're shooting")).toBeInTheDocument());
+    // The visible Select input shows the option's label ("45°"); before the fix
+    // there was no matching option for a 45° floor and it rendered blank.
+    expect(screen.getByDisplayValue("45°")).toBeInTheDocument();
+  });
+
   it("ranks library targets and fresh catalog suggestions separately", async () => {
     vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
       targets: [

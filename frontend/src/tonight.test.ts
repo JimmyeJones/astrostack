@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  compassPoint, formatMinutes, moonPhaseLabel, scoreColor, splitTargets,
+  compassPoint, formatMinutes, minAltOptions, moonPhaseLabel, scoreColor, splitTargets,
 } from "./tonight";
 import type { PlannedTarget } from "./api/client";
 
@@ -56,6 +56,41 @@ describe("compassPoint", () => {
     expect(compassPoint(360)).toBe("N");  // wraps
     expect(compassPoint(-90)).toBe("W");  // negative wraps
     expect(compassPoint(NaN)).toBe("");
+  });
+});
+
+describe("minAltOptions", () => {
+  const vals = (active: number | null | undefined) =>
+    minAltOptions(active).map((o) => o.value);
+
+  it("returns just the presets when the active floor is already one", () => {
+    expect(vals(30)).toEqual(["10", "20", "30", "40", "50"]);
+    expect(vals(10)).toEqual(["10", "20", "30", "40", "50"]);
+    expect(vals(50)).toEqual(["10", "20", "30", "40", "50"]);
+  });
+
+  it("splices a non-preset active floor in, numerically sorted", () => {
+    // 15° / 45° / 55° are all reachable from the step-5 Settings input.
+    expect(vals(45)).toEqual(["10", "20", "30", "40", "45", "50"]);
+    expect(vals(15)).toEqual(["10", "15", "20", "30", "40", "50"]);
+    expect(vals(55)).toEqual(["10", "20", "30", "40", "50", "55"]);
+    expect(vals(0)).toEqual(["0", "10", "20", "30", "40", "50"]);
+  });
+
+  it("labels the spliced option with its degree value", () => {
+    const opt = minAltOptions(45).find((o) => o.value === "45");
+    expect(opt?.label).toBe("45°");
+  });
+
+  it("rounds a fractional floor before matching / splicing", () => {
+    expect(vals(30.4)).toEqual(["10", "20", "30", "40", "50"]);
+    expect(vals(44.6)).toEqual(["10", "20", "30", "40", "45", "50"]);
+  });
+
+  it("falls back to the presets for a missing / non-finite floor", () => {
+    expect(vals(null)).toEqual(["10", "20", "30", "40", "50"]);
+    expect(vals(undefined)).toEqual(["10", "20", "30", "40", "50"]);
+    expect(vals(NaN)).toEqual(["10", "20", "30", "40", "50"]);
   });
 });
 
