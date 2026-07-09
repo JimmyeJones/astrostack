@@ -212,6 +212,37 @@ export function filterByTypeBucket(targets: PlannedTarget[], bucket: string): Pl
   return targets.filter((t) => objectTypeBucket(t.type) === bucket);
 }
 
+export interface UpTonightSplit {
+  up: PlannedTarget[];
+  notUp: PlannedTarget[];
+}
+
+// Split a target list into the ones that are actually up tonight and the ones
+// that never clear the minimum-altitude floor (`minutes_above_min_alt > 0`).
+// The planner returns *every* catalog object regardless of observability, so on
+// a typical night roughly half never rise above the floor — dead weight in a
+// "what's worth shooting tonight?" ranking. The page lists the up ones and
+// collapses the rest into a dimmed count (with a "lower the floor" hint), so the
+// table shows only genuinely-shootable targets without hiding that more exist.
+export function partitionByUpTonight(targets: PlannedTarget[]): UpTonightSplit {
+  const up: PlannedTarget[] = [];
+  const notUp: PlannedTarget[] = [];
+  for (const t of targets) {
+    (t.minutes_above_min_alt > 0 ? up : notUp).push(t);
+  }
+  return { up, notUp };
+}
+
+// A short dimmed footnote for the targets a table omitted because they never
+// clear the floor tonight — names the count and how to reveal them. `null` when
+// none were hidden, so the caller can drop the line entirely. `whenWord` is the
+// page's "tonight" / "on Sat 15 Aug" phrase, kept consistent with the headings.
+export function notUpTonightNote(count: number, whenWord: string): string | null {
+  if (count <= 0) return null;
+  const verb = count === 1 ? "target isn't" : "targets aren't";
+  return `${count} more ${verb} up ${whenWord} — lower the minimum altitude to include them.`;
+}
+
 export interface SplitTargets {
   already: PlannedTarget[];
   fresh: PlannedTarget[];

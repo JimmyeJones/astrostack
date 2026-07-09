@@ -11,8 +11,9 @@ import { QueryError } from "../components/QueryError";
 import { formatIntegration } from "../format";
 import {
   filterByTypeBucket, formatClock, formatMinutes, minAltOptions, moonCueForTarget,
-  moonPhaseLabel, moonWindowNote, planDateBounds, planNightLabel, scoreColor,
-  splitTargets, typeFilterOptions, usableWindowNote,
+  moonPhaseLabel, moonWindowNote, notUpTonightNote, partitionByUpTonight,
+  planDateBounds, planNightLabel, scoreColor, splitTargets, typeFilterOptions,
+  usableWindowNote,
 } from "../tonight";
 
 function ScoreBadge({ score }: { score: number }) {
@@ -189,8 +190,14 @@ export function TonightView() {
     : "twilight only";
   const { already, fresh } = splitTargets(data.targets);
   const whenWord = nightLabel ? `on ${nightLabel}` : "tonight";
-  const typeOptions = typeFilterOptions(fresh);
-  const freshShown = filterByTypeBucket(fresh, typeFilter);
+  // Show only targets actually up tonight; the rest (roughly half the catalog on
+  // a typical night) collapse into a dimmed count so the ranking stays readable.
+  const { up: alreadyUp, notUp: alreadyNotUp } = partitionByUpTonight(already);
+  const { up: freshUp, notUp: freshNotUp } = partitionByUpTonight(fresh);
+  const typeOptions = typeFilterOptions(freshUp);
+  const freshShown = filterByTypeBucket(freshUp, typeFilter);
+  const alreadyNote = alreadyUp.length > 0 ? notUpTonightNote(alreadyNotUp.length, whenWord) : null;
+  const freshNote = freshUp.length > 0 ? notUpTonightNote(freshNotUp.length, whenWord) : null;
 
   return (
     <Stack gap="lg">
@@ -229,8 +236,11 @@ export function TonightView() {
           topping up integration.
         </Text>
         <TargetTable
-          targets={already}
-          empty="You haven't shot any targets with a known position yet — start something new below." />
+          targets={alreadyUp}
+          empty={already.length === 0
+            ? "You haven't shot any targets with a known position yet — start something new below."
+            : `None of your targets are up ${whenWord} — lower the minimum altitude to include them.`} />
+        {alreadyNote ? <Text size="xs" c="dimmed" mt="xs">{alreadyNote}</Text> : null}
       </Paper>
 
       <Paper withBorder p="md">
@@ -251,9 +261,10 @@ export function TonightView() {
         </Text>
         <TargetTable
           targets={freshShown}
-          empty={freshShown.length === 0 && fresh.length > 0
+          empty={freshShown.length === 0 && freshUp.length > 0
             ? "No targets of that type clear your minimum altitude — try another type or lower the floor."
             : `Nothing in the catalog clears your minimum altitude ${whenWord} — try lowering it above.`} />
+        {freshNote ? <Text size="xs" c="dimmed" mt="xs">{freshNote}</Text> : null}
       </Paper>
     </Stack>
   );

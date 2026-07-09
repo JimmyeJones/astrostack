@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   compassPoint, filterByTypeBucket, formatClock, formatMinutes, isoDate,
   minAltOptions, MAX_PLAN_LOOKAHEAD_DAYS, moonCueForTarget, moonPhaseLabel,
-  moonWindowNote, objectTypeBucket, planDateBounds, planNightLabel, scoreColor,
-  splitTargets, typeFilterOptions, usableWindowNote,
+  moonWindowNote, notUpTonightNote, objectTypeBucket, partitionByUpTonight,
+  planDateBounds, planNightLabel, scoreColor, splitTargets, typeFilterOptions,
+  usableWindowNote,
 } from "./tonight";
 import type { PlannedTarget } from "./api/client";
 
@@ -207,6 +208,41 @@ describe("splitTargets", () => {
     ]);
     expect(already.map((t) => t.id)).toEqual(["A", "C"]);
     expect(fresh.map((t) => t.id)).toEqual(["B", "D"]);
+  });
+});
+
+describe("partitionByUpTonight", () => {
+  const minutes = (id: string, m: number): PlannedTarget => ({ ...mk(id, false), minutes_above_min_alt: m });
+
+  it("splits on whether the target clears the floor at all tonight", () => {
+    const { up, notUp } = partitionByUpTonight([
+      minutes("A", 120), minutes("B", 0), minutes("C", 45), minutes("D", 0),
+    ]);
+    expect(up.map((t) => t.id)).toEqual(["A", "C"]);
+    expect(notUp.map((t) => t.id)).toEqual(["B", "D"]);
+  });
+
+  it("treats a zero (or negative) usable window as not up", () => {
+    const { up, notUp } = partitionByUpTonight([minutes("A", 0), minutes("B", -1)]);
+    expect(up).toHaveLength(0);
+    expect(notUp.map((t) => t.id)).toEqual(["A", "B"]);
+  });
+});
+
+describe("notUpTonightNote", () => {
+  it("names the count and how to reveal the hidden targets", () => {
+    expect(notUpTonightNote(79, "tonight"))
+      .toBe("79 more targets aren't up tonight — lower the minimum altitude to include them.");
+    expect(notUpTonightNote(1, "tonight"))
+      .toBe("1 more target isn't up tonight — lower the minimum altitude to include them.");
+  });
+  it("uses the page's when-phrase", () => {
+    expect(notUpTonightNote(3, "on Sat 15 Aug"))
+      .toContain("up on Sat 15 Aug —");
+  });
+  it("is null when nothing was hidden", () => {
+    expect(notUpTonightNote(0, "tonight")).toBeNull();
+    expect(notUpTonightNote(-2, "tonight")).toBeNull();
   });
 });
 
