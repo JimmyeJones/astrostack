@@ -66,6 +66,18 @@ export function countNewSubsSinceStack(
   }).length;
 }
 
+// Count frames that couldn't be quality-checked at all — QC raised on them
+// (unreadable/corrupt/truncated FITS), so they carry a `qc_error:…` reject
+// reason. Such a frame is left `accept=1` but is silently skipped when stacking
+// (the stacker can't load it) and — because the reject-summary tallies only
+// rejected frames — it never shows in the "why frames were dropped" breakdown,
+// so a beginner otherwise gets zero signal that some subs were unreadable. We
+// count them regardless of accept state so a later manual reject doesn't hide
+// the QC failure. Powers a small "N frames couldn't be quality-checked" callout.
+export function countQcUncheckable(frames: Frame[]): number {
+  return frames.filter((f) => (f.reject_reason ?? "").startsWith("qc_error")).length;
+}
+
 // Turn a raw `reject_reason` (qc:fwhm, bulk:streaked, user, …) into a plain-language
 // label so a beginner can see *why* frames were dropped, not just how many.
 const METRIC_LABEL: Record<string, string> = {
@@ -428,6 +440,11 @@ export function TargetView() {
     return countNewSubsSinceStack(list, latestGenuine?.timestamp_utc);
   }, [needsProcessing, solveSetup, runs.data, list]);
 
+  // Frames QC couldn't read at all (corrupt/truncated FITS): make them visible —
+  // they're skipped when stacking but invisible in the reject breakdown. A full
+  // QC + Solve re-checks them (`only_new_qc=False`), so offer that one click.
+  const qcUncheckable = useMemo(() => countQcUncheckable(list), [list]);
+
   // Keyboard grading: j/k or arrows to move, a to accept, r/x to reject. Skips
   // when typing in a field so notes/tags editing isn't hijacked.
   useEffect(() => {
@@ -583,6 +600,25 @@ export function TargetView() {
               leftSection={<IconStack2 size={14} />}
               loading={process.isPending} onClick={() => process.mutate()}>
               Restack
+            </Button>
+          </Group>
+        </Alert>
+      ) : null}
+      {qcUncheckable > 0 ? (
+        <Alert color="gray" variant="light" icon={<IconAlertTriangle size={18} />}
+          title={`${qcUncheckable} frame${qcUncheckable === 1 ? "" : "s"} couldn't be quality-checked`}>
+          <Text size="sm">
+            {qcUncheckable === 1 ? "A frame" : `${qcUncheckable} frames`} couldn't be
+            read during quality-check (an unreadable, corrupt or truncated FITS
+            file), so {qcUncheckable === 1 ? "it has" : "they have"} no metrics and{" "}
+            {qcUncheckable === 1 ? "is" : "are"} skipped when stacking. Re-check{" "}
+            {qcUncheckable === 1 ? "it" : "them"} in case the read failure was
+            transient (a copy still in progress).
+          </Text>
+          <Group gap="xs" mt="xs">
+            <Button size="xs" variant="light" color="gray"
+              loading={qcSolve.isPending} onClick={() => qcSolve.mutate()}>
+              Re-check these frames
             </Button>
           </Group>
         </Alert>

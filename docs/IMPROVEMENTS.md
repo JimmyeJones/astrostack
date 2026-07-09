@@ -708,8 +708,13 @@ problems. Dogfood it every big-picture run and fix root causes.
   Builder should build the classifier as a local measurement and skip the SIMBAD idea unless the owner signs off on
   the network call. `friendly_object_type`/OTYPE mapping (v0.94.17) already exists if the SIMBAD route is ever
   approved.)_
-- **⭐ Auto-bind recommended calibration masters in the *autonomous* stack chains (Process target /
-  watcher auto-stack / reprocess-all).** (M, autonomy/image-quality) — *Scout-filed 2026-07-09, traced.*
+- ~~**⭐ Auto-bind recommended calibration masters in the *autonomous* stack chains (Process target /
+  watcher auto-stack / reprocess-all).**~~ — **shipped v0.99.0** (see Shipped). Landed as an off-by-default
+  `auto_bind_calibration` setting: the three unattended chains bind the library's best *confidently-matching*
+  master dark/flat/bias (stricter than the interactive recommender — a dark only when its exposure matches
+  the subs within 25%) when no calibration was chosen, leaving an ambiguous library uncalibrated as today.
+  The interactive Stack form is untouched. Original write-up kept below for provenance.
+  (M, autonomy/image-quality) — *Scout-filed 2026-07-09, traced.*
   `webapp/calibration.py::recommend_masters` already ranks the library's master darks/flats/bias against a
   target's frames (exposure/gain/temp/dimensions match), but it is wired **only into the interactive Stack
   form** as a one-click "use recommended masters" nudge — the user must open the form and click it. The
@@ -803,7 +808,13 @@ problems. Dogfood it every big-picture run and fix root causes.
   v0.84.2. A Builder dogfood of the other five routes (Dashboard/Library/Target/
   History/Editor) found them already well-handled with icon+prose+next-step empty
   states, beginner tooltips, and translated reject/combine labels.)_
-- **Surface "N frames couldn't be quality-checked" on the Target page.** (S, friendliness/trust) —
+- ~~**Surface "N frames couldn't be quality-checked" on the Target page.**~~ — **shipped v0.99.1**
+  (see Shipped). Frontend-only, zero backend change: a new pure `countQcUncheckable(frames)` helper counts
+  frames whose `reject_reason` starts with `qc_error` (from the already-fetched frames list, any accept
+  state), and a dimmed gray Target-page callout ("N frames couldn't be quality-checked") explains they're
+  unreadable/corrupt and skipped when stacking, with a one-click "Re-check these frames" that reuses the
+  existing QC + Solve action (`only_new_qc=False`, so it retries `qc_error` frames). Original write-up kept
+  below for provenance. (S, friendliness/trust) —
   *Scout-filed 2026-07-09, traced.* When `compute_frame_metrics` raises on a frame (unreadable/corrupt/
   truncated FITS), `apply_qc_result_to_db` stamps `reject_reason="qc_error:…"` but leaves the frame
   **`accept=1`** (`webapp/routers/... / seestack/qc/runner.py:75-76`). The consequence: the frame is counted
@@ -1389,6 +1400,35 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.99.1** — Surface "N frames couldn't be quality-checked" on the Target page (friendliness/trust —
+  priority 3, Builder 2026-07-09; Scout-traced). When QC *raises* on a frame (unreadable/corrupt/truncated
+  FITS) it's stamped `reject_reason="qc_error:…"` but left `accept=1`, so it inflates the accepted count,
+  silently drops out of the stack (the stacker skips a frame it can't load), and — because the
+  reject-summary tallies only `accept=0` rows — never appears in the "why frames were dropped" breakdown,
+  leaving a beginner with zero signal that some subs were unreadable. New pure `countQcUncheckable(frames)`
+  helper counts `qc_error`-reasoned frames (from the already-fetched frames list, any accept state) and a
+  dimmed gray Target-page callout names the count, explains they're skipped when stacking, and offers a
+  one-click "Re-check these frames" reusing the existing QC + Solve action (`only_new_qc=False` retries
+  them, in case the read failure was transient). Frontend-only, additive, read-only detection — no backend
+  or schema change. Helper unit tests + two component tests (callout appears + re-checks; quiet when clean).
+- **v0.99.0** — Auto-bind matching calibration masters to the *unattended* stack chains (autonomy +
+  image-quality — priorities 2 & 4, Builder 2026-07-09). `recommend_masters` was wired **only** into the
+  interactive Stack form, so a beginner who built masters once but reached a finished image via the
+  one-click **Process target**, the walk-away **watcher auto-stack**, or a library-wide **reprocess-all**
+  got an *uncalibrated* stack even with a perfectly-matching master dark/flat sitting in the store. New
+  off-by-default `auto_bind_calibration` setting (Settings → "Auto-apply matching calibration masters to
+  hands-off stacks"): when a stack in one of those chains has no calibration chosen, a new pure
+  `calibration.auto_bind_master_paths` picks the library's best **confidently-matching** masters and binds
+  them — stricter than the interactive recommender (which only *warns* on a poor match): a dark only when
+  its exposure matches the subs within 25% (mirroring the Stack form's own `expMismatch` threshold), the
+  recommended flat + flat-dark, and a bias only when no dark matched. An ambiguous/mismatched library
+  leaves the stack uncalibrated exactly as today, and the bound masters flow through the normal path so
+  `CALSTAT` provenance records what was applied. The interactive Stack form is untouched — it still honours
+  exactly what the user picked (or deliberately left blank). Off by default (§9): a live install's
+  autonomous output is unchanged until the user opts in. Tests: `auto_bind_master_paths` unit coverage
+  (confident dark+flat bound / exposure-mismatched dark dropped / bias-only-when-no-dark / empty store),
+  reprocess-all integration (auto-binds when on, uncalibrated when off), a regression that the interactive
+  form never auto-binds even with the setting on, and a config-upgrade default-off assertion.
 - **v0.98.2** — Tonight planner (friendliness — priority 3, Builder dogfood-found 2026-07-09): the
   "Start something new" (and "Add more to what you're shooting") tables listed **every** target the
   planner returns regardless of observability — and the engine returns the whole 157-object catalog, so

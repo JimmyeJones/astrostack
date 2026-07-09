@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { TargetView, countNewSubsSinceStack } from "./Target";
+import { TargetView, countNewSubsSinceStack, countQcUncheckable } from "./Target";
 import * as client from "../api/client";
 import type { Frame, Target } from "../api/client";
 
@@ -171,6 +171,58 @@ describe("countNewSubsSinceStack", () => {
     // runner's local timezone.
     const frames = [F({ timestamp_utc: "2026-02-01T00:00:01" })];
     expect(countNewSubsSinceStack(frames, "2026-02-01T00:00:00+00:00")).toBe(1);
+  });
+});
+
+describe("countQcUncheckable", () => {
+  const F = (o: Partial<Frame>) => mkFrame(1, o);
+  it("counts frames carrying a qc_error reject reason, any accept state", () => {
+    const frames = [
+      F({ id: 1, reject_reason: "qc_error:OSError: truncated" }),       // counts
+      F({ id: 2, reject_reason: "qc_error:unknown", accept: false }),   // counts (rejected too)
+      F({ id: 3, reject_reason: "qc:fwhm", accept: false }),            // a normal QC reject: no
+      F({ id: 4, reject_reason: null }),                               // clean frame: no
+    ];
+    expect(countQcUncheckable(frames)).toBe(2);
+  });
+  it("is 0 when nothing failed to read", () => {
+    expect(countQcUncheckable([F({}), F({ id: 2, reject_reason: "user" })])).toBe(0);
+  });
+});
+
+describe("TargetView QC-uncheckable callout", () => {
+  it("surfaces unreadable frames and re-checks them on click", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ reusable: true })]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      mkFrame(1, {}),
+      mkFrame(2, { reject_reason: "qc_error:OSError: truncated file" }),
+    ]);
+    const qcSolve = vi
+      .spyOn(client.api, "qcSolve")
+      .mockResolvedValue({ job_id: "j1" });
+
+    renderTarget();
+
+    const btn = await screen.findByRole("button", { name: "Re-check these frames" });
+    expect(
+      screen.getByText("1 frame couldn't be quality-checked"),
+    ).toBeInTheDocument();
+    btn.click();
+    await waitFor(() => expect(qcSolve).toHaveBeenCalledWith("M_42"));
+  });
+
+  it("stays quiet when every frame was quality-checked", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ reusable: true })]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1, {}), mkFrame(2, {})]);
+
+    renderTarget();
+
+    await screen.findByText("M42");
+    expect(
+      screen.queryByText(/couldn't be quality-checked/),
+    ).not.toBeInTheDocument();
   });
 });
 

@@ -37,6 +37,10 @@ def test_old_config_loads_keeps_values_and_defaults_new_fields(tmp_path):
     # New auto-edit-on-autostack flag defaults off → an upgrade never starts
     # seeding editor recipes on unattended stacks on its own.
     assert s.auto_edit_on_autostack is False
+    # New auto-bind-calibration flag defaults off → an upgrade never starts
+    # binding master darks/flats to unattended stacks on its own (a live
+    # install's autonomous output is unchanged until the user opts in).
+    assert s.auto_bind_calibration is False
     # New job-history cap defaults to the long-standing hard-coded value, so an
     # upgraded install keeps exactly as much job history as before.
     assert s.job_history_limit == 200

@@ -31,6 +31,7 @@ const HINTS: Record<string, string> = {
   auto_solve: "On new files: plate-solve with ASTAP so frames can be aligned and placed on the sky.",
   auto_stack: "On new files: also stack each touched target automatically (uses the defaults below, or a target's saved defaults).",
   auto_edit_on_autostack: "After an automatic stack, also auto-edit the master into a finished picture (the same one-click Auto processing), so an unattended run comes back to a great image, not a flat linear master. Reversible in the editor (Reset). Needs Auto-stack on.",
+  auto_bind_calibration: "When a hands-off stack (auto-stack, Process target, or Reprocess everything) has no calibration masters chosen, automatically use the library's best matching master dark/flat/bias for it — so a stack you didn't set up by hand is still calibrated. Only a confident match is used (a dark whose exposure matches your subs within 25%); if nothing matches, the stack is left uncalibrated as before. The Stack form is unaffected — it always uses exactly what you pick.",
   copy_to_cache: "Copy each frame into a fast local cache before processing. Helps with slow or network-mounted sources.",
   keep_streaked_frames: "Don't auto-reject a whole frame when QC finds a satellite/plane trail — keep it (flagged) so a stack with sigma-clip or drizzle rejection removes just the streak and keeps the frame's good signal. Only turn on if you stack with rejection enabled.",
   auto_grade_frames: "After QC, automatically reject frames that are clear statistical outliers versus the rest of the target (trailed, cloud-hit or hazy subs), each with a plain-language reason. The same grading is available manually via Auto-grade on a target's page. Frames you graded yourself are never touched.",
@@ -524,6 +525,9 @@ export function SettingsView() {
           <Switch label={lbl("auto_edit_on_autostack", "Auto-edit the auto-stacked master into a finished picture")}
             checked={bool("auto_edit_on_autostack")} disabled={!bool("auto_stack")}
             onChange={(e) => set("auto_edit_on_autostack", e.currentTarget.checked)} />
+          <Switch label={lbl("auto_bind_calibration", "Auto-apply matching calibration masters to hands-off stacks")}
+            checked={bool("auto_bind_calibration")}
+            onChange={(e) => set("auto_bind_calibration", e.currentTarget.checked)} />
           <Switch label={lbl("copy_to_cache", "Copy frames into local cache")}
             checked={bool("copy_to_cache")}
             onChange={(e) => set("copy_to_cache", e.currentTarget.checked)} />
