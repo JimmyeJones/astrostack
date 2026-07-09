@@ -47,6 +47,19 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**'Tonight' planner 500s (ZeroDivisionError) when the min-altitude floor is exactly 70°.**~~
+  — **FIXED v0.97.1** (Builder audit 2026-07-09; reproduced end-to-end before fixing). The night
+  planner's observability `_score` computed its altitude term as `(max_alt − min_alt) / (70.0 −
+  min_alt)`, hard-coding 70° as the "high enough for a small scope" cap. With `min_altitude_deg == 70`
+  — a legal value both as the `?min_alt` query param and the `min_target_altitude_deg` setting (both
+  `ge=0 le=80`) — the denominator is **zero**, so any target that transits above 70° (a target near the
+  zenith, i.e. dec ≈ observer latitude — common) raised `ZeroDivisionError`, surfacing as a 500 on
+  `GET /api/plan/tonight?min_alt=70`. `_score` now saturates the altitude term to 1.0 when the floor is
+  already at/above the 70° cap (and returns 0 when `max_alt ≤ min_alt`), so a floor of 70–80° scores
+  cleanly instead of crashing. Regression test `test_high_min_altitude_does_not_crash_the_score`
+  (min_alt 70 & 80; fails before / passes after). Newest-feature bug found by auditing the recently
+  shipped nightplan path (v0.95–0.97), which the QA cycle hadn't covered yet.
+
 - ~~**Watcher can permanently drop a batch from auto-ingest when it stabilises during a
   running pipeline.**~~ — **FIXED v0.81.7** (see Shipped). `_on_batch_ready` now reports
   whether it enqueued a pipeline; when it declines because one is already `queued`/`running`,

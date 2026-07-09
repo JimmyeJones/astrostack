@@ -347,8 +347,16 @@ def _score(max_alt: float, minutes_above: float, dark_minutes: float,
     """
     if minutes_above <= 0 or dark_minutes <= 0:
         return 0.0
-    alt_component = float(np.clip((max_alt - min_alt) / (70.0 - min_alt), 0.0, 1.0)) \
-        if max_alt > min_alt else 0.0
+    alt_cap = 70.0  # above this a small scope gains nothing meaningful
+    if max_alt <= min_alt:
+        alt_component = 0.0
+    elif min_alt >= alt_cap:
+        # The usable floor is already at/above the "good enough" altitude, so any
+        # target that clears it is as high as scoring cares about (and the
+        # ``alt_cap - min_alt`` denominator below would be zero/negative).
+        alt_component = 1.0
+    else:
+        alt_component = float(np.clip((max_alt - min_alt) / (alt_cap - min_alt), 0.0, 1.0))
     window_component = float(np.clip(minutes_above / dark_minutes, 0.0, 1.0))
     base = 0.5 * alt_component + 0.5 * window_component
     proximity = float(np.clip((60.0 - moon_sep) / 60.0, 0.0, 1.0))
