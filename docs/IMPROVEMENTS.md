@@ -1018,22 +1018,31 @@ problems. Dogfood it every big-picture run and fix root causes.
   hint). Regression tests pin the full-Moon (up all night), new-Moon (down all night), waxing-sets and
   waning-rises cases against real 2026 ephemeris dates with a crossing-direction check, plus the plan
   wiring, the endpoint shape, and the pure TS helper.
-- **Tonight planner: fold "is the Moon even up while the target is?" into the observability score.**
-  (M, autonomy/trust — priority 2/4) Spotted shipping the Moon rise/set cue (v0.97.5). `nightplan._score`
-  applies its Moon penalty from a **single mid-window Moon separation** (`_observability_batch` measures
-  the Moon at `stamps[len//2]`) times the full illuminated fraction — regardless of whether the Moon is
-  actually *above the horizon* during the hours the target is usable. So a bright Moon that has already
-  **set** (or hasn't yet **risen**) during the target's window still docks the target's score as if it
-  were washing it out, and a target that only clears the trees *after moonset* is under-ranked. Now that
-  the planner already computes when the Moon rises/sets over the window (`moon_window`), the fix is
-  cheap and self-contained: weight the Moon penalty by the *overlap* between the target's usable window
-  and the Moon-up interval (0 penalty when they never coincide, full when the Moon is up throughout),
-  instead of a single instant. Keep it conservative — a partial overlap scales the existing penalty, and
-  a target with no Moon-up overlap simply loses the penalty it never deserved. It touches the ranking on
-  the live Tonight path, so validate it doesn't reshuffle a normal moonlit night unreasonably (spot-check
-  a full-Moon and a new-Moon night) before it graduates. Additive, offline, testable on `_score` /
-  `_observability_batch` in isolation against a known ephemeris date. Serves better, more-trustworthy
-  target ranking (fewer good targets buried by a Moon that isn't even up for them).
+- ~~**Tonight planner: fold "is the Moon even up while the target is?" into the observability score.**~~
+  — **shipped v0.97.6** (see Shipped). `_observability_batch` now samples the topocentric Moon altitude
+  across the same 5-minute dark-window grid it already builds, and weights each target's Moon penalty by
+  the **overlap** between that target's *usable* window and the Moon-up interval (`moon_up_fraction` = the
+  share of the target's usable samples during which the Moon is above the horizon). A new
+  `moon_up_fraction` arg on `nightplan._score` (default 1.0 → old behaviour) scales the existing
+  illumination×proximity penalty by it, so a bright Moon that has already **set** — or hasn't yet
+  **risen** — while the target is up no longer docks the score. Conservative and monotonic: the penalty
+  can only *shrink* (a target's score never drops below the old full-penalty value), so a normal
+  moonlit night where the Moon is up all night is byte-for-byte unchanged; only targets observable while
+  the Moon is down get relief. Additive, offline, deterministic. Regression tests: the penalty scales
+  0→full with overlap (and a zero-overlap score equals an unlit sky); a full-Moon-up-all-night night
+  matches the old formula; a waxing-Moon-sets-partway night lifts the penalty on post-moonset targets.
+- **Tonight planner: surface *why* the Moon (didn't) hurt a target — a per-row Moon cue.** (S,
+  friendliness/trust — priority 3) Spotted shipping the Moon-up-overlap score (v0.97.6). The score now
+  correctly ignores a Moon that has set/not risen during a target's window, but the only Moon number the
+  UI shows per target is `moon_separation_deg` — and that's measured at a **single mid-window instant**,
+  so on a night where the Moon sets partway it can read "12° away" (scary) for a target the planner
+  *didn't* actually penalise because the Moon was down while it was up. That mismatch between the shown
+  separation and the (now more nuanced) score erodes trust in the ranking. Cheap, offline follow-up:
+  the planner already computes each target's Moon-up overlap — expose it as a nullable field on
+  `PlannedTarget` (e.g. `moon_overlap_fraction`, or a coarse "Moon down for your window" / "Moon up &
+  N° away" verdict) and render it as a dimmed per-row cue so the user sees *why* a bright-Moon night
+  still ranked a target well. Additive (new nullable field, old rows omit it), frontend cue only, no
+  score/ranking change. Testable on the endpoint payload + a pure TS label helper.
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
@@ -1265,6 +1274,14 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.97.6** — Tonight planner (autonomy/trust): the observability score now weights each target's Moon
+  penalty by whether the Moon is *actually up* while the target is observable. `_observability_batch`
+  samples topocentric Moon altitude over the dark-window grid and passes each target a `moon_up_fraction`
+  (share of its usable samples with the Moon above the horizon) to the new `moon_up_fraction` arg on
+  `_score` (default 1.0 = old behaviour), which scales the illumination×proximity penalty. Monotonic:
+  the penalty can only shrink, so a Moon-up-all-night sky is unchanged and only post-moonset/pre-moonrise
+  targets get relief — fewer good targets buried by a Moon that isn't up for them. Offline, additive.
+  Tests in `test_nightplan.py` (scaling, up-all-night no-change, waxing-sets relief). (#PR)
 - **v0.97.5** — Tonight planner (friendliness): the Moon card now shows *when* the Moon rises or sets
   during tonight's dark window, complementing the phase with a concrete time. New offline
   `nightplan.moon_window(observer, window)` samples the topocentric Moon altitude across the dark
