@@ -110,6 +110,30 @@ the real webapp stack→edit path.)_
   pathological skew reverts — same real-data-gating as the SCNR / `sky_sigma` items in Image-quality
   below. Fix all four sites together (they share the bug). (S code / M validation, image-quality/correctness)
 
+_(Builder QA audit 2026-07-09 (v0.98.2 baseline): with the editor + stacking core saturated by weeks of
+clean audits, rotated onto the **newest, least-hardened subsystem — the "Tonight" night planner**
+(`seestack/nightplan.py`, `webapp/routers/plan.py`, `frontend/src/tonight.ts`, and the two bundled
+catalogs), which had only had one real bug traced (the v0.97.1 ZeroDivisionError) and a fortnight of rapid
+feature-piling. Read + numerically probed adversarially for degenerate geometry, wrong-shape broadcasts,
+crossing-interpolation edges, and bad input. **No bug found.** `_find_dark_window` degrades correctly
+through the −18→−12→−6→−0.833° twilight ladder (polar midsummer → `None`; polar midwinter → an 808-min
+below-−18 run; southern-hemisphere + seasonal London/Sydney windows all sane); `_score` handles the
+`min_alt ≥ 70°` cap (the v0.97.1 fix holds) and `max_alt ≤ min_alt`; `HorizonProfile.from_pairs` sanitises
+malformed/non-finite/duplicate/out-of-range points and interpolates across the 0°/360° seam; `moon_window`
+rise/set interpolation and `up/down_all_night` flags are consistent; the router's `date` picker validates
+`[−1, +60] d` (clean 422 otherwise), `when` takes precedence, `_reference_for_date` aims local solar noon,
+and `_parse_angle` handles sexagesimal + the `-00:MM` sign case. Both catalogs are clean: 157 unique ids
+(no cross-file dups), every RA∈[0,360)/Dec∈[−90,90], every object typed (so the type-filter buckets never
+fall through). The frontend pure helpers (`moonWindowNote`/`moonCueForTarget`/`objectTypeBucket`/
+`partitionByUpTonight`/…) are well-tested and edge-guarded. **One candidate refinement investigated and
+dismissed as measurably negligible (so a future agent needn't re-open it):** `_observability_batch` measures
+each target's Moon separation at a single mid-window instant rather than at the target's own transit — but
+because the Moon moves only ~13°/day in ICRS and the *separation* changes far more slowly than that,
+measuring at transit instead differs by **≤0.25° across all up-targets** even for a target transiting ~6 h
+from mid-window (mean 0.13°, p90 0.21° over the 100 up-targets on a bright-Moon London night). Below the
+sub-degree precision the ranking cares about, so the documented approximation is correct and the change
+would be pure churn. Baseline suite green: 950 passed, 2 skipped.)_
+
 _(Builder engine-hardening audit 2026-07-08 (v0.94.16 baseline): fresh adversarial **numeric** audit of
 the mosaic/drizzle **geometry** path — `stack/mosaic.py` (union canvas, `_bbox`, footprint-outlier
 rejection, iterative canvas shrink), `stack/drizzle_path.py` (`_compute_output_canvas` CRPIX/CDELT scaling,
