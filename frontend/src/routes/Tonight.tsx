@@ -51,9 +51,9 @@ function TargetRow({ t }: { t: PlannedTarget }) {
   );
 }
 
-function TargetTable({ targets }: { targets: PlannedTarget[] }) {
+function TargetTable({ targets, empty }: { targets: PlannedTarget[]; empty: string }) {
   if (targets.length === 0) {
-    return <Text size="sm" c="dimmed">Nothing here clears your minimum altitude tonight.</Text>;
+    return <Text size="sm" c="dimmed">{empty}</Text>;
   }
   return (
     <Table.ScrollContainer minWidth={520}>
@@ -185,7 +185,9 @@ export function TonightView() {
           Targets already in your library that are well placed tonight — good for
           topping up integration.
         </Text>
-        <TargetTable targets={already} />
+        <TargetTable
+          targets={already}
+          empty="You haven't shot any targets with a known position yet — start something new below." />
       </Paper>
 
       <Paper withBorder p="md">
@@ -194,7 +196,9 @@ export function TonightView() {
           Popular deep-sky targets (Messier plus well-known NGC/IC objects) you
           haven't shot yet, ranked by how well placed they are.
         </Text>
-        <TargetTable targets={fresh} />
+        <TargetTable
+          targets={fresh}
+          empty="Nothing in the catalog clears your minimum altitude tonight — try lowering it above." />
       </Paper>
     </Stack>
   );

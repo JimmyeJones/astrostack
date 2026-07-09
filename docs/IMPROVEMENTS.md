@@ -1226,6 +1226,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.97.3** — Tonight planner (friendliness): section-accurate empty states. The two target
+  tables shared one message — "Nothing here clears your minimum altitude tonight." — which is
+  *never* accurate for the "Add more to what you're shooting" (already-targeted) section: the engine
+  always lists a positioned library target in the plan (with score 0 if it doesn't clear the floor),
+  so that section is empty **iff** the user has no positioned library targets, not because of
+  altitude. A first-timer with an empty library was told the wrong reason. `TargetTable` now takes an
+  `empty` message: the already-targeted section says "You haven't shot any targets with a known
+  position yet — start something new below."; the catalog section keeps the (accurate-there) altitude
+  message with a "try lowering it" nudge. Frontend-only, additive. Component regression in
+  `Tonight.test.tsx` (empty library shows the guidance, not the altitude blame). Found in the same
+  §2 dogfood as v0.97.2.
 - **v0.97.2** — Tonight planner (friendliness): the "Minimum altitude" picker no longer renders
   **blank** when the user's `min_target_altitude_deg` setting isn't one of the round presets. The
   Settings input steps by 5° (so 15° / 45° / 55° are all reachable) but the Tonight `Select` only
