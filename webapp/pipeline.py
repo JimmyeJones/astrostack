@@ -1206,6 +1206,12 @@ def _stack_target(
         "cancelled": result.cancelled,
         "errors": result.errors,
         "excluded_frames": result.excluded_frames,
+        # Honest frame accounting for the Jobs summary — how many subs were
+        # attempted and how many couldn't be aligned. getattr-guarded so a partial
+        # result stand-in (older code path / test double) degrades to 0 rather
+        # than raising; the real StackResult always carries them.
+        "n_offered": getattr(result, "n_offered", 0),
+        "n_align_failed": getattr(result, "n_align_failed", 0),
     }
 
 

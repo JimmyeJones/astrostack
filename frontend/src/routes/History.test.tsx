@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, darkScalingSummaryText, rejectionSummaryText } from "./History";
+import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, darkScalingSummaryText, rejectionSummaryText, frameAccountingNote } from "./History";
 import { formatIntegration } from "../format";
 import * as client from "../api/client";
 import type { StackRun } from "../api/client";
@@ -491,6 +491,63 @@ describe("rejectionSummaryText", () => {
     ).toBe("Rejection clipped ~0.4% of samples (transient outliers)");
     const high = rejectionSummaryText({ mode: "drizzle-reject", fraction: 0.15 });
     expect(high).toContain("check that κ isn't clipping real signal");
+  });
+});
+
+describe("frameAccountingNote", () => {
+  it("returns null when no accounting was recorded (older master)", () => {
+    expect(frameAccountingNote(null)).toBeNull();
+    expect(frameAccountingNote(undefined)).toBeNull();
+    expect(frameAccountingNote({ n_offered: 0 })).toBeNull();
+  });
+  it("stays quiet when every attempted sub aligned", () => {
+    // The "· N subs" integration line already tells the happy story, so there's
+    // nothing to add.
+    expect(frameAccountingNote({ n_offered: 2000, n_align_failed: 0 })).toBeNull();
+    expect(frameAccountingNote({ n_offered: 2000 })).toBeNull();
+  });
+  it("reports a small align-failure count without a scary nudge", () => {
+    const fa = frameAccountingNote({ n_offered: 2000, n_align_failed: 12 });
+    expect(fa).not.toBeNull();
+    expect(fa!.text).toBe("1,988 of 2,000 subs combined · 12 couldn't be aligned");
+    expect(fa!.concern).toBe(false);
+    expect(fa!.guidance).toBeNull();
+  });
+  it("guides a fix when a large share couldn't be aligned", () => {
+    const fa = frameAccountingNote({ n_offered: 2000, n_align_failed: 840 });
+    expect(fa!.text).toBe("1,160 of 2,000 subs combined · 840 couldn't be aligned");
+    expect(fa!.concern).toBe(true);
+    expect(fa!.guidance).toContain("two targets' frames");
+    expect(fa!.guidance).toContain("Frames table");
+  });
+  it("doesn't nag on a tiny stack where one dud is a big fraction", () => {
+    // 1 of 5 is 20%, but a 5-frame stack isn't worth a mixed-targets nudge.
+    const fa = frameAccountingNote({ n_offered: 5, n_align_failed: 1 });
+    expect(fa!.concern).toBe(false);
+    expect(fa!.guidance).toBeNull();
+  });
+  it("clamps a failure count that exceeds the offered total", () => {
+    const fa = frameAccountingNote({ n_offered: 10, n_align_failed: 99 });
+    expect(fa!.text).toBe("0 of 10 subs combined · 10 couldn't be aligned");
+  });
+});
+
+describe("HistoryView frame accounting", () => {
+  it("surfaces a large align-failure fraction with guidance in the Info panel", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({
+      run_id: 1, integration_s: 2520, n_frames: 1160, weighting: null,
+      frame_accounting: { n_offered: 2000, n_align_failed: 840 },
+      cards: [{ key: "STACKER", value: "sigma-clip", comment: "stacking method" }],
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Info" }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/1,160 of 2,000 subs combined/)).toBeInTheDocument());
+    expect(screen.getByText(/Open the Frames table/)).toBeInTheDocument();
   });
 });
 

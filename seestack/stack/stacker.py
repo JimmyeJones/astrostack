@@ -329,6 +329,14 @@ class StackResult:
     # Frames dropped (and flagged rejected) for a bad plate-solve that would
     # have flung the mosaic canvas across the sky. Human-readable labels.
     excluded_frames: list[str] = field(default_factory=list)
+    # Honest frame accounting for the finished stack: how many subs the stacker
+    # *attempted* to combine (post lucky/mosaic-outlier filtering) and how many of
+    # those could not be aligned (load failure, or a footprint that missed the
+    # canvas — usually a stray sub from another target or a bad plate-solve).
+    # ``n_offered - n_align_failed == n_frames_used``. Both 0 on a cancelled /
+    # nothing-aligned run that returns before the passes complete.
+    n_offered: int = 0
+    n_align_failed: int = 0
     # The new ``stack_runs`` row id for this run (None if history recording was
     # skipped — e.g. a cancelled run — or failed). Lets callers deep-link the
     # finished run's editor instead of just its target's History list.
@@ -648,6 +656,20 @@ def _build_output_header_meta(
                            "fraction of samples rejected")
         meta["REJNREJ"] = (int(rstats.n_rejected), "samples rejected")
         meta["REJNTOT"] = (int(rstats.n_contributed), "samples contributed")
+    # Frame-accounting provenance: how many of the subs the stacker *attempted*
+    # to combine actually made it in. ``frames`` here is the post-filter list the
+    # passes iterated (after lucky-imaging selection and any gross plate-solve
+    # outlier exclusion), and ``n_used`` is how many contributed — so a frame that
+    # couldn't be loaded, or whose footprint didn't intersect the canvas (a stray
+    # sub from a different target, a bad plate-solve), shows up as the gap. Persisting
+    # it in the header means the History Info panel can honestly report "1,850 of
+    # 2,000 subs combined; 150 couldn't be aligned" long after the Jobs page is gone,
+    # and flag a large align-failure fraction (usually mixed targets / bad solves).
+    n_offered = len(frames)
+    if n_offered:
+        n_failed = max(0, n_offered - int(n_used))
+        meta["NOFFERED"] = (int(n_offered), "subs offered to the stacker")
+        meta["NALIGNFL"] = (int(n_failed), "subs that could not be aligned")
     return meta
 
 
@@ -1286,6 +1308,8 @@ def run_stack(
         options=options,
         errors=errors,
         excluded_frames=excluded_frames,
+        n_offered=len(frames),
+        n_align_failed=max(0, len(frames) - n_used),
         run_id=run_id,
     )
 
