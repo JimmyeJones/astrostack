@@ -769,10 +769,12 @@ export const api = {
   // sky viewer
   getSky: () => req<SkyData>("/api/sky"),
 
-  // tonight — night planner
-  getTonight: (opts?: { minAlt?: number }) => {
+  // tonight — night planner. `date` (YYYY-MM-DD) plans an upcoming night instead
+  // of tonight; omit it for tonight.
+  getTonight: (opts?: { minAlt?: number; date?: string }) => {
     const qs = new URLSearchParams();
     if (opts?.minAlt != null) qs.set("min_alt", String(opts.minAlt));
+    if (opts?.date) qs.set("date", opts.date);
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
     return req<NightPlan>(`/api/plan/tonight${suffix}`);
   },

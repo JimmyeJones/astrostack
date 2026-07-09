@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date as _date
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from webapp.routers.plan import _parse_angle, _site_from_header
@@ -133,6 +135,65 @@ def test_settings_sanitises_a_malformed_horizon_profile(client):
 def test_tonight_rejects_bad_when(client, solved_library):
     client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
     r = client.get("/api/plan/tonight", params={"when": "not-a-timestamp"})
+    assert r.status_code == 422
+
+
+def test_reference_for_date_lands_on_local_noon():
+    # Local solar noon in UTC is 12:00 − lon/15 h: Greenwich noons at 12:00 UTC,
+    # 15°E an hour earlier, 30°W two hours later — always on the chosen date.
+    from webapp.routers.plan import _reference_for_date
+
+    d = _date(2026, 7, 15)
+    assert _reference_for_date(d, 0.0) == datetime(2026, 7, 15, 12, 0, tzinfo=timezone.utc)
+    assert _reference_for_date(d, 15.0) == datetime(2026, 7, 15, 11, 0, tzinfo=timezone.utc)
+    assert _reference_for_date(d, -30.0) == datetime(2026, 7, 15, 14, 0, tzinfo=timezone.utc)
+
+
+def test_tonight_plans_a_chosen_future_date(client, solved_library):
+    # A calendar-date pick a few weeks out plans that night's dark window — the
+    # same offline computation, just aimed at a different night. The Moon has moved
+    # meaningfully by then, so the plan is genuinely date-specific, not "tonight".
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    today = datetime.now(timezone.utc)
+    future = (today + timedelta(days=20)).date().isoformat()
+    r = client.get("/api/plan/tonight", params={"date": future, "min_alt": 20})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["location_source"] == "settings"
+    assert body["dark_window"] is not None
+    # generated_utc sits on (or adjacent to, across the noon boundary) the picked date.
+    gen = datetime.fromisoformat(body["generated_utc"]).date()
+    assert abs((gen - datetime.fromisoformat(future + "T00:00:00").date()).days) <= 1
+    assert body["targets"], "expected a ranked target list for the chosen night"
+
+
+def test_tonight_date_differs_from_today(client, solved_library):
+    # Planning a night ~2 weeks out gives a different Moon than tonight (the Moon
+    # cycles in ~29.5 days), proving the date actually drove the ephemeris.
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    tonight = client.get("/api/plan/tonight").json()
+    future = (datetime.now(timezone.utc) + timedelta(days=14)).date().isoformat()
+    later = client.get("/api/plan/tonight", params={"date": future}).json()
+    assert tonight["moon_illumination"] != later["moon_illumination"]
+
+
+def test_tonight_rejects_a_far_future_date(client, solved_library):
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    far = (datetime.now(timezone.utc) + timedelta(days=120)).date().isoformat()
+    r = client.get("/api/plan/tonight", params={"date": far})
+    assert r.status_code == 422
+
+
+def test_tonight_rejects_a_past_date(client, solved_library):
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    past = (datetime.now(timezone.utc) - timedelta(days=10)).date().isoformat()
+    r = client.get("/api/plan/tonight", params={"date": past})
+    assert r.status_code == 422
+
+
+def test_tonight_rejects_a_malformed_date(client, solved_library):
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    r = client.get("/api/plan/tonight", params={"date": "2026-13-40"})
     assert r.status_code == 422
 
 

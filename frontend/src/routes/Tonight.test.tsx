@@ -1,6 +1,6 @@
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TonightView } from "./Tonight";
@@ -109,6 +109,62 @@ describe("TonightView", () => {
     // The visible Select input shows the option's label ("45°"); before the fix
     // there was no matching option for a 45° floor and it rendered blank.
     expect(screen.getByDisplayValue("45°")).toBeInTheDocument();
+  });
+
+  it("plans a chosen future night by passing the date to the API", async () => {
+    const spy = vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({}));
+    renderTonight();
+    await waitFor(() =>
+      expect(screen.getByText("Add more to what you're shooting")).toBeInTheDocument());
+    // Initial fetch plans tonight — no date param.
+    expect(spy).toHaveBeenLastCalledWith(expect.not.objectContaining({ date: expect.anything() }));
+
+    // Picking a future date refetches with that date and renames the sections.
+    const future = "2026-08-15";
+    fireEvent.change(screen.getByLabelText("Night"), { target: { value: future } });
+    await waitFor(() =>
+      expect(spy).toHaveBeenLastCalledWith(expect.objectContaining({ date: future })));
+    await waitFor(() =>
+      expect(screen.getByText(/Start something new on/)).toBeInTheDocument());
+    // A "Tonight" reset clears the date back to tonight.
+    fireEvent.click(screen.getByRole("button", { name: "Tonight" }));
+    await waitFor(() =>
+      expect(screen.getByText("Start something new tonight")).toBeInTheDocument());
+  });
+
+  it("filters 'start something new' by object type", async () => {
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
+      targets: [
+        target({ id: "M31", name: "Andromeda", type: "galaxy", already_targeted: false, score: 80 }),
+        target({ id: "M42", name: "Orion Nebula", type: "nebula", already_targeted: false, score: 70 }),
+        target({ id: "M13", name: "Hercules", type: "globular cluster", already_targeted: false, score: 60 }),
+      ],
+    }));
+    renderTonight();
+    await waitFor(() =>
+      expect(screen.getByText("Start something new tonight")).toBeInTheDocument());
+    // All three show initially.
+    expect(screen.getByText(/M31/)).toBeInTheDocument();
+    expect(screen.getByText(/M42/)).toBeInTheDocument();
+    expect(screen.getByText(/M13/)).toBeInTheDocument();
+    // Picking "Nebula" keeps only the nebula.
+    fireEvent.click(screen.getByRole("radio", { name: "Nebula" }));
+    await waitFor(() => expect(screen.queryByText(/M31/)).not.toBeInTheDocument());
+    expect(screen.getByText(/M42/)).toBeInTheDocument();
+    expect(screen.queryByText(/M13/)).not.toBeInTheDocument();
+  });
+
+  it("hides the type filter when only one object type is present", async () => {
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
+      targets: [
+        target({ id: "M31", type: "galaxy", already_targeted: false, score: 80 }),
+        target({ id: "M81", type: "galaxy", already_targeted: false, score: 70 }),
+      ],
+    }));
+    renderTonight();
+    await waitFor(() =>
+      expect(screen.getByText("Start something new tonight")).toBeInTheDocument());
+    expect(screen.queryByRole("radio", { name: "Galaxy" })).not.toBeInTheDocument();
   });
 
   it("ranks library targets and fresh catalog suggestions separately", async () => {
