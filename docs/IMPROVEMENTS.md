@@ -1400,16 +1400,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   now reads "no star database (*.290 or *.1476) was found", matching the count (which already tallies
   both) and its own D-series `d05` example (a `.1476` file). Purely cosmetic (fires only in a genuine
   zero-database state); no behaviour or test change.
-- **Low-priority (diagnostics): the *drizzle*+quality_weighted coverage_min/max still reports Σweights,
-  not a frame count.** *(Builder-filed 2026-07-09, follow-up to the v0.99.6 `WeightedSumAccumulator`
-  fix.)* The v0.99.6 fix gave the standard weighted-sum path an honest unweighted `frame_coverage` for
-  the "N frames per pixel" diagnostics, and the min/max-reject path already reported a true count — but
-  the **drizzle** accumulator's `.coverage` is still Σ of drizzle weights, so a `drizzle=True` +
-  `quality_weighted=True` run understates coverage_min/max exactly as the standard path used to. Niche
-  (both are opt-in, and drizzle+weighting together is rare), and diagnostic-only (no image impact), so
-  low priority. Shape: track an unweighted per-output-pixel contribution count in `DrizzleStacker`
-  (increment where a frame's weight footprint is > 0), expose it like `frame_coverage`, and route it
-  through the same `frame_cov` branch in `run_stack`. (S, diagnostics/trust)
+- ~~**Low-priority (diagnostics): the *drizzle*+quality_weighted coverage_min/max still reports Σweights,
+  not a frame count.**~~ — **FIXED v0.99.9** (Builder 2026-07-09; completes the v0.99.6 frame-count family).
+  `DrizzleStacker` now keeps an unweighted per-output-pixel `frame_coverage` (uint32) alongside `coverage`
+  (out_wht): after each frame it marks the output pixels whose channel-0 accumulated weight *strictly
+  increased* (the deposit's support is independent of the frame's scalar quality weight, and a
+  clip-rejected/out-of-bounds pixel leaves the weight unchanged so it correctly doesn't count), and
+  `run_stack`'s drizzle branch routes it through the same `frame_cov` diagnostics path the standard
+  weighted-sum path already uses. So a `drizzle=True` + `quality_weighted=True` run now persists an honest
+  "N frames per pixel" `coverage_min`/`coverage_max` instead of the smaller Σweights (it also fixes the
+  unweighted pixfrac<1 / scale≠1 fractional-weight understatement). `coverage` itself is untouched — the
+  coverage-map output and `level_by_coverage` are byte-for-byte identical — and the statistics-only
+  (rejection pass-1) accumulator skips the per-frame copy (its output is discarded). Cheap: one
+  single-channel weight-snapshot copy per frame, no extra drizzle pass. Regression tests in
+  `tests/test_drizzle.py` (weighted count ≠ Σweights; unweighted parity with rounded coverage; NaN/uncovered
+  pixels don't count; stats accumulator has no `frame_coverage`; and an end-to-end quality-weighted
+  `run_stack` reports `coverage_max == n` not the weight sum — all fail before / pass after).
 - ~~**Low-priority (traced, off-by-default): sub-pixel-refine darkens a ≤1–2 px band at an *interior*
   coverage boundary.**~~ — **FIXED v0.99.8** (Builder 2026-07-09; reproduced numerically then fixed).
   Both `align.py::_apply_subpixel_shift` and `_apply_subpixel_shift_windowed` did the *data* shift with
@@ -1519,6 +1525,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.99.9** — Honest per-pixel *frame count* for `coverage_min`/`coverage_max` on the **drizzle**
+  path too (stacking-engine trust — current focus, Builder 2026-07-09). Completes the v0.99.6
+  frame-count family: `DrizzleStacker` now keeps an unweighted `frame_coverage` (uint32) alongside
+  `coverage` (out_wht = Σ weighted footprint overlap), marking each frame's output support by the
+  strict post-add increase in channel-0's accumulated weight, and `run_stack`'s drizzle branch routes
+  it through the existing `frame_cov` diagnostics path — so a `drizzle=True` + `quality_weighted=True`
+  run reports an honest "N frames per pixel" instead of the smaller weight sum (also fixes the
+  unweighted pixfrac<1 / scale≠1 fractional understatement). `coverage` untouched (coverage-map output
+  + `level_by_coverage` byte-for-byte identical); stats-only accumulator skips the tracking. Regression
+  tests in `tests/test_drizzle.py` (fail before / pass after).
 - **v0.99.6** — Honest per-pixel *frame count* for `coverage_min`/`coverage_max` under quality
   weighting (stacking-engine hardening — current focus, Builder 2026-07-09). Found by a deep
   adversarial audit of the stacking hot path (the audit otherwise came back clean of any

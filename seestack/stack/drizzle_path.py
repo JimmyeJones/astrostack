@@ -113,6 +113,22 @@ class DrizzleStacker:
         # for propagating input variance maps — so it can't be reused here.)
         self._sq_drizzlers = _make_drizzlers() if compute_stats else None
         self._n_added = 0
+        # Unweighted per-output-pixel *frame count* for the coverage_min/max
+        # "N frames per pixel" diagnostics. ``coverage`` (out_wht) is Σ of
+        # (quality weight × footprint overlap area), so it equals the frame
+        # count only at unit weight *and* pixfrac=1/scale=1 — with quality
+        # weighting on, or any pixfrac<1 / scale≠1, it is not an integer frame
+        # count and understates it. The *support* of a frame's deposit is
+        # independent of its scalar weight, so a strict increase in channel-0's
+        # accumulated weight after a frame is added marks exactly the output
+        # pixels that frame contributed to (a clip-rejected or out-of-bounds
+        # pixel leaves the weight unchanged, so it correctly doesn't count).
+        # Mirrors ``WeightedSumAccumulator.frame_coverage``. The statistics-only
+        # accumulator never surfaces this (its output is discarded), so it skips
+        # the per-frame copy.
+        self._count: np.ndarray | None = (
+            None if compute_stats else np.zeros(self.out_shape, dtype=np.uint32)
+        )
         # Memory-free rejection tally for the two-pass reject path (mirrors the
         # κ-σ and min/max accumulators): while pass 2 zero-weights outlier
         # contributions we sum two scalars — the covered samples that would have
@@ -166,6 +182,11 @@ class DrizzleStacker:
             # coordinates clamp harmlessly — their weight is already 0.
             xi = np.clip(np.rint(pixmap[..., 0]), 0, w_out - 1).astype(np.intp)
             yi = np.clip(np.rint(pixmap[..., 1]), 0, h_out - 1).astype(np.intp)
+        # Snapshot channel-0's accumulated weight so a strict post-add increase
+        # marks this frame's output footprint for the unweighted frame count.
+        prev_wht0 = (
+            self._drizzlers[0].out_wht.copy() if self._count is not None else None
+        )
         for c in range(3):
             vals = rgb[..., c]
             finite = np.isfinite(vals)
@@ -202,6 +223,10 @@ class DrizzleStacker:
                     pixfrac=self.params.pixfrac,
                     in_units="counts",
                 )
+        if self._count is not None:
+            self._count += (
+                self._drizzlers[0].out_wht > prev_wht0
+            ).astype(np.uint32, copy=False)
         self._n_added += 1
 
     def clip_reference(self, kappa: float) -> tuple[np.ndarray, np.ndarray]:
@@ -270,6 +295,19 @@ class DrizzleStacker:
         for c, driz in enumerate(self._drizzlers):
             cov[..., c] = driz.out_wht
         return cov
+
+    @property
+    def frame_coverage(self) -> np.ndarray | None:
+        """Per-output-pixel **frame count** (2-D), independent of quality weights
+        and pixfrac/scale.
+
+        Unlike :attr:`coverage` (Σ of weighted footprint overlap), this counts
+        how many frames actually deposited signal into each output pixel, so
+        ``coverage_min``/``coverage_max`` report an honest "N frames per pixel"
+        even with quality weighting on (or any pixfrac<1 / scale≠1, where the
+        weight sum is fractional). ``None`` on a statistics-only accumulator,
+        whose output is discarded."""
+        return self._count
 
     @property
     def n_added(self) -> int:
