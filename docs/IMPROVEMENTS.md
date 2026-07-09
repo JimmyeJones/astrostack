@@ -199,6 +199,38 @@ magenta overshoot) — the −14% magenta failure mode needs an *already-truly-n
 doesn't produce on cast data. Net: the twice-established deferral of the SCNR change is **correct**; no new
 bug found; no code shipped this run (an idle run leaving main green — AGENTS.md §2).)_
 
+_(Builder audit 2026-07-09 (v0.99.9 baseline, suite green 983 passed / 2 skipped). Ran two parallel
+adversarial audits over the **current-focus** areas — the stacking engine (`stack/*` + `calibrate/*`) and
+the editor engine (`edit/*` incl. the Auto path / proxy↔export parity). **Both came back essentially
+clean** — the accumulators' NaN/coverage gates, reprojection index conventions, min/max & κ-σ & drizzle
+rejection math, calibration `(raw−pedestal)/flat` + exposure-scaling, degenerate-input fallbacks, and every
+proxy-scaled editor op parameter all traced correct (matching the many prior clean audits). **One genuine
+discrepancy shipped (v0.99.10, above):** the drizzle pre-run output-shape estimate used `int(dim·s+1)` vs
+the real canvas's `int(round(dim·s))`, a ≤1 px trust gap on the displayed `output_w/h`. **Findings
+deliberately NOT actioned, with evidence, so they aren't re-chased:**
+  • **Auto `tone.curves` (`auto:True`) re-derives its curve per render → proxy vs export can pick slightly
+    different control points** (the one editor op left un-baked; everything else in `auto_recipe` bakes its
+    data-driven params at build time). Real mechanism, but **measured that baking the curve once from the
+    proxy does NOT improve preview↔export parity**: on synthetic single-field stacks the full-recipe
+    proxy↔export divergence is ~identical with the curve auto vs baked (e.g. clean 1.82%→1.80%, noisy
+    4.90%→4.87% mean |Δ|), because the divergence is dominated by the **upstream STF-stretch** proxy
+    approximation (already documented as accepted, like gray-star colour-cal) which the curve merely
+    transmits/amplifies through its slope (`nocurve` is *lower*: 1.58% / 4.27%). So baking would be churn
+    that doesn't fix the real (accepted) source — same disposition as the closed wavelet-denoise parity
+    item. Leave `auto:True` as-is. _(If ever revisited: the only parity lever that would help is making the
+    STF stretch itself proxy-invariant, not the curve — and real well-stacked Seestar data reads ~0%
+    divergence in the Scout's real dogfoods, so the high synthetic-noisy numbers are an unrepresentative
+    input, not a live bug.)_
+  • **Welford mean/M2 in float32** — on 10⁴-frame runs the variance can drift a hair, nudging the κ-σ clip
+    threshold slightly; the *final image* comes from the float32 weighted **sum** (checked fine at 10⁴), so
+    it's a marginal rejection-aggressiveness effect, not a wrong image. Low priority; only worth a
+    `float64` M2 accumulator if a real over/under-rejection is ever observed. (idea, image-quality)
+  • **Drizzle `frame_coverage` counts a frame only where channel-0 `out_wht` strictly increases** — with
+    `pixfrac<1` a frame can deposit into G/B but not R at a given output pixel, marginally under-counting
+    the `coverage_min/max` **diagnostic** (never the stacked pixels). Cosmetic; only worth an any-channel
+    OR if a user ever reports an implausibly-low frames-per-pixel figure. (idea, trust)
+  No other code shipped — depth over count (AGENTS.md §2).)_
+
 _(Builder QA audit 2026-07-09 (v0.98.2 baseline): with the editor + stacking core saturated by weeks of
 clean audits, rotated onto the **newest, least-hardened subsystem — the "Tonight" night planner**
 (`seestack/nightplan.py`, `webapp/routers/plan.py`, `frontend/src/tonight.ts`, and the two bundled
@@ -1525,6 +1557,18 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.99.10** — Drizzle pre-run estimate reports the **real** output canvas size (stacking-engine
+  trust — current focus, Builder 2026-07-09). `_estimate_peak_bytes` computed the post-drizzle output
+  shape as `int(dim·s + 1)`, but the canvas the run actually allocates
+  (`drizzle_path._compute_output_canvas`) uses `int(round(dim·s))`; whenever `dim·s` was near-integer
+  (e.g. 320×1.5 = 480.0) the estimate over-stated each axis by 1 px, so the `output_w`/`output_h` the
+  Stack form shows before a run (and the shape the memory guard reserved against) didn't match the FITS
+  the run writes. Now uses the identical `int(round(dim·s))`, so estimate == actual. Harmless for the
+  guard either way (the old value only over-reserved), purely a trust/honesty fix on the displayed
+  dimensions. Regression test `tests/test_stack_memory_guard.py::
+  test_estimated_drizzle_output_shape_matches_the_real_canvas` cross-checks the estimate against a real
+  `DrizzleStacker.output_canvas_shape` (fails before / passes after). Found by a Builder adversarial
+  audit of the stacking engine (see the audit note in Bugs).
 - **v0.99.9** — Honest per-pixel *frame count* for `coverage_min`/`coverage_max` on the **drizzle**
   path too (stacking-engine trust — current focus, Builder 2026-07-09). Completes the v0.99.6
   frame-count family: `DrizzleStacker` now keeps an unweighted `frame_coverage` (uint32) alongside
