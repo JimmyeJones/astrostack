@@ -167,6 +167,27 @@ describe("TonightView", () => {
     expect(screen.queryByRole("radio", { name: "Galaxy" })).not.toBeInTheDocument();
   });
 
+  it("hides targets that aren't up tonight behind a dimmed count", async () => {
+    // The planner returns every catalog object regardless of observability;
+    // ones that never clear the floor (minutes_above_min_alt 0) are dead rows.
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
+      targets: [
+        target({ id: "M13", name: "Up Now", already_targeted: false, score: 65,
+                 minutes_above_min_alt: 180 }),
+        target({ id: "M99", name: "Not Up", already_targeted: false, score: 0,
+                 minutes_above_min_alt: 0 }),
+      ],
+    }));
+    renderTonight();
+    await waitFor(() =>
+      expect(screen.getByText("Start something new tonight")).toBeInTheDocument());
+    // The observable target is listed; the not-up one is not a table row.
+    expect(screen.getByText(/M13/)).toBeInTheDocument();
+    expect(screen.queryByText(/M99/)).not.toBeInTheDocument();
+    // A dimmed footnote accounts for the hidden target with a way to reveal it.
+    expect(screen.getByText(/1 more target isn't up tonight/)).toBeInTheDocument();
+  });
+
   it("ranks library targets and fresh catalog suggestions separately", async () => {
     vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
       targets: [

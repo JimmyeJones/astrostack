@@ -1294,6 +1294,21 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.98.2** — Tonight planner (friendliness — priority 3, Builder dogfood-found 2026-07-09): the
+  "Start something new" (and "Add more to what you're shooting") tables listed **every** target the
+  planner returns regardless of observability — and the engine returns the whole 157-object catalog, so
+  on a typical night ~**half the rows were dead** (targets that never clear the minimum-altitude floor
+  tonight: score 0, "—" transit / "—" time-up), diluting the ranking whose entire job is "what's worth
+  shooting tonight?" (measured: 79 of 157 fresh catalog rows unobservable at a 40°N / min-alt-30 October
+  night). Both tables now list only targets **up tonight** (`minutes_above_min_alt > 0`) and collapse the
+  rest into a dimmed footnote naming the count with a "lower the minimum altitude to include them" hint —
+  so nothing is hidden (the escape hatch is one control away) but the table reads as a clean shortlist,
+  and the "well placed tonight" copy is honest. New pure helpers `partitionByUpTonight` + `notUpTonightNote`
+  (unit-tested) + a component test (dead row hidden behind the count); the type filter now derives its
+  buckets from the up-tonight set too. Frontend-only, additive, read-only — no engine/schema/API/default
+  change (`minutes_above_min_alt` has always been on the response). Dogfood also confirmed the planner is
+  healthy end-to-end across polar (no dark window), southern-hemisphere, future-date and min-alt 0/80
+  edge cases — no engine bug found.
 - **v0.97.8** — Tonight planner (friendliness/autonomy — priority 3, Builder §4 top-up): show *when
   tonight* a target is actually shootable, which the single transit time can't answer (a 7-hour target
   could clear the floor at 21:00 or not until 01:00). `_observability_batch` now derives the usable
