@@ -869,6 +869,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   action — in the Process / watcher auto-stack chain, refuse-with-guidance or auto-stack just the majority
   pointing (flagging the rest) instead of silently combining half the data; that touches the hot path and the
   walk-away default, so it wants its own careful build. Original write-up kept below for provenance.
+  _(Builder follow-up idea, spotted auditing the shipped v0.101–0.102 detection 2026-07-09: the warning
+  currently only **tells** the user to "open the Frames table and reject the odd frames" — but
+  `detectMixedPointings` already knows **exactly which** subs belong to the minority pointing(s) (they're
+  the members of every cluster below the majority). Close the loop with a one-click **"Reject the N
+  odd-target frames"** button right on the amber callout that rejects just those frames (the existing
+  frame accept/reject mutation, with an Undo like the auto-grade "Drop N outliers" hint), so the user
+  fixes the mistake in one click instead of hunting the table and eyeballing RA/Dec. Extend
+  `detectMixedPointings` to also return the minority frame **ids** (it already computes the per-frame
+  cluster assignment), keep the majority pointing accepted, and confirm-gate it like the other
+  destructive one-clicks. Serves autonomy + friendliness (removes the manual hunt the warning currently
+  hands off); frontend + the existing reject endpoint, additive, testable on the pure helper. (S–M,
+  autonomy/friendliness)_
   The still-open *preventive* complement to the now-**shipped** post-hoc pair (v0.100.0: "Persist & surface
   honest per-run frame accounting" + "Proactively diagnose a large align-failure fraction", both in Shipped).
   Root cause (verified): in `stacker.py::_pass` a frame whose reprojected footprint doesn't intersect the
