@@ -1270,6 +1270,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.97.8** — Tonight planner (friendliness/autonomy — priority 3, Builder §4 top-up): show *when
+  tonight* a target is actually shootable, which the single transit time can't answer (a 7-hour target
+  could clear the floor at 21:00 or not until 01:00). `_observability_batch` now derives the usable
+  window's enclosing clock bounds from the per-sample above-floor mask it already computes and reports
+  them as nullable `usable_start_utc`/`usable_end_utc` on `Observability`/`PlannedTarget` (both `None`
+  when never usable); the Tonight page renders them as a dimmed "HH:MM–HH:MM" line under "Time up" via a
+  pure `usableWindowNote` helper. Honest: `minutes_above_min_alt` stays the true usable total, so a rare
+  horizon-mask gap shows as the enclosing span (exact for the common no-mask case). Additive/offline, no
+  score/ranking change. Tests: `test_nightplan.py` (bounds enclose transit & sit in the dark window, span
+  matches usable minutes, `None` when never usable) + a `usableWindowNote` block in `tonight.test.ts`. (#PR)
 - **v0.97.7** — Tonight planner (friendliness/trust): a dimmed per-row Moon cue explains *why* a
   bright-Moon night still ranked a target well. The planner now surfaces each target's Moon-up overlap
   (`moon_up_fraction` on `PlannedTarget`/`Observability` — the same share the score already computes,

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   compassPoint, formatClock, formatMinutes, minAltOptions, moonCueForTarget,
-  moonPhaseLabel, moonWindowNote, scoreColor, splitTargets,
+  moonPhaseLabel, moonWindowNote, scoreColor, splitTargets, usableWindowNote,
 } from "./tonight";
 import type { PlannedTarget } from "./api/client";
 
@@ -105,6 +105,27 @@ describe("moonCueForTarget", () => {
   it("clamps out-of-range fractions", () => {
     expect(moonCueForTarget(-0.2)).toBe("Moon down for its window");
     expect(moonCueForTarget(1.5)).toBeNull();
+  });
+});
+
+describe("usableWindowNote", () => {
+  it("joins the two clock bounds with an en dash", () => {
+    // Times render in the viewer's local zone / locale (12- or 24-hour), so
+    // assert the two clock parts joined by an en dash rather than exact hours.
+    const note = usableWindowNote("2026-01-15T21:00:00+00:00", "2026-01-16T04:30:00+00:00");
+    expect(note).toMatch(/^\d{1,2}:\d{2}.*–.*\d{1,2}:\d{2}/);
+    expect(note).toContain("–");
+  });
+
+  it("omits the line when either bound is missing", () => {
+    expect(usableWindowNote(null, "2026-01-16T04:30:00+00:00")).toBeNull();
+    expect(usableWindowNote("2026-01-15T21:00:00+00:00", null)).toBeNull();
+    expect(usableWindowNote(null, null)).toBeNull();
+    expect(usableWindowNote(undefined, undefined)).toBeNull();
+  });
+
+  it("omits the line when a bound is unparseable", () => {
+    expect(usableWindowNote("not-a-date", "2026-01-16T04:30:00+00:00")).toBeNull();
   });
 });
 

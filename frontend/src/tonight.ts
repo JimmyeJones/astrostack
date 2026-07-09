@@ -69,6 +69,22 @@ export function moonCueForTarget(frac: number | null | undefined): string | null
   return `Moon up ${pct}% of its window`;
 }
 
+// A short "HH:MM–HH:MM" cue for *when* tonight a target is usable, from its
+// usable-window clock bounds (UTC ISO). Complements the single transit time: a
+// target up for hours could clear the floor at 21:00 or not until 01:00. `null`
+// (omit the line) when either bound is missing — never usable, or an older
+// backend. Times render in the viewer's local zone, like the rest of the page.
+export function usableWindowNote(
+  start: string | null | undefined,
+  end: string | null | undefined,
+): string | null {
+  if (!start || !end) return null;
+  const a = formatClock(start);
+  const b = formatClock(end);
+  if (a === "—" || b === "—") return null;
+  return `${a}–${b}`;
+}
+
 export interface MinAltOption {
   value: string;
   label: string;
