@@ -218,6 +218,37 @@ magenta overshoot) — the −14% magenta failure mode needs an *already-truly-n
 doesn't produce on cast data. Net: the twice-established deferral of the SCNR change is **correct**; no new
 bug found; no code shipped this run (an idle run leaving main green — AGENTS.md §2).)_
 
+_(Builder audit 2026-07-09 (v0.99.10 baseline, suite green 984 passed / 2 skipped; frontend 642 passed).
+With the Bugs list drained to the one deliberately real-data-gated entry (the dead SExtractor skew guard)
+and the ready Ideas all real-data-gated / owner-sign-off / large / low-value, ran two fresh adversarial
+audits over the areas least-recently code-audited: **(1) the editor's server-side suggestion + preview
+endpoints** (`webapp/routers/editor.py` — `_recipe_before_uid`, the levels/stretch/curve/denoise/preset
+suggestions, and proxy↔export op-parameter scaling) and **(2) config/schema upgrade-safety**
+(`webapp/config.py` `Settings` loader, `webapp/schemas.py` form-descriptor↔`NON_FORM_KEYS`, and the
+project/library DB migrations). **Both came back clean — no shippable bug.** Config: every numeric field
+that gained `ge/le` bounds after an early *unbounded* release still admits that release's default, and
+`_load_resilient` isolates a single out-of-range/malformed field without ever wiping the rest (fuzzed a
+full early-release config with out-of-new-bounds + wrong-typed values — always single-field reset, never a
+wipe); `describable_keys() ∪ NON_FORM_KEYS` == the `StackOptions` fields (no drift), all descriptors JSON-
+serialise, and the calibration `NON_FORM_KEYS` can't be injected from client input; genuine v2/v3
+`project.sqlite` files migrate to v9 with every row/metadata/note preserved (all `ALTER … ADD COLUMN`, no
+drop/rewrite). **One candidate editor "defect" was chased to ground and dismissed as a false positive, so a
+future agent needn't re-open it:** the suggestion audit flagged `stretch_suggestion` (editor.py:783) as
+omitting `coverage` from its `EditContext` (which would make a preceding mosaic `background.level_coverage`
+op silently no-op and mis-measure the stretch). **But the live code already passes
+`coverage=_proxy_coverage(run.fits_path, scale)` (editor.py:784)** — `level_coverage` *does* run in the
+measurement (verified: the leveled image differs from the raw by 0.13). The only genuine difference from
+its three sibling endpoints (levels/curve/denoise) is a missing `already_display=…`, and that flag is read
+in exactly one place — `pipeline.py:81`'s `if not stretched and auto_stretch and not ctx.already_display`
+fallback — which `stretch_suggestion` disables via `auto_stretch=False`, so passing it is **provably a
+no-op** (measured: adding it yields byte-identical output). Adding it would be pure parity churn for zero
+behaviour change (AGENTS.md §2), so **not shipped**. Also re-ran the priority-1 Auto dogfood on a fresh
+realistic 1080p single-field OSC stack (nebula + 400 stars + mild L→R gradient + σ≈0.003 noise): full Auto
+chain, **preview↔export parity 0.62% mean / 2.12% p99**, full 0..1 range, 0% black-clip — healthy; it
+reproduced *only* the two already-filed real-data-gated observations (a mild gradient inflates
+`analyze_proxy`'s `sky_sigma` 0.043 → Auto drops sharpen; SCNR nudges the background green median low), so
+no new bug. No code shipped — an idle run leaving main green is a success (AGENTS.md §2/§3).)_
+
 _(Builder audit 2026-07-09 (v0.99.9 baseline, suite green 983 passed / 2 skipped). Ran two parallel
 adversarial audits over the **current-focus** areas — the stacking engine (`stack/*` + `calibrate/*`) and
 the editor engine (`edit/*` incl. the Auto path / proxy↔export parity). **Both came back essentially
