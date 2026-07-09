@@ -20,6 +20,11 @@ export interface PlannedTarget {
   minutes_above_min_alt: number;
   moon_separation_deg: number;
   score: number;
+  // Share (0..1) of this target's usable window the Moon is above the horizon —
+  // the overlap that weights its Moon penalty. Lets the UI explain why a
+  // bright-Moon night still ranked a target well (the Moon was down while it was
+  // up). null/absent when the target has no usable window or on an older backend.
+  moon_up_fraction?: number | null;
   target_safe: string | null;
   frames_accepted: number | null;
   total_exposure_s: number | null;

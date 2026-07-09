@@ -393,6 +393,49 @@ def _orion_belt_targets():
                         dec_deg=24.12, frames_accepted=5, total_exposure_s=50.0)
 
 
+def test_plan_reports_moon_up_fraction_per_target():
+    # Each observable target carries the share of its usable window the Moon is
+    # above the horizon, so the UI can explain why a bright-Moon night still
+    # ranked it well. On an up-all-night full Moon every target's fraction is 1.0.
+    ref = datetime(2026, 1, 3, 22, 0, tzinfo=timezone.utc)  # full Moon, up all night
+    plan = plan_tonight(LONDON, ref, include_catalog=False,
+                        library_targets=list(_orion_belt_targets()))
+    assert plan.moon_window["up_all_night"] is True
+    observable = [p for p in plan.targets if p.minutes_above_min_alt > 0]
+    assert observable  # the fixtures are well placed in January
+    for p in observable:
+        assert p.moon_up_fraction == pytest.approx(1.0)
+
+
+def test_moon_up_fraction_tracks_the_penalty_relief():
+    # On a night where a waxing Moon sets partway through the dark window, a target
+    # relieved of the Moon penalty (score risen above the full-penalty value) must
+    # report a below-1 overlap — the field and the score tell a consistent story.
+    ref = datetime(2026, 1, 25, 22, 0, tzinfo=timezone.utc)  # waxing Moon sets partway
+    plan = plan_tonight(LONDON, ref)
+    assert plan.moon_window["set_utc"] is not None
+    dark_minutes = plan.dark_window["duration_minutes"]
+    for p in plan.targets:
+        if p.minutes_above_min_alt <= 0:
+            continue
+        old = _full_moon_penalty_score(p, dark_minutes, plan.moon_illumination)
+        if p.score > old + 1.0:  # genuinely relieved by the Moon setting
+            assert p.moon_up_fraction is not None
+            assert p.moon_up_fraction < 1.0
+
+
+def test_moon_up_fraction_is_none_for_a_never_usable_target():
+    # A deep-southern target never clears the floor → no usable window → the
+    # overlap is unknown (None), so the UI shows no misleading Moon cue.
+    south = LibraryTarget(safe="deep-south", name="Deep South", ra_deg=90.0,
+                          dec_deg=-70.0, frames_accepted=0, total_exposure_s=0.0)
+    plan = plan_tonight(LONDON, JAN_EVENING, library_targets=[south],
+                        include_catalog=False, min_altitude_deg=30.0)
+    entry = next(p for p in plan.targets if p.id == "deep-south")
+    assert entry.score == 0.0
+    assert entry.moon_up_fraction is None
+
+
 def test_plan_is_deterministic():
     a = plan_tonight(LONDON, JAN_EVENING)
     b = plan_tonight(LONDON, JAN_EVENING)
