@@ -114,23 +114,26 @@ _(none of the traced *editor-engine* op bugs are open — that backlog stayed dr
 the entry above is a stacking/autonomy↔editor classification bug found by dogfooding
 the real webapp stack→edit path.)_
 
-- **Watcher can leave a batch unimported when an *accepted* pipeline later fails before ingesting
-  (lower severity — self-recovers, so filed not blind-fixed).** *(traced, Builder audit 2026-07-09;
-  the sibling of the v0.99.4/v0.99.5 watcher fixes.)* When `_on_batch_ready` returns `True`, the
-  watcher treats the batch as consumed and clears `_pending_batch`. If that enqueued pipeline then
-  *fails before ingesting* (a scan/QC error, an OOM refusal, a cancel), the newly-stable files stay
-  in `incoming/` and in `StabilityTracker._stable` (kept by `self._stable &= seen` while they're
-  present), and are never re-offered on their own. **Why it's lower severity / not a blind fix:** it
-  self-recovers — the pipeline job body re-scans the *whole* incoming dir (`find_fits_files`), so the
-  next batch (any new file) or a manual "Scan incoming" re-ingests the stranded files, and ingest is
-  idempotent; only a site where no further files ever arrive *and* the user never manually scans is
-  stuck. And the clean fix is a **design change**, not a one-liner: the watcher would need to learn
-  whether the pipeline actually ingested (couple it to job outcomes, or re-arm `_pending_batch` on a
-  pipeline that ends in `error`/`cancelled` without importing), which wants deliberate design + its
-  own test rather than a reflexive patch. Candidate shapes for whoever takes it: (a) on a pipeline
-  finishing non-`done`, re-offer the last batch; (b) periodically re-arm if `incoming/` is non-empty
-  and no pipeline is active. (S–M design, autonomy/robustness) —
-  *Builder-filed 2026-07-09, traced.*
+- ~~**Watcher can leave a batch unimported when an *accepted* pipeline later fails before ingesting
+  (lower severity — self-recovers, so filed not blind-fixed).**~~ — **FIXED v0.99.7** (Builder
+  2026-07-09; the sibling of the v0.99.4/v0.99.5 watcher fixes, taken with the deliberate design its
+  filing asked for). When `_on_batch_ready` returned `True`, the watcher treated the batch as consumed
+  and cleared `_pending_batch`; if that enqueued pipeline then *failed before ingesting* (a scan/QC
+  error, an OOM refusal), the newly-stable files sat unimported in `incoming/` with nothing to re-offer
+  them until another file arrived or the user manually scanned. Took candidate shape (a) — couple the
+  re-offer to the pipeline's outcome: `_on_batch_ready` now records the id of the pipeline it enqueued
+  on `app.state`, and a new `webapp/main.py::_stranded_batch_needs_retry` hook (wired into the watcher
+  as `on_check_stranded`) reports on an *otherwise-idle* poll (nothing newly stable, nothing pending —
+  so it can't race a duplicate) whether that pipeline ended in `error`; if so the watcher re-arms
+  `_pending_batch` and hands the batch off afresh (a fresh pipeline re-scans the whole incoming dir and
+  re-imports idempotently). **Bounded to a single retry per strand** — a pipeline enqueued *as* a
+  recovery is flagged (`watcher_pipeline_is_recovery`), so a persistently-failing pipeline can't loop —
+  and only a genuine `error` re-offers, never a user `cancel`/`interrupted` (deliberate). Regression
+  tests: `tests/webapp/test_watcher.py::test_stranded_batch_is_reoffered_when_a_failed_pipeline_stranded_it`
+  + `test_stranded_check_is_skipped_on_stable_and_pending_polls`, and the `_stranded_batch_needs_retry`
+  truth table + `_on_batch_ready` id-tracking / recovery-flag tests in
+  `tests/webapp/test_batch_trigger.py` (fail before / pass after). Additive, upgrade-safe (no
+  schema/config/API change; the hook is opt-in and no-ops on an older `app.state`).
 
 - **Dead SExtractor skew-fallback guard in 4 background/leveling helpers (needs REAL-data
   threshold validation before fixing — NOT a blind Builder change).** *(traced + reproduced,

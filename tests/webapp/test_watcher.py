@@ -170,6 +170,98 @@ def test_batch_pending_when_pipeline_busy_is_reoffered(tmp_path):
     assert len(calls) == 3
 
 
+def test_stranded_batch_is_reoffered_when_a_failed_pipeline_stranded_it(tmp_path):
+    """A batch accepted by a pipeline that then *failed before importing* is re-offered.
+
+    Regression: ``_on_batch_ready`` treats an accepted batch as consumed (the
+    stability tracker won't re-offer those files). If that pipeline errors before
+    it ingests, the files sit unimported forever. The watcher now consults an
+    ``on_check_stranded`` hook on a poll where nothing new is stable and nothing
+    is pending; when it reports a stranded batch, the batch is handed off afresh.
+    """
+    import os
+
+    incoming = tmp_path / "incoming"
+    incoming.mkdir()
+    f = incoming / "a.fit"
+    f.write_bytes(b"x" * 100)
+
+    clock = FakeClock()
+    os.utime(f, (clock.t, clock.t))
+
+    accepts: list[float] = []
+    stranded = {"v": False}
+
+    settings = SimpleNamespace(
+        resolved_incoming_dir=incoming, watch_quiet_period_s=30,
+        watch_poll_interval_s=300, watcher_enabled=True,
+    )
+    w = Watcher(
+        get_settings=lambda: settings,
+        on_batch_ready=lambda: (accepts.append(clock.t), True)[1],
+        on_check_stranded=lambda: stranded["v"],
+        time_fn=clock,
+    )
+    # First poll registers the file; it isn't stable yet.
+    assert w.poll_once() == set()
+    assert accepts == []
+    # File stabilises → accepted once (the pipeline "takes" it).
+    clock.advance(31)
+    assert w.poll_once() == {str(f)}
+    assert len(accepts) == 1
+    # No new files, not stranded → no re-offer.
+    clock.advance(31)
+    assert w.poll_once() == set()
+    assert len(accepts) == 1
+    # The pipeline failed before importing → the hook reports a strand, and the
+    # next poll re-offers the batch even though nothing new is stable.
+    stranded["v"] = True
+    clock.advance(31)
+    assert w.poll_once() == set()
+    assert len(accepts) == 2
+
+
+def test_stranded_check_is_skipped_on_stable_and_pending_polls(tmp_path):
+    """The stranded hook only runs on an otherwise-idle poll.
+
+    It must not be consulted on a poll that already has newly-stable work or a
+    pending batch, so it can never race the normal re-offer into a duplicate.
+    """
+    import os
+
+    incoming = tmp_path / "incoming"
+    incoming.mkdir()
+    f = incoming / "a.fit"
+    f.write_bytes(b"x" * 100)
+
+    clock = FakeClock()
+    os.utime(f, (clock.t, clock.t))
+
+    checked: list[float] = []
+    # Pipeline stays busy so the batch stays pending across polls.
+    settings = SimpleNamespace(
+        resolved_incoming_dir=incoming, watch_quiet_period_s=30,
+        watch_poll_interval_s=300, watcher_enabled=True,
+    )
+    w = Watcher(
+        get_settings=lambda: settings,
+        on_batch_ready=lambda: False,  # always declines → batch stays pending
+        on_check_stranded=lambda: (checked.append(clock.t), False)[1],
+        time_fn=clock,
+    )
+    # Idle first poll (file registered, not stable, nothing pending) → checked.
+    assert w.poll_once() == set()
+    assert checked == [1000.0]
+    # File stabilises → newly_stable is non-empty, so the check is skipped.
+    clock.advance(31)
+    assert w.poll_once() == {str(f)}   # stable + declined → pending
+    assert checked == [1000.0]
+    # Batch is now pending → the check is skipped again.
+    clock.advance(31)
+    assert w.poll_once() == set()
+    assert checked == [1000.0]
+
+
 def test_batch_reoffered_when_callback_raises(tmp_path):
     """A batch whose hand-off *raises* is kept pending and re-offered, not dropped.
 

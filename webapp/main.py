@@ -59,7 +59,47 @@ def _on_batch_ready(app: FastAPI) -> bool:
     if active is not None:
         log.info("pipeline already %s; deferring trigger", active.state)
         return False
-    pipeline.submit_pipeline(store.get(), jm)
+    job = pipeline.submit_pipeline(store.get(), jm)
+    # Remember which pipeline is responsible for importing this batch so a later
+    # poll can re-offer the batch if that pipeline *fails before ingesting* (see
+    # `_stranded_batch_needs_retry`). Mark the job as a recovery retry when this
+    # enqueue is itself the re-offer, so a persistently-failing pipeline can be
+    # retried at most once and never loops.
+    st = app.state
+    st.watcher_pipeline_id = job.id
+    st.watcher_pipeline_is_recovery = getattr(st, "watcher_recovery_next", False)
+    st.watcher_recovery_next = False
+    return True
+
+
+def _stranded_batch_needs_retry(app: FastAPI) -> bool:
+    """Watcher hook: True when the last auto-ingest pipeline failed before importing.
+
+    When ``_on_batch_ready`` enqueues a pipeline it treats the batch as consumed
+    (the stability tracker won't re-offer those files). If that pipeline then
+    *errors before it ingests* — a scan/QC crash, an OOM refusal — the
+    newly-stable files stay unimported in ``incoming/`` with nothing to re-trigger
+    them until another file arrives or the user manually scans. This lets the
+    watcher re-offer the batch once: enqueuing a fresh pipeline re-scans the whole
+    incoming dir (idempotently), so the stranded files get imported.
+
+    Bounded to a single retry per strand — a pipeline enqueued *as* a recovery is
+    flagged, so a persistently-failing pipeline can't loop. Only a genuine
+    ``error`` re-offers; a user ``cancel`` (deliberate) is left alone.
+    """
+    jm: JobManager = app.state.job_manager
+    st = app.state
+    pid = getattr(st, "watcher_pipeline_id", None)
+    if pid is None:
+        return False
+    if jm.active_of_kind("pipeline") is not None:
+        return False  # a pipeline is running; let it finish before deciding
+    job = jm.get(pid)
+    if job is None or job.state != "error":
+        return False  # succeeded, cancelled by the user, or no longer known
+    if getattr(st, "watcher_pipeline_is_recovery", False):
+        return False  # this failure was already a retry — don't loop
+    st.watcher_recovery_next = True
     return True
 
 
@@ -87,6 +127,7 @@ async def lifespan(app: FastAPI):
     watcher = Watcher(
         get_settings=store.get,
         on_batch_ready=lambda: _on_batch_ready(app),
+        on_check_stranded=lambda: _stranded_batch_needs_retry(app),
     )
     watcher.start()
     app.state.watcher = watcher
