@@ -31,17 +31,82 @@ def _transit_altitude(lat_deg: float, dec_deg: float) -> float:
     return 90.0 - abs(lat_deg - dec_deg)
 
 
-def test_catalog_loads_full_messier():
+# The 88 canonical IAU three-letter constellation abbreviations. A catalog entry
+# whose ``con`` isn't in here is a typo (and would render as junk in the UI).
+_IAU_CONSTELLATIONS = {
+    "And", "Ant", "Aps", "Aqr", "Aql", "Ara", "Ari", "Aur", "Boo", "Cae", "Cam",
+    "Cnc", "CVn", "CMa", "CMi", "Cap", "Car", "Cas", "Cen", "Cep", "Cet", "Cha",
+    "Cir", "Col", "Com", "CrA", "CrB", "Crv", "Crt", "Cru", "Cyg", "Del", "Dor",
+    "Dra", "Equ", "Eri", "For", "Gem", "Gru", "Her", "Hor", "Hya", "Hyi", "Ind",
+    "Lac", "Leo", "LMi", "Lep", "Lib", "Lup", "Lyn", "Lyr", "Men", "Mic", "Mon",
+    "Mus", "Nor", "Oct", "Oph", "Ori", "Pav", "Peg", "Per", "Phe", "Pic", "Psc",
+    "PsA", "Pup", "Pyx", "Ret", "Sge", "Sgr", "Sco", "Scl", "Sct", "Ser", "Sex",
+    "Tau", "Tel", "Tri", "TrA", "Tuc", "UMa", "UMi", "Vel", "Vir", "Vol", "Vul",
+}
+
+# Types the planner/UI understand (shared with the Messier catalog vocabulary).
+_KNOWN_TYPES = {
+    "asterism", "double star", "galaxy", "globular cluster", "nebula",
+    "open cluster", "planetary nebula", "star cloud", "supernova remnant",
+}
+
+
+def test_catalog_loads_messier_plus_curated_extras():
     cat = load_catalog()
-    assert len(cat) == 110
     ids = {o.id for o in cat}
+    # The full Messier catalog is still present and canonical.
+    messier = [o for o in cat if o.id.startswith("M") and o.id[1:].isdigit()]
+    assert len(messier) == 110
     assert "M1" in ids and "M42" in ids and "M110" in ids
     m42 = next(o for o in cat if o.id == "M42")
     assert m42.name == "Orion Nebula"
-    # Every coordinate is sane.
+    # The curated non-Messier set widens the catalog with popular NGC/IC targets.
+    assert len(cat) > 110
+    for expected in ("NGC 7000", "NGC 869", "NGC 6960", "NGC 7293", "IC 1805"):
+        assert expected in ids, expected
+    # Every coordinate is sane across the whole combined catalog.
     for o in cat:
         assert 0.0 <= o.ra_deg < 360.0
         assert -90.0 <= o.dec_deg <= 90.0
+
+
+def test_curated_catalog_is_well_formed_and_disjoint_from_messier():
+    """The bundled non-Messier file has unique, valid, non-duplicating entries."""
+    cat = load_catalog()
+    extras = [o for o in cat if not (o.id.startswith("M") and o.id[1:].isdigit())]
+    assert len(extras) >= 40  # a curated set worth having
+
+    # Ids are unique across the whole catalog (the loader de-dups; verify no
+    # accidental Messier/NGC id collision slipped through).
+    ids = [o.id for o in cat]
+    assert len(ids) == len(set(ids))
+
+    for o in extras:
+        assert o.id.startswith(("NGC ", "IC ")), o.id
+        assert o.name, o.id  # every curated target carries a recognisable name
+        assert o.type in _KNOWN_TYPES, (o.id, o.type)
+        assert o.con in _IAU_CONSTELLATIONS, (o.id, o.con)
+
+    # No curated object sits on top of a Messier object (they should be a genuine
+    # widening, not a rename) — nothing closer than 0.2° to any Messier entry.
+    messier = [o for o in cat if o.id.startswith("M") and o.id[1:].isdigit()]
+    for e in extras:
+        for m in messier:
+            assert np_plan._angular_sep_deg(e.ra_deg, e.dec_deg,
+                                            m.ra_deg, m.dec_deg) > 0.2, (e.id, m.id)
+
+
+def test_curated_extras_appear_in_a_plan():
+    """A widely-observable curated target surfaces as a not-yet-targeted entry."""
+    # The Double Cluster (Dec +57°) is well up from London in January — it should
+    # show up in the ranked plan as a catalog suggestion.
+    plan = plan_tonight(LONDON, JAN_EVENING)
+    by_id = {t.id: t for t in plan.targets}
+    assert "NGC 869" in by_id
+    dbl = by_id["NGC 869"]
+    assert dbl.already_targeted is False
+    assert dbl.name == "Double Cluster"
+    assert dbl.max_altitude_deg > 30.0  # genuinely up that night
 
 
 def test_dark_window_is_astronomical_in_winter():

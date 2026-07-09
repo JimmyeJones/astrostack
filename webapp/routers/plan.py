@@ -2,8 +2,9 @@
 
 ``GET /api/plan/tonight`` returns an offline, ranked list of deep-sky targets
 worth pointing the scope at tonight: the user's own library targets ("already
-targeted", annotated with what they've captured) plus a bundled Messier catalog
-("not yet targeted"), each scored by altitude, usable window and Moon proximity
+targeted", annotated with what they've captured) plus bundled catalogs — the
+Messier objects and a curated set of popular non-Messier NGC/IC targets — ("not
+yet targeted"), each scored by altitude, usable window and Moon proximity
 (see :mod:`seestack.nightplan`).
 
 The observer location comes from Settings when set, otherwise it's read

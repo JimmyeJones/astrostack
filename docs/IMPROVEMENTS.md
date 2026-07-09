@@ -972,9 +972,13 @@ problems. Dogfood it every big-picture run and fix root causes.
   Additive and read-only throughout (never touches stacks/data); the catalog is a
   static bundled file (no network, no heavy dependency); location/horizon are opt-in
   with sane fallbacks. Overall L; **slice (a) shipped v0.95.0, slice (b) shipped
-  v0.96.0** — remaining: (c) the sign-off-gated weather enrichment. A future slice
-  could also widen the bundled catalog beyond Messier (a curated Caldwell/NGC set) —
-  the loader + scorer already handle any number of objects. (L, autonomy/workflow)
+  v0.96.0** — remaining: (c) the sign-off-gated weather enrichment. ~~A future slice
+  could also widen the bundled catalog beyond Messier (a curated Caldwell/NGC set).~~
+  — **catalog-widening shipped v0.97.0** (47 curated popular non-Messier NGC/IC targets
+  in `data/deepsky_popular.json`, concatenated by `load_catalog()`). Could still grow
+  further (a broader Caldwell/NGC/IC set, or a southern-sky pack) — the loader + scorer
+  handle any number of objects — but the current 157-object list already covers the
+  popular OSC targets, so only worth it if the owner wants more suggestions. (L, autonomy/workflow)
 - Annotated sky overlay (label detected objects / show solved field). (M) —
   related to the night planner above; the planner's "plot tonight's targets" view
   can reuse this.
@@ -1209,6 +1213,18 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.97.0** — ⭐ OWNER-REQUESTED "Tonight" night planner — widen the bundled catalog beyond Messier.
+  A second static, offline file `seestack/data/deepsky_popular.json` (47 curated popular non-Messier
+  NGC/IC targets — Double Cluster, Veil, North America/Pelican, Heart/Soul, Rosette, Iris, Cocoon,
+  Helix, Blue Snowball, Cat's Eye, Sculptor Galaxy, Centaurus A, Needle, Omega Cen, 47 Tuc, …) is now
+  concatenated into `nightplan.load_catalog()` (refactored into `_load_catalog_file` + a de-duping
+  loop keyed on id — first file wins), so "Start something new" suggests the well-known objects an OSC
+  Seestar owner actually shoots, not just Messier. Same schema/vocabulary as `messier.json`; coordinates
+  are sub-degree J2000 (ample for altitude/window ranking); ids are the primary NGC/IC designation and
+  don't collide with Messier ids. Additive, offline, upgrade-safe (packaging already globs `data/*.json`;
+  API shape unchanged — just more entries). New validation tests pin catalog well-formedness (unique ids,
+  valid IAU constellations, known types, no positional overlap with Messier) and that a curated target
+  surfaces in a plan. Frontend "Start something new" description reworded to match. (this branch)
 - **v0.96.0** — ⭐ OWNER-REQUESTED "Tonight" night planner, slice (b) — horizon / tree-cover mask: an opt-in `horizon_profile` (azimuth→min-clear-altitude points) shapes each target's usable window past low obstructions; `HorizonProfile` interpolates with 360° wrap, Settings gets a point editor, Tonight flags `horizon_active`. Additive, upgrade-safe (empty default = old flat-floor behaviour).
 - **v0.95.0** — ⭐ OWNER-REQUESTED "Tonight" night planner, slice (a) — the offline astronomy core.
   New pure engine module `seestack/nightplan.py` (astropy, offline, deterministic): computes tonight's

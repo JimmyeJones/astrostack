@@ -7,7 +7,8 @@ wash them out. It answers the pre-capture question "what's worth pointing the
 Seestar at tonight?" — the complement to the post-capture stack/edit pipeline.
 
 Everything here is **offline and deterministic**: pure ``astropy`` (already a
-dependency) over a bundled Messier catalog (``data/messier.json``). No network,
+dependency) over bundled catalogs (``data/messier.json`` plus a curated set of
+popular non-Messier NGC/IC targets in ``data/deepsky_popular.json``). No network,
 no heavy dependency. Every entry point takes the reference time explicitly, so a
 fixed date + site always yields the same plan (which is what the tests pin).
 
@@ -37,7 +38,13 @@ import numpy as np
 
 log = logging.getLogger(__name__)
 
-_CATALOG_PATH = Path(__file__).parent / "data" / "messier.json"
+_DATA_DIR = Path(__file__).parent / "data"
+# Bundled deep-sky catalogs, loaded and concatenated in order. Messier first (its
+# ids/names are canonical), then a curated set of popular non-Messier NGC/IC
+# targets so "start something new" can suggest the well-known objects a Seestar
+# owner actually shoots (Double Cluster, Veil, North America, …). Static files,
+# no network. A later file never overrides an id an earlier one already defined.
+_CATALOG_FILES = ("messier.json", "deepsky_popular.json")
 
 # Altitude thresholds (deg) for the dark window, tried in order. Astronomical
 # dark is ideal; the fallbacks keep short summer nights usable rather than empty.
@@ -210,18 +217,36 @@ class NightPlan:
     targets: list[PlannedTarget] = field(default_factory=list)
 
 
-@lru_cache(maxsize=1)
-def load_catalog() -> tuple[CatalogObject, ...]:
-    """Load the bundled Messier catalog (cached; static file)."""
-    with _CATALOG_PATH.open(encoding="utf-8") as fh:
+def _load_catalog_file(path: Path) -> list[CatalogObject]:
+    """Parse one bundled catalog JSON file into :class:`CatalogObject` records."""
+    with path.open(encoding="utf-8") as fh:
         raw = json.load(fh)
-    return tuple(
+    return [
         CatalogObject(
             id=o["id"], name=o.get("name", ""), ra_deg=float(o["ra_deg"]),
             dec_deg=float(o["dec_deg"]), type=o.get("type", ""), con=o.get("con", ""),
         )
         for o in raw["objects"]
-    )
+    ]
+
+
+@lru_cache(maxsize=1)
+def load_catalog() -> tuple[CatalogObject, ...]:
+    """Load the bundled deep-sky catalogs, concatenated (cached; static files).
+
+    Messier plus a curated set of popular non-Messier NGC/IC targets (see
+    ``_CATALOG_FILES``). Ids are de-duplicated across files — the first file to
+    define an id wins — so a target can never appear twice in the plan.
+    """
+    objects: list[CatalogObject] = []
+    seen: set[str] = set()
+    for fname in _CATALOG_FILES:
+        for obj in _load_catalog_file(_DATA_DIR / fname):
+            if obj.id in seen:
+                continue
+            seen.add(obj.id)
+            objects.append(obj)
+    return tuple(objects)
 
 
 def _times_grid(start: datetime, end: datetime, step_minutes: float):  # noqa: ANN202
