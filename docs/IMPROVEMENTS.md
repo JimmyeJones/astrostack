@@ -1039,6 +1039,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   ~0 (reconciling a scary single-instant separation with the ranking), "Moon up N% of its window" for a
   partial overlap, and nothing when the Moon is up throughout (the separation column already tells that
   story). Additive/offline (new nullable field, old rows/backends omit it), no score/ranking change.
+- **Tonight planner: plan a *future* night, not just tonight (offline date picker).** (M,
+  autonomy/friendliness — priority 2/3) Filed by the Builder shipping v0.97.7/8. The planner engine
+  already takes the reference moment explicitly (`plan_tonight(observer, when_utc, …)` — every entry
+  point is deterministic on a passed-in time), but `GET /api/plan/tonight` hard-codes "now", so a user
+  can't ask "how well-placed is M31 next Saturday?" or "when's the new-Moon window this month?". Add an
+  optional `date` query param (default = today) + a small date picker on the Tonight page, so the same
+  offline computation ranks a chosen upcoming night. Pairs naturally with the Moon phase/window and the
+  usable-window cues already shipped — the user can scan a few nights out for a dark-sky window on a
+  target they care about. Additive (default preserves today's behaviour), fully offline, testable on the
+  endpoint with a fixed future date. Cap the lookahead to a sane horizon (say ~60 days) so the picker
+  can't request a nonsense far-future ephemery.
+- **Tonight planner: narrow "start something new" by object type (a quick filter).** (S, friendliness
+  — priority 3) The "start something new" table can be long, and a user often arrives wanting *a
+  specific kind* of target ("show me a nebula tonight", "what galaxy is well placed?"). Every catalog row
+  already carries a `type` (galaxy / nebula / open cluster / globular cluster / …), so a small segmented
+  filter (All · Galaxy · Nebula · Cluster · …) above the table would let them cut straight to what they
+  want without scanning. Frontend-only, additive, pure client-side filter over the already-fetched plan
+  (no backend/endpoint change); the buckets can coalesce the fine types (open/globular → "Cluster",
+  planetary/SNR/emission → "Nebula") for a short, friendly control. Testable as a pure bucket/filter
+  helper.
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
