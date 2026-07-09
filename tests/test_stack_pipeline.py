@@ -77,6 +77,65 @@ def test_stack_records_is_mosaic_false_for_single_field(tmp_path):
         proj.close()
 
 
+def test_stack_reports_honest_frame_accounting_all_aligned(tmp_path):
+    """run_stack reports how many subs it attempted to combine and how many
+    couldn't be aligned. When every sub aligns cleanly, n_offered == frames used
+    and nothing failed — the happy case the History panel stays quiet about."""
+    proj = _build_project(tmp_path, n=5)
+    try:
+        result = run_stack(proj, StackOptions(sigma_clip=False, max_workers=2,
+                                              output_name="allok"))
+        assert result.n_offered == 5
+        assert result.n_align_failed == 0
+        assert result.n_frames_used == 5
+        # And it self-documents in the master FITS header for a later info read.
+        from astropy.io import fits
+        header = fits.getheader(result.fits_path)
+        assert int(header["NOFFERED"]) == 5
+        assert int(header["NALIGNFL"]) == 0
+    finally:
+        proj.close()
+
+
+def test_stack_reports_a_sub_that_could_not_be_aligned(tmp_path):
+    """A sub that plate-solved to a wildly different pointing (a stray frame from
+    another target, or a bad solve) reprojects entirely off the reference canvas,
+    so it silently drops out of the stack. run_stack now counts it: n_offered
+    includes it, n_align_failed flags it, and the header records the gap so the
+    History panel can honestly say "N of M subs combined; 1 couldn't be aligned".
+
+    Regression: before this change the drop was invisible — only n_frames_used was
+    kept, so nothing told the user a sub hadn't lined up.
+    """
+    proj = _build_project(tmp_path, n=4)
+    try:
+        # Add one accepted, plate-solved frame whose WCS points far across the sky.
+        stray_wcs = make_synth_wcs_text(ra_center_deg=200.0, dec_center_deg=50.0)
+        raws = tmp_path / "raws"
+        stray = write_seestar_fits(raws / "stray.fit", add_wcs=True, seed=99,
+                                   n_stars=30)
+        proj.add_frame(FrameRow(
+            source_path=str(stray), cached_path=str(stray),
+            width_px=480, height_px=320, bayer_pattern="RGGB",
+            wcs_json=stray_wcs, ra_center_deg=200.0, dec_center_deg=50.0,
+        ))
+        # Force the reference-frame canvas so the stray isn't folded into a union
+        # mosaic (which would land it on-canvas) or dropped as a mosaic outlier —
+        # it must reach the stacking pass and miss the canvas there.
+        result = run_stack(proj, StackOptions(sigma_clip=False, max_workers=2,
+                                              mosaic_canvas="reference",
+                                              output_name="stray"))
+        assert result.n_offered == 5
+        assert result.n_align_failed == 1
+        assert result.n_frames_used == 4
+        from astropy.io import fits
+        header = fits.getheader(result.fits_path)
+        assert int(header["NOFFERED"]) == 5
+        assert int(header["NALIGNFL"]) == 1
+    finally:
+        proj.close()
+
+
 def test_restack_same_basename_keeps_old_run_pointing_at_its_own_image(tmp_path):
     """Re-stacking a target under the same basename (the Stack form's default
     ``master``) must not make the *previous* run's history row serve the new

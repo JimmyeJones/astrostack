@@ -463,6 +463,20 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
             with contextlib.suppress(KeyError, TypeError, ValueError):
                 rejection[k] = float(header[hk])
 
+    # Frame-accounting summary (present on stacks recorded once the stacker began
+    # stamping it): how many subs it attempted to combine and how many couldn't be
+    # aligned. Lets the panel honestly report "1,850 of 2,000 subs combined; 150
+    # couldn't be aligned" and flag a large align-failure fraction (usually mixed
+    # targets / bad plate-solves). Omitted on older masters that lack the cards.
+    frame_accounting: dict[str, Any] | None = None
+    if "NOFFERED" in header:
+        frame_accounting = {}
+        for hk, k in (("NOFFERED", "n_offered"), ("NALIGNFL", "n_align_failed")):
+            with contextlib.suppress(KeyError, TypeError, ValueError):
+                frame_accounting[k] = int(header[hk])
+        if "n_offered" not in frame_accounting:
+            frame_accounting = None
+
     for key in _INFO_CARDS:
         if key not in header:
             continue
@@ -487,7 +501,8 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
     return {"run_id": run_id, "integration_s": integration_s,
             "n_frames": n_frames, "weighting": weighting,
             "photometric": photometric, "dark_scaling": dark_scaling,
-            "rejection": rejection, "auto_edit": auto_edit,
+            "rejection": rejection, "frame_accounting": frame_accounting,
+            "auto_edit": auto_edit,
             "processing": processing, "cards": cards}
 
 
