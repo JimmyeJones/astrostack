@@ -148,7 +148,10 @@ def align_one(
         win_rgb = _apply_subpixel_shift_windowed(
             win_rgb, y0, x0, ref_patch, ref_patch_origin,
         )
-        # Valid mask is unchanged — the shift is <1 pixel so coverage doesn't move.
+        # win_valid is left as reprojected: the refine shift (up to ~5 px) does
+        # NaN a thin coverage ring, but every downstream consumer recomputes the
+        # valid mask from np.isfinite(win_rgb), so that ring is respected without
+        # threading an updated mask back through here.
 
     return win_rgb, win_valid, y0, x0
 
@@ -382,14 +385,21 @@ def _apply_subpixel_shift(
         ch_clean = np.where(np.isfinite(ch), ch, 0.0)
         out[..., c] = nd_shift(ch_clean, shift=(dy, dx), order=1,
                                mode="constant", cval=0.0)
-        # Restore NaN in pixels that were originally NaN, *and* mark the ~1 px
-        # edge strip vacated by the shift as uncovered (NaN) rather than the
-        # cval=0.0 fill above. cval=1.0 treats out-of-frame as NaN, so this
-        # runs unconditionally — a fully-finite window still gets its vacated
-        # ring marked NaN (NaN = no coverage; never turn a gap into a 0).
+        # Mark as uncovered (NaN) every output pixel whose order-1 interpolation
+        # blended in a NaN — both the frame's own gaps and the strip vacated by
+        # the shift. The data shift is *order-1* (bilinear), so it draws on a
+        # 2×2 source footprint: a pixel on the data side of a NaN boundary (an
+        # interior gap *or* the out-of-frame edge, up to ~5 px in for the shifts
+        # this applies) mixes real data with the ``cval=0.0`` fill and comes back
+        # darkened. Propagating the NaN mask with the *same* order-1 footprint
+        # (``cval=1.0`` = out-of-frame is uncovered) and rejecting any non-zero
+        # NaN weight marks exactly those blended pixels, so a darkened boundary
+        # ring can't survive as a covered-but-dimmed value (NaN = no coverage;
+        # never turn a gap into a 0). A measured shift of ~0 blends nothing, so
+        # it still invents no edge NaN.
         nan_mask = ~np.isfinite(ch)
         nan_shifted = nd_shift(nan_mask.astype(np.float32), shift=(dy, dx),
-                               order=0, mode="constant", cval=1.0) > 0.5
+                               order=1, mode="constant", cval=1.0) > 1e-6
         out[..., c] = np.where(nan_shifted, np.nan, out[..., c])
     return out
 
@@ -462,13 +472,16 @@ def _apply_subpixel_shift_windowed(
         ch_clean = np.where(np.isfinite(ch), ch, 0.0)
         out[..., c] = nd_shift(ch_clean, shift=(dy, dx), order=1,
                                mode="constant", cval=0.0)
-        # As in _apply_subpixel_shift: mark both the originally-NaN pixels and
-        # the ~1 px edge vacated by the shift as uncovered (NaN), even when the
-        # window is fully finite — the strip that shifted in from outside the
-        # window is genuinely uncovered, not a 0.
+        # As in _apply_subpixel_shift: mark as uncovered (NaN) every pixel whose
+        # order-1 data interpolation blended in a NaN — the frame's own gaps and
+        # the edge vacated by the shift — by propagating the NaN mask with the
+        # same order-1 footprint (cval=1.0 = out-of-frame uncovered) and
+        # rejecting any non-zero NaN weight. This catches the data-side ring at
+        # an *interior* coverage boundary that a nearest-neighbour (order-0) mask
+        # missed, so a darkened boundary pixel can't survive as covered.
         nan_mask = ~np.isfinite(ch)
         nan_shifted = nd_shift(nan_mask.astype(np.float32), shift=(dy, dx),
-                               order=0, mode="constant", cval=1.0) > 0.5
+                               order=1, mode="constant", cval=1.0) > 1e-6
         out[..., c] = np.where(nan_shifted, np.nan, out[..., c])
     return out
 

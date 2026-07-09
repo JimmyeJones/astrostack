@@ -1410,16 +1410,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   low priority. Shape: track an unweighted per-output-pixel contribution count in `DrizzleStacker`
   (increment where a frame's weight footprint is > 0), expose it like `frame_coverage`, and route it
   through the same `frame_cov` branch in `run_stack`. (S, diagnostics/trust)
-- **Low-priority (traced, off-by-default): sub-pixel-refine darkens a ≤1–2 px band at an *interior*
-  coverage boundary.** *(Builder audit 2026-07-09, PLAUSIBLE — needs a real-frame repro.)* When
-  `subpixel_refine=True` (off by default) `align.py::_apply_subpixel_shift_windowed`'s order-1 data
-  shift blends real data with the NaN region's 0-fill at a footprint's *interior* NaN boundary, and
-  those pixels are kept as covered (only the fully-vacated ring is NaN'd), so a ~1 px ring at a
-  data/gap edge dims (measured 100→60 on a synthetic edge, align.py ~L462-472). The science region is
-  untouched and it's the same class as the documented `FRAME_EDGE_INSET_PX` tradeoff, so it's low
-  severity; the code comment ("shift is <1 pixel") is also inaccurate since shifts up to ~5 px are
-  applied. Candidate: also NaN (or inset) the interior-boundary ring, or mark it uncovered so it can't
-  darken the average. Validate on a real dithered set with `subpixel_refine` on. (S, image-quality/robustness)
+- ~~**Low-priority (traced, off-by-default): sub-pixel-refine darkens a ≤1–2 px band at an *interior*
+  coverage boundary.**~~ — **FIXED v0.99.8** (Builder 2026-07-09; reproduced numerically then fixed).
+  Both `align.py::_apply_subpixel_shift` and `_apply_subpixel_shift_windowed` did the *data* shift with
+  order-1 (bilinear) interpolation — a 2×2 source footprint — but propagated the NaN/coverage mask with
+  a nearest-neighbour **order-0** shift and a `> 0.5` threshold. So a finite pixel on the data side of a
+  NaN boundary (an *interior* gap, or the out-of-frame edge up to ~5 px in for the shifts this applies)
+  blended real data with the `cval=0.0` fill and came back **darkened**, yet the order-0 mask left it
+  *covered* — a violation of the NaN=coverage invariant (a covered-but-dimmed boundary ring dragging the
+  stack average down). Both sites now propagate the NaN mask with the **same order-1 footprint**
+  (`cval=1.0` = out-of-frame uncovered) and reject *any* non-zero NaN weight (`> 1e-6`), so exactly the
+  pixels whose data interpolation touched a NaN are marked uncovered instead of surviving darkened. The
+  change is monotone (it only ever *adds* NaN; no kept pixel's value changes) and a measured shift of ~0
+  blends nothing, so it invents no edge NaN. Also corrected the inaccurate `align.py` comments
+  ("shift is <1 pixel" / "coverage doesn't move"). Regression test
+  `tests/test_subpixel_align.py::test_subpixel_shift_does_not_darken_an_interior_coverage_boundary`
+  (an interior NaN hole leaves a min finite value of ~47 before / ~90 after; fails before / passes
+  after); the existing vacated-edge + zero-shift + large-shift tests still pass unchanged. Additive,
+  upgrade-safe (no config/DB/API/on-disk change), and `subpixel_refine` stays off by default.
 - ~~**Trivial (doc): `calibrate/apply.py:119` comment says flat values ≤0.1·mean are "floored to 0.1"
   but the code sets them to 1.0 (no correction).**~~ — **already accurate (Builder 2026-07-09):** the
   live comment reads "Floor tiny / non-finite values to 1.0 (= no correction there)", which matches the

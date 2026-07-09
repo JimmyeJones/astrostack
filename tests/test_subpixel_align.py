@@ -101,6 +101,41 @@ def test_subpixel_shift_zero_shift_adds_no_nan():
     assert not np.isnan(out).any()
 
 
+def test_subpixel_shift_does_not_darken_an_interior_coverage_boundary():
+    """A finite pixel on the data side of an *interior* NaN gap must not be left
+    darkened toward the 0-fill — it's marked uncovered (NaN) instead.
+
+    The data shift is order-1 (bilinear), so it draws on a 2×2 source footprint:
+    a pixel next to an interior NaN hole mixes real data with the ``cval=0.0``
+    fill and comes back dimmed. The old NaN mask used a nearest-neighbour
+    (order-0) footprint and so *missed* those data-side pixels, leaving a
+    ~1 px darkened ring around every interior gap as covered-but-dimmed — a
+    violation of the NaN=coverage invariant. Regression for that.
+    """
+    from scipy.ndimage import shift as nd_shift
+
+    rng = np.random.default_rng(0)
+    h = w = 128
+    # Textured data bounded well away from 0, so a 0-blend artifact is
+    # unambiguous (real data ~[90, 110]; a boundary blend dips toward 0).
+    base = (100.0 + rng.uniform(-10.0, 10.0, size=(h, w))).astype(np.float32)
+    shifted = nd_shift(base, shift=(0.5, 0.0), order=1, mode="nearest").astype(np.float32)
+    aligned = np.stack([shifted, shifted, shifted], axis=-1)
+    # An interior no-coverage hole surrounded on all sides by real data.
+    aligned[40:60, 40:60, :] = np.nan
+
+    out = _apply_subpixel_shift(aligned, base, (0, 0))
+
+    ch = out[..., 0]
+    finite = np.isfinite(ch)
+    # No finite pixel may sit below the real-data floor (~90): a darkened
+    # boundary blend of ~100 with the 0-fill lands in ~[47, 80], while a
+    # genuine bilinear blend of real neighbours stays within [90, 110]. An 85
+    # floor cleanly separates the two, so a surviving darkened pixel trips it.
+    assert finite.any()
+    assert float(np.nanmin(ch[finite])) > 85.0, "a boundary pixel was left darkened"
+
+
 def test_subpixel_shift_windowed_marks_vacated_edge_as_nan():
     """Same NaN=coverage guarantee for the windowed (mosaic) refine path."""
     from scipy.ndimage import shift as nd_shift
