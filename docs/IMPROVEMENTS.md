@@ -1018,6 +1018,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   hint). Regression tests pin the full-Moon (up all night), new-Moon (down all night), waxing-sets and
   waning-rises cases against real 2026 ephemeris dates with a crossing-direction check, plus the plan
   wiring, the endpoint shape, and the pure TS helper.
+- **Tonight planner: fold "is the Moon even up while the target is?" into the observability score.**
+  (M, autonomy/trust — priority 2/4) Spotted shipping the Moon rise/set cue (v0.97.5). `nightplan._score`
+  applies its Moon penalty from a **single mid-window Moon separation** (`_observability_batch` measures
+  the Moon at `stamps[len//2]`) times the full illuminated fraction — regardless of whether the Moon is
+  actually *above the horizon* during the hours the target is usable. So a bright Moon that has already
+  **set** (or hasn't yet **risen**) during the target's window still docks the target's score as if it
+  were washing it out, and a target that only clears the trees *after moonset* is under-ranked. Now that
+  the planner already computes when the Moon rises/sets over the window (`moon_window`), the fix is
+  cheap and self-contained: weight the Moon penalty by the *overlap* between the target's usable window
+  and the Moon-up interval (0 penalty when they never coincide, full when the Moon is up throughout),
+  instead of a single instant. Keep it conservative — a partial overlap scales the existing penalty, and
+  a target with no Moon-up overlap simply loses the penalty it never deserved. It touches the ranking on
+  the live Tonight path, so validate it doesn't reshuffle a normal moonlit night unreasonably (spot-check
+  a full-Moon and a new-Moon night) before it graduates. Additive, offline, testable on `_score` /
+  `_observability_batch` in isolation against a known ephemeris date. Serves better, more-trustworthy
+  target ranking (fewer good targets buried by a Moon that isn't even up for them).
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
