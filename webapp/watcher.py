@@ -88,6 +88,7 @@ class Watcher:
         *,
         get_settings: Callable[[], object],
         on_batch_ready: Callable[[], bool | None],
+        on_check_stranded: Callable[[], bool] | None = None,
         time_fn: TimeFn | None = None,
         stat_fn: StatFn | None = None,
     ) -> None:
@@ -95,6 +96,12 @@ class Watcher:
 
         self._get_settings = get_settings
         self._on_batch_ready = on_batch_ready
+        # Optional hook: returns True when a batch was *accepted* by a prior poll
+        # but the pipeline that took it later failed before importing, so the
+        # files sit unimported with nothing to re-offer them. When it fires we
+        # re-arm the pending flag so the batch is handed off afresh (the pipeline
+        # re-scans the whole incoming dir, so a new run re-imports them).
+        self._on_check_stranded = on_check_stranded
         # A batch we couldn't hand off yet because a pipeline was already
         # running when it stabilised. Re-offered on later polls until accepted,
         # so a file that stabilises mid-pipeline is never permanently dropped.
@@ -191,6 +198,23 @@ class Watcher:
         newly_stable = self._tracker.update(snapshot)
         if newly_stable:
             log.info("%d new file(s) stable in %s", len(newly_stable), incoming)
+        # Re-arm a batch that was accepted but stranded by a pipeline that then
+        # *failed before importing* (a scan/QC error, an OOM refusal). Those
+        # newly-stable files were already consumed from the tracker, so without
+        # this they'd sit unimported until another file arrives or the user
+        # manually scans. Only check when we wouldn't already fire (nothing new
+        # and nothing pending) so it never enqueues a duplicate.
+        if (
+            not newly_stable
+            and not self._pending_batch
+            and self._on_check_stranded is not None
+        ):
+            try:
+                if self._on_check_stranded():
+                    log.info("re-offering a batch stranded by a failed pipeline")
+                    self._pending_batch = True
+            except Exception:  # noqa: BLE001 — a check failure must not kill the poll
+                log.exception("watcher stranded-batch check failed")
         # Fire the batch callback when there is newly-stable work OR a batch
         # left pending because a prior poll couldn't hand it off (a pipeline was
         # already running). The callback returns False when it declined to
