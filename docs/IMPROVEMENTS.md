@@ -808,7 +808,13 @@ problems. Dogfood it every big-picture run and fix root causes.
   v0.84.2. A Builder dogfood of the other five routes (Dashboard/Library/Target/
   History/Editor) found them already well-handled with icon+prose+next-step empty
   states, beginner tooltips, and translated reject/combine labels.)_
-- **Surface "N frames couldn't be quality-checked" on the Target page.** (S, friendliness/trust) —
+- ~~**Surface "N frames couldn't be quality-checked" on the Target page.**~~ — **shipped v0.99.1**
+  (see Shipped). Frontend-only, zero backend change: a new pure `countQcUncheckable(frames)` helper counts
+  frames whose `reject_reason` starts with `qc_error` (from the already-fetched frames list, any accept
+  state), and a dimmed gray Target-page callout ("N frames couldn't be quality-checked") explains they're
+  unreadable/corrupt and skipped when stacking, with a one-click "Re-check these frames" that reuses the
+  existing QC + Solve action (`only_new_qc=False`, so it retries `qc_error` frames). Original write-up kept
+  below for provenance. (S, friendliness/trust) —
   *Scout-filed 2026-07-09, traced.* When `compute_frame_metrics` raises on a frame (unreadable/corrupt/
   truncated FITS), `apply_qc_result_to_db` stamps `reject_reason="qc_error:…"` but leaves the frame
   **`accept=1`** (`webapp/routers/... / seestack/qc/runner.py:75-76`). The consequence: the frame is counted
@@ -1394,6 +1400,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.99.1** — Surface "N frames couldn't be quality-checked" on the Target page (friendliness/trust —
+  priority 3, Builder 2026-07-09; Scout-traced). When QC *raises* on a frame (unreadable/corrupt/truncated
+  FITS) it's stamped `reject_reason="qc_error:…"` but left `accept=1`, so it inflates the accepted count,
+  silently drops out of the stack (the stacker skips a frame it can't load), and — because the
+  reject-summary tallies only `accept=0` rows — never appears in the "why frames were dropped" breakdown,
+  leaving a beginner with zero signal that some subs were unreadable. New pure `countQcUncheckable(frames)`
+  helper counts `qc_error`-reasoned frames (from the already-fetched frames list, any accept state) and a
+  dimmed gray Target-page callout names the count, explains they're skipped when stacking, and offers a
+  one-click "Re-check these frames" reusing the existing QC + Solve action (`only_new_qc=False` retries
+  them, in case the read failure was transient). Frontend-only, additive, read-only detection — no backend
+  or schema change. Helper unit tests + two component tests (callout appears + re-checks; quiet when clean).
 - **v0.99.0** — Auto-bind matching calibration masters to the *unattended* stack chains (autonomy +
   image-quality — priorities 2 & 4, Builder 2026-07-09). `recommend_masters` was wired **only** into the
   interactive Stack form, so a beginner who built masters once but reached a finished image via the
