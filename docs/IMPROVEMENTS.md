@@ -60,6 +60,21 @@ when you take it.
   (min_alt 70 & 80; fails before / passes after). Newest-feature bug found by auditing the recently
   shipped nightplan path (v0.95–0.97), which the QA cycle hadn't covered yet.
 
+- ~~**Watcher silently drops an auto-ingest batch forever when the enqueue hand-off *raises*.**~~
+  — **FIXED v0.99.5** (Builder audit 2026-07-09; traced + reproduced with a regression test).
+  `Watcher.poll_once` consumes newly-stable files from the `StabilityTracker` (a one-shot contract —
+  they're never returned again) *before* invoking `_on_batch_ready`, and the only re-offer safety net
+  (`_pending_batch`) was set solely on a clean `accepted is False` return. If the callback **raised**
+  mid-hand-off — a transient `sqlite3.OperationalError: database is locked` / disk-full while
+  `submit_pipeline` persists the job — the exception propagated to the poll loop (which logs and
+  swallows it), leaving `_pending_batch` at its prior `False`; since the files were already consumed,
+  the batch was never re-offered and sat unimported in `incoming/` forever. `poll_once` now sets
+  `_pending_batch = True` before re-raising, so the next poll re-offers the batch once the callback
+  recovers, while the failure is still logged. Regression test
+  `tests/webapp/test_watcher.py::test_batch_reoffered_when_callback_raises` (fails before / passes
+  after). Sibling of the v0.81.7 "declined while busy" fix, found by the same watcher audit as the
+  v0.99.4 duplicate-pipeline fix.
+
 - ~~**Watcher enqueues a *duplicate* auto-ingest pipeline once ≥20 newer jobs push the running
   one out of the recent-jobs window.**~~ — **FIXED v0.99.4** (Builder audit 2026-07-09; traced +
   reproduced with a regression test). `webapp/main.py::_on_batch_ready` guarded against a

@@ -199,6 +199,16 @@ class Watcher:
         # while a pipeline is mid-run is picked up once that pipeline finishes
         # instead of being silently dropped forever.
         if newly_stable or self._pending_batch:
-            accepted = self._on_batch_ready()
+            try:
+                accepted = self._on_batch_ready()
+            except Exception:  # noqa: BLE001 — re-raised below after keeping the batch
+                # The callback failed mid-hand-off (e.g. a transient DB-locked /
+                # disk-full while enqueuing the pipeline). The newly-stable files
+                # are already consumed from the tracker and won't be re-offered on
+                # their own, so keep the batch pending — the next poll re-offers it
+                # — and re-raise so the poll loop logs the failure. Without this a
+                # single failed hand-off would silently drop the batch forever.
+                self._pending_batch = True
+                raise
             self._pending_batch = accepted is False
         return newly_stable
