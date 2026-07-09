@@ -1420,10 +1420,11 @@ problems. Dogfood it every big-picture run and fix root causes.
   severity; the code comment ("shift is <1 pixel") is also inaccurate since shifts up to ~5 px are
   applied. Candidate: also NaN (or inset) the interior-boundary ring, or mark it uncovered so it can't
   darken the average. Validate on a real dithered set with `subpixel_refine` on. (S, image-quality/robustness)
-- **Trivial (doc): `calibrate/apply.py:119` comment says flat values ≤0.1·mean are "floored to 0.1"
-  but the code sets them to 1.0 (no correction).** *(Builder audit 2026-07-09.)* The behaviour is the
-  *safer* choice (a near-zero flat pixel gets no gain applied rather than a ×0.1→×10 amplification);
-  only the comment is imprecise. Fix the comment to match on the next pass through that file. (XS, doc)
+- ~~**Trivial (doc): `calibrate/apply.py:119` comment says flat values ≤0.1·mean are "floored to 0.1"
+  but the code sets them to 1.0 (no correction).**~~ — **already accurate (Builder 2026-07-09):** the
+  live comment reads "Floor tiny / non-finite values to 1.0 (= no correction there)", which matches the
+  code (`np.where(isfinite(fn) & (fn > _FLAT_FLOOR), fn, 1.0)`, `_FLAT_FLOOR = 0.1`). The imprecise
+  wording the item described is no longer present, so there is nothing to change — pruned.
 - Chip away at the ~127 pre-existing `ruff check .` findings (don't add new ones);
   consider wiring ruff into CI once the count is low. (L, correctness/maintainability)
 - ~~Add a retention/pruning policy for `jobs.sqlite`~~ — **done, then made
