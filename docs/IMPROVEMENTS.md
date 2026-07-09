@@ -1290,18 +1290,16 @@ problems. Dogfood it every big-picture run and fix root causes.
   already-cached frame is never re-copied (its skip touches nothing). Regression tests
   `test_ingest_retries_cache_after_a_transient_copy_failure` (fails before / passes after) and
   `test_ingest_does_not_recopy_an_already_cached_frame`.
-- **Low-priority robustness (QC, traced 2026-07-09): the watcher auto-pipeline never re-QCs a frame
-  that failed on a *transient* error.** (S, autonomy/robustness) — the exact analog of the ingest-cache
-  retry above (v0.94.9). `build_qc_arglist(project, only_new=True)` (used by the auto-pipeline) skips any
-  frame where `(f.reject_reason or "").startswith("qc_error")` (`seestack/qc/runner.py:60-61`), treating a
-  prior QC *error* as permanently "done". So if `compute_frame_metrics` raised on a transient read blip
-  (NAS hiccup, a file still being written), the frame is stamped `qc_error:…` and the auto-pipeline never
-  re-measures it — it stays uncheck-able forever until the user manually triggers a *full* re-QC
-  (`only_new=False`, which does retry). Near-unreachable for a local cached file, but the same shape the team
-  already chose to fix for ingest. Fix shape: on a re-scan, re-offer a frame whose only record is a
-  `qc_error` (bounded — e.g. retry once, or don't skip errored frames under `only_new` at all), so a genuine
-  new/transient failure gets a second chance automatically. Additive; testable in isolation (a frame with a
-  `qc_error` reject reason is re-included by `build_qc_arglist(only_new=True)`).
+- ~~**Low-priority robustness (QC, traced 2026-07-09): the watcher auto-pipeline never re-QCs a frame
+  that failed on a *transient* error.**~~ — **FIXED v0.99.2** (see Shipped). Took the bounded "retry
+  once" direction. `build_qc_arglist(only_new=True)` now re-offers a frame carrying a plain `qc_error:…`
+  reject reason (a first, possibly-transient failure) so the auto-pipeline retries it automatically, while
+  a *second* consecutive failure is stamped terminal (`qc_error_final:…` by `apply_qc_result_to_db`) and
+  skipped thereafter — so a genuinely-corrupt file isn't re-QC'd on every scan forever; a manual full re-QC
+  (`only_new=False`) still retries even terminal frames. Bonus correctness fix: a retry that finally succeeds
+  now clears the stale `qc_error` reject reason (it no longer shows as "couldn't be quality-checked"), and
+  a user/auto reject is never touched. No schema change (upgrade-safe). Regression tests in
+  `tests/test_qc_retry.py` + updated `tests/test_qc_idempotent.py` (fail before / pass after).
 - ~~**Low-priority robustness (traced 2026-07-08, near-unreachable): opening an empty/foreign
   `project.sqlite` yields a DB with no `frames` table.**~~ — **FIXED v0.94.10** (see Shipped).
   `_migrate_schema` now detects a missing `frames` table (an empty/foreign sqlite at `user_version==0`)
@@ -1400,6 +1398,18 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.99.2** — Retry a transient QC error in the auto-pipeline (autonomy/robustness — priority 2,
+  Builder 2026-07-09; Scout-traced, the QC analog of the v0.94.9 ingest cache-copy retry). When
+  `compute_frame_metrics` raised on a frame (a transient read blip — NAS hiccup, a file still being
+  written), it was stamped `qc_error:…` and `build_qc_arglist(only_new=True)` treated it as permanently
+  "done", so the watcher auto-pipeline never re-measured it — it stayed uncheck-able until a manual full
+  re-QC. Now a first `qc_error` is **re-offered once** by the auto-pipeline; a second consecutive failure
+  is stamped terminal (`qc_error_final:…`) and skipped thereafter, so a genuinely-corrupt file isn't
+  re-QC'd on every scan forever (a manual `only_new=False` re-QC still retries even terminal frames). Bonus
+  correctness fix: a retry that finally succeeds clears the stale `qc_error` reject reason (so it no longer
+  shows as "couldn't be quality-checked") while never touching a user/auto reject. No schema change,
+  additive, upgrade-safe. `tests/test_qc_retry.py` (retryable→terminal, success-clears-stale,
+  user-reject-untouched) + updated `tests/test_qc_idempotent.py`.
 - **v0.99.1** — Surface "N frames couldn't be quality-checked" on the Target page (friendliness/trust —
   priority 3, Builder 2026-07-09; Scout-traced). When QC *raises* on a frame (unreadable/corrupt/truncated
   FITS) it's stamped `reject_reason="qc_error:…"` but left `accept=1`, so it inflates the accepted count,
