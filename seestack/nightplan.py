@@ -436,14 +436,19 @@ def moon_window(observer: Observer, window: DarkWindow) -> MoonWindow:
 
 
 def _score(max_alt: float, minutes_above: float, dark_minutes: float,
-           moon_sep: float, moon_illum: float, min_alt: float) -> float:
+           moon_sep: float, moon_illum: float, min_alt: float,
+           moon_up_fraction: float = 1.0) -> float:
     """Blend altitude, usable-window fraction and a Moon penalty into 0..100.
 
     * Altitude: rewards a high transit (capped at 70° — above that adds nothing
       meaningful for a small scope).
     * Window: fraction of tonight's darkness the target clears ``min_alt``.
     * Moon: a bright Moon close to the target subtracts up to 40%; a faint or
-      far Moon barely matters.
+      far Moon barely matters. ``moon_up_fraction`` is the share of the target's
+      *usable* window during which the Moon is actually above the horizon — the
+      penalty is scaled by it, so a bright Moon that has already set (or hasn't
+      yet risen) while the target is observable does **not** dock the score. It
+      defaults to 1.0 (Moon up throughout), which reproduces the old behaviour.
     """
     if minutes_above <= 0 or dark_minutes <= 0:
         return 0.0
@@ -460,7 +465,8 @@ def _score(max_alt: float, minutes_above: float, dark_minutes: float,
     window_component = float(np.clip(minutes_above / dark_minutes, 0.0, 1.0))
     base = 0.5 * alt_component + 0.5 * window_component
     proximity = float(np.clip((60.0 - moon_sep) / 60.0, 0.0, 1.0))
-    moon_penalty = 0.4 * float(np.clip(moon_illum, 0.0, 1.0)) * proximity
+    moon_penalty = (0.4 * float(np.clip(moon_illum, 0.0, 1.0)) * proximity
+                    * float(np.clip(moon_up_fraction, 0.0, 1.0)))
     return round(100.0 * base * (1.0 - moon_penalty), 1)
 
 
@@ -500,6 +506,12 @@ def _observability_batch(ras_deg, decs_deg, observer: Observer, window: DarkWind
     moon_sep = coords.separation(moon).deg
     moon_sep = np.atleast_1d(np.asarray(moon_sep, dtype=float))
 
+    # Whether the Moon is actually above the horizon at each sampled moment, so a
+    # target's Moon penalty can be weighted by how much of *its* usable window the
+    # Moon is up for (a bright Moon that has set, or not yet risen, shouldn't dock
+    # a target that's only observable while the Moon is down).
+    moon_up = _moon_altitudes(times, location) >= 0.0
+
     out: list[Observability] = []
     dark_minutes = window.duration_minutes
     for i in range(alt.shape[0]):
@@ -511,10 +523,17 @@ def _observability_batch(ras_deg, decs_deg, observer: Observer, window: DarkWind
         # mask is set. ``max_altitude_deg`` stays the honest physical peak.
         floor = np.maximum(min_alt_deg, horizon.altitude_at(az[i])) if use_horizon else min_alt_deg
         usable = row >= floor
-        minutes_above = float(np.count_nonzero(usable) * step_min)
+        n_usable = int(np.count_nonzero(usable))
+        minutes_above = float(n_usable * step_min)
         transit = stamps[imax].astimezone(timezone.utc) if minutes_above > 0 else None
         sep = float(moon_sep[i])
-        score = _score(max_alt, minutes_above, dark_minutes, sep, moon_illum, min_alt_deg)
+        # Share of the target's usable samples during which the Moon is up. 1.0
+        # (full penalty, as before) when it has no usable window — the score is 0
+        # there anyway, so it can't matter.
+        moon_up_fraction = (float(np.count_nonzero(usable & moon_up)) / n_usable
+                            if n_usable else 1.0)
+        score = _score(max_alt, minutes_above, dark_minutes, sep, moon_illum,
+                       min_alt_deg, moon_up_fraction)
         out.append(Observability(
             max_altitude_deg=round(max_alt, 1),
             transit_utc=transit,

@@ -323,6 +323,76 @@ def test_plan_without_dark_window_has_no_moon_window():
     assert plan.moon_window is None
 
 
+def test_moon_penalty_scales_with_moon_up_overlap():
+    # The Moon penalty is weighted by how much of the target's usable window the
+    # Moon is actually above the horizon. A bright, close Moon that has set (or
+    # not yet risen) while the target is up shouldn't dock the score at all.
+    args = dict(max_alt=60.0, minutes_above=300.0, dark_minutes=300.0,
+                moon_sep=10.0, moon_illum=1.0, min_alt=30.0)
+    full = np_plan._score(**args, moon_up_fraction=1.0)
+    half = np_plan._score(**args, moon_up_fraction=0.5)
+    none = np_plan._score(**args, moon_up_fraction=0.0)
+    # No overlap → the bright-Moon penalty vanishes; partial overlap lands between.
+    assert none > half > full
+    # With zero overlap the score matches an unlit (new-Moon) sky — the penalty
+    # is entirely gone, not merely reduced.
+    assert none == pytest.approx(np_plan._score(**{**args, "moon_illum": 0.0}))
+    # Omitting the fraction reproduces the old full-penalty behaviour exactly.
+    assert np_plan._score(**args) == full
+
+
+def _full_moon_penalty_score(p, dark_minutes: float, illum: float,
+                             min_alt: float = 30.0) -> float:
+    """Recompute a target's score as if the Moon were up for its whole window
+    (the pre-overlap behaviour), from the plan's rounded public fields."""
+    return np_plan._score(p.max_altitude_deg, p.minutes_above_min_alt,
+                          dark_minutes, p.moon_separation_deg, illum, min_alt,
+                          moon_up_fraction=1.0)
+
+
+def test_moon_up_all_night_leaves_scores_unchanged():
+    # Backward-compat guard: when the (full) Moon is above the horizon for the
+    # whole dark window, every target's Moon overlap is 1.0, so scores match the
+    # old full-penalty formula — a normal moonlit night isn't reshuffled.
+    ref = datetime(2026, 1, 3, 22, 0, tzinfo=timezone.utc)  # full Moon, up all night
+    plan = plan_tonight(LONDON, ref, include_catalog=False,
+                        library_targets=list(_orion_belt_targets()))
+    assert plan.moon_window["up_all_night"] is True
+    dark_minutes = plan.dark_window["duration_minutes"]
+    for p in plan.targets:
+        old = _full_moon_penalty_score(p, dark_minutes, plan.moon_illumination)
+        assert p.score == pytest.approx(old, abs=0.3)
+
+
+def test_moon_that_sets_partway_relieves_post_moonset_targets():
+    # On a night where a bright Moon sets partway through the dark window, targets
+    # that are only usable after moonset get their penalty lifted — their score
+    # can only rise above (never fall below) the old full-Moon-penalty value.
+    ref = datetime(2026, 1, 25, 22, 0, tzinfo=timezone.utc)  # waxing Moon sets partway
+    plan = plan_tonight(LONDON, ref)
+    assert plan.moon_window["set_utc"] is not None
+    assert plan.moon_window["up_all_night"] is False
+    dark_minutes = plan.dark_window["duration_minutes"]
+    relieved = 0
+    for p in plan.targets:
+        old = _full_moon_penalty_score(p, dark_minutes, plan.moon_illumination)
+        # The new score never drops below the old full-penalty score.
+        assert p.score >= old - 0.3
+        if p.score > old + 1.0:
+            relieved += 1
+    # Some real targets are only up after the Moon sets, so the penalty is lifted.
+    assert relieved > 0
+
+
+def _orion_belt_targets():
+    # A few well-placed January targets so the up-all-night test has a Moon-close
+    # object to penalise (M42 sits near the January full Moon's path).
+    yield LibraryTarget(safe="m42", name="Orion Nebula", ra_deg=83.82,
+                        dec_deg=-5.39, frames_accepted=10, total_exposure_s=100.0)
+    yield LibraryTarget(safe="m45", name="Pleiades", ra_deg=56.75,
+                        dec_deg=24.12, frames_accepted=5, total_exposure_s=50.0)
+
+
 def test_plan_is_deterministic():
     a = plan_tonight(LONDON, JAN_EVENING)
     b = plan_tonight(LONDON, JAN_EVENING)
