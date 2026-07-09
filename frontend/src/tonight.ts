@@ -1,7 +1,7 @@
 // Pure helpers for the 'Tonight' night-planner page — kept out of the component
 // so they're easy to unit-test without rendering.
 
-import type { PlannedTarget } from "./api/client";
+import type { NightPlan, PlannedTarget } from "./api/client";
 
 // A short, friendly Moon-phase label from the illuminated fraction (0..1).
 //
@@ -28,6 +28,29 @@ export function moonPhaseLabel(illum: number | null, waxing?: boolean | null): s
     return `${name} (${pct}%)`;
   }
   return `Full Moon (${pct}%)`;
+}
+
+// One short line naming *when* the Moon rises or sets during tonight's dark
+// window — the concrete time the phase label can't give. `null` when there's no
+// useful cue (no window computed), so the caller can omit the line entirely.
+//
+//   sets ~23:40   → dark skies after that time (a waxing Moon leaving the night)
+//   rises ~01:10  → clean until then (a waning Moon spoiling the small hours)
+//   up all night  → the Moon never leaves the dark window (worst case)
+//   down all night→ below the horizon throughout — no interference at all
+export function moonWindowNote(
+  mw: NightPlan["moon_window"] | null | undefined,
+): string | null {
+  if (mw == null) return null;
+  if (mw.down_all_night) return "Below the horizon all night";
+  if (mw.up_all_night) return "Above the horizon all night";
+  const parts: string[] = [];
+  if (mw.set_utc) parts.push(`sets ~${formatClock(mw.set_utc)}, dark after`);
+  if (mw.rise_utc) parts.push(`rises ~${formatClock(mw.rise_utc)}, dark before`);
+  if (parts.length === 0) return null;
+  // Capitalise the first word of the combined sentence.
+  const s = parts.join("; ");
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 export interface MinAltOption {

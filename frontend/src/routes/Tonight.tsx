@@ -10,7 +10,7 @@ import { api, type PlannedTarget } from "../api/client";
 import { QueryError } from "../components/QueryError";
 import { formatIntegration } from "../format";
 import {
-  formatClock, formatMinutes, minAltOptions, moonPhaseLabel, scoreColor, splitTargets,
+  formatClock, formatMinutes, minAltOptions, moonPhaseLabel, moonWindowNote, scoreColor, splitTargets,
 } from "../tonight";
 
 function ScoreBadge({ score }: { score: number }) {
@@ -166,7 +166,11 @@ export function TonightView() {
         <Card withBorder padding="sm">
           <Text size="xs" c="dimmed">Moon</Text>
           <Text fw={600}>{moonPhaseLabel(data.moon_illumination, data.moon_waxing)}</Text>
-          <Text size="xs" c="dimmed">Nearer + brighter = worse for faint targets</Text>
+          {moonWindowNote(data.moon_window) ? (
+            <Text size="xs" c="dimmed">{moonWindowNote(data.moon_window)}</Text>
+          ) : (
+            <Text size="xs" c="dimmed">Nearer + brighter = worse for faint targets</Text>
+          )}
         </Card>
         <Card withBorder padding="sm">
           <Text size="xs" c="dimmed">Observing from</Text>
