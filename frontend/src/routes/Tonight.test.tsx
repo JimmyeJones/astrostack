@@ -61,6 +61,32 @@ describe("TonightView", () => {
       expect(screen.getByText("No darkness tonight")).toBeInTheDocument());
   });
 
+  it("guides a first-timer with no library targets instead of blaming altitude", async () => {
+    // No library targets => the "already targeted" table is empty, but the
+    // reason is an empty library, not the altitude floor.
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
+      targets: [target({ id: "M13", already_targeted: false, score: 65 })],
+    }));
+    renderTonight();
+    await waitFor(() =>
+      expect(screen.getByText("Add more to what you're shooting")).toBeInTheDocument());
+    expect(screen.getByText(/haven't shot any targets/i)).toBeInTheDocument();
+    // The catalog section still lists its suggestion.
+    expect(screen.getByText(/M13/)).toBeInTheDocument();
+  });
+
+  it("shows the active minimum-altitude floor even when it isn't a round preset", async () => {
+    // A 45° floor is reachable from the step-5 Settings input but isn't one of
+    // the picker's presets — the Select must still render it, not blank out.
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({ min_altitude_deg: 45 }));
+    renderTonight();
+    await waitFor(() =>
+      expect(screen.getByText("Add more to what you're shooting")).toBeInTheDocument());
+    // The visible Select input shows the option's label ("45°"); before the fix
+    // there was no matching option for a 45° floor and it rendered blank.
+    expect(screen.getByDisplayValue("45°")).toBeInTheDocument();
+  });
+
   it("ranks library targets and fresh catalog suggestions separately", async () => {
     vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
       targets: [

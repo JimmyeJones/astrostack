@@ -10,16 +10,8 @@ import { api, type PlannedTarget } from "../api/client";
 import { QueryError } from "../components/QueryError";
 import { formatIntegration } from "../format";
 import {
-  formatClock, formatMinutes, moonPhaseLabel, scoreColor, splitTargets,
+  formatClock, formatMinutes, minAltOptions, moonPhaseLabel, scoreColor, splitTargets,
 } from "../tonight";
-
-const MIN_ALT_OPTIONS = [
-  { value: "10", label: "10° (low)" },
-  { value: "20", label: "20°" },
-  { value: "30", label: "30° (default)" },
-  { value: "40", label: "40°" },
-  { value: "50", label: "50° (high only)" },
-];
 
 function ScoreBadge({ score }: { score: number }) {
   return (
@@ -59,9 +51,9 @@ function TargetRow({ t }: { t: PlannedTarget }) {
   );
 }
 
-function TargetTable({ targets }: { targets: PlannedTarget[] }) {
+function TargetTable({ targets, empty }: { targets: PlannedTarget[]; empty: string }) {
   if (targets.length === 0) {
-    return <Text size="sm" c="dimmed">Nothing here clears your minimum altitude tonight.</Text>;
+    return <Text size="sm" c="dimmed">{empty}</Text>;
   }
   return (
     <Table.ScrollContainer minWidth={520}>
@@ -114,7 +106,7 @@ export function TonightView() {
       </div>
       <Select
         label="Minimum altitude"
-        data={MIN_ALT_OPTIONS}
+        data={minAltOptions(minAlt ? Number(minAlt) : data.min_altitude_deg)}
         value={minAlt || String(data.min_altitude_deg)}
         onChange={(v) => setMinAlt(v ?? "")}
         w={180}
@@ -193,7 +185,9 @@ export function TonightView() {
           Targets already in your library that are well placed tonight — good for
           topping up integration.
         </Text>
-        <TargetTable targets={already} />
+        <TargetTable
+          targets={already}
+          empty="You haven't shot any targets with a known position yet — start something new below." />
       </Paper>
 
       <Paper withBorder p="md">
@@ -202,7 +196,9 @@ export function TonightView() {
           Popular deep-sky targets (Messier plus well-known NGC/IC objects) you
           haven't shot yet, ranked by how well placed they are.
         </Text>
-        <TargetTable targets={fresh} />
+        <TargetTable
+          targets={fresh}
+          empty="Nothing in the catalog clears your minimum altitude tonight — try lowering it above." />
       </Paper>
     </Stack>
   );

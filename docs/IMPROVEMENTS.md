@@ -995,6 +995,16 @@ problems. Dogfood it every big-picture run and fix root causes.
 - Annotated sky overlay (label detected objects / show solved field). (M) —
   related to the night planner above; the planner's "plot tonight's targets" view
   can reuse this.
+- **Tonight planner: distinguish a waxing vs waning Moon (evening vs morning problem).**
+  (S, friendliness/workflow — priority 3) The Moon card shows only illuminated *fraction*
+  ("Gibbous (72%)"), but for planning it matters *when* that Moon is up: a **waxing** Moon
+  sets in the evening (early-night targets are safe), a **waning** Moon rises after midnight
+  (late-night targets suffer). The illuminated fraction alone can't tell them apart. Cheap to
+  add offline: `nightplan.moon_illumination` already computes the Sun–Moon elongation; the sign
+  of the Moon's ecliptic-longitude minus the Sun's (or the illumination trend over ~1 h) gives
+  waxing/waning with no extra dependency. Surface it in `moonPhaseLabel` ("Waxing gibbous (72%)")
+  and optionally a one-line "sets ~23:40 / rises ~01:10" cue on the Moon card. Additive,
+  offline, testable on the pure helper. Found dogfooding the newest feature (v0.97.x).
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
@@ -1226,6 +1236,27 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.97.3** — Tonight planner (friendliness): section-accurate empty states. The two target
+  tables shared one message — "Nothing here clears your minimum altitude tonight." — which is
+  *never* accurate for the "Add more to what you're shooting" (already-targeted) section: the engine
+  always lists a positioned library target in the plan (with score 0 if it doesn't clear the floor),
+  so that section is empty **iff** the user has no positioned library targets, not because of
+  altitude. A first-timer with an empty library was told the wrong reason. `TargetTable` now takes an
+  `empty` message: the already-targeted section says "You haven't shot any targets with a known
+  position yet — start something new below."; the catalog section keeps the (accurate-there) altitude
+  message with a "try lowering it" nudge. Frontend-only, additive. Component regression in
+  `Tonight.test.tsx` (empty library shows the guidance, not the altitude blame). Found in the same
+  §2 dogfood as v0.97.2.
+- **v0.97.2** — Tonight planner (friendliness): the "Minimum altitude" picker no longer renders
+  **blank** when the user's `min_target_altitude_deg` setting isn't one of the round presets. The
+  Settings input steps by 5° (so 15° / 45° / 55° are all reachable) but the Tonight `Select` only
+  listed {10,20,30,40,50}, so an active floor like 45° left the control showing nothing (the plan was
+  still correct — only the control looked broken). New pure `minAltOptions(active)` helper (in
+  `tonight.ts`) splices the active floor into the options list, numerically sorted, whenever it isn't
+  already a preset, so the picker always shows the real floor the plan was computed for. Frontend-only,
+  additive, no backend/API change. Unit tests for the helper (`tonight.test.ts`: preset/non-preset/
+  rounded/null cases) + a component regression (`Tonight.test.tsx`: a 45° floor renders "45°", not
+  blank). Found by a big-picture dogfood of the newest feature (§2).
 - **v0.97.0** — ⭐ OWNER-REQUESTED "Tonight" night planner — widen the bundled catalog beyond Messier.
   A second static, offline file `seestack/data/deepsky_popular.json` (47 curated popular non-Messier
   NGC/IC targets — Double Cluster, Veil, North America/Pelican, Heart/Soul, Rosette, Iris, Cocoon,
