@@ -4,12 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  TargetView,
-  countNewSubsSinceStack,
-  countQcUncheckable,
-  detectMixedPointings,
-} from "./Target";
+import { TargetView, countNewSubsSinceStack, countQcUncheckable } from "./Target";
 import * as client from "../api/client";
 import type { Frame, Target } from "../api/client";
 
@@ -228,79 +223,6 @@ describe("TargetView QC-uncheckable callout", () => {
     expect(
       screen.queryByText(/couldn't be quality-checked/),
     ).not.toBeInTheDocument();
-  });
-});
-
-describe("detectMixedPointings", () => {
-  // n solved+accepted frames scattered within ~jitter degrees of (ra, dec).
-  const cluster = (
-    n: number,
-    ra: number,
-    dec: number,
-    startId: number,
-    jitter = 0.3,
-    over: Partial<Frame> = {},
-  ): Frame[] =>
-    Array.from({ length: n }, (_, i) =>
-      mkFrame(startId + i, {
-        ra_center_deg: ra + ((i % 3) - 1) * jitter,
-        dec_center_deg: dec + ((i % 2) - 0.5) * jitter,
-        ...over,
-      }),
-    );
-
-  it("is null for a single dithered pointing", () => {
-    expect(detectMixedPointings(cluster(20, 83, -5, 1))).toBeNull();
-  });
-
-  it("is null for a contiguous mosaic (adjacent panels ~1° apart)", () => {
-    // A 3×3 Seestar mosaic: panels step ~1° and overlap, so single-linkage at 3°
-    // keeps the whole thing one cluster even though its total span is ~2.4°.
-    const panels: Frame[] = [];
-    let id = 1;
-    for (let px = 0; px < 3; px++) {
-      for (let py = 0; py < 3; py++) {
-        panels.push(...cluster(4, 40 + px * 1.2, 30 + py * 1.2, id, 0.1));
-        id += 4;
-      }
-    }
-    expect(detectMixedPointings(panels)).toBeNull();
-  });
-
-  it("flags two well-separated targets in one folder", () => {
-    const frames = [...cluster(18, 10, 20, 1), ...cluster(12, 83, -5, 100)];
-    const res = detectMixedPointings(frames);
-    expect(res).not.toBeNull();
-    expect(res!.pointings).toBe(2);
-    expect(res!.majority).toBe(18);
-    expect(res!.others).toBe(12);
-    expect(res!.separationDeg).toBeGreaterThan(30);
-  });
-
-  it("ignores a lone mis-solved stray (second group below the floor)", () => {
-    // 20 real subs + 2 frames that solved far away → the stray group is < 5.
-    const frames = [...cluster(20, 10, 20, 1), ...cluster(2, 200, 60, 100)];
-    expect(detectMixedPointings(frames)).toBeNull();
-  });
-
-  it("is null when too few frames to judge", () => {
-    expect(detectMixedPointings(cluster(6, 10, 20, 1))).toBeNull();
-  });
-
-  it("does not split one pointing straddling RA=0 (wrap-safe)", () => {
-    // Frames near RA 359.7 and RA 0.3 are the *same* patch of sky.
-    const frames = [...cluster(10, 359.7, 15, 1, 0.2), ...cluster(10, 0.3, 15, 100, 0.2)];
-    expect(detectMixedPointings(frames)).toBeNull();
-  });
-
-  it("ignores unsolved, unaccepted and coordinate-less frames", () => {
-    const frames = [
-      ...cluster(18, 10, 20, 1),
-      ...cluster(12, 83, -5, 100, 0.3, { accept: false }), // rejected: not counted
-      ...cluster(12, 83, -5, 200, 0.3, { solved: false, ra_center_deg: null, dec_center_deg: null }),
-    ];
-    // Only the one accepted+solved pointing remains → no bimodal split.
-    expect(detectMixedPointings(frames)).toBeNull();
   });
 });
 
