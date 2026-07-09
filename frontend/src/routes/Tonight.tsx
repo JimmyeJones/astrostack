@@ -165,7 +165,7 @@ export function TonightView() {
         </Card>
         <Card withBorder padding="sm">
           <Text size="xs" c="dimmed">Moon</Text>
-          <Text fw={600}>{moonPhaseLabel(data.moon_illumination)}</Text>
+          <Text fw={600}>{moonPhaseLabel(data.moon_illumination, data.moon_waxing)}</Text>
           <Text size="xs" c="dimmed">Nearer + brighter = worse for faint targets</Text>
         </Card>
         <Card withBorder padding="sm">

@@ -23,6 +23,20 @@ describe("moonPhaseLabel", () => {
     expect(moonPhaseLabel(1)).toContain("Full Moon");
     expect(moonPhaseLabel(null)).toBe("—");
   });
+
+  it("weaves the waxing/waning state into the intermediate phases", () => {
+    expect(moonPhaseLabel(0.2, true)).toBe("Waxing crescent (20%)");
+    expect(moonPhaseLabel(0.2, false)).toBe("Waning crescent (20%)");
+    expect(moonPhaseLabel(0.5, true)).toBe("First Quarter (50%)");
+    expect(moonPhaseLabel(0.5, false)).toBe("Last Quarter (50%)");
+    expect(moonPhaseLabel(0.8, true)).toBe("Waxing gibbous (80%)");
+    expect(moonPhaseLabel(0.8, false)).toBe("Waning gibbous (80%)");
+    // New / Full read the same either way, so they never take a prefix.
+    expect(moonPhaseLabel(0, true)).toBe("New Moon (0%)");
+    expect(moonPhaseLabel(1, false)).toBe("Full Moon (100%)");
+    // An unknown state falls back to the plain, direction-agnostic labels.
+    expect(moonPhaseLabel(0.8, null)).toBe("Gibbous (80%)");
+  });
 });
 
 describe("scoreColor", () => {

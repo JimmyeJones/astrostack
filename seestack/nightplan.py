@@ -210,6 +210,10 @@ class NightPlan:
     observer: dict
     dark_window: dict | None
     moon_illumination: float
+    # Whether the Moon is waxing (sets in the evening) or waning (rises after
+    # midnight) tonight — the illuminated fraction alone can't tell them apart.
+    # ``None`` only when no location/plan could be computed.
+    moon_waxing: bool | None
     min_altitude_deg: float
     # True when a non-empty horizon/tree mask shaped the usable windows below, so
     # the UI can explain that low-altitude obstructions were accounted for.
@@ -333,6 +337,29 @@ def moon_illumination(when_utc: datetime) -> float:
     # Illuminated fraction = (1 + cos(phase_angle)) / 2; phase angle ≈ π − elong
     # for the Sun ≫ Moon distance ratio (adequate for a "how bright is it" cue).
     return float((1.0 + np.cos(np.pi - elong)) / 2.0)
+
+
+def moon_is_waxing(when_utc: datetime) -> bool:
+    """True if the Moon is waxing (growing) at ``when_utc``, else waning.
+
+    The illuminated *fraction* alone can't tell a waxing from a waning Moon, but
+    for planning it matters *when* the Moon is up: a **waxing** Moon leads the Sun
+    across the sky and sets in the evening (so early-night targets are safe),
+    while a **waning** Moon trails the Sun and rises after midnight (so late-night
+    targets suffer). The two are distinguished by the Moon's ecliptic longitude
+    relative to the Sun's: ``0 < (λ_moon − λ_sun) mod 360 < 180`` is waxing
+    (new → full), the rest is waning (full → new). Offline and
+    location-independent, like :func:`moon_illumination`.
+    """
+    _configure_iers_offline()
+    from astropy.coordinates import GeocentricTrueEcliptic, get_body, get_sun
+    from astropy.time import Time
+
+    t = Time(when_utc.astimezone(timezone.utc).replace(tzinfo=None), scale="utc")
+    ecl = GeocentricTrueEcliptic(equinox=t)
+    sun_lon = float(get_sun(t).transform_to(ecl).lon.deg)
+    moon_lon = float(get_body("moon", t).transform_to(ecl).lon.deg)
+    return 0.0 < (moon_lon - sun_lon) % 360.0 < 180.0
 
 
 def _score(max_alt: float, minutes_above: float, dark_minutes: float,
@@ -469,6 +496,7 @@ def plan_tonight(observer: Observer, when_utc: datetime, *,
         observer=asdict(observer),
         dark_window=None,
         moon_illumination=round(illum, 3),
+        moon_waxing=moon_is_waxing(when_utc),
         min_altitude_deg=min_altitude_deg,
         horizon_active=horizon_active,
     )

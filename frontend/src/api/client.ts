@@ -36,6 +36,10 @@ export interface NightPlan {
     sun_alt_threshold_deg: number;
   } | null;
   moon_illumination: number | null;
+  // Whether the Moon is waxing (sets in the evening) or waning (rises after
+  // midnight); null when no plan could be computed. Lets the UI say "Waxing
+  // gibbous" vs "Waning gibbous" — the fraction alone can't tell them apart.
+  moon_waxing?: boolean | null;
   min_altitude_deg: number;
   // True when a horizon/tree mask (Settings → Observing site) shaped the usable
   // windows, so the UI can note that low-sky obstructions were accounted for.

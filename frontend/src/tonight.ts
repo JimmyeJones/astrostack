@@ -4,13 +4,29 @@
 import type { PlannedTarget } from "./api/client";
 
 // A short, friendly Moon-phase label from the illuminated fraction (0..1).
-export function moonPhaseLabel(illum: number | null): string {
+//
+// When the waxing/waning state is known it's woven into the intermediate phases
+// ("Waxing crescent", "First Quarter", "Waning gibbous", …), which for planning
+// matters more than the raw fraction: a waxing Moon sets in the evening (so
+// early-night targets stay dark) while a waning Moon rises after midnight. New
+// and Full read the same either way, so they never take a prefix. Passing
+// `waxing` null/undefined keeps the plain, direction-agnostic labels.
+export function moonPhaseLabel(illum: number | null, waxing?: boolean | null): string {
   if (illum == null || !Number.isFinite(illum)) return "—";
   const pct = Math.round(illum * 100);
   if (pct <= 3) return `New Moon (${pct}%)`;
-  if (pct < 45) return `Crescent (${pct}%)`;
-  if (pct <= 55) return `Quarter Moon (${pct}%)`;
-  if (pct < 97) return `Gibbous (${pct}%)`;
+  if (pct < 45) {
+    const name = waxing == null ? "Crescent" : waxing ? "Waxing crescent" : "Waning crescent";
+    return `${name} (${pct}%)`;
+  }
+  if (pct <= 55) {
+    const name = waxing == null ? "Quarter Moon" : waxing ? "First Quarter" : "Last Quarter";
+    return `${name} (${pct}%)`;
+  }
+  if (pct < 97) {
+    const name = waxing == null ? "Gibbous" : waxing ? "Waxing gibbous" : "Waning gibbous";
+    return `${name} (${pct}%)`;
+  }
   return `Full Moon (${pct}%)`;
 }
 

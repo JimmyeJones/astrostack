@@ -18,6 +18,7 @@ from seestack.nightplan import (
     Observer,
     load_catalog,
     moon_illumination,
+    moon_is_waxing,
     plan_tonight,
 )
 
@@ -201,6 +202,25 @@ def test_moon_illumination_range_and_known_phase():
     # A full Moon (~2026-01-03) reads near-fully-lit.
     full = moon_illumination(datetime(2026, 1, 3, 22, 0, tzinfo=timezone.utc))
     assert full > 0.9
+
+
+def test_moon_waxing_matches_the_phase_cycle():
+    # Waning crescent a few days before the ~2026-01-18 new Moon.
+    assert moon_is_waxing(JAN_EVENING) is False
+    # Just after new Moon (2026-01-20) the Moon is growing again.
+    assert moon_is_waxing(datetime(2026, 1, 20, 22, 0, tzinfo=timezone.utc)) is True
+    # Rising toward the ~2026-02-01 full Moon — still waxing.
+    assert moon_is_waxing(datetime(2026, 1, 25, 22, 0, tzinfo=timezone.utc)) is True
+    # A day past the ~2026-01-03 full Moon — waning.
+    assert moon_is_waxing(datetime(2026, 1, 4, 22, 0, tzinfo=timezone.utc)) is False
+
+
+def test_plan_reports_moon_waxing_state():
+    plan = plan_tonight(LONDON, JAN_EVENING)
+    # The plan carries the same waxing verdict the standalone helper computes, so
+    # the UI can label it "Waning crescent" rather than a bare "Crescent".
+    assert plan.moon_waxing is moon_is_waxing(JAN_EVENING)
+    assert plan.moon_waxing is False
 
 
 def test_plan_is_deterministic():

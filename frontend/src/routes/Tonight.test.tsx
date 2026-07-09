@@ -61,6 +61,15 @@ describe("TonightView", () => {
       expect(screen.getByText("No darkness tonight")).toBeInTheDocument());
   });
 
+  it("labels the Moon card with its waxing/waning state", async () => {
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
+      moon_illumination: 0.72, moon_waxing: false,
+    }));
+    renderTonight();
+    await waitFor(() =>
+      expect(screen.getByText("Waning gibbous (72%)")).toBeInTheDocument());
+  });
+
   it("guides a first-timer with no library targets instead of blaming altitude", async () => {
     // No library targets => the "already targeted" table is empty, but the
     // reason is an empty library, not the altitude floor.

@@ -995,16 +995,25 @@ problems. Dogfood it every big-picture run and fix root causes.
 - Annotated sky overlay (label detected objects / show solved field). (M) —
   related to the night planner above; the planner's "plot tonight's targets" view
   can reuse this.
-- **Tonight planner: distinguish a waxing vs waning Moon (evening vs morning problem).**
-  (S, friendliness/workflow — priority 3) The Moon card shows only illuminated *fraction*
-  ("Gibbous (72%)"), but for planning it matters *when* that Moon is up: a **waxing** Moon
-  sets in the evening (early-night targets are safe), a **waning** Moon rises after midnight
-  (late-night targets suffer). The illuminated fraction alone can't tell them apart. Cheap to
-  add offline: `nightplan.moon_illumination` already computes the Sun–Moon elongation; the sign
-  of the Moon's ecliptic-longitude minus the Sun's (or the illumination trend over ~1 h) gives
-  waxing/waning with no extra dependency. Surface it in `moonPhaseLabel` ("Waxing gibbous (72%)")
-  and optionally a one-line "sets ~23:40 / rises ~01:10" cue on the Moon card. Additive,
-  offline, testable on the pure helper. Found dogfooding the newest feature (v0.97.x).
+- ~~**Tonight planner: distinguish a waxing vs waning Moon (evening vs morning problem).**~~
+  — **shipped v0.97.4** (see Shipped). The Moon card now reads "Waxing gibbous (72%)" /
+  "Waning gibbous", "First Quarter" / "Last Quarter", "Waxing crescent" / "Waning crescent" —
+  the direction that tells the planner *when* the Moon is up (waxing sets in the evening, waning
+  rises after midnight), which the illuminated fraction alone can't. A new offline
+  `nightplan.moon_is_waxing(when_utc)` compares the Moon's vs the Sun's ecliptic longitude
+  (`0 < Δλ < 180` = waxing), surfaced as an additive nullable `moon_waxing` field on the plan and
+  woven into `moonPhaseLabel(illum, waxing)`. New/Full never take a prefix; an absent state
+  (older backend) falls back to the plain labels. The optional rise/set-time cue was left for a
+  future run. Additive, offline, tested on the pure helpers (Python + TS) and the endpoint.
+- **Tonight planner: show tonight's Moon rise/set time on the Moon card.** (S, friendliness/workflow —
+  priority 3) Now that the card names the *phase direction* (waxing/waning, v0.97.4), the natural
+  follow-up is the concrete times: a waxing Moon that **sets ~23:40** leaves the second half of the
+  night dark, a waning Moon that **rises ~01:10** keeps the first half clean — far more actionable than
+  "waxing" alone. Offline and deterministic: sample the Moon's altitude over the night grid the planner
+  already builds (`_times_grid` noon→noon at the observer's `EarthLocation`) and report the horizon
+  crossings that bracket the dark window (handle "up all night" / "never up" gracefully → no cue).
+  Surface as one dimmed line under `moonPhaseLabel` ("sets ~23:40" / "rises ~01:10" / "up most of the
+  night"). Additive, testable on a pure helper against a known ephemeris date. Found shipping v0.97.4.
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
@@ -1236,6 +1245,18 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.97.4** — Tonight planner (friendliness): the Moon card now distinguishes a **waxing** from a
+  **waning** Moon ("Waxing gibbous (72%)" / "Waning gibbous"; "First Quarter" / "Last Quarter";
+  "Waxing crescent" / "Waning crescent"), which tells the planner *when* the Moon is up — a waxing
+  Moon sets in the evening (early-night targets stay dark), a waning one rises after midnight — a
+  distinction the illuminated *fraction* alone can't make. New offline
+  `nightplan.moon_is_waxing(when_utc)` (Moon-vs-Sun ecliptic longitude, `0 < Δλ < 180` = waxing),
+  surfaced as an additive nullable `moon_waxing` field on the plan (`asdict`) and woven into
+  `moonPhaseLabel(illum, waxing)`. New/Full never take a prefix; an older backend without the field
+  falls back to the plain labels. Additive, offline, upgrade-safe. Tests: `test_nightplan.py`
+  (`test_moon_waxing_matches_the_phase_cycle`, `test_plan_reports_moon_waxing_state`), `test_plan.py`
+  (endpoint carries `moon_waxing`), and TS (`tonight.test.ts` waxing/waning labels, `Tonight.test.tsx`
+  Moon card). Found dogfooding the newest feature.
 - **v0.97.3** — Tonight planner (friendliness): section-accurate empty states. The two target
   tables shared one message — "Nothing here clears your minimum altitude tonight." — which is
   *never* accurate for the "Add more to what you're shooting" (already-targeted) section: the engine

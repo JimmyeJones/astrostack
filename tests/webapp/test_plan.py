@@ -48,6 +48,8 @@ def test_tonight_with_settings_location(client, solved_library):
     assert body["dark_window"] is not None
     assert body["dark_window"]["sun_alt_threshold_deg"] == -18.0
     assert 0.0 <= body["moon_illumination"] <= 1.0
+    # 2026-01-15 is a waning crescent (days before the ~01-18 new Moon).
+    assert body["moon_waxing"] is False
 
     targets = body["targets"]
     assert targets, "expected a ranked target list"

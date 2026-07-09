@@ -180,6 +180,7 @@ def get_tonight(
             "generated_utc": ref.astimezone(timezone.utc).isoformat(),
             "dark_window": None,
             "moon_illumination": None,
+            "moon_waxing": None,
             "min_altitude_deg": min_altitude,
             "targets": [],
         }
