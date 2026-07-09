@@ -60,6 +60,20 @@ when you take it.
   (min_alt 70 & 80; fails before / passes after). Newest-feature bug found by auditing the recently
   shipped nightplan path (v0.95–0.97), which the QA cycle hadn't covered yet.
 
+- ~~**Watcher enqueues a *duplicate* auto-ingest pipeline once ≥20 newer jobs push the running
+  one out of the recent-jobs window.**~~ — **FIXED v0.99.4** (Builder audit 2026-07-09; traced +
+  reproduced with a regression test). `webapp/main.py::_on_batch_ready` guarded against a
+  double-enqueue by scanning `jm.list(limit=20)` for an active `pipeline` — but `JobManager.list()`
+  merges live + DB jobs, sorts by `created_utc DESC` and truncates to the limit, so a long-running
+  auto-stack pipeline (old `created_utc`) is pushed past position 20 once 20 newer jobs
+  (queued/finished editor/stack/reprocess work) exist. The guard then saw *no* active pipeline and
+  enqueued a **second** one — a redundant full re-scan/QC/solve/stack pass (harmless because the
+  single worker serialises them and ingest is idempotent, but wasteful). It now uses the unbounded
+  in-memory `JobManager.active_of_kind("pipeline")` (which was purpose-built for exactly this and
+  can't be truncated away). Regression test `tests/webapp/test_batch_trigger.py`
+  (`test_on_batch_ready_defers_when_running_pipeline_is_past_the_recent_window`, fails before /
+  passes after). Found by an adversarial audit of the watcher stabilise→enqueue path.
+
 - ~~**Watcher can permanently drop a batch from auto-ingest when it stabilises during a
   running pipeline.**~~ — **FIXED v0.81.7** (see Shipped). `_on_batch_ready` now reports
   whether it enqueued a pipeline; when it declines because one is already `queued`/`running`,

@@ -51,10 +51,13 @@ def _on_batch_ready(app: FastAPI) -> bool:
     """
     jm: JobManager = app.state.job_manager
     store: SettingsStore = app.state.settings_store
-    active = [j for j in jm.list(limit=20)
-              if j.kind == "pipeline" and j.state in ("queued", "running")]
-    if active:
-        log.info("pipeline already %s; deferring trigger", active[0].state)
+    # Use the unbounded in-memory `active_of_kind` rather than scanning `list()`:
+    # `list(limit=N)` merges live + DB jobs, sorts by created_utc, and truncates,
+    # so a long-running pipeline (old created_utc) can be pushed past the window
+    # once N newer jobs exist — making the guard miss it and enqueue a duplicate.
+    active = jm.active_of_kind("pipeline")
+    if active is not None:
+        log.info("pipeline already %s; deferring trigger", active.state)
         return False
     pipeline.submit_pipeline(store.get(), jm)
     return True
