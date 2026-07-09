@@ -114,6 +114,24 @@ _(none of the traced *editor-engine* op bugs are open — that backlog stayed dr
 the entry above is a stacking/autonomy↔editor classification bug found by dogfooding
 the real webapp stack→edit path.)_
 
+- **Watcher can leave a batch unimported when an *accepted* pipeline later fails before ingesting
+  (lower severity — self-recovers, so filed not blind-fixed).** *(traced, Builder audit 2026-07-09;
+  the sibling of the v0.99.4/v0.99.5 watcher fixes.)* When `_on_batch_ready` returns `True`, the
+  watcher treats the batch as consumed and clears `_pending_batch`. If that enqueued pipeline then
+  *fails before ingesting* (a scan/QC error, an OOM refusal, a cancel), the newly-stable files stay
+  in `incoming/` and in `StabilityTracker._stable` (kept by `self._stable &= seen` while they're
+  present), and are never re-offered on their own. **Why it's lower severity / not a blind fix:** it
+  self-recovers — the pipeline job body re-scans the *whole* incoming dir (`find_fits_files`), so the
+  next batch (any new file) or a manual "Scan incoming" re-ingests the stranded files, and ingest is
+  idempotent; only a site where no further files ever arrive *and* the user never manually scans is
+  stuck. And the clean fix is a **design change**, not a one-liner: the watcher would need to learn
+  whether the pipeline actually ingested (couple it to job outcomes, or re-arm `_pending_batch` on a
+  pipeline that ends in `error`/`cancelled` without importing), which wants deliberate design + its
+  own test rather than a reflexive patch. Candidate shapes for whoever takes it: (a) on a pipeline
+  finishing non-`done`, re-offer the last batch; (b) periodically re-arm if `incoming/` is non-empty
+  and no pipeline is active. (S–M design, autonomy/robustness) —
+  *Builder-filed 2026-07-09, traced.*
+
 - **Dead SExtractor skew-fallback guard in 4 background/leveling helpers (needs REAL-data
   threshold validation before fixing — NOT a blind Builder change).** *(traced + reproduced,
   Builder audit 2026-07-08; med confidence it produces a visibly-wrong result in practice.)*
