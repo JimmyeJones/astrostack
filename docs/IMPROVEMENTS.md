@@ -995,6 +995,16 @@ problems. Dogfood it every big-picture run and fix root causes.
 - Annotated sky overlay (label detected objects / show solved field). (M) —
   related to the night planner above; the planner's "plot tonight's targets" view
   can reuse this.
+- **Tonight planner: distinguish a waxing vs waning Moon (evening vs morning problem).**
+  (S, friendliness/workflow — priority 3) The Moon card shows only illuminated *fraction*
+  ("Gibbous (72%)"), but for planning it matters *when* that Moon is up: a **waxing** Moon
+  sets in the evening (early-night targets are safe), a **waning** Moon rises after midnight
+  (late-night targets suffer). The illuminated fraction alone can't tell them apart. Cheap to
+  add offline: `nightplan.moon_illumination` already computes the Sun–Moon elongation; the sign
+  of the Moon's ecliptic-longitude minus the Sun's (or the illumination trend over ~1 h) gives
+  waxing/waning with no extra dependency. Surface it in `moonPhaseLabel` ("Waxing gibbous (72%)")
+  and optionally a one-line "sets ~23:40 / rises ~01:10" cue on the Moon card. Additive,
+  offline, testable on the pure helper. Found dogfooding the newest feature (v0.97.x).
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
