@@ -91,6 +91,35 @@ def test_guard_accounts_for_k_reject_planes(monkeypatch):
                                     memory_budget_gb=0.9)
 
 
+def test_estimated_drizzle_output_shape_matches_the_real_canvas():
+    """The estimate's post-drizzle output shape must equal the canvas the run
+    actually allocates (``drizzle_path._compute_output_canvas``), so the
+    ``output_w``/``output_h`` the UI shows before a run matches the file written.
+
+    Regression: ``_estimate_peak_bytes`` used ``int(dim·s + 1)`` while the real
+    canvas uses ``int(round(dim·s))``; at a near-integer ``dim·s`` (here 320×1.5
+    = 480.0, 480×1.5 = 720.0) the old formula reported 481×721, one pixel too
+    big on each axis."""
+    from seestack.io.wcs_io import wcs_from_text
+    from seestack.stack.drizzle_path import DrizzleParams, DrizzleStacker
+    from tests.synth import make_synth_wcs_text
+
+    dst_shape = (320, 480)  # (h, w) pre-drizzle reference canvas
+    scale = 1.5
+    # Prove the old formula and the real formula genuinely disagree here, so this
+    # test would fail against the pre-fix code.
+    h, w = dst_shape
+    assert (int(h * scale + 1), int(w * scale + 1)) != (
+        int(round(h * scale)), int(round(w * scale)))
+
+    _, est_shape = stacker._estimate_peak_bytes(
+        dst_shape, drizzle=True, drizzle_scale=scale)
+
+    wcs = wcs_from_text(make_synth_wcs_text(width=w, height=h))
+    drz = DrizzleStacker(wcs, dst_shape, DrizzleParams(scale=scale, pixfrac=1.0))
+    assert est_shape == drz.output_canvas_shape == (480, 720)
+
+
 def _peak(shape, scale, reject=False):
     peak, _ = stacker._estimate_peak_bytes(
         shape, drizzle=True, drizzle_scale=scale, drizzle_reject=reject)

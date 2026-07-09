@@ -122,7 +122,14 @@ def _estimate_peak_bytes(dst_shape: tuple[int, int], *, drizzle: bool,
     h, w = dst_shape
     if drizzle:
         s = max(1.0, float(drizzle_scale))
-        out_h, out_w = int(h * s + 1), int(w * s + 1)
+        # Match the *actual* drizzle canvas formula in
+        # ``drizzle_path._compute_output_canvas`` (``int(round(dim·scale))``)
+        # exactly, so the estimated/guarded output shape equals the file the run
+        # really writes. The old ``int(dim·s + 1)`` over-stated each axis by up to
+        # 1 px whenever ``dim·s`` was near-integer — harmless for the memory guard
+        # (it only over-reserved) but it surfaced wrong ``output_w``/``output_h``
+        # dimensions in the pre-run estimate the UI shows.
+        out_h, out_w = int(round(h * s)), int(round(w * s))
     else:
         out_h, out_w = h, w
     out_pixels = out_h * out_w
