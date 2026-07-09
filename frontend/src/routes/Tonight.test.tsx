@@ -1,6 +1,6 @@
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TonightView } from "./Tonight";
@@ -109,6 +109,27 @@ describe("TonightView", () => {
     // The visible Select input shows the option's label ("45°"); before the fix
     // there was no matching option for a 45° floor and it rendered blank.
     expect(screen.getByDisplayValue("45°")).toBeInTheDocument();
+  });
+
+  it("plans a chosen future night by passing the date to the API", async () => {
+    const spy = vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({}));
+    renderTonight();
+    await waitFor(() =>
+      expect(screen.getByText("Add more to what you're shooting")).toBeInTheDocument());
+    // Initial fetch plans tonight — no date param.
+    expect(spy).toHaveBeenLastCalledWith(expect.not.objectContaining({ date: expect.anything() }));
+
+    // Picking a future date refetches with that date and renames the sections.
+    const future = "2026-08-15";
+    fireEvent.change(screen.getByLabelText("Night"), { target: { value: future } });
+    await waitFor(() =>
+      expect(spy).toHaveBeenLastCalledWith(expect.objectContaining({ date: future })));
+    await waitFor(() =>
+      expect(screen.getByText(/Start something new on/)).toBeInTheDocument());
+    // A "Tonight" reset clears the date back to tonight.
+    fireEvent.click(screen.getByRole("button", { name: "Tonight" }));
+    await waitFor(() =>
+      expect(screen.getByText("Start something new tonight")).toBeInTheDocument());
   });
 
   it("ranks library targets and fresh catalog suggestions separately", async () => {

@@ -1039,17 +1039,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   ~0 (reconciling a scary single-instant separation with the ranking), "Moon up N% of its window" for a
   partial overlap, and nothing when the Moon is up throughout (the separation column already tells that
   story). Additive/offline (new nullable field, old rows/backends omit it), no score/ranking change.
-- **Tonight planner: plan a *future* night, not just tonight (offline date picker).** (M,
-  autonomy/friendliness — priority 2/3) Filed by the Builder shipping v0.97.7/8. The planner engine
-  already takes the reference moment explicitly (`plan_tonight(observer, when_utc, …)` — every entry
-  point is deterministic on a passed-in time), but `GET /api/plan/tonight` hard-codes "now", so a user
-  can't ask "how well-placed is M31 next Saturday?" or "when's the new-Moon window this month?". Add an
-  optional `date` query param (default = today) + a small date picker on the Tonight page, so the same
-  offline computation ranks a chosen upcoming night. Pairs naturally with the Moon phase/window and the
-  usable-window cues already shipped — the user can scan a few nights out for a dark-sky window on a
-  target they care about. Additive (default preserves today's behaviour), fully offline, testable on the
-  endpoint with a fixed future date. Cap the lookahead to a sane horizon (say ~60 days) so the picker
-  can't request a nonsense far-future ephemery.
+- ~~**Tonight planner: plan a *future* night, not just tonight (offline date picker).**~~ —
+  **shipped v0.98.0** (see Shipped). A new optional `date=YYYY-MM-DD` query param on
+  `GET /api/plan/tonight` plans an upcoming night's dark window instead of tonight, capped to a
+  sane horizon (`_MAX_LOOKAHEAD_DAYS = 60`, one day of slack behind "today" for timezone skew;
+  a bad/too-far/past date is a clean 422). The date is resolved to that night's *local solar noon*
+  once the observer's longitude is known (`_reference_for_date`), so the engine's existing
+  ±12 h solar-noon search lands on the right night regardless of longitude. `plan_tonight` already
+  took the reference moment explicitly, so no engine change was needed; a precise `when` timestamp
+  still takes precedence when supplied. The Tonight page gains a native "Night" date picker
+  (min = today, max = +60 d) with a one-click "Tonight" reset; the subtitle and both section
+  headings name the chosen night ("Start something new on Sat 15 Aug"). Additive (default preserves
+  today's behaviour), fully offline, upgrade-safe. Pure helpers `isoDate`/`planDateBounds`/
+  `planNightLabel` + `_reference_for_date` are unit-tested, plus endpoint tests for a future date,
+  moon-differs-from-tonight, and the far-future/past/malformed 422s.
 - **Tonight planner: narrow "start something new" by object type (a quick filter).** (S, friendliness
   — priority 3) The "start something new" table can be long, and a user often arrives wanting *a
   specific kind* of target ("show me a nebula tonight", "what galaxy is well placed?"). Every catalog row

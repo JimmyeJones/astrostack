@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  compassPoint, formatClock, formatMinutes, minAltOptions, moonCueForTarget,
-  moonPhaseLabel, moonWindowNote, scoreColor, splitTargets, usableWindowNote,
+  compassPoint, formatClock, formatMinutes, isoDate, minAltOptions,
+  MAX_PLAN_LOOKAHEAD_DAYS, moonCueForTarget, moonPhaseLabel, moonWindowNote,
+  planDateBounds, planNightLabel, scoreColor, splitTargets, usableWindowNote,
 } from "./tonight";
 import type { PlannedTarget } from "./api/client";
 
@@ -205,5 +206,42 @@ describe("splitTargets", () => {
     ]);
     expect(already.map((t) => t.id)).toEqual(["A", "C"]);
     expect(fresh.map((t) => t.id)).toEqual(["B", "D"]);
+  });
+});
+
+describe("isoDate", () => {
+  it("formats a Date as local YYYY-MM-DD, zero-padded", () => {
+    expect(isoDate(new Date(2026, 6, 5))).toBe("2026-07-05"); // month is 0-based
+    expect(isoDate(new Date(2026, 11, 31))).toBe("2026-12-31");
+  });
+});
+
+describe("planDateBounds", () => {
+  it("runs from today to +max-lookahead days", () => {
+    const now = new Date(2026, 6, 15);
+    const { min, max } = planDateBounds(now);
+    expect(min).toBe("2026-07-15");
+    const expected = new Date(2026, 6, 15);
+    expected.setDate(expected.getDate() + MAX_PLAN_LOOKAHEAD_DAYS);
+    expect(max).toBe(isoDate(expected));
+    expect(new Date(max).getTime()).toBeGreaterThan(new Date(min).getTime());
+  });
+});
+
+describe("planNightLabel", () => {
+  const now = new Date(2026, 6, 15);
+  it("is empty for tonight (no date, or today's date)", () => {
+    expect(planNightLabel("", now)).toBe("");
+    expect(planNightLabel(null, now)).toBe("");
+    expect(planNightLabel("2026-07-15", now)).toBe("");
+  });
+  it("names a future night", () => {
+    const label = planNightLabel("2026-08-01", now);
+    expect(label).not.toBe("");
+    expect(label).toMatch(/Aug/);
+    expect(label).toMatch(/1/);
+  });
+  it("is empty for an unparseable date", () => {
+    expect(planNightLabel("garbage", now)).toBe("");
   });
 });

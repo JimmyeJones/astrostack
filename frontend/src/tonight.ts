@@ -85,6 +85,39 @@ export function usableWindowNote(
   return `${a}–${b}`;
 }
 
+// The furthest ahead the date picker lets you plan, matching the backend's
+// `_MAX_LOOKAHEAD_DAYS` cap (keeps the offline ephemeris cheap; further out is
+// almost always a typo).
+export const MAX_PLAN_LOOKAHEAD_DAYS = 60;
+
+// Local calendar date (YYYY-MM-DD) for a Date — the value a native date input
+// expects. Uses the viewer's own timezone, so "today" is their today.
+export function isoDate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+// The [min, max] the date picker should accept: today through +N days. `now` is
+// injectable so the bounds are testable without touching the clock.
+export function planDateBounds(now: Date): { min: string; max: string } {
+  const max = new Date(now.getTime());
+  max.setDate(max.getDate() + MAX_PLAN_LOOKAHEAD_DAYS);
+  return { min: isoDate(now), max: isoDate(max) };
+}
+
+// A friendly label for which night the plan is for. Tonight (empty/today) reads
+// "tonight"; a future pick names the date ("the night of Sat 15 Aug"). `now` is
+// injectable for testing. Returns "" for tonight so callers can keep their
+// existing "…tonight" copy unchanged.
+export function planNightLabel(date: string | null | undefined, now: Date): string {
+  if (!date || date === isoDate(now)) return "";
+  const d = new Date(`${date}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" });
+}
+
 export interface MinAltOption {
   value: string;
   label: string;

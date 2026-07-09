@@ -17,7 +17,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import date as _date
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -32,6 +33,29 @@ router = APIRouter(prefix="/api/plan", tags=["plan"])
 # Cap how many frames we probe for a site location so a big library with no
 # SITELAT header anywhere can't turn one request into thousands of header reads.
 _MAX_SITE_PROBE_FRAMES = 24
+
+# How far ahead the `date` picker may plan. Deep-sky observability a couple of
+# months out is still useful ("when's the next dark-sky window for M31?"); beyond
+# that the request is almost always a typo, and pinning a horizon keeps the offline
+# ephemeris cheap. One day of slack behind "today" absorbs timezone skew (a viewer
+# west of UTC whose local calendar day trails UTC's can still ask for "tonight").
+_MAX_LOOKAHEAD_DAYS = 60
+
+
+def _reference_for_date(plan_date: _date, lon_deg: float) -> datetime:
+    """A UTC reference instant at local solar noon on ``plan_date``.
+
+    The night planner derives "tonight" as the dark window around the solar
+    midnight *following* its reference moment (see
+    ``nightplan._find_dark_window``), so aiming the reference at local noon on the
+    chosen date lands squarely on that date's night regardless of the observer's
+    longitude. Local noon in UTC is ``12:00 − lon/15`` hours (east of Greenwich is
+    earlier in UTC); the engine's ±12 h solar-noon search corrects any residual
+    equation-of-time offset.
+    """
+    noon_utc = datetime(plan_date.year, plan_date.month, plan_date.day,
+                        12, 0, 0, tzinfo=timezone.utc)
+    return noon_utc - timedelta(hours=lon_deg / 15.0)
 
 
 def _parse_angle(value: Any) -> float | None:
@@ -140,10 +164,34 @@ def _library_targets(request: Request) -> list[LibraryTarget]:
 def get_tonight(
     request: Request,
     when: str | None = Query(default=None, description="ISO-8601 UTC time; defaults to now"),
+    date: str | None = Query(default=None, description="YYYY-MM-DD calendar night to plan; defaults to today"),
     min_alt: int | None = Query(default=None, ge=0, le=80),
 ) -> dict[str, Any]:
-    """Ranked observability plan for tonight (see module docstring)."""
+    """Ranked observability plan for a night (see module docstring).
+
+    By default this plans tonight. Pass ``date=YYYY-MM-DD`` to plan an upcoming
+    night instead (up to ``_MAX_LOOKAHEAD_DAYS`` ahead) — the same offline
+    computation, aimed at that date's dark window. ``when`` (a precise ISO
+    timestamp) still takes precedence when supplied, for callers that want an
+    exact reference moment.
+    """
     settings = deps.get_settings(request)
+
+    # Validate an optional calendar-date pick up front so a bad/too-far date is a
+    # clean 422 (its reference instant is resolved against the observer below,
+    # once the longitude is known — local noon depends on it).
+    plan_date: _date | None = None
+    if date:
+        try:
+            plan_date = _date.fromisoformat(date)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Bad 'date' (expected YYYY-MM-DD)") from exc
+        today = datetime.now(timezone.utc).date()
+        if not (today - timedelta(days=1) <= plan_date <= today + timedelta(days=_MAX_LOOKAHEAD_DAYS)):
+            raise HTTPException(
+                status_code=422,
+                detail=f"'date' must be within the next {_MAX_LOOKAHEAD_DAYS} days",
+            )
 
     if when:
         try:
@@ -152,6 +200,12 @@ def get_tonight(
             raise HTTPException(status_code=422, detail="Bad 'when' timestamp") from exc
         if ref.tzinfo is None:
             ref = ref.replace(tzinfo=timezone.utc)
+    elif plan_date is not None:
+        # Provisional (UTC-noon) reference; refined to local noon once we know the
+        # observer's longitude. If no observer resolves, only `generated_utc` in the
+        # location-less response uses it, so UTC noon is a fine stand-in there.
+        ref = datetime(plan_date.year, plan_date.month, plan_date.day,
+                       12, 0, 0, tzinfo=timezone.utc)
     else:
         ref = datetime.now(timezone.utc)
 
@@ -184,6 +238,11 @@ def get_tonight(
             "min_altitude_deg": min_altitude,
             "targets": [],
         }
+
+    # With the observer's longitude known, aim a calendar-date pick at that night's
+    # local solar noon (a precise `when` is left exactly as the caller supplied it).
+    if plan_date is not None and not when:
+        ref = _reference_for_date(plan_date, observer.lon_deg)
 
     plan = plan_tonight(
         observer, ref, min_altitude_deg=float(min_altitude),

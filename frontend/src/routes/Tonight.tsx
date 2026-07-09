@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
-  Alert, Anchor, Badge, Card, Center, Group, Loader, Paper, Select, SimpleGrid,
-  Stack, Table, Text, Title, Tooltip,
+  Alert, Anchor, Badge, Button, Card, Center, Group, Loader, Paper, Select,
+  SimpleGrid, Stack, Table, Text, TextInput, Title, Tooltip,
 } from "@mantine/core";
 import { IconMoon, IconStars, IconTelescope } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
@@ -11,7 +11,8 @@ import { QueryError } from "../components/QueryError";
 import { formatIntegration } from "../format";
 import {
   formatClock, formatMinutes, minAltOptions, moonCueForTarget, moonPhaseLabel,
-  moonWindowNote, scoreColor, splitTargets, usableWindowNote,
+  moonWindowNote, planDateBounds, planNightLabel, scoreColor, splitTargets,
+  usableWindowNote,
 } from "../tonight";
 
 function ScoreBadge({ score }: { score: number }) {
@@ -89,9 +90,16 @@ function TargetTable({ targets, empty }: { targets: PlannedTarget[]; empty: stri
 
 export function TonightView() {
   const [minAlt, setMinAlt] = useState<string>("");
+  const [date, setDate] = useState<string>("");
+  const now = useMemo(() => new Date(), []);
+  const bounds = useMemo(() => planDateBounds(now), [now]);
+  const nightLabel = planNightLabel(date, now);
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ["tonight", minAlt],
-    queryFn: () => api.getTonight(minAlt ? { minAlt: Number(minAlt) } : undefined),
+    queryKey: ["tonight", minAlt, date],
+    queryFn: () => api.getTonight({
+      ...(minAlt ? { minAlt: Number(minAlt) } : {}),
+      ...(date ? { date } : {}),
+    }),
     staleTime: 60_000,
   });
 
@@ -109,20 +117,36 @@ export function TonightView() {
           <Group gap="xs"><IconStars size={26} /> Tonight</Group>
         </Title>
         <Text c="dimmed" size="sm">
-          The best deep-sky targets to point the scope at tonight — ranked, offline.
+          The best deep-sky targets to point the scope at
+          {nightLabel ? ` on ${nightLabel}` : " tonight"} — ranked, offline.
           {data.horizon_active
             ? " Time-up accounts for your horizon / tree mask."
             : ""}
         </Text>
       </div>
-      <Select
-        label="Minimum altitude"
-        data={minAltOptions(minAlt ? Number(minAlt) : data.min_altitude_deg)}
-        value={minAlt || String(data.min_altitude_deg)}
-        onChange={(v) => setMinAlt(v ?? "")}
-        w={180}
-        allowDeselect={false}
-      />
+      <Group align="flex-end" gap="sm" wrap="wrap">
+        <TextInput
+          type="date"
+          label="Night"
+          value={date}
+          min={bounds.min}
+          max={bounds.max}
+          onChange={(e) => setDate(e.currentTarget.value)}
+          rightSection={date
+            ? <Button variant="subtle" size="compact-xs" onClick={() => setDate("")}>Tonight</Button>
+            : undefined}
+          rightSectionWidth={date ? 72 : undefined}
+          w={200}
+        />
+        <Select
+          label="Minimum altitude"
+          data={minAltOptions(minAlt ? Number(minAlt) : data.min_altitude_deg)}
+          value={minAlt || String(data.min_altitude_deg)}
+          onChange={(v) => setMinAlt(v ?? "")}
+          w={180}
+          allowDeselect={false}
+        />
+      </Group>
     </Group>
   );
 
@@ -163,6 +187,7 @@ export function TonightView() {
     : dw.sun_alt_threshold_deg <= -12 ? "nautical (short summer night)"
     : "twilight only";
   const { already, fresh } = splitTargets(data.targets);
+  const whenWord = nightLabel ? `on ${nightLabel}` : "tonight";
 
   return (
     <Stack gap="lg">
@@ -197,7 +222,7 @@ export function TonightView() {
       <Paper withBorder p="md">
         <Title order={4} mb="xs">Add more to what you're shooting</Title>
         <Text size="sm" c="dimmed" mb="sm">
-          Targets already in your library that are well placed tonight — good for
+          Targets already in your library that are well placed {whenWord} — good for
           topping up integration.
         </Text>
         <TargetTable
@@ -206,14 +231,14 @@ export function TonightView() {
       </Paper>
 
       <Paper withBorder p="md">
-        <Title order={4} mb="xs">Start something new tonight</Title>
+        <Title order={4} mb="xs">Start something new {whenWord}</Title>
         <Text size="sm" c="dimmed" mb="sm">
           Popular deep-sky targets (Messier plus well-known NGC/IC objects) you
           haven't shot yet, ranked by how well placed they are.
         </Text>
         <TargetTable
           targets={fresh}
-          empty="Nothing in the catalog clears your minimum altitude tonight — try lowering it above." />
+          empty={`Nothing in the catalog clears your minimum altitude ${whenWord} — try lowering it above.`} />
       </Paper>
     </Stack>
   );
