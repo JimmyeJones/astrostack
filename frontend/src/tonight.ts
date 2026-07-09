@@ -178,6 +178,40 @@ export function compassPoint(az: number): string {
   return dirs[Math.round((((az % 360) + 360) % 360) / 45) % 8];
 }
 
+// The friendly object-type buckets the "start something new" filter offers, in
+// display order. The catalog's fine types (open/globular cluster, planetary
+// nebula, supernova remnant, …) coalesce into these so the control stays short.
+export type TypeBucket = "Galaxy" | "Nebula" | "Cluster" | "Other";
+const BUCKET_ORDER: TypeBucket[] = ["Galaxy", "Nebula", "Cluster", "Other"];
+
+// Map a catalog `type` string to its friendly bucket. Nebula absorbs planetary
+// nebulae and supernova remnants (all diffuse emission); Cluster absorbs open /
+// globular clusters and loose star groupings (star cloud / asterism); everything
+// else (e.g. double star) falls to Other.
+export function objectTypeBucket(type: string | null | undefined): TypeBucket {
+  const t = (type ?? "").toLowerCase();
+  if (t.includes("galaxy")) return "Galaxy";
+  if (t.includes("nebula") || t.includes("supernova")) return "Nebula";
+  if (t.includes("cluster") || t.includes("asterism") || t.includes("cloud")) return "Cluster";
+  return "Other";
+}
+
+// Build the segmented-filter options for a target list: "All" plus each bucket
+// that actually appears, in canonical order. Returns just ["All"] when a single
+// bucket (or none) is present, so the caller can hide a pointless one-choice control.
+export function typeFilterOptions(targets: PlannedTarget[]): string[] {
+  const present = new Set(targets.map((t) => objectTypeBucket(t.type)));
+  const buckets = BUCKET_ORDER.filter((b) => present.has(b));
+  return buckets.length <= 1 ? ["All"] : ["All", ...buckets];
+}
+
+// Filter targets to a chosen bucket ("All" — or any value not among the present
+// buckets — returns everything unchanged, so a stale selection is inert).
+export function filterByTypeBucket(targets: PlannedTarget[], bucket: string): PlannedTarget[] {
+  if (bucket === "All" || !BUCKET_ORDER.includes(bucket as TypeBucket)) return targets;
+  return targets.filter((t) => objectTypeBucket(t.type) === bucket);
+}
+
 export interface SplitTargets {
   already: PlannedTarget[];
   fresh: PlannedTarget[];

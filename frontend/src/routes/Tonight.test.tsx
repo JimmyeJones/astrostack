@@ -132,6 +132,41 @@ describe("TonightView", () => {
       expect(screen.getByText("Start something new tonight")).toBeInTheDocument());
   });
 
+  it("filters 'start something new' by object type", async () => {
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
+      targets: [
+        target({ id: "M31", name: "Andromeda", type: "galaxy", already_targeted: false, score: 80 }),
+        target({ id: "M42", name: "Orion Nebula", type: "nebula", already_targeted: false, score: 70 }),
+        target({ id: "M13", name: "Hercules", type: "globular cluster", already_targeted: false, score: 60 }),
+      ],
+    }));
+    renderTonight();
+    await waitFor(() =>
+      expect(screen.getByText("Start something new tonight")).toBeInTheDocument());
+    // All three show initially.
+    expect(screen.getByText(/M31/)).toBeInTheDocument();
+    expect(screen.getByText(/M42/)).toBeInTheDocument();
+    expect(screen.getByText(/M13/)).toBeInTheDocument();
+    // Picking "Nebula" keeps only the nebula.
+    fireEvent.click(screen.getByRole("radio", { name: "Nebula" }));
+    await waitFor(() => expect(screen.queryByText(/M31/)).not.toBeInTheDocument());
+    expect(screen.getByText(/M42/)).toBeInTheDocument();
+    expect(screen.queryByText(/M13/)).not.toBeInTheDocument();
+  });
+
+  it("hides the type filter when only one object type is present", async () => {
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
+      targets: [
+        target({ id: "M31", type: "galaxy", already_targeted: false, score: 80 }),
+        target({ id: "M81", type: "galaxy", already_targeted: false, score: 70 }),
+      ],
+    }));
+    renderTonight();
+    await waitFor(() =>
+      expect(screen.getByText("Start something new tonight")).toBeInTheDocument());
+    expect(screen.queryByRole("radio", { name: "Galaxy" })).not.toBeInTheDocument();
+  });
+
   it("ranks library targets and fresh catalog suggestions separately", async () => {
     vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
       targets: [

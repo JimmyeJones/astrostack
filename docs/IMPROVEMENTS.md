@@ -1053,15 +1053,16 @@ problems. Dogfood it every big-picture run and fix root causes.
   today's behaviour), fully offline, upgrade-safe. Pure helpers `isoDate`/`planDateBounds`/
   `planNightLabel` + `_reference_for_date` are unit-tested, plus endpoint tests for a future date,
   moon-differs-from-tonight, and the far-future/past/malformed 422s.
-- **Tonight planner: narrow "start something new" by object type (a quick filter).** (S, friendliness
-  — priority 3) The "start something new" table can be long, and a user often arrives wanting *a
-  specific kind* of target ("show me a nebula tonight", "what galaxy is well placed?"). Every catalog row
-  already carries a `type` (galaxy / nebula / open cluster / globular cluster / …), so a small segmented
-  filter (All · Galaxy · Nebula · Cluster · …) above the table would let them cut straight to what they
-  want without scanning. Frontend-only, additive, pure client-side filter over the already-fetched plan
-  (no backend/endpoint change); the buckets can coalesce the fine types (open/globular → "Cluster",
-  planetary/SNR/emission → "Nebula") for a short, friendly control. Testable as a pure bucket/filter
-  helper.
+- ~~**Tonight planner: narrow "start something new" by object type (a quick filter).**~~ —
+  **shipped v0.98.1** (see Shipped). A small segmented control (All · Galaxy · Nebula · Cluster · …)
+  above the "start something new" table filters the catalog suggestions by object type, so a user
+  after "a nebula tonight" cuts straight to it. Pure client-side filter over the already-fetched plan
+  (no backend/endpoint change); the fine catalog types coalesce into friendly buckets via
+  `objectTypeBucket` (planetary nebula / supernova remnant → Nebula; open/globular cluster + star
+  cloud/asterism → Cluster; everything else → Other). The control only shows when ≥2 buckets are
+  present and lists just the buckets that actually appear; a stale selection is inert (falls back to
+  All). Unit-tested helpers `objectTypeBucket`/`typeFilterOptions`/`filterByTypeBucket` plus component
+  tests (filter narrows the list; the control hides for a single type).
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)

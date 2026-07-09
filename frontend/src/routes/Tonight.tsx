@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import {
   Alert, Anchor, Badge, Button, Card, Center, Group, Loader, Paper, Select,
-  SimpleGrid, Stack, Table, Text, TextInput, Title, Tooltip,
+  SegmentedControl, SimpleGrid, Stack, Table, Text, TextInput, Title, Tooltip,
 } from "@mantine/core";
 import { IconMoon, IconStars, IconTelescope } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
@@ -10,9 +10,9 @@ import { api, type PlannedTarget } from "../api/client";
 import { QueryError } from "../components/QueryError";
 import { formatIntegration } from "../format";
 import {
-  formatClock, formatMinutes, minAltOptions, moonCueForTarget, moonPhaseLabel,
-  moonWindowNote, planDateBounds, planNightLabel, scoreColor, splitTargets,
-  usableWindowNote,
+  filterByTypeBucket, formatClock, formatMinutes, minAltOptions, moonCueForTarget,
+  moonPhaseLabel, moonWindowNote, planDateBounds, planNightLabel, scoreColor,
+  splitTargets, typeFilterOptions, usableWindowNote,
 } from "../tonight";
 
 function ScoreBadge({ score }: { score: number }) {
@@ -91,6 +91,7 @@ function TargetTable({ targets, empty }: { targets: PlannedTarget[]; empty: stri
 export function TonightView() {
   const [minAlt, setMinAlt] = useState<string>("");
   const [date, setDate] = useState<string>("");
+  const [typeFilter, setTypeFilter] = useState<string>("All");
   const now = useMemo(() => new Date(), []);
   const bounds = useMemo(() => planDateBounds(now), [now]);
   const nightLabel = planNightLabel(date, now);
@@ -188,6 +189,8 @@ export function TonightView() {
     : "twilight only";
   const { already, fresh } = splitTargets(data.targets);
   const whenWord = nightLabel ? `on ${nightLabel}` : "tonight";
+  const typeOptions = typeFilterOptions(fresh);
+  const freshShown = filterByTypeBucket(fresh, typeFilter);
 
   return (
     <Stack gap="lg">
@@ -231,14 +234,26 @@ export function TonightView() {
       </Paper>
 
       <Paper withBorder p="md">
-        <Title order={4} mb="xs">Start something new {whenWord}</Title>
+        <Group justify="space-between" align="flex-start" mb="xs" wrap="wrap">
+          <Title order={4}>Start something new {whenWord}</Title>
+          {typeOptions.length > 1 ? (
+            <SegmentedControl
+              size="xs"
+              data={typeOptions}
+              value={typeOptions.includes(typeFilter) ? typeFilter : "All"}
+              onChange={setTypeFilter}
+            />
+          ) : null}
+        </Group>
         <Text size="sm" c="dimmed" mb="sm">
           Popular deep-sky targets (Messier plus well-known NGC/IC objects) you
           haven't shot yet, ranked by how well placed they are.
         </Text>
         <TargetTable
-          targets={fresh}
-          empty={`Nothing in the catalog clears your minimum altitude ${whenWord} — try lowering it above.`} />
+          targets={freshShown}
+          empty={freshShown.length === 0 && fresh.length > 0
+            ? "No targets of that type clear your minimum altitude — try another type or lower the floor."
+            : `Nothing in the catalog clears your minimum altitude ${whenWord} — try lowering it above.`} />
       </Paper>
     </Stack>
   );

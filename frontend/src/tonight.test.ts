@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  compassPoint, formatClock, formatMinutes, isoDate, minAltOptions,
-  MAX_PLAN_LOOKAHEAD_DAYS, moonCueForTarget, moonPhaseLabel, moonWindowNote,
-  planDateBounds, planNightLabel, scoreColor, splitTargets, usableWindowNote,
+  compassPoint, filterByTypeBucket, formatClock, formatMinutes, isoDate,
+  minAltOptions, MAX_PLAN_LOOKAHEAD_DAYS, moonCueForTarget, moonPhaseLabel,
+  moonWindowNote, objectTypeBucket, planDateBounds, planNightLabel, scoreColor,
+  splitTargets, typeFilterOptions, usableWindowNote,
 } from "./tonight";
 import type { PlannedTarget } from "./api/client";
 
@@ -243,5 +244,52 @@ describe("planNightLabel", () => {
   });
   it("is empty for an unparseable date", () => {
     expect(planNightLabel("garbage", now)).toBe("");
+  });
+});
+
+function typed(id: string, type: string): PlannedTarget {
+  return { ...mk(id, false), type };
+}
+
+describe("objectTypeBucket", () => {
+  it("coalesces the catalog's fine types into friendly buckets", () => {
+    expect(objectTypeBucket("galaxy")).toBe("Galaxy");
+    expect(objectTypeBucket("nebula")).toBe("Nebula");
+    expect(objectTypeBucket("planetary nebula")).toBe("Nebula");
+    expect(objectTypeBucket("supernova remnant")).toBe("Nebula");
+    expect(objectTypeBucket("open cluster")).toBe("Cluster");
+    expect(objectTypeBucket("globular cluster")).toBe("Cluster");
+    expect(objectTypeBucket("star cloud")).toBe("Cluster");
+    expect(objectTypeBucket("asterism")).toBe("Cluster");
+    expect(objectTypeBucket("double star")).toBe("Other");
+    expect(objectTypeBucket("")).toBe("Other");
+    expect(objectTypeBucket(null)).toBe("Other");
+  });
+});
+
+describe("typeFilterOptions", () => {
+  it("lists All plus the present buckets in canonical order", () => {
+    expect(typeFilterOptions([
+      typed("a", "open cluster"), typed("b", "galaxy"),
+      typed("c", "planetary nebula"), typed("d", "galaxy"),
+    ])).toEqual(["All", "Galaxy", "Nebula", "Cluster"]);
+  });
+  it("collapses to just All when a single (or no) bucket is present", () => {
+    expect(typeFilterOptions([typed("a", "galaxy"), typed("b", "galaxy")])).toEqual(["All"]);
+    expect(typeFilterOptions([])).toEqual(["All"]);
+  });
+});
+
+describe("filterByTypeBucket", () => {
+  const targets = [
+    typed("g", "galaxy"), typed("n", "nebula"), typed("c", "globular cluster"),
+  ];
+  it("filters to the chosen bucket", () => {
+    expect(filterByTypeBucket(targets, "Nebula").map((t) => t.id)).toEqual(["n"]);
+    expect(filterByTypeBucket(targets, "Cluster").map((t) => t.id)).toEqual(["c"]);
+  });
+  it("returns everything for All or a stale/unknown selection", () => {
+    expect(filterByTypeBucket(targets, "All")).toHaveLength(3);
+    expect(filterByTypeBucket(targets, "Nonexistent")).toHaveLength(3);
   });
 });
