@@ -60,6 +60,35 @@ when you take it.
   (min_alt 70 & 80; fails before / passes after). Newest-feature bug found by auditing the recently
   shipped nightplan path (v0.95–0.97), which the QA cycle hadn't covered yet.
 
+- ~~**Watcher silently drops an auto-ingest batch forever when the enqueue hand-off *raises*.**~~
+  — **FIXED v0.99.5** (Builder audit 2026-07-09; traced + reproduced with a regression test).
+  `Watcher.poll_once` consumes newly-stable files from the `StabilityTracker` (a one-shot contract —
+  they're never returned again) *before* invoking `_on_batch_ready`, and the only re-offer safety net
+  (`_pending_batch`) was set solely on a clean `accepted is False` return. If the callback **raised**
+  mid-hand-off — a transient `sqlite3.OperationalError: database is locked` / disk-full while
+  `submit_pipeline` persists the job — the exception propagated to the poll loop (which logs and
+  swallows it), leaving `_pending_batch` at its prior `False`; since the files were already consumed,
+  the batch was never re-offered and sat unimported in `incoming/` forever. `poll_once` now sets
+  `_pending_batch = True` before re-raising, so the next poll re-offers the batch once the callback
+  recovers, while the failure is still logged. Regression test
+  `tests/webapp/test_watcher.py::test_batch_reoffered_when_callback_raises` (fails before / passes
+  after). Sibling of the v0.81.7 "declined while busy" fix, found by the same watcher audit as the
+  v0.99.4 duplicate-pipeline fix.
+
+- ~~**Watcher enqueues a *duplicate* auto-ingest pipeline once ≥20 newer jobs push the running
+  one out of the recent-jobs window.**~~ — **FIXED v0.99.4** (Builder audit 2026-07-09; traced +
+  reproduced with a regression test). `webapp/main.py::_on_batch_ready` guarded against a
+  double-enqueue by scanning `jm.list(limit=20)` for an active `pipeline` — but `JobManager.list()`
+  merges live + DB jobs, sorts by `created_utc DESC` and truncates to the limit, so a long-running
+  auto-stack pipeline (old `created_utc`) is pushed past position 20 once 20 newer jobs
+  (queued/finished editor/stack/reprocess work) exist. The guard then saw *no* active pipeline and
+  enqueued a **second** one — a redundant full re-scan/QC/solve/stack pass (harmless because the
+  single worker serialises them and ingest is idempotent, but wasteful). It now uses the unbounded
+  in-memory `JobManager.active_of_kind("pipeline")` (which was purpose-built for exactly this and
+  can't be truncated away). Regression test `tests/webapp/test_batch_trigger.py`
+  (`test_on_batch_ready_defers_when_running_pipeline_is_past_the_recent_window`, fails before /
+  passes after). Found by an adversarial audit of the watcher stabilise→enqueue path.
+
 - ~~**Watcher can permanently drop a batch from auto-ingest when it stabilises during a
   running pipeline.**~~ — **FIXED v0.81.7** (see Shipped). `_on_batch_ready` now reports
   whether it enqueued a pipeline; when it declines because one is already `queued`/`running`,
@@ -84,6 +113,24 @@ when you take it.
 _(none of the traced *editor-engine* op bugs are open — that backlog stayed drained;
 the entry above is a stacking/autonomy↔editor classification bug found by dogfooding
 the real webapp stack→edit path.)_
+
+- **Watcher can leave a batch unimported when an *accepted* pipeline later fails before ingesting
+  (lower severity — self-recovers, so filed not blind-fixed).** *(traced, Builder audit 2026-07-09;
+  the sibling of the v0.99.4/v0.99.5 watcher fixes.)* When `_on_batch_ready` returns `True`, the
+  watcher treats the batch as consumed and clears `_pending_batch`. If that enqueued pipeline then
+  *fails before ingesting* (a scan/QC error, an OOM refusal, a cancel), the newly-stable files stay
+  in `incoming/` and in `StabilityTracker._stable` (kept by `self._stable &= seen` while they're
+  present), and are never re-offered on their own. **Why it's lower severity / not a blind fix:** it
+  self-recovers — the pipeline job body re-scans the *whole* incoming dir (`find_fits_files`), so the
+  next batch (any new file) or a manual "Scan incoming" re-ingests the stranded files, and ingest is
+  idempotent; only a site where no further files ever arrive *and* the user never manually scans is
+  stuck. And the clean fix is a **design change**, not a one-liner: the watcher would need to learn
+  whether the pipeline actually ingested (couple it to job outcomes, or re-arm `_pending_batch` on a
+  pipeline that ends in `error`/`cancelled` without importing), which wants deliberate design + its
+  own test rather than a reflexive patch. Candidate shapes for whoever takes it: (a) on a pipeline
+  finishing non-`done`, re-offer the last batch; (b) periodically re-arm if `incoming/` is non-empty
+  and no pipeline is active. (S–M design, autonomy/robustness) —
+  *Builder-filed 2026-07-09, traced.*
 
 - **Dead SExtractor skew-fallback guard in 4 background/leveling helpers (needs REAL-data
   threshold validation before fixing — NOT a blind Builder change).** *(traced + reproduced,

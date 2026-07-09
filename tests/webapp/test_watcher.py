@@ -168,3 +168,64 @@ def test_batch_pending_when_pipeline_busy_is_reoffered(tmp_path):
     clock.advance(31)
     assert w.poll_once() == set()
     assert len(calls) == 3
+
+
+def test_batch_reoffered_when_callback_raises(tmp_path):
+    """A batch whose hand-off *raises* is kept pending and re-offered, not dropped.
+
+    Regression: ``_on_batch_ready`` can raise mid-hand-off (a transient
+    ``database is locked`` / disk-full while enqueuing the pipeline). The
+    newly-stable files are already consumed by the stability tracker, so if the
+    exception left ``_pending_batch`` untouched (its prior ``False``) the batch
+    would never be re-offered and would sit unimported in ``incoming/`` forever.
+    ``poll_once`` now sets ``_pending_batch=True`` before re-raising, so the next
+    poll re-offers the batch once the callback recovers.
+    """
+    import os
+
+    import pytest
+
+    incoming = tmp_path / "incoming"
+    incoming.mkdir()
+    f = incoming / "a.fit"
+    f.write_bytes(b"x" * 100)
+
+    clock = FakeClock()
+    os.utime(f, (clock.t, clock.t))
+
+    fail = {"v": True}
+    calls: list[float] = []
+
+    def on_batch_ready() -> bool:
+        calls.append(clock.t)
+        if fail["v"]:
+            raise RuntimeError("database is locked")
+        return True
+
+    settings = SimpleNamespace(
+        resolved_incoming_dir=incoming, watch_quiet_period_s=30,
+        watch_poll_interval_s=300, watcher_enabled=True,
+    )
+    w = Watcher(
+        get_settings=lambda: settings,
+        on_batch_ready=on_batch_ready,
+        time_fn=clock,
+    )
+    # Not stable yet → no call.
+    assert w.poll_once() == set()
+    assert calls == []
+    # Stable now, but the callback raises → poll_once propagates (so the poll
+    # loop logs it) and the batch is kept pending rather than silently dropped.
+    clock.advance(31)
+    with pytest.raises(RuntimeError):
+        w.poll_once()
+    assert len(calls) == 1
+    # No *new* files, but the pending batch is re-offered; this time it succeeds.
+    fail["v"] = False
+    clock.advance(31)
+    assert w.poll_once() == set()
+    assert len(calls) == 2
+    # Accepted → no longer re-offered.
+    clock.advance(31)
+    assert w.poll_once() == set()
+    assert len(calls) == 2
