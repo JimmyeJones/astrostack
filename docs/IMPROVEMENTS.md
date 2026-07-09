@@ -160,6 +160,35 @@ the real webapp stack→edit path.)_
   pathological skew reverts — same real-data-gating as the SCNR / `sky_sigma` items in Image-quality
   below. Fix all four sites together (they share the bug). (S code / M validation, image-quality/correctness)
 
+_(Scout QA audit 2026-07-09 (v0.99.10 baseline, suite green **984 passed / 2 skipped**): led the rotation
+with a fresh adversarial re-read of the **stacking engine + its final-image edges** and the
+**recently-churned watcher hand-off** — `stack/{weighting,photometric,align,accumulator,output}.py`,
+`calibrate/apply.py`, `render/thumbnail.py` (asinh + STF stretch, NaN-preserving stride/downsample),
+`bg/coverage_leveling.py`, `edit/{proxy,pipeline}.py`, and the v0.99.4–0.99.7 watcher recovery logic
+(`webapp/watcher.py` + `main.py::_on_batch_ready`/`_stranded_batch_needs_retry`). Read for
+NaN=coverage violations, photometric sign, calibration double-subtract, weight/scale cross-pass symmetry,
+proxy↔export parity, and the stranded-batch retry-flag state machine. **No new verified bug found** —
+photometric scale multiplies by `ref/transp` (dim frames gain-matched *up*, correct); `apply_raw` subtracts
+dark **or** bias (never both) and never mutates its input; the min/max-k accumulator's ±inf-seeded k-sets and
+graceful count<2k+1 degradation are sound; `asinh_stretch`/`autostretch` compute all stats over finite
+pixels and render NaN black; `build_proxy` and `load_coverage` stride by the same integer step so the
+coverage-leveling op lines up proxy↔full-res; and the watcher's single-retry recovery flag can't loop
+(`watcher_pipeline_is_recovery` is consumed then reset in `_on_batch_ready`, re-armed only on a genuine
+`error`, never a `cancel`). **Numeric dogfood** of the real single-field OSC path (12 dithered subs → κ-σ
+quality-weighted `run_stack` → one-click `auto_recipe` → preview vs `_render_recipe_fullres` export):
+`is_mosaic` persists **False**, the Auto chain is the full sane sequence
+(final_gradient → color_calibrate → stretch → scnr → saturation → curves → sharpen; denoise correctly
+absent on a clean stack), **preview↔export parity exactly 0.000%** at proxy_scale 1.0, RGB medians balanced
+(0.258/0.220/0.259), median grey 0.242, and true (all-channel) black-clip only **0.046%** — healthy.
+**One traced trust/friendliness gap filed to Ideas (NOT a bug — no wrong *result*, and only reachable by
+mixing two targets in one batch):** a frame whose reprojected footprint doesn't intersect the reference
+canvas is silently skipped in `stacker.py::_pass` (L1384-1388) — no `errors` entry, no `excluded_frames`,
+only a quietly-lower `n_frames_used` — so an accidental co-mingled batch auto-stacks one pointing and drops
+the other's subs. Filed under Autonomy as a **pre-flight** RA/Dec-cluster guard; note v0.100.0 (merged in
+during this run) now *surfaces the count* post-hoc (NALIGNFL + the History Info amber line), closing the
+visibility half — the filed idea is scoped to the still-open *prevention* half. Consistent with the ~16
+prior clean engine/editor audits — the engine remains well-hardened.)_
+
 _(Scout QA audit 2026-07-09 (v0.99.10 baseline, suite green **978 passed / 2 skipped**): led the rotation
 with a fresh adversarial re-read of the **stacking engine + its final-image edges** —
 `stack/{weighting,photometric,reference,accumulator,align,mosaic,output,drizzle_path}.py`,
@@ -826,6 +855,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   careful classifier: **lucky_fraction** from FWHM spread (contentious — it drops signal, so
   weigh against quality-weighting); a background/gradient flatten nudge from a measured sky
   gradient.)_
+- **Pre-flight "this batch looks like two targets" guard — catch mixed pointings *before* the
+  walk-away stack wastes itself.** (S–M, autonomy/friendliness/trust) *(Scout-filed 2026-07-09, traced.)*
+  The still-open *preventive* complement to the now-**shipped** post-hoc pair (v0.100.0: "Persist & surface
+  honest per-run frame accounting" + "Proactively diagnose a large align-failure fraction", both in Shipped).
+  Root cause (verified): in `stacker.py::_pass` a frame whose reprojected footprint doesn't intersect the
+  reference canvas returns `None` from `align_one` and is dropped — v0.100.0 now *counts* those (NALIGNFL)
+  and the History Info panel flags a large align-failure fraction after the fact, which closes the
+  *visibility* gap. **What's still open is prevention:** for the "drop two targets in one batch" mistake, the
+  unattended auto-stack still picks one pointing as reference and burns the whole walk-away run producing a
+  half-complete stack the user only learns about *afterwards* from the amber count. Close the loop by acting
+  **pre-stack**: in the Process / auto-stack chain, cluster the frames' already-stored
+  `ra_center_deg`/`dec_center_deg`; if they split into two+ well-separated pointings that aren't a contiguous
+  mosaic (gap ≫ the ~1° Seestar FoV between clusters), auto-stack just the majority pointing (flagging the
+  rest) or refuse-with-guidance — instead of silently combining half the data. Purely local (RA/Dec are in
+  the project DB), additive, off-nothing (only fires on a clearly-bimodal set), and testable on a synthetic
+  two-pointing frame set. Distinct from the shipped diagnosis because it acts *before* the stack (no wasted
+  run) and keys on the sky coordinates we already have, not on the post-hoc align-failure count. **Smallest
+  safe first slice:** just the detection + an amber "your batch looks like 2 targets" pre-stack warning,
+  leaving the actual split/auto-select for a follow-up.
 - **Nudge `background_mode='luminance'` for extended-emission (nebula) targets.** (M,
   autonomy/image-quality) `StackOptions.background_mode` defaults to `per_channel` and has **no**
   data-driven nudge in the Stack form (unlike sigma/drizzle/quality-weight/etc.). `bg/per_frame.py`'s
