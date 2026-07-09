@@ -226,6 +226,44 @@ describe("TargetView QC-uncheckable callout", () => {
   });
 });
 
+describe("TargetView mixed-pointings callout", () => {
+  const cluster = (n: number, ra: number, dec: number, startId: number): Frame[] =>
+    Array.from({ length: n }, (_, i) =>
+      mkFrame(startId + i, {
+        ra_center_deg: ra + ((i % 3) - 1) * 0.3,
+        dec_center_deg: dec + ((i % 2) - 0.5) * 0.3,
+      }),
+    );
+
+  it("warns when the accepted+solved subs cluster into two pointings", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ reusable: true })]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      ...cluster(18, 10, 20, 1),
+      ...cluster(12, 83, -5, 100),
+    ]);
+
+    renderTarget();
+
+    expect(
+      await screen.findByText("This batch looks like 2 different targets"),
+    ).toBeInTheDocument();
+  });
+
+  it("stays quiet for a single pointing", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ reusable: true })]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(cluster(30, 10, 20, 1));
+
+    renderTarget();
+
+    await screen.findByText("M42");
+    expect(
+      screen.queryByText(/looks like .* different targets/),
+    ).not.toBeInTheDocument();
+  });
+});
+
 describe("TargetView new-subs-since-stack nudge", () => {
   it("nudges a restack when accepted+solved subs arrived after the last stack", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());

@@ -332,6 +332,45 @@ describe("StackView", () => {
     expect(screen.queryByText(/it can reject real signal as an outlier/)).not.toBeInTheDocument();
   });
 
+  it("warns when the accepted+solved subs look like two different targets", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
+    // Two well-separated pointings (RA 10 vs RA 83) in one folder.
+    const frames = [
+      ...Array.from({ length: 16 }, (_, i) => ({
+        ...mkFrame(i + 1), ra_center_deg: 10 + (i % 3) * 0.2, dec_center_deg: 20,
+      })),
+      ...Array.from({ length: 12 }, (_, i) => ({
+        ...mkFrame(i + 100), ra_center_deg: 83 + (i % 3) * 0.2, dec_center_deg: -5,
+      })),
+    ];
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    expect(
+      await screen.findByText("This batch looks like 2 different targets"),
+    ).toBeInTheDocument();
+  });
+
+  it("does not warn about mixed targets for a single pointing", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
+    const frames = Array.from({ length: 20 }, (_, i) => ({
+      ...mkFrame(i + 1), ra_center_deg: 10 + (i % 3) * 0.2, dec_center_deg: 20,
+    }));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    await waitFor(() => expect(screen.getByText("Start stacking")).toBeInTheDocument());
+    expect(
+      screen.queryByText(/looks like .* different targets/),
+    ).not.toBeInTheDocument();
+  });
+
   it("hints to tighten kappa on a very large stack", async () => {
     vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
       { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",

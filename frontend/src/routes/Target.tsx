@@ -14,6 +14,7 @@ import { notifications } from "@mantine/notifications";
 import { api, type Frame } from "../api/client";
 import { QueryError } from "../components/QueryError";
 import { detectSolveSetupProblem } from "../components/target/solveSetup";
+import { detectMixedPointings } from "../components/target/mixedPointings";
 
 const NUM = (v: number | null, digits = 2) =>
   v === null || v === undefined ? "—" : v.toFixed(digits);
@@ -445,6 +446,16 @@ export function TargetView() {
   // QC + Solve re-checks them (`only_new_qc=False`), so offer that one click.
   const qcUncheckable = useMemo(() => countQcUncheckable(list), [list]);
 
+  // Pre-flight mixed-pointing guard: the accepted+solved subs cluster into two
+  // (or more) well-separated pointings, so the folder probably holds frames from
+  // two different targets. Stacking would waste the run on one pointing and
+  // silently drop the rest. Suppressed while plate-solving is misconfigured (the
+  // RA/Dec we cluster on would be missing/unreliable then). Read-only detection.
+  const mixedPointings = useMemo(
+    () => (solveSetup ? null : detectMixedPointings(list)),
+    [solveSetup, list],
+  );
+
   // Keyboard grading: j/k or arrows to move, a to accept, r/x to reject. Skips
   // when typing in a field so notes/tags editing isn't hijacked.
   useEffect(() => {
@@ -621,6 +632,23 @@ export function TargetView() {
               Re-check these frames
             </Button>
           </Group>
+        </Alert>
+      ) : null}
+      {mixedPointings ? (
+        <Alert color="orange" variant="light" icon={<IconAlertTriangle size={18} />}
+          title={`This batch looks like ${mixedPointings.pointings} different targets`}>
+          <Text size="sm">
+            {mixedPointings.majority} of your accepted, plate-solved subs point at
+            one place and {mixedPointings.others} point about{" "}
+            {Math.round(mixedPointings.separationDeg)}° away — that usually means two
+            different targets' frames landed in the same folder (or some subs
+            plate-solved to the wrong place). If you stack now, only the frames
+            matching the reference pointing are combined and the other{" "}
+            {mixedPointings.others === 1 ? "one is" : `${mixedPointings.others} are`}{" "}
+            silently dropped, so you'd waste a stack on part of the data. Check each
+            frame's solved RA/Dec in the Frames table below and reject the ones that
+            don't belong (or split them into their own target) before stacking.
+          </Text>
         </Alert>
       ) : null}
       <Group justify="space-between" gap="xs">

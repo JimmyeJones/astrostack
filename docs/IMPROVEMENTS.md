@@ -857,6 +857,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   gradient.)_
 - **Pre-flight "this batch looks like two targets" guard — catch mixed pointings *before* the
   walk-away stack wastes itself.** (S–M, autonomy/friendliness/trust) *(Scout-filed 2026-07-09, traced.)*
+  **Interactive slice SHIPPED v0.101.0 (Target page) + v0.102.0 (Stack form):** the pre-flight detection +
+  amber warning on both surfaces a user reaches before stacking. A new pure `detectMixedPointings(frames)`
+  helper (`components/target/mixedPointings.ts`, mirroring `countQcUncheckable`/`countNewSubsSinceStack`)
+  single-linkage-clusters the accepted+solved subs' RA/Dec at a 3° link distance (wrap/pole-safe via unit
+  vectors; a contiguous mosaic stays one cluster, two well-separated targets split), and both the Target page
+  (v0.101.0) and the Stack form itself (v0.102.0, right next to the Stack button) show an orange "This batch
+  looks like N different targets" callout — with the majority/minority counts + their separation + guidance
+  to reject the odd frames — *before* the user clicks Process/Stack. Frontend-only, read-only, additive (no
+  backend/schema/default change). **Remaining (higher-bar) slice:** the *unattended*
+  action — in the Process / watcher auto-stack chain, refuse-with-guidance or auto-stack just the majority
+  pointing (flagging the rest) instead of silently combining half the data; that touches the hot path and the
+  walk-away default, so it wants its own careful build. Original write-up kept below for provenance.
   The still-open *preventive* complement to the now-**shipped** post-hoc pair (v0.100.0: "Persist & surface
   honest per-run frame accounting" + "Proactively diagnose a large align-failure fraction", both in Shipped).
   Root cause (verified): in `stacker.py::_pass` a frame whose reprojected footprint doesn't intersect the
@@ -1696,6 +1708,32 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.102.0** — Pre-flight "batch looks like two targets" guard on the Stack form too (autonomy/
+  friendliness/trust, priority 2–3; Builder 2026-07-09). Extends the v0.101.0 detection to the Stack form —
+  the surface a user is literally on when they click "Start stacking", so the warning sits right next to the
+  button they're about to press (with a link back to the Frames table to fix it). Refactored the pure
+  `detectMixedPointings` helper out of `Target.tsx` into a shared `components/target/mixedPointings.ts` module
+  (matching the `components/target/solveSetup.ts` convention) so both routes import one implementation; the
+  Target page (v0.101.0) is unchanged behaviourally. Frontend-only, read-only, additive. Dedicated pure-helper
+  unit tests moved to `mixedPointings.test.ts` (+ a three-pointing case + an RA=0-seam two-target case) and two
+  Stack-form component tests (warns on two pointings; quiet on one). (#PR)
+- **v0.101.0** — Pre-flight "this batch looks like two targets" guard, first slice (autonomy/friendliness/
+  trust, priority 2–3; Builder 2026-07-09). A new pure `detectMixedPointings(frames)` helper on the Target
+  page single-linkage-clusters the accepted, plate-solved subs' `ra_center_deg`/`dec_center_deg` (converted
+  to unit vectors, so RA-wrap and the poles need no special case) at a 3° link distance and flags when they
+  split into two or more *substantial* (≥ 5 frames each) well-separated pointings. A contiguous Seestar mosaic
+  (panels step ~1° and overlap) stays one cluster because single-linkage keys on the *gap between* groups, not
+  their total span, so it never trips; a lone mis-solved stray (< 5 frames) is ignored (the stack's own
+  outlier rejection already handles it). When it fires, an orange Target-page callout ("This batch looks like
+  N different targets") names the majority/minority split + their separation and tells the user to reject the
+  odd frames *before* stacking — closing the *prevention* half the v0.100.0 post-hoc accounting couldn't (the
+  unattended stack silently drops the minority pointing as NALIGNFL and the user only learns afterward). It
+  catches the "dropped two nights of different targets in one incoming folder" mistake pre-stack, so a
+  walk-away run isn't wasted on half the data. Frontend-only, read-only, additive — no backend/schema/API/
+  default change; suppressed while plate-solving is misconfigured (RA/Dec would be unreliable). Pure-helper
+  unit tests (single pointing, contiguous mosaic, two targets, lone stray, RA=0 wrap, unsolved/rejected/
+  coordinate-less exclusion) + two component tests. The *unattended*-chain action (refuse/auto-split) remains
+  as the higher-bar follow-up. (#PR)
 - **v0.100.0** — Honest per-run frame accounting + large-align-failure diagnosis (friendliness/trust,
   priorities 2–3; Builder 2026-07-09). The stacker now records how many subs it *attempted* to combine
   and how many couldn't be aligned, stamping `NOFFERED`/`NALIGNFL` into the master FITS header (the same

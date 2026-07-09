@@ -2,14 +2,17 @@ import {
   Accordion, Alert, Button, Center, Group, Loader, Paper, Progress,
   Select, Stack, Text, Title, Tooltip,
 } from "@mantine/core";
-import { IconFlask, IconPlayerPlay, IconTelescope } from "@tabler/icons-react";
+import {
+  IconAlertTriangle, IconFlask, IconPlayerPlay, IconTelescope,
+} from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
 import { api, type StackOptionField } from "../api/client";
 import { dependencyMet } from "../api/depends";
 import { StackOptionControl as FieldControl } from "../components/StackOptionControl";
+import { detectMixedPointings } from "../components/target/mixedPointings";
 import { useJobEvents } from "../hooks/useJobEvents";
 
 // Linear-interpolated percentile of an unsorted numeric sample (p in [0, 100]).
@@ -192,6 +195,17 @@ export function StackView() {
     }),
     onError: (e: Error) => notifications.show({ message: `Save failed: ${e.message}`, color: "red" }),
   });
+
+  // Pre-flight mixed-pointing guard: the accepted+solved subs cluster into two
+  // (or more) well-separated pointings, so the folder probably holds frames from
+  // two different targets. Stacking now would waste the run on one pointing and
+  // silently drop the rest — so warn right here, next to the Stack button. Same
+  // detection the Target page uses; read-only, advisory only. (Declared here,
+  // above the loading-guard early return, so the hook order stays stable.)
+  const mixedPointings = useMemo(
+    () => detectMixedPointings(frames.data ?? []),
+    [frames.data],
+  );
 
   // Also wait for `initialized` (the values seed) — but never block on it if the
   // defaults fetch errored, or the sync effect would never run and the form would
@@ -599,6 +613,27 @@ export function StackView() {
               Run QC + plate-solve
             </Button>
           </Stack>
+        </Alert>
+      ) : null}
+
+      {mixedPointings ? (
+        <Alert color="orange" variant="light" icon={<IconAlertTriangle size={18} />}
+          title={`This batch looks like ${mixedPointings.pointings} different targets`}>
+          <Text size="sm">
+            {mixedPointings.majority} of your accepted, plate-solved subs point at
+            one place and {mixedPointings.others} point about{" "}
+            {Math.round(mixedPointings.separationDeg)}° away — that usually means two
+            different targets' frames landed in the same folder (or some subs
+            plate-solved to the wrong place). If you stack now, only the frames
+            matching the reference pointing are combined and the other{" "}
+            {mixedPointings.others === 1 ? "one is" : `${mixedPointings.others} are`}{" "}
+            silently dropped, so you'd waste a stack on part of the data.{" "}
+            <Text component={Link} to={`/targets/${safe}`} c="blue" inherit>
+              Open the Frames table
+            </Text>{" "}
+            to check each frame's solved RA/Dec and reject the ones that don't
+            belong before stacking.
+          </Text>
         </Alert>
       ) : null}
 
