@@ -1397,6 +1397,30 @@ problems. Dogfood it every big-picture run and fix root causes.
   now reads "no star database (*.290 or *.1476) was found", matching the count (which already tallies
   both) and its own D-series `d05` example (a `.1476` file). Purely cosmetic (fires only in a genuine
   zero-database state); no behaviour or test change.
+- **Low-priority (diagnostics): the *drizzle*+quality_weighted coverage_min/max still reports Σweights,
+  not a frame count.** *(Builder-filed 2026-07-09, follow-up to the v0.99.6 `WeightedSumAccumulator`
+  fix.)* The v0.99.6 fix gave the standard weighted-sum path an honest unweighted `frame_coverage` for
+  the "N frames per pixel" diagnostics, and the min/max-reject path already reported a true count — but
+  the **drizzle** accumulator's `.coverage` is still Σ of drizzle weights, so a `drizzle=True` +
+  `quality_weighted=True` run understates coverage_min/max exactly as the standard path used to. Niche
+  (both are opt-in, and drizzle+weighting together is rare), and diagnostic-only (no image impact), so
+  low priority. Shape: track an unweighted per-output-pixel contribution count in `DrizzleStacker`
+  (increment where a frame's weight footprint is > 0), expose it like `frame_coverage`, and route it
+  through the same `frame_cov` branch in `run_stack`. (S, diagnostics/trust)
+- **Low-priority (traced, off-by-default): sub-pixel-refine darkens a ≤1–2 px band at an *interior*
+  coverage boundary.** *(Builder audit 2026-07-09, PLAUSIBLE — needs a real-frame repro.)* When
+  `subpixel_refine=True` (off by default) `align.py::_apply_subpixel_shift_windowed`'s order-1 data
+  shift blends real data with the NaN region's 0-fill at a footprint's *interior* NaN boundary, and
+  those pixels are kept as covered (only the fully-vacated ring is NaN'd), so a ~1 px ring at a
+  data/gap edge dims (measured 100→60 on a synthetic edge, align.py ~L462-472). The science region is
+  untouched and it's the same class as the documented `FRAME_EDGE_INSET_PX` tradeoff, so it's low
+  severity; the code comment ("shift is <1 pixel") is also inaccurate since shifts up to ~5 px are
+  applied. Candidate: also NaN (or inset) the interior-boundary ring, or mark it uncovered so it can't
+  darken the average. Validate on a real dithered set with `subpixel_refine` on. (S, image-quality/robustness)
+- **Trivial (doc): `calibrate/apply.py:119` comment says flat values ≤0.1·mean are "floored to 0.1"
+  but the code sets them to 1.0 (no correction).** *(Builder audit 2026-07-09.)* The behaviour is the
+  *safer* choice (a near-zero flat pixel gets no gain applied rather than a ×0.1→×10 amplification);
+  only the comment is imprecise. Fix the comment to match on the next pass through that file. (XS, doc)
 - Chip away at the ~127 pre-existing `ruff check .` findings (don't add new ones);
   consider wiring ruff into CI once the count is low. (L, correctness/maintainability)
 - ~~Add a retention/pruning policy for `jobs.sqlite`~~ — **done, then made
@@ -1483,6 +1507,23 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.99.6** — Honest per-pixel *frame count* for `coverage_min`/`coverage_max` under quality
+  weighting (stacking-engine hardening — current focus, Builder 2026-07-09). Found by a deep
+  adversarial audit of the stacking hot path (the audit otherwise came back clean of any
+  image-corrupting bug). `WeightedSumAccumulator.coverage` is Σ-of-weights, not a frame count, so
+  with `quality_weighted` on the persisted `coverage_min`/`coverage_max` diagnostics — surfaced to
+  the user as "coverage N–M **frames** per pixel" (History Info) — *understated* coverage (a
+  fully-covered 4-frame stack could report max 2; a heavily-weighted 100-frame stack could read
+  "0–6 frames"). The accumulator now also keeps a cheap 2-D **unweighted** contribution count
+  (`frame_coverage`), and `run_stack` reads it for the coverage_min/max scalars, so "frames per
+  pixel" is honest even when weights ≠ 1. `.coverage` (Σweights) is unchanged, so `level_by_coverage`
+  and the on-disk `master_coverage.fits` are byte-for-byte identical; an unweighted stack (the
+  default) is byte-for-byte identical too (count == Σweights). The min/max-reject path already
+  reported a true count; **drizzle+quality_weighted still reports Σweights** (a niche opt-in-on-opt-in
+  combo) — logged as a follow-up idea below. Regression tests: `tests/test_accumulator.py`
+  (`frame_coverage` semantics: unweighted parity, NaN gaps, windowed) + `tests/test_stack_pipeline.py::
+  test_quality_weighted_coverage_reports_frame_count_not_weight_sum` (a weighted 4-frame stack reports
+  coverage_max 4, not the weight sum; fails before / passes after).
 - **v0.99.3** — Plain-language help on every advanced Stack-form knob (friendliness — priority 3,
   Builder 2026-07-09). The advanced group of the Stack form was a wall of bare jargon: 14 fields
   (Background mode, Background/Final-gradient box size, Hot-pixel suppression + σ, Sub-pixel refine,

@@ -217,6 +217,36 @@ def test_stack_no_clip(tmp_path):
     assert result.coverage_max == 4
 
 
+def test_quality_weighted_coverage_reports_frame_count_not_weight_sum(tmp_path):
+    """Regression: under quality weighting the accumulator's coverage map is
+    Σ-of-weights, not a frame count, so the coverage_min/max diagnostics — shown
+    to the user as "N frames per pixel" — used to *understate* coverage (e.g. a
+    fully-covered 4-frame stack reporting max 2). They now read the unweighted
+    frame count, so a pixel covered by all N frames reports N regardless of the
+    weights applied."""
+    proj = _build_project(tmp_path, n=4)
+    try:
+        # Give the frames sharply different FWHM so quality weighting pulls the
+        # softer frames well below weight 1.0 (Σweights at a full-coverage pixel
+        # then rounds to < 4).
+        for i, f in enumerate(proj.iter_frames()):
+            proj.update_frame(f.id, fwhm_px=2.0 if i == 0 else 5.0)
+        result = run_stack(
+            proj,
+            StackOptions(quality_weighted=True, sigma_clip=True, max_workers=2,
+                         output_name="qw"),
+        )
+        run = next(iter(proj.iter_stack_runs()))
+    finally:
+        proj.close()
+
+    assert result.n_frames_used == 4
+    # Every interior pixel is covered by all 4 frames → honest frame count is 4,
+    # even though Σweights there is < 4. Before the fix this was < 4.
+    assert result.coverage_max == 4
+    assert run.coverage_max == 4
+
+
 def test_stack_writes_provenance_header(tmp_path):
     """The output FITS records how the stack was made (target, count, method)."""
     from astropy.io import fits

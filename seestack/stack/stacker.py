@@ -885,6 +885,13 @@ def run_stack(
     # (a memory-free trust signal stamped into the output header). None on paths
     # that don't run a data-driven κ-σ pass (mean / min-max / drizzle).
     rej_stats: RejectionStats | None = None
+    # Per-pixel *frame count* (2-D) for the coverage_min/max diagnostics, set by
+    # the weighted-sum branches. With quality weighting on, ``coverage`` there is
+    # Σweights (not a frame count), so the honest "N frames per pixel" figure
+    # comes from the accumulator's unweighted count instead. Left None on the
+    # min/max path (whose ``coverage`` is already a true count) and the drizzle
+    # path (which falls back to its weight map).
+    frame_cov: np.ndarray | None = None
 
     # ---- 3a. Drizzle path (alternate accumulator) --------------------------
     if options.drizzle:
@@ -1064,6 +1071,7 @@ def run_stack(
         n_used = min(n_used_p1, n_used_p2)
         result_image = wsum.result()
         coverage = wsum.coverage
+        frame_cov = wsum.frame_coverage
         rej_stats = RejectionStats(
             mode="sigma-clip",
             n_contributed=clip_counts["contributed"],
@@ -1098,6 +1106,7 @@ def run_stack(
             raise ValueError("no frames could be aligned")
         result_image = wsum.result()
         coverage = wsum.coverage
+        frame_cov = wsum.frame_coverage
 
     if cancel():
         return StackResult(
@@ -1212,7 +1221,13 @@ def run_stack(
         import json as _json
         from seestack.io.project import StackRunRow
 
-        cov_2d = coverage[..., 0] if coverage.ndim == 3 else coverage
+        # Frame-count map for the coverage_min/max diagnostics: the unweighted
+        # per-pixel count when we have it (so "N frames per pixel" stays honest
+        # under quality weighting), else the coverage map itself (already a true
+        # count on the min/max path; Σweights on drizzle). Identical to the old
+        # coverage[...,0] for an unweighted stack.
+        cov_2d = frame_cov if frame_cov is not None else (
+            coverage[..., 0] if coverage.ndim == 3 else coverage)
         applied_cal = calibration.describe() if calibration is not None else None
         if applied_cal in (None, "", "none"):
             applied_cal = None
@@ -1240,8 +1255,10 @@ def run_stack(
     except Exception as exc:  # noqa: BLE001 — history is non-critical
         log.warning("Could not record stack run in history: %s", exc)
 
-    # Coverage min/max for diagnostics — taken across all 3 channels.
-    cov_2d = coverage[..., 0]  # all channels share the same valid mask in our pipeline
+    # Coverage min/max for diagnostics — an honest *frame* count (unweighted)
+    # when available, so quality weighting doesn't understate it; else the
+    # coverage map (channels share the valid mask in our pipeline).
+    cov_2d = frame_cov if frame_cov is not None else coverage[..., 0]
     return StackResult(
         output_dir=project.project_dir / "output",
         fits_path=paths["fits"],

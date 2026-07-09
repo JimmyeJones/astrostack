@@ -42,6 +42,15 @@ class WeightedSumAccumulator:
         self.shape = shape
         self._sum = np.zeros(shape, dtype=dtype)
         self._weight = np.zeros(shape, dtype=dtype)
+        # Unweighted per-pixel contribution count (a true *frame* count), kept
+        # separately from ``_weight`` (which is Σ of per-frame weights). With
+        # quality weighting on, ``_weight`` is no longer a frame count, so the
+        # ``coverage_min``/``coverage_max`` diagnostics — reported to the user as
+        # "N frames per pixel" — must read this instead. A cheap 2-D uint32 plane
+        # (⅓ of one channel-plane); byte-for-byte equal to ``coverage[..., 0]``
+        # when every weight is 1.0 (the default), so unweighted stacks are
+        # unaffected. See :meth:`frame_coverage`.
+        self._count = np.zeros(shape[:2], dtype=np.uint32)
 
     def add(
         self,
@@ -78,6 +87,8 @@ class WeightedSumAccumulator:
         if weight != 1.0:
             valid_weighted = valid_weighted * np.float32(weight)
         self._weight += valid_weighted
+        covered = valid[..., 0] if valid.ndim == 3 else valid
+        self._count += covered.astype(np.uint32, copy=False)
 
     def add_window(
         self,
@@ -106,6 +117,8 @@ class WeightedSumAccumulator:
         # In-place add into the canvas sub-views.
         self._sum[y0:y0 + wh, x0:x0 + ww] += contribution
         self._weight[y0:y0 + wh, x0:x0 + ww] += valid_w
+        covered = valid[..., 0] if valid.ndim == 3 else valid
+        self._count[y0:y0 + wh, x0:x0 + ww] += covered.astype(np.uint32, copy=False)
 
     def result(self) -> np.ndarray:
         """Return ``sum / weight`` with empty pixels = NaN."""
@@ -116,8 +129,23 @@ class WeightedSumAccumulator:
 
     @property
     def coverage(self) -> np.ndarray:
-        """Per-pixel weight (number of contributing frames). Read-only view."""
+        """Per-pixel weight. Read-only view.
+
+        This is Σ of per-frame weights, which equals the contributing-frame
+        count only when every weight is 1.0 (no quality weighting). Sky
+        leveling wants this weight sum (it rounds it into coverage bins); the
+        *frame-count* diagnostics should use :attr:`frame_coverage` instead."""
         return self._weight
+
+    @property
+    def frame_coverage(self) -> np.ndarray:
+        """Per-pixel **frame count** (2-D), independent of quality weights.
+
+        Unlike :attr:`coverage` (Σ weights), this counts how many frames
+        actually contributed to each pixel, so ``coverage_min``/``coverage_max``
+        report honest "frames per pixel" even with quality weighting on. Equal
+        to ``coverage[..., 0]`` for an unweighted stack."""
+        return self._count
 
     @property
     def sum(self) -> np.ndarray:
