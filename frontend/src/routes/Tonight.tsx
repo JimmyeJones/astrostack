@@ -199,8 +199,8 @@ export function TonightView() {
       <Paper withBorder p="md">
         <Title order={4} mb="xs">Start something new tonight</Title>
         <Text size="sm" c="dimmed" mb="sm">
-          Bundled Messier targets you haven't shot yet, ranked by how well placed
-          they are.
+          Popular deep-sky targets (Messier plus well-known NGC/IC objects) you
+          haven't shot yet, ranked by how well placed they are.
         </Text>
         <TargetTable targets={fresh} />
       </Paper>

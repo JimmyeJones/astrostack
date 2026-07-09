@@ -63,7 +63,8 @@ include = ["seestack*", "webapp*"]
 [tool.setuptools.package-data]
 # The built React SPA (produced by `npm run build` into webapp/static).
 webapp = ["static/*", "static/assets/*"]
-# Bundled static data (the Messier catalog for the offline night planner).
+# Bundled static data (the Messier + curated NGC/IC catalogs for the offline
+# night planner).
 seestack = ["data/*.json"]
 
 [tool.ruff]
