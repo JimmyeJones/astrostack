@@ -11,7 +11,9 @@ Formula (geometric mean of up to five sub-weights, each in [0.1, 1.0]):
   - ``stars_factor        = frame_stars / median_stars`` — penalises
     cloud-affected frames whose star count dropped.
   - ``sky_factor          = (median_sky / frame_sky)^0.5`` — mild penalty for
-    very bright skies (moonlight, thin cloud).
+    very bright skies (moonlight, thin cloud). Guards ``frame_sky <= 0`` (a
+    black / corrupt sub, or a non-Seestar frame with no ADU pedestal) as
+    neutral rather than dividing by it, symmetrically with the other factors.
   - ``transparency_factor = frame_transp / median_transp`` — penalises hazy /
     thin-cloud frames whose bright stars dimmed (the ``transparency_score`` is
     the median flux of a frame's brightest stars). Normalised against the
@@ -95,7 +97,8 @@ def compute_frame_weights(
             factors.append(float(np.clip((best_fwhm / f.fwhm_px) ** 2, min_weight, 1.0)))
         if f.star_count is not None and median_stars is not None and median_stars > 0:
             factors.append(float(np.clip(f.star_count / median_stars, min_weight, 1.0)))
-        if f.sky_adu_median is not None and median_sky is not None and median_sky > 0:
+        if (f.sky_adu_median is not None and f.sky_adu_median > 0
+                and median_sky is not None and median_sky > 0):
             factors.append(float(np.clip((median_sky / f.sky_adu_median) ** 0.5, min_weight, 1.0)))
         if (f.transparency_score is not None and f.transparency_score > 0
                 and median_transp is not None and median_transp > 0):
