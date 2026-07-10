@@ -171,6 +171,11 @@ class JobOut(BaseModel):
     started_utc: str | None = None
     finished_utc: str | None = None
     error: str | None = None
+    # Stable canonical classification of a fatal error (memory_budget,
+    # no_solved_frames, …) stamped server-side by JobManager. Mirrors the SSE
+    # payload and Job.to_dict(); the frontend prefers it over string-matching the
+    # raw `error` text (webapp/jobs.py, Jobs.tsx). None when unclassified.
+    error_kind: str | None = None
     result: dict[str, Any] | None = None
 
 
