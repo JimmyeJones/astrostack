@@ -236,6 +236,51 @@ def test_reprocess_all_auto_binds_calibration_when_enabled(solved_library, monke
     assert all(o.dark_path and Path(o.dark_path).name == dark_name for o in captured)
 
 
+def test_reprocess_all_auto_binds_scaled_dark_with_bias(solved_library, monkeypatch):
+    """With auto_bind_calibration on and only an exposure-mismatched (but same-gain)
+    master dark plus a matching master bias, the unattended restack recovers the
+    dark by exposure-scaling it to the subs — binding dark_path + bias_path +
+    scale_dark_to_light rather than falling back to the (weaker) bias-only path."""
+    import numpy as np
+
+    from seestack.calibrate.masters import MasterMeta
+    from tests.webapp.conftest import FRAME_H, FRAME_W
+    from webapp import calibration
+
+    captured: list = []
+    _patch_run_stack(monkeypatch, capture=captured)
+    root = solved_library / "library"
+    # Subs are 10 s / gain 80; the only dark is a same-gain 30 s (exposure mismatch),
+    # and a matching master bias is present → scale the dark to 10 s.
+    dark = calibration.register_master(
+        root, name="Dark 30s",
+        array=np.full((FRAME_H, FRAME_W), 1.0, dtype=np.float32),
+        meta=MasterMeta("dark", 5, FRAME_W, FRAME_H, "median",
+                        exposure_s=30.0, gain=80.0))
+    bias = calibration.register_master(
+        root, name="Bias",
+        array=np.full((FRAME_H, FRAME_W), 0.5, dtype=np.float32),
+        meta=MasterMeta("bias", 5, FRAME_W, FRAME_H, "median",
+                        exposure_s=0.0, gain=80.0))
+    lib = Library.open_or_create(root)
+    try:
+        _seed_prior_runs_without_calibration(lib)
+        settings = Settings(data_root=str(solved_library), auto_ingest=False,
+                            auto_qc=False, auto_solve=False, auto_stack=False,
+                            auto_bind_calibration=True)
+        job = Job(kind="reprocess_all")
+        summary = _run_body(pipeline.submit_reprocess_all, settings, job)
+    finally:
+        lib.close()
+
+    assert summary["stacked"] == 2
+    assert len(captured) == 2
+    for o in captured:
+        assert o.dark_path and Path(o.dark_path).name == dark["filename"]
+        assert o.bias_path and Path(o.bias_path).name == bias["filename"]
+        assert o.scale_dark_to_light is True
+
+
 def test_reprocess_all_no_calibration_bind_when_disabled(solved_library, monkeypatch):
     """Default (off) — the autonomous restack stays uncalibrated even when a
     matching master exists, so the behaviour on a live install is unchanged."""

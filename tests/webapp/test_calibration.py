@@ -246,13 +246,16 @@ def test_auto_bind_binds_bias_only_when_no_dark(tmp_path):
     """A bias is only bound for the lights when no dark matched (a dark already
     carries the bias)."""
     root = tmp_path / "lib"
-    _register(root, "dark", exposure_s=300.0, gain=80.0)   # mismatched → dropped
+    # A gain-mismatched dark is dropped outright (not scalable — its gain is wrong,
+    # so exposure-scaling wouldn't fix it); the bias is bound for the lights.
+    _register(root, "dark", exposure_s=300.0, gain=400.0)  # gain-mismatched → dropped
     bias = _register(root, "bias", exposure_s=0.0, gain=80.0)
     masters = calibration.list_masters(root)
 
     bound = calibration.auto_bind_master_paths(
         root, masters, exposure_s=30.0, gain=80.0)
     assert "dark_path" not in bound
+    assert "scale_dark_to_light" not in bound
     assert Path(bound["bias_path"]).name == bias["filename"]
 
     # Add a matching dark → the bias is no longer bound (the dark supersedes it).
@@ -260,6 +263,53 @@ def test_auto_bind_binds_bias_only_when_no_dark(tmp_path):
     bound2 = calibration.auto_bind_master_paths(
         root, calibration.list_masters(root), exposure_s=30.0, gain=80.0)
     assert "dark_path" in bound2 and "bias_path" not in bound2
+
+
+def test_auto_bind_scales_exposure_mismatched_dark_via_bias(tmp_path):
+    """A dark that matches gain/temperature but *not* exposure is recovered by
+    exposure-scaling when a confident master bias is available — the unattended
+    equivalent of the Stack form's "select your master bias and scale the dark".
+    The bias is consumed by the scaling (``bias + (dark − bias)·t_light/t_dark``),
+    not bound as a separate light-frame bias, so this beats the bias-only fallback
+    (it recovers the thermal signal a bare bias can't)."""
+    root = tmp_path / "lib"
+    # Subs are 10 s / gain 80; the dark is a same-gain 30 s (exposure mismatch), and
+    # a matching master bias is present → scale the dark to 10 s.
+    dark = _register(root, "dark", exposure_s=30.0, gain=80.0)
+    bias = _register(root, "bias", exposure_s=0.0, gain=80.0)
+    masters = calibration.list_masters(root)
+
+    bound = calibration.auto_bind_master_paths(
+        root, masters, exposure_s=10.0, gain=80.0)
+    assert Path(bound["dark_path"]).name == dark["filename"]
+    assert Path(bound["bias_path"]).name == bias["filename"]
+    assert bound["scale_dark_to_light"] is True
+
+
+def test_auto_bind_no_dark_scaling_without_a_bias(tmp_path):
+    """A gain-matched but exposure-mismatched dark is left off entirely when there
+    is no master bias to scale it with — the stack stays dark-uncalibrated exactly
+    as before Task 2 (never a bare mismatched-exposure dark)."""
+    root = tmp_path / "lib"
+    _register(root, "dark", exposure_s=30.0, gain=80.0)  # right gain, wrong exposure
+    bound = calibration.auto_bind_master_paths(
+        root, calibration.list_masters(root), exposure_s=10.0, gain=80.0)
+    assert "dark_path" not in bound
+    assert "scale_dark_to_light" not in bound
+
+
+def test_auto_bind_no_scaling_when_dark_gain_mismatched(tmp_path):
+    """Exposure-scaling requires the dark's *gain* to confidently match too — a
+    dark that mismatches on both exposure and gain is never scaled (scaling can't
+    fix a wrong gain), so it drops through to the ordinary bias-only fallback."""
+    root = tmp_path / "lib"
+    _register(root, "dark", exposure_s=30.0, gain=400.0)  # wrong gain AND exposure
+    bias = _register(root, "bias", exposure_s=0.0, gain=80.0)
+    bound = calibration.auto_bind_master_paths(
+        root, calibration.list_masters(root), exposure_s=10.0, gain=80.0)
+    assert "dark_path" not in bound
+    assert "scale_dark_to_light" not in bound
+    assert Path(bound["bias_path"]).name == bias["filename"]
 
 
 def test_auto_bind_empty_when_no_masters(tmp_path):

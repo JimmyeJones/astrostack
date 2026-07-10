@@ -267,7 +267,7 @@ def auto_bind_master_paths(
     sensor_temp_c: float | None = None,
     width_px: int | None = None,
     height_px: int | None = None,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     """Calibration master *paths* safe to auto-apply in an *unattended* stack.
 
     :func:`recommend_masters` always returns the best *available* master of each
@@ -275,13 +275,16 @@ def auto_bind_master_paths(
     autonomous chain there is no human to see that warning, so this is stricter —
     it binds only a master we are *confident* about:
 
-    * a **dark** whose exposure matches the subs within 25% (the Stack form's own
-      mismatch threshold) *and* whose gain/temperature confidently match (a dark
-      encodes the gain-dependent bias pedestal, so a wrong-gain dark mis-subtracts
-      even at the right exposure). A dark with an unknown or mismatched exposure, or
-      a materially mismatched gain/temperature, is left off, so the stack stays
-      uncalibrated exactly as today rather than risking an over-/under-subtraction
-      from the wrong dark;
+    * a **dark** whose gain/temperature confidently match (a dark encodes the
+      gain-dependent bias pedestal, so a wrong-gain dark mis-subtracts even at the
+      right exposure) and whose exposure either matches the subs within 25% (the
+      Stack form's own mismatch threshold) *or* — when only the exposure is off —
+      can be exposure-scaled to the subs because a confident master bias is also
+      available (bound as ``dark_path`` + ``bias_path`` + ``scale_dark_to_light``,
+      the unattended equivalent of the form's "select your master bias and scale
+      the dark"). A dark with a materially mismatched gain/temperature, or a
+      mismatched exposure with no scalable bias, is left off, so the stack stays
+      uncalibrated exactly as today rather than risking an over-/under-subtraction;
     * the recommended **flat** and its **flat-dark** (flats are exposure
       independent, and the flat-dark is already distance-gated inside
       :func:`_recommend_flat_dark`);
@@ -295,10 +298,11 @@ def auto_bind_master_paths(
     contract. The dimension gate is skipped only when the subs' dimensions are
     unknown (then behaviour is unchanged from today).
 
-    Returns only the confident ``StackOptions`` path keys (``dark_path`` /
-    ``flat_path`` / ``flat_dark_path`` / ``bias_path``); an empty dict means
-    "leave the stack uncalibrated". Never raises — a master that can't be
-    resolved to an on-disk file is simply skipped.
+    Returns only the confident ``StackOptions`` keys (``dark_path`` / ``flat_path``
+    / ``flat_dark_path`` / ``bias_path``, plus ``scale_dark_to_light=True`` when a
+    dark is bound for exposure-scaling); an empty dict means "leave the stack
+    uncalibrated". Never raises — a master that can't be resolved to an on-disk file
+    is simply skipped.
     """
     rec = recommend_masters(masters, exposure_s=exposure_s, gain=gain,
                             sensor_temp_c=sensor_temp_c)
@@ -332,25 +336,50 @@ def auto_bind_master_paths(
         p = master_path(library_root, int(mid))
         return str(p) if p is not None else None
 
-    out: dict[str, str] = {}
+    out: dict[str, Any] = {}
 
-    # Dark — only when its exposure *and* its gain/temperature confidently match
-    # the subs (a dark encodes the gain-dependent bias pedestal, so a wrong-gain
-    # dark mis-subtracts even at the right exposure; unknown gain/temperature still
-    # passes, so the gate only tightens on a materially mismatched-gain dark).
+    # Dark — bind only when its gain/temperature confidently match the subs (a dark
+    # encodes the gain-dependent bias pedestal, so a wrong-gain dark mis-subtracts
+    # even at the right exposure; unknown gain/temperature still passes, so the gate
+    # only tightens on a materially mismatched-gain dark). Given that confident
+    # gain/temperature match:
+    #   * bind the dark directly when its exposure also matches within 25%;
+    #   * else — the dark's *exposure* is the only mismatch — recover it by
+    #     exposure-scaling to the subs, but only when a confident master bias is
+    #     also available and the dark's + subs' exposures are both known
+    #     (dark_path + bias_path + scale_dark_to_light, the engine's
+    #     ``bias + (dark − bias)·t_light/t_dark``). This is the unattended
+    #     equivalent of the interactive form's "select your master bias and scale
+    #     the dark" nudge; it recovers the thermal signal a bias-only fallback
+    #     can't. Without a confident bias (or a known exposure) the dark is left
+    #     off, so the stack stays uncalibrated exactly as today.
     dark_bound = False
     dark_id = rec.get("dark_master_id")
-    if dark_id is not None and exposure_s:
-        dm = by_id.get(int(dark_id))
-        dexp = dm.get("exposure_s") if dm else None
-        if (dexp and float(dexp) > 0
-                and abs(float(dexp) - exposure_s) / exposure_s
-                <= _AUTO_BIND_EXP_MISMATCH_FRAC
-                and _dark_match_confident(dm, gain=gain, sensor_temp_c=sensor_temp_c)):
+    dm = by_id.get(int(dark_id)) if dark_id is not None else None
+    if (dm is not None and exposure_s
+            and _dark_match_confident(dm, gain=gain, sensor_temp_c=sensor_temp_c)):
+        dexp = dm.get("exposure_s")
+        dexp_known = bool(dexp and float(dexp) > 0)
+        if dexp_known and (abs(float(dexp) - exposure_s) / exposure_s
+                           <= _AUTO_BIND_EXP_MISMATCH_FRAC):
             p = _path(dark_id)
             if p:
                 out["dark_path"] = p
                 dark_bound = True
+        elif dexp_known:
+            # Exposure mismatch, gain/temp confident: recover via exposure-scaling
+            # if a confident master bias (with matching dimensions) is available.
+            bias_id = rec.get("bias_master_id")
+            bm = by_id.get(int(bias_id)) if bias_id is not None else None
+            if bm is not None and _bias_match_confident(
+                    bm, gain=gain, sensor_temp_c=sensor_temp_c):
+                dp = _path(dark_id)
+                bp = _path(bias_id)
+                if dp and bp:
+                    out["dark_path"] = dp
+                    out["bias_path"] = bp
+                    out["scale_dark_to_light"] = True
+                    dark_bound = True
 
     # Flat (+ its flat-dark) — exposure independent, but only when its
     # gain/temperature confidently match the subs (a flat from a different rig
