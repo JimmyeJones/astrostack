@@ -186,10 +186,60 @@ def _subtract_background_luminance(
     return out
 
 
+# exclude_percentile ladder: how much of a box may be masked before the box is
+# dropped. We start at the tuned-for-look 80 and, only if the fit *fails* (every
+# box is more masked than that — a dense star/cluster field swells the object
+# mask past the threshold, or a sparse mosaic canvas is mostly uncovered NaN),
+# degrade to progressively more tolerant fits and finally a half-size box, so a
+# busy/sparse frame still gets a coarse flatten instead of the whole op failing.
+# A succeeding fit at 80 is untouched, so a normal frame is byte-for-byte
+# unchanged. Mirrors ``final_gradient._fit_background_2d``'s ladder (v0.89.2).
+_EXCLUDE_PERCENTILE_LADDER = (80.0, 95.0, 100.0)
+
+
+def _fit_bg2d_ladder(channel: np.ndarray, *, box_size: int, filter_size: int,
+                     sigma_clip, estimator, mask: np.ndarray) -> np.ndarray:
+    """``Background2D`` with the ``exclude_percentile`` degradation ladder.
+
+    On a dense field (object mask covers >80% of every box) or a sparse mosaic
+    proxy (mostly-uncovered NaN canvas), the strict ``exclude_percentile=80``
+    fit raises ``ValueError``. Rather than give up (dropping the op — a silent
+    no-op on the stack path, a hard editor failure on the editor path), we retry
+    with more tolerant percentiles and, last, a half-size box. Returns the fitted
+    background as a same-shape array; re-raises the last failure if none succeed.
+    """
+    from photutils.background import Background2D
+
+    h, w = channel.shape[:2]
+    box = max(1, min(int(box_size), h, w))
+    half = max(1, min(box // 2, h, w))
+    attempts: list[tuple[int, float]] = [(box, p) for p in _EXCLUDE_PERCENTILE_LADDER]
+    if half < box:
+        attempts.append((half, _EXCLUDE_PERCENTILE_LADDER[-1]))
+
+    last_exc: Exception | None = None
+    for fit_box, excl in attempts:
+        try:
+            bkg = Background2D(
+                channel,
+                box_size=(fit_box, fit_box),
+                filter_size=(filter_size, filter_size),
+                sigma_clip=sigma_clip,
+                bkg_estimator=estimator,
+                mask=mask,
+                exclude_percentile=excl,
+            )
+            return bkg.background.astype(np.float32, copy=False)
+        except Exception as exc:  # noqa: BLE001 — degrade, then re-raise the last
+            last_exc = exc
+    assert last_exc is not None
+    raise last_exc
+
+
 def _subtract_background_cpu(rgb: np.ndarray, options: "BackgroundOptions",
                              *, errors: list[str] | None = None) -> np.ndarray:
     from astropy.stats import SigmaClip
-    from photutils.background import Background2D, MMMBackground
+    from photutils.background import MMMBackground
 
     out = rgb.astype(np.float32, copy=True)
     sigma_clip = SigmaClip(sigma=options.sigma_clip_n)
@@ -208,14 +258,13 @@ def _subtract_background_cpu(rgb: np.ndarray, options: "BackgroundOptions",
 
     for c in range(3):
         try:
-            bkg = Background2D(
+            bg = _fit_bg2d_ladder(
                 out[..., c],
-                box_size=(options.box_size, options.box_size),
-                filter_size=(options.filter_size, options.filter_size),
+                box_size=options.box_size,
+                filter_size=options.filter_size,
                 sigma_clip=sigma_clip,
-                bkg_estimator=estimator,
+                estimator=estimator,
                 mask=obj_mask,
-                exclude_percentile=80.0,
             )
         except Exception as exc:  # noqa: BLE001 — degenerate inputs (constant arrays)
             if errors is not None:
@@ -225,7 +274,7 @@ def _subtract_background_cpu(rgb: np.ndarray, options: "BackgroundOptions",
                 return rgb.astype(np.float32, copy=True)
             log.warning("background fit failed for channel %d: %s; skipping", c, exc)
             continue
-        out[..., c] -= bkg.background.astype(np.float32, copy=False)
+        out[..., c] -= bg
 
     _zero_sky_per_channel(out)
     return out
