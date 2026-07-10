@@ -33,6 +33,11 @@ import numpy as np
 
 log = logging.getLogger(__name__)
 
+# Below this many *strided* sky pixels a per-level median is meaningless noise,
+# so we never level a level with fewer — even on a heavily-decimated proxy where
+# scaling ``min_pixels_per_level`` down would otherwise reach into single digits.
+_MIN_STRIDED_PIXELS = 12
+
 
 def level_by_coverage(
     rgb: np.ndarray,
@@ -42,6 +47,7 @@ def level_by_coverage(
     min_pixels_per_level: int = 200,
     dilate_object_mask_px: int = 4,
     smooth_across_levels: bool = True,
+    proxy_scale: float = 1.0,
 ) -> np.ndarray:
     """
     Equalise the sky background across every distinct coverage value.
@@ -58,11 +64,28 @@ def level_by_coverage(
         out of the per-coverage median calculation — that's stars and
         nebulosity, which should not bias the sky estimate.
     min_pixels_per_level
-        A coverage value with fewer than this many sky pixels is skipped
-        (no reliable median).
+        A coverage value with fewer than this many *full-resolution* sky pixels
+        is skipped (no reliable median).
+    proxy_scale
+        When called on a strided live-preview proxy (``proxy_scale > 1``), the
+        image and coverage map carry ~``proxy_scale²`` fewer pixels than the
+        full-resolution export, so the pixel-count floor is scaled down by the
+        same factor. Without this a coverage level with, say, 800 full-res sky
+        pixels has only ~50 on a ×4 proxy and would be **skipped in the preview
+        but leveled in the export** — a visible mosaic panel-step mismatch
+        between the live preview and the exported image. Default ``1.0`` (the
+        full-res export) leaves the behaviour unchanged.
     """
     from astropy.stats import sigma_clipped_stats
     from scipy.ndimage import binary_dilation
+
+    # Select the *same set* of coverage levels the full-res export would, by
+    # gating on the full-resolution-equivalent pixel count: a strided proxy pixel
+    # stands in for ``step²`` full-res pixels, so scale the floor by 1/step²
+    # (never below a handful of pixels — a median over 3 pixels is noise).
+    step = max(1, int(round(float(proxy_scale))))
+    effective_min = max(
+        _MIN_STRIDED_PIXELS, int(round(min_pixels_per_level / (step * step))))
 
     out = rgb.astype(np.float32, copy=True)
 
@@ -110,12 +133,12 @@ def level_by_coverage(
     offsets: dict[int, list[float]] = {}  # level -> [R_off, G_off, B_off]
     sky_counts: dict[int, int] = {}
     for level, count in zip(levels, counts):
-        if level <= 0 or count < min_pixels_per_level:
+        if level <= 0 or count < effective_min:
             continue
         region_mask = (cov_int == level) & valid_pix
         region_sky_mask = region_mask & ~object_mask
         n_sky = int(region_sky_mask.sum())
-        if n_sky < min_pixels_per_level:
+        if n_sky < effective_min:
             continue
         ch_offsets: list[float] = []
         ok = True

@@ -47,6 +47,23 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**Editor preview↔export parity: the mosaic "Coverage leveling" op skips thin panels in the live
+  preview that it levels in the exported image.**~~ — **FIXED v0.103.16** (Builder audit 2026-07-10;
+  reproduced + regression-tested before fixing). `bg/coverage_leveling.py::level_by_coverage` gates each
+  coverage level on a fixed `min_pixels_per_level=200` *absolute* sky-pixel count, but the editor calls it
+  with two different coverage maps: the full-res export uses the native map (`load_coverage(step=1)`), while
+  the live preview uses the map **strided by `round(proxy_scale)`** (`_proxy_coverage` mirrors `build_proxy`).
+  So a mosaic coverage level with, e.g., 800 full-res sky pixels has only ~50 on a ×4 proxy — **leveled in the
+  export (800 ≥ 200) but skipped in the preview (50 < 200)**, leaving a visible rectangular panel-step in the
+  live preview that the exported picture doesn't have (a priority-1 preview≠export mismatch). `level_by_coverage`
+  now takes a `proxy_scale` (default 1.0 → unchanged export behaviour) and scales the floor by 1/step² so the
+  **same set of coverage levels is selected at both resolutions** (with a small absolute floor so a median is
+  never computed over a handful of strided pixels); `edit/ops/background.py::_level_coverage` passes
+  `ctx.proxy_scale`. Regression test `tests/test_coverage_leveling.py::test_proxy_scale_matches_full_res_level_selection`
+  (a thin panel leveled full-res but skipped on a ×4 proxy under the old floor; leveled under the fix — fails
+  before / passes after). Additive, upgrade-safe (no config/schema/API change; the export path is byte-for-byte
+  unchanged). Found by an adversarial audit of the editor ops' proxy↔export parity.
+
 - ~~**'Tonight' planner 500s (ZeroDivisionError) when the min-altitude floor is exactly 70°.**~~
   — **FIXED v0.97.1** (Builder audit 2026-07-09; reproduced end-to-end before fixing). The night
   planner's observability `_score` computed its altitude term as `(max_alt − min_alt) / (70.0 −
@@ -679,6 +696,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   pipeline no longer skips any op. What remains here is *responsiveness* (heavy
   ops on the proxy can lag) and closing any remaining proxy↔export look
   differences — chase those, but never by hiding an action again. (S–M, editor)
+  _(Builder note 2026-07-10: closed the big proxy↔export gap in the mosaic
+  "Coverage leveling" op — its per-level pixel-count floor is now scaled by
+  proxy_scale so the same panels are leveled in preview and export, v0.103.16
+  (see Bugs → fixed). A **smaller, second-order parity nuance remains in the same
+  op** and is filed here rather than blind-fixed: `level_by_coverage`'s object-mask
+  dilation (`dilate_object_mask_px=4`) is a **fixed pixel count applied at both
+  resolutions**, so on a ×N proxy it grows the star/nebula mask by 4 strided px ≈
+  4·N full-res px — a wider sky exclusion than the export's 4 full-res px, which
+  can shift a per-level sky median slightly between preview and export. Low
+  severity (the median is robust to a few extra masked edge pixels, and the offset
+  it shifts is tiny), so it didn't clear the bar for churn this run. If a future
+  run touches this op, scale the dilation like the other pixel params
+  (`round(4/step)`, matching `ctx.scaled_px`), guarding the step≥8 case where it
+  rounds to 0. (S, editor/parity))_
 - ~~**Give the Auto recipe a gentle contrast curve (as the presets already do)**~~ — **shipped v0.73.0** (see Shipped). The one-click Auto recipe now appends a data-driven `tone.curves` (auto contrast) after the saturation boost, matching the built-in galaxy/nebula presets.
 - ~~**Reflect the auto-contrast curve's shape in the Curves widget (v0.73.0 follow-up).**~~
   — **shipped v0.74.4** (see Shipped). Both options landed: (a) when `auto` is on and the

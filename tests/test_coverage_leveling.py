@@ -88,6 +88,50 @@ def test_leveling_skips_thinly_covered_levels():
     np.testing.assert_array_equal(out[0, :5, :], rgb[0, :5, :])
 
 
+def test_proxy_scale_matches_full_res_level_selection():
+    """Preview↔export parity: a mosaic coverage level that is leveled in the
+    full-resolution export must also be leveled on the strided live-preview proxy.
+
+    The proxy is decimated by ``step = round(proxy_scale)`` (exactly how
+    ``build_proxy``/``load_coverage`` stride), so a level with N full-res sky
+    pixels has only ~N/step² on the proxy. With a fixed ``min_pixels_per_level``
+    floor a thin panel leveled in the export (N ≥ 200) is *skipped* on a ×4 proxy
+    (~N/16 < 200), leaving a visible panel-step in the preview that the export
+    doesn't have. Passing ``proxy_scale`` scales the floor by 1/step² so the same
+    levels are selected at both resolutions.
+    """
+    rng = np.random.default_rng(0)
+    h = w = 240
+    rgb = rng.normal(0.0, 0.03, size=(h, w, 3)).astype(np.float32)
+    coverage = np.full((h, w), 6, dtype=np.int32)
+    # A thin panel at a distinct coverage: 60×12 = 720 full-res sky pixels
+    # (≥200 → leveled in the export), but only 15×3 = 45 after striding by 4.
+    coverage[0:60, 0:12] = 3
+    rgb[0:60, 0:12, :] += 0.02  # its sky sits above the rest of the canvas
+    panel_full = coverage == 3
+
+    proxy = rgb[::4, ::4].copy()
+    cov_proxy = coverage[::4, ::4]
+    panel_proxy = cov_proxy == 3
+    assert int(panel_proxy.sum()) == 45  # below the fixed 200 floor, above 200/16
+
+    # Full-res export levels the thin panel's sky to ~0.
+    export = level_by_coverage(rgb.copy(), coverage, object_sigma=5.0)
+    assert abs(float(np.median(export[panel_full]))) < 0.005
+
+    # Old behaviour (no proxy_scale): the strided panel drops below the fixed 200
+    # floor and is skipped, so its offset survives — the preview↔export mismatch.
+    skipped = level_by_coverage(proxy.copy(), cov_proxy,
+                                object_sigma=5.0, proxy_scale=1.0)
+    assert float(np.median(skipped[panel_proxy])) > 0.015
+
+    # With the proxy scale, the floor is scaled to full-res-equivalent pixels, so
+    # the same panel is leveled on the proxy — matching the export.
+    fixed = level_by_coverage(proxy.copy(), cov_proxy,
+                              object_sigma=5.0, proxy_scale=4.0)
+    assert abs(float(np.median(fixed[panel_proxy]))) < 0.005
+
+
 def test_uncovered_region_is_left_alone():
     """coverage == 0 pixels (uncovered canvas) must not be touched."""
     rng = np.random.default_rng(1)
