@@ -68,7 +68,13 @@ def _sigma_clip_mean(stack: np.ndarray, sigma: float) -> np.ndarray:
     """
     med = np.median(stack, axis=0)
     mad = np.median(np.abs(stack - med), axis=0) * 1.4826  # MAD → σ estimate
-    tol = sigma * np.where(mad > 0, mad, np.inf)  # mad==0 → keep all (no spread)
+    # mad==0 means a *majority* of frames sit exactly at the median — NOT that
+    # there are no outliers. A minority cosmic-ray/hot-pixel spike routinely
+    # coexists with mad==0 (common on quantised bias/dark frames), so substituting
+    # +inf here would keep the spike and bake it into the master. Use tol=0 instead:
+    # only the exact-median samples survive, so the result degrades to the (robust)
+    # median at those pixels and the spike is correctly rejected.
+    tol = sigma * np.where(mad > 0, mad, 0.0)
     keep = np.abs(stack - med) <= tol
     # Mean over kept samples; fall back to the median where nothing survived.
     kept = np.where(keep, stack, np.nan)
