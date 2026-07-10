@@ -1637,18 +1637,34 @@ problems. Dogfood it every big-picture run and fix root causes.
 - **Scout to vet: two latent (not-yet-active) robustness traps flagged by the 2026-07-10 engine audit
   that shipped the v0.103.2 drizzle-reject fix — filed, not blind-fixed, because neither is traceable
   to a concrete wrong result *today*.** (S each, correctness/robustness)
-  (1) `seestack/edit/ops/background.py` `_subtract`/`_final_gradient` re-raise a `RuntimeError` when their
-  errors collector is non-empty. `final_gradient` degrades first (exclude_percentile ladder + box clamp,
-  v0.89.2/v0.84.12), but the *per-frame* `bg/per_frame.py::_subtract_background_cpu` path uses a fixed
-  `exclude_percentile=80` with **no** ladder — a pathologically dense/small field could make `Background2D`
-  raise → errors populated → the editor op raises a hard "Gradient removal" failure. Confirm whether the
-  per-frame box clamp already prevents it on any real ≥1080 px Seestar frame before touching it (may be a
-  non-issue like the v0.84.12 fix's full-size case). (2) `seestack/calibrate/apply.py::apply_raw` returns the
+  ~~(1) `seestack/edit/ops/background.py` `_subtract`/`_final_gradient` re-raise a `RuntimeError` when their
+  errors collector is non-empty … the *per-frame* `bg/per_frame.py::_subtract_background_cpu` path uses a fixed
+  `exclude_percentile=80` with **no** ladder.~~ — **FIXED v0.103.3** (Builder 2026-07-10; reproduced
+  end-to-end before fixing, then vetted per the note). Trap (1) *is* reachable: a **sparse mosaic proxy** —
+  a covered strip that's <20% of its bounding canvas, the rest uncovered NaN — makes the object mask
+  (`| ~finite`) cover >80% of every box, so the strict `exclude_percentile=80` fit raises and the editor's
+  `background.subtract` op **hard-failed** ("background fit failed: All boxes contain <= … unmasked or finite
+  pixels") while its sibling `final_gradient` (which got the ladder in v0.89.2) degraded fine — a real
+  editor inconsistency, not just the dense-field case. (The per-frame **box clamp** already prevents the
+  *too-few-boxes* failure on any real ≥1080 px frame; it does **not** prevent this *too-much-masked* one.)
+  `_subtract_background_cpu` now fits through the same `exclude_percentile` ladder (80 → 95 → 100, then a
+  half-size box) via a new `_fit_bg2d_ladder` helper mirroring `final_gradient._fit_background_2d`. The
+  strict 80 stays the first rung, so a normal frame's result is byte-for-byte unchanged (covers per-channel
+  *and* luminance mode, and the stack path — which merely stopped silently skipping every channel). Regression
+  tests `tests/test_bg_modes.py::test_sparse_mosaic_canvas_degrades_instead_of_failing` (asserts the strict-80
+  fit really raises, then that the op surfaces no error and flattens the covered strip while preserving NaN)
+  + `test_ladder_first_rung_matches_strict_fit` (byte-for-byte parity on a normal frame). Additive,
+  upgrade-safe (no config/DB/API/on-disk change).
+  **(2) still open:** `seestack/calibrate/apply.py::apply_raw` returns the
   *caller's own* float32 array when `is_empty` (no masters apply) — `asarray(...).astype(copy=False)` is a
   no-op, so the documented "returns a new array" contract is violated by aliasing. No corruption today (every
   traced consumer treats it read-only), but a future in-place consumer would mutate shared frame data. A
   one-line `np.array(..., copy=True)` on the empty path would harden the contract; verify no hot-path
-  double-copy cost first.
+  double-copy cost first. **Builder note 2026-07-10:** the stacker sets `calibration = None` when
+  `is_empty` (`stacker.py:737-738`), so the hot path never even *calls* `apply_raw` on an empty bundle —
+  the aliasing is unreachable from the stack/align path today, which is why it's a pure latent
+  contract-hardening (and why the "double-copy cost" concern is moot: the empty branch is never on the hot
+  path). Low value; left for whenever a run is already in that file.
 - ~~Add a retention/pruning policy for `jobs.sqlite`~~ — **done, then made
   configurable** (`JobManager._evict_old` + the `job_history_limit` setting,
   v0.51.1). (S, scale)

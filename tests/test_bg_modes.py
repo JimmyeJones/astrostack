@@ -73,3 +73,81 @@ def test_luminance_subtracts_same_shape_from_all_channels():
     # → ~14 in the difference). Looser bound to handle small statistical
     # variations from the per-channel median offset.
     assert np.std(rg_diff) < 25
+
+
+def _sparse_mosaic_canvas(h: int = 400, w: int = 400) -> np.ndarray:
+    """A mosaic proxy whose covered area is a thin diagonal strip (~10% of the
+    bounding canvas) and the rest is uncovered NaN. The object mask ``| ~finite``
+    then covers >80% of every default box, which makes ``Background2D`` raise at
+    the strict ``exclude_percentile=80`` — exactly the case the ladder degrades."""
+    rng = np.random.default_rng(0)
+    img = np.full((h, w), np.nan, dtype=np.float32)
+    for i in range(h):
+        lo = int(i * 0.9)
+        hi = min(w, lo + 40)
+        # A tight sky population inside the covered strip; the rest is NaN.
+        img[i, lo:hi] = rng.normal(0.3, 0.02, size=hi - lo).astype(np.float32)
+    return np.stack([img, img, img], axis=-1)
+
+
+def test_sparse_mosaic_canvas_degrades_instead_of_failing():
+    """A mostly-uncovered mosaic proxy masks >80% of every box, so the strict
+    ``exclude_percentile=80`` fit raises. The per-frame op used to hard-fail on
+    the editor path (``background.subtract`` raised "background fit failed") and
+    silently skip every channel on the stack path; it must now degrade to a
+    coarse flatten — no surfaced error, covered sky flattened, NaN preserved."""
+    rgb = _sparse_mosaic_canvas()
+    assert np.isnan(rgb[..., 0]).mean() > 0.8
+
+    # Sanity: the strict single-attempt fit the old code did really does fail
+    # here, so this is a genuine before/after regression test.
+    from astropy.stats import SigmaClip
+    from photutils.background import Background2D, MMMBackground
+
+    from seestack.bg.per_frame import _build_object_mask_for_bg
+
+    obj_mask = _build_object_mask_for_bg(rgb)
+    with pytest.raises(ValueError):
+        Background2D(
+            rgb[..., 0], box_size=(100, 100), filter_size=(3, 3),
+            sigma_clip=SigmaClip(sigma=3.0), bkg_estimator=MMMBackground(),
+            mask=obj_mask, exclude_percentile=80.0,
+        )
+
+    for mode in (MODE_PER_CHANNEL, MODE_LUMINANCE):
+        errors: list[str] = []
+        out = subtract_background(
+            rgb, BackgroundOptions(mode=mode, box_size=100), use_gpu=False,
+            errors=errors,
+        )
+        assert errors == [], f"{mode}: {errors}"
+        assert out.shape == rgb.shape
+        # NaN (uncovered) stays NaN — coverage semantics preserved.
+        covered = np.isfinite(rgb[..., 0])
+        assert np.array_equal(np.isfinite(out[..., 0]), covered)
+        # The op actually flattened the covered strip's sky toward zero rather
+        # than returning the input unchanged.
+        assert np.nanmedian(out[..., 1][covered]) < np.nanmedian(rgb[..., 1][covered])
+
+
+def test_ladder_first_rung_matches_strict_fit():
+    """A frame whose fit succeeds at the tuned ``exclude_percentile=80`` must be
+    byte-for-byte unchanged by the degradation ladder — the retry only kicks in
+    *after* the strict fit fails, so normal frames stay identical."""
+    from astropy.stats import SigmaClip
+    from photutils.background import Background2D, MMMBackground
+
+    from seestack.bg.per_frame import _build_object_mask_for_bg, _fit_bg2d_ladder
+
+    rgb = _frame_with_gradient_and_object()
+    obj_mask = _build_object_mask_for_bg(rgb.astype(np.float32, copy=True))
+    ladder = _fit_bg2d_ladder(
+        rgb[..., 1], box_size=32, filter_size=3,
+        sigma_clip=SigmaClip(sigma=3.0), estimator=MMMBackground(), mask=obj_mask,
+    )
+    strict = Background2D(
+        rgb[..., 1], box_size=(32, 32), filter_size=(3, 3),
+        sigma_clip=SigmaClip(sigma=3.0), bkg_estimator=MMMBackground(),
+        mask=obj_mask, exclude_percentile=80.0,
+    ).background.astype(np.float32, copy=False)
+    np.testing.assert_array_equal(ladder, strict)
