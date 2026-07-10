@@ -34,6 +34,33 @@ def test_constant_image_passthrough():
     np.testing.assert_array_equal(out, rgb)
 
 
+def test_suppression_still_works_with_nan_coverage_gap():
+    """Regression: a NaN coverage gap (mosaic / partial overlap) must not disable
+    the whole suppression. Previously the noise floor was a non-NaN-aware median
+    over the residual, so any NaN made the threshold NaN and the pass no-op'd —
+    every hot/cold pixel survived into the stack."""
+    rng = np.random.default_rng(3)
+    rgb = rng.normal(loc=100.0, scale=3.0, size=(64, 64, 3)).astype(np.float32)
+    rgb[20, 30, :] = 6000.0  # hot pixels away from the gap
+    rgb[40, 50, :] = 6000.0
+    rgb[:, :10, :] = np.nan  # an uncovered region (NaN = no coverage)
+    out = suppress_hot_cold_pixels(rgb, sigma=5.0, use_gpu=False)
+    # Hot pixels are repaired to the local sky despite the gap (were ~6000 before).
+    assert out[20, 30, 1] < 500
+    assert out[40, 50, 1] < 500
+    # The coverage gap is preserved as NaN (never turned into zeros/finite values).
+    assert np.isnan(out[5, 5, 0])
+    assert np.isfinite(out[:, 10:, :]).all()
+
+
+def test_all_nan_channel_is_left_untouched():
+    """A fully-uncovered channel has no valid residual to estimate noise from —
+    it must be skipped cleanly, not crash or emit spurious values."""
+    rgb = np.full((16, 16, 3), np.nan, dtype=np.float32)
+    out = suppress_hot_cold_pixels(rgb, sigma=5.0, use_gpu=False)
+    assert np.isnan(out).all()
+
+
 def test_many_hot_pixels():
     """Field of dozens of hot pixels should all get suppressed."""
     rng = np.random.default_rng(2)

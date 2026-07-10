@@ -62,10 +62,18 @@ def _suppress_cpu(rgb: np.ndarray, sigma: float) -> np.ndarray:
     for c in range(3):
         med3 = median_filter(out[..., c], size=3)
         residual = out[..., c] - med3
-        sigma_est = 1.4826 * np.median(np.abs(residual))
+        # Estimate the noise floor over VALID residuals only. NaN = "no coverage"
+        # (mosaic / partial-overlap gaps), and a plain median over a residual that
+        # contains any NaN returns NaN, which makes the threshold NaN and turns the
+        # whole suppression into a silent no-op. Restrict to finite residuals, and
+        # only ever flag/replace finite-residual pixels so gaps stay NaN.
+        finite = np.isfinite(residual)
+        if not finite.any():
+            continue
+        sigma_est = 1.4826 * float(np.median(np.abs(residual[finite])))
         if sigma_est <= 0:
             continue
-        mask = np.abs(residual) > sigma * sigma_est
+        mask = finite & (np.abs(residual) > sigma * sigma_est)
         out[..., c] = np.where(mask, med3, out[..., c])
     return out
 
@@ -79,9 +87,14 @@ def _suppress_gpu(rgb: np.ndarray, sigma: float) -> np.ndarray:
     for c in range(3):
         med3 = cp_median_filter(rgb_gpu[..., c], size=3)
         residual = rgb_gpu[..., c] - med3
-        sigma_est = 1.4826 * float(cp.median(cp.abs(residual)))
+        # NaN-aware noise floor over valid residuals only (see the CPU path) — a
+        # plain median over a gap-containing residual is NaN and no-ops the pass.
+        finite = cp.isfinite(residual)
+        if not bool(finite.any()):
+            continue
+        sigma_est = 1.4826 * float(cp.median(cp.abs(residual[finite])))
         if sigma_est <= 0:
             continue
-        mask = cp.abs(residual) > sigma * sigma_est
+        mask = finite & (cp.abs(residual) > sigma * sigma_est)
         out[..., c] = cp.where(mask, med3, rgb_gpu[..., c])
     return cp.asnumpy(out)
