@@ -1142,6 +1142,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   *tightens* what auto-bind will apply), testable on `auto_bind_master_paths` in isolation. Closes the flat's
   "confident only" gap in the v0.99.0 auto-bind contract. _(Correction, Scout 2026-07-10: this was **not** the
   last such gap — the **bias** was still ungated; that was closed in v0.103.10.)_
+- **Auto-bind considers only the *single* top-ranked dark, so a gain-mismatched-but-exposure-perfect dark can
+  suppress a gain-matched *scalable* one — leaving a walk-away stack uncalibrated when a usable dark existed.**
+  (S–M, autonomy/image-quality) *(Builder-audit-noted 2026-07-10; low urgency — the effect is
+  under-calibration, i.e. the "leave uncalibrated rather than risk anything" safe direction, never wrong
+  pixels — so filed, not blind-fixed. Needs a real-library validation before building.)* `recommend_masters`
+  scores each dark with `_match_distance` (exposure ×3 + gain + temp) and returns **only** the lowest-distance
+  dark as `best["dark"]`; `auto_bind_master_paths` then applies the confidence + (v0.103.12) exposure-scaling
+  gates to *that one pick* and never falls back to a different library dark. So in a library holding both (a) a
+  dark at the subs' exact exposure but a different **gain**, and (b) a gain/temp-matched dark at a different
+  exposure with a matching **bias** (scalable via `bias + (dark−bias)·t_light/t_dark`), whichever has the lower
+  combined distance wins — and if (a) wins the ranking but then fails the gain gate, auto-bind binds **nothing**
+  for the dark even though (b) was a perfectly usable scaled dark. The v0.103.12 scaling recovery only fires
+  when the *top-ranked* dark is the gain-matched one. **Shape:** when the top dark fails its gate, let auto-bind
+  consider the next-best dark that *passes* (confident gain/temp + either exposure-match or scalable-via-bias)
+  rather than giving up — i.e. rank darks by "bindable-ness", not raw distance alone. Purely local, additive,
+  off-nothing (only ever binds a *confident* dark it would already trust; still leaves uncalibrated when none
+  qualifies), testable on `auto_bind_master_paths` with a two-dark synthetic library. Serves autonomy + image
+  quality (recovers dark calibration the walk-away path currently drops). Distinct from the shipped v0.103.12
+  item, which fixed the *scaling* of an already-top-ranked dark, not the *selection* among competing darks.
 - ~~**⭐ Auto-enable *dark exposure-scaling* in the unattended chains when the best dark matches gain/temp but
   not exposure (and a bias is present).**~~ — **shipped v0.103.12** (see Shipped). `auto_bind_master_paths` now
   recovers an exposure-mismatched dark that confidently matches gain/temperature by binding `dark_path` +
