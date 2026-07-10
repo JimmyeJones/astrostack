@@ -1828,6 +1828,24 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.103.9** — Fix drizzle frame-accounting counting an off-canvas stray sub as *used* (Builder
+  2026-07-10; found by a fresh adversarial audit of the newest v0.100 provenance code, reproduced
+  end-to-end before fixing). The standard/κ-σ/min-max paths skip a frame whose reprojected footprint
+  misses the reference canvas via `align_one → None` (so `n_frames_used` / `NALIGNFL` are honest), but the
+  drizzle path did `used += 1` whenever `DrizzleStacker.add_frame` didn't *raise* — and an off-canvas frame
+  builds an all-zero weight map, deposits nothing, and returns cleanly, so a stray sub from a different
+  pointing dropped in the same batch was **counted as aligned**. Two consequences: (1) wrong provenance —
+  `n_frames_used` over-reported and `NALIGNFL` under-reported (and `coverage_max`, which `frame_coverage`
+  computes correctly, could sit *below* the claimed `n_frames_used`); (2) worse — if the *whole* batch
+  reprojected off-canvas (wrong reference / batch-wide bad solve) `used` stayed non-zero, slipping past the
+  `n_used == 0` guard, so `drizzler.result()` returned an **all-NaN image that was written to disk** with a
+  bogus frame count instead of raising "no frames could be aligned". `add_frame` now returns whether the
+  frame's footprint intersects the output canvas (`in_bounds.any()`, the drizzle analogue of `align_one`'s
+  non-`None`; a wholly clip-rejected but on-canvas frame still counts as aligned, matching the standard
+  path), and `_drizzle_pass` only counts a frame that intersected. Regression tests in `tests/test_drizzle.py`
+  (`test_add_frame_reports_off_canvas_frames_as_not_aligned` unit + `test_drizzle_does_not_count_an_off_canvas_stray_frame`
+  end-to-end via `run_stack`; both fail before / pass after). Additive, upgrade-safe (no config/DB/API/on-disk
+  change). (#PR)
 - **v0.103.8** — Carry the calibration-status trust line onto the editor's auto-note surface (Builder
   2026-07-10; the second surface of the v0.103.7 History calibration line). The one-click Process-target
   deep-link lands a walk-away user in the *editor* on the finished picture, where the "This picture was
