@@ -24,6 +24,7 @@ import { autoCauseSentence, autoSummarySentence, autoValueSentence, presetSugges
 import { applyDataDrivenDefaults, countDataDrivenDefaults, type OpSuggestion }
   from "../components/editor/dataDrivenDefaults";
 import { deconvUnderstatesCaption } from "../components/editor/deconvPreview";
+import { starReduceOverstatesCaption } from "../components/editor/starReducePreview";
 import { previewScaleCaption } from "../components/editor/previewScale";
 import { prependCoverageLeveling } from "../components/editor/coverageLeveling";
 import { applyTrimCrop, trimRectStyle, trimKeptLabel, geometryOpsKey, previewBoxStyle,
@@ -1297,6 +1298,17 @@ export function EditorView() {
                 <IconInfoCircle size={14} color="var(--mantine-color-dimmed)"
                   style={{ flexShrink: 0, marginTop: 2 }} />
                 <Text size="xs" c="dimmed">{deconvUnderstatesCaption(hist.data)}</Text>
+              </Group>
+            ) : null}
+            {/* Star reduction erodes with a footprint that clamps to 1 px on a
+                heavily-decimated proxy, so on a large mosaic/drizzle the preview
+                *overstates* the effect (opposite of deconv). Caption it honestly
+                so the user doesn't under-set the amount. Advisory only. */}
+            {starReduceOverstatesCaption(hist.data) ? (
+              <Group gap={6} wrap="nowrap" align="flex-start" mt={4}>
+                <IconInfoCircle size={14} color="var(--mantine-color-dimmed)"
+                  style={{ flexShrink: 0, marginTop: 2 }} />
+                <Text size="xs" c="dimmed">{starReduceOverstatesCaption(hist.data)}</Text>
               </Group>
             ) : null}
             {hist.data?.errors?.length ? (

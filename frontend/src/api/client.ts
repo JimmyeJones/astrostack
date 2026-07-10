@@ -535,6 +535,11 @@ export interface Histogram {
   // export applies. Surfaced as an honest advisory (the sub-pixel blur simply
   // isn't representable on the proxy grid — see deconvUnderstatesCaption).
   deconv_preview_understates?: boolean;
+  // True when an enabled Star-reduction op's star size collapses below one proxy
+  // pixel on the decimated preview, so its erosion footprint clamps up and the
+  // live preview *over*-reduces the stars relative to the full-res export.
+  // Surfaced as an honest advisory (see starReduceOverstatesCaption).
+  star_reduce_preview_overstates?: boolean;
 }
 
 export interface PsfSuggestion {

@@ -47,6 +47,30 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**Editor preview↔export parity: Star reduction *over*-reduces the stars in the live preview (vs the
+  export) on a large drizzle/mosaic.**~~ — **FIXED v0.103.19** (Builder audit 2026-07-10; traced +
+  measured + regression-tested). `edit/ops/stars.py::_reduce` (and the `star_mask` gate it shares with
+  `boost_nebula`) erode with a footprint of `size` full-res px divided by `proxy_scale` for the live-preview
+  proxy — but morphology can't use a **sub-pixel** footprint, so once `size / proxy_scale < 1` the footprint
+  clamps up to 1 proxy-pixel (= `proxy_scale` full-res px), physically *larger* than the export's, and the
+  preview eats into a wider ring of (extended/overlapping) star structure than the full-res export does. On a
+  heavily-decimated proxy (a ≤1500 px view of a >4500 px drizzle/mosaic) the preview then **over-reduces the
+  stars** — measured ~1.15–1.25× the export's reduction on a star-rich field — so a user tuning the amount on
+  the preview under-sets it and the export keeps the stars larger than they dialled. This is the *opposite*
+  direction of the shipped deconvolution `deconv_understates_on_proxy` advisory. **Fix = honest advisory, not a
+  fake pixel correction:** the sub-pixel footprint is fundamentally unrepresentable on the decimated grid, and a
+  fractional-radius blend *over*-corrects into under-reduction (measured: current ~1.06–1.09× at scale 3–4, but
+  a fractional blend drops to ~0.5–0.73× — erosion is non-linear), so a new pure `star_reduce_overstates_on_proxy(size, proxy_scale)`
+  predicate flags the case, the histogram endpoint sets `star_reduce_preview_overstates` for any enabled
+  `stars.reduce` op, and the editor captions it ("Star reduction preview overstates the effect … judge the final
+  strength on the export"), mirroring the deconv advisory exactly. Regression tests:
+  `tests/test_edit_engine.py::test_star_reduce_overstates_on_proxy_rule` +
+  `test_star_reduce_overstates_flag_matches_the_stronger_preview` (the preview reduces materially more than the
+  export on a decimated proxy), `tests/webapp/test_editor.py::test_histogram_flags_star_reduce_preview_overstatement`,
+  and the TS helper test `starReducePreview.test.ts`. Advisory-only, additive, no pixel/export/schema/config/API
+  change (the export path is byte-for-byte unchanged; the flag is a new nullable histogram field). Found by an
+  adversarial audit of the editor ops' proxy↔export parity.
+
 - ~~**`GET /api/jobs` silently drops the *running* job from its listing once ≥`limit` newer jobs exist —
   the Jobs/Logs UI can't show or cancel the job that's actually executing.**~~ — **FIXED v0.103.18**
   (Builder audit 2026-07-10; traced + reproduced with a regression test). `JobManager.list(limit)`

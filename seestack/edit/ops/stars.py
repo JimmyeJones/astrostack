@@ -21,6 +21,37 @@ from seestack.edit.registry import (
 from seestack.edit.starmask import star_mask
 
 
+def star_reduce_overstates_on_proxy(size: float, proxy_scale: float) -> bool:
+    """True when the star-reduction live preview *overstates* the full-res export.
+
+    Star reduction erodes with a footprint of ``size`` full-resolution pixels,
+    divided by ``proxy_scale`` for the decimated live-preview proxy (``_reduce`` /
+    :mod:`seestack.edit.starmask`) so the preview shrinks stars by the same
+    *physical* amount the export will. But morphology can't use a sub-pixel
+    footprint: once ``size / proxy_scale`` falls below 1 px the proxy footprint
+    clamps up to 1 proxy-pixel = ``proxy_scale`` full-res px — physically *larger*
+    than the export's ``size`` px — so the preview erodes a wider neighbourhood
+    and shows *more* star reduction than the full-res export applies. A user
+    tuning the amount on such a preview then under-sets it and the export comes
+    out with weaker star reduction than they saw. This only bites on a heavily
+    decimated proxy (a ≤1500 px view of a large drizzle/mosaic).
+
+    Mirror of ``detail.deconv_understates_on_proxy`` in the opposite direction.
+    Advisory only — there is no clean pixel-level fix: the sub-pixel footprint is
+    fundamentally unrepresentable on the decimated grid, and simply blending the
+    darkening by the fractional radius over-corrects into *under*-reduction
+    (measured: at ``proxy_scale`` 3–4 the current preview over-reduces by ~1.06–
+    1.09×, but a fractional blend drops to ~0.5–0.73× — erosion is non-linear), so
+    we caption the limit honestly rather than fake a correction. The sibling
+    ``stars.boost_nebula`` shares the same ``star_mask`` footprint mechanism.
+    """
+    if not np.isfinite(size) or not np.isfinite(proxy_scale):
+        return False
+    if proxy_scale <= 1.0 or size <= 0.0:
+        return False
+    return (size / proxy_scale) < 1.0
+
+
 def _reduce(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     from scipy.ndimage import grey_erosion
 

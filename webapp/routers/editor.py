@@ -22,6 +22,7 @@ from pydantic import BaseModel
 from seestack.edit.coverage_trim import coverage_is_mosaic, largest_covered_rect
 from seestack.edit.histogram import compute_histogram
 from seestack.edit.ops.detail import deconv_understates_on_proxy
+from seestack.edit.ops.stars import star_reduce_overstates_on_proxy
 from seestack.edit.pipeline import apply_recipe
 from seestack.edit.proxy import coverage_path_for, get_proxy, load_coverage
 from seestack.edit.recipe import Recipe, recipe_from_dict
@@ -969,6 +970,19 @@ async def edit_histogram(safe: str, run_id: int, request: Request,
             op.enabled and op.id == "detail.deconvolve"
             and deconv_understates_on_proxy(
                 float(op.params.get("psf_sigma", 1.5)), float(scale))
+            for op in rec.ops
+        )
+        # A star-reduction op's live preview *overstates* the full-res export when
+        # the proxy is decimated enough that the star size collapses below one
+        # proxy pixel: the erosion footprint clamps up to 1 px (= scale full-res
+        # px), physically larger than the export's, so the preview over-reduces
+        # the stars. Flag it so the editor can honestly caption that the export
+        # will apply *less* star reduction than the preview shows (the opposite
+        # direction of deconv). Only enabled star-reduce ops count.
+        hist["star_reduce_preview_overstates"] = any(
+            op.enabled and op.id == "stars.reduce"
+            and star_reduce_overstates_on_proxy(
+                float(op.params.get("size", 2)), float(scale))
             for op in rec.ops
         )
         return hist
