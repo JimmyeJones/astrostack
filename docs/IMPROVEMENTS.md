@@ -881,6 +881,16 @@ problems. Dogfood it every big-picture run and fix root causes.
 - **Editor bug hunt (ongoing)** — there are undocumented issues. Each big-picture
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
+  _(Builder note 2026-07-10: the `edit/ops/detail.py::_hot_pixels` NaN-fill/restore band-aid
+  (the `_with_nan_filled` wrapper) is now **redundant** — v0.103.23 made
+  `bg/hot_pixels.py::suppress_hot_cold_pixels` NaN-aware at the root, so the op no longer needs a
+  caller-side shim to avoid no-oping on a mosaic/partial-coverage image. Low priority and not worth
+  churn on its own: the shim is harmless (it feeds NaN-filled input to an already-NaN-safe function).
+  If a future run is already in `detail.py`, it could drop the wrapper for `_hot_pixels` and call
+  `suppress_hot_cold_pixels` directly — but only after confirming byte-for-byte parity (the shim
+  repairs a hot pixel *at* a coverage boundary using a median-fill neighbourhood, where the root
+  function leaves it, so verify that edge doesn't matter on a real mosaic before simplifying). (S,
+  editor/maintainability))_
 - ~~**Data-driven "From your image" starting curve for the Curves op**~~ —
   **shipped v0.72.0** (see Shipped). The Curves op now has a header "Auto curve"
   button that drops a gentle, strictly-monotone midtone-lift curve derived from the
@@ -1668,6 +1678,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   info-endpoint + History wiring and renders with the sigma-clip trust wording — a small share
   reads "transient outliers", a large one keeps the too-tight-κ caution (unlike min/max's
   structural drop). Plain single-pass drizzle stamps no provenance.
+- **Iterate the `sigma_mean` master-build clip to convergence (currently a single round).** (S,
+  image-quality) *(Builder-audit-noted 2026-07-10, while fixing the v0.103.22 zero-MAD bug.)*
+  `calibrate/masters.py::_sigma_clip_mean` does **one** clip-about-the-median pass and then means the
+  survivors. Standard master-frame combination (DSS/Siril/PixInsight) iterates the sigma-clip 2–3 rounds
+  (or until the surviving set stops changing), because after the first round removes the grossest outliers
+  the recomputed mean/σ is tighter and catches milder ones a single round leaves in. Low urgency — the
+  v0.103.22 fix already makes the single round *correct* (it rejects, rather than keeps, an outlier), so
+  this is a marginal cleanliness gain on the non-default `sigma_mean` method, not a correctness bug. Shape:
+  loop the median→MAD→clip step on the kept set until convergence or a small max-iters, keeping the
+  "fall back to the median where nothing survives" guard. It **changes the `sigma_mean` master's pixels**,
+  so validate on a real bias/dark set that iterating removes more transients without eating real signal
+  before shipping; additive, off-nothing (default `median` path untouched), testable on `_sigma_clip_mean`
+  in isolation.
 
 ### Features that serve real workflows
 - **⭐ OWNER-REQUESTED — "Tonight" night planner: rank the best targets to shoot
