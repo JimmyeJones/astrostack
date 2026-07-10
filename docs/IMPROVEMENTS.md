@@ -66,6 +66,28 @@ consistent with the mature audit history. No new verified bug filed this run (pe
 manufacturing). Next rotation: `webapp/watcher.py` / `webapp/jobs.py` orchestration, and the
 `qc/` + `solve/` paths, which this run didn't re-cover._
 
+- ~~**A single failed jobs-DB write silently kills the job worker thread — every subsequent job (watcher
+  auto-stack, Process, reprocess) stalls forever while the app still looks healthy.**~~ — **FIXED v0.106.1**
+  (Builder audit 2026-07-10; traced + reproduced with two regression tests). `webapp/jobs.py::JobManager._persist`
+  wrote to the global `jobs.sqlite` inside a bare `with self._connect() as conn: conn.execute(...)` with **no
+  error handling** — unlike its sibling DB helpers `_evict_old` and `clear_history`, which both guard their writes
+  with `except sqlite3.Error`, showing the design clearly intends best-effort persistence. `_persist` is called in
+  the single `job-worker` thread twice per job (setting `running` before the work, then `finished` in the `finally`)
+  and on the 1.5 s throttled progress flush, so a `sqlite3.OperationalError` from a full disk (`"database or disk is
+  full"`) or a lock outlasting the 5 s `busy_timeout` (request threads also write this DB) propagated straight out of
+  the worker loop `_run`, **exiting the daemon thread**. After that `submit()` keeps queuing jobs and the watcher
+  keeps enqueuing pipelines, SSE stays alive and the UI looks fine — but **no queued job is ever processed again**
+  until a process restart, exactly when a walk-away user most needs the queue to drain after freeing space. Reachable
+  on the north-star workflow (drop thousands of subs, walk away → masters/stacks/WAL fill a container volume). Fixed
+  by wrapping `_persist`'s write in `try/except sqlite3.Error` with a `log.warning` (mirroring the two siblings), so a
+  DB write failure is swallowed and the in-memory job map — already authoritative for the SSE stream and
+  `get`/`list`'s active jobs — carries the job to completion; only durable history is lost, not the run. Regression
+  tests `tests/webapp/test_jobs.py::test_persist_swallows_db_write_errors` (a failing `_connect` no longer raises out
+  of `_persist`) and `test_worker_survives_a_persistent_db_write_failure` (with every DB touch failing, two submitted
+  jobs both still run to `done` and the worker thread stays alive — fails before / passes after). Additive, no
+  schema/config/API change; found by the adversarial audit of the `webapp/jobs.py`/`watcher.py` orchestration layer
+  the prior Scout note flagged as un-recovered.
+
 - ~~**`suppress_hot_cold_pixels` silently no-ops the *entire* hot/cold/cosmic-ray pass on any frame with a NaN
   coverage gap — a non-NaN-aware noise estimate makes the threshold NaN, so every defect survives into the
   image.**~~ — **FIXED v0.103.23** (Builder audit 2026-07-10; traced + reproduced + regression-tested).
@@ -302,6 +324,25 @@ the real webapp stack→edit path.)_
   on **real** OSC stacks that (a) normal sky + nebula frames are unchanged and (b) a genuinely
   pathological skew reverts — same real-data-gating as the SCNR / `sky_sigma` items in Image-quality
   below. Fix all four sites together (they share the bug). (S code / M validation, image-quality/correctness)
+
+- **Sky-atlas overlay WCS uses a rotation sign that deviates from the FITS/AIPS `CROTA2→CD` convention
+  (display-only; needs a real solved frame to validate before flipping — NOT a blind Builder change).**
+  *(Traced, Builder audit 2026-07-10; high confidence it deviates from the convention, low confidence it
+  visibly matters.)* `webapp/routers/sky.py::_tan_wcs` (~L92) builds the derived TAN WCS for the sky-atlas
+  preview overlay with `CD1_2 = +scale·sinθ`, `CD2_1 = +scale·sinθ`. With the RA axis flipped
+  (`CD1_1 = −scale·cosθ`, i.e. `CDELT1 < 0`), the standard AIPS `CROTA2` convention wants **both** off-diagonals
+  **negated** (`CD1_2 = CD2_1 = −scale·sinθ`) — the current signs are equivalent to using `−θ`, so on a frame
+  with non-zero field rotation the Aladin overlay is rotated by `2θ` from correct (a mirrored rotation). It is
+  **display-only**: it never touches the stored `wcs_json` or any stacking/science result (the built-in viewer
+  is unaffected), and the code comment already flags "Sign of the rotation is a best-effort starting point."
+  **Why NOT a blind fix:** whether ASTAP's `CROTA2` follows the same sign sense as the AIPS convention decides
+  which way is right, and some solvers differ — flipping the sign without checking could just rotate it wrong
+  the *other* way. Validate against a **real** Seestar frame solved with a known non-zero field rotation (compare
+  the overlay placement to the true sky) before changing it; a synthetic can't stand in for ASTAP's convention.
+  (S code / S validation, display-only/friendliness — low priority, deprioritised sky-atlas surface.) Found by an
+  adversarial audit of the plate-solving path (`solve/*` + its persistence/consumers), which otherwise traced
+  clean — WCS parse, solve-success detection (returncode + sidecar), RA-wrap in the center consumers, hint
+  unit conversion, and setup-error classification all held.
 
 - ~~**`render.autostretch` crashes on a 2-D (mono) input while its sibling `asinh_stretch` handles it —
   latent API-contract gap, not currently user-reachable.**~~ — **FIXED v0.103.20** (Builder 2026-07-10;
@@ -1008,6 +1049,27 @@ problems. Dogfood it every big-picture run and fix root causes.
   **visible and one-click-fixable** in-app, and gives the owner a live signal on whether Auto's
   colour path lands neutral on real Seestar backgrounds. Smallest first slice: ship just the
   read-only readout (no button) so the signal is gathered before adding an action.
+  _(Builder design note 2026-07-10 — the read-out has now shipped across three layers (v0.104.0 editor
+  readout, v0.105.0 auto-edit provenance, v0.106.0 library-wide aggregate), so the deferral's precondition
+  is met and the action is the intended next step. **Worked out the correct, safe design** so a future run
+  can build it without re-deriving the pipeline subtleties: (1) The op MUST be **appended to the end of the
+  recipe** so it runs in **display space** — ops execute in recipe order (`edit/pipeline.py`), and the readout
+  measures the cast on the post-recipe *display* image, so the correction domain must match. A pre-stretch
+  (linear) placement would be **undone** by the stretch, which anchors each channel's black point to its own
+  robust sky median (`render/thumbnail.py::asinh_stretch`/`autostretch`) and thus already per-channel-neutralises
+  the sky — which is also *why* the readout only ever shows a cast when an explicit stretch or an
+  `already_display` re-open produced it, i.e. exactly the cases where appending lands the op post-stretch and the
+  fix is correct. (2) Reuse the existing `tone.white_balance` op (multiplicative per-channel gain); no new op
+  needed. (3) Compute gains from the display-space sky medians the histogram endpoint **already returns**
+  (`sky_cast.{r,g,b}`), so this can be **frontend-only** (a pure helper + a button next to the sky-cast caption
+  in `Editor.tsx`, appended as one undoable step like the Auto-curve / trim buttons). (4) Target the **minimum**
+  of the three medians (`gain_c = min_med / med_c ≤ 1`) so every gain darkens rather than brightens — this
+  neutralises with **no highlight clipping** (a gain > 1 could push bright pixels past 1.0). Median is
+  scale-equivariant, so scaling channel c by `min_med/med_c` drives its sky median to `min_med` for all three →
+  measured deviation → 0 → neutral. (5) Test both ways: a pure TS gain helper, and a Python end-to-end test that
+  appending the suggested white_balance to a synthetically-cast stack drives `measure_sky_cast` on the re-rendered
+  display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
+  PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
 - **⭐ OWNER-REQUESTED — "Reprocess everything" — ALL SLICES SHIPPED: (a) v0.74.0,
   (c) v0.76.0–0.77.0, (b) v0.83.0.** The stacking engine keeps improving (better rejection /

@@ -176,6 +176,52 @@ def test_error_is_captured(tmp_path):
         jm.stop()
 
 
+def test_persist_swallows_db_write_errors(tmp_path):
+    """A failing DB write in _persist must not propagate (it runs in the single
+    worker thread; an unguarded raise would kill it and halt all jobs)."""
+    import sqlite3
+
+    jm = JobManager(tmp_path / "jobs.sqlite")
+
+    def boom():
+        raise sqlite3.OperationalError("database or disk is full")
+
+    jm._connect = boom  # simulate a full/locked DB on the persist write
+    # Before the fix this raised sqlite3.OperationalError; now it's swallowed.
+    jm._persist(Job(kind="t", state="running"))
+
+
+def test_worker_survives_a_persistent_db_write_failure(tmp_path):
+    """If the jobs DB becomes unwritable (disk full / prolonged lock), the
+    single job-worker thread must keep draining the queue rather than dying and
+    silently stalling every subsequent job until a process restart."""
+    import sqlite3
+
+    from webapp.jobs import _TERMINAL
+
+    jm = JobManager(tmp_path / "jobs.sqlite")
+    jm.start()
+    try:
+        def boom(*_a, **_k):
+            raise sqlite3.OperationalError("database or disk is full")
+
+        # Every DB touch now fails, as under a full disk. _persist is called in
+        # submit() and twice in the worker loop per job; the fix keeps all of
+        # them best-effort so the job still runs to completion in memory.
+        jm._connect = boom
+        j1 = jm.submit("test", lambda job: {"n": 1})
+        j2 = jm.submit("test", lambda job: {"n": 2})
+        # Both must finish — if the worker died persisting j1, j2 would hang.
+        assert _wait(lambda: jm.get(j1.id).state in _TERMINAL
+                     and jm.get(j2.id).state in _TERMINAL)
+        assert jm.get(j1.id).state == "done"
+        assert jm.get(j2.id).state == "done"
+        assert jm.get(j1.id).result == {"n": 1}
+        assert jm._worker is not None and jm._worker.is_alive()
+    finally:
+        jm.stop()
+
+
 def test_classify_job_error_maps_known_signatures():
     from webapp.jobs import classify_job_error
 
