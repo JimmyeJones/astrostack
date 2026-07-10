@@ -160,7 +160,7 @@ class DrizzleStacker:
         *,
         weight: float = 1.0,
         clip: tuple[np.ndarray, np.ndarray] | None = None,
-    ) -> None:
+    ) -> bool:
         """
         Add one debayered, optionally bg-flattened frame to the drizzle.
 
@@ -174,6 +174,15 @@ class DrizzleStacker:
         is tested against the statistics of the output pixel nearest its
         centre: contributions with ``|value − mean| > tol`` get zero weight.
         NaN mean or infinite tol always keeps the pixel.
+
+        Returns ``True`` if the frame's footprint intersects the output canvas
+        (at least one input-pixel centre maps in-bounds), ``False`` if it lies
+        entirely off-canvas and deposited nothing. This mirrors the standard
+        path's ``align_one`` returning ``None`` for a non-intersecting frame, so
+        the caller counts an off-canvas stray sub as an align failure rather
+        than a used frame. (A frame that intersects but is wholly clip-rejected
+        still returns ``True`` — it *aligned* — matching the standard path,
+        which counts a fully-clipped-but-aligned frame as used.)
         """
         # Drizzle wants a "pixmap" — for each input pixel, the (x, y)
         # coordinate in the output. Compute once per frame, share across
@@ -185,6 +194,12 @@ class DrizzleStacker:
             (pixmap[..., 0] >= 0) & (pixmap[..., 0] <= w_out - 1)
             & (pixmap[..., 1] >= 0) & (pixmap[..., 1] <= h_out - 1)
         )
+        # Whether this frame's footprint intersects the output canvas at all —
+        # the drizzle analogue of ``align_one`` returning a non-``None`` window.
+        # A stray sub from a different pointing reprojects entirely off-canvas
+        # (``in_bounds`` all False, an all-zero weight map, nothing deposited);
+        # the caller must treat it as an align failure, not a used frame.
+        intersects = bool(in_bounds.any())
         if clip is not None:
             mean, tol = clip
             # Nearest output pixel per input-pixel centre. Out-of-bounds
@@ -237,6 +252,7 @@ class DrizzleStacker:
                 self._drizzlers[0].out_wht > prev_wht0
             ).astype(np.uint32, copy=False)
         self._n_added += 1
+        return intersects
 
     def clip_reference(self, kappa: float) -> tuple[np.ndarray, np.ndarray]:
         """

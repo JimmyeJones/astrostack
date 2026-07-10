@@ -174,7 +174,7 @@ scale); `pick_reference_frame` unwraps RA before the median/distance/span; `_to_
 drizzle two-pass reject's `unresolved`-variance guard (v0.103.2) correctly disables clipping on bright flat
 regions; the `_crop` degenerate-guard decides in full-res pixels for proxy↔export parity (v0.103.1); and
 `mixedPointings` clusters wrap-safely via unit vectors. **One real "confident only" gap found + fixed
-(v0.103.9, see Shipped):** the v0.99.0 auto-bind gates the dark on exposure and (since v0.103.6) the flat on
+(v0.103.10, see Shipped):** the v0.99.0 auto-bind gates the dark on exposure and (since v0.103.6) the flat on
 gain/temperature, but the **bias** — bound for the lights when no dark matched — had **no confidence gate**,
 so a walk-away stack whose only dark was an exposure mismatch would fall back to a bias from a genuinely
 different rig, subtracting a mis-scaled fixed pattern (amp glow / column offsets scale with gain/offset, and
@@ -1019,7 +1019,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   bar exactly as the dark already does on a poor exposure match. Purely local, additive, off-nothing (only
   *tightens* what auto-bind will apply), testable on `auto_bind_master_paths` in isolation. Closes the flat's
   "confident only" gap in the v0.99.0 auto-bind contract. _(Correction, Scout 2026-07-10: this was **not** the
-  last such gap — the **bias** was still ungated; that was closed in v0.103.9.)_
+  last such gap — the **bias** was still ungated; that was closed in v0.103.10.)_
 - **⭐ Auto-enable *dark exposure-scaling* in the unattended chains when the best dark matches gain/temp but
   not exposure (and a bias is present).** (S–M, autonomy/image-quality) *(Scout-filed 2026-07-10, traced.)*
   The interactive Stack form already nudges this: when a dark's exposure is mismatched, no bias is chosen,
@@ -1032,7 +1032,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   and now shoots 10 s subs, then drops them and walks away, silently loses dark calibration (thermal signal +
   amp glow) — the single biggest OSC image-quality lever after stacking — while the interactive user one
   folder over gets it. This is the exact "interactive form has the feature, the unattended path doesn't"
-  shape the v0.99.0 auto-bind itself and the v0.103.6/v0.103.9 confidence gates all closed. **Shape:** when
+  shape the v0.99.0 auto-bind itself and the v0.103.6/v0.103.10 confidence gates all closed. **Shape:** when
   the recommended dark fails only the *exposure* gate but confidently matches gain/temperature, and a
   confident bias is available with both exposures known, bind `dark_path` + `bias_path` and set
   `scale_dark_to_light=True` (the engine already scales correctly and stamps `DARKSCAL` provenance, which the
@@ -1045,7 +1045,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   line (v0.103.7) could say specifically "you have a dark at a different exposure — add a master bias to
   reuse it" — more actionable than the generic message.
 - **Give the auto-bound *dark* a gain/temperature confidence gate too (finish the "confident only"
-  contract).** (S, autonomy/trust) *(Scout-filed 2026-07-10, traced.)* After v0.103.6 (flat) and v0.103.9
+  contract).** (S, autonomy/trust) *(Scout-filed 2026-07-10, traced.)* After v0.103.6 (flat) and v0.103.10
   (bias), the dark is the one auto-bound master still gated on **exposure only** (`_AUTO_BIND_EXP_MISMATCH_FRAC`,
   25%) with **no** gain/temperature check. `recommend_masters` picks the best dark by *combined* distance, so
   the recommended dark is usually the closest on gain too — but when the library's only exposure-matching dark
@@ -1890,7 +1890,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
-- **v0.103.9** — Gate the auto-bound *bias* on a gain/temperature confidence match (Scout 2026-07-10;
+- **v0.103.10** — Gate the auto-bound *bias* on a gain/temperature confidence match (Scout 2026-07-10;
   the genuinely last "confident only" gap in the v0.99.0 auto-bind contract — the v0.103.6 flat-gate
   write-up claimed to close it, but the **bias** was still bound whenever one merely existed). In the
   unattended `auto_bind_master_paths`, the dark is exposure-gated (v0.99.0) and the flat is gain/temperature
@@ -1906,6 +1906,25 @@ _Newest first. One line each: what + commit/PR._
   bias still binds; `recommend_masters` still *offers* it for the interactive form) +
   `test_auto_bind_binds_bias_with_unknown_gain_temp`. One file (`webapp/calibration.py`), strictly
   conservative (only tightens what auto-bind applies), upgrade-safe (no config/schema/API/default change). (#PR)
+- **v0.103.9** — Fix drizzle frame-accounting counting an off-canvas stray sub as *used* (Builder
+  2026-07-10; found by a fresh adversarial audit of the newest v0.100 provenance code, reproduced
+  end-to-end before fixing). The standard/κ-σ/min-max paths skip a frame whose reprojected footprint
+  misses the reference canvas via `align_one → None` (so `n_frames_used` / `NALIGNFL` are honest), but the
+  drizzle path did `used += 1` whenever `DrizzleStacker.add_frame` didn't *raise* — and an off-canvas frame
+  builds an all-zero weight map, deposits nothing, and returns cleanly, so a stray sub from a different
+  pointing dropped in the same batch was **counted as aligned**. Two consequences: (1) wrong provenance —
+  `n_frames_used` over-reported and `NALIGNFL` under-reported (and `coverage_max`, which `frame_coverage`
+  computes correctly, could sit *below* the claimed `n_frames_used`); (2) worse — if the *whole* batch
+  reprojected off-canvas (wrong reference / batch-wide bad solve) `used` stayed non-zero, slipping past the
+  `n_used == 0` guard, so `drizzler.result()` returned an **all-NaN image that was written to disk** with a
+  bogus frame count instead of raising "no frames could be aligned". `add_frame` now returns whether the
+  frame's footprint intersects the output canvas (`in_bounds.any()`, the drizzle analogue of `align_one`'s
+  non-`None`; a wholly clip-rejected but on-canvas frame still counts as aligned, matching the standard
+  path), and `_drizzle_pass` only counts a frame that intersected. Regression tests in `tests/test_drizzle.py`
+  (`test_add_frame_reports_off_canvas_frames_as_not_aligned` unit + `test_drizzle_does_not_count_an_off_canvas_stray_frame`
+  end-to-end via `run_stack`; both fail before / pass after). Additive, upgrade-safe (no config/DB/API/on-disk
+  change). (#PR)
+
 - **v0.103.8** — Carry the calibration-status trust line onto the editor's auto-note surface (Builder
   2026-07-10; the second surface of the v0.103.7 History calibration line). The one-click Process-target
   deep-link lands a walk-away user in the *editor* on the finished picture, where the "This picture was

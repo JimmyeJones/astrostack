@@ -217,6 +217,74 @@ def test_drizzle_frame_coverage_skips_uncovered_and_nan_pixels():
     assert int(fc[5:25, 5:35].min()) == 2
 
 
+def test_add_frame_reports_off_canvas_frames_as_not_aligned():
+    """``add_frame`` must return True when the frame's footprint intersects the
+    canvas and False when it lies entirely off-canvas — the drizzle analogue of
+    ``align_one`` returning ``None``. Without this the drizzle path counts a
+    stray sub from a different pointing (which deposits nothing) as a *used*
+    frame, inflating ``n_frames_used`` / hiding the align failure, and lets a
+    wholly off-canvas batch slip past the ``n_used == 0`` guard and write an
+    all-NaN image to disk."""
+    wcs = wcs_from_text(make_synth_wcs_text(width=100, height=80))
+    drz = DrizzleStacker(wcs, (80, 100), DrizzleParams(scale=1.0, pixfrac=1.0))
+    on = np.full((80, 100, 3), 500.0, dtype=np.float32)
+    # Same WCS → the frame lands fully on the canvas.
+    assert drz.add_frame(on, wcs) is True
+
+    # A WCS pointing ~10° away reprojects entirely off this ~0.14°-wide canvas.
+    far = wcs_from_text(make_synth_wcs_text(width=100, height=80, ra_center_deg=93.6))
+    off = np.full((80, 100, 3), 500.0, dtype=np.float32)
+    assert drz.add_frame(off, far) is False
+    # The off-canvas frame deposited nothing: only the on-canvas frame counted.
+    fc = drz.frame_coverage
+    assert fc is not None
+    assert int(fc.max()) == 1
+
+
+def test_drizzle_does_not_count_an_off_canvas_stray_frame(tmp_path):
+    """End-to-end: a stray sub from a different pointing reprojects entirely off
+    the reference canvas and deposits nothing, so the drizzle path must report it
+    as an align failure (``n_align_failed``), not inflate ``n_frames_used``.
+
+    Regression for the drizzle-only frame-accounting bug: the standard path skips
+    a non-intersecting frame via ``align_one`` → ``None``, but the drizzle path
+    did ``used += 1`` whenever ``add_frame`` didn't raise — and an off-canvas
+    frame builds an all-zero weight map and returns cleanly, so it was counted."""
+    proj = _build_project(tmp_path, n=5)
+    # A sixth frame ~10° away — a different target accidentally dropped in the
+    # same incoming folder. Its centre is far from the on-target median, so it is
+    # never picked as the reference; it reprojects off the reference-frame canvas.
+    raws = tmp_path / "raws"
+    stray = write_seestar_fits(
+        raws / "stray.fit", add_wcs=True, seed=99, n_stars=20,
+        ra_center_deg=93.6, dec_center_deg=-5.4,
+    )
+    proj.add_frame(FrameRow(
+        source_path=str(stray), cached_path=str(stray),
+        width_px=480, height_px=320, bayer_pattern="RGGB",
+        wcs_json=make_synth_wcs_text(ra_center_deg=93.6, dec_center_deg=-5.4),
+        ra_center_deg=93.6, dec_center_deg=-5.4,
+    ))
+    try:
+        result = run_stack(
+            proj,
+            StackOptions(
+                drizzle=True, drizzle_scale=1.5, drizzle_pixfrac=0.8,
+                background_flatten=False, max_workers=1,
+                # Force the reference-frame canvas so the stray is genuinely
+                # off-canvas (a union canvas would just grow to include it).
+                mosaic_canvas="reference",
+                output_name="stray",
+            ),
+        )
+    finally:
+        proj.close()
+    # Only the 5 on-target subs aligned; the stray is an honest align failure.
+    assert result.n_offered == 6
+    assert result.n_frames_used == 5
+    assert result.n_align_failed == 1
+
+
 def test_drizzle_stats_accumulator_has_no_frame_coverage():
     """The statistics-only accumulator (rejection pass 1) discards its output, so
     it doesn't pay for frame-count tracking."""
