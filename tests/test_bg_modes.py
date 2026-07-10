@@ -151,3 +151,34 @@ def test_ladder_first_rung_matches_strict_fit():
         mask=obj_mask, exclude_percentile=80.0,
     ).background.astype(np.float32, copy=False)
     np.testing.assert_array_equal(ladder, strict)
+
+
+def test_gpu_failure_falls_back_to_cpu_in_both_modes(monkeypatch):
+    """A GPU/cupy hiccup must degrade to CPU in *both* per-channel and luminance
+    modes — not just per-channel. Previously the luminance path called the GPU
+    routine directly with no fallback, so the same failure per-channel recovered
+    from aborted a luminance-mode stack (the mode recommended for nebulae)."""
+    import seestack.bg.per_frame as pf
+
+    calls = {"gpu": 0}
+
+    def boom(*_a, **_k):
+        calls["gpu"] += 1
+        raise RuntimeError("cupy OOM")
+
+    rgb = _frame_with_gradient_and_object()
+    for mode in (MODE_PER_CHANNEL, MODE_LUMINANCE):
+        # Reset the per-worker latch so each mode genuinely re-attempts the GPU.
+        monkeypatch.setattr(pf, "_gpu_bg_disabled", False)
+        monkeypatch.setattr(pf, "_subtract_background_gpu", boom)
+        before = calls["gpu"]
+        # use_gpu=True forces the GPU branch regardless of hardware; it must not
+        # propagate the RuntimeError but fall back to a real CPU flatten.
+        out = subtract_background(
+            rgb, BackgroundOptions(mode=mode, box_size=32), use_gpu=True,
+        )
+        assert calls["gpu"] == before + 1, f"{mode}: GPU path not attempted"
+        assert out.shape == rgb.shape
+        # The CPU fallback actually flattened the gradient (didn't return input).
+        for c in range(3):
+            assert abs(np.median(out[..., c])) < 5.0, mode

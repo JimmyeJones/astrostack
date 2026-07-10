@@ -1796,6 +1796,21 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.103.5** — Engine robustness (background flatten; Builder 2026-07-10, found by a fresh adversarial
+  audit of `seestack/bg/*` — the stacker + align/accumulator audits ran alongside and came back clean).
+  `bg/per_frame.py::subtract_background`'s **luminance** mode called `_subtract_background_gpu` directly with
+  **no** try/except and never consulted the `_gpu_bg_disabled` latch, while the **per-channel** mode wrapped
+  the same GPU call in a guard that falls back to CPU (and latches the disable + warns once) on any cupy/CUDA
+  hiccup. So the *identical* GPU failure — cupy not importable in a worker process (the exact case the
+  per-channel guard was written for), or a CUDA OOM on a large frame — degraded gracefully in per-channel but
+  **aborted the whole stack** in luminance mode. Since `use_gpu` auto-selects `True` for any ≥500k-px frame
+  (every Seestar sub) and luminance is the *recommended* mode for extended-emission nebulae (M42, Lagoon,
+  North America — see the mode docstring), a walk-away nebula stack could crash on a GPU wobble that a star
+  field would have survived. Extracted the guarded GPU→CPU dispatch into a shared `_flatten_gpu_or_cpu`
+  helper now used by **both** modes, so they degrade identically; byte-for-byte unchanged on the happy path
+  (GPU success or CPU-only). Regression test `test_bg_modes.py::test_gpu_failure_falls_back_to_cpu_in_both_modes`
+  (monkeypatches the GPU routine to raise; per-channel recovered before/after, luminance raised before / falls
+  back after). Additive, upgrade-safe (no config/DB/API/on-disk change). (#PR)
 - **v0.103.4** — Auto-bind calibration: dimension-gate the masters so an unattended stack can't
   hard-fail (Scout 2026-07-10, traced + reproduced, then fixed under the full quality bar).
   `webapp/calibration.py::auto_bind_master_paths` picked the best-matching library master by

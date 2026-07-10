@@ -106,8 +106,6 @@ def subtract_background(
     """
     from seestack.core.xp import GPU_AVAILABLE
 
-    global _gpu_bg_disabled
-
     if options is None:
         options = BackgroundOptions()
     if not options.enabled or options.mode == MODE_OFF:
@@ -123,19 +121,36 @@ def subtract_background(
         return _subtract_background_luminance(rgb, options, use_gpu=use_gpu, errors=errors)
 
     # MODE_PER_CHANNEL
+    return _flatten_gpu_or_cpu(rgb, options, use_gpu=use_gpu, errors=errors)
+
+
+def _flatten_gpu_or_cpu(
+    rgb: np.ndarray,
+    options: "BackgroundOptions",
+    *,
+    use_gpu: bool,
+    errors: list[str] | None = None,
+) -> np.ndarray:
+    """Flatten one image, preferring the GPU path but degrading to CPU on any
+    cupy/CUDA hiccup, so a GPU failure never aborts the whole stack.
+
+    Shared by the per-channel dispatch and the luminance path so **both** modes
+    degrade identically — previously only per-channel had this guard, so the same
+    GPU failure that per-channel recovered from crashed a luminance-mode run (the
+    mode recommended for extended-emission nebulae). The disable is latched per
+    worker via ``_gpu_bg_disabled`` and warned once (it fired hundreds of times a
+    minute when cupy isn't importable in the worker process).
+    """
+    global _gpu_bg_disabled
     if use_gpu and not _gpu_bg_disabled:
         try:
             return _subtract_background_gpu(rgb, options)
         except Exception as exc:  # noqa: BLE001 — fall back if cupy hiccups
-            # Disable GPU bg-flatten for the rest of this worker and warn ONCE,
-            # instead of logging per frame (it fired hundreds of times/min when
-            # cupy isn't importable in the worker process).
             _gpu_bg_disabled = True
             log.warning(
                 "GPU bg flatten unavailable (%s); using CPU for this and all "
                 "subsequent frames in this worker", exc,
             )
-
     return _subtract_background_cpu(rgb, options, errors=errors)
 
 
@@ -168,13 +183,11 @@ def _subtract_background_luminance(
     luma = (0.299 * rgb[..., 0] + 0.587 * rgb[..., 1] + 0.114 * rgb[..., 2]).astype(
         np.float32, copy=False
     )
-    # Reuse the per-channel path by feeding a 3-channel copy of luma.
+    # Reuse the per-channel path by feeding a 3-channel copy of luma, through the
+    # same GPU-with-CPU-fallback guard so a GPU hiccup degrades gracefully here
+    # too instead of aborting the stack.
     fake_rgb = np.stack([luma, luma, luma], axis=-1)
-    flat_fake = (
-        _subtract_background_gpu(fake_rgb, options)
-        if use_gpu
-        else _subtract_background_cpu(fake_rgb, options, errors=errors)
-    )
+    flat_fake = _flatten_gpu_or_cpu(fake_rgb, options, use_gpu=use_gpu, errors=errors)
     bg_luma = (luma - flat_fake[..., 0]).astype(np.float32)
 
     out = rgb.astype(np.float32, copy=True)
