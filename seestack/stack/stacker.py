@@ -1512,10 +1512,19 @@ def _drizzle_pass(
                 continue
             rgb, in_wcs = payload
             try:
-                drizzler.add_frame(rgb, in_wcs,
-                                   weight=weights.get(f.id if f.id is not None else -1, 1.0),
-                                   clip=clip)
-                used += 1
+                aligned = drizzler.add_frame(
+                    rgb, in_wcs,
+                    weight=weights.get(f.id if f.id is not None else -1, 1.0),
+                    clip=clip)
+                # Only count a frame that actually intersected the canvas.
+                # A stray sub from a different pointing reprojects entirely
+                # off-canvas and deposits nothing — counting it would inflate
+                # n_frames_used / hide the align failure (NALIGNFL), and, worse,
+                # if *every* frame is off-canvas it would slip past the
+                # ``n_used == 0`` guard and write an all-NaN image to disk.
+                # This mirrors the standard path's ``align_one`` → ``None`` skip.
+                if aligned:
+                    used += 1
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"{Path(f.source_path).name}: drizzle add_image: {exc}")
             progress(phase_label, done, total)
