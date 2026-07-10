@@ -47,6 +47,31 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**`suppress_hot_cold_pixels` silently no-ops the *entire* hot/cold/cosmic-ray pass on any frame with a NaN
+  coverage gap — a non-NaN-aware noise estimate makes the threshold NaN, so every defect survives into the
+  image.**~~ — **FIXED v0.103.23** (Builder audit 2026-07-10; traced + reproduced + regression-tested).
+  `bg/hot_pixels.py::_suppress_cpu`/`_suppress_gpu` estimated the per-channel noise floor as
+  `1.4826 * np.median(np.abs(residual))` (and the `cp.median` GPU twin). `residual = channel − median_filter(channel)`
+  contains **NaN** wherever the frame has an uncovered region (NaN = "no coverage" — mosaic / partial-overlap
+  edges), and a plain (non-`nan`) median over any-NaN input returns **NaN**, so `sigma_est` became NaN, the guard
+  `NaN <= 0` evaluated **False** (didn't skip), `mask = |residual| > sigma·NaN` was **all-False**, and
+  `np.where(mask, med3, channel)` returned the channel **unchanged** — the whole always-on suppression became a
+  silent no-op for that channel, leaving every hot/cold pixel and cosmic ray in the frame (verified: two 6000-ADU
+  hot pixels survive untouched with a gap present; both are correctly repaired to the ~100-ADU local sky without
+  one). This is the exact NaN-aware invariant the engine is built on, violated in a public, re-exported,
+  "always-on by default" function — and `edit/ops/detail.py::_hot_pixels` already carries a caller-side NaN-fill
+  band-aid *because* it hit this ("Without this the op silently no-ops on any mosaic/partial-coverage image"),
+  a symptom-level workaround for the root cause. Fixed at the root in both paths: estimate the MAD over the
+  **finite** residuals only (`residual[finite]`, skipping a fully-uncovered channel) and only ever flag/replace
+  finite-residual pixels (`mask = finite & …`), so gaps stay NaN and a defect away from the gap is still repaired.
+  Byte-for-byte identical on the paths that use it today (the two stacking callers pass pre-reprojection frames
+  with no NaN; the editor caller's band-aid feeds NaN-filled input), so it only *adds* correct behaviour on
+  NaN-gap input (the editor band-aid becomes redundant but is left in place, harmless). Regression tests
+  `tests/test_hot_pixels.py::test_suppression_still_works_with_nan_coverage_gap` (hot pixels repaired + gap kept
+  NaN, fails before / passes after) and `test_all_nan_channel_is_left_untouched`. Additive, no
+  schema/config/API change; found by an adversarial audit of the background-subtraction paths (`bg/per_frame.py`,
+  `bg/final_gradient.py`, `bg/hot_pixels.py`), the other two of which traced clean.
+
 - ~~**`sigma_mean` master build keeps a cosmic-ray / hot-pixel outlier (never rejects it) on any pixel whose
   per-frame MAD is exactly 0 — the outlier is baked into the master and over-subtracted from every light.**~~
   — **FIXED v0.103.22** (Builder audit 2026-07-10; traced + reproduced + regression-tested). `calibrate/masters.py::
