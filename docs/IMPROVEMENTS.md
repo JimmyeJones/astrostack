@@ -1634,6 +1634,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   wording the item described is no longer present, so there is nothing to change — pruned.
 - Chip away at the ~127 pre-existing `ruff check .` findings (don't add new ones);
   consider wiring ruff into CI once the count is low. (L, correctness/maintainability)
+- **Scout to vet: two latent (not-yet-active) robustness traps flagged by the 2026-07-10 engine audit
+  that shipped the v0.103.2 drizzle-reject fix — filed, not blind-fixed, because neither is traceable
+  to a concrete wrong result *today*.** (S each, correctness/robustness)
+  (1) `seestack/edit/ops/background.py` `_subtract`/`_final_gradient` re-raise a `RuntimeError` when their
+  errors collector is non-empty. `final_gradient` degrades first (exclude_percentile ladder + box clamp,
+  v0.89.2/v0.84.12), but the *per-frame* `bg/per_frame.py::_subtract_background_cpu` path uses a fixed
+  `exclude_percentile=80` with **no** ladder — a pathologically dense/small field could make `Background2D`
+  raise → errors populated → the editor op raises a hard "Gradient removal" failure. Confirm whether the
+  per-frame box clamp already prevents it on any real ≥1080 px Seestar frame before touching it (may be a
+  non-issue like the v0.84.12 fix's full-size case). (2) `seestack/calibrate/apply.py::apply_raw` returns the
+  *caller's own* float32 array when `is_empty` (no masters apply) — `asarray(...).astype(copy=False)` is a
+  no-op, so the documented "returns a new array" contract is violated by aliasing. No corruption today (every
+  traced consumer treats it read-only), but a future in-place consumer would mutate shared frame data. A
+  one-line `np.array(..., copy=True)` on the empty path would harden the contract; verify no hot-path
+  double-copy cost first.
 - ~~Add a retention/pruning policy for `jobs.sqlite`~~ — **done, then made
   configurable** (`JobManager._evict_old` + the `job_history_limit` setting,
   v0.51.1). (S, scale)
