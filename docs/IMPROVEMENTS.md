@@ -869,18 +869,16 @@ problems. Dogfood it every big-picture run and fix root causes.
   action — in the Process / watcher auto-stack chain, refuse-with-guidance or auto-stack just the majority
   pointing (flagging the rest) instead of silently combining half the data; that touches the hot path and the
   walk-away default, so it wants its own careful build. Original write-up kept below for provenance.
-  _(Builder follow-up idea, spotted auditing the shipped v0.101–0.102 detection 2026-07-09: the warning
-  currently only **tells** the user to "open the Frames table and reject the odd frames" — but
-  `detectMixedPointings` already knows **exactly which** subs belong to the minority pointing(s) (they're
-  the members of every cluster below the majority). Close the loop with a one-click **"Reject the N
-  odd-target frames"** button right on the amber callout that rejects just those frames (the existing
-  frame accept/reject mutation, with an Undo like the auto-grade "Drop N outliers" hint), so the user
-  fixes the mistake in one click instead of hunting the table and eyeballing RA/Dec. Extend
-  `detectMixedPointings` to also return the minority frame **ids** (it already computes the per-frame
-  cluster assignment), keep the majority pointing accepted, and confirm-gate it like the other
-  destructive one-clicks. Serves autonomy + friendliness (removes the manual hunt the warning currently
-  hands off); frontend + the existing reject endpoint, additive, testable on the pure helper. (S–M,
-  autonomy/friendliness)_
+  _(~~Builder follow-up idea, spotted auditing the shipped v0.101–0.102 detection 2026-07-09: the warning
+  currently only **tells** the user to "open the Frames table and reject the odd frames"…~~ —
+  **shipped v0.103.0** (see Shipped). `detectMixedPointings` now also returns `minorityIds` — the ids of
+  every accepted+solved sub outside the largest pointing (exactly what the stacker would silently drop) —
+  and both surfaces that show the amber warning (Target page + Stack form) now carry a one-click **"Reject
+  the N odd-target frames"** button that rejects just those subs via the existing `bulk` reject endpoint
+  (`action:"reject"`, `reason:"user"`), leaving a clean single-target batch. Undoable like the auto-grade
+  "Drop N" hint (the warning swaps to a teal "Rejected N — Undo — re-accept" confirmation), so a stray good
+  frame is one click back; any lone strays outside the majority are rejected too (they'd be dropped anyway).
+  Frontend-only, additive, no backend/schema/default change; the pure helper + button are unit-tested.)_
   The still-open *preventive* complement to the now-**shipped** post-hoc pair (v0.100.0: "Persist & surface
   honest per-run frame accounting" + "Proactively diagnose a large align-failure fraction", both in Shipped).
   Root cause (verified): in `stacker.py::_pass` a frame whose reprojected footprint doesn't intersect the
@@ -1720,6 +1718,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.103.0** — One-click "Reject the N odd-target frames" on the mixed-pointing guard (autonomy/
+  friendliness, priority 2–3; Builder 2026-07-10). The v0.101–0.102 pre-flight guard only *told* the user
+  to open the Frames table and reject the odd subs by hand; this closes the loop. `detectMixedPointings`
+  now also returns `minorityIds` — every accepted+solved sub outside the largest pointing (exactly what the
+  stacker would silently drop; includes lone strays, which would be dropped anyway) — and both surfaces that
+  show the amber warning (Target page + Stack form) carry a "Reject the N odd-target frames" button that
+  rejects just those subs via the existing `bulk` endpoint (`action:"reject"` → `reject_reason="user"`),
+  leaving a clean single-target batch. Undoable like the auto-grade "Drop N" hint: the warning swaps to a
+  teal "Rejected N — Undo — re-accept N" confirmation (its own state, so the messaging is specific), so a
+  stray good frame is one click back. Frontend-only, additive, no backend/schema/default change. Pure-helper
+  tests (`minorityIds` contents incl. the stray case) + existing route tests green. (#PR)
 - **v0.102.0** — Pre-flight "batch looks like two targets" guard on the Stack form too (autonomy/
   friendliness/trust, priority 2–3; Builder 2026-07-09). Extends the v0.101.0 detection to the Stack form —
   the surface a user is literally on when they click "Start stacking", so the warning sits right next to the

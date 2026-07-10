@@ -262,6 +262,31 @@ describe("TargetView mixed-pointings callout", () => {
       screen.queryByText(/looks like .* different targets/),
     ).not.toBeInTheDocument();
   });
+
+  it("one-click rejects just the odd-target frames (the minority pointing)", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ reusable: true })]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      ...cluster(18, 10, 20, 1),
+      ...cluster(12, 83, -5, 100), // ids 100..111 are the odd-target subs
+    ]);
+    const bulk = vi
+      .spyOn(client.api, "bulkFrames")
+      .mockResolvedValue({ changed: 12, changed_ids: [] });
+
+    renderTarget();
+
+    const btn = await screen.findByRole("button", {
+      name: /Reject the 12 odd-target frames/,
+    });
+    btn.click();
+    await waitFor(() =>
+      expect(bulk).toHaveBeenCalledWith("M_42", {
+        action: "reject",
+        ids: Array.from({ length: 12 }, (_, i) => 100 + i),
+      }),
+    );
+  });
 });
 
 describe("TargetView new-subs-since-stack nudge", () => {

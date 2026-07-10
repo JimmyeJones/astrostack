@@ -36,6 +36,12 @@ export interface MixedPointings {
   majority: number; // frames in the largest pointing
   others: number; // frames in the other substantial pointings
   separationDeg: number; // separation between the two largest pointings
+  // The accepted+solved frames that do NOT belong to the largest pointing —
+  // exactly the subs the stacker would silently drop, and the ones a one-click
+  // "reject the odd-target frames" should reject so only the majority pointing
+  // remains. Includes any lone strays outside the majority too (they'd be
+  // dropped anyway), so this count can exceed `others` (substantial-only).
+  minorityIds: number[];
 }
 
 // Unit vector on the celestial sphere for an (RA, Dec) in degrees — lets us
@@ -100,7 +106,8 @@ export function detectMixedPointings(frames: Frame[]): MixedPointings | null {
     }
   }
 
-  // Collect clusters as (count, summed unit vector) → centroid pointing.
+  // Collect clusters as (count, summed unit vector) → centroid pointing, keyed
+  // by union-find root so we can map the majority root back to its frames.
   const groups = new Map<number, { count: number; sum: [number, number, number] }>();
   for (let i = 0; i < vecs.length; i++) {
     const root = find(i);
@@ -112,15 +119,15 @@ export function detectMixedPointings(frames: Frame[]): MixedPointings | null {
     groups.set(root, g);
   }
 
-  const clusters: (PointingCluster & { vec: [number, number, number] })[] = [];
-  for (const g of groups.values()) {
+  const clusters: (PointingCluster & { vec: [number, number, number]; root: number })[] = [];
+  for (const [root, g] of groups.entries()) {
     const [x, y, z] = g.sum;
     const norm = Math.hypot(x, y, z) || 1;
     const v: [number, number, number] = [x / norm, y / norm, z / norm];
     let ra = (Math.atan2(v[1], v[0]) * 180) / Math.PI;
     if (ra < 0) ra += 360;
     const dec = (Math.asin(Math.min(1, Math.max(-1, v[2]))) * 180) / Math.PI;
-    clusters.push({ count: g.count, raDeg: ra, decDeg: dec, vec: v });
+    clusters.push({ count: g.count, raDeg: ra, decDeg: dec, vec: v, root });
   }
   clusters.sort((a, b) => b.count - a.count);
 
@@ -131,5 +138,15 @@ export function detectMixedPointings(frames: Frame[]): MixedPointings | null {
   const majority = substantial[0].count;
   const others = substantial.slice(1).reduce((s, c) => s + c.count, 0);
   const separationDeg = angularSepDeg(substantial[0].vec, substantial[1].vec);
-  return { pointings: substantial.length, majority, others, separationDeg };
+
+  // Every accepted+solved frame outside the largest pointing — the subs the
+  // stacker would drop, and the ones a one-click "reject the odd frames" clears
+  // so only the majority pointing (the reference) is left to stack.
+  const majorityRoot = substantial[0].root;
+  const minorityIds: number[] = [];
+  for (let i = 0; i < pts.length; i++) {
+    if (find(i) !== majorityRoot) minorityIds.push(pts[i].id);
+  }
+
+  return { pointings: substantial.length, majority, others, separationDeg, minorityIds };
 }
