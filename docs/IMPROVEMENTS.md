@@ -66,6 +66,37 @@ consistent with the mature audit history. No new verified bug filed this run (pe
 manufacturing). Next rotation: `webapp/watcher.py` / `webapp/jobs.py` orchestration, and the
 `qc/` + `solve/` paths, which this run didn't re-cover._
 
+- ~~**The shape-only streak detector auto-rejects a bright edge-on galaxy / elongated nebula on *every*
+  sub — silently discarding the whole target's data (on by default).**~~ — **FIXED v0.106.2** (Builder
+  audit 2026-07-10; traced + reproduced-on-synthetic + regression-tested). `qc/streaks.py::detect_streaks`
+  is purely **per-frame and shape-based**: it flags any bright (>6σ) connected component that's long
+  (`axis_major_length ≥ 80` half-res px ≈ 160 full-res) and elongated (`≥ 4:1`). That's right for a
+  *transient* satellite/plane trail (a small minority of subs), but a **stationary** bright extended object —
+  an edge-on galaxy (NGC 4565 Needle, NGC 891), the Sombrero's dust lane, an elongated nebula — forms exactly
+  such a component on **essentially every sub**. With the shipped defaults (`auto_reject_streaks=True`,
+  `keep_streaked_frames=False`), `apply_qc_result_to_db` then sets `accept=False, reject_reason="auto:streak"`
+  on frame after frame, so a walk-away QC pass **silently rejects the entire target** — a real, on-by-default
+  data-loss on a *popular* OSC target class (reproduced on a synthetic edge-on galaxy: peak ≥8σ over sky →
+  flagged 4/4; found by an adversarial audit of the QC subsystem, which otherwise traced clean — NaN-safe
+  reductions, zero-variance guards, correct Bayer-green extraction, and correct grading directions/rails all
+  held). Fixed with a **population-level guardrail** that needs no real-data threshold tuning:
+  `qc/runner.py::reconcile_streak_rejections` runs after the QC pass (wired into `scanner.run_qc_and_solve`) and,
+  when `auto:streak` rejections cover **more than half** of a target's ≥10 non-override / non-qc_error frames
+  (an implausible fraction for transient trails, an expected one for a stationary object), **re-accepts** them —
+  clearing only the `auto:streak` reason and keeping `streak_detected=True` so the UI still shows "N streaked"
+  and the user can bulk-reject if they really are trails. It only ever *un*-rejects, only above an
+  implausible-for-satellites majority, never touches a user override or a non-streak reason, and is a no-op in
+  the normal case (a few real satellite subs stay rejected); any genuine trail that slips through is still
+  cleaned per-pixel by the stack's sigma-clip/drizzle rejection (the same fallback `keep_streaked_frames` relies
+  on). Regression tests `tests/test_qc_streak_reconcile.py` (majority re-accepted; minority stays rejected;
+  user-override held; small target untouched; non-streak reason never cleared). Additive, upgrade-safe (new
+  function + one guarded call + an optional `streak_reaccepted` summary key; no config/schema/default/API-shape
+  change; the common case is byte-for-byte unchanged). **Follow-up filed to Ideas (needs REAL data — the
+  root-cause fix):** teach the detector to *distinguish* a trail from a stationary object per-frame (absolute
+  minor-axis thinness, straightness, or cross-frame persistence) so even a *minority*-flagging bright galaxy
+  isn't wrongly rejected — but that needs real Seestar galaxy **and** trail subs to tune without regressing
+  trail detection, so it's real-data-gated, not a blind change.
+
 - ~~**A single failed jobs-DB write silently kills the job worker thread — every subsequent job (watcher
   auto-stack, Process, reprocess) stalls forever while the app still looks healthy.**~~ — **FIXED v0.106.1**
   (Builder audit 2026-07-10; traced + reproduced with two regression tests). `webapp/jobs.py::JobManager._persist`
@@ -1873,6 +1904,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   so validate on a real bias/dark set that iterating removes more transients without eating real signal
   before shipping; additive, off-nothing (default `median` path untouched), testable on `_sigma_clip_mean`
   in isolation.
+- **Root-cause fix for the streak/edge-on-galaxy false positive: make the streak detector distinguish a
+  trail from a stationary object *per frame* (needs REAL data to tune — NOT a blind change).** (M,
+  image-quality/autonomy — PRIORITY 4) *(Builder-filed 2026-07-10, follow-up to the v0.106.2 population
+  guardrail.)* v0.106.2 stopped the *catastrophic* case (a bright edge-on galaxy / elongated nebula flagged as a
+  "streak" on a majority of subs → whole-target auto-reject) with a safe population rail
+  (`qc/runner.py::reconcile_streak_rejections`: re-accept when >½ the target is auto:streak). That's a symptom
+  guard: a bright galaxy that flags on only a *minority* of subs (the best-seeing ones) still gets those subs
+  wrongly rejected, under the rail. The real fix is to teach `qc/streaks.py::detect_streaks` to tell a transient
+  trail from a stationary extended object *on a single frame*. Candidate signals: **absolute minor-axis
+  thinness** (a satellite/plane trail is ~1–3 px wide near the PSF; a galaxy core is many px thick, so require a
+  small `axis_minor_length` in addition to the elongation ratio); **straightness/fill** (a trail is a near-perfect
+  straight ridge — a high Hough-line-length ÷ component-length ratio — while a galaxy's disk is fatter and
+  curved); or **cross-frame persistence** (a component at the same sky position across subs is stationary, i.e.
+  the target, not a trail — the strongest discriminator but needs the frames' WCS/registration, so it's a bigger
+  change). **Why real-data-gated:** any threshold that excludes galaxies risks also missing genuine (thin, faint)
+  trails, so it must be tuned/validated on **real** Seestar subs of both an edge-on galaxy *and* a real satellite
+  trail before shipping — a synthetic can't stand in for the true width/brightness/straightness distributions.
+  Additive, testable on `detect_streaks` in isolation; keep the v0.106.2 rail as the belt-and-braces backstop
+  even after the detector improves.
 
 ### Features that serve real workflows
 - **⭐ OWNER-REQUESTED — "Tonight" night planner: rank the best targets to shoot

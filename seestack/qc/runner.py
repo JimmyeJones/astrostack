@@ -113,3 +113,59 @@ def apply_qc_result_to_db(project, result: QCResult, *, auto_reject: bool = True
         # a user/auto reject is left untouched.
         fields["reject_reason"] = None
     project.update_frame(result.frame_id, **fields)
+
+
+# The streak detector (``qc/streaks.py``) is shape-based and per-frame: it flags
+# any bright, long, elongated connected component. A *transient* satellite/plane
+# trail hits only a small minority of a target's subs, which is exactly the case
+# the whole-frame auto-reject is meant for. But a *stationary* bright extended
+# object — an edge-on galaxy (NGC 4565, NGC 891), the Sombrero's dust lane, an
+# elongated nebula — forms such a component on essentially *every* sub, so the
+# shape-only detector flags a large fraction of the target and the auto-reject
+# would then silently discard the WHOLE target's data. Guard against that here:
+# a streak flagged on more than half a target's frames cannot be a transient
+# trail, so those auto:streak rejections are re-accepted (any genuine trail is
+# still cleaned per-pixel by the stack's sigma-clip/drizzle rejection — the same
+# fallback ``keep_streaked_frames`` relies on). This only ever *un*-rejects, only
+# above an implausible-for-satellites majority, never touches a user override or
+# a non-streak reject reason, and only engages on a target large enough for the
+# fraction to be meaningful.
+STREAK_MASS_REJECT_FRACTION = 0.5
+STREAK_RECONCILE_MIN_FRAMES = 10
+
+
+def reconcile_streak_rejections(project) -> list[int]:
+    """Re-accept auto:streak frames when they cover a majority of the target.
+
+    Returns the ids re-accepted (empty when the guard doesn't fire), so the
+    caller can log/summarise. Pure DB reconciliation — safe to call after any
+    QC pass; a no-op when auto:streak rejection wasn't mass.
+    """
+    frames = list(project.iter_frames())
+    # The population the streak auto-reject could plausibly act on: exclude hard
+    # QC errors (unreadable frames, handled separately) and user decisions.
+    eligible = [
+        f for f in frames
+        if not (f.reject_reason or "").startswith("qc_error")
+        and not f.user_override
+    ]
+    if len(eligible) < STREAK_RECONCILE_MIN_FRAMES:
+        return []
+    streaked = [f for f in eligible if (f.reject_reason or "") == "auto:streak"]
+    if len(streaked) <= STREAK_MASS_REJECT_FRACTION * len(eligible):
+        return []
+    restored: list[int] = []
+    for f in streaked:
+        if f.id is None:
+            continue
+        # Only the streak reason kept these out; clear it and re-accept. The
+        # ``streak_detected`` flag stays set, so the UI still shows "N streaked"
+        # and the user can bulk-reject them if they really are trails.
+        project.update_frame(f.id, accept=True, reject_reason=None)
+        restored.append(f.id)
+    log.info(
+        "streak reconcile: re-accepted %d of %d frames auto-rejected as streaks "
+        "(a majority — a stationary extended object, not transient trails)",
+        len(restored), len(eligible),
+    )
+    return restored
