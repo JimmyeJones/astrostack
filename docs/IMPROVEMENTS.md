@@ -1634,6 +1634,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   wording the item described is no longer present, so there is nothing to change — pruned.
 - Chip away at the ~127 pre-existing `ruff check .` findings (don't add new ones);
   consider wiring ruff into CI once the count is low. (L, correctness/maintainability)
+- **Scout to vet: two latent (not-yet-active) robustness traps flagged by the 2026-07-10 engine audit
+  that shipped the v0.103.2 drizzle-reject fix — filed, not blind-fixed, because neither is traceable
+  to a concrete wrong result *today*.** (S each, correctness/robustness)
+  (1) `seestack/edit/ops/background.py` `_subtract`/`_final_gradient` re-raise a `RuntimeError` when their
+  errors collector is non-empty. `final_gradient` degrades first (exclude_percentile ladder + box clamp,
+  v0.89.2/v0.84.12), but the *per-frame* `bg/per_frame.py::_subtract_background_cpu` path uses a fixed
+  `exclude_percentile=80` with **no** ladder — a pathologically dense/small field could make `Background2D`
+  raise → errors populated → the editor op raises a hard "Gradient removal" failure. Confirm whether the
+  per-frame box clamp already prevents it on any real ≥1080 px Seestar frame before touching it (may be a
+  non-issue like the v0.84.12 fix's full-size case). (2) `seestack/calibrate/apply.py::apply_raw` returns the
+  *caller's own* float32 array when `is_empty` (no masters apply) — `asarray(...).astype(copy=False)` is a
+  no-op, so the documented "returns a new array" contract is violated by aliasing. No corruption today (every
+  traced consumer treats it read-only), but a future in-place consumer would mutate shared frame data. A
+  one-line `np.array(..., copy=True)` on the empty path would harden the contract; verify no hot-path
+  double-copy cost first.
 - ~~Add a retention/pruning policy for `jobs.sqlite`~~ — **done, then made
   configurable** (`JobManager._evict_old` + the `job_history_limit` setting,
   v0.51.1). (S, scale)
@@ -1718,6 +1733,29 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.103.2** — Stacking-engine correctness (drizzle reject; Builder 2026-07-10, found by a fresh
+  adversarial audit of `stack/align.py`/`drizzle_path.py`/`mosaic.py` — reproduced numerically, then fixed).
+  `DrizzleStacker.clip_reference` built its per-output-pixel clip tolerance from a **float32** variance
+  `m2 − m²`, where `m` (weighted mean) and `m2` (weighted mean-of-squares) are ~counts² for a bright pixel:
+  at ~5.5e4 ADU, `m² ≈ 3e9` where float32's ULP (~360) dwarfs a true per-frame variance of ~1e2, so the
+  variance suffered **catastrophic cancellation** and underflowed to 0 → tolerance collapsed to 0 → in
+  pass 2 *every* real contribution failed `|value − mean| > 0` → zero weight → `out_wht == 0` → the
+  fully-covered bright pixel came back **NaN**. Net effect with `drizzle` + `drizzle_reject` on: a bright,
+  flat region — a near-saturated star core or a smooth bright nebula — could be punched into a NaN coverage
+  hole (a NaN=coverage-invariant violation, and the exact "star cores are not eaten" the module docstring
+  promises). Verified by sweep: at V=48–64k, real σ=8–20, fp32 collapsed to *all 40 contributions rejected*.
+  The fix computes the difference in float64 **and** — since `m2` is itself accumulated in float32 by the
+  drizzle library, so a variance below `ULP(m²)` is already lost before the subtract — disables rejection
+  where the variance is at/below the float32 resolution of `m²` (`var ≤ 16·εf32·m²`), treating it like the
+  existing low-`neff` guard (`tol = +inf`, never reject). The threshold scales with brightness, so dim
+  sky/nebula (`var ≫ ULP(m²)`) is byte-for-byte unchanged and legitimate outliers at normal brightness are
+  still clipped. Additive, upgrade-safe (no config/DB/API/on-disk change; `drizzle_reject` stays off by
+  default). Regression tests `test_drizzle_reject_keeps_a_bright_flat_region` (fails before / passes after)
+  and `test_drizzle_reject_still_clips_a_real_outlier_at_normal_brightness` (guards the floor doesn't disable
+  real rejection). The two lower-severity items the same audit raised were dismissed: `rejection_counts`
+  tallies channel-samples *consistently* with the standard κ-σ path (the fraction is correct — same
+  convention, not a bug), and the returned `win_valid` staleness is covered by every consumer recomputing
+  `isfinite(win_rgb)`.
 - **v0.103.1** — Editor/parity hardening (PRIORITY 1; Builder 2026-07-10, found by a fresh adversarial
   editor-pipeline audit). `geometry.crop`'s "too small → ignore" degenerate guard was evaluated in *this
   render's* pixels, so a tiny fractional crop that is a real (≥2 px) crop on the full-res image but rounds
