@@ -1613,22 +1613,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
-- **Stamp the finished sky-background cast into the *autonomous* auto-edit provenance, to gather a
-  passive real-data signal on whether Auto's colour path lands neutral.** (S, image-quality/trust —
-  PRIORITY 4) *(Builder-spotted 2026-07-10, while shipping the editor sky-cast readout v0.104.0.)*
-  The new `edit/histogram.py::measure_sky_cast` now gives a pure, cheap, per-channel sky-background
-  cast verdict on any display-space image — but it only runs in the *interactive* editor histogram.
-  The unattended auto-edit chain (`_auto_edit_process_run` → Process-target / reprocess / watcher
-  auto-stack) already stamps a plain-language "what Auto did" note (`editor_auto_note:`); extend it to
-  also measure the finished picture's sky-cast (run `measure_sky_cast` on the auto-edited render it
-  already produces) and record the r/g/b sky medians + verdict in the run's provenance meta, surfaced
-  as one dimmed History line ("Auto's background came out neutral ✓" / "…a slight green cast"). This
-  turns every walk-away Auto result into a **data point on whether the SCNR / gray-star colour path
-  lands neutral on *real* Seestar backgrounds** — exactly the real-data question the two deferred
-  "vet on REAL data: SCNR magenta / gray-star leaves a background cast" items below need answered
-  before anyone touches the most-used Auto path. Read-only measurement, additive provenance, no
-  default/API-shape change; testable on the pure `measure_sky_cast` call. Deliberately *after* the
-  editor readout (v0.104.0) so the interactive surface gathers signal first.
+- ~~**Stamp the finished sky-background cast into the *autonomous* auto-edit provenance, to gather a
+  passive real-data signal on whether Auto's colour path lands neutral.**~~ — **SHIPPED v0.105.0**
+  (Builder 2026-07-10). `_auto_edit_process_run` (webapp/pipeline.py — the shared helper behind
+  Process-target / reprocess-everything / watcher auto-stack) now runs `edit/histogram.py::measure_sky_cast`
+  on the same auto-edited display render it already produces for the preview thumbnail, and stamps the
+  r/g/b sky medians + neutral/colour verdict into the run's provenance as JSON meta
+  (`editor_auto_skycast:{run_id}`, mirroring the `editor_auto_note:` pattern — no schema change,
+  upgrade-safe by construction). The `…/stack-runs/{id}/info` endpoint returns it as a nullable
+  `sky_cast` field, and the History Info panel shows one line under the "Auto-edited: …" note — teal
+  "Auto's background came out neutral ✓" or a dimmed "Auto's background came out with a slight green
+  cast" (new pure `autoSkyCastCaption` helper in `components/editor/skyCast.ts`, sibling to the
+  interactive `skyCastCaption`). Best-effort (a failed measurement never sinks the auto-edit), read-only,
+  additive, off-nothing (only annotates runs an unattended job auto-edited; manual/older runs carry no
+  `sky_cast`). This turns every walk-away Auto result into a passive data point on whether the
+  color_calibrate → SCNR colour path lands neutral on **real** Seestar backgrounds — the signal the two
+  deferred "vet on REAL data: SCNR magenta / gray-star leaves a background cast" items below need. Tests:
+  `tests/webapp/test_pipeline.py::test_process_target_chains_auto_edit` (asserts the `sky_cast` verdict
+  dict) + `test_manual_stack_has_no_auto_edit_note` (a manual stack carries none), the TS helper test
+  `skyCast.test.ts::autoSkyCastCaption`, and a History render test.
 - **Scout to vet on REAL data: does the Auto denoise↔sharpen crossfade over-read a *sky
   gradient* as noise?** (M, image-quality/autonomy) `presets.auto_recipe` picks its denoise
   strength and whether to sharpen from `analyze_proxy`'s `sky_sigma`, measured on the **raw**
@@ -2224,6 +2227,14 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.105.0** — Image quality / trust (PRIORITY 4): the unattended auto-edit now measures the finished
+  picture's residual sky-background colour cast (`measure_sky_cast` on the render it already produces) and
+  stamps the r/g/b sky medians + verdict into run provenance (`editor_auto_skycast:` meta); the `…/info`
+  endpoint returns a nullable `sky_cast` and the History Info panel shows a "Auto's background came out
+  neutral ✓ / …slight green cast" line under the auto-edit note. Gives the owner a passive real-data read
+  on whether Auto's colour path lands neutral on real Seestar backgrounds. Best-effort, read-only,
+  additive, off-nothing (only auto-edited runs). New `autoSkyCastCaption` helper; tests in
+  `test_pipeline.py`, `skyCast.test.ts`, `History.test.tsx`.
 - **v0.104.1** — Friendliness (PRIORITY 3 / trust): total integration time on the Target detail page.
   A dimmed teal "X.X h integration" badge next to the "N/M accepted" badge (from the target's accepted
   `total_exposure_s`, reusing `formatIntegration`), so the page where a user decides whether to keep

@@ -55,3 +55,23 @@ export function skyCastCaption(
     text: `Sky background has a ${strong ? "" : "slight "}${colour} cast`,
   };
 }
+
+// As above, but phrased for a result the user *didn't* drive — the History Info
+// panel's read-out of what the unattended auto-edit produced, sitting under the
+// "Auto-edited: …" note. Same measurement, framed as "what Auto's colour path
+// landed" rather than a live editor read-out. Returns null when unavailable.
+export function autoSkyCastCaption(
+  info: SkyCastHistogram | undefined | null,
+): { neutral: boolean; text: string } | null {
+  const sc = info?.sky_cast;
+  if (!sc || sc.cast === "unknown") return null;
+  if (sc.neutral || sc.cast === "neutral") {
+    return { neutral: true, text: "Auto's background came out neutral ✓" };
+  }
+  const colour = CAST_LABEL[sc.cast] ?? sc.cast;
+  const strong = sc.deviation >= 0.03;
+  return {
+    neutral: false,
+    text: `Auto's background came out with a ${strong ? "" : "slight "}${colour} cast`,
+  };
+}

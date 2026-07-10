@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { skyCastCaption } from "./skyCast";
+import { autoSkyCastCaption, skyCastCaption } from "./skyCast";
 
 describe("skyCastCaption", () => {
   it("returns null with no data or an unknown/empty measurement", () => {
@@ -35,5 +35,39 @@ describe("skyCastCaption", () => {
       sky_cast: { r: 0.2, g: 0.2, b: 0.26, neutral: false, cast: "blue", deviation: 0.05 },
     });
     expect(cap!.text).toBe("Sky background has a blue cast");
+  });
+});
+
+describe("autoSkyCastCaption", () => {
+  it("returns null with no data or an unknown/empty measurement", () => {
+    expect(autoSkyCastCaption(undefined)).toBeNull();
+    expect(autoSkyCastCaption(null)).toBeNull();
+    expect(autoSkyCastCaption({})).toBeNull();
+    expect(
+      autoSkyCastCaption({ sky_cast: { r: null, g: null, b: null, neutral: true, cast: "unknown", deviation: 0 } }),
+    ).toBeNull();
+  });
+
+  it("reads neutral as Auto's result with a reassuring ✓", () => {
+    const cap = autoSkyCastCaption({
+      sky_cast: { r: 0.2, g: 0.2, b: 0.2, neutral: true, cast: "neutral", deviation: 0.001 },
+    });
+    expect(cap!.neutral).toBe(true);
+    expect(cap!.text).toBe("Auto's background came out neutral ✓");
+  });
+
+  it("names a slight cast Auto's colour path left", () => {
+    const cap = autoSkyCastCaption({
+      sky_cast: { r: 0.2, g: 0.24, b: 0.2, neutral: false, cast: "green", deviation: 0.013 },
+    });
+    expect(cap!.neutral).toBe(false);
+    expect(cap!.text).toBe("Auto's background came out with a slight green cast");
+  });
+
+  it("drops 'slight' for a strong cast", () => {
+    const cap = autoSkyCastCaption({
+      sky_cast: { r: 0.2, g: 0.2, b: 0.26, neutral: false, cast: "magenta", deviation: 0.04 },
+    });
+    expect(cap!.text).toBe("Auto's background came out with a magenta cast");
   });
 });
