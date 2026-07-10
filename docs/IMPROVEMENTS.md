@@ -1011,6 +1011,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   amber line) so the user trusts that the hands-off result was calibrated — and, conversely, learns when it
   *wasn't* (no confident match) so they know to build/pick masters. Read-only, additive, no new computation
   (the data is on the run); the honest complement to the auto-bind autonomy win above.
+- **Carry the calibration-status trust line onto the *editor's* auto-note surface too (walk-away path lands
+  there).** (S, friendliness/trust) *(Builder-filed 2026-07-10, spotted shipping v0.103.7.)* v0.103.7 surfaced
+  the "Calibrated with your master dark + flat" / "No calibration masters were applied" line on the History
+  **Info panel**, but the one-click **Process target** deep-link (v0.85.3) actually lands a walk-away user in
+  the **editor** on the finished picture — where the auto-edit "why" note (v0.93.0, `…/editor/auto-note`)
+  describes only the *editing* steps and says nothing about *calibration*. So the beginner who took the most
+  hands-off path never sees whether their result was calibrated on the surface they're actually looking at.
+  Weave the same calibration status into the editor's auto-note (or a sibling dimmed line next to it): reuse
+  the exact `CALSTAT`-derived `calibrationSummaryText` logic already shipped for History, sourced from the
+  run's persisted provenance (the auto-note endpoint already reads per-run meta, so the run id is in hand).
+  Read-only, additive, no new computation; completes the "the walk-away user always sees whether it was
+  calibrated" trust story across both surfaces (History Info **and** editor). Smallest slice: just the
+  positive "Calibrated with…" line where CALSTAT is present, leaving the uncalibrated nudge to History.
 - ~~**One-click "Drop N outlier frames" on the Stack-form auto-grade hint.**~~ —
   **shipped v0.83.2** (see Shipped). The auto-grade hint now carries a "Drop N outlier
   frames" button (beside the retained "Review Auto-grade" link) that calls
