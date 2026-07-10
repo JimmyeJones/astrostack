@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Maintenance, reprocessNudgeText } from "./Settings";
+import { autoCastSummaryText, Maintenance, reprocessNudgeText } from "./Settings";
 import * as client from "../api/client";
 
 function renderMaintenance() {
@@ -27,6 +27,11 @@ function renderMaintenance() {
 beforeEach(() => {
   vi.spyOn(client.api, "reprocessStatus").mockResolvedValue({
     current_version: "0.81.3", outdated: 0, up_to_date: 3, total_targets: 3,
+  });
+  // Maintenance also queries the auto-cast summary on mount; default to "nothing
+  // measured yet" so the button tests don't hit an unmocked fetch.
+  vi.spyOn(client.api, "autoCastSummary").mockResolvedValue({
+    measured: 0, neutral: 0, cast: 0, by_cast: {}, median_deviation: null,
   });
 });
 
@@ -55,6 +60,62 @@ describe("reprocessNudgeText", () => {
     });
     expect(msg).toContain("3 targets were");
     expect(msg).toContain("Reprocess them");
+  });
+});
+
+describe("autoCastSummaryText", () => {
+  it("returns null when nothing has been measured or the summary is missing", () => {
+    expect(autoCastSummaryText(undefined)).toBeNull();
+    expect(autoCastSummaryText({
+      measured: 0, neutral: 0, cast: 0, by_cast: {}, median_deviation: null,
+    })).toBeNull();
+  });
+
+  it("reports an all-neutral result cleanly", () => {
+    const msg = autoCastSummaryText({
+      measured: 5, neutral: 5, cast: 0, by_cast: {}, median_deviation: 0.004,
+    });
+    expect(msg).toContain("neutral on all 5 auto-edited results");
+    expect(msg).toContain("landing clean");
+  });
+
+  it("splits neutral vs cast and names the dominant tints commonest-first", () => {
+    const msg = autoCastSummaryText({
+      measured: 10, neutral: 7, cast: 3,
+      by_cast: { magenta: 1, green: 2 }, median_deviation: 0.018,
+    });
+    expect(msg).toContain("neutral on 7 of 10 auto-edited results");
+    expect(msg).toContain("3 carried a slight cast");
+    // Green (2) is listed before magenta (1).
+    expect(msg).toMatch(/2 green, 1 magenta/);
+  });
+
+  it("uses the singular for a single measured result", () => {
+    const msg = autoCastSummaryText({
+      measured: 1, neutral: 0, cast: 1,
+      by_cast: { green: 1 }, median_deviation: 0.02,
+    });
+    expect(msg).toContain("neutral on 0 of 1 auto-edited result;");
+  });
+});
+
+describe("Maintenance — Auto colour self-check", () => {
+  it("shows the sky-cast read-out once auto-edited runs are measured", async () => {
+    vi.spyOn(client.api, "autoCastSummary").mockResolvedValue({
+      measured: 4, neutral: 3, cast: 1, by_cast: { green: 1 }, median_deviation: 0.012,
+    });
+    renderMaintenance();
+    await waitFor(() =>
+      expect(screen.getByText(/neutral on 3 of 4 auto-edited results/))
+        .toBeInTheDocument());
+  });
+
+  it("shows no read-out before any auto-edited run is measured", async () => {
+    renderMaintenance();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Reprocess .* targets/ }))
+        .toBeInTheDocument());
+    expect(screen.queryByText(/auto-edited result/)).toBeNull();
   });
 });
 

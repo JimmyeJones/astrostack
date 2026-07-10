@@ -426,6 +426,79 @@ def reprocess_status(lib: Library) -> dict[str, Any]:
     }
 
 
+def auto_cast_summary(lib: Library) -> dict[str, Any]:
+    """Aggregate every auto-edited run's finished sky-background cast into one
+    library-wide "does Auto land neutral?" read-out.
+
+    Each unattended auto-edit (Process-target / reprocess-everything / watcher
+    auto-stack) stamps the finished picture's residual sky-background cast into
+    that run's provenance (``editor_auto_skycast:{run_id}`` project meta — r/g/b
+    sky medians + a neutral/colour verdict, see ``measure_sky_cast``). Read on
+    their own those are one dimmed History line each; aggregated they answer the
+    exact question the deferred "vet on REAL data: does Auto's colour path leave a
+    background cast?" items need — *on how many of the owner's real auto-edited
+    runs did the ``color_calibrate → SCNR`` path actually land the background
+    neutral, and when it didn't, which way did it skew?*
+
+    Pure read-only aggregation over data already on disk: iterates every target's
+    stack runs, reads the stamped cast metas, and tallies the neutral/cast split,
+    the counts by dominant tint, and the median per-channel deviation. Runs whose
+    measurement couldn't be taken (``cast == "unknown"`` — a failed/empty stack)
+    are ignored so they neither inflate nor skew the split. Empty (all zeros) until
+    auto-edited runs accrue.
+
+    Returns ``{measured, neutral, cast, by_cast, median_deviation}`` where
+    ``measured`` is the number of auto-edited runs with a usable cast reading,
+    ``neutral``/``cast`` split it, ``by_cast`` counts the dominant tints among the
+    cast runs, and ``median_deviation`` is the median largest per-channel departure
+    from grey across the measured runs (``None`` when nothing is measured).
+    """
+    import numpy as np
+
+    from webapp.routers.editor import AUTO_EDIT_SKYCAST_PREFIX
+
+    neutral = 0
+    cast = 0
+    by_cast: dict[str, int] = {}
+    deviations: list[float] = []
+    for entry in lib.list_targets():
+        proj = lib.open_target(entry.safe_name)
+        try:
+            for run in proj.iter_stack_runs():
+                raw = proj.get_meta(f"{AUTO_EDIT_SKYCAST_PREFIX}{run.id}")
+                if not raw:
+                    continue
+                try:
+                    parsed = json.loads(raw)
+                except (ValueError, TypeError):
+                    continue
+                if not isinstance(parsed, dict):
+                    continue
+                verdict = parsed.get("cast")
+                if not isinstance(verdict, str) or verdict == "unknown":
+                    continue  # not measurable — don't count it either way
+                dev = parsed.get("deviation")
+                if isinstance(dev, (int, float)):
+                    deviations.append(float(dev))
+                if verdict == "neutral" or parsed.get("neutral") is True:
+                    neutral += 1
+                else:
+                    cast += 1
+                    by_cast[verdict] = by_cast.get(verdict, 0) + 1
+        finally:
+            proj.close()
+    measured = neutral + cast
+    median_dev = float(np.median(deviations)) if deviations else None
+    return {
+        "measured": measured,
+        "neutral": neutral,
+        "cast": cast,
+        "by_cast": by_cast,
+        "median_deviation": (round(median_dev, 5)
+                             if median_dev is not None else None),
+    }
+
+
 def _refresh_target(settings: Settings, jm: JobManager, job: Job,
                     lib: Library, safe: str) -> None:
     """Deep-rescan one target before it's restacked: re-run QC + plate-solve over

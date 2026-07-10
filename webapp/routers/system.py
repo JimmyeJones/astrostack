@@ -254,6 +254,32 @@ def reprocess_status(request: Request) -> dict[str, Any]:
         lib.close()
 
 
+@router.get("/api/auto-cast-summary")
+def auto_cast_summary(request: Request) -> dict[str, Any]:
+    """Library-wide "does Auto land the background neutral?" read-out.
+
+    Aggregates the finished sky-background cast every unattended auto-edit stamps
+    into its run's provenance (``editor_auto_skycast:{run_id}``) into one honest
+    real-data answer: of the auto-edited runs, how many landed neutral vs carried
+    a residual colour cast, which tints, and the median per-channel deviation from
+    grey. This turns the per-run passive signal into a distribution the owner (and a
+    future agent deciding whether to touch Auto's most-used colour path) can read,
+    instead of a synthetic guess. Read-only; empty (zeros) until auto-edited runs
+    accrue. FastAPI runs this sync endpoint in a threadpool, so the per-target
+    SQLite reads don't block the event loop.
+
+    Returns ``{measured, neutral, cast, by_cast, median_deviation}``.
+    """
+    from seestack.io.library import Library
+
+    settings = deps.get_settings(request)
+    lib = Library.open_or_create(settings.resolved_library_root)
+    try:
+        return pipeline.auto_cast_summary(lib)
+    finally:
+        lib.close()
+
+
 @router.get("/api/health")
 async def health() -> dict:
     """Liveness probe. Deliberately trivial — no subprocess, no disk, no locks.
