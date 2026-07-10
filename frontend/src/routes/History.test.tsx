@@ -366,6 +366,23 @@ describe("calibrationSummaryText", () => {
   it("says nothing when the stack carries no provenance at all", () => {
     expect(calibrationSummaryText([])).toBeNull();
   });
+  it("shows the specific backend advice in place of the generic uncalibrated copy", () => {
+    const advice =
+      "You have a master dark taken at a different exposure (30s vs 10s) — " +
+      "build a master bias and AstroStack will scale that dark to your subs automatically.";
+    const r = calibrationSummaryText([{ key: "STACKER", value: "mean" }], advice);
+    expect(r).toEqual({ text: advice, calibrated: false });
+  });
+  it("ignores advice when the stack IS calibrated (never replaces the positive line)", () => {
+    const r = calibrationSummaryText(
+      [{ key: "CALSTAT", value: "dark+flat" }],
+      "You have a master dark taken at a different exposure — build a master bias.",
+    );
+    expect(r).toEqual({
+      text: "Calibrated with your master dark and master flat.",
+      calibrated: true,
+    });
+  });
 });
 
 describe("HistoryView noise trend card", () => {

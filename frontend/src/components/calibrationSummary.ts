@@ -14,14 +14,23 @@ import { calibrationLabel } from "./CalibrationBadge";
 // Pure and shared so both the History Info panel (v0.103.7) and the editor's
 // auto-note surface (where the Process-target deep-link lands the walk-away user)
 // tell the same calibration story.
+// `advice` (optional) is the backend's specific, actionable "why uncalibrated"
+// hint (`StackRunInfo.calibration_advice`) — e.g. "you have a master dark at a
+// different exposure — build a master bias and it'll be reused automatically". It
+// only ever replaces the *generic* uncalibrated copy (never the calibrated line),
+// so a concrete fix is shown when the library holds a nearly-usable master.
 export function calibrationSummaryText(
   cards: { key: string; value: string | number | boolean }[],
+  advice?: string | null,
 ): { text: string; calibrated: boolean } | null {
   if (cards.length === 0) return null;
   const card = cards.find((c) => c.key === "CALSTAT");
   const label = calibrationLabel(card ? String(card.value) : null);
   if (label) {
     return { text: `Calibrated with your ${label}.`, calibrated: true };
+  }
+  if (advice && advice.trim()) {
+    return { text: advice.trim(), calibrated: false };
   }
   return {
     text:

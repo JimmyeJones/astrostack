@@ -484,6 +484,57 @@ def test_auto_bind_binds_dark_with_unknown_gain_temp(tmp_path):
     assert Path(bound["dark_path"]).name == dark["filename"]
 
 
+def test_diagnose_advises_a_bias_for_a_gain_matched_exposure_mismatched_dark(tmp_path):
+    """The one still-uncalibrated dark signature after v0.103.12: a gain-matching
+    dark at the wrong exposure with no bias to scale it — advise building a bias."""
+    root = tmp_path / "lib"
+    _register(root, "dark", exposure_s=30.0, gain=80.0)  # right gain, wrong exposure
+    advice = calibration.diagnose_uncalibrated(
+        calibration.list_masters(root), exposure_s=10.0, gain=80.0)
+    assert advice is not None
+    assert "master bias" in advice
+    assert "30s" in advice and "10s" in advice
+
+
+def test_diagnose_none_when_a_confident_bias_exists(tmp_path):
+    """With a confident master bias the exposure-mismatched dark would be scaled
+    (v0.103.12) and the stack wouldn't be uncalibrated — so no advice fires."""
+    root = tmp_path / "lib"
+    _register(root, "dark", exposure_s=30.0, gain=80.0)
+    _register(root, "bias", exposure_s=0.0, gain=80.0)
+    assert calibration.diagnose_uncalibrated(
+        calibration.list_masters(root), exposure_s=10.0, gain=80.0) is None
+
+
+def test_diagnose_none_when_the_dark_exposure_matches(tmp_path):
+    """A dark whose exposure matches would have been bound directly — no advice."""
+    root = tmp_path / "lib"
+    _register(root, "dark", exposure_s=10.0, gain=80.0)
+    assert calibration.diagnose_uncalibrated(
+        calibration.list_masters(root), exposure_s=10.0, gain=80.0) is None
+
+
+def test_diagnose_none_when_the_dark_gain_mismatches(tmp_path):
+    """A dark from a genuinely different rig (wrong gain) isn't confidently the
+    user's dark — building a bias wouldn't recover it, so give no bias advice."""
+    root = tmp_path / "lib"
+    _register(root, "dark", exposure_s=30.0, gain=400.0)  # wrong gain AND exposure
+    assert calibration.diagnose_uncalibrated(
+        calibration.list_masters(root), exposure_s=10.0, gain=80.0) is None
+
+
+def test_diagnose_none_without_a_dark_or_exposure(tmp_path):
+    """No matching dark, or an unknown sub exposure, yields no specific advice."""
+    root = tmp_path / "lib"
+    _register(root, "flat", exposure_s=2.0, gain=80.0)  # only a flat
+    assert calibration.diagnose_uncalibrated(
+        calibration.list_masters(root), exposure_s=10.0, gain=80.0) is None
+    # A dark present but the subs' exposure is unknown → can't judge the mismatch.
+    _register(root, "dark", exposure_s=30.0, gain=80.0)
+    assert calibration.diagnose_uncalibrated(
+        calibration.list_masters(root), exposure_s=None, gain=80.0) is None
+
+
 def test_calibration_suggestions_endpoint(client, solved_library):
     from seestack.calibrate.masters import MasterMeta
     from seestack.io.library import Library
