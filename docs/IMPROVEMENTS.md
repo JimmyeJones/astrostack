@@ -1055,17 +1055,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   dark was an exposure mismatch (not "no dark at all"), the History "No calibration masters were applied"
   line (v0.103.7) could say specifically "you have a dark at a different exposure — add a master bias to
   reuse it" — more actionable than the generic message.
-- **Companion to v0.103.12: a more actionable "why uncalibrated" History line when the only dark was an
-  exposure mismatch *and no bias exists*.** (S, friendliness/trust) *(Builder-filed 2026-07-10, spotted
-  shipping v0.103.12.)* v0.103.12 now recovers an exposure-mismatched dark *when a master bias is present* (by
-  scaling), so the still-uncalibrated case narrows to "you have a same-gain dark at a different exposure but
-  **no** master bias to scale it with". The generic v0.103.7 "No calibration masters were applied — build or
-  pick a master dark/flat" line doesn't tell that user the concrete fix (build a master bias). The data to
-  distinguish this case lives in the library registry (a gain-matching dark whose exposure is off, no bias),
-  so a Target/History-side check could surface a specific "you have a dark at a different exposure — add a
-  master bias and it'll be reused automatically" nudge. Read-only, additive; needs the frame's exposure/gain +
-  the library masters, both already fetched. Smallest slice: just the more-specific copy where the
-  gain-matching-but-exposure-mismatched-dark-and-no-bias signature holds.
+- ~~**Companion to v0.103.12: a more actionable "why uncalibrated" History line when the only dark was an
+  exposure mismatch *and no bias exists*.**~~ — **shipped v0.103.13** (see Shipped). The History Info panel's
+  uncalibrated line now shows the concrete fix — "You have a master dark taken at a different exposure (30s vs
+  10s) — build a master bias and AstroStack will scale that dark to your subs automatically." — for exactly
+  the signature v0.103.11–0.103.12 narrowed the still-uncalibrated dark case to (a gain/temperature-confident
+  master dark at a mismatched exposure with **no** confident bias to exposure-scale it). A new pure
+  `webapp/calibration.py::diagnose_uncalibrated` reuses the auto-bind confidence/exposure gates; the info
+  endpoint computes it best-effort only for a provenance-carrying stack that came out uncalibrated (no CALSTAT)
+  and returns it as `calibration_advice`, and `calibrationSummaryText` swaps it in for the generic copy (never
+  the calibrated line; the editor auto-note still shows the positive case only). Read-only, additive, no
+  schema/config/API-shape change. Smallest slice as filed — the more-specific copy where the
+  gain-matching-but-exposure-mismatched-dark-and-no-bias signature holds; other near-miss signatures still fall
+  back to the generic line.
 - ~~**Give the auto-bound *dark* a gain/temperature confidence gate too (finish the "confident only"
   contract).**~~ — **shipped v0.103.11** (see Shipped). The unattended `auto_bind_master_paths` now gates the
   dark on a gain/temperature match distance (`_AUTO_BIND_DARK_MAX_DIST`, the same bar the flat/bias use) *in
@@ -1920,6 +1922,15 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.103.13** — Actionable "why uncalibrated" advice on the History Info panel (Builder 2026-07-10). For a
+  provenance-carrying stack that came out uncalibrated, the panel now names the concrete fix when the library
+  holds a gain/temperature-confident master **dark** at a mismatched exposure with no confident **bias** to
+  exposure-scale it — "build a master bias and AstroStack will scale that dark to your subs automatically" —
+  instead of the generic "build or pick a master". New pure `calibration.diagnose_uncalibrated` (reuses the
+  auto-bind confidence/exposure gates); the info endpoint returns it best-effort as `calibration_advice` only
+  on an uncalibrated run, and `calibrationSummaryText` swaps it in for the generic uncalibrated copy (never the
+  calibrated line). Read-only, additive, no schema/config/API-shape change. Tests: `diagnose_uncalibrated` unit
+  cases + info-endpoint integration + `calibrationSummaryText` frontend cases.
 - **v0.103.12** — Auto-enable *dark exposure-scaling* in the unattended chains (Builder 2026-07-10). The
   unattended `auto_bind_master_paths` bound a dark only when its exposure matched the subs within 25%,
   otherwise leaving the walk-away stack dark-uncalibrated entirely — even when a same-gain/temp dark **and** a

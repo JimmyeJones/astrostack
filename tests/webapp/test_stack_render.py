@@ -532,3 +532,60 @@ def test_stack_runs_expose_integration_time(client, solved_library):
         total_exposure_s=2520.0)
     runs = {r["id"]: r for r in client.get(f"/api/targets/{safe}/stack-runs").json()}
     assert runs[run_id]["total_exposure_s"] == 2520.0
+
+
+def test_stack_info_advises_a_bias_when_only_a_mismatched_dark_exists(
+        client, solved_library):
+    """A stack that carries provenance but is uncalibrated, whose library holds a
+    gain-matching dark at the wrong exposure and no bias, surfaces the specific
+    "build a master bias and the dark is reused automatically" advice (the subs
+    are 10 s / gain 80 from synth; the dark is 30 s / gain 80)."""
+    from webapp import calibration
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    # Give the run provenance cards but no CALSTAT (= uncalibrated with provenance).
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            with fits.open(run.fits_path, mode="update") as hdul:
+                hdul[0].header["STACKER"] = "sigma-clip"
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    calibration.register_master(
+        solved_library / "library", name="Mismatched dark",
+        array=np.full((4, 4), 1.0, dtype=np.float32),
+        meta=MasterMeta("dark", 5, 4, 4, "median", exposure_s=30.0, gain=80.0))
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/info").json()
+    advice = body["calibration_advice"]
+    assert advice is not None
+    assert "master bias" in advice
+    assert "30s" in advice and "10s" in advice
+
+
+def test_stack_info_no_calibration_advice_without_a_near_miss_master(
+        client, solved_library):
+    """With no library master that's a fixable near-miss, the advice field is
+    None and the frontend falls back to the generic "build or pick a master" copy."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            with fits.open(run.fits_path, mode="update") as hdul:
+                hdul[0].header["STACKER"] = "sigma-clip"
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/info").json()
+    assert body["calibration_advice"] is None

@@ -498,12 +498,56 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
                 n_frames = int(value)
     processing = _parse_processing_chain(header)
     auto_edit = _run_auto_edit_note(request, safe, run_id)
+    # For a stack that carries provenance but came out *uncalibrated* (no CALSTAT
+    # card — the stacker stamps it only when masters were applied), see whether the
+    # library holds a master that's usable but for one concrete, fixable thing, and
+    # surface a specific fix instead of the generic "build or pick a master" copy.
+    calibration_advice = None
+    if cards and "CALSTAT" not in header:
+        calibration_advice = _uncalibrated_advice(request, safe)
     return {"run_id": run_id, "integration_s": integration_s,
             "n_frames": n_frames, "weighting": weighting,
             "photometric": photometric, "dark_scaling": dark_scaling,
             "rejection": rejection, "frame_accounting": frame_accounting,
-            "auto_edit": auto_edit,
+            "auto_edit": auto_edit, "calibration_advice": calibration_advice,
             "processing": processing, "cards": cards}
+
+
+def _uncalibrated_advice(request: Request, safe: str) -> str | None:
+    """Best-effort actionable hint for why this target's stack was uncalibrated.
+
+    Reads the target's median exposure/gain/temperature and the library masters
+    (the same signals the Stack form's calibration suggestions use) and asks
+    :func:`calibration.diagnose_uncalibrated` for a specific fix. Never raises — a
+    diagnosis is a nicety, so any failure just yields the generic copy.
+    """
+    from webapp import calibration
+
+    try:
+        settings = deps.get_settings(request)
+        lib, proj = deps.open_target_project(request, safe)
+        try:
+            frames = list(proj.iter_frames(accepted_only=True))
+        finally:
+            proj.close()
+            lib.close()
+        exposure_s = _median([f.exposure_s for f in frames if f.exposure_s])
+        gain = _median([f.gain for f in frames if f.gain is not None])
+        sensor_temp_c = _median(
+            [f.sensor_temp_c for f in frames if f.sensor_temp_c is not None])
+        masters = calibration.list_masters(settings.resolved_library_root)
+        return calibration.diagnose_uncalibrated(
+            masters, exposure_s=exposure_s, gain=gain, sensor_temp_c=sensor_temp_c)
+    except Exception:  # noqa: BLE001 — advice is optional; never fail the info read
+        return None
+
+
+def _median(values: list[float]) -> float | None:
+    vals = sorted(v for v in values if v is not None)
+    if not vals:
+        return None
+    n = len(vals)
+    return vals[n // 2] if n % 2 else (vals[n // 2 - 1] + vals[n // 2]) / 2.0
 
 
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/options")

@@ -284,7 +284,7 @@ function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
         </Text>
       ) : null}
       {(() => {
-        const cal = calibrationSummaryText(data.cards);
+        const cal = calibrationSummaryText(data.cards, data.calibration_advice);
         if (!cal) return null;
         return (
           <Text size="xs" c="dimmed">

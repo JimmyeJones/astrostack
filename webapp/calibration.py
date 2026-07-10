@@ -464,6 +464,75 @@ def _bias_match_confident(
     return dist <= _AUTO_BIND_BIAS_MAX_DIST
 
 
+def diagnose_uncalibrated(
+    masters: list[dict[str, Any]], *,
+    exposure_s: float | None = None, gain: float | None = None,
+    sensor_temp_c: float | None = None,
+) -> str | None:
+    """A *specific*, actionable hint for why an unattended stack came out
+    uncalibrated — when the library holds a master that's usable but for one
+    concrete, fixable thing.
+
+    Today it detects the single signature that v0.103.11–0.103.12 narrowed the
+    still-uncalibrated dark case down to: the library's best-matching master
+    **dark** confidently matches the subs' gain/temperature but its **exposure**
+    is mismatched (so :func:`auto_bind_master_paths` won't bind it directly), and
+    there is **no confident master bias** to exposure-scale it against (with one,
+    v0.103.12 would have scaled the dark and the stack would *be* calibrated). The
+    fix is concrete — build a master bias — after which the exposure-scaling reuses
+    the existing dark automatically, so tell the walk-away user exactly that rather
+    than the generic "build or pick a master dark/flat".
+
+    Returns the advice string, or ``None`` when no specific advice applies (the
+    caller then falls back to the generic copy). Pure and never raises — a master
+    with unusable fields is simply skipped, mirroring the auto-bind helpers.
+    """
+    if not exposure_s or exposure_s <= 0:
+        return None
+    rec = recommend_masters(masters, exposure_s=exposure_s, gain=gain,
+                            sensor_temp_c=sensor_temp_c)
+    by_id: dict[int, dict[str, Any]] = {}
+    for m in masters:
+        try:
+            by_id[int(m["id"])] = m
+        except (KeyError, TypeError, ValueError):
+            continue
+
+    dark_id = rec.get("dark_master_id")
+    dm = by_id.get(int(dark_id)) if dark_id is not None else None
+    if dm is None or not _dark_match_confident(
+            dm, gain=gain, sensor_temp_c=sensor_temp_c):
+        return None
+    try:
+        dexp = float(dm.get("exposure_s"))
+    except (TypeError, ValueError):
+        return None
+    if dexp <= 0:
+        return None
+    # A dark whose exposure already matches within the bind threshold would have
+    # been bound directly — nothing to advise.
+    if abs(dexp - exposure_s) / exposure_s <= _AUTO_BIND_EXP_MISMATCH_FRAC:
+        return None
+    # A confident master bias would let v0.103.12 exposure-scale the dark, so the
+    # stack wouldn't be uncalibrated — this advice only applies when one is absent.
+    bias_id = rec.get("bias_master_id")
+    bm = by_id.get(int(bias_id)) if bias_id is not None else None
+    if bm is not None and _bias_match_confident(
+            bm, gain=gain, sensor_temp_c=sensor_temp_c):
+        return None
+    return (
+        f"You have a master dark taken at a different exposure "
+        f"({_fmt_seconds(dexp)} vs {_fmt_seconds(exposure_s)}) — build a master "
+        f"bias and AstroStack will scale that dark to your subs automatically."
+    )
+
+
+def _fmt_seconds(value: float) -> str:
+    """Format an exposure in seconds without a trailing ``.0`` (30.0 → ``30s``,
+    2.5 → ``2.5s``) for user-facing calibration copy."""
+    return f"{value:g}s"
+
+
 # A flat-dark must match the *flat's* exposure closely (it removes the flat's own
 # dark-current/bias pedestal). Only recommend one whose match distance clears
 # this bar, so we never suggest, say, a 300 s dark for a 2 s flat.

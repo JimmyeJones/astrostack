@@ -305,6 +305,12 @@ export interface StackRunInfo {
   // only on runs an autonomous job auto-edited (Process-target / reprocess /
   // watcher auto-stack). Absent on manual/un-edited runs.
   auto_edit?: string | null;
+  // A specific, actionable hint for *why* a stack that carries provenance came out
+  // uncalibrated (e.g. "you have a master dark at a different exposure — build a
+  // master bias and it'll be reused automatically"). Present only when the library
+  // holds a master that's usable but for one concrete, fixable thing; the generic
+  // "build or pick a master" copy is used otherwise.
+  calibration_advice?: string | null;
   processing?: StackProcessingStep[];
   cards: StackInfoCard[];
 }
