@@ -40,6 +40,15 @@ RECIPE_META_PREFIX = "editor_recipe:"
 # silent auto-edit did to a result they didn't drive. Absent on manual/un-edited
 # runs, so it only ever annotates runs the auto-edit actually touched.
 AUTO_EDIT_NOTE_PREFIX = "editor_auto_note:"
+# The finished picture's residual sky-background colour cast, measured on the
+# auto-edited display render an *unattended* job produced (Process-target /
+# reprocess-everything / watcher auto-stack) and stored as JSON per run. Surfaced
+# on the History Info panel so a beginner sees whether the hands-off Auto path
+# landed the background neutral — and, aggregated across many walk-away runs, it
+# gives the owner a passive real-data signal on whether Auto's colour path
+# (color_calibrate → SCNR) actually neutralises real Seestar backgrounds. Absent
+# on manual/un-edited runs, so it only ever annotates runs the auto-edit touched.
+AUTO_EDIT_SKYCAST_PREFIX = "editor_auto_skycast:"
 USER_PRESETS_META_KEY = "editor_user_presets"
 # A single, user-designated "house style" recipe stored library-wide (not per
 # target). Once set, the editor offers it as a one-click seed on any run that has

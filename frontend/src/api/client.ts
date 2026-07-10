@@ -305,6 +305,11 @@ export interface StackRunInfo {
   // only on runs an autonomous job auto-edited (Process-target / reprocess /
   // watcher auto-stack). Absent on manual/un-edited runs.
   auto_edit?: string | null;
+  // The finished picture's residual sky-background colour cast (r/g/b sky medians
+  // + a neutral/colour verdict), measured on the auto-edited render an unattended
+  // job produced. Present only on auto-edited runs; lets History show whether the
+  // hands-off Auto path landed the background neutral. Absent on older runs.
+  sky_cast?: SkyCast | null;
   // A specific, actionable hint for *why* a stack that carries provenance came out
   // uncalibrated (e.g. "you have a master dark at a different exposure — build a
   // master bias and it'll be reused automatically"). Present only when the library

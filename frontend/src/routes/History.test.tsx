@@ -106,6 +106,24 @@ describe("HistoryView", () => {
       expect(screen.getByText(/Auto-edited: flattened the background/)).toBeInTheDocument());
   });
 
+  it("shows the auto-edit sky-cast read-out for a walk-away run", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({
+      run_id: 1, integration_s: 2520, n_frames: 840, weighting: null,
+      auto_edit: "Auto-edited: flattened the background, then applied a natural stretch.",
+      sky_cast: { r: 0.2, g: 0.24, b: 0.2, neutral: false, cast: "green", deviation: 0.013 },
+      cards: [{ key: "STACKER", value: "sigma-clip", comment: "stacking method" }],
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Info" }));
+    await waitFor(() =>
+      expect(
+        screen.getByText("Auto's background came out with a slight green cast"),
+      ).toBeInTheDocument());
+  });
+
   it("shows the quality-weighting summary when present", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
     vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({

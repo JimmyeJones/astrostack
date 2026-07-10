@@ -1246,12 +1246,14 @@ def _auto_edit_process_run(lib: Library, safe: str, run_id: int) -> int | None:
     (best-effort — never fails the Process job)."""
     from webapp.routers.editor import (
         AUTO_EDIT_NOTE_PREFIX,
+        AUTO_EDIT_SKYCAST_PREFIX,
         RECIPE_META_PREFIX,
         build_auto_analysis_for_run,
         build_auto_recipe_for_run,
         render_run_display_array,
     )
     from seestack.edit import presets as presets_mod
+    from seestack.edit.histogram import measure_sky_cast
     from seestack.io.project import Project
     from seestack.stack.output import _write_preview_png
 
@@ -1282,6 +1284,18 @@ def _auto_edit_process_run(lib: Library, safe: str, run_id: int) -> int | None:
             if run.preview_path:
                 out = render_run_display_array(proj.project_dir, run, recipe)
                 _write_preview_png(Path(run.preview_path), out, already_display=True)
+                # Measure the finished picture's residual sky-background colour
+                # cast on the render we just produced and stamp it into the run's
+                # provenance, so History can show whether this hands-off Auto
+                # result landed neutral — and the owner gets a passive real-data
+                # read on Auto's colour path across every walk-away run. Read-only
+                # + best-effort (a measurement is a nicety, never fatal).
+                try:
+                    sky_cast = measure_sky_cast(out)
+                    proj.set_meta(f"{AUTO_EDIT_SKYCAST_PREFIX}{run_id}",
+                                  json.dumps(sky_cast))
+                except Exception:  # noqa: BLE001 — the sky-cast read is a nicety
+                    pass
         finally:
             proj.close()
         return len([o for o in recipe.ops if o.enabled])

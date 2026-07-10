@@ -13,6 +13,7 @@ import { formatIntegration } from "../format";
 import { HazyNightBadge } from "../components/HazyNightBadge";
 import { CalibrationBadge } from "../components/CalibrationBadge";
 import { calibrationSummaryText } from "../components/calibrationSummary";
+import { autoSkyCastCaption } from "../components/editor/skyCast";
 import { RejectionBadge } from "../components/RejectionBadge";
 import { NoiseReadout, NoiseDelta, CleanestBadge, cleanestRunId, hasNoise } from "../components/NoiseBadge";
 import { ImageLightbox } from "../components/ImageLightbox";
@@ -283,6 +284,15 @@ function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
           {data.auto_edit}
         </Text>
       ) : null}
+      {(() => {
+        const sc = autoSkyCastCaption({ sky_cast: data.sky_cast });
+        if (!sc) return null;
+        return (
+          <Text size="xs" c={sc.neutral ? "teal.6" : "dimmed"}>
+            {sc.text}
+          </Text>
+        );
+      })()}
       {(() => {
         const cal = calibrationSummaryText(data.cards, data.calibration_advice);
         if (!cal) return null;
