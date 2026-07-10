@@ -206,6 +206,7 @@ def run_qc_and_solve(
         apply_qc_result_to_db,
         build_qc_arglist,
         compute_for_db_row,
+        reconcile_streak_rejections,
     )
     from seestack.solve.runner import (
         apply_solve_result_to_db,
@@ -230,6 +231,16 @@ def run_qc_and_solve(
                 except Exception as exc:  # noqa: BLE001
                     log.warning("QC DB write failed: %s", exc)
             summary["qc_done"] = done
+        # A stationary bright extended object (edge-on galaxy, elongated nebula)
+        # trips the shape-only streak detector on most/all subs, so an unguarded
+        # auto-reject would silently discard the whole target. Re-accept the
+        # streak rejections when they cover a majority of the target (they can't
+        # be transient trails); stacking's per-pixel rejection still cleans any
+        # genuine trail. No-op in the normal case (a few real satellite subs).
+        if auto_reject_streaks:
+            restored = reconcile_streak_rejections(project)
+            if restored:
+                summary["streak_reaccepted"] = len(restored)
 
     if run_solve and not _stopped(should_stop):
         solve_args = build_solve_arglist(project, use_hint=use_solve_hints)

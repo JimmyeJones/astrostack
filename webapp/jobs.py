@@ -208,28 +208,40 @@ class JobManager:
             )
 
     def _persist(self, job: Job) -> None:
+        # Persistence is best-effort — the in-memory job map is authoritative for
+        # the live SSE stream and for ``get``/``list``'s active jobs; the DB is a
+        # durable *history* mirror so state survives a restart. A DB write error
+        # (disk full, or a lock outlasting the 5 s busy_timeout while request
+        # threads also write) must therefore NEVER propagate: two of these calls
+        # run in the single ``job-worker`` thread (before/after every job) and a
+        # third fires on the 1.5 s progress flush, so an unguarded raise would
+        # kill the worker and silently halt *all* job processing until a restart.
+        # Swallow like the sibling DB helpers (``_evict_old`` / ``clear_history``).
         import json
-        with self._connect() as conn:
-            conn.execute(
-                """
-                INSERT INTO jobs(id, kind, target, state, phase, done, total, detail,
-                                 created_utc, started_utc, finished_utc, error,
-                                 error_kind, result_json)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                ON CONFLICT(id) DO UPDATE SET
-                    state=excluded.state, phase=excluded.phase, done=excluded.done,
-                    total=excluded.total, detail=excluded.detail,
-                    started_utc=excluded.started_utc, finished_utc=excluded.finished_utc,
-                    error=excluded.error, error_kind=excluded.error_kind,
-                    result_json=excluded.result_json
-                """,
-                (
-                    job.id, job.kind, job.target, job.state, job.phase, job.done,
-                    job.total, job.detail, job.created_utc, job.started_utc,
-                    job.finished_utc, job.error, job.error_kind,
-                    json.dumps(job.result) if job.result is not None else None,
-                ),
-            )
+        try:
+            with self._connect() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO jobs(id, kind, target, state, phase, done, total, detail,
+                                     created_utc, started_utc, finished_utc, error,
+                                     error_kind, result_json)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        state=excluded.state, phase=excluded.phase, done=excluded.done,
+                        total=excluded.total, detail=excluded.detail,
+                        started_utc=excluded.started_utc, finished_utc=excluded.finished_utc,
+                        error=excluded.error, error_kind=excluded.error_kind,
+                        result_json=excluded.result_json
+                    """,
+                    (
+                        job.id, job.kind, job.target, job.state, job.phase, job.done,
+                        job.total, job.detail, job.created_utc, job.started_utc,
+                        job.finished_utc, job.error, job.error_kind,
+                        json.dumps(job.result) if job.result is not None else None,
+                    ),
+                )
+        except sqlite3.Error as exc:  # noqa: BLE001 — persistence is best-effort
+            log.warning("job persist failed for %s (%s): %s", job.id, job.kind, exc)
 
     # ---- submit / query -------------------------------------------------
 
