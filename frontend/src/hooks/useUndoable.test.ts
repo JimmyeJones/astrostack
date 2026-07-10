@@ -1,3 +1,4 @@
+import { StrictMode } from "react";
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useUndoable } from "./useUndoable";
@@ -81,6 +82,51 @@ describe("useUndoable", () => {
     expect(result.current.state).toEqual([5]);
     act(() => result.current.undo());
     expect(result.current.state).toEqual([3]);
+    expect(result.current.canUndo).toBe(false);
+  });
+
+  it("undo/redo work correctly under StrictMode's double-invoke", () => {
+    // Regression: the history used to be kept in refs mutated *inside* the state
+    // updater, so React StrictMode's dev double-invocation double-pushed/​popped
+    // and undo silently no-op'd after a single edit (the whole app renders under
+    // <StrictMode>, so this broke undo in `npm run dev`). A pure reducer is
+    // idempotent under a repeated invoke, so history stays consistent. This test
+    // FAILS on the old ref-based hook and PASSES on the reducer version.
+    const { result } = renderHook(() => useUndoable<number[]>([]), {
+      wrapper: StrictMode,
+    });
+    act(() => result.current.set([1]));
+    expect(result.current.state).toEqual([1]);
+    expect(result.current.canUndo).toBe(true);
+
+    act(() => result.current.set((p) => [...p, 2]));
+    expect(result.current.state).toEqual([1, 2]);
+
+    // Exactly one undo per edit — no phantom duplicate entries.
+    act(() => result.current.undo());
+    expect(result.current.state).toEqual([1]);
+    act(() => result.current.undo());
+    expect(result.current.state).toEqual([]);
+    expect(result.current.canUndo).toBe(false);
+
+    // Redo steps forward one at a time too.
+    act(() => result.current.redo());
+    expect(result.current.state).toEqual([1]);
+    act(() => result.current.redo());
+    expect(result.current.state).toEqual([1, 2]);
+    expect(result.current.canRedo).toBe(false);
+  });
+
+  it("coalesces a keyed drag into one step even under StrictMode", () => {
+    const { result } = renderHook(() => useUndoable<number[]>([0]), {
+      wrapper: StrictMode,
+    });
+    act(() => result.current.set([1], "strength"));
+    act(() => result.current.set([2], "strength"));
+    act(() => result.current.set([3], "strength"));
+    expect(result.current.state).toEqual([3]);
+    act(() => result.current.undo());
+    expect(result.current.state).toEqual([0]);
     expect(result.current.canUndo).toBe(false);
   });
 
