@@ -72,8 +72,13 @@ def _level_coverage(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarr
         return rgb
     from seestack.bg.coverage_leveling import level_by_coverage
 
+    # Pass the proxy scale so the per-level pixel-count floor is measured in
+    # full-res-equivalent pixels: the live-preview proxy is strided, so without
+    # this a mosaic panel would be leveled in the full-res export yet skipped in
+    # the preview (a visible preview↔export panel-step mismatch).
     return level_by_coverage(rgb, ctx.coverage,
-                             object_sigma=float(params.get("object_sigma", 2.0)))
+                             object_sigma=float(params.get("object_sigma", 2.0)),
+                             proxy_scale=ctx.proxy_scale)
 
 
 _MODE = ["per_channel", "luminance"]

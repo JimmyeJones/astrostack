@@ -47,6 +47,23 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**Editor preview↔export parity: the mosaic "Coverage leveling" op skips thin panels in the live
+  preview that it levels in the exported image.**~~ — **FIXED v0.103.16** (Builder audit 2026-07-10;
+  reproduced + regression-tested before fixing). `bg/coverage_leveling.py::level_by_coverage` gates each
+  coverage level on a fixed `min_pixels_per_level=200` *absolute* sky-pixel count, but the editor calls it
+  with two different coverage maps: the full-res export uses the native map (`load_coverage(step=1)`), while
+  the live preview uses the map **strided by `round(proxy_scale)`** (`_proxy_coverage` mirrors `build_proxy`).
+  So a mosaic coverage level with, e.g., 800 full-res sky pixels has only ~50 on a ×4 proxy — **leveled in the
+  export (800 ≥ 200) but skipped in the preview (50 < 200)**, leaving a visible rectangular panel-step in the
+  live preview that the exported picture doesn't have (a priority-1 preview≠export mismatch). `level_by_coverage`
+  now takes a `proxy_scale` (default 1.0 → unchanged export behaviour) and scales the floor by 1/step² so the
+  **same set of coverage levels is selected at both resolutions** (with a small absolute floor so a median is
+  never computed over a handful of strided pixels); `edit/ops/background.py::_level_coverage` passes
+  `ctx.proxy_scale`. Regression test `tests/test_coverage_leveling.py::test_proxy_scale_matches_full_res_level_selection`
+  (a thin panel leveled full-res but skipped on a ×4 proxy under the old floor; leveled under the fix — fails
+  before / passes after). Additive, upgrade-safe (no config/schema/API change; the export path is byte-for-byte
+  unchanged). Found by an adversarial audit of the editor ops' proxy↔export parity.
+
 - ~~**'Tonight' planner 500s (ZeroDivisionError) when the min-altitude floor is exactly 70°.**~~
   — **FIXED v0.97.1** (Builder audit 2026-07-09; reproduced end-to-end before fixing). The night
   planner's observability `_score` computed its altitude term as `(max_alt − min_alt) / (70.0 −
