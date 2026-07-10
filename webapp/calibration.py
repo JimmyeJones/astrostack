@@ -229,6 +229,8 @@ def auto_bind_master_paths(
     exposure_s: float | None = None,
     gain: float | None = None,
     sensor_temp_c: float | None = None,
+    width_px: int | None = None,
+    height_px: int | None = None,
 ) -> dict[str, str]:
     """Calibration master *paths* safe to auto-apply in an *unattended* stack.
 
@@ -246,6 +248,14 @@ def auto_bind_master_paths(
       :func:`_recommend_flat_dark`);
     * a **bias** only when no dark was bound (a dark already carries the bias).
 
+    When ``width_px``/``height_px`` are given (the subs' raw, un-debayered
+    dimensions), a master is bound only if *its* recorded dimensions match. A
+    master built for a different camera/binning would otherwise be bound and then
+    make ``run_stack`` **hard-fail** at :meth:`CalibrationMasters.validate` — the
+    opposite of this helper's "leave uncalibrated rather than risk anything"
+    contract. The dimension gate is skipped only when the subs' dimensions are
+    unknown (then behaviour is unchanged from today).
+
     Returns only the confident ``StackOptions`` path keys (``dark_path`` /
     ``flat_path`` / ``flat_dark_path`` / ``bias_path``); an empty dict means
     "leave the stack uncalibrated". Never raises — a master that can't be
@@ -260,8 +270,25 @@ def auto_bind_master_paths(
         except (KeyError, TypeError, ValueError):
             continue
 
+    def _dims_ok(mid: Any) -> bool:
+        """Master ``mid``'s dimensions match the subs' (or the subs' are unknown,
+        so we can't gate). A master whose own dimensions are unrecorded can't be
+        confirmed to match, so it fails the gate when the subs' dims *are* known."""
+        if width_px is None or height_px is None:
+            return True  # nothing to gate against — preserve prior behaviour
+        m = by_id.get(int(mid)) if mid is not None else None
+        if not m:
+            return False
+        mw, mh = m.get("width_px"), m.get("height_px")
+        if mw is None or mh is None:
+            return False
+        try:
+            return int(mw) == int(width_px) and int(mh) == int(height_px)
+        except (TypeError, ValueError):
+            return False
+
     def _path(mid: Any) -> str | None:
-        if mid is None:
+        if mid is None or not _dims_ok(mid):
             return None
         p = master_path(library_root, int(mid))
         return str(p) if p is not None else None

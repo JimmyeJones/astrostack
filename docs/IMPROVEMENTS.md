@@ -160,6 +160,31 @@ the real webapp stack→edit path.)_
   pathological skew reverts — same real-data-gating as the SCNR / `sky_sigma` items in Image-quality
   below. Fix all four sites together (they share the bug). (S code / M validation, image-quality/correctness)
 
+_(Scout QA audit 2026-07-10 (v0.103.3 baseline, suite green **994 passed / 2 skipped**): rotated the focused
+subsystem audit onto the **calibration path** — `seestack/calibrate/{masters,apply}.py` (master build,
+sigma-clip combine, atomic save/load, `apply_raw`'s dark-or-bias/never-both + flat-floor + exposure-scaling)
+and the **autonomous auto-bind** layer (`webapp/calibration.py` + `pipeline.py::_auto_bind_calibration`),
+read adversarially for double-subtraction, wrong-flat-normalisation, NaN handling, and the unattended
+"never fail, leave uncalibrated" contract. **The engine build/apply path traced clean** — the sigma-clip
+mean falls back to the median where nothing survives, `apply_raw` subtracts dark **xor** bias and never
+mutates its input, the flat is mean-normalised with a `_FLAT_FLOOR` guard against exploding dark corners,
+and `_effective_dark` scales the dark current about a fixed bias pedestal only when opted in with a known
+bias+exposures (matching the prior clean reads of this path). **One real autonomy bug found + reproduced +
+fixed (v0.103.4, see Shipped):** `auto_bind_master_paths` matched masters on exposure/gain/temperature but
+**never on pixel dimensions**, so a library holding a master from a different-sized camera would auto-bind
+it and make `run_stack`'s `validate()` **hard-fail the whole walk-away stack** — violating auto-bind's own
+"leave uncalibrated rather than risk anything" promise. Now dimension-gated (binds only a same-size master,
+strictly more conservative). **Two lower-severity observations left as notes, not blind-fixed:** (1) the
+**flat** is auto-bound with **no gain/temperature confidence gate** — only "best available" + (now) a
+dimension match — so a flat from a genuinely different optical train (different scope, same camera body)
+could be auto-applied to an unattended stack; a flat's vignetting is largely gain-independent so it rarely
+*corrupts*, but a min-confidence gate (as the dark already has on exposure) would be more faithful to the
+"confident only" contract — filed to Ideas below. (2) `bias_exposure_s` is loaded and stored on
+`CalibrationMasters` but never read (the exposure-scaling keys off the *dark's* exposure); harmless dead
+state, not worth churn. Consistent with the many prior clean engine audits — the calibration core is
+well-hardened; the gap was in the newest (v0.99.0) unattended auto-bind glue, exactly where the last few
+real bugs have lived.)_
+
 _(Scout QA audit 2026-07-09 (v0.99.10 baseline, suite green **984 passed / 2 skipped**): led the rotation
 with a fresh adversarial re-read of the **stacking engine + its final-image edges** and the
 **recently-churned watcher hand-off** — `stack/{weighting,photometric,align,accumulator,output}.py`,
@@ -954,6 +979,28 @@ problems. Dogfood it every big-picture run and fix root causes.
   and testable on `recommend_masters` + the chain in isolation. Serves autonomy (one fewer decision) *and*
   image quality (calibrated frames) at once. Consider surfacing "auto-applied your master dark+flat" in the
   auto-edit "why" note for trust.
+- **Give the auto-bound *flat* a minimum-confidence gate (match the dark's exposure gate).** (S,
+  autonomy/trust) *(Scout-filed 2026-07-10, traced while fixing the v0.103.4 dimension bug.)* In the
+  unattended `auto_bind_master_paths`, the **dark** is bound only when its exposure matches the subs within
+  25%, but the **flat** is bound whenever one merely *exists* (now also dimension-gated in v0.103.4, but
+  still with **no gain/temperature confidence gate**). A flat's vignetting/dust pattern is largely
+  gain-independent so a mild gain mismatch rarely corrupts, but a flat shot on a genuinely *different optical
+  train* (a different scope/reducer, same camera body) would be silently applied to a walk-away stack and
+  divide in the wrong illumination pattern — a wrong *image*, with no human to catch it. `recommend_masters`
+  already computes a per-master `score` in 0..1; gate the auto-bound flat on `score ≥ τ` (pick τ so a
+  same-rig flat clears it and a wildly-different one doesn't), leaving the stack flat-uncalibrated below the
+  bar exactly as the dark already does on a poor exposure match. Purely local, additive, off-nothing (only
+  *tightens* what auto-bind will apply), testable on `auto_bind_master_paths` in isolation. Closes the last
+  "confident only" gap in the v0.99.0 auto-bind contract.
+- **Surface what calibration the *unattended* chains auto-applied (trust for the walk-away path).** (S,
+  friendliness/trust) *(Scout-filed 2026-07-10.)* v0.99.0 auto-binds masters into watcher auto-stack /
+  Process target / reprocess-all, and the run's `CALSTAT`/`describe()` provenance already records *what* was
+  calibrated — but a beginner who dropped subs and walked away never *sees* it: there's no plain-language
+  "we auto-applied your master dark + flat" line on the History card or in the auto-edit "why" note. Add one
+  dimmed informational sentence (from the already-persisted run provenance, like the existing frame-accounting
+  amber line) so the user trusts that the hands-off result was calibrated — and, conversely, learns when it
+  *wasn't* (no confident match) so they know to build/pick masters. Read-only, additive, no new computation
+  (the data is on the run); the honest complement to the auto-bind autonomy win above.
 - ~~**One-click "Drop N outlier frames" on the Stack-form auto-grade hint.**~~ —
   **shipped v0.83.2** (see Shipped). The auto-grade hint now carries a "Drop N outlier
   frames" button (beside the retained "Review Auto-grade" link) that calls
@@ -1749,7 +1796,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
-- **v0.103.4** — Engine robustness (background flatten; Builder 2026-07-10, found by a fresh adversarial
+- **v0.103.5** — Engine robustness (background flatten; Builder 2026-07-10, found by a fresh adversarial
   audit of `seestack/bg/*` — the stacker + align/accumulator audits ran alongside and came back clean).
   `bg/per_frame.py::subtract_background`'s **luminance** mode called `_subtract_background_gpu` directly with
   **no** try/except and never consulted the `_gpu_bg_disabled` latch, while the **per-channel** mode wrapped
@@ -1764,6 +1811,27 @@ _Newest first. One line each: what + commit/PR._
   (GPU success or CPU-only). Regression test `test_bg_modes.py::test_gpu_failure_falls_back_to_cpu_in_both_modes`
   (monkeypatches the GPU routine to raise; per-channel recovered before/after, luminance raised before / falls
   back after). Additive, upgrade-safe (no config/DB/API/on-disk change). (#PR)
+- **v0.103.4** — Auto-bind calibration: dimension-gate the masters so an unattended stack can't
+  hard-fail (Scout 2026-07-10, traced + reproduced, then fixed under the full quality bar).
+  `webapp/calibration.py::auto_bind_master_paths` picked the best-matching library master by
+  exposure/gain/temperature but **never checked pixel dimensions**, and the unattended chains
+  (watcher auto-stack / Process target / reprocess-all, via `pipeline.py::_auto_bind_calibration`)
+  passed no dimensions to gate on. So a library holding a master from a **different-sized camera**
+  (two Seestars, an upgrade, a binning change) would auto-bind that master to the subs, and
+  `run_stack` → `CalibrationMasters.validate(ref_shape)` then **raised `ValueError`, aborting the whole
+  walk-away stack** — the exact opposite of auto-bind's documented "leave uncalibrated rather than risk
+  anything / never fail" contract. Reproduced end-to-end: a 1000×800 flat auto-bound against 1920×1080
+  subs → `validate` raises "master is 1000×800 but the frames are 1920×1080". Notably the existing
+  `test_reprocess_all_auto_binds_calibration_when_enabled` had registered a **4×4** master against 480×320
+  synthetic frames and still "passed" — because the test patches `run_stack`, so `validate` never fired,
+  hiding the bug. Fix: `auto_bind_master_paths` now takes optional `width_px`/`height_px` and binds a
+  master only when its recorded dimensions match (a master with unrecorded dims fails the gate when the
+  subs' dims are known; the gate is skipped only when the subs' dims are unknown, so prior behaviour is
+  preserved); `_auto_bind_calibration` computes the frames' most-common dims and passes them. The gate can
+  only ever bind *fewer* masters, never a wrong one, so it can't introduce a mis-calibration. Regression
+  tests `test_auto_bind_skips_dimension_mismatched_masters` + `test_auto_bind_dimension_gate_skipped_when_subs_dims_unknown`
+  (fail before / pass after); the reprocess fixture master now matches the frame dims (as a real one would).
+  Additive, upgrade-safe (no config/DB/API/on-disk change; auto-bind stays off by default). PR #<this>.
 - **v0.103.2** — Stacking-engine correctness (drizzle reject; Builder 2026-07-10, found by a fresh
   adversarial audit of `stack/align.py`/`drizzle_path.py`/`mosaic.py` — reproduced numerically, then fixed).
   `DrizzleStacker.clip_reference` built its per-output-pixel clip tolerance from a **float32** variance

@@ -201,12 +201,13 @@ def test_recommend_masters_skips_missing_and_handles_empty():
     assert empty["dark_master_id"] is None and empty["scores"] == {}
 
 
-def _register(root, kind, exposure_s=None, gain=None, sensor_temp_c=None):
+def _register(root, kind, exposure_s=None, gain=None, sensor_temp_c=None,
+              width=4, height=4):
     from seestack.calibrate.masters import MasterMeta
     return calibration.register_master(
         root, name=f"{kind} {exposure_s}",
-        array=np.full((4, 4), 1.0, dtype=np.float32),
-        meta=MasterMeta(kind, 5, 4, 4, "median", exposure_s=exposure_s,
+        array=np.full((height, width), 1.0, dtype=np.float32),
+        meta=MasterMeta(kind, 5, width, height, "median", exposure_s=exposure_s,
                         gain=gain, sensor_temp_c=sensor_temp_c))
 
 
@@ -264,6 +265,44 @@ def test_auto_bind_binds_bias_only_when_no_dark(tmp_path):
 def test_auto_bind_empty_when_no_masters(tmp_path):
     assert calibration.auto_bind_master_paths(
         tmp_path / "lib", [], exposure_s=30.0) == {}
+
+
+def test_auto_bind_skips_dimension_mismatched_masters(tmp_path):
+    """A master built for a different-sized camera must NOT be auto-bound when
+    the subs' dimensions are known: binding it would make ``run_stack`` hard-fail
+    at ``CalibrationMasters.validate`` — the opposite of auto-bind's "leave
+    uncalibrated rather than risk anything" contract. (Regression: before the
+    dimension gate the wrong-camera flat/dark were bound and aborted the whole
+    unattended stack.)"""
+    root = tmp_path / "lib"
+    # Library holds masters from an OTHER camera (1000x800), subs are 1920x1080.
+    _register(root, "dark", exposure_s=30.0, gain=80.0, width=1000, height=800)
+    _register(root, "flat", exposure_s=2.0, gain=80.0, width=1000, height=800)
+    masters = calibration.list_masters(root)
+
+    bound = calibration.auto_bind_master_paths(
+        root, masters, exposure_s=30.0, gain=80.0, width_px=1920, height_px=1080)
+    assert bound == {}  # nothing bound → stack stays uncalibrated, never aborts
+
+    # A same-dimension master IS still bound when the subs' dims match it.
+    same = _register(root, "flat", exposure_s=2.0, gain=80.0,
+                     width=1920, height=1080)
+    bound2 = calibration.auto_bind_master_paths(
+        root, calibration.list_masters(root),
+        exposure_s=30.0, gain=80.0, width_px=1920, height_px=1080)
+    assert Path(bound2["flat_path"]).name == same["filename"]
+
+
+def test_auto_bind_dimension_gate_skipped_when_subs_dims_unknown(tmp_path):
+    """When the subs' dimensions are unknown the gate is disabled (unchanged from
+    the pre-gate behaviour) — a flat is still bound rather than silently dropped."""
+    root = tmp_path / "lib"
+    flat = _register(root, "flat", exposure_s=2.0, gain=80.0,
+                     width=1000, height=800)
+    bound = calibration.auto_bind_master_paths(
+        root, calibration.list_masters(root),
+        exposure_s=30.0, gain=80.0)  # no width_px/height_px passed
+    assert Path(bound["flat_path"]).name == flat["filename"]
 
 
 def test_calibration_suggestions_endpoint(client, solved_library):

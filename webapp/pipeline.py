@@ -1121,12 +1121,29 @@ def _auto_bind_calibration(settings: Settings, proj: Any, opts_dict: dict[str, A
             n = len(xs)
             return xs[n // 2] if n % 2 else (xs[n // 2 - 1] + xs[n // 2]) / 2.0
 
+        def _mode_dim(vals: list[Any]) -> int | None:
+            """Most common frame dimension — the size ``run_stack`` will validate
+            calibration masters against. Used to reject a wrong-camera master
+            before it can hard-fail the unattended stack."""
+            counts: dict[int, int] = {}
+            for v in vals:
+                if v is None:
+                    continue
+                try:
+                    k = int(v)
+                except (TypeError, ValueError):
+                    continue
+                counts[k] = counts.get(k, 0) + 1
+            return max(counts, key=lambda k: counts[k]) if counts else None
+
         masters = calibration.list_masters(settings.resolved_library_root)
         bound = calibration.auto_bind_master_paths(
             settings.resolved_library_root, masters,
             exposure_s=_med([f.exposure_s for f in frames]),
             gain=_med([f.gain for f in frames]),
             sensor_temp_c=_med([f.sensor_temp_c for f in frames]),
+            width_px=_mode_dim([f.width_px for f in frames]),
+            height_px=_mode_dim([f.height_px for f in frames]),
         )
     except Exception as exc:  # noqa: BLE001 — calibration binding is a best-effort nicety
         log.warning("auto-bind calibration failed for %s: %s",
