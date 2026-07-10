@@ -56,6 +56,50 @@ def test_build_master_mean(tmp_path):
     np.testing.assert_allclose(master, 20.0)
 
 
+def test_sigma_clip_mean_rejects_outlier_when_mad_is_zero():
+    # Regression: a per-pixel MAD of 0 means a *majority* of frames sit exactly
+    # at the median, NOT that there are no outliers. A minority cosmic-ray/hot-
+    # pixel spike must still be rejected. Previously tol was set to +inf when
+    # mad==0, so the spike was kept and averaged in (→ 680 below).
+    from seestack.calibrate.masters import _sigma_clip_mean
+
+    stack = np.array(
+        [200, 200, 200, 200, 200, 200, 200, 200, 200, 5000], dtype=np.float32
+    ).reshape(10, 1, 1)
+    out = _sigma_clip_mean(stack, 3.0)
+    assert float(out[0, 0]) == pytest.approx(200.0)  # spike rejected (was ~680)
+
+    # A genuine spread (mad>0) still clips the outlier and means the rest.
+    spread = np.array(
+        [100, 101, 99, 102, 98, 100, 101, 9000], dtype=np.float32
+    ).reshape(8, 1, 1)
+    assert float(_sigma_clip_mean(spread, 3.0)[0, 0]) == pytest.approx(100.0, abs=0.5)
+
+    # Truly-identical frames (real zero spread) keep every sample → their value.
+    flat = np.full((5, 1, 1), 300.0, dtype=np.float32)
+    assert float(_sigma_clip_mean(flat, 3.0)[0, 0]) == pytest.approx(300.0)
+
+
+def test_build_master_sigma_mean_rejects_cosmic_ray_on_quiet_pixel(tmp_path):
+    # End-to-end: a bias/dark set where every frame reads the same quiet level
+    # except one frame with a cosmic-ray spike on one pixel (so that pixel's MAD
+    # is 0). sigma_mean must reject the spike, not bake it into the master.
+    paths = []
+    for i in range(10):
+        arr = np.full((4, 4), 200.0, dtype=np.float32)
+        if i == 0:
+            arr[2, 3] = 5000.0  # lone cosmic-ray hit on an otherwise-quiet pixel
+        p = tmp_path / f"bias_{i}.fits"
+        _write_raw(p, arr, exptime=0.0, gain=80.0, temp=-5.0)
+        paths.append(p)
+    master, meta = build_master(paths, kind="bias", method="sigma_mean", sigma=3.0)
+    assert master.shape == (4, 4)
+    # The spiked pixel is rejected back to the quiet level, not ~680.
+    assert float(master[2, 3]) == pytest.approx(200.0, abs=1.0)
+    np.testing.assert_allclose(master, 200.0, atol=1.0)
+    assert meta.method == "sigma_mean"
+
+
 def test_build_master_rejects_mismatched_shape(tmp_path):
     p1 = tmp_path / "a.fits"
     p2 = tmp_path / "b.fits"

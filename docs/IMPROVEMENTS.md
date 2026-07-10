@@ -47,6 +47,27 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**`sigma_mean` master build keeps a cosmic-ray / hot-pixel outlier (never rejects it) on any pixel whose
+  per-frame MAD is exactly 0 — the outlier is baked into the master and over-subtracted from every light.**~~
+  — **FIXED v0.103.22** (Builder audit 2026-07-10; traced + reproduced + regression-tested). `calibrate/masters.py::
+  _sigma_clip_mean` set the rejection tolerance to `sigma * np.where(mad > 0, mad, np.inf)` — substituting **+inf**
+  when the per-pixel MAD was 0, so `keep = |x − med| ≤ inf` kept *every* sample. But `mad == 0` does **not** mean
+  "no outliers": it means a *majority* of frames sit exactly at the median, which is the common case on quantised
+  **bias / dark** frames (low, integer-ADU signal → most frames read the identical value at a given pixel). A lone
+  cosmic-ray / transient-hot-pixel spike on such a pixel therefore survived and was **averaged into the master**
+  (measured: 9×200 ADU + 1×5000 → master pixel **680** instead of ~200; 7×100 + 1×9000 → **1212** instead of ~100),
+  and that inflated value is then subtracted from *every* light via `apply_raw`, punching a fixed-pattern
+  over-subtraction hole at that pixel across the whole stack — a persistent, real image-corruption on the
+  user-selectable `sigma_mean` combine method (`POST …/calibration/build-master` accepts `method="sigma_mean"`).
+  Fixed by using `tol = 0` when `mad == 0` (`np.where(mad > 0, mad, 0.0)`): only the exact-median samples survive,
+  so the pixel degrades to the **robust median** and the spike is correctly rejected — while a genuine spread
+  (`mad > 0`) clips and means exactly as before, and a truly-identical stack still keeps every sample. Regression
+  tests `tests/test_calibrate.py::test_sigma_clip_mean_rejects_outlier_when_mad_is_zero` (asserts ~200 / unchanged
+  spread / identical-stack) and `test_build_master_sigma_mean_rejects_cosmic_ray_on_quiet_pixel` (end-to-end
+  `build_master(method="sigma_mean")`, fails before / passes after). Additive, no schema/config/API change; the
+  default `median` combine path was never affected. Found by an adversarial audit of the calibration master-build
+  path (`calibrate/masters.py` + `apply.py`), which otherwise traced clean.
+
 - ~~**Quality weighting crashes the *whole* stack (or silently mis-weights) on a frame whose stored
   `sky_adu_median` is ≤ 0.**~~ — **FIXED v0.103.21** (Builder audit 2026-07-10; traced + reproduced +
   regression-tested). `stack/weighting.py::compute_frame_weights`'s sky sub-weight
