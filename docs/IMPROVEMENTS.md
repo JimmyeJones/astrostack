@@ -996,8 +996,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   bar exactly as the dark already does on a poor exposure match. Purely local, additive, off-nothing (only
   *tightens* what auto-bind will apply), testable on `auto_bind_master_paths` in isolation. Closes the last
   "confident only" gap in the v0.99.0 auto-bind contract.
-- **Surface what calibration the *unattended* chains auto-applied (trust for the walk-away path).** (S,
-  friendliness/trust) *(Scout-filed 2026-07-10.)* v0.99.0 auto-binds masters into watcher auto-stack /
+- ~~**Surface what calibration the *unattended* chains auto-applied (trust for the walk-away path).**~~ —
+  **shipped v0.103.7** (see Shipped). The run Info/provenance panel now shows a plain-language calibration
+  line derived from the already-returned `CALSTAT` card: "Calibrated with your master dark and master flat."
+  when masters were applied, and — critically for the walk-away user — an explicit "No calibration masters
+  were applied — build or pick a master dark/flat…" note when a stack that *does* carry provenance came out
+  uncalibrated (previously the panel showed only a cryptic `CALSTAT` row and said nothing at all when
+  uncalibrated). Frontend-only, additive, no backend/schema/API change. Original write-up kept below for
+  provenance. (S, friendliness/trust) *(Scout-filed 2026-07-10.)* v0.99.0 auto-binds masters into watcher auto-stack /
   Process target / reprocess-all, and the run's `CALSTAT`/`describe()` provenance already records *what* was
   calibrated — but a beginner who dropped subs and walked away never *sees* it: there's no plain-language
   "we auto-applied your master dark + flat" line on the History card or in the auto-edit "why" note. Add one
@@ -1800,6 +1806,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.103.7** — Surface calibration provenance in plain language on the run Info panel (Builder 2026-07-10;
+  the trust complement to the v0.99.0/v0.103.4/v0.103.6 auto-bind work). A hands-off (auto-bound) stack now
+  tells the walk-away user, in the provenance panel they open for trust, whether it was calibrated — a plain
+  "Calibrated with your master dark and master flat." line when `CALSTAT` is present, and an explicit "No
+  calibration masters were applied — build or pick a master dark/flat…" note when a stack that carries
+  provenance came out uncalibrated (the panel previously showed only a cryptic `CALSTAT  dark+flat` row when
+  calibrated and said *nothing at all* when uncalibrated, so a beginner had no cue to go build masters). The
+  presence of `CALSTAT` among other provenance cards reliably distinguishes calibrated from uncalibrated (the
+  panel already returns early when a stack has no provenance at all), so it's derived purely from the existing
+  `…/info` response — frontend-only, additive, no backend/schema/API change. Pure `calibrationSummaryText`
+  helper + tests in `History.test.tsx`. (#PR)
 - **v0.103.6** — Auto-bind calibration: gate the auto-bound *flat* on a gain/temperature confidence match
   (Builder 2026-07-10; closes the last "confident only" gap the Scout filed on the v0.99.0 auto-bind
   contract). `recommend_masters` always returns the best *available* flat no matter how poorly it matches

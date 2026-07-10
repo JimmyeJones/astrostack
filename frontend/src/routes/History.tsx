@@ -11,7 +11,7 @@ import { Link, useParams } from "react-router-dom";
 import { api, type StackRun, type StackPhotometricSummary, type StackDarkScalingSummary, type StackRejectionSummary, type StackFrameAccounting } from "../api/client";
 import { formatIntegration } from "../format";
 import { HazyNightBadge } from "../components/HazyNightBadge";
-import { CalibrationBadge } from "../components/CalibrationBadge";
+import { CalibrationBadge, calibrationLabel } from "../components/CalibrationBadge";
 import { RejectionBadge } from "../components/RejectionBadge";
 import { NoiseReadout, NoiseDelta, CleanestBadge, cleanestRunId, hasNoise } from "../components/NoiseBadge";
 import { ImageLightbox } from "../components/ImageLightbox";
@@ -100,6 +100,34 @@ export function combineMethodLabel(
     "drizzle": "Drizzle (sub-pixel resampling)",
   };
   return labels[method] ?? null;
+}
+
+// Plain-language calibration provenance for the Info/provenance panel. The
+// stacker stamps a CALSTAT card ("dark+flat", "bias+flat", "flat", …) only when
+// masters were actually applied to the lights, so — among a stack that *does*
+// carry provenance — CALSTAT's presence reliably means calibrated and its
+// absence means uncalibrated (the panel returns early when a stack has no
+// provenance cards at all, so this never confuses "uncalibrated" with an older
+// master that recorded nothing). For the walk-away user this closes a real trust
+// gap: the panel previously showed only a cryptic "CALSTAT  dark+flat" row when
+// calibrated, and said *nothing at all* when a hands-off (auto-bound) stack came
+// out uncalibrated — leaving no cue to go build or pick a master. Returns
+// { text, calibrated } or null when there's no provenance to speak to. Pure.
+export function calibrationSummaryText(
+  cards: { key: string; value: string | number | boolean }[],
+): { text: string; calibrated: boolean } | null {
+  if (cards.length === 0) return null;
+  const card = cards.find((c) => c.key === "CALSTAT");
+  const label = calibrationLabel(card ? String(card.value) : null);
+  if (label) {
+    return { text: `Calibrated with your ${label}.`, calibrated: true };
+  }
+  return {
+    text:
+      "No calibration masters were applied — build or pick a master dark/flat " +
+      "in Calibration to cut thermal noise and vignetting.",
+    calibrated: false,
+  };
 }
 
 // Provenance label for a run's producing app version — "v0.75.0", or "" when
@@ -277,6 +305,15 @@ function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
           {data.auto_edit}
         </Text>
       ) : null}
+      {(() => {
+        const cal = calibrationSummaryText(data.cards);
+        if (!cal) return null;
+        return (
+          <Text size="xs" c="dimmed">
+            {cal.text}
+          </Text>
+        );
+      })()}
       {data.weighting ? (
         <Text size="xs" c="dimmed">
           Quality-weighted

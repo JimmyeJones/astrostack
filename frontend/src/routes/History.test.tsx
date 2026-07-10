@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, darkScalingSummaryText, rejectionSummaryText, frameAccountingNote } from "./History";
+import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, darkScalingSummaryText, rejectionSummaryText, frameAccountingNote, calibrationSummaryText } from "./History";
 import { formatIntegration } from "../format";
 import * as client from "../api/client";
 import type { StackRun } from "../api/client";
@@ -339,6 +339,32 @@ describe("combineMethodLabel", () => {
     expect(combineMethodLabel([{ key: "OBJECT", value: "M42" }])).toBeNull();
     expect(combineMethodLabel([{ key: "STACKER", value: "quantum" }])).toBeNull();
     expect(combineMethodLabel([])).toBeNull();
+  });
+});
+
+describe("calibrationSummaryText", () => {
+  it("names the applied masters in plain language when CALSTAT is present", () => {
+    const r = calibrationSummaryText([
+      { key: "STACKER", value: "sigma-clip" },
+      { key: "CALSTAT", value: "dark+flat" },
+    ]);
+    expect(r).toEqual({
+      text: "Calibrated with your master dark and master flat.",
+      calibrated: true,
+    });
+  });
+  it("handles a single applied master", () => {
+    expect(calibrationSummaryText([{ key: "CALSTAT", value: "flat" }]))
+      .toEqual({ text: "Calibrated with your master flat.", calibrated: true });
+  });
+  it("tells the walk-away user when a stack that HAS provenance wasn't calibrated", () => {
+    const r = calibrationSummaryText([{ key: "STACKER", value: "mean" }]);
+    expect(r?.calibrated).toBe(false);
+    expect(r?.text).toMatch(/No calibration masters were applied/);
+    expect(r?.text).toMatch(/Calibration/);
+  });
+  it("says nothing when the stack carries no provenance at all", () => {
+    expect(calibrationSummaryText([])).toBeNull();
   });
 });
 
