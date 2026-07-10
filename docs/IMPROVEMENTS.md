@@ -980,7 +980,16 @@ problems. Dogfood it every big-picture run and fix root causes.
   is self-describing for Siril/PixInsight. Absence = today's linear behaviour, so
   old runs are unaffected.
 - **Measure the finished picture's residual background colour cast and offer a one-click
-  "neutralise background".** (S–M, editor/trust — PRIORITY 1) *(Scout-filed 2026-07-10.)* The
+  "neutralise background".** (S–M, editor/trust — PRIORITY 1) *(Scout-filed 2026-07-10.)*
+  _(Builder 2026-07-10: **read-only readout slice SHIPPED v0.104.0** — the smallest-first slice the
+  item called for. `edit/histogram.py::measure_sky_cast` returns the robust per-channel
+  sky-background medians (median of each channel's finite pixels at/below the luminance median, so
+  stars/target don't pull it) + a plain colour-cast verdict; the `…/editor/histogram` endpoint adds a
+  `sky_cast` field, and the editor shows a dimmed "Sky background: neutral ✓ / slight green cast"
+  line next to the other advisories (`frontend/.../skyCast.ts`). Read-only, additive, NaN-aware,
+  off-by-nothing. **Remaining follow-up:** the one-click that appends a `tone.white_balance` op to
+  equalise the off-channels to the reference sky median — described below — deliberately deferred so
+  the read-out gathers real signal on whether Auto lands neutral before an action is wired.)_ The
   editor already has SCNR (green removal) and Color-calibration, but a beginner has no way to
   *see* whether their sky background actually ended up neutral, nor a data-driven correction when
   it didn't — they'd have to eyeball SCNR `amount` or hand-tune White-balance gains. The
@@ -2186,6 +2195,15 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.104.0** — Feature (editor, PRIORITY 1 / trust): sky-background colour-cast readout. The
+  `…/editor/histogram` endpoint now returns a read-only `sky_cast` measurement of the *finished*
+  picture — `edit/histogram.py::measure_sky_cast` computes the robust per-channel sky medians over the
+  sky population (finite pixels at/below the luminance median, so stars/target don't pull it) and a
+  plain colour-cast verdict — and the editor shows a dimmed "Sky background: neutral ✓ / slight green
+  cast" line, so a beginner can *see* whether their background ended up neutral. NaN-aware, additive,
+  no config/schema/API-shape change (new nullable field). The smallest-first slice of the Scout's
+  colour-cast item; the one-click "neutralise background" action is a deferred follow-up (still listed
+  under Ideas → Editor).
 - **v0.103.17** — Fix (editor, PRIORITY 1): the editor's undo/redo hook (`useUndoable`) misbehaved under
   React StrictMode (Builder 2026-07-10; found by an adversarial frontend-logic audit, reproduced with a
   deterministic test before fixing). The history was kept in `useRef` arrays that were **mutated inside the

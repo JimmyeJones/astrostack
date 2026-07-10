@@ -662,6 +662,25 @@ def test_edit_preview_and_histogram(client, solved_library):
     assert hist["render_height"] == hist["proxy_height"]
 
 
+def test_histogram_reports_sky_cast(client, solved_library):
+    """The histogram endpoint returns a read-only ``sky_cast`` measurement of the
+    finished picture's residual background colour balance, so the editor can show
+    a "Sky background: neutral ✓ / slight green cast" line."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe)
+    recipe = {"ops": [{"id": "tone.stretch", "params": {"stretch": 0.6, "black": 0.35}}]}
+    q = _enc(recipe)
+    hist = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/histogram?recipe={q}").json()
+    sc = hist["sky_cast"]
+    assert set(sc) == {"r", "g", "b", "neutral", "cast", "deviation"}
+    assert sc["cast"] in {"neutral", "unknown", "red", "green", "blue",
+                          "cyan", "magenta", "yellow"}
+    # A real (finite) stack yields measured medians, not the empty sentinel.
+    assert sc["cast"] != "unknown"
+    assert sc["r"] is not None and 0.0 <= sc["r"] <= 1.0
+
+
 def test_histogram_reports_rendered_dims_after_crop(client, solved_library):
     """Regression: a recipe with a reshaping geometry op (crop) must report the
     *rendered* dims (``render_width``/``render_height``), matching the preview PNG,

@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from seestack.edit.coverage_trim import coverage_is_mosaic, largest_covered_rect
-from seestack.edit.histogram import compute_histogram
+from seestack.edit.histogram import compute_histogram, measure_sky_cast
 from seestack.edit.ops.detail import deconv_understates_on_proxy
 from seestack.edit.ops.stars import star_reduce_overstates_on_proxy
 from seestack.edit.pipeline import apply_recipe
@@ -935,6 +935,13 @@ async def edit_histogram(safe: str, run_id: int, request: Request,
         hist = compute_histogram(out)
         hist["empty"] = empty
         hist["errors"] = errors  # ops that failed (surfaced near the preview)
+        # Robust per-channel sky-background medians + a plain colour-cast verdict
+        # over the *finished* display image, so a beginner can see whether their
+        # sky background actually ended up neutral (and, later, one-click fix it).
+        # Read-only measurement; the editor shows a dimmed "Sky background:
+        # neutral ✓ / slight green cast" line from these fields. Absent-safe: old
+        # clients ignore the extra key.
+        hist["sky_cast"] = measure_sky_cast(out)
         # Surface the proxy geometry so the editor can tell the user the live
         # preview is downscaled (a ≤1500 px proxy of what may be a 150 MP mosaic),
         # which sets expectations for why fine detail reads differently than the
