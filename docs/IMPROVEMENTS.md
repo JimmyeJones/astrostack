@@ -1632,6 +1632,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   `tests/webapp/test_pipeline.py::test_process_target_chains_auto_edit` (asserts the `sky_cast` verdict
   dict) + `test_manual_stack_has_no_auto_edit_note` (a manual stack carries none), the TS helper test
   `skyCast.test.ts::autoSkyCastCaption`, and a History render test.
+- **Aggregate the per-run auto-edit sky-cast (v0.105.0) into a library-wide "does Auto land neutral?"
+  read-out — turn the passive signal into an actual answer to the deferred SCNR/gray-star real-data
+  question.** (S–M, image-quality/trust — PRIORITY 4) *(Builder-filed 2026-07-10, the natural next step
+  after shipping v0.105.0.)* v0.105.0 now stamps every walk-away Auto result's finished sky-background
+  cast (r/g/b sky medians + neutral/colour verdict) into per-run provenance (`editor_auto_skycast:{run_id}`
+  meta). Individually those are one dimmed History line; **in aggregate they answer the exact real-data
+  question the three deferred "vet on REAL data: SCNR magenta / gray-star leaves a background cast" items
+  need** — "on how many of the owner's real auto-edited runs did Auto's colour path (`color_calibrate → SCNR`)
+  actually land the background neutral, and when it didn't, which way did it skew?" Shape: a small read-only
+  diagnostic (a Settings or Dashboard card, or a `GET /api/…/auto-cast-summary` endpoint) that reads the
+  stamped `editor_auto_skycast:` metas across the library's stack runs and reports e.g. "Auto's background
+  came out neutral on 34 of 41 auto-edited runs; 6 skewed slightly green, 1 magenta" (+ the median per-channel
+  deviation). That gives the owner — and a future Scout deciding whether to touch the most-used Auto path — a
+  concrete, real-Seestar-data distribution instead of a synthetic guess, without touching any pixels. The
+  data is already on disk (this run put it there), so it's pure aggregation: read-only, additive, off-nothing
+  (empty until auto-edited runs accrue), no schema/default/API-shape change, testable on the aggregation over
+  a synthetic set of stamped metas. Serves trust (an honest self-check on Auto's colour) and directly unblocks
+  the long-deferred SCNR real-data decision. Best filed for the Scout (it's a QA/measurement read-out), or a
+  Builder can ship the aggregation slice once a few real auto-edited runs exist to read.
 - **Scout to vet on REAL data: does the Auto denoise↔sharpen crossfade over-read a *sky
   gradient* as noise?** (M, image-quality/autonomy) `presets.auto_recipe` picks its denoise
   strength and whether to sharpen from `analyze_proxy`'s `sky_sigma`, measured on the **raw**
