@@ -1718,6 +1718,29 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.103.2** — Stacking-engine correctness (drizzle reject; Builder 2026-07-10, found by a fresh
+  adversarial audit of `stack/align.py`/`drizzle_path.py`/`mosaic.py` — reproduced numerically, then fixed).
+  `DrizzleStacker.clip_reference` built its per-output-pixel clip tolerance from a **float32** variance
+  `m2 − m²`, where `m` (weighted mean) and `m2` (weighted mean-of-squares) are ~counts² for a bright pixel:
+  at ~5.5e4 ADU, `m² ≈ 3e9` where float32's ULP (~360) dwarfs a true per-frame variance of ~1e2, so the
+  variance suffered **catastrophic cancellation** and underflowed to 0 → tolerance collapsed to 0 → in
+  pass 2 *every* real contribution failed `|value − mean| > 0` → zero weight → `out_wht == 0` → the
+  fully-covered bright pixel came back **NaN**. Net effect with `drizzle` + `drizzle_reject` on: a bright,
+  flat region — a near-saturated star core or a smooth bright nebula — could be punched into a NaN coverage
+  hole (a NaN=coverage-invariant violation, and the exact "star cores are not eaten" the module docstring
+  promises). Verified by sweep: at V=48–64k, real σ=8–20, fp32 collapsed to *all 40 contributions rejected*.
+  The fix computes the difference in float64 **and** — since `m2` is itself accumulated in float32 by the
+  drizzle library, so a variance below `ULP(m²)` is already lost before the subtract — disables rejection
+  where the variance is at/below the float32 resolution of `m²` (`var ≤ 16·εf32·m²`), treating it like the
+  existing low-`neff` guard (`tol = +inf`, never reject). The threshold scales with brightness, so dim
+  sky/nebula (`var ≫ ULP(m²)`) is byte-for-byte unchanged and legitimate outliers at normal brightness are
+  still clipped. Additive, upgrade-safe (no config/DB/API/on-disk change; `drizzle_reject` stays off by
+  default). Regression tests `test_drizzle_reject_keeps_a_bright_flat_region` (fails before / passes after)
+  and `test_drizzle_reject_still_clips_a_real_outlier_at_normal_brightness` (guards the floor doesn't disable
+  real rejection). The two lower-severity items the same audit raised were dismissed: `rejection_counts`
+  tallies channel-samples *consistently* with the standard κ-σ path (the fraction is correct — same
+  convention, not a bug), and the returned `win_valid` staleness is covered by every consumer recomputing
+  `isfinite(win_rgb)`.
 - **v0.103.1** — Editor/parity hardening (PRIORITY 1; Builder 2026-07-10, found by a fresh adversarial
   editor-pipeline audit). `geometry.crop`'s "too small → ignore" degenerate guard was evaluated in *this
   render's* pixels, so a tiny fractional crop that is a real (≥2 px) crop on the full-res image but rounds

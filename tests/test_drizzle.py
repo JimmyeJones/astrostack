@@ -311,3 +311,88 @@ def test_drizzle_suppresses_hot_pixels(tmp_path):
     assert r_on[hot_y, hot_x] < 0.6 * r_off[hot_y, hot_x], (
         "hot pixel should be suppressed on the drizzle path too"
     )
+
+
+def test_drizzle_reject_keeps_a_bright_flat_region(tmp_path):
+    """A bright, flat region (a near-saturated star core / smooth bright nebula)
+    must survive the two-pass drizzle rejection — it must NOT be punched into a
+    NaN coverage hole.
+
+    Regression guard for the float32 catastrophic-cancellation bug in
+    ``clip_reference``: the clip variance is ``m2 − m²`` of two large float32
+    ~counts² operands. At ~5.5e4 counts, m² ≈ 3e9 where float32's ULP (~360)
+    dwarfs a true per-frame variance of ~1e2, so the variance underflowed to 0,
+    the tolerance collapsed to 0, and in pass 2 *every* real contribution failed
+    ``|value − mean| > 0`` → zero weight → ``out_wht == 0`` → the fully-covered
+    bright pixel came back NaN. The fix disables rejection where the variance is
+    below the float32 resolution of m² (it's unrecoverable noise, not a real
+    spread), so the region is kept instead of holed.
+    """
+    wcs = wcs_from_text(make_synth_wcs_text(width=100, height=80))
+    params = DrizzleParams(scale=1.0, pixfrac=1.0)
+    rng = np.random.default_rng(7)
+    n = 8
+    # A very bright, flat field with a small, genuine per-pixel frame-to-frame
+    # spread (σ ≈ 10 counts) — well within noise, far below ULP(m²) at 5.5e4.
+    frames = [
+        (55000.0 + rng.normal(0.0, 10.0, (80, 100, 3))).astype(np.float32)
+        for _ in range(n)
+    ]
+
+    # Mirror the stacker's two-pass reject flow: pass 1 builds the statistics,
+    # pass 2 re-drizzles clipping against them.
+    stats = DrizzleStacker(wcs, (80, 100), params, compute_stats=True)
+    for f in frames:
+        stats.add_frame(f, wcs)
+    clip = stats.clip_reference(kappa=3.0)
+    mean_ref, tol_ref = clip
+    # The bright interior must be flagged unresolvable → tol = +inf (never
+    # reject), not the collapsed-to-0 tolerance the bug produced.
+    assert np.all(np.isinf(tol_ref[10:-10, 10:-10, :])), (
+        "bright flat region should disable rejection, not clip against ~0 tol"
+    )
+
+    drz = DrizzleStacker(wcs, (80, 100), params)
+    for f in frames:
+        drz.add_frame(f, wcs, clip=clip)
+    result = drz.result()
+    interior = result[10:-10, 10:-10, :]
+    # The bug made this entirely NaN (every contribution rejected). It must stay
+    # covered and near the true brightness.
+    assert np.isfinite(interior).all(), "bright flat region was punched into a NaN hole"
+    assert np.nanmedian(interior) == pytest.approx(55000.0, rel=0.01)
+
+
+def test_drizzle_reject_still_clips_a_real_outlier_at_normal_brightness(tmp_path):
+    """The variance-reliability floor must not disable *legitimate* rejection on
+    normal-brightness data: a genuine bright outlier in one frame is still clipped
+    (the floor only trips where the spread is unresolvable float32 noise, which a
+    real outlier at ~500 counts is not)."""
+    wcs = wcs_from_text(make_synth_wcs_text(width=100, height=80))
+    params = DrizzleParams(scale=1.0, pixfrac=1.0)
+    # Enough frames that a single-pass κ=3 clip can actually fire — the largest
+    # possible z-score of a point against statistics that include it is
+    # (n−1)/√n, which only clears κ=3 for n ≳ 11.
+    n = 16
+    base = 500.0
+    frames = [np.full((80, 100, 3), base, dtype=np.float32) for _ in range(n)]
+    # One frame carries a big cosmic-ray-like spike over an interior block.
+    frames[3][30:50, 30:50, :] = 8000.0
+
+    stats = DrizzleStacker(wcs, (80, 100), params, compute_stats=True)
+    for f in frames:
+        stats.add_frame(f, wcs)
+    clip = stats.clip_reference(kappa=3.0)
+
+    drz = DrizzleStacker(wcs, (80, 100), params)
+    for f in frames:
+        drz.add_frame(f, wcs, clip=clip)
+    result = drz.result()
+    # The spike was rejected: the block reads ~500 (the good frames' value), not
+    # pulled up toward 8000, and it stays covered (not NaN).
+    block = result[32:48, 32:48, :]
+    assert np.isfinite(block).all()
+    assert np.nanmedian(block) == pytest.approx(base, abs=5.0)
+    # And rejection actually fired (the tally saw non-zero drops).
+    _, n_rej = drz.rejection_counts()
+    assert n_rej > 0
