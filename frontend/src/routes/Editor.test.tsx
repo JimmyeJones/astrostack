@@ -804,6 +804,68 @@ describe("EditorView", () => {
       expect(screen.queryByText("This picture was auto-edited")).not.toBeInTheDocument());
   });
 
+  it("tells the walk-away user their auto-edited run was calibrated", async () => {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [{ uid: "x1", id: "tone.stretch", enabled: true,
+              params: { mode: "stf", target_bg: 0.2 } }],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "autoNote").mockResolvedValue({
+      note: "Auto-edited: flattened the background, then applied a natural stretch.",
+    });
+    // The run's provenance says a master dark + flat were applied (the hands-off
+    // auto-bind on a walk-away stack) — the editor should say so, mirroring History.
+    vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({
+      run_id: 3, integration_s: null, n_frames: null, weighting: null,
+      cards: [{ key: "CALSTAT", value: "dark+flat", comment: null }],
+    } as unknown as client.StackRunInfo);
+    vi.spyOn(client.api, "getDefaultRecipe").mockResolvedValue({ ops: [], count: 0 });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    expect(await screen.findByText("This picture was auto-edited")).toBeInTheDocument();
+    expect(await screen.findByText("Calibrated with your master dark and master flat."))
+      .toBeInTheDocument();
+  });
+
+  it("omits the calibration line for an uncalibrated auto-edited run", async () => {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [{ uid: "x1", id: "tone.stretch", enabled: true,
+              params: { mode: "stf", target_bg: 0.2 } }],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "autoNote").mockResolvedValue({
+      note: "Auto-edited: flattened the background, then applied a natural stretch.",
+    });
+    // A run that carries provenance but no CALSTAT (auto-bind found no confident
+    // master): the editor stays quiet — the "build a master" nudge lives on History.
+    vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({
+      run_id: 3, integration_s: null, n_frames: null, weighting: null,
+      cards: [{ key: "STACKER", value: "mean", comment: null }],
+    } as unknown as client.StackRunInfo);
+    vi.spyOn(client.api, "getDefaultRecipe").mockResolvedValue({ ops: [], count: 0 });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    expect(await screen.findByText("This picture was auto-edited")).toBeInTheDocument();
+    expect(screen.queryByText(/No calibration masters were applied/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Calibrated with/)).not.toBeInTheDocument();
+  });
+
   it("shows no auto-edit note for a run without one (a hand-built recipe)", async () => {
     mockEditorQueries();  // getRecipe returns a non-empty recipe, no autoNote stored
     vi.spyOn(client.api, "autoNote").mockResolvedValue({ note: null });

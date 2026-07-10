@@ -1011,8 +1011,17 @@ problems. Dogfood it every big-picture run and fix root causes.
   amber line) so the user trusts that the hands-off result was calibrated — and, conversely, learns when it
   *wasn't* (no confident match) so they know to build/pick masters. Read-only, additive, no new computation
   (the data is on the run); the honest complement to the auto-bind autonomy win above.
-- **Carry the calibration-status trust line onto the *editor's* auto-note surface too (walk-away path lands
-  there).** (S, friendliness/trust) *(Builder-filed 2026-07-10, spotted shipping v0.103.7.)* v0.103.7 surfaced
+- ~~**Carry the calibration-status trust line onto the *editor's* auto-note surface too (walk-away path lands
+  there).**~~ — **shipped v0.103.8** (see Shipped). The editor's "This picture was auto-edited" note (the
+  surface the Process-target deep-link lands the walk-away user on) now also shows the positive "Calibrated
+  with your master dark and master flat." line when the run's `CALSTAT` provenance records applied masters,
+  so the beginner who took the most hands-off path finally sees — on the surface they're looking at — that
+  their result was calibrated. Took the "smallest slice" the filing asked for: the positive line only, with
+  the "build a master" nudge left on History so the editor note doesn't scold a user mid-edit. Reused the
+  exact `calibrationSummaryText` History already ships (extracted to a shared `components/calibrationSummary.ts`
+  module; History re-exports it so its tests are unchanged) and the existing read-only `…/stack-runs/{id}/info`
+  cards endpoint — frontend-only, additive, no backend/schema/API change. Original write-up kept below for
+  provenance. (S, friendliness/trust) *(Builder-filed 2026-07-10, spotted shipping v0.103.7.)* v0.103.7 surfaced
   the "Calibrated with your master dark + flat" / "No calibration masters were applied" line on the History
   **Info panel**, but the one-click **Process target** deep-link (v0.85.3) actually lands a walk-away user in
   the **editor** on the finished picture — where the auto-edit "why" note (v0.93.0, `…/editor/auto-note`)
@@ -1819,6 +1828,18 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.103.8** — Carry the calibration-status trust line onto the editor's auto-note surface (Builder
+  2026-07-10; the second surface of the v0.103.7 History calibration line). The one-click Process-target
+  deep-link lands a walk-away user in the *editor* on the finished picture, where the "This picture was
+  auto-edited" note (v0.93.0) explained only the *editing* steps and said nothing about *calibration*. That
+  note now also shows the positive "Calibrated with your master dark and master flat." line when the run's
+  `CALSTAT` provenance records applied masters, so the beginner who took the most hands-off path sees — on
+  the surface they're actually looking at — that their result was calibrated. Positive line only (the
+  "build a master" nudge stays on History so the editor note doesn't scold mid-edit). Reused the exact
+  `calibrationSummaryText` History ships (extracted to a shared `components/calibrationSummary.ts`; History
+  re-exports it, tests unchanged) and the existing read-only `…/stack-runs/{id}/info` cards endpoint —
+  frontend-only, additive, no backend/schema/API change. Two new `Editor.test.tsx` cases (calibrated shows,
+  uncalibrated stays quiet). (#PR)
 - **v0.103.7** — Surface calibration provenance in plain language on the run Info panel (Builder 2026-07-10;
   the trust complement to the v0.99.0/v0.103.4/v0.103.6 auto-bind work). A hands-off (auto-bound) stack now
   tells the walk-away user, in the provenance panel they open for trust, whether it was calibrated — a plain

@@ -40,6 +40,7 @@ import { starMaskSizePx } from "../components/editor/starMaskSize";
 import { levelsAtIdentity, resetLevelsPoints } from "../components/editor/levelsReset";
 import { curvePointsMatch, isIdentityCurve } from "../components/editor/curveMatch";
 import { coalesceFwhm, measuredContextText } from "../components/editor/measuredContext";
+import { calibrationSummaryText } from "../components/calibrationSummary";
 import { OpParamPanel } from "../components/editor/OpParamPanel";
 import { PresetMenu } from "../components/editor/PresetMenu";
 import { HintLabel } from "../components/StackOptionControl";
@@ -130,6 +131,19 @@ export function EditorView() {
   const autoNote = useQuery({
     queryKey: ["auto-note", safe, rid],
     queryFn: () => api.autoNote(safe, rid).catch(() => ({ note: null })),
+    enabled: !!saved.data && !savedIsEmpty,
+    staleTime: 30_000,
+  });
+  // The run's provenance cards, read only to tell the walk-away user whether
+  // their hands-off result was calibrated (v0.103.7 surfaced this on the History
+  // Info panel, but the Process-target deep-link actually lands them in the
+  // editor). Fetched under the same condition as the auto-note — a run a
+  // background job auto-edited — and used solely for the positive "Calibrated
+  // with your master dark + flat" line inside that note. Best-effort: null on an
+  // older backend / missing FITS, in which case the line is simply omitted.
+  const runInfo = useQuery({
+    queryKey: ["stack-run-info", safe, rid],
+    queryFn: () => api.stackRunInfo(safe, rid).catch(() => null),
     enabled: !!saved.data && !savedIsEmpty,
     staleTime: 30_000,
   });
@@ -1367,6 +1381,18 @@ export function EditorView() {
                 {autoValueSentence(ops) ? (
                   <Text size="xs" c="dimmed" mt={4}>{autoValueSentence(ops)}</Text>
                 ) : null}
+                {/* The walk-away user landed here via Process-target — tell them
+                    the hands-off master was calibrated (the same trust line the
+                    History Info panel shows). Positive case only: the "build a
+                    master" nudge stays on History so the editor note doesn't
+                    scold a user mid-edit. */}
+                {(() => {
+                  const cards = runInfo.data?.cards;
+                  if (!cards) return null;
+                  const cal = calibrationSummaryText(cards);
+                  if (!cal || !cal.calibrated) return null;
+                  return <Text size="xs" c="dimmed" mt={4}>{cal.text}</Text>;
+                })()}
                 <Text size="10px" c="dimmed" mt={4}>
                   These steps were chosen from your image — tweak or remove any of them below.
                 </Text>
