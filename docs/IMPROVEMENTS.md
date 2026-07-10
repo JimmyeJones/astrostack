@@ -696,6 +696,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   pipeline no longer skips any op. What remains here is *responsiveness* (heavy
   ops on the proxy can lag) and closing any remaining proxy↔export look
   differences — chase those, but never by hiding an action again. (S–M, editor)
+  _(Builder note 2026-07-10: closed the big proxy↔export gap in the mosaic
+  "Coverage leveling" op — its per-level pixel-count floor is now scaled by
+  proxy_scale so the same panels are leveled in preview and export, v0.103.16
+  (see Bugs → fixed). A **smaller, second-order parity nuance remains in the same
+  op** and is filed here rather than blind-fixed: `level_by_coverage`'s object-mask
+  dilation (`dilate_object_mask_px=4`) is a **fixed pixel count applied at both
+  resolutions**, so on a ×N proxy it grows the star/nebula mask by 4 strided px ≈
+  4·N full-res px — a wider sky exclusion than the export's 4 full-res px, which
+  can shift a per-level sky median slightly between preview and export. Low
+  severity (the median is robust to a few extra masked edge pixels, and the offset
+  it shifts is tiny), so it didn't clear the bar for churn this run. If a future
+  run touches this op, scale the dilation like the other pixel params
+  (`round(4/step)`, matching `ctx.scaled_px`), guarding the step≥8 case where it
+  rounds to 0. (S, editor/parity))_
 - ~~**Give the Auto recipe a gentle contrast curve (as the presets already do)**~~ — **shipped v0.73.0** (see Shipped). The one-click Auto recipe now appends a data-driven `tone.curves` (auto contrast) after the saturation boost, matching the built-in galaxy/nebula presets.
 - ~~**Reflect the auto-contrast curve's shape in the Curves widget (v0.73.0 follow-up).**~~
   — **shipped v0.74.4** (see Shipped). Both options landed: (a) when `auto` is on and the
