@@ -368,6 +368,38 @@ export function TargetView() {
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
 
+  // One-click "reject the odd-target frames" for the mixed-pointing guard: reject
+  // exactly the subs outside the largest pointing (the ones the stacker would
+  // silently drop), leaving a clean single-target batch. Undoable — auto-grade
+  // style — because it changes accept state, so a stray good frame is one click
+  // back. Its own state (not the bulk `lastReject`) so the messaging is specific.
+  const [mixedRejected, setMixedRejected] = useState<number[] | null>(null);
+  const rejectMixed = useMutation({
+    mutationFn: (ids: number[]) => api.bulkFrames(safe, { action: "reject", ids }),
+    onSuccess: (_r, ids) => {
+      setMixedRejected(ids);
+      notifications.show({
+        message: `Rejected ${ids.length} odd-target frame${ids.length === 1 ? "" : "s"}`,
+        color: "violet",
+      });
+      qc.invalidateQueries({ queryKey: ["frames", safe] });
+      qc.invalidateQueries({ queryKey: ["target", safe] });
+      qc.invalidateQueries({ queryKey: ["reject-summary", safe] });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
+  const undoMixed = useMutation({
+    mutationFn: (ids: number[]) => api.bulkFrames(safe, { action: "accept", ids }),
+    onSuccess: () => {
+      setMixedRejected(null);
+      notifications.show({ message: "Re-accepted the odd-target frames", color: "violet" });
+      qc.invalidateQueries({ queryKey: ["frames", safe] });
+      qc.invalidateQueries({ queryKey: ["target", safe] });
+      qc.invalidateQueries({ queryKey: ["reject-summary", safe] });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
+
   // Plate-solve *setup* problem (ASTAP or its star database not available) —
   // when present, every frame's solve fails identically, so the whole target's
   // frames pile up as "Plate-solve failed" with no hint that the fix is a
@@ -634,7 +666,22 @@ export function TargetView() {
           </Group>
         </Alert>
       ) : null}
-      {mixedPointings ? (
+      {mixedRejected !== null ? (
+        <Alert color="teal" variant="light" icon={<IconCheck size={18} />}
+          title="Rejected the odd-target frames">
+          <Text size="sm">
+            Rejected {mixedRejected.length} sub{mixedRejected.length === 1 ? "" : "s"} that
+            didn't match the main pointing — the batch is a single target now, so a
+            stack won't waste itself on part of the data.
+          </Text>
+          <Button mt="xs" size="xs" variant="light" color="teal"
+            leftSection={<IconArrowBackUp size={14} />}
+            loading={undoMixed.isPending}
+            onClick={() => undoMixed.mutate(mixedRejected)}>
+            Undo — re-accept {mixedRejected.length} frame{mixedRejected.length === 1 ? "" : "s"}
+          </Button>
+        </Alert>
+      ) : mixedPointings ? (
         <Alert color="orange" variant="light" icon={<IconAlertTriangle size={18} />}
           title={`This batch looks like ${mixedPointings.pointings} different targets`}>
           <Text size="sm">
@@ -645,10 +692,18 @@ export function TargetView() {
             plate-solved to the wrong place). If you stack now, only the frames
             matching the reference pointing are combined and the other{" "}
             {mixedPointings.others === 1 ? "one is" : `${mixedPointings.others} are`}{" "}
-            silently dropped, so you'd waste a stack on part of the data. Check each
-            frame's solved RA/Dec in the Frames table below and reject the ones that
-            don't belong (or split them into their own target) before stacking.
+            silently dropped, so you'd waste a stack on part of the data. Reject the
+            odd frames to keep just the main pointing, or check each frame's solved
+            RA/Dec in the Frames table below and split them into their own target.
           </Text>
+          {mixedPointings.minorityIds.length ? (
+            <Button mt="xs" size="xs" variant="light" color="orange"
+              loading={rejectMixed.isPending}
+              onClick={() => rejectMixed.mutate(mixedPointings.minorityIds)}>
+              Reject the {mixedPointings.minorityIds.length} odd-target frame
+              {mixedPointings.minorityIds.length === 1 ? "" : "s"}
+            </Button>
+          ) : null}
         </Alert>
       ) : null}
       <Group justify="space-between" gap="xs">

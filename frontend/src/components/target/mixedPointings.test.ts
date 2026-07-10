@@ -61,6 +61,36 @@ describe("detectMixedPointings", () => {
     expect(res!.separationDeg).toBeGreaterThan(30);
   });
 
+  it("returns the minority frame ids (everything outside the largest pointing)", () => {
+    // Majority = the 18-frame pointing (ids 1..18); the 12-frame pointing
+    // (ids 100..111) are the odd-target frames to reject.
+    const frames = [...cluster(18, 10, 20, 1), ...cluster(12, 83, -5, 100)];
+    const res = detectMixedPointings(frames);
+    expect(res).not.toBeNull();
+    expect(res!.minorityIds.length).toBe(12);
+    expect([...res!.minorityIds].sort((a, b) => a - b)).toEqual(
+      Array.from({ length: 12 }, (_, i) => 100 + i),
+    );
+    // None of the kept (majority) frames leak into the reject set.
+    for (const id of res!.minorityIds) expect(id).toBeGreaterThanOrEqual(100);
+  });
+
+  it("includes a lone stray outside the majority in minorityIds too", () => {
+    // A bimodal split (20 + 8) plus 3 mis-solved strays far from both: the
+    // warning fires on the two substantial pointings, and the odd-frame set is
+    // everything but the largest — the 8-frame pointing AND the 3 strays.
+    const frames = [
+      ...cluster(20, 10, 20, 1),
+      ...cluster(8, 83, -5, 100),
+      ...cluster(3, 250, 70, 200),
+    ];
+    const res = detectMixedPointings(frames);
+    expect(res).not.toBeNull();
+    expect(res!.majority).toBe(20);
+    expect(res!.minorityIds.length).toBe(11); // 8 + 3 strays
+    for (const id of res!.minorityIds) expect(id).toBeGreaterThanOrEqual(100);
+  });
+
   it("reports three substantial pointings and the two-largest separation", () => {
     const frames = [
       ...cluster(20, 10, 20, 1),

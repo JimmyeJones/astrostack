@@ -3,7 +3,8 @@ import {
   Select, Stack, Text, Title, Tooltip,
 } from "@mantine/core";
 import {
-  IconAlertTriangle, IconFlask, IconPlayerPlay, IconTelescope,
+  IconAlertTriangle, IconArrowBackUp, IconCheck, IconFlask, IconPlayerPlay,
+  IconTelescope,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
@@ -181,6 +182,35 @@ export function StackView() {
       notifications.show({ message: "Re-accepted the dropped frames", color: "violet" });
       qc.invalidateQueries({ queryKey: ["frames", safe] });
       qc.invalidateQueries({ queryKey: ["auto-grade-preview", safe] });
+      qc.invalidateQueries({ queryKey: ["stack-estimate", safe] });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
+
+  // One-click "reject the odd-target frames" for the mixed-pointing guard: reject
+  // the subs outside the largest pointing (the ones the stack would silently
+  // drop) so the batch is a single clean target before stacking. Undoable, like
+  // the auto-grade drop above.
+  const [mixedRejected, setMixedRejected] = useState<number[] | null>(null);
+  const rejectMixed = useMutation({
+    mutationFn: (ids: number[]) => api.bulkFrames(safe, { action: "reject", ids }),
+    onSuccess: (_r, ids) => {
+      setMixedRejected(ids);
+      notifications.show({
+        message: `Rejected ${ids.length} odd-target frame${ids.length === 1 ? "" : "s"}`,
+        color: "violet",
+      });
+      qc.invalidateQueries({ queryKey: ["frames", safe] });
+      qc.invalidateQueries({ queryKey: ["stack-estimate", safe] });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
+  const undoMixed = useMutation({
+    mutationFn: (ids: number[]) => api.bulkFrames(safe, { action: "accept", ids }),
+    onSuccess: () => {
+      setMixedRejected(null);
+      notifications.show({ message: "Re-accepted the odd-target frames", color: "violet" });
+      qc.invalidateQueries({ queryKey: ["frames", safe] });
       qc.invalidateQueries({ queryKey: ["stack-estimate", safe] });
     },
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
@@ -616,7 +646,22 @@ export function StackView() {
         </Alert>
       ) : null}
 
-      {mixedPointings ? (
+      {mixedRejected !== null ? (
+        <Alert color="teal" variant="light" icon={<IconCheck size={18} />}
+          title="Rejected the odd-target frames">
+          <Text size="sm">
+            Rejected {mixedRejected.length} sub{mixedRejected.length === 1 ? "" : "s"} that
+            didn't match the main pointing — the batch is a single target now, so this
+            stack won't waste itself on part of the data.
+          </Text>
+          <Button mt="xs" size="xs" variant="light" color="teal"
+            leftSection={<IconArrowBackUp size={14} />}
+            loading={undoMixed.isPending}
+            onClick={() => undoMixed.mutate(mixedRejected)}>
+            Undo — re-accept {mixedRejected.length} frame{mixedRejected.length === 1 ? "" : "s"}
+          </Button>
+        </Alert>
+      ) : mixedPointings ? (
         <Alert color="orange" variant="light" icon={<IconAlertTriangle size={18} />}
           title={`This batch looks like ${mixedPointings.pointings} different targets`}>
           <Text size="sm">
@@ -627,13 +672,21 @@ export function StackView() {
             plate-solved to the wrong place). If you stack now, only the frames
             matching the reference pointing are combined and the other{" "}
             {mixedPointings.others === 1 ? "one is" : `${mixedPointings.others} are`}{" "}
-            silently dropped, so you'd waste a stack on part of the data.{" "}
+            silently dropped, so you'd waste a stack on part of the data. Reject the
+            odd frames to keep just the main pointing, or{" "}
             <Text component={Link} to={`/targets/${safe}`} c="blue" inherit>
-              Open the Frames table
+              open the Frames table
             </Text>{" "}
-            to check each frame's solved RA/Dec and reject the ones that don't
-            belong before stacking.
+            to split them into their own target.
           </Text>
+          {mixedPointings.minorityIds.length ? (
+            <Button mt="xs" size="xs" variant="light" color="orange"
+              loading={rejectMixed.isPending}
+              onClick={() => rejectMixed.mutate(mixedPointings.minorityIds)}>
+              Reject the {mixedPointings.minorityIds.length} odd-target frame
+              {mixedPointings.minorityIds.length === 1 ? "" : "s"}
+            </Button>
+          ) : null}
         </Alert>
       ) : null}
 
