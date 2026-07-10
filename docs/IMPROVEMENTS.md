@@ -1613,6 +1613,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+- **Stamp the finished sky-background cast into the *autonomous* auto-edit provenance, to gather a
+  passive real-data signal on whether Auto's colour path lands neutral.** (S, image-quality/trust —
+  PRIORITY 4) *(Builder-spotted 2026-07-10, while shipping the editor sky-cast readout v0.104.0.)*
+  The new `edit/histogram.py::measure_sky_cast` now gives a pure, cheap, per-channel sky-background
+  cast verdict on any display-space image — but it only runs in the *interactive* editor histogram.
+  The unattended auto-edit chain (`_auto_edit_process_run` → Process-target / reprocess / watcher
+  auto-stack) already stamps a plain-language "what Auto did" note (`editor_auto_note:`); extend it to
+  also measure the finished picture's sky-cast (run `measure_sky_cast` on the auto-edited render it
+  already produces) and record the r/g/b sky medians + verdict in the run's provenance meta, surfaced
+  as one dimmed History line ("Auto's background came out neutral ✓" / "…a slight green cast"). This
+  turns every walk-away Auto result into a **data point on whether the SCNR / gray-star colour path
+  lands neutral on *real* Seestar backgrounds** — exactly the real-data question the two deferred
+  "vet on REAL data: SCNR magenta / gray-star leaves a background cast" items below need answered
+  before anyone touches the most-used Auto path. Read-only measurement, additive provenance, no
+  default/API-shape change; testable on the pure `measure_sky_cast` call. Deliberately *after* the
+  editor readout (v0.104.0) so the interactive surface gathers signal first.
 - **Scout to vet on REAL data: does the Auto denoise↔sharpen crossfade over-read a *sky
   gradient* as noise?** (M, image-quality/autonomy) `presets.auto_recipe` picks its denoise
   strength and whether to sharpen from `analyze_proxy`'s `sky_sigma`, measured on the **raw**
