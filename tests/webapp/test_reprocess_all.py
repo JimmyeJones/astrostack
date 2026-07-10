@@ -505,6 +505,132 @@ def test_reprocess_status_ignores_editor_and_combine_runs(solved_library):
     assert status["total_targets"] == 2
 
 
+# --------------------------------------------------------------------------- #
+# Library-wide auto-edit sky-cast aggregation
+# --------------------------------------------------------------------------- #
+
+def _seed_run_with_cast(proj, cast):
+    """Add a stack run and stamp it with an auto-edit sky-cast meta (or none when
+    ``cast`` is ``None``). Returns the new run id."""
+    from webapp.routers.editor import AUTO_EDIT_SKYCAST_PREFIX
+
+    run_id = proj.add_stack_run(StackRunRow(
+        id=None, timestamp_utc="2026-05-01T00:00:00Z",
+        output_basename="master", fits_path=None, tiff_path=None,
+        preview_path=None, n_frames_used=3, canvas_h=10, canvas_w=10,
+        coverage_min=1, coverage_max=3,
+        options_json=json.dumps({"method": "sigma", "sigma_kappa": 4.25}),
+        engine_version=pipeline.APP_VERSION,
+    ))
+    if cast is not None:
+        proj.set_meta(f"{AUTO_EDIT_SKYCAST_PREFIX}{run_id}", json.dumps(cast))
+    return run_id
+
+
+def _cast(cast, deviation, *, r=0.2, g=0.2, b=0.2):
+    return {"r": r, "g": g, "b": b,
+            "neutral": cast == "neutral", "cast": cast, "deviation": deviation}
+
+
+def test_auto_cast_summary_aggregates_neutral_and_cast_runs(solved_library):
+    """Aggregates every auto-edited run's stamped sky-cast into a neutral/cast
+    split, per-tint counts, and the median deviation — ignoring runs with no
+    stamp and unmeasurable ('unknown') ones."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        targets = [e.safe_name for e in lib.list_targets()]
+        proj = lib.open_target(targets[0])
+        try:
+            _seed_run_with_cast(proj, _cast("neutral", 0.004))
+            _seed_run_with_cast(proj, _cast("neutral", 0.006))
+            _seed_run_with_cast(proj, _cast("green", 0.02))
+            _seed_run_with_cast(proj, _cast("magenta", 0.03))
+            _seed_run_with_cast(proj, _cast("unknown", 0.0))  # not measurable
+            _seed_run_with_cast(proj, None)                    # manual/older run
+        finally:
+            proj.close()
+        proj = lib.open_target(targets[1])
+        try:
+            _seed_run_with_cast(proj, _cast("green", 0.015))
+        finally:
+            proj.close()
+        summary = pipeline.auto_cast_summary(lib)
+    finally:
+        lib.close()
+
+    # 5 measurable runs (2 neutral + 3 cast); unknown + unstamped excluded.
+    assert summary["measured"] == 5
+    assert summary["neutral"] == 2
+    assert summary["cast"] == 3
+    assert summary["by_cast"] == {"green": 2, "magenta": 1}
+    # Deviations of the measurable runs: 0.004, 0.006, 0.02, 0.03, 0.015 → median 0.015.
+    assert summary["median_deviation"] == 0.015
+
+
+def test_auto_cast_summary_empty_until_runs_accrue(solved_library):
+    """With no auto-edited runs stamped, the read-out is all zeros / no median —
+    off-nothing on a fresh or pre-feature install."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        summary = pipeline.auto_cast_summary(lib)
+    finally:
+        lib.close()
+    assert summary == {"measured": 0, "neutral": 0, "cast": 0,
+                       "by_cast": {}, "median_deviation": None}
+
+
+def test_auto_cast_summary_ignores_malformed_meta(solved_library):
+    """A corrupt/non-JSON or non-dict cast meta is skipped, never crashing the
+    aggregation (defensive against a partially-written meta)."""
+    from webapp.routers.editor import AUTO_EDIT_SKYCAST_PREFIX
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        targets = [e.safe_name for e in lib.list_targets()]
+        proj = lib.open_target(targets[0])
+        try:
+            good = _seed_run_with_cast(proj, _cast("neutral", 0.003))
+            bad1 = _seed_run_with_cast(proj, None)
+            proj.set_meta(f"{AUTO_EDIT_SKYCAST_PREFIX}{bad1}", "not json")
+            bad2 = _seed_run_with_cast(proj, None)
+            proj.set_meta(f"{AUTO_EDIT_SKYCAST_PREFIX}{bad2}", json.dumps([1, 2, 3]))
+            assert good  # the good run is present
+        finally:
+            proj.close()
+        summary = pipeline.auto_cast_summary(lib)
+    finally:
+        lib.close()
+    assert summary["measured"] == 1
+    assert summary["neutral"] == 1
+
+
+def test_auto_cast_summary_endpoint(solved_client, solved_library):
+    """GET /api/auto-cast-summary reports the library-wide neutral/cast split."""
+    # Empty until any auto-edited run is stamped.
+    r = solved_client.get("/api/auto-cast-summary")
+    assert r.status_code == 200
+    assert r.json() == {"measured": 0, "neutral": 0, "cast": 0,
+                        "by_cast": {}, "median_deviation": None}
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        targets = [e.safe_name for e in lib.list_targets()]
+        proj = lib.open_target(targets[0])
+        try:
+            _seed_run_with_cast(proj, _cast("neutral", 0.005))
+            _seed_run_with_cast(proj, _cast("green", 0.02))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    body = solved_client.get("/api/auto-cast-summary").json()
+    assert body["measured"] == 2
+    assert body["neutral"] == 1
+    assert body["cast"] == 1
+    assert body["by_cast"] == {"green": 1}
+
+
 def test_reprocess_all_deep_rescan_reruns_qc_solve_grade_before_each_stack(
         solved_library, monkeypatch):
     """With deep_rescan, each target is re-QC'd/re-solved/re-graded *before* it's

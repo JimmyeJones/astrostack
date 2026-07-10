@@ -1632,9 +1632,15 @@ problems. Dogfood it every big-picture run and fix root causes.
   `tests/webapp/test_pipeline.py::test_process_target_chains_auto_edit` (asserts the `sky_cast` verdict
   dict) + `test_manual_stack_has_no_auto_edit_note` (a manual stack carries none), the TS helper test
   `skyCast.test.ts::autoSkyCastCaption`, and a History render test.
-- **Aggregate the per-run auto-edit sky-cast (v0.105.0) into a library-wide "does Auto land neutral?"
+- ~~**Aggregate the per-run auto-edit sky-cast (v0.105.0) into a library-wide "does Auto land neutral?"
   read-out — turn the passive signal into an actual answer to the deferred SCNR/gray-star real-data
-  question.** (S–M, image-quality/trust — PRIORITY 4) *(Builder-filed 2026-07-10, the natural next step
+  question.**~~ — **SHIPPED v0.106.0** (Builder 2026-07-10, see Shipped). `pipeline.auto_cast_summary(lib)`
+  aggregates every stamped `editor_auto_skycast:` meta across all targets into `{measured, neutral, cast,
+  by_cast, median_deviation}` (ignoring unstamped + `unknown` runs); `GET /api/auto-cast-summary` serves it,
+  and the Settings → Reprocess panel shows one dimmed self-check line. Pure read-only aggregation over data
+  already on disk, additive, off-nothing (empty until auto-edited runs accrue). New `autoCastSummaryText`
+  helper; tests in `test_reprocess_all.py` + `Settings.test.tsx`. Original write-up kept below for provenance.
+  (S–M, image-quality/trust — PRIORITY 4) *(Builder-filed 2026-07-10, the natural next step
   after shipping v0.105.0.)* v0.105.0 now stamps every walk-away Auto result's finished sky-background
   cast (r/g/b sky medians + neutral/colour verdict) into per-run provenance (`editor_auto_skycast:{run_id}`
   meta). Individually those are one dimmed History line; **in aggregate they answer the exact real-data
@@ -2246,6 +2252,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.106.0** — Image quality / trust (PRIORITY 4): library-wide "does Auto land the background neutral?"
+  read-out. New `pipeline.auto_cast_summary(lib)` aggregates every auto-edited run's stamped sky-cast
+  (`editor_auto_skycast:` meta, v0.105.0) across all targets into `{measured, neutral, cast, by_cast,
+  median_deviation}` — ignoring runs with no stamp and unmeasurable (`unknown`) ones; a new
+  `GET /api/auto-cast-summary` endpoint serves it, and the Settings → Reprocess panel shows one dimmed
+  self-check line ("Auto's background came out neutral on 7 of 10 auto-edited results; 3 carried a slight
+  cast (2 green, 1 magenta)…"). Turns the per-run passive signal into a real-Seestar-data distribution the
+  owner (and a future agent weighing the deferred SCNR/neutralise-background decisions) can read, without
+  touching any pixels. Pure read-only aggregation, additive, off-nothing (empty until auto-edited runs
+  accrue), no schema/default/API-shape change. New pure `autoCastSummaryText` helper; tests in
+  `test_reprocess_all.py` (aggregation + endpoint + malformed-meta) and `Settings.test.tsx`.
 - **v0.105.0** — Image quality / trust (PRIORITY 4): the unattended auto-edit now measures the finished
   picture's residual sky-background colour cast (`measure_sky_cast` on the render it already produces) and
   stamps the r/g/b sky medians + verdict into run provenance (`editor_auto_skycast:` meta); the `…/info`

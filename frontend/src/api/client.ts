@@ -248,6 +248,14 @@ export interface ReprocessStatus {
   total_targets: number;
 }
 
+export interface AutoCastSummary {
+  measured: number;                  // auto-edited runs with a usable sky-cast reading
+  neutral: number;                   // of those, how many landed background-neutral
+  cast: number;                      // of those, how many carried a residual colour cast
+  by_cast: Record<string, number>;   // dominant-tint counts among the cast runs
+  median_deviation: number | null;   // median largest per-channel departure from grey
+}
+
 export interface StackWeightingSummary {
   mode: string;
   n_downweighted?: number;
@@ -806,6 +814,7 @@ export const api = {
       }),
     }),
   reprocessStatus: () => req<ReprocessStatus>("/api/reprocess-status"),
+  autoCastSummary: () => req<AutoCastSummary>("/api/auto-cast-summary"),
 
   // sky viewer
   getSky: () => req<SkyData>("/api/sky"),

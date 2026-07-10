@@ -11,7 +11,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
-import { api, type ReprocessStatus } from "../api/client";
+import { api, type AutoCastSummary, type ReprocessStatus } from "../api/client";
 import { dependencyMet } from "../api/depends";
 import { compassPoint } from "../tonight";
 import { HintLabel, StackOptionControl } from "../components/StackOptionControl";
@@ -195,6 +195,35 @@ export function reprocessNudgeText(status: ReprocessStatus | undefined): string 
   );
 }
 
+// Read-only self-check on Auto's colour path: every unattended auto-edit stamps
+// its finished sky-background cast, and this turns that per-run signal into one
+// plain library-wide answer — of the auto-edited results, how many landed neutral
+// vs carried a residual cast, and which tint dominated when they didn't. Null
+// until any auto-edited run is measured, so no line is shown on a fresh install.
+export function autoCastSummaryText(summary: AutoCastSummary | undefined): string | null {
+  if (!summary || summary.measured <= 0) return null;
+  const { measured, neutral, cast, by_cast } = summary;
+  const runs = measured === 1 ? "auto-edited result" : "auto-edited results";
+  if (cast <= 0) {
+    return (
+      `Auto's background came out neutral on all ${measured} ${runs} so far — `
+      + `its colour path is landing clean on your data.`
+    );
+  }
+  // Name the tints that actually appeared, commonest first, so the owner sees
+  // which way Auto skews when it isn't neutral.
+  const tints = Object.entries(by_cast)
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, n]) => `${n} ${name}`)
+    .join(", ");
+  const skew = tints ? ` (${tints})` : "";
+  return (
+    `Auto's background came out neutral on ${neutral} of ${measured} ${runs}; `
+    + `${cast} carried a slight cast${skew}. A run or two off-neutral is normal; a `
+    + `consistent tint would be worth a look at the colour steps.`
+  );
+}
+
 export function Maintenance() {
   const navigate = useNavigate();
   // Default to "only outdated" — after an upgrade the user wants to reprocess just
@@ -214,6 +243,12 @@ export function Maintenance() {
     staleTime: 60_000,
   });
   const nudge = reprocessNudgeText(status.data);
+  const castSummary = useQuery({
+    queryKey: ["auto-cast-summary"],
+    queryFn: api.autoCastSummary,
+    staleTime: 60_000,
+  });
+  const castText = autoCastSummaryText(castSummary.data);
   const reprocess = useMutation({
     mutationFn: (opts: { staleOnly: boolean; deepRescan: boolean; autoEdit: boolean }) =>
       api.reprocessAll(opts.staleOnly, opts.deepRescan, opts.autoEdit),
@@ -311,6 +346,11 @@ export function Maintenance() {
             {staleOnly ? "Reprocess outdated targets…" : "Reprocess all targets…"}
           </Button>
         </Group>
+        {castText && (
+          <Text size="xs" c="dimmed" mt={4}>
+            {castText}
+          </Text>
+        )}
       </Stack>
     </Paper>
   );
