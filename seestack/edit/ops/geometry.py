@@ -15,14 +15,29 @@ from seestack.edit.registry import EditContext, EditParam, OpSpec, as_rgb, regis
 def _crop(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     img = as_rgb(rgb)
     h, w = img.shape[:2]
-    x0 = int(round(min(max(float(params.get("x0", 0.0)), 0.0), 1.0) * w))
-    y0 = int(round(min(max(float(params.get("y0", 0.0)), 0.0), 1.0) * h))
-    x1 = int(round(min(max(float(params.get("x1", 1.0)), 0.0), 1.0) * w))
-    y1 = int(round(min(max(float(params.get("y1", 1.0)), 0.0), 1.0) * h))
-    x0, x1 = sorted((x0, x1))
-    y0, y1 = sorted((y0, y1))
-    if x1 - x0 < 2 or y1 - y0 < 2:
-        return img  # degenerate crop — ignore
+    x0f, x1f = sorted((min(max(float(params.get("x0", 0.0)), 0.0), 1.0),
+                       min(max(float(params.get("x1", 1.0)), 0.0), 1.0)))
+    y0f, y1f = sorted((min(max(float(params.get("y0", 0.0)), 0.0), 1.0),
+                       min(max(float(params.get("y1", 1.0)), 0.0), 1.0)))
+    # Decide "degenerate crop" in **full-resolution** pixels (proxy_scale-corrected)
+    # so the crop/no-crop decision is identical on the decimated live-preview proxy
+    # and the full-res export — the fractional-coordinate parity contract this
+    # module documents. Evaluating ``< 2 px`` in *this render's* pixels let a tiny
+    # fractional crop no-op on the small proxy while it still applied on the export
+    # (or vice-versa), so the preview didn't match what was exported.
+    scale = max(1.0, float(ctx.proxy_scale))
+    if (x1f - x0f) * w * scale < 2.0 or (y1f - y0f) * h * scale < 2.0:
+        return img  # degenerate crop — ignore (consistently on proxy and export)
+    x0, x1 = int(round(x0f * w)), int(round(x1f * w))
+    y0, y1 = int(round(y0f * h)), int(round(y1f * h))
+    # A non-degenerate full-res crop can still round to < 1 px on a heavily
+    # decimated proxy; keep at least 1 px per axis so the proxy slice is never
+    # empty (an empty image crashes the PNG/export render) while still applying the
+    # same crop the export does. A no-op on the export and on any real crop.
+    x0 = min(x0, w - 1)
+    y0 = min(y0, h - 1)
+    x1 = max(x1, x0 + 1)
+    y1 = max(y1, y0 + 1)
     return img[y0:y1, x0:x1].copy()
 
 
