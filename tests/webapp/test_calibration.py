@@ -354,6 +354,46 @@ def test_auto_bind_flat_dark_dropped_with_gain_mismatched_flat(tmp_path):
     assert "flat_path" not in bound and "flat_dark_path" not in bound
 
 
+def test_auto_bind_skips_gain_mismatched_bias(tmp_path):
+    """A bias shot at a wildly different gain must NOT be auto-bound unattended.
+    A master bias carries fixed-pattern structure (readout pedestal, amp glow,
+    column offsets) that scales with the camera's gain/offset; the per-frame
+    background subtraction removes only the DC offset, not that spatial structure,
+    so a wrong-gain bias would leave a mis-scaled pattern in the walk-away stack.
+    (Regression: the bias auto-bind had no confidence gate, unlike the dark's
+    exposure gate and the flat's gain gate.)"""
+    root = tmp_path / "lib"
+    # No dark (so the bias would be bound for the lights); the only bias is gain 400.
+    bias = _register(root, "bias", exposure_s=0.0, gain=400.0)
+    masters = calibration.list_masters(root)
+
+    bound = calibration.auto_bind_master_paths(
+        root, masters, exposure_s=30.0, gain=80.0)
+    assert "bias_path" not in bound  # left uncalibrated rather than wrong-pedestal
+    # recommend_masters still *offers* it (the interactive form warns a human);
+    # only the unattended binder is stricter.
+    assert calibration.recommend_masters(
+        masters, exposure_s=30.0, gain=80.0)["bias_master_id"] == bias["id"]
+
+    # A same-gain bias clears the gate and is bound as before.
+    same = _register(root, "bias", exposure_s=0.0, gain=80.0)
+    bound2 = calibration.auto_bind_master_paths(
+        root, calibration.list_masters(root), exposure_s=30.0, gain=80.0)
+    assert Path(bound2["bias_path"]).name == same["filename"]
+
+
+def test_auto_bind_binds_bias_with_unknown_gain_temp(tmp_path):
+    """A bias that never recorded gain/temperature still binds — the confidence
+    gate only *tightens* on a materially mismatched bias, it must not drop a bias
+    whose params are simply unknown (behaviour unchanged from before the gate)."""
+    root = tmp_path / "lib"
+    bias = _register(root, "bias", exposure_s=0.0)  # no gain / sensor_temp_c
+    bound = calibration.auto_bind_master_paths(
+        root, calibration.list_masters(root), exposure_s=30.0, gain=80.0,
+        sensor_temp_c=-5.0)
+    assert Path(bound["bias_path"]).name == bias["filename"]
+
+
 def test_calibration_suggestions_endpoint(client, solved_library):
     from seestack.calibrate.masters import MasterMeta
     from seestack.io.library import Library

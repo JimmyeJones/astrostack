@@ -160,6 +160,29 @@ the real webapp stack→edit path.)_
   pathological skew reverts — same real-data-gating as the SCNR / `sky_sigma` items in Image-quality
   below. Fix all four sites together (they share the bug). (S code / M validation, image-quality/correctness)
 
+_(Scout QA audit 2026-07-10 (v0.103.8 baseline, suite green **1000 passed / 2 skipped**): led the rotation
+with a fresh adversarial re-read of the **stacking engine's final-image path** and the **newest calibration
+glue** — `stack/{weighting,photometric,reference,output,drizzle_path}.py`, `calibrate/apply.py`,
+`render/colormap.py`, `edit/coverage_trim.py`, `edit/ops/geometry.py`, and the unattended
+`webapp/calibration.py` auto-bind layer (`recommend_masters` / `auto_bind_master_paths` / `_match_distance`),
+plus the newest frontend guard `components/target/mixedPointings.ts`. Read for NaN=coverage violations,
+weight/scale symmetry, RA-wrap, proxy↔export crop parity, and the "confident only" auto-bind contract.
+**The engine traced clean** (consistent with the ~16 prior clean audits): quality weights and photometric
+scales are each clipped to bounded ranges and composed as intended (geometric-mean weight, median-referenced
+scale); `pick_reference_frame` unwraps RA before the median/distance/span; `_to_uint16_linear` /
+`_autostretch_for_export` compute percentiles over **covered** pixels only and write NaN gaps black; the
+drizzle two-pass reject's `unresolved`-variance guard (v0.103.2) correctly disables clipping on bright flat
+regions; the `_crop` degenerate-guard decides in full-res pixels for proxy↔export parity (v0.103.1); and
+`mixedPointings` clusters wrap-safely via unit vectors. **One real "confident only" gap found + fixed
+(v0.103.10, see Shipped):** the v0.99.0 auto-bind gates the dark on exposure and (since v0.103.6) the flat on
+gain/temperature, but the **bias** — bound for the lights when no dark matched — had **no confidence gate**,
+so a walk-away stack whose only dark was an exposure mismatch would fall back to a bias from a genuinely
+different rig, subtracting a mis-scaled fixed pattern (amp glow / column offsets scale with gain/offset, and
+per-frame background subtraction removes only the DC term). Now gated exactly like the flat (strictly
+conservative; unknown params still bind). This is precisely the pattern the last several real bugs have
+followed — the core is hardened; the gaps live in the newest unattended glue. Consistent otherwise with the
+mature audit history: no other verified wrong-result bug found.)_
+
 _(Scout QA audit 2026-07-10 (v0.103.3 baseline, suite green **994 passed / 2 skipped**): rotated the focused
 subsystem audit onto the **calibration path** — `seestack/calibrate/{masters,apply}.py` (master build,
 sigma-clip combine, atomic save/load, `apply_raw`'s dark-or-bias/never-both + flat-floor + exposure-scaling)
@@ -994,8 +1017,47 @@ problems. Dogfood it every big-picture run and fix root causes.
   already computes a per-master `score` in 0..1; gate the auto-bound flat on `score ≥ τ` (pick τ so a
   same-rig flat clears it and a wildly-different one doesn't), leaving the stack flat-uncalibrated below the
   bar exactly as the dark already does on a poor exposure match. Purely local, additive, off-nothing (only
-  *tightens* what auto-bind will apply), testable on `auto_bind_master_paths` in isolation. Closes the last
-  "confident only" gap in the v0.99.0 auto-bind contract.
+  *tightens* what auto-bind will apply), testable on `auto_bind_master_paths` in isolation. Closes the flat's
+  "confident only" gap in the v0.99.0 auto-bind contract. _(Correction, Scout 2026-07-10: this was **not** the
+  last such gap — the **bias** was still ungated; that was closed in v0.103.10.)_
+- **⭐ Auto-enable *dark exposure-scaling* in the unattended chains when the best dark matches gain/temp but
+  not exposure (and a bias is present).** (S–M, autonomy/image-quality) *(Scout-filed 2026-07-10, traced.)*
+  The interactive Stack form already nudges this: when a dark's exposure is mismatched, no bias is chosen,
+  and the library holds a bias, it offers a one-click "Select your master bias and scale the dark"
+  (`scale_dark_to_light`, v0.82.2) that recovers a usable dark via `bias + (dark − bias)·(t_light/t_dark)`.
+  But the **unattended** binder (`auto_bind_master_paths`) has no equivalent: it binds the dark **only** when
+  the exposure matches within 25% (`_AUTO_BIND_EXP_MISMATCH_FRAC`) and otherwise leaves the walk-away stack
+  **dark-uncalibrated entirely** — even when a same-gain/temp dark **and** a matching bias are both sitting
+  in the library and scaling would give a correct dark. So the beginner who built a 30 s dark library once
+  and now shoots 10 s subs, then drops them and walks away, silently loses dark calibration (thermal signal +
+  amp glow) — the single biggest OSC image-quality lever after stacking — while the interactive user one
+  folder over gets it. This is the exact "interactive form has the feature, the unattended path doesn't"
+  shape the v0.99.0 auto-bind itself and the v0.103.6/v0.103.10 confidence gates all closed. **Shape:** when
+  the recommended dark fails only the *exposure* gate but confidently matches gain/temperature, and a
+  confident bias is available with both exposures known, bind `dark_path` + `bias_path` and set
+  `scale_dark_to_light=True` (the engine already scales correctly and stamps `DARKSCAL` provenance, which the
+  History Info panel already renders). Leave uncalibrated exactly as today when the bias or an exposure is
+  missing (neutral fallback). Gated behind the existing off-by-default `auto_bind_calibration` setting, so
+  it's opt-in and never changes a live install's default; purely local; testable on `auto_bind_master_paths`
+  in isolation (mismatched-exposure dark + matching bias → dark_path+bias_path+scale set; no bias → still
+  uncalibrated). Companion friendliness slice: when a stack came out dark-uncalibrated *because* the only
+  dark was an exposure mismatch (not "no dark at all"), the History "No calibration masters were applied"
+  line (v0.103.7) could say specifically "you have a dark at a different exposure — add a master bias to
+  reuse it" — more actionable than the generic message.
+- **Give the auto-bound *dark* a gain/temperature confidence gate too (finish the "confident only"
+  contract).** (S, autonomy/trust) *(Scout-filed 2026-07-10, traced.)* After v0.103.6 (flat) and v0.103.10
+  (bias), the dark is the one auto-bound master still gated on **exposure only** (`_AUTO_BIND_EXP_MISMATCH_FRAC`,
+  25%) with **no** gain/temperature check. `recommend_masters` picks the best dark by *combined* distance, so
+  the recommended dark is usually the closest on gain too — but when the library's only exposure-matching dark
+  is from a genuinely different rig (same integration time, very different gain/offset), auto-bind still binds
+  it, and a dark encodes both thermal signal *and* the gain-dependent bias pedestal, so a wrong-gain dark
+  over-/under-subtracts on the walk-away path. Lower-probability than the flat/bias cases (a dark library is
+  almost always at the user's own gain, and the exposure gate already filters most cross-rig darks), which is
+  why it's filed rather than blind-fixed — but it's the same trivial pattern: add a gain/temperature match
+  distance check alongside the exposure gate (reuse the shared `_match_distance` gain/temp terms ≤ the same
+  bar the flat/bias use) so a materially mismatched-gain dark is left off exactly as the flat/bias now are.
+  Strictly conservative (only tightens), unknown params still bind, testable on `auto_bind_master_paths` in
+  isolation. Completes the "auto-bind only a master we're confident about" contract across all three kinds.
 - ~~**Surface what calibration the *unattended* chains auto-applied (trust for the walk-away path).**~~ —
   **shipped v0.103.7** (see Shipped). The run Info/provenance panel now shows a plain-language calibration
   line derived from the already-returned `CALSTAT` card: "Calibrated with your master dark and master flat."
@@ -1828,6 +1890,22 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.103.10** — Gate the auto-bound *bias* on a gain/temperature confidence match (Scout 2026-07-10;
+  the genuinely last "confident only" gap in the v0.99.0 auto-bind contract — the v0.103.6 flat-gate
+  write-up claimed to close it, but the **bias** was still bound whenever one merely existed). In the
+  unattended `auto_bind_master_paths`, the dark is exposure-gated (v0.99.0) and the flat is gain/temperature
+  gated (v0.103.6), but the bias (bound for the lights when no dark matched) had **no** confidence gate — so
+  a walk-away stack whose only dark was an exposure mismatch would fall back to a bias from a genuinely
+  different rig. A master bias carries fixed-pattern structure (readout pedestal, amp glow, column offsets)
+  that scales with the camera's gain/offset, and the per-frame background subtraction removes only the DC
+  offset, not that spatial pattern — so a wrong-gain bias leaves a mis-scaled structure in the final image
+  with no human to catch it. New `_bias_match_confident` mirrors `_flat_match_confident` (same
+  `_AUTO_BIND_BIAS_MAX_DIST == _AUTO_BIND_FLAT_MAX_DIST` bar; exposure ignored — a bias is a zero-second
+  read; unknown gain/temperature still binds, so the gate only *tightens*). Regression tests
+  `test_auto_bind_skips_gain_mismatched_bias` (a gain-400 bias is left off for gain-80 subs; a same-gain
+  bias still binds; `recommend_masters` still *offers* it for the interactive form) +
+  `test_auto_bind_binds_bias_with_unknown_gain_temp`. One file (`webapp/calibration.py`), strictly
+  conservative (only tightens what auto-bind applies), upgrade-safe (no config/schema/API/default change). (#PR)
 - **v0.103.9** — Fix drizzle frame-accounting counting an off-canvas stray sub as *used* (Builder
   2026-07-10; found by a fresh adversarial audit of the newest v0.100 provenance code, reproduced
   end-to-end before fixing). The standard/κ-σ/min-max paths skip a frame whose reprojected footprint
@@ -1846,6 +1924,7 @@ _Newest first. One line each: what + commit/PR._
   (`test_add_frame_reports_off_canvas_frames_as_not_aligned` unit + `test_drizzle_does_not_count_an_off_canvas_stray_frame`
   end-to-end via `run_stack`; both fail before / pass after). Additive, upgrade-safe (no config/DB/API/on-disk
   change). (#PR)
+
 - **v0.103.8** — Carry the calibration-status trust line onto the editor's auto-note surface (Builder
   2026-07-10; the second surface of the v0.103.7 History calibration line). The one-click Process-target
   deep-link lands a walk-away user in the *editor* on the finished picture, where the "This picture was

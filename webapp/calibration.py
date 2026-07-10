@@ -235,6 +235,18 @@ _AUTO_BIND_EXP_MISMATCH_FRAC = 0.25
 # exactly as today — the gate only *tightens*, catching a materially mismatched flat.
 _AUTO_BIND_FLAT_MAX_DIST = 1.0
 
+# A master bias is the readout pedestal *plus* fixed-pattern structure (amp glow,
+# column offsets) that scales with the camera's gain/offset. Like the flat, it is
+# exposure-independent, so :func:`recommend_masters` returns the best *available*
+# bias no matter how poorly its gain/temperature match. For *unattended* binding —
+# where the bias is subtracted from the lights (no dark) with no human to see the
+# form's warning — require the same confident gain/temperature match: a bias shot
+# at a very different gain would subtract the wrong pedestal and a mis-scaled fixed
+# pattern, and the per-frame background subtraction only removes the DC offset, not
+# that spatial structure. Same bar as the flat; an unknown gain/temperature still
+# binds (the gate only *tightens*).
+_AUTO_BIND_BIAS_MAX_DIST = _AUTO_BIND_FLAT_MAX_DIST
+
 
 def auto_bind_master_paths(
     library_root: str | Path,
@@ -336,11 +348,17 @@ def auto_bind_master_paths(
             if fd:
                 out["flat_dark_path"] = fd
 
-    # Bias — only meaningful for the lights when no dark was applied.
+    # Bias — only meaningful for the lights when no dark was applied, and (like the
+    # flat) only when its gain/temperature confidently match the subs; a bias from a
+    # different rig would subtract the wrong pedestal + fixed pattern (unknown params
+    # still pass, so the gate only tightens on a materially mismatched bias).
     if not dark_bound:
-        bp = _path(rec.get("bias_master_id"))
-        if bp:
-            out["bias_path"] = bp
+        bias_id = rec.get("bias_master_id")
+        if bias_id is not None and _bias_match_confident(
+                by_id.get(int(bias_id)), gain=gain, sensor_temp_c=sensor_temp_c):
+            bp = _path(bias_id)
+            if bp:
+                out["bias_path"] = bp
 
     return out
 
@@ -361,6 +379,24 @@ def _flat_match_confident(
     dist = _match_distance(flat, exposure_s=None, gain=gain,
                            sensor_temp_c=sensor_temp_c, kind="flat")
     return dist <= _AUTO_BIND_FLAT_MAX_DIST
+
+
+def _bias_match_confident(
+    bias: dict[str, Any] | None, *,
+    gain: float | None, sensor_temp_c: float | None,
+) -> bool:
+    """Whether a recommended bias matches the subs' gain/temperature closely enough
+    to auto-bind unattended (see :data:`_AUTO_BIND_BIAS_MAX_DIST`).
+
+    Uses the same gain/temperature match distance as the flat; a bias is a
+    zero-second read, so exposure is ignored. Unknown gain/temperature on either
+    side contributes 0 distance, so a bias missing those fields still clears the
+    bar (behaviour unchanged from before the gate)."""
+    if not bias:
+        return False
+    dist = _match_distance(bias, exposure_s=None, gain=gain,
+                           sensor_temp_c=sensor_temp_c, kind="bias")
+    return dist <= _AUTO_BIND_BIAS_MAX_DIST
 
 
 # A flat-dark must match the *flat's* exposure closely (it removes the flat's own
