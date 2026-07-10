@@ -1408,7 +1408,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
-- **Show total integration time on the History / Target card ("2,000 subs · 5.6 h total").**
+- ~~**Show total integration time on the History / Target card ("2,000 subs · 5.6 h total").**~~
+  — **SHIPPED v0.104.1** (Builder 2026-07-10). On investigation the History Info panel *already*
+  showed "Integration: 5.6 h · 2,000 subs" (`integration_s` from the `EXPTOTAL` FITS card, parsed by
+  the `…/info` endpoint), the Library card already showed per-target `total_exposure_s`, and the
+  Dashboard showed the aggregate — so the only genuine gap was the **Target detail page header**,
+  the exact surface where a user decides "keep shooting this target?". Added a dimmed teal
+  "X.X h integration" badge next to the "N/M accepted" badge, from the target's already-fetched
+  `total_exposure_s` (sum of the *accepted* subs' exposures — the honest light-collected figure,
+  not a run sum that would double-count restacks), reusing the existing `formatIntegration`
+  formatter. Frontend-only, additive, no backend/schema/default/API-shape change; omitted when no
+  light has been collected. Tests `Target.test.tsx` ("shows the total integration time" / "omits the
+  badge when no light collected"). The "optionally the Target page's total across runs" was
+  deliberately *not* built — summing integration across a target's runs double-counts subs that get
+  restacked, so the per-frame accepted total is the honest metric. Original write-up kept below.
   (S, friendliness/trust — PRIORITY 3) *(Scout-filed 2026-07-10.)* For the target user (thousands
   of short Seestar subs) the single most intuitive image-quality signal is *how much light they've
   actually collected* — yet nothing in the app surfaces it. The History Info panel already shows
@@ -2195,6 +2208,12 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.104.1** — Friendliness (PRIORITY 3 / trust): total integration time on the Target detail page.
+  A dimmed teal "X.X h integration" badge next to the "N/M accepted" badge (from the target's accepted
+  `total_exposure_s`, reusing `formatIntegration`), so the page where a user decides whether to keep
+  shooting a target now shows the honest "do I have enough light yet?" figure — closing the one gap
+  after the History card, Library card and Dashboard, which already surfaced it. Frontend-only,
+  additive, omitted when no light collected. Tests in `Target.test.tsx`.
 - **v0.104.0** — Feature (editor, PRIORITY 1 / trust): sky-background colour-cast readout. The
   `…/editor/histogram` endpoint now returns a read-only `sky_cast` measurement of the *finished*
   picture — `edit/histogram.py::measure_sky_cast` computes the robust per-channel sky medians over the
