@@ -47,6 +47,47 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**Editor preview↔export parity: Star reduction *over*-reduces the stars in the live preview (vs the
+  export) on a large drizzle/mosaic.**~~ — **FIXED v0.103.19** (Builder audit 2026-07-10; traced +
+  measured + regression-tested). `edit/ops/stars.py::_reduce` (and the `star_mask` gate it shares with
+  `boost_nebula`) erode with a footprint of `size` full-res px divided by `proxy_scale` for the live-preview
+  proxy — but morphology can't use a **sub-pixel** footprint, so once `size / proxy_scale < 1` the footprint
+  clamps up to 1 proxy-pixel (= `proxy_scale` full-res px), physically *larger* than the export's, and the
+  preview eats into a wider ring of (extended/overlapping) star structure than the full-res export does. On a
+  heavily-decimated proxy (a ≤1500 px view of a >4500 px drizzle/mosaic) the preview then **over-reduces the
+  stars** — measured ~1.15–1.25× the export's reduction on a star-rich field — so a user tuning the amount on
+  the preview under-sets it and the export keeps the stars larger than they dialled. This is the *opposite*
+  direction of the shipped deconvolution `deconv_understates_on_proxy` advisory. **Fix = honest advisory, not a
+  fake pixel correction:** the sub-pixel footprint is fundamentally unrepresentable on the decimated grid, and a
+  fractional-radius blend *over*-corrects into under-reduction (measured: current ~1.06–1.09× at scale 3–4, but
+  a fractional blend drops to ~0.5–0.73× — erosion is non-linear), so a new pure `star_reduce_overstates_on_proxy(size, proxy_scale)`
+  predicate flags the case, the histogram endpoint sets `star_reduce_preview_overstates` for any enabled
+  `stars.reduce` op, and the editor captions it ("Star reduction preview overstates the effect … judge the final
+  strength on the export"), mirroring the deconv advisory exactly. Regression tests:
+  `tests/test_edit_engine.py::test_star_reduce_overstates_on_proxy_rule` +
+  `test_star_reduce_overstates_flag_matches_the_stronger_preview` (the preview reduces materially more than the
+  export on a decimated proxy), `tests/webapp/test_editor.py::test_histogram_flags_star_reduce_preview_overstatement`,
+  and the TS helper test `starReducePreview.test.ts`. Advisory-only, additive, no pixel/export/schema/config/API
+  change (the export path is byte-for-byte unchanged; the flag is a new nullable histogram field). Found by an
+  adversarial audit of the editor ops' proxy↔export parity.
+
+- ~~**`GET /api/jobs` silently drops the *running* job from its listing once ≥`limit` newer jobs exist —
+  the Jobs/Logs UI can't show or cancel the job that's actually executing.**~~ — **FIXED v0.103.18**
+  (Builder audit 2026-07-10; traced + reproduced with a regression test). `JobManager.list(limit)`
+  (`webapp/jobs.py`) merged the live in-memory jobs with recent DB history into one list, sorted the
+  **whole** thing by `created_utc DESC`, and returned `out[:limit]` — so a long-running job (old
+  `created_utc`) fell out of the window once `limit` newer jobs (queued editor/stack/reprocess work
+  against the single serial worker) existed, even though its docstring promised "active jobs first". The
+  running job then vanished from `GET /api/jobs` (and from the `stats` active count), so the Jobs/Logs page
+  couldn't display or offer to cancel the in-flight job — a real trust/friendliness hole on a live install
+  with a deep queue. `list` now guarantees **active (non-terminal) jobs are never truncated**: they lead the
+  result and `limit` bounds only the *history* that fills the remaining slots (`active + history[:remaining]`).
+  Regression tests `tests/webapp/test_jobs.py::test_list_never_truncates_active_jobs` (1 old running + 20
+  newer queued, `limit=5` → running still present; fails before / passes after) and
+  `test_list_history_still_bounded_by_limit` (history alone is still capped at `limit`, newest first). No
+  schema/config/API-shape change (the response is the same `Job` list, just complete); found by an
+  adversarial audit of the webapp job-orchestration layer.
+
 - ~~**Editor preview↔export parity: the mosaic "Coverage leveling" op skips thin panels in the live
   preview that it levels in the exported image.**~~ — **FIXED v0.103.16** (Builder audit 2026-07-10;
   reproduced + regression-tested before fixing). `bg/coverage_leveling.py::level_by_coverage` gates each
@@ -176,6 +217,19 @@ the real webapp stack→edit path.)_
   on **real** OSC stacks that (a) normal sky + nebula frames are unchanged and (b) a genuinely
   pathological skew reverts — same real-data-gating as the SCNR / `sky_sigma` items in Image-quality
   below. Fix all four sites together (they share the bug). (S code / M validation, image-quality/correctness)
+
+- **`render.autostretch` crashes on a 2-D (mono) input while its sibling `asinh_stretch` handles it —
+  latent API-contract gap, not currently user-reachable.** *(traced + reproduced, Builder audit 2026-07-10.)*
+  `seestack/render/thumbnail.py::autostretch` (~L266) does `img = rgb.astype(np.float32, copy=True)` with **no**
+  2-D→3-D expansion, then immediately `np.isfinite(img).any(axis=2)` — so a 2-D grayscale array raises
+  `AxisError: axis 2 is out of bounds`. Its sibling `asinh_stretch` guards exactly this (`if img.ndim == 2:
+  img = np.stack([img,img,img], -1)`) and the module docstrings assert the two behave "exactly" alike. Both
+  are public, re-exported API documented to take an image array. **Not shipped as a blind fix because it is
+  genuinely unreachable today** — every in-repo caller feeds 3-D (mono stacking expands to 3 channels at
+  `stacker.py:1471`, the compare dialog up-converts, `generate_thumbnail` feeds 3-D) — so fixing it now is
+  marginal churn (AGENTS.md §2). Worth the one-line guard **if** a run is already in that file, or if a future
+  mono/FITS-preview path ever calls `autostretch` on a 2-D array. (XS, correctness/robustness) — found by an
+  adversarial audit of the render/post numeric paths.
 
 _(Scout QA audit 2026-07-10 (v0.103.8 baseline, suite green **1000 passed / 2 skipped**): led the rotation
 with a fresh adversarial re-read of the **stacking engine's final-image path** and the **newest calibration

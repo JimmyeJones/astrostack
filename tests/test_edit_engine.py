@@ -663,6 +663,73 @@ def test_deconv_understates_on_proxy_rule():
     assert deconv_understates_on_proxy(1.5, float("inf")) is False
 
 
+def test_star_reduce_overstates_on_proxy_rule():
+    from seestack.edit.ops.stars import star_reduce_overstates_on_proxy
+
+    # Export (scale <= 1) never overstates.
+    assert star_reduce_overstates_on_proxy(2.0, 1.0) is False
+    assert star_reduce_overstates_on_proxy(8.0, 1.0) is False
+    # Default star size on a 3x/4x-decimated proxy collapses below one proxy
+    # pixel (2/3 = 0.67 < 1, 2/4 = 0.5 < 1) → footprint clamps up, preview
+    # over-reduces.
+    assert star_reduce_overstates_on_proxy(2.0, 3.0) is True
+    assert star_reduce_overstates_on_proxy(2.0, 4.0) is True
+    # A mild 2x proxy keeps the default size at exactly one proxy pixel (2/2 = 1),
+    # so the footprint matches the export — no overstatement.
+    assert star_reduce_overstates_on_proxy(2.0, 2.0) is False
+    # A large star survives moderate decimation (8/4 = 2 >= 1).
+    assert star_reduce_overstates_on_proxy(8.0, 4.0) is False
+    # Degenerate inputs are safe (no false alarms).
+    assert star_reduce_overstates_on_proxy(0.0, 4.0) is False
+    assert star_reduce_overstates_on_proxy(float("nan"), 4.0) is False
+    assert star_reduce_overstates_on_proxy(2.0, float("inf")) is False
+
+
+def test_star_reduce_overstates_flag_matches_the_stronger_preview():
+    """The star-reduction live preview genuinely *over*-reduces on a heavily
+    decimated proxy — the erosion footprint clamps to 1 proxy-pixel (= scale
+    full-res px), physically larger than the export's, so the preview eats into a
+    wider ring of the (extended) star structure than the full-res export does.
+    ``star_reduce_overstates_on_proxy`` must flag exactly that case so the editor
+    can caption it honestly.
+    """
+    from seestack.edit.ops.stars import star_reduce_overstates_on_proxy
+
+    # A field of *extended* (soft, overlapping-halo) stars: the larger proxy
+    # footprint has more surrounding structure to pull down, which is where the
+    # over-reduction shows (a fully-isolated hard star is removed either way).
+    rng = np.random.default_rng(2)
+    H = W = 240
+    yy, xx = np.mgrid[0:H, 0:W]
+    img = np.full((H, W), 0.12, np.float32)
+    for _ in range(220):
+        cy, cx = rng.uniform(0, H), rng.uniform(0, W)
+        amp, sig = rng.uniform(0.3, 0.9), rng.uniform(1.2, 3.0)
+        img += amp * np.exp(-(((yy - cy) ** 2 + (xx - cx) ** 2) / (2 * sig * sig)))
+    full = np.clip(np.stack([img, img, img], -1), 0.0, 1.0).astype(np.float32)
+    spec = get_op("stars.reduce")
+    params = {"amount": 0.6, "size": 2, "protect_nebula": False}  # the default size
+
+    # Export (proxy_scale=1): the reference star reduction at full resolution.
+    exported = spec.apply(full.copy(), params, EditContext(proxy_scale=1.0))
+
+    # Heavily-decimated preview proxy (proxy_scale=4, e.g. a wide drizzle): the
+    # footprint clamps to 1 proxy-pixel and the preview over-reduces. Compare the
+    # total reduction "ink" against the export's, sampled on the same proxy grid.
+    proxy = full[::4, ::4].copy()
+    previewed = spec.apply(
+        proxy, params, EditContext(proxy_scale=4.0, is_proxy=True))
+    preview_energy = float(np.sum(np.abs(proxy - previewed)))
+    export_energy = float(np.sum(np.abs(proxy - exported[::4, ::4])))
+
+    assert export_energy > 0.0                          # export clearly reduces
+    # The preview reduces materially *more* than the export (measured ~1.2×).
+    assert preview_energy > export_energy * 1.05
+    # ...and the helper flags exactly this misleading case, but not the export.
+    assert star_reduce_overstates_on_proxy(2.0, 4.0) is True
+    assert star_reduce_overstates_on_proxy(2.0, 1.0) is False
+
+
 def test_hot_pixels_works_on_mosaic_nan_image():
     """The hot-pixel editor op must remove hot pixels even on a partial-coverage
     (NaN) mosaic — and preserve NaN. Regression: it used to derive its threshold

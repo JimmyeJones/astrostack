@@ -760,6 +760,43 @@ def test_histogram_flags_deconv_preview_understatement(client, solved_library):
     assert none["deconv_preview_understates"] is False
 
 
+def test_histogram_flags_star_reduce_preview_overstatement(client, solved_library):
+    """When the preview proxy is decimated enough that an enabled Star-reduction
+    op's star size falls below one proxy pixel, the erosion footprint clamps up
+    and the preview over-reduces the stars; the histogram reports
+    ``star_reduce_preview_overstates`` so the editor can honestly caption that the
+    export keeps the stars a little larger. A size that survives the proxy, or a
+    disabled op, must not raise the flag."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    # A wide master (1700 px) → proxy_scale 2, so size 1 collapses (1/2 = 0.5 < 1)
+    # while size 4 survives (4/2 = 2 >= 1).
+    rid = _make_run(solved_library, safe, basename="wide_star", h=120, w=1700)
+
+    def hist_for(recipe):
+        q = _enc(recipe)
+        return client.get(
+            f"/api/targets/{safe}/stack-runs/{rid}/editor/histogram?recipe={q}").json()
+
+    weak = hist_for({"ops": [{"id": "stars.reduce",
+                              "params": {"amount": 0.5, "size": 1}}]})
+    assert weak["proxy_scale"] >= 2.0
+    assert weak["star_reduce_preview_overstates"] is True
+
+    # A larger star size is representable on the same proxy → no overstatement.
+    strong = hist_for({"ops": [{"id": "stars.reduce",
+                                "params": {"amount": 0.5, "size": 4}}]})
+    assert strong["star_reduce_preview_overstates"] is False
+
+    # A disabled star-reduce op doesn't count.
+    disabled = hist_for({"ops": [{"id": "stars.reduce", "enabled": False,
+                                  "params": {"amount": 0.5, "size": 1}}]})
+    assert disabled["star_reduce_preview_overstates"] is False
+
+    # A recipe with no star-reduce op is never flagged.
+    none = hist_for({"ops": [{"id": "tone.stretch", "params": {}}]})
+    assert none["star_reduce_preview_overstates"] is False
+
+
 def test_trim_suggestion_mosaic(client, solved_library):
     """On a mosaic, the trim endpoint returns a fractional crop to the largest
     well-covered rectangle, excluding the ragged low-coverage border."""
