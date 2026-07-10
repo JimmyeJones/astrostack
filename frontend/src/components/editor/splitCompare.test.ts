@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { splitFraction, splitClipLeft, splitLeftPct, lookCompareOps } from "./splitCompare";
+import { splitFraction, splitClipLeft, splitLeftPct, lookCompareOps, reshapesFrame } from "./splitCompare";
 
 describe("splitFraction", () => {
   it("maps a pointer inside the box to its fractional x", () => {
@@ -63,5 +63,21 @@ describe("lookCompareOps", () => {
   it("is the look verbatim when neither side has geometry ops", () => {
     const look = [{ id: "tone.stretch" }, { id: "detail.sharpen" }];
     expect(lookCompareOps(look, [])).toEqual(look);
+  });
+});
+
+describe("reshapesFrame", () => {
+  it("is true for the crop/rotate/resize ops that change the frame shape", () => {
+    expect(reshapesFrame("geometry.crop")).toBe(true);
+    expect(reshapesFrame("geometry.rotate")).toBe(true);
+    expect(reshapesFrame("geometry.resize")).toBe(true);
+  });
+
+  it("is false for tone/detail/star ops that leave the frame shape alone", () => {
+    expect(reshapesFrame("tone.stretch")).toBe(false);
+    expect(reshapesFrame("tone.curves")).toBe(false);
+    expect(reshapesFrame("detail.sharpen")).toBe(false);
+    expect(reshapesFrame("stars.reduce")).toBe(false);
+    expect(reshapesFrame("background.level_coverage")).toBe(false);
   });
 });

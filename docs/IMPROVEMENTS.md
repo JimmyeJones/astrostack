@@ -1922,6 +1922,19 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.103.15** — Fix (editor, PRIORITY 1): the per-op "Split this op" / "Without this op" compare
+  mis-aligned on a frame-reshaping op (Builder 2026-07-10; adversarial editor dogfood). The per-op compare
+  overlays the with-op preview on the without-op render and clips both under one divider sized to the
+  (cropped) rendered box; when the selected op is `geometry.crop`/`rotate`/`resize`, disabling it changes the
+  frame shape, so the without-op image is a *different shape* and `objectFit:contain`-letterboxes at a
+  different scale — nothing lines up across the divider, yet the tooltip promised "see exactly what just this
+  op did". (The whole-recipe Split sidesteps this by rendering its Original through all enabled geometry ops so
+  the shapes match; the per-op path, which must toggle exactly one op, had no such guard.) New pure
+  `splitCompare.reshapesFrame(opId)` (mirrors `GEOMETRY_OP_IDS`) now disables both per-op compare buttons for a
+  reshaping op with an explanatory tooltip pointing to Compare/Split for the whole edit — a pixel-aligned
+  per-op A/B is meaningless for a reshaping op anyway. Frontend-only, additive (removes a misleading control
+  for three op ids; tone/detail/star ops unchanged). Tests: `reshapesFrame` unit cases + an Editor component
+  test that the buttons disable on Crop and re-enable on a tonal op.
 - **v0.103.14** — Fix: the REST job endpoints silently stripped the server-classified `error_kind` (Builder
   2026-07-10; adversarial webapp-router audit). `Job.to_dict()`, the SSE stream, and the frontend `Job` type
   all carry the stable canonical `error_kind` (v0.84.4, added to be reword-proof), but the `JobOut` response
