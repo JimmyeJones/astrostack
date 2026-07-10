@@ -1044,8 +1044,16 @@ problems. Dogfood it every big-picture run and fix root causes.
   dark was an exposure mismatch (not "no dark at all"), the History "No calibration masters were applied"
   line (v0.103.7) could say specifically "you have a dark at a different exposure — add a master bias to
   reuse it" — more actionable than the generic message.
-- **Give the auto-bound *dark* a gain/temperature confidence gate too (finish the "confident only"
-  contract).** (S, autonomy/trust) *(Scout-filed 2026-07-10, traced.)* After v0.103.6 (flat) and v0.103.10
+- ~~**Give the auto-bound *dark* a gain/temperature confidence gate too (finish the "confident only"
+  contract).**~~ — **shipped v0.103.11** (see Shipped). The unattended `auto_bind_master_paths` now gates the
+  dark on a gain/temperature match distance (`_AUTO_BIND_DARK_MAX_DIST`, the same bar the flat/bias use) *in
+  addition to* the existing 25% exposure gate, so a same-exposure dark from a genuinely different rig (very
+  different gain/offset) is left off rather than over-/under-subtracting the walk-away stack; a dark with
+  unknown gain/temperature still binds (the gate only *tightens*). New `_dark_match_confident` helper mirrors
+  `_flat_match_confident`/`_bias_match_confident`; regression tests `test_auto_bind_skips_gain_mismatched_dark`
+  (fails before / passes after) + `test_auto_bind_binds_dark_with_unknown_gain_temp`. Completes the "auto-bind
+  only a master we're confident about" contract across all three master kinds. Original write-up kept below.
+  (S, autonomy/trust) *(Scout-filed 2026-07-10, traced.)* After v0.103.6 (flat) and v0.103.10
   (bias), the dark is the one auto-bound master still gated on **exposure only** (`_AUTO_BIND_EXP_MISMATCH_FRAC`,
   25%) with **no** gain/temperature check. `recommend_masters` picks the best dark by *combined* distance, so
   the recommended dark is usually the closest on gain too — but when the library's only exposure-matching dark
@@ -1890,6 +1898,19 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.103.11** — Gate the auto-bound *dark* on a gain/temperature confidence match too, completing the
+  "confident only" auto-bind contract across all three master kinds (Builder 2026-07-10). The unattended
+  `auto_bind_master_paths` bound the dark on **exposure only** (25% gate, v0.99.0) with no gain/temperature
+  check — so a same-exposure dark from a genuinely different rig (very different gain/offset) would still be
+  bound to a walk-away stack, and a dark encodes the gain-dependent bias pedestal, so a wrong-gain dark
+  over-/under-subtracts even at the right exposure. New `_dark_match_confident` mirrors
+  `_flat_match_confident`/`_bias_match_confident` (same `_AUTO_BIND_DARK_MAX_DIST == _AUTO_BIND_FLAT_MAX_DIST`
+  bar; exposure passed as `None` so only gain/temperature is scored — the exposure gate stays a separate
+  check; unknown gain/temperature still binds, so the gate only *tightens*). Regression tests
+  `test_auto_bind_skips_gain_mismatched_dark` (a gain-400 dark at the right exposure is left off for gain-80
+  subs; a same-gain dark still binds; `recommend_masters` still *offers* it for the interactive form) +
+  `test_auto_bind_binds_dark_with_unknown_gain_temp`. One file (`webapp/calibration.py`), strictly
+  conservative (only tightens what auto-bind applies), upgrade-safe (no config/schema/API/default change). (#PR)
 - **v0.103.10** — Gate the auto-bound *bias* on a gain/temperature confidence match (Scout 2026-07-10;
   the genuinely last "confident only" gap in the v0.99.0 auto-bind contract — the v0.103.6 flat-gate
   write-up claimed to close it, but the **bias** was still bound whenever one merely existed). In the

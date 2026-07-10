@@ -394,6 +394,46 @@ def test_auto_bind_binds_bias_with_unknown_gain_temp(tmp_path):
     assert Path(bound["bias_path"]).name == bias["filename"]
 
 
+def test_auto_bind_skips_gain_mismatched_dark(tmp_path):
+    """A dark whose exposure matches the subs but whose gain is a wild mismatch
+    (a different rig) must NOT be auto-bound unattended — a dark encodes the
+    gain-dependent bias pedestal, so a wrong-gain dark over-/under-subtracts even
+    at the right exposure, and there's no human to catch it. (Regression: before
+    the dark confidence gate the dark was bound on exposure alone, unlike the
+    flat's and bias's gain gates.)"""
+    root = tmp_path / "lib"
+    # Subs are gain 80; the only dark is a same-exposure but gain-400 (other rig).
+    dark = _register(root, "dark", exposure_s=30.0, gain=400.0)
+    masters = calibration.list_masters(root)
+
+    bound = calibration.auto_bind_master_paths(
+        root, masters, exposure_s=30.0, gain=80.0)
+    assert "dark_path" not in bound  # left uncalibrated rather than mis-subtracted
+    # recommend_masters still *offers* it (the interactive form warns a human);
+    # only the unattended binder is stricter.
+    assert calibration.recommend_masters(
+        masters, exposure_s=30.0, gain=80.0)["dark_master_id"] == dark["id"]
+
+    # A same-gain dark clears the gate and is bound as before.
+    same = _register(root, "dark", exposure_s=30.0, gain=80.0)
+    bound2 = calibration.auto_bind_master_paths(
+        root, calibration.list_masters(root), exposure_s=30.0, gain=80.0)
+    assert Path(bound2["dark_path"]).name == same["filename"]
+
+
+def test_auto_bind_binds_dark_with_unknown_gain_temp(tmp_path):
+    """A dark that never recorded gain/temperature still binds when its exposure
+    matches — the confidence gate only *tightens* on a materially mismatched gain,
+    it must not drop a dark whose gain/temperature are simply unknown (behaviour
+    unchanged from before the gate)."""
+    root = tmp_path / "lib"
+    dark = _register(root, "dark", exposure_s=30.0)  # no gain / sensor_temp_c
+    bound = calibration.auto_bind_master_paths(
+        root, calibration.list_masters(root), exposure_s=30.0, gain=80.0,
+        sensor_temp_c=-5.0)
+    assert Path(bound["dark_path"]).name == dark["filename"]
+
+
 def test_calibration_suggestions_endpoint(client, solved_library):
     from seestack.calibrate.masters import MasterMeta
     from seestack.io.library import Library
