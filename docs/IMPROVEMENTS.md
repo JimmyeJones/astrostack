@@ -218,6 +218,19 @@ the real webapp stack→edit path.)_
   pathological skew reverts — same real-data-gating as the SCNR / `sky_sigma` items in Image-quality
   below. Fix all four sites together (they share the bug). (S code / M validation, image-quality/correctness)
 
+- **`render.autostretch` crashes on a 2-D (mono) input while its sibling `asinh_stretch` handles it —
+  latent API-contract gap, not currently user-reachable.** *(traced + reproduced, Builder audit 2026-07-10.)*
+  `seestack/render/thumbnail.py::autostretch` (~L266) does `img = rgb.astype(np.float32, copy=True)` with **no**
+  2-D→3-D expansion, then immediately `np.isfinite(img).any(axis=2)` — so a 2-D grayscale array raises
+  `AxisError: axis 2 is out of bounds`. Its sibling `asinh_stretch` guards exactly this (`if img.ndim == 2:
+  img = np.stack([img,img,img], -1)`) and the module docstrings assert the two behave "exactly" alike. Both
+  are public, re-exported API documented to take an image array. **Not shipped as a blind fix because it is
+  genuinely unreachable today** — every in-repo caller feeds 3-D (mono stacking expands to 3 channels at
+  `stacker.py:1471`, the compare dialog up-converts, `generate_thumbnail` feeds 3-D) — so fixing it now is
+  marginal churn (AGENTS.md §2). Worth the one-line guard **if** a run is already in that file, or if a future
+  mono/FITS-preview path ever calls `autostretch` on a 2-D array. (XS, correctness/robustness) — found by an
+  adversarial audit of the render/post numeric paths.
+
 _(Scout QA audit 2026-07-10 (v0.103.8 baseline, suite green **1000 passed / 2 skipped**): led the rotation
 with a fresh adversarial re-read of the **stacking engine's final-image path** and the **newest calibration
 glue** — `stack/{weighting,photometric,reference,output,drizzle_path}.py`, `calibrate/apply.py`,
