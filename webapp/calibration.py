@@ -221,6 +221,20 @@ def recommend_masters(
 # for *unattended* auto-binding, where there is no human to see the warning.
 _AUTO_BIND_EXP_MISMATCH_FRAC = 0.25
 
+# A flat is exposure-independent, so :func:`recommend_masters` always returns the
+# best *available* one no matter how poorly its gain/temperature match. For
+# *unattended* binding — where no human sees the interactive form's warning — also
+# require the flat's gain/temperature to be a confident match, so a flat shot on a
+# genuinely different rig (a different scope/reducer on the same camera body, or a
+# very different gain/temperature) is left off rather than dividing the walk-away
+# stack by the wrong illumination pattern. This mirrors the dark's exposure gate:
+# "leave the flat uncalibrated rather than risk applying the wrong one". The bar is
+# the same match distance the flat-dark already uses (:data:`_FLAT_DARK_MAX_DIST`);
+# because an unknown gain/temperature on either side contributes 0 distance (see
+# :func:`_match_distance`), a flat that simply never recorded them still binds,
+# exactly as today — the gate only *tightens*, catching a materially mismatched flat.
+_AUTO_BIND_FLAT_MAX_DIST = 1.0
+
 
 def auto_bind_master_paths(
     library_root: str | Path,
@@ -309,9 +323,12 @@ def auto_bind_master_paths(
                 out["dark_path"] = p
                 dark_bound = True
 
-    # Flat (+ its flat-dark) — exposure independent, safe to apply as recommended.
+    # Flat (+ its flat-dark) — exposure independent, but only when its
+    # gain/temperature confidently match the subs (a flat from a different rig
+    # would divide in the wrong illumination pattern; unknown params still pass).
     flat_id = rec.get("flat_master_id")
-    if flat_id is not None:
+    if flat_id is not None and _flat_match_confident(
+            by_id.get(int(flat_id)), gain=gain, sensor_temp_c=sensor_temp_c):
         p = _path(flat_id)
         if p:
             out["flat_path"] = p
@@ -326,6 +343,24 @@ def auto_bind_master_paths(
             out["bias_path"] = bp
 
     return out
+
+
+def _flat_match_confident(
+    flat: dict[str, Any] | None, *,
+    gain: float | None, sensor_temp_c: float | None,
+) -> bool:
+    """Whether a recommended flat matches the subs' gain/temperature closely enough
+    to auto-bind unattended (see :data:`_AUTO_BIND_FLAT_MAX_DIST`).
+
+    Uses the same gain/temperature match distance as the recommender; a flat is
+    exposure independent, so exposure is ignored. Unknown gain/temperature on
+    either side contributes 0 distance, so a flat missing those fields still
+    clears the bar (behaviour unchanged from before the gate)."""
+    if not flat:
+        return False
+    dist = _match_distance(flat, exposure_s=None, gain=gain,
+                           sensor_temp_c=sensor_temp_c, kind="flat")
+    return dist <= _AUTO_BIND_FLAT_MAX_DIST
 
 
 # A flat-dark must match the *flat's* exposure closely (it removes the flat's own

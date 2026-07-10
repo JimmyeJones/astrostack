@@ -979,8 +979,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   and testable on `recommend_masters` + the chain in isolation. Serves autonomy (one fewer decision) *and*
   image quality (calibrated frames) at once. Consider surfacing "auto-applied your master dark+flat" in the
   auto-edit "why" note for trust.
-- **Give the auto-bound *flat* a minimum-confidence gate (match the dark's exposure gate).** (S,
-  autonomy/trust) *(Scout-filed 2026-07-10, traced while fixing the v0.103.4 dimension bug.)* In the
+- ~~**Give the auto-bound *flat* a minimum-confidence gate (match the dark's exposure gate).**~~ —
+  **shipped v0.103.6** (see Shipped). The unattended `auto_bind_master_paths` now gates the flat on a
+  gain/temperature match distance (`_AUTO_BIND_FLAT_MAX_DIST`, the same bar the flat-dark uses), so a flat
+  from a genuinely different rig is left off rather than dividing the walk-away stack by the wrong
+  illumination pattern; a flat with unknown gain/temperature still binds (the gate only *tightens*). Original
+  write-up kept below for provenance. (S, autonomy/trust) *(Scout-filed 2026-07-10, traced while fixing the v0.103.4 dimension bug.)* In the
   unattended `auto_bind_master_paths`, the **dark** is bound only when its exposure matches the subs within
   25%, but the **flat** is bound whenever one merely *exists* (now also dimension-gated in v0.103.4, but
   still with **no gain/temperature confidence gate**). A flat's vignetting/dust pattern is largely
@@ -992,8 +996,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   bar exactly as the dark already does on a poor exposure match. Purely local, additive, off-nothing (only
   *tightens* what auto-bind will apply), testable on `auto_bind_master_paths` in isolation. Closes the last
   "confident only" gap in the v0.99.0 auto-bind contract.
-- **Surface what calibration the *unattended* chains auto-applied (trust for the walk-away path).** (S,
-  friendliness/trust) *(Scout-filed 2026-07-10.)* v0.99.0 auto-binds masters into watcher auto-stack /
+- ~~**Surface what calibration the *unattended* chains auto-applied (trust for the walk-away path).**~~ —
+  **shipped v0.103.7** (see Shipped). The run Info/provenance panel now shows a plain-language calibration
+  line derived from the already-returned `CALSTAT` card: "Calibrated with your master dark and master flat."
+  when masters were applied, and — critically for the walk-away user — an explicit "No calibration masters
+  were applied — build or pick a master dark/flat…" note when a stack that *does* carry provenance came out
+  uncalibrated (previously the panel showed only a cryptic `CALSTAT` row and said nothing at all when
+  uncalibrated). Frontend-only, additive, no backend/schema/API change. Original write-up kept below for
+  provenance. (S, friendliness/trust) *(Scout-filed 2026-07-10.)* v0.99.0 auto-binds masters into watcher auto-stack /
   Process target / reprocess-all, and the run's `CALSTAT`/`describe()` provenance already records *what* was
   calibrated — but a beginner who dropped subs and walked away never *sees* it: there's no plain-language
   "we auto-applied your master dark + flat" line on the History card or in the auto-edit "why" note. Add one
@@ -1796,6 +1806,32 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.103.7** — Surface calibration provenance in plain language on the run Info panel (Builder 2026-07-10;
+  the trust complement to the v0.99.0/v0.103.4/v0.103.6 auto-bind work). A hands-off (auto-bound) stack now
+  tells the walk-away user, in the provenance panel they open for trust, whether it was calibrated — a plain
+  "Calibrated with your master dark and master flat." line when `CALSTAT` is present, and an explicit "No
+  calibration masters were applied — build or pick a master dark/flat…" note when a stack that carries
+  provenance came out uncalibrated (the panel previously showed only a cryptic `CALSTAT  dark+flat` row when
+  calibrated and said *nothing at all* when uncalibrated, so a beginner had no cue to go build masters). The
+  presence of `CALSTAT` among other provenance cards reliably distinguishes calibrated from uncalibrated (the
+  panel already returns early when a stack has no provenance at all), so it's derived purely from the existing
+  `…/info` response — frontend-only, additive, no backend/schema/API change. Pure `calibrationSummaryText`
+  helper + tests in `History.test.tsx`. (#PR)
+- **v0.103.6** — Auto-bind calibration: gate the auto-bound *flat* on a gain/temperature confidence match
+  (Builder 2026-07-10; closes the last "confident only" gap the Scout filed on the v0.99.0 auto-bind
+  contract). `recommend_masters` always returns the best *available* flat no matter how poorly it matches
+  (a flat is exposure-independent, so the interactive form only *warns* on gain/temperature), but the
+  unattended `auto_bind_master_paths` applied it regardless — so a flat shot on a genuinely different optical
+  train (a different scope/reducer on the same camera body) or at a very different gain/temperature would be
+  silently divided into a walk-away stack, corrupting the illumination pattern with no human to catch it. It
+  now gates the flat (and, with it, its flat-dark) on the same gain/temperature match distance the flat-dark
+  already uses (`_AUTO_BIND_FLAT_MAX_DIST = 1.0`), mirroring the dark's exposure gate: leave the flat
+  uncalibrated rather than risk the wrong one. Because an unknown gain/temperature on either side contributes
+  0 distance, a flat that never recorded those fields still binds — the gate only *tightens*, catching a
+  materially mismatched flat. Regression tests in `test_calibration.py`
+  (`test_auto_bind_skips_gain_mismatched_flat`, `test_auto_bind_binds_flat_with_unknown_gain_temp`,
+  `test_auto_bind_flat_dark_dropped_with_gain_mismatched_flat`; the mismatched flat is still *recommended* to
+  the interactive form). Additive, upgrade-safe (no config/DB/API/on-disk change). (#PR)
 - **v0.103.5** — Engine robustness (background flatten; Builder 2026-07-10, found by a fresh adversarial
   audit of `seestack/bg/*` — the stacker + align/accumulator audits ran alongside and came back clean).
   `bg/per_frame.py::subtract_background`'s **luminance** mode called `_subtract_background_gpu` directly with

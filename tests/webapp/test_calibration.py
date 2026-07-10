@@ -305,6 +305,55 @@ def test_auto_bind_dimension_gate_skipped_when_subs_dims_unknown(tmp_path):
     assert Path(bound["flat_path"]).name == flat["filename"]
 
 
+def test_auto_bind_skips_gain_mismatched_flat(tmp_path):
+    """A flat shot at a wildly different gain (a different rig) must NOT be
+    auto-bound unattended — dividing by the wrong illumination pattern would
+    corrupt the walk-away stack, and there's no human to catch it. (Regression:
+    before the flat confidence gate, ``recommend_masters`` always returned the
+    only available flat and auto-bind applied it regardless of match quality.)"""
+    root = tmp_path / "lib"
+    # Subs are gain 80; the library's only flat is gain 400 (a very different rig).
+    flat = _register(root, "flat", exposure_s=2.0, gain=400.0)
+    masters = calibration.list_masters(root)
+
+    bound = calibration.auto_bind_master_paths(
+        root, masters, exposure_s=30.0, gain=80.0)
+    assert "flat_path" not in bound  # left uncalibrated rather than mis-flatted
+    # recommend_masters still *offers* it (the interactive form warns a human);
+    # only the unattended binder is stricter.
+    assert calibration.recommend_masters(
+        masters, exposure_s=30.0, gain=80.0)["flat_master_id"] == flat["id"]
+
+    # A same-gain flat clears the gate and is bound as before.
+    same = _register(root, "flat", exposure_s=2.0, gain=80.0)
+    bound2 = calibration.auto_bind_master_paths(
+        root, calibration.list_masters(root), exposure_s=30.0, gain=80.0)
+    assert Path(bound2["flat_path"]).name == same["filename"]
+
+
+def test_auto_bind_binds_flat_with_unknown_gain_temp(tmp_path):
+    """A flat that never recorded gain/temperature still binds — the confidence
+    gate only *tightens* on a materially mismatched flat, it must not drop a
+    flat whose params are simply unknown (behaviour unchanged from before)."""
+    root = tmp_path / "lib"
+    flat = _register(root, "flat", exposure_s=2.0)  # no gain / sensor_temp_c
+    bound = calibration.auto_bind_master_paths(
+        root, calibration.list_masters(root), exposure_s=30.0, gain=80.0,
+        sensor_temp_c=-5.0)
+    assert Path(bound["flat_path"]).name == flat["filename"]
+
+
+def test_auto_bind_flat_dark_dropped_with_gain_mismatched_flat(tmp_path):
+    """When the flat itself fails the confidence gate, its flat-dark isn't bound
+    either (a flat-dark only calibrates a flat that's being applied)."""
+    root = tmp_path / "lib"
+    _register(root, "flat", exposure_s=2.0, gain=400.0)   # mismatched flat
+    _register(root, "dark", exposure_s=2.0, gain=400.0)   # would-be flat-dark
+    bound = calibration.auto_bind_master_paths(
+        root, calibration.list_masters(root), exposure_s=30.0, gain=80.0)
+    assert "flat_path" not in bound and "flat_dark_path" not in bound
+
+
 def test_calibration_suggestions_endpoint(client, solved_library):
     from seestack.calibrate.masters import MasterMeta
     from seestack.io.library import Library
