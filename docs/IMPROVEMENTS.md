@@ -47,6 +47,25 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+_Scout audit log 2026-07-10 (baseline green: 1031 passed / 2 skipped): adversarially
+re-traced the core stacking-engine combine path — `stack/accumulator.py` (WeightedSum /
+MinMaxReject / Welford, incl. the windowed `add_window` sub-views and the frame-count vs
+Σ-weight coverage split), `stack/drizzle_path.py` (two-pass κ-σ reject, the float64
+catastrophic-cancellation guard + `_VAR_RESOLUTION_FACTOR` unresolved-variance gate,
+frame-count support tracking, off-canvas `intersects` accounting), `stack/mosaic.py`
+(wrap-safe circular-mean outlier rejection, canvas px/MP caps), `stack/align.py`
+(windowed reproject, inset valid-mask, order-1 sub-pixel-shift NaN propagation on both the
+full and windowed paths), and `calibrate/apply.py` (dark/bias-never-both, flat floor,
+exposure-scaled dark). Also re-traced the editor's proxy↔export surface — `render/thumbnail.py`
+(asinh/STF NaN-aware stretch), all of `edit/ops/*` (tone/detail/geometry/stars), `edit/proxy.py`
++ `edit/coverage_trim.py` + `edit/starmask.py` + `edit/curve.py`/`levels.py`/`histogram.py`, and
+the webapp `routers/editor.py` preview/histogram/coverage endpoints (proxy_scale↔coverage stride
+parity, the deconv-understates / star-reduce-overstates advisory flags). **All traced clean** —
+NaN=coverage, robust-scale fallbacks, divisor guards, and preview↔export parity all held,
+consistent with the mature audit history. No new verified bug filed this run (per §2, no
+manufacturing). Next rotation: `webapp/watcher.py` / `webapp/jobs.py` orchestration, and the
+`qc/` + `solve/` paths, which this run didn't re-cover._
+
 - ~~**`suppress_hot_cold_pixels` silently no-ops the *entire* hot/cold/cosmic-ray pass on any frame with a NaN
   coverage gap — a non-NaN-aware noise estimate makes the threshold NaN, so every defect survives into the
   image.**~~ — **FIXED v0.103.23** (Builder audit 2026-07-10; traced + reproduced + regression-tested).
@@ -960,6 +979,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   re-opening/re-rendering an edited run no longer double-stretches it and the FITS
   is self-describing for Siril/PixInsight. Absence = today's linear behaviour, so
   old runs are unaffected.
+- **Measure the finished picture's residual background colour cast and offer a one-click
+  "neutralise background".** (S–M, editor/trust — PRIORITY 1) *(Scout-filed 2026-07-10.)* The
+  editor already has SCNR (green removal) and Color-calibration, but a beginner has no way to
+  *see* whether their sky background actually ended up neutral, nor a data-driven correction when
+  it didn't — they'd have to eyeball SCNR `amount` or hand-tune White-balance gains. The
+  histogram endpoint (`…/editor/histogram`) already renders the post-recipe display image over the
+  finite pixels; extend it to also return the **robust per-channel sky-background medians** (median
+  of each channel's finite pixels *at or below* the luminance median — the same sky-population trick
+  `presets.analyze_proxy`/`classify_target` already use, so stars/target don't pull it), and the
+  editor shows a dimmed line: "Sky background: neutral ✓" or "Sky background has a slight green
+  cast". When the channels deviate beyond a small tolerance, offer a one-click that appends a
+  `tone.white_balance` op whose gains equalise the two off-channels to the reference channel's sky
+  median (an undoable step, exactly like the Auto-curve / trim buttons) — so the user corrects a
+  measured residual cast instead of guessing a slider. Read-only measurement + additive op, off by
+  default (a suggestion, never auto-applied), fully reversible, and testable on the pure
+  sky-median measurement in isolation. Direct synergy with the two open "vet on REAL data" items
+  below (SCNR magenta / gray-star leaves a background cast): this makes exactly that residual cast
+  **visible and one-click-fixable** in-app, and gives the owner a live signal on whether Auto's
+  colour path lands neutral on real Seestar backgrounds. Smallest first slice: ship just the
+  read-only readout (no button) so the signal is gathered before adding an action.
 ### Autonomy — "just works" (PRIORITY 2)
 - **⭐ OWNER-REQUESTED — "Reprocess everything" — ALL SLICES SHIPPED: (a) v0.74.0,
   (c) v0.76.0–0.77.0, (b) v0.83.0.** The stacking engine keeps improving (better rejection /
@@ -1360,6 +1399,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+- **Show total integration time on the History / Target card ("2,000 subs · 5.6 h total").**
+  (S, friendliness/trust — PRIORITY 3) *(Scout-filed 2026-07-10.)* For the target user (thousands
+  of short Seestar subs) the single most intuitive image-quality signal is *how much light they've
+  actually collected* — yet nothing in the app surfaces it. The History Info panel already shows
+  "N frames used" and the frame-accounting line, but never the **total integration time** (Σ of the
+  contributing subs' exposures), which is the number every astrophotographer thinks in and the one
+  that tells a beginner whether they have "enough" or should keep shooting. The data is already in
+  hand: per-frame `exposure_s` is in the project DB and the stacker knows `n_frames_used`; stamp the
+  summed integration seconds into the run's provenance (a FITS header card like the existing
+  `NOFFERED`/`NALIGNFL` route — durable on disk, read by the `…/info` endpoint, no schema migration,
+  upgrade-safe by construction) and render one dimmed line ("2,000 subs · 5.6 h integration") on the
+  History Info panel (and optionally the Target page's total across runs). Read-only, additive, no
+  default/API-shape change; a pure seconds→"Xh Ym" formatter is testable in isolation. Serves trust
+  (a concrete quality figure) and friendliness (answers "do I have enough subs yet?") for the OSC
+  workflow.
 - ~~**"Why these steps?" — surface the Auto recipe's data-driven reasoning.**~~ — **shipped
   v0.91.0** (see Shipped). All three layers now ship: the *what* (`autoSummarySentence`) and
   the *chosen values* (`autoValueSentence`) were already there, and this run added the missing
