@@ -1082,6 +1082,42 @@ describe("EditorView", () => {
       expect(screen.queryByAltText("original")).not.toBeInTheDocument());
   });
 
+  it("disables the per-op compare buttons for a frame-reshaping op (crop/rotate/resize)", async () => {
+    // A per-op split/swap overlays the with-op preview on the without-op render
+    // under one divider sized to the cropped box; toggling a crop changes the
+    // frame shape, so the two halves can't be pixel-aligned (the whole-recipe
+    // Split handles geometry, the per-op compare can't). The buttons must be
+    // disabled rather than render a misleading, mis-scaled A/B.
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CROP]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [
+        { uid: "s1", id: "tone.stretch", enabled: true, params: { stretch: 0.5 } },
+        { uid: "c1", id: "geometry.crop", enabled: true,
+          params: { x0: 0.1, y0: 0.1, x1: 0.9, y1: 0.9 } },
+      ],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    // Selecting the Crop op disables both per-op compare buttons…
+    fireEvent.click(await screen.findByText("Crop"));
+    expect(await screen.findByRole("button", { name: "Without this op" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Split this op" })).toBeDisabled();
+
+    // …while selecting the tonal op re-enables them (they only gate on geometry).
+    fireEvent.click(screen.getByText("Stretch"));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Without this op" })).not.toBeDisabled());
+    expect(screen.getByRole("button", { name: "Split this op" })).not.toBeDisabled();
+  });
+
   it("applies data-driven defaults across the pipeline in one click", async () => {
     vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, SHARPEN]);
     vi.spyOn(client.api, "getRecipe").mockResolvedValue({

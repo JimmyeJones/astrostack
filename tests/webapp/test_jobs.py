@@ -223,3 +223,30 @@ def test_restart_marks_interrupted(tmp_path):
     finally:
         release.set()
         jm.stop()
+
+
+def test_rest_endpoints_include_error_kind(client):
+    """The REST job endpoints must expose the server-classified ``error_kind``.
+
+    It's persisted and returned by ``Job.to_dict()`` and the SSE stream, but the
+    ``JobOut`` response model has to declare the field or FastAPI silently strips
+    it — leaving the Jobs page (which loads history over ``GET /api/jobs``, not
+    SSE) to fall back to brittle string-matching of the raw error text.
+    """
+    jm: JobManager = client.app.state.job_manager
+
+    def boom(job: Job):
+        raise MemoryError("stack output canvas needs more working memory")
+
+    job = jm.submit("stack", boom)
+    assert _wait(lambda: jm.get(job.id).state == "error")
+    assert jm.get(job.id).error_kind == "memory_budget"
+
+    # GET /api/jobs/{id}
+    one = client.get(f"/api/jobs/{job.id}").json()
+    assert one["error_kind"] == "memory_budget"
+
+    # GET /api/jobs (history list) — the path the Jobs page actually uses.
+    listed = client.get("/api/jobs").json()
+    row = next(r for r in listed if r["id"] == job.id)
+    assert row["error_kind"] == "memory_budget"

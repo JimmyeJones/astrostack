@@ -29,7 +29,7 @@ import { prependCoverageLeveling } from "../components/editor/coverageLeveling";
 import { applyTrimCrop, trimRectStyle, trimKeptLabel, geometryOpsKey, previewBoxStyle,
   cropCoveragePct, removeCropOps }
   from "../components/editor/mosaicTrim";
-import { splitFraction, splitClipLeft, splitLeftPct, lookCompareOps }
+import { splitFraction, splitClipLeft, splitLeftPct, lookCompareOps, reshapesFrame }
   from "../components/editor/splitCompare";
 import { LookComparePicker, type LookChoice } from "../components/editor/LookComparePicker";
 import { pngProgressLabel } from "../components/editor/pngProgress";
@@ -1640,12 +1640,14 @@ export function EditorView() {
                     ) : null}
                     {selectedOp.enabled ? (
                       <Tooltip
-                        label="Preview the image with only this op bypassed, to see just its effect"
-                        multiline w={220} withArrow>
+                        label={reshapesFrame(selectedOp.id)
+                          ? "This op changes the frame's shape (crop/rotate/resize), so a per-op compare can't line up pixel-for-pixel — use Compare or Split to judge the whole edit"
+                          : "Preview the image with only this op bypassed, to see just its effect"}
+                        multiline w={240} withArrow>
                         <Button size="compact-xs"
                           variant={soloActive ? "filled" : "default"} color="grape"
                           loading={soloActive && withoutOpPreview.isLoading}
-                          disabled={!preview.data}
+                          disabled={!preview.data || reshapesFrame(selectedOp.id)}
                           onClick={() => setSoloExclude((s) => {
                             if (!s) { setShowBase(false); setShowMask(false); setShowCoverage(false); setSoloSplit(false); setSplitCompare(false); }
                             return !s;
@@ -1659,12 +1661,14 @@ export function EditorView() {
                         precise answer to "is this slider actually helping?". */}
                     {selectedOp.enabled ? (
                       <Tooltip
-                        label="Drag a divider across the preview to reveal the image without this op on the left and with it on the right — see exactly what just this op did"
+                        label={reshapesFrame(selectedOp.id)
+                          ? "This op changes the frame's shape (crop/rotate/resize), so a per-op split can't line up pixel-for-pixel — use the whole-edit Split instead"
+                          : "Drag a divider across the preview to reveal the image without this op on the left and with it on the right — see exactly what just this op did"}
                         multiline w={240} withArrow>
                         <Button size="compact-xs"
                           variant={soloSplitActive ? "filled" : "default"} color="grape"
                           loading={soloSplitActive && withoutOpPreview.isLoading}
-                          disabled={!preview.data}
+                          disabled={!preview.data || reshapesFrame(selectedOp.id)}
                           onClick={() => setSoloSplit((s) => {
                             if (!s) { setShowBase(false); setShowMask(false); setShowCoverage(false);
                               setSoloExclude(false); setSplitCompare(false); setSplitFrac(0.5); }

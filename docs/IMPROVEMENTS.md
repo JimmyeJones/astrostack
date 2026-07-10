@@ -1922,6 +1922,31 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.103.15** — Fix (editor, PRIORITY 1): the per-op "Split this op" / "Without this op" compare
+  mis-aligned on a frame-reshaping op (Builder 2026-07-10; adversarial editor dogfood). The per-op compare
+  overlays the with-op preview on the without-op render and clips both under one divider sized to the
+  (cropped) rendered box; when the selected op is `geometry.crop`/`rotate`/`resize`, disabling it changes the
+  frame shape, so the without-op image is a *different shape* and `objectFit:contain`-letterboxes at a
+  different scale — nothing lines up across the divider, yet the tooltip promised "see exactly what just this
+  op did". (The whole-recipe Split sidesteps this by rendering its Original through all enabled geometry ops so
+  the shapes match; the per-op path, which must toggle exactly one op, had no such guard.) New pure
+  `splitCompare.reshapesFrame(opId)` (mirrors `GEOMETRY_OP_IDS`) now disables both per-op compare buttons for a
+  reshaping op with an explanatory tooltip pointing to Compare/Split for the whole edit — a pixel-aligned
+  per-op A/B is meaningless for a reshaping op anyway. Frontend-only, additive (removes a misleading control
+  for three op ids; tone/detail/star ops unchanged). Tests: `reshapesFrame` unit cases + an Editor component
+  test that the buttons disable on Crop and re-enable on a tonal op.
+- **v0.103.14** — Fix: the REST job endpoints silently stripped the server-classified `error_kind` (Builder
+  2026-07-10; adversarial webapp-router audit). `Job.to_dict()`, the SSE stream, and the frontend `Job` type
+  all carry the stable canonical `error_kind` (v0.84.4, added to be reword-proof), but the `JobOut` response
+  model never declared the field — so FastAPI's `response_model` dropped it from `GET /api/jobs` and
+  `GET /api/jobs/{id}`. The **Jobs page loads its history over `GET /api/jobs`, not SSE**, so every finished
+  failed job arrived with `error_kind` undefined and `friendlyJobError` fell back to brittle string-matching of
+  the raw error text — defeating the whole point of the server-side classification (a reworded engine message
+  would silently regress the friendly sentence). One-line additive fix: declare `error_kind: str | None = None`
+  on `JobOut` (matches `to_dict()`, the SSE payload, and the frontend type; older clients ignore it). Regression
+  test `tests/webapp/test_jobs.py::test_rest_endpoints_include_error_kind` submits a `MemoryError` job and
+  asserts both REST endpoints return `error_kind == "memory_budget"` (fails before / passes after). Upgrade-safe
+  (no schema/config/API-shape change — purely adds a field the client already expected).
 - **v0.103.13** — Actionable "why uncalibrated" advice on the History Info panel (Builder 2026-07-10). For a
   provenance-carrying stack that came out uncalibrated, the panel now names the concrete fix when the library
   holds a gain/temperature-confident master **dark** at a mismatched exposure with no confident **bias** to

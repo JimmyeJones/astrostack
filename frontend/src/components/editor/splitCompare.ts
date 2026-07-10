@@ -35,6 +35,26 @@ export function splitLeftPct(fraction: number): string {
   return `${pct}%`;
 }
 
+/** The ops that reshape the frame's canvas — mirrors
+ * `seestack/edit/ops/geometry.py::GEOMETRY_OP_IDS`. Disabling one changes the
+ * frame's shape. */
+export const RESHAPING_OP_IDS = [
+  "geometry.crop", "geometry.rotate", "geometry.resize",
+] as const;
+
+/** Whether an op reshapes the frame (crop/rotate/resize). A *per-op* compare
+ * overlays the with-op preview on the without-op render and clips both under one
+ * divider, sized to the (cropped) rendered box; when the toggled op is a
+ * reshaping one the without-op image is a *different shape* and letterboxes at a
+ * different scale, so the two halves can't be pixel-aligned. The whole-recipe
+ * Split sidesteps this by rendering its Original through *all* enabled geometry
+ * ops so the shapes match, but the per-op compare must toggle exactly one op and
+ * has no such option — so it shouldn't offer a per-op split/swap for these ops.
+ * Pure. */
+export function reshapesFrame(opId: string): boolean {
+  return (RESHAPING_OP_IDS as readonly string[]).includes(opId);
+}
+
 /** Build the op list that renders *another look* (a preset or the Auto recipe) as
  * the "before" side of the split divider. The right side of the divider is the
  * user's current edit, whose frame shape is fixed by *its* enabled geometry ops
