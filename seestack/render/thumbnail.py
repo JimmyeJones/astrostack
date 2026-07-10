@@ -264,6 +264,12 @@ def autostretch(
     after shadow clipping at ``median + sigma_factor·σ``.
     """
     img = rgb.astype(np.float32, copy=True)
+    if img.ndim == 2:
+        # A 2-D (mono) array is treated as a grey image — expand to 3 channels
+        # so the per-channel stretch below has an ``axis=2`` to work on, exactly
+        # as :func:`asinh_stretch` does. Without this a mono input would raise an
+        # ``AxisError`` at the ``any(axis=2)`` below.
+        img = np.stack([img, img, img], axis=-1)
 
     # NaN = uncovered canvas (mosaic gaps, corners). These MUST be excluded
     # from every statistic — otherwise a mosaic's large no-data regions drag
