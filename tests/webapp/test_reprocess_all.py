@@ -199,12 +199,16 @@ def _register_matching_dark(root):
     import numpy as np
 
     from seestack.calibrate.masters import MasterMeta
+    from tests.webapp.conftest import FRAME_H, FRAME_W
     from webapp import calibration
-    # The synth subs are 10 s / gain 80 (tests/synth.py), so this dark matches.
+    # The synth subs are 10 s / gain 80 (tests/synth.py) at FRAME_W×FRAME_H, so
+    # this dark matches on exposure/gain *and* dimensions (auto-bind rejects a
+    # wrong-size master so it can't hard-fail run_stack's validate()).
     return calibration.register_master(
         root, name="Dark 10s",
-        array=np.full((4, 4), 1.0, dtype=np.float32),
-        meta=MasterMeta("dark", 5, 4, 4, "median", exposure_s=10.0, gain=80.0))
+        array=np.full((FRAME_H, FRAME_W), 1.0, dtype=np.float32),
+        meta=MasterMeta("dark", 5, FRAME_W, FRAME_H, "median",
+                        exposure_s=10.0, gain=80.0))
 
 
 def test_reprocess_all_auto_binds_calibration_when_enabled(solved_library, monkeypatch):
