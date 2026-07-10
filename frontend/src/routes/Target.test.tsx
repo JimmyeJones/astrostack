@@ -121,6 +121,35 @@ describe("TargetView getting-started callout", () => {
     expect(screen.queryByText("Ready to process?")).not.toBeInTheDocument();
   });
 
+  it("shows the total integration time collected across accepted subs", async () => {
+    // total_exposure_s 90s → "2 min integration"; the honest "do I have enough
+    // light yet?" signal on the page where a user decides whether to keep shooting.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ total_exposure_s: 90 }),
+    );
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1), mkFrame(2)]);
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(screen.getByText("2 min integration")).toBeInTheDocument());
+  });
+
+  it("omits the integration badge when no light has been collected", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ total_exposure_s: 0 }),
+    );
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1), mkFrame(2)]);
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(screen.getByText("3/3 accepted")).toBeInTheDocument());
+    expect(screen.queryByText(/integration/)).not.toBeInTheDocument();
+  });
+
   it("stays quiet while the plate-solve setup banner is showing", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(
       mkTarget({ n_frames: 3, n_frames_accepted: 0 }),

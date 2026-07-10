@@ -540,6 +540,20 @@ export interface Histogram {
   // live preview *over*-reduces the stars relative to the full-res export.
   // Surfaced as an honest advisory (see starReduceOverstatesCaption).
   star_reduce_preview_overstates?: boolean;
+  // Robust per-channel sky-background medians + colour-cast verdict over the
+  // finished display image (sky population only, so stars/target don't pull it),
+  // so the editor can show whether the background ended up neutral (see
+  // skyCastCaption). Absent on an older backend.
+  sky_cast?: SkyCast;
+}
+
+export interface SkyCast {
+  r: number | null;
+  g: number | null;
+  b: number | null;
+  neutral: boolean;
+  cast: string;
+  deviation: number;
 }
 
 export interface PsfSuggestion {

@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
 import { api, type Frame } from "../api/client";
+import { formatIntegration } from "../format";
 import { QueryError } from "../components/QueryError";
 import { detectSolveSetupProblem } from "../components/target/solveSetup";
 import { detectMixedPointings } from "../components/target/mixedPointings";
@@ -712,6 +713,19 @@ export function TargetView() {
           <Badge variant="light" color="violet">
             {target.data?.n_frames_accepted}/{target.data?.n_frames} accepted
           </Badge>
+          {/* Total integration time (sum of the *accepted* subs' exposures) — the
+              number every astrophotographer thinks in and the honest "do I have
+              enough light yet?" signal for the multi-night Seestar workflow. The
+              Library card and Dashboard already show it; surface it here on the
+              page where a user decides whether to keep shooting this target. */}
+          {target.data?.total_exposure_s ? (
+            <Tooltip label="Total light collected across all accepted subs"
+              withArrow openDelay={200}>
+              <Badge variant="light" color="teal" style={{ cursor: "help" }}>
+                {formatIntegration(target.data.total_exposure_s)} integration
+              </Badge>
+            </Tooltip>
+          ) : null}
           {rejectedCount > 0 ? (
             <HoverCard width={260} shadow="md" withArrow openDelay={100}>
               <HoverCard.Target>

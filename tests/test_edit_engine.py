@@ -229,6 +229,47 @@ def test_uncovered_pixels_excluded_from_histogram_after_stretch():
     assert sum(hist["g"]) == covered   # would be h*w (all pixels) with the bug
 
 
+def test_measure_sky_cast_neutral_background():
+    # A neutral (R=G=B) sky with per-channel noise and a bright central target
+    # must read as neutral: the sky-population median trick excludes the target.
+    from seestack.edit.histogram import measure_sky_cast
+    rng = np.random.default_rng(1)
+    img = np.full((120, 120, 3), 0.20, dtype=np.float32)
+    img += rng.normal(0.0, 0.02, img.shape).astype(np.float32)
+    img[50:70, 50:70, :] += 0.6                     # bright target — must be excluded
+    sc = measure_sky_cast(img)
+    assert sc["cast"] == "neutral" and sc["neutral"] is True
+    assert sc["deviation"] <= 0.01
+    # Sky medians land near the true sky level, not pulled up by the target.
+    for ch in "rgb":
+        assert abs(sc[ch] - 0.20) < 0.02
+
+
+def test_measure_sky_cast_names_green_and_magenta():
+    # A green-biased sky (G median clearly above R/B) reads "green"; the mirror
+    # case (G below R/B) reads its complement, "magenta".
+    from seestack.edit.histogram import measure_sky_cast
+    rng = np.random.default_rng(2)
+    base = np.full((100, 100, 3), 0.20, dtype=np.float32)
+    base += rng.normal(0.0, 0.01, base.shape).astype(np.float32)
+    green = base.copy(); green[..., 1] += 0.04
+    assert measure_sky_cast(green)["cast"] == "green"
+    magenta = base.copy(); magenta[..., 1] -= 0.04
+    assert measure_sky_cast(magenta)["cast"] == "magenta"
+
+
+def test_measure_sky_cast_nan_aware_and_empty():
+    # NaN "no coverage" pixels are ignored; an all-NaN frame reports "unknown".
+    from seestack.edit.histogram import measure_sky_cast
+    img = np.full((40, 40, 3), 0.15, dtype=np.float32)
+    img[:20, :, :] = np.nan                         # half uncovered
+    sc = measure_sky_cast(img)
+    assert sc["cast"] == "neutral" and abs(sc["g"] - 0.15) < 0.02
+    empty = np.full((40, 40, 3), np.nan, dtype=np.float32)
+    assert measure_sky_cast(empty)["cast"] == "unknown"
+    assert measure_sky_cast(empty)["r"] is None
+
+
 def test_recipe_validation_drops_unknown_and_clamps():
     rec = recipe_from_dict({"ops": [
         {"id": "tone.stretch", "params": {"stretch": 5.0}},   # clamp to 1.0

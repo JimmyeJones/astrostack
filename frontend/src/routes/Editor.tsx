@@ -25,6 +25,7 @@ import { applyDataDrivenDefaults, countDataDrivenDefaults, type OpSuggestion }
   from "../components/editor/dataDrivenDefaults";
 import { deconvUnderstatesCaption } from "../components/editor/deconvPreview";
 import { starReduceOverstatesCaption } from "../components/editor/starReducePreview";
+import { skyCastCaption } from "../components/editor/skyCast";
 import { previewScaleCaption } from "../components/editor/previewScale";
 import { prependCoverageLeveling } from "../components/editor/coverageLeveling";
 import { applyTrimCrop, trimRectStyle, trimKeptLabel, geometryOpsKey, previewBoxStyle,
@@ -1309,6 +1310,18 @@ export function EditorView() {
                 <IconInfoCircle size={14} color="var(--mantine-color-dimmed)"
                   style={{ flexShrink: 0, marginTop: 2 }} />
                 <Text size="xs" c="dimmed">{starReduceOverstatesCaption(hist.data)}</Text>
+              </Group>
+            ) : null}
+            {/* Robust read-out of the *finished* sky background's colour balance,
+                measured over the sky population of the post-recipe display image.
+                Beginners have no other way to see whether their background ended
+                up neutral; this makes a residual green/magenta cast visible.
+                Read-only advisory — changes nothing. */}
+            {skyCastCaption(hist.data) ? (
+              <Group gap={6} wrap="nowrap" align="flex-start" mt={4}>
+                <IconInfoCircle size={14} color="var(--mantine-color-dimmed)"
+                  style={{ flexShrink: 0, marginTop: 2 }} />
+                <Text size="xs" c="dimmed">{skyCastCaption(hist.data)!.text}</Text>
               </Group>
             ) : null}
             {hist.data?.errors?.length ? (

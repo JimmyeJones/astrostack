@@ -980,7 +980,16 @@ problems. Dogfood it every big-picture run and fix root causes.
   is self-describing for Siril/PixInsight. Absence = today's linear behaviour, so
   old runs are unaffected.
 - **Measure the finished picture's residual background colour cast and offer a one-click
-  "neutralise background".** (S–M, editor/trust — PRIORITY 1) *(Scout-filed 2026-07-10.)* The
+  "neutralise background".** (S–M, editor/trust — PRIORITY 1) *(Scout-filed 2026-07-10.)*
+  _(Builder 2026-07-10: **read-only readout slice SHIPPED v0.104.0** — the smallest-first slice the
+  item called for. `edit/histogram.py::measure_sky_cast` returns the robust per-channel
+  sky-background medians (median of each channel's finite pixels at/below the luminance median, so
+  stars/target don't pull it) + a plain colour-cast verdict; the `…/editor/histogram` endpoint adds a
+  `sky_cast` field, and the editor shows a dimmed "Sky background: neutral ✓ / slight green cast"
+  line next to the other advisories (`frontend/.../skyCast.ts`). Read-only, additive, NaN-aware,
+  off-by-nothing. **Remaining follow-up:** the one-click that appends a `tone.white_balance` op to
+  equalise the off-channels to the reference sky median — described below — deliberately deferred so
+  the read-out gathers real signal on whether Auto lands neutral before an action is wired.)_ The
   editor already has SCNR (green removal) and Color-calibration, but a beginner has no way to
   *see* whether their sky background actually ended up neutral, nor a data-driven correction when
   it didn't — they'd have to eyeball SCNR `amount` or hand-tune White-balance gains. The
@@ -1399,7 +1408,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
-- **Show total integration time on the History / Target card ("2,000 subs · 5.6 h total").**
+- ~~**Show total integration time on the History / Target card ("2,000 subs · 5.6 h total").**~~
+  — **SHIPPED v0.104.1** (Builder 2026-07-10). On investigation the History Info panel *already*
+  showed "Integration: 5.6 h · 2,000 subs" (`integration_s` from the `EXPTOTAL` FITS card, parsed by
+  the `…/info` endpoint), the Library card already showed per-target `total_exposure_s`, and the
+  Dashboard showed the aggregate — so the only genuine gap was the **Target detail page header**,
+  the exact surface where a user decides "keep shooting this target?". Added a dimmed teal
+  "X.X h integration" badge next to the "N/M accepted" badge, from the target's already-fetched
+  `total_exposure_s` (sum of the *accepted* subs' exposures — the honest light-collected figure,
+  not a run sum that would double-count restacks), reusing the existing `formatIntegration`
+  formatter. Frontend-only, additive, no backend/schema/default/API-shape change; omitted when no
+  light has been collected. Tests `Target.test.tsx` ("shows the total integration time" / "omits the
+  badge when no light collected"). The "optionally the Target page's total across runs" was
+  deliberately *not* built — summing integration across a target's runs double-counts subs that get
+  restacked, so the per-frame accepted total is the honest metric. Original write-up kept below.
   (S, friendliness/trust — PRIORITY 3) *(Scout-filed 2026-07-10.)* For the target user (thousands
   of short Seestar subs) the single most intuitive image-quality signal is *how much light they've
   actually collected* — yet nothing in the app surfaces it. The History Info panel already shows
@@ -1591,6 +1613,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+- **Stamp the finished sky-background cast into the *autonomous* auto-edit provenance, to gather a
+  passive real-data signal on whether Auto's colour path lands neutral.** (S, image-quality/trust —
+  PRIORITY 4) *(Builder-spotted 2026-07-10, while shipping the editor sky-cast readout v0.104.0.)*
+  The new `edit/histogram.py::measure_sky_cast` now gives a pure, cheap, per-channel sky-background
+  cast verdict on any display-space image — but it only runs in the *interactive* editor histogram.
+  The unattended auto-edit chain (`_auto_edit_process_run` → Process-target / reprocess / watcher
+  auto-stack) already stamps a plain-language "what Auto did" note (`editor_auto_note:`); extend it to
+  also measure the finished picture's sky-cast (run `measure_sky_cast` on the auto-edited render it
+  already produces) and record the r/g/b sky medians + verdict in the run's provenance meta, surfaced
+  as one dimmed History line ("Auto's background came out neutral ✓" / "…a slight green cast"). This
+  turns every walk-away Auto result into a **data point on whether the SCNR / gray-star colour path
+  lands neutral on *real* Seestar backgrounds** — exactly the real-data question the two deferred
+  "vet on REAL data: SCNR magenta / gray-star leaves a background cast" items below need answered
+  before anyone touches the most-used Auto path. Read-only measurement, additive provenance, no
+  default/API-shape change; testable on the pure `measure_sky_cast` call. Deliberately *after* the
+  editor readout (v0.104.0) so the interactive surface gathers signal first.
 - **Scout to vet on REAL data: does the Auto denoise↔sharpen crossfade over-read a *sky
   gradient* as noise?** (M, image-quality/autonomy) `presets.auto_recipe` picks its denoise
   strength and whether to sharpen from `analyze_proxy`'s `sky_sigma`, measured on the **raw**
@@ -2186,6 +2224,21 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.104.1** — Friendliness (PRIORITY 3 / trust): total integration time on the Target detail page.
+  A dimmed teal "X.X h integration" badge next to the "N/M accepted" badge (from the target's accepted
+  `total_exposure_s`, reusing `formatIntegration`), so the page where a user decides whether to keep
+  shooting a target now shows the honest "do I have enough light yet?" figure — closing the one gap
+  after the History card, Library card and Dashboard, which already surfaced it. Frontend-only,
+  additive, omitted when no light collected. Tests in `Target.test.tsx`.
+- **v0.104.0** — Feature (editor, PRIORITY 1 / trust): sky-background colour-cast readout. The
+  `…/editor/histogram` endpoint now returns a read-only `sky_cast` measurement of the *finished*
+  picture — `edit/histogram.py::measure_sky_cast` computes the robust per-channel sky medians over the
+  sky population (finite pixels at/below the luminance median, so stars/target don't pull it) and a
+  plain colour-cast verdict — and the editor shows a dimmed "Sky background: neutral ✓ / slight green
+  cast" line, so a beginner can *see* whether their background ended up neutral. NaN-aware, additive,
+  no config/schema/API-shape change (new nullable field). The smallest-first slice of the Scout's
+  colour-cast item; the one-click "neutralise background" action is a deferred follow-up (still listed
+  under Ideas → Editor).
 - **v0.103.17** — Fix (editor, PRIORITY 1): the editor's undo/redo hook (`useUndoable`) misbehaved under
   React StrictMode (Builder 2026-07-10; found by an adversarial frontend-logic audit, reproduced with a
   deterministic test before fixing). The history was kept in `useRef` arrays that were **mutated inside the
