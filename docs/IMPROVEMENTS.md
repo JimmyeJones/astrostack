@@ -1718,6 +1718,27 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.103.1** — Editor/parity hardening (PRIORITY 1; Builder 2026-07-10, found by a fresh adversarial
+  editor-pipeline audit). `geometry.crop`'s "too small → ignore" degenerate guard was evaluated in *this
+  render's* pixels, so a tiny fractional crop that is a real (≥2 px) crop on the full-res image but rounds
+  to <2 px on the heavily-decimated preview proxy no-op'd on the proxy while it still applied on the export
+  (or vice-versa) — the preview showed the whole frame while the export cropped, breaking the fractional-
+  coordinate proxy↔export parity the module's own docstring promises. The guard now decides degeneracy in
+  **full-resolution** pixels (`(x1−x0)·w·proxy_scale`), so proxy and export make the identical crop/no-crop
+  call, and the proxy slice is clamped to ≥1 px per axis so a real full-res crop that rounds sub-pixel on a
+  small proxy still crops instead of returning an empty (render-crashing) image. Byte-for-byte on the export
+  (proxy_scale=1) and on every real crop; only the absurd ~2–8 px fractional-crop edge changes. Regression
+  tests `test_crop_degenerate_decision_matches_between_proxy_and_fullres` (fails before / passes after) and
+  `test_crop_truly_degenerate_is_ignored_on_both_scales`. Additive, upgrade-safe (no config/DB/API/on-disk
+  change). _(Same 2026-07-10 audit re-read the whole stacking engine (`stack/{accumulator,stacker,weighting,
+  photometric,align}.py`, `calibrate/apply.py`) and the whole editor op set (`edit/pipeline,proxy,registry,
+  presets` + `ops/{tone,detail,background,geometry}.py`) against the NaN=coverage, memory-bound, photometric-
+  sign, calibrate-xor, frame-id-0, and proxy_scale invariants + a numeric stack→Auto→export dogfood — both
+  came back **clean** (17th consecutive), so the engine/editor stay well-hardened. Two sub-threshold
+  observations logged for a future run, neither a bug: (1) `detail.denoise` wavelet/TV smoothing scale isn't
+  proxy-scaled — but it exposes no scalable spatial knob and prior measurement put the parity gap at
+  0.37–0.53 % (< the ≤2 % decimation floor), so it's an accepted inherent limit, not a fix; (2) the crop
+  clamp above is the concrete half of that same parity family, now closed.)_ (#PR)
 - **v0.103.0** — One-click "Reject the N odd-target frames" on the mixed-pointing guard (autonomy/
   friendliness, priority 2–3; Builder 2026-07-10). The v0.101–0.102 pre-flight guard only *told* the user
   to open the Frames table and reject the odd subs by hand; this closes the loop. `detectMixedPointings`

@@ -789,6 +789,44 @@ def test_crop_fraction_consistent_across_scales():
     assert abs(cs.shape[0] / small.shape[0] - 0.5) < 0.05
 
 
+def test_crop_degenerate_decision_matches_between_proxy_and_fullres():
+    """The crop's "too small → ignore" decision must be resolution-independent so
+    the preview proxy and the full-res export agree. A tiny fractional crop that is
+    a real (≥2 px) crop on the full image used to no-op on the heavily-decimated
+    proxy (its <2 px guard fired in *proxy* pixels), so the preview showed the whole
+    frame while the export cropped — a violation of the fractional-coord parity the
+    module documents."""
+    spec = get_op("geometry.crop")
+    full = _img(200, 400, nan_band=0)
+    proxy = full[::4, ::4]  # proxy_scale 4 → 50×100
+    # Width fraction 0.01 → 4 px on the full image (a real crop) but 1 px on the
+    # proxy (below the raw <2 px guard). Height fraction is large so only the width
+    # is at issue.
+    params = {"x0": 0.20, "y0": 0.10, "x1": 0.21, "y1": 0.90}
+    cf = spec.apply(full, params, EditContext(proxy_scale=1.0))
+    cp = spec.apply(proxy, params, EditContext(proxy_scale=4.0, is_proxy=True))
+    # The export crops the width...
+    assert cf.shape[1] < full.shape[1]
+    # ...so the proxy must crop it too (before the fix it returned the whole image).
+    assert cp.shape[1] < proxy.shape[1]
+    # And the proxy slice is never empty (would crash the render).
+    assert cp.shape[0] >= 1 and cp.shape[1] >= 1
+
+
+def test_crop_truly_degenerate_is_ignored_on_both_scales():
+    """A crop that is degenerate on the *full* image (<2 px either axis) is ignored
+    identically on proxy and export — the guard still protects a genuinely tiny
+    fractional crop, it just decides consistently."""
+    spec = get_op("geometry.crop")
+    full = _img(200, 400, nan_band=0)
+    proxy = full[::4, ::4]
+    params = {"x0": 0.500, "y0": 0.10, "x1": 0.502, "y1": 0.90}  # 0.8 px wide on full
+    cf = spec.apply(full, params, EditContext(proxy_scale=1.0))
+    cp = spec.apply(proxy, params, EditContext(proxy_scale=4.0, is_proxy=True))
+    assert cf.shape[:2] == full.shape[:2]     # ignored on export
+    assert cp.shape[:2] == proxy.shape[:2]    # and on the proxy
+
+
 def test_rotate_expand_param_controls_canvas_size():
     """The rotate op's ``expand`` param must actually control whether the canvas
     grows to fit the rotated frame (default) or keeps the original size — it's a
