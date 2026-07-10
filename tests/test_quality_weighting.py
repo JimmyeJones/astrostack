@@ -97,6 +97,34 @@ def test_eccentricity_zero_is_best_case_not_divide_error():
     assert w[2] < 1.0        # more-elongated-than-median frame is penalised
 
 
+def test_sky_zero_is_neutral_not_divide_error():
+    # A frame whose stored sky level is exactly 0 (a black / corrupt sub, or a
+    # non-Seestar frame with no ADU pedestal) must not crash the whole
+    # quality-weighted stack with a divide-by-zero: the sky factor divides by
+    # the per-frame sky, so a 0 there has to be guarded like every sibling
+    # factor's denominator. The frame keeps the neutral sky factor.
+    frames = [
+        _f(1, fwhm=3.0, stars=100, sky=1000),
+        _f(2, fwhm=3.0, stars=100, sky=0.0),
+    ]
+    w, _ = compute_frame_weights(frames)  # must not raise ZeroDivisionError
+    # Both share fwhm/stars; frame 2's only differing metric (sky) is dropped as
+    # unmeasurable, so it isn't penalised relative to frame 1.
+    assert w[1] == w[2] == 1.0
+
+
+def test_sky_negative_is_neutral_not_complex_weight():
+    # A negative stored sky (nonsense, but reachable from an odd calibration /
+    # import) would make ``(median_sky / frame_sky) ** 0.5`` complex and get
+    # silently cast to a bogus real weight; guard it as neutral instead.
+    frames = [
+        _f(1, fwhm=3.0, stars=100, sky=1000),
+        _f(2, fwhm=3.0, stars=100, sky=-50.0),
+    ]
+    w, _ = compute_frame_weights(frames)
+    assert w[1] == w[2] == 1.0
+
+
 def test_missing_metrics_get_neutral_weight():
     frames = [
         _f(1, fwhm=None, stars=None, sky=None),

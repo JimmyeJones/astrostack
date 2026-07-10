@@ -47,6 +47,26 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**Quality weighting crashes the *whole* stack (or silently mis-weights) on a frame whose stored
+  `sky_adu_median` is ≤ 0.**~~ — **FIXED v0.103.21** (Builder audit 2026-07-10; traced + reproduced +
+  regression-tested). `stack/weighting.py::compute_frame_weights`'s sky sub-weight
+  `(median_sky / f.sky_adu_median) ** 0.5` guarded only the *numerator* (`median_sky > 0`), never the
+  per-frame **denominator** `f.sky_adu_median` — the lone factor to skip its own divisor guard (fwhm,
+  transparency and ecc all guard theirs; the ecc docstring even documents it). A frame with
+  `sky_adu_median == 0.0` (a black / corrupt sub that still loaded, or a non-Seestar frame with no ADU
+  pedestal) therefore raised `ZeroDivisionError`, and since `compute_frame_weights` is called *unguarded*
+  in `run_stack` (stacker.py:826) that aborted the **entire quality-weighted stack** — the user gets no
+  image and a Python traceback, a worse failure than a slightly-off weight. A *negative* stored sky was
+  quieter but also wrong: `(median_sky / −x) ** 0.5` is complex and got silently cast to a bogus real
+  weight (~0.46) with a `ComplexWarning`. Fixed by adding `and f.sky_adu_median > 0` to the guard so a
+  non-positive sky drops to the neutral factor (unmeasurable), symmetric with every sibling and with the
+  `> 0` filter already used to build `median_sky` at line 72. Regression tests
+  `tests/test_quality_weighting.py::test_sky_zero_is_neutral_not_divide_error` (crashes with
+  `ZeroDivisionError` before / neutral 1.0 after) and `test_sky_negative_is_neutral_not_complex_weight`.
+  Additive, no schema/config/API change; found by an adversarial audit of the stacking engine's
+  weighting/photometric path (the engine otherwise traced clean, consistent with the mature audit
+  history).
+
 - ~~**Editor preview↔export parity: Star reduction *over*-reduces the stars in the live preview (vs the
   export) on a large drizzle/mosaic.**~~ — **FIXED v0.103.19** (Builder audit 2026-07-10; traced +
   measured + regression-tested). `edit/ops/stars.py::_reduce` (and the `star_mask` gate it shares with
