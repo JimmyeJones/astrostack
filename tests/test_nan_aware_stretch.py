@@ -65,6 +65,35 @@ def test_autostretch_all_nan_returns_zeros():
     assert np.all(out == 0.0)
 
 
+def test_autostretch_accepts_2d_mono_like_asinh():
+    """A 2-D (mono) input must stretch as a grey image, not raise an AxisError.
+
+    ``asinh_stretch`` already expands a 2-D array to 3 channels; ``autostretch``
+    is documented to behave the same way, so a mono array must produce a 3-channel
+    result whose channels are identical (neutral grey). Before the guard this
+    raised ``AxisError: axis 2 is out of bounds`` at the ``any(axis=2)`` stat.
+    """
+    from seestack.render.thumbnail import asinh_stretch
+
+    rng = np.random.default_rng(3)
+    mono = rng.normal(1000.0, 30.0, size=(80, 100)).astype(np.float32)
+    # A couple of bright sources so the stretch has real signal to lift.
+    mono[20:24, 30:34] += 8000.0
+
+    out = autostretch(mono)
+    assert out.ndim == 3 and out.shape == (80, 100, 3)
+    assert np.isfinite(out).all()
+    assert 0.0 <= out.min() and out.max() <= 1.0
+    # Mono in → the three output channels must be identical (no colour cast).
+    assert np.array_equal(out[..., 0], out[..., 1])
+    assert np.array_equal(out[..., 1], out[..., 2])
+    # And a mono array is treated exactly like its 3-channel expansion.
+    expanded = autostretch(np.stack([mono, mono, mono], axis=-1))
+    assert np.array_equal(out, expanded)
+    # Sibling parity: asinh_stretch has always accepted 2-D — so does this now.
+    assert asinh_stretch(mono).shape == (80, 100, 3)
+
+
 def test_to_uint16_linear_skips_nan_for_percentiles():
     """The linear TIFF percentile range must come from covered pixels only."""
     img = _covered_image_with_nan_gaps(gap_fraction=0.6)
