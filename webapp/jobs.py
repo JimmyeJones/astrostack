@@ -281,17 +281,30 @@ class JobManager:
         return job
 
     def list(self, limit: int = 100) -> list[Job]:
-        """Active jobs (in-memory) first, then recent history from the DB."""
+        """Active jobs (in-memory) first, then recent history from the DB.
+
+        Active (non-terminal) jobs are **never** truncated away: they lead the
+        result and ``limit`` only bounds the *history* that fills the remaining
+        slots. A single serial worker can have many queued jobs plus one running
+        one whose ``created_utc`` is older than ``limit`` newer jobs — sorting the
+        merged list by ``created_utc`` and truncating (the previous behaviour)
+        dropped that running job out of the response entirely, so ``GET
+        /api/jobs`` couldn't show or offer to cancel the job actually executing.
+        """
         import json
         with self._lock:
-            live = {j.id: j for j in self._jobs.values()}
-        out: list[Job] = list(live.values())
+            live = list(self._jobs.values())
+        live_ids = {j.id for j in live}
+        active = [j for j in live if j.state not in _TERMINAL]
+        # Terminal in-memory jobs count as history (they're also persisted, but
+        # the in-memory copy is authoritative — dedup the DB row against it).
+        history: list[Job] = [j for j in live if j.state in _TERMINAL]
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM jobs ORDER BY created_utc DESC LIMIT ?", (limit,)
             ).fetchall()
         for row in rows:
-            if row["id"] in live:
+            if row["id"] in live_ids:
                 continue
             job = Job(kind=row["kind"], target=row["target"], id=row["id"])
             job.state, job.phase = row["state"], row["phase"] or ""
@@ -301,9 +314,11 @@ class JobManager:
             job.finished_utc, job.error = row["finished_utc"], row["error"]
             job.error_kind = row["error_kind"]
             job.result = json.loads(row["result_json"]) if row["result_json"] else None
-            out.append(job)
-        out.sort(key=lambda j: j.created_utc or "", reverse=True)
-        return out[:limit]
+            history.append(job)
+        active.sort(key=lambda j: j.created_utc or "", reverse=True)
+        history.sort(key=lambda j: j.created_utc or "", reverse=True)
+        remaining = max(limit - len(active), 0)
+        return active + history[:remaining]
 
     def cancel(self, job_id: str) -> bool:
         with self._lock:

@@ -50,6 +50,57 @@ def test_clear_history_removes_finished_only(tmp_path):
     assert states == ["running"]  # only the in-flight job survives
 
 
+def test_list_never_truncates_active_jobs(tmp_path):
+    """Regression: the currently-running job must stay visible in ``list`` even
+    when more than ``limit`` newer jobs exist.
+
+    A single serial worker holds many queued jobs plus one running one whose
+    ``created_utc`` predates them. The old ``list`` merged live + history, sorted
+    by ``created_utc DESC`` and truncated to ``limit`` — so the old running job
+    fell off the end and ``GET /api/jobs`` couldn't show or cancel the job that
+    was actually executing. Active jobs are now guaranteed present.
+    """
+    jm = JobManager(tmp_path / "jobs.sqlite")
+
+    # A pipeline that started before everything else (oldest created_utc).
+    running = Job(kind="pipeline", state="running")
+    running.created_utc = running.started_utc = "0000"
+    jm._jobs[running.id] = running  # active jobs live in the in-memory map
+    jm._persist(running)
+
+    # A queue of newer jobs, all created after it and well past a limit=5 window.
+    for i in range(1, 21):
+        q = Job(kind="editor_png", state="queued")
+        q.created_utc = f"{i:04d}"
+        jm._jobs[q.id] = q
+        jm._persist(q)
+
+    listed = jm.list(limit=5)
+    ids = {j.id for j in listed}
+    # The running job is present despite 20 newer jobs and a limit of 5.
+    assert running.id in ids
+    running_out = next(j for j in listed if j.id == running.id)
+    assert running_out.state == "running"
+    # All active jobs are surfaced (21 total: 1 running + 20 queued); history
+    # only fills the *remaining* slots, so a large active queue is never hidden.
+    assert len(listed) == 21
+    assert all(j.state in ("running", "queued") for j in listed)
+
+
+def test_list_history_still_bounded_by_limit(tmp_path):
+    """With no active jobs, ``list`` still returns at most ``limit`` history rows
+    (newest first) — the limit bounds history exactly as before."""
+    jm = JobManager(tmp_path / "jobs.sqlite")
+    for i in range(20):
+        j = Job(kind="t", state="done")
+        j.created_utc = j.finished_utc = f"{i:04d}"
+        jm._persist(j)
+    listed = jm.list(limit=5)
+    assert len(listed) == 5
+    # Newest five (created 0015..0019), most-recent first.
+    assert [j.created_utc for j in listed] == ["0019", "0018", "0017", "0016", "0015"]
+
+
 def test_runs_and_records_result(tmp_path):
     jm = JobManager(tmp_path / "jobs.sqlite")
     jm.start()

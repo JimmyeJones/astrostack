@@ -29,12 +29,15 @@ def test_on_batch_ready_defers_when_running_pipeline_is_past_the_recent_window(
     """Regression: a long-running pipeline (old created_utc) must still block a
     duplicate trigger after many newer jobs have been recorded.
 
-    The old guard scanned ``jm.list(limit=20)`` — which merges live + DB jobs,
-    sorts by ``created_utc`` and truncates — so a running pipeline that started
-    before 20 newer jobs were created was truncated out of the result, the guard
-    saw no active pipeline, and it enqueued a *second* pipeline (a redundant
-    full re-scan/QC/solve/stack pass). ``active_of_kind`` scans the full
-    in-memory job map, so it can't be truncated away.
+    The old guard scanned ``jm.list(limit=20)`` — which historically merged
+    live + DB jobs, sorted by ``created_utc`` and truncated, so a running
+    pipeline that started before 20 newer jobs were created was truncated out of
+    the result, the guard saw no active pipeline, and it enqueued a *second*
+    pipeline (a redundant full re-scan/QC/solve/stack pass). ``active_of_kind``
+    scans the full in-memory job map, so it can't be truncated away regardless.
+    (``list`` no longer truncates active jobs either — see
+    ``test_list_never_truncates_active_jobs`` — but ``_on_batch_ready`` relies on
+    the unbounded ``active_of_kind`` lookup, not on ``list``.)
     """
     jm = JobManager(tmp_path / "jobs.sqlite")
 
@@ -51,10 +54,9 @@ def test_on_batch_ready_defers_when_running_pipeline_is_past_the_recent_window(
         j.created_utc = j.finished_utc = f"{i:04d}"
         jm._persist(j)
 
-    # Sanity: the old approach would have truncated the running pipeline out.
-    recent = jm.list(limit=20)
-    assert running.id not in {j.id for j in recent}
-    # …but the unbounded active lookup still finds it.
+    # The running pipeline stays visible in `list` (active jobs are never
+    # truncated) and the unbounded active lookup `_on_batch_ready` uses finds it.
+    assert running.id in {j.id for j in jm.list(limit=20)}
     assert jm.active_of_kind("pipeline") is not None
 
     submitted: list[int] = []

@@ -47,6 +47,23 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**`GET /api/jobs` silently drops the *running* job from its listing once ≥`limit` newer jobs exist —
+  the Jobs/Logs UI can't show or cancel the job that's actually executing.**~~ — **FIXED v0.103.18**
+  (Builder audit 2026-07-10; traced + reproduced with a regression test). `JobManager.list(limit)`
+  (`webapp/jobs.py`) merged the live in-memory jobs with recent DB history into one list, sorted the
+  **whole** thing by `created_utc DESC`, and returned `out[:limit]` — so a long-running job (old
+  `created_utc`) fell out of the window once `limit` newer jobs (queued editor/stack/reprocess work
+  against the single serial worker) existed, even though its docstring promised "active jobs first". The
+  running job then vanished from `GET /api/jobs` (and from the `stats` active count), so the Jobs/Logs page
+  couldn't display or offer to cancel the in-flight job — a real trust/friendliness hole on a live install
+  with a deep queue. `list` now guarantees **active (non-terminal) jobs are never truncated**: they lead the
+  result and `limit` bounds only the *history* that fills the remaining slots (`active + history[:remaining]`).
+  Regression tests `tests/webapp/test_jobs.py::test_list_never_truncates_active_jobs` (1 old running + 20
+  newer queued, `limit=5` → running still present; fails before / passes after) and
+  `test_list_history_still_bounded_by_limit` (history alone is still capped at `limit`, newest first). No
+  schema/config/API-shape change (the response is the same `Job` list, just complete); found by an
+  adversarial audit of the webapp job-orchestration layer.
+
 - ~~**Editor preview↔export parity: the mosaic "Coverage leveling" op skips thin panels in the live
   preview that it levels in the exported image.**~~ — **FIXED v0.103.16** (Builder audit 2026-07-10;
   reproduced + regression-tested before fixing). `bg/coverage_leveling.py::level_by_coverage` gates each
