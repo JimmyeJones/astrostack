@@ -710,6 +710,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   run touches this op, scale the dilation like the other pixel params
   (`round(4/step)`, matching `ctx.scaled_px`), guarding the step≥8 case where it
   rounds to 0. (S, editor/parity))_
+  _(Builder note 2026-07-10, second addendum — verified while dogfooding a real 2×2 mosaic editor path
+  (parity p99 1.5%, healthy): **measured the dilation nuance above and it is genuinely negligible** — on a
+  ×4 proxy the far-sky per-level median it shifts moved only ~1e-4 of range (−4e-5 export vs −1.6e-4 proxy),
+  well below the documented ~2% decimation-parity floor, confirming the "didn't clear the churn bar"
+  disposition. **A distinct, symmetric floor nuance in the same op is worth folding into the same eventual
+  fix:** the `_MIN_STRIDED_PIXELS = 12` safety floor makes `effective_min = max(12, round(200/step²))`, so on a
+  *heavily*-strided proxy (step≥5 — reachable only on a very large mosaic canvas >7500px) the proxy requires
+  **more** full-res-equivalent sky pixels than the export (step5→300, step6→432, step8→768, vs the export's
+  200), so a thin panel with 200–768 full-res sky pixels is leveled in the export but *skipped* in the preview
+  — the same preview≠export class the v0.103.16 fix closed at moderate stride, re-opening at heavy stride.
+  Both are the *same* op and would be fixed together; both are low-severity edges (the floor is a deliberate
+  "never median over a handful of pixels" guard, so any fix must keep a sane absolute minimum rather than let
+  the proxy median run over <12 pixels). Neither cleared the churn bar alone; recorded so a future run in this
+  op resolves the dilation scaling **and** the heavy-stride floor in one pass. (S, editor/parity))_
 - ~~**Give the Auto recipe a gentle contrast curve (as the presets already do)**~~ — **shipped v0.73.0** (see Shipped). The one-click Auto recipe now appends a data-driven `tone.curves` (auto contrast) after the saturation boost, matching the built-in galaxy/nebula presets.
 - ~~**Reflect the auto-contrast curve's shape in the Curves widget (v0.73.0 follow-up).**~~
   — **shipped v0.74.4** (see Shipped). Both options landed: (a) when `auto` is on and the
@@ -1953,6 +1967,21 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.103.17** — Fix (editor, PRIORITY 1): the editor's undo/redo hook (`useUndoable`) misbehaved under
+  React StrictMode (Builder 2026-07-10; found by an adversarial frontend-logic audit, reproduced with a
+  deterministic test before fixing). The history was kept in `useRef` arrays that were **mutated inside the
+  `setStateRaw` updater** (`past.current.push(prev)` etc.) — a side effect in a state updater, which React's
+  StrictMode double-invokes in dev *specifically to surface this class of impurity*. The whole SPA renders
+  under `<StrictMode>` (main.tsx), so in `npm run dev` the double-invoke double-pushed/​double-popped the
+  history and **a single undo after an edit silently did nothing** — the editor's core undo interaction
+  visibly broken during development (and latent tech-debt for prod: React concurrent features may invoke or
+  discard a reducer more than once). Rewrote the hook over a **pure `useReducer`** (history in reducer state,
+  `Date.now()` computed by the caller and passed in the action, no ref mutation), so it's idempotent under a
+  repeated invoke; the public API (`state/set/reset/undo/redo/canUndo/canRedo`) and the coalescing semantics
+  (keyed slider-drag → one undo step, gesture-boundary time window) are byte-for-byte preserved. Frontend-only,
+  additive. Regression tests: two new StrictMode cases (single-edit undo, and a coalesced drag) that **fail on
+  the old ref hook and pass on the reducer**, plus all six existing history/coalesce tests unchanged. tsc/
+  vitest (678)/vite build green.
 - **v0.103.15** — Fix (editor, PRIORITY 1): the per-op "Split this op" / "Without this op" compare
   mis-aligned on a frame-reshaping op (Builder 2026-07-10; adversarial editor dogfood). The per-op compare
   overlays the with-op preview on the without-op render and clips both under one divider sized to the
