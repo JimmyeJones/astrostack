@@ -789,9 +789,9 @@ def _carry_provenance(fits_path: str) -> dict[str, Any]:
 def _render_recipe_fullres(fits_path: str, recipe_dict: dict, progress,
                            errors: list[str] | None = None) -> tuple[Any, Any]:
     """Apply an editor recipe to a full-res FITS. Returns ``(out_rgb, recipe)``
-    where ``out_rgb`` is the display-stretched 0..1 result. A default asinh
-    stretch is applied if the recipe has no stretch op (so the result is never
-    raw-linear/black).
+    where ``out_rgb`` is the display-stretched 0..1 result. A default STF
+    autostretch is applied if the recipe has no stretch op (so the result is never
+    raw-linear/black), matching the live preview's fallback.
 
     An op that raises on the full-res data is dropped (best-effort, like the live
     preview) but its failure message is appended to ``errors`` (when provided) —
@@ -839,15 +839,17 @@ def _render_recipe_fullres(fits_path: str, recipe_dict: dict, progress,
         done += 1
         progress("render", done, n)
     if not stretched and not display_space:
-        # Mirror the live preview's fallback (seestack/edit/pipeline.py): asinh
-        # renders uncovered (NaN) pixels as black 0, so restore NaN afterwards.
-        # Without this the export bakes mosaic-gap / reproject-border "no
-        # coverage" to real black in the float32 FITS — diverging from the
-        # preview and making a re-edit treat the gap as covered black.
+        # Mirror the live preview's fallback (seestack/edit/pipeline.py): the STF
+        # autostretch renders uncovered (NaN) pixels as black 0, so restore NaN
+        # afterwards. Without this the export bakes mosaic-gap / reproject-border
+        # "no coverage" to real black in the float32 FITS — diverging from the
+        # preview and making a re-edit treat the gap as covered black. Using the
+        # same autostretch as the preview keeps a no-stretch export byte-parallel
+        # with what the editor showed.
         from seestack.edit.registry import finite_mask
-        from seestack.render.thumbnail import asinh_stretch
+        from seestack.render.thumbnail import autostretch
         uncovered = ~finite_mask(out)
-        out = as_rgb(asinh_stretch(out)).copy()
+        out = as_rgb(autostretch(out)).copy()
         out[uncovered] = np.nan
     return out, recipe
 

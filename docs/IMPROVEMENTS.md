@@ -1267,7 +1267,9 @@ problems. Dogfood it every big-picture run and fix root causes.
   gentle denoise/sharpen). Improve the auto recipe so "Auto" is a great one-click
   start. (Gentle SCNR green-cast removal added to the auto recipe in v0.56.6 —
   more of these incremental tweaks welcome.) (M, editor)
-- **Make the editor's no-recipe fallback view use STF autostretch, not the fixed asinh default.** *(Idea,
+- ~~**Make the editor's no-recipe fallback view use STF autostretch, not the fixed asinh default.**~~ —
+  **SHIPPED v0.109.0** (Builder 2026-07-11; both fallbacks now call `render.thumbnail.autostretch`, matching the
+  stored thumbnail; preview↔export parity + before/after regression tests added; see Shipped). *(Idea,
   Scout 2026-07-11 — PRIORITY 1 editor default / better first impression.)* When a stack is opened in the editor
   before any stretch op is added, `edit/pipeline.py`/`webapp/pipeline.py` render it with a bare
   `asinh_stretch(out)` at a **fixed** `stretch=0.5, black=0.35` — a middling, one-size-fits-all look that
@@ -1280,6 +1282,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   used on export when the user never adds a stretch (`webapp/pipeline.py:850`), so this changes those exports
   too — verify preview↔export parity and add a before/after regression. Fold in / supersedes the asinh
   robustness bug if taken together. (S–M, editor — PRIORITY 1.)
+- **Consistency: the History-page adjustable stack render still defaults to asinh, while the thumbnail,
+  the editor first-open view, and the one-click Auto all use STF.** *(Idea, Builder-noted 2026-07-11 while
+  shipping v0.109.0 — S, friendliness/consistency, PRIORITY 3.)* `webapp/routers/stack.py::render_stack_run`
+  (the History page's live-adjustable preview) tone-maps with a **fixed default asinh** (`_STRETCH_DEFAULT 0.5`,
+  `_BLACK_DEFAULT 0.35`); the stored preview thumbnail directly above it (`render.thumbnail.generate_thumbnail`)
+  and now the editor's no-recipe view (v0.109.0) both use the adaptive **STF autostretch**, so the same stack can
+  look one way as a thumbnail and another way when the History render loads at its defaults. This surface is
+  *deliberately* asinh-with-sliders (the user drags Strength/Black), so it should NOT be blind-flipped to STF —
+  but the **initial/default** render could either (a) anchor its default asinh Strength/Black to the run's own sky
+  (reuse `edit/stretch.py::suggest_asinh_stretch`, which already solves the two sliders from the data) so the
+  first look is well-exposed and closer to the STF thumbnail, or (b) show the STF autostretch as the zero-state and
+  only switch to asinh once the user touches a slider. Low-severity polish, real-data-worth-a-look; a Scout should
+  decide which framing (a or b) is least surprising before a Builder takes it. Additive, no config/schema change.
 - **Seed the editor with the Auto recipe on first open** — moved to **Needs owner
   sign-off** (2026-07-04): it's high-value PRIORITY-1 work, but its value *requires*
   it to be **on by default** (an off-by-default first-open seed helps no beginner),
@@ -2825,6 +2840,21 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.109.0** — Editor (PRIORITY 1; Builder 2026-07-11): the editor's no-recipe fallback view now uses the
+  adaptive **STF autostretch**, not the fixed-slider asinh default. When a stack is opened before any stretch op
+  is added (and on a no-stretch export), `edit/pipeline.py`/`webapp/pipeline.py` rendered it with a bare
+  `asinh_stretch(out)` at a fixed `stretch=0.5, black=0.35` — a middling one-size-fits-all look that ignores the
+  actual sky level. Both fallbacks now call `render.thumbnail.autostretch`, which anchors each channel's robust
+  sky median to a neutral target grey and adapts to the data — the same stretch the stored History/Target
+  thumbnail (`generate_thumbnail`) and the one-click Auto recipe already use, so the first-open view is now a
+  good-looking, correctly-exposed image *and* consistent with the thumbnail the user just saw. Purely a render
+  default (no seeded/persisted recipe, no config/schema/API/on-disk change); the `already_display` re-edit guard
+  and the NaN=coverage restore are unchanged. Preview (proxy) and export (full-res) call the identical stretch,
+  and STF re-anchors the sky median regardless of the top-end scale, so preview↔export parity holds within the
+  documented decimation floor. Regression tests `tests/test_edit_engine.py::
+  test_no_recipe_fallback_uses_adaptive_stf_autostretch` (fallback == `autostretch()`; sky grey is scale-invariant
+  near 0.20 — the adaptive property asinh lacks) and `::test_no_recipe_fallback_preview_export_parity`
+  (proxy↔full-res sky grey agree <0.02). Supersedes the v0.108.5 asinh-robustness fix for this default path.
 - **v0.108.4** — Editor robustness (PRIORITY 1; Scout 2026-07-11): `recipe_from_dict` no longer 500s on a
   malformed `version` in the `PUT …/editor/recipe` body. `edit/recipe.py` coerced `version=int(...)` with no
   guard while `put_recipe` calls it directly on the unvalidated `dict` body, so `{"version":"x"|null|[1]}` raised

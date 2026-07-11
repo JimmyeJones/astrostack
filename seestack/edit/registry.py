@@ -64,7 +64,7 @@ class EditContext:
     stage: Stage = "linear"           # updated by the pipeline as it crosses stretch
     already_display: bool = False     # input is a tone-mapped display-space image
     #   (an editor export re-opened for editing): suppress the pipeline's default
-    #   asinh fallback so an empty recipe doesn't double-stretch it.
+    #   autostretch fallback so an empty recipe doesn't double-stretch it.
     op_notes: dict[str, Any] = field(default_factory=dict)
     #   A best-effort channel for an op to record a small, JSON-safe outcome the
     #   caller may want to surface (e.g. which colour-calibration path actually ran
