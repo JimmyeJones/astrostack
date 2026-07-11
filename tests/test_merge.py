@@ -77,6 +77,42 @@ def test_merge_preserves_target_pointing_hints(tmp_path):
     dst.close()
 
 
+def test_merge_dedupes_a_symlinked_respell_of_the_same_frame(tmp_path):
+    # The same physical FITS reached via a different path spelling (a symlinked
+    # NAS mount, a relative-vs-absolute scan root) must dedup on merge, exactly
+    # as ingest does since v0.107.8 — otherwise the frame lands twice and is
+    # double-weighted in the stack. Merge previously keyed on the raw string.
+    raws = tmp_path / "raws"
+    raws.mkdir()
+    real = write_seestar_fits(raws / "frame_0.fit", seed=1, n_stars=10)
+
+    # Destination already holds the frame under its real path.
+    dst = Project.create(tmp_path / "dst", name="dst")
+    dst.add_frame(FrameRow(
+        source_path=str(real), cached_path=str(real),
+        width_px=480, height_px=320, bayer_pattern="RGGB",
+    ))
+
+    # Source references the identical file through a symlinked directory, so the
+    # raw string differs but os.path.realpath is the same.
+    link_dir = tmp_path / "raws_link"
+    link_dir.symlink_to(raws)
+    respelled = link_dir / "frame_0.fit"
+    assert str(respelled) != str(real)  # different spelling, same realpath
+    src = Project.create(tmp_path / "src", name="src")
+    src.add_frame(FrameRow(
+        source_path=str(respelled), cached_path=str(respelled),
+        width_px=480, height_px=320, bayer_pattern="RGGB",
+    ))
+    src.close()
+
+    results = list(merge_projects(dst, [src.project_dir]))
+    assert results[0].n_added == 0
+    assert results[0].n_skipped_duplicate == 1
+    assert dst.count() == 1  # not double-counted
+    dst.close()
+
+
 def test_merge_handles_non_project_dir(tmp_path):
     dst = _make_project(tmp_path, "dst", 0)
     bogus = tmp_path / "not_a_project"

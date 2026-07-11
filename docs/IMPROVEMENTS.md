@@ -228,6 +228,28 @@ manufacturing) — the frontend editor, webapp orchestration/upgrade-safety, and
 consistent with the mature audit history. **Next rotation** (not re-covered this run): `qc/*` + `solve/*` from a fresh
 angle, and the `io/scanner.py`/`io/ingest.py`/`io/merge.py` ingest path (last deep-traced by the Scout 2026-07-11)._
 
+- ~~**`merge_projects` dedups on the *raw* `source_path` string — the same physical frame merged from two
+  projects under divergent path spellings (a symlinked NAS mount, a relative-vs-absolute scan root) is added
+  twice → double-weighted in the stack. The v0.107.8 ingest canonicalization fix was never propagated to this
+  sibling path.**~~ — **FIXED v0.109.13** (Builder, 2026-07-11; traced + reproduced + regression-tested).
+  `io/merge.py::merge_projects` built its dedup set as `{f.source_path …}` and tested `frame.source_path in
+  existing_sources` verbatim, while the sibling ingest path was hardened in v0.107.8 to key dedup on a canonical
+  `_dedup_key(path) = os.path.realpath(...)`. So any change of spelling for one physical file defeated merge
+  dedup — the exact class v0.107.8 fixed for ingest, left un-propagated to `merge.py` (untouched by that commit).
+  Reproduced: the same FITS registered in the destination via its real path and in a source project via a
+  symlinked directory spelling (identical realpath) merges with `n_added=1`/`n_skipped_duplicate=0` → the frame
+  lands twice and the stacker weights that light twice, on the common "merge several nights, then stack" workflow.
+  Fixed by reusing the same `_dedup_key` helper (imported from `io/ingest.py`) applied **symmetrically** to the
+  stored and incoming paths at lookup time — the stored `source_path` is never rewritten, so an existing merged
+  library re-merges clean (`realpath` is idempotent) and two genuinely different files can never collide (distinct
+  realpaths), so it can only ever *prevent* a double-merge, never wrongly skip a frame. Regression test
+  `tests/test_merge.py::test_merge_dedupes_a_symlinked_respell_of_the_same_frame` (a symlink-respelled duplicate
+  now skips rather than double-adds — fails before with `n_added=1` / passes after). Additive, no
+  schema/config/API change; found by an adversarial re-audit of the io/ingest path (which otherwise traced clean —
+  FITS value fidelity, sexagesimal/neg-zero coord parse, debayer constant-field invariant, schema-v2→v9 migration,
+  RA-wrap/pole target matching, and the merge field-copy all held). *(Traced + reproduced, Builder audit
+  2026-07-11; low–moderate severity, image-quality/data-integrity on the merge-then-stack path.)*
+
 - ~~**Editor: turning on a *per-op* compare ("Without this op" / "Split this op") doesn't exit an active
   "Compare a look" split — the "Look:" button lingers in a stale active state and the look split reappears
   when the per-op compare is dismissed.**~~ — **FIXED v0.109.4** (Builder, 2026-07-11; traced + reproduced +

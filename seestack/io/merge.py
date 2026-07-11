@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from seestack.core.cache import CacheManager
+from seestack.io.ingest import _dedup_key
 from seestack.io.project import FrameRow, Project
 
 log = logging.getLogger(__name__)
@@ -55,7 +56,11 @@ def merge_projects(
     """
     dest_cache = CacheManager(destination.project_dir)
     dest_cache.ensure_dirs()
-    existing_sources = {f.source_path for f in destination.iter_frames()}
+    # Dedup on the canonical (realpath) key, symmetrically to ingest — a change
+    # of path spelling for one physical file (a symlinked NAS mount, a relative
+    # vs absolute scan root) must not merge the same frame twice → double-weighted
+    # in the stack. Mirrors the ingest fix; stored source_path is never rewritten.
+    existing_sources = {_dedup_key(f.source_path) for f in destination.iter_frames()}
 
     for src_dir in source_dirs:
         src_path = Path(src_dir)
@@ -70,13 +75,14 @@ def merge_projects(
             missing = 0
             with destination.transaction():
                 for frame in src_project.iter_frames():
-                    if frame.source_path in existing_sources:
+                    key = _dedup_key(frame.source_path)
+                    if key in existing_sources:
                         dup += 1
                         continue
                     # Copy the row sans id; let the destination assign a new one.
                     new_row = _frame_without_id(frame)
                     new_id = destination.add_frame(new_row)
-                    existing_sources.add(frame.source_path)
+                    existing_sources.add(key)
                     added += 1
                     # Copy the cached file if available.
                     if copy_cached_files and frame.cached_path:
