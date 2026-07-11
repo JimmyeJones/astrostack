@@ -1073,6 +1073,15 @@ def run_stack(
         # ---- 4. Pass 2: clipped weighted sum ------------------------------
         mean = wel.mean()
         std = wel.std()
+        # Free the pass-1 Welford accumulator (n/mean/M2 — 3 full-canvas arrays)
+        # before pass 2 allocates its own buffers. ``mean()``/``std()`` return
+        # fresh arrays, so ``wel`` is dead here, and ``del`` also empties the cell
+        # the pass-1 consumer closure shares with it. Without this the pass-1
+        # accumulator stays live all through pass 2, so the peak is ~7 canvas
+        # arrays, not the 4 the OOM guard (``_PEAK_CANVAS_ARRAYS``) charges — a
+        # large mosaic the guard certified as safe could then OOM mid-stack. The
+        # drizzle two-pass path already frees its pass-1 stats the same way.
+        del wel
         wsum = WeightedSumAccumulator(canvas_3)
         # Memory-free rejection tally: sum two scalars over the per-pixel keep
         # mask this pass already computes (no extra canvas). "contributed" = the

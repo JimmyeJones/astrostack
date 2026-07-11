@@ -2429,6 +2429,19 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.107.2** — Stacking-engine memory safety (found by a fresh adversarial audit of the stacker
+  orchestration path 2026-07-11): the κ-σ (default sigma-clip) path never freed its **pass-1 Welford
+  accumulator** (`_n`/`_mean`/`_m2` — 3 full-canvas arrays) before pass 2 allocated `mean`, `std` and the
+  weighted-sum buffers, so the live set through all of pass 2 was ~7 canvas arrays, not the **4** the
+  pre-allocation OOM guard (`_PEAK_CANVAS_ARRAYS`) charges — a ~1.8× underestimate that persists for the whole
+  second pass. On a large mosaic union canvas sized to pass the guard at 4 arrays but exceed RAM at 7, the run
+  the guard *certified as safe* could OOM-kill mid-stack (the exact failure the guard exists to prevent). Fixed
+  with a one-line `del wel` after `mean()`/`std()` extract fresh arrays (they don't alias `wel`), mirroring the
+  drizzle two-pass path's existing `del stats`; `del` also empties the cell the pass-1 consumer closure shares
+  with `wel`, so the accumulator is genuinely freed. Byte-for-byte identical output; only the memory profile
+  changes. Regression test `tests/test_stack_pipeline.py::test_sigma_clip_frees_pass1_accumulator_before_pass2`
+  (asserts no `WelfordAccumulator` is live when pass 2 builds its `WeightedSumAccumulator` — fails before /
+  passes after). Additive, no config/schema/API/on-disk change. (claude/happy-franklin-t22hm6)
 - **v0.107.0** — Editor (PRIORITY 1): one-click **"Neutralize background"** fix for a residual sky
   colour cast — the action slice the v0.104.0 read-out deferred. New display-space op
   `tone.neutralize_background` (self-measures the sky median at render time via factored-out
