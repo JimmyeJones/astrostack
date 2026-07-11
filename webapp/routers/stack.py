@@ -355,6 +355,37 @@ async def render_stack_run(
                     headers={"Cache-Control": "no-store"})
 
 
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/render-suggestion")
+async def render_stretch_suggestion(
+    safe: str, run_id: int, request: Request,
+) -> dict[str, Any]:
+    """Suggest asinh ``stretch``/``black`` for the History live-render sliders
+    from the run's own linear data, so opening "Adjust" starts on a well-exposed
+    look that matches the STF preview thumbnail instead of a fixed 0.5/0.35 that
+    can jump brighter or darker. Mirrors the editor's stretch suggestion but for
+    the History ``…/render`` surface (measures the identical pixels that endpoint
+    stretches). Returns ``{stretch, black}`` null when there's no useful
+    suggestion (too little dynamic range) or the run is a display-space export
+    (its sliders are a no-op — nothing to anchor)."""
+    _, fits_path = _run_fits_path(request, safe, run_id)
+    if not fits_path or not Path(fits_path).exists():
+        raise HTTPException(status_code=404, detail="No FITS for this run to render")
+
+    from seestack.edit.stretch import STRETCH_TARGET_BG, suggest_asinh_stretch
+    from seestack.render.thumbnail import load_stack_rgb
+
+    def work() -> dict[str, Any]:
+        rgb, display_space = load_stack_rgb(fits_path, max_width=1024)
+        if display_space:
+            return {"stretch": None, "black": None}
+        sug = suggest_asinh_stretch(rgb)
+        if sug is None:
+            return {"stretch": None, "black": None}
+        return {"stretch": sug[0], "black": sug[1], "target_bg": STRETCH_TARGET_BG}
+
+    return await run_in_threadpool(work)
+
+
 @router.post("/api/targets/{safe}/stack-runs/{run_id}/preview")
 async def save_stack_preview(
     safe: str, run_id: int, body: dict[str, Any], request: Request,

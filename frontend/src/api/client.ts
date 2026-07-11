@@ -801,6 +801,9 @@ export const api = {
     `/api/targets/${safe}/stack-runs/${id}/${kind}`,
   stackRenderUrl: (safe: string, id: number, stretch: number, black: number) =>
     `/api/targets/${safe}/stack-runs/${id}/render?stretch=${stretch}&black=${black}`,
+  stackRenderSuggestion: (safe: string, id: number) =>
+    req<{ stretch: number | null; black: number | null; target_bg?: number }>(
+      `/api/targets/${safe}/stack-runs/${id}/render-suggestion`),
   saveStackPreview: (safe: string, id: number, stretch: number, black: number) =>
     req<{ ok: boolean }>(`/api/targets/${safe}/stack-runs/${id}/preview`, {
       method: "POST", body: JSON.stringify({ stretch, black }),
