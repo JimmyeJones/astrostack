@@ -128,6 +128,33 @@ master-path server-side-resolution invariant (`trigger_stack` pops raw client `*
 resolving `*_master_id`s), and `merge.py` cross-source dedup. Next rotation: `bg/*` gradient/coverage
 paths and `edit/pipeline.py`/`edit/recipe.py` op-ordering, which this run didn't re-cover._
 
+- ~~**Coverage-leveling's cross-level smoothing *extrapolates* a wrong sky offset onto a sparsely-sampled
+  deep-overlap coverage level — subtracting a bright/dark seam over that region (the panel step the pass
+  exists to remove), on the default mosaic stack path and in the editor.**~~ — **FIXED v0.108.2** (Builder,
+  2026-07-11; traced + reproduced-on-synthetic + regression-tested). `bg/coverage_leveling.py::level_by_coverage`
+  measures a robust per-channel sky offset for each distinct coverage level, then (when ≥3 levels) replaces every
+  level's offset with a **single global degree-2 `np.polyfit` weighted by sky-pixel count**. Coverage levels are
+  typically *gapped* — dense single-panel frame-counts, then a jump to the far smaller 2×/3× **overlap** counts —
+  and the weighted fit is dominated by the high-pixel-count single-panel cluster, so it **extrapolates** that
+  cluster's trend across the gap onto an isolated overlap level whose small sky sample can't anchor the fit.
+  Unbounded, that overrides the level's own well-measured offset with a value far outside the measured range and
+  subtracts a seam over the whole overlap region — *introducing* the exact panel-step artefact the pass removes.
+  Reproduced on a synthetic 4-band mosaic with a gentle curved sky trend + one sparsely-sampled deep-overlap
+  level (256 sky px): the current code leaves a **~28 ADU seam** at the overlap level; before the existing
+  3-level test (an exact interpolation) never exercised this branch. Reachable on **every** stack —
+  `stacker.py` calls `level_by_coverage(result_image, coverage)` with `smooth_across_levels=True` for any mosaic
+  with ≥3 kept coverage levels and a gap — and via the editor's `background.level_coverage` op. Fixed by clamping
+  the fitted per-level offset to the **envelope of the genuinely-measured offsets** (`np.clip(smoothed,
+  min(ys), max(ys))`): a physical sky offset can't be more extreme than the most extreme value actually measured
+  across levels. It's a **no-op for the normal interpolating (contiguous-level) fit** — the existing
+  `test_panel_steps_disappear_after_leveling` (3 levels → exact fit, already within range) is byte-for-byte
+  unchanged — but bounds the gapped-extrapolation to the real per-level spread (the ~28 ADU seam drops to
+  ~1 ADU). Additive, no schema/config/API change, off-nothing. Regression test
+  `tests/test_coverage_leveling.py::test_smoothing_does_not_extrapolate_a_seam_onto_a_gapped_overlap_level`
+  (overlap level leveled within 5 ADU of the dense sky; ~28 ADU seam before / ~1 after). Found by an adversarial
+  audit of the `bg/*` paths (which otherwise traced clean — NaN=coverage, divisor guards, and empty/degenerate
+  handling all held).
+
 - ~~**Gray-star colour calibration applies an *unclamped* per-channel scale — an unusual detected-star
   population can blow out or crush a channel of the final image, where the Gaia path would have clamped
   it.**~~ — **FIXED v0.107.2** (Scout audit 2026-07-11; traced + reproduced-on-synthetic + regression-tested).
