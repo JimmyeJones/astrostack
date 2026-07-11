@@ -194,6 +194,25 @@ re-covered this run): the frontend editor route UX (React/TS — needs a `vitest
 engine audits), and `qc/*` + `solve/*` (last deep-traced 2026-07-11 by the qc/solve Builder run) if a fresh angle
 surfaces._
 
+- ~~**`merge_projects` silently drops each frame's `ra_hint_deg`/`dec_hint_deg` — a frame merged *before* it's
+  plate-solved then gets a slow, failure-prone blind all-sky ASTAP solve instead of a localized search around
+  the mount's pointing.**~~ — **FIXED v0.109.3** (Builder, 2026-07-11; traced + reproduced + regression-tested).
+  `io/merge.py::_frame_without_id` copies the frame row field-by-field for the destination project, but the
+  enumeration jumped straight from `bayer_pattern` to `wcs_json`, skipping the two adjacent header-derived
+  target-pointing hints (`ra_hint_deg`/`dec_hint_deg`), which therefore defaulted to `None` on every merged row.
+  Unlike the deliberately-reset path caches (`cached_path`/`aligned_cache_path`, Stage-2), these are sky-position
+  metadata with no reason to drop. Downstream: for a frame merged while still unsolved (no `wcs_json`),
+  `solve/runner.py::build_solve_arglist` passes `ra_hint=None`, so `astap.py` omits the `-ra`/`-spd` flags
+  (`astap.py:244-245`) and ASTAP runs a blind all-sky solve rather than the intended ~30° localized search —
+  slower and more failure-prone, on the common "merge several nights, then QC+solve" workflow (reachable from the
+  webapp `merge_targets` and the GUI). Already-solved frames were unaffected (their `wcs_json` copied, and the
+  solver skips solved frames). Fixed by adding the two fields to the `FrameRow(...)` copy. Regression test
+  `tests/test_merge.py::test_merge_preserves_target_pointing_hints` (merge an unsolved hints-only frame; assert
+  the hints survive — fails before with `None` / passes after). Additive, no schema/config/API change; found by
+  an adversarial audit of the io/ingest path (which otherwise traced clean — dedup, schema-v2→v9 migration, FITS
+  header parsing, and merge dedup all held). *(Traced + reproduced, Builder audit 2026-07-11; low–moderate
+  severity, autonomy/image-quality on the merge-then-solve path.)*
+
 - ~~**The interactive editor's default asinh stretch (and the manual "Asinh" stretch mode) blacks out the whole
   picture when a single extreme outlier pixel survives into the stack — its `[min,max]` range normalization is
   not outlier-robust, unlike its sibling `autostretch`.**~~ — **FIXED v0.108.5** (Builder, 2026-07-11; traced +
