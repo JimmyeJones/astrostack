@@ -484,6 +484,55 @@ def test_auto_bind_binds_dark_with_unknown_gain_temp(tmp_path):
     assert Path(bound["dark_path"]).name == dark["filename"]
 
 
+def test_auto_bind_recovers_a_scalable_dark_when_the_top_pick_fails_its_gate(tmp_path):
+    """The library's *closest* dark (exposure-perfect but a wrong gain) fails the
+    gain confidence gate, while a further-ranked dark matches gain/temperature and
+    — with a master bias present — is exposure-scalable to the subs. Auto-bind must
+    fall through to that usable dark instead of giving up on the single top-ranked
+    pick, so the walk-away stack keeps its dark calibration. (Regression: before
+    ranking darks by bindability, a gain-mismatched-but-exposure-perfect dark
+    masked a gain-matched scalable one, leaving the stack uncalibrated.)"""
+    root = tmp_path / "lib"
+    # Subs: 10 s / gain 80.
+    # Dark A — exposure-perfect (10 s) but gain 200 (a different rig). Its combined
+    # match distance is the lowest (the exposure term, weighted ×3, is zero), so
+    # recommend_masters returns it as the top pick — but it fails the gain gate.
+    _register(root, "dark", exposure_s=10.0, gain=200.0)
+    # Dark B — gain-matched (80) but 30 s (exposure mismatch): further by distance,
+    # yet scalable to 10 s via the bias.
+    dark_b = _register(root, "dark", exposure_s=30.0, gain=80.0)
+    bias = _register(root, "bias", exposure_s=0.0, gain=80.0)
+    masters = calibration.list_masters(root)
+
+    # Precondition: the top-ranked dark really is the exposure-perfect (but
+    # gain-mismatched) A, not the scalable B — so this exercises the fallthrough.
+    rec = calibration.recommend_masters(masters, exposure_s=10.0, gain=80.0)
+    assert rec["dark_master_id"] != dark_b["id"]
+
+    bound = calibration.auto_bind_master_paths(
+        root, masters, exposure_s=10.0, gain=80.0)
+    assert Path(bound["dark_path"]).name == dark_b["filename"]
+    assert Path(bound["bias_path"]).name == bias["filename"]
+    assert bound["scale_dark_to_light"] is True
+
+
+def test_auto_bind_still_uncalibrated_when_no_dark_is_bindable(tmp_path):
+    """The fallthrough only ever binds a *confident* dark: when the top pick fails
+    its gate and no other dark qualifies either, the stack stays dark-uncalibrated
+    (the safe direction), never a bare mismatched dark. Here the second dark is
+    gain-matched but exposure-mismatched with NO bias to scale it — so unbindable."""
+    root = tmp_path / "lib"
+    # A: exposure-perfect, gain-mismatched (fails the gain gate).
+    _register(root, "dark", exposure_s=10.0, gain=200.0)
+    # B: gain-matched but exposure-mismatched, and no bias exists to scale it.
+    _register(root, "dark", exposure_s=30.0, gain=80.0)
+    bound = calibration.auto_bind_master_paths(
+        root, calibration.list_masters(root), exposure_s=10.0, gain=80.0)
+    assert "dark_path" not in bound
+    assert "scale_dark_to_light" not in bound
+    assert "bias_path" not in bound
+
+
 def test_diagnose_advises_a_bias_for_a_gain_matched_exposure_mismatched_dark(tmp_path):
     """The one still-uncalibrated dark signature after v0.103.12: a gain-matching
     dark at the wrong exposure with no bias to scale it — advise building a bias."""

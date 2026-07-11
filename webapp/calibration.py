@@ -353,33 +353,61 @@ def auto_bind_master_paths(
     #     the dark" nudge; it recovers the thermal signal a bias-only fallback
     #     can't. Without a confident bias (or a known exposure) the dark is left
     #     off, so the stack stays uncalibrated exactly as today.
+    #
+    # `recommend_masters` ranks darks by *combined* distance (exposure ×3 + gain +
+    # temp) and returns only the single closest — but that closest dark can *fail*
+    # its bind gate (a mismatched gain, or a mismatched exposure with no scalable
+    # bias) while a slightly-further dark would bind cleanly. Classic case: a
+    # gain-mismatched-but-exposure-perfect dark out-ranks a gain-matched dark that
+    # only needs bias-scaling, so keying off the single top pick leaves the stack
+    # dark-uncalibrated even though a usable dark existed. So try every dark in
+    # ascending match distance and bind the *first that clears a gate*. This never
+    # binds a dark we wouldn't already trust (each candidate still passes the same
+    # gain/temp + exposure/scalable gates); it only stops the best-ranked-but-
+    # unbindable dark from masking a bindable one. Ordering by distance means the
+    # closest bindable dark wins (an exposure-perfect dark is preferred over one
+    # that needs scaling, since its exposure term is 0).
+    def _try_bind_dark(cand: dict[str, Any]) -> dict[str, Any] | None:
+        """The confident dark-binding keys for master ``cand`` (``dark_path`` alone,
+        or ``dark_path`` + ``bias_path`` + ``scale_dark_to_light`` when only the
+        exposure is off and a confident bias can scale it), or ``None`` when it
+        can't be confidently bound to these subs."""
+        if not exposure_s or not _dark_match_confident(
+                cand, gain=gain, sensor_temp_c=sensor_temp_c):
+            return None
+        dexp = cand.get("exposure_s")
+        if not (dexp and float(dexp) > 0):
+            return None  # a dark's thermal signal is exposure-specific — can't gate
+        mid = cand.get("id")
+        if abs(float(dexp) - exposure_s) / exposure_s <= _AUTO_BIND_EXP_MISMATCH_FRAC:
+            p = _path(mid)
+            return {"dark_path": p} if p else None
+        # Exposure mismatch, gain/temp confident: recover via exposure-scaling if a
+        # confident master bias (with matching dimensions) is available.
+        bias_id = rec.get("bias_master_id")
+        bm = by_id.get(int(bias_id)) if bias_id is not None else None
+        if bm is not None and _bias_match_confident(
+                bm, gain=gain, sensor_temp_c=sensor_temp_c):
+            dp = _path(mid)
+            bp = _path(bias_id)
+            if dp and bp:
+                return {"dark_path": dp, "bias_path": bp, "scale_dark_to_light": True}
+        return None
+
     dark_bound = False
-    dark_id = rec.get("dark_master_id")
-    dm = by_id.get(int(dark_id)) if dark_id is not None else None
-    if (dm is not None and exposure_s
-            and _dark_match_confident(dm, gain=gain, sensor_temp_c=sensor_temp_c)):
-        dexp = dm.get("exposure_s")
-        dexp_known = bool(dexp and float(dexp) > 0)
-        if dexp_known and (abs(float(dexp) - exposure_s) / exposure_s
-                           <= _AUTO_BIND_EXP_MISMATCH_FRAC):
-            p = _path(dark_id)
-            if p:
-                out["dark_path"] = p
-                dark_bound = True
-        elif dexp_known:
-            # Exposure mismatch, gain/temp confident: recover via exposure-scaling
-            # if a confident master bias (with matching dimensions) is available.
-            bias_id = rec.get("bias_master_id")
-            bm = by_id.get(int(bias_id)) if bias_id is not None else None
-            if bm is not None and _bias_match_confident(
-                    bm, gain=gain, sensor_temp_c=sensor_temp_c):
-                dp = _path(dark_id)
-                bp = _path(bias_id)
-                if dp and bp:
-                    out["dark_path"] = dp
-                    out["bias_path"] = bp
-                    out["scale_dark_to_light"] = True
-                    dark_bound = True
+    dark_candidates = sorted(
+        (m for m in by_id.values()
+         if str(m.get("kind", "")) == "dark" and m.get("exists", True)),
+        key=lambda m: _match_distance(
+            m, exposure_s=exposure_s, gain=gain,
+            sensor_temp_c=sensor_temp_c, kind="dark"),
+    )
+    for cand in dark_candidates:
+        keys = _try_bind_dark(cand)
+        if keys:
+            out.update(keys)
+            dark_bound = True
+            break
 
     # Flat (+ its flat-dark) — exposure independent, but only when its
     # gain/temperature confidently match the subs (a flat from a different rig
