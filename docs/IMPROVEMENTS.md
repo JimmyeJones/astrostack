@@ -1282,6 +1282,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   used on export when the user never adds a stretch (`webapp/pipeline.py:850`), so this changes those exports
   too — verify preview↔export parity and add a before/after regression. Fold in / supersedes the asinh
   robustness bug if taken together. (S–M, editor — PRIORITY 1.)
+- **Consistency: the History-page adjustable stack render still defaults to asinh, while the thumbnail,
+  the editor first-open view, and the one-click Auto all use STF.** *(Idea, Builder-noted 2026-07-11 while
+  shipping v0.109.0 — S, friendliness/consistency, PRIORITY 3.)* `webapp/routers/stack.py::render_stack_run`
+  (the History page's live-adjustable preview) tone-maps with a **fixed default asinh** (`_STRETCH_DEFAULT 0.5`,
+  `_BLACK_DEFAULT 0.35`); the stored preview thumbnail directly above it (`render.thumbnail.generate_thumbnail`)
+  and now the editor's no-recipe view (v0.109.0) both use the adaptive **STF autostretch**, so the same stack can
+  look one way as a thumbnail and another way when the History render loads at its defaults. This surface is
+  *deliberately* asinh-with-sliders (the user drags Strength/Black), so it should NOT be blind-flipped to STF —
+  but the **initial/default** render could either (a) anchor its default asinh Strength/Black to the run's own sky
+  (reuse `edit/stretch.py::suggest_asinh_stretch`, which already solves the two sliders from the data) so the
+  first look is well-exposed and closer to the STF thumbnail, or (b) show the STF autostretch as the zero-state and
+  only switch to asinh once the user touches a slider. Low-severity polish, real-data-worth-a-look; a Scout should
+  decide which framing (a or b) is least surprising before a Builder takes it. Additive, no config/schema change.
 - **Seed the editor with the Auto recipe on first open** — moved to **Needs owner
   sign-off** (2026-07-04): it's high-value PRIORITY-1 work, but its value *requires*
   it to be **on by default** (an off-by-default first-open seed helps no beginner),
