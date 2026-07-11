@@ -3058,6 +3058,22 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.109.15** — Editor (PRIORITY 1): the **Compare** toggle now disables itself while previewing a trim crop,
+  like every sibling overlay button (Builder 2026-07-11; found + reproduced by a frontend editor-UX audit). The
+  v0.109.7 commit set out to "disable overlay/compare toggles while previewing a trim crop" and its message
+  asserts Compare already guards it — but Compare's `disabled` was the one that never referenced `trimPreview`.
+  Reachable via a real query race: the "Trim border" button appears as soon as the lighter *trim-suggestion*
+  query resolves, which can beat the heavier *histogram* query, and `enterTrimPreview` only force-enabled the
+  coverage overlay + cleared other overlays *inside* `if (hist.data?.is_mosaic)`. So clicking Trim before the
+  histogram loaded left Compare enabled; clicking it showed the un-edited **Original** under the dashed "Proposed
+  crop" rectangle and a "Proposed crop …" caption — a contradictory state (no coverage backdrop, Original
+  mislabelled as the trim target) that persisted the whole trim session. Two-part fix: (1) add `|| trimPreview`
+  to the Compare button's `disabled` (the belt), and (2) dedent the `setShowMask/ShowBase/SoloExclude(false)`
+  overlay-clears out of the `is_mosaic` branch so entering trim always clears an active overlay regardless of the
+  histogram's load state (the braces). Frontend-only, additive, no backend/API/default change. Regression
+  `Editor.test.tsx > "disables Compare during trim even before the histogram resolves as a mosaic"` (non-mosaic
+  histogram + mosaic trim suggestion → Compare must be disabled during trim; fails before / passes after). (S,
+  editor — PRIORITY 1.)
 - **v0.109.14** — Watcher auto-stack no longer redundantly re-stacks an already-current target after a manual
   stack (Builder 2026-07-11; found + reproduced by a webapp-orchestration audit). `_auto_stack_frame_count`'s
   "already stacked?" guard compared the current solved+accepted count to the last run's **`n_frames_used`**, which

@@ -894,12 +894,21 @@ export function EditorView() {
     setSplitCompare(false);
     setSoloSplit(false);
     setLookSplit(false);
+    // Clear any active overlay/compare unconditionally so the proposed crop is
+    // never drawn over a contradictory backdrop (e.g. the un-edited "Original")
+    // with a mislabelled caption. This must run even before the heavier histogram
+    // query resolves — the "Trim border" button appears as soon as the lighter
+    // trim-suggestion query does, so a fast click could otherwise enter trim with
+    // an overlay still on and the coverage backdrop not yet forced.
+    setShowMask(false);
+    setShowBase(false);
+    setSoloExclude(false);
     if (hist.data?.is_mosaic) {
+      // On a mosaic, auto-show the coverage heatmap so the crop is drawn over
+      // exactly what it addresses; remember the prior state so Cancel/Apply
+      // restores it (null = we didn't change it).
       setCoverageBeforeTrim(showCoverage);
       setShowCoverage(true);
-      setShowMask(false);
-      setShowBase(false);
-      setSoloExclude(false);
     }
   };
   const restoreCoverageAfterTrim = () => {
@@ -1228,7 +1237,7 @@ export function EditorView() {
                   </Button>
                 </Tooltip>
                 <Button size="xs" variant={showBase ? "filled" : "default"}
-                  disabled={!preview.data || showMask || showCoverage || splitCompare || lookSplit}
+                  disabled={!preview.data || showMask || showCoverage || splitCompare || lookSplit || trimPreview}
                   onClick={() => setShowBase((s) => { if (!s) { setSoloExclude(false); setSoloSplit(false); setLookSplit(false); } return !s; })}>
                   {showBase ? "Edited" : "Compare"}
                 </Button>

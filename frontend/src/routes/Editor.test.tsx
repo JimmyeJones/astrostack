@@ -1810,6 +1810,46 @@ describe("EditorView", () => {
     expect(screen.getByRole("button", { name: "Hide coverage" })).toBeDisabled();
   });
 
+  it("disables Compare during trim even before the histogram resolves as a mosaic", async () => {
+    // Regression: the "Trim border" button appears as soon as the (lighter)
+    // trim-suggestion query resolves, which can beat the (heavier) histogram
+    // query. Before the histogram reports is_mosaic, entering trim did not force
+    // the coverage overlay on, and Compare — the one overlay toggle that lacked
+    // the trimPreview guard — stayed enabled, letting the user show the un-edited
+    // "Original" under the "Proposed crop" caption. Model that race with a
+    // non-mosaic histogram but a mosaic trim suggestion (hist.data?.is_mosaic
+    // falsy is the same branch a still-loading histogram takes).
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CROP]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [{ uid: "s1", id: "tone.stretch", enabled: true, params: { stretch: 0.6 } }],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0],
+        b: [0, 0, 0, 0], is_mosaic: false });
+    vi.spyOn(client.api, "trimSuggestion").mockResolvedValue({
+      is_mosaic: true, crop: { x0: 0.2, y0: 0.1, x1: 0.8, y1: 0.9 },
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    // Compare is enabled once a preview is loaded and no overlay is active.
+    const compare = await screen.findByRole("button", { name: "Compare" });
+    await waitFor(() => expect(compare).not.toBeDisabled());
+
+    // Enter the trim proposal. The histogram isn't a mosaic, so no coverage
+    // overlay is forced on — only the explicit trimPreview guard keeps Compare
+    // from opening the Original under the crop proposal.
+    fireEvent.click(await screen.findByRole("button", { name: /Trim border/ }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Compare" })).toBeDisabled();
+  });
+
   it("hides the 'Trim border' button on a single-field stack (no crop)", async () => {
     mockEditorQueries();
     vi.spyOn(client.api, "trimSuggestion").mockResolvedValue({ is_mosaic: false, crop: null });
