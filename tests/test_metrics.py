@@ -25,6 +25,15 @@ def test_green_channel_shape():
     assert g.shape == (20, 30)
 
 
+def test_green_channel_no_uint16_overflow():
+    # A raw Bayer mosaic is natively 16-bit; averaging two bright green pixels
+    # must not wrap around modulo 2**16 (which would silently corrupt exactly the
+    # bright stars QC relies on). Regression for the pre-promotion integer add.
+    mosaic = np.full((4, 4), 60000, dtype=np.uint16)
+    g = green_channel(mosaic, pattern="RGGB")
+    assert np.allclose(g, 60000.0)  # not (60000+60000) % 65536 * 0.5 == 27232
+
+
 def test_estimate_sky_recovers_level():
     rng = np.random.default_rng(1)
     img = rng.normal(loc=1500.0, scale=20.0, size=(200, 300)).astype(np.float32)
@@ -107,3 +116,19 @@ def test_detect_stars_returns_none_on_empty():
     assert sources is None or len(sources) == 0
     assert median_fwhm(img, sources) is None
     assert median_eccentricity(sources) is None
+
+
+def test_median_eccentricity_is_nan_safe():
+    from astropy.table import Table
+
+    # One NaN roundness must not poison the whole frame's median (the module
+    # docstring promises a NaN-safe eccentricity, like its FWHM/flux siblings).
+    src = Table({"roundness1": [0.1, 0.2, np.nan], "roundness2": [0.05, 0.1, 0.2]})
+    ecc = median_eccentricity(src)
+    assert ecc is not None and np.isfinite(ecc)
+    # per-source ecc = max(|r1|,|r2|) → {0.1, 0.2} after dropping the NaN source
+    assert ecc == pytest.approx(0.15)
+
+    # All-NaN roundness leaves no usable source → None, matching the siblings.
+    all_nan = Table({"roundness1": [np.nan, np.nan], "roundness2": [np.nan, np.nan]})
+    assert median_eccentricity(all_nan) is None

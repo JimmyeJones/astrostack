@@ -2979,6 +2979,19 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.109.10** — QC-engine correctness hardening (PRIORITY: stacking/QC-engine data-integrity; Builder
+  2026-07-11; found by an adversarial `qc/*` audit). Two defects in `seestack/qc/metrics.py`, each fixed against
+  its own documented contract and regression-tested. (1) `green_channel` summed the two Bayer-green sub-planes in
+  the **input dtype before** the `0.5 *` float promotion, so a raw 16-bit mosaic (Seestar native — and the
+  function's documented input) wrapped bright green pixels modulo 2**16 (60000+60000 → 27232), silently
+  corrupting exactly the bright stars QC measures; now promotes to float32 before the add. Latent today (the sole
+  pipeline caller feeds float32 via `load_seestar_raw`), but a real data-integrity trap in a public, documented
+  API. (2) `median_eccentricity` didn't drop non-finite roundness before the median, so one NaN source turned the
+  whole frame's eccentricity into NaN — contrary to the module's "NaN-safe … ecc" promise and unlike its
+  `median_fwhm`/`median_star_flux` siblings; now filters `np.isfinite` and returns `None` when nothing survives.
+  Both additive, no behaviour change on the live float32 path, upgrade-safe. Regressions
+  `test_metrics.py::test_green_channel_no_uint16_overflow` and `::test_median_eccentricity_is_nan_safe` (both fail
+  before / pass after).
 - **v0.109.9** — Friendliness / UX bug (PRIORITY 3; Builder 2026-07-11; found by the frontend non-editor route
   audit): the Tonight "Start something new" object-type filter could show a contradictory empty table. When the
   picked bucket (e.g. "Nebula") was no longer present after the data changed (a different night via the date

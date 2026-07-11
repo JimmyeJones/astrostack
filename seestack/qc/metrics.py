@@ -74,7 +74,11 @@ def green_channel(mosaic: np.ndarray, pattern: str = "RGGB") -> np.ndarray:
     # Crop to common size, then average.
     h = min(g1.shape[0], g2.shape[0])
     w = min(g1.shape[1], g2.shape[1])
-    return 0.5 * (g1[:h, :w] + g2[:h, :w])
+    # Promote to float *before* the add: a raw Bayer mosaic is natively 16-bit
+    # (Seestar), so summing two bright green pixels in the input dtype would wrap
+    # around modulo 2**16 and silently corrupt exactly the bright stars QC relies
+    # on. The float32 cast keeps the sum exact before the 0.5 average.
+    return 0.5 * (g1[:h, :w].astype(np.float32, copy=False) + g2[:h, :w])
 
 
 def estimate_sky(image: np.ndarray) -> tuple[float, float]:
@@ -199,9 +203,15 @@ def median_eccentricity(sources) -> float | None:
     """
     if sources is None or len(sources) == 0:
         return None
-    r1 = np.abs(np.asarray(sources["roundness1"]))
-    r2 = np.abs(np.asarray(sources["roundness2"]))
+    r1 = np.abs(np.asarray(sources["roundness1"], dtype=float))
+    r2 = np.abs(np.asarray(sources["roundness2"], dtype=float))
     ecc = np.clip(np.maximum(r1, r2), 0.0, 1.0)
+    # Drop any non-finite roundness before the median (matching the NaN-safe
+    # `median_fwhm`/`median_star_flux` siblings the module docstring promises), so
+    # a single NaN source can't turn the whole frame's eccentricity into NaN.
+    ecc = ecc[np.isfinite(ecc)]
+    if ecc.size == 0:
+        return None
     return float(np.median(ecc))
 
 
