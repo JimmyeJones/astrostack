@@ -2771,15 +2771,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
-- **Minor state-classification tidy-up: a Process-target job cancelled *during the stack* is reported `done`, not
-  `cancelled`.** (S, webapp/tidiness — no data impact) *(Builder-audit-noted 2026-07-11.)* `webapp/pipeline.py::
-  submit_process_target` always returns a truthy summary, and `webapp/jobs.py`'s `engine_cancelled` check only
-  inspects a top-level `cancelled` key on the result — which `submit_stack`/`reprocess_all` set on a mid-stack
-  cancel but `process_target` never does. So cancelling a Process job while its stack step is running classifies it
-  `done` with `stacked:True`/`run_id:None` instead of `cancelled`. **No data impact** (no `stack_runs` row is
-  written, no crash-loop marker is set, nothing is stranded) — it's purely a cosmetic job-state label on the Jobs
-  page. If pursued: have `process_target` surface a `cancelled` flag on its summary (mirroring the two sibling job
-  bodies) so `engine_cancelled` classifies it correctly. Additive, testable in isolation.
+- ~~**Minor state-classification tidy-up: a Process-target job cancelled *during the stack* is reported `done`, not
+  `cancelled`.**~~ — **SHIPPED v0.109.18** (Builder 2026-07-11). `submit_process_target` now checks the stack
+  step's returned `cancelled` sentinel and, when set, surfaces `cancelled:True`/`stacked:False` at the top level of
+  its summary (mirroring `submit_stack`/`reprocess_all`) so `webapp/jobs.py`'s `engine_cancelled` check classifies
+  the job `cancelled` instead of `done` with a misleading `stacked:True`/`run_id:None`. Additive, no data impact (no
+  run is written on cancel), no schema/config/API-shape change. Regression test
+  `tests/webapp/test_pipeline.py::test_process_target_cancelled_during_stack_is_marked_cancelled` (monkeypatches the
+  stack step to honour a mid-stack cancel and return the sentinel; asserts the job ends `cancelled` with no run
+  recorded — fails before as `done` / passes after). *(Original write-up kept below for provenance.)*
+  `webapp/pipeline.py::submit_process_target` always returns a truthy summary, and `webapp/jobs.py`'s
+  `engine_cancelled` check only inspects a top-level `cancelled` key on the result — which `submit_stack`/
+  `reprocess_all` set on a mid-stack cancel but `process_target` never did. So cancelling a Process job while its
+  stack step is running classified it `done` with `stacked:True`/`run_id:None` instead of `cancelled`. No data
+  impact (no `stack_runs` row is written, no crash-loop marker is set, nothing is stranded) — a cosmetic job-state
+  label on the Jobs page.
 - **Latent robustness (not a live bug): `stacker.py`'s `coverage_min/max` diagnostic slice lacks its sibling's
   `ndim==3` guard.** *(Traced, Builder engine audit 2026-07-11.)* At ~L1307 `run_stack` computes
   `cov_2d = frame_cov if frame_cov is not None else coverage[..., 0]` **without** the `coverage.ndim == 3` guard

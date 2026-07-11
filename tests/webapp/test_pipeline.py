@@ -339,6 +339,36 @@ def test_mixed_pointing_guard_off_by_default_single_pointing_stacks(
     assert body["result"]["stacked"] is True
 
 
+def test_process_target_cancelled_during_stack_is_marked_cancelled(
+    client, solved_library, monkeypatch
+):
+    # A Process-target job cancelled *while its stack step runs* must be
+    # classified 'cancelled', not 'done'. The stack step honours the cancel and
+    # returns the {"cancelled": True, "run_id": None, ...} sentinel with no run
+    # written; submit_process_target must surface that at the top level so the
+    # JobManager's engine_cancelled check fires. Regression: it used to set
+    # stacked:True and never propagate `cancelled`, so the job showed 'done' with
+    # run_id:None on the Jobs page.
+    from webapp import pipeline as pl
+
+    def fake_stack_target(settings, jm, job, lib, safe, **kwargs):
+        job._cancel.set()  # user pressed cancel just as the stack aborts
+        return {"cancelled": True, "run_id": None, "output_dir": "",
+                "errors": [], "n_frames_used": 0, "canvas_shape": [0, 0, 0]}
+
+    monkeypatch.setattr(pl, "_stack_target", fake_stack_target)
+    r = client.post("/api/targets/M_42/process")
+    assert r.status_code == 200
+    body = _wait_job(client, r.json()["job_id"], timeout=120)
+    assert body["state"] == "cancelled", body
+    result = body["result"]
+    assert result["cancelled"] is True
+    assert result["stacked"] is False
+    # No stack run was recorded (the cancel aborted before any output).
+    runs = client.get("/api/targets/M_42/stack-runs").json()
+    assert len(runs) == 0
+
+
 def test_process_target_skips_stack_when_nothing_solved(client, built_library):
     # No ASTAP in CI and no injected WCS → nothing is plate-solved, so the chained
     # stack is skipped with a clear reason rather than failing the whole job.
