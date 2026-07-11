@@ -181,6 +181,20 @@ def level_by_coverage(
                 smoothed = np.polyval(coeffs, lvls)
             except (np.linalg.LinAlgError, ValueError):
                 smoothed = ys
+            # Coverage levels are often *gapped*: dense single-panel counts, then
+            # a jump to the 2×/3× overlap counts, whose sky sample is far smaller.
+            # A single global polynomial is dominated by the high-pixel-count
+            # cluster and *extrapolates* its trend across the gap onto an isolated
+            # (overlap) level — unbounded, that overrides a well-measured level
+            # with a wildly wrong offset and subtracts a bright/dark seam over that
+            # region: the very panel step this pass exists to remove. A physical
+            # sky offset can't be more extreme than the most extreme value actually
+            # *measured* across levels, so clamp the fitted value to the measured
+            # envelope. It's a no-op for the normal interpolating fit (the existing
+            # contiguous-level behaviour is byte-for-byte unchanged) but bounds the
+            # gapped-extrapolation to the real per-level spread.
+            lo, hi = float(np.min(ys)), float(np.max(ys))
+            smoothed = np.clip(smoothed, lo, hi)
             for i, l in enumerate(lvls):
                 offsets[int(l)][c] = float(smoothed[i])
 

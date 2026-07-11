@@ -132,6 +132,54 @@ def test_proxy_scale_matches_full_res_level_selection():
     assert abs(float(np.median(fixed[panel_proxy]))) < 0.005
 
 
+def test_smoothing_does_not_extrapolate_a_seam_onto_a_gapped_overlap_level():
+    """A sparsely-sampled deep-overlap coverage level must not have a wrong
+    offset *extrapolated* onto it from the dense single-panel levels.
+
+    Coverage levels are typically gapped: dense single-panel frame-counts, then a
+    jump to the far smaller 2×/3× overlap counts. The cross-level smoothing fits a
+    single global polynomial weighted by sky-pixel count, which is dominated by the
+    high-pixel-count cluster; without a bound it *extrapolates* that cluster's trend
+    across the gap onto an isolated overlap level and overrides its well-measured
+    offset with a value far outside the measured range — subtracting a bright/dark
+    seam over that region, i.e. the very panel step this pass exists to remove.
+    """
+    rng = np.random.default_rng(11)
+    h = w = 700
+    coverage = np.zeros((h, w), dtype=np.int32)
+    # Four dense single-panel coverage bands (4..7) with a gentle, slightly-curved
+    # residual sky trend, plus one sparsely-sampled deep-overlap level (18) far up
+    # the coverage axis — a big gap the global fit would extrapolate across.
+    coverage[0:175, :] = 4
+    coverage[175:350, :] = 5
+    coverage[350:525, :] = 6
+    coverage[525:700, :] = 7
+    coverage[360:376, 300:316] = 18  # ~256 sky px — just above the 200 floor
+    band_off = {4: 0.0, 5: 1.2, 6: 2.6, 7: 4.2, 18: 3.0}
+    base, sig = 100.0, 1.0
+    rgb = np.zeros((h, w, 3), dtype=np.float32)
+    for lvl, off in band_off.items():
+        m = coverage == lvl
+        for c in range(3):
+            rgb[..., c][m] = base + off + rng.normal(0, sig, size=int(m.sum()))
+
+    out = level_by_coverage(rgb.copy(), coverage)
+
+    def band_median(res, lvl):
+        return float(np.median(res[..., 1][coverage == lvl]))
+
+    dense_levels = (4, 5, 6, 7)
+    dense_mean = float(np.mean([band_median(out, lvl) for lvl in dense_levels]))
+    overlap_med = band_median(out, 18)
+    # The overlap level's leveled sky must land near the dense levels' sky (all ~0),
+    # not be driven tens of ADU away by an unbounded extrapolation. Before the fix
+    # this seam is ~28 ADU; the clamp holds it to the measured per-level spread.
+    assert abs(overlap_med - dense_mean) < 5.0, (
+        f"overlap coverage level leveled to {overlap_med:.2f} vs dense sky "
+        f"{dense_mean:.2f} — a {overlap_med - dense_mean:.1f} ADU seam"
+    )
+
+
 def test_uncovered_region_is_left_alone():
     """coverage == 0 pixels (uncovered canvas) must not be touched."""
     rng = np.random.default_rng(1)

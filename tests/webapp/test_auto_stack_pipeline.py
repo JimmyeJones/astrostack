@@ -126,6 +126,57 @@ def test_auto_stack_process_crash_marker_prevents_reloop(solved_library):
         lib.close()
 
 
+def test_auto_stack_clears_marker_when_cancelled(solved_library, monkeypatch):
+    # A user cancel mid-stack is a survivable, non-crash outcome: run_stack returns
+    # cancelled=True with no run recorded and raises nothing, so it never reaches
+    # the except handler. The pre-stack crash-loop marker must still be cleared —
+    # otherwise the cancelled target is stranded (skipped on every future scan until
+    # brand-new frames arrive) — and a cancelled stack must not be reported as
+    # stacked. (Contrast the process-crash case, which keeps its marker.)
+    calls: list[str] = []
+
+    def run_pipeline():
+        lib = Library.open_or_create(solved_library / "library")
+        try:
+            job = Job(kind="pipeline")
+
+            def fake_run_stack(proj, opts, *, progress=None, cancel=None,
+                               memory_budget_gb=None, app_version=None):  # noqa: ANN001
+                calls.append(getattr(proj, "name", "?"))
+                job._cancel.set()  # the user cancels while this target is stacking
+                return SimpleNamespace(
+                    output_dir="/tmp/x", run_id=None, n_frames_used=0,
+                    canvas_shape=(1, 1, 3), cancelled=True, errors=[],
+                    excluded_frames=[],
+                )
+
+            monkeypatch.setattr("seestack.stack.stacker.run_stack", fake_run_stack)
+            return pipeline._pipeline_body(
+                _settings(solved_library), _FakeJM(), job, root=None
+            )
+        finally:
+            lib.close()
+
+    summary = run_pipeline()
+    assert len(calls) == 1                  # cancel breaks the loop after one target
+    assert summary["auto_stacked"] == []    # a cancelled stack isn't "stacked"
+
+    # No target may be left carrying the pre-stack crash-loop marker after a cancel:
+    # before the fix the one attempted target kept its marker and was stranded.
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        markers = []
+        for entry in lib.list_targets():
+            proj = lib.open_target(entry.safe_name)
+            try:
+                markers.append(proj.get_meta(pipeline.AUTO_STACK_ATTEMPT_META_KEY))
+            finally:
+                proj.close()
+    finally:
+        lib.close()
+    assert all(m is None for m in markers)
+
+
 def test_auto_stack_retries_after_a_recoverable_failure(solved_library, monkeypatch):
     # A *recoverable* exception (transient I/O off a flapping mount, a momentary
     # lock) is caught — the process survives — so the pre-stack marker must be
