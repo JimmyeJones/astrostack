@@ -218,6 +218,20 @@ class JobManager:
         # kill the worker and silently halt *all* job processing until a restart.
         # Swallow like the sibling DB helpers (``_evict_old`` / ``clear_history``).
         import json
+        # Serialise the result *before* the DB write and guard it separately: a
+        # non-JSON-serialisable result field (a stray numpy scalar / Path / set
+        # from some future job body) raises TypeError/ValueError, which — inside
+        # the DB try that only caught sqlite3.Error — would propagate out of this
+        # method in the worker's finally and kill the single worker, exactly the
+        # silent-halt the docstring above promises to prevent. The row is still
+        # worth persisting for its state/error, so on a serialisation failure we
+        # drop just the result and keep the row.
+        try:
+            result_json = json.dumps(job.result) if job.result is not None else None
+        except (TypeError, ValueError) as exc:
+            log.warning(
+                "job result not JSON-serialisable for %s (%s): %s", job.id, job.kind, exc)
+            result_json = None
         try:
             with self._connect() as conn:
                 conn.execute(
@@ -237,7 +251,7 @@ class JobManager:
                         job.id, job.kind, job.target, job.state, job.phase, job.done,
                         job.total, job.detail, job.created_utc, job.started_utc,
                         job.finished_utc, job.error, job.error_kind,
-                        json.dumps(job.result) if job.result is not None else None,
+                        result_json,
                     ),
                 )
         except sqlite3.Error as exc:  # noqa: BLE001 — persistence is best-effort
@@ -367,15 +381,23 @@ class JobManager:
             try:
                 result = fn(job)
                 completed = result or job.result
-                if job.cancel_requested() and not completed:
-                    # Cancel was requested and the job honored it — it aborted
-                    # without producing a result. But a job that isn't
-                    # cancel-aware runs to completion and returns its result
-                    # even after cancel is pressed; in that case the work is
-                    # already done, so keep the result and mark it done rather
-                    # than discarding a finished stack and making the user redo
-                    # it.
+                # A cancel-aware job that honored the cancel produced no finished
+                # work, and must be marked 'cancelled' — it can signal that two
+                # ways: (1) by returning nothing (`not completed`), or (2) by
+                # returning an explicit cancellation sentinel. `run_stack` returns
+                # a StackResult(cancelled=True) with no output on cancel, which
+                # `_stack_target` surfaces as a top-level `{"cancelled": True,
+                # "run_id": None, ...}` — a *truthy* dict, so `not completed`
+                # alone would misclassify that cancelled stack as a successful
+                # 'done' run with no openable output. But a job that isn't
+                # cancel-aware runs to completion and returns its (non-cancelled)
+                # result even after a late cancel; that work is already done, so
+                # keep the result and mark it done rather than making the user
+                # redo a finished stack.
+                engine_cancelled = isinstance(result, dict) and result.get("cancelled") is True
+                if job.cancel_requested() and (not completed or engine_cancelled):
                     job.state = "cancelled"
+                    job.result = result or job.result
                 else:
                     job.state = "done"
                     job.result = result or job.result

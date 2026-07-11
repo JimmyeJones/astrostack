@@ -2979,6 +2979,47 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.109.12** — Job-worker robustness: `_persist` no longer risks killing the single worker on a
+  non-serialisable result (Builder 2026-07-11; latent hardening flagged independently by two webapp audits + a
+  prior v0.108.x note). `webapp/jobs.py::_persist` ran `json.dumps(job.result)` **inside** a `try` that only
+  caught `sqlite3.Error`, so a future job body returning a non-JSON-serialisable field (a stray `numpy` scalar /
+  `Path` / `set`) would raise `TypeError` past the guard, propagate out of `_persist` in the worker's `finally`,
+  and **kill the single `job-worker` thread — silently halting all job processing until restart** — the exact
+  failure the method's own docstring claims to prevent. No current job body triggers it (all return JSON-native
+  results, so not a live bug), but the worker is a single point of failure, so the invariant is worth making
+  real. Fix: serialise the result *before* the DB write and guard it separately, dropping just the result (and
+  logging) on a serialisation failure while still persisting the row's state/error. Additive, no behaviour change
+  on the live path. Regression `tests/webapp/test_job_cancel.py::test_non_serializable_result_does_not_kill_worker`
+  (a job returning `np.int64` must stay `done` **and** a subsequently-submitted job must still run — fails before
+  / passes after).
+- **v0.109.11** — Job-state correctness bug (Builder 2026-07-11; found by an adversarial webapp-orchestration
+  audit): a **cancelled interactive stack was reported as "done"** on the Jobs page instead of "cancelled". When
+  the user cancels a running stack from the Stack form, `run_stack` honors the cancel and returns a
+  `StackResult(cancelled=True)` with **no output** (empty `fits_path`, `run_id=None`, nothing written to
+  disk/history), which `_stack_target` surfaces as a top-level `{"cancelled": True, "run_id": None, …}`. In the
+  `JobManager` worker loop (`webapp/jobs.py`) the cancel test was `if job.cancel_requested() and not completed`,
+  but `completed = result or job.result` is **truthy** for that sentinel dict — so the honored-cancel path was
+  skipped and the job fell through to `state = "done"`, showing the user a "successful" stack with `run_id: None`
+  and no openable output. Fixed by also treating an explicit top-level `cancelled is True` sentinel as a
+  cancellation (`engine_cancelled`), while preserving the two existing semantics (a non-cancel-aware job that
+  returns a full, non-cancelled result after a late cancel stays "done"; a job that returns nothing stays
+  "cancelled"). Only the plain `submit_stack` / `reprocess_all` returns carry a top-level `cancelled` key, so
+  `process_target` and the other chains are unaffected. Additive, no API/schema/default change. Regression
+  `tests/webapp/test_job_cancel.py::test_cancel_sentinel_result_marks_cancelled` (fails before / passes after);
+  the two pre-existing cancel-semantics tests still pass.
+- **v0.109.10** — QC-engine correctness hardening (PRIORITY: stacking/QC-engine data-integrity; Builder
+  2026-07-11; found by an adversarial `qc/*` audit). Two defects in `seestack/qc/metrics.py`, each fixed against
+  its own documented contract and regression-tested. (1) `green_channel` summed the two Bayer-green sub-planes in
+  the **input dtype before** the `0.5 *` float promotion, so a raw 16-bit mosaic (Seestar native — and the
+  function's documented input) wrapped bright green pixels modulo 2**16 (60000+60000 → 27232), silently
+  corrupting exactly the bright stars QC measures; now promotes to float32 before the add. Latent today (the sole
+  pipeline caller feeds float32 via `load_seestar_raw`), but a real data-integrity trap in a public, documented
+  API. (2) `median_eccentricity` didn't drop non-finite roundness before the median, so one NaN source turned the
+  whole frame's eccentricity into NaN — contrary to the module's "NaN-safe … ecc" promise and unlike its
+  `median_fwhm`/`median_star_flux` siblings; now filters `np.isfinite` and returns `None` when nothing survives.
+  Both additive, no behaviour change on the live float32 path, upgrade-safe. Regressions
+  `test_metrics.py::test_green_channel_no_uint16_overflow` and `::test_median_eccentricity_is_nan_safe` (both fail
+  before / pass after).
 - **v0.109.9** — Friendliness / UX bug (PRIORITY 3; Builder 2026-07-11; found by the frontend non-editor route
   audit): the Tonight "Start something new" object-type filter could show a contradictory empty table. When the
   picked bucket (e.g. "Nebula") was no longer present after the data changed (a different night via the date
