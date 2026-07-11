@@ -228,6 +228,29 @@ manufacturing) — the frontend editor, webapp orchestration/upgrade-safety, and
 consistent with the mature audit history. **Next rotation** (not re-covered this run): `qc/*` + `solve/*` from a fresh
 angle, and the `io/scanner.py`/`io/ingest.py`/`io/merge.py` ingest path (last deep-traced by the Scout 2026-07-11)._
 
+_Builder audit log 2026-07-11 (baseline green: 1100 passed / 2 skipped): with both open Bugs entries REAL-data-gated
+(dead SExtractor skew guard; sky-atlas WCS rotation sign) and the Ideas backlog shipped-or-gated, ran **three parallel
+adversarial audits** of exactly the paths the prior note flagged as least-recently-covered — each required to *reproduce*
+any suspected defect before filing: (1) the **io/ingest path** (`io/{scanner,ingest,merge,fits_loader,project,library}.py`),
+(2) **qc + solve** (`qc/{metrics,grading,runner,streaks}.py`, `solve/{astap,runner}.py`), and (3) the **stacker combine
+path** (`stack/{stacker,weighting,photometric,reference,output,accumulator}.py`, `calibrate/apply.py`). **One genuine
+data-integrity bug found, reproduced, fixed, and shipped this run — v0.109.13** (`merge_projects` deduped on the raw
+`source_path` string, so the same physical frame merged under a symlinked/relative-vs-absolute path respelling was
+double-added → double-weighted in the stack; the v0.107.8 ingest realpath-canonicalization fix was never propagated to
+the sibling merge path — see Bugs → fixed). **The other two audits traced clean, with runnable reproductions:** qc/solve
+— grading directions correct across 400 randomized populations (no good frame flagged, no bad frame missed), MAD→meanAD
+fallback + `MAX_REJECT_FRACTION` rail sound, Bayer-green extraction/float32-pre-add/top-k-flux all correct, hint
+deg→hours/spd conversion unit-correct, solve-success gated on returncode so a stale `.wcs` sidecar can't falsely mark a
+solve, streak reconcile boundary right (`≤50%` doesn't fire; only `auto:streak` cleared); stacker — NaN=coverage held
+(no partial-NaN leak, gaps stay NaN not zero), the apparent "κ-σ keeps a lone spike at n=8" is the *documented*
+`(n−1)/√n < κ` limit that `min_max_reject` exists to cover (verified it rejects at n=12 and min/max reject removes it at
+n=8), `add`/`add_window` sibling accumulators apply weight/count identically, every weighting/photometric divisor is
+guarded, photometric scale applied identically in both κ-σ passes, calibration subtracts dark XOR bias (no
+double-subtraction) and only exposure-scales a dark when a bias is present, RA-wrap/pole and uint16-output all correct,
+and the memory guard bounds in-flight frames. No other verified bug filed (per §2, no manufacturing). **Next rotation**
+(not re-covered this run): the `bg/*` gradient/coverage paths and `edit/pipeline.py`/`recipe.py` op-ordering from a fresh
+angle, and the frontend editor route UX (needs a `vitest`/`tsc` dogfood, distinct from these Python engine audits)._
+
 - ~~**`merge_projects` dedups on the *raw* `source_path` string — the same physical frame merged from two
   projects under divergent path spellings (a symlinked NAS mount, a relative-vs-absolute scan root) is added
   twice → double-weighted in the stack. The v0.107.8 ingest canonicalization fix was never propagated to this
