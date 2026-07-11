@@ -2957,6 +2957,21 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.109.5** — Security / invariant hardening (Builder 2026-07-11; found by an adversarial audit of the
+  webapp schema-adaptation seam, which otherwise traced clean): a calibration master **path** placed in the
+  global `default_stack_options` (via a raw settings PUT body or an imported backup) leaked straight into
+  `StackOptions` on every default-based stack — bypassing the "calibration paths are resolved server-side,
+  never from raw client input" invariant that `trigger_stack` (pops `*_path`, resolves master *ids*) and
+  `put_stack_defaults` (form-key filter) already honour. `default_stack_options` was the one ingress with no
+  guard. Fixed at both the ingress and the consumption point: a new `schemas.strip_non_form_keys` drops
+  `NON_FORM_KEYS` (`dark_path`/`flat_path`/`flat_dark_path`/`bias_path`) from a persisted
+  `default_stack_options` on `PUT`/`POST /import` (new `_sanitize_patch`), and `pipeline._stack_target` strips
+  them from the global-defaults base so even an already-persisted config can't apply a leaked path (legitimate
+  server-resolved paths still arrive later via explicit run options / auto-bind, after the stripped base).
+  Additive, no config/schema/API-shape change, upgrade-safe (an old config with such a key is neutralised, not
+  rejected). Regression tests: `test_auto_stack_defaults.py::test_global_default_calibration_paths_never_reach_the_stacker`
+  (a config carrying the four paths → `run_stack` sees `dark_path`/… `None`, `sigma_kappa` kept; fails before /
+  passes after) and `test_api.py::test_settings_put_strips_calibration_paths_from_default_stack_options`.
 - **v0.109.2** — Friendliness / consistency (PRIORITY 3; Builder 2026-07-11): the History card's **Adjust**
   sliders now open on a data-driven asinh stretch/black anchored to the run's own sky (new read-only
   `GET …/stack-runs/{id}/render-suggestion` → `edit/stretch.suggest_asinh_stretch` via a shared

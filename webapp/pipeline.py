@@ -20,7 +20,11 @@ from seestack.io.scanner import run_qc_and_solve, scan_and_organize
 from webapp import __version__ as APP_VERSION
 from webapp.config import Settings
 from webapp.jobs import Job, JobManager
-from webapp.schemas import STACK_DEFAULTS_META_KEY, coerce_stack_options
+from webapp.schemas import (
+    STACK_DEFAULTS_META_KEY,
+    coerce_stack_options,
+    strip_non_form_keys,
+)
 
 if TYPE_CHECKING:
     from seestack.io.project import StackRunRow
@@ -1298,7 +1302,11 @@ def _stack_target(
     #   global settings.default_stack_options
     #     → per-target "Save as defaults" (used by auto-stack)
     #       → explicit options passed for this run (manual stack from the form)
-    opts_dict = dict(settings.default_stack_options)
+    # Never let a calibration master *path* in the global defaults reach the
+    # stacker: those are resolved server-side from master ids and applied later
+    # (explicit run options / auto-bind), so a raw path in default_stack_options
+    # would only be a leaked client value. Strip the base defensively.
+    opts_dict = strip_non_form_keys(settings.default_stack_options)
     proj = lib.open_target(safe)
     try:
         if options is None:

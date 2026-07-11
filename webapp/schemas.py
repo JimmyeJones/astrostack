@@ -393,6 +393,19 @@ def describable_keys() -> set[str]:
     return {d["key"] for d in _DESCRIPTORS}
 
 
+def strip_non_form_keys(data: dict[str, Any]) -> dict[str, Any]:
+    """Return *data* without any ``NON_FORM_KEYS`` (calibration master paths).
+
+    Those paths are resolved server-side from master *ids* and must never
+    originate from raw client input (a settings PUT body, a persisted global
+    ``default_stack_options``). Callers that seed a StackOptions dict from a
+    source that could carry client-supplied paths strip them with this first;
+    legitimate server-resolved paths (from ``trigger_stack`` / auto-bind) are
+    applied downstream, after the stripped base.
+    """
+    return {k: v for k, v in data.items() if k not in NON_FORM_KEYS}
+
+
 def coerce_stack_options(data: dict[str, Any]) -> StackOptions:
     """Build a StackOptions from a (possibly partial) dict, ignoring unknowns."""
     valid = {f.name for f in dataclasses.fields(StackOptions)}

@@ -364,6 +364,20 @@ def test_settings_roundtrip(client):
     assert body["watch_quiet_period_s"] == 45
 
 
+def test_settings_put_strips_calibration_paths_from_default_stack_options(client):
+    # Calibration master paths are resolved server-side from master ids and must
+    # never be persisted from raw client input — a settings PUT drops them from
+    # default_stack_options (keeping legitimate form fields).
+    r = client.put("/api/settings", json={"default_stack_options": {
+        "dark_path": "/etc/shadow", "flat_path": "/evil.fits",
+        "bias_path": "/x", "flat_dark_path": "/y", "sigma_kappa": 2.5}})
+    assert r.status_code == 200
+    stored = client.get("/api/settings").json()["default_stack_options"]
+    assert stored.get("sigma_kappa") == 2.5
+    for k in ("dark_path", "flat_path", "bias_path", "flat_dark_path"):
+        assert k not in stored, f"{k} should have been stripped, got {stored}"
+
+
 def test_settings_rejects_out_of_bounds_values(client):
     # A zero timeout would make every ASTAP solve fail instantly; a zero
     # quiet-period would defeat the half-written-file guard.
