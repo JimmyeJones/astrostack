@@ -194,6 +194,40 @@ re-covered this run): the frontend editor route UX (React/TS — needs a `vitest
 engine audits), and `qc/*` + `solve/*` (last deep-traced 2026-07-11 by the qc/solve Builder run) if a fresh angle
 surfaces._
 
+_Builder audit log 2026-07-11 (baseline green: 1100 passed / 2 skipped): with both open Bugs entries REAL-data-gated
+(dead SExtractor skew guard; sky-atlas WCS rotation sign) and the Ideas backlog shipped-or-gated (real-data /
+owner-sign-off / explicit "only if a run is already in that file" tidiness — the `coverage_min/max` ndim guard, the
+stray `scale_dark_to_light` flag, the bulk "Set all suggested" denoise nicety), spent the run on the §2 big-picture
+audit rather than manufacturing churn. Confirmed the tree is clean of shippable-blind work first (no non-GPU
+skipped/xfail tests; the only engine/webapp TODO is in the deprecated Qt GUI). Ran **three parallel adversarial
+audits**, covering the two paths the prior note flagged as least-recently-covered plus a fresh end-to-end dogfood:
+(1) the **frontend editor route** (React/TS — `Editor.tsx` + all `components/editor/*`/`lib/*` helpers: the 7-mode
+compare state machine, query `enabled` gates + key/`queryFn` input parity, blob-URL lifecycle, undo coalescing, trim
+save/restore, look-compare adopt-vs-preview reframing) — the rotation item explicitly still open since 2026-07-11;
+(2) the **webapp orchestration + persistence + upgrade-safety** layer (`webapp/{jobs,watcher,config,pipeline}.py`,
+`io/project.py::_migrate_schema`) re-traced from **hand-built v1 *and* v2 schema DBs**; (3) an **end-to-end
+image-quality dogfood** of the real `run_stack → auto_recipe → _render_recipe_fullres`/`apply_recipe` path on
+realistic synthetic OSC data + four break-it cases. **All three traced clean, with runnable reproductions.** Editor:
+mutual exclusion of the 7 compare modes holds in every direction (the one asymmetric `Compare` handler is covered by
+its own `disabled` guard), `tsc --noEmit` clean, all 62 editor tests pass, all six blob queries hold `gcTime:0` +
+per-`data` revoke (no accumulating leak). Webapp: the single worker's `_run` cannot die on any DB failure (result
+serialization guarded before the write, every DB touch swallows `sqlite3.Error`), the watcher's three drop-avoidance
+paths (declined-while-busy / callback-raises / accept-then-fail-stranding) all hold, `_load_resilient` drops only the
+offending field and converges, and a hand-built **v1** (frames-only, no `stack_runs`) and **v2** DB both migrate
+additively to v9 in place with rows preserved (no reset/drop). Dogfood: the export sky is neutral (per-channel median
+spread ~0.011), fully finite (**0** partial-NaN leaks into covered pixels, NaN holes preserved through `level_coverage`
+on a gapped mosaic), preview↔export sky-grey Δ ≤0.0005/channel, white stars stay neutral (spread 0.0000) while real
+nebula colour is kept, and Auto stays sane on a strong gradient / injected hot pixel (result byte-identical to base —
+κ-σ + STF re-anchoring self-correct) / near-flat low-signal. **Two non-defects recorded so a future run doesn't chase
+them:** (a) `background.final_gradient`'s default `box_size=256` removes only ~80–85% of a *strong* linear gradient
+(vs 96–99% at box=64), leaving a faint corner residual — but shrinking the box guts extended nebulosity (box=64 keeps
+only ~35% of a nebula core, wings gone/negative), so the default sits at a defensible operating point, not a bug
+(consistent with the existing Infra/`final_gradient` notes); (b) the slight background magenta on a truly-neutral field
+is the already-filed, real-data-gated SCNR one-sided-clip observation, not new. No new verified bug filed (per §2, no
+manufacturing) — the frontend editor, webapp orchestration/upgrade-safety, and the real image-quality path all held,
+consistent with the mature audit history. **Next rotation** (not re-covered this run): `qc/*` + `solve/*` from a fresh
+angle, and the `io/scanner.py`/`io/ingest.py`/`io/merge.py` ingest path (last deep-traced by the Scout 2026-07-11)._
+
 - ~~**Editor: turning on a *per-op* compare ("Without this op" / "Split this op") doesn't exit an active
   "Compare a look" split — the "Look:" button lingers in a stale active state and the look split reappears
   when the per-op compare is dismissed.**~~ — **FIXED v0.109.4** (Builder, 2026-07-11; traced + reproduced +
