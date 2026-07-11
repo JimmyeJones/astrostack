@@ -2105,9 +2105,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   *and* the matched-exposure branch means the scale factor is ~1, and `_effective_dark` no-ops without a bias
   anyway), so it's a tidiness item, not a bug. If pursued: clear a stray `scale_dark_to_light` when the
   auto-bind branch didn't itself set a bias-scaled dark. Additive, testable in isolation.
-- **When Auto's colour calibration silently gives up (too few stars), fall back to a *background-neutral*
-  white balance instead of leaving a colour cast.** (M, image-quality/autonomy — PRIORITY 4) *(Scout-filed
-  2026-07-11, from the colour/post audit.)* `post/color_cal.py::calibrate_color` returns `mode_used="none"`
+- ~~**When Auto's colour calibration silently gives up (too few stars), fall back to a *background-neutral*
+  white balance instead of leaving a colour cast.**~~ — **SHIPPED v0.107.9** (Builder 2026-07-11; implemented +
+  regression-tested). `post/color_cal.py::calibrate_color`'s two give-up paths (no usable stars detected; too few
+  stars with positive flux in every channel) now fall through to a new starless `_solve_background_neutral(rgb)`
+  instead of returning the input unchanged: it measures the robust per-channel **sky-background** median (over the
+  finite pixels at/below the luminance median — the same sky-population trick the STF stretch and the editor's
+  sky-cast readout use, so stars/target don't pull it) and scales R and B so their sky medians match G's, leaving
+  G=1.0 as the reference exactly like the star solvers. Clamped to the same `[_MIN_CAL_SCALE, _MAX_CAL_SCALE]`
+  range, NaN-aware (uncovered mosaic pixels excluded and left NaN), reports an honest `mode_used="background_neutral"`
+  with `n_stars_used=0` and the sky-pixel sample size + skipped-star reason in the note. Falls through to a genuine
+  no-op (`mode_used="none"`) only when the sky itself can't be measured (fewer than `_MIN_SKY_PIXELS=256` finite
+  pixels). This is the default one-click Auto path (`edit/ops/tone.py::_color_calibrate`, gray_star), so a
+  sparse-star OSC field (a big diffuse galaxy/nebula on a thin star field, a short session, a small crop) now ships
+  a neutralised background instead of its raw green/magenta cast — the north-star "it just worked". Strictly
+  additive/off-nothing (only the previously do-nothing path changes; enough-stars fields are byte-for-byte
+  unchanged), no schema/config/API change. Regression tests in `tests/test_color_cal.py`
+  (`test_falls_back_to_background_neutral_when_too_few_stars`, `_removes_a_starless_cast`, `_is_nan_aware_on_a_mosaic`,
+  `_gives_up_cleanly_on_a_tiny_canvas`) + updated the mosaic-canvas assertion. Follow-up left in Ideas: surface the
+  outcome (the sibling item below).
+  _(original write-up kept for provenance.)_ `post/color_cal.py::calibrate_color` returns `mode_used="none"`
   and the **input unchanged** whenever it can't find `min_stars` (default 20) stars with positive flux in
   every channel — common on exactly the sparse-star OSC targets a beginner shoots (a big diffuse galaxy/nebula
   on a thin star field, a short session, a small crop). The one-click Auto recipe then leaves that stack with
@@ -2574,6 +2591,12 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.107.9** — Autonomy / image-quality (PRIORITY 2/4; Builder 2026-07-11): when Auto's colour calibration
+  can't run (too few stars — the common sparse-star OSC case), `post/color_cal.py` now falls back to a starless
+  **background-neutral** white balance (equalise the per-channel sky medians so the background is neutral grey)
+  instead of shipping the raw green/magenta cast unchanged. NaN-aware, clamped, `mode_used="background_neutral"`;
+  genuine `none` only when the sky can't be measured. Additive/off-nothing (only the do-nothing path changes).
+  Regression tests in `tests/test_color_cal.py`.
 - **v0.107.5** — Autonomy (PRIORITY 2; found by the same 2026-07-11 auto-stack audit): finish the v0.107.1
   auto-bind robustness by extending the "iterate candidates when the top pick fails its gate" logic from the
   **dark** path to the **flat** and **bias** paths, which still keyed off only `recommend_masters`' single

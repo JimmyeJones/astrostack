@@ -67,13 +67,77 @@ def test_disabled_is_passthrough():
     assert result.mode_used == "none"
 
 
-def test_falls_back_when_too_few_stars():
-    rgb = np.full((64, 64, 3), 100.0, dtype=np.float32)  # no stars
-    _, result = calibrate_color(rgb, options=ColorCalibrationOptions(
+def test_falls_back_to_background_neutral_when_too_few_stars():
+    """When gray-star can't run (no usable stars), the starless fallback still
+    runs a background-neutral white balance. On an already-neutral flat field it
+    resolves to a no-op (scales ≈ 1) — but reports it honestly, and the pixels
+    are unchanged."""
+    rgb = np.full((64, 64, 3), 100.0, dtype=np.float32)  # no stars, no cast
+    out, result = calibrate_color(rgb, options=ColorCalibrationOptions(
+        enabled=True, mode="gray_star", min_stars=10,
+    ))
+    assert result.mode_used == "background_neutral"
+    sr, sg, sb = result.scale_rgb
+    assert sg == 1.0
+    assert abs(sr - 1.0) < 1e-6 and abs(sb - 1.0) < 1e-6
+    np.testing.assert_allclose(out, rgb, rtol=0, atol=1e-4)
+    # The reason the star path was skipped is carried in the note for provenance.
+    assert "stars found" in result.notes
+
+
+def test_background_neutral_fallback_removes_a_starless_cast():
+    """A sparse-star field with a real background colour cast (the sparse-star
+    OSC case: a diffuse galaxy/nebula on a thin star field) is now
+    background-neutralised instead of shipping the raw cast. Fails before the
+    fallback existed (would be mode 'none', cast left in)."""
+    rng = np.random.default_rng(11)
+    # Neutral-grey sky at 100 ADU, then a green cast (G lifted, R/B suppressed)
+    # and per-channel noise — no stars bright enough to detect.
+    rgb = rng.normal(loc=100.0, scale=1.5, size=(200, 200, 3)).astype(np.float32)
+    rgb[..., 0] *= 0.80   # red suppressed
+    rgb[..., 1] *= 1.30   # green cast
+    rgb[..., 2] *= 0.85   # blue suppressed
+    out, result = calibrate_color(rgb, options=ColorCalibrationOptions(
+        enabled=True, mode="gray_star", min_stars=20,
+    ))
+    assert result.mode_used == "background_neutral"
+    # After the balance the sky-background medians must be near-neutral.
+    def _sky_median(img, c):
+        luma = 0.299 * img[..., 0] + 0.587 * img[..., 1] + 0.114 * img[..., 2]
+        sky = luma <= np.median(luma)
+        return float(np.median(img[..., c][sky]))
+    mr, mg, mb = (_sky_median(out, c) for c in range(3))
+    assert abs(mr - mg) / mg < 0.02
+    assert abs(mb - mg) / mg < 0.02
+
+
+def test_background_neutral_fallback_is_nan_aware_on_a_mosaic():
+    """Uncovered (NaN) mosaic pixels must be ignored by the sky measurement and
+    left NaN by the balance."""
+    rng = np.random.default_rng(12)
+    rgb = rng.normal(loc=100.0, scale=1.5, size=(120, 200, 3)).astype(np.float32)
+    rgb[..., 0] *= 0.80
+    rgb[..., 1] *= 1.30
+    rgb[:, :110, :] = np.nan  # large uncovered region
+    out, result = calibrate_color(rgb, options=ColorCalibrationOptions(
+        enabled=True, mode="gray_star", min_stars=20,
+    ))
+    assert result.mode_used == "background_neutral"
+    assert np.isnan(out[0, 0, 0])          # gap stays NaN
+    covered = np.isfinite(out[..., 0])
+    assert np.isfinite(out[..., 0][covered]).all()
+
+
+def test_background_neutral_gives_up_cleanly_on_a_tiny_canvas():
+    """Below the sky-pixel floor the fallback declines rather than balancing off
+    noise — the genuine 'none' path is preserved."""
+    rgb = np.full((8, 8, 3), 100.0, dtype=np.float32)  # 64 px < _MIN_SKY_PIXELS
+    out, result = calibrate_color(rgb, options=ColorCalibrationOptions(
         enabled=True, mode="gray_star", min_stars=10,
     ))
     assert result.mode_used == "none"
     assert result.scale_rgb == (1.0, 1.0, 1.0)
+    np.testing.assert_array_equal(out, rgb)
 
 
 def test_apply_scale_handles_nan():
