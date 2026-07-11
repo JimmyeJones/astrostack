@@ -152,25 +152,23 @@ paths and `edit/pipeline.py`/`edit/recipe.py` op-ordering, which this run didn't
   note flags it, and a near-neutral field is untouched — fails before / passes after). Additive, no
   schema/config/API change; found by the colour/post adversarial audit rotation.
 
-- **Ingest dedup keys on the *raw* source-path string, never canonicalized — the same physical frame reached
-  via a different path spelling is ingested twice → double-weighted in the stack.** *(Traced, Scout audit
-  2026-07-11; med confidence — the wrong-result outcome is conditional on non-identical path spelling. NOT a
-  blind Builder fix — see the upgrade trap below.)* `io/ingest.py:98-103` builds the dedup map as
-  `{f.source_path: f}` and looks up `str(Path(src))` verbatim; `io/scanner.py:112` does `root = Path(root)`
-  with no `.resolve()`. The module contract says frames are "matched by their **absolute** source path"
-  (`scanner.py:108-110`, `ingest.py:92`), but nothing resolves them — so any change in spelling defeats dedup
-  on re-scan: a NAS share remounted at a different mountpoint (`/mnt/nas` → `/mnt/nas2` — exactly the
-  NAS-copy workflow this code targets), a symlinked subdirectory that makes the recursive `find_fits_files`
-  glob yield two paths to one file within a single scan, or scanning a relative root then re-scanning from a
-  different cwd. The frame's row misses `existing.get(...)`, `add_frame` runs again, and the stacker weights
-  that light twice. In the normal webapp path the config dirs are absolute so this is dormant; the remount /
-  symlink cases are the real triggers. **Why NOT a blind fix (upgrade trap):** existing libraries already
-  store non-resolved `source_path` values, so naively switching dedup to `Path.resolve()` would make *every*
-  already-ingested frame compare unequal to its stored row on the next scan and **re-ingest the entire
-  library** (doubling all data) — the exact data corruption we're trying to prevent. A correct fix must
-  either match on a resolved key *and* backfill/normalize existing `source_path` rows in an additive
-  migration, or keep the stored path and add a resolved-path index; test the upgrade from an old DB. (S code
-  / M migration+validation, correctness/data-integrity)
+- ~~**Ingest dedup keys on the *raw* source-path string, never canonicalized — the same physical frame reached
+  via a different path spelling is ingested twice → double-weighted in the stack.**~~ — **FIXED v0.107.8**
+  (Builder, 2026-07-11; traced + reproduced + regression-tested). `io/ingest.py` built the dedup map as
+  `{f.source_path: f}` and looked up `str(Path(src))` verbatim, so any change of spelling for one physical file
+  defeated dedup: a symlinked subdirectory that makes the recursive `find_fits_files` glob yield two paths to
+  one file within a single scan, or scanning a relative root then re-scanning from a different cwd. The row
+  missed `existing.get(...)`, `add_frame` ran again, and the stacker weighted that light twice. Fixed by keying
+  dedup on a canonical `_dedup_key(path) = os.path.realpath(...)` applied **symmetrically to both the stored and
+  the incoming path at lookup time** — the stored `source_path` is never rewritten, so an existing library
+  (whose rows hold raw, non-normalised paths) re-scans clean (`realpath` is idempotent for an unchanged file)
+  instead of the mass re-ingest a naïve one-sided `Path.resolve()` would have triggered. Two genuinely different
+  files can never collide (distinct realpaths), so it can only ever *prevent* a double-ingest, never wrongly
+  skip a frame. The remount-to-a-different-mountpoint case (genuinely different device paths for the same data)
+  is out of scope for path normalisation and left as-is. Regression tests `tests/test_ingest.py::
+  test_ingest_dedupes_a_symlinked_path_within_one_scan` and `_across_a_relative_vs_absolute_respell` (the latter
+  doubles as the upgrade-safety check: stored path untouched, old library re-scans clean) — both fail before /
+  pass after. Additive, no schema/config/API change; found by the Scout's ingest/loader audit rotation.
 
 - ~~**`load_seestar_raw` raises an opaque `IndexError` (instead of a clear error, or reading the image) on a
   FITS whose primary HDU carries no data.**~~ — **FIXED v0.107.6** (Builder, 2026-07-11; traced +

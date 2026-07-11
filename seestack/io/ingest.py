@@ -18,6 +18,7 @@ Yields per-file results so a Qt model can update the frame table live.
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
@@ -59,6 +60,28 @@ def find_fits_files(root: str | Path, *, recursive: bool = True) -> list[Path]:
     return files
 
 
+def _dedup_key(path: str | Path) -> str:
+    """Canonical key for deciding whether two source paths are the *same frame*.
+
+    Dedup used to key on the raw ``source_path`` string, but the module contract
+    is that frames are matched by their **absolute** path — nothing enforced it.
+    So any change of spelling for one physical file defeated dedup and ingested
+    it twice (→ double-weighted in the stack): a symlinked subdirectory yielding
+    two glob paths to one file within a single scan, or a relative root re-scanned
+    from a different cwd. ``os.path.realpath`` normalises both cases (resolves
+    symlinks + ``..`` and makes relative paths absolute).
+
+    Crucially this is applied **symmetrically** to the stored and the incoming
+    path at lookup time — we do *not* rewrite what's stored — so an already-
+    ingested library re-scans clean (``realpath`` is stable/idempotent for an
+    unchanged file) rather than re-ingesting every frame. Two genuinely different
+    files can never collide (distinct realpaths); at worst an exotic spelling we
+    don't normalise still falls back to the old raw-string behaviour (a possible
+    duplicate), never a wrong skip.
+    """
+    return os.path.realpath(str(path))
+
+
 def _copy_to_stage1(
     project: Project, cache: CacheManager, src: Path, frame_id: int
 ) -> Path | None:
@@ -95,12 +118,15 @@ def ingest_files(
     forever.
     """
     cache.ensure_dirs()
-    existing: dict[str, FrameRow] = {f.source_path: f for f in project.iter_frames()}
+    existing: dict[str, FrameRow] = {
+        _dedup_key(f.source_path): f for f in project.iter_frames()
+    }
 
     for src in sources:
         src = Path(src)
         s_str = str(src)
-        prior = existing.get(s_str)
+        key = _dedup_key(src)
+        prior = existing.get(key)
         if prior is not None:
             # Registered already → skip. But if a NAS blip during an earlier copy
             # left this frame uncached, retry the Stage-1 copy now; otherwise the
@@ -158,7 +184,7 @@ def ingest_files(
 
         row.id = frame_id
         row.cached_path = str(cached) if cached is not None else None
-        existing[s_str] = row
+        existing[key] = row
         yield IngestResult(
             source_path=src, frame_id=frame_id, cached_path=cached, skipped=False
         )
