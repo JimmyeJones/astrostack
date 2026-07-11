@@ -96,6 +96,26 @@ def test_render_with_nan_borders_is_not_blank(tmp_path):
     assert arr.mean() > 1.0       # the blob/sky actually rendered
 
 
+def test_load_stack_rgb_shapes_and_preserves_nan(tmp_path):
+    """The shared loader returns an (H, W, 3) array with the display-space flag
+    and preserves NaN (uncovered) pixels through the striding decimation."""
+    from seestack.render.thumbnail import load_stack_rgb
+
+    h, w = 40, 200
+    chan = np.full((h, w), 0.1, dtype=np.float32)
+    chan[:, :20] = np.nan                       # uncovered strip
+    cube = np.stack([chan, chan * 0.7, chan * 0.5]).astype(np.float32)
+    fp = tmp_path / "m.fits"
+    fits.PrimaryHDU(data=cube).writeto(fp)
+
+    rgb, display_space = load_stack_rgb(fp, max_width=50)
+    assert display_space is False
+    assert rgb.ndim == 3 and rgb.shape[2] == 3
+    assert rgb.shape[1] <= 50                    # decimated to <= max_width
+    assert np.isnan(rgb[:, 0]).all()            # the uncovered strip stayed NaN
+    assert np.isfinite(rgb[:, -1]).all()        # covered pixels are finite
+
+
 def test_render_display_space_fits_is_verbatim(tmp_path):
     """An editor-export FITS is already tone-mapped display space, so render is
     verbatim: the stretch/black sliders don't apply (identical bytes at any
@@ -135,6 +155,62 @@ def test_render_endpoint_returns_png(client, solved_library):
     assert r.status_code == 200
     assert r.headers["content-type"] == "image/png"
     assert r.content[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_render_suggestion_anchors_sliders_to_the_data(client, solved_library):
+    """The History render-suggestion endpoint returns data-driven asinh
+    stretch/black (so opening Adjust matches the STF thumbnail, not a fixed
+    0.5/0.35)."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+
+    r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/render-suggestion")
+    assert r.status_code == 200
+    body = r.json()
+    assert isinstance(body["stretch"], float) and 0.0 <= body["stretch"] <= 1.0
+    assert isinstance(body["black"], float) and 0.0 <= body["black"] <= 1.0
+    assert body["target_bg"] == 0.10
+
+
+def test_render_suggestion_null_for_display_space_run(client, solved_library):
+    """A display-space editor export renders verbatim (sliders are a no-op), so
+    there's nothing to anchor — the suggestion is null and the frontend keeps the
+    fixed defaults."""
+    from seestack.io.library import Library
+    from seestack.io.project import StackRunRow
+    from seestack.stack.output import write_stack_outputs
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        tdir = lib.target_dir(lib.find_target(safe))
+        ramp = np.clip(np.linspace(0.0, 1.0, 64, dtype=np.float32), 0, 1)
+        rgb = np.repeat(np.tile(ramp, (16, 1))[..., None], 3, axis=2)
+        cov = np.ones(rgb.shape[:2], dtype=np.float32)
+        paths = write_stack_outputs(tdir, rgb, cov, wcs_text=None,
+                                    out_basename="edit", already_display=True)
+        proj = lib.open_target(safe)
+        try:
+            run_id = proj.add_stack_run(StackRunRow(
+                id=None, timestamp_utc="2026-05-01T00:00:00Z",
+                output_basename="edit", fits_path=str(paths["fits"]), tiff_path=None,
+                preview_path=None, n_frames_used=1, canvas_h=16, canvas_w=64,
+                coverage_min=1, coverage_max=1, options_json="{}",
+            ))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    body = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/render-suggestion").json()
+    assert body["stretch"] is None and body["black"] is None
+
+
+def test_render_suggestion_404_without_fits(client, solved_library):
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    r = client.get(f"/api/targets/{safe}/stack-runs/99999/render-suggestion")
+    assert r.status_code == 404
 
 
 def test_save_preview_overwrites_file(client, solved_library):

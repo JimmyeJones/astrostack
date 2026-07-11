@@ -1282,9 +1282,27 @@ problems. Dogfood it every big-picture run and fix root causes.
   used on export when the user never adds a stretch (`webapp/pipeline.py:850`), so this changes those exports
   too — verify preview↔export parity and add a before/after regression. Fold in / supersedes the asinh
   robustness bug if taken together. (S–M, editor — PRIORITY 1.)
-- **Consistency: the History-page adjustable stack render still defaults to asinh, while the thumbnail,
-  the editor first-open view, and the one-click Auto all use STF.** *(Idea, Builder-noted 2026-07-11 while
-  shipping v0.109.0 — S, friendliness/consistency, PRIORITY 3.)* `webapp/routers/stack.py::render_stack_run`
+- ~~**Consistency: the History-page adjustable stack render still defaults to asinh, while the thumbnail,
+  the editor first-open view, and the one-click Auto all use STF.**~~ — **SHIPPED v0.109.2** (Builder 2026-07-11;
+  took framing (a) — anchor the sliders, don't flip the surface). The History card's **Adjust** sliders no longer
+  open on the fixed `0.5`/`0.35`: a new read-only endpoint `GET …/stack-runs/{id}/render-suggestion` runs
+  `edit/stretch.py::suggest_asinh_stretch` on the run's own linear FITS (via a shared `render.thumbnail.
+  load_stack_rgb` loader, so it measures the *exact* pixels `render_stack_png` stretches) and returns the
+  data-driven `(stretch, black)`; the History `RunCard` fetches it lazily the first time Adjust is opened and
+  seeds the sliders from it (keeping the STF preview thumbnail on screen until the suggestion resolves, so there's
+  no flash to the wrong default), so the first adjustable look is well-exposed and close to the STF thumbnail
+  instead of jumping brighter/darker. Chose framing (a) over (b) because it keeps the surface's deliberate
+  asinh-with-sliders nature intact (the user still drags Strength/Black, just from a good starting point) rather
+  than a jarring STF→asinh mode-switch on first touch. Falls back to the fixed `0.5`/`0.35` when the suggestion is
+  unavailable (too little dynamic range, older backend, or a display-space export whose sliders are a no-op — the
+  endpoint returns nulls there); Reset re-seeds from the suggestion. Additive, read-only, no config/schema/default/
+  API-shape change (a new endpoint + a nullable payload); `render_stack_png` output is byte-for-byte unchanged (the
+  loader refactor is a pure extraction). Tests: `tests/webapp/test_stack_render.py`
+  (`test_render_suggestion_anchors_sliders_to_the_data`, `_null_for_display_space_run`, `_404_without_fits`,
+  `test_load_stack_rgb_shapes_and_preserves_nan`) + frontend `History.test.tsx` ("anchors the Adjust sliders to
+  the run's own data suggestion" / "falls back to the fixed defaults when there's no useful suggestion").
+  *(Original write-up kept below for provenance.)*
+  `webapp/routers/stack.py::render_stack_run`
   (the History page's live-adjustable preview) tone-maps with a **fixed default asinh** (`_STRETCH_DEFAULT 0.5`,
   `_BLACK_DEFAULT 0.35`); the stored preview thumbnail directly above it (`render.thumbnail.generate_thumbnail`)
   and now the editor's no-recipe view (v0.109.0) both use the adaptive **STF autostretch**, so the same stack can
@@ -2539,6 +2557,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+- **Latent robustness (not a live bug): `stacker.py`'s `coverage_min/max` diagnostic slice lacks its sibling's
+  `ndim==3` guard.** *(Traced, Builder engine audit 2026-07-11.)* At ~L1307 `run_stack` computes
+  `cov_2d = frame_cov if frame_cov is not None else coverage[..., 0]` **without** the `coverage.ndim == 3` guard
+  its sibling at ~L1275 carries. It's safe *today* — the only path that returns `frame_cov=None` (min/max reject)
+  always produces a 3-D `coverage`, so the `[..., 0]` slice is never handed a 2-D array — but it's an asymmetric
+  latent trap: if a future stacking path ever returned `frame_cov=None` alongside a 2-D coverage map, this line
+  would silently take a wrong slice for the `coverage_min`/`coverage_max` provenance (a mis-reported, not
+  corrupt, diagnostic). Harmonise it to match L1275 (add the `coverage.ndim == 3` guard). One-line consistency
+  fix, no behaviour change today; only worth doing if a run is already in `stacker.py`. (S, engine/tidiness.)
+  Found alongside a full re-trace of the accumulator/stacker/mosaic/drizzle/calibrate combine paths, which
+  otherwise came back clean (NaN=coverage, divisor guards, weight accounting, wrap-safe RA, and the pass-1
+  free-before-pass-2 OOM guard all held).
 - ~~**Tidiness: `stretch_suggestion` omits `already_display` from its `EditContext`.**~~ — **SHIPPED v0.109.1**
   (Builder 2026-07-11). `webapp/routers/editor.py::stretch_suggestion` now threads
   `already_display=_run_display_space(run)` into its ctx like every sibling suggestion endpoint, closing the
@@ -2857,6 +2887,15 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.109.2** — Friendliness / consistency (PRIORITY 3; Builder 2026-07-11): the History card's **Adjust**
+  sliders now open on a data-driven asinh stretch/black anchored to the run's own sky (new read-only
+  `GET …/stack-runs/{id}/render-suggestion` → `edit/stretch.suggest_asinh_stretch` via a shared
+  `render.thumbnail.load_stack_rgb` loader; the `RunCard` fetches it lazily on first Adjust and keeps the STF
+  thumbnail on screen until it resolves), so the first adjustable look matches the STF preview thumbnail instead
+  of jumping to a fixed 0.5/0.35. Took framing (a) from the filed idea (anchor the sliders, keep the surface's
+  asinh-with-sliders nature) over (b) (STF zero-state). Falls back to the fixed defaults when there's no useful
+  suggestion or on a display-space export. Additive, read-only, byte-for-byte-unchanged render; tests in
+  `test_stack_render.py` + `History.test.tsx`.
 - **v0.109.1** — Two safe, self-contained hardening fixes (Builder 2026-07-11): (1) **image quality** —
   `calibrate/masters.py::_sigma_clip_mean` now iterates the sigma-clip to convergence over the surviving samples
   (kept set only shrinks; `max_iters=5` cap) instead of a single round, matching DSS/Siril/PixInsight so a mild

@@ -649,3 +649,39 @@ describe("HistoryView provenance", () => {
     expect(screen.queryByText(/·\s*v\d/)).toBeNull();
   });
 });
+
+describe("HistoryView adjustable render", () => {
+  it("anchors the Adjust sliders to the run's own data suggestion", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ has_fits: true, has_preview: true }),
+    ]);
+    const sug = vi.spyOn(client.api, "stackRenderSuggestion").mockResolvedValue({
+      stretch: 0.72, black: 0.28, target_bg: 0.1,
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Adjust" }));
+
+    await waitFor(() => expect(sug).toHaveBeenCalledWith("M_42", 1));
+    // The sliders show the data-driven values, not the fixed 0.50 / 0.35 defaults.
+    await waitFor(() => expect(screen.getByText("0.72")).toBeInTheDocument());
+    expect(screen.getByText("0.28")).toBeInTheDocument();
+  });
+
+  it("falls back to the fixed defaults when there's no useful suggestion", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ has_fits: true, has_preview: true }),
+    ]);
+    vi.spyOn(client.api, "stackRenderSuggestion").mockResolvedValue({
+      stretch: null, black: null,
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Adjust" }));
+
+    await waitFor(() => expect(screen.getByText("0.50")).toBeInTheDocument());
+    expect(screen.getByText("0.35")).toBeInTheDocument();
+  });
+});

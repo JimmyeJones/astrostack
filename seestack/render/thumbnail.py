@@ -110,6 +110,46 @@ def generate_thumbnail(
     return out_path
 
 
+def load_stack_rgb(
+    fits_path: str | Path, *, max_width: int = 1024,
+) -> tuple[np.ndarray, bool]:
+    """Load a stacked-image FITS as an ``(H, W, 3)`` float32 array plus whether it
+    is a tone-mapped display-space export.
+
+    Reads an already-processed stack FITS — a 3-channel ``(C, H, W)`` float cube
+    (or 2-D mono, expanded to grey RGB) — and decimates it to ``max_width`` by
+    NaN-preserving striding. Shared by :func:`render_stack_png` (which stretches
+    the result) and the History render's stretch suggestion (which measures it),
+    so both operate on the *identical* pixels and the suggested asinh sliders
+    reproduce what the render actually shows.
+    """
+    from astropy.io import fits as _fits
+
+    from seestack.stack.output import fits_is_display_space
+
+    display_space = fits_is_display_space(fits_path)
+    arr = np.asarray(_fits.getdata(fits_path), dtype=np.float32)
+    if arr.ndim == 3:                       # (channels, H, W) → (H, W, channels)
+        rgb = np.transpose(arr, (1, 2, 0))
+        if rgb.shape[2] == 1:
+            rgb = np.repeat(rgb, 3, axis=2)
+        elif rgb.shape[2] > 3:
+            rgb = rgb[..., :3]
+    else:                                   # 2-D mono → grey RGB
+        rgb = np.stack([arr, arr, arr], axis=-1)
+
+    w = rgb.shape[1]
+    if w > max_width:
+        # Decimate by striding (nearest) rather than box-averaging. Stack FITS
+        # carry NaN in uncovered/mosaic-gap regions; box averaging (and a plain
+        # min/max normalize) would smear NaN across the whole frame and blank
+        # it out. Striding preserves NaN so the NaN-aware stretch below can
+        # exclude those pixels — and it's faster, which suits live previews.
+        step = int(np.ceil(w / max_width))
+        rgb = rgb[::step, ::step]
+    return rgb, display_space
+
+
 def render_stack_png(
     fits_path: str | Path,
     *,
@@ -133,31 +173,9 @@ def render_stack_png(
     """
     import io
 
-    from astropy.io import fits as _fits
     from PIL import Image
 
-    from seestack.stack.output import fits_is_display_space
-
-    display_space = fits_is_display_space(fits_path)
-    arr = np.asarray(_fits.getdata(fits_path), dtype=np.float32)
-    if arr.ndim == 3:                       # (channels, H, W) → (H, W, channels)
-        rgb = np.transpose(arr, (1, 2, 0))
-        if rgb.shape[2] == 1:
-            rgb = np.repeat(rgb, 3, axis=2)
-        elif rgb.shape[2] > 3:
-            rgb = rgb[..., :3]
-    else:                                   # 2-D mono → grey RGB
-        rgb = np.stack([arr, arr, arr], axis=-1)
-
-    h, w = rgb.shape[:2]
-    if w > max_width:
-        # Decimate by striding (nearest) rather than box-averaging. Stack FITS
-        # carry NaN in uncovered/mosaic-gap regions; box averaging (and a plain
-        # min/max normalize) would smear NaN across the whole frame and blank
-        # it out. Striding preserves NaN so the NaN-aware stretch below can
-        # exclude those pixels — and it's faster, which suits live previews.
-        step = int(np.ceil(w / max_width))
-        rgb = rgb[::step, ::step]
+    rgb, display_space = load_stack_rgb(fits_path, max_width=max_width)
 
     # A display-space export is shown as written (matches its stored preview PNG);
     # a linear stack gets the adjustable asinh stretch. A second stretch on an

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActionIcon, Alert, Badge, Button, Card, Center, Group, Image, Loader, SegmentedControl,
   SimpleGrid, Slider, Stack, Table, Text, TextInput, Title, Tooltip,
@@ -455,6 +455,29 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
   const [light, setLight] = useState(false);
   const [dStretch] = useDebouncedValue(stretch, 250);
   const [dBlack] = useDebouncedValue(black, 250);
+  // Suggest the initial asinh sliders from the run's own data (fetched lazily
+  // once Adjust is opened) so the first adjustable render matches the STF preview
+  // thumbnail instead of jumping to a fixed 0.5/0.35. Falls back to the fixed
+  // defaults when there's no useful suggestion or on an older/display-space run.
+  const suggestion = useQuery({
+    queryKey: ["render-suggestion", safe, run.id],
+    queryFn: () => api.stackRenderSuggestion(safe, run.id),
+    enabled: adjust && run.has_fits,
+    staleTime: Infinity,
+  });
+  const sugStretch = suggestion.data?.stretch;
+  const sugBlack = suggestion.data?.black;
+  const defStretch = typeof sugStretch === "number" ? sugStretch : DEFAULT_STRETCH;
+  const defBlack = typeof sugBlack === "number" ? sugBlack : DEFAULT_BLACK;
+  // Apply the suggestion the first time it arrives, but only while the user
+  // hasn't touched the sliders yet (so it never yanks a value out from under them).
+  const touched = useRef(false);
+  useEffect(() => {
+    if (!touched.current && (typeof sugStretch === "number" || typeof sugBlack === "number")) {
+      if (typeof sugStretch === "number") setStretch(sugStretch);
+      if (typeof sugBlack === "number") setBlack(sugBlack);
+    }
+  }, [sugStretch, sugBlack]);
 
   const save = useMutation({
     mutationFn: () => api.saveStackPreview(safe, run.id, dStretch, dBlack),
@@ -468,7 +491,10 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
   });
 
   const previewSrc = `${api.stackArtifactUrl(safe, run.id, "preview")}${cacheBust ? `?v=${cacheBust}` : ""}`;
-  const imgSrc = adjust && run.has_fits
+  // While the first suggestion fetch is still in flight, keep showing the STF
+  // preview thumbnail rather than briefly rendering at the fixed defaults and
+  // then jumping to the anchored sliders.
+  const imgSrc = adjust && run.has_fits && !suggestion.isLoading
     ? api.stackRenderUrl(safe, run.id, dStretch, dBlack)
     : previewSrc;
 
@@ -514,7 +540,8 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
               <Text size="xs" c="dimmed">{stretch.toFixed(2)}</Text>
             </Group>
             <Slider
-              min={0} max={1} step={0.01} value={stretch} onChange={setStretch}
+              min={0} max={1} step={0.01} value={stretch}
+              onChange={(v) => { touched.current = true; setStretch(v); }}
               label={(v) => v.toFixed(2)} size="sm"
             />
           </div>
@@ -524,7 +551,8 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
               <Text size="xs" c="dimmed">{black.toFixed(2)}</Text>
             </Group>
             <Slider
-              min={0} max={1} step={0.01} value={black} onChange={setBlack}
+              min={0} max={1} step={0.01} value={black}
+              onChange={(v) => { touched.current = true; setBlack(v); }}
               label={(v) => v.toFixed(2)} size="sm"
             />
           </div>
@@ -537,7 +565,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
             </Button>
             <Button
               size="xs" variant="subtle"
-              onClick={() => { setStretch(DEFAULT_STRETCH); setBlack(DEFAULT_BLACK); }}
+              onClick={() => { touched.current = false; setStretch(defStretch); setBlack(defBlack); }}
             >
               Reset
             </Button>
