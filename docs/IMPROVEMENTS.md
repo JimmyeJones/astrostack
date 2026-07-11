@@ -1411,6 +1411,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   repairs a hot pixel *at* a coverage boundary using a median-fill neighbourhood, where the root
   function leaves it, so verify that edge doesn't matter on a real mosaic before simplifying). (S,
   editor/maintainability))_
+  _(Builder note 2026-07-11, found during the frontend editor-logic audit that shipped v0.109.6/v0.109.7:
+  the editor's **histogram** query (`Editor.tsx` `hist = useQuery(["edit-hist", …])`) is **not** gated on
+  `seeded`, unlike the `preview` query right above it. So on first open it fires once against the empty
+  pre-seed recipe before the saved recipe loads, then refetches against the real recipe — a wasted request
+  plus a brief pre-seed histogram/clipping-advisory flash. Harmless (the clipping warning is derived from
+  `hist.data`, so it self-corrects on the second fetch) and trivially fixable by adding `&& seeded` to the
+  `hist` `enabled` (mirroring `preview`), but too low-value to ship as its own churn commit — fold it in if a
+  future run is already wiring that query. (XS, editor/polish.))_
 - ~~**Data-driven "From your image" starting curve for the Curves op**~~ —
   **shipped v0.72.0** (see Shipped). The Curves op now has a header "Auto curve"
   button that drops a gentle, strictly-monotone midtone-lift curve derived from the
@@ -1443,6 +1451,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   user saw), accepting that it's the ≤1024 px preview rather than the ≤1500 px editor
   proxy. Care: it's a behaviour change to Compare, so gate/validate the resolution
   swap doesn't jar the A/B. (S, editor/trust)
+  _(Builder note 2026-07-11 — re-traced this after the v0.109.0 change and it is **not a clear win; do
+  not blind-take it.** Two things have shifted the premise: (1) the empty-recipe "Original" render no longer
+  uses the fixed asinh 0.5/0.35 — since v0.109.0 both editor fallbacks call `render.thumbnail.autostretch`
+  (STF) at the **preview** `target_bg≈0.20`, so it already resembles the stored thumbnail's algorithm. (2) But
+  the stored `preview_path` uses `_autostretch_for_export`, which is deliberately a **much milder** stretch —
+  `target_bg=0.06, sigma_factor=-2.8` (`stack/output.py::_autostretch_for_export`, "sky at ~6% grey … deeper
+  shadows clipped") vs the editor proxy's ~20% grey. So serving the stored preview as "Original" would make the
+  A/B *baseline* markedly **darker** than the edited image on screen — arguably a **worse** before/after
+  reference than the current same-exposure empty-recipe render, not a better one. The editor's Compare is an
+  interactive same-view A/B, not an attempt to reproduce the History thumbnail; matching the thumbnail's
+  exposure isn't obviously the right goal. If a future run still wants "literally what the user saw", it should
+  first decide whether the darker export exposure actually reads better in the A/B (needs a real-image look), and
+  handle the ≤1024 px vs ≤1500 px size mismatch under the Split divider. Left filed but **down-weighted** — this
+  is a judgment call, not a blind fix.)_
 - ~~**Split-slider before/after in the preview (drag a divider to reveal Original vs
   Edited in one frame).**~~ — **shipped v0.78.0** (see Shipped). A new "Split" mode
   button next to Compare overlays the Original on the edited preview and clips it with
