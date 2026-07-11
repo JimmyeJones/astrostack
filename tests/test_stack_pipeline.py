@@ -823,3 +823,45 @@ def test_stack_with_bg_flatten_subtracts_sky(tmp_path):
         assert finite.size > 0
         # Sky was 1000 ADU before flattening; should be near zero after.
         assert abs(float(np.median(finite))) < 50
+
+
+def test_sigma_clip_frees_pass1_accumulator_before_pass2(tmp_path, monkeypatch):
+    """The κ-σ path must release its pass-1 Welford accumulator (n/mean/M2 — 3
+    full-canvas arrays) *before* pass 2 allocates its weighted-sum buffers.
+
+    If it doesn't, the live set through all of pass 2 is ~7 canvas arrays
+    (wel 3 + mean 1 + std 1 + wsum ~2) instead of the 4 the pre-allocation OOM
+    guard (``_PEAK_CANVAS_ARRAYS``) charges — so a large mosaic canvas the guard
+    certified as safe could OOM-kill mid-stack, the exact failure the guard
+    exists to prevent. We can't measure RAM directly, so we assert the
+    observable consequence: when pass 2 constructs its ``WeightedSumAccumulator``,
+    no ``WelfordAccumulator`` is still alive. Fails before the ``del wel`` fix
+    (one Welford still live), passes after.
+    """
+    import gc
+
+    from seestack.stack import accumulator as acc
+
+    proj = _build_project(tmp_path, n=5)
+    live_welfords_at_wsum_build: list[int] = []
+    orig_init = acc.WeightedSumAccumulator.__init__
+
+    def counting_init(self, *a, **k):
+        orig_init(self, *a, **k)
+        gc.collect()
+        live_welfords_at_wsum_build.append(
+            sum(1 for o in gc.get_objects()
+                if isinstance(o, acc.WelfordAccumulator)))
+
+    monkeypatch.setattr(acc.WeightedSumAccumulator, "__init__", counting_init)
+    gc.collect()
+    try:
+        run_stack(proj, StackOptions(sigma_clip=True, max_workers=1,
+                                     output_name="sigfree"))
+    finally:
+        proj.close()
+
+    # The κ-σ path builds exactly one WeightedSumAccumulator — pass 2's — and it
+    # must be built only after the pass-1 Welford has been freed.
+    assert live_welfords_at_wsum_build, "pass 2 never built its weighted sum"
+    assert live_welfords_at_wsum_build[-1] == 0

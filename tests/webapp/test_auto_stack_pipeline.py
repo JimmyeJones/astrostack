@@ -97,16 +97,47 @@ def test_auto_stack_failure_is_non_fatal(solved_library, monkeypatch):
     assert summary["auto_stacked"] == []
 
 
-def test_auto_stack_does_not_loop_on_repeated_crash(solved_library, monkeypatch):
-    # A stack that kills the run (here: raises) must be auto-attempted only ONCE
-    # per data state — otherwise a process-crashing stack + watcher re-trigger
-    # would loop forever (every job "interrupted").
+def test_auto_stack_process_crash_marker_prevents_reloop(solved_library):
+    # The genuine crash-loop guard: a stack that kills the *whole process* (OOM
+    # SIGKILL) can't run its cleanup, so the attempt marker is written *before*
+    # the stack and survives in the DB. On restart the next scan must see that
+    # persisted marker and skip the target — otherwise a process-crashing stack
+    # plus the watcher re-trigger would loop forever. We assert the guard itself:
+    # once the marker is at the current solved+accepted count, the frame-count
+    # selector returns None (skip) for that unchanged data.
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        checked = 0
+        for entry in lib.list_targets():
+            safe = entry.safe_name
+            proj = lib.open_target(safe)
+            try:
+                count = pipeline._solved_accepted_count(proj)
+            finally:
+                proj.close()
+            if count == 0:
+                continue
+            checked += 1
+            # Marker persisted by the pre-stack mark (what a real crash leaves).
+            pipeline._mark_auto_stack_attempt(lib, safe, count)
+            assert pipeline._auto_stack_frame_count(lib, safe) is None
+        assert checked >= 1
+    finally:
+        lib.close()
+
+
+def test_auto_stack_retries_after_a_recoverable_failure(solved_library, monkeypatch):
+    # A *recoverable* exception (transient I/O off a flapping mount, a momentary
+    # lock) is caught — the process survives — so the pre-stack marker must be
+    # cleared, letting the next scan retry instead of stranding the target's
+    # auto-stack forever. (Contrast the process-crash case above, which never
+    # reaches the handler and keeps its marker.)
     calls: list[str] = []
 
     def boom(proj, opts, *, progress=None, cancel=None,
              memory_budget_gb=None, app_version=None):  # noqa: ANN001
         calls.append(getattr(proj, "name", "?"))
-        raise MemoryError("simulated OOM")
+        raise ValueError("simulated transient read error")
 
     monkeypatch.setattr("seestack.stack.stacker.run_stack", boom)
 
@@ -124,7 +155,6 @@ def test_auto_stack_does_not_loop_on_repeated_crash(solved_library, monkeypatch)
     assert attempted >= 1            # tried each eligible target once
     assert first["stack_errors"]
 
-    second = run_pipeline()          # same data → must NOT retry the crash
-    assert len(calls) == attempted   # no further attempts
-    assert second["auto_stacked"] == []
-    assert second["auto_stack_skipped"]
+    second = run_pipeline()          # same data, transient error → must RETRY
+    assert len(calls) == 2 * attempted   # every eligible target tried again
+    assert second["stack_errors"]

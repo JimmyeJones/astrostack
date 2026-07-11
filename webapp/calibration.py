@@ -412,27 +412,58 @@ def auto_bind_master_paths(
     # Flat (+ its flat-dark) — exposure independent, but only when its
     # gain/temperature confidently match the subs (a flat from a different rig
     # would divide in the wrong illumination pattern; unknown params still pass).
-    flat_id = rec.get("flat_master_id")
-    if flat_id is not None and _flat_match_confident(
-            by_id.get(int(flat_id)), gain=gain, sensor_temp_c=sensor_temp_c):
-        p = _path(flat_id)
-        if p:
-            out["flat_path"] = p
-            fd = _path(rec.get("flat_dark_master_id"))
-            if fd:
-                out["flat_dark_path"] = fd
+    # Mirror the dark path: ``recommend_masters`` returns only the single closest
+    # flat, but that flat can fail its confidence *or* dimension gate while a
+    # slightly-further flat binds cleanly (e.g. the top-ranked flat is from a
+    # different-sized camera, but a second confident, same-dimension flat exists).
+    # Keying off only the top pick would then leave the stack flat-uncalibrated
+    # even though a usable flat existed — so try every flat in ascending match
+    # distance and bind the first that clears both gates. This never binds a flat
+    # we wouldn't already trust; it only stops the best-ranked-but-unbindable flat
+    # from masking a bindable one. Byte-for-byte unchanged when the top flat binds.
+    flat_candidates = sorted(
+        (m for m in by_id.values()
+         if str(m.get("kind", "")) == "flat" and m.get("exists", True)),
+        key=lambda m: _match_distance(
+            m, exposure_s=None, gain=gain,
+            sensor_temp_c=sensor_temp_c, kind="flat"),
+    )
+    for cand in flat_candidates:
+        if not _flat_match_confident(cand, gain=gain, sensor_temp_c=sensor_temp_c):
+            continue
+        p = _path(cand.get("id"))
+        if not p:
+            continue
+        out["flat_path"] = p
+        # The flat-dark calibrates *this* flat, so match it to the flat we bound
+        # (not necessarily ``recommend_masters``' top flat).
+        fd = _path(_recommend_flat_dark(dark_candidates, cand))
+        if fd:
+            out["flat_dark_path"] = fd
+        break
 
     # Bias — only meaningful for the lights when no dark was applied, and (like the
     # flat) only when its gain/temperature confidently match the subs; a bias from a
     # different rig would subtract the wrong pedestal + fixed pattern (unknown params
-    # still pass, so the gate only tightens on a materially mismatched bias).
+    # still pass, so the gate only tightens on a materially mismatched bias). Same
+    # top-pick-can-fail-a-gate reasoning as the dark/flat: iterate the candidates in
+    # ascending match distance and bind the first that clears both gates.
     if not dark_bound:
-        bias_id = rec.get("bias_master_id")
-        if bias_id is not None and _bias_match_confident(
-                by_id.get(int(bias_id)), gain=gain, sensor_temp_c=sensor_temp_c):
-            bp = _path(bias_id)
-            if bp:
-                out["bias_path"] = bp
+        bias_candidates = sorted(
+            (m for m in by_id.values()
+             if str(m.get("kind", "")) == "bias" and m.get("exists", True)),
+            key=lambda m: _match_distance(
+                m, exposure_s=None, gain=gain,
+                sensor_temp_c=sensor_temp_c, kind="bias"),
+        )
+        for cand in bias_candidates:
+            if not _bias_match_confident(cand, gain=gain, sensor_temp_c=sensor_temp_c):
+                continue
+            bp = _path(cand.get("id"))
+            if not bp:
+                continue
+            out["bias_path"] = bp
+            break
 
     return out
 

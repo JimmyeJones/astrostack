@@ -365,6 +365,11 @@ class Project:
         ).fetchone()
         return row["value"] if row else None
 
+    def delete_meta(self, key: str) -> None:
+        """Remove a project-meta key (a no-op if it isn't set)."""
+        assert self._conn is not None
+        self._conn.execute("DELETE FROM project_meta WHERE key = ?", (key,))
+
     # ---- frames ---------------------------------------------------------
 
     def add_frame(self, frame: FrameRow) -> int:

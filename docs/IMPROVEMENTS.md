@@ -94,6 +94,22 @@ result <0.16% because `_midtones_for` re-anchors the sky median to `target_bg` r
 top-end scale (self-correcting). No new verified bug filed (per §2, no manufacturing) — the engine,
 QC, solve, watcher and editor-stretch paths all held, consistent with the mature audit history._
 
+_Builder audit log 2026-07-11 (baseline green: 1053 passed / 2 skipped): with the two open Bugs entries
+REAL-data-gated and the Ideas shipped-or-gated, ran three parallel adversarial audits of paths flagged as
+un-recovered / worth re-checking: (1) the stacker orchestration (`stack/{stacker,weighting,photometric,
+reference,output}.py`), (2) the autonomous ingest→auto-stack→auto-edit path (`webapp/pipeline.py`,
+`edit/recipe.py`, `edit/pipeline.py`, `webapp/calibration.py`), and (3) the render/post/color paths
+(`render/{thumbnail,colormap}.py`, `post/{color_cal,target_id}.py`, `bg/{final_gradient,coverage_leveling}.py`).
+The render/post path **traced clean** (stretch math, NaN=coverage, channel handling all held). Three genuine
+robustness/correctness defects were found, fixed, and shipped this run — **v0.107.3** (κ-σ pass-1 Welford
+accumulator not freed before pass 2 → defeats the OOM guard on large mosaics), **v0.107.4** (a recoverable
+auto-stack failure permanently stranded a target's auto-stack — the marker written for the process-*crash*
+case was never cleared after a survivable exception), and **v0.107.5** (auto-bind flat/bias didn't iterate
+candidates when the top pick fails a gate, unlike the v0.107.1 dark path). (Versions renumbered +1 at merge
+time: a concurrent Scout took v0.107.2.) One lower-value observation filed to Ideas (stray
+`scale_dark_to_light` skip-guard); the other observation I noted — the gray-star color-cal clamp parity — was
+**independently shipped by the concurrent Scout as v0.107.2**, so that filed Idea is dropped as done._
+
 _Scout audit log 2026-07-11 (baseline green: 1053 passed / 2 skipped): with the stacking-engine core
 re-traced clean across the last several runs, rotated the adversarial audit to **under-covered
 subsystems** — the colour/post path (`post/color_cal.py`, `stack/channel_combine.py`, `post/skymap.py`,
@@ -2077,6 +2093,15 @@ problems. Dogfood it every big-picture run and fix root causes.
   trail before shipping — a synthetic can't stand in for the true width/brightness/straightness distributions.
   Additive, testable on `detect_streaks` in isolation; keep the v0.106.2 rail as the belt-and-braces backstop
   even after the detector improves.
+- **Minor: the auto-bind skip-guard ignores a stray `scale_dark_to_light` flag.** (S, autonomy/tidiness —
+  PRIORITY 2) *(Builder-audit-noted 2026-07-11.)* `pipeline.py::_auto_bind_calibration` skips only when a
+  calibration *path* is already set; it doesn't consider a leftover `scale_dark_to_light: True` in
+  `settings.default_stack_options`. If a user set that flag globally with no dark path, auto-bind can add a
+  matched-exposure `dark_path` (no scale flag, no bias) while the stray `scale_dark_to_light=True` survives —
+  asking the engine to exposure-scale a dark with no bias. Impact is negligible (needs an unusual global config
+  *and* the matched-exposure branch means the scale factor is ~1, and `_effective_dark` no-ops without a bias
+  anyway), so it's a tidiness item, not a bug. If pursued: clear a stray `scale_dark_to_light` when the
+  auto-bind branch didn't itself set a bias-scaled dark. Additive, testable in isolation.
 - **When Auto's colour calibration silently gives up (too few stars), fall back to a *background-neutral*
   white balance instead of leaving a colour cast.** (M, image-quality/autonomy — PRIORITY 4) *(Scout-filed
   2026-07-11, from the colour/post audit.)* `post/color_cal.py::calibrate_color` returns `mode_used="none"`
@@ -2546,6 +2571,51 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.107.5** — Autonomy (PRIORITY 2; found by the same 2026-07-11 auto-stack audit): finish the v0.107.1
+  auto-bind robustness by extending the "iterate candidates when the top pick fails its gate" logic from the
+  **dark** path to the **flat** and **bias** paths, which still keyed off only `recommend_masters`' single
+  top pick. If the best-scored flat/bias failed its confidence or **dimension** gate (e.g. it's from a
+  different-sized camera) while a slightly-further same-dimension one existed, the stack was left
+  flat-/bias-uncalibrated even though a usable master was available — the exact masking case v0.107.1 fixed for
+  darks. Now both iterate their candidates in ascending match distance and bind the first that clears both
+  gates (the flat-dark is matched to the flat actually bound, not the top-ranked one). Never binds a master we
+  wouldn't already trust (same per-candidate gates); byte-for-byte unchanged when the top pick binds (the
+  common case). Regression tests `test_auto_bind_recovers_a_flat_when_the_top_pick_fails_its_gate` and
+  `..._bias_...` (a wrong-size top pick masks a bindable same-size one — fail before / pass after). Additive,
+  upgrade-safe, auto-bind stays confident-only. (claude/happy-franklin-t22hm6)
+- **v0.107.4** — Autonomy / "just works" (PRIORITY 2; found by a fresh adversarial audit of the auto-stack
+  path 2026-07-11): a **recoverable** auto-stack failure permanently stranded the target's auto-stack. The
+  watcher's auto-stack loop writes a crash-loop marker (`web_auto_stack_attempt = solved_accepted`) *before*
+  the stack, so a stack that OOM-kills the whole process can't re-loop on restart. But a **survivable**
+  exception (a transient read error off a flapping SMB/NFS mount while auto-binding a calibration master, a
+  momentary lock, a bad-frame `ValueError`) is *caught* at `pipeline.py:138` — the process lives — yet the
+  marker was left set, so `_auto_stack_frame_count` returned `None` on every later scan and the target
+  **never auto-stacked again until brand-new frames arrived** (worse when a prior smaller stack existed: the
+  new frames were silently never integrated, and the user kept being served the stale master). Fixed by
+  clearing the marker in the recoverable-exception handler (`_clear_auto_stack_attempt` → new additive
+  `Project.delete_meta`), so the next scan retries a transient failure; a true process crash never reaches the
+  handler, so the crash-loop guard is unweakened. Rewrote the misleading raise-as-crash test into two honest
+  ones: `test_auto_stack_process_crash_marker_prevents_reloop` (persisted marker → guard skips, the genuine
+  protection) and `test_auto_stack_retries_after_a_recoverable_failure` (caught error → marker cleared → retry;
+  fails before / passes after), plus `test_delete_meta`. Additive, upgrade-safe (no schema/config/API/on-disk
+  change — `delete_meta` uses the existing `project_meta` table); auto-stack stays off by default.
+  (claude/happy-franklin-t22hm6)
+- **v0.107.2** — Image-quality/correctness (Scout, #238): clamp `_solve_gray_star`'s per-channel colour-cal
+  scales to `[_MIN_CAL_SCALE, _MAX_CAL_SCALE]` like the Gaia path, so the default gray-star white balance
+  (used by the Auto recipe) can only rescale a channel, never invert/extinguish it. See the FIXED entry in Bugs.
+- **v0.107.3** — Stacking-engine memory safety (found by a fresh adversarial audit of the stacker
+  orchestration path 2026-07-11): the κ-σ (default sigma-clip) path never freed its **pass-1 Welford
+  accumulator** (`_n`/`_mean`/`_m2` — 3 full-canvas arrays) before pass 2 allocated `mean`, `std` and the
+  weighted-sum buffers, so the live set through all of pass 2 was ~7 canvas arrays, not the **4** the
+  pre-allocation OOM guard (`_PEAK_CANVAS_ARRAYS`) charges — a ~1.8× underestimate that persists for the whole
+  second pass. On a large mosaic union canvas sized to pass the guard at 4 arrays but exceed RAM at 7, the run
+  the guard *certified as safe* could OOM-kill mid-stack (the exact failure the guard exists to prevent). Fixed
+  with a one-line `del wel` after `mean()`/`std()` extract fresh arrays (they don't alias `wel`), mirroring the
+  drizzle two-pass path's existing `del stats`; `del` also empties the cell the pass-1 consumer closure shares
+  with `wel`, so the accumulator is genuinely freed. Byte-for-byte identical output; only the memory profile
+  changes. Regression test `tests/test_stack_pipeline.py::test_sigma_clip_frees_pass1_accumulator_before_pass2`
+  (asserts no `WelfordAccumulator` is live when pass 2 builds its `WeightedSumAccumulator` — fails before /
+  passes after). Additive, no config/schema/API/on-disk change. (claude/happy-franklin-t22hm6)
 - **v0.107.0** — Editor (PRIORITY 1): one-click **"Neutralize background"** fix for a residual sky
   colour cast — the action slice the v0.104.0 read-out deferred. New display-space op
   `tone.neutralize_background` (self-measures the sky median at render time via factored-out
