@@ -2957,6 +2957,18 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.109.7** — Editor bug (PRIORITY 1; Builder 2026-07-11; found by the same frontend editor-logic audit —
+  the same enumeration-oversight class as the v0.109.4 look-compare fix): while previewing a mosaic **trim
+  crop** (`trimPreview` active, with the coverage heatmap auto-enabled + Apply/Cancel controls), the overlay/
+  compare toggles that don't guard trim could still be clicked — clicking **Star mask** set `showMask` while
+  `trimPreview` stayed true, rendering the star-mask overlay *underneath* the "Proposed crop" rectangle with its
+  caption suppressed (a contradictory state); the Coverage toggle and the per-op "Without this op"/"Split this
+  op" buttons had the same gap. Split/Look/Compare already disable themselves during trim; brought the four
+  stragglers (Coverage, Star mask, Without-this-op, Split-this-op) into line by adding `|| trimPreview` to their
+  `disabled`, so the user finishes (Apply/Cancel) the trim before switching overlay/compare modes. Frontend-only,
+  additive, no backend/schema/API change. Regression `Editor.test.tsx::"disables the overlay/compare toggles
+  while previewing a trim crop"` (enter trim on a mosaic → Star mask + Coverage buttons are disabled; fails
+  before / passes after).
 - **v0.109.6** — Editor bug (PRIORITY 1; Builder 2026-07-11; found by an adversarial audit of the frontend
   editor state/lifecycle logic): the live-preview (and the five sibling base/mask/coverage/without-op/look)
   queries fetch a PNG blob, mint an object URL per fetch, and revoke it the instant the query's `data` changes.

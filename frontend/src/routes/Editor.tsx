@@ -1205,7 +1205,7 @@ export function EditorView() {
                     label="Show this mosaic's frame-coverage map as a colour heatmap: yellow where the most frames overlap, dark blue at the ragged, uncovered edges. This is what 'Trim border' and 'Coverage leveling' act on.">
                     <Button size="xs" variant={showCoverage ? "filled" : "default"}
                       color="grape"
-                      disabled={!preview.data}
+                      disabled={!preview.data || trimPreview}
                       loading={showCoverage && coveragePreview.isLoading}
                       onClick={() => setShowCoverage((s) => {
                         if (!s) { setShowMask(false); setShowBase(false); setSoloExclude(false); setSoloSplit(false); setSplitCompare(false); setLookSplit(false); }
@@ -1218,7 +1218,7 @@ export function EditorView() {
                 <Tooltip label="Show the soft mask that gates star ops (white = treated as a star)">
                   <Button size="xs" variant={showMask ? "filled" : "default"}
                     color="grape"
-                    disabled={!preview.data}
+                    disabled={!preview.data || trimPreview}
                     loading={showMask && maskPreview.isLoading}
                     onClick={() => setShowMask((s) => {
                       if (!s) { setShowBase(false); setSoloExclude(false); setSoloSplit(false); setShowCoverage(false); setSplitCompare(false); setLookSplit(false); }
@@ -1720,7 +1720,7 @@ export function EditorView() {
                         <Button size="compact-xs"
                           variant={soloActive ? "filled" : "default"} color="grape"
                           loading={soloActive && withoutOpPreview.isLoading}
-                          disabled={!preview.data || reshapesFrame(selectedOp.id)}
+                          disabled={!preview.data || reshapesFrame(selectedOp.id) || trimPreview}
                           onClick={() => setSoloExclude((s) => {
                             if (!s) { setShowBase(false); setShowMask(false); setShowCoverage(false); setSoloSplit(false); setSplitCompare(false); setLookSplit(false); }
                             return !s;
@@ -1741,7 +1741,7 @@ export function EditorView() {
                         <Button size="compact-xs"
                           variant={soloSplitActive ? "filled" : "default"} color="grape"
                           loading={soloSplitActive && withoutOpPreview.isLoading}
-                          disabled={!preview.data || reshapesFrame(selectedOp.id)}
+                          disabled={!preview.data || reshapesFrame(selectedOp.id) || trimPreview}
                           onClick={() => setSoloSplit((s) => {
                             if (!s) { setShowBase(false); setShowMask(false); setShowCoverage(false);
                               setSoloExclude(false); setSplitCompare(false); setLookSplit(false); setSplitFrac(0.5); }
