@@ -2957,6 +2957,19 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.109.6** — Editor bug (PRIORITY 1; Builder 2026-07-11; found by an adversarial audit of the frontend
+  editor state/lifecycle logic): the live-preview (and the five sibling base/mask/coverage/without-op/look)
+  queries fetch a PNG blob, mint an object URL per fetch, and revoke it the instant the query's `data` changes.
+  React Query cached each result by key with the app's default 5-min gcTime, so an **undo/redo** — which
+  reproduces a prior recipe → prior query key, fresh within the 10s staleTime → served straight from cache with
+  no refetch — re-served a URL that was **already revoked** when the user first left that state, blanking the
+  preview until an unrelated edit healed it (and re-entering the editor could hit the same dead URL). Fixed by
+  setting `gcTime: 0` on the six blob-URL queries so a superseded blob query is dropped immediately and never
+  re-served after revocation; `keepPreviousData` still holds the last good image on screen while the fresh
+  render loads (no flash — verified by the existing Editor tests, all 59 green). Frontend-only, additive, no
+  backend/schema/API change. Regression `frontend/src/components/editor/blobRevoke.test.tsx` exercises the exact
+  react-query + revoke-effect interaction across a key A→B→A transition: with `gcTime: 0` the returned URL is
+  fresh/live, and a control case proves the cached-entry path re-serves the revoked URL (the bug).
 - **v0.109.5** — Security / invariant hardening (Builder 2026-07-11; found by an adversarial audit of the
   webapp schema-adaptation seam, which otherwise traced clean): a calibration master **path** placed in the
   global `default_stack_options` (via a raw settings PUT body or an imported backup) leaked straight into
