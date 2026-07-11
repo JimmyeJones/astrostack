@@ -2429,6 +2429,23 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.107.3** — Autonomy / "just works" (PRIORITY 2; found by a fresh adversarial audit of the auto-stack
+  path 2026-07-11): a **recoverable** auto-stack failure permanently stranded the target's auto-stack. The
+  watcher's auto-stack loop writes a crash-loop marker (`web_auto_stack_attempt = solved_accepted`) *before*
+  the stack, so a stack that OOM-kills the whole process can't re-loop on restart. But a **survivable**
+  exception (a transient read error off a flapping SMB/NFS mount while auto-binding a calibration master, a
+  momentary lock, a bad-frame `ValueError`) is *caught* at `pipeline.py:138` — the process lives — yet the
+  marker was left set, so `_auto_stack_frame_count` returned `None` on every later scan and the target
+  **never auto-stacked again until brand-new frames arrived** (worse when a prior smaller stack existed: the
+  new frames were silently never integrated, and the user kept being served the stale master). Fixed by
+  clearing the marker in the recoverable-exception handler (`_clear_auto_stack_attempt` → new additive
+  `Project.delete_meta`), so the next scan retries a transient failure; a true process crash never reaches the
+  handler, so the crash-loop guard is unweakened. Rewrote the misleading raise-as-crash test into two honest
+  ones: `test_auto_stack_process_crash_marker_prevents_reloop` (persisted marker → guard skips, the genuine
+  protection) and `test_auto_stack_retries_after_a_recoverable_failure` (caught error → marker cleared → retry;
+  fails before / passes after), plus `test_delete_meta`. Additive, upgrade-safe (no schema/config/API/on-disk
+  change — `delete_meta` uses the existing `project_meta` table); auto-stack stays off by default.
+  (claude/happy-franklin-t22hm6)
 - **v0.107.2** — Stacking-engine memory safety (found by a fresh adversarial audit of the stacker
   orchestration path 2026-07-11): the κ-σ (default sigma-clip) path never freed its **pass-1 Welford
   accumulator** (`_n`/`_mean`/`_m2` — 3 full-canvas arrays) before pass 2 allocated `mean`, `std` and the

@@ -138,6 +138,13 @@ def _pipeline_body(
                 except Exception as exc:  # noqa: BLE001 — one target shouldn't sink the batch
                     log.warning("auto-stack failed for %s: %s", safe, exc)
                     stack_errors[safe] = str(exc)
+                    # The process survived this failure, so the crash-loop marker
+                    # written at line 123 must be cleared — otherwise a *transient*
+                    # error (flapping mount, momentary lock) would strand the
+                    # target's auto-stack permanently. A true process-killing crash
+                    # never reaches here, so this doesn't weaken the crash-loop guard.
+                    with contextlib.suppress(Exception):
+                        _clear_auto_stack_attempt(lib, safe)
             summary["auto_stacked"] = stacked
             summary["auto_stack_skipped"] = skipped
             if auto_edited:
@@ -1142,6 +1149,26 @@ def _mark_auto_stack_attempt(lib: Library, safe: str, frame_count: int) -> None:
     proj = lib.open_target(safe)
     try:
         proj.set_meta(AUTO_STACK_ATTEMPT_META_KEY, str(frame_count))
+    finally:
+        proj.close()
+
+
+def _clear_auto_stack_attempt(lib: Library, safe: str) -> None:
+    """Drop the crash-loop marker so the next scan may retry the target.
+
+    Called when an auto-stack raised a *recoverable* exception (the process
+    survived): the marker was written before the stack purely to break a
+    process-*crash* loop (an OOM kills the worker before it can clean up, so the
+    guard must already be persisted). A survivable failure — a transient I/O
+    error reading a calibration master off a flapping mount, a momentary lock —
+    reaches the handler, so leaving the marker set would wrongly disable
+    auto-stack for this target *forever* (until brand-new frames arrive), silently
+    breaking the walk-away promise. Clearing it lets the next scan try again; a
+    genuinely reproducible failure simply re-fails fast and is re-logged each
+    scan, which is the acceptable cost of not stranding a transient one."""
+    proj = lib.open_target(safe)
+    try:
+        proj.delete_meta(AUTO_STACK_ATTEMPT_META_KEY)
     finally:
         proj.close()
 

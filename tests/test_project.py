@@ -18,6 +18,15 @@ def test_create_and_meta(proj):
     assert proj.get_meta("schema_version") == str(SCHEMA_VERSION)
 
 
+def test_delete_meta(proj):
+    proj.set_meta("scratch", "v")
+    assert proj.get_meta("scratch") == "v"
+    proj.delete_meta("scratch")
+    assert proj.get_meta("scratch") is None
+    # Deleting an absent key is a no-op, not an error.
+    proj.delete_meta("never_set")
+
+
 def test_open_after_create(tmp_path):
     p = Project.create(tmp_path / "p", name="Reopen")
     p.close()
