@@ -152,52 +152,55 @@ paths and `edit/pipeline.py`/`edit/recipe.py` op-ordering, which this run didn't
   note flags it, and a near-neutral field is untouched — fails before / passes after). Additive, no
   schema/config/API change; found by the colour/post adversarial audit rotation.
 
-- **Ingest dedup keys on the *raw* source-path string, never canonicalized — the same physical frame reached
-  via a different path spelling is ingested twice → double-weighted in the stack.** *(Traced, Scout audit
-  2026-07-11; med confidence — the wrong-result outcome is conditional on non-identical path spelling. NOT a
-  blind Builder fix — see the upgrade trap below.)* `io/ingest.py:98-103` builds the dedup map as
-  `{f.source_path: f}` and looks up `str(Path(src))` verbatim; `io/scanner.py:112` does `root = Path(root)`
-  with no `.resolve()`. The module contract says frames are "matched by their **absolute** source path"
-  (`scanner.py:108-110`, `ingest.py:92`), but nothing resolves them — so any change in spelling defeats dedup
-  on re-scan: a NAS share remounted at a different mountpoint (`/mnt/nas` → `/mnt/nas2` — exactly the
-  NAS-copy workflow this code targets), a symlinked subdirectory that makes the recursive `find_fits_files`
-  glob yield two paths to one file within a single scan, or scanning a relative root then re-scanning from a
-  different cwd. The frame's row misses `existing.get(...)`, `add_frame` runs again, and the stacker weights
-  that light twice. In the normal webapp path the config dirs are absolute so this is dormant; the remount /
-  symlink cases are the real triggers. **Why NOT a blind fix (upgrade trap):** existing libraries already
-  store non-resolved `source_path` values, so naively switching dedup to `Path.resolve()` would make *every*
-  already-ingested frame compare unequal to its stored row on the next scan and **re-ingest the entire
-  library** (doubling all data) — the exact data corruption we're trying to prevent. A correct fix must
-  either match on a resolved key *and* backfill/normalize existing `source_path` rows in an additive
-  migration, or keep the stored path and add a resolved-path index; test the upgrade from an old DB. (S code
-  / M migration+validation, correctness/data-integrity)
+- ~~**Ingest dedup keys on the *raw* source-path string, never canonicalized — the same physical frame reached
+  via a different path spelling is ingested twice → double-weighted in the stack.**~~ — **FIXED v0.107.8**
+  (Builder, 2026-07-11; traced + reproduced + regression-tested). `io/ingest.py` built the dedup map as
+  `{f.source_path: f}` and looked up `str(Path(src))` verbatim, so any change of spelling for one physical file
+  defeated dedup: a symlinked subdirectory that makes the recursive `find_fits_files` glob yield two paths to
+  one file within a single scan, or scanning a relative root then re-scanning from a different cwd. The row
+  missed `existing.get(...)`, `add_frame` ran again, and the stacker weighted that light twice. Fixed by keying
+  dedup on a canonical `_dedup_key(path) = os.path.realpath(...)` applied **symmetrically to both the stored and
+  the incoming path at lookup time** — the stored `source_path` is never rewritten, so an existing library
+  (whose rows hold raw, non-normalised paths) re-scans clean (`realpath` is idempotent for an unchanged file)
+  instead of the mass re-ingest a naïve one-sided `Path.resolve()` would have triggered. Two genuinely different
+  files can never collide (distinct realpaths), so it can only ever *prevent* a double-ingest, never wrongly
+  skip a frame. The remount-to-a-different-mountpoint case (genuinely different device paths for the same data)
+  is out of scope for path normalisation and left as-is. Regression tests `tests/test_ingest.py::
+  test_ingest_dedupes_a_symlinked_path_within_one_scan` and `_across_a_relative_vs_absolute_respell` (the latter
+  doubles as the upgrade-safety check: stored path untouched, old library re-scans clean) — both fail before /
+  pass after. Additive, no schema/config/API change; found by the Scout's ingest/loader audit rotation.
 
-- **`load_seestar_raw` raises an opaque `IndexError` (instead of a clear error, or reading the image) on a
-  FITS whose primary HDU carries no data.** *(Traced, Scout audit 2026-07-11; low severity — non-Seestar
-  input, degrades to a per-frame error at most call sites.)* `io/fits_loader.py:104` does
-  `data = np.asarray(hdu.data)` on `hdul[0]`, then `data.shape[-1]` at `:111` — for a compressed
-  (`CompImageHDU`) or multi-extension FITS where the image lives in `hdul[1]` and `hdul[0].data is None`,
-  `np.asarray(None)` is a 0-d object array and `.shape[-1]` raises `IndexError: tuple index out of range`,
-  **before** the intended `if data.ndim != 2: raise ValueError("expected 2D…")` guard at `:119` can fire. The
-  sibling `load_header` (`:55-59`) silently records `width=height=0` for the same file. Seestar raws are
-  simple single-HDU 2-D FITS so the normal path is unaffected, but a user dropping an fpack'd or
-  multi-extension FITS gets a confusing crash rather than "unsupported / expected 2D." Minimal fix: guard
-  `hdu.data is None` and raise the clear `ValueError` (or fall through to the first data-bearing HDU to
-  actually support compressed FITS — a small feature). (S, robustness/friendliness)
+- ~~**`load_seestar_raw` raises an opaque `IndexError` (instead of a clear error, or reading the image) on a
+  FITS whose primary HDU carries no data.**~~ — **FIXED v0.107.6** (Builder, 2026-07-11; traced +
+  regression-tested). `io/fits_loader.py` read `hdul[0]` unconditionally, so `data = np.asarray(hdu.data)` on a
+  data-less primary produced a 0-d object array and `data.shape[-1]` raised `IndexError: tuple index out of
+  range`, **before** the intended `if data.ndim != 2: raise ValueError("expected 2D…")` guard could fire — the
+  case for a compressed (`CompImageHDU`) or multi-extension FITS where the image lives in `hdul[1]` and
+  `hdul[0].data is None`. `load_header` silently recorded `width=height=0` for the same file. Fixed at the root
+  with a `_first_image_hdu(hdul)` helper that returns the first HDU carrying a ≥2D image (read via `.shape`, no
+  forced decompression); both `load_header` and `load_seestar_raw` now select it, so an fpack'd/multi-extension
+  FITS **loads** instead of crashing (a small friendliness feature), and a genuinely image-less FITS raises the
+  clear `ValueError("no image data found…")`. Byte-for-byte identical on normal single-HDU Seestar raws (the
+  primary carries the data, so it's still selected). Regression tests `tests/test_fits_loader.py::
+  test_load_raw_reads_image_from_a_data_less_primary_hdu` / `_reads_a_compressed_fits` /
+  `_raises_clear_error_when_no_image_data`. Additive, no schema/config/API change; found by the Scout's
+  ingest/loader audit rotation.
 
-- **`delete_master` does an unlocked read-modify-write of the calibration registry off the job worker —
-  a concurrent master build can lose its just-registered entry (or a delete can be resurrected).** *(Traced,
-  Scout audit 2026-07-11; low severity — narrow race window, no silent wrong *image*.)* `webapp/calibration.py`'s
-  own docstring states the invariant "the single job worker is the only writer; routers only read, so no
-  locking is needed beyond the atomic replace." But `delete_master` (`webapp/calibration.py:641-656`, called
-  directly from the `DELETE …/calibration/masters/{id}` endpoint on the Starlette threadpool) does its own
-  `_read_registry` → mutate → `_write_registry`, while a `POST …/calibration/masters` build job's
-  `register_master` (`:605-638`) does the same read-modify-write on the job-worker thread. `os.replace` makes
-  each individual write atomic but does nothing for the interleave, so a delete landing between the build's
-  read and write (or vice-versa) drops one side's change — a just-built master vanishes from the registry
-  (its `.fits` orphaned) or a deleted one is resurrected pointing at a now-missing file. Fix: route deletion
-  through the job manager too (single-writer), or guard `_read_registry`/`_write_registry` with a
-  process-level lock. (S, correctness/concurrency)
+- ~~**`delete_master` does an unlocked read-modify-write of the calibration registry off the job worker —
+  a concurrent master build can lose its just-registered entry (or a delete can be resurrected).**~~ —
+  **FIXED v0.107.7** (Builder, 2026-07-11; traced + regression-tested). `delete_master` (called directly from
+  the `DELETE …/calibration/masters/{id}` endpoint on the Starlette threadpool) did its own `_read_registry` →
+  mutate → `_write_registry`, while a `POST …/calibration/masters` build job's `register_master` did the same
+  read-modify-write on the job-worker thread. `os.replace` makes each write atomic but does nothing for the
+  interleave, so a delete landing between the build's read and write (or vice-versa) dropped one side's change —
+  a just-built master vanished from the registry (its `.fits` orphaned) or a deleted one was resurrected
+  pointing at a now-missing file. Fixed by serialising the two mutating sequences under a process-level
+  `_REGISTRY_LOCK` (`threading.Lock`) held across the whole read→mutate→write in both `register_master` and
+  `delete_master`; writes are rare so the coarse global lock is harmless, and the stale docstring invariant is
+  corrected. Regression test `tests/webapp/test_calibration.py::
+  test_concurrent_register_and_delete_stay_consistent` runs a concurrent register+delete with a widened
+  read→write window and asserts registry↔disk consistency (no orphaned file, no dangling entry) — fails before
+  / passes after. Additive, no schema/config/API change; found by the Scout's calibration-registry audit.
 
 - ~~**The shape-only streak detector auto-rejects a bright edge-on galaxy / elongated nebula on *every*
   sub — silently discarding the whole target's data (on by default).**~~ — **FIXED v0.106.2** (Builder

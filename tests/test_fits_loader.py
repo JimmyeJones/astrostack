@@ -38,6 +38,62 @@ def test_load_raw_debayer(tmp_path):
     assert img.shape == (320, 480, 3)
 
 
+def test_load_raw_reads_image_from_a_data_less_primary_hdu(tmp_path):
+    """A multi-extension FITS with an empty primary HDU and the image in ext 1
+    must load, not raise an opaque IndexError.
+
+    Regression: ``load_seestar_raw`` read ``hdul[0]`` unconditionally, so an
+    empty primary made ``np.asarray(None).shape[-1]`` raise ``IndexError: tuple
+    index out of range`` *before* the intended "expected 2D" guard could fire.
+    We now fall through to the first data-bearing HDU."""
+    from astropy.io import fits
+
+    data = (np.arange(320 * 480, dtype=np.uint16) % 1000).reshape(320, 480)
+    ext = fits.ImageHDU(data=data)
+    ext.header["BAYERPAT"] = "RGGB"
+    hdul = fits.HDUList([fits.PrimaryHDU(), ext])  # primary carries no data
+    p = tmp_path / "multiext.fits"
+    hdul.writeto(p)
+
+    img, info = load_seestar_raw(p, debayer=False)
+    assert img.shape == (320, 480)
+    assert info.width_px == 480 and info.height_px == 320
+    # load_header reports the same geometry, from the same data-bearing HDU.
+    h = load_header(p)
+    assert h.width_px == 480 and h.height_px == 320
+
+
+def test_load_raw_reads_a_compressed_fits(tmp_path):
+    """An fpack'd (CompImageHDU) FITS keeps an empty primary and the pixels in a
+    compressed extension. Falling through to the first data-bearing HDU lets us
+    read those too instead of crashing on the empty primary."""
+    from astropy.io import fits
+
+    data = (np.arange(320 * 480, dtype=np.uint16) % 1000).reshape(320, 480)
+    comp = fits.CompImageHDU(data=data)
+    comp.header["BAYERPAT"] = "RGGB"
+    hdul = fits.HDUList([fits.PrimaryHDU(), comp])
+    p = tmp_path / "compressed.fits"
+    hdul.writeto(p)
+
+    img, info = load_seestar_raw(p, debayer=False)
+    assert img.shape == (320, 480)
+    assert info.bayer_pattern == "RGGB"
+
+
+def test_load_raw_raises_clear_error_when_no_image_data(tmp_path):
+    """A FITS with no image extension at all raises a clear ValueError, not an
+    opaque IndexError."""
+    from astropy.io import fits
+
+    hdul = fits.HDUList([fits.PrimaryHDU()])  # no data anywhere
+    p = tmp_path / "empty.fits"
+    hdul.writeto(p)
+
+    with pytest.raises(ValueError, match="no image data|expected 2D"):
+        load_seestar_raw(p, debayer=False)
+
+
 def test_bilinear_debayer_constant_image():
     """A constant mosaic must debayer to that exact constant in every channel —
     borders included. A missing-sample interpolation that reached off the frame

@@ -1,5 +1,7 @@
 """Ingest pipeline — find files, copy to cache, register in DB."""
 
+from pathlib import Path
+
 import pytest
 
 pytest.importorskip("astropy")
@@ -143,5 +145,65 @@ def test_ingest_skips_duplicates(tmp_path):
         assert len(results) == 1
         assert results[0].skipped is True
         assert proj.count() == 1
+    finally:
+        proj.close()
+
+
+def test_ingest_dedupes_a_symlinked_path_within_one_scan(tmp_path):
+    """Two glob paths to the *same physical file* in one scan (a symlinked
+    subdirectory) must register the frame once, not twice.
+
+    Regression: dedup keyed on the raw path string, so a symlinked spelling
+    missed the already-added row and the frame was ingested twice → double-
+    weighted in the stack. We now dedup on the canonical (realpath) key."""
+    real = tmp_path / "raws"
+    real.mkdir()
+    p = write_seestar_fits(real / "a.fit", seed=3)
+    link = tmp_path / "raws_link"
+    link.symlink_to(real, target_is_directory=True)  # second spelling of the same dir
+    linked_p = link / "a.fit"
+    assert linked_p.exists() and linked_p != p
+
+    proj = Project.create(tmp_path / "proj", name="t")
+    cache = CacheManager(proj.project_dir)
+    try:
+        results = list(ingest_files(proj, cache, [p, linked_p]))
+        assert len(results) == 2
+        added = [r for r in results if not r.skipped]
+        skipped = [r for r in results if r.skipped]
+        assert len(added) == 1 and len(skipped) == 1
+        assert proj.count() == 1  # the physical frame is registered exactly once
+    finally:
+        proj.close()
+
+
+def test_ingest_dedupes_across_a_relative_vs_absolute_respell(tmp_path, monkeypatch):
+    """Re-scanning an already-ingested file via a *different spelling* (relative
+    vs the absolute path stored on the first scan) must skip it, not re-ingest.
+
+    This is also the upgrade-safety check: an existing library stores raw,
+    non-normalised ``source_path`` values, and the fix normalises both sides at
+    lookup time (never rewriting what's stored), so an old library re-scans
+    clean instead of doubling every frame."""
+    src = tmp_path / "raws"
+    src.mkdir()
+    abs_p = write_seestar_fits(src / "a.fit", seed=4)
+
+    proj = Project.create(tmp_path / "proj", name="t")
+    cache = CacheManager(proj.project_dir)
+    try:
+        # First scan stores the absolute path (simulating an existing library).
+        list(ingest_files(proj, cache, [abs_p]))
+        assert proj.count() == 1
+        stored = next(iter(proj.iter_frames())).source_path
+        assert stored == str(abs_p)  # stored path is untouched by the fix
+
+        # Second scan reaches the same file via a relative spelling.
+        monkeypatch.chdir(tmp_path)
+        rel_p = Path("raws") / "a.fit"
+        assert str(rel_p) != stored
+        results = list(ingest_files(proj, cache, [rel_p]))
+        assert results[0].skipped is True
+        assert proj.count() == 1  # no duplicate row
     finally:
         proj.close()

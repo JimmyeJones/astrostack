@@ -47,14 +47,36 @@ class FitsHeaderInfo:
     raw_header: dict[str, Any]
 
 
+def _first_image_hdu(hdul):
+    """The first HDU that carries a ≥2D image array, or ``None``.
+
+    Seestar raws put the mosaic in the primary HDU, but a compressed
+    (``CompImageHDU``) or multi-extension FITS keeps an empty primary HDU and
+    the image in a later extension. Selecting the first data-bearing HDU lets us
+    read those too — and, crucially, avoids crashing on the empty primary (an
+    ``IndexError`` from ``None.shape[-1]``) before the clear "expected 2D" error
+    can fire. ``.shape`` is read without forcing decompression of the pixels.
+    """
+    for hdu in hdul:
+        shape = getattr(hdu, "shape", None)
+        if shape is not None and len(shape) >= 2:
+            return hdu
+    return None
+
+
 def load_header(path: str | Path) -> FitsHeaderInfo:
     """Read just the FITS header — fast, no pixel data."""
     from astropy.io import fits
 
     path = Path(path)
     with fits.open(path, memmap=True) as hdul:
-        h = hdul[0].header
-        data_shape = hdul[0].shape  # (H, W) for 2D raw
+        hdu = _first_image_hdu(hdul)
+        if hdu is None:
+            h = hdul[0].header
+            data_shape: tuple = ()
+        else:
+            h = hdu.header
+            data_shape = hdu.shape  # (H, W) for 2D raw
 
     height, width = (data_shape[-2], data_shape[-1]) if len(data_shape) >= 2 else (0, 0)
     return FitsHeaderInfo(
@@ -100,7 +122,9 @@ def load_seestar_raw(
 
     path = Path(path)
     with fits.open(path, memmap=False) as hdul:
-        hdu = hdul[0]
+        hdu = _first_image_hdu(hdul)
+        if hdu is None:
+            raise ValueError("no image data found in FITS (expected a 2D Bayer array)")
         data = np.asarray(hdu.data)
         h = hdu.header
         info = FitsHeaderInfo(
