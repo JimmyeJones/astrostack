@@ -158,8 +158,12 @@ export function scoreColor(score: number): string {
 // Format a minutes count as "3.2 h" / "45 min" / "—".
 export function formatMinutes(minutes: number): string {
   if (!Number.isFinite(minutes) || minutes <= 0) return "—";
-  if (minutes >= 90) return `${(minutes / 60).toFixed(1)} h`;
-  return `${Math.round(minutes)} min`;
+  if (minutes < 90) {
+    const m = Math.round(minutes);
+    if (m < 90) return `${m} min`;
+    minutes = 90;  // rounds up past the hours threshold — don't print "90 min"
+  }
+  return `${(minutes / 60).toFixed(1)} h`;
 }
 
 // Local wall-clock HH:MM for a UTC ISO timestamp (in the viewer's timezone).

@@ -18,6 +18,20 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 _AUTH_KEYS = ("auth_password_hash", "auth_salt", "auth_username")
 
 
+def _sanitize_patch(clean: dict[str, Any]) -> dict[str, Any]:
+    """Drop calibration master *paths* from a persisted default_stack_options.
+
+    Those paths are resolved server-side from master ids and must never be set
+    from raw client input (a settings PUT body or an imported backup) — otherwise
+    a raw path would leak into every default-based stack. Mutates and returns
+    *clean*."""
+    dso = clean.get("default_stack_options")
+    if isinstance(dso, dict):
+        from webapp.schemas import strip_non_form_keys
+        clean["default_stack_options"] = strip_non_form_keys(dso)
+    return clean
+
+
 def _serialize(s) -> dict[str, Any]:  # noqa: ANN001
     data = s.model_dump()
     for k in _AUTH_KEYS:
@@ -39,7 +53,7 @@ def update_settings(patch: dict[str, Any], request: Request) -> dict[str, Any]:
     store = deps.get_settings_store(request)
     # Strip auth credentials (managed only via /api/auth/password) and surface a
     # 422 rather than a 500 when a patch fails validation.
-    clean = {k: v for k, v in patch.items() if k not in _AUTH_KEYS}
+    clean = _sanitize_patch({k: v for k, v in patch.items() if k not in _AUTH_KEYS})
     try:
         s = store.update(clean)
     except ValidationError as exc:
@@ -96,7 +110,7 @@ def import_settings(payload: dict[str, Any], request: Request) -> dict[str, Any]
     """
     store = deps.get_settings_store(request)
     skip = (*_AUTH_KEYS, *_HOST_KEYS)
-    clean = {k: v for k, v in payload.items() if k not in skip}
+    clean = _sanitize_patch({k: v for k, v in payload.items() if k not in skip})
     try:
         s = store.update(clean)
     except ValidationError as exc:

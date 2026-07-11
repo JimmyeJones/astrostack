@@ -9,10 +9,14 @@ import { Link } from "react-router-dom";
 import { api, type Target } from "../api/client";
 import { QueryError } from "../components/QueryError";
 
-function expo(seconds: number): string {
+export function expo(seconds: number): string {
   if (!seconds) return "—";
-  const h = Math.floor(seconds / 3600);
-  const m = Math.round((seconds % 3600) / 60);
+  // Round to whole minutes first, then split into h/m — rounding the minutes
+  // remainder independently could yield a nonsensical "1h 60m" (e.g. 7190 s,
+  // 1h 59.8m, rounds the remainder to 60).
+  const totalMin = Math.round(seconds / 60);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
   return h ? `${h}h ${m}m` : `${m}m`;
 }
 

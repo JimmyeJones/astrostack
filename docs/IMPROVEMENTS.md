@@ -2957,6 +2957,67 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.109.9** — Friendliness / UX bug (PRIORITY 3; Builder 2026-07-11; found by the frontend non-editor route
+  audit): the Tonight "Start something new" object-type filter could show a contradictory empty table. When the
+  picked bucket (e.g. "Nebula") was no longer present after the data changed (a different night via the date
+  picker, or a min-altitude change), `filterByTypeBucket(freshUp, typeFilter)` filtered to `[]` — a
+  valid-but-absent bucket isn't inert — while the SegmentedControl fell back to displaying "All", so the control
+  read "All" yet the table showed "No targets of that type…", hiding real targets. Fixed by deriving one
+  `effectiveTypeFilter` (`typeOptions.includes(typeFilter) ? typeFilter : "All"`) used by **both** the control's
+  value and the filter, so a stale selection cleanly falls back to All in both. Frontend-only, additive, no
+  backend/schema change. Regression `Tonight.test.tsx::"falls back to All (not an empty table) when the picked
+  type vanishes after a data change"` (pick Nebula → re-plan a nebula-less night → the galaxy still shows, no
+  empty state; fails before / passes after).
+- **v0.109.8** — Friendliness / display bug (PRIORITY 3; Builder 2026-07-11; found by the frontend non-editor
+  route audit): three time formatters rounded their remainder into the next unit's threshold and then printed it
+  in the smaller unit — the Library card's `expo(7190)` (1h 59.8m) read **"1h 60m"**, `formatIntegration(3599)`
+  read **"60 min"** (should be ~1 h) and `(59.9)` **"60 s"**, and Tonight's `formatMinutes(89.9)` read
+  **"90 min"** (should be 1.5 h). Fixed each to round first / re-check the rounded figure and roll into the next
+  unit (`expo` rounds to whole minutes then splits h/m; `formatIntegration`/`formatMinutes` promote a value that
+  rounds up to a full unit). Genuine sub-boundary values are unchanged (`30 s`, `50 min`, `89 min`). Frontend
+  display only, no backend/schema change. `expo` is now exported for unit testing. Tests: new `format.test.ts`,
+  an `expo` block in `Library.test.tsx`, and a `formatMinutes` boundary case in `tonight.test.ts` (each fails
+  before / passes after).
+- **v0.109.7** — Editor bug (PRIORITY 1; Builder 2026-07-11; found by the same frontend editor-logic audit —
+  the same enumeration-oversight class as the v0.109.4 look-compare fix): while previewing a mosaic **trim
+  crop** (`trimPreview` active, with the coverage heatmap auto-enabled + Apply/Cancel controls), the overlay/
+  compare toggles that don't guard trim could still be clicked — clicking **Star mask** set `showMask` while
+  `trimPreview` stayed true, rendering the star-mask overlay *underneath* the "Proposed crop" rectangle with its
+  caption suppressed (a contradictory state); the Coverage toggle and the per-op "Without this op"/"Split this
+  op" buttons had the same gap. Split/Look/Compare already disable themselves during trim; brought the four
+  stragglers (Coverage, Star mask, Without-this-op, Split-this-op) into line by adding `|| trimPreview` to their
+  `disabled`, so the user finishes (Apply/Cancel) the trim before switching overlay/compare modes. Frontend-only,
+  additive, no backend/schema/API change. Regression `Editor.test.tsx::"disables the overlay/compare toggles
+  while previewing a trim crop"` (enter trim on a mosaic → Star mask + Coverage buttons are disabled; fails
+  before / passes after).
+- **v0.109.6** — Editor bug (PRIORITY 1; Builder 2026-07-11; found by an adversarial audit of the frontend
+  editor state/lifecycle logic): the live-preview (and the five sibling base/mask/coverage/without-op/look)
+  queries fetch a PNG blob, mint an object URL per fetch, and revoke it the instant the query's `data` changes.
+  React Query cached each result by key with the app's default 5-min gcTime, so an **undo/redo** — which
+  reproduces a prior recipe → prior query key, fresh within the 10s staleTime → served straight from cache with
+  no refetch — re-served a URL that was **already revoked** when the user first left that state, blanking the
+  preview until an unrelated edit healed it (and re-entering the editor could hit the same dead URL). Fixed by
+  setting `gcTime: 0` on the six blob-URL queries so a superseded blob query is dropped immediately and never
+  re-served after revocation; `keepPreviousData` still holds the last good image on screen while the fresh
+  render loads (no flash — verified by the existing Editor tests, all 59 green). Frontend-only, additive, no
+  backend/schema/API change. Regression `frontend/src/components/editor/blobRevoke.test.tsx` exercises the exact
+  react-query + revoke-effect interaction across a key A→B→A transition: with `gcTime: 0` the returned URL is
+  fresh/live, and a control case proves the cached-entry path re-serves the revoked URL (the bug).
+- **v0.109.5** — Security / invariant hardening (Builder 2026-07-11; found by an adversarial audit of the
+  webapp schema-adaptation seam, which otherwise traced clean): a calibration master **path** placed in the
+  global `default_stack_options` (via a raw settings PUT body or an imported backup) leaked straight into
+  `StackOptions` on every default-based stack — bypassing the "calibration paths are resolved server-side,
+  never from raw client input" invariant that `trigger_stack` (pops `*_path`, resolves master *ids*) and
+  `put_stack_defaults` (form-key filter) already honour. `default_stack_options` was the one ingress with no
+  guard. Fixed at both the ingress and the consumption point: a new `schemas.strip_non_form_keys` drops
+  `NON_FORM_KEYS` (`dark_path`/`flat_path`/`flat_dark_path`/`bias_path`) from a persisted
+  `default_stack_options` on `PUT`/`POST /import` (new `_sanitize_patch`), and `pipeline._stack_target` strips
+  them from the global-defaults base so even an already-persisted config can't apply a leaked path (legitimate
+  server-resolved paths still arrive later via explicit run options / auto-bind, after the stripped base).
+  Additive, no config/schema/API-shape change, upgrade-safe (an old config with such a key is neutralised, not
+  rejected). Regression tests: `test_auto_stack_defaults.py::test_global_default_calibration_paths_never_reach_the_stacker`
+  (a config carrying the four paths → `run_stack` sees `dark_path`/… `None`, `sigma_kappa` kept; fails before /
+  passes after) and `test_api.py::test_settings_put_strips_calibration_paths_from_default_stack_options`.
 - **v0.109.2** — Friendliness / consistency (PRIORITY 3; Builder 2026-07-11): the History card's **Adjust**
   sliders now open on a data-driven asinh stretch/black anchored to the run's own sky (new read-only
   `GET …/stack-runs/{id}/render-suggestion` → `edit/stretch.suggest_asinh_stretch` via a shared

@@ -282,6 +282,15 @@ export function EditorView() {
   // render shows a message instead of a silently blank panel) and can revoke URLs.
   const preview = useQuery({
     queryKey: ["edit-preview", safe, rid, dKey, bust],
+    // gcTime: 0 — these queries mint an object URL per fetch and revoke it (in the
+    // effect below) the moment `data` changes. Without immediate GC, an inactive
+    // blob query lingers in cache with its now-*revoked* URL string, so a later
+    // undo/redo (which reproduces a prior recipe → prior query key) or re-entering
+    // the editor would re-serve that dead URL and show a blank/broken preview. With
+    // gcTime 0 a superseded blob query is dropped at once, so it's never re-served
+    // after revocation; keepPreviousData still keeps the last good image on screen
+    // while the fresh render loads (no flash).
+    gcTime: 0,
     enabled: !!opsSchema.data && !saved.isLoading && seeded,
     // Keep the previous render visible while the next one loads (rather than
     // flashing to a black Loader on every slider drag); the "Updating…" badge
@@ -387,6 +396,7 @@ export function EditorView() {
   );
   const basePreview = useQuery({
     queryKey: ["edit-base", safe, rid, geometryOpsKey(dRecipe.ops)],
+    gcTime: 0,  // see the preview query — blob URLs are revoked, never re-serve a dead one
     enabled: (showBase || splitCompare) && !!opsSchema.data && !saved.isLoading,
     queryFn: async ({ signal }) => {
       const res = await fetch(
@@ -417,6 +427,7 @@ export function EditorView() {
   const [dMaskSizePx] = useDebouncedValue(maskSizePx, debounceMs);
   const maskPreview = useQuery({
     queryKey: ["edit-mask", safe, rid, dMaskSizePx ?? "default", dKey, starSelUid ?? ""],
+    gcTime: 0,  // see the preview query — blob URLs are revoked, never re-serve a dead one
     enabled: showMask && !!opsSchema.data && !saved.isLoading,
     queryFn: async ({ signal }) => {
       const res = await fetch(
@@ -440,6 +451,7 @@ export function EditorView() {
   const geomKey = useMemo(() => geometryOpsKey(dRecipe.ops), [dRecipe]);
   const coveragePreview = useQuery({
     queryKey: ["edit-coverage", safe, rid, geomKey],
+    gcTime: 0,  // see the preview query — blob URLs are revoked, never re-serve a dead one
     enabled: showCoverage && !!opsSchema.data && !saved.isLoading,
     queryFn: async ({ signal }) => {
       const res = await fetch(api.editCoverageMapUrl(safe, rid, dRecipe), { signal });
@@ -472,6 +484,7 @@ export function EditorView() {
   const soloWanted = (soloExclude || soloSplit) && !!selForSolo && selForSolo.enabled;
   const withoutOpPreview = useQuery({
     queryKey: ["edit-without-op", safe, rid, dKey, selected, bust],
+    gcTime: 0,  // see the preview query — blob URLs are revoked, never re-serve a dead one
     enabled: soloWanted && !!opsSchema.data && !saved.isLoading,
     queryFn: async ({ signal }) => {
       const withoutRecipe: Recipe = {
@@ -505,6 +518,7 @@ export function EditorView() {
   const lookPreview = useQuery({
     queryKey: ["edit-look", safe, rid, lookSel?.label,
       lookPreviewRecipe ? JSON.stringify(lookPreviewRecipe.ops) : ""],
+    gcTime: 0,  // see the preview query — blob URLs are revoked, never re-serve a dead one
     enabled: lookSplit && !!lookPreviewRecipe && !!opsSchema.data && !saved.isLoading,
     queryFn: async ({ signal }) => {
       const res = await fetch(api.editPreviewUrl(safe, rid, lookPreviewRecipe!), { signal });
@@ -1191,7 +1205,7 @@ export function EditorView() {
                     label="Show this mosaic's frame-coverage map as a colour heatmap: yellow where the most frames overlap, dark blue at the ragged, uncovered edges. This is what 'Trim border' and 'Coverage leveling' act on.">
                     <Button size="xs" variant={showCoverage ? "filled" : "default"}
                       color="grape"
-                      disabled={!preview.data}
+                      disabled={!preview.data || trimPreview}
                       loading={showCoverage && coveragePreview.isLoading}
                       onClick={() => setShowCoverage((s) => {
                         if (!s) { setShowMask(false); setShowBase(false); setSoloExclude(false); setSoloSplit(false); setSplitCompare(false); setLookSplit(false); }
@@ -1204,7 +1218,7 @@ export function EditorView() {
                 <Tooltip label="Show the soft mask that gates star ops (white = treated as a star)">
                   <Button size="xs" variant={showMask ? "filled" : "default"}
                     color="grape"
-                    disabled={!preview.data}
+                    disabled={!preview.data || trimPreview}
                     loading={showMask && maskPreview.isLoading}
                     onClick={() => setShowMask((s) => {
                       if (!s) { setShowBase(false); setSoloExclude(false); setSoloSplit(false); setShowCoverage(false); setSplitCompare(false); setLookSplit(false); }
@@ -1706,7 +1720,7 @@ export function EditorView() {
                         <Button size="compact-xs"
                           variant={soloActive ? "filled" : "default"} color="grape"
                           loading={soloActive && withoutOpPreview.isLoading}
-                          disabled={!preview.data || reshapesFrame(selectedOp.id)}
+                          disabled={!preview.data || reshapesFrame(selectedOp.id) || trimPreview}
                           onClick={() => setSoloExclude((s) => {
                             if (!s) { setShowBase(false); setShowMask(false); setShowCoverage(false); setSoloSplit(false); setSplitCompare(false); setLookSplit(false); }
                             return !s;
@@ -1727,7 +1741,7 @@ export function EditorView() {
                         <Button size="compact-xs"
                           variant={soloSplitActive ? "filled" : "default"} color="grape"
                           loading={soloSplitActive && withoutOpPreview.isLoading}
-                          disabled={!preview.data || reshapesFrame(selectedOp.id)}
+                          disabled={!preview.data || reshapesFrame(selectedOp.id) || trimPreview}
                           onClick={() => setSoloSplit((s) => {
                             if (!s) { setShowBase(false); setShowMask(false); setShowCoverage(false);
                               setSoloExclude(false); setSplitCompare(false); setLookSplit(false); setSplitFrac(0.5); }

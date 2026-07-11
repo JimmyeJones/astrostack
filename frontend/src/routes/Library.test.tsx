@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Library } from "./Library";
+import { Library, expo } from "./Library";
 import * as client from "../api/client";
 import type { Target } from "../api/client";
 
@@ -29,6 +29,17 @@ function renderLibrary() {
 afterEach(() => {
   vi.restoreAllMocks();
   localStorage.clear();  // filters persist to localStorage — isolate tests
+});
+
+describe("expo", () => {
+  it("formats exposure and rolls minutes into hours (never '1h 60m')", () => {
+    expect(expo(0)).toBe("—");
+    expect(expo(90)).toBe("2m");
+    expect(expo(3600)).toBe("1h 0m");
+    expect(expo(5400)).toBe("1h 30m");
+    // 7190 s = 1h 59.8m: the minutes remainder rounds to 60 and must roll over.
+    expect(expo(7190)).toBe("2h 0m");
+  });
 });
 
 describe("Library", () => {
