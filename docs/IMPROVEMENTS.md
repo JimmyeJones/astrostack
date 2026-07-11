@@ -188,19 +188,21 @@ paths and `edit/pipeline.py`/`edit/recipe.py` op-ordering, which this run didn't
   `_raises_clear_error_when_no_image_data`. Additive, no schema/config/API change; found by the Scout's
   ingest/loader audit rotation.
 
-- **`delete_master` does an unlocked read-modify-write of the calibration registry off the job worker —
-  a concurrent master build can lose its just-registered entry (or a delete can be resurrected).** *(Traced,
-  Scout audit 2026-07-11; low severity — narrow race window, no silent wrong *image*.)* `webapp/calibration.py`'s
-  own docstring states the invariant "the single job worker is the only writer; routers only read, so no
-  locking is needed beyond the atomic replace." But `delete_master` (`webapp/calibration.py:641-656`, called
-  directly from the `DELETE …/calibration/masters/{id}` endpoint on the Starlette threadpool) does its own
-  `_read_registry` → mutate → `_write_registry`, while a `POST …/calibration/masters` build job's
-  `register_master` (`:605-638`) does the same read-modify-write on the job-worker thread. `os.replace` makes
-  each individual write atomic but does nothing for the interleave, so a delete landing between the build's
-  read and write (or vice-versa) drops one side's change — a just-built master vanishes from the registry
-  (its `.fits` orphaned) or a deleted one is resurrected pointing at a now-missing file. Fix: route deletion
-  through the job manager too (single-writer), or guard `_read_registry`/`_write_registry` with a
-  process-level lock. (S, correctness/concurrency)
+- ~~**`delete_master` does an unlocked read-modify-write of the calibration registry off the job worker —
+  a concurrent master build can lose its just-registered entry (or a delete can be resurrected).**~~ —
+  **FIXED v0.107.7** (Builder, 2026-07-11; traced + regression-tested). `delete_master` (called directly from
+  the `DELETE …/calibration/masters/{id}` endpoint on the Starlette threadpool) did its own `_read_registry` →
+  mutate → `_write_registry`, while a `POST …/calibration/masters` build job's `register_master` did the same
+  read-modify-write on the job-worker thread. `os.replace` makes each write atomic but does nothing for the
+  interleave, so a delete landing between the build's read and write (or vice-versa) dropped one side's change —
+  a just-built master vanished from the registry (its `.fits` orphaned) or a deleted one was resurrected
+  pointing at a now-missing file. Fixed by serialising the two mutating sequences under a process-level
+  `_REGISTRY_LOCK` (`threading.Lock`) held across the whole read→mutate→write in both `register_master` and
+  `delete_master`; writes are rare so the coarse global lock is harmless, and the stale docstring invariant is
+  corrected. Regression test `tests/webapp/test_calibration.py::
+  test_concurrent_register_and_delete_stay_consistent` runs a concurrent register+delete with a widened
+  read→write window and asserts registry↔disk consistency (no orphaned file, no dangling entry) — fails before
+  / passes after. Additive, no schema/config/API change; found by the Scout's calibration-registry audit.
 
 - ~~**The shape-only streak detector auto-rejects a bright edge-on galaxy / elongated nebula on *every*
   sub — silently discarding the whole target's data (on by default).**~~ — **FIXED v0.106.2** (Builder
