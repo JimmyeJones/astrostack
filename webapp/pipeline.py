@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 from seestack.io.library import Library
 from seestack.io.scanner import run_qc_and_solve, scan_and_organize
+from seestack.stack.pointings import MixedPointings, detect_mixed_pointings
 from webapp import __version__ as APP_VERSION
 from webapp.config import Settings
 from webapp.jobs import Job, JobManager
@@ -111,6 +112,7 @@ def _pipeline_body(
         if settings.auto_stack:
             stacked: list[str] = []
             skipped: list[str] = []
+            mixed_skipped: list[str] = []
             stack_errors: dict[str, str] = {}
             auto_edited = 0
             for entry in lib.list_targets():
@@ -120,6 +122,14 @@ def _pipeline_body(
                 attempt_n = _auto_stack_frame_count(lib, safe)
                 if attempt_n is None:
                     skipped.append(safe)
+                    continue
+                if settings.mixed_pointing_guard and _mixed_pointing_check(
+                        lib, safe) is not None:
+                    # Looks like two+ targets in one folder — don't burn a
+                    # walk-away stack on one pointing. Skip without marking the
+                    # attempt, so the next scan re-checks (and stacks once the
+                    # user rejects the odd-target frames), rather than stranding it.
+                    mixed_skipped.append(safe)
                     continue
                 # Record the attempt *before* stacking so that if this stack
                 # crashes the whole process, the watcher won't re-trigger the
@@ -163,6 +173,8 @@ def _pipeline_body(
                         _clear_auto_stack_attempt(lib, safe)
             summary["auto_stacked"] = stacked
             summary["auto_stack_skipped"] = skipped
+            if mixed_skipped:
+                summary["auto_stack_mixed_skipped"] = mixed_skipped
             if auto_edited:
                 summary["auto_edited"] = auto_edited
             if stack_errors:
@@ -290,6 +302,10 @@ def submit_process_target(settings: Settings, jm: JobManager, safe: str) -> Job:
                     if n:
                         summary["auto_graded"] = n
                 solved_accepted = _solved_accepted_count(proj)
+                # Pre-flight mixed-pointing check while the project is still open
+                # (below reflects the post-grade accept state the stack will use).
+                mixed = (_detect_mixed_pointings(proj)
+                         if settings.mixed_pointing_guard else None)
             finally:
                 proj.close()
             lib.refresh_target_stats(safe)
@@ -304,6 +320,15 @@ def submit_process_target(settings: Settings, jm: JobManager, safe: str) -> Job:
                 # WCS). Leave a clear reason instead of failing the whole job.
                 summary["stacked"] = False
                 summary["stack_skipped_reason"] = "no_solved_frames"
+                return summary
+            if mixed is not None:
+                # The batch looks like two+ targets in one folder — stacking would
+                # burn the run on one pointing and silently drop the rest. Skip
+                # with guidance instead (guard is opt-in; off by default).
+                summary["stacked"] = False
+                summary["stack_skipped_reason"] = "mixed_pointings"
+                summary["mixed_pointings"] = _mixed_pointing_summary(mixed)
+                summary["mixed_pointings_message"] = _mixed_pointing_message(mixed)
                 return summary
             summary["stack"] = _stack_target(
                 settings, jm, job, lib, safe,
@@ -1134,6 +1159,52 @@ def submit_channel_combine(
 
 def _solved_accepted_count(proj: Any) -> int:
     return sum(1 for f in proj.iter_frames(accepted_only=True) if f.wcs_json)
+
+
+def _detect_mixed_pointings(proj: Any) -> MixedPointings | None:
+    """The mixed-pointing verdict over a target's accepted+solved subs, or ``None``.
+
+    Reads exactly the frames the stacker would combine (accepted, plate-solved)
+    and clusters their pointings — see :mod:`seestack.stack.pointings`.
+    """
+    radecs = [
+        (f.ra_center_deg, f.dec_center_deg)
+        for f in proj.iter_frames(accepted_only=True)
+        if f.wcs_json
+    ]
+    return detect_mixed_pointings(radecs)
+
+
+def _mixed_pointing_check(lib: Library, safe: str) -> MixedPointings | None:
+    """Open ``safe`` and return its mixed-pointing verdict (``None`` if single)."""
+    proj = lib.open_target(safe)
+    try:
+        return _detect_mixed_pointings(proj)
+    finally:
+        proj.close()
+
+
+def _mixed_pointing_summary(mixed: MixedPointings) -> dict[str, Any]:
+    """A small JSON-safe blob describing a bimodal batch for a job summary."""
+    return {
+        "pointings": mixed.pointings,
+        "majority": mixed.majority,
+        "others": mixed.others,
+        "separation_deg": round(mixed.separation_deg, 1),
+    }
+
+
+def _mixed_pointing_message(mixed: MixedPointings) -> str:
+    """Plain-language reason shown when the guard skips a walk-away stack."""
+    total = mixed.majority + mixed.others
+    return (
+        f"This batch looks like {mixed.pointings} different targets "
+        f"(the largest pointing has {mixed.majority} of {total} solved subs, "
+        f"~{round(mixed.separation_deg)}° apart). Stacking would combine only one "
+        f"pointing and silently drop the rest, so it was skipped. Open the Frames "
+        f"table and reject the odd-target frames (the Target page's "
+        f'"Reject the odd-target frames" button does this in one click), then stack.'
+    )
 
 
 def _auto_stack_frame_count(lib: Library, safe: str) -> int | None:

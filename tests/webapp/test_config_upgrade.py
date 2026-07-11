@@ -41,6 +41,10 @@ def test_old_config_loads_keeps_values_and_defaults_new_fields(tmp_path):
     # binding master darks/flats to unattended stacks on its own (a live
     # install's autonomous output is unchanged until the user opts in).
     assert s.auto_bind_calibration is False
+    # New mixed-pointing guard defaults off → an upgrade never starts skipping an
+    # unattended stack on its own; a bimodal batch stacks exactly as before until
+    # the user opts in.
+    assert s.mixed_pointing_guard is False
     # New job-history cap defaults to the long-standing hard-coded value, so an
     # upgraded install keeps exactly as much job history as before.
     assert s.job_history_limit == 200

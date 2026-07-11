@@ -88,6 +88,17 @@ class Settings(BaseModel):
     # autonomous chains produce on a live install); the interactive Stack form is
     # never affected — it keeps honouring exactly what the user picked (or didn't).
     auto_bind_calibration: bool = False
+    # Pre-flight guard for the *unattended* stack chains (watcher auto-stack /
+    # one-click "Process target"): before stacking, cluster the accepted+solved
+    # subs' plate-solved pointings; if they split into two+ well-separated targets
+    # (a batch that looks like two objects dropped in one folder — a contiguous
+    # mosaic never trips it), skip the stack with a plain-language reason instead
+    # of silently combining only one pointing and dropping the rest of the night.
+    # Off by default (it changes what the walk-away chains do on a bimodal batch —
+    # today they stack the majority pointing and drop the strays); the interactive
+    # Stack form is never affected (it already shows a pre-flight warning + a
+    # one-click "reject the odd-target frames" fix, and honours the user's choice).
+    mixed_pointing_guard: bool = False
     # QC auto-rejects a whole frame when it detects a satellite/plane streak,
     # discarding ~99% good pixels with it. With this on, streaked frames are
     # *flagged* but kept accepted, so a stack with per-pixel rejection
