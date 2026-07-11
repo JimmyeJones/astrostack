@@ -154,6 +154,37 @@ describe("TonightView", () => {
     expect(screen.queryByText(/M13/)).not.toBeInTheDocument();
   });
 
+  it("falls back to All (not an empty table) when the picked type vanishes after a data change", async () => {
+    const spy = vi.spyOn(client.api, "getTonight")
+      .mockResolvedValueOnce(plan({
+        targets: [
+          target({ id: "M31", name: "Andromeda", type: "galaxy", already_targeted: false, score: 80 }),
+          target({ id: "M42", name: "Orion Nebula", type: "nebula", already_targeted: false, score: 70 }),
+        ],
+      }))
+      .mockResolvedValue(plan({
+        // A different night: only a galaxy is up, so the previously-picked "Nebula" bucket is gone.
+        targets: [
+          target({ id: "M81", name: "Bode's Galaxy", type: "galaxy", already_targeted: false, score: 75 }),
+        ],
+      }));
+    renderTonight();
+    await waitFor(() =>
+      expect(screen.getByText("Start something new tonight")).toBeInTheDocument());
+    // Pick Nebula while it's available.
+    fireEvent.click(screen.getByRole("radio", { name: "Nebula" }));
+    await waitFor(() => expect(screen.queryByText(/M31/)).not.toBeInTheDocument());
+    expect(screen.getByText(/M42/)).toBeInTheDocument();
+
+    // Re-plan a night whose fresh data has no nebula — the stale "Nebula"
+    // selection must fall back to All rather than filtering the table to empty.
+    fireEvent.change(screen.getByLabelText("Night"), { target: { value: "2026-08-15" } });
+    await waitFor(() =>
+      expect(spy).toHaveBeenLastCalledWith(expect.objectContaining({ date: "2026-08-15" })));
+    await waitFor(() => expect(screen.getByText(/M81/)).toBeInTheDocument());
+    expect(screen.queryByText(/No targets of that type/)).not.toBeInTheDocument();
+  });
+
   it("hides the type filter when only one object type is present", async () => {
     vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
       targets: [

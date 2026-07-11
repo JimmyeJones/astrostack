@@ -195,7 +195,13 @@ export function TonightView() {
   const { up: alreadyUp, notUp: alreadyNotUp } = partitionByUpTonight(already);
   const { up: freshUp, notUp: freshNotUp } = partitionByUpTonight(fresh);
   const typeOptions = typeFilterOptions(freshUp);
-  const freshShown = filterByTypeBucket(freshUp, typeFilter);
+  // A previously-chosen bucket may no longer be present after the data changes
+  // (a different night, a min-altitude change). Fall back to "All" for *both* the
+  // control's displayed value and the filtered list, so they never disagree — a
+  // valid-but-absent bucket (e.g. "Nebula" with no nebulae up) would otherwise
+  // filter to an empty table while the control read "All".
+  const effectiveTypeFilter = typeOptions.includes(typeFilter) ? typeFilter : "All";
+  const freshShown = filterByTypeBucket(freshUp, effectiveTypeFilter);
   const alreadyNote = alreadyUp.length > 0 ? notUpTonightNote(alreadyNotUp.length, whenWord) : null;
   const freshNote = freshUp.length > 0 ? notUpTonightNote(freshNotUp.length, whenWord) : null;
 
@@ -250,7 +256,7 @@ export function TonightView() {
             <SegmentedControl
               size="xs"
               data={typeOptions}
-              value={typeOptions.includes(typeFilter) ? typeFilter : "All"}
+              value={effectiveTypeFilter}
               onChange={setTypeFilter}
             />
           ) : null}

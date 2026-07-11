@@ -2957,6 +2957,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.109.9** — Friendliness / UX bug (PRIORITY 3; Builder 2026-07-11; found by the frontend non-editor route
+  audit): the Tonight "Start something new" object-type filter could show a contradictory empty table. When the
+  picked bucket (e.g. "Nebula") was no longer present after the data changed (a different night via the date
+  picker, or a min-altitude change), `filterByTypeBucket(freshUp, typeFilter)` filtered to `[]` — a
+  valid-but-absent bucket isn't inert — while the SegmentedControl fell back to displaying "All", so the control
+  read "All" yet the table showed "No targets of that type…", hiding real targets. Fixed by deriving one
+  `effectiveTypeFilter` (`typeOptions.includes(typeFilter) ? typeFilter : "All"`) used by **both** the control's
+  value and the filter, so a stale selection cleanly falls back to All in both. Frontend-only, additive, no
+  backend/schema change. Regression `Tonight.test.tsx::"falls back to All (not an empty table) when the picked
+  type vanishes after a data change"` (pick Nebula → re-plan a nebula-less night → the galaxy still shows, no
+  empty state; fails before / passes after).
 - **v0.109.8** — Friendliness / display bug (PRIORITY 3; Builder 2026-07-11; found by the frontend non-editor
   route audit): three time formatters rounded their remainder into the next unit's threshold and then printed it
   in the smaller unit — the Library card's `expo(7190)` (1h 59.8m) read **"1h 60m"**, `formatIntegration(3599)`
