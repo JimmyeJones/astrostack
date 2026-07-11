@@ -1390,11 +1390,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   *tightens* what auto-bind will apply), testable on `auto_bind_master_paths` in isolation. Closes the flat's
   "confident only" gap in the v0.99.0 auto-bind contract. _(Correction, Scout 2026-07-10: this was **not** the
   last such gap — the **bias** was still ungated; that was closed in v0.103.10.)_
-- **Auto-bind considers only the *single* top-ranked dark, so a gain-mismatched-but-exposure-perfect dark can
-  suppress a gain-matched *scalable* one — leaving a walk-away stack uncalibrated when a usable dark existed.**
-  (S–M, autonomy/image-quality) *(Builder-audit-noted 2026-07-10; low urgency — the effect is
-  under-calibration, i.e. the "leave uncalibrated rather than risk anything" safe direction, never wrong
-  pixels — so filed, not blind-fixed. Needs a real-library validation before building.)* `recommend_masters`
+- ~~**Auto-bind considers only the *single* top-ranked dark, so a gain-mismatched-but-exposure-perfect dark can
+  suppress a gain-matched *scalable* one — leaving a walk-away stack uncalibrated when a usable dark existed.**~~
+  — **shipped v0.107.1** (Builder 2026-07-11; traced + regression-tested). `auto_bind_master_paths` no longer keys
+  off `recommend_masters`'s single top-ranked dark: it now iterates **every** library dark in ascending match
+  distance and binds the *first that clears a bind gate* (confident gain/temperature **and** either an
+  exposure-match within 25% or an exposure-scalable-via-confident-bias). Ordering by distance means the closest
+  *bindable* dark wins (an exposure-perfect dark is preferred over one that needs scaling, its exposure term being
+  0), and the top pick is still tried first, so the common case is byte-for-byte unchanged — the fallthrough only
+  fires when the best-ranked dark **fails** its gate, stopping it from masking a usable one. Strictly conservative:
+  each candidate still passes the exact same confidence bar auto-bind already trusts, so it never applies a dark it
+  wouldn't already bind, and still leaves the stack dark-uncalibrated (the safe direction) when *no* dark qualifies.
+  A new nested `_try_bind_dark(cand)` helper returns the confident binding keys (`dark_path`, or
+  `dark_path`+`bias_path`+`scale_dark_to_light`) or `None`. Regression tests
+  `tests/webapp/test_calibration.py::test_auto_bind_recovers_a_scalable_dark_when_the_top_pick_fails_its_gate`
+  (the headline case: a gain-mismatched-but-exposure-perfect dark out-ranks a gain-matched scalable one → the
+  scalable one is now bound+scaled, fails before / passes after) and
+  `test_auto_bind_still_uncalibrated_when_no_dark_is_bindable` (the fallthrough stays conservative — no bindable
+  dark → uncalibrated). Additive, gated behind the existing off-by-default `auto_bind_calibration` setting, no
+  schema/config/API-shape change. Original write-up kept below for provenance. `recommend_masters`
   scores each dark with `_match_distance` (exposure ×3 + gain + temp) and returns **only** the lowest-distance
   dark as `best["dark"]`; `auto_bind_master_paths` then applies the confidence + (v0.103.12) exposure-scaling
   gates to *that one pick* and never falls back to a different library dark. So in a library holding both (a) a
