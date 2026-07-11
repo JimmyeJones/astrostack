@@ -80,6 +80,71 @@ def test_store_register_list_resolve_delete(tmp_path):
     assert calibration.list_masters(root) == []
 
 
+def test_concurrent_register_and_delete_stay_consistent(tmp_path, monkeypatch):
+    """A master build (``register_master``, on the job worker) and a master
+    deletion (``delete_master``, on the request threadpool) run concurrently.
+
+    Regression: both did an unlocked read → mutate → write, so an interleave
+    dropped one side's change — a just-built master vanished from the registry
+    (its ``.fits`` orphaned) or a deleted one was resurrected. With the shared
+    ``_REGISTRY_LOCK`` the two sequences serialise, so the outcome is always the
+    consistent one: the old master gone (file + entry) and the new one present
+    (file + entry). We widen the read→write window with a delayed write so an
+    unlocked implementation reliably loses the race."""
+    import threading
+
+    from seestack.calibrate.masters import MasterMeta
+
+    root = tmp_path / "lib"
+    old = calibration.register_master(
+        root, name="Old", array=np.full((4, 4), 1.0, dtype=np.float32),
+        meta=MasterMeta("dark", 5, 4, 4, "median", exposure_s=30.0))
+    old_file = calibration.calibration_dir(root) / old["filename"]
+    assert old_file.exists()
+
+    orig_write = calibration._write_registry
+
+    def slow_write(library_root, entries):
+        time.sleep(0.05)  # widen the race window between read and write
+        return orig_write(library_root, entries)
+
+    monkeypatch.setattr(calibration, "_write_registry", slow_write)
+
+    start = threading.Barrier(2)
+    new_entry: dict = {}
+
+    def do_register():
+        start.wait()
+        new_entry.update(calibration.register_master(
+            root, name="New", array=np.full((4, 4), 2.0, dtype=np.float32),
+            meta=MasterMeta("dark", 5, 4, 4, "median", exposure_s=60.0)))
+
+    def do_delete():
+        start.wait()
+        calibration.delete_master(root, old["id"])
+
+    t1 = threading.Thread(target=do_register)
+    t2 = threading.Thread(target=do_delete)
+    t1.start(); t2.start()
+    t1.join(); t2.join()
+
+    # The outcome must be internally consistent: exactly the new master
+    # registered, every registered entry's file present, and no orphaned files
+    # on disk. (An unlocked race instead loses the register — leaving an
+    # orphaned .fits with no entry — or resurrects the delete, leaving an entry
+    # whose file was unlinked. Filenames are id-derived so the surviving master
+    # may reuse the old id/filename; the invariant is registry↔disk agreement,
+    # not a specific filename.)
+    listed = calibration.list_masters(root)
+    assert [e["name"] for e in listed] == ["New"], listed
+    cal_dir = calibration.calibration_dir(root)
+    registered_files = {e["filename"] for e in listed}
+    for fn in registered_files:
+        assert (cal_dir / fn).exists(), f"registered master {fn} has no file"
+    on_disk = {p.name for p in cal_dir.glob("*.fits")}
+    assert on_disk == registered_files, (on_disk, registered_files)
+
+
 def test_resolve_unknown_raises(tmp_path):
     import pytest
 

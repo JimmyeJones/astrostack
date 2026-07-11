@@ -10,9 +10,11 @@ at the library root rather than inside a single target:
         flat_2.fits
         ...
 
-The registry is a small JSON file written atomically. The single job worker is
-the only writer; routers only read, so no locking is needed beyond the atomic
-replace.
+The registry is a small JSON file written atomically. Master *builds* run on the
+single job worker, but master *deletion* runs on the request threadpool, so the
+two are concurrent writers — their read-modify-write sequences are serialised by
+``_REGISTRY_LOCK`` (the atomic replace alone only makes each write atomic, not the
+read→mutate→write sequence).
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -28,6 +31,15 @@ log = logging.getLogger(__name__)
 
 CALIBRATION_SUBDIR = "calibration"
 REGISTRY_NAME = "masters.json"
+
+# The registry is a small JSON file mutated by a read-modify-write. The atomic
+# ``os.replace`` in ``_write_registry`` makes each *write* atomic, but not the
+# read→mutate→write *sequence*: a build job (`register_master`, on the job
+# worker) and a delete (`delete_master`, on the Starlette threadpool) can
+# interleave so one clobbers the other's change — a just-built master vanishes
+# or a deleted one is resurrected. This process-level lock serialises the two
+# mutating sequences. Writes are rare, so the coarse global lock is harmless.
+_REGISTRY_LOCK = threading.Lock()
 
 # FITS extensions we'll treat as calibration frames in a source folder.
 FITS_GLOBS = ("*.fit", "*.fits", "*.FIT", "*.FITS", "*.fit.gz", "*.fits.gz")
@@ -645,45 +657,47 @@ def register_master(
     :func:`seestack.calibrate.build_master`."""
     from seestack.calibrate.masters import save_master
 
-    entries = _read_registry(library_root)
-    mid = _next_id(entries)
-    filename = f"{meta.kind}_{mid}.fits"
-    save_master(calibration_dir(library_root) / filename, array, meta)
-    entry = {
-        "id": mid,
-        "name": name or f"{meta.kind} {mid}",
-        "kind": meta.kind,
-        "filename": filename,
-        "n_frames": meta.n_frames,
-        "method": meta.method,
-        "exposure_s": meta.exposure_s,
-        "gain": meta.gain,
-        "sensor_temp_c": meta.sensor_temp_c,
-        "bayer_pattern": meta.bayer_pattern,
-        "width_px": meta.width_px,
-        "height_px": meta.height_px,
-        "created_utc": datetime.now(timezone.utc).isoformat(),
-    }
-    entries.append(entry)
-    _write_registry(library_root, entries)
+    with _REGISTRY_LOCK:
+        entries = _read_registry(library_root)
+        mid = _next_id(entries)
+        filename = f"{meta.kind}_{mid}.fits"
+        save_master(calibration_dir(library_root) / filename, array, meta)
+        entry = {
+            "id": mid,
+            "name": name or f"{meta.kind} {mid}",
+            "kind": meta.kind,
+            "filename": filename,
+            "n_frames": meta.n_frames,
+            "method": meta.method,
+            "exposure_s": meta.exposure_s,
+            "gain": meta.gain,
+            "sensor_temp_c": meta.sensor_temp_c,
+            "bayer_pattern": meta.bayer_pattern,
+            "width_px": meta.width_px,
+            "height_px": meta.height_px,
+            "created_utc": datetime.now(timezone.utc).isoformat(),
+        }
+        entries.append(entry)
+        _write_registry(library_root, entries)
     return entry
 
 
 def delete_master(library_root: str | Path, master_id: int) -> bool:
     """Remove a master's registry entry and its FITS file. Returns True if it
     existed."""
-    entries = _read_registry(library_root)
-    keep = [e for e in entries if int(e.get("id", -1)) != int(master_id)]
-    removed = [e for e in entries if int(e.get("id", -1)) == int(master_id)]
-    if not removed:
-        return False
-    for e in removed:
-        fp = calibration_dir(library_root) / e.get("filename", "")
-        try:
-            fp.unlink(missing_ok=True)
-        except OSError as exc:
-            log.warning("could not delete master file %s: %s", fp, exc)
-    _write_registry(library_root, keep)
+    with _REGISTRY_LOCK:
+        entries = _read_registry(library_root)
+        keep = [e for e in entries if int(e.get("id", -1)) != int(master_id)]
+        removed = [e for e in entries if int(e.get("id", -1)) == int(master_id)]
+        if not removed:
+            return False
+        for e in removed:
+            fp = calibration_dir(library_root) / e.get("filename", "")
+            try:
+                fp.unlink(missing_ok=True)
+            except OSError as exc:
+                log.warning("could not delete master file %s: %s", fp, exc)
+        _write_registry(library_root, keep)
     return True
 
 

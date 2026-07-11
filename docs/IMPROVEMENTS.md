@@ -172,18 +172,21 @@ paths and `edit/pipeline.py`/`edit/recipe.py` op-ordering, which this run didn't
   migration, or keep the stored path and add a resolved-path index; test the upgrade from an old DB. (S code
   / M migration+validation, correctness/data-integrity)
 
-- **`load_seestar_raw` raises an opaque `IndexError` (instead of a clear error, or reading the image) on a
-  FITS whose primary HDU carries no data.** *(Traced, Scout audit 2026-07-11; low severity — non-Seestar
-  input, degrades to a per-frame error at most call sites.)* `io/fits_loader.py:104` does
-  `data = np.asarray(hdu.data)` on `hdul[0]`, then `data.shape[-1]` at `:111` — for a compressed
-  (`CompImageHDU`) or multi-extension FITS where the image lives in `hdul[1]` and `hdul[0].data is None`,
-  `np.asarray(None)` is a 0-d object array and `.shape[-1]` raises `IndexError: tuple index out of range`,
-  **before** the intended `if data.ndim != 2: raise ValueError("expected 2D…")` guard at `:119` can fire. The
-  sibling `load_header` (`:55-59`) silently records `width=height=0` for the same file. Seestar raws are
-  simple single-HDU 2-D FITS so the normal path is unaffected, but a user dropping an fpack'd or
-  multi-extension FITS gets a confusing crash rather than "unsupported / expected 2D." Minimal fix: guard
-  `hdu.data is None` and raise the clear `ValueError` (or fall through to the first data-bearing HDU to
-  actually support compressed FITS — a small feature). (S, robustness/friendliness)
+- ~~**`load_seestar_raw` raises an opaque `IndexError` (instead of a clear error, or reading the image) on a
+  FITS whose primary HDU carries no data.**~~ — **FIXED v0.107.6** (Builder, 2026-07-11; traced +
+  regression-tested). `io/fits_loader.py` read `hdul[0]` unconditionally, so `data = np.asarray(hdu.data)` on a
+  data-less primary produced a 0-d object array and `data.shape[-1]` raised `IndexError: tuple index out of
+  range`, **before** the intended `if data.ndim != 2: raise ValueError("expected 2D…")` guard could fire — the
+  case for a compressed (`CompImageHDU`) or multi-extension FITS where the image lives in `hdul[1]` and
+  `hdul[0].data is None`. `load_header` silently recorded `width=height=0` for the same file. Fixed at the root
+  with a `_first_image_hdu(hdul)` helper that returns the first HDU carrying a ≥2D image (read via `.shape`, no
+  forced decompression); both `load_header` and `load_seestar_raw` now select it, so an fpack'd/multi-extension
+  FITS **loads** instead of crashing (a small friendliness feature), and a genuinely image-less FITS raises the
+  clear `ValueError("no image data found…")`. Byte-for-byte identical on normal single-HDU Seestar raws (the
+  primary carries the data, so it's still selected). Regression tests `tests/test_fits_loader.py::
+  test_load_raw_reads_image_from_a_data_less_primary_hdu` / `_reads_a_compressed_fits` /
+  `_raises_clear_error_when_no_image_data`. Additive, no schema/config/API change; found by the Scout's
+  ingest/loader audit rotation.
 
 - **`delete_master` does an unlocked read-modify-write of the calibration registry off the job worker —
   a concurrent master build can lose its just-registered entry (or a delete can be resurrected).** *(Traced,
