@@ -156,6 +156,64 @@ def test_pipeline_autoinserts_stretch_and_outputs_display_range():
     assert fin.max() > 0.0  # not blank
 
 
+def _scene(scale: float = 1.0, h: int = 80, w: int = 100) -> np.ndarray:
+    """A realistic linear OSC scene: faint sky + a diffuse nebula blob + a bright
+    star core, in arbitrary linear ADU (multiplied by ``scale``)."""
+    rng = np.random.default_rng(3)
+    img = (rng.random((h, w, 3)).astype("float32") * 0.01) + 0.05   # sky ~0.05
+    yy, xx = np.mgrid[0:h, 0:w]
+    img += (0.15 * np.exp(-(((xx - w / 2) / 18) ** 2
+                            + ((yy - h / 2) / 18) ** 2)))[..., None]  # nebula
+    img[10:12, 12:14, :] = 3.0                                       # bright star
+    return (img * scale).astype("float32")
+
+
+def test_no_recipe_fallback_uses_adaptive_stf_autostretch():
+    # The no-stretch fallback must be the adaptive per-channel STF autostretch — the
+    # same stretch the stored thumbnail (render.thumbnail.autostretch) uses — not the
+    # old fixed-slider asinh. Two checks pin this down:
+    #   (a) the fallback output is *exactly* autostretch() of the linear scene, and
+    #   (b) STF anchors each channel's sky median to a neutral target grey, so the
+    #       rendered sky lands at the same grey regardless of the raw linear scale of
+    #       the data. A fixed-gain asinh renders two identically-shaped-but-differently
+    #       -scaled scenes to *different* sky greys (its gain doesn't re-anchor the
+    #       median), so a scale-invariant sky grey is exactly what proves it's STF.
+    from seestack.render.thumbnail import autostretch
+
+    rec = Recipe(ops=[])
+    assert not has_stretch(rec)
+    greys = []
+    for scale in (1.0, 12.0):
+        scene = _scene(scale=scale)
+        out = apply_recipe(scene, rec, EditContext())
+        fin = out[np.isfinite(out)]
+        assert fin.min() >= 0.0 and fin.max() <= 1.0                  # display range
+        # (a) the fallback is exactly autostretch() of the linear scene.
+        assert np.allclose(np.nan_to_num(out), np.nan_to_num(autostretch(scene)),
+                           atol=1e-5)
+        # Sky = the low-value bulk; its median is where STF pins ~target_bg (0.20).
+        greys.append(float(np.median(out[..., 1])))
+    # (b) same sky grey at both raw scales — the adaptive-STF property asinh lacks.
+    assert abs(greys[0] - greys[1]) < 0.02
+    assert 0.12 < greys[0] < 0.28                                     # near 0.20 grey
+
+
+def test_no_recipe_fallback_preview_export_parity():
+    # The editor preview runs the fallback on the strided proxy; the export runs it
+    # on the full-res FITS. Both now call the same STF autostretch, and STF re-anchors
+    # the sky median to the target grey regardless of the top-end scale, so the two
+    # agree within the inherent decimation-sampling floor (the same ≤2% parity the
+    # other spatial ops document). Simulate the two resolutions by striding the scene.
+    from seestack.render.thumbnail import autostretch
+
+    scene = _scene(scale=1.0, h=160, w=200)
+    full = autostretch(scene)                       # "export" — full-res
+    proxy = autostretch(scene[::2, ::2])            # "preview" — 2x strided proxy
+    # Compare the sky grey (channel-median) — the value the user's eye anchors to.
+    for c in range(3):
+        assert abs(float(np.median(full[..., c])) - float(np.median(proxy[..., c]))) < 0.02
+
+
 def test_auto_stretch_false_returns_linear_ops_output():
     # The Stretch suggestion needs the *linear* image the stretch op will receive,
     # so auto_stretch=False must suppress the default-stretch fallback and leave a
@@ -183,7 +241,7 @@ def test_already_display_ctx_suppresses_the_default_stretch():
     assert not has_stretch(rec)
     same = apply_recipe(disp_img, rec, EditContext(already_display=True))
     assert np.allclose(same, disp_img)                       # verbatim, no re-stretch
-    # Without the flag the fallback asinh fires and materially changes the image.
+    # Without the flag the fallback autostretch fires and materially changes the image.
     stretched = apply_recipe(disp_img, rec, EditContext())
     assert not np.allclose(stretched, disp_img)
     # An explicit stretch op the user adds still runs even when already_display.

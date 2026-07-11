@@ -5,9 +5,9 @@ The pipeline owns the linear→stretch→nonlinear contract:
 * operations run in recipe order;
 * the (single) stretch op maps linear data into display space ``[0, 1]`` and flips
   ``ctx.stage`` to ``"nonlinear"``;
-* if no stretch op is enabled, a default asinh stretch is applied after the last
-  enabled op so the preview is never black (matching the existing renderer, which
-  always stretches).
+* if no stretch op is enabled, a default STF autostretch is applied after the last
+  enabled op so the preview is never black (matching the stored thumbnail's
+  stretch, which is also STF).
 
 Every op is best-effort: a failing op is skipped (its error collected) rather than
 sinking the whole render — important for live preview responsiveness.
@@ -44,11 +44,11 @@ def apply_recipe(
     proxy result matches the full-res export). ``for_preview`` is kept for API
     symmetry but no longer skips anything.
 
-    ``auto_stretch`` (default ``True``) inserts the default asinh stretch when no
-    stretch op is enabled, so a preview is never black. Pass ``False`` to get the
-    *linear* result of the enabled ops unchanged (used by the Stretch suggestion,
-    which needs to measure the linear image the stretch op will receive, not a
-    tone-mapped one).
+    ``auto_stretch`` (default ``True``) inserts a default STF autostretch when no
+    stretch op is enabled, so a preview is never black (the same adaptive stretch
+    the stored thumbnail uses). Pass ``False`` to get the *linear* result of the
+    enabled ops unchanged (used by the Stretch suggestion, which needs to measure
+    the linear image the stretch op will receive, not a tone-mapped one).
 
     When ``ctx.already_display`` is set the input is *itself* a tone-mapped
     display-space image (an editor export re-opened for editing), so the default
@@ -79,11 +79,20 @@ def apply_recipe(
             ctx.stage = "nonlinear"
 
     if not stretched and auto_stretch and not ctx.already_display:
-        # Auto-insert a default stretch so the output is viewable.
+        # Auto-insert a default stretch so the output is viewable. Use the
+        # per-channel STF autostretch — the same stretch the stored preview/
+        # thumbnail (render.thumbnail.generate_thumbnail) and the one-click Auto
+        # recipe already use — rather than a fixed-slider asinh. STF anchors each
+        # channel's robust sky median to a neutral target grey and adapts to the
+        # data, so a beginner's first-open view of an unedited stack is a
+        # good-looking, correctly-exposed image (and consistent with the History/
+        # Target thumbnail they already saw), instead of a middling one-size-fits-
+        # all asinh. Like asinh it renders uncovered (NaN) pixels black, so we
+        # restore NaN afterwards to keep "no coverage" out of the histogram/levels.
         from seestack.edit.registry import finite_mask
-        from seestack.render.thumbnail import asinh_stretch
+        from seestack.render.thumbnail import autostretch
         uncovered = ~finite_mask(out)
-        out = as_rgb(asinh_stretch(out)).copy()
+        out = as_rgb(autostretch(out)).copy()
         out[uncovered] = np.nan  # keep "no coverage" out of the histogram/levels
         ctx.stage = "nonlinear"
 

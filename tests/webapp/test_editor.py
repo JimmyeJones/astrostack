@@ -93,8 +93,8 @@ def _write_linear_stack_fits(path, rgb):
 
 
 def test_fullres_export_keeps_nan_coverage_on_a_no_stretch_recipe(tmp_path):
-    """The full-res export must mirror the live preview: its fallback asinh
-    stretch renders uncovered (NaN) pixels as black 0, so it has to restore NaN
+    """The full-res export must mirror the live preview: its fallback STF
+    autostretch renders uncovered (NaN) pixels as black 0, so it has to restore NaN
     afterwards. Otherwise a no-stretch export (empty recipe, or a recipe with no
     stretch op) bakes mosaic-gap / reproject-border "no coverage" to real black
     in the float32 FITS — diverging from the preview and making a re-edit treat
@@ -112,7 +112,7 @@ def test_fullres_export_keeps_nan_coverage_on_a_no_stretch_recipe(tmp_path):
     def _noop(*a, **k):
         return None
 
-    # Empty recipe → the default asinh fallback runs. The gap must stay NaN.
+    # Empty recipe → the default STF autostretch fallback runs. The gap must stay NaN.
     out, _ = _render_recipe_fullres(str(fp), {"ops": []}, _noop)
     out = np.asarray(out)
     assert np.isnan(out[:12, :12, :]).all(), "no-coverage gap baked to black on export"
@@ -1055,7 +1055,7 @@ def test_star_mask_display_space_reveals_more_than_linear(client, solved_library
     linear = client.get(base)
     assert linear.status_code == 200
     # An empty recipe still triggers the display-space path: apply_recipe auto-adds
-    # the default asinh stretch, so this is the post-stretch image the ops see.
+    # the default STF autostretch, so this is the post-stretch image the ops see.
     display = client.get(base, params={"recipe": _enc({"ops": [], "base_run_id": rid})})
     assert display.status_code == 200
 
@@ -1289,8 +1289,8 @@ def _register_display_space_run(data_root, safe, basename, options_json):
 def test_reopening_display_space_run_does_not_double_stretch(client, solved_library):
     """The editor preview of a display-space run with an empty recipe renders it
     verbatim (mean ~0.5 grey), not double-stretched. The SAME data registered
-    WITHOUT the display_space flag falls back to the default asinh (a materially
-    different look) — proving the flag drives the fix, and old runs are
+    WITHOUT the display_space flag falls back to the default STF autostretch (a
+    materially different look) — proving the flag drives the fix, and old runs are
     unaffected."""
     from io import BytesIO
 
@@ -1311,7 +1311,7 @@ def test_reopening_display_space_run_does_not_double_stretch(client, solved_libr
     disp_mean = np.asarray(Image.open(BytesIO(disp_png)).convert("RGB")).mean()
     lin_mean = np.asarray(Image.open(BytesIO(lin_png)).convert("RGB")).mean()
     assert abs(disp_mean - 127) <= 8            # verbatim ~0.5 ramp, not re-stretched
-    assert abs(lin_mean - disp_mean) > 20       # the fallback asinh changes the look
+    assert abs(lin_mean - disp_mean) > 20       # the fallback autostretch changes the look
 
 
 def test_export_reports_failed_ops_in_result(client, solved_library, monkeypatch):
