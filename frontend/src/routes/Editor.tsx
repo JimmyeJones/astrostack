@@ -1708,7 +1708,7 @@ export function EditorView() {
                           loading={soloActive && withoutOpPreview.isLoading}
                           disabled={!preview.data || reshapesFrame(selectedOp.id)}
                           onClick={() => setSoloExclude((s) => {
-                            if (!s) { setShowBase(false); setShowMask(false); setShowCoverage(false); setSoloSplit(false); setSplitCompare(false); }
+                            if (!s) { setShowBase(false); setShowMask(false); setShowCoverage(false); setSoloSplit(false); setSplitCompare(false); setLookSplit(false); }
                             return !s;
                           })}>
                           {soloActive ? "Showing without" : "Without this op"}
@@ -1730,7 +1730,7 @@ export function EditorView() {
                           disabled={!preview.data || reshapesFrame(selectedOp.id)}
                           onClick={() => setSoloSplit((s) => {
                             if (!s) { setShowBase(false); setShowMask(false); setShowCoverage(false);
-                              setSoloExclude(false); setSplitCompare(false); setSplitFrac(0.5); }
+                              setSoloExclude(false); setSplitCompare(false); setLookSplit(false); setSplitFrac(0.5); }
                             return !s;
                           })}>
                           {soloSplitActive ? "Hide op split" : "Split this op"}

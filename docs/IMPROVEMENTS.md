@@ -194,6 +194,26 @@ re-covered this run): the frontend editor route UX (React/TS — needs a `vitest
 engine audits), and `qc/*` + `solve/*` (last deep-traced 2026-07-11 by the qc/solve Builder run) if a fresh angle
 surfaces._
 
+- ~~**Editor: turning on a *per-op* compare ("Without this op" / "Split this op") doesn't exit an active
+  "Compare a look" split — the "Look:" button lingers in a stale active state and the look split reappears
+  when the per-op compare is dismissed.**~~ — **FIXED v0.109.4** (Builder, 2026-07-11; traced + reproduced +
+  regression-tested). The editor's preview has a set of mutually-exclusive compare modes (`showBase`,
+  `splitCompare`, `showMask`, `showCoverage`, `soloExclude`, `soloSplit`, `lookSplit`); every top-level toggle's
+  activation handler clears all the others, including `setLookSplit(false)`. But the two **per-op** handlers
+  (`Editor.tsx` "Without this op" / "Split this op") cleared every sibling *except* `lookSplit` — an enumeration
+  oversight. So with "Compare a look" active, selecting an op and clicking a per-op compare switched the preview
+  correctly (per-op overlay wins the precedence) yet left `lookSplit=true`: the "Compare a look" button kept
+  reading "Look: <name>" as if still comparing, the hidden look-preview query kept re-fetching/holding a blob,
+  and dismissing the per-op compare surprised the user by *re-showing* the look split instead of the plain
+  edited preview. Fixed by adding `setLookSplit(false)` to both handlers, exactly mirroring every sibling toggle.
+  Frontend-only, additive, no backend/schema/API change. Regression test `Editor.test.tsx::"turning on a per-op
+  compare exits look-compare"` (activate look-compare → select the op → "Without this op" → assert the picker
+  reverts to "Compare a look" and the per-op mode is active — fails before / passes after). *(Traced +
+  reproduced, Builder audit 2026-07-11; low severity, PRIORITY-1 editor state consistency; found by an
+  adversarial audit of the frontend editor interaction logic, which otherwise traced clean — undo/coalescing,
+  seeding/per-run gating, blob lifecycle, query enablement, stage placement, and the data-driven helpers all
+  held.)*
+
 - ~~**`merge_projects` silently drops each frame's `ra_hint_deg`/`dec_hint_deg` — a frame merged *before* it's
   plate-solved then gets a slow, failure-prone blind all-sky ASTAP solve instead of a localized search around
   the mount's pointing.**~~ — **FIXED v0.109.3** (Builder, 2026-07-11; traced + reproduced + regression-tested).

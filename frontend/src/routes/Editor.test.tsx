@@ -405,6 +405,39 @@ describe("EditorView", () => {
     });
   });
 
+  it("turning on a per-op compare exits look-compare (mutually-exclusive modes)", async () => {
+    mockEditorQueries();
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({
+      builtin: [{ id: "nebula", label: "Nebula", group: "builtin",
+        ops: [{ id: "tone.stretch", params: { stretch: 0.83 } }] }],
+      user: [],
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    // Activate look-compare (the split against the "Nebula" look).
+    const picker = await screen.findByRole("button", { name: "Compare a look" });
+    await waitFor(() => expect(picker).not.toBeDisabled());
+    picker.click();
+    (await screen.findByRole("menuitem", { name: "Nebula" })).click();
+    expect(await screen.findByRole("button", { name: "Look: Nebula" })).toBeInTheDocument();
+
+    // Select the (enabled) Stretch op and turn on its per-op "Without this op"
+    // compare. Like every sibling compare mode, this must exit look-compare —
+    // otherwise the "Look:" button lingers in a stale active state and the look
+    // split reappears when the per-op compare is dismissed.
+    (await screen.findByRole("button", { name: "Select Stretch" })).click();
+    (await screen.findByRole("button", { name: "Without this op" })).click();
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Compare a look" })).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "Look: Nebula" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Showing without" })).toBeInTheDocument();
+  });
+
   it("switches the working recipe to the compared look in one click", async () => {
     mockEditorQueries();
     // Start from an empty pipeline (so adopting needs no confirm), and a built-in
