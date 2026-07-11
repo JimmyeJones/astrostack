@@ -2429,6 +2429,18 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.107.4** — Autonomy (PRIORITY 2; found by the same 2026-07-11 auto-stack audit): finish the v0.107.1
+  auto-bind robustness by extending the "iterate candidates when the top pick fails its gate" logic from the
+  **dark** path to the **flat** and **bias** paths, which still keyed off only `recommend_masters`' single
+  top pick. If the best-scored flat/bias failed its confidence or **dimension** gate (e.g. it's from a
+  different-sized camera) while a slightly-further same-dimension one existed, the stack was left
+  flat-/bias-uncalibrated even though a usable master was available — the exact masking case v0.107.1 fixed for
+  darks. Now both iterate their candidates in ascending match distance and bind the first that clears both
+  gates (the flat-dark is matched to the flat actually bound, not the top-ranked one). Never binds a master we
+  wouldn't already trust (same per-candidate gates); byte-for-byte unchanged when the top pick binds (the
+  common case). Regression tests `test_auto_bind_recovers_a_flat_when_the_top_pick_fails_its_gate` and
+  `..._bias_...` (a wrong-size top pick masks a bindable same-size one — fail before / pass after). Additive,
+  upgrade-safe, auto-bind stays confident-only. (claude/happy-franklin-t22hm6)
 - **v0.107.3** — Autonomy / "just works" (PRIORITY 2; found by a fresh adversarial audit of the auto-stack
   path 2026-07-11): a **recoverable** auto-stack failure permanently stranded the target's auto-stack. The
   watcher's auto-stack loop writes a crash-loop marker (`web_auto_stack_attempt = solved_accepted`) *before*

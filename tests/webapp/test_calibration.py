@@ -533,6 +533,53 @@ def test_auto_bind_still_uncalibrated_when_no_dark_is_bindable(tmp_path):
     assert "bias_path" not in bound
 
 
+def test_auto_bind_recovers_a_flat_when_the_top_pick_fails_its_gate(tmp_path):
+    """The closest flat by match distance is from a different-sized camera, so it
+    fails the dimension gate, while a slightly-further same-dimension flat binds
+    cleanly. Auto-bind must fall through to that usable flat instead of leaving the
+    stack flat-uncalibrated on the single top-ranked pick — mirroring the dark
+    path. (Regression: the flat binder keyed off only ``recommend_masters``' top
+    flat, so a top-ranked-but-unbindable flat masked a bindable one.)"""
+    root = tmp_path / "lib"
+    # Subs: 1920×1080, gain 80. Flat A is the exact-gain top pick but wrong-size;
+    # Flat B is a hair further (gain 81) but the right size.
+    _register(root, "flat", exposure_s=2.0, gain=80.0, width=1000, height=800)
+    flat_b = _register(root, "flat", exposure_s=2.0, gain=81.0,
+                       width=1920, height=1080)
+    masters = calibration.list_masters(root)
+
+    # Precondition: the top-ranked flat really is the wrong-size A, so this
+    # exercises the fallthrough rather than just picking B outright.
+    rec = calibration.recommend_masters(masters, gain=80.0)
+    assert rec["flat_master_id"] != flat_b["id"]
+
+    bound = calibration.auto_bind_master_paths(
+        root, masters, exposure_s=30.0, gain=80.0, width_px=1920, height_px=1080)
+    assert Path(bound["flat_path"]).name == flat_b["filename"]
+
+
+def test_auto_bind_recovers_a_bias_when_the_top_pick_fails_its_gate(tmp_path):
+    """Same fallthrough for the bias: the closest bias is a different-sized
+    camera's (fails the dimension gate) while a slightly-further same-dimension
+    bias binds. With no dark present the usable bias must still be found for the
+    lights instead of being masked by the top-ranked unbindable one."""
+    root = tmp_path / "lib"
+    # No dark, so the bias is bound for the lights. Bias A: exact-gain but wrong
+    # size (top pick); Bias B: a hair further (gain 81) but the right size.
+    _register(root, "bias", exposure_s=0.0, gain=80.0, width=1000, height=800)
+    bias_b = _register(root, "bias", exposure_s=0.0, gain=81.0,
+                       width=1920, height=1080)
+    masters = calibration.list_masters(root)
+
+    rec = calibration.recommend_masters(masters, gain=80.0)
+    assert rec["bias_master_id"] != bias_b["id"]
+
+    bound = calibration.auto_bind_master_paths(
+        root, masters, exposure_s=30.0, gain=80.0, width_px=1920, height_px=1080)
+    assert "dark_path" not in bound
+    assert Path(bound["bias_path"]).name == bias_b["filename"]
+
+
 def test_diagnose_advises_a_bias_for_a_gain_matched_exposure_mismatched_dark(tmp_path):
     """The one still-uncalibrated dark signature after v0.103.12: a gain-matching
     dark at the wrong exposure with no bias to scale it — advise building a bias."""
