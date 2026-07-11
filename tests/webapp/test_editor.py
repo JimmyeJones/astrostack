@@ -684,6 +684,31 @@ def test_histogram_reports_sky_cast(client, solved_library):
     assert hist["already_display"] is False
 
 
+def test_histogram_reports_color_cal_outcome(client, solved_library):
+    """The histogram endpoint surfaces which white-balance path an enabled
+    colour-calibration op ran on the live preview (``color_cal``), so the
+    interactive editor can show the same read-out the History Info panel shows for
+    the autonomous auto-edit. Absent (None) when no colour-cal op is in the recipe."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe)
+    # A recipe with an enabled colour-cal op → the endpoint reports its outcome.
+    recipe = {"ops": [{"id": "tone.color_calibrate", "params": {"mode": "gray_star"}}]}
+    hist = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/histogram?recipe={_enc(recipe)}").json()
+    cc = hist["color_cal"]
+    assert cc is not None
+    assert set(cc) == {"mode_used", "n_stars_used", "notes"}
+    # gray_star on the preview solves from stars, falls back to background-neutral,
+    # or gives up — every path stamps one of these modes (never gaia on the proxy).
+    assert cc["mode_used"] in {"gray_star", "background_neutral", "none"}
+    assert isinstance(cc["n_stars_used"], int)
+    # A recipe with no colour-cal op → no outcome to report.
+    plain = {"ops": [{"id": "tone.stretch", "params": {"stretch": 0.6, "black": 0.35}}]}
+    hist2 = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/histogram?recipe={_enc(plain)}").json()
+    assert hist2["color_cal"] is None
+
+
 def test_histogram_reports_rendered_dims_after_crop(client, solved_library):
     """Regression: a recipe with a reshaping geometry op (crop) must report the
     *rendered* dims (``render_width``/``render_height``), matching the preview PNG,

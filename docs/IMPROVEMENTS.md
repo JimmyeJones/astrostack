@@ -2161,26 +2161,31 @@ problems. Dogfood it every big-picture run and fix root causes.
   `tests/test_edit_tone_ops.py::test_color_calibrate_records_its_outcome_into_op_notes` / `_preserves_nan_gaps`,
   the TS helper test `colorCal.test.ts`, and a History render test. Pairs with the v0.107.9 fallback — this tells
   the user which path ran.
-- **Surface Auto's colour-calibration outcome in the *interactive* editor too (not just the autonomous
-  auto-edit's History Info line).** (S, friendliness/trust — PRIORITY 3) *(Builder-filed 2026-07-11, follow-up to
-  v0.107.10.)* v0.107.10 stamps which white-balance path Auto ran (`mode_used`/`n_stars_used`) for the *unattended*
-  auto-edit and shows it on the History Info panel — but a user who clicks **Auto** *inside the editor* still gets
-  no read-out of whether their picture was really white-balanced or fell back to background-neutral / gave up. The
-  plumbing now exists: the op records its outcome into the new `EditContext.op_notes["tone.color_calibrate"]`
-  during every render, so the interactive preview/auto endpoints (`routers/editor.py`) can read it off the ctx the
-  same way `render_run_display_array(return_ctx=True)` does and return it alongside the preview (or on the
-  `…/editor/auto` response), and the editor can show the same `autoColorCalCaption` line next to the existing
-  auto-note. Mirrors exactly how the auto-note has both an autonomous (v0.92.0) and an interactive (v0.93.0)
-  surface. Pure read-out of data already computed each render; additive, no behaviour change, testable on the
-  endpoint. Reuses the shipped `colorCal.ts` helper verbatim, so it's a small wiring task.
-- **Also surface the colour-cal *clamp* warning, not just the mode/star-count.** (S, image-quality/trust —
-  PRIORITY 4) *(Builder-filed 2026-07-11, small extension of v0.107.10.)* The stamped `color_cal.notes` string
-  already carries "(clamped an out-of-range channel scale)" when a solved per-channel scale hit the
-  `[_MIN_CAL_SCALE, _MAX_CAL_SCALE]` rail (v0.107.2 gray-star / v0.94.16 Gaia / v0.107.9 background-neutral) — a
-  genuine "your field's colour was extreme enough that Auto had to cap a channel" signal the owner would want to
-  know — but `autoColorCalCaption` only reads `mode_used`/`n_stars_used`, so the clamp note is captured-but-unshown.
-  Idea: when `notes` contains the clamp phrase, append a dimmed "(capped an extreme channel)" to the caption so the
-  user learns Auto hit the rail. Pure frontend read of a field already returned; additive, testable on the helper.
+- ~~**Surface Auto's colour-calibration outcome in the *interactive* editor too (not just the autonomous
+  auto-edit's History Info line).**~~ — **SHIPPED v0.108.0** (Builder 2026-07-11; implemented + tested). The
+  `…/editor/histogram` endpoint already builds an `EditContext` and runs `apply_recipe` on the live-preview proxy,
+  so the recipe's colour-cal op (the one-click Auto recipe includes one) now records its outcome into
+  `ctx.op_notes["tone.color_calibrate"]` during that render; the endpoint reads it off the ctx and returns it as a
+  nullable `color_cal` field (`{mode_used, n_stars_used, notes}`), null when no colour-cal op ran. The editor shows
+  the same `autoColorCalCaption` line (reused verbatim) next to the existing sky-cast/advisory captions — teal
+  "Auto white-balanced from N stars ✓" / "…from the background — too few stars ✓", or a dimmed give-up advisory —
+  so a user who clicks **Auto** *inside the editor* now learns whether their picture was really white-balanced, the
+  same read-out the History Info panel shows for the unattended auto-edit (v0.107.10). Chose the histogram endpoint
+  (runs on every recipe change → the caption updates live) over a separate call. On the decimated proxy Gaia falls
+  back to gray-star, so `mode_used` honestly reflects what the preview applied. Read-only + best-effort, additive,
+  no behaviour/default/API-shape change (a new nullable field). Regression test
+  `tests/webapp/test_editor.py::test_histogram_reports_color_cal_outcome` (a colour-cal recipe reports the outcome;
+  a plain recipe reports `color_cal=None`).
+- ~~**Also surface the colour-cal *clamp* warning, not just the mode/star-count.**~~ — **SHIPPED v0.108.1**
+  (Builder 2026-07-11; implemented + tested). Extended the shared `autoColorCalCaption` helper (used by both the
+  History Info panel and, as of v0.108.0, the interactive editor) to append a dimmed "(capped an extreme channel)"
+  when the stamped `color_cal.notes` contains the backend's "(clamped an out-of-range channel scale)" phrase (set
+  by the v0.107.2 gray-star / Gaia / v0.107.9 background-neutral clamp paths when a solved per-channel scale hit the
+  `[_MIN_CAL_SCALE, _MAX_CAL_SCALE]` rail) — so the user learns Auto had to cap a channel on an extreme-colour
+  field, on *both* surfaces at once (one helper). Only ever appends on a path that actually solved & applied scales
+  (never the give-up "none" path). Pure frontend read of a field already returned; additive, no behaviour change.
+  Regression tests in `colorCal.test.ts` (appends the note for a clamped star/background solve; absent when nothing
+  was clamped or `notes` is missing).
 
 ### Features that serve real workflows
 - **⭐ OWNER-REQUESTED — "Tonight" night planner: rank the best targets to shoot
@@ -2622,6 +2627,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.108.1** — Image-quality / trust (PRIORITY 4; Builder 2026-07-11): surface the colour-cal *clamp* warning.
+  `autoColorCalCaption` (shared by History Info and the interactive editor) now appends a dimmed "(capped an
+  extreme channel)" when the stamped `color_cal.notes` flags a clamped per-channel scale, so the user learns Auto
+  hit the `[_MIN_CAL_SCALE, _MAX_CAL_SCALE]` rail on an extreme-colour field — on both surfaces from one helper.
+  Frontend-only read of a field already returned; additive. Tests in `colorCal.test.ts`.
+- **v0.108.0** — Friendliness / trust (PRIORITY 3; Builder 2026-07-11): surface Auto's colour-calibration outcome
+  in the *interactive* editor too. The `…/editor/histogram` endpoint reads the colour-cal op's outcome off
+  `ctx.op_notes["tone.color_calibrate"]` (recorded during the live-preview render) and returns it as a nullable
+  `color_cal` field; the editor shows the same `autoColorCalCaption` line it shows on History Info (v0.107.10), so
+  a user who clicks Auto in the editor learns whether their picture was really white-balanced. Read-only, additive,
+  new nullable field. Test `tests/webapp/test_editor.py::test_histogram_reports_color_cal_outcome`.
 - **v0.107.10** — Friendliness / trust (PRIORITY 3/4; Builder 2026-07-11): surface *which* colour-calibration
   (white-balance) path Auto ran and on how many stars. `edit/ops/tone.py::_color_calibrate` no longer discards
   its `ColorCalibrationResult` — it records `{mode_used, n_stars_used, notes}` into a new generic

@@ -50,4 +50,35 @@ describe("autoColorCalCaption", () => {
     expect(cc!.neutral).toBe(false);
     expect(cc!.text).toContain("Neutralize background");
   });
+
+  it("appends a clamp note when the backend capped an extreme channel", () => {
+    const star = autoColorCalCaption({
+      mode_used: "gray_star",
+      n_stars_used: 240,
+      notes: "gray-world over detected stars (clamped an out-of-range channel scale)",
+    });
+    expect(star!.neutral).toBe(true);
+    expect(star!.text).toContain("240 stars");
+    expect(star!.text).toContain("capped an extreme channel");
+    // The background-neutral fallback can clamp too.
+    const bg = autoColorCalCaption({
+      mode_used: "background_neutral",
+      n_stars_used: 0,
+      notes: "neutralised sky background (clamped an out-of-range channel scale)",
+    });
+    expect(bg!.text).toContain("capped an extreme channel");
+  });
+
+  it("does not add the clamp note when nothing was clamped", () => {
+    const cc = autoColorCalCaption({
+      mode_used: "gray_star",
+      n_stars_used: 240,
+      notes: "gray-world over detected stars",
+    });
+    expect(cc!.text).not.toContain("capped an extreme channel");
+    // Absent notes is fine too.
+    expect(
+      autoColorCalCaption({ mode_used: "gray_star", n_stars_used: 12 })!.text,
+    ).not.toContain("capped an extreme channel");
+  });
 });

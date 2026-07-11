@@ -11,30 +11,44 @@
 
 import type { AutoColorCal } from "../../api/client";
 
-// Returns { neutral, text } for the History Info panel's read-out of what the
-// unattended auto-edit's white balance did, or null when unavailable (an old
-// backend / a manual run with no stamped outcome, or an unrecognised mode).
-// `neutral` (a reassuring ✓ tone) is true whenever a balance actually ran; the
-// give-up case reads as a dimmed advisory.
+// The backend appends this phrase to `notes` when a solved per-channel scale hit
+// the [_MIN_CAL_SCALE, _MAX_CAL_SCALE] rail — i.e. the field's colour was extreme
+// enough that Auto had to cap a channel to avoid over-amplifying or blanking it.
+// A genuine "your field was unusual" signal the user would want to know.
+const CLAMP_NOTE = "clamped an out-of-range channel scale";
+
+// Returns { neutral, text } for the read-out of what a colour-calibration
+// white-balance did — used both by the History Info panel (the unattended
+// auto-edit's outcome) and by the interactive editor's live preview — or null
+// when unavailable (an old backend / a manual run with no stamped outcome, or an
+// unrecognised mode). `neutral` (a reassuring ✓ tone) is true whenever a balance
+// actually ran; the give-up case reads as a dimmed advisory. When the backend
+// flagged a clamped channel (an extreme field), append a dimmed note so the user
+// learns Auto hit the rail.
 export function autoColorCalCaption(
   cc: AutoColorCal | undefined | null,
 ): { neutral: boolean; text: string } | null {
   const mode = cc?.mode_used;
   if (!mode) return null;
   const n = typeof cc?.n_stars_used === "number" ? cc.n_stars_used : 0;
+  // A clamp only happens on a path that actually solved & applied scales (the
+  // star-based and background-neutral solves), never on the give-up "none" path.
+  const clamped = typeof cc?.notes === "string" && cc.notes.includes(CLAMP_NOTE);
+  const withClamp = (text: string): string =>
+    clamped ? `${text} (capped an extreme channel)` : text;
   if (mode === "gray_star" || mode === "gaia") {
     // A star-based solve. Guard the degenerate n=0 (shouldn't happen for these
     // modes, but never claim "0 stars ✓").
-    if (n <= 0) return { neutral: true, text: "Auto white-balanced your image ✓" };
+    if (n <= 0) return { neutral: true, text: withClamp("Auto white-balanced your image ✓") };
     return {
       neutral: true,
-      text: `Auto white-balanced from ${n} star${n === 1 ? "" : "s"} ✓`,
+      text: withClamp(`Auto white-balanced from ${n} star${n === 1 ? "" : "s"} ✓`),
     };
   }
   if (mode === "background_neutral") {
     return {
       neutral: true,
-      text: "Auto balanced the colour from the background — too few stars ✓",
+      text: withClamp("Auto balanced the colour from the background — too few stars ✓"),
     };
   }
   if (mode === "none") {

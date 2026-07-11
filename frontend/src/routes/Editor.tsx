@@ -27,6 +27,7 @@ import { deconvUnderstatesCaption } from "../components/editor/deconvPreview";
 import { starReduceOverstatesCaption } from "../components/editor/starReducePreview";
 import { canNeutraliseSkyCast, neutraliseBackgroundOps, skyCastCaption }
   from "../components/editor/skyCast";
+import { autoColorCalCaption } from "../components/editor/colorCal";
 import { previewScaleCaption } from "../components/editor/previewScale";
 import { prependCoverageLeveling } from "../components/editor/coverageLeveling";
 import { applyTrimCrop, trimRectStyle, trimKeptLabel, geometryOpsKey, previewBoxStyle,
@@ -1320,6 +1321,24 @@ export function EditorView() {
                 <Text size="xs" c="dimmed">{starReduceOverstatesCaption(hist.data)}</Text>
               </Group>
             ) : null}
+            {/* Which white-balance path the recipe's colour-calibration op ran on
+                this live preview (the one-click Auto includes one) — star-based,
+                the too-few-stars background-neutral fallback, or gave up. Mirrors
+                the History Info read-out the autonomous auto-edit shows, so a user
+                who clicks Auto *in the editor* also learns whether their picture
+                was really white-balanced. Read-only; absent until a colour-cal op
+                runs. */}
+            {(() => {
+              const cc = autoColorCalCaption(hist.data?.color_cal);
+              if (!cc) return null;
+              return (
+                <Group gap={6} wrap="nowrap" align="flex-start" mt={4}>
+                  <IconInfoCircle size={14} color="var(--mantine-color-dimmed)"
+                    style={{ flexShrink: 0, marginTop: 2 }} />
+                  <Text size="xs" c={cc.neutral ? "teal.6" : "dimmed"}>{cc.text}</Text>
+                </Group>
+              );
+            })()}
             {/* Robust read-out of the *finished* sky background's colour balance,
                 measured over the sky population of the post-recipe display image.
                 Beginners have no other way to see whether their background ended

@@ -1024,6 +1024,18 @@ async def edit_histogram(safe: str, run_id: int, request: Request,
                 float(op.params.get("size", 2)), float(scale))
             for op in rec.ops
         )
+        # Which colour-calibration (white-balance) path actually ran on this
+        # live preview, if the recipe has an enabled colour-cal op (the one-click
+        # Auto recipe does). The op records its outcome into ``ctx.op_notes``
+        # during the render above (mode used, star count, and a note that flags a
+        # clamped channel); surface it so the interactive editor can tell the user
+        # whether their picture was really white-balanced — the same read-out the
+        # autonomous auto-edit stamps onto the History Info panel (v0.107.10),
+        # here for the in-editor Auto too. Read-only; absent when no colour-cal op
+        # ran (old clients ignore the extra key). On the decimated proxy Gaia
+        # falls back to gray-star, so ``mode_used`` here reflects the preview.
+        cc = ctx.op_notes.get("tone.color_calibrate")
+        hist["color_cal"] = cc if isinstance(cc, dict) and cc.get("mode_used") else None
         return hist
 
     return await run_in_threadpool(work)

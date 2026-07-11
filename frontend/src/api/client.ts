@@ -570,6 +570,13 @@ export interface Histogram {
   // enabled OR the run is already display-space, so the editor only offers it then.
   // Absent on an older backend (treated as false).
   already_display?: boolean;
+  // Which white-balance path an enabled colour-calibration op ran on this live
+  // preview (the one-click Auto recipe includes one), so the editor can show the
+  // same read-out the History Info panel shows for the autonomous auto-edit (see
+  // autoColorCalCaption). null/absent when no colour-cal op ran or on an older
+  // backend. On the decimated proxy Gaia falls back to gray-star, so mode_used
+  // here reflects what the preview actually applied.
+  color_cal?: AutoColorCal | null;
 }
 
 export interface SkyCast {
