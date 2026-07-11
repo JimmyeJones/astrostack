@@ -85,6 +85,28 @@ def test_returns_none_when_typical_tone_already_at_or_above_target():
     assert suggest_tone_curve(img) is None
 
 
+def test_saturated_highlight_p99_5_rounding_does_not_drop_the_curve():
+    """Regression: a stretched image whose 99.5th percentile sits just below 1.0
+    (0.9998) but *rounds* to 1.0 must still yield a valid midtone-lift curve — the
+    high anchor is dropped (it would duplicate the pinned [1,1] endpoint), not the
+    whole suggestion. Before the fix the rounded anchor collided with the endpoint
+    and the strict-monotone guard bailed to None."""
+    rng = np.random.default_rng(4)
+    # Dark sky floor + a broad object with a bright, near-saturated highlight tail
+    # so p99.5 lands at ~0.9998 (rounds to 1.0) while the median stays below target.
+    yy, xx = np.mgrid[0:120, 0:160]
+    img = 0.08 + rng.normal(0.0, 0.015, (120, 160))
+    img += 0.25 * np.exp(-(((xx - 80) / 45.0) ** 2 + ((yy - 60) / 35.0) ** 2))
+    img[50:70, 70:90] = 0.9998                  # a bright saturated patch (>0.5% of px)
+    img = np.clip(np.repeat(img[..., None], 3, axis=2), 0.0, 1.0).astype("float32")
+    high = float(np.percentile(img[np.isfinite(img)], 99.5))
+    assert high < 1.0 and round(high, 3) == 1.0  # the exact rounding-collision case
+    pts = suggest_tone_curve(img)
+    assert pts is not None, "a valid curve must survive a p99.5 that rounds to 1.0"
+    assert pts[0] == [0.0, 0.0] and pts[-1] == [1.0, 1.0]
+    assert _is_strictly_monotone(pts)
+
+
 def test_the_curve_applied_by_the_op_preserves_nan_and_stays_in_range():
     # The suggested points must produce a sane LUT through the real Curves op:
     # covered pixels stay in [0, 1] and NaN (uncovered) is preserved.

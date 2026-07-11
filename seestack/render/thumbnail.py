@@ -205,8 +205,18 @@ def asinh_stretch(
         return np.zeros_like(np.nan_to_num(img))
 
     # Normalize over covered pixels only; keeps per-channel scales intact.
+    # Use a robust high percentile rather than the raw max for the top of the
+    # range: a single surviving hot/warm pixel, bloom, or bright column that
+    # sigma-clip didn't reject would otherwise inflate `hi`, divide the whole
+    # image down, and — with the asinh gain fixed by the slider, not adaptive —
+    # crush faint nebulosity to near-black. The bright stars still saturate to
+    # white via the final `np.clip(..., 0, 1)`. This mirrors the 0.5–99.5th
+    # percentile scaling in edit/ops/detail.py, added for the same reason
+    # ("a single hot star sets max(), crushing the sky noise").
     lo = float(np.nanmin(img))
-    hi = float(np.nanmax(img))
+    hi = float(np.nanpercentile(img, 99.5))
+    if not np.isfinite(hi) or hi <= lo:
+        hi = float(np.nanmax(img))          # degenerate/near-flat image
     if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
         return np.zeros_like(np.nan_to_num(img))
     img = (img - lo) / (hi - lo)
