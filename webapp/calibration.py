@@ -31,6 +31,15 @@ log = logging.getLogger(__name__)
 
 CALIBRATION_SUBDIR = "calibration"
 REGISTRY_NAME = "masters.json"
+# Persisted high-water mark of the highest master id ever allocated. Master ids
+# (and the ``{kind}_{id}.fits`` filenames derived from them) are *permanent*
+# references — a stack run stores the server-resolved calibration path in its
+# options — so an id must never be reused for a different master. ``max(current
+# ids)+1`` is not monotonic across deletions, so we also carry this counter,
+# which survives deleting every registry entry. It lives in its own tiny file so
+# ``masters.json`` stays a bare list (an older app version simply ignores this
+# file, so a downgrade loses no masters — it only reverts to the old id policy).
+NEXT_ID_NAME = "masters_next_id"
 
 # The registry is a small JSON file mutated by a read-modify-write. The atomic
 # ``os.replace`` in ``_write_registry`` makes each *write* atomic, but not the
@@ -70,6 +79,28 @@ def _write_registry(library_root: str | Path, entries: list[dict[str, Any]]) -> 
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(entries, indent=2))
+    os.replace(tmp, path)
+
+
+def _read_id_high_water(library_root: str | Path) -> int:
+    """Highest master id ever allocated (0 if the counter is missing/unreadable).
+
+    A missing counter (an older library, or a downgrade that never wrote it)
+    falls back to the registry max, so allocation is still correct — it just
+    can't see ids freed by a *past* deletion. Going forward the counter tracks
+    every allocation, so future ids are never reused."""
+    path = calibration_dir(library_root) / NEXT_ID_NAME
+    try:
+        return int(path.read_text().strip())
+    except (OSError, ValueError):
+        return 0
+
+
+def _write_id_high_water(library_root: str | Path, value: int) -> None:
+    path = calibration_dir(library_root) / NEXT_ID_NAME
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(str(int(value)))
     os.replace(tmp, path)
 
 
@@ -641,8 +672,21 @@ def _recommend_flat_dark(
     return best_id if best_dist <= _FLAT_DARK_MAX_DIST else None
 
 
-def _next_id(entries: list[dict[str, Any]]) -> int:
-    return (max((int(e.get("id", 0)) for e in entries), default=0)) + 1
+def _next_id(library_root: str | Path, entries: list[dict[str, Any]]) -> int:
+    """Allocate a fresh master id that has never been used before.
+
+    Master ids — and the ``{kind}_{id}.fits`` filenames derived from them — are
+    *permanent* references: a stack run persists the server-resolved calibration
+    path (``.../dark_1.fits``) in its ``options_json``, and a one-click *Reprocess
+    everything* reuses those options verbatim. So reusing an id for a *different*
+    master would silently rebind an old run's recorded dark/flat to different
+    pixels and miscalibrate the unattended reprocess. ``max(current ids)+1`` is
+    not monotonic across deletions (deleting the newest master frees its id), so
+    combine it with the persisted high-water mark, which survives deleting every
+    entry.
+    """
+    from_entries = max((int(e.get("id", 0)) for e in entries), default=0)
+    return max(from_entries, _read_id_high_water(library_root)) + 1
 
 
 def register_master(
@@ -659,7 +703,7 @@ def register_master(
 
     with _REGISTRY_LOCK:
         entries = _read_registry(library_root)
-        mid = _next_id(entries)
+        mid = _next_id(library_root, entries)
         filename = f"{meta.kind}_{mid}.fits"
         save_master(calibration_dir(library_root) / filename, array, meta)
         entry = {
@@ -679,6 +723,11 @@ def register_master(
         }
         entries.append(entry)
         _write_registry(library_root, entries)
+        # Advance the high-water mark last, so this id is never handed out again
+        # even after every registry entry is later deleted. (If a crash lands
+        # between the two writes, ``max(current ids)`` still covers this id, so
+        # the counter is only ever an *extra* guard, never the sole source.)
+        _write_id_high_water(library_root, mid)
     return entry
 
 

@@ -80,6 +80,71 @@ def test_store_register_list_resolve_delete(tmp_path):
     assert calibration.list_masters(root) == []
 
 
+def test_master_ids_are_never_reused_after_deletion(tmp_path):
+    """A stack run persists the server-resolved calibration *path*
+    (``.../dark_1.fits``) in its options, so a master id/filename is a permanent
+    reference. Deleting the newest master and rebuilding must NOT reuse its
+    id/filename — otherwise an old run's recorded dark silently rebinds to a
+    different master's pixels and an unattended *Reprocess everything*
+    miscalibrates. Regression for the ``_next_id = max(current)+1`` id-reuse bug.
+    """
+    from seestack.calibrate.masters import MasterMeta
+
+    root = tmp_path / "lib"
+    a = calibration.register_master(
+        root, name="DarkA",
+        array=np.full((4, 4), 1.0, dtype=np.float32),
+        meta=MasterMeta("dark", 5, 4, 4, "median", exposure_s=10.0),
+    )
+    assert a["id"] == 1 and a["filename"] == "dark_1.fits"
+    a_path = calibration.master_path(root, 1)
+
+    # Delete the newest (here only) master, then build a *different* one.
+    assert calibration.delete_master(root, a["id"]) is True
+    b = calibration.register_master(
+        root, name="DarkB",
+        array=np.full((4, 4), 999.0, dtype=np.float32),
+        meta=MasterMeta("dark", 5, 4, 4, "median", exposure_s=30.0),
+    )
+    # Its id and filename must be fresh — never dark_1.fits again.
+    assert b["id"] == 2, "master id was reused after deletion"
+    assert b["filename"] == "dark_2.fits"
+    # A run that recorded the old path must NOT now resolve to B's pixels.
+    assert calibration.master_id_for_path(root, str(a_path)) is None
+    assert calibration.master_path(root, 2) is not None
+
+    # Even after deleting *every* master (empty registry), ids keep climbing —
+    # the persisted high-water mark, not the registry max, is what guarantees it.
+    assert calibration.delete_master(root, b["id"]) is True
+    assert calibration.list_masters(root) == []
+    c = calibration.register_master(
+        root, name="DarkC",
+        array=np.full((4, 4), 7.0, dtype=np.float32),
+        meta=MasterMeta("dark", 5, 4, 4, "median", exposure_s=20.0),
+    )
+    assert c["id"] == 3 and c["filename"] == "dark_3.fits"
+
+
+def test_master_id_high_water_falls_back_to_registry_max_when_absent(tmp_path):
+    """An older library with no persisted counter (or a downgrade that never
+    wrote one) must still allocate correctly from the registry max — the counter
+    is an extra guard, never the sole source of the next id."""
+    from seestack.calibrate.masters import MasterMeta
+
+    root = tmp_path / "lib"
+    calibration.register_master(
+        root, name="D1", array=np.full((4, 4), 1.0, dtype=np.float32),
+        meta=MasterMeta("dark", 5, 4, 4, "median", exposure_s=10.0),
+    )
+    # Simulate an old library: drop the sidecar counter but keep masters.json.
+    (calibration.calibration_dir(root) / calibration.NEXT_ID_NAME).unlink()
+    b = calibration.register_master(
+        root, name="D2", array=np.full((4, 4), 2.0, dtype=np.float32),
+        meta=MasterMeta("dark", 5, 4, 4, "median", exposure_s=20.0),
+    )
+    assert b["id"] == 2 and b["filename"] == "dark_2.fits"
+
+
 def test_concurrent_register_and_delete_stay_consistent(tmp_path, monkeypatch):
     """A master build (``register_master``, on the job worker) and a master
     deletion (``delete_master``, on the request threadpool) run concurrently.
