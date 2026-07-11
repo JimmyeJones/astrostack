@@ -3058,6 +3058,24 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.109.14** — Watcher auto-stack no longer redundantly re-stacks an already-current target after a manual
+  stack (Builder 2026-07-11; found + reproduced by a webapp-orchestration audit). `_auto_stack_frame_count`'s
+  "already stacked?" guard compared the current solved+accepted count to the last run's **`n_frames_used`**, which
+  excludes subs dropped at *alignment* — so a perfectly-normal stack where any solved+accepted sub failed to align
+  (`n_frames_used < solved+accepted`; common with mosaics, mixed sessions, or a few bad solves) read the gap as
+  "new work". The auto-stack path masks this with the crash-loop marker (`AUTO_STACK_ATTEMPT_META_KEY`, stamped
+  before each auto-stack), but targets last stacked via the interactive **Stack form** / **Process target** /
+  **Reprocess everything** carried no marker — so the very next watcher poll on an `auto_stack`-enabled install
+  re-stacked each of them once: a surprise duplicate `stack_runs` row + a full expensive stack on the walk-away
+  path, even though nothing new arrived. Fix: `_stack_target` (the single funnel for **all** stack paths) now
+  stamps the solved+accepted count it covered into the same marker after a successful, non-cancelled run, so the
+  marker — keyed on solved+accepted, not the align-reduced `n_frames_used` — authoritatively answers "have I
+  stacked this data?" for every path. The `n_frames_used` check stays as the upgrade-safe fallback for
+  pre-existing marker-less runs; a user cancel writes nothing (the outer handler clears the pre-stack marker).
+  Additive per-target meta write (no schema/config/API/default change), upgrade-safe. Regression
+  `tests/webapp/test_auto_stack_pipeline.py::test_stack_marks_solved_count_so_watcher_skips_align_dropped_target`
+  (a manual stack that dropped 1 sub at alignment → the watcher must skip, not re-stack; fails before / passes
+  after). (S, autonomy — PRIORITY 2.)
 - **v0.109.12** — Job-worker robustness: `_persist` no longer risks killing the single worker on a
   non-serialisable result (Builder 2026-07-11; latent hardening flagged independently by two webapp audits + a
   prior v0.108.x note). `webapp/jobs.py::_persist` ran `json.dumps(job.result)` **inside** a `try` that only

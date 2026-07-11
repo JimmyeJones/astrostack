@@ -1140,10 +1140,15 @@ def _auto_stack_frame_count(lib: Library, safe: str) -> int | None:
     """Solved+accepted frame count to stack now, or ``None`` to skip the target.
 
     Stacks the first time a target has solvable data, and again only when more
-    accepted+solved frames exist than the last stack used — so repeated scans
-    don't redundantly re-stack unchanged targets. Also skips a target whose
-    auto-stack was already attempted at this exact frame count but produced no
-    run (crash-loop guard); a manual stack bypasses this.
+    accepted+solved frames exist than the last stack covered — so repeated scans
+    don't redundantly re-stack unchanged targets. Every successful stack (auto or
+    manual — Stack form / Process target / reprocess) records the solved+accepted
+    count it covered in ``AUTO_STACK_ATTEMPT_META_KEY`` (see ``_stack_target``), so
+    a stack that legitimately dropped subs at alignment (``n_frames_used <
+    solved+accepted``) isn't misread as "new work". That marker also breaks a
+    crash-loop: it's written *before* an auto-stack, so a process-crashing stack
+    can't re-trigger forever. The ``n_frames_used`` check below is the fallback for
+    a pre-existing run that predates the marker (upgrade-safe).
     """
     proj = lib.open_target(safe)
     try:
@@ -1333,6 +1338,20 @@ def _stack_target(
             memory_budget_gb=settings.max_stack_memory_gb,
             app_version=APP_VERSION,
         )
+        if not result.cancelled:
+            # Record how many solved+accepted subs this stack covered, so the
+            # watcher auto-stack won't redundantly re-stack this target until
+            # genuinely *new* solved frames arrive. Keyed on the solved+accepted
+            # count — not the align-reduced ``n_frames_used`` — because a normal
+            # stack that drops subs at alignment (mosaics, mixed sessions, a few
+            # bad solves) has ``n_frames_used < solved+accepted``, which the
+            # ``n_frames_used`` guard alone misreads as "new work" and re-stacks.
+            # Reuses the auto-stack crash-loop marker key so the manual Stack-form
+            # / Process-target / reprocess paths (which otherwise write no marker)
+            # are covered too; a user cancel writes nothing (the outer auto-stack
+            # handler clears the pre-stack marker for that survivable case).
+            proj.set_meta(AUTO_STACK_ATTEMPT_META_KEY,
+                          str(_solved_accepted_count(proj)))
     finally:
         proj.close()
     lib.refresh_target_stats(safe)

@@ -80,6 +80,59 @@ def test_auto_stack_skips_already_stacked(solved_library, monkeypatch):
     assert summary["auto_stack_skipped"]
 
 
+def test_stack_marks_solved_count_so_watcher_skips_align_dropped_target(
+    solved_library, monkeypatch,
+):
+    # Regression: a *manual* stack (Stack form / Process target / reprocess) that
+    # legitimately drops some subs at alignment records n_frames_used < the number
+    # of solved+accepted subs. The watcher's "already stacked?" guard compared the
+    # current solved+accepted count to that align-reduced n_frames_used, so it read
+    # the gap as "new work" and re-stacked the target once on the next scan — a
+    # surprise duplicate run + a full expensive stack on the walk-away path, even
+    # though nothing new arrived. _stack_target now stamps the solved+accepted count
+    # it covered, so the watcher correctly skips the unchanged target.
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        settings = _settings(solved_library)
+        job = Job(kind="stack")
+        checked = 0
+        for entry in lib.list_targets():
+            safe = entry.safe_name
+            proj = lib.open_target(safe)
+            try:
+                n = pipeline._solved_accepted_count(proj)
+            finally:
+                proj.close()
+            if n == 0:
+                continue
+            checked += 1
+            # A manual stack that dropped one sub at alignment: it records a run
+            # whose n_frames_used is n-1, and writes no crash-loop marker of its own.
+            def fake_run_stack(proj, opts, *, progress=None, cancel=None,
+                               memory_budget_gb=None, app_version=None, _n=n):  # noqa: ANN001
+                proj.add_stack_run(StackRunRow(
+                    id=None, timestamp_utc="2026-05-01T00:00:00Z",
+                    output_basename="master", fits_path=None, tiff_path=None,
+                    preview_path=None, n_frames_used=_n - 1,
+                    canvas_h=10, canvas_w=10, coverage_min=1, coverage_max=_n - 1,
+                    options_json="{}",
+                ))
+                return SimpleNamespace(
+                    output_dir="/tmp/x", run_id=1, n_frames_used=_n - 1,
+                    canvas_shape=(10, 10, 3), cancelled=False, errors=[],
+                    excluded_frames=[], n_offered=_n, n_align_failed=1,
+                )
+
+            monkeypatch.setattr("seestack.stack.stacker.run_stack", fake_run_stack)
+            pipeline._stack_target(settings, _FakeJM(), job, lib, safe)
+            # The watcher must now treat this target as fully stacked, not re-stack
+            # it (before the fix this returned n — a redundant re-stack).
+            assert pipeline._auto_stack_frame_count(lib, safe) is None
+        assert checked >= 1
+    finally:
+        lib.close()
+
+
 def test_auto_stack_failure_is_non_fatal(solved_library, monkeypatch):
     def boom(proj, opts, *, progress=None, cancel=None,
              memory_budget_gb=None, app_version=None):  # noqa: ANN001
