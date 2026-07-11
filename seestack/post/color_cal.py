@@ -243,7 +243,23 @@ def _solve_gray_star(fluxes: np.ndarray) -> tuple[tuple[float, float, float], in
         return (1.0, 1.0, 1.0), len(fluxes), "G flux median is zero"
     scale_r = med_g / med_r if med_r > 0 else 1.0
     scale_b = med_g / med_b if med_b > 0 else 1.0
-    return (scale_r, 1.0, scale_b), int(len(fluxes)), "gray-world over detected stars"
+    # Clamp to a sane positive range, exactly as ``_solve_gaia`` does, so an
+    # unusual detected-star population (a strongly colour-biased field, or a
+    # residual cast that survived into the flux ratios) can only ever *rescale*
+    # a channel, never blow it out or blank it. A no-op on any realistic OSC
+    # field, where the gray-world scales sit near 1.0; this is the missing twin
+    # of the Gaia-path clamp (the raw ratios were previously applied unbounded).
+    n_clamped = 0
+    if not (_MIN_CAL_SCALE <= scale_r <= _MAX_CAL_SCALE):
+        scale_r = float(np.clip(scale_r, _MIN_CAL_SCALE, _MAX_CAL_SCALE))
+        n_clamped += 1
+    if not (_MIN_CAL_SCALE <= scale_b <= _MAX_CAL_SCALE):
+        scale_b = float(np.clip(scale_b, _MIN_CAL_SCALE, _MAX_CAL_SCALE))
+        n_clamped += 1
+    note = "gray-world over detected stars"
+    if n_clamped:
+        note += " (clamped an out-of-range channel scale)"
+    return (scale_r, 1.0, scale_b), int(len(fluxes)), note
 
 
 def _solve_gaia(

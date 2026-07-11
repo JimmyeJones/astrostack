@@ -237,3 +237,33 @@ def test_solve_gray_star_directly():
     # B scale = G/B = 200/150 ≈ 1.33
     assert abs(scale[2] - 200/150) < 0.01
     assert n == 50
+
+
+def test_solve_gray_star_clamps_an_out_of_range_channel_scale():
+    """A detected-star population where one channel's median flux is far below G
+    (a strongly colour-biased field / residual cast) previously made
+    ``_solve_gray_star`` return an unbounded scale — e.g. ``med_g/med_r ≈ 50`` —
+    which ``_apply_scale`` then multiplied straight into the channel, blowing it
+    out. Unlike the Gaia path, the gray-star solver applied its raw ratios with
+    no clamp. It now clamps to the same ``[_MIN_CAL_SCALE, _MAX_CAL_SCALE]`` range
+    so calibration can only rescale a channel, never extinguish or over-amplify
+    it. Fails before / passes after the fix."""
+    from seestack.post.color_cal import _MAX_CAL_SCALE, _MIN_CAL_SCALE
+
+    # med_r ≈ 1, med_g ≈ med_b ≈ 55 → raw scale_r ≈ 55 (well above the 20 cap).
+    fluxes = np.empty((40, 3), dtype=np.float32)
+    fluxes[:, 0] = 1.0
+    fluxes[:, 1] = 55.0
+    fluxes[:, 2] = 55.0
+    scale, n, note = _solve_gray_star(fluxes)
+    assert _MIN_CAL_SCALE <= scale[0] <= _MAX_CAL_SCALE
+    assert scale[0] == _MAX_CAL_SCALE  # raw ≈55 clamped down to the 20 ceiling
+    assert scale[1] == 1.0
+    assert _MIN_CAL_SCALE <= scale[2] <= _MAX_CAL_SCALE
+    assert "clamped" in note
+
+    # And a normal near-neutral field is untouched (the clamp is a no-op there).
+    neutral = np.array([[100, 105, 98]] * 40, dtype=np.float32)
+    nscale, _, nnote = _solve_gray_star(neutral)
+    assert abs(nscale[0] - 105 / 100) < 0.01
+    assert "clamped" not in nnote
