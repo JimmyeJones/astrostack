@@ -66,6 +66,34 @@ consistent with the mature audit history. No new verified bug filed this run (pe
 manufacturing). Next rotation: `webapp/watcher.py` / `webapp/jobs.py` orchestration, and the
 `qc/` + `solve/` paths, which this run didn't re-cover._
 
+_Builder dogfood + audit log 2026-07-11 (baseline green: 1046 passed / 2 skipped): with the
+Bugs list drained of ready work (the two open entries are explicitly REAL-data-gated — the dead
+SExtractor skew-fallback guard and the sky-atlas WCS rotation sign — so not blind-fixable) and the
+Ideas sections shipped-or-gated, spent the run on the §2 big-picture dogfood + a correctness audit
+of the paths the prior Scout note flagged as un-recovered. **Re-traced clean:** `qc/metrics.py`
+(Bayer-green extraction per pattern, NaN-safe sky/FWHM/ecc/transparency, top-k flux guard),
+`qc/grading.py` (robust modified-z with MAD→meanAD→skip fallback, one-sided direction-aware gating,
+practical-significance floors, the ≤`MAX_REJECT_FRACTION` rail, `apply_grade_report`'s re-check at
+apply time), `qc/streaks.py` + the v0.106.2 `qc/runner.py::reconcile_streak_rejections` rail,
+`solve/astap.py` (solve-ladder fatal-error short-circuit, `.wcs`/`.ini` parse, setup-error
+classification) + `solve/runner.py`, and `webapp/watcher.py` (StabilityTracker debounce, the
+pending-batch / stranded-batch re-arm, the callback-failure re-raise). **Dogfooded the real
+`stack → auto_recipe → apply_recipe` path end-to-end** on a synthetic 4600×3000 single-field stack
+at proxy_scale 2 and 4. One finding that looked alarming turned out to be a **measurement artifact,
+recorded here so a future run doesn't chase it:** a naïve preview↔export parity check (stretch the
+full-res, `skimage.resize(..., anti_aliasing=True)` down to the proxy grid, diff vs the stretched
+strided proxy) reports a ~5–6% mean / ~20% p99 "mismatch" that first-order reads as a broken STF
+stretch — but it is **entirely the anti-aliased resize averaging away the full-res background noise
+on one side while the strided proxy keeps full per-pixel noise**; after the steep STF gain that
+noise-texture delta alone is ~5%. Comparing the actual **stretch parameters** instead shows they are
+near-identical proxy↔full (median 0.0568 vs 0.0519, MAD-σ 0.0106 vs 0.0107, midtones m 0.0827 vs
+0.0831) and the sky anchors to exactly `target_bg` (0.20) on both — i.e. `render/thumbnail.py::
+autostretch` preview↔export parity is genuinely sound. Also confirmed the `hi = nanmax` global
+normalization is **not** a fragility: injecting a single 40× hot/cosmic pixel shifted the whole
+result <0.16% because `_midtones_for` re-anchors the sky median to `target_bg` regardless of the
+top-end scale (self-correcting). No new verified bug filed (per §2, no manufacturing) — the engine,
+QC, solve, watcher and editor-stretch paths all held, consistent with the mature audit history._
+
 - ~~**The shape-only streak detector auto-rejects a bright edge-on galaxy / elongated nebula on *every*
   sub — silently discarding the whole target's data (on by default).**~~ — **FIXED v0.106.2** (Builder
   audit 2026-07-10; traced + reproduced-on-synthetic + regression-tested). `qc/streaks.py::detect_streaks`
