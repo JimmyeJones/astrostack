@@ -281,3 +281,31 @@ def test_levels_degenerate_white_le_black_is_identity_not_binarised():
     for out in (inverted, equal):
         assert np.all(np.isnan(out[:3, :, :]))                       # NaN border kept
         assert np.allclose(out[3:, :, :], rgb[3:, :, :], atol=1e-5)  # covered = unchanged
+
+
+# ---- tone.color_calibrate — records which white-balance path ran -----------
+
+def test_color_calibrate_records_its_outcome_into_op_notes():
+    """The op discarded its ``ColorCalibrationResult`` before v0.107.10, so the
+    History Info panel couldn't tell the user whether their image was really
+    white-balanced (and by which route). The op now stamps the outcome
+    (``mode_used`` / ``n_stars_used`` / ``notes``) into ``ctx.op_notes`` so the
+    auto-edit pipeline can surface it. The image transform is unchanged."""
+    rgb = _rgb(0.3, 0.25, 0.28, h=40, w=40)
+    ctx = EditContext()
+    out = get_op("tone.color_calibrate").apply(rgb, {"mode": "gray_star"}, ctx)
+    assert out.shape == rgb.shape
+    note = ctx.op_notes.get("tone.color_calibrate")
+    assert isinstance(note, dict)
+    assert note["mode_used"] in {
+        "gray_star", "gaia", "background_neutral", "none"}
+    assert isinstance(note["n_stars_used"], int)
+    assert note["n_stars_used"] >= 0
+    assert isinstance(note["notes"], str)
+
+
+def test_color_calibrate_preserves_nan_gaps():
+    rgb = _with_nan_border(_rgb(0.3, 0.25, 0.28, h=40, w=40))
+    out = get_op("tone.color_calibrate").apply(rgb, {"mode": "gray_star"}, EditContext())
+    assert np.all(np.isnan(out[:3, :, :]))
+    assert np.all(np.isfinite(out[3:, :, :]))

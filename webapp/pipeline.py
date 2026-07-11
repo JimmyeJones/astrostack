@@ -1345,6 +1345,7 @@ def _auto_edit_process_run(lib: Library, safe: str, run_id: int) -> int | None:
     ops applied, or ``None`` when it was skipped (no such run / no FITS) or failed
     (best-effort — never fails the Process job)."""
     from webapp.routers.editor import (
+        AUTO_EDIT_COLORCAL_PREFIX,
         AUTO_EDIT_NOTE_PREFIX,
         AUTO_EDIT_SKYCAST_PREFIX,
         RECIPE_META_PREFIX,
@@ -1382,8 +1383,18 @@ def _auto_edit_process_run(lib: Library, safe: str, run_id: int) -> int | None:
             if note:
                 proj.set_meta(f"{AUTO_EDIT_NOTE_PREFIX}{run_id}", note)
             if run.preview_path:
-                out = render_run_display_array(proj.project_dir, run, recipe)
+                out, render_ctx = render_run_display_array(
+                    proj.project_dir, run, recipe, return_ctx=True)
                 _write_preview_png(Path(run.preview_path), out, already_display=True)
+                # Stamp which colour-calibration (white-balance) path Auto actually
+                # ran and on how many stars — star-based, the v0.107.9
+                # background-neutral fallback, or a no-op — so the History Info panel
+                # can tell the user whether their hands-off image was really
+                # white-balanced. Read-only + best-effort (a nicety, never fatal).
+                cc = render_ctx.op_notes.get("tone.color_calibrate")
+                if isinstance(cc, dict) and cc.get("mode_used"):
+                    proj.set_meta(f"{AUTO_EDIT_COLORCAL_PREFIX}{run_id}",
+                                  json.dumps(cc))
                 # Measure the finished picture's residual sky-background colour
                 # cast on the render we just produced and stamp it into the run's
                 # provenance, so History can show whether this hands-off Auto

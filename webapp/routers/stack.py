@@ -84,6 +84,30 @@ def _run_auto_edit_sky_cast(request: Request, safe: str, run_id: int) -> dict | 
     return None
 
 
+def _run_auto_edit_color_cal(request: Request, safe: str, run_id: int) -> dict | None:
+    """Which colour-calibration (white-balance) path the unattended auto-edit
+    actually ran and on how many stars (``mode_used`` gray_star/gaia/
+    background_neutral/none, ``n_stars_used``, ``notes``), or ``None`` when the run
+    wasn't auto-edited by a background job. Read from project meta so the History
+    Info panel can tell the user whether the hands-off Auto path really
+    white-balanced their image (and by which route)."""
+    from webapp.routers.editor import AUTO_EDIT_COLORCAL_PREFIX
+
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        raw = proj.get_meta(f"{AUTO_EDIT_COLORCAL_PREFIX}{run_id}")
+    finally:
+        proj.close()
+        lib.close()
+    if not raw:
+        return None
+    with contextlib.suppress(ValueError, TypeError):
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            return parsed
+    return None
+
+
 @router.get("/api/stack/options/schema", response_model=list[StackOptionField])
 def options_schema() -> list[StackOptionField]:
     return stack_option_fields()
@@ -522,6 +546,7 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
     processing = _parse_processing_chain(header)
     auto_edit = _run_auto_edit_note(request, safe, run_id)
     sky_cast = _run_auto_edit_sky_cast(request, safe, run_id)
+    color_cal = _run_auto_edit_color_cal(request, safe, run_id)
     # For a stack that carries provenance but came out *uncalibrated* (no CALSTAT
     # card — the stacker stamps it only when masters were applied), see whether the
     # library holds a master that's usable but for one concrete, fixable thing, and
@@ -534,6 +559,7 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
             "photometric": photometric, "dark_scaling": dark_scaling,
             "rejection": rejection, "frame_accounting": frame_accounting,
             "auto_edit": auto_edit, "sky_cast": sky_cast,
+            "color_cal": color_cal,
             "calibration_advice": calibration_advice,
             "processing": processing, "cards": cards}
 

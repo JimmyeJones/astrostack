@@ -124,6 +124,24 @@ describe("HistoryView", () => {
       ).toBeInTheDocument());
   });
 
+  it("shows which white-balance path Auto ran for a walk-away run", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({
+      run_id: 1, integration_s: 2520, n_frames: 840, weighting: null,
+      auto_edit: "Auto-edited: flattened the background, then applied a natural stretch.",
+      color_cal: { mode_used: "gray_star", n_stars_used: 240, notes: "gray-world over detected stars" },
+      cards: [{ key: "STACKER", value: "sigma-clip", comment: "stacking method" }],
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Info" }));
+    await waitFor(() =>
+      expect(
+        screen.getByText("Auto white-balanced from 240 stars ✓"),
+      ).toBeInTheDocument());
+  });
+
   it("shows the quality-weighting summary when present", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
     vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({

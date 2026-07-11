@@ -2138,18 +2138,29 @@ problems. Dogfood it every big-picture run and fix root causes.
   reporting an honest `mode_used="background_neutral"`. Additive, off-nothing (only changes the currently
   *do-nothing* path), testable on a synthetic sparse-star cast. Serves the north-star "drop files → trustworthy
   image" on the fields where the star-based path can't.
-- **Surface Auto's colour-calibration *outcome* (mode used, star count, clamped/gave-up) so the user knows
-  whether their image was actually white-balanced.** (S, friendliness/trust — PRIORITY 3/4) *(Scout-filed
-  2026-07-11, sibling to the fallback idea above.)* `edit/ops/tone.py::_color_calibrate` throws away the
-  `ColorCalibrationResult` (`calibrated, _ = calibrate_color(...)`), so the rich provenance
-  `calibrate_color` already returns — `mode_used` (`gray_star`/`gaia`/**`none`**), `n_stars_used`, and the
-  note (now including "clamped an out-of-range channel scale" after v0.107.2) — is silently dropped. The user
-  never learns Auto's white-balance found only 6 stars and did nothing, or hit a clamp rail. Idea: thread the
-  result out through the op (via `EditContext`/op-note the way other ops surface advisories, mirroring the
-  existing `editor_auto_note:`/`sky_cast` provenance the auto-edit pipeline already stamps) and show a plain
-  line in the editor / History Info ("White-balanced from 240 stars ✓" vs "Couldn't auto white-balance — only
-  6 stars found; try Neutralize background"). Pure read-out of data already computed; additive, no behaviour
-  change. Pairs naturally with the fallback idea (this tells the user *which* path ran).
+- ~~**Surface Auto's colour-calibration *outcome* (mode used, star count, clamped/gave-up) so the user knows
+  whether their image was actually white-balanced.**~~ — **SHIPPED v0.107.10** (Builder 2026-07-11; implemented +
+  tested). `edit/ops/tone.py::_color_calibrate` threw away the `ColorCalibrationResult`
+  (`calibrated, _ = calibrate_color(...)`), so the rich provenance `calibrate_color` already returns —
+  `mode_used` (`gray_star`/`gaia`/**`background_neutral`**/**`none`**), `n_stars_used`, and the note — was
+  silently dropped and the walk-away user never learned whether their image was really white-balanced (and, after
+  v0.107.9 added the background-neutral fallback, *by which route*). Threaded the outcome out through a new generic
+  `EditContext.op_notes` dict the op writes into (`{mode_used, n_stars_used, notes}`), had
+  `render_run_display_array(..., return_ctx=True)` hand the ctx back, and stamped it into the run's provenance
+  (`editor_auto_colorcal:{run_id}` project meta — JSON, mirroring the `editor_auto_skycast:` pattern exactly, so
+  no schema change and upgrade-safe by construction) from the shared `_auto_edit_process_run` helper (covers
+  Process-target / reprocess-everything / watcher auto-stack at once). The `…/stack-runs/{id}/info` endpoint
+  returns it as a nullable `color_cal` field and the History Info panel shows one dimmed line via a new pure
+  `autoColorCalCaption` helper (`components/editor/colorCal.ts`): teal "Auto white-balanced from 240 stars ✓" for
+  a star solve, teal "Auto balanced the colour from the background — too few stars ✓" for the fallback, and a
+  dimmed "Auto couldn't white-balance this image — try Neutralize background in the editor" for the give-up case.
+  Read-only + best-effort (never fails the auto-edit), additive, off-nothing (only annotates runs an unattended
+  job auto-edited — manual/older runs carry no `color_cal`), no default/API-shape change. Tests: extended
+  `tests/webapp/test_pipeline.py::test_process_target_chains_auto_edit` (asserts the `color_cal` dict) +
+  `test_manual_stack_has_no_auto_edit_note` (a manual stack carries none), unit
+  `tests/test_edit_tone_ops.py::test_color_calibrate_records_its_outcome_into_op_notes` / `_preserves_nan_gaps`,
+  the TS helper test `colorCal.test.ts`, and a History render test. Pairs with the v0.107.9 fallback — this tells
+  the user which path ran.
 
 ### Features that serve real workflows
 - **⭐ OWNER-REQUESTED — "Tonight" night planner: rank the best targets to shoot
@@ -2591,6 +2602,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.107.10** — Friendliness / trust (PRIORITY 3/4; Builder 2026-07-11): surface *which* colour-calibration
+  (white-balance) path Auto ran and on how many stars. `edit/ops/tone.py::_color_calibrate` no longer discards
+  its `ColorCalibrationResult` — it records `{mode_used, n_stars_used, notes}` into a new generic
+  `EditContext.op_notes`, `render_run_display_array(return_ctx=True)` hands the ctx back, and
+  `_auto_edit_process_run` stamps it as `editor_auto_colorcal:{run_id}` provenance (mirrors the
+  `editor_auto_skycast:` pattern — no schema change). The `…/info` endpoint returns a nullable `color_cal` field
+  and the History Info panel shows a dimmed line ("Auto white-balanced from 240 stars ✓" / "…from the background
+  — too few stars ✓" / "couldn't white-balance — try Neutralize background"). Pairs with the v0.107.9 fallback.
+  Additive, off-nothing, upgrade-safe. Tests: `test_pipeline.py` (extended), `test_edit_tone_ops.py`,
+  `colorCal.test.ts`, `History.test.tsx`.
 - **v0.107.9** — Autonomy / image-quality (PRIORITY 2/4; Builder 2026-07-11): when Auto's colour calibration
   can't run (too few stars — the common sparse-star OSC case), `post/color_cal.py` now falls back to a starless
   **background-neutral** white balance (equalise the per-channel sky medians so the background is neutral grey)
