@@ -55,3 +55,29 @@ def test_cancel_without_result_marks_cancelled(tmp_path):
         assert job.state == "cancelled", job.state
     finally:
         mgr.stop()
+
+
+def test_cancel_sentinel_result_marks_cancelled(tmp_path):
+    """A cancel-aware stack that honors the cancel returns a *truthy* sentinel
+    dict (`run_stack` -> StackResult(cancelled=True) -> `_stack_target` returns
+    {"cancelled": True, "run_id": None, ...}) — with no finished run. The worker
+    must mark that 'cancelled', not report an empty result as a done stack.
+
+    Regression: `completed = result or job.result` is truthy for the sentinel, so
+    the old `not completed` test alone misclassified a cancelled stack as 'done'
+    with `run_id: None` and no openable output.
+    """
+    mgr = JobManager(tmp_path / "jobs.db")
+    mgr.start()
+    try:
+        def fn(job):
+            job._cancel.set()
+            return {"cancelled": True, "run_id": None, "output_dir": "", "errors": []}
+
+        job = mgr.submit("stack", fn)
+        assert _wait_until(lambda: job.state in ("done", "cancelled", "error"))
+        assert job.state == "cancelled", job.state
+        # The sentinel result is preserved so the Jobs page can show cancel detail.
+        assert job.result is not None and job.result.get("cancelled") is True
+    finally:
+        mgr.stop()

@@ -367,15 +367,23 @@ class JobManager:
             try:
                 result = fn(job)
                 completed = result or job.result
-                if job.cancel_requested() and not completed:
-                    # Cancel was requested and the job honored it — it aborted
-                    # without producing a result. But a job that isn't
-                    # cancel-aware runs to completion and returns its result
-                    # even after cancel is pressed; in that case the work is
-                    # already done, so keep the result and mark it done rather
-                    # than discarding a finished stack and making the user redo
-                    # it.
+                # A cancel-aware job that honored the cancel produced no finished
+                # work, and must be marked 'cancelled' — it can signal that two
+                # ways: (1) by returning nothing (`not completed`), or (2) by
+                # returning an explicit cancellation sentinel. `run_stack` returns
+                # a StackResult(cancelled=True) with no output on cancel, which
+                # `_stack_target` surfaces as a top-level `{"cancelled": True,
+                # "run_id": None, ...}` — a *truthy* dict, so `not completed`
+                # alone would misclassify that cancelled stack as a successful
+                # 'done' run with no openable output. But a job that isn't
+                # cancel-aware runs to completion and returns its (non-cancelled)
+                # result even after a late cancel; that work is already done, so
+                # keep the result and mark it done rather than making the user
+                # redo a finished stack.
+                engine_cancelled = isinstance(result, dict) and result.get("cancelled") is True
+                if job.cancel_requested() and (not completed or engine_cancelled):
                     job.state = "cancelled"
+                    job.result = result or job.result
                 else:
                     job.state = "done"
                     job.result = result or job.result

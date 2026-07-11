@@ -2979,6 +2979,21 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.109.11** — Job-state correctness bug (Builder 2026-07-11; found by an adversarial webapp-orchestration
+  audit): a **cancelled interactive stack was reported as "done"** on the Jobs page instead of "cancelled". When
+  the user cancels a running stack from the Stack form, `run_stack` honors the cancel and returns a
+  `StackResult(cancelled=True)` with **no output** (empty `fits_path`, `run_id=None`, nothing written to
+  disk/history), which `_stack_target` surfaces as a top-level `{"cancelled": True, "run_id": None, …}`. In the
+  `JobManager` worker loop (`webapp/jobs.py`) the cancel test was `if job.cancel_requested() and not completed`,
+  but `completed = result or job.result` is **truthy** for that sentinel dict — so the honored-cancel path was
+  skipped and the job fell through to `state = "done"`, showing the user a "successful" stack with `run_id: None`
+  and no openable output. Fixed by also treating an explicit top-level `cancelled is True` sentinel as a
+  cancellation (`engine_cancelled`), while preserving the two existing semantics (a non-cancel-aware job that
+  returns a full, non-cancelled result after a late cancel stays "done"; a job that returns nothing stays
+  "cancelled"). Only the plain `submit_stack` / `reprocess_all` returns carry a top-level `cancelled` key, so
+  `process_target` and the other chains are unaffected. Additive, no API/schema/default change. Regression
+  `tests/webapp/test_job_cancel.py::test_cancel_sentinel_result_marks_cancelled` (fails before / passes after);
+  the two pre-existing cancel-semantics tests still pass.
 - **v0.109.10** — QC-engine correctness hardening (PRIORITY: stacking/QC-engine data-integrity; Builder
   2026-07-11; found by an adversarial `qc/*` audit). Two defects in `seestack/qc/metrics.py`, each fixed against
   its own documented contract and regression-tested. (1) `green_channel` summed the two Bayer-green sub-planes in
