@@ -2,6 +2,8 @@
 
 import time
 
+import numpy as np
+
 from webapp.jobs import JobManager
 
 
@@ -79,5 +81,33 @@ def test_cancel_sentinel_result_marks_cancelled(tmp_path):
         assert job.state == "cancelled", job.state
         # The sentinel result is preserved so the Jobs page can show cancel detail.
         assert job.result is not None and job.result.get("cancelled") is True
+    finally:
+        mgr.stop()
+
+
+def test_non_serializable_result_does_not_kill_worker(tmp_path):
+    """A job whose result isn't JSON-serialisable (e.g. a stray numpy scalar)
+    must not kill the single worker thread — persistence is best-effort, and a
+    dead worker would silently halt *all* subsequent job processing.
+
+    Regression: json.dumps(job.result) used to run inside a try that only caught
+    sqlite3.Error, so a TypeError propagated out of _persist in the worker's
+    finally and killed the worker.
+    """
+    mgr = JobManager(tmp_path / "jobs.db")
+    mgr.start()
+    try:
+        def bad(job):
+            return {"val": np.int64(7)}  # not JSON-serialisable
+
+        j1 = mgr.submit("stack", bad)
+        assert _wait_until(lambda: j1.state in ("done", "cancelled", "error"))
+        assert j1.state == "done", j1.state
+
+        # The worker must still be alive: a later job runs to completion.
+        j2 = mgr.submit("stack", lambda job: {"ok": True})
+        assert _wait_until(lambda: j2.state in ("done", "cancelled", "error"))
+        assert j2.state == "done", j2.state
+        assert j2.result == {"ok": True}
     finally:
         mgr.stop()

@@ -218,6 +218,20 @@ class JobManager:
         # kill the worker and silently halt *all* job processing until a restart.
         # Swallow like the sibling DB helpers (``_evict_old`` / ``clear_history``).
         import json
+        # Serialise the result *before* the DB write and guard it separately: a
+        # non-JSON-serialisable result field (a stray numpy scalar / Path / set
+        # from some future job body) raises TypeError/ValueError, which — inside
+        # the DB try that only caught sqlite3.Error — would propagate out of this
+        # method in the worker's finally and kill the single worker, exactly the
+        # silent-halt the docstring above promises to prevent. The row is still
+        # worth persisting for its state/error, so on a serialisation failure we
+        # drop just the result and keep the row.
+        try:
+            result_json = json.dumps(job.result) if job.result is not None else None
+        except (TypeError, ValueError) as exc:
+            log.warning(
+                "job result not JSON-serialisable for %s (%s): %s", job.id, job.kind, exc)
+            result_json = None
         try:
             with self._connect() as conn:
                 conn.execute(
@@ -237,7 +251,7 @@ class JobManager:
                         job.id, job.kind, job.target, job.state, job.phase, job.done,
                         job.total, job.detail, job.created_utc, job.started_utc,
                         job.finished_utc, job.error, job.error_kind,
-                        json.dumps(job.result) if job.result is not None else None,
+                        result_json,
                     ),
                 )
         except sqlite3.Error as exc:  # noqa: BLE001 — persistence is best-effort

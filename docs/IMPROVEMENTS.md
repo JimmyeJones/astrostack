@@ -2979,6 +2979,19 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.109.12** — Job-worker robustness: `_persist` no longer risks killing the single worker on a
+  non-serialisable result (Builder 2026-07-11; latent hardening flagged independently by two webapp audits + a
+  prior v0.108.x note). `webapp/jobs.py::_persist` ran `json.dumps(job.result)` **inside** a `try` that only
+  caught `sqlite3.Error`, so a future job body returning a non-JSON-serialisable field (a stray `numpy` scalar /
+  `Path` / `set`) would raise `TypeError` past the guard, propagate out of `_persist` in the worker's `finally`,
+  and **kill the single `job-worker` thread — silently halting all job processing until restart** — the exact
+  failure the method's own docstring claims to prevent. No current job body triggers it (all return JSON-native
+  results, so not a live bug), but the worker is a single point of failure, so the invariant is worth making
+  real. Fix: serialise the result *before* the DB write and guard it separately, dropping just the result (and
+  logging) on a serialisation failure while still persisting the row's state/error. Additive, no behaviour change
+  on the live path. Regression `tests/webapp/test_job_cancel.py::test_non_serializable_result_does_not_kill_worker`
+  (a job returning `np.int64` must stay `done` **and** a subsequently-submitted job must still run — fails before
+  / passes after).
 - **v0.109.11** — Job-state correctness bug (Builder 2026-07-11; found by an adversarial webapp-orchestration
   audit): a **cancelled interactive stack was reported as "done"** on the Jobs page instead of "cancelled". When
   the user cancels a running stack from the Stack form, `run_stack` honors the cancel and returns a
