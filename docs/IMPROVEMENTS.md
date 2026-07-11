@@ -163,6 +163,37 @@ they usually agree — cosmetic), and `stretch_suggestion` omitting `already_dis
 because it also passes `auto_stretch=False`). Next rotation: `stack/mosaic.py` + `stack/drizzle_path.py`
 canvas/rejection edges (last deep-traced 2026-07-10), and the frontend editor route UX._
 
+_Builder audit log 2026-07-11 (baseline green: 1093 passed / 2 skipped): with both open Bugs entries REAL-data-gated
+(dead SExtractor skew guard; sky-atlas WCS rotation sign) and the Ideas backlog shipped-or-gated (real-data /
+owner-sign-off), spent the run on the §2 big-picture audit rather than manufacturing tidiness churn (the remaining
+open non-gated items — the `coverage_min/max` ndim guard, the stray `scale_dark_to_light` flag, the coverage-leveling
+proxy-scale dilation/floor nuance — are all explicitly "only worth doing if a run is already in that file" and were
+measured negligible, so shipping them standalone would be exactly the churn §2 warns against). Ran **three parallel
+adversarial audits** of the paths the prior Scout note flagged as least-recently-covered, each required to **reproduce**
+any suspected defect against the live engine before filing: (1) `stack/mosaic.py` + `stack/drizzle_path.py`
+canvas/rejection edges (the #208 unresolved-variance/NaN-hole gate, the #215 off-canvas `intersects` fix, the two-pass
+κ-σ catastrophic-cancellation guard, wrap-safe circular-mean RA + footprint outlier rejection, px/MP caps + iterative
+shrink, frame-count support tracking); (2) the editor's Auto/slider path — all of `edit/ops/*`, `edit/pipeline.py`/
+`recipe.py`/`registry.py`, `render/thumbnail.py` (STF/asinh), `edit/{stretch,curve,levels,histogram}.py` — for
+preview↔export parity, NaN=coverage, and degenerate/adversarial inputs; (3) the webapp orchestration + persistence +
+**upgrade-safety** layers (`webapp/{pipeline,jobs,config}.py`, `routers/*`, and `io/project.py::_migrate_schema` from a
+hand-built **schema-v2** DB). **All three traced clean, with runnable reproductions**: mosaic/drizzle rejection punches
+no NaN holes on bright-flat/negative/sub-ULP regions while still clipping real spikes, and keeps the good frames on an
+RA=0°-straddling mosaic; the one-click Auto recipe's preview↔export mean|Δ| is ~0.0024 (p99 ≤0.01) on both single-field
+and NaN-gapped mosaic proxies — well inside the ~2% decimation floor — with zero coverage flips across every op at both
+proxy scales and no crash on flat/near-flat/sliver/all-NaN/negative inputs or extreme slider values; and an old v2
+config/DB loads + migrates additively to v9 with every router rejecting ~20 malformed inputs as 400/422 (zero 500s), the
+job worker swallowing DB-write errors, and all reprocess/auto-edit chains staying non-destructive + best-effort. One
+**non-defect** recorded so a future run doesn't chase it: the drizzle `frame_coverage` (`_count`) channel-0 support
+heuristic can undercount by 1 at a pixel where a per-channel contribution is clip-rejected while other channels still
+deposit — but this is the **same documented channel-0 shared-valid-mask rule** the standard `WeightedSum`/`MinMaxReject`
+accumulators use (`accumulator.py:90,120`; `stacker.py:1306`), its only surface is the `coverage_min/max` diagnostic,
+and it's a consistent design choice, not a bug. No new verified bug filed (per §2, no manufacturing) — engine combine,
+editor render, and webapp orchestration all held, consistent with the mature audit history. **Next rotation** (not
+re-covered this run): the frontend editor route UX (React/TS — needs a `vitest`/`tsc` dogfood, distinct from the Python
+engine audits), and `qc/*` + `solve/*` (last deep-traced 2026-07-11 by the qc/solve Builder run) if a fresh angle
+surfaces._
+
 - ~~**The interactive editor's default asinh stretch (and the manual "Asinh" stretch mode) blacks out the whole
   picture when a single extreme outlier pixel survives into the stack — its `[min,max]` range normalization is
   not outlier-robust, unlike its sibling `autostretch`.**~~ — **FIXED v0.108.5** (Builder, 2026-07-11; traced +
