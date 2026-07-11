@@ -132,6 +132,44 @@ def _white_balance(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarra
     return as_rgb(rgb) * gains
 
 
+def _neutralize_background(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
+    """Remove a residual colour cast by balancing each channel's *sky* level.
+
+    Measures the robust per-channel sky-background median at render time (the same
+    sky population the editor's "Sky background" read-out reports) and multiplies
+    each channel by ``min_median / channel_median`` — driving every channel's sky
+    to the darkest channel's level, so the background goes neutral grey. Targeting
+    the *minimum* keeps every gain ``<= 1`` (it only ever darkens the off-channels),
+    which neutralises with no highlight clipping. Meant to run in **display space**
+    (add it after the stretch), where the read-out measures the cast; it's a plain
+    per-channel gain so it's harmless either side.
+
+    ``strength`` (0..1) blends the correction toward identity: 1.0 fully neutralises,
+    lower keeps some of the original tint. NaN (no-coverage) pixels are preserved.
+    Deriving the gains at render time (rather than baking fixed numbers) keeps the
+    background neutral even as upstream ops change, exactly like the auto-contrast
+    curve derives its shape from the image entering it."""
+    from seestack.edit.histogram import sky_channel_medians
+
+    strength = float(params.get("strength", 1.0))
+    out = as_rgb(rgb).copy()
+    if strength <= 0.0:
+        return out
+    medians = sky_channel_medians(out)
+    if medians is None:
+        return out
+    lo = min(medians)
+    if not (lo > 0.0):  # can't scale toward a non-positive reference
+        return out
+    for c in range(3):
+        m = medians[c]
+        if not (m > 0.0):
+            continue
+        gain = 1.0 + strength * (lo / m - 1.0)  # in (0, 1], = 1 for the darkest channel
+        out[..., c] *= np.float32(gain)
+    return out
+
+
 def _scnr(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     """Subtractive chromatic noise reduction: clip the green channel to the
     neutral of red/blue (removes the green cast common on OSC nebulae)."""
@@ -181,6 +219,18 @@ register(OpSpec(
         EditParam("b", "Blue gain", "float", default=1.0, min=0.0, max=3.0, step=0.01,
                   help="Multiplier for the blue channel. 1.0 = unchanged; raise to cool, "
                        "lower to warm."),
+    ],
+))
+
+register(OpSpec(
+    id="tone.neutralize_background", label="Neutralize background", group="tone",
+    stage="nonlinear", apply=_neutralize_background, proxy_safe=True,
+    help="Remove a residual colour cast from the sky by balancing each channel's "
+         "background to the darkest — a display-space fix, so add it after the stretch.",
+    params=[
+        EditParam("strength", "Strength", "float", default=1.0, min=0.0, max=1.0, step=0.05,
+                  help="How fully to neutralise the measured sky cast. 1.0 balances the "
+                       "background to neutral grey; lower keeps some of the original tint."),
     ],
 ))
 

@@ -25,7 +25,8 @@ import { applyDataDrivenDefaults, countDataDrivenDefaults, type OpSuggestion }
   from "../components/editor/dataDrivenDefaults";
 import { deconvUnderstatesCaption } from "../components/editor/deconvPreview";
 import { starReduceOverstatesCaption } from "../components/editor/starReducePreview";
-import { skyCastCaption } from "../components/editor/skyCast";
+import { canNeutraliseSkyCast, neutraliseBackgroundOps, skyCastCaption }
+  from "../components/editor/skyCast";
 import { previewScaleCaption } from "../components/editor/previewScale";
 import { prependCoverageLeveling } from "../components/editor/coverageLeveling";
 import { applyTrimCrop, trimRectStyle, trimKeptLabel, geometryOpsKey, previewBoxStyle,
@@ -699,6 +700,13 @@ export function EditorView() {
     if (!selectedOp || !curveGhost) return;
     setParams(selectedOp.uid, { ...selectedOp.params, points: curveGhost, auto: false });
   };
+  // One-click "neutralise background": append a display-space neutralise op when
+  // the read-out shows a residual sky cast (and the fix will land in display space).
+  // An undoable step, like the Auto-curve / trim buttons.
+  const canNeutralise = canNeutraliseSkyCast(
+    hist.data, ops, hasEnabledStretch(ops, specs));
+  const neutraliseBackground = () =>
+    setOps((p) => neutraliseBackgroundOps(p, specs, uid));
   // No enabled stretch → the pipeline silently applies a default asinh stretch at
   // the end. Nudge the user to add/enable an explicit, controllable one.
   const disabledStretch = ops.find((o) => !o.enabled && specs[o.id]?.is_stretch) ?? null;
@@ -1322,6 +1330,13 @@ export function EditorView() {
                 <IconInfoCircle size={14} color="var(--mantine-color-dimmed)"
                   style={{ flexShrink: 0, marginTop: 2 }} />
                 <Text size="xs" c="dimmed">{skyCastCaption(hist.data)!.text}</Text>
+                {/* When there's a real cast and the fix will land in display space,
+                    offer a one-click neutralise (appends a display-space op that
+                    balances the sky to neutral grey) — an undoable step. */}
+                {canNeutralise ? (
+                  <Button variant="subtle" size="compact-xs" px={6}
+                    onClick={neutraliseBackground}>Neutralize</Button>
+                ) : null}
               </Group>
             ) : null}
             {hist.data?.errors?.length ? (

@@ -118,6 +118,57 @@ def test_white_balance_preserves_nan_gaps():
     assert np.all(np.isfinite(out[3:, :, :]))
 
 
+# ---- tone.neutralize_background --------------------------------------------
+
+def _cast_sky_image(r: float, g: float, b: float,
+                    h: int = 40, w: int = 40) -> np.ndarray:
+    """A dim, colour-cast sky background with a small bright target block.
+
+    The bright block sits well above the luminance median so it's *excluded* from
+    the sky population — a neutralise must balance the sky, not the target."""
+    img = _rgb(r, g, b, h, w)
+    img[4:10, 4:10, :] = 0.7  # bright target/star region (neutral, above the sky)
+    return img
+
+
+def test_neutralize_background_balances_sky_to_neutral():
+    from seestack.edit.histogram import measure_sky_cast
+    rgb = _cast_sky_image(0.20, 0.24, 0.20)  # green sky cast
+    assert measure_sky_cast(rgb)["cast"] == "green"  # cast present before
+    out = get_op("tone.neutralize_background").apply(rgb, {"strength": 1.0}, EditContext())
+    assert measure_sky_cast(out)["neutral"] is True  # neutral after
+    # Every gain is <= 1 (targets the darkest channel), so no channel brightens
+    # past its input — the darkest channels (r, b) are untouched, green darkens.
+    assert np.all(out[..., 0] <= rgb[..., 0] + 1e-6)
+    assert np.all(out[..., 1] <= rgb[..., 1] + 1e-6)
+    assert np.all(out[..., 2] <= rgb[..., 2] + 1e-6)
+
+
+def test_neutralize_background_strength_scales_the_correction():
+    from seestack.edit.histogram import sky_channel_medians
+    rgb = _cast_sky_image(0.20, 0.24, 0.20)
+    half = get_op("tone.neutralize_background").apply(rgb, {"strength": 0.5}, EditContext())
+    meds = sky_channel_medians(half)
+    # Half strength moves green halfway from 0.24 toward the 0.20 minimum (~0.22).
+    assert abs(meds[1] - 0.22) < 5e-3
+    # strength 0 is an identity (no correction at all).
+    noop = get_op("tone.neutralize_background").apply(rgb, {"strength": 0.0}, EditContext())
+    assert np.allclose(noop, rgb, atol=1e-6)
+
+
+def test_neutralize_background_preserves_nan_gaps():
+    rgb = _with_nan_border(_cast_sky_image(0.20, 0.24, 0.20))
+    out = get_op("tone.neutralize_background").apply(rgb, {"strength": 1.0}, EditContext())
+    assert np.all(np.isnan(out[:3, :, :]))
+    assert np.all(np.isfinite(out[3:, :, :]))
+
+
+def test_neutralize_background_noop_on_already_neutral_sky():
+    rgb = _cast_sky_image(0.21, 0.21, 0.21)  # already neutral
+    out = get_op("tone.neutralize_background").apply(rgb, {"strength": 1.0}, EditContext())
+    assert np.allclose(out, rgb, atol=1e-6)
+
+
 # ---- tone.curves / tone.levels ---------------------------------------------
 
 def test_curves_identity_default_is_noop_and_keeps_nan():
