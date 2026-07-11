@@ -96,11 +96,15 @@ def suggest_tone_curve(
     # identity; drop either when it coincides with the pinned 0/1 endpoint (e.g. a
     # hard black clip lands p1 at exactly 0), which keeps the curve valid instead
     # of forcing a duplicate point.
+    # Compare the *rounded* anchor against the pinned endpoints (not the raw
+    # value): a sky floor of 0.0004 rounds to 0.0, and a saturated-highlight
+    # p99.5 of 0.9998 rounds to 1.0 — either would duplicate a 0/1 endpoint and
+    # trip the strict-monotone guard below into dropping an otherwise-valid curve.
     points: list[list[float]] = [[0.0, 0.0]]
-    if sky > 0.0:
+    if round(sky, 3) > 0.0:
         points.append([round(sky, 3), round(sky, 3)])
     points.append([round(mid, 3), round(y_mid, 3)])
-    if high < 1.0:
+    if round(high, 3) < 1.0:
         points.append([round(high, 3), round(high, 3)])
     points.append([1.0, 1.0])
 

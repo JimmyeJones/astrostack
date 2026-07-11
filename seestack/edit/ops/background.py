@@ -27,6 +27,11 @@ def _subtract(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
 
     opts = BackgroundOptions(
         box_size=_scaled_box(ctx, int(params.get("box_size", 128))),
+        # The object-mask dilation is a full-res pixel measure too; scale it by
+        # proxy_scale (floor 0 so a small dilation can vanish on a heavy proxy) so
+        # the sky fit masks the same physical halo preview↔export, exactly as
+        # box_size and _final_gradient's dilate_px already do.
+        dilate_object_mask_px=_scaled_box(ctx, 4, minimum=0),
         mode=str(params.get("mode", "per_channel")),
         enabled=True,
     )

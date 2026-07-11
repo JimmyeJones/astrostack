@@ -9,11 +9,18 @@ from seestack.edit.stretch import STRETCH_TARGET_BG, suggest_asinh_stretch
 from seestack.render.thumbnail import asinh_stretch
 
 
-def _linear_scene(sky=1000.0, sig=40.0, star_max=30000.0, n_stars=15, h=180, w=220,
+def _linear_scene(sky=1000.0, sig=40.0, star_max=30000.0, n_stars=60, h=180, w=220,
                   seed=0):
     """A *linear* stacked-image proxy: a faint sky background, a soft nebula, and
-    a handful of near-saturated stars that set the dynamic-range ceiling (as a
-    real Seestar stack does)."""
+    a scatter of near-saturated stars that set the dynamic-range ceiling (as a
+    real Seestar stack does).
+
+    Stars are rendered as small Gaussian PSF blobs, not single pixels: a real
+    stack's bright-star population is a genuine (few-percent) tail, not a lone
+    hot pixel. `asinh_stretch` (and this suggestion) scales the top of the range
+    by a robust 99.5th percentile so a single non-physical outlier can't crush
+    the image — so the fixture must model stars as a real population, or it would
+    conflate "star" with "hot pixel" and the robust ceiling would clip them all."""
     rng = np.random.default_rng(seed)
     img = rng.normal(sky, sig, size=(h, w, 3)).astype(np.float32)
     yy, xx = np.mgrid[0:h, 0:w]
@@ -21,9 +28,14 @@ def _linear_scene(sky=1000.0, sig=40.0, star_max=30000.0, n_stars=15, h=180, w=2
     img[..., 0] += neb
     img[..., 1] += neb * 0.7
     img[..., 2] += neb * 0.4
+    r = 3
+    dy, dx = np.mgrid[-r:r + 1, -r:r + 1]
+    psf = np.exp(-((dy ** 2 + dx ** 2) / (2 * 1.6 ** 2)))
     for _ in range(n_stars):
-        img[rng.integers(0, h), rng.integers(0, w)] += rng.uniform(star_max * 0.3,
-                                                                    star_max)
+        cy = int(rng.integers(r, h - r))
+        cx = int(rng.integers(r, w - r))
+        amp = rng.uniform(star_max * 0.3, star_max)
+        img[cy - r:cy + r + 1, cx - r:cx + r + 1, :] += (amp * psf)[..., None]
     return img
 
 

@@ -163,10 +163,28 @@ they usually agree — cosmetic), and `stretch_suggestion` omitting `already_dis
 because it also passes `auto_stretch=False`). Next rotation: `stack/mosaic.py` + `stack/drizzle_path.py`
 canvas/rejection edges (last deep-traced 2026-07-10), and the frontend editor route UX._
 
-- **The interactive editor's default asinh stretch (and the manual "Asinh" stretch mode) blacks out the whole
+- ~~**The interactive editor's default asinh stretch (and the manual "Asinh" stretch mode) blacks out the whole
   picture when a single extreme outlier pixel survives into the stack — its `[min,max]` range normalization is
-  not outlier-robust, unlike its sibling `autostretch`.** *(Traced + reproduced-on-synthetic, Scout audit
-  2026-07-11; severity wrong-result / broken-UX on a PRIORITY-1 default path; confidence: reproduced.)*
+  not outlier-robust, unlike its sibling `autostretch`.**~~ — **FIXED v0.108.5** (Builder, 2026-07-11; traced +
+  reproduced-on-synthetic + regression-tested). Root cause and repro as traced by the Scout below.
+  `render/thumbnail.py::asinh_stretch` now scales the top of its normalization range by a robust
+  `np.nanpercentile(img, 99.5)` (falling back to `nanmax` only for a degenerate/near-flat image), keeping the
+  final `np.clip(...,0,1)` so bright star cores still saturate to white — mirroring the `0.5–99.5th`-percentile
+  scaling `edit/ops/detail.py` already uses for the same reason. The strength/black **suggestion**
+  (`edit/stretch.py::suggest_asinh_stretch`) was updated in lockstep so preview↔suggestion parity holds (its
+  normalization mirrors the op exactly). Verified on a realistic star-blob stack the suggestion still lands the
+  sky at `STRETCH_TARGET_BG` (0.100). Regression `tests/test_asinh_stretch_robust.py` (a single ~100× hot pixel
+  no longer crushes the nebula: baseline preserved vs. blacked-out; normal image unharmed, star cores still peg
+  to white; near-flat fallback). **Follow-on fix in the same commit:** the now-brighter stretch surfaced a latent
+  rounding bug in `edit/curve.py::suggest_tone_curve` — a stretched image whose p99.5 rounds to 1.0 duplicated the
+  pinned `[1,1]` endpoint and the strict-monotone guard dropped the whole (valid) curve; now the high/sky anchors
+  are compared as *rounded* values against the 0/1 endpoints (regression
+  `tests/test_edit_curve.py::test_saturated_highlight_p99_5_rounding_does_not_drop_the_curve`; this also un-broke
+  `tests/webapp/test_editor.py::test_curve_suggestion_from_image`). The synthetic `_linear_scene` fixture in
+  `tests/test_edit_stretch.py` was made realistic (stars as small Gaussian PSF blobs, not single pixels) so it no
+  longer conflates a star with a hot pixel. Additive, display-only, no config/schema/API change. *(Traced +
+  reproduced-on-synthetic, Scout audit 2026-07-11; severity wrong-result / broken-UX on a PRIORITY-1 default path;
+  confidence: reproduced.)*
   `render/thumbnail.py::asinh_stretch` normalizes over the full covered range — `lo = np.nanmin(img)`,
   `hi = np.nanmax(img)`, `img = (img-lo)/(hi-lo)` (thumbnail.py:208-212) — and then applies a **fixed** asinh
   gain set only by the `stretch` slider (`a = 0.004**s`; thumbnail.py:216-218). The black point is anchored to
@@ -596,9 +614,21 @@ the real webapp stack→edit path.)_
   `tests/webapp/test_batch_trigger.py` (fail before / pass after). Additive, upgrade-safe (no
   schema/config/API change; the hook is opt-in and no-ops on an older `app.state`).
 
-- **`background.subtract` editor op's internal object-mask dilation is a fixed 4 px, *not* scaled by
-  `proxy_scale` → a preview↔export sky-model mismatch (sibling to the filed coverage-leveling dilation
-  nuance).** *(Traced, Builder audit 2026-07-11; low/moderate severity, editor preview↔export parity.)*
+- ~~**`background.subtract` editor op's internal object-mask dilation is a fixed 4 px, *not* scaled by
+  `proxy_scale` → a preview↔export sky-model mismatch.**~~ — **FIXED v0.108.6** (Builder, 2026-07-11; traced +
+  regression-tested). The object-mask dilation is now a `BackgroundOptions.dilate_object_mask_px` field
+  (default 4) threaded into `_build_object_mask_for_bg`, and the editor `_subtract` op scales it via
+  `_scaled_box(ctx, 4, minimum=0)` — exactly as it already scales `box_size` and as `_final_gradient` scales its
+  `dilate_px`. On a ×4 live-preview proxy the sky fit now masks a 1-proxy-px (≈4 full-res px) halo instead of
+  4 proxy px (≈16 full-res px), matching the export's 4 full-res px. The stack/export path (`proxy_scale == 1`)
+  keeps the default 4 → byte-for-byte unchanged (verified: `subtract_background` with the default equals an
+  explicit `dilate_object_mask_px=4`). Regression `tests/test_bg_object_mask_dilation_parity.py`: the option is
+  threaded (default==4, differs from 0), `for_image_size` preserves it, and a spy confirms the editor op passes 4
+  on export / 1 on a ×4 proxy (was 4 on both before). Additive, JSON-safe new field, no schema/API/default change.
+  **The sibling `coverage_leveling.py` `dilate_object_mask_px=4` nuance is left filed below** — that pass's
+  dilation effect on the leveled sky is marginal and scenario-dependent (it can even go either way on residual
+  noise), so it isn't cleanly regression-testable as an *improvement*; per §5 I did not ship it dressed as a
+  tested fix. *(Traced, Builder audit 2026-07-11; low/moderate severity, editor preview↔export parity.)*
   `edit/ops/background.py::_subtract` carefully scales its `box_size` via `_scaled_box` (the codebase's explicit
   "pixel measures must be divided by `proxy_scale` for preview↔export parity" discipline, which
   `_final_gradient` also applies to *its* `dilate_px`), but the object-mask dilation used to keep stars/nebulae

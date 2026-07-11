@@ -11,8 +11,9 @@ other "From your image" buttons use.
 The maths mirrors :func:`seestack.render.thumbnail.asinh_stretch` exactly (that's
 the op this suggests for), so the suggested values reproduce its behaviour:
 
-  * asinh normalizes the whole image to ``[0, 1]`` by its global finite min/max,
-    then per channel clips a shadow floor at ``shadows = median + (6·black − 2)·σ``
+  * asinh normalizes the whole image to ``[0, 1]`` by its global finite min and a
+    robust 99.5th-percentile max (so one hot pixel can't crush the range), then
+    per channel clips a shadow floor at ``shadows = median + (6·black − 2)·σ``
     and maps ``x = (v − shadows)/(1 − shadows)`` through
     ``arcsinh(x/a) / arcsinh(1/a)`` with ``a = 0.004**stretch``.
   * **Black point** — we put the sky floor (a low percentile of the finite
@@ -91,11 +92,13 @@ def suggest_asinh_stretch(
     if finite.size < 100:
         return None
     lo = float(finite.min())
-    hi = float(finite.max())
+    hi = float(np.percentile(finite, 99.5))
+    if not math.isfinite(hi) or hi <= lo:
+        hi = float(finite.max())             # degenerate/near-flat image
     if not math.isfinite(lo) or not math.isfinite(hi) or hi <= lo:
         return None
-    # Same global-min/max normalize asinh does, so our median/sigma live in the
-    # same [0, 1] space its shadow-clip formula does.
+    # Same global min / robust-99.5th-percentile normalize asinh does, so our
+    # median/sigma live in the same [0, 1] space its shadow-clip formula does.
     norm = (finite - lo) / (hi - lo)
     median, sigma = _robust_median_sigma(norm)
     if sigma <= 0:
