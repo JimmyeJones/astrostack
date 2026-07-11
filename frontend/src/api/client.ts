@@ -558,6 +558,12 @@ export interface Histogram {
   // so the editor can show whether the background ended up neutral (see
   // skyCastCaption). Absent on an older backend.
   sky_cast?: SkyCast;
+  // True when this run is already in display space (a re-opened editor export, so
+  // no default stretch runs). The one-click "Neutralize background" fix only lands
+  // in display space — where the cast is measured — when an explicit stretch is
+  // enabled OR the run is already display-space, so the editor only offers it then.
+  // Absent on an older backend (treated as false).
+  already_display?: boolean;
 }
 
 export interface SkyCast {

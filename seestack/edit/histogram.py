@@ -20,27 +20,22 @@ _CAST_HIGH = {0: "red", 1: "green", 2: "blue"}
 _CAST_LOW = {0: "cyan", 1: "magenta", 2: "yellow"}
 
 
-def measure_sky_cast(rgb: np.ndarray) -> dict:
-    """Robust per-channel sky-background medians + a plain colour-cast verdict.
+def sky_channel_medians(rgb: np.ndarray) -> list[float] | None:
+    """Robust per-channel sky-background medians of an RGB image, or ``None``.
 
-    Measures the *sky population* only — the finite pixels at or below the
-    luminance median — so bright stars/target don't pull the medians (the same
-    trick ``presets.analyze_proxy`` / ``classify_target`` use). Intended for the
-    post-recipe display image, so a user can *see* whether their finished sky
-    background actually ended up neutral.
-
-    Returns ``{r, g, b, neutral, cast, deviation}`` where ``r/g/b`` are the sky
-    medians in display ``[0, 1]``, ``deviation`` is the largest per-channel
-    departure from their mean, ``neutral`` is ``deviation <= _SKY_CAST_TOL``, and
-    ``cast`` names the dominant tint (``"neutral"`` when balanced). Returns
-    ``None``-valued medians + ``cast="unknown"`` when there aren't enough finite
-    sky pixels to measure (a failed/empty stack). Read-only, side-effect free."""
+    The *sky population* is the finite pixels at or below the luminance median,
+    so bright stars/target don't pull the medians (the same trick
+    ``presets.analyze_proxy`` / ``classify_target`` use). Returns a 3-list of the
+    R/G/B sky medians in the image's own units, or ``None`` when there aren't
+    enough finite sky pixels to measure (a failed/empty stack). Shared by
+    :func:`measure_sky_cast` (the read-out) and the ``tone.neutralize_background``
+    op (the one-click fix), so both anchor on the *same* sky population. Read-only,
+    side-effect free."""
     img = as_rgb(rgb)
     lum = img[..., :3].mean(axis=2)
     finite_mask = np.isfinite(lum)
     if int(finite_mask.sum()) < 16:
-        return {"r": None, "g": None, "b": None,
-                "neutral": True, "cast": "unknown", "deviation": 0.0}
+        return None
     med = float(np.median(lum[finite_mask]))
     # Sky = finite pixels at or below the luminance median. Guard the degenerate
     # case where every finite pixel equals the median (a flat frame) by keeping
@@ -54,6 +49,26 @@ def measure_sky_cast(rgb: np.ndarray) -> dict:
         chan = chan[np.isfinite(chan)]
         medians.append(float(np.median(chan)) if chan.size else float("nan"))
     if not all(np.isfinite(m) for m in medians):
+        return None
+    return medians
+
+
+def measure_sky_cast(rgb: np.ndarray) -> dict:
+    """Robust per-channel sky-background medians + a plain colour-cast verdict.
+
+    Measures the *sky population* only (see :func:`sky_channel_medians`) so bright
+    stars/target don't pull the medians. Intended for the post-recipe display
+    image, so a user can *see* whether their finished sky background actually
+    ended up neutral.
+
+    Returns ``{r, g, b, neutral, cast, deviation}`` where ``r/g/b`` are the sky
+    medians in display ``[0, 1]``, ``deviation`` is the largest per-channel
+    departure from their mean, ``neutral`` is ``deviation <= _SKY_CAST_TOL``, and
+    ``cast`` names the dominant tint (``"neutral"`` when balanced). Returns
+    ``None``-valued medians + ``cast="unknown"`` when there aren't enough finite
+    sky pixels to measure (a failed/empty stack). Read-only, side-effect free."""
+    medians = sky_channel_medians(rgb)
+    if medians is None:
         return {"r": None, "g": None, "b": None,
                 "neutral": True, "cast": "unknown", "deviation": 0.0}
     mean_m = sum(medians) / 3.0

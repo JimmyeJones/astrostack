@@ -679,6 +679,9 @@ def test_histogram_reports_sky_cast(client, solved_library):
     # A real (finite) stack yields measured medians, not the empty sentinel.
     assert sc["cast"] != "unknown"
     assert sc["r"] is not None and 0.0 <= sc["r"] <= 1.0
+    # A linear stack (not a re-opened editor export) is not already display-space,
+    # so the one-click neutralise fix is gated on the enabled stretch instead.
+    assert hist["already_display"] is False
 
 
 def test_histogram_reports_rendered_dims_after_crop(client, solved_library):

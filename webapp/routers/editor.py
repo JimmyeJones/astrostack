@@ -951,6 +951,13 @@ async def edit_histogram(safe: str, run_id: int, request: Request,
         # neutral ✓ / slight green cast" line from these fields. Absent-safe: old
         # clients ignore the extra key.
         hist["sky_cast"] = measure_sky_cast(out)
+        # Whether this run is already in display space (an editor export re-opened
+        # for editing), so no default stretch is applied. The one-click "Neutralize
+        # background" fix only lands in display space — where the cast is measured —
+        # when an explicit stretch is enabled OR the run is already display-space;
+        # the editor uses this (plus its own knowledge of enabled stretch ops) to
+        # only offer the fix when it will actually work. Read-only; absent-safe.
+        hist["already_display"] = bool(ctx.already_display)
         # Surface the proxy geometry so the editor can tell the user the live
         # preview is downscaled (a ≤1500 px proxy of what may be a 150 MP mosaic),
         # which sets expectations for why fine detail reads differently than the

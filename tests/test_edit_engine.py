@@ -270,6 +270,34 @@ def test_measure_sky_cast_nan_aware_and_empty():
     assert measure_sky_cast(empty)["r"] is None
 
 
+def test_neutralize_background_op_drives_a_display_cast_to_neutral():
+    # End-to-end (the path the one-click "Neutralize background" fix takes): a
+    # re-opened editor export (already display space, so no re-stretch) whose sky
+    # kept a green cast. Appending tone.neutralize_background runs it in display
+    # space — exactly where the sky-cast read-out measures — and measure_sky_cast on
+    # the final image must go from a cast to neutral. (A pure *linear* cast is
+    # instead re-anchored to neutral by the stretch's per-channel black point, which
+    # is why the read-out only fires — and this fix only applies — post-stretch.)
+    from seestack.edit.histogram import measure_sky_cast
+    rng = np.random.default_rng(7)
+    img = np.full((120, 120, 3), 0.20, dtype=np.float32)
+    img[..., 1] += 0.03                                 # a green sky cast (display space)
+    img += rng.normal(0.0, 0.005, img.shape).astype(np.float32)
+    img[50:70, 50:70, :] += 0.5                         # bright target (excluded from sky)
+
+    reopened = apply_recipe(img, Recipe(ops=[]), EditContext(already_display=True))
+    assert measure_sky_cast(reopened)["neutral"] is False    # cast present on re-open
+
+    fixed = apply_recipe(
+        img,
+        Recipe(ops=validate_ops([
+            OpInstance(id="tone.neutralize_background", params={"strength": 1.0}),
+        ])),
+        EditContext(already_display=True))
+    assert measure_sky_cast(fixed)["neutral"] is True        # appended fix neutralises it
+    assert np.isfinite(fixed).any()
+
+
 def test_recipe_validation_drops_unknown_and_clamps():
     rec = recipe_from_dict({"ops": [
         {"id": "tone.stretch", "params": {"stretch": 5.0}},   # clamp to 1.0

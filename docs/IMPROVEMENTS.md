@@ -1079,8 +1079,31 @@ problems. Dogfood it every big-picture run and fix root causes.
   re-opening/re-rendering an edited run no longer double-stretches it and the FITS
   is self-describing for Siril/PixInsight. Absence = today's linear behaviour, so
   old runs are unaffected.
-- **Measure the finished picture's residual background colour cast and offer a one-click
-  "neutralise background".** (S–M, editor/trust — PRIORITY 1) *(Scout-filed 2026-07-10.)*
+- ~~**Measure the finished picture's residual background colour cast and offer a one-click
+  "neutralise background".**~~ — **BOTH SLICES SHIPPED (readout v0.104.0, one-click fix v0.107.0).**
+  (S–M, editor/trust — PRIORITY 1) *(Scout-filed 2026-07-10.)*
+  _(Builder 2026-07-11: **one-click fix SHIPPED v0.107.0** — the action slice the readout deferred.
+  Rather than reuse `tone.white_balance` (which is deliberately `stage="linear"`, locked by
+  `test_white_balance_is_linear_stage`, so appending it post-stretch would trip the stage-conflict
+  caution and its "fix stage" would drag it back before the stretch — undoing the correction), shipped
+  a new **display-space op `tone.neutralize_background`** (`stage="nonlinear"`, `edit/ops/tone.py`).
+  It **self-measures** the per-channel sky median at render time via a factored-out
+  `edit/histogram.py::sky_channel_medians` (shared with `measure_sky_cast`, so the fix anchors on the
+  exact sky population the readout reports) and multiplies each channel by `min_median/channel_median`
+  (× a 0..1 `strength`), targeting the **minimum** so every gain ≤ 1 → neutral grey with no highlight
+  clipping. Deriving at render time keeps the background neutral as upstream ops change (like the
+  auto-contrast curve). The editor shows a one-click **"Neutralize"** button next to the sky-cast
+  caption (`frontend/.../skyCast.ts::neutraliseBackgroundOps`, appended at the *end* so it runs last in
+  display space), gated by `canNeutraliseSkyCast` to only appear when a real cast is measured **and**
+  the fix will land in display space (an enabled stretch OR an already-display re-open — a *linear*
+  cast is re-anchored to neutral by the stretch's per-channel black point, so the readout only fires,
+  and the op only applies, post-stretch). The histogram endpoint now also returns `already_display`
+  for that gate. Off by default (a suggestion, never auto-applied), undoable, additive, NaN-aware.
+  Tests: `test_edit_tone_ops.py` (balances sky to neutral / strength scaling / NaN gaps / neutral
+  no-op), `test_edit_engine.py::test_neutralize_background_op_drives_a_display_cast_to_neutral`
+  (end-to-end through `apply_recipe`), `test_editor.py` (`already_display` field), and
+  `skyCast.test.ts` (gate + append helpers). A genuine reusable display-space colour tool, not just a
+  one-off button.)_
   _(Builder 2026-07-10: **read-only readout slice SHIPPED v0.104.0** — the smallest-first slice the
   item called for. `edit/histogram.py::measure_sky_cast` returns the robust per-channel
   sky-background medians (median of each channel's finite pixels at/below the luminance median, so
@@ -2392,6 +2415,14 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.107.0** — Editor (PRIORITY 1): one-click **"Neutralize background"** fix for a residual sky
+  colour cast — the action slice the v0.104.0 read-out deferred. New display-space op
+  `tone.neutralize_background` (self-measures the sky median at render time via factored-out
+  `sky_channel_medians`, balances each channel to the darkest → neutral grey, gains ≤ 1 so no
+  clipping, `strength` 0..1); a "Neutralize" button next to the sky-cast caption, gated by
+  `canNeutraliseSkyCast` to only show when a real cast is measured and the fix lands in display space
+  (enabled stretch or already-display re-open); histogram endpoint returns `already_display`. Off by
+  default, undoable, additive, NaN-aware. Tests across engine/webapp/frontend. (agent/editor-neutralise-bg)
 - **v0.106.0** — Image quality / trust (PRIORITY 4): library-wide "does Auto land the background neutral?"
   read-out. New `pipeline.auto_cast_summary(lib)` aggregates every auto-edited run's stamped sky-cast
   (`editor_auto_skycast:` meta, v0.105.0) across all targets into `{measured, neutral, cast, by_cast,
