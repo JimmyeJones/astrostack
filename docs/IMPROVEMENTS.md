@@ -2269,8 +2269,17 @@ problems. Dogfood it every big-picture run and fix root causes.
   info-endpoint + History wiring and renders with the sigma-clip trust wording — a small share
   reads "transient outliers", a large one keeps the too-tight-κ caution (unlike min/max's
   structural drop). Plain single-pass drizzle stamps no provenance.
-- **Iterate the `sigma_mean` master-build clip to convergence (currently a single round).** (S,
-  image-quality) *(Builder-audit-noted 2026-07-10, while fixing the v0.103.22 zero-MAD bug.)*
+- ~~**Iterate the `sigma_mean` master-build clip to convergence (currently a single round).**~~ —
+  **SHIPPED v0.109.1** (Builder 2026-07-11). `calibrate/masters.py::_sigma_clip_mean` now iterates the
+  median→MAD→clip step over the *surviving* samples (kept set only shrinks, so it converges; a `max_iters=5`
+  cap is the belt-and-braces bound) instead of doing a single round — matching how DSS/Siril/PixInsight combine
+  masters, so a milder outlier that a strong one's inflated first-round MAD leaves in is caught once the strong
+  one is removed. Strictly additive: the default `median` path is untouched, the mad==0 quantised-spike guard
+  and the finite full-stack-median fallback are preserved, and existing single-round cases converge to the same
+  result. Regression `tests/test_calibrate.py::test_sigma_clip_mean_iterates_to_convergence` (a +6 outlier that
+  survives one round is rejected after iterating: single-round mean 100.86 → iterated 100.0; fails before /
+  passes after) + a no-empty-column guardrail. (S, image-quality — PRIORITY 4.) *(Original write-up kept below.)*
+  (S, image-quality) *(Builder-audit-noted 2026-07-10, while fixing the v0.103.22 zero-MAD bug.)*
   `calibrate/masters.py::_sigma_clip_mean` does **one** clip-about-the-median pass and then means the
   survivors. Standard master-frame combination (DSS/Siril/PixInsight) iterates the sigma-clip 2–3 rounds
   (or until the surviving set stops changing), because after the first round removes the grossest outliers
@@ -2530,6 +2539,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+- ~~**Tidiness: `stretch_suggestion` omits `already_display` from its `EditContext`.**~~ — **SHIPPED v0.109.1**
+  (Builder 2026-07-11). `webapp/routers/editor.py::stretch_suggestion` now threads
+  `already_display=_run_display_space(run)` into its ctx like every sibling suggestion endpoint, closing the
+  latent trap (had that call ever enabled the auto-stretch fallback, a re-edited display-space run would have
+  double-stretched in the stretch measurement only). Regression
+  `tests/webapp/test_editor.py::test_stretch_suggestion_threads_already_display` captures the ctx for a
+  display-space run and asserts `already_display is True` (fails before / passes after). One-line consistency
+  fix, no behaviour change today. *(Original write-up kept below.)*
 - **Tidiness: `stretch_suggestion` omits `already_display` from its `EditContext`.** *(Traced, Scout
   2026-07-11 — latent, not a live bug.)* Every sibling suggestion endpoint threads `already_display` into the
   ctx it builds, but `webapp/routers/editor.py::stretch_suggestion` (~L809) doesn't. It's harmless *today* only
@@ -2840,6 +2857,14 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.109.1** — Two safe, self-contained hardening fixes (Builder 2026-07-11): (1) **image quality** —
+  `calibrate/masters.py::_sigma_clip_mean` now iterates the sigma-clip to convergence over the surviving samples
+  (kept set only shrinks; `max_iters=5` cap) instead of a single round, matching DSS/Siril/PixInsight so a mild
+  outlier a strong one's inflated first-round MAD leaves in is caught once the strong one is removed; default
+  `median` path + mad==0 guard + finite fallback all preserved (regression `test_sigma_clip_mean_iterates_to_convergence`).
+  (2) **editor tidiness/safety** — `routers/editor.py::stretch_suggestion` now threads `already_display` into its
+  ctx like every sibling endpoint, closing a latent re-edit double-stretch trap (regression
+  `test_stretch_suggestion_threads_already_display`). Both additive, no config/schema/API/default change.
 - **v0.109.0** — Editor (PRIORITY 1; Builder 2026-07-11): the editor's no-recipe fallback view now uses the
   adaptive **STF autostretch**, not the fixed-slider asinh default. When a stack is opened before any stretch op
   is added (and on a no-stretch export), `edit/pipeline.py`/`webapp/pipeline.py` rendered it with a bare

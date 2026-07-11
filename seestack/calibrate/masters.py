@@ -9,10 +9,10 @@ Combination methods
 -------------------
 ``median``       — per-pixel median. Robust default: rejects cosmic-ray hits,
                    satellite trails and the odd warm pixel without tuning.
-``sigma_mean``   — one round of sigma-clipping (reject pixels more than
-                   ``sigma`` MADs from the per-pixel median) then mean of what
-                   survives. Slightly lower noise than the median when the
-                   inputs are clean.
+``sigma_mean``   — iterated sigma-clipping (reject pixels more than ``sigma``
+                   MADs from the per-pixel median, recomputing the scale over the
+                   survivors until it converges) then mean of what survives.
+                   Slightly lower noise than the median when the inputs are clean.
 ``mean``         — plain average. Lowest noise, but no outlier rejection.
 
 Memory
@@ -60,27 +60,42 @@ class MasterMeta:
         return asdict(self)
 
 
-def _sigma_clip_mean(stack: np.ndarray, sigma: float) -> np.ndarray:
-    """One round of per-pixel sigma-clip about the median, then mean.
+def _sigma_clip_mean(stack: np.ndarray, sigma: float, max_iters: int = 5) -> np.ndarray:
+    """Iterated per-pixel sigma-clip about the median, then mean of the survivors.
 
     ``stack`` is (N, H, W). Uses the MAD (scaled to σ) as a robust scale so a
-    couple of outlier frames don't inflate the rejection threshold.
+    couple of outlier frames don't inflate the rejection threshold. The clip is
+    repeated — recomputing the median and MAD over the *surviving* samples each
+    round and only ever removing more — until the kept set stops changing or
+    ``max_iters`` rounds elapse. This matches how DSS/Siril/PixInsight combine
+    masters: after the first round removes the grossest outliers the recomputed
+    scale is tighter and catches milder ones that a single round leaves in.
     """
-    med = np.median(stack, axis=0)
-    mad = np.median(np.abs(stack - med), axis=0) * 1.4826  # MAD → σ estimate
-    # mad==0 means a *majority* of frames sit exactly at the median — NOT that
-    # there are no outliers. A minority cosmic-ray/hot-pixel spike routinely
-    # coexists with mad==0 (common on quantised bias/dark frames), so substituting
-    # +inf here would keep the spike and bake it into the master. Use tol=0 instead:
-    # only the exact-median samples survive, so the result degrades to the (robust)
-    # median at those pixels and the spike is correctly rejected.
-    tol = sigma * np.where(mad > 0, mad, 0.0)
-    keep = np.abs(stack - med) <= tol
-    # Mean over kept samples; fall back to the median where nothing survived.
-    kept = np.where(keep, stack, np.nan)
+    # The kept set only shrinks (a rejected sample never returns), so iterating
+    # is guaranteed to converge; the max_iters cap is just a belt-and-braces bound.
+    kept = np.ones(stack.shape, dtype=bool)
+    for _ in range(max(1, max_iters)):
+        masked = np.where(kept, stack, np.nan)
+        with np.errstate(invalid="ignore"):
+            med = np.nanmedian(masked, axis=0)
+            mad = np.nanmedian(np.abs(masked - med), axis=0) * 1.4826  # MAD → σ
+        # mad==0 means the surviving *majority* sits exactly at the median — NOT
+        # that there are no outliers. A minority cosmic-ray/hot-pixel spike
+        # routinely coexists with mad==0 (common on quantised bias/dark frames),
+        # so substituting +inf here would keep the spike and bake it into the
+        # master. Use tol=0 instead: only the exact-median samples survive, so the
+        # result degrades to the (robust) median there and the spike is rejected.
+        tol = sigma * np.where(mad > 0, mad, 0.0)
+        new_keep = kept & (np.abs(stack - med) <= tol)
+        if np.array_equal(new_keep, kept):
+            break
+        kept = new_keep
+    # Mean over the kept samples; fall back to the (always-finite) full-stack
+    # median where nothing survived, exactly as the single-round version did.
     with np.errstate(invalid="ignore"):
-        out = np.nanmean(kept, axis=0)
-    return np.where(np.isfinite(out), out, med).astype(np.float32, copy=False)
+        out = np.nanmean(np.where(kept, stack, np.nan), axis=0)
+    full_med = np.median(stack, axis=0)
+    return np.where(np.isfinite(out), out, full_med).astype(np.float32, copy=False)
 
 
 def build_master(

@@ -807,7 +807,8 @@ async def stretch_suggestion(safe: str, run_id: int, request: Request,
     def work() -> StretchSuggestionOut:
         rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
         ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None,
-                          coverage=_proxy_coverage(run.fits_path, scale))
+                          coverage=_proxy_coverage(run.fits_path, scale),
+                          already_display=_run_display_space(run))
         # Measure the *linear* image the stretch op will receive: apply the prior
         # (linear) ops but suppress the default-stretch fallback, so we never
         # measure a tone-mapped image.

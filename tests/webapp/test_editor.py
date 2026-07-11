@@ -365,6 +365,34 @@ def test_stretch_suggestion_unknown_uid_falls_back(client, solved_library):
     assert body["stretch"] is not None and body["black"] is not None
 
 
+def test_stretch_suggestion_threads_already_display(client, solved_library, monkeypatch):
+    # Regression: stretch_suggestion must build its EditContext with the run's
+    # already_display flag, like every sibling suggestion endpoint. For a
+    # display-space run the ctx must carry already_display=True — without it, a
+    # re-edited export would double-stretch in the stretch measurement should the
+    # endpoint ever enable the auto-stretch fallback (latent trap, closed here).
+    import webapp.routers.editor as editor_mod
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _register_display_space_run(solved_library, safe, "stretch_disp",
+                                      json.dumps({"display_space": True}))
+
+    captured = {}
+    real_apply = editor_mod.apply_recipe
+
+    def _spy(rgb, recipe, ctx, *args, **kwargs):
+        captured["already_display"] = ctx.already_display
+        return real_apply(rgb, recipe, ctx, *args, **kwargs)
+
+    monkeypatch.setattr(editor_mod, "apply_recipe", _spy)
+    q = _enc({"ops": [{"id": "tone.stretch", "uid": "s1",
+                       "params": {"stretch": 0.5, "black": 0.35}}]})
+    r = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/stretch-suggestion?recipe={q}&uid=s1")
+    assert r.status_code == 200
+    assert captured["already_display"] is True
+
+
 def test_curve_suggestion_from_image(client, solved_library):
     # A stretch places the image into display space; the Curve suggestion then
     # measures the histogram *entering* the Curves op and returns a gentle,
