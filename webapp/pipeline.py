@@ -125,6 +125,18 @@ def _pipeline_body(
                     res = _stack_target(
                         settings, jm, job, lib, safe,
                         auto_bind_calibration=settings.auto_bind_calibration)
+                    if res.get("cancelled"):
+                        # A user cancel mid-stack is a survivable, non-crash outcome
+                        # that recorded no run and raised no exception, so it never
+                        # reaches the except handler below. Clear the crash-loop
+                        # marker written at line ~123 (exactly as that handler does
+                        # for a survivable error) — otherwise the target is stranded
+                        # and never auto-stacked again until brand-new frames arrive
+                        # — and don't report a cancelled target as stacked. The loop
+                        # breaks on the next iteration's cancel check anyway.
+                        with contextlib.suppress(Exception):
+                            _clear_auto_stack_attempt(lib, safe)
+                        break
                     stacked.append(safe)
                     # Optionally finish the fresh master into a picture (the same
                     # Auto-recipe chain the one-click Process/Reprocess use), so

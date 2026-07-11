@@ -128,6 +128,45 @@ master-path server-side-resolution invariant (`trigger_stack` pops raw client `*
 resolving `*_master_id`s), and `merge.py` cross-source dedup. Next rotation: `bg/*` gradient/coverage
 paths and `edit/pipeline.py`/`edit/recipe.py` op-ordering, which this run didn't re-cover._
 
+_Builder audit log 2026-07-11 (baseline green: 1071 passed / 2 skipped): with the two long-standing open Bugs
+entries REAL-data-gated (dead SExtractor skew guard; sky-atlas WCS rotation sign) and the ready Ideas
+shipped-or-gated, ran three parallel adversarial audits of paths prior notes flagged as un-recovered: the
+`bg/*` gradient/coverage paths, the `edit/pipeline.py`/`edit/recipe.py`/`ops/*` op-ordering + proxy-scale
+parity, and the `webapp/{jobs,watcher,pipeline}.py` job orchestration. **Two genuine bugs found, fixed, and
+shipped this run:** v0.108.2 (coverage-leveling cross-level smoothing extrapolates a seam onto a gapped overlap
+level — a final-image correctness bug on the default mosaic stack path) and v0.108.3 (a cancelled auto-stack
+permanently strands that target's auto-stack — the crash-loop marker isn't cleared on the survivable non-crash
+cancel). **One lower-severity parity nuance filed** (`background.subtract`'s internal `dilate_px=4` not scaled by
+`proxy_scale`, sibling to the filed coverage-leveling dilation nuance — below). Everything else traced clean,
+consistent with the mature audit history: NaN=coverage held across all `bg/*` and `edit/ops/*` paths, every
+pixel-distance op param except the two filed dilation nuances is routed through `ctx.scaled_px`, ops execute in
+identical recipe order in preview and export, and the job worker's error handling is sound (one **latent**
+hardening gap noted, not currently reachable: `_persist`'s `json.dumps(job.result)` sits inside the
+`except sqlite3.Error` guard, so a future non-JSON-serialisable result field — a numpy scalar / `Path` / `set` —
+would raise `TypeError` past the handler and kill the single worker; all current job-result shapes are plain
+primitives, so no live bug — worth broadening the guard if a run is already in `jobs.py`)._
+
+- ~~**Cancelling an unattended auto-stack permanently strands that target's auto-stack — the crash-loop
+  marker written before the stack is never cleared on a user cancel (the survivable non-crash outcome that
+  never raises), so the target is skipped on every future scan.**~~ — **FIXED v0.108.3** (Builder, 2026-07-11;
+  traced + reproduced + regression-tested). The watcher/auto-stack loop (`webapp/pipeline.py::_pipeline_body`)
+  writes a crash-loop marker (`AUTO_STACK_ATTEMPT_META_KEY = solved_accepted count`) *before* stacking a target,
+  so a process-killing crash (OOM SIGKILL, which never reaches cleanup) can't re-trigger the identical stack on
+  restart. A *recoverable* exception clears it in the `except` block — but a **user cancel** mid-stack is neither:
+  `run_stack` observes `cancel()` and **returns** `StackResult(cancelled=True, run_id=None)` with no run recorded
+  and **no exception raised**, so `_stack_target` returns normally, the `except` cleanup never runs, and the
+  marker survives at the current frame count. On every subsequent scan `_auto_stack_frame_count` then sees
+  `attempted (N) >= solved_accepted (N)` → returns `None` → the target is **never auto-stacked again** until
+  brand-new solved frames arrive — silently breaking the walk-away promise for that target after a single Cancel
+  (a routine action when the session is over). It also mis-reported the cancelled target in
+  `summary["auto_stacked"]`. Fixed by detecting `res.get("cancelled")` right after the stack and clearing the
+  marker exactly as the recoverable-error handler does (a cancel is a survivable non-crash), not appending it to
+  `stacked`, and breaking (the loop's own cancel check breaks on the next iteration anyway). Additive, no
+  schema/config/API change; a cancel now behaves like the survivable outcome it is. Regression test
+  `tests/webapp/test_auto_stack_pipeline.py::test_auto_stack_clears_marker_when_cancelled` (a cancelling stack
+  leaves no target carrying the crash-loop marker and reports none as stacked — fails before / passes after).
+  Found by an adversarial audit of the job-orchestration paths (`webapp/{jobs,watcher,pipeline}.py`).
+
 - ~~**Coverage-leveling's cross-level smoothing *extrapolates* a wrong sky offset onto a sparsely-sampled
   deep-overlap coverage level — subtracting a bright/dark seam over that region (the panel step the pass
   exists to remove), on the default mosaic stack path and in the editor.**~~ — **FIXED v0.108.2** (Builder,
@@ -493,6 +532,24 @@ the real webapp stack→edit path.)_
   truth table + `_on_batch_ready` id-tracking / recovery-flag tests in
   `tests/webapp/test_batch_trigger.py` (fail before / pass after). Additive, upgrade-safe (no
   schema/config/API change; the hook is opt-in and no-ops on an older `app.state`).
+
+- **`background.subtract` editor op's internal object-mask dilation is a fixed 4 px, *not* scaled by
+  `proxy_scale` → a preview↔export sky-model mismatch (sibling to the filed coverage-leveling dilation
+  nuance).** *(Traced, Builder audit 2026-07-11; low/moderate severity, editor preview↔export parity.)*
+  `edit/ops/background.py::_subtract` carefully scales its `box_size` via `_scaled_box` (the codebase's explicit
+  "pixel measures must be divided by `proxy_scale` for preview↔export parity" discipline, which
+  `_final_gradient` also applies to *its* `dilate_px`), but the object-mask dilation used to keep stars/nebulae
+  out of the sky fit lives inside `bg/per_frame.py::_build_object_mask_for_bg(..., dilate_px=4)` and is a
+  hardcoded, **unscaled** 4 px. On the decimated live-preview proxy that masks a `4·proxy_scale` full-res-equivalent
+  halo around every source vs exactly 4 px on the export, so the fitted low-frequency sky model — and thus the
+  subtracted result — differs preview↔export. Reachable via the `background.subtract` op and the
+  `globular_cluster` preset (dense star field on a ×3–4 proxy, where the masked *fraction* per small mesh box
+  diverges most). **Same class as the already-filed `coverage_leveling` `dilate_object_mask_px=4` nuance** (both
+  deemed below the churn bar individually), so fold them together: the fix is to thread `proxy_scale` through
+  `subtract_background` → `_build_object_mask_for_bg` and use `round(dilate_px/proxy_scale)` — but that touches an
+  engine function the **stack hot path** also calls, so the default (`proxy_scale=1` → 4 px, byte-for-byte
+  unchanged on export/stack) must be preserved and tested. Additive; validate on a proxy vs full-res parity check.
+  (S code, editor/parity — low priority.)
 
 - **Dead SExtractor skew-fallback guard in 4 background/leveling helpers (needs REAL-data
   threshold validation before fixing — NOT a blind Builder change).** *(traced + reproduced,
