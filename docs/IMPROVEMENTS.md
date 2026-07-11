@@ -194,6 +194,45 @@ re-covered this run): the frontend editor route UX (React/TS — needs a `vitest
 engine audits), and `qc/*` + `solve/*` (last deep-traced 2026-07-11 by the qc/solve Builder run) if a fresh angle
 surfaces._
 
+- ~~**Editor: turning on a *per-op* compare ("Without this op" / "Split this op") doesn't exit an active
+  "Compare a look" split — the "Look:" button lingers in a stale active state and the look split reappears
+  when the per-op compare is dismissed.**~~ — **FIXED v0.109.4** (Builder, 2026-07-11; traced + reproduced +
+  regression-tested). The editor's preview has a set of mutually-exclusive compare modes (`showBase`,
+  `splitCompare`, `showMask`, `showCoverage`, `soloExclude`, `soloSplit`, `lookSplit`); every top-level toggle's
+  activation handler clears all the others, including `setLookSplit(false)`. But the two **per-op** handlers
+  (`Editor.tsx` "Without this op" / "Split this op") cleared every sibling *except* `lookSplit` — an enumeration
+  oversight. So with "Compare a look" active, selecting an op and clicking a per-op compare switched the preview
+  correctly (per-op overlay wins the precedence) yet left `lookSplit=true`: the "Compare a look" button kept
+  reading "Look: <name>" as if still comparing, the hidden look-preview query kept re-fetching/holding a blob,
+  and dismissing the per-op compare surprised the user by *re-showing* the look split instead of the plain
+  edited preview. Fixed by adding `setLookSplit(false)` to both handlers, exactly mirroring every sibling toggle.
+  Frontend-only, additive, no backend/schema/API change. Regression test `Editor.test.tsx::"turning on a per-op
+  compare exits look-compare"` (activate look-compare → select the op → "Without this op" → assert the picker
+  reverts to "Compare a look" and the per-op mode is active — fails before / passes after). *(Traced +
+  reproduced, Builder audit 2026-07-11; low severity, PRIORITY-1 editor state consistency; found by an
+  adversarial audit of the frontend editor interaction logic, which otherwise traced clean — undo/coalescing,
+  seeding/per-run gating, blob lifecycle, query enablement, stage placement, and the data-driven helpers all
+  held.)*
+
+- ~~**`merge_projects` silently drops each frame's `ra_hint_deg`/`dec_hint_deg` — a frame merged *before* it's
+  plate-solved then gets a slow, failure-prone blind all-sky ASTAP solve instead of a localized search around
+  the mount's pointing.**~~ — **FIXED v0.109.3** (Builder, 2026-07-11; traced + reproduced + regression-tested).
+  `io/merge.py::_frame_without_id` copies the frame row field-by-field for the destination project, but the
+  enumeration jumped straight from `bayer_pattern` to `wcs_json`, skipping the two adjacent header-derived
+  target-pointing hints (`ra_hint_deg`/`dec_hint_deg`), which therefore defaulted to `None` on every merged row.
+  Unlike the deliberately-reset path caches (`cached_path`/`aligned_cache_path`, Stage-2), these are sky-position
+  metadata with no reason to drop. Downstream: for a frame merged while still unsolved (no `wcs_json`),
+  `solve/runner.py::build_solve_arglist` passes `ra_hint=None`, so `astap.py` omits the `-ra`/`-spd` flags
+  (`astap.py:244-245`) and ASTAP runs a blind all-sky solve rather than the intended ~30° localized search —
+  slower and more failure-prone, on the common "merge several nights, then QC+solve" workflow (reachable from the
+  webapp `merge_targets` and the GUI). Already-solved frames were unaffected (their `wcs_json` copied, and the
+  solver skips solved frames). Fixed by adding the two fields to the `FrameRow(...)` copy. Regression test
+  `tests/test_merge.py::test_merge_preserves_target_pointing_hints` (merge an unsolved hints-only frame; assert
+  the hints survive — fails before with `None` / passes after). Additive, no schema/config/API change; found by
+  an adversarial audit of the io/ingest path (which otherwise traced clean — dedup, schema-v2→v9 migration, FITS
+  header parsing, and merge dedup all held). *(Traced + reproduced, Builder audit 2026-07-11; low–moderate
+  severity, autonomy/image-quality on the merge-then-solve path.)*
+
 - ~~**The interactive editor's default asinh stretch (and the manual "Asinh" stretch mode) blacks out the whole
   picture when a single extreme outlier pixel survives into the stack — its `[min,max]` range normalization is
   not outlier-robust, unlike its sibling `autostretch`.**~~ — **FIXED v0.108.5** (Builder, 2026-07-11; traced +

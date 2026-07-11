@@ -109,6 +109,12 @@ def _frame_without_id(frame: FrameRow) -> FrameRow:
         width_px=frame.width_px,
         height_px=frame.height_px,
         bayer_pattern=frame.bayer_pattern,
+        # Telescope-target pointing hints (header-derived, not path-specific like
+        # the deliberately-reset caches) — kept so a frame merged *before* it's
+        # plate-solved still gets a localized ASTAP search around the mount's
+        # pointing instead of a slow, failure-prone blind all-sky solve.
+        ra_hint_deg=frame.ra_hint_deg,
+        dec_hint_deg=frame.dec_hint_deg,
         wcs_json=frame.wcs_json,
         ra_center_deg=frame.ra_center_deg,
         dec_center_deg=frame.dec_center_deg,
