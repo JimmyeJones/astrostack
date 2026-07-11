@@ -94,6 +94,21 @@ result <0.16% because `_midtones_for` re-anchors the sky median to `target_bg` r
 top-end scale (self-correcting). No new verified bug filed (per §2, no manufacturing) — the engine,
 QC, solve, watcher and editor-stretch paths all held, consistent with the mature audit history._
 
+_Builder audit log 2026-07-11 (baseline green: 1053 passed / 2 skipped): with the two open Bugs entries
+REAL-data-gated and the Ideas shipped-or-gated, ran three parallel adversarial audits of paths flagged as
+un-recovered / worth re-checking: (1) the stacker orchestration (`stack/{stacker,weighting,photometric,
+reference,output}.py`), (2) the autonomous ingest→auto-stack→auto-edit path (`webapp/pipeline.py`,
+`edit/recipe.py`, `edit/pipeline.py`, `webapp/calibration.py`), and (3) the render/post/color paths
+(`render/{thumbnail,colormap}.py`, `post/{color_cal,target_id}.py`, `bg/{final_gradient,coverage_leveling}.py`).
+The render/post path **traced clean** (stretch math, NaN=coverage, channel handling all held). Three genuine
+robustness/correctness defects were found, fixed, and shipped this run — **v0.107.2** (κ-σ pass-1 Welford
+accumulator not freed before pass 2 → defeats the OOM guard on large mosaics), **v0.107.3** (a recoverable
+auto-stack failure permanently stranded a target's auto-stack — the marker written for the process-*crash*
+case was never cleared after a survivable exception), and **v0.107.4** (auto-bind flat/bias didn't iterate
+candidates when the top pick fails a gate, unlike the v0.107.1 dark path). Two lower-value observations filed to
+Ideas for the Scout (gray-star color-cal clamp parity; stray `scale_dark_to_light` skip-guard) rather than
+blind-fixed, since neither reproduces a wrong result today._
+
 - ~~**The shape-only streak detector auto-rejects a bright edge-on galaxy / elongated nebula on *every*
   sub — silently discarding the whole target's data (on by default).**~~ — **FIXED v0.106.2** (Builder
   audit 2026-07-10; traced + reproduced-on-synthetic + regression-tested). `qc/streaks.py::detect_streaks`
@@ -1988,6 +2003,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   trail before shipping — a synthetic can't stand in for the true width/brightness/straightness distributions.
   Additive, testable on `detect_streaks` in isolation; keep the v0.106.2 rail as the belt-and-braces backstop
   even after the detector improves.
+- **Scout to vet: `post/color_cal.py::_solve_gray_star` doesn't clamp its solved channel scales the way
+  `_solve_gaia` does.** (S, image-quality/robustness — PRIORITY 4) *(Builder-audit-noted 2026-07-11.)* The
+  Gaia solver clamps both channel scales to `_MIN_CAL_SCALE`..`_MAX_CAL_SCALE` before returning (shipped
+  v0.94.16, to stop a pathological field inverting a channel); the module comment frames that clamp as a
+  general defensive bound, but the **default** gray-star solver (`_solve_gray_star`, also the auto-fallback)
+  never applies it. A 2026-07-11 render/post audit couldn't construct a realistic OSC field that produces an
+  out-of-range gray-star scale (the median over ≥20 positive-flux stars stays near 1.0 even for reddened
+  populations), so this is a latent robustness gap, not a reproduced wrong result — hence filed for the Scout
+  to either (a) confirm it's genuinely unreachable and close, or (b) add the same clamp for parity if a
+  realistic trigger exists. Low urgency; a one-liner if pursued (mirror `_solve_gaia`'s clamp), testable on
+  `_solve_gray_star` in isolation.
+- **Minor: the auto-bind skip-guard ignores a stray `scale_dark_to_light` flag.** (S, autonomy/tidiness —
+  PRIORITY 2) *(Builder-audit-noted 2026-07-11.)* `pipeline.py::_auto_bind_calibration` skips only when a
+  calibration *path* is already set; it doesn't consider a leftover `scale_dark_to_light: True` in
+  `settings.default_stack_options`. If a user set that flag globally with no dark path, auto-bind can add a
+  matched-exposure `dark_path` (no scale flag, no bias) while the stray `scale_dark_to_light=True` survives —
+  asking the engine to exposure-scale a dark with no bias. Impact is negligible (needs an unusual global config
+  *and* the matched-exposure branch means the scale factor is ~1, and `_effective_dark` no-ops without a bias
+  anyway), so it's a tidiness item, not a bug. If pursued: clear a stray `scale_dark_to_light` when the
+  auto-bind branch didn't itself set a bias-scaled dark. Additive, testable in isolation.
 
 ### Features that serve real workflows
 - **⭐ OWNER-REQUESTED — "Tonight" night planner: rank the best targets to shoot
