@@ -614,9 +614,21 @@ the real webapp stack→edit path.)_
   `tests/webapp/test_batch_trigger.py` (fail before / pass after). Additive, upgrade-safe (no
   schema/config/API change; the hook is opt-in and no-ops on an older `app.state`).
 
-- **`background.subtract` editor op's internal object-mask dilation is a fixed 4 px, *not* scaled by
-  `proxy_scale` → a preview↔export sky-model mismatch (sibling to the filed coverage-leveling dilation
-  nuance).** *(Traced, Builder audit 2026-07-11; low/moderate severity, editor preview↔export parity.)*
+- ~~**`background.subtract` editor op's internal object-mask dilation is a fixed 4 px, *not* scaled by
+  `proxy_scale` → a preview↔export sky-model mismatch.**~~ — **FIXED v0.108.6** (Builder, 2026-07-11; traced +
+  regression-tested). The object-mask dilation is now a `BackgroundOptions.dilate_object_mask_px` field
+  (default 4) threaded into `_build_object_mask_for_bg`, and the editor `_subtract` op scales it via
+  `_scaled_box(ctx, 4, minimum=0)` — exactly as it already scales `box_size` and as `_final_gradient` scales its
+  `dilate_px`. On a ×4 live-preview proxy the sky fit now masks a 1-proxy-px (≈4 full-res px) halo instead of
+  4 proxy px (≈16 full-res px), matching the export's 4 full-res px. The stack/export path (`proxy_scale == 1`)
+  keeps the default 4 → byte-for-byte unchanged (verified: `subtract_background` with the default equals an
+  explicit `dilate_object_mask_px=4`). Regression `tests/test_bg_object_mask_dilation_parity.py`: the option is
+  threaded (default==4, differs from 0), `for_image_size` preserves it, and a spy confirms the editor op passes 4
+  on export / 1 on a ×4 proxy (was 4 on both before). Additive, JSON-safe new field, no schema/API/default change.
+  **The sibling `coverage_leveling.py` `dilate_object_mask_px=4` nuance is left filed below** — that pass's
+  dilation effect on the leveled sky is marginal and scenario-dependent (it can even go either way on residual
+  noise), so it isn't cleanly regression-testable as an *improvement*; per §5 I did not ship it dressed as a
+  tested fix. *(Traced, Builder audit 2026-07-11; low/moderate severity, editor preview↔export parity.)*
   `edit/ops/background.py::_subtract` carefully scales its `box_size` via `_scaled_box` (the codebase's explicit
   "pixel measures must be divided by `proxy_scale` for preview↔export parity" discipline, which
   `_final_gradient` also applies to *its* `dilate_px`), but the object-mask dilation used to keep stars/nebulae

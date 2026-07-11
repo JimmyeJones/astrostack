@@ -52,6 +52,12 @@ class BackgroundOptions:
     box_size: int = 128      # tile size for the sky-sample grid (pixels)
     filter_size: int = 3     # smoothing window across grid samples
     sigma_clip_n: float = 3.0  # sigma for the per-tile sky estimate
+    # Dilation (px) of the object mask that keeps stars/nebulosity out of the sky
+    # fit. A full-resolution pixel measure: the editor scales it by proxy_scale so
+    # the masked halo is the same physical size in the decimated live preview as
+    # in the export (preview↔export parity). The stack/export path leaves the
+    # default 4, so it is byte-for-byte unchanged.
+    dilate_object_mask_px: int = 4
     enabled: bool = True
     # 'per_channel': fit a separate bg model for R, G, B. Best for star fields
     #     and small targets where most tiles are sky.
@@ -70,6 +76,7 @@ class BackgroundOptions:
                 box_size=max_box,
                 filter_size=self.filter_size,
                 sigma_clip_n=self.sigma_clip_n,
+                dilate_object_mask_px=self.dilate_object_mask_px,
                 enabled=self.enabled,
                 mode=self.mode,
             )
@@ -267,7 +274,7 @@ def _subtract_background_cpu(rgb: np.ndarray, options: "BackgroundOptions",
     # nebula itself as "sky" and the subtraction eats it. The mask is cheap
     # (one luminance pass + dilation) and only stops the *bg estimator* from
     # seeing those pixels — the actual subtraction still applies everywhere.
-    obj_mask = _build_object_mask_for_bg(out)
+    obj_mask = _build_object_mask_for_bg(out, dilate_px=options.dilate_object_mask_px)
 
     for c in range(3):
         try:
