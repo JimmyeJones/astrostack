@@ -32,6 +32,11 @@ log = logging.getLogger(__name__)
 
 MODE_GRAY_STAR = "gray_star"
 MODE_GAIA = "gaia"
+# Starless fallback used when neither star-based solver can run (too few stars):
+# equalise the per-channel *sky-background* medians so the background is neutral
+# grey. A weaker balance than gray-star/Gaia (it neutralises the background, not
+# the stars), but strictly better than shipping the raw OSC cast unchanged.
+MODE_BACKGROUND_NEUTRAL = "background_neutral"
 
 
 @dataclass
@@ -67,7 +72,10 @@ def calibrate_color(
 
     Returns ``(calibrated_rgb, result)``. If too few stars are found or the
     Gaia query fails, falls back to gray-star automatically; if even that
-    can't be done, returns the input unchanged with ``mode_used="none"``.
+    can't be done (no usable star population), falls back to a starless
+    **background-neutral** white balance (``mode_used="background_neutral"``),
+    and only returns the input unchanged (``mode_used="none"``) when even the
+    sky background can't be measured.
     """
     if options is None:
         options = ColorCalibrationOptions(enabled=True)
@@ -77,9 +85,8 @@ def calibrate_color(
     # 1. Detect bright stars on luminance.
     detections = _detect_calibration_stars(rgb, options)
     if detections is None or len(detections) < options.min_stars:
-        return rgb, ColorCalibrationResult(
-            (1.0, 1.0, 1.0), 0, "none",
-            f"only {0 if detections is None else len(detections)} stars found",
+        return _background_neutral_fallback(
+            rgb, f"only {0 if detections is None else len(detections)} stars found",
         )
 
     # 2. Aperture photometry per channel.
@@ -89,9 +96,8 @@ def calibrate_color(
     fluxes = fluxes[keep]
     detections = detections[keep]
     if len(fluxes) < options.min_stars:
-        return rgb, ColorCalibrationResult(
-            (1.0, 1.0, 1.0), int(len(fluxes)), "none",
-            "not enough stars with positive flux in every channel",
+        return _background_neutral_fallback(
+            rgb, "not enough stars with positive flux in every channel",
         )
 
     # 3. Solve for scale factors.
@@ -260,6 +266,85 @@ def _solve_gray_star(fluxes: np.ndarray) -> tuple[tuple[float, float, float], in
     if n_clamped:
         note += " (clamped an out-of-range channel scale)"
     return (scale_r, 1.0, scale_b), int(len(fluxes)), note
+
+
+# Minimum number of sky-background pixels needed for the starless fallback to
+# trust its per-channel medians. Well below any real stack (the sky is the
+# majority of the frame); a canvas with fewer finite pixels than this is
+# degenerate enough that we'd rather do nothing than balance off noise.
+_MIN_SKY_PIXELS = 256
+
+
+def _background_neutral_fallback(
+    rgb: np.ndarray, star_reason: str,
+) -> tuple[np.ndarray, ColorCalibrationResult]:
+    """Starless white balance for when neither star-based solver can run.
+
+    Equalise the per-channel *sky-background* medians so the background is
+    neutral grey. This needs no stars, so it rescues the sparse-star OSC fields
+    (a big diffuse galaxy/nebula on a thin star field, a short session, a small
+    crop) where gray-star gives up — those would otherwise ship with their raw
+    OSC colour cast and no white balance at all. Falls through to a genuine
+    no-op (``mode_used="none"``) only when the sky itself can't be measured.
+    """
+    solved = _solve_background_neutral(rgb)
+    if solved is None:
+        return rgb, ColorCalibrationResult(
+            (1.0, 1.0, 1.0), 0, "none", star_reason,
+        )
+    scale, n_sky, note = solved
+    calibrated = _apply_scale(rgb, scale)
+    # No stars were used — this is a starless balance. Keep ``n_stars_used`` at 0
+    # (an honest count for consumers that print "from N stars") and carry the
+    # sky-pixel sample size in the note instead.
+    return calibrated, ColorCalibrationResult(
+        scale, 0, MODE_BACKGROUND_NEUTRAL,
+        f"{note} over {n_sky} sky px; {star_reason}",
+    )
+
+
+def _solve_background_neutral(
+    rgb: np.ndarray,
+) -> tuple[tuple[float, float, float], int, str] | None:
+    """Per-channel scale that drives the sky-background medians to neutral grey.
+
+    Measures the robust sky median of each channel over the pixels *at or below*
+    the luminance median (the same sky-population trick the STF stretch and the
+    editor's sky-cast readout use, so stars/target don't pull the estimate), and
+    scales R and B so their sky medians match G's — leaving G as the reference,
+    exactly like the star-based solvers. NaN-aware (uncovered mosaic pixels are
+    excluded). Returns ``None`` when the sky can't be measured.
+    """
+    luma = (0.299 * rgb[..., 0] + 0.587 * rgb[..., 1]
+            + 0.114 * rgb[..., 2]).astype(np.float32, copy=False)
+    finite = np.isfinite(luma)
+    n_finite = int(finite.sum())
+    if n_finite < _MIN_SKY_PIXELS:
+        return None
+    luma_med = float(np.median(luma[finite]))
+    sky = finite & (luma <= luma_med)
+    if int(sky.sum()) < _MIN_SKY_PIXELS:
+        return None
+    med_g = float(np.median(rgb[..., 1][sky]))
+    if not np.isfinite(med_g) or med_g <= 0:
+        return None
+    med_r = float(np.median(rgb[..., 0][sky]))
+    med_b = float(np.median(rgb[..., 2][sky]))
+    scale_r = med_g / med_r if np.isfinite(med_r) and med_r > 0 else 1.0
+    scale_b = med_g / med_b if np.isfinite(med_b) and med_b > 0 else 1.0
+    # Clamp to the same physical range as the star solvers so an extreme sky
+    # ratio can only ever rescale a channel, never blow it out or blank it.
+    n_clamped = 0
+    if not (_MIN_CAL_SCALE <= scale_r <= _MAX_CAL_SCALE):
+        scale_r = float(np.clip(scale_r, _MIN_CAL_SCALE, _MAX_CAL_SCALE))
+        n_clamped += 1
+    if not (_MIN_CAL_SCALE <= scale_b <= _MAX_CAL_SCALE):
+        scale_b = float(np.clip(scale_b, _MIN_CAL_SCALE, _MAX_CAL_SCALE))
+        n_clamped += 1
+    note = "neutralised sky background"
+    if n_clamped:
+        note += " (clamped an out-of-range channel scale)"
+    return (scale_r, 1.0, scale_b), int(sky.sum()), note
 
 
 def _solve_gaia(

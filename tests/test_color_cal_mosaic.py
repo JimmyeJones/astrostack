@@ -67,7 +67,7 @@ def test_calibrate_color_completes_on_mosaic_canvas():
         ),
     )
     elapsed = time.perf_counter() - t0
-    assert result.mode_used in ("gray_star", "none")
+    assert result.mode_used in ("gray_star", "background_neutral", "none")
     assert out.shape == img.shape
     # Uncovered region must stay NaN (calibration only scales finite pixels).
     assert np.isnan(out[0, 0, 0])
