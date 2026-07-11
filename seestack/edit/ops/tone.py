@@ -191,7 +191,15 @@ def _color_calibrate(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndar
     if mode == "gaia" and (ctx.is_proxy or ctx.wcs is None):
         mode = "gray_star"
     opts = ColorCalibrationOptions(enabled=True, mode=mode)
-    calibrated, _ = calibrate_color(rgb, ctx.wcs, opts)
+    calibrated, result = calibrate_color(rgb, ctx.wcs, opts)
+    # Record which white-balance path actually ran (star-based, background-neutral
+    # fallback, or gave up) so a caller can tell the user whether their image was
+    # really colour-calibrated. Best-effort, JSON-safe scalars only.
+    ctx.op_notes["tone.color_calibrate"] = {
+        "mode_used": result.mode_used,
+        "n_stars_used": int(result.n_stars_used),
+        "notes": result.notes,
+    }
     return calibrated
 
 

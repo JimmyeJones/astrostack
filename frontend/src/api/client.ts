@@ -318,6 +318,12 @@ export interface StackRunInfo {
   // job produced. Present only on auto-edited runs; lets History show whether the
   // hands-off Auto path landed the background neutral. Absent on older runs.
   sky_cast?: SkyCast | null;
+  // Which colour-calibration (white-balance) path the auto-edit's Auto recipe
+  // actually ran and on how many stars — the star-based gray-star/Gaia solve, the
+  // background-neutral fallback (too few stars), or a no-op. Present only on
+  // auto-edited runs; lets History tell the user whether their hands-off image was
+  // really white-balanced (and by which route). Absent on older/manual runs.
+  color_cal?: AutoColorCal | null;
   // A specific, actionable hint for *why* a stack that carries provenance came out
   // uncalibrated (e.g. "you have a master dark at a different exposure — build a
   // master bias and it'll be reused automatically"). Present only when the library
@@ -573,6 +579,15 @@ export interface SkyCast {
   neutral: boolean;
   cast: string;
   deviation: number;
+}
+
+// Which white-balance path the unattended auto-edit ran. `mode_used` is one of
+// "gray_star" | "gaia" (star-based), "background_neutral" (the too-few-stars
+// fallback), or "none" (couldn't balance at all).
+export interface AutoColorCal {
+  mode_used: string;
+  n_stars_used: number;
+  notes?: string;
 }
 
 export interface PsfSuggestion {

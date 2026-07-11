@@ -49,6 +49,13 @@ AUTO_EDIT_NOTE_PREFIX = "editor_auto_note:"
 # (color_calibrate → SCNR) actually neutralises real Seestar backgrounds. Absent
 # on manual/un-edited runs, so it only ever annotates runs the auto-edit touched.
 AUTO_EDIT_SKYCAST_PREFIX = "editor_auto_skycast:"
+# Which colour-calibration (white-balance) path the auto-edit's Auto recipe
+# actually ran and on how many stars — the star-based gray-star/Gaia solve, the
+# v0.107.9 background-neutral fallback (too few stars), or a genuine no-op. Stored
+# as JSON per run so the History Info panel can tell the user whether their
+# hands-off image was really white-balanced (and by which route). Absent on
+# manual/un-edited runs, so it only ever annotates runs the auto-edit touched.
+AUTO_EDIT_COLORCAL_PREFIX = "editor_auto_colorcal:"
 USER_PRESETS_META_KEY = "editor_user_presets"
 # A single, user-designated "house style" recipe stored library-wide (not per
 # target). Once set, the editor offers it as a one-click seed on any run that has
@@ -215,15 +222,24 @@ def build_preset_suggestion_for_run(project_dir: Path, run) -> dict:
             "reason": out["reason"], "confidence": out["confidence"]}
 
 
-def render_run_display_array(project_dir: Path, run, recipe: Recipe) -> np.ndarray:
+def render_run_display_array(
+    project_dir: Path, run, recipe: Recipe, *, return_ctx: bool = False):
     """Render a recipe on the run's live-preview proxy and return the display-space
     RGB array (values in 0..1, NaN = uncovered). Shared by the PNG preview endpoint
-    and the "Process target" auto-edit's thumbnail render."""
+    and the "Process target" auto-edit's thumbnail render.
+
+    With ``return_ctx=True`` returns ``(array, ctx)`` so a caller can read the
+    ``EditContext.op_notes`` an op recorded during the render (e.g. which
+    colour-calibration path ran); the default returns just the array so existing
+    callers are unchanged."""
     rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
     ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None,
                       coverage=_proxy_coverage(run.fits_path, scale),
                       already_display=_run_display_space(run))
-    return apply_recipe(rgb, recipe, ctx, for_preview=True)
+    out = apply_recipe(rgb, recipe, ctx, for_preview=True)
+    if return_ctx:
+        return out, ctx
+    return out
 
 
 def _render_png(project_dir: Path, run, recipe: Recipe) -> bytes:

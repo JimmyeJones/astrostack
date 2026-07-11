@@ -65,6 +65,11 @@ class EditContext:
     already_display: bool = False     # input is a tone-mapped display-space image
     #   (an editor export re-opened for editing): suppress the pipeline's default
     #   asinh fallback so an empty recipe doesn't double-stretch it.
+    op_notes: dict[str, Any] = field(default_factory=dict)
+    #   A best-effort channel for an op to record a small, JSON-safe outcome the
+    #   caller may want to surface (e.g. which colour-calibration path actually ran
+    #   and on how many stars). Keyed by op id. Ops write it; nothing reads it in the
+    #   pipeline itself, so leaving it unread is harmless.
 
     def scaled_px(self, px: float) -> float:
         """Convert a *full-resolution* pixel measure to this render's pixel scale.

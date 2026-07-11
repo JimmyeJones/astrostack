@@ -153,6 +153,16 @@ def test_process_target_chains_auto_edit(client, solved_library):
         "neutral", "red", "green", "blue", "cyan", "magenta", "yellow"}
     assert sc["deviation"] >= 0.0
 
+    # It also records which colour-calibration (white-balance) path Auto actually
+    # ran and on how many stars — so the walk-away user can tell whether their
+    # image was really white-balanced (star-based, the background-neutral fallback,
+    # or a no-op). Present only on this auto-edited run.
+    cc = info.get("color_cal")
+    assert isinstance(cc, dict), info
+    assert cc["mode_used"] in {"gray_star", "gaia", "background_neutral", "none"}
+    assert isinstance(cc["n_stars_used"], int)
+    assert cc["n_stars_used"] >= 0
+
     # ...and the editor's auto-note endpoint serves that same note, so opening the
     # run in the editor (where the Process deep-link lands the user) explains the
     # recipe they didn't build — the same trust layer, on the surface they see.
@@ -171,9 +181,10 @@ def test_manual_stack_has_no_auto_edit_note(client, solved_library):
     rid = client.get("/api/targets/M_42/stack-runs").json()[0]["id"]
     info = client.get(f"/api/targets/M_42/stack-runs/{rid}/info").json()
     assert info.get("auto_edit") is None
-    # ...and no sky-cast read-out either — that's stamped only by the unattended
-    # auto-edit, so a manual stack carries neither annotation.
+    # ...and no sky-cast or colour-cal read-out either — those are stamped only by
+    # the unattended auto-edit, so a manual stack carries none of the annotations.
     assert info.get("sky_cast") is None
+    assert info.get("color_cal") is None
 
 
 def _run_scan(client):
