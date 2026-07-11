@@ -80,6 +80,26 @@ def test_sigma_clip_mean_rejects_outlier_when_mad_is_zero():
     assert float(_sigma_clip_mean(flat, 3.0)[0, 0]) == pytest.approx(300.0)
 
 
+def test_sigma_clip_mean_iterates_to_convergence():
+    # A moderate outlier (+6) survives the *first* clip round because a stronger
+    # outlier (+10) inflates the first-round MAD enough to keep it under tol; only
+    # after the strong outlier is removed does the recomputed (tighter) scale
+    # reject the moderate one. A single round leaves the +6 in and pulls the mean
+    # above the true core (100.86); iterating recovers the exact core mean (100.0).
+    from seestack.calibrate.masters import _sigma_clip_mean
+
+    stack = np.array(
+        [98, 99, 100, 100, 101, 102, 106, 110], dtype=np.float32
+    ).reshape(8, 1, 1)
+    out = float(_sigma_clip_mean(stack, 3.0)[0, 0])
+    assert out == pytest.approx(100.0)  # was ~100.86 with a single clip round
+
+    # Guardrail: iterating never empties a pixel — a pathological all-different
+    # column still returns the (finite) full-stack median fallback, not NaN.
+    weird = np.array([1, 2, 3, 4], dtype=np.float32).reshape(4, 1, 1)
+    assert np.isfinite(_sigma_clip_mean(weird, 3.0)[0, 0])
+
+
 def test_build_master_sigma_mean_rejects_cosmic_ray_on_quiet_pixel(tmp_path):
     # End-to-end: a bias/dark set where every frame reads the same quiet level
     # except one frame with a cosmic-ray spike on one pixel (so that pixel's MAD
