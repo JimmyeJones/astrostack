@@ -112,9 +112,18 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
             enabled=bool(o.get("enabled", True)),
             uid=str(o.get("uid") or uuid.uuid4().hex[:8]),
         ))
+    # ``version`` must be coercible to int; a malformed client body (or hand-built
+    # recipe) can send a string/list/null here, which ``int()`` would raise on —
+    # the same unhandled 500 in ``put_recipe`` the ``params`` coercion above guards
+    # against (``put_recipe`` calls this directly on an unvalidated ``dict`` body).
+    # Fall back to the current version rather than crash the recipe save/export.
+    try:
+        version = int(data.get("version", RECIPE_VERSION))
+    except (TypeError, ValueError):
+        version = RECIPE_VERSION
     return Recipe(
         ops=validate_ops(ops),
-        version=int(data.get("version", RECIPE_VERSION)),
+        version=version,
         base_run_id=data.get("base_run_id"),
         updated_utc=data.get("updated_utc"),
     )

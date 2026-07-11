@@ -146,6 +146,69 @@ hardening gap noted, not currently reachable: `_persist`'s `json.dumps(job.resul
 would raise `TypeError` past the handler and kill the single worker; all current job-result shapes are plain
 primitives, so no live bug — worth broadening the guard if a run is already in `jobs.py`)._
 
+_Scout audit log 2026-07-11 (baseline green: 1073 passed / 2 skipped): dogfooded the editor's out-of-box
+`stack → auto_recipe → apply_recipe` result (healthy — sky lifted to ~0.20, fully finite, no NaN leakage) and
+ran three parallel adversarial audits of the **editor** paths (PRIORITY 1) prior notes flagged as
+under-covered: (1) `webapp/routers/editor.py` + `webapp/schemas.py`/`deps.py`/`edit/proxy.py`/`coverage_trim.py`
+(preview↔export op parity, coverage-stride parity, NaN semantics, degenerate-input error paths), (2) the
+recipe/auto-edit engine (`edit/recipe.py`, `presets.py`, `pipeline.py`, `registry.py`, `curve.py`,
+`histogram.py`, `levels.py`), and (3) the editor support/render code (`edit/starmask.py`, `render/thumbnail.py`,
+`render/colormap.py`). **Two verified defects found; one fixed+shipped this run, one filed below.** The router
+itself **traced clean** — coverage stride is `round(scale)==step` (no int/float drift), preview (`apply_recipe`)
+and export (`_render_recipe_fullres`) apply ops identically incl. the no-stretch asinh fallback, every
+`nan_to_num`/`→0` is display-PNG-only (measurement paths stay NaN-aware), and all-NaN/1px/mono proxies bail
+cleanly rather than 500. Two **latent** router nuances noted (not live bugs, not filed): a legacy-run
+`is_mosaic` verdict computed on two different coverage stridings (`coverage_is_mosaic` is stride-robust, so
+they usually agree — cosmetic), and `stretch_suggestion` omitting `already_display` from its ctx (harmless only
+because it also passes `auto_stretch=False`). Next rotation: `stack/mosaic.py` + `stack/drizzle_path.py`
+canvas/rejection edges (last deep-traced 2026-07-10), and the frontend editor route UX._
+
+- **The interactive editor's default asinh stretch (and the manual "Asinh" stretch mode) blacks out the whole
+  picture when a single extreme outlier pixel survives into the stack — its `[min,max]` range normalization is
+  not outlier-robust, unlike its sibling `autostretch`.** *(Traced + reproduced-on-synthetic, Scout audit
+  2026-07-11; severity wrong-result / broken-UX on a PRIORITY-1 default path; confidence: reproduced.)*
+  `render/thumbnail.py::asinh_stretch` normalizes over the full covered range — `lo = np.nanmin(img)`,
+  `hi = np.nanmax(img)`, `img = (img-lo)/(hi-lo)` (thumbnail.py:208-212) — and then applies a **fixed** asinh
+  gain set only by the `stretch` slider (`a = 0.004**s`; thumbnail.py:216-218). The black point is anchored to
+  the sky median, but the *gain* is not, so a single pixel far above the star cores (a surviving warm/hot pixel,
+  bloom, or bright column that sigma-clip didn't reject) inflates `hi`, divides the whole image down, and — with
+  no adaptive gain to compensate — collapses faint nebulosity to near-black. Its sibling `autostretch` (STF)
+  survives the identical input because its midtones parameter `m = _midtones_for(...)` re-anchors the sky median
+  to `target_bg` regardless of the max (the same robustness the 2026-07-11 audit note verified for autostretch —
+  but that note did **not** cover asinh_stretch). **Reproduced:** on a synthetic sky+nebula+stars frame, one hot
+  pixel (~100× the star cores) drops the rendered nebula from **0.144 → 0.0015** under asinh (blacked out) while
+  autostretch only goes 0.50 → 0.31 (still clearly visible). **Reachable on a PRIORITY-1 default path:** the
+  no-stretch fallback in `edit/pipeline.py:86` and `webapp/pipeline.py:850` renders a fresh stack in the editor
+  with a bare `asinh_stretch(out)` *before any stretch op is added* (what you see the instant you open the
+  editor), plus the manual `tone.stretch` mode `asinh` (`edit/ops/tone.py:25`) and `render_stack_png`
+  (`thumbnail.py:165`). **This is the exact class the codebase already fixed elsewhere** — `edit/ops/detail.py`'s
+  denoise/deconvolve deliberately scale by the `0.5–99.5th` percentile with the comment *"a single hot star sets
+  max(), crushing the sky noise… don't clip the highlights"*. Proposed fix: normalize `hi` (and optionally `lo`)
+  with a robust high percentile (e.g. `np.nanpercentile(img, 99.5)`) instead of `nanmax`, keeping the final
+  `np.clip(...,0,1)` so bright stars still saturate to white — mirroring `_denoise`/`_deconvolve`. **NOT a
+  blind no-op** (it slightly brightens *every* asinh render, since `hi` drops below the brightest star), so the
+  Builder must add a preview↔export parity check and a before/after regression on a normal stack, not just the
+  outlier case — but it fixes a genuine "my stack looks black/broken" moment on the editor's default view.
+  (S–M code, editor/render — PRIORITY 1.) Found by the editor render/support adversarial audit.
+
+- ~~**`recipe_from_dict` raised an unhandled `int()`/`TypeError` on a malformed `version` in the PUT body —
+  a 500 from `PUT …/editor/recipe` instead of a validated recipe (the same class the `params` coercion already
+  guards).**~~ — **FIXED v0.108.4** (Scout audit 2026-07-11; traced + reproduced + regression-tested).
+  `edit/recipe.py::recipe_from_dict` coerced `version=int(data.get("version", RECIPE_VERSION))` with no guard,
+  while `put_recipe` (`webapp/routers/editor.py:917-920`) calls it **directly on the unvalidated `dict` body**
+  (`body: dict`, no pydantic schema, no try/except). A body with a non-int `version` — `"x"` (`ValueError`),
+  `null` (`TypeError`, since the key is present so the `.get` default doesn't fire), or `[1]`/`{…}`
+  (`TypeError`) — escaped straight to an HTTP 500. This directly contradicts the module's own documented
+  contract: the `params` coercion two lines up (recipe.py:107-108) exists *specifically* "so a malformed body…
+  isn't an unhandled 500 in `put_recipe`", and every other `recipe_from_dict` caller is wrapped
+  (`_decode_recipe_query`, `get_default_recipe`, `recipe_from_json`) — `version` was the one unguarded field on
+  the one unguarded caller. (`base_run_id` looked similar but is immediately overwritten by `put_recipe`, and
+  JSON can't carry a non-serialisable value anyway, so it's a non-issue.) Fixed by coercing `version` in a
+  `try/except (TypeError, ValueError)` that falls back to `RECIPE_VERSION`, mirroring the params guard exactly.
+  Regression test `tests/test_edit_engine.py::test_recipe_from_dict_tolerates_non_int_version` (parametrised over
+  `"x"`, `None`, `[1]`, `{…}` — all fail before / pass after). One-file, additive, no schema/config/API change.
+  Found by the recipe/auto-edit adversarial audit.
+
 - ~~**Cancelling an unattended auto-stack permanently strands that target's auto-stack — the crash-loop
   marker written before the stack is never cleared on a user cancel (the survivable non-crash outcome that
   never raises), so the target is skipped on every future scan.**~~ — **FIXED v0.108.3** (Builder, 2026-07-11;
@@ -1174,6 +1237,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   gentle denoise/sharpen). Improve the auto recipe so "Auto" is a great one-click
   start. (Gentle SCNR green-cast removal added to the auto recipe in v0.56.6 —
   more of these incremental tweaks welcome.) (M, editor)
+- **Make the editor's no-recipe fallback view use STF autostretch, not the fixed asinh default.** *(Idea,
+  Scout 2026-07-11 — PRIORITY 1 editor default / better first impression.)* When a stack is opened in the editor
+  before any stretch op is added, `edit/pipeline.py`/`webapp/pipeline.py` render it with a bare
+  `asinh_stretch(out)` at a **fixed** `stretch=0.5, black=0.35` — a middling, one-size-fits-all look that
+  ignores the actual sky level (and, per the filed bug, is fragile to a single hot pixel). The one-click Auto
+  already uses STF `autostretch`, which anchors each channel's sky median to a target grey and adapts to the
+  data — a markedly better default view for essentially every OSC stack. Switching the *fallback* to STF gives
+  a beginner a good-looking first-open image without seeding/persisting any recipe (still fully opt-in to edit),
+  which is the value the blocked "seed Auto on first open" item wanted *without* the on-by-default guardrail
+  problem — it's a render default, not a saved-state change. **Caveat for the Builder:** the same fallback is
+  used on export when the user never adds a stretch (`webapp/pipeline.py:850`), so this changes those exports
+  too — verify preview↔export parity and add a before/after regression. Fold in / supersedes the asinh
+  robustness bug if taken together. (S–M, editor — PRIORITY 1.)
 - **Seed the editor with the Auto recipe on first open** — moved to **Needs owner
   sign-off** (2026-07-04): it's high-value PRIORITY-1 work, but its value *requires*
   it to be **on by default** (an off-by-default first-open seed helps no beginner),
@@ -2409,6 +2485,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+- **Tidiness: `stretch_suggestion` omits `already_display` from its `EditContext`.** *(Traced, Scout
+  2026-07-11 — latent, not a live bug.)* Every sibling suggestion endpoint threads `already_display` into the
+  ctx it builds, but `webapp/routers/editor.py::stretch_suggestion` (~L809) doesn't. It's harmless *today* only
+  because that call also passes `auto_stretch=False`, and `already_display` is read solely by the auto-stretch
+  fallback (`if not stretched and auto_stretch and not ctx.already_display`, `edit/pipeline.py:81`). But if that
+  call ever flips to `auto_stretch=True`, a re-edited display-space run would double-stretch in the stretch
+  measurement only — a silent, hard-to-spot divergence. One-line consistency fix (pass `already_display` like
+  the siblings) closes the trap. (S, tidiness/safety.)
 - ~~**Low-priority: manual re-stacks (not just reprocess) still overwrite the target's
   `master` output.**~~ — **FIXED v0.81.8** (see Shipped). Took the "newest run stays
   `master`, older run renamed+rerowed" direction the note preferred: `write_stack_outputs`
@@ -2711,6 +2795,12 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.108.4** — Editor robustness (PRIORITY 1; Scout 2026-07-11): `recipe_from_dict` no longer 500s on a
+  malformed `version` in the `PUT …/editor/recipe` body. `edit/recipe.py` coerced `version=int(...)` with no
+  guard while `put_recipe` calls it directly on the unvalidated `dict` body, so `{"version":"x"|null|[1]}` raised
+  out to an HTTP 500 — the exact class the sibling `params` coercion already documents guarding against. Now
+  wrapped in `try/except`, falling back to `RECIPE_VERSION`. Regression test
+  `tests/test_edit_engine.py::test_recipe_from_dict_tolerates_non_int_version`. One-file, additive.
 - **v0.108.1** — Image-quality / trust (PRIORITY 4; Builder 2026-07-11): surface the colour-cal *clamp* warning.
   `autoColorCalCaption` (shared by History Info and the interactive editor) now appends a dimmed "(capped an
   extreme channel)" when the stamped `color_cal.notes` flags a clamped per-channel scale, so the user learns Auto

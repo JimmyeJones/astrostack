@@ -319,6 +319,17 @@ def test_recipe_validation_tolerates_non_mapping_params(bad_params):
     assert rec.ops[0].params == get_op("tone.curves").defaults()
 
 
+@pytest.mark.parametrize("bad_version", ["x", None, [1], {"a": 1}])
+def test_recipe_from_dict_tolerates_non_int_version(bad_version):
+    # ``version`` is read straight off the unvalidated PUT body in put_recipe; a
+    # non-int value (string / null / list) must not raise ``int()`` out to an
+    # unhandled 500 — fall back to the current version, mirroring the params guard.
+    from seestack.edit.recipe import RECIPE_VERSION
+
+    rec = recipe_from_dict({"version": bad_version, "ops": []})
+    assert rec.version == RECIPE_VERSION
+
+
 def test_every_op_renders_in_preview():
     # A live preview must show EVERY enabled action — including the heavy
     # deconvolution op, which used to be skipped. What you see = what you export.
