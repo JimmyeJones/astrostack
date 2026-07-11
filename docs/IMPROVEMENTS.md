@@ -2957,6 +2957,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.109.8** — Friendliness / display bug (PRIORITY 3; Builder 2026-07-11; found by the frontend non-editor
+  route audit): three time formatters rounded their remainder into the next unit's threshold and then printed it
+  in the smaller unit — the Library card's `expo(7190)` (1h 59.8m) read **"1h 60m"**, `formatIntegration(3599)`
+  read **"60 min"** (should be ~1 h) and `(59.9)` **"60 s"**, and Tonight's `formatMinutes(89.9)` read
+  **"90 min"** (should be 1.5 h). Fixed each to round first / re-check the rounded figure and roll into the next
+  unit (`expo` rounds to whole minutes then splits h/m; `formatIntegration`/`formatMinutes` promote a value that
+  rounds up to a full unit). Genuine sub-boundary values are unchanged (`30 s`, `50 min`, `89 min`). Frontend
+  display only, no backend/schema change. `expo` is now exported for unit testing. Tests: new `format.test.ts`,
+  an `expo` block in `Library.test.tsx`, and a `formatMinutes` boundary case in `tonight.test.ts` (each fails
+  before / passes after).
 - **v0.109.7** — Editor bug (PRIORITY 1; Builder 2026-07-11; found by the same frontend editor-logic audit —
   the same enumeration-oversight class as the v0.109.4 look-compare fix): while previewing a mosaic **trim
   crop** (`trimPreview` active, with the coverage heatmap auto-enabled + Apply/Cancel controls), the overlay/

@@ -147,6 +147,10 @@ describe("formatMinutes", () => {
     expect(formatMinutes(0)).toBe("—");
     expect(formatMinutes(-5)).toBe("—");
   });
+  it("promotes a value that rounds up past the hours threshold instead of '90 min'", () => {
+    expect(formatMinutes(89.9)).toBe("1.5 h");
+    expect(formatMinutes(89)).toBe("89 min");  // genuinely below the threshold
+  });
 });
 
 describe("compassPoint", () => {
