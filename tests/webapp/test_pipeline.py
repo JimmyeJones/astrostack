@@ -8,6 +8,46 @@ optional ``reproject`` dependency isn't present.
 from __future__ import annotations
 
 import time
+from pathlib import Path
+
+
+def _build_mixed_pointing_target(data_root: Path, *, n_each: int = 6) -> None:
+    """One incoming folder → one target whose solved frames form TWO well-separated
+    pointings (a batch that looks like two objects dropped in one folder)."""
+    from synth import make_synth_wcs_text, write_seestar_fits
+
+    from seestack.io.library import Library
+    from seestack.io.scanner import scan_and_organize
+
+    incoming = data_root / "incoming"
+    d = incoming / "M_MIXED"
+    d.mkdir(parents=True, exist_ok=True)
+    for i in range(2 * n_each):
+        write_seestar_fits(
+            d / f"frame_{i:03d}.fit", n_stars=30, seed=200 + i,
+            add_wcs=True, ra_center_deg=83.6, dec_center_deg=-5.0,
+        )
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        scan_and_organize(lib, incoming, copy_to_cache=False)
+        proj = lib.open_target("M_MIXED")
+        try:
+            frames = list(proj.iter_frames())
+            for idx, f in enumerate(frames):
+                # First half → pointing A (RA 83.6), second half → pointing B
+                # (RA 200) — ~110° apart, clearly two targets, wrap-safe geometry.
+                ra = 83.6 if idx < len(frames) // 2 else 200.0
+                proj.update_frame(
+                    f.id, wcs_json=make_synth_wcs_text(ra_center_deg=ra),
+                    ra_center_deg=ra, dec_center_deg=-5.0,
+                    width_px=480, height_px=320, bayer_pattern="RGGB",
+                )
+        finally:
+            proj.close()
+        lib.refresh_target_stats("M_MIXED")
+    finally:
+        lib.close()
 
 
 def _wait_job(client, job_id, timeout=60):
@@ -228,6 +268,75 @@ def test_auto_edit_on_autostack_finishes_the_picture(client, solved_library):
     # The Auto recipe always includes a tone stretch — a genuine finished-picture
     # recipe, not the empty recipe a plain auto-stack leaves.
     assert any(o["id"] == "tone.stretch" for o in saved_ops)
+
+
+def test_mixed_pointing_guard_skips_a_bimodal_process(client, data_root):
+    # A batch that looks like two different targets in one folder: with the
+    # (opt-in) mixed-pointing guard ON, the one-click Process skips the stack with
+    # a plain-language reason instead of burning the run combining one pointing and
+    # silently dropping the rest. With the guard OFF (the default), the same batch
+    # still stacks exactly as before — the guardrail on upgrade behaviour.
+    _build_mixed_pointing_target(data_root)
+
+    # Guard on → skip with a reason, no stack run produced.
+    client.put("/api/settings", json={"mixed_pointing_guard": True})
+    r = client.post("/api/targets/M_MIXED/process")
+    assert r.status_code == 200
+    body = _wait_job(client, r.json()["job_id"], timeout=120)
+    assert body["state"] == "done", body
+    result = body["result"]
+    assert result["stacked"] is False
+    assert result["stack_skipped_reason"] == "mixed_pointings"
+    assert result["mixed_pointings"]["pointings"] == 2
+    assert result["mixed_pointings"]["majority"] == 6
+    assert "2 different targets" in result["mixed_pointings_message"]
+    assert len(client.get("/api/targets/M_MIXED/stack-runs").json()) == 0
+
+    # Guard off (default) → the bimodal batch stacks as before (upgrade-safe: the
+    # new setting never changes behaviour unless the owner opts in).
+    client.put("/api/settings", json={"mixed_pointing_guard": False})
+    r = client.post("/api/targets/M_MIXED/process")
+    assert r.status_code == 200
+    body = _wait_job(client, r.json()["job_id"], timeout=120)
+    assert body["state"] == "done", body
+    assert body["result"]["stacked"] is True
+    assert len(client.get("/api/targets/M_MIXED/stack-runs").json()) == 1
+
+
+def test_mixed_pointing_guard_skips_watcher_auto_stack(client, data_root):
+    # The same guard protects the fully-unattended watcher auto-stack: a bimodal
+    # target is reported as mixed-skipped (not stacked), and — crucially — the
+    # attempt marker is NOT written, so once the user rejects the odd-target
+    # frames a later scan re-checks and stacks rather than the target being
+    # stranded.
+    _build_mixed_pointing_target(data_root)
+    client.put("/api/settings",
+               json={"auto_stack": True, "mixed_pointing_guard": True})
+    body = _run_scan(client)
+    result = body["result"]
+    assert "M_MIXED" in result.get("auto_stack_mixed_skipped", [])
+    assert "M_MIXED" not in result.get("auto_stacked", [])
+    assert len(client.get("/api/targets/M_MIXED/stack-runs").json()) == 0
+    # Turning the guard back off, a re-scan now auto-stacks the (bimodal) target —
+    # proof the skip didn't strand it via the crash-loop attempt marker.
+    client.put("/api/settings",
+               json={"auto_stack": True, "mixed_pointing_guard": False})
+    body = _run_scan(client)
+    assert "M_MIXED" in body["result"].get("auto_stacked", [])
+    assert len(client.get("/api/targets/M_MIXED/stack-runs").json()) == 1
+
+
+def test_mixed_pointing_guard_off_by_default_single_pointing_stacks(
+        client, solved_library):
+    # Even with the guard ON, a normal single-pointing target stacks (the guard
+    # only fires on a clearly-bimodal batch) — so turning it on doesn't block
+    # ordinary walk-away stacks.
+    client.put("/api/settings", json={"mixed_pointing_guard": True})
+    r = client.post("/api/targets/M_42/process")
+    assert r.status_code == 200
+    body = _wait_job(client, r.json()["job_id"], timeout=120)
+    assert body["state"] == "done", body
+    assert body["result"]["stacked"] is True
 
 
 def test_process_target_skips_stack_when_nothing_solved(client, built_library):

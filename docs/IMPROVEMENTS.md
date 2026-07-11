@@ -1785,10 +1785,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   (v0.101.0) and the Stack form itself (v0.102.0, right next to the Stack button) show an orange "This batch
   looks like N different targets" callout — with the majority/minority counts + their separation + guidance
   to reject the odd frames — *before* the user clicks Process/Stack. Frontend-only, read-only, additive (no
-  backend/schema/default change). **Remaining (higher-bar) slice:** the *unattended*
-  action — in the Process / watcher auto-stack chain, refuse-with-guidance or auto-stack just the majority
-  pointing (flagging the rest) instead of silently combining half the data; that touches the hot path and the
-  walk-away default, so it wants its own careful build. Original write-up kept below for provenance.
+  backend/schema/default change). **Unattended slice SHIPPED v0.109.16** (Builder 2026-07-11; see Shipped): a new
+  off-by-default `mixed_pointing_guard` setting makes the Process-target and watcher auto-stack chains cluster
+  the pointings (Python mirror `seestack/stack/pointings.py::detect_mixed_pointings`) and **refuse-with-guidance**
+  — skip the walk-away stack with a plain-language reason — on a clearly-bimodal batch, instead of burning the run
+  combining one pointing. Chose refuse-with-guidance over auto-stacking just the majority to avoid touching the
+  engine hot path (`run_stack` reads frames straight from the DB); the "auto-stack just the majority pointing"
+  variant would need an engine frame-filter param and is left as a possible future refinement if refuse-only
+  proves too blunt on real data. Off by default (§9). Original write-up kept below for provenance.
   _(~~Builder follow-up idea, spotted auditing the shipped v0.101–0.102 detection 2026-07-09: the warning
   currently only **tells** the user to "open the Frames table and reject the odd frames"…~~ —
   **shipped v0.103.0** (see Shipped). `detectMixedPointings` now also returns `minorityIds` — the ids of
@@ -3058,6 +3062,25 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.109.16** — Autonomy (PRIORITY 2; Builder 2026-07-11): the **unattended slice** of the pre-flight
+  "this batch looks like two targets" guard. A new off-by-default `mixed_pointing_guard` setting makes the two
+  *walk-away* stack chains — the watcher **auto-stack** and one-click **Process target** — cluster a target's
+  accepted+solved pointings *before* stacking (new pure engine helper `seestack/stack/pointings.py::
+  detect_mixed_pointings`, the Python mirror of the shipped frontend `detectMixedPointings`: single-linkage
+  union-find on unit vectors at a 3° link distance, so a contiguous mosaic stays one cluster but two
+  well-separated targets split, wrap/pole-safe). When the batch is clearly bimodal (≥2 substantial pointings),
+  the chain **skips the stack with a plain-language reason** ("This batch looks like 2 different targets … open
+  the Frames table and reject the odd-target frames, then stack") instead of silently combining one pointing and
+  dropping the rest of the night as align failures. Process returns `stack_skipped_reason="mixed_pointings"` (+ a
+  `mixed_pointings` count blob and message); auto-stack reports `auto_stack_mixed_skipped` and — crucially —
+  does **not** write the crash-loop attempt marker, so once the user rejects the odd frames a later scan
+  re-checks and stacks rather than stranding the target. Off by default (§9: a bimodal batch stacks exactly as
+  before until the owner opts in); the interactive Stack form is untouched (it already warns + offers a one-click
+  "reject the odd-target frames" fix). Settings toggle added. Tests: `tests/test_pointings.py` (8 geometry cases
+  — single/mosaic/bimodal/stray/wrap-safe/too-few), `tests/webapp/test_pipeline.py` (Process skips a bimodal
+  batch with the reason and stacks it with the guard off; a single-pointing target still stacks with the guard
+  on; watcher auto-stack mixed-skips without stranding), and a config-upgrade default assertion. Closes the
+  "Remaining (higher-bar) slice" of the Pre-flight two-targets item under Autonomy. (S–M, autonomy — PRIORITY 2.)
 - **v0.109.15** — Editor (PRIORITY 1): the **Compare** toggle now disables itself while previewing a trim crop,
   like every sibling overlay button (Builder 2026-07-11; found + reproduced by a frontend editor-UX audit). The
   v0.109.7 commit set out to "disable overlay/compare toggles while previewing a trim crop" and its message
