@@ -101,13 +101,103 @@ reference,output}.py`), (2) the autonomous ingest→auto-stack→auto-edit path 
 `edit/recipe.py`, `edit/pipeline.py`, `webapp/calibration.py`), and (3) the render/post/color paths
 (`render/{thumbnail,colormap}.py`, `post/{color_cal,target_id}.py`, `bg/{final_gradient,coverage_leveling}.py`).
 The render/post path **traced clean** (stretch math, NaN=coverage, channel handling all held). Three genuine
-robustness/correctness defects were found, fixed, and shipped this run — **v0.107.2** (κ-σ pass-1 Welford
-accumulator not freed before pass 2 → defeats the OOM guard on large mosaics), **v0.107.3** (a recoverable
+robustness/correctness defects were found, fixed, and shipped this run — **v0.107.3** (κ-σ pass-1 Welford
+accumulator not freed before pass 2 → defeats the OOM guard on large mosaics), **v0.107.4** (a recoverable
 auto-stack failure permanently stranded a target's auto-stack — the marker written for the process-*crash*
-case was never cleared after a survivable exception), and **v0.107.4** (auto-bind flat/bias didn't iterate
-candidates when the top pick fails a gate, unlike the v0.107.1 dark path). Two lower-value observations filed to
-Ideas for the Scout (gray-star color-cal clamp parity; stray `scale_dark_to_light` skip-guard) rather than
-blind-fixed, since neither reproduces a wrong result today._
+case was never cleared after a survivable exception), and **v0.107.5** (auto-bind flat/bias didn't iterate
+candidates when the top pick fails a gate, unlike the v0.107.1 dark path). (Versions renumbered +1 at merge
+time: a concurrent Scout took v0.107.2.) One lower-value observation filed to Ideas (stray
+`scale_dark_to_light` skip-guard); the other observation I noted — the gray-star color-cal clamp parity — was
+**independently shipped by the concurrent Scout as v0.107.2**, so that filed Idea is dropped as done._
+
+_Scout audit log 2026-07-11 (baseline green: 1053 passed / 2 skipped): with the stacking-engine core
+re-traced clean across the last several runs, rotated the adversarial audit to **under-covered
+subsystems** — the colour/post path (`post/color_cal.py`, `stack/channel_combine.py`, `post/skymap.py`,
+`render/colormap.py`), the ingest/loader path (`io/scanner.py`, `io/ingest.py`, `io/merge.py`,
+`io/fits_loader.py`), and the non-editor webapp routers (`routers/stack.py`, `routers/frames.py`,
+`webapp/calibration.py`, `webapp/pipeline.py`) — plus an independent re-trace of `stack/photometric.py`,
+`stack/weighting.py`, `stack/reference.py`, `stack/output.py`, `render/thumbnail.py`, and the
+`io/project.py` schema-9 migration + `io/library.py` target-matching (all clean: additive migration,
+wrap-safe haversine/circular-median, NaN-aware STF/asinh parity, guarded weighting/photometric divisors).
+**One verified image-correctness bug found and shipped this run** (the gray-star colour-cal clamp
+asymmetry, below — v0.107.2, one-file/obviously-safe under the §5 bar). **Three more verified bugs filed**
+(ingest path-canonicalization dedup gap; `load_seestar_raw` IndexError on a data-less primary HDU;
+`delete_master` registry write race) — none blind-fixable without care, so left for the Builder. Also
+confirmed clean: `channel_combine`/`skymap`/`colormap` NaN & RA-flip handling, the calibration
+master-path server-side-resolution invariant (`trigger_stack` pops raw client `*_path` keys before
+resolving `*_master_id`s), and `merge.py` cross-source dedup. Next rotation: `bg/*` gradient/coverage
+paths and `edit/pipeline.py`/`edit/recipe.py` op-ordering, which this run didn't re-cover._
+
+- ~~**Gray-star colour calibration applies an *unclamped* per-channel scale — an unusual detected-star
+  population can blow out or crush a channel of the final image, where the Gaia path would have clamped
+  it.**~~ — **FIXED v0.107.2** (Scout audit 2026-07-11; traced + reproduced-on-synthetic + regression-tested).
+  `post/color_cal.py::_solve_gray_star` computes `scale_r = med_g/med_r`, `scale_b = med_g/med_b` (gray-world
+  white balance) and returned them **raw**, and `calibrate_color` fed them straight into `_apply_scale`
+  (`color_cal.py:130-131`) — while the sibling `_solve_gaia` clamps its solved scales to
+  `[_MIN_CAL_SCALE=0.05, _MAX_CAL_SCALE=20.0]` "so colour calibration can only ever rescale a channel, never
+  flip or extinguish it." The gray-star path skipped that identical guard — the classic
+  guarded-in-one-sibling-not-the-other pattern this codebase keeps finding (cf. the v0.103.21 sky-weighting
+  denominator and the v0.103.22 zero-MAD sigma_mean). **gray_star is the default colour-cal mode and is
+  applied by the one-click Auto recipe** (`edit/presets.py:367`, `tone.color_calibrate` mode `gray_star`) on
+  every auto-edit, plus the galaxy/nebula presets and the optional stacker colour-cal — so a pathological but
+  possible detected-star flux ratio (a strongly colour-biased field, or a residual cast surviving into the
+  ratios) amplifies a channel unbounded. Reproduced: a synthetic star population with `med_r ≈ 1`,
+  `med_g ≈ med_b ≈ 55` yields `scale_r ≈ 49`, multiplying R by 49× (vs the 20× the Gaia path caps at). Fixed
+  by clamping both scales to the same `[_MIN_CAL_SCALE, _MAX_CAL_SCALE]` range in `_solve_gray_star` and
+  flagging it in the note ("clamped an out-of-range channel scale"), mirroring `_solve_gaia` exactly.
+  Strictly safe / a no-op on any realistic OSC field (gray-world scales sit near 1.0, as the author's own
+  Gaia-clamp comment already asserts) — it can only ever *prevent* an over-amplified/blanked channel, never
+  change a normal balance. Regression test
+  `tests/test_color_cal.py::test_solve_gray_star_clamps_an_out_of_range_channel_scale` (raw ≈55 clamped to 20,
+  note flags it, and a near-neutral field is untouched — fails before / passes after). Additive, no
+  schema/config/API change; found by the colour/post adversarial audit rotation.
+
+- **Ingest dedup keys on the *raw* source-path string, never canonicalized — the same physical frame reached
+  via a different path spelling is ingested twice → double-weighted in the stack.** *(Traced, Scout audit
+  2026-07-11; med confidence — the wrong-result outcome is conditional on non-identical path spelling. NOT a
+  blind Builder fix — see the upgrade trap below.)* `io/ingest.py:98-103` builds the dedup map as
+  `{f.source_path: f}` and looks up `str(Path(src))` verbatim; `io/scanner.py:112` does `root = Path(root)`
+  with no `.resolve()`. The module contract says frames are "matched by their **absolute** source path"
+  (`scanner.py:108-110`, `ingest.py:92`), but nothing resolves them — so any change in spelling defeats dedup
+  on re-scan: a NAS share remounted at a different mountpoint (`/mnt/nas` → `/mnt/nas2` — exactly the
+  NAS-copy workflow this code targets), a symlinked subdirectory that makes the recursive `find_fits_files`
+  glob yield two paths to one file within a single scan, or scanning a relative root then re-scanning from a
+  different cwd. The frame's row misses `existing.get(...)`, `add_frame` runs again, and the stacker weights
+  that light twice. In the normal webapp path the config dirs are absolute so this is dormant; the remount /
+  symlink cases are the real triggers. **Why NOT a blind fix (upgrade trap):** existing libraries already
+  store non-resolved `source_path` values, so naively switching dedup to `Path.resolve()` would make *every*
+  already-ingested frame compare unequal to its stored row on the next scan and **re-ingest the entire
+  library** (doubling all data) — the exact data corruption we're trying to prevent. A correct fix must
+  either match on a resolved key *and* backfill/normalize existing `source_path` rows in an additive
+  migration, or keep the stored path and add a resolved-path index; test the upgrade from an old DB. (S code
+  / M migration+validation, correctness/data-integrity)
+
+- **`load_seestar_raw` raises an opaque `IndexError` (instead of a clear error, or reading the image) on a
+  FITS whose primary HDU carries no data.** *(Traced, Scout audit 2026-07-11; low severity — non-Seestar
+  input, degrades to a per-frame error at most call sites.)* `io/fits_loader.py:104` does
+  `data = np.asarray(hdu.data)` on `hdul[0]`, then `data.shape[-1]` at `:111` — for a compressed
+  (`CompImageHDU`) or multi-extension FITS where the image lives in `hdul[1]` and `hdul[0].data is None`,
+  `np.asarray(None)` is a 0-d object array and `.shape[-1]` raises `IndexError: tuple index out of range`,
+  **before** the intended `if data.ndim != 2: raise ValueError("expected 2D…")` guard at `:119` can fire. The
+  sibling `load_header` (`:55-59`) silently records `width=height=0` for the same file. Seestar raws are
+  simple single-HDU 2-D FITS so the normal path is unaffected, but a user dropping an fpack'd or
+  multi-extension FITS gets a confusing crash rather than "unsupported / expected 2D." Minimal fix: guard
+  `hdu.data is None` and raise the clear `ValueError` (or fall through to the first data-bearing HDU to
+  actually support compressed FITS — a small feature). (S, robustness/friendliness)
+
+- **`delete_master` does an unlocked read-modify-write of the calibration registry off the job worker —
+  a concurrent master build can lose its just-registered entry (or a delete can be resurrected).** *(Traced,
+  Scout audit 2026-07-11; low severity — narrow race window, no silent wrong *image*.)* `webapp/calibration.py`'s
+  own docstring states the invariant "the single job worker is the only writer; routers only read, so no
+  locking is needed beyond the atomic replace." But `delete_master` (`webapp/calibration.py:641-656`, called
+  directly from the `DELETE …/calibration/masters/{id}` endpoint on the Starlette threadpool) does its own
+  `_read_registry` → mutate → `_write_registry`, while a `POST …/calibration/masters` build job's
+  `register_master` (`:605-638`) does the same read-modify-write on the job-worker thread. `os.replace` makes
+  each individual write atomic but does nothing for the interleave, so a delete landing between the build's
+  read and write (or vice-versa) drops one side's change — a just-built master vanishes from the registry
+  (its `.fits` orphaned) or a deleted one is resurrected pointing at a now-missing file. Fix: route deletion
+  through the job manager too (single-writer), or guard `_read_registry`/`_write_registry` with a
+  process-level lock. (S, correctness/concurrency)
 
 - ~~**The shape-only streak detector auto-rejects a bright edge-on galaxy / elongated nebula on *every*
   sub — silently discarding the whole target's data (on by default).**~~ — **FIXED v0.106.2** (Builder
@@ -2003,17 +2093,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   trail before shipping — a synthetic can't stand in for the true width/brightness/straightness distributions.
   Additive, testable on `detect_streaks` in isolation; keep the v0.106.2 rail as the belt-and-braces backstop
   even after the detector improves.
-- **Scout to vet: `post/color_cal.py::_solve_gray_star` doesn't clamp its solved channel scales the way
-  `_solve_gaia` does.** (S, image-quality/robustness — PRIORITY 4) *(Builder-audit-noted 2026-07-11.)* The
-  Gaia solver clamps both channel scales to `_MIN_CAL_SCALE`..`_MAX_CAL_SCALE` before returning (shipped
-  v0.94.16, to stop a pathological field inverting a channel); the module comment frames that clamp as a
-  general defensive bound, but the **default** gray-star solver (`_solve_gray_star`, also the auto-fallback)
-  never applies it. A 2026-07-11 render/post audit couldn't construct a realistic OSC field that produces an
-  out-of-range gray-star scale (the median over ≥20 positive-flux stars stays near 1.0 even for reddened
-  populations), so this is a latent robustness gap, not a reproduced wrong result — hence filed for the Scout
-  to either (a) confirm it's genuinely unreachable and close, or (b) add the same clamp for parity if a
-  realistic trigger exists. Low urgency; a one-liner if pursued (mirror `_solve_gaia`'s clamp), testable on
-  `_solve_gray_star` in isolation.
 - **Minor: the auto-bind skip-guard ignores a stray `scale_dark_to_light` flag.** (S, autonomy/tidiness —
   PRIORITY 2) *(Builder-audit-noted 2026-07-11.)* `pipeline.py::_auto_bind_calibration` skips only when a
   calibration *path* is already set; it doesn't consider a leftover `scale_dark_to_light: True` in
@@ -2023,6 +2102,34 @@ problems. Dogfood it every big-picture run and fix root causes.
   *and* the matched-exposure branch means the scale factor is ~1, and `_effective_dark` no-ops without a bias
   anyway), so it's a tidiness item, not a bug. If pursued: clear a stray `scale_dark_to_light` when the
   auto-bind branch didn't itself set a bias-scaled dark. Additive, testable in isolation.
+- **When Auto's colour calibration silently gives up (too few stars), fall back to a *background-neutral*
+  white balance instead of leaving a colour cast.** (M, image-quality/autonomy — PRIORITY 4) *(Scout-filed
+  2026-07-11, from the colour/post audit.)* `post/color_cal.py::calibrate_color` returns `mode_used="none"`
+  and the **input unchanged** whenever it can't find `min_stars` (default 20) stars with positive flux in
+  every channel — common on exactly the sparse-star OSC targets a beginner shoots (a big diffuse galaxy/nebula
+  on a thin star field, a short session, a small crop). The one-click Auto recipe then leaves that stack with
+  its raw OSC colour cast (usually green/magenta) and no white balance at all — the opposite of "it just
+  worked." Idea: when star-based gray-star can't run, fall back to a **channel-median background neutraliser**
+  (equalise the per-channel *sky* medians so the background is neutral grey — the same principle behind the
+  editor's v0.107.0 "Neutralize background" op and the STF's per-channel sky anchor), which needs *no* stars.
+  It's a weaker balance than gray-star/Gaia (it neutralises the background, not the stars) but strictly better
+  than shipping an uncalibrated cast, and it's data-driven + reversible. Wire it as the internal fallback
+  inside `calibrate_color` (or as an extra op the Auto recipe appends only when colour-cal reported `none`),
+  reporting an honest `mode_used="background_neutral"`. Additive, off-nothing (only changes the currently
+  *do-nothing* path), testable on a synthetic sparse-star cast. Serves the north-star "drop files → trustworthy
+  image" on the fields where the star-based path can't.
+- **Surface Auto's colour-calibration *outcome* (mode used, star count, clamped/gave-up) so the user knows
+  whether their image was actually white-balanced.** (S, friendliness/trust — PRIORITY 3/4) *(Scout-filed
+  2026-07-11, sibling to the fallback idea above.)* `edit/ops/tone.py::_color_calibrate` throws away the
+  `ColorCalibrationResult` (`calibrated, _ = calibrate_color(...)`), so the rich provenance
+  `calibrate_color` already returns — `mode_used` (`gray_star`/`gaia`/**`none`**), `n_stars_used`, and the
+  note (now including "clamped an out-of-range channel scale" after v0.107.2) — is silently dropped. The user
+  never learns Auto's white-balance found only 6 stars and did nothing, or hit a clamp rail. Idea: thread the
+  result out through the op (via `EditContext`/op-note the way other ops surface advisories, mirroring the
+  existing `editor_auto_note:`/`sky_cast` provenance the auto-edit pipeline already stamps) and show a plain
+  line in the editor / History Info ("White-balanced from 240 stars ✓" vs "Couldn't auto white-balance — only
+  6 stars found; try Neutralize background"). Pure read-out of data already computed; additive, no behaviour
+  change. Pairs naturally with the fallback idea (this tells the user *which* path ran).
 
 ### Features that serve real workflows
 - **⭐ OWNER-REQUESTED — "Tonight" night planner: rank the best targets to shoot
@@ -2464,7 +2571,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
-- **v0.107.4** — Autonomy (PRIORITY 2; found by the same 2026-07-11 auto-stack audit): finish the v0.107.1
+- **v0.107.5** — Autonomy (PRIORITY 2; found by the same 2026-07-11 auto-stack audit): finish the v0.107.1
   auto-bind robustness by extending the "iterate candidates when the top pick fails its gate" logic from the
   **dark** path to the **flat** and **bias** paths, which still keyed off only `recommend_masters`' single
   top pick. If the best-scored flat/bias failed its confidence or **dimension** gate (e.g. it's from a
@@ -2476,7 +2583,7 @@ _Newest first. One line each: what + commit/PR._
   common case). Regression tests `test_auto_bind_recovers_a_flat_when_the_top_pick_fails_its_gate` and
   `..._bias_...` (a wrong-size top pick masks a bindable same-size one — fail before / pass after). Additive,
   upgrade-safe, auto-bind stays confident-only. (claude/happy-franklin-t22hm6)
-- **v0.107.3** — Autonomy / "just works" (PRIORITY 2; found by a fresh adversarial audit of the auto-stack
+- **v0.107.4** — Autonomy / "just works" (PRIORITY 2; found by a fresh adversarial audit of the auto-stack
   path 2026-07-11): a **recoverable** auto-stack failure permanently stranded the target's auto-stack. The
   watcher's auto-stack loop writes a crash-loop marker (`web_auto_stack_attempt = solved_accepted`) *before*
   the stack, so a stack that OOM-kills the whole process can't re-loop on restart. But a **survivable**
@@ -2493,7 +2600,10 @@ _Newest first. One line each: what + commit/PR._
   fails before / passes after), plus `test_delete_meta`. Additive, upgrade-safe (no schema/config/API/on-disk
   change — `delete_meta` uses the existing `project_meta` table); auto-stack stays off by default.
   (claude/happy-franklin-t22hm6)
-- **v0.107.2** — Stacking-engine memory safety (found by a fresh adversarial audit of the stacker
+- **v0.107.2** — Image-quality/correctness (Scout, #238): clamp `_solve_gray_star`'s per-channel colour-cal
+  scales to `[_MIN_CAL_SCALE, _MAX_CAL_SCALE]` like the Gaia path, so the default gray-star white balance
+  (used by the Auto recipe) can only rescale a channel, never invert/extinguish it. See the FIXED entry in Bugs.
+- **v0.107.3** — Stacking-engine memory safety (found by a fresh adversarial audit of the stacker
   orchestration path 2026-07-11): the κ-σ (default sigma-clip) path never freed its **pass-1 Welford
   accumulator** (`_n`/`_mean`/`_m2` — 3 full-canvas arrays) before pass 2 allocated `mean`, `std` and the
   weighted-sum buffers, so the live set through all of pass 2 was ~7 canvas arrays, not the **4** the
