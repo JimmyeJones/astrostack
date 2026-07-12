@@ -78,6 +78,11 @@ def _pipeline_body(
             graded: dict[str, int] = {}
             for safe in touched_names:
                 if job.cancel_requested():
+                    # Surface the cancel at the top level so JobManager._run's
+                    # ``engine_cancelled`` check marks the job 'cancelled' rather
+                    # than 'done' — a bare truthy summary would otherwise read as a
+                    # fully-successful scan on the Jobs/History page.
+                    summary["cancelled"] = True
                     break
                 proj = lib.open_target(safe)
                 try:
@@ -117,6 +122,7 @@ def _pipeline_body(
             auto_edited = 0
             for entry in lib.list_targets():
                 if job.cancel_requested():
+                    summary["cancelled"] = True
                     break
                 safe = entry.safe_name
                 attempt_n = _auto_stack_frame_count(lib, safe)
@@ -150,6 +156,7 @@ def _pipeline_body(
                         # breaks on the next iteration's cancel check anyway.
                         with contextlib.suppress(Exception):
                             _clear_auto_stack_attempt(lib, safe)
+                        summary["cancelled"] = True
                         break
                     stacked.append(safe)
                     # Optionally finish the fresh master into a picture (the same
@@ -260,6 +267,13 @@ def submit_qc_solve(settings: Settings, jm: JobManager, safe: str) -> Job:
             finally:
                 proj.close()
             lib.refresh_target_stats(safe)
+            if job.cancel_requested():
+                # QC/solve honours the cancel between frame completions and
+                # returns its (truthy) partial summary with no cancelled marker;
+                # surface it at the top level so the job is classified 'cancelled'
+                # rather than a misleading 'done'. Partial QC results are already
+                # persisted, so nothing is lost either way.
+                summary["cancelled"] = True
             return summary
         finally:
             lib.close()
@@ -312,6 +326,10 @@ def submit_process_target(settings: Settings, jm: JobManager, safe: str) -> Job:
 
             summary["solved_accepted"] = solved_accepted
             if job.cancel_requested():
+                # Cancelled *during* QC/solve, before the stack. Surface the
+                # cancel at the top level (mirroring the stack-phase cancel below)
+                # so the job is classified 'cancelled', not a misleading 'done'.
+                summary["cancelled"] = True
                 summary["stacked"] = False
                 summary["stack_skipped_reason"] = "cancelled"
                 return summary

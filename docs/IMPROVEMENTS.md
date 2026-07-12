@@ -47,33 +47,24 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
-- **A user-cancelled auto-ingest pipeline job is reported `done`, not `cancelled` (misleading green
-  "success" for a cancelled scan).** — _reproduced (Scout 2026-07-12, against current `origin/main`
-  v0.109.26)_. **Symptom:** cancelling the background auto-pipeline job (auto-ingest → QC/solve →
-  auto-stack) mid-run leaves the job in state `done`, indistinguishable from a fully-successful run,
-  so the History/Jobs UI shows a cancelled scan as if it completed. **Location:** the worker's
-  cancel-classification in `webapp/jobs.py::_run` (≈ lines 397–403) marks a job `cancelled` only when
-  the body returns falsy **or** a top-level `{"cancelled": True}` sentinel (`engine_cancelled`). But
-  `webapp/pipeline.py::_pipeline_body` breaks out of its QC/solve loop (≈ line 80) and its auto-stack
-  loop (≈ line 119/153) on `job.cancel_requested()` and then returns its **truthy** `summary` dict
-  (line 182) with **no `cancelled` key** — so `not completed` is False and `engine_cancelled` is False
-  → the worker falls through to `done`. (`submit_reprocess_all` / `submit_process_target` bodies embed
-  a nested `cancelled` in the *result* but likewise don't surface it as the top-level sentinel, so their
-  job *state* is `done` too — worth checking in the same fix.) **Repro (ran):** a `JobManager` job whose
-  cancel-aware body loops until `cancel_requested()` then returns `{"root":…, "targets":[], "scanned":0}`
-  (mirroring `_pipeline_body`); after `jm.cancel(id)` the final state is `done`, not `cancelled`
-  (`scratchpad/repro2.py`). **Severity:** broken-UX (low — cosmetic job-state mislabel; no data effect;
-  the auto-stack loop still aborts correctly and clears its crash-loop marker). **Fix sketch / caveat for
-  the Builder:** signal the abort precisely — set `summary["cancelled"] = True` **at each cancel-driven
-  `break`** (not a blanket `if job.cancel_requested()` at the return, which would mislabel a run that
-  happened to *finish* just as a late cancel arrived — the worker's documented philosophy is to keep a
-  late-cancel *finished* job as `done`). Add a regression test that a cancelled `_pipeline_body`-shaped
-  job lands in state `cancelled`. Additive, no schema/API change. _(Found by an adversarial
-  watcher/jobs audit; the same audit's two higher-severity candidates — an unguarded `_persist` killing
-  the worker thread, and un-normalised source-path dedup double-ingesting frames — were checked against
-  current `origin/main` and are **already fixed**: `_persist` swallows `sqlite3.Error`/serialisation
-  errors by design (jobs.py:210–258), and ingest/merge dedup on `os.path.realpath` via `_dedup_key`
-  (ingest.py:63). Not filed.)_
+- ~~**A user-cancelled auto-ingest pipeline job is reported `done`, not `cancelled` (misleading green
+  "success" for a cancelled scan).**~~ — **FIXED v0.109.27** (Builder 2026-07-12, branch
+  `claude/pensive-faraday-v8rvhn`; traced + reproduced + regression-tested). The cancel-aware bodies
+  (`webapp/pipeline.py::_pipeline_body`, `submit_process_target`, `submit_qc_solve`) broke out of their
+  QC/solve and auto-stack loops on `job.cancel_requested()` and then returned their **truthy** `summary`
+  dict with **no top-level `cancelled` key**, so `JobManager._run`'s classification (`not completed` False,
+  `engine_cancelled` False) fell through to `done` — a cancelled scan showed on the Jobs/History page as a
+  full success. Fix: surface `summary["cancelled"] = True` **at each cancel-driven `break`/early-return**
+  precisely (not a blanket check at the final return, which would mislabel a run that *finished* just as a
+  late cancel arrived — the worker's philosophy keeps a late-cancel *finished* job `done`): the QC/solve
+  loop break, the auto-stack loop break, the mid-stack cancel break in `_pipeline_body`; the QC/solve-phase
+  cancel early-return in `submit_process_target` (its stack-phase cancel already surfaced the sentinel); and
+  the post-QC cancel in `submit_qc_solve`. (`submit_reprocess_all` already returns a top-level `"cancelled":
+  cancelled`, so it was correct.) Regression `tests/webapp/test_pipeline_cancel_state.py` drives the real
+  bodies with a cancelled job across four cases (QC-phase, auto-stack-phase, mid-stack, and process-target
+  QC-phase) and asserts `summary["cancelled"] is True` — all fail-before / pass-after. Additive, no
+  schema/API change; only changes a cosmetic job-state label. Found by an adversarial watcher/jobs audit
+  (Scout 2026-07-12). (Broken-UX — friendliness/trust.)
 
 - ~~**`auto:streak` rejection not self-healed on a clean re-QC — a frame the streak detector
   previously auto-rejected stayed rejected (with a contradictory `streak_detected=False`) even when a full
