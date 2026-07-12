@@ -114,3 +114,20 @@ def test_process_target_qc_phase_cancel_is_classified_cancelled(solved_library, 
     summary = pipeline.submit_process_target(settings, _JM(), safe)
     assert summary.get("cancelled") is True
     assert summary.get("stack_skipped_reason") == "cancelled"
+
+
+def test_editor_batch_cancel_is_classified_cancelled(solved_library):
+    # A cancelled batch export must surface the sentinel too — a beginner who hits
+    # Stop mid-batch shouldn't see a green "Done".
+    settings = Settings(data_root=str(solved_library))
+
+    class _JM(_FakeJM):
+        def submit(self, kind, fn, **kw):  # noqa: ANN001
+            job = Job(kind=kind)
+            job._cancel.set()  # cancelled before the first item
+            return fn(job)
+
+    items = [{"safe": "M_42", "run_id": 1}]
+    result = pipeline.submit_editor_batch(settings, _JM(), items, {"ops": []})
+    assert result.get("cancelled") is True
+    assert result["exported"] == []

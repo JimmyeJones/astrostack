@@ -2374,17 +2374,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
-- **NEW (Scout 2026-07-12) — Job-state honesty sweep: a cancelled long-running job should read
-  "Cancelled", not "Done".** _(S, friendliness/trust.)_ Generalises the filed Bugs entry (cancel-aware
-  `_pipeline_body` reports `done`). Audit every long-running job body — `_pipeline_body`, `submit_reprocess_all`,
-  `submit_process_target`, `submit_build_master`, export/render — so that a user cancel deterministically lands
-  the **job state** at `cancelled` (they all currently rely on `webapp/jobs.py::_run`'s falsy-or-`{"cancelled":True}`
-  sentinel, and several return a truthy summary with the cancel flag nested in the *result*, not at top level).
-  Then surface it in the Jobs/History UI as a plain "Cancelled — any partial work was kept" line so a beginner
-  who hits Stop isn't left staring at a green "Done" wondering whether it finished. Small, additive, high-trust;
-  each body already has the cancel signal, it just isn't propagated to the state consistently. Mark cancellation
-  at the actual cancel-driven `break`/return points (not a blanket end-of-body `cancel_requested()` check, which
-  can mislabel a run that *finished* just as a late cancel arrived).
+- ~~**Job-state honesty sweep: a cancelled long-running job should read "Cancelled", not "Done".**~~ —
+  **SHIPPED v0.109.27–0.109.28** (Builder 2026-07-12, branch `claude/pensive-faraday-v8rvhn`). Audited every
+  cancel-aware job body and made each surface a top-level `cancelled` sentinel at its actual cancel-driven
+  `break`/early-return so `webapp/jobs.py::_run` classifies the **job state** as `cancelled`, not a misleading
+  `done`. Fixed: `_pipeline_body` (QC/solve loop, auto-stack loop, mid-stack breaks), `submit_process_target`
+  (QC/solve-phase cancel — its stack-phase cancel already surfaced it), `submit_qc_solve` (post-QC cancel), and
+  `submit_editor_batch` (batch-export cancel). Already correct: `submit_stack` (via `_stack_target`'s sentinel),
+  `submit_reprocess_all` (top-level `"cancelled"`), `submit_channel_combine` (surfaces `result.cancelled`);
+  `submit_build_master` and the export/png bodies aren't cancel-aware (nothing to fix). No frontend change
+  needed — `Jobs.tsx` already renders `job.state` as a distinct orange "cancelled" badge, so the state fix makes
+  the existing UI honest (a Stop now shows "cancelled", not a green "done"). Regressions in
+  `tests/webapp/test_pipeline_cancel_state.py` (five cases: pipeline QC-phase / auto-stack-phase / mid-stack,
+  process-target QC-phase, editor-batch — all fail-before / pass-after). Additive, no schema/API/default change;
+  only corrects a cosmetic job-state label. Generalised the filed Bugs entry (now also Shipped). *(Scout-filed
+  2026-07-12; S, friendliness/trust.)*
 - ~~**Show total integration time on the History / Target card ("2,000 subs · 5.6 h total").**~~
   — **SHIPPED v0.104.1** (Builder 2026-07-10). On investigation the History Info panel *already*
   showed "Integration: 5.6 h · 2,000 subs" (`integration_s` from the `EXPTOTAL` FITS card, parsed by

@@ -1052,10 +1052,12 @@ def submit_editor_batch(settings: Settings, jm: JobManager, items: list[dict],
         lib = Library.open_or_create(settings.resolved_library_root)
         exported: list[dict] = []
         errors: dict[str, str] = {}
+        cancelled = False
         total = len(items)
         try:
             for i, item in enumerate(items, start=1):
                 if job.cancel_requested():
+                    cancelled = True
                     break
                 safe = str(item.get("safe"))
                 rid = int(item.get("run_id"))
@@ -1073,7 +1075,13 @@ def submit_editor_batch(settings: Settings, jm: JobManager, items: list[dict],
                     errors[f"{safe}:{rid}"] = str(exc)
         finally:
             lib.close()
-        return {"exported": exported, "errors": errors}
+        result: dict[str, Any] = {"exported": exported, "errors": errors}
+        if cancelled:
+            # Surface the cancel at the top level so JobManager._run classifies the
+            # job 'cancelled' rather than a misleading 'done'; any items already
+            # exported are kept in `exported`.
+            result["cancelled"] = True
+        return result
 
     return jm.submit("editor_batch", body)
 
