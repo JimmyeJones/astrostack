@@ -3007,6 +3007,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+- **Exercise the production-only SPA-serving path in tests (test-coverage blind spot that hid a security bug).**
+  *(Idea, Builder 2026-07-12 — surfaced while fixing the v0.109.24 path-traversal.)* The SPA fallback route +
+  `/assets` mount in `webapp/main.py::_mount_spa` are only registered when `webapp/static` exists — i.e. the
+  production Docker image, which builds the frontend into `webapp/static/`. The dev/test tree has no `static`
+  dir, so `_mount_spa` installs the harmless placeholder route and the real serving path was **never exercised
+  by any test** — which is exactly why an unauthenticated arbitrary-file-read in that handler went unnoticed
+  until an adversarial audit. The v0.109.24 fix added `tests/webapp/test_spa_static.py` (mounts `_mount_spa`
+  over a temp static tree), which closes the traversal-contract gap, but the *broader* structural gap remains:
+  no test boots the **full** `create_app()` with a built static dir, so prod-only wiring (the SPA mount, the
+  `/assets` StaticFiles mount, and — importantly — how the auth-gate middleware interacts with static asset
+  requests) is untested end-to-end. Add a small fixture that materialises a minimal `webapp/static/`
+  (`index.html` + `assets/`) and asserts: (a) `/` and a client route serve the shell; (b) a real asset serves;
+  (c) traversal is blocked; (d) with auth **on**, static/asset requests follow the intended allow/deny policy.
+  Cheap, additive, no product change; prevents a whole class of "only broken in the shipped image" regressions.
+  (S, infra/security — test coverage.)
 - ~~**Minor state-classification tidy-up: a Process-target job cancelled *during the stack* is reported `done`, not
   `cancelled`.**~~ — **SHIPPED v0.109.18** (Builder 2026-07-11). `submit_process_target` now checks the stack
   step's returned `cancelled` sentinel and, when set, surfaces `cancelled:True`/`stacked:False` at the top level of
