@@ -90,6 +90,41 @@ when you take it.
   used only a mild 40× outlier where the MTF self-correction still holds; the clamps break it at the larger (and
   realistic full-well) outlier magnitudes measured here.
 
+_Builder audit log 2026-07-12 (baseline green: 1118 passed / 2 skipped): with both open Bugs entries
+REAL-data-gated (the dead SExtractor skew-fallback guard; the sky-atlas WCS rotation sign) and the Ideas
+backlog shipped-or-gated (real-data / owner-sign-off / explicit "only worth doing if a run is already in that
+file" tidiness — the `coverage_min/max` ndim guard, the bulk-denoise raw-proxy strength), spent the run on
+the §2 big-picture correctness audit rather than manufacturing churn, aimed at the owner's current focus #1
+(QA/harden the stacking engine). Ran **three parallel adversarial audits**, each required to *reproduce* any
+suspected defect numerically against the live engine before filing: (1) the **stacking combine numerics**
+(`stack/{accumulator,stacker,weighting,photometric,drizzle_path}.py`), (2) the **calibration path**
+(`calibrate/apply.py` + `calibrate/masters.py` + `webapp/calibration.py` recommend/auto-bind/resolve), and
+(3) the **editor ops + preview↔export parity** (`edit/ops/*`, `edit/{pipeline,recipe,registry}.py`,
+`render/thumbnail.py`, `edit/{curve,levels,histogram,starmask,coverage_trim}.py`). **All three traced clean,
+with runnable reproductions.** Combine: `WeightedSum`/`Welford`/`MinMaxReject` accumulators match independent
+NaN-aware references exactly (maxerr ≤1e-6), the two κ-σ passes apply photometric scale/weight identically,
+every divisor is guarded, the drizzle catastrophic-cancellation guard preserves near-saturated cores without
+NaN punch-through, and overlapping `add_window` sub-views neither double-count nor leak NaN (the n=8
+non-rejection is the documented `(n−1)/√n < κ` small-sample limit that min/max-reject covers, not a bug).
+Calibration: `apply_raw` matches an independent `(light−pedestal)/flat` reference across 2000 randomized
+libraries (maxerr ~2.5e-7, all finite) — dark-XOR-bias holds (no double-subtraction), a dark exposure-scales
+only with a matching bias present, the `_FLAT_FLOOR=0.1` guard prevents divide-by-~0; the confident-only
+auto-bind contract held across 3000 randomized libraries (zero violations of the documented gates), and
+client `*_path` keys are popped + resolved server-side. Editor: preview and export iterate the enabled ops in
+identical recipe order with the identical STF-autostretch fallback, every pixel-distance param is routed
+through `ctx.scaled_px`/`proxy_scale`, the asinh/STF stretch is robust to a cold/negative outlier (per-channel
+median/σ re-anchor is affine so a global `lo` shift cancels; only the robust 99.5th-pct `hi` sets the scale),
+and no covered pixel became NaN / no gap was filled across a normal/partial-NaN/flat/mono/1px-thin/all-NaN fuzz
+at proxy_scale 1 and 4; the one-click Auto recipe's preview↔export look delta is ~0.9% (within the documented
+~2% decimation floor). **Two non-defects recorded so a future run doesn't chase them:** (a) the `median`/`mean`
+master-combine methods are not NaN-aware (only `sigma_mean` is), but this app's calibration inputs are Seestar
+uint16 raws which can never be NaN (`io/fits_loader.py`), so it is not reachable on a live install — not a bug;
+(b) the proxy's gaia→gray_star colour-calibration fallback is the documented intentional preview/export
+divergence, not a parity break. No new verified bug filed (per §2, no manufacturing) — combine, calibration,
+and editor-render all held, consistent with the mature audit history. **Next rotation** (not re-covered this
+run from a fresh angle): `qc/*` + `solve/*`, the `io/scanner.py`/`io/ingest.py`/`io/merge.py` ingest path, and
+the `webapp/{watcher,jobs}.py` orchestration._
+
 _Scout audit log 2026-07-10 (baseline green: 1031 passed / 2 skipped): adversarially
 re-traced the core stacking-engine combine path — `stack/accumulator.py` (WeightedSum /
 MinMaxReject / Welford, incl. the windowed `add_window` sub-views and the frame-count vs
