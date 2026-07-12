@@ -6,6 +6,7 @@ import {
 import {
   IconAlertTriangle, IconArrowBackUp, IconCheck, IconDeviceFloppy, IconHistory,
   IconNotes, IconPhoto, IconSparkles, IconStack2, IconTelescope, IconWand, IconX,
+  IconStars,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
@@ -111,6 +112,16 @@ function rejectReasonLabel(reason: string): string {
   if (reason.startsWith("qc_error")) return "QC error";
   if (reason.startsWith("solve_failed")) return "Plate-solve failed";
   return reason;
+}
+
+/** A plain-language one-liner for the object card, e.g.
+ *  "A galaxy in the constellation Andromeda." Constellation is dropped when the
+ *  catalog abbreviation is unknown. Uses "an" before a vowel sound. */
+export function describeObject(type: string, constellation: string): string {
+  const t = (type || "deep-sky object").trim();
+  const article = /^[aeiou]/i.test(t) ? "An" : "A";
+  const where = constellation ? ` in the constellation ${constellation}` : "";
+  return `${article} ${t}${where}.`;
 }
 
 const SENSITIVITIES = [
@@ -296,6 +307,12 @@ export function TargetView() {
   const [gradeOpen, setGradeOpen] = useState(false);
 
   const target = useQuery({ queryKey: ["target", safe], queryFn: () => api.getTarget(safe) });
+  // "What am I looking at?" — an offline catalog lookup that turns a bare folder
+  // name (or the solved centre) into friendly context. Renders nothing on no match.
+  const identity = useQuery({
+    queryKey: ["identify", safe],
+    queryFn: () => api.identifyTarget(safe),
+  });
   const rejectedCount = target.data
     ? target.data.n_frames - target.data.n_frames_accepted
     : 0;
@@ -867,6 +884,28 @@ export function TargetView() {
           </Button>
         </Group>
       </Group>
+
+      {identity.data ? (
+        <Paper withBorder p="sm" radius="md" mt="xs" bg="var(--mantine-color-default-hover)">
+          <Group gap="sm" wrap="nowrap" align="flex-start">
+            <IconStars size={22} style={{ flexShrink: 0, marginTop: 2 }} color="var(--mantine-color-indigo-5)" />
+            <Stack gap={2} style={{ minWidth: 0 }}>
+              <Group gap="xs">
+                <Text fw={600}>
+                  {identity.data.name || identity.data.id}
+                </Text>
+                <Badge variant="light" color="indigo" size="sm">{identity.data.id}</Badge>
+              </Group>
+              <Text size="sm" c="dimmed">
+                {describeObject(identity.data.type, identity.data.constellation)}
+                {identity.data.matched_by === "coords"
+                  ? " Identified from this target's plate-solved position."
+                  : ""}
+              </Text>
+            </Stack>
+          </Group>
+        </Paper>
+      ) : null}
 
       <Grid>
         <Grid.Col span={{ base: 12, md: 7 }}>

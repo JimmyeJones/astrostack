@@ -39,6 +39,19 @@ class TargetPatch(BaseModel):
     tags: list[str] | None = None
 
 
+class ObjectInfoOut(BaseModel):
+    """Friendly identity for a target matched against the bundled catalog."""
+
+    id: str
+    name: str
+    type: str
+    constellation: str
+    constellation_abbr: str
+    ra_deg: float
+    dec_deg: float
+    matched_by: str
+
+
 class FrameOut(BaseModel):
     id: int
     name: str

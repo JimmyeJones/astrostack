@@ -2926,17 +2926,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   button. Why it fits: the whole point of the pipeline is a picture worth showing, and a beginner's very
   next step after "it looks great" is "how do I post this?" — right now there's no good answer. Ship as one
   slice (JPEG + optional caption); a later slice could offer a couple of caption placements/sizes.
-- **NEW (Scout 2026-07-12) — "What am I looking at?" object info card on the Target / result page.**
-  _(S–M, friendliness — PRIORITY 3; beginner bar: ✔ pure delight + orientation for a non-expert.)_ When a
-  target's name (or its plate-solved centre) matches the **bundled** deep-sky catalog (`data/messier.json`
-  + `data/deepsky_popular.json`, already loaded by `nightplan.load_catalog()`), show a small friendly card
-  next to the result: the object's common name, plain-language type ("barred spiral galaxy", not "SBbc"),
-  the constellation it's in, its catalog IDs (M / NGC / IC), and a one-line "what it is" blurb. Turns a bare
-  `M_31` folder name into context a beginner enjoys and learns from. Pure **offline** lookup over data we
-  already ship (a name-normalise + optional cone-match against the catalog's RA/Dec using the run's solved
-  centre); renders nothing when there's no match (no clutter, no guessing). Additive read-only endpoint +
-  a small card component. (A later slice could add a one-line blurb field to the catalog JSON for the
-  most-popular targets; absent it, type + constellation + IDs already read well.)
+- ~~**"What am I looking at?" object info card on the Target / result page.**~~ — **SHIPPED v0.110.0**
+  (Builder 2026-07-12, branch `claude/pensive-faraday-v8rvhn`). New pure/offline engine module
+  `seestack/objectinfo.py::identify_object(name, ra_deg, dec_deg)` matches a captured target against the
+  **bundled** deep-sky catalog (`nightplan.load_catalog()`, 157 objects) — first by a designation parsed from
+  the folder name (M/NGC/IC/C + number, separator- and leading-zero-insensitive: `M_31`→`M31`, `NGC 07000`→
+  `NGC 7000`), then by exact common-name, then by a tight ≤0.75° cone match against a **plate-solved** centre
+  when the name is unrecognised; returns `None` (no card) when nothing matches confidently, so it never
+  guesses. It resolves the catalog's plain-language `type` (e.g. "nebula") and expands the IAU constellation
+  abbreviation to a full name via a static 88-entry map. New read-only endpoint
+  `GET /api/targets/{safe}/identify` (returns the info or `null`); the Target page renders a small friendly
+  card — common name + catalog id badge + "A nebula in the constellation Orion." — that appears only on a
+  match. Turns a bare `M_31` folder into context a beginner enjoys. Additive/read-only throughout, no
+  schema/config/DB/default change, fully offline (no network, no new dependency). Tests:
+  `tests/test_objectinfo.py` (10, incl. designation/name/coords matching, precedence, 88-constellation
+  completeness), `tests/webapp/test_target_identify.py` (3, endpoint incl. null + 404), and
+  `Target.test.tsx` (`describeObject` helper + card renders-on-match / hidden-on-no-match). tsc + full
+  vitest (731) + vite build all green. *(Scout-filed 2026-07-12; S–M, friendliness — PRIORITY 3.)*
 - **⭐ OWNER-REQUESTED — "Tonight" night planner: rank the best targets to shoot
   tonight, showing what you've already captured vs. what you haven't.** A
   pre-capture planning view that complements the post-capture stack/edit pipeline:
