@@ -1552,6 +1552,21 @@ problems. Dogfood it every big-picture run and fix root causes.
 - **Editor bug hunt (ongoing)** — there are undocumented issues. Each big-picture
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
+  _(~~Builder note 2026-07-12, found in an adversarial frontend-editor-route audit: "Compare a
+  look" → "Switch to this look" (`adoptLook`) silently dropped the user's crop/geometry — it set
+  the look's **raw** ops, while the split preview the user was judging renders the look on the
+  current edit's framing via `lookCompareOps(lookSel.ops, baseGeometryOps)`. So a user who cropped,
+  compared a look, then switched to it got the **uncropped** frame — a different image than the
+  split they'd just evaluated (WYSIWYG violation on the PRIORITY-1 editor compare→adopt loop).~~ —
+  **SHIPPED v0.109.20** (Builder 2026-07-12). `adoptLook` now adopts exactly what the divider showed
+  — `lookCompareOps(lookSel.ops, baseGeometryOps)` (the look's tone/colour/detail on the current
+  recipe's enabled geometry ops) — so the adopted recipe renders identically to the compared split.
+  A no-op when the current recipe has no geometry op (the look's ops verbatim, exactly as before), so
+  the common case is byte-for-byte unchanged. Frontend-only, additive, one undoable step; no
+  backend/schema/API change. Regression `Editor.test.tsx::"preserves the current crop when adopting
+  the compared look (WYSIWYG)"` (crop in the recipe → compare a Curves-only look → Switch → assert
+  both Curves **and** Crop survive; fails before as the crop is dropped / passes after). (XS,
+  editor/consistency — PRIORITY 1.))_
   _(Builder note 2026-07-10: the `edit/ops/detail.py::_hot_pixels` NaN-fill/restore band-aid
   (the `_with_nan_filled` wrapper) is now **redundant** — v0.103.23 made
   `bg/hot_pixels.py::suppress_hot_cold_pixels` NaN-aware at the root, so the op no longer needs a
