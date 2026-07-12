@@ -43,12 +43,19 @@ real bugs and sharp, well-shaped ideas is your deliverable. Each run:
    one-line symptom, the code location, **repro steps**, severity (wrong-result >
    broken-UX > cosmetic), and a confidence (traced / reproduced). **Only file bugs
    you've actually verified — no speculation.**
-4. **Curate the backlog.** Reprioritise it to match §1, merge duplicates, delete
-   done/stale items, and split anything too big for one Builder run into concrete
-   slices. Then **add a few genuinely new ideas** (§4) — with the editor hardened,
-   favour **stacking-engine correctness, autonomy, friendliness, and image quality**
-   now (editor ideas only if you find a real gap), each tagged with the pillar it
-   serves and a size — so the Builder always has ready, well-shaped work.
+4. **Curate the backlog + feed the feature pipeline.** Reprioritise to match §1,
+   merge duplicates, delete done/stale items, and split anything too big for one
+   Builder run into concrete slices. Then add new ideas (§4) of **two kinds every
+   run**:
+   - **improvement ideas** — stacking-engine correctness, autonomy, friendliness,
+     image quality (editor only if you find a real gap); and
+   - **at least one genuinely NEW beginner feature** for the "Features that serve
+     real workflows" list — a new user-facing capability that helps a *non-expert*
+     Seestar OSC owner plan / get / understand / enjoy / share a good image (see the
+     **beginner bar** in AGENTS.md §1: sane default + plain-language, and **not**
+     pro/niche tooling — no mono/LRGB/narrowband/expert knobs). Keep this section
+     stocked so the Builder always has a beginner feature ready to build.
+   Tag each idea with the pillar it serves and a size.
 5. **Optional:** if you find a *small, obviously-safe* bug (one file, clear fix,
    easy regression test), fix and ship it under the full quality bar (§5/§8/§9).
    Otherwise leave building to the Builder — your leverage is a great backlog, not

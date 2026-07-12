@@ -35,6 +35,13 @@ count.** Run the loop:
      well-hardened, so favour **stacking-engine correctness, autonomy,
      friendliness, and image-quality** items from the Ideas list (still fix any
      real editor regression first if one exists).
+   - **and grow the app: on a regular cadence, pick up a NEW beginner feature**
+     from "Features that serve real workflows" — not only when the bug list is
+     empty. Aim to ship a genuine new user-facing capability every few runs (build
+     the first slice if it's large). It must clear the **beginner bar** in
+     AGENTS.md §1 (helps a non-expert Seestar OSC owner; sane default +
+     plain-language; **not** pro/niche tooling). Don't let bug-fixing crowd out
+     feature growth entirely — the owner wants both.
    Implement it across engine/webapp/frontend as needed, **add tests**, get the
    full suite green, commit it as its own independently-green commit, bump the
    version, and mark it **Shipped**. **Finish each task properly — never leave one

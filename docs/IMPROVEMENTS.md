@@ -2908,6 +2908,28 @@ problems. Dogfood it every big-picture run and fix root causes.
 - Annotated sky overlay (label detected objects / show solved field). (M) —
   related to the night planner above; the planner's "plot tonight's targets" view
   can reuse this.
+- **NEW BEGINNER FEATURE — "Share this image": one-click export of the finished
+  picture with its details.** A beginner's payoff is showing off the result, but
+  today exporting is a raw PNG/TIFF with no context. Add a "Share" action on a
+  stack run / the editor that produces a nicely-sized JPEG/PNG (sensible dimensions
+  for posting) with a small, tasteful caption corner — **object name, total
+  integration time, date, frame count, and "AstroStack"** — drawn from data the app
+  already has (target name, `total_exposure_s`, run date). Offer a caption-on /
+  caption-off toggle and a copy-friendly text blurb ("M31 · 3h12m · 152×75s · 2026-07-11")
+  the user can paste alongside. Clears the beginner bar: understandable, one click,
+  sane default, no expert knowledge. Additive, read-only (renders from the existing
+  final image); pure image compositing. Slice: (a) plain sized-JPEG export + text
+  blurb first; (b) the burned-in caption corner. (M, beginner-feature/workflow)
+- **NEW BEGINNER FEATURE — per-target progress & integration goals.** A beginner
+  wants to know "have I shot enough of this yet?" Add a per-target progress view:
+  total accepted integration accumulated across *all* sessions, an optional
+  user-set **goal** ("I want 6 hours on M31") with a progress bar, and a gentle
+  "you've added N new subs since your last stack — restack?" nudge (the stale-target
+  signal already exists). Helps decide what to point at tonight and pairs naturally
+  with the night planner (already-targeted badges) and reprocess-everything.
+  Beginner bar: plain-language, opt-in goal, sane default of no goal. Additive
+  (a nullable `integration_goal_s` in target/library meta — upgrade-safe); mostly
+  aggregating data already stored. (M, beginner-feature/workflow)
 - ~~**Tonight planner: distinguish a waxing vs waning Moon (evening vs morning problem).**~~
   — **shipped v0.97.4** (see Shipped). The Moon card now reads "Waxing gibbous (72%)" /
   "Waning gibbous", "First Quarter" / "Last Quarter", "Waxing crescent" / "Waning crescent" —
