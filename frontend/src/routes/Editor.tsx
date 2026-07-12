@@ -314,7 +314,13 @@ export function EditorView() {
   const hist = useQuery({
     queryKey: ["edit-hist", safe, rid, dKey],
     queryFn: ({ signal }) => api.getHistogram(safe, rid, dRecipe, signal),
-    enabled: !!opsSchema.data,
+    // Gate on `seeded` exactly like the live preview above: until the saved
+    // recipe loads, `dRecipe` is the empty pre-seed pipeline, so an ungated
+    // query would fetch the histogram for the un-edited image on open — a wasted
+    // request plus a brief pre-seed histogram/clipping-advisory flash before it
+    // refetches against the real recipe (most visible on the walk-away
+    // Process-target deep-link, which opens on a saved auto-edit recipe).
+    enabled: !!opsSchema.data && !saved.isLoading && seeded,
   });
   // Data-driven black/white points for the selected Levels op, measured from the
   // display-space image *entering* that op (all prior ops applied), so a beginner

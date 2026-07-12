@@ -1529,14 +1529,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   repairs a hot pixel *at* a coverage boundary using a median-fill neighbourhood, where the root
   function leaves it, so verify that edge doesn't matter on a real mosaic before simplifying). (S,
   editor/maintainability))_
-  _(Builder note 2026-07-11, found during the frontend editor-logic audit that shipped v0.109.6/v0.109.7:
+  _(~~Builder note 2026-07-11, found during the frontend editor-logic audit that shipped v0.109.6/v0.109.7:
   the editor's **histogram** query (`Editor.tsx` `hist = useQuery(["edit-hist", …])`) is **not** gated on
-  `seeded`, unlike the `preview` query right above it. So on first open it fires once against the empty
-  pre-seed recipe before the saved recipe loads, then refetches against the real recipe — a wasted request
-  plus a brief pre-seed histogram/clipping-advisory flash. Harmless (the clipping warning is derived from
-  `hist.data`, so it self-corrects on the second fetch) and trivially fixable by adding `&& seeded` to the
-  `hist` `enabled` (mirroring `preview`), but too low-value to ship as its own churn commit — fold it in if a
-  future run is already wiring that query. (XS, editor/polish.))_
+  `seeded`, unlike the `preview` query right above it…~~ — **SHIPPED v0.109.19** (Builder 2026-07-12). The
+  `hist` query is now gated `!!opsSchema.data && !saved.isLoading && seeded`, mirroring the live preview, so it
+  no longer fires against the empty pre-seed recipe before the saved recipe loads — removing a wasted request
+  and the brief pre-seed histogram/clipping-advisory flash on first open (most visible on the walk-away
+  Process-target deep-link, which opens on a saved auto-edit recipe). Frontend-only, additive; no
+  backend/schema/API change. Regression `Editor.test.tsx::"does not fetch the histogram until the saved recipe
+  has loaded"` (holds the recipe query pending and asserts `getHistogram` isn't called until it resolves —
+  fails before / passes after). Upgraded from "too low-value to ship standalone" because it's on the PRIORITY-1
+  editor default surface and the north-star walk-away flow lands there with a saved recipe, so the flash is
+  genuinely user-visible there. (XS, editor/polish.))_
 - ~~**Data-driven "From your image" starting curve for the Curves op**~~ —
   **shipped v0.72.0** (see Shipped). The Curves op now has a header "Auto curve"
   button that drops a gentle, strictly-monotone midtone-lift curve derived from the

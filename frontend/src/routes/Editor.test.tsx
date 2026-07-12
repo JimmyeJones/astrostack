@@ -140,6 +140,49 @@ describe("EditorView", () => {
     expect(screen.getByText("Download full-res PNG")).toBeInTheDocument();
   });
 
+  it("does not fetch the histogram until the saved recipe has loaded", async () => {
+    // The histogram query must be gated on `seeded` exactly like the live
+    // preview: before the saved recipe loads, the debounced recipe is the empty
+    // pre-seed pipeline, so an ungated histogram query fetches the un-edited
+    // image's histogram/clipping advisory on open — a wasted request plus a
+    // brief wrong-data flash (most visible on the walk-away Process-target
+    // deep-link, which opens on a saved auto-edit recipe). Regression: `hist`
+    // used to be `enabled: !!opsSchema.data`, firing before the recipe loaded,
+    // while `preview` gated on `seeded`.
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES]);
+    // Hold the saved recipe open so we can observe the pre-seed window: while it
+    // is unresolved, an ungated histogram query would already have fired.
+    let resolveRecipe!: (r: unknown) => void;
+    vi.spyOn(client.api, "getRecipe").mockReturnValue(
+      new Promise((resolve) => { resolveRecipe = resolve; }) as never);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getDefaultRecipe").mockResolvedValue({ ops: [], count: 0 });
+    const getHistogram = vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    const editorOps = client.api.editorOps as unknown as ReturnType<typeof vi.fn>;
+    renderEditor();
+
+    // Let the op schema resolve (the ungated query's other precondition) and give
+    // any pending query a real tick to fire; the recipe is still pending, so the
+    // histogram must NOT have been fetched yet (the whole panel is a Loader until
+    // the recipe loads, but the hist hook runs regardless).
+    await waitFor(() => expect(editorOps).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 50));
+    expect(getHistogram).not.toHaveBeenCalled();
+
+    // Once the saved recipe resolves and seeds, the histogram is fetched.
+    resolveRecipe({
+      ops: [{ uid: "x1", id: "tone.stretch", enabled: true, params: { stretch: 0.6 } }],
+      base_run_id: 3,
+    });
+    expect(await screen.findByText("Stretch")).toBeInTheDocument();
+    await waitFor(() => expect(getHistogram).toHaveBeenCalled());
+  });
+
   it("seeds the recipe only once — a refetch (e.g. after Save) does not re-seed and wipe edits", async () => {
     mockEditorQueries();
     vi.stubGlobal("fetch", vi.fn(async () => ({
