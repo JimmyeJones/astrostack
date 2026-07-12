@@ -538,6 +538,14 @@ describe("EditorView", () => {
 
     renderEditor();
 
+    // Wait for the saved recipe (the enabled Crop) to actually seed BEFORE driving
+    // the compare-look flow: adoptLook reads the *current* recipe's geometry ops
+    // (baseGeometryOps) at the moment it runs, so if the flow is driven before the
+    // crop has loaded, the adopt captures an empty geometry and the crop is lost.
+    // Under full-suite load the picker enables before the recipe seeds, which raced
+    // this (passed in isolation, flaked in CI) — gate on the crop being present.
+    expect(await screen.findByText("Crop")).toBeInTheDocument();
+
     const picker = await screen.findByRole("button", { name: "Compare a look" });
     await waitFor(() => expect(picker).not.toBeDisabled());
     picker.click();
@@ -550,7 +558,7 @@ describe("EditorView", () => {
     // (before the fix the crop was dropped — the adopted frame no longer matched the
     // split preview).
     expect(await screen.findByText("Curves")).toBeInTheDocument();
-    expect(screen.getByText("Crop")).toBeInTheDocument();
+    expect(await screen.findByText("Crop")).toBeInTheDocument();
   });
 
   it("offers a Coverage overlay on a mosaic and toggles it", async () => {
