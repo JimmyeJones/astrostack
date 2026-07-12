@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { TargetView, countNewSubsSinceStack, countQcUncheckable } from "./Target";
+import { TargetView, countNewSubsSinceStack, countQcUncheckable, describeObject } from "./Target";
 import * as client from "../api/client";
 import type { Frame, Target } from "../api/client";
 
@@ -746,6 +746,48 @@ describe("TargetView reject breakdown + undo", () => {
 
     await waitFor(() =>
       expect(bulk).toHaveBeenCalledWith("M_42", { action: "accept", ids: [1, 2] }));
+  });
+});
+
+describe("describeObject helper", () => {
+  it("builds a plain-language sentence with the right article and constellation", () => {
+    expect(describeObject("galaxy", "Andromeda")).toBe(
+      "A galaxy in the constellation Andromeda.");
+    expect(describeObject("open cluster", "Taurus")).toBe(
+      "An open cluster in the constellation Taurus.");
+  });
+  it("omits the constellation when it is unknown", () => {
+    expect(describeObject("nebula", "")).toBe("A nebula.");
+  });
+});
+
+describe("TargetView object-info card", () => {
+  it("shows the 'what am I looking at' card when the target matches the catalog", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M42", name: "Orion Nebula", type: "nebula",
+      constellation: "Orion", constellation_abbr: "Ori",
+      ra_deg: 83.8, dec_deg: -5.4, matched_by: "name",
+    });
+
+    renderTarget();
+
+    expect(await screen.findByText("Orion Nebula")).toBeInTheDocument();
+    expect(screen.getByText("A nebula in the constellation Orion.")).toBeInTheDocument();
+  });
+
+  it("renders no card when the target does not match the catalog", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget({ name: "backyard" }));
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue(null);
+
+    renderTarget();
+
+    await screen.findByRole("button", { name: "Process this target" });
+    expect(screen.queryByText(/in the constellation/)).not.toBeInTheDocument();
   });
 });
 

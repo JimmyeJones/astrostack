@@ -8,7 +8,13 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 
 from webapp import deps
-from webapp.schemas import MergeRequest, TargetCreate, TargetOut, TargetPatch
+from webapp.schemas import (
+    MergeRequest,
+    ObjectInfoOut,
+    TargetCreate,
+    TargetOut,
+    TargetPatch,
+)
 
 router = APIRouter(prefix="/api/targets", tags=["targets"])
 
@@ -75,6 +81,32 @@ def get_target(safe: str, request: Request) -> TargetOut:
         return _to_out(entry)
     finally:
         lib.close()
+
+
+@router.get("/{safe}/identify", response_model=ObjectInfoOut | None)
+def identify_target(safe: str, request: Request) -> ObjectInfoOut | None:
+    """Match this target against the bundled deep-sky catalog (offline) and
+    return friendly context — common name, type, constellation, catalog id — or
+    ``null`` when nothing matches confidently. Read-only; renders the
+    "What am I looking at?" card. Matches by the target's name first, then by its
+    plate-solved centre if one is known."""
+    from seestack.objectinfo import identify_object
+
+    lib = deps.open_library(request)
+    try:
+        entry = lib.find_target(safe)
+        if entry is None:
+            raise HTTPException(status_code=404, detail=f"No target '{safe}'")
+        info = identify_object(entry.name, entry.ra_deg, entry.dec_deg)
+    finally:
+        lib.close()
+    if info is None:
+        return None
+    return ObjectInfoOut(
+        id=info.id, name=info.name, type=info.type,
+        constellation=info.constellation, constellation_abbr=info.constellation_abbr,
+        ra_deg=info.ra_deg, dec_deg=info.dec_deg, matched_by=info.matched_by,
+    )
 
 
 @router.patch("/{safe}", response_model=TargetOut)

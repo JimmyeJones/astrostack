@@ -80,6 +80,17 @@ export interface Target {
   tags: string[];
 }
 
+export interface ObjectInfo {
+  id: string;
+  name: string;
+  type: string;
+  constellation: string;
+  constellation_abbr: string;
+  ra_deg: number;
+  dec_deg: number;
+  matched_by: "name" | "coords";
+}
+
 export interface DashboardStats {
   n_targets: number;
   n_frames: number;
@@ -722,6 +733,8 @@ export const api = {
   mergeTargets: (into: string, sources: string[]) =>
     req("/api/targets/merge", { method: "POST", body: JSON.stringify({ into, sources }) }),
   targetThumbnailUrl: (safe: string) => `/api/targets/${safe}/thumbnail`,
+  identifyTarget: (safe: string) =>
+    req<ObjectInfo | null>(`/api/targets/${safe}/identify`),
 
   // frames
   listFrames: (safe: string, sort = "id", order = "asc") =>
