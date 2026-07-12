@@ -47,6 +47,24 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**Editor "Switch to this look" could drop the user's crop when adopted quickly after load — a
+  debounce-window WYSIWYG race (also a flaky CI test).**~~ — **FIXED v0.109.23** (Builder 2026-07-12, branch
+  `claude/happy-franklin-959xf9`; traced + reproduced via the flaky test). `Editor.tsx::adoptLook` (the
+  v0.109.20 "adopt the compared look while keeping the current crop" fix) computed the adopted geometry from
+  `baseGeometryOps`, which is derived from the **debounced** recipe (`dRecipe`, lagging the live recipe by
+  `debounceMs`) — while its own confirm gate reads the **live** `ops`. So in the brief window right after the
+  saved recipe loads (or a crop changes), a user who runs Compare-a-look → Switch fast enough adopts with a
+  *stale, often empty* geometry and silently loses their crop — the exact WYSIWYG loss v0.109.20 exists to
+  prevent. Steady-state (after the debounce settles) the two are equal, so the common case was unaffected,
+  which is why it only surfaced as a **flaky frontend test** (`Editor.test.tsx` "preserves the current crop
+  when adopting the compared look") that passed in isolation but failed ~1-in-3 under full-suite CPU-starved
+  load, where the debounce timing shifts. Fix: `adoptLook` now reads the geometry from the live `ops`
+  (`ops.filter(enabled && id.startsWith("geometry."))`), matching its confirm gate — the adopt captures the
+  crop that's actually in the recipe regardless of the debounce. Frontend-only, additive, no schema/API change.
+  The regression test was also hardened to seed the recipe (assert the Crop chip renders) before driving the
+  compare flow. `tsc` clean, full `vitest` suite green across repeated full-suite runs (was intermittently red),
+  `vite build` succeeds. Found while getting main's CI green after the v0.109.22 merge exposed the flake.
+
 - ~~**STF `autostretch` was not hot-pixel-robust — a single un-rejected hot/cosmic pixel darkened (and, at
   the extreme, blacked out) the whole picture.**~~ — **FIXED v0.109.22** (Builder 2026-07-12, branch
   `claude/happy-franklin-959xf9`; traced + reproduced + regression-tested). `render/thumbnail.py::autostretch`

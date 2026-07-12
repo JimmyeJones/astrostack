@@ -843,7 +843,14 @@ export function EditorView() {
       + `${ops.length}-operation edit (Undo to revert).`)) {
       return;
     }
-    const next = lookCompareOps(lookSel.ops, baseGeometryOps);
+    // Read the geometry from the *live* recipe (`ops`), not the debounced
+    // `baseGeometryOps` which lags it by `debounceMs`: an adopt in the brief window
+    // right after the recipe loads or a crop changes would otherwise capture a stale
+    // (often empty) geometry and silently drop the user's crop — the very WYSIWYG
+    // loss this adopt path exists to prevent (the confirm gate above already reads
+    // live `ops`, so this makes the two consistent). Steady-state the two are equal.
+    const liveGeometry = ops.filter((o) => o.enabled && o.id.startsWith("geometry."));
+    const next = lookCompareOps(lookSel.ops, liveGeometry);
     setLookSplit(false);
     setOps(() => next);
     notifications.show({
