@@ -309,9 +309,19 @@ def autostretch(
         return np.zeros_like(np.nan_to_num(img))
 
     # Normalize the *whole image* to 0..1 first — keeps per-channel scales
-    # intact relative to each other. Use nan-aware min/max over covered pixels.
+    # intact relative to each other. Use a robust high percentile rather than
+    # the raw max for the top of the range: a single surviving hot/cosmic pixel
+    # or bright column that sigma-clip didn't reject would otherwise inflate
+    # `hi`, compress the real sky median toward 0, and — once the MTF's midtone
+    # clamp (`m` clamped to [1e-3, 1-1e-3]) is hit — crush the whole picture to
+    # near-black. The bright star cores still saturate to white via the final
+    # `np.clip(..., 0, 1)`. This mirrors the 99.5th-percentile scaling already
+    # in the sibling `asinh_stretch` (and edit/ops/detail.py), added there for
+    # exactly the same reason ("a single hot star sets max(), crushing the sky").
     lo = float(np.nanmin(img))
-    hi = float(np.nanmax(img))
+    hi = float(np.nanpercentile(img, 99.5))
+    if not np.isfinite(hi) or hi <= lo:
+        hi = float(np.nanmax(img))          # degenerate/near-flat image
     if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
         return np.zeros_like(np.nan_to_num(img))
     img = (img - lo) / (hi - lo)
