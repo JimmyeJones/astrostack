@@ -47,6 +47,25 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**`auto:streak` rejection not self-healed on a clean re-QC — a frame the streak detector
+  previously auto-rejected stayed rejected (with a contradictory `streak_detected=False`) even when a full
+  re-QC found no streak, silently keeping good data out of the stack.**~~ — **FIXED v0.109.26** (Builder
+  2026-07-12, branch `claude/happy-franklin-bmloov`; traced + reproduced + regression-tested).
+  `qc/runner.py::apply_qc_result_to_db` clears a stale `qc_error` reject reason when QC later succeeds, but had
+  **no equivalent heal for `auto:streak`**: a frame rejected `auto:streak`, then re-QC'd with
+  `streak_detected=False` (a borderline detection that no longer fires — compounded by the now-fixed streak
+  non-determinism — or a detector/parameter change between versions, reachable via a manual full re-QC
+  `only_new=False`), ended up `accept=False, reject_reason="auto:streak", streak_detected=False` — an
+  internally contradictory record that silently keeps a now-clean frame out of the stack, whereas the
+  `qc_error` path in the same function re-accepts. Fix: add a sibling `elif` that un-rejects an `auto:streak`
+  frame on a clean, non-override re-QC (`accept=True`, `reject_reason=None`), mirroring the `qc_error` heal and
+  `reconcile_streak_rejections`' un-reject-only contract. Reproduced across four cases; regression
+  `tests/test_qc_streak_heal.py` covers heal-on-clean-reqc (fails-before/passes-after) **and** the three
+  must-not-touch guards (user override kept, still-streaked stays rejected, a non-streak `manual` reason left
+  alone). Additive, only ever *un*-rejects an auto decision, never touches a user override or a non-streak
+  reason; no config/schema/API change. Found by a fresh-angle adversarial qc/solve audit.
+  (Correctness/data-retention — image-quality/autonomy.)
+
 - ~~**Non-deterministic `streak_count` — the QC streak detector's Hough transform was unseeded, so
   re-QC'ing the same frame stored a different count each time (breaks QC idempotency; can flip a marginal
   `streak_detected`).**~~ — **FIXED v0.109.25** (Builder 2026-07-12, branch `claude/happy-franklin-bmloov`;
@@ -3311,6 +3330,11 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.109.26** — Correctness/data-retention (image-quality/autonomy; Builder 2026-07-12; found by an
+  adversarial qc/solve audit). `qc/runner.py::apply_qc_result_to_db` now self-heals an `auto:streak`
+  rejection on a clean, non-override re-QC (mirroring the existing `qc_error` heal), so a frame that's no
+  longer a streak isn't silently kept out of the stack with a contradictory record. Regression
+  `tests/test_qc_streak_heal.py` (heal + three must-not-touch guards).
 - **v0.109.25** — Determinism/idempotency (image-quality/autonomy; Builder 2026-07-12; found by an
   adversarial qc/solve audit). Seeded the QC streak detector's `probabilistic_hough_line`
   (`qc/streaks.py`) so `streak_count` (stored to the DB) no longer varies run-to-run on re-QC — restoring QC
