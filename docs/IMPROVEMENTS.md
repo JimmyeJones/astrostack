@@ -2943,6 +2943,17 @@ problems. Dogfood it every big-picture run and fix root causes.
   completeness), `tests/webapp/test_target_identify.py` (3, endpoint incl. null + 404), and
   `Target.test.tsx` (`describeObject` helper + card renders-on-match / hidden-on-no-match). tsc + full
   vitest (731) + vite build all green. *(Scout-filed 2026-07-12; S–M, friendliness — PRIORITY 3.)*
+  - **Follow-up slice (Builder-spotted while shipping v0.110.0; S, friendliness):** the identify endpoint +
+    `objectinfo.identify_object()` + the `describeObject` helper are generic and page-agnostic — reuse the
+    exact same card on the **History/result page** and the **editor** (where a beginner is admiring the
+    finished picture and most wants "what is this?"), not just the Target page. Pure-frontend once the
+    endpoint exists (fetch `GET /api/targets/{safe}/identify`, render the shared card); no backend change.
+    A later, larger slice could add an optional one-line "what it is" blurb field to the catalog JSON for the
+    most-popular targets (absent it, type + constellation already read well).
+  - **NOTE for the Scout (dedup):** the "Share image / Share card" feature is filed **twice** in "Features
+    that serve real workflows" (the "Share card" entry near the top of that list and the "Share this image"
+    entry lower down) — near-identical scope. Worth collapsing into one entry so a Builder doesn't half-build
+    it from two descriptions.
 - **⭐ OWNER-REQUESTED — "Tonight" night planner: rank the best targets to shoot
   tonight, showing what you've already captured vs. what you haven't.** A
   pre-capture planning view that complements the post-capture stack/edit pipeline:
