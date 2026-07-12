@@ -333,6 +333,16 @@ def submit_process_target(settings: Settings, jm: JobManager, safe: str) -> Job:
             summary["stack"] = _stack_target(
                 settings, jm, job, lib, safe,
                 auto_bind_calibration=settings.auto_bind_calibration)
+            if summary["stack"].get("cancelled"):
+                # Cancelled *during* the stack: no run was written. Surface the
+                # cancellation at the top level (mirroring submit_stack /
+                # reprocess_all) so JobMan._run's ``engine_cancelled`` check
+                # classifies the job 'cancelled' rather than 'done' — otherwise a
+                # user who cancels mid-stack sees a misleading "done" with
+                # ``stacked:True``/``run_id:None`` on the Jobs page.
+                summary["cancelled"] = True
+                summary["stacked"] = False
+                return summary
             summary["stacked"] = True
             run_id = summary["stack"].get("run_id")
             if run_id is not None and not job.cancel_requested():

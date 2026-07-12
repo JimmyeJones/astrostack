@@ -1529,14 +1529,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   repairs a hot pixel *at* a coverage boundary using a median-fill neighbourhood, where the root
   function leaves it, so verify that edge doesn't matter on a real mosaic before simplifying). (S,
   editor/maintainability))_
-  _(Builder note 2026-07-11, found during the frontend editor-logic audit that shipped v0.109.6/v0.109.7:
+  _(~~Builder note 2026-07-11, found during the frontend editor-logic audit that shipped v0.109.6/v0.109.7:
   the editor's **histogram** query (`Editor.tsx` `hist = useQuery(["edit-hist", …])`) is **not** gated on
-  `seeded`, unlike the `preview` query right above it. So on first open it fires once against the empty
-  pre-seed recipe before the saved recipe loads, then refetches against the real recipe — a wasted request
-  plus a brief pre-seed histogram/clipping-advisory flash. Harmless (the clipping warning is derived from
-  `hist.data`, so it self-corrects on the second fetch) and trivially fixable by adding `&& seeded` to the
-  `hist` `enabled` (mirroring `preview`), but too low-value to ship as its own churn commit — fold it in if a
-  future run is already wiring that query. (XS, editor/polish.))_
+  `seeded`, unlike the `preview` query right above it…~~ — **SHIPPED v0.109.19** (Builder 2026-07-12). The
+  `hist` query is now gated `!!opsSchema.data && !saved.isLoading && seeded`, mirroring the live preview, so it
+  no longer fires against the empty pre-seed recipe before the saved recipe loads — removing a wasted request
+  and the brief pre-seed histogram/clipping-advisory flash on first open (most visible on the walk-away
+  Process-target deep-link, which opens on a saved auto-edit recipe). Frontend-only, additive; no
+  backend/schema/API change. Regression `Editor.test.tsx::"does not fetch the histogram until the saved recipe
+  has loaded"` (holds the recipe query pending and asserts `getHistogram` isn't called until it resolves —
+  fails before / passes after). Upgraded from "too low-value to ship standalone" because it's on the PRIORITY-1
+  editor default surface and the north-star walk-away flow lands there with a saved recipe, so the flash is
+  genuinely user-visible there. (XS, editor/polish.))_
 - ~~**Data-driven "From your image" starting curve for the Curves op**~~ —
   **shipped v0.72.0** (see Shipped). The Curves op now has a header "Auto curve"
   button that drops a gentle, strictly-monotone midtone-lift curve derived from the
@@ -2771,15 +2775,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
-- **Minor state-classification tidy-up: a Process-target job cancelled *during the stack* is reported `done`, not
-  `cancelled`.** (S, webapp/tidiness — no data impact) *(Builder-audit-noted 2026-07-11.)* `webapp/pipeline.py::
-  submit_process_target` always returns a truthy summary, and `webapp/jobs.py`'s `engine_cancelled` check only
-  inspects a top-level `cancelled` key on the result — which `submit_stack`/`reprocess_all` set on a mid-stack
-  cancel but `process_target` never does. So cancelling a Process job while its stack step is running classifies it
-  `done` with `stacked:True`/`run_id:None` instead of `cancelled`. **No data impact** (no `stack_runs` row is
-  written, no crash-loop marker is set, nothing is stranded) — it's purely a cosmetic job-state label on the Jobs
-  page. If pursued: have `process_target` surface a `cancelled` flag on its summary (mirroring the two sibling job
-  bodies) so `engine_cancelled` classifies it correctly. Additive, testable in isolation.
+- ~~**Minor state-classification tidy-up: a Process-target job cancelled *during the stack* is reported `done`, not
+  `cancelled`.**~~ — **SHIPPED v0.109.18** (Builder 2026-07-11). `submit_process_target` now checks the stack
+  step's returned `cancelled` sentinel and, when set, surfaces `cancelled:True`/`stacked:False` at the top level of
+  its summary (mirroring `submit_stack`/`reprocess_all`) so `webapp/jobs.py`'s `engine_cancelled` check classifies
+  the job `cancelled` instead of `done` with a misleading `stacked:True`/`run_id:None`. Additive, no data impact (no
+  run is written on cancel), no schema/config/API-shape change. Regression test
+  `tests/webapp/test_pipeline.py::test_process_target_cancelled_during_stack_is_marked_cancelled` (monkeypatches the
+  stack step to honour a mid-stack cancel and return the sentinel; asserts the job ends `cancelled` with no run
+  recorded — fails before as `done` / passes after). *(Original write-up kept below for provenance.)*
+  `webapp/pipeline.py::submit_process_target` always returns a truthy summary, and `webapp/jobs.py`'s
+  `engine_cancelled` check only inspects a top-level `cancelled` key on the result — which `submit_stack`/
+  `reprocess_all` set on a mid-stack cancel but `process_target` never did. So cancelling a Process job while its
+  stack step is running classified it `done` with `stacked:True`/`run_id:None` instead of `cancelled`. No data
+  impact (no `stack_runs` row is written, no crash-loop marker is set, nothing is stranded) — a cosmetic job-state
+  label on the Jobs page.
 - **Latent robustness (not a live bug): `stacker.py`'s `coverage_min/max` diagnostic slice lacks its sibling's
   `ndim==3` guard.** *(Traced, Builder engine audit 2026-07-11.)* At ~L1307 `run_stack` computes
   `cov_2d = frame_cov if frame_cov is not None else coverage[..., 0]` **without** the `coverage.ndim == 3` guard
