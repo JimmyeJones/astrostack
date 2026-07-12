@@ -47,6 +47,31 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**STF `autostretch` was not hot-pixel-robust — a single un-rejected hot/cosmic pixel darkened (and, at
+  the extreme, blacked out) the whole picture.**~~ — **FIXED v0.109.22** (Builder 2026-07-12, branch
+  `claude/happy-franklin-959xf9`; traced + reproduced + regression-tested). `render/thumbnail.py::autostretch`
+  (the PixInsight-style STF stretch) normalised the whole image with `hi = float(np.nanmax(img))` before
+  fitting the per-channel MTF. A single surviving hot/cosmic pixel (or a stuck sensor pixel that survives
+  sigma-clip because it's in most subs) inflated `hi`, compressed the real sky median toward 0, and once the
+  MTF's midtone clamp (`m ∈ [1e-3, 1-1e-3]`) was hit the sky mapped far below `target_bg` — the whole image
+  rendered too dark, or black for an extreme outlier. The **sibling `asinh_stretch` was already fixed for
+  exactly this** (uses `nanpercentile(img, 99.5)` with a detailed comment), but `autostretch` never received
+  the same fix — and `autostretch` is now the more important of the two: since v0.109.0 it is the editor's
+  default no-recipe fallback stretch for **both the first-open preview and the export**, plus the STF thumbnail
+  and the `tone.stretch` `"stf"` mode, so this was a wrong *picture* on the PRIORITY-1 editor surface (preview
+  **and** export together, so no parity break). Fix: mirror the sibling — `hi = nanpercentile(img, 99.5)` with a
+  `nanmax` fallback for a degenerate/near-flat image. Measured on a realistic stack (brightest star core ~900×
+  the sky): the clean sky median actually lands *closer* to the 0.20 target (0.185 → 0.198, the self-correction
+  was already slightly degraded by the brightest star at `hi=max`), and it now holds rock-steady at ~0.198 with
+  a hot pixel 2×/20×/200× the brightest star instead of collapsing to 0.10/0.011/0.001; the only cost is the top
+  ~0.5% of pixels (bright star cores) saturating to pure white — the exact documented, accepted tradeoff already
+  in `asinh_stretch`/`detail.py`. Additive robustness change, no config/schema/API change. Regression
+  `tests/test_nan_aware_stretch.py::test_autostretch_is_hot_pixel_robust` (a hot pixel 2×/20×/200× the brightest
+  star moves the STF sky by <0.02 after / by 0.08–0.18 before). Found by an adversarial editor-ops/render audit;
+  **this corrects the 2026-07-11 audit note below that recorded `hi = nanmax` as "not a fragility"** — that probe
+  used only a mild 40× outlier where the MTF self-correction still holds; the clamps break it at the larger (and
+  realistic full-well) outlier magnitudes measured here.
+
 _Scout audit log 2026-07-10 (baseline green: 1031 passed / 2 skipped): adversarially
 re-traced the core stacking-engine combine path — `stack/accumulator.py` (WeightedSum /
 MinMaxReject / Welford, incl. the windowed `add_window` sub-views and the frame-count vs

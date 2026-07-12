@@ -58,6 +58,50 @@ def test_autostretch_without_nan_still_works():
     assert 0.0 <= out.min() and out.max() <= 1.0
 
 
+def test_autostretch_is_hot_pixel_robust():
+    """A single un-rejected hot/cosmic pixel must not darken the STF picture.
+
+    ``autostretch`` normalises the whole image by its top-of-range before
+    fitting the per-channel MTF. Using the raw ``nanmax`` let one surviving hot
+    pixel inflate that top, compress the sky median toward 0, and — once the
+    MTF midtone clamp is hit — crush the whole result to near-black (the sibling
+    ``asinh_stretch`` was already fixed for exactly this). Using a robust 99.5th
+    percentile keeps the sky anchored at ``target_bg`` regardless of the outlier.
+    """
+    rng = np.random.default_rng(7)
+    h, w = 400, 400
+    sky = 0.02
+    base = np.abs(rng.normal(sky, 0.002, size=(h, w))).astype(np.float32)
+    # A realistic bright-star population so hi/sky is already large, like real data.
+    for _ in range(60):
+        y = int(rng.integers(20, h - 20))
+        x = int(rng.integers(20, w - 20))
+        amp = float(10 ** rng.uniform(-1.0, 1.3)) * sky * 50.0
+        yy, xx = np.mgrid[y - 6:y + 7, x - 6:x + 7]
+        base[y - 6:y + 7, x - 6:x + 7] += (
+            amp * np.exp(-((yy - y) ** 2 + (xx - x) ** 2) / 4.0)
+        ).astype(np.float32)
+    rgb = np.stack([base, base, base], axis=-1)
+
+    sky_mask = base < (sky + 0.01)  # pixels that are genuinely background
+
+    def sky_median(out):
+        return float(np.median(out[..., 0][sky_mask]))
+
+    clean = sky_median(autostretch(rgb))
+    # Clean sky lands near the 0.20 target.
+    assert 0.12 < clean < 0.28, clean
+
+    # A hot pixel far brighter than the brightest star must not move the sky.
+    for mult in (2.0, 20.0, 200.0):
+        contaminated = rgb.copy()
+        contaminated[h // 2, w // 2, :] = float(base.max()) * mult
+        got = sky_median(autostretch(contaminated))
+        # Before the fix this collapsed toward 0 (0.10 → 0.011 → 0.001); after,
+        # it holds within a small tolerance of the clean sky level.
+        assert abs(got - clean) < 0.02, f"hot pixel {mult}x moved sky {clean:.3f}->{got:.3f}"
+
+
 def test_autostretch_all_nan_returns_zeros():
     img = np.full((20, 20, 3), np.nan, dtype=np.float32)
     out = autostretch(img)
