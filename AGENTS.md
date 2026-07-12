@@ -94,15 +94,38 @@ and the highest *marginal* value has moved to:
   2. **Autonomy, friendliness, and image quality (priorities 2–4).** Smarter,
      better-defaulted auto-stack / auto-calibrate / auto-grade; clearer screens,
      guidance, and empty/error states; and cleaner final images for the OSC
-     workflow. When picking from the Ideas list, favour these now.
-Do **not** invent new editor surface just to stay in priority 1 — a real
-stacking-engine bug or a genuine autonomy/friendliness/image-quality win now beats
-another editor tweak.
+     workflow.
+  3. **Genuinely new *beginner* features (owner-requested rebalance, 2026-07).**
+     The app is mature enough that it should also *grow*, not only harden — so on a
+     regular cadence, propose and ship **new user-facing capabilities that help a
+     beginner plan, get, understand, enjoy, and share a good image**: e.g. night
+     planning, target progress tracking, session/night views, sharing or exporting
+     a finished picture, guided end-to-end workflows, mobile-friendly capture-night
+     views, annotated results. Use §4 to invent them; hold each to the **beginner
+     bar** below. This is a real, standing allocation of effort — don't let the
+     fix/polish default crowd it out. The Scout files new feature ideas each run;
+     the Builder pulls one from the "Features that serve real workflows" list on a
+     regular cadence, not only when the bug list is empty.
 
-**Depth over surface.** The app already has *plenty* of features. Your default
-should be to **fix, polish, simplify, and deepen what exists — not add new
-surface.** A new button/page needs a much higher bar than making an existing
-thing genuinely good. When in doubt, improve the editor or remove friction.
+**Beginner bar (what a "new feature" must clear).** It qualifies only if a
+*non-expert Seestar OSC owner* would understand it and use it to get, enjoy, or
+share a better picture with less effort — and it ships with a sane default and a
+plain-language explanation. It is **not** pro/niche tooling: no
+mono/LRGB/channel-combine/narrowband, no PixInsight-style expert knobs, nothing
+that only helps advanced/filtered imagers (that stays deprioritised, below). When
+unsure, ask *"would this help me, the beginner, on my next clear night?"* — if not,
+don't build it. Still fix a real editor or stacking-engine bug first when one
+exists (correctness outranks new surface), but a genuine beginner feature now beats
+yet another marginal polish tweak.
+
+**Depth over surface — but the app should still grow (beginner features).** The app
+already has *plenty* of features, so a **pro/niche** addition needs a very high bar
+and usually shouldn't happen at all. But a **beginner-facing** feature that clears
+the bar above is now welcome on a regular cadence — deepening what exists *and*
+adding well-chosen new beginner capabilities are both valued. Prefer fixing/polish
+over a *marginal* new toggle; prefer a *real* new beginner capability over a
+marginal polish. When in doubt: improve the editor, remove friction, or ship a
+beginner feature — never add expert surface.
 
 **Deprioritised — do NOT invest more here** (these are niche for an OSC Seestar
 owner and have soaked up too much effort already): mono / LRGB / **channel
