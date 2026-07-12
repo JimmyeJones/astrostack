@@ -47,6 +47,22 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**Non-deterministic `streak_count` — the QC streak detector's Hough transform was unseeded, so
+  re-QC'ing the same frame stored a different count each time (breaks QC idempotency; can flip a marginal
+  `streak_detected`).**~~ — **FIXED v0.109.25** (Builder 2026-07-12, branch `claude/happy-franklin-bmloov`;
+  traced + reproduced + regression-tested). `qc/streaks.py::detect_streaks` fits line segments with
+  `skimage.transform.probabilistic_hough_line`, a Monte-Carlo transform, called with **no `rng`** — so
+  identical input yields a different segment count run-to-run. Reproduced on a real-shaped 540×960 streak: the
+  unseeded count varied `[6,7,6,6,6,5,6,9]` across repeats. `streak_count` is written to the project DB
+  (`qc/runner.py`), so a manual full re-QC (`only_new=False`) stored a different value each time — violating the
+  "compute once, stored" idempotency contract (`test_qc_idempotent`) — and on a *marginal* streak the
+  reject-driving `streak_detected` boolean could flip too. Fix: seed the transform (`rng=_HOUGH_SEED`, a new
+  module constant `=0`), so the same frame always yields the same result. Regression
+  `tests/test_qc_streak_determinism.py` runs `detect_streaks` 8× on a fixed streak and asserts identical
+  `(detected, count)` (fails-before with the unseeded drift / passes-after). Additive, no config/schema/API
+  change; only makes an existing computation deterministic. Found by a fresh-angle adversarial qc/solve audit.
+  (Correctness/idempotency — image-quality/autonomy.)
+
 - ~~**SECURITY: unauthenticated path traversal / arbitrary file read in the SPA static fallback
   (`webapp/main.py::spa`).**~~ — **FIXED v0.109.24** (Builder 2026-07-12, branch
   `claude/happy-franklin-bmloov`; traced + reproduced + regression-tested). The SPA fallback route
@@ -3295,6 +3311,10 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.109.25** — Determinism/idempotency (image-quality/autonomy; Builder 2026-07-12; found by an
+  adversarial qc/solve audit). Seeded the QC streak detector's `probabilistic_hough_line`
+  (`qc/streaks.py`) so `streak_count` (stored to the DB) no longer varies run-to-run on re-QC — restoring QC
+  idempotency and stabilising a marginal `streak_detected`. Regression `tests/test_qc_streak_determinism.py`.
 - **v0.109.24** — SECURITY: fixed an unauthenticated path-traversal / arbitrary-file-read in the SPA static
   fallback (`webapp/main.py::spa`). Confine the resolved served path to `STATIC_DIR`
   (`is_relative_to(static_root)`) so a percent-encoded `../` escape (`/%2e%2e/…/etc/passwd`) falls back to the
