@@ -120,6 +120,49 @@ def test_lrgb_black_but_covered_pixel_stays_black_not_nan():
     np.testing.assert_allclose(out[0, 0], 0.0)
 
 
+def test_lrgb_on_linear_background_subtracted_stack_keeps_a_quiet_background():
+    # Regression: the LRGB path is fed *linear, background-subtracted* master
+    # stacks (webapp._channel_combine loads raw master.fits, writes tiff_mode
+    # "linear"), whose sky sits at ~0 ± noise (signed). A raw ``L / luminance(rgb)``
+    # then divides by a tiny signed number and blows the background up into huge,
+    # half-sign-flipped colour speckle. The denominator floor must keep the
+    # background quiet (comparable to the input noise, not orders of magnitude
+    # above it) while leaving a bright star's colour untouched.
+    rng = np.random.default_rng(0)
+    h, w = 96, 96
+    sky_sigma = 4.0
+
+    def mono(star_amp: float) -> np.ndarray:
+        a = rng.normal(0.0, sky_sigma, (h, w)).astype(np.float32)  # sky ~0, signed
+        a[48:56, 48:56] += star_amp  # a bright star well above the noise
+        return a
+
+    r, g, b, lum = mono(2000.0), mono(3000.0), mono(1500.0), mono(4000.0)
+
+    rgb_only = combine_channels({"R": r, "G": g, "B": b})
+    lrgb = combine_channels({"R": r, "G": g, "B": b, "L": lum})
+
+    bg = np.ones((h, w), bool)
+    bg[44:60, 44:60] = False  # exclude the star neighbourhood
+    for c in range(3):
+        rgb_bg = rgb_only[..., c][bg]
+        lrgb_bg = lrgb[..., c][bg]
+        assert np.all(np.isfinite(lrgb_bg))
+        # The background must not explode: keep it within a small multiple of the
+        # plain-RGB background spread (before the fix this ratio was ~90×).
+        assert lrgb_bg.std() < 5.0 * rgb_bg.std(), (
+            f"channel {c} background std {lrgb_bg.std():.1f} vs "
+            f"RGB {rgb_bg.std():.1f} — LRGB blew up the background"
+        )
+        # And it must not run orders of magnitude above the true sky noise.
+        assert np.abs(lrgb_bg).max() < 100.0 * sky_sigma
+
+    # The star region (real signal) is retargeted to L exactly as before, not lost.
+    star_lum = float(lum[52, 52])
+    from seestack.edit.registry import luminance as _lum
+    np.testing.assert_allclose(_lum(lrgb)[52, 52], star_lum, rtol=1e-3)
+
+
 def test_single_pixel_combine():
     # Degenerate 1×1 canvas must not crash any path.
     out = combine_channels({"R": np.array([[0.5]], np.float32),

@@ -21,6 +21,19 @@ from seestack.edit.registry import luminance
 
 CHANNELS = ("L", "R", "G", "B")
 
+# LRGB retargets luminance by scaling each pixel by ``L / luminance(rgb)``. That
+# ratio is only well-conditioned where the RGB luminance is a real positive
+# signal; on a *linear, background-subtracted* stack the sky sits at ~0 ± noise
+# (signed), so a raw ``L / cur`` divides by a tiny, arbitrarily-signed number and
+# the background explodes into huge, half-sign-flipped colour speckle (the classic
+# technique assumes a stretched, positive-pedestal domain). We floor the
+# denominator at ``_LUM_FLOOR_SIGMA`` times the RGB luminance's own robust
+# sky-noise scale so a near-zero/negative background pixel gets a bounded, positive
+# scale (background stays near-neutral and quiet) while any pixel with real signal
+# above the noise (``cur`` well above the floor) is scaled exactly as before.
+_LUM_FLOOR_SIGMA = 3.0
+_LUM_FLOOR_MIN = 1e-6
+
 
 def combine_channels(
     channels: dict[str, np.ndarray],
@@ -70,13 +83,28 @@ def combine_channels(
         # LRGB: keep RGB's colour ratios but set the luminance to L.
         lum_target = channels["L"] * w("L")
         cur = luminance(rgb)
+        # Floor the divisor at a robust multiple of the RGB luminance's own
+        # sky-noise scale so a near-zero/negative background pixel can't blow up or
+        # flip sign (see ``_LUM_FLOOR_SIGMA``). Real signal has ``cur`` well above
+        # the floor, so it is divided by ``cur`` unchanged; the floor only bites in
+        # the noise-dominated background. Robust MAD over the covered pixels, which
+        # on a background-dominated stack anchors to the sky.
+        finite = cur[np.isfinite(cur)]
+        if finite.size:
+            med = float(np.median(finite))
+            sky_sigma = 1.4826 * float(np.median(np.abs(finite - med)))
+        else:
+            sky_sigma = 0.0
+        floor = max(_LUM_FLOOR_SIGMA * sky_sigma, _LUM_FLOOR_MIN)
         with np.errstate(invalid="ignore", divide="ignore"):
-            scale = np.where(np.abs(cur) > 1e-6, lum_target / cur, 0.0)
+            scale = lum_target / np.maximum(cur, floor)
         # A pixel whose RGB luminance is NaN is uncovered in at least one colour
         # channel — its colour is undefined, so mark it fully uncovered (NaN)
-        # rather than letting scale=0 zero-out the channels that *were* covered.
-        # This keeps the "NaN = no coverage" invariant clean at mosaic edges
-        # where per-filter footprints differ.
+        # rather than zeroing-out the channels that *were* covered. This keeps the
+        # "NaN = no coverage" invariant clean at mosaic edges where per-filter
+        # footprints differ. (``np.maximum`` already propagates the NaN into
+        # ``scale``; this makes the intent explicit and covers a NaN ``lum_target``
+        # over a covered pixel too.)
         scale = np.where(np.isnan(cur), np.nan, scale)
         rgb = rgb * scale[..., None]
 
