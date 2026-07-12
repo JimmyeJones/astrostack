@@ -112,6 +112,19 @@ def apply_qc_result_to_db(project, result: QCResult, *, auto_reject: bool = True
         # "couldn't be quality-checked". Only ever clears a QC-error reason —
         # a user/auto reject is left untouched.
         fields["reject_reason"] = None
+    elif prior_reason == "auto:streak" and not (
+        existing is not None and existing.user_override
+    ):
+        # A frame the streak detector previously auto-rejected is now clean
+        # (no streak on re-QC — e.g. a borderline detection that no longer
+        # fires, or a detector/parameter change between versions). Self-heal it
+        # the same way the ``qc_error`` branch above does, so a good frame isn't
+        # silently kept out of the stack with a contradictory
+        # ``accept=False`` / ``streak_detected=False`` record. Only ever
+        # *un*-rejects an auto:streak reason on a clean, non-override re-QC —
+        # mirrors ``reconcile_streak_rejections``' un-reject-only contract.
+        fields["accept"] = True
+        fields["reject_reason"] = None
     project.update_frame(result.frame_id, **fields)
 
 

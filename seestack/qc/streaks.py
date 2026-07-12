@@ -33,6 +33,13 @@ log = logging.getLogger(__name__)
 DEFAULT_MIN_LINE_LENGTH = 80
 DEFAULT_LINE_GAP = 8
 
+# ``probabilistic_hough_line`` is a Monte-Carlo transform; with no fixed seed it
+# returns a different set of line segments run-to-run, so ``streak_count`` (which
+# is written to the DB) would change every time the same frame is re-QC'd —
+# breaking QC idempotency (``test_qc_idempotent``) and, on a marginal streak, the
+# ``streak_detected`` boolean too. Seed it so QC is deterministic.
+_HOUGH_SEED = 0
+
 
 def detect_streaks(
     image: np.ndarray,
@@ -98,7 +105,8 @@ def detect_streaks(
     keep = dilation(keep, footprint=disk(1))
 
     lines = probabilistic_hough_line(
-        keep, threshold=10, line_length=min_line_length, line_gap=line_gap
+        keep, threshold=10, line_length=min_line_length, line_gap=line_gap,
+        rng=_HOUGH_SEED,
     )
     n_lines = len(lines)
     return n_lines > 0, n_lines

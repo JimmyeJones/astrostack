@@ -47,6 +47,67 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**`auto:streak` rejection not self-healed on a clean re-QC — a frame the streak detector
+  previously auto-rejected stayed rejected (with a contradictory `streak_detected=False`) even when a full
+  re-QC found no streak, silently keeping good data out of the stack.**~~ — **FIXED v0.109.26** (Builder
+  2026-07-12, branch `claude/happy-franklin-bmloov`; traced + reproduced + regression-tested).
+  `qc/runner.py::apply_qc_result_to_db` clears a stale `qc_error` reject reason when QC later succeeds, but had
+  **no equivalent heal for `auto:streak`**: a frame rejected `auto:streak`, then re-QC'd with
+  `streak_detected=False` (a borderline detection that no longer fires — compounded by the now-fixed streak
+  non-determinism — or a detector/parameter change between versions, reachable via a manual full re-QC
+  `only_new=False`), ended up `accept=False, reject_reason="auto:streak", streak_detected=False` — an
+  internally contradictory record that silently keeps a now-clean frame out of the stack, whereas the
+  `qc_error` path in the same function re-accepts. Fix: add a sibling `elif` that un-rejects an `auto:streak`
+  frame on a clean, non-override re-QC (`accept=True`, `reject_reason=None`), mirroring the `qc_error` heal and
+  `reconcile_streak_rejections`' un-reject-only contract. Reproduced across four cases; regression
+  `tests/test_qc_streak_heal.py` covers heal-on-clean-reqc (fails-before/passes-after) **and** the three
+  must-not-touch guards (user override kept, still-streaked stays rejected, a non-streak `manual` reason left
+  alone). Additive, only ever *un*-rejects an auto decision, never touches a user override or a non-streak
+  reason; no config/schema/API change. Found by a fresh-angle adversarial qc/solve audit.
+  (Correctness/data-retention — image-quality/autonomy.)
+
+- ~~**Non-deterministic `streak_count` — the QC streak detector's Hough transform was unseeded, so
+  re-QC'ing the same frame stored a different count each time (breaks QC idempotency; can flip a marginal
+  `streak_detected`).**~~ — **FIXED v0.109.25** (Builder 2026-07-12, branch `claude/happy-franklin-bmloov`;
+  traced + reproduced + regression-tested). `qc/streaks.py::detect_streaks` fits line segments with
+  `skimage.transform.probabilistic_hough_line`, a Monte-Carlo transform, called with **no `rng`** — so
+  identical input yields a different segment count run-to-run. Reproduced on a real-shaped 540×960 streak: the
+  unseeded count varied `[6,7,6,6,6,5,6,9]` across repeats. `streak_count` is written to the project DB
+  (`qc/runner.py`), so a manual full re-QC (`only_new=False`) stored a different value each time — violating the
+  "compute once, stored" idempotency contract (`test_qc_idempotent`) — and on a *marginal* streak the
+  reject-driving `streak_detected` boolean could flip too. Fix: seed the transform (`rng=_HOUGH_SEED`, a new
+  module constant `=0`), so the same frame always yields the same result. Regression
+  `tests/test_qc_streak_determinism.py` runs `detect_streaks` 8× on a fixed streak and asserts identical
+  `(detected, count)` (fails-before with the unseeded drift / passes-after). Additive, no config/schema/API
+  change; only makes an existing computation deterministic. Found by a fresh-angle adversarial qc/solve audit.
+  (Correctness/idempotency — image-quality/autonomy.)
+
+- ~~**SECURITY: unauthenticated path traversal / arbitrary file read in the SPA static fallback
+  (`webapp/main.py::spa`).**~~ — **FIXED v0.109.24** (Builder 2026-07-12, branch
+  `claude/happy-franklin-bmloov`; traced + reproduced + regression-tested). The SPA fallback route
+  `@app.get("/{full_path:path}")` built the served file as `candidate = STATIC_DIR / full_path` with
+  **no confinement to the static root**, then served it via `FileResponse` whenever `candidate.is_file()`.
+  Starlette decodes percent-encoded `../` (`%2e%2e`) into the `full_path` path parameter *after* routing
+  (browsers/httpx leave `%2e%2e` literal, so it isn't URL-normalised away), so an unauthenticated
+  `GET /%2e%2e/%2e%2e/%2e%2e/%2e%2e/%2e%2e/etc/passwd` (or `/%2e%2e/SECRET.txt`) escaped `STATIC_DIR` and
+  streamed **any file the process could read** — `state/config.json` (which holds `auth_password_hash`/
+  `auth_salt`), source, SSH keys, `/etc/passwd`. **Unauthenticated in the default deployment**: auth ships
+  **off** (`auth_password_hash=""`), and the auth-gate middleware is the only other gate. Reproduced against
+  a faithful copy of the production static tree: `GET /%2e%2e/SECRET.txt` → `200` + the out-of-root file
+  body. **Why it was never caught:** the route is only registered when `webapp/static` exists — i.e. the
+  production Docker image (`docker/Dockerfile` builds the SPA into `webapp/static/`); the dev/test tree has
+  no `static` dir, so `_mount_spa` installs the harmless placeholder route instead and the vulnerable branch
+  was never exercised by any test, and a numeric/engine audit never touches this seam. Fix: confine the
+  resolved candidate to the static root — `candidate = (STATIC_DIR / full_path).resolve()`, serve only when
+  `candidate.is_relative_to(static_root) and candidate.is_file()`, else fall through to the SPA shell (same
+  as any unknown client route). The sibling `/assets` mount uses Starlette `StaticFiles`, which already has
+  its own traversal guard (404s the escape) — only this hand-rolled fallback was affected. Regression
+  `tests/webapp/test_spa_static.py` mounts `_mount_spa` over a temp production-shaped static tree with a
+  secret file outside it and pins the contract (traversal → SPA shell, never the secret; legit assets + SPA
+  routes still serve; the `/assets` mount also non-leaking). Fails-before (leaks `SECRET.txt` / `etc/passwd`)
+  / passes-after. Additive, no config/schema/API-shape change, no behaviour change for any legitimate request.
+  Found by a fresh-angle adversarial webapp/router security audit. (Security/correctness — data-exposure.)
+
 - ~~**Editor "Switch to this look" could drop the user's crop when adopted quickly after load — a
   debounce-window WYSIWYG race (also a flaky CI test).**~~ — **FIXED v0.109.23** (Builder 2026-07-12, branch
   `claude/happy-franklin-959xf9`; traced + reproduced via the flaky test). `Editor.tsx::adoptLook` (the
@@ -3291,6 +3352,21 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.109.26** — Correctness/data-retention (image-quality/autonomy; Builder 2026-07-12; found by an
+  adversarial qc/solve audit). `qc/runner.py::apply_qc_result_to_db` now self-heals an `auto:streak`
+  rejection on a clean, non-override re-QC (mirroring the existing `qc_error` heal), so a frame that's no
+  longer a streak isn't silently kept out of the stack with a contradictory record. Regression
+  `tests/test_qc_streak_heal.py` (heal + three must-not-touch guards).
+- **v0.109.25** — Determinism/idempotency (image-quality/autonomy; Builder 2026-07-12; found by an
+  adversarial qc/solve audit). Seeded the QC streak detector's `probabilistic_hough_line`
+  (`qc/streaks.py`) so `streak_count` (stored to the DB) no longer varies run-to-run on re-QC — restoring QC
+  idempotency and stabilising a marginal `streak_detected`. Regression `tests/test_qc_streak_determinism.py`.
+- **v0.109.24** — SECURITY: fixed an unauthenticated path-traversal / arbitrary-file-read in the SPA static
+  fallback (`webapp/main.py::spa`). Confine the resolved served path to `STATIC_DIR`
+  (`is_relative_to(static_root)`) so a percent-encoded `../` escape (`/%2e%2e/…/etc/passwd`) falls back to the
+  SPA shell instead of streaming out-of-root files. Only the production Docker image (which builds `webapp/
+  static/`) was exposed; auth ships off by default. Regression `tests/webapp/test_spa_static.py`
+  (fails-before/passes-after). Found by a fresh-angle adversarial webapp security audit. (Builder 2026-07-12.)
 - **v0.109.17** — Data-integrity bug (autonomy/image-quality; Builder 2026-07-11; found + reproduced by an
   adversarial webapp-orchestration audit). **Calibration master ids (and their `{kind}_{id}.fits` filenames)
   were reused after deleting the newest master**, so a stack run's persisted `dark_path`/`flat_path` could

@@ -201,12 +201,23 @@ def _mount_spa(app: FastAPI) -> None:
 
     app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
     index = STATIC_DIR / "index.html"
+    static_root = STATIC_DIR.resolve()
 
     @app.get("/{full_path:path}")
     def spa(full_path: str):  # noqa: ANN202
         # API routes are already matched above; anything else → the SPA shell.
-        candidate = STATIC_DIR / full_path
-        if full_path and candidate.is_file():
+        # Confine the resolved candidate to the static root: Starlette decodes
+        # percent-encoded "../" (``%2e%2e``) into ``full_path`` *after* routing,
+        # so without this an unauthenticated request could escape STATIC_DIR and
+        # read arbitrary files (e.g. ``/%2e%2e/%2e%2e/etc/passwd``). A path that
+        # escapes the root falls through to the SPA shell, same as any unknown
+        # client route.
+        candidate = (STATIC_DIR / full_path).resolve()
+        if (
+            full_path
+            and candidate.is_relative_to(static_root)
+            and candidate.is_file()
+        ):
             return FileResponse(candidate)
         return FileResponse(index)
 
