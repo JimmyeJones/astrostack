@@ -47,6 +47,32 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**SECURITY: unauthenticated path traversal / arbitrary file read in the SPA static fallback
+  (`webapp/main.py::spa`).**~~ — **FIXED v0.109.24** (Builder 2026-07-12, branch
+  `claude/happy-franklin-bmloov`; traced + reproduced + regression-tested). The SPA fallback route
+  `@app.get("/{full_path:path}")` built the served file as `candidate = STATIC_DIR / full_path` with
+  **no confinement to the static root**, then served it via `FileResponse` whenever `candidate.is_file()`.
+  Starlette decodes percent-encoded `../` (`%2e%2e`) into the `full_path` path parameter *after* routing
+  (browsers/httpx leave `%2e%2e` literal, so it isn't URL-normalised away), so an unauthenticated
+  `GET /%2e%2e/%2e%2e/%2e%2e/%2e%2e/%2e%2e/etc/passwd` (or `/%2e%2e/SECRET.txt`) escaped `STATIC_DIR` and
+  streamed **any file the process could read** — `state/config.json` (which holds `auth_password_hash`/
+  `auth_salt`), source, SSH keys, `/etc/passwd`. **Unauthenticated in the default deployment**: auth ships
+  **off** (`auth_password_hash=""`), and the auth-gate middleware is the only other gate. Reproduced against
+  a faithful copy of the production static tree: `GET /%2e%2e/SECRET.txt` → `200` + the out-of-root file
+  body. **Why it was never caught:** the route is only registered when `webapp/static` exists — i.e. the
+  production Docker image (`docker/Dockerfile` builds the SPA into `webapp/static/`); the dev/test tree has
+  no `static` dir, so `_mount_spa` installs the harmless placeholder route instead and the vulnerable branch
+  was never exercised by any test, and a numeric/engine audit never touches this seam. Fix: confine the
+  resolved candidate to the static root — `candidate = (STATIC_DIR / full_path).resolve()`, serve only when
+  `candidate.is_relative_to(static_root) and candidate.is_file()`, else fall through to the SPA shell (same
+  as any unknown client route). The sibling `/assets` mount uses Starlette `StaticFiles`, which already has
+  its own traversal guard (404s the escape) — only this hand-rolled fallback was affected. Regression
+  `tests/webapp/test_spa_static.py` mounts `_mount_spa` over a temp production-shaped static tree with a
+  secret file outside it and pins the contract (traversal → SPA shell, never the secret; legit assets + SPA
+  routes still serve; the `/assets` mount also non-leaking). Fails-before (leaks `SECRET.txt` / `etc/passwd`)
+  / passes-after. Additive, no config/schema/API-shape change, no behaviour change for any legitimate request.
+  Found by a fresh-angle adversarial webapp/router security audit. (Security/correctness — data-exposure.)
+
 - ~~**Editor "Switch to this look" could drop the user's crop when adopted quickly after load — a
   debounce-window WYSIWYG race (also a flaky CI test).**~~ — **FIXED v0.109.23** (Builder 2026-07-12, branch
   `claude/happy-franklin-959xf9`; traced + reproduced via the flaky test). `Editor.tsx::adoptLook` (the
@@ -3269,6 +3295,12 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.109.24** — SECURITY: fixed an unauthenticated path-traversal / arbitrary-file-read in the SPA static
+  fallback (`webapp/main.py::spa`). Confine the resolved served path to `STATIC_DIR`
+  (`is_relative_to(static_root)`) so a percent-encoded `../` escape (`/%2e%2e/…/etc/passwd`) falls back to the
+  SPA shell instead of streaming out-of-root files. Only the production Docker image (which builds `webapp/
+  static/`) was exposed; auth ships off by default. Regression `tests/webapp/test_spa_static.py`
+  (fails-before/passes-after). Found by a fresh-angle adversarial webapp security audit. (Builder 2026-07-12.)
 - **v0.109.17** — Data-integrity bug (autonomy/image-quality; Builder 2026-07-11; found + reproduced by an
   adversarial webapp-orchestration audit). **Calibration master ids (and their `{kind}_{id}.fits` filenames)
   were reused after deleting the newest master**, so a stack run's persisted `dark_path`/`flat_path` could
