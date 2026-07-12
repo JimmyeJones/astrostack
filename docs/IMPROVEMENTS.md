@@ -1136,6 +1136,36 @@ the real webapp stack→edit path.)_
   matches its own 3-channel expansion). Additive, no schema/config/API change; found by an adversarial audit
   of the render/post numeric paths.
 
+_(Scout QA audit 2026-07-12 (v0.110.0 baseline, suite green): led the rotation with a fresh adversarial
+re-read of the **stacking engine + calibration core at the current HEAD**, deliberately re-reading the files
+that have *changed* since the last clean audit rather than trusting a stale pass — `stack/accumulator.py`
+(the three accumulators' NaN=coverage + the `frame_coverage` honest-count plane), `stack/weighting.py` (now
+guarding a non-positive per-frame sky, v0.103.21), `bg/coverage_leveling.py` (now clamping the cross-level
+smoothing to the measured-offset envelope so a gapped overlap level can't get a seam extrapolated onto it,
+v0.108.2), `calibrate/masters.py` (the rewritten **iterated** `_sigma_clip_mean` + the `mad==0 → tol=0`
+zero-MAD-spike fix, v0.103.22/v0.109.1), the newest engine module `stack/pointings.py` (the mixed-pointing
+union-find guard, v0.109.16), and the v0.99.8 sub-pixel-refine coverage-ring fix in `stack/align.py`. Traced
+each adversarially for wrong-result edges. **No reachable image-corruption bug found**, consistent with the
+long clean-audit history: (1) the iterated master clip converges monotonically (kept set only shrinks) and
+its `mad==0 → tol=0` branch correctly degrades a quantised-frame pixel to the robust median while still
+rejecting a minority spike — verified the pathological [100,100,100,100,5000] and legit-read-noise
+[100,101,100,…] cases by hand; (2) the coverage-leveling envelope clamp is a no-op on a contiguous
+interpolating fit and only bounds the gapped extrapolation, and every subtraction stays NaN-preserving
+(region masks require `finite`); (3) `detect_mixed_pointings` is conservative-and-safe — gated at ≥10 solved
+frames, only flags ≥2 clusters each ≥5 frames, single-linkage keys on the *gap* so an arbitrarily-large
+contiguous mosaic stays one cluster, and it's off-by-default and only ever *skips* a stack (a false positive
+refuses, never corrupts); (4) the v0.99.8 subpixel-ring fix holds — `_align_for_stack` discards `win_valid`
+and every downstream accumulator recomputes `valid = isfinite(win_rgb)`, so the order-1 NaN ring is respected
+without a stale mask. **Also re-verified the manual Stack form already surfaces the mixed-pointing warning**
+(`Stack.tsx:664`, not just the unattended chains) — so that friendliness gap is closed. One observation
+examined and **dismissed as a documented design choice, not a bug**: on a **drizzle + quality-weighted** stack
+`coverage_min/max` reads the Σ-weights map (drizzle leaves `frame_cov=None`), so the reported "frames per
+pixel" is weight-scaled — but drizzle coverage is inherently a kernel-weighted footprint sum (not an integer
+frame count) even unweighted, and the v0.99.6 fix explicitly left drizzle on the weight-map fallback, so this
+is expected, not the v0.99.6 bug re-opened. Filed one beginner feature (per-target integration goal /
+"is it enough?") and one friendliness idea (post-hoc "N subs didn't align" note on a silently-half-complete
+stack). No code shipped — an idle run leaving main green (AGENTS.md §2).)_
+
 _(Scout QA audit 2026-07-10 (v0.103.8 baseline, suite green **1000 passed / 2 skipped**): led the rotation
 with a fresh adversarial re-read of the **stacking engine's final-image path** and the **newest calibration
 glue** — `stack/{weighting,photometric,reference,output,drizzle_path}.py`, `calibrate/apply.py`,
@@ -2374,6 +2404,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+- **NEW (Scout 2026-07-12) — post-hoc "N of your M subs didn't align" note on a silently
+  half-complete stack.** _(M, friendliness/trust — PRIORITY 3.)_ The mixed-pointing guard
+  (`stack/pointings.py`, v0.109.16) is **off by default**, and the manual Stack form only *warns
+  before* stacking. So a user who keeps the guard off — or stacks a folder that's mostly one target
+  plus a handful of stray/second-target subs — still gets a stack that silently dropped every
+  non-overlapping frame as an align failure, and the only trace is a raw count in the run Info panel.
+  The stacker already knows `n_frames_used` vs the candidate count (and `errors`/`excluded_frames`),
+  so after a stack completes, when a **material** fraction of accepted+solved subs didn't contribute
+  (e.g. ≥20% dropped, ≥N absolute), surface a plain-language note on the run / History card: *"Heads
+  up — 90 of your 240 solved subs didn't align into this stack. They may be a second target in the
+  folder, or badly trailed. Check the folder or turn on the mixed-pointing guard."* Closes the loop
+  for the common case the pre-stack guard can't (guard off, or a minority second pointing below the
+  bimodal threshold). Additive, read-only, derived from data the stacker already records; no schema
+  change if surfaced from the existing run row + errors. Pillar: trust/friendliness. Complements the
+  existing pre-stack warning rather than duplicating it (this fires *after*, on what actually happened).
 - ~~**Job-state honesty sweep: a cancelled long-running job should read "Cancelled", not "Done".**~~ —
   **SHIPPED v0.109.27–0.109.28** (Builder 2026-07-12, branch `claude/pensive-faraday-v8rvhn`). Audited every
   cancel-aware job body and made each surface a top-level `cancelled` sentinel at its actual cancel-driven
@@ -2912,6 +2957,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   was clamped or `notes` is missing).
 
 ### Features that serve real workflows
+- **NEW (Scout 2026-07-12) — "Is it enough yet?": a per-target integration goal + plain-language
+  readiness verdict.** _(M, autonomy/friendliness — PRIORITY 2/3; beginner bar: ✔ sane default per
+  object type, plain-language, answers a top beginner question with no expert knobs.)_ A beginner's
+  most common uncertainty on the stack→result path is *"do I have enough subs for a clean image, or
+  should I keep shooting this target?"* Today the app shows raw integration time (Target page, Tonight
+  "add more" rows) but never judges whether it's *enough* — so the user guesses. Add a small,
+  data-free heuristic that maps a target's total accepted integration time against a **sane suggested
+  goal by object type** (baked-in defaults, e.g. bright emission nebula ≈ 2 h, galaxy / faint nebula
+  ≈ 6 h, star cluster ≈ 1 h — pulled from the same catalog `type` the planner already buckets), and
+  renders a one-line verdict + a simple progress bar: *"1.8 h of ~4 h — a solid start; more time pulls
+  out fainter detail"* / *"3.2 h — plenty for a clean image of this bright target."* Reuse the
+  planner's `objectTypeBucket` for the goal lookup and the existing per-target integration total; the
+  goal is a **suggestion, not a gate** (never blocks stacking) and needs no config. Surface it on the
+  Target page and as a badge on the Tonight "add more to what you're shooting" rows so the planner can
+  say "you're basically done here — start something new instead." Slice-friendly: (a) the goal table +
+  pure `integrationReadiness(hours, type)` helper + Target-page line; (b) the Tonight-row badge.
+  Additive, offline, no schema/API change (goal defaults live in code; a future run could make them a
+  per-target override setting if asked). Distinct from the planner (which ranks *what* to shoot) and
+  the Share card (which exports a *finished* result) — this answers *"is this one done?"*
 - **NEW (Scout 2026-07-12) — "Share card": a one-click, social-ready export with an optional caption
   strip.** _(M, friendliness/workflow — PRIORITY 3; beginner bar: ✔ sane default, plain-language, helps
   a beginner *share* their result.)_ Today's export gives a 16-bit linear TIFF (looks dark on its own —
