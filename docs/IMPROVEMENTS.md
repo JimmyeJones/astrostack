@@ -47,6 +47,34 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- **A user-cancelled auto-ingest pipeline job is reported `done`, not `cancelled` (misleading green
+  "success" for a cancelled scan).** — _reproduced (Scout 2026-07-12, against current `origin/main`
+  v0.109.26)_. **Symptom:** cancelling the background auto-pipeline job (auto-ingest → QC/solve →
+  auto-stack) mid-run leaves the job in state `done`, indistinguishable from a fully-successful run,
+  so the History/Jobs UI shows a cancelled scan as if it completed. **Location:** the worker's
+  cancel-classification in `webapp/jobs.py::_run` (≈ lines 397–403) marks a job `cancelled` only when
+  the body returns falsy **or** a top-level `{"cancelled": True}` sentinel (`engine_cancelled`). But
+  `webapp/pipeline.py::_pipeline_body` breaks out of its QC/solve loop (≈ line 80) and its auto-stack
+  loop (≈ line 119/153) on `job.cancel_requested()` and then returns its **truthy** `summary` dict
+  (line 182) with **no `cancelled` key** — so `not completed` is False and `engine_cancelled` is False
+  → the worker falls through to `done`. (`submit_reprocess_all` / `submit_process_target` bodies embed
+  a nested `cancelled` in the *result* but likewise don't surface it as the top-level sentinel, so their
+  job *state* is `done` too — worth checking in the same fix.) **Repro (ran):** a `JobManager` job whose
+  cancel-aware body loops until `cancel_requested()` then returns `{"root":…, "targets":[], "scanned":0}`
+  (mirroring `_pipeline_body`); after `jm.cancel(id)` the final state is `done`, not `cancelled`
+  (`scratchpad/repro2.py`). **Severity:** broken-UX (low — cosmetic job-state mislabel; no data effect;
+  the auto-stack loop still aborts correctly and clears its crash-loop marker). **Fix sketch / caveat for
+  the Builder:** signal the abort precisely — set `summary["cancelled"] = True` **at each cancel-driven
+  `break`** (not a blanket `if job.cancel_requested()` at the return, which would mislabel a run that
+  happened to *finish* just as a late cancel arrived — the worker's documented philosophy is to keep a
+  late-cancel *finished* job as `done`). Add a regression test that a cancelled `_pipeline_body`-shaped
+  job lands in state `cancelled`. Additive, no schema/API change. _(Found by an adversarial
+  watcher/jobs audit; the same audit's two higher-severity candidates — an unguarded `_persist` killing
+  the worker thread, and un-normalised source-path dedup double-ingesting frames — were checked against
+  current `origin/main` and are **already fixed**: `_persist` swallows `sqlite3.Error`/serialisation
+  errors by design (jobs.py:210–258), and ingest/merge dedup on `os.path.realpath` via `_dedup_key`
+  (ingest.py:63). Not filed.)_
+
 - ~~**`auto:streak` rejection not self-healed on a clean re-QC — a frame the streak detector
   previously auto-rejected stayed rejected (with a contradictory `streak_detected=False`) even when a full
   re-QC found no streak, silently keeping good data out of the stack.**~~ — **FIXED v0.109.26** (Builder
@@ -150,6 +178,36 @@ when you take it.
   **this corrects the 2026-07-11 audit note below that recorded `hi = nanmax` as "not a fragility"** — that probe
   used only a mild 40× outlier where the MTF self-correction still holds; the clamps break it at the larger (and
   realistic full-well) outlier magnitudes measured here.
+
+_Scout audit log 2026-07-12 (baseline green on current `origin/main` v0.109.26: 978 passed / 2 skipped):
+led the rotation with the **stacking engine** per the owner's current focus #1, then fanned three
+adversarial breadth audits across the less-recently-covered subsystems. **(1) Stacking + calibration —
+traced clean by hand.** Re-read `stack/accumulator.py` (WeightedSum / Welford / **MinMaxReject** incl.
+the value-sum tie-safety of the k-trim and the count-band degrade schedule), `stack/drizzle_path.py`
+(two-pass κ-σ `clip_reference` var = E[v²]−E[v]², Bessel gate + `_MIN_REJECT_NEFF` +inf-tol,
+NaN-weight handling), `stack/align.py` (windowed reproject inset valid-mask, order-1 sub-pixel-shift
+NaN propagation on full + windowed paths), `stack/mosaic.py` (wrap-safe circular-mean outlier reject,
+px/MP caps), `stack/stacker.py` (κ-σ pass-1/pass-2 orchestration, `consume_clipped` keep-mask + tally,
+photometric-scale application `win_rgb *= scale` on the hot path), `stack/weighting.py` /
+`photometric.py` / `reference.py`, and `calibrate/apply.py` + `masters.py` (dark-XOR-bias, flat floor,
+exposure-scaled dark, additive migration). All held — divisor guards, NaN=coverage, robust-scale
+fallbacks intact — consistent with the mature audit history. Also spot-checked the autonomy hot path
+(`webapp/pipeline.py` auto-stack crash-loop guard + `_auto_stack_frame_count`). **(2) Three parallel
+subagent audits (qc/solve; io ingest; watcher/jobs).** `qc/*` + `solve/*` traced **clean** (green-site
+extraction per Bayer pattern, top-k flux, modified z-score grading, ASTAP hint conventions
+`-ra`=hours / `-spd`=dec+90, the unsolved-but-`accept=True` behaviour is documented + stacking selects
+on `accept` only). The other two agents each surfaced one real defect **but had been launched against a
+stale local checkout (v0.99.8, before the branch was re-based onto the fresh `origin/main` v0.109.26)** —
+and **both are already fixed** on current main: the worker-thread-death-on-`_persist` case (now swallowed
+by design, jobs.py:210–258) and the un-normalised source-path double-ingest (now `os.path.realpath`
+dedup via `_dedup_key`, ingest.py:63). **One survivor filed** to Bugs (verified against current main):
+the cancel-aware pipeline job reported `done` not `cancelled` (low-severity UX). No stacking-engine bug
+found — the engine is genuinely mature. **Lesson recorded for future runs:** re-base the working branch
+onto the freshly-fetched `origin/main` **before** spawning audit agents, and re-verify every agent
+finding against current main (the container can start with a stale `origin/main` ref). **Next rotation
+(not re-covered from a fresh angle this run):** `webapp/render/*` + the storage/gallery routers, and a
+real-data pass on the two open Image-quality Scout items (Auto denoise↔sharpen crossfade vs. gradient;
+Auto SCNR on a truly-neutral background) which remain blocked on real Seestar stacks._
 
 _Builder audit log 2026-07-12 (baseline green: 1118 passed / 2 skipped): with both open Bugs entries
 REAL-data-gated (the dead SExtractor skew-fallback guard; the sky-atlas WCS rotation sign) and the Ideas
@@ -2325,6 +2383,17 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+- **NEW (Scout 2026-07-12) — Job-state honesty sweep: a cancelled long-running job should read
+  "Cancelled", not "Done".** _(S, friendliness/trust.)_ Generalises the filed Bugs entry (cancel-aware
+  `_pipeline_body` reports `done`). Audit every long-running job body — `_pipeline_body`, `submit_reprocess_all`,
+  `submit_process_target`, `submit_build_master`, export/render — so that a user cancel deterministically lands
+  the **job state** at `cancelled` (they all currently rely on `webapp/jobs.py::_run`'s falsy-or-`{"cancelled":True}`
+  sentinel, and several return a truthy summary with the cancel flag nested in the *result*, not at top level).
+  Then surface it in the Jobs/History UI as a plain "Cancelled — any partial work was kept" line so a beginner
+  who hits Stop isn't left staring at a green "Done" wondering whether it finished. Small, additive, high-trust;
+  each body already has the cancel signal, it just isn't propagated to the state consistently. Mark cancellation
+  at the actual cancel-driven `break`/return points (not a blanket end-of-body `cancel_requested()` check, which
+  can mislabel a run that *finished* just as a late cancel arrived).
 - ~~**Show total integration time on the History / Target card ("2,000 subs · 5.6 h total").**~~
   — **SHIPPED v0.104.1** (Builder 2026-07-10). On investigation the History Info panel *already*
   showed "Integration: 5.6 h · 2,000 subs" (`integration_s` from the `EXPTOTAL` FITS card, parsed by
@@ -2848,6 +2917,31 @@ problems. Dogfood it every big-picture run and fix root causes.
   was clamped or `notes` is missing).
 
 ### Features that serve real workflows
+- **NEW (Scout 2026-07-12) — "Share card": a one-click, social-ready export with an optional caption
+  strip.** _(M, friendliness/workflow — PRIORITY 3; beginner bar: ✔ sane default, plain-language, helps
+  a beginner *share* their result.)_ Today's export gives a 16-bit linear TIFF (looks dark on its own —
+  correct for re-processing, wrong for posting) or a bare PNG; neither is share-ready or labelled. Add a
+  **"Share image"** action that renders the *displayed* (already-stretched) result to a JPEG/PNG sized for
+  social (long edge ~2048), with an **optional, off-by-default** caption strip burned into a footer/corner:
+  target name · total integration (e.g. "3.2 h") · capture date · a small "AstroStack" wordmark — all pulled
+  from data we already have on the run (`_build_output_header_meta`: target, `n_frames`, integration_s,
+  date). Default = caption **off** (byte-for-byte a plain JPEG of the current view, so it's trivially
+  upgrade-safe); toggling it on composites a tasteful overlay. Pure server-side render from the exported
+  image + header — Pillow is already a dep, no new packages, no network. Additive endpoint + one editor
+  button. Why it fits: the whole point of the pipeline is a picture worth showing, and a beginner's very
+  next step after "it looks great" is "how do I post this?" — right now there's no good answer. Ship as one
+  slice (JPEG + optional caption); a later slice could offer a couple of caption placements/sizes.
+- **NEW (Scout 2026-07-12) — "What am I looking at?" object info card on the Target / result page.**
+  _(S–M, friendliness — PRIORITY 3; beginner bar: ✔ pure delight + orientation for a non-expert.)_ When a
+  target's name (or its plate-solved centre) matches the **bundled** deep-sky catalog (`data/messier.json`
+  + `data/deepsky_popular.json`, already loaded by `nightplan.load_catalog()`), show a small friendly card
+  next to the result: the object's common name, plain-language type ("barred spiral galaxy", not "SBbc"),
+  the constellation it's in, its catalog IDs (M / NGC / IC), and a one-line "what it is" blurb. Turns a bare
+  `M_31` folder name into context a beginner enjoys and learns from. Pure **offline** lookup over data we
+  already ship (a name-normalise + optional cone-match against the catalog's RA/Dec using the run's solved
+  centre); renders nothing when there's no match (no clutter, no guessing). Additive read-only endpoint +
+  a small card component. (A later slice could add a one-line blurb field to the catalog JSON for the
+  most-popular targets; absent it, type + constellation + IDs already read well.)
 - **⭐ OWNER-REQUESTED — "Tonight" night planner: rank the best targets to shoot
   tonight, showing what you've already captured vs. what you haven't.** A
   pre-capture planning view that complements the post-capture stack/edit pipeline:
