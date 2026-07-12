@@ -276,6 +276,39 @@ tidy-up; (b) the `background.level_coverage` dilation/heavy-stride parity nuance
 (measured-negligible). Next rotation (not re-covered this run): the `qc/`+`solve/` paths and `io/*` ingest/merge from
 a fresh angle, and a frontend `vitest`/`tsc` editor-route UX dogfood._
 
+_Builder audit log 2026-07-12 (baseline green: 1116 passed / 2 skipped Python, 726 passed / tsc clean frontend): with
+both open Bugs entries REAL-data-gated (dead SExtractor skew guard; sky-atlas WCS rotation sign — neither blind-fixable)
+and the Ideas backlog shipped / real-data-gated / owner-sign-off / explicitly self-flagged "only worth doing if a run is
+already in that file" (the `coverage_min/max` ndim guard, the stray `scale_dark_to_light` flag, the bulk denoise-strength
+nicety), spent the run on the §2 fresh-angle audit rather than manufacturing tidiness churn. Ran **three parallel
+adversarial audits**, each required to **reproduce** any suspected defect against the live code before filing, of the
+subsystems prior notes flagged as least-recently-covered: (1) the **`io/*` ingest/loader/merge/migration path**
+(`io/{scanner,ingest,merge,fits_loader,project,library}.py` + `coords.py`); (2) the **`qc/` + `solve/` paths**
+(`qc/{metrics,grading,streaks,runner}.py`, `solve/{astap,runner}.py`); and (3) the **webapp orchestration +
+upgrade-safety layer** (`webapp/{config,jobs,watcher,pipeline,calibration}.py` + routers). **All three traced clean,
+with runnable reproductions** (consistent with the ~20 prior clean audits): (1) `_migrate_schema` migrates a hand-built
+old DB at user_version 0/1/2/3/4/8 additively to v9 and stays usable; haversine target-match + `_median_radec` are
+wrap/pole-safe across the RA=0° seam; `_dedup_key` realpath-dedups symlinks/`./`-spellings/intra-batch dups and rescans
+are idempotent; malformed/empty/table-only/1-D/3-D FITS HDUs load without crashing and the normalized-convolution
+debayer keeps a constant frame exactly constant on all 4 CFA patterns incl. odd dimensions. (2) green-channel extraction
+is correct for RGGB/BGGR/GRBG/GBRG (float32-before-add prevents the uint16 overflow), top-k flux has no off-by-one,
+one-sided grading gates the correct tail with the MAD→meanAD→skip + `MAX_REJECT_FRACTION` rails, `reconcile_streak_
+rejections` fires on a strict majority (10/20 → 0, 11/20 → all), and the ASTAP solve-ladder short-circuits on a fatal
+setup error with correct `.ini`/`.wcs`/setup-error classification. (3) an old/partial `config.json` (removed fields +
+unknown keys + 6 simultaneously-invalid fields) loads with only the invalid fields reset (not wiped); `jobs.sqlite`
+migrates additively (adds `error_kind`, `running`/`queued` → `interrupted`, `done` history preserved); cancel-during-
+stack is classified `cancelled` on all four job shapes; the `StabilityTracker` debounce needs both quiet-period AND
+mtime-age and re-arms on change/disappearance; and **no router accepts a client calibration filesystem path** —
+`trigger_stack` pops raw `*_path` keys and resolves only master ids server-side, `_sanitize_patch`/`put_stack_defaults`
+strip them from settings PUT/import, and auth secrets are stripped from every settings GET/PUT/import/export. **Two
+already-known non-defects re-confirmed, not filed as new** (per §2, no manufacturing): the `jobs.py::_persist`
+non-JSON-serialisable-result guard is defensive-but-unreachable (every live job-result dict is plain primitives — the
+same disposition the 2026-07-11 note recorded), and the `make_safe_name` 64-char truncation collision needs
+unrealistic Seestar target names and causes no crash/data-loss (the documented safe-name-collision design class, not a
+distinct bug). No new verified bug filed — the io/loader/merge, qc/solve, and webapp orchestration/upgrade-safety paths
+all held. Next rotation (not re-covered this run): a frontend `vitest`/`tsc` editor-route UX dogfood (React/TS, distinct
+from the Python engine audits), and the `bg/*` + `edit/ops/*` numeric paths from a fresh angle._
+
 - ~~**Calibration master ids/filenames were reused after deleting the newest master — a stack run's persisted
   `dark_path`/`flat_path` then silently rebound to a *different* master's pixels, miscalibrating a walk-away
   Reprocess everything.**~~ — **FIXED v0.109.17** (Builder, 2026-07-11; traced + reproduced + regression-tested).
