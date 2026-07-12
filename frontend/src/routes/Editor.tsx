@@ -830,8 +830,12 @@ export function EditorView() {
   // Adopt the look currently being compared as the working recipe (an undoable
   // step, not persisted until Save) — closes the compare→adopt loop so a user who
   // prefers the compared look switches to it in one click. Replaces the whole
-  // pipeline, so confirm when that throws away a non-empty edit (mirrors applying
-  // a preset from the Presets menu).
+  // pipeline, so confirm when that throws away a non-empty edit. We adopt exactly
+  // what the split divider showed — `lookCompareOps(...)`, the look on the current
+  // edit's own framing (see `lookPreviewRecipe`) — so the adopted result matches
+  // the frame the user was just judging rather than silently dropping their crop /
+  // rotate / resize (WYSIWYG). With no geometry op in the current recipe this is
+  // the look's ops verbatim, exactly as before.
   const adoptLook = () => {
     if (!lookSel) return;
     if (ops.length && !window.confirm(
@@ -839,7 +843,7 @@ export function EditorView() {
       + `${ops.length}-operation edit (Undo to revert).`)) {
       return;
     }
-    const next = lookSel.ops;
+    const next = lookCompareOps(lookSel.ops, baseGeometryOps);
     setLookSplit(false);
     setOps(() => next);
     notifications.show({

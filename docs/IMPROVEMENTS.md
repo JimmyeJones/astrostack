@@ -309,6 +309,29 @@ distinct bug). No new verified bug filed — the io/loader/merge, qc/solve, and 
 all held. Next rotation (not re-covered this run): a frontend `vitest`/`tsc` editor-route UX dogfood (React/TS, distinct
 from the Python engine audits), and the `bg/*` + `edit/ops/*` numeric paths from a fresh angle._
 
+- ~~**LRGB channel-combine destroyed the background on linear stacks — the L-luminance replacement divided by a
+  near-zero *signed* RGB luminance, amplifying the sky ~90× into random half-sign-flipped colour speckle.**~~ —
+  **FIXED v0.109.21** (Builder, 2026-07-12; traced + reproduced + regression-tested). `stack/channel_combine.py`'s
+  LRGB path retargets luminance by scaling each pixel by `L / luminance(rgb)`, guarded only by `abs(cur) > 1e-6`
+  (catching exact zero). But `webapp/pipeline.py::_channel_combine` feeds it **linear, background-subtracted** master
+  stacks (loaded raw from `master.fits`, written `tiff_mode="linear"`), whose sky sits at ~0 ± noise (**signed**) —
+  so `L / cur` divides by a tiny signed number and the background (the majority of the image) explodes into huge,
+  ~half-sign-flipped colour speckle, while the star region (large positive luminance) is fine. The classic technique
+  assumes a stretched, positive-pedestal domain; every existing test used positive `[0,1]` values, so it was never
+  caught. **Reproduced:** four synthetic linear mono stacks (sky σ≈4, one bright star) → LRGB background std **87×**
+  the plain-RGB control (±14 700 ADU vs ±16), ~half the pixels sign-flipped. Fixed by flooring the divisor at a robust
+  multiple of the RGB luminance's own sky-noise scale (`_LUM_FLOOR_SIGMA=3 × MAD-σ`, min `1e-6`): a near-zero/negative
+  background pixel gets a bounded positive scale (background stays quiet/neutral — post-fix std **0.4×** the control)
+  while any pixel with real signal well above the noise divides by `cur` **exactly as before** (the star pixel is
+  byte-for-byte unchanged, luminance still retargeted to L). A no-op on positive-domain inputs (uniform/positive →
+  MAD-σ≈0 → floor `1e-6` ≤ `cur`), so all 13 existing tests pass byte-for-byte; NaN=coverage preserved. Regression
+  `tests/test_channel_combine.py::test_lrgb_on_linear_background_subtracted_stack_keeps_a_quiet_background` (linear
+  signed stacks → background std bounded to <5× the RGB control and the star's luminance preserved; fails before as
+  the background blows up / passes after). Additive, no schema/config/API change. *(Channel-combine is deprioritised
+  per §1, but this is an outright wrong-result data-integrity bug in existing functionality — the one exception §3
+  allows; found by a fresh-angle adversarial engine audit which otherwise traced weighting/photometric/reference/
+  drizzle/mosaic/calibrate/color-cal all clean.)*
+
 - ~~**Calibration master ids/filenames were reused after deleting the newest master — a stack run's persisted
   `dark_path`/`flat_path` then silently rebound to a *different* master's pixels, miscalibrating a walk-away
   Reprocess everything.**~~ — **FIXED v0.109.17** (Builder, 2026-07-11; traced + reproduced + regression-tested).
@@ -1552,6 +1575,21 @@ problems. Dogfood it every big-picture run and fix root causes.
 - **Editor bug hunt (ongoing)** — there are undocumented issues. Each big-picture
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
+  _(~~Builder note 2026-07-12, found in an adversarial frontend-editor-route audit: "Compare a
+  look" → "Switch to this look" (`adoptLook`) silently dropped the user's crop/geometry — it set
+  the look's **raw** ops, while the split preview the user was judging renders the look on the
+  current edit's framing via `lookCompareOps(lookSel.ops, baseGeometryOps)`. So a user who cropped,
+  compared a look, then switched to it got the **uncropped** frame — a different image than the
+  split they'd just evaluated (WYSIWYG violation on the PRIORITY-1 editor compare→adopt loop).~~ —
+  **SHIPPED v0.109.20** (Builder 2026-07-12). `adoptLook` now adopts exactly what the divider showed
+  — `lookCompareOps(lookSel.ops, baseGeometryOps)` (the look's tone/colour/detail on the current
+  recipe's enabled geometry ops) — so the adopted recipe renders identically to the compared split.
+  A no-op when the current recipe has no geometry op (the look's ops verbatim, exactly as before), so
+  the common case is byte-for-byte unchanged. Frontend-only, additive, one undoable step; no
+  backend/schema/API change. Regression `Editor.test.tsx::"preserves the current crop when adopting
+  the compared look (WYSIWYG)"` (crop in the recipe → compare a Curves-only look → Switch → assert
+  both Curves **and** Crop survive; fails before as the crop is dropped / passes after). (XS,
+  editor/consistency — PRIORITY 1.))_
   _(Builder note 2026-07-10: the `edit/ops/detail.py::_hot_pixels` NaN-fill/restore band-aid
   (the `_with_nan_filled` wrapper) is now **redundant** — v0.103.23 made
   `bg/hot_pixels.py::suppress_hot_cold_pixels` NaN-aware at the root, so the op no longer needs a

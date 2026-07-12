@@ -513,6 +513,46 @@ describe("EditorView", () => {
     expect(await screen.findByText("Curves")).toBeInTheDocument();
   });
 
+  it("preserves the current crop when adopting the compared look (WYSIWYG)", async () => {
+    mockEditorQueries();
+    // Current recipe carries an enabled crop; the "Compare a look" split renders the
+    // look on *this* framing (lookCompareOps appends the current geometry ops), so
+    // adopting the look must keep the crop — otherwise the adopted frame differs from
+    // the split the user was just judging.
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES, CROP]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [{ uid: "c1", id: "geometry.crop", enabled: true,
+              params: { x0: 0.1, y0: 0.1, x1: 0.9, y1: 0.9 } }],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({
+      builtin: [{ id: "curvy", label: "Curvy", group: "builtin",
+        ops: [{ id: "tone.curves", params: { points: [[0, 0], [1, 1]] } }] }],
+      user: [],
+    });
+    // Adopting over a non-empty edit (the crop) confirms first.
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    const picker = await screen.findByRole("button", { name: "Compare a look" });
+    await waitFor(() => expect(picker).not.toBeDisabled());
+    picker.click();
+    (await screen.findByRole("menuitem", { name: "Curvy" })).click();
+
+    (await screen.findByRole("button", { name: "Look: Curvy" })).click();
+    (await screen.findByRole("menuitem", { name: "Switch to this look" })).click();
+
+    // Both the look's Curves op AND the user's original Crop survive in the pipeline
+    // (before the fix the crop was dropped — the adopted frame no longer matched the
+    // split preview).
+    expect(await screen.findByText("Curves")).toBeInTheDocument();
+    expect(screen.getByText("Crop")).toBeInTheDocument();
+  });
+
   it("offers a Coverage overlay on a mosaic and toggles it", async () => {
     mockEditorQueries();
     // is_mosaic:true → the coverage overlay button is offered.
