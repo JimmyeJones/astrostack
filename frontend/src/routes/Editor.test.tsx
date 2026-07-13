@@ -235,6 +235,28 @@ describe("EditorView", () => {
     await waitFor(() => expect(screen.getByText("Rendering — 50%")).toBeInTheDocument());
   });
 
+  it("reveals a copy-friendly caption blurb after the share image renders", async () => {
+    mockEditorQueries();
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+    vi.spyOn(client.api, "exportShare").mockResolvedValue({ job_id: "share1" });
+    vi.spyOn(client.api, "getJob").mockResolvedValue({
+      id: "share1", kind: "editor_share", target: "M_42", state: "done",
+      phase: "", done: 1, total: 1, detail: "", created_utc: null,
+      started_utc: null, finished_utc: null, error: null,
+      result: { blurb: "M 42 · 3h 12m · 152 subs" },
+    });
+
+    renderEditor();
+
+    const btn = await screen.findByText("Download share image (JPEG)");
+    fireEvent.click(btn);
+    await waitFor(() =>
+      expect(screen.getByText("M 42 · 3h 12m · 152 subs")).toBeInTheDocument());
+    expect(screen.getByLabelText("Copy caption")).toBeInTheDocument();
+  });
+
   it("threads an AbortSignal into the live-preview fetch so stale renders can be cancelled", async () => {
     mockEditorQueries();
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => ({

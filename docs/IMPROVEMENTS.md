@@ -3212,8 +3212,27 @@ problems. Dogfood it every big-picture run and fix root causes.
   + vite build all green. Both slices shipped. *(Scout-filed 2026-07-12; M, autonomy/friendliness —
   PRIORITY 2/3.)*
 - **NEW (Scout 2026-07-12) — "Share card": a one-click, social-ready export with an optional caption
-  strip.** _(M, friendliness/workflow — PRIORITY 3; beginner bar: ✔ sane default, plain-language, helps
-  a beginner *share* their result.)_ Today's export gives a 16-bit linear TIFF (looks dark on its own —
+  strip.** — **SLICE (a) SHIPPED v0.114.0** (Builder 2026-07-13, branch `claude/pensive-faraday-4lta1b`).
+  A new **"Download share image (JPEG)"** action in the editor's Export panel renders the *displayed*
+  (already-stretched) result to a social-sized JPEG (long edge ≤ 2048 px, LANCZOS downscale, quality 90)
+  — what image-sharing sites actually want, versus the existing full-res PNG of a 100+ MP mosaic — and
+  reveals a **copy-friendly caption blurb** built from the run's own metadata (*"M 42 · 3h 12m · 152 subs"*)
+  with a one-click Copy button. New pure engine pieces: `seestack/stack/output.py::write_share_jpeg`
+  (display-space RGB → downscaled JPEG, NaN→black) and `seestack/sharecard.py` (`format_duration` +
+  `share_blurb`, each part included only when it carries real info — no dangling separator, singular
+  "1 sub"). New job `submit_editor_share` (reuses `_render_recipe_fullres`, writes to the run's `output/`
+  dir, returns `jpeg_path`/`filename`/`blurb`/`op_errors`) + endpoints `POST …/editor/share` and
+  `GET …/editor/share/{job_id}` (mirrors the PNG download). Additive/upgrade-safe: new endpoints + one
+  button, no schema/config/API-shape/default change. Tests: `tests/test_sharecard.py` (7 — duration
+  buckets, blurb full/singular/omission, JPEG downscale + native-size + NaN-black),
+  `tests/webapp/test_editor.py` (share JPEG download + blurb + bad-job 404), `Editor.test.tsx` (caption
+  reveals + Copy button). Python (1185) + tsc + full vitest (758) + vite build all green. **Deferred to a
+  later slice (explicitly not shipped):** the *burned-in caption strip* overlay — a good-looking footer
+  needs a bundled TTF (Pillow's default bitmap font looks poor at 2048 px) and its own layout/placement
+  work; the plain JPEG + paste-able caption already delivers the core "how do I post this?" ask without the
+  typography risk. _(Scout-filed 2026-07-12; M, friendliness/workflow — PRIORITY 3; beginner bar ✔.)_
+  <details><summary>Original idea</summary>
+  Today's export gives a 16-bit linear TIFF (looks dark on its own —
   correct for re-processing, wrong for posting) or a bare PNG; neither is share-ready or labelled. Add a
   **"Share image"** action that renders the *displayed* (already-stretched) result to a JPEG/PNG sized for
   social (long edge ~2048), with an **optional, off-by-default** caption strip burned into a footer/corner:
@@ -3228,6 +3247,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   right now there's no good answer. Ship as one slice (JPEG + optional caption + copy blurb); a later slice
   could offer a couple of caption placements/sizes. _(Absorbed the former duplicate "Share this image" entry,
   Scout 2026-07-13.)_
+  </details>
 - ~~**"What am I looking at?" object info card on the Target / result page.**~~ — **SHIPPED v0.110.0**
   (Builder 2026-07-12, branch `claude/pensive-faraday-v8rvhn`). New pure/offline engine module
   `seestack/objectinfo.py::identify_object(name, ra_deg, dec_deg)` matches a captured target against the
@@ -3410,8 +3430,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
-- **NEW (Builder 2026-07-13) — harden `session_recap._parse` against mixed tz-aware/naive frame timestamps.**
-  _(S, robustness — latent, not currently reachable.)_ `seestack/session_recap.py::_parse` returns a
+- ~~**NEW (Builder 2026-07-13) — harden `session_recap._parse` against mixed tz-aware/naive frame timestamps.**~~
+  — **FIXED v0.113.2** (Builder 2026-07-13, branch `claude/pensive-faraday-4lta1b`; regression-tested).
+  `_parse` now coerces a tz-naive parse to UTC (`dt.replace(tzinfo=timezone.utc)`) so the session-split
+  sort/subtraction is always well-defined. Verified the trap *is* reachable: `fits_loader._parse_timestamp`
+  falls back to `return raw` for a header `DATE-OBS` it can't normalise (e.g. a date-only value, or one
+  carrying a `+02:00` offset), which `_parse` would read as naive — so a project mixing that with the usual
+  tz-aware `+00:00` frames would raise `TypeError: can't compare offset-naive and offset-aware datetimes` in
+  `_split_sessions`. Regression `tests/test_session_recap.py::test_handles_mixed_tz_aware_and_naive_timestamps`
+  (fails-before with the TypeError / passes-after, both frames land in one session treated as UTC). Additive,
+  pure; no schema/config/API/default change.
+  <details><summary>Original trace</summary>
+  `seestack/session_recap.py::_parse` returns a
   **tz-aware** datetime for a timestamp carrying an offset (`…+00:00`/`…Z`) but a **tz-naive** one for a bare
   `YYYY-MM-DDT…` with no zone. `session_recap` then `sort`s and subtracts these in `_split_sessions`; Python
   raises `TypeError: can't compare offset-naive and offset-aware datetimes` if a single project ever holds
@@ -3422,6 +3452,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   comparison is always well-defined regardless of what wrote the timestamp. Additive, pure, testable with a
   mixed-tz frame pair; verify first that no ingest/merge path can persist a naive timestamp (if one can, that's
   the real bug). Found while adding the cross-session drift nudge (a test hit exactly this on mixed fixtures).
+  </details>
 - **Exercise the production-only SPA-serving path in tests (test-coverage blind spot that hid a security bug).**
   *(Idea, Builder 2026-07-12 — surfaced while fixing the v0.109.24 path-traversal.)* The SPA fallback route +
   `/assets` mount in `webapp/main.py::_mount_spa` are only registered when `webapp/static` exists — i.e. the
@@ -3782,6 +3813,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.114.0** — Beginner feature (friendliness/workflow — PRIORITY 3; Builder 2026-07-13). "Share card"
+  slice (a): a "Download share image (JPEG)" editor action renders the displayed result to a social-sized
+  JPEG (long edge ≤ 2048, LANCZOS) + a copy-friendly caption blurb ("M 42 · 3h 12m · 152 subs") with a Copy
+  button — the beginner's "how do I post this?" step. New `write_share_jpeg` + `seestack/sharecard.py`,
+  `submit_editor_share` job, `POST/GET …/editor/share` endpoints. Burned-in caption strip deferred (needs a
+  bundled font). Additive; no schema/API/default change. Tests across engine/webapp/frontend.
+- **v0.113.2** — Robustness (Builder 2026-07-13). Harden `session_recap._parse`: coerce a tz-naive timestamp
+  parse to UTC so `_split_sessions`' sort/subtraction never raises "can't compare offset-naive and
+  offset-aware datetimes". Reachable via `fits_loader._parse_timestamp`'s `return raw` fallback for an
+  unnormalised header `DATE-OBS`. Regression test on a mixed-tz frame pair (fails-before / passes-after).
+  Additive, pure.
 - **v0.113.1** — Autonomy/image-quality/correctness (Builder 2026-07-13). Re-QC a frame whose Stage-1 cache
   was refreshed after a mid-copy ingest: `ingest_files` now resets the frame's stale QC (computed on the
   truncated data) via new `Project.reset_frame_qc`, flags the refresh (`IngestResult.refreshed` →

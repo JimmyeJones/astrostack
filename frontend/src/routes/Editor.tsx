@@ -1,12 +1,12 @@
 import {
-  ActionIcon, Alert, Badge, Button, Center, Grid, Group, Loader, Menu, Paper, Select, Stack, Text,
-  TextInput, Title, Tooltip,
+  ActionIcon, Alert, Badge, Button, Center, CopyButton, Grid, Group, Loader, Menu, Paper, Select,
+  Stack, Text, TextInput, Title, Tooltip,
 } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import {
-  IconAlertTriangle, IconArrowBackUp, IconArrowForwardUp, IconArrowLeft, IconChevronDown,
-  IconChevronUp, IconCrop, IconDeviceFloppy, IconDownload, IconHistory, IconInfoCircle,
-  IconPhotoDown, IconPlus, IconRefresh, IconSparkles, IconStar, IconWand, IconZoomScan,
+  IconAlertTriangle, IconArrowBackUp, IconArrowForwardUp, IconArrowLeft, IconCheck, IconChevronDown,
+  IconChevronUp, IconCopy, IconCrop, IconDeviceFloppy, IconDownload, IconHistory, IconInfoCircle,
+  IconPhotoDown, IconPlus, IconRefresh, IconShare, IconSparkles, IconStar, IconWand, IconZoomScan,
 } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -670,6 +670,44 @@ export function EditorView() {
     },
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
     onSettled: () => setPngProgress(null),
+  });
+
+  // Share: render a social-sized JPEG of the current look and reveal a
+  // copy-friendly caption blurb (the beginner's "how do I post this?" step).
+  const [shareProgress, setShareProgress] = useState<string | null>(null);
+  const [shareBlurb, setShareBlurb] = useState<string | null>(null);
+  const downloadShare = useMutation({
+    mutationFn: async () => {
+      setShareProgress("Preparing…");
+      const { job_id } = await api.exportShare(safe, rid, recipe);
+      for (;;) {
+        const j = await api.getJob(job_id);
+        if (j.state === "done") {
+          return {
+            jobId: job_id,
+            blurb: typeof j.result?.blurb === "string" ? j.result.blurb : null,
+            opErrors: opErrorsMessage(j.result?.op_errors),
+          };
+        }
+        if (["error", "cancelled", "interrupted"].includes(j.state)) {
+          throw new Error(j.error || "Share image failed");
+        }
+        setShareProgress(pngProgressLabel(j));
+        await new Promise((r) => setTimeout(r, 500));
+      }
+    },
+    onSuccess: ({ jobId, blurb, opErrors }) => {
+      const a = document.createElement("a");
+      a.href = api.editShareUrl(safe, rid, jobId);
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setShareBlurb(blurb);
+      notifications.show({ message: "Share image ready", color: "teal" });
+      if (opErrors) notifications.show({ message: opErrors, color: "orange", autoClose: 10000 });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+    onSettled: () => setShareProgress(null),
   });
 
   // --- op list ops ---------------------------------------------------------
@@ -1921,10 +1959,35 @@ export function EditorView() {
               {downloadPng.isPending && pngProgress ? (
                 <Text size="xs" c="dimmed" ta="center" mt={4}>{pngProgress}</Text>
               ) : null}
+              <Button mt="xs" fullWidth variant="light" leftSection={<IconShare size={16} />}
+                loading={downloadShare.isPending} onClick={() => downloadShare.mutate()}>
+                Download share image (JPEG)
+              </Button>
+              {downloadShare.isPending && shareProgress ? (
+                <Text size="xs" c="dimmed" ta="center" mt={4}>{shareProgress}</Text>
+              ) : null}
+              {shareBlurb ? (
+                <Group gap="xs" mt={6} wrap="nowrap" align="center">
+                  <Text size="xs" c="dimmed" style={{ flex: 1 }}>
+                    Caption to paste: <Text span fw={500} c="inherit">{shareBlurb}</Text>
+                  </Text>
+                  <CopyButton value={shareBlurb}>
+                    {({ copied, copy }) => (
+                      <Tooltip label={copied ? "Copied" : "Copy caption"} withArrow>
+                        <ActionIcon variant="subtle" color={copied ? "teal" : "gray"} onClick={copy}
+                          aria-label="Copy caption">
+                          {copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
+                        </ActionIcon>
+                      </Tooltip>
+                    )}
+                  </CopyButton>
+                </Group>
+              ) : null}
               <Text size="xs" c="dimmed" mt={6}>
                 "Export" writes a new stack run (FITS/TIFF/PNG); the original is never
                 changed. "Download full-res PNG" renders your edits at native resolution
-                and downloads the PNG (can be slow on large/mosaic images).
+                and downloads the PNG (can be slow on large/mosaic images). "Share image"
+                saves a smaller, post-ready JPEG plus a caption you can copy.
               </Text>
             </Paper>
           </Stack>

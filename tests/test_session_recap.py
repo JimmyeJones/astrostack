@@ -232,3 +232,25 @@ def test_handles_trailing_z_and_unparseable_timestamps(tmp_path):
         assert recap.n_kept == 2
     finally:
         proj.close()
+
+
+def test_handles_mixed_tz_aware_and_naive_timestamps(tmp_path):
+    """A project holding both a tz-aware (``…+00:00``/``…Z``) and a bare naive
+    ``YYYY-MM-DDT…`` timestamp must not crash the session split. The
+    ``fits_loader`` fallback can persist an unnormalised header value, so
+    ``_parse`` coerces a naive time to UTC — otherwise sorting/subtracting the two
+    kinds raises "can't compare offset-naive and offset-aware datetimes"."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        # Aware (as every normal writer stores) …
+        proj.add_frame(FrameRow(source_path="/x/a.fit",
+                                timestamp_utc="2026-07-08T22:00:00+00:00", exposure_s=10.0))
+        # … alongside a bare naive one (the fallback path), same night.
+        proj.add_frame(FrameRow(source_path="/x/b.fit",
+                                timestamp_utc="2026-07-08T22:00:30", exposure_s=10.0))
+        recap = session_recap(proj)  # fails-before: TypeError from the mixed compare
+        assert recap is not None
+        assert recap.n_frames == 2  # both land in one session, treated as UTC
+        assert recap.n_kept == 2
+    finally:
+        proj.close()

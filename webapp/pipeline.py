@@ -1072,6 +1072,48 @@ def submit_editor_png(settings: Settings, jm: JobManager, safe: str, run_id: int
     return jm.submit("editor_png", body, target=safe)
 
 
+def submit_editor_share(settings: Settings, jm: JobManager, safe: str, run_id: int,
+                        recipe_dict: dict) -> Job:
+    """Render an editor recipe to a social-ready JPEG (long edge ≤ 2048 px) of the
+    image exactly as shown — for posting/sharing rather than re-processing. The
+    JPEG path + a copy-friendly caption blurb are returned in the job result."""
+    def body(job: Job) -> dict[str, Any]:
+        from datetime import datetime, timezone
+
+        from seestack.io.project import Project
+        from seestack.sharecard import share_blurb
+        from seestack.stack.output import safe_basename, write_share_jpeg
+
+        lib = Library.open_or_create(settings.resolved_library_root)
+        try:
+            entry = lib.find_target(safe)
+            if entry is None:
+                raise FileNotFoundError(f"no target '{safe}'")
+            proj = Project.open(lib.target_dir(entry))
+            try:
+                run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
+                if run is None or not run.fits_path or not Path(run.fits_path).exists():
+                    raise FileNotFoundError(f"run {run_id} has no FITS")
+                op_errors: list[str] = []
+                out, _recipe = _render_recipe_fullres(
+                    run.fits_path, recipe_dict, _progress(jm, job),
+                    errors=op_errors)
+                ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+                jpeg = (Path(proj.project_dir) / "output"
+                        / f"{safe_basename(run.output_basename)}_share_{ts}.jpg")
+                write_share_jpeg(jpeg, out)
+                blurb = share_blurb(entry.name, run.n_frames_used, run.total_exposure_s)
+            finally:
+                proj.close()
+            return {"safe": safe, "run_id": run_id,
+                    "jpeg_path": str(jpeg), "filename": jpeg.name,
+                    "blurb": blurb, "op_errors": op_errors}
+        finally:
+            lib.close()
+
+    return jm.submit("editor_share", body, target=safe)
+
+
 def submit_editor_batch(settings: Settings, jm: JobManager, items: list[dict],
                         recipe_dict: dict, *, output_name: str | None = None,
                         tiff_mode: str = "linear") -> Job:

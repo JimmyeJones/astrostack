@@ -1195,6 +1195,34 @@ def download_png(safe: str, run_id: int, job_id: str, request: Request) -> FileR
     return FileResponse(png_path, media_type="image/png", filename=filename)
 
 
+@router.post("/api/targets/{safe}/stack-runs/{run_id}/editor/share")
+def export_share(safe: str, run_id: int, body: PngRequest, request: Request) -> dict:
+    """Kick off a social-ready JPEG render (long edge ≤ 2048 px) of the recipe.
+    Poll the job, then GET .../editor/share/{job_id} to download it. The job
+    result also carries a copy-friendly caption ``blurb``."""
+    from webapp import pipeline
+
+    settings = deps.get_settings(request)
+    jm = deps.get_job_manager(request)
+    job = pipeline.submit_editor_share(settings, jm, safe, run_id, body.recipe or {})
+    return {"job_id": job.id}
+
+
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/editor/share/{job_id}")
+def download_share(safe: str, run_id: int, job_id: str, request: Request) -> FileResponse:
+    jm = deps.get_job_manager(request)
+    job = jm.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="No such job")
+    if job.state != "done" or not job.result:
+        raise HTTPException(status_code=409, detail=f"Share image not ready (job {job.state})")
+    jpeg_path = job.result.get("jpeg_path")
+    if not jpeg_path or not Path(jpeg_path).exists():
+        raise HTTPException(status_code=404, detail="Share image not found")
+    filename = job.result.get("filename") or Path(jpeg_path).name
+    return FileResponse(jpeg_path, media_type="image/jpeg", filename=filename)
+
+
 class BatchRequest(BaseModel):
     items: list[dict]                 # [{"safe": ..., "run_id": ...}, ...]
     recipe: dict | None = None
