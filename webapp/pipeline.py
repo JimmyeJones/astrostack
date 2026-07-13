@@ -68,7 +68,14 @@ def _pipeline_body(
                 copy_to_cache=settings.copy_to_cache,
                 progress=_progress(jm, job),
             )
-            touched_names = [t.safe_name for t in scan.targets if t.n_frames_added > 0]
+            # Re-QC a target when it gained new frames OR when a dedup-skipped
+            # frame's cache was refreshed (a mid-copy sub whose source completed):
+            # its stale QC was reset, so re-grade it here rather than waiting for
+            # brand-new frames to touch the target.
+            touched_names = [
+                t.safe_name for t in scan.targets
+                if t.n_frames_added > 0 or t.n_frames_refreshed > 0
+            ]
             summary["scanned"] = scan.total_added
         else:
             touched_names = [t.safe_name for t in lib.list_targets()]

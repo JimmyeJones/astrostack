@@ -2,7 +2,12 @@ import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SessionRecapCard, describeRejects, describeSession } from "./SessionRecapCard";
+import {
+  SessionRecapCard,
+  describeQualityDrift,
+  describeRejects,
+  describeSession,
+} from "./SessionRecapCard";
 import type { SessionRecap } from "../api/client";
 import * as client from "../api/client";
 
@@ -12,6 +17,7 @@ function recap(over: Partial<SessionRecap> = {}): SessionRecap {
     session_exposure_s: 100, kept_exposure_s: 80, total_kept_exposure_s: 130,
     start_utc: "2026-07-08T22:00:00", end_utc: "2026-07-08T22:05:00",
     reject_buckets: { trailed: 2 },
+    quality_drift: null,
     ...over,
   };
 }
@@ -60,6 +66,20 @@ describe("describeSession", () => {
   });
 });
 
+describe("describeQualityDrift", () => {
+  it("phrases the softness nudge with both FWHM values, to one decimal", () => {
+    expect(
+      describeQualityDrift({
+        kind: "fwhm", latest_fwhm_px: 5.2, baseline_fwhm_px: 3.4,
+        n_latest: 8, n_baseline: 8,
+      }),
+    ).toBe(
+      "Heads up: last session's stars are softer than your usual best " +
+        "(5.2 px vs 3.4 px FWHM) — worth checking focus.",
+    );
+  });
+});
+
 describe("SessionRecapCard", () => {
   it("renders the recap card with a kept-percentage badge", async () => {
     vi.spyOn(client.api, "sessionRecap").mockResolvedValue(recap());
@@ -67,6 +87,26 @@ describe("SessionRecapCard", () => {
     await waitFor(() => expect(screen.getByText("Last session")).toBeInTheDocument());
     expect(screen.getByText("80% kept")).toBeInTheDocument();
     expect(screen.getByText(/2 set aside \(2 trailed\)/)).toBeInTheDocument();
+  });
+
+  it("shows the softness nudge only when a quality drift is reported", async () => {
+    vi.spyOn(client.api, "sessionRecap").mockResolvedValue(
+      recap({
+        quality_drift: {
+          kind: "fwhm", latest_fwhm_px: 5.2, baseline_fwhm_px: 3.4,
+          n_latest: 8, n_baseline: 8,
+        },
+      }),
+    );
+    renderCard();
+    await waitFor(() => expect(screen.getByText(/worth checking focus/)).toBeInTheDocument());
+  });
+
+  it("omits the nudge when quality is steady", async () => {
+    vi.spyOn(client.api, "sessionRecap").mockResolvedValue(recap());
+    renderCard();
+    await waitFor(() => expect(screen.getByText("Last session")).toBeInTheDocument());
+    expect(screen.queryByText(/worth checking focus/)).toBeNull();
   });
 
   it("renders nothing when there's nothing datable to report", async () => {

@@ -160,17 +160,49 @@ def test_ingest_refreshes_cache_when_source_grew_after_a_mid_copy_ingest(tmp_pat
         cached = first[0].cached_path
         assert cached is not None and cached.stat().st_size == len(truncated)
 
+        # Simulate QC having run on the truncated cache: stale metrics get stored.
+        frame_id = first[0].frame_id
+        proj.update_frame(frame_id, star_count=42, fwhm_px=9.9,
+                          accept=False, reject_reason="auto:grade:fwhm_px")
+
         # The source copy finishes: the file grows to its full size.
         full.write_bytes(full_bytes)
 
         # A re-scan dedup-skips the registered row but must refresh the cache.
         second = list(ingest_files(proj, cache, [full]))
         assert second[0].skipped is True
+        assert second[0].refreshed is True  # flagged so the caller re-QCs the target
         refreshed = second[0].cached_path
         assert refreshed is not None and refreshed.exists()
         assert refreshed.read_bytes() == full_bytes  # cache now matches the source
         assert proj.count() == 1  # no duplicate row
-        assert next(iter(proj.iter_frames())).cached_path == str(refreshed)
+        row = next(iter(proj.iter_frames()))
+        assert row.cached_path == str(refreshed)
+        # The QC computed on the truncated data was reset, so the complete frame is
+        # re-graded (star_count NULL → build_qc_arglist(only_new=True) re-offers it),
+        # and the stale auto-reject is cleared.
+        assert row.star_count is None and row.fwhm_px is None
+        assert row.accept is True and row.reject_reason is None
+    finally:
+        proj.close()
+
+
+def test_ingest_does_not_reset_qc_on_a_plain_dedup_skip(tmp_path):
+    """A normal (unchanged) re-scan must NOT reset QC or flag a refresh — only a
+    genuine cache refresh (source grew past the cached size) does."""
+    src = tmp_path / "raws"
+    src.mkdir()
+    p = write_seestar_fits(src / "a.fit", seed=11)
+    proj = Project.create(tmp_path / "proj", name="t")
+    cache = CacheManager(proj.project_dir)
+    try:
+        first = list(ingest_files(proj, cache, [p]))
+        proj.update_frame(first[0].frame_id, star_count=200, fwhm_px=2.1)
+        second = list(ingest_files(proj, cache, [p]))
+        assert second[0].skipped is True
+        assert second[0].refreshed is False
+        row = next(iter(proj.iter_frames()))
+        assert row.star_count == 200 and row.fwhm_px == 2.1  # QC untouched
     finally:
         proj.close()
 

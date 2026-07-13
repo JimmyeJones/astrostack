@@ -42,6 +42,10 @@ class IngestResult:
     cached_path: Path | None
     skipped: bool
     error: str | None = None
+    # True when a dedup-skipped frame's Stage-1 cache was *refreshed* because the
+    # source grew past the cached size (a mid-copy-truncated sub whose source
+    # later finished). Its QC was reset, so the caller should re-QC its target.
+    refreshed: bool = False
 
 
 def find_fits_files(root: str | Path, *, recursive: bool = True) -> list[Path]:
@@ -146,6 +150,7 @@ def ingest_files(
             # left this frame uncached, retry the Stage-1 copy now; otherwise the
             # row is skipped on every future scan and the cache is never populated.
             recovered: Path | None = None
+            refreshed = False
             if copy_to_cache and prior.id is not None:
                 if not prior.cached_path:
                     recovered = _copy_to_stage1(project, cache, src, prior.id)
@@ -162,10 +167,19 @@ def ingest_files(
                     # frame, not the truncated one. Byte-identical in the normal
                     # case, so this is a cheap stat compare with no copy.
                     recovered = _copy_to_stage1(project, cache, src, prior.id)
+                    if recovered is not None:
+                        # The old QC metrics were computed on the truncated data —
+                        # reset them so the frame is re-QC'd on the complete cache
+                        # (nulling star_count re-offers it to build_qc_arglist), and
+                        # flag the refresh so the caller re-QCs this frame's target
+                        # in the same run rather than waiting for new frames to land.
+                        project.reset_frame_qc(prior.id)
+                        refreshed = True
             # frame_id stays None on a skip (a registered frame is not "added"),
             # so existing consumers that gate on frame_id don't re-list it.
             yield IngestResult(
-                source_path=src, frame_id=None, cached_path=recovered, skipped=True
+                source_path=src, frame_id=None, cached_path=recovered, skipped=True,
+                refreshed=refreshed,
             )
             continue
 

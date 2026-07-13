@@ -11,6 +11,7 @@ from webapp import deps
 from webapp.schemas import (
     MergeRequest,
     ObjectInfoOut,
+    SessionQualityDriftOut,
     SessionRecapOut,
     TargetCreate,
     TargetOut,
@@ -128,6 +129,7 @@ def target_session_recap(safe: str, request: Request) -> SessionRecapOut | None:
         lib.close()
     if recap is None:
         return None
+    drift = recap.quality_drift
     return SessionRecapOut(
         n_frames=recap.n_frames,
         n_kept=recap.n_kept,
@@ -138,6 +140,17 @@ def target_session_recap(safe: str, request: Request) -> SessionRecapOut | None:
         start_utc=recap.start_utc,
         end_utc=recap.end_utc,
         reject_buckets=recap.reject_buckets,
+        quality_drift=(
+            SessionQualityDriftOut(
+                kind=drift.kind,
+                latest_fwhm_px=drift.latest_fwhm_px,
+                baseline_fwhm_px=drift.baseline_fwhm_px,
+                n_latest=drift.n_latest,
+                n_baseline=drift.n_baseline,
+            )
+            if drift is not None
+            else None
+        ),
     )
 
 

@@ -9,13 +9,15 @@ from seestack.session_recap import (
 )
 
 
-def _frame(ts: datetime | None, *, exposure=10.0, accept=True, reject_reason=None):
+def _frame(ts: datetime | None, *, exposure=10.0, accept=True, reject_reason=None,
+           fwhm_px=None):
     return FrameRow(
-        source_path=f"/x/{ts}-{accept}-{reject_reason}-{id(ts)}.fit",
+        source_path=f"/x/{ts}-{accept}-{reject_reason}-{fwhm_px}-{id(ts)}.fit",
         timestamp_utc=ts.isoformat() if ts else None,
         exposure_s=exposure,
         accept=accept,
         reject_reason=reject_reason,
+        fwhm_px=fwhm_px,
     )
 
 
@@ -113,6 +115,106 @@ def test_bucket_reject_reason_direct():
     assert bucket_reject_reason("user") == "set aside by you"
     assert bucket_reject_reason(None) == "set aside by you"
     assert bucket_reject_reason("mystery") == "other"
+
+
+def _add_session(proj, night, *, n, fwhm, accept=True, reject_reason=None):
+    """Add ``n`` frames all captured on ``night`` (30 s apart) with the given FWHM."""
+    for i in range(n):
+        proj.add_frame(_frame(night + timedelta(seconds=30 * i), fwhm_px=fwhm,
+                              accept=accept, reject_reason=reject_reason))
+
+
+def test_quality_drift_flags_a_soft_newest_session(tmp_path):
+    """A sharp first night then a soft second night → the recap nudges about focus."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        _add_session(proj, datetime(2026, 7, 1, 22, 0, 0), n=8, fwhm=3.4)   # sharp
+        _add_session(proj, datetime(2026, 7, 8, 22, 0, 0), n=8, fwhm=5.2)   # soft
+        recap = session_recap(proj)
+        assert recap is not None
+        d = recap.quality_drift
+        assert d is not None
+        assert d.kind == "fwhm"
+        assert d.latest_fwhm_px == 5.2
+        assert d.baseline_fwhm_px == 3.4
+        assert d.n_latest == 8 and d.n_baseline == 8
+    finally:
+        proj.close()
+
+
+def test_quality_drift_silent_when_newest_is_as_sharp(tmp_path):
+    """Two nights of comparable seeing → no nudge (must not nag on normal wobble)."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        _add_session(proj, datetime(2026, 7, 1, 22, 0, 0), n=8, fwhm=3.4)
+        _add_session(proj, datetime(2026, 7, 8, 22, 0, 0), n=8, fwhm=3.7)  # 9% softer only
+        recap = session_recap(proj)
+        assert recap is not None
+        assert recap.quality_drift is None
+    finally:
+        proj.close()
+
+
+def test_quality_drift_needs_a_prior_session(tmp_path):
+    """A single (soft) session has no baseline to compare against → no nudge."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        _add_session(proj, datetime(2026, 7, 8, 22, 0, 0), n=8, fwhm=6.0)
+        recap = session_recap(proj)
+        assert recap is not None
+        assert recap.quality_drift is None
+    finally:
+        proj.close()
+
+
+def test_quality_drift_ignores_a_thin_newest_session(tmp_path):
+    """Too few measured subs in the newest session → not enough to trust its median."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        _add_session(proj, datetime(2026, 7, 1, 22, 0, 0), n=8, fwhm=3.0)
+        _add_session(proj, datetime(2026, 7, 8, 22, 0, 0), n=2, fwhm=6.0)  # only 2 subs
+        recap = session_recap(proj)
+        assert recap is not None
+        assert recap.quality_drift is None
+    finally:
+        proj.close()
+
+
+def test_quality_drift_uses_the_best_prior_session_as_baseline(tmp_path):
+    """Baseline is the *sharpest* prior night, not the most recent prior one."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        _add_session(proj, datetime(2026, 7, 1, 22, 0, 0), n=8, fwhm=3.0)  # sharpest ever
+        _add_session(proj, datetime(2026, 7, 5, 22, 0, 0), n=8, fwhm=4.5)  # a softer night
+        _add_session(proj, datetime(2026, 7, 8, 22, 0, 0), n=8, fwhm=5.0)  # newest
+        recap = session_recap(proj)
+        assert recap is not None
+        d = recap.quality_drift
+        assert d is not None
+        assert d.baseline_fwhm_px == 3.0  # compares against the best, not 4.5
+    finally:
+        proj.close()
+
+
+def test_quality_drift_only_counts_accepted_measured_subs(tmp_path):
+    """Rejected subs and subs with no FWHM don't feed the per-session median."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        _add_session(proj, datetime(2026, 7, 1, 22, 0, 0), n=6, fwhm=3.4)
+        # Newest night: 6 soft accepted subs (drive the drift) plus noise that must
+        # not count — a rejected sharp sub and one with no FWHM measured.
+        night2 = datetime(2026, 7, 8, 22, 0, 0)
+        _add_session(proj, night2, n=6, fwhm=5.2)
+        proj.add_frame(_frame(night2 + timedelta(minutes=5), fwhm_px=2.0,
+                              accept=False, reject_reason="auto:streak"))
+        proj.add_frame(_frame(night2 + timedelta(minutes=6), fwhm_px=None))
+        recap = session_recap(proj)
+        assert recap is not None
+        d = recap.quality_drift
+        assert d is not None
+        assert d.latest_fwhm_px == 5.2 and d.n_latest == 6  # noise excluded
+    finally:
+        proj.close()
 
 
 def test_handles_trailing_z_and_unparseable_timestamps(tmp_path):
