@@ -52,6 +52,18 @@ _KNOWN_TYPES = {
 }
 
 
+def test_iers_offline_disables_the_staleness_check():
+    """Regression: the planner must stay offline-safe as its astropy IERS data
+    ages. Without ``auto_max_age = None`` astropy raises "predictive values that
+    are more than 30.0 days old" once the bundled table passes 30 days (or when
+    planning >30 days out), 500-ing the planner on a NAS that can't re-download.
+    """
+    np_plan._configure_iers_offline()
+    from astropy.utils import iers
+    assert iers.conf.auto_max_age is None
+    assert iers.conf.auto_download is False
+
+
 def test_catalog_loads_messier_plus_curated_extras():
     cat = load_catalog()
     ids = {o.id for o in cat}

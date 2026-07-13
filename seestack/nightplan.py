@@ -64,6 +64,13 @@ def _configure_iers_offline() -> None:
 
     iers.conf.auto_download = False
     iers.conf.iers_degraded_accuracy = "ignore"
+    # The bundled IERS-A predictive table goes "stale" after auto_max_age days
+    # (default 30). Once a deployed image's astropy data ages past that — or when
+    # planning a date >30 days out — astropy *raises* ("predictive values that are
+    # more than 30.0 days old") rather than use the stale table, which would 500
+    # the planner on an offline NAS. Disable the staleness check: the IERS
+    # correction is sub-arcsecond, far below this planner's degree-level ranking.
+    iers.conf.auto_max_age = None
 
 
 @dataclass(frozen=True)
