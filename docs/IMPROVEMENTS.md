@@ -3053,6 +3053,41 @@ problems. Dogfood it every big-picture run and fix root causes.
   was clamped or `notes` is missing).
 
 ### Features that serve real workflows
+- **⭐ OWNER-REQUESTED — Bulk upload FITS through the web interface (no NAS share
+  needed).** Today the only way to get subs in is to drop Seestar target folders
+  into `incoming/` over an SMB/NFS share — which assumes the user can mount the NAS
+  share. A browser upload (drag a folder / multi-select files → progress bar →
+  done) removes that hurdle entirely and is the natural beginner on-ramp. **Reuse
+  the existing pipeline, don't fork it:** stream uploaded files into
+  `settings.resolved_incoming_dir` (`incoming/<target>/…`) and let the existing
+  watcher run ingest → QC → solve exactly as if they'd been dropped there (kick an
+  immediate incoming re-scan rather than waiting for the poll). Guardrails that
+  *must* be honoured (this is a file-writing endpoint on a live NAS):
+  - **Stream to disk; never buffer whole files in RAM** — "bulk" is potentially
+    thousands of subs / many GB. Chunked/streaming multipart, disk writes in a
+    threadpool so the event loop and the single job worker aren't blocked (memory
+    bounds / OOM history).
+  - **Sanitise every filename** — strip path separators, reject `..`/traversal
+    (same class as the recent SPA path-traversal fix), and confine every write
+    strictly under `incoming/`. Accept only FITS (`.fit`/`.fits`/`.fits.gz` + the
+    Seestar variants); reject anything else with a plain-language message.
+  - **Disk-space aware:** pre-check free space (reuse the storage read-out) and fail
+    with a clear "not enough room" message instead of silently filling the NAS.
+  - **Resilient:** show overall + per-file progress (a beginner uploading 5 GB needs
+    to see it working); on a dropped connection, clean up / quarantine partial files
+    so a half-written FITS is never ingested.
+  Slices: **(a)** core — multi-file streaming endpoint (sanitised, FITS-only,
+  size/space cap, threadpool writes) → lands in `incoming/<target>/` → triggers a
+  scan; a drag-drop / multi-select zone on the Library area with overall progress
+  (delivers the ask). **(b)** robustness — per-file progress, folder-structure
+  preservation (`webkitdirectory`), dedupe against already-ingested, partial-upload
+  cleanup. **(c)** nice-to-have — accept a `.zip` and unpack server-side; pick/create
+  the destination target in the UI. Beginner bar: clearly yes (removes the
+  mount-the-share step, one obvious action, sane defaults). Additive / upgrade-safe:
+  new endpoint + UI, no schema change, no default flip. Note: like the rest of the
+  app, uploads are **unauthenticated by default** (auth stays off) — consistent with
+  the current open-on-LAN model; do not change that default here. (L; slice (a) is
+  the shippable M — beginner-feature/workflow, PRIORITY 3/2)
 - **NEW (Scout 2026-07-13) — "Last night" session recap: a friendly, persistent summary of what a
   scan brought in and what happened to it.** _(M, friendliness/autonomy — PRIORITY 2/3; beginner bar:
   ✔ plain-language, sane default, answers the first question a walk-away user has on return, no expert
