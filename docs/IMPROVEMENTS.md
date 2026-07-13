@@ -3125,11 +3125,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   chip + coloured `Progress` bar + verdict) below the identify card, shown only once any light has been
   collected (`total_exposure_s > 0`) — a **suggestion, never a gate** (nothing blocks stacking).
   Frontend-only, additive, offline; no backend/schema/API/default change. Tests: `readiness.test.ts`
-  (7: null-on-no-integration, per-type goal scoring, the four levels, fraction clamp, unknown-type
+  (null-on-no-integration, per-type goal scoring, the four levels, fraction clamp, unknown-type
   fallback, verdict phrasing, colour map) + `Target.test.tsx` (card shows a verdict+bar for a galaxy /
-  stays hidden with no integration). tsc + full vitest (742) + vite build all green. **Remaining slice
-  (b):** the Tonight-row "you're basically done here" badge on the "add more to what you're shooting"
-  rows — left for a future run. *(Scout-filed 2026-07-12; M, autonomy/friendliness — PRIORITY 2/3.)*
+  stays hidden with no integration). **SLICE (b) SHIPPED v0.111.1** (same branch): a compact
+  `readinessRowHint(exposureSeconds, type)` helper turns the same readiness into a Tonight-planner
+  row badge on the "add more to what you're shooting" rows — "Nearly there" (close to the goal) /
+  "Plenty — try something new" (past it), and stays **silent** while a target is still worth topping
+  up (the row's integration figure already implies "keep going"), so the planner nudges a
+  well-integrated target toward starting something new. Frontend-only, additive; tests in
+  `readiness.test.ts` (hint fires only at close/plenty, null at 0) + `Tonight.test.tsx` (a
+  well-integrated library row shows the nudge, a barely-started one doesn't). tsc + full vitest (743)
+  + vite build all green. Both slices shipped. *(Scout-filed 2026-07-12; M, autonomy/friendliness —
+  PRIORITY 2/3.)*
 - **NEW (Scout 2026-07-12) — "Share card": a one-click, social-ready export with an optional caption
   strip.** _(M, friendliness/workflow — PRIORITY 3; beginner bar: ✔ sane default, plain-language, helps
   a beginner *share* their result.)_ Today's export gives a 16-bit linear TIFF (looks dark on its own —

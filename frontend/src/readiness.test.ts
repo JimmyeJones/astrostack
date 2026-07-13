@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { integrationReadiness, readinessColor } from "./readiness";
+import { integrationReadiness, readinessColor, readinessRowHint } from "./readiness";
 
 const H = 3600;
 
@@ -60,5 +60,24 @@ describe("integrationReadiness", () => {
     expect(readinessColor("solid")).toBe("blue");
     expect(readinessColor("close")).toBe("teal");
     expect(readinessColor("plenty")).toBe("green");
+  });
+});
+
+describe("readinessRowHint", () => {
+  it("nudges toward something new only once close to / past the goal", () => {
+    // Galaxy goal 6 h: 1 h (starting) and 3 h (solid) stay quiet — still worth
+    // topping up. 5 h (close) and 7 h (plenty) nudge.
+    expect(readinessRowHint(1 * H, "galaxy")).toBeNull();
+    expect(readinessRowHint(3 * H, "galaxy")).toBeNull();
+    expect(readinessRowHint(5 * H, "galaxy")).toEqual({
+      label: "Nearly there", color: "teal",
+    });
+    expect(readinessRowHint(7 * H, "galaxy")).toEqual({
+      label: "Plenty — try something new", color: "green",
+    });
+  });
+
+  it("returns null when there's no integration", () => {
+    expect(readinessRowHint(0, "galaxy")).toBeNull();
   });
 });

@@ -238,4 +238,23 @@ describe("TonightView", () => {
     // The dark-window summary card shows the twilight kind.
     expect(screen.getByText(/astronomical/)).toBeInTheDocument();
   });
+
+  it("nudges a well-integrated library target toward something new", async () => {
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
+      targets: [
+        // 7 h on a galaxy (6 h goal) → past the goal → "try something new".
+        target({ id: "M31", name: "Andromeda", type: "galaxy", already_targeted: true,
+                 target_safe: "M_31", frames_accepted: 200, total_exposure_s: 7 * 3600, score: 80 }),
+        // 1 h on a galaxy → still worth topping up → no nudge.
+        target({ id: "M81", name: "Bode's", type: "galaxy", already_targeted: true,
+                 target_safe: "M_81", frames_accepted: 40, total_exposure_s: 3600, score: 70 }),
+      ],
+    }));
+    renderTonight();
+    await waitFor(() =>
+      expect(screen.getByText("Add more to what you're shooting")).toBeInTheDocument());
+    expect(screen.getByText("Plenty — try something new")).toBeInTheDocument();
+    // The barely-started target gets no readiness nudge.
+    expect(screen.queryByText("Nearly there")).not.toBeInTheDocument();
+  });
 });

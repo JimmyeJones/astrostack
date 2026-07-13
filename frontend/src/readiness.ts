@@ -84,6 +84,23 @@ export function integrationReadiness(
   return { bucket, goalHours, hours, fraction, level, verdict };
 }
 
+// A compact hint for a target already in the library, for the Tonight planner's
+// "add more to what you're shooting" rows: nudge the user toward starting
+// something new once a target has close-to / more-than its suggested goal, and
+// stay quiet (null) while it's still worth topping up (the row's integration
+// figure already implies "keep going"). Caller supplies the accepted-sub
+// exposure total + catalog type for one already-targeted row.
+export function readinessRowHint(
+  exposureSeconds: number,
+  type: string | null | undefined,
+): { label: string; color: string } | null {
+  const r = integrationReadiness(exposureSeconds, type);
+  if (!r) return null;
+  if (r.level === "plenty") return { label: "Plenty — try something new", color: "green" };
+  if (r.level === "close") return { label: "Nearly there", color: "teal" };
+  return null;
+}
+
 // Mantine colour for the readiness level, so the progress bar and any accent
 // track the verdict (grey while just starting → teal once there's plenty).
 export function readinessColor(level: ReadinessLevel): string {
