@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type Target } from "../api/client";
 import { QueryError } from "../components/QueryError";
+import { UploadFits } from "../components/UploadFits";
 
 export function expo(seconds: number): string {
   if (!seconds) return "—";
@@ -183,19 +184,29 @@ export function Library() {
         </Chip.Group>
       ) : null}
 
-      {targets.length === 0 ? (
-        <Card withBorder padding="xl">
-          <Stack align="center" gap="sm">
-            <IconStars size={48} color="var(--mantine-color-dark-3)" />
-            <Text c="dimmed">No targets yet.</Text>
-            <Text c="dimmed" size="sm">
-              Drop your Seestar target folders into the watched dataset, or click “Scan incoming”.
-            </Text>
-            <Button component={Link} to="/jobs" variant="light">
-              View jobs
-            </Button>
-          </Stack>
+      {targets.length > 0 ? (
+        <Card withBorder padding="sm">
+          <UploadFits compact />
         </Card>
+      ) : null}
+
+      {targets.length === 0 ? (
+        <Stack>
+          <Card withBorder padding="xl">
+            <Stack align="center" gap="sm">
+              <IconStars size={48} color="var(--mantine-color-dark-3)" />
+              <Text c="dimmed">No targets yet.</Text>
+              <Text c="dimmed" size="sm" ta="center">
+                Upload your Seestar FITS files below, or drop target folders into the watched
+                dataset over your NAS share.
+              </Text>
+              <Button component={Link} to="/jobs" variant="light">
+                View jobs
+              </Button>
+            </Stack>
+          </Card>
+          <UploadFits />
+        </Stack>
       ) : visible.length === 0 ? (
         <Text c="dimmed" mt="md">No targets match your filters.</Text>
       ) : (
