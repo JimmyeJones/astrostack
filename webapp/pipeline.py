@@ -76,6 +76,7 @@ def _pipeline_body(
 
         if settings.auto_qc or settings.auto_solve:
             graded: dict[str, int] = {}
+            qc_errors: dict[str, str] = {}
             for safe in touched_names:
                 if job.cancel_requested():
                     # Surface the cancel at the top level so JobManager._run's
@@ -84,29 +85,48 @@ def _pipeline_body(
                     # fully-successful scan on the Jobs/History page.
                     summary["cancelled"] = True
                     break
-                proj = lib.open_target(safe)
                 try:
-                    run_qc_and_solve(
-                        proj,
-                        astap_path=settings.astap_path,
-                        max_workers=settings.cpu_workers,
-                        run_qc=settings.auto_qc,
-                        run_solve=settings.auto_solve,
-                        only_new_qc=True,  # don't re-QC frames already done on re-scans
-                        use_solve_hints=settings.astap_use_solve_hints,
-                        auto_reject_streaks=not settings.keep_streaked_frames,
-                        progress=_progress(jm, job),
-                        should_stop=job.cancel_requested,
-                    )
-                    if settings.auto_grade_frames and settings.auto_qc:
-                        n = _auto_grade_target(proj, settings)
-                        if n:
-                            graded[safe] = n
-                finally:
-                    proj.close()
-                lib.refresh_target_stats(safe)
+                    proj = lib.open_target(safe)
+                    try:
+                        run_qc_and_solve(
+                            proj,
+                            astap_path=settings.astap_path,
+                            max_workers=settings.cpu_workers,
+                            run_qc=settings.auto_qc,
+                            run_solve=settings.auto_solve,
+                            only_new_qc=True,  # don't re-QC frames already done on re-scans
+                            use_solve_hints=settings.astap_use_solve_hints,
+                            auto_reject_streaks=not settings.keep_streaked_frames,
+                            progress=_progress(jm, job),
+                            should_stop=job.cancel_requested,
+                        )
+                        if settings.auto_grade_frames and settings.auto_qc:
+                            n = _auto_grade_target(proj, settings)
+                            if n:
+                                graded[safe] = n
+                    finally:
+                        proj.close()
+                    lib.refresh_target_stats(safe)
+                except Exception as exc:  # noqa: BLE001 — one target shouldn't sink the batch
+                    # A target-level failure in QC/solve (a process-pool spin-up
+                    # error, a build_*_arglist raise, a DB hiccup) must isolate like
+                    # every sibling per-target loop (auto-stack, reprocess-all,
+                    # editor-batch) — otherwise one bad target aborts the whole
+                    # unattended pipeline, marks the job 'error', and skips the
+                    # auto-stack pass for *all* targets (the frames were already
+                    # scanned/persisted, so this is purely lost automation + a
+                    # misleading red job). A cancel surfaces as a graceful early
+                    # return from run_qc_and_solve, not a raise, but re-check it here
+                    # so a cancel-driven error is still classified as a cancel.
+                    if job.cancel_requested():
+                        summary["cancelled"] = True
+                        break
+                    log.warning("auto QC/solve failed for %s: %s", safe, exc)
+                    qc_errors[safe] = str(exc)
             if graded:
                 summary["auto_graded"] = graded
+            if qc_errors:
+                summary["qc_errors"] = qc_errors
 
         # Auto-stack runs as its own pass (not gated on QC/solve being on) and is
         # non-fatal per target. It considers *all* targets — not just the ones
