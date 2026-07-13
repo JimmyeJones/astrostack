@@ -80,6 +80,39 @@ def test_update_frame(proj):
     assert proj.count(accepted_only=True) == 0
 
 
+def test_reset_frame_qc_clears_auto_metrics_and_reject(proj):
+    fid = proj.add_frame(FrameRow(source_path="x.fit"))
+    proj.update_frame(fid, star_count=120, fwhm_px=3.1, sky_adu_median=800.0,
+                      eccentricity_median=0.4, transparency_score=0.9,
+                      streak_detected=True, streak_count=2,
+                      accept=False, reject_reason="auto:streak")
+    proj.reset_frame_qc(fid)
+    out = proj.get_frame(fid)
+    assert out is not None
+    assert out.star_count is None and out.fwhm_px is None
+    assert out.sky_adu_median is None and out.eccentricity_median is None
+    assert out.transparency_score is None
+    assert out.streak_detected is False and out.streak_count == 0
+    # An auto reject is cleared so the re-QC decides fresh.
+    assert out.accept is True and out.reject_reason is None
+
+
+def test_reset_frame_qc_preserves_a_user_override(proj):
+    fid = proj.add_frame(FrameRow(source_path="x.fit"))
+    proj.update_frame(fid, star_count=50, accept=False,
+                      reject_reason="user", user_override=True)
+    proj.reset_frame_qc(fid)
+    out = proj.get_frame(fid)
+    assert out is not None
+    assert out.star_count is None          # metrics still cleared for re-QC
+    assert out.accept is False             # but the user's decision stands
+    assert out.reject_reason == "user"
+
+
+def test_reset_frame_qc_on_missing_frame_is_a_noop(proj):
+    proj.reset_frame_qc(999)  # no such frame → no raise
+
+
 def test_iter_frames_filters(proj):
     proj.add_frames([FrameRow(source_path=f"a{i}.fit") for i in range(5)])
     proj.update_frame(1, accept=False, reject_reason="user")

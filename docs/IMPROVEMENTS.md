@@ -2087,18 +2087,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
-- **NEW (Builder 2026-07-13) — re-QC a frame whose Stage-1 cache was just refreshed after a mid-copy
-  ingest.** _(S, autonomy/image-quality — PRIORITY 2/4; residual from the v0.111.3 watcher-stability fix.)_
-  The v0.111.3 fix refreshes a truncated Stage-1 cache to the complete source on a re-scan, so the stack
-  reads the whole frame — but the frame's *QC result* isn't automatically re-run when only its cache is
-  refreshed (a dedup-skip adds 0 frames, so `_pipeline_body`'s `touched_names` excludes its target and the
-  auto-QC/solve pass skips it). This is strictly safe today (a truncated frame that QC'd as `qc_error` stays
-  excluded from the stack; one that QC'd as accepted now stacks the refreshed *complete* cache; and the
-  existing `qc_error` self-heal recovers it on any later re-QC). The polish: when `ingest_files` refreshes a
-  cache because the source grew, mark that frame for re-QC (e.g. clear its stale QC row / surface the
-  refreshed frame-ids so `_pipeline_body` re-QCs their targets) so a mid-copy frame is fully re-graded on
-  the complete data with no manual re-QC. Keep it additive and off the memory-bounded hot path. Located:
-  `seestack/io/ingest.py::ingest_files` (the `_cache_stale` refresh branch), `webapp/pipeline.py::_pipeline_body`.
+- ~~**NEW (Builder 2026-07-13) — re-QC a frame whose Stage-1 cache was just refreshed after a mid-copy
+  ingest.**~~ — **SHIPPED v0.113.1** (Builder 2026-07-13, branch `claude/pensive-faraday-0ishjc`). The
+  v0.111.3 fix refreshes a truncated Stage-1 cache to the complete source on a re-scan, but the frame's QC
+  result — computed on the *partial* data (wrong FWHM/star-count etc., which also feed auto-grade and the new
+  v0.113.0 cross-session drift nudge) — wasn't re-run because a dedup-skip adds 0 frames, so
+  `_pipeline_body`'s `touched_names` excluded its target. Now: `seestack/io/ingest.py::ingest_files` calls a
+  new `Project.reset_frame_qc(frame_id)` in the `_cache_stale` refresh branch (nulls the computed metrics and
+  clears any *auto* accept/reject — preserving a `user_override` — so `build_qc_arglist(only_new=True)`
+  re-offers the frame), and flags the refresh on `IngestResult.refreshed`; the scanner tallies it as
+  `TargetScanResult.n_frames_refreshed`; and `_pipeline_body` includes a refreshed-only target in
+  `touched_names`, so the frame is re-graded on the complete cache **in the same run**, not left with stale
+  truncated-frame metrics. Additive, off the memory-bounded hot path (a plain re-scan is unaffected — the
+  reset fires only when a size mismatch proves the cache was truncated), no schema/config/API/default change.
+  Tests: `tests/test_project.py` (reset clears auto metrics / preserves user_override / no-op on a missing
+  frame), `tests/test_ingest.py` (refresh resets QC + sets `refreshed`; a plain dedup-skip does neither),
+  `tests/test_scanner.py` (a refresh counts as `n_frames_refreshed`, not added), and
+  `tests/webapp/test_pipeline_qc_isolation.py` (a refreshed-only target is re-QC'd; an untouched one isn't).
 - ~~**NEW (Scout 2026-07-13) — cross-session quality-drift nudge: flag a *whole* soft/hazy session that
   auto-grade can't catch.**~~ — **SHIPPED v0.113.0** (Builder 2026-07-13, branch
   `claude/pensive-faraday-0ishjc`). Implemented the FWHM slice (the concrete, absolute metric — transparency
@@ -2539,8 +2544,15 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
-- **NEW (Scout 2026-07-12) — post-hoc "N of your M subs didn't align" note on a silently
-  half-complete stack.** _(M, friendliness/trust — PRIORITY 3.)_ The mixed-pointing guard
+- ~~**NEW (Scout 2026-07-12) — post-hoc "N of your M subs didn't align" note on a silently
+  half-complete stack.**~~ — **ALREADY SHIPPED** (Builder note 2026-07-13): this is already implemented on
+  the History card. The stacker stamps `NOFFERED`/`NALIGNFL` into the master header, the `…/stack-runs/{id}/info`
+  endpoint returns them as `frame_accounting`, and `History.tsx::frameAccountingNote` renders exactly the
+  requested plain-language note — "1,850 of 2,000 subs combined · 150 couldn't be aligned" — with a `concern`
+  flag (≥10 offered **and** ≥20% failed) that turns it amber and adds the "two targets in one folder / some
+  plate-solved to the wrong place → open the Frames table, sort by RA/Dec, reject or re-solve the outliers"
+  guidance. Covered by `History.test.tsx`. The Scout filed this without spotting the existing implementation;
+  closing it as done rather than building a duplicate. _(Original request kept below for provenance.)_ The mixed-pointing guard
   (`stack/pointings.py`, v0.109.16) is **off by default**, and the manual Stack form only *warns
   before* stacking. So a user who keeps the guard off — or stacks a folder that's mostly one target
   plus a handful of stray/second-target subs — still gets a stack that silently dropped every
@@ -3758,6 +3770,13 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.113.1** — Autonomy/image-quality/correctness (Builder 2026-07-13). Re-QC a frame whose Stage-1 cache
+  was refreshed after a mid-copy ingest: `ingest_files` now resets the frame's stale QC (computed on the
+  truncated data) via new `Project.reset_frame_qc`, flags the refresh (`IngestResult.refreshed` →
+  `TargetScanResult.n_frames_refreshed`), and `_pipeline_body` re-QCs the refreshed target in the same run
+  instead of leaving wrong FWHM/star-count metrics (which feed auto-grade and the v0.113.0 drift nudge).
+  Preserves `user_override`; off the hot path (fires only on a proven size mismatch). Tests across
+  project/ingest/scanner/pipeline.
 - **v0.113.0** — Autonomy/friendliness/image-quality (Builder 2026-07-13). Cross-session quality-drift nudge:
   `seestack/session_recap.py` compares the newest capture session's median FWHM (over accepted, measured subs)
   against the target's sharpest prior session and, when materially softer (≥25% *and* ≥0.6 px, both sessions

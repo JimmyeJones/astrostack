@@ -73,6 +73,47 @@ def test_qc_target_failure_isolated_and_autostack_still_runs(solved_library, mon
     assert set(stacked) == {"M_42", "NGC_7000"}
 
 
+def test_refreshed_only_target_is_requeued_for_qc(solved_library, monkeypatch):
+    """A target whose only change on a scan was a *refreshed* cache (a mid-copy
+    sub whose source completed) must be re-QC'd even though it gained no new
+    frame — its stale truncated-frame QC was reset and needs recomputing."""
+    from seestack.io.scanner import ScanResult, TargetScanResult
+
+    settings = Settings(
+        data_root=str(solved_library), auto_ingest=True, auto_qc=True,
+        auto_solve=False, auto_stack=False,
+    )
+
+    def fake_scan(lib, root, **kwargs):  # noqa: ANN001
+        return ScanResult(root=str(root), targets=[
+            # Nothing new, but its cache was refreshed → must be re-QC'd.
+            TargetScanResult(target_name="M 42", safe_name="M_42",
+                             n_frames_found=1, n_frames_added=0, n_frames_refreshed=1),
+            # Untouched (no new frame, no refresh) → must be skipped.
+            TargetScanResult(target_name="NGC 7000", safe_name="NGC_7000",
+                             n_frames_found=1, n_frames_added=0, n_frames_refreshed=0),
+        ])
+
+    monkeypatch.setattr("webapp.pipeline.scan_and_organize", fake_scan)
+
+    qc_calls: list[str] = []
+    real_open = Library.open_target
+
+    def spy_open(self, safe):  # noqa: ANN001
+        qc_calls.append(safe)
+        return real_open(self, safe)
+
+    monkeypatch.setattr(Library, "open_target", spy_open)
+    monkeypatch.setattr("webapp.pipeline.run_qc_and_solve",
+                        lambda proj, **kw: {"qc_done": 0, "qc_total": 0})
+
+    summary = pipeline._pipeline_body(settings, _FakeJM(), Job(kind="pipeline"), root=None)
+
+    # Only the refreshed target is re-QC'd; the untouched one is skipped.
+    assert summary["targets"] == ["M_42"]
+    assert qc_calls == ["M_42"]
+
+
 def test_qc_cancel_during_target_is_classified_cancelled(solved_library, monkeypatch):
     # A cancel that surfaces as a raise (rather than run_qc_and_solve's graceful
     # early return) must still be classified as a cancel, not an error, by the new

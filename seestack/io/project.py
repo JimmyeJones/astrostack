@@ -406,6 +406,29 @@ class Project:
         row = self._conn.execute("SELECT * FROM frames WHERE id = ?", (frame_id,)).fetchone()
         return _row_to_frame(row) if row else None
 
+    def reset_frame_qc(self, frame_id: int) -> None:
+        """Clear a frame's computed QC metrics (and any *auto* accept/reject) so
+        the next QC pass re-grades it from scratch.
+
+        Used when a frame's Stage-1 cache was refreshed after ingest (e.g. a
+        mid-copy-truncated sub whose source later finished copying): its stored
+        metrics were computed on the partial data and must not persist. Nulling
+        ``star_count`` also makes ``build_qc_arglist(only_new=True)`` re-offer the
+        frame automatically. A user's manual accept/reject (``user_override``) is
+        preserved — only auto decisions are reset."""
+        existing = self.get_frame(frame_id)
+        if existing is None:
+            return
+        fields: dict[str, Any] = {
+            "fwhm_px": None, "star_count": None, "sky_adu_median": None,
+            "eccentricity_median": None, "transparency_score": None,
+            "streak_detected": False, "streak_count": 0,
+        }
+        if not existing.user_override:
+            fields["accept"] = True
+            fields["reject_reason"] = None
+        self.update_frame(frame_id, **fields)
+
     def iter_frames(self, accepted_only: bool = False) -> Iterator[FrameRow]:
         assert self._conn is not None
         sql = "SELECT * FROM frames"

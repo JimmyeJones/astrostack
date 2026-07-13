@@ -57,6 +57,10 @@ class TargetScanResult:
     n_frames_added: int = 0
     n_skipped_existing: int = 0
     n_errors: int = 0
+    # Dedup-skipped frames whose Stage-1 cache was refreshed (a mid-copy sub whose
+    # source later completed) — their QC was reset, so the target needs re-QC even
+    # though no *new* frame was added.
+    n_frames_refreshed: int = 0
 
 
 @dataclass
@@ -165,6 +169,8 @@ def _ingest_into_target(
                 tsr.n_errors += 1
             elif res.skipped:
                 tsr.n_skipped_existing += 1
+                if res.refreshed:
+                    tsr.n_frames_refreshed += 1
             else:
                 tsr.n_frames_added += 1
     finally:

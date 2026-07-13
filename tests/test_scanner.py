@@ -105,6 +105,32 @@ def test_scan_picks_up_new_frames_on_rescan(tmp_path):
         lib.close()
 
 
+def test_scan_counts_a_cache_refresh_as_refreshed_not_added(tmp_path):
+    """A mid-copy-truncated sub whose source later completes is refreshed (not
+    re-added) on re-scan, so the scanner reports it under n_frames_refreshed —
+    which the pipeline uses to re-QC the target even with no new frames."""
+    scan_root = tmp_path / "seestar"
+    (scan_root / "M 42").mkdir(parents=True)
+    full = write_seestar_fits(scan_root / "M 42" / "Light_001.fit", n_stars=5, seed=1)
+    full_bytes = full.read_bytes()
+    full.write_bytes(full_bytes[: len(full_bytes) // 2])  # simulate still-copying
+
+    lib = Library.create(tmp_path / "lib")
+    try:
+        # copy_to_cache=True so the truncated bytes land in the Stage-1 cache.
+        first = scan_and_organize(lib, scan_root, copy_to_cache=True)
+        m42_first = next(t for t in first.targets if t.safe_name == "M_42")
+        assert m42_first.n_frames_added == 1 and m42_first.n_frames_refreshed == 0
+
+        full.write_bytes(full_bytes)  # the copy finishes
+        second = scan_and_organize(lib, scan_root, copy_to_cache=True)
+        m42 = next(t for t in second.targets if t.safe_name == "M_42")
+        assert m42.n_frames_added == 0        # nothing new
+        assert m42.n_frames_refreshed == 1    # but the cache was refreshed
+    finally:
+        lib.close()
+
+
 def test_scan_empty_root_produces_no_targets(tmp_path):
     empty = tmp_path / "empty"
     empty.mkdir()
