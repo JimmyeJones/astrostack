@@ -3410,6 +3410,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+- **NEW (Builder 2026-07-13) — harden `session_recap._parse` against mixed tz-aware/naive frame timestamps.**
+  _(S, robustness — latent, not currently reachable.)_ `seestack/session_recap.py::_parse` returns a
+  **tz-aware** datetime for a timestamp carrying an offset (`…+00:00`/`…Z`) but a **tz-naive** one for a bare
+  `YYYY-MM-DDT…` with no zone. `session_recap` then `sort`s and subtracts these in `_split_sessions`; Python
+  raises `TypeError: can't compare offset-naive and offset-aware datetimes` if a single project ever holds
+  *both* kinds. Today every writer stores tz-aware UTC (`fits_loader._parse_timestamp` appends `+00:00`;
+  `datetime.now(timezone.utc).isoformat()` in the stacker/pipeline), so it's **not reachable in production** —
+  but it's a one-line latent trap in code the new v0.113.0 quality-drift nudge also depends on. Fix: coerce a
+  naive parse to UTC in `_parse` (`dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt`) so the
+  comparison is always well-defined regardless of what wrote the timestamp. Additive, pure, testable with a
+  mixed-tz frame pair; verify first that no ingest/merge path can persist a naive timestamp (if one can, that's
+  the real bug). Found while adding the cross-session drift nudge (a test hit exactly this on mixed fixtures).
 - **Exercise the production-only SPA-serving path in tests (test-coverage blind spot that hid a security bug).**
   *(Idea, Builder 2026-07-12 — surfaced while fixing the v0.109.24 path-traversal.)* The SPA fallback route +
   `/assets` mount in `webapp/main.py::_mount_spa` are only registered when `webapp/static` exists — i.e. the
