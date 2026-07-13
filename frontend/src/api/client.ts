@@ -91,6 +91,14 @@ export interface ObjectInfo {
   matched_by: "name" | "coords";
 }
 
+export interface SessionQualityDrift {
+  kind: string;
+  latest_fwhm_px: number;
+  baseline_fwhm_px: number;
+  n_latest: number;
+  n_baseline: number;
+}
+
 export interface SessionRecap {
   n_frames: number;
   n_kept: number;
@@ -101,6 +109,7 @@ export interface SessionRecap {
   start_utc: string | null;
   end_utc: string | null;
   reject_buckets: Record<string, number>;
+  quality_drift: SessionQualityDrift | null;
 }
 
 export interface DashboardStats {

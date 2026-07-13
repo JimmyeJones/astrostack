@@ -52,6 +52,17 @@ class ObjectInfoOut(BaseModel):
     matched_by: str
 
 
+class SessionQualityDriftOut(BaseModel):
+    """A cross-session softness nudge: the newest session is materially softer
+    than the target's best previous one (higher FWHM = softer stars)."""
+
+    kind: str
+    latest_fwhm_px: float
+    baseline_fwhm_px: float
+    n_latest: int
+    n_baseline: int
+
+
 class SessionRecapOut(BaseModel):
     """Plain-language recap of a target's most recent capture session."""
 
@@ -64,6 +75,7 @@ class SessionRecapOut(BaseModel):
     start_utc: str | None = None
     end_utc: str | None = None
     reject_buckets: dict[str, int] = {}
+    quality_drift: SessionQualityDriftOut | None = None
 
 
 class FrameOut(BaseModel):

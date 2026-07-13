@@ -1,7 +1,7 @@
 import { Badge, Group, Paper, Stack, Text } from "@mantine/core";
 import { IconMoonStars } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
-import { api, type SessionRecap } from "../api/client";
+import { api, type SessionQualityDrift, type SessionRecap } from "../api/client";
 import { formatIntegration } from "../format";
 
 // Plain-language names for the reject buckets the backend groups into, in the
@@ -40,6 +40,18 @@ export function describeSession(r: SessionRecap): string {
   return out;
 }
 
+/** A gentle, plain-language heads-up when the newest session is materially softer
+ *  than the target's best previous one — a whole-session focus/seeing dip that
+ *  auto-grade (relative *within* a session) can't catch. Pure and unit-testable. */
+export function describeQualityDrift(d: SessionQualityDrift): string {
+  const latest = d.latest_fwhm_px.toFixed(1);
+  const best = d.baseline_fwhm_px.toFixed(1);
+  return (
+    `Heads up: last session's stars are softer than your usual best ` +
+    `(${latest} px vs ${best} px FWHM) — worth checking focus.`
+  );
+}
+
 /**
  * "Last session" recap — a small, persistent, plain-language card answering the
  * first question a walk-away user has on return: *what did last night give me?*
@@ -67,6 +79,9 @@ export function SessionRecapCard({ safe }: { safe: string }) {
             <Badge variant="light" color="violet" size="sm">{keptPct}% kept</Badge>
           </Group>
           <Text size="sm" c="dimmed">{describeSession(r)}</Text>
+          {r.quality_drift && (
+            <Text size="sm" c="yellow.7">{describeQualityDrift(r.quality_drift)}</Text>
+          )}
         </Stack>
       </Group>
     </Paper>

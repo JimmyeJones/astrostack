@@ -2099,24 +2099,29 @@ problems. Dogfood it every big-picture run and fix root causes.
   refreshed frame-ids so `_pipeline_body` re-QCs their targets) so a mid-copy frame is fully re-graded on
   the complete data with no manual re-QC. Keep it additive and off the memory-bounded hot path. Located:
   `seestack/io/ingest.py::ingest_files` (the `_cache_stale` refresh branch), `webapp/pipeline.py::_pipeline_body`.
-- **NEW (Scout 2026-07-13) — cross-session quality-drift nudge: flag a *whole* soft/hazy session that
-  auto-grade can't catch.** _(S–M, autonomy/friendliness/image-quality — PRIORITY 2/3.)_ Auto-grade
-  (`qc/grading.py`) is deliberately **relative within a target's frame population** — it flags frames
-  that are outliers *versus the rest of this target*. That's correct for a mixed night, but it is blind
-  to a night where **every** sub is uniformly bad: a whole session shot slightly out of focus, or through
-  thin high haze, has a tight FWHM/transparency distribution, so nothing looks like an outlier and every
-  frame passes — quietly dragging the target's stack down. The data to catch it already exists: each
-  frame carries `fwhm_px` / `transparency_score` / `sky_adu_median` and a capture timestamp, so frames
-  group into sessions (by night), and prior sessions give a per-target baseline. Add a read-only check
-  that compares the newest session's median FWHM (and/or transparency) against the target's historical
-  best-session baseline and, when materially worse, surfaces a gentle plain-language note — *"Heads up:
-  last night's subs of M31 are softer than your usual best (5.2 px vs 3.4 px FWHM) — worth checking
-  focus."* Purely informational (never auto-rejects a whole session — that would risk nuking a legitimately
-  faint target's only data), so it's safe and needs no real-data gating like the Auto-path items. Pairs
-  naturally with the "Last night" recap (surface it there) and the readiness verdict. Additive, read-only,
-  offline; a pure `session_quality_drift(frames)` helper is testable in isolation. Distinct from
-  auto-grade (within-target outliers) — this is *across sessions*, the gap auto-grade structurally can't
-  see.
+- ~~**NEW (Scout 2026-07-13) — cross-session quality-drift nudge: flag a *whole* soft/hazy session that
+  auto-grade can't catch.**~~ — **SHIPPED v0.113.0** (Builder 2026-07-13, branch
+  `claude/pensive-faraday-0ishjc`). Implemented the FWHM slice (the concrete, absolute metric — transparency
+  is only a *relative* score vs a reference frame, so cross-session comparison is unreliable and was left
+  out). `seestack/session_recap.py` now splits the target's frames into capture-time sessions (a new shared
+  `_split_sessions`, which `_last_session_frames` reuses) and compares the newest session's median FWHM over
+  its *accepted, measured* subs against the **sharpest prior session's** baseline; when the newest is
+  materially softer — clearing **both** a relative floor (`FWHM_DRIFT_RATIO=1.25`, ≥25% softer) **and** an
+  absolute one (`FWHM_DRIFT_ABS_PX=0.6`), and both sessions carry ≥`SESSION_QUALITY_MIN_FRAMES=4` measured
+  subs — it attaches a `SessionQualityDrift` to the `SessionRecap`. The `…/session-recap` endpoint returns it
+  as a nullable `quality_drift` object and the "Last session" card shows one gentle amber line ("Heads up:
+  last session's stars are softer than your usual best (5.2 px vs 3.4 px FWHM) — worth checking focus").
+  Purely informational — never rejects anything (so a legitimately faint target's only data is safe) and
+  read-only/offline, so no real-data gating. Deliberately conservative thresholds so it never nags on ordinary
+  night-to-night seeing wobble. Additive, no schema/config/API-shape change (a new nullable field + nested
+  object). Tests: `tests/test_session_recap.py` (flags a soft newest session / silent on comparable seeing /
+  needs a prior session / ignores a thin newest session / baselines off the *best* prior / counts only
+  accepted-measured subs), the endpoint serialisation in `tests/webapp/test_target_session_recap.py`, and the
+  frontend `SessionRecapCard.test.tsx` (`describeQualityDrift` phrasing + shows/omits the nudge). Distinct from
+  auto-grade (within-session outliers) — this is the across-session gap auto-grade structurally can't see.
+  _(Follow-up left for a future run: extend the same session-drift check to a transparency/star-count
+  signal once there's a reference-independent per-session measure, and surface the note on the History
+  card / readiness verdict too, not only the "Last session" card.)_
 - **⭐ OWNER-REQUESTED — "Reprocess everything" — ALL SLICES SHIPPED: (a) v0.74.0,
   (c) v0.76.0–0.77.0, (b) v0.83.0.** The stacking engine keeps improving (better rejection /
   alignment / calibration, bug fixes), but each target's existing stack was produced
@@ -3753,6 +3758,13 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.113.0** — Autonomy/friendliness/image-quality (Builder 2026-07-13). Cross-session quality-drift nudge:
+  `seestack/session_recap.py` compares the newest capture session's median FWHM (over accepted, measured subs)
+  against the target's sharpest prior session and, when materially softer (≥25% *and* ≥0.6 px, both sessions
+  ≥4 measured subs), surfaces a gentle "Last session" card line ("…softer than your usual best — worth checking
+  focus"). Catches a whole soft/out-of-focus night that auto-grade (within-session outliers) can't see; purely
+  informational, read-only, off-nothing. New nullable `quality_drift` on the `…/session-recap` endpoint.
+  Tests: `tests/test_session_recap.py`, `tests/webapp/test_target_session_recap.py`, `SessionRecapCard.test.tsx`.
 - **v0.109.26** — Correctness/data-retention (image-quality/autonomy; Builder 2026-07-12; found by an
   adversarial qc/solve audit). `qc/runner.py::apply_qc_result_to_db` now self-heals an `auto:streak`
   rejection on a clean, non-override re-QC (mirroring the existing `qc_error` heal), so a frame that's no
