@@ -1,12 +1,12 @@
 import {
   ActionIcon, Alert, Badge, Box, Button, Center, Grid, Group, HoverCard, Image,
-  Loader, Modal, NumberFormatter, NumberInput, Paper, Select, Stack, Table,
-  TagsInput, Text, Textarea, Title, Tooltip,
+  Loader, Modal, NumberFormatter, NumberInput, Paper, Progress, Select, Stack,
+  Table, TagsInput, Text, Textarea, Title, Tooltip,
 } from "@mantine/core";
 import {
   IconAlertTriangle, IconArrowBackUp, IconCheck, IconDeviceFloppy, IconHistory,
-  IconNotes, IconPhoto, IconSparkles, IconStack2, IconTelescope, IconWand, IconX,
-  IconStars,
+  IconNotes, IconPhoto, IconSparkles, IconStack2, IconTelescope, IconTargetArrow,
+  IconWand, IconX, IconStars,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
@@ -14,6 +14,7 @@ import { Link, useParams } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
 import { api, type Frame } from "../api/client";
 import { formatIntegration } from "../format";
+import { integrationReadiness, readinessColor } from "../readiness";
 import { QueryError } from "../components/QueryError";
 import { detectSolveSetupProblem } from "../components/target/solveSetup";
 import { detectMixedPointings } from "../components/target/mixedPointings";
@@ -491,6 +492,19 @@ export function TargetView() {
     return countNewSubsSinceStack(list, latestGenuine?.timestamp_utc);
   }, [needsProcessing, solveSetup, runs.data, list]);
 
+  // "Is it enough yet?" — judge this target's accumulated integration against a
+  // sane per-object-type goal so a beginner gets a plain-language answer to "do
+  // I have enough subs, or keep shooting?" The object type comes from the
+  // offline identify card (a catalog match); unknown → a mid-range default. A
+  // suggestion only — never gates stacking. Null (no integration yet) → no card.
+  const readiness = useMemo(
+    () =>
+      target.data
+        ? integrationReadiness(target.data.total_exposure_s, identity.data?.type)
+        : null,
+    [target.data, identity.data],
+  );
+
   // Frames QC couldn't read at all (corrupt/truncated FITS): make them visible —
   // they're skipped when stacking but invisible in the reject breakdown. A full
   // QC + Solve re-checks them (`only_new_qc=False`), so offer that one click.
@@ -902,6 +916,26 @@ export function TargetView() {
                   ? " Identified from this target's plate-solved position."
                   : ""}
               </Text>
+            </Stack>
+          </Group>
+        </Paper>
+      ) : null}
+
+      {readiness ? (
+        <Paper withBorder p="sm" radius="md" mt="xs">
+          <Group gap="sm" wrap="nowrap" align="flex-start">
+            <IconTargetArrow size={22} style={{ flexShrink: 0, marginTop: 2 }}
+              color={`var(--mantine-color-${readinessColor(readiness.level)}-5)`} />
+            <Stack gap={6} style={{ flex: 1, minWidth: 0 }}>
+              <Group gap="xs" justify="space-between" wrap="nowrap">
+                <Text size="sm" fw={500}>Is it enough yet?</Text>
+                <Text size="xs" c="dimmed" style={{ whiteSpace: "nowrap" }}>
+                  goal ~{readiness.goalHours} h
+                </Text>
+              </Group>
+              <Progress value={readiness.fraction * 100}
+                color={readinessColor(readiness.level)} size="sm" radius="xl" />
+              <Text size="sm" c="dimmed">{readiness.verdict}</Text>
             </Stack>
           </Group>
         </Paper>
