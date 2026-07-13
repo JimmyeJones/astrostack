@@ -135,6 +135,46 @@ def test_ingest_does_not_recopy_an_already_cached_frame(tmp_path, monkeypatch):
         proj.close()
 
 
+def test_ingest_refreshes_cache_when_source_grew_after_a_mid_copy_ingest(tmp_path):
+    """A frame swept in while its source was still being copied leaves a truncated
+    Stage-1 cache; once the source finishes copying, a re-scan must refresh the
+    cache so the *complete* frame — not the truncated one — flows into QC/stack.
+
+    Regression: a plain dedup-skip only retried the copy when ``cached_path`` was
+    NULL, so a truncated-but-cached frame was never refreshed even after the
+    source grew to full size (partial sub silently persisting into the stack)."""
+    src = tmp_path / "raws"
+    src.mkdir()
+    full = write_seestar_fits(src / "a.fit", seed=9)
+    full_bytes = full.read_bytes()
+
+    # Simulate the first scan seeing a still-mid-copy (truncated) source.
+    truncated = full_bytes[: len(full_bytes) // 2]
+    full.write_bytes(truncated)
+
+    proj = Project.create(tmp_path / "proj", name="t")
+    cache = CacheManager(proj.project_dir)
+    try:
+        first = list(ingest_files(proj, cache, [full]))
+        assert first[0].frame_id is not None
+        cached = first[0].cached_path
+        assert cached is not None and cached.stat().st_size == len(truncated)
+
+        # The source copy finishes: the file grows to its full size.
+        full.write_bytes(full_bytes)
+
+        # A re-scan dedup-skips the registered row but must refresh the cache.
+        second = list(ingest_files(proj, cache, [full]))
+        assert second[0].skipped is True
+        refreshed = second[0].cached_path
+        assert refreshed is not None and refreshed.exists()
+        assert refreshed.read_bytes() == full_bytes  # cache now matches the source
+        assert proj.count() == 1  # no duplicate row
+        assert next(iter(proj.iter_frames())).cached_path == str(refreshed)
+    finally:
+        proj.close()
+
+
 def test_ingest_skips_duplicates(tmp_path):
     p = write_seestar_fits(tmp_path / "a.fit")
     proj = Project.create(tmp_path / "proj", name="t")

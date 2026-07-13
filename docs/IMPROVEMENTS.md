@@ -76,9 +76,30 @@ when you take it.
   autonomy — the unattended path silently stops working. Severity: wrong *outcome* for automation,
   though no pixel data is corrupted.)
 
-- **Watcher stability guarantee is bypassed at ingest — a still-being-copied sub can be swept into the
-  stack.** *(Traced, Scout 2026-07-13; medium confidence on real-world harm — mostly mitigated
-  downstream, so NOT a blind Builder change.)* The `StabilityTracker` (`webapp/watcher.py`) exists
+- ~~**Watcher stability guarantee is bypassed at ingest — a still-being-copied sub can be swept into the
+  stack.**~~ — **FIXED v0.111.3** (Builder 2026-07-13, branch `claude/pensive-faraday-b6ko10`; traced +
+  regression-tested). Took the safest of the three suggested angles — **re-copy to cache when the source
+  size no longer matches the cached size** — which fixes the actual data-integrity path (a truncated
+  Stage-1 copy that persists into the stack) without disturbing the hot watcher→pipeline plumbing. In
+  `seestack/io/ingest.py::ingest_files`, the dedup-skip branch previously refreshed the Stage-1 copy only
+  when `cached_path` was NULL; it now also refreshes when a new `_cache_stale(cached_path, src)` helper
+  finds the cached copy's size no longer matches the (now-complete) source — the signature of a frame that
+  was swept in mid-copy. So even though a still-copying sub can still be *registered* while truncated, the
+  next scan (fired when it finally stabilises) refreshes its cache to the whole file **before** it is
+  stacked — the stack reads the complete frame, not the partial one. Byte-identical in the normal case, so
+  a routine re-scan is a cheap stat compare with no copy and no DB write (the existing
+  `test_ingest_does_not_recopy_an_already_cached_frame` guard still holds); `_cache_stale` returns False
+  on any stat error, so a NAS blip never churns. Regression
+  `tests/test_ingest.py::test_ingest_refreshes_cache_when_source_grew_after_a_mid_copy_ingest` ingests a
+  half-written source, grows it to full size, re-scans, and asserts the cache now byte-matches the complete
+  source (fails-before: the truncated cache persisted / passes-after) with no duplicate row. Additive, no
+  schema/config/API/default change. **Residual (filed as a fresh idea below):** the truncated frame's QC
+  result isn't auto-re-run when only its cache is refreshed (a dedup-skip adds 0 frames, so its target
+  isn't re-QC'd) — but this is strictly safe (a rejected partial frame is *excluded* from the stack, and an
+  accepted one now stacks the refreshed complete cache), and the existing `qc_error` self-heal recovers it
+  on any later re-QC. (Wrong-result on a live-capture race, well-mitigated — image-quality/trust.)
+  <details><summary>Original trace</summary>
+  The `StabilityTracker` (`webapp/watcher.py`) exists
   precisely so the app "doesn't react to a file that's still being copied over SMB/NFS" — a file is only
   *stable* once its size+mtime have been quiet for `watch_quiet_period_s`. But that stable-set only gates
   **whether to fire** the batch callback; the pipeline it triggers (`_on_batch_ready` →
@@ -101,6 +122,7 @@ when you take it.
   `webapp/watcher.py::poll_once` (computes but discards the stable-set for ingest), `webapp/main.py`
   `_on_batch_ready`, `webapp/pipeline.py::_pipeline_body`, `seestack/io/ingest.py::ingest_files`. (Wrong-result
   on a live-capture race, well-mitigated — image-quality/trust; S–M code + test.)
+  </details>
 
 - ~~**A user-cancelled auto-ingest pipeline job is reported `done`, not `cancelled` (misleading green
   "success" for a cancelled scan).**~~ — **FIXED v0.109.27** (Builder 2026-07-12, branch
@@ -2065,6 +2087,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+- **NEW (Builder 2026-07-13) — re-QC a frame whose Stage-1 cache was just refreshed after a mid-copy
+  ingest.** _(S, autonomy/image-quality — PRIORITY 2/4; residual from the v0.111.3 watcher-stability fix.)_
+  The v0.111.3 fix refreshes a truncated Stage-1 cache to the complete source on a re-scan, so the stack
+  reads the whole frame — but the frame's *QC result* isn't automatically re-run when only its cache is
+  refreshed (a dedup-skip adds 0 frames, so `_pipeline_body`'s `touched_names` excludes its target and the
+  auto-QC/solve pass skips it). This is strictly safe today (a truncated frame that QC'd as `qc_error` stays
+  excluded from the stack; one that QC'd as accepted now stacks the refreshed *complete* cache; and the
+  existing `qc_error` self-heal recovers it on any later re-QC). The polish: when `ingest_files` refreshes a
+  cache because the source grew, mark that frame for re-QC (e.g. clear its stale QC row / surface the
+  refreshed frame-ids so `_pipeline_body` re-QCs their targets) so a mid-copy frame is fully re-graded on
+  the complete data with no manual re-QC. Keep it additive and off the memory-bounded hot path. Located:
+  `seestack/io/ingest.py::ingest_files` (the `_cache_stale` refresh branch), `webapp/pipeline.py::_pipeline_body`.
 - **NEW (Scout 2026-07-13) — cross-session quality-drift nudge: flag a *whole* soft/hazy session that
   auto-grade can't catch.** _(S–M, autonomy/friendliness/image-quality — PRIORITY 2/3.)_ Auto-grade
   (`qc/grading.py`) is deliberately **relative within a target's frame population** — it flags frames
