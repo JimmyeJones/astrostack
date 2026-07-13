@@ -3111,25 +3111,32 @@ problems. Dogfood it every big-picture run and fix root causes.
   Dashboard card; (c) fold in a one-click "(re)stack now" action. Why it fits: turns the walk-away →
   come-back moment from "hunt through pages to see what happened" into "one friendly card that tells me,
   and points me at the next click."
-- **NEW (Scout 2026-07-12) — "Is it enough yet?": a per-target integration goal + plain-language
-  readiness verdict.** _(M, autonomy/friendliness — PRIORITY 2/3; beginner bar: ✔ sane default per
-  object type, plain-language, answers a top beginner question with no expert knobs.)_ A beginner's
-  most common uncertainty on the stack→result path is *"do I have enough subs for a clean image, or
-  should I keep shooting this target?"* Today the app shows raw integration time (Target page, Tonight
-  "add more" rows) but never judges whether it's *enough* — so the user guesses. Add a small,
-  data-free heuristic that maps a target's total accepted integration time against a **sane suggested
-  goal by object type** (baked-in defaults, e.g. bright emission nebula ≈ 2 h, galaxy / faint nebula
-  ≈ 6 h, star cluster ≈ 1 h — pulled from the same catalog `type` the planner already buckets), and
-  renders a one-line verdict + a simple progress bar: *"1.8 h of ~4 h — a solid start; more time pulls
-  out fainter detail"* / *"3.2 h — plenty for a clean image of this bright target."* Reuse the
-  planner's `objectTypeBucket` for the goal lookup and the existing per-target integration total; the
-  goal is a **suggestion, not a gate** (never blocks stacking) and needs no config. Surface it on the
-  Target page and as a badge on the Tonight "add more to what you're shooting" rows so the planner can
-  say "you're basically done here — start something new instead." Slice-friendly: (a) the goal table +
-  pure `integrationReadiness(hours, type)` helper + Target-page line; (b) the Tonight-row badge.
-  Additive, offline, no schema/API change (goal defaults live in code; a future run could make them a
-  per-target override setting if asked). Distinct from the planner (which ranks *what* to shoot) and
-  the Share card (which exports a *finished* result) — this answers *"is this one done?"*
+- **"Is it enough yet?": a per-target integration goal + plain-language readiness verdict.** —
+  **SLICE (a) SHIPPED v0.111.0** (Builder 2026-07-13, branch `claude/pensive-faraday-4u7fxt`). A new
+  pure/offline frontend helper `frontend/src/readiness.ts::integrationReadiness(exposureSeconds, type)`
+  maps a target's accepted-sub integration total against a **sane per-object-type goal** (Galaxy 6 h,
+  Nebula 4 h, Cluster 1.5 h, unknown/Other 4 h — the coarse buckets can't split bright-vs-faint nebula,
+  so Nebula sits mid-range), reusing the planner's `objectTypeBucket` for the lookup and the identify
+  card's catalog `type` for the object class. It returns a `fraction` (clamped 0..1 for a progress bar),
+  a four-step `level` (starting → solid → close → plenty), and a plain-language `verdict` built with the
+  existing `formatIntegration` so small amounts read "2 min of ~6 h …" rather than "0.0 h" — e.g.
+  *"3.0 h of ~6 h — a solid start — keep going to pull out fainter detail."* / *"8.0 h — plenty for a
+  clean image of this target."* The Target page renders a small **"Is it enough yet?"** card (goal
+  chip + coloured `Progress` bar + verdict) below the identify card, shown only once any light has been
+  collected (`total_exposure_s > 0`) — a **suggestion, never a gate** (nothing blocks stacking).
+  Frontend-only, additive, offline; no backend/schema/API/default change. Tests: `readiness.test.ts`
+  (null-on-no-integration, per-type goal scoring, the four levels, fraction clamp, unknown-type
+  fallback, verdict phrasing, colour map) + `Target.test.tsx` (card shows a verdict+bar for a galaxy /
+  stays hidden with no integration). **SLICE (b) SHIPPED v0.111.1** (same branch): a compact
+  `readinessRowHint(exposureSeconds, type)` helper turns the same readiness into a Tonight-planner
+  row badge on the "add more to what you're shooting" rows — "Nearly there" (close to the goal) /
+  "Plenty — try something new" (past it), and stays **silent** while a target is still worth topping
+  up (the row's integration figure already implies "keep going"), so the planner nudges a
+  well-integrated target toward starting something new. Frontend-only, additive; tests in
+  `readiness.test.ts` (hint fires only at close/plenty, null at 0) + `Tonight.test.tsx` (a
+  well-integrated library row shows the nudge, a barely-started one doesn't). tsc + full vitest (743)
+  + vite build all green. Both slices shipped. *(Scout-filed 2026-07-12; M, autonomy/friendliness —
+  PRIORITY 2/3.)*
 - **NEW (Scout 2026-07-12) — "Share card": a one-click, social-ready export with an optional caption
   strip.** _(M, friendliness/workflow — PRIORITY 3; beginner bar: ✔ sane default, plain-language, helps
   a beginner *share* their result.)_ Today's export gives a 16-bit linear TIFF (looks dark on its own —
@@ -3164,11 +3171,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   completeness), `tests/webapp/test_target_identify.py` (3, endpoint incl. null + 404), and
   `Target.test.tsx` (`describeObject` helper + card renders-on-match / hidden-on-no-match). tsc + full
   vitest (731) + vite build all green. *(Scout-filed 2026-07-12; S–M, friendliness — PRIORITY 3.)*
-  - **Follow-up slice (Builder-spotted while shipping v0.110.0; S, friendliness):** the identify endpoint +
-    `objectinfo.identify_object()` + the `describeObject` helper are generic and page-agnostic — reuse the
-    exact same card on the **History/result page** and the **editor** (where a beginner is admiring the
-    finished picture and most wants "what is this?"), not just the Target page. Pure-frontend once the
-    endpoint exists (fetch `GET /api/targets/{safe}/identify`, render the shared card); no backend change.
+  - **Follow-up slice — reuse the card on the editor — SHIPPED v0.111.2** (Builder 2026-07-13, branch
+    `claude/pensive-faraday-4u7fxt`). Extracted the identify card + `describeObject` helper out of
+    `Target.tsx` into a shared `frontend/src/components/ObjectInfoCard.tsx` (`<ObjectInfoCard safe={…} />`,
+    fetches `GET /api/targets/{safe}/identify`, renders nothing until a confident match resolves) and
+    dropped it onto the **editor** header — where a beginner is admiring the finished picture and most
+    wants "what is this?" — as well as the Target page (which now renders the shared component; its own
+    identify query is kept for the readiness card, and react-query dedupes the two to one request via the
+    shared `["identify", safe]` key). Pure-frontend, additive; no backend/schema/API change. Tests:
+    `ObjectInfoCard.test.tsx` (describeObject phrasing + renders-on-match / coords-note / hidden-on-no-match);
+    `Target.test.tsx` re-exports `describeObject` from the route so its existing tests are unchanged. tsc +
+    full vitest (747) + vite build all green. *(History-page reuse deferred — the editor is where the
+    "what is this?" question lands hardest; a future run can drop the same one-liner onto History too.)*
     A later, larger slice could add an optional one-line "what it is" blurb field to the catalog JSON for the
     most-popular targets (absent it, type + constellation already read well).
   - **Dedup done (Scout 2026-07-13):** the duplicate "Share this image" entry lower in this list was

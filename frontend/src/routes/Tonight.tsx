@@ -9,6 +9,7 @@ import { Link } from "react-router-dom";
 import { api, type PlannedTarget } from "../api/client";
 import { QueryError } from "../components/QueryError";
 import { formatIntegration } from "../format";
+import { readinessRowHint } from "../readiness";
 import {
   filterByTypeBucket, formatClock, formatMinutes, minAltOptions, moonCueForTarget,
   moonPhaseLabel, moonWindowNote, notUpTonightNote, partitionByUpTonight,
@@ -28,6 +29,12 @@ function ScoreBadge({ score }: { score: number }) {
 
 function TargetRow({ t }: { t: PlannedTarget }) {
   const label = t.name && t.name !== t.id ? `${t.id} — ${t.name}` : t.id;
+  // For a target already in the library, nudge toward starting something new
+  // once it's close to / past its suggested integration goal ("Is it enough
+  // yet?"); silent while it's still worth topping up.
+  const readyHint = t.already_targeted
+    ? readinessRowHint(t.total_exposure_s ?? 0, t.type)
+    : null;
   return (
     <Table.Tr>
       <Table.Td>
@@ -44,6 +51,11 @@ function TargetRow({ t }: { t: PlannedTarget }) {
             ? ` · ${t.frames_accepted} subs, ${formatIntegration(t.total_exposure_s ?? 0)}`
             : ""}
         </Text>
+        {readyHint ? (
+          <Badge mt={4} size="xs" variant="light" color={readyHint.color}>
+            {readyHint.label}
+          </Badge>
+        ) : null}
       </Table.Td>
       <Table.Td>{t.max_altitude_deg.toFixed(0)}°</Table.Td>
       <Table.Td>{formatClock(t.transit_utc)}</Table.Td>

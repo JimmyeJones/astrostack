@@ -1,12 +1,12 @@
 import {
   ActionIcon, Alert, Badge, Box, Button, Center, Grid, Group, HoverCard, Image,
-  Loader, Modal, NumberFormatter, NumberInput, Paper, Select, Stack, Table,
-  TagsInput, Text, Textarea, Title, Tooltip,
+  Loader, Modal, NumberFormatter, NumberInput, Paper, Progress, Select, Stack,
+  Table, TagsInput, Text, Textarea, Title, Tooltip,
 } from "@mantine/core";
 import {
   IconAlertTriangle, IconArrowBackUp, IconCheck, IconDeviceFloppy, IconHistory,
-  IconNotes, IconPhoto, IconSparkles, IconStack2, IconTelescope, IconWand, IconX,
-  IconStars,
+  IconNotes, IconPhoto, IconSparkles, IconStack2, IconTelescope, IconTargetArrow,
+  IconWand, IconX,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
@@ -14,9 +14,14 @@ import { Link, useParams } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
 import { api, type Frame } from "../api/client";
 import { formatIntegration } from "../format";
+import { integrationReadiness, readinessColor } from "../readiness";
 import { QueryError } from "../components/QueryError";
+import { ObjectInfoCard, describeObject } from "../components/ObjectInfoCard";
 import { detectSolveSetupProblem } from "../components/target/solveSetup";
 import { detectMixedPointings } from "../components/target/mixedPointings";
+
+// Re-exported for existing tests that import it from this route module.
+export { describeObject };
 
 const NUM = (v: number | null, digits = 2) =>
   v === null || v === undefined ? "—" : v.toFixed(digits);
@@ -112,16 +117,6 @@ function rejectReasonLabel(reason: string): string {
   if (reason.startsWith("qc_error")) return "QC error";
   if (reason.startsWith("solve_failed")) return "Plate-solve failed";
   return reason;
-}
-
-/** A plain-language one-liner for the object card, e.g.
- *  "A galaxy in the constellation Andromeda." Constellation is dropped when the
- *  catalog abbreviation is unknown. Uses "an" before a vowel sound. */
-export function describeObject(type: string, constellation: string): string {
-  const t = (type || "deep-sky object").trim();
-  const article = /^[aeiou]/i.test(t) ? "An" : "A";
-  const where = constellation ? ` in the constellation ${constellation}` : "";
-  return `${article} ${t}${where}.`;
 }
 
 const SENSITIVITIES = [
@@ -490,6 +485,19 @@ export function TargetView() {
     const latestGenuine = runs.data?.find((r) => r.reusable);
     return countNewSubsSinceStack(list, latestGenuine?.timestamp_utc);
   }, [needsProcessing, solveSetup, runs.data, list]);
+
+  // "Is it enough yet?" — judge this target's accumulated integration against a
+  // sane per-object-type goal so a beginner gets a plain-language answer to "do
+  // I have enough subs, or keep shooting?" The object type comes from the
+  // offline identify card (a catalog match); unknown → a mid-range default. A
+  // suggestion only — never gates stacking. Null (no integration yet) → no card.
+  const readiness = useMemo(
+    () =>
+      target.data
+        ? integrationReadiness(target.data.total_exposure_s, identity.data?.type)
+        : null,
+    [target.data, identity.data],
+  );
 
   // Frames QC couldn't read at all (corrupt/truncated FITS): make them visible —
   // they're skipped when stacking but invisible in the reject breakdown. A full
@@ -886,22 +894,24 @@ export function TargetView() {
       </Group>
 
       {identity.data ? (
-        <Paper withBorder p="sm" radius="md" mt="xs" bg="var(--mantine-color-default-hover)">
+        <Box mt="xs"><ObjectInfoCard safe={safe} /></Box>
+      ) : null}
+
+      {readiness ? (
+        <Paper withBorder p="sm" radius="md" mt="xs">
           <Group gap="sm" wrap="nowrap" align="flex-start">
-            <IconStars size={22} style={{ flexShrink: 0, marginTop: 2 }} color="var(--mantine-color-indigo-5)" />
-            <Stack gap={2} style={{ minWidth: 0 }}>
-              <Group gap="xs">
-                <Text fw={600}>
-                  {identity.data.name || identity.data.id}
+            <IconTargetArrow size={22} style={{ flexShrink: 0, marginTop: 2 }}
+              color={`var(--mantine-color-${readinessColor(readiness.level)}-5)`} />
+            <Stack gap={6} style={{ flex: 1, minWidth: 0 }}>
+              <Group gap="xs" justify="space-between" wrap="nowrap">
+                <Text size="sm" fw={500}>Is it enough yet?</Text>
+                <Text size="xs" c="dimmed" style={{ whiteSpace: "nowrap" }}>
+                  goal ~{readiness.goalHours} h
                 </Text>
-                <Badge variant="light" color="indigo" size="sm">{identity.data.id}</Badge>
               </Group>
-              <Text size="sm" c="dimmed">
-                {describeObject(identity.data.type, identity.data.constellation)}
-                {identity.data.matched_by === "coords"
-                  ? " Identified from this target's plate-solved position."
-                  : ""}
-              </Text>
+              <Progress value={readiness.fraction * 100}
+                color={readinessColor(readiness.level)} size="sm" radius="xl" />
+              <Text size="sm" c="dimmed">{readiness.verdict}</Text>
             </Stack>
           </Group>
         </Paper>

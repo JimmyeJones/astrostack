@@ -177,6 +177,45 @@ describe("TargetView getting-started callout", () => {
   });
 });
 
+describe("TargetView readiness card", () => {
+  it("judges integration against the object's goal and shows a verdict + bar", async () => {
+    // 3 h on a galaxy (6 h goal) → "solid" half-way verdict.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ total_exposure_s: 3 * 3600 }),
+    );
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M31", name: "Andromeda Galaxy", type: "galaxy",
+      constellation: "Andromeda", constellation_abbr: "And",
+      ra_deg: 10, dec_deg: 41, matched_by: "name",
+    });
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(screen.getByText("Is it enough yet?")).toBeInTheDocument());
+    expect(screen.getByText("goal ~6 h")).toBeInTheDocument();
+    expect(
+      screen.getByText(/3\.0 h of ~6 h — a solid start/),
+    ).toBeInTheDocument();
+  });
+
+  it("stays hidden until any light has been collected", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ total_exposure_s: 0 }),
+    );
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(screen.getByText("3/3 accepted")).toBeInTheDocument());
+    expect(screen.queryByText("Is it enough yet?")).not.toBeInTheDocument();
+  });
+});
+
 describe("countNewSubsSinceStack", () => {
   const F = (o: Partial<Frame>) => mkFrame(1, o);
   it("returns 0 without a stack timestamp to compare against", () => {
