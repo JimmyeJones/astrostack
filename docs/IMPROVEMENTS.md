@@ -3122,10 +3122,32 @@ problems. Dogfood it every big-picture run and fix root causes.
   app, uploads are **unauthenticated by default** (auth stays off) — consistent with
   the current open-on-LAN model; do not change that default here. (L; slice (a) is
   the shippable M — beginner-feature/workflow, PRIORITY 3/2)
-- **NEW (Scout 2026-07-13) — "Last night" session recap: a friendly, persistent summary of what a
-  scan brought in and what happened to it.** _(M, friendliness/autonomy — PRIORITY 2/3; beginner bar:
-  ✔ plain-language, sane default, answers the first question a walk-away user has on return, no expert
-  knobs.)_ The north-star loop is *drop a night's subs, walk away, come back to a result* — but on
+- **"Last night" session recap: a friendly, persistent summary of what a scan brought in and what
+  happened to it.** — **SLICE (a) SHIPPED v0.112.0** (Builder 2026-07-13, branch
+  `claude/pensive-faraday-b6ko10`). New pure/offline engine helper
+  `seestack/session_recap.py::session_recap(project)` aggregates the frames table into a friendly
+  `SessionRecap`: it isolates the **most recent capture session** by clustering frames on their capture
+  `timestamp_utc` (a night's subs are minutes apart; the gap to the previous night is hours — the trailing
+  run separated by >6 h is "last session", which groups a UTC-midnight-spanning night together and is
+  timezone-robust), then reports subs added, kept vs. set aside, Σ exposure this session, and the target's
+  **total** kept integration across all sessions. Reject reasons are collapsed into plain buckets
+  (`bucket_reject_reason`: `trailed` / `cloudy` / `soft` / `unreadable` / `set aside by you` / `other`)
+  so a beginner reads *"8 kept; 2 set aside (2 trailed)"* not `auto:grade:sky_adu_median`. New read-only
+  endpoint `GET /api/targets/{safe}/session-recap` (returns the recap or `null` when nothing is datable);
+  the Target page renders a small **"Last session"** card (`SessionRecapCard`) below the identify card —
+  a plain-language paragraph via a pure, testable `describeSession` helper (*"Last session added 10 subs
+  (…). 8 kept; 2 set aside (2 trailed). Total on this target: …"*) plus a "% kept" badge — shown only when
+  there's something to report. Additive/read-only throughout: no schema/config/DB/default change, fully
+  offline. Tests: `tests/test_session_recap.py` (7 — session isolation across two nights, single-session,
+  reject-bucket grouping, direct bucket mapping, trailing-`Z`/unparseable-timestamp handling, null-on-no-
+  dates), `tests/webapp/test_target_session_recap.py` (3 — endpoint incl. null + 404),
+  `SessionRecapCard.test.tsx` (6 — `describeRejects` ordering, `describeSession` phrasing incl. all-kept
+  and singular, card render + null). Python (1162) + tsc + full vitest (759) + vite build all green.
+  *(Scout-filed 2026-07-13; M, friendliness/autonomy — PRIORITY 2/3.)* **Slices (b) a combined "last
+  night across all targets" Dashboard card and (c) a one-click "(re)stack now" action remain open for a
+  future run.**
+  <details><summary>Original idea</summary>
+  The north-star loop is *drop a night's subs, walk away, come back to a result* — but on
   return today the only trace of what actually happened is the **transient** Jobs summary (gone once the
   job scrolls off, and still fairly jargon-y) plus raw counts scattered across the Target/History pages.
   A beginner's very first question is *"what did last night give me?"* Add a small, persistent **session
@@ -3145,6 +3167,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   Dashboard card; (c) fold in a one-click "(re)stack now" action. Why it fits: turns the walk-away →
   come-back moment from "hunt through pages to see what happened" into "one friendly card that tells me,
   and points me at the next click."
+  </details>
 - **"Is it enough yet?": a per-target integration goal + plain-language readiness verdict.** —
   **SLICE (a) SHIPPED v0.111.0** (Builder 2026-07-13, branch `claude/pensive-faraday-4u7fxt`). A new
   pure/offline frontend helper `frontend/src/readiness.ts::integrationReadiness(exposureSeconds, type)`

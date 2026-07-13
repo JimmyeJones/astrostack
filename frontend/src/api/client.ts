@@ -91,6 +91,18 @@ export interface ObjectInfo {
   matched_by: "name" | "coords";
 }
 
+export interface SessionRecap {
+  n_frames: number;
+  n_kept: number;
+  n_set_aside: number;
+  session_exposure_s: number;
+  kept_exposure_s: number;
+  total_kept_exposure_s: number;
+  start_utc: string | null;
+  end_utc: string | null;
+  reject_buckets: Record<string, number>;
+}
+
 export interface DashboardStats {
   n_targets: number;
   n_frames: number;
@@ -735,6 +747,8 @@ export const api = {
   targetThumbnailUrl: (safe: string) => `/api/targets/${safe}/thumbnail`,
   identifyTarget: (safe: string) =>
     req<ObjectInfo | null>(`/api/targets/${safe}/identify`),
+  sessionRecap: (safe: string) =>
+    req<SessionRecap | null>(`/api/targets/${safe}/session-recap`),
 
   // frames
   listFrames: (safe: string, sort = "id", order = "asc") =>

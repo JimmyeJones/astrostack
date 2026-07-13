@@ -52,6 +52,20 @@ class ObjectInfoOut(BaseModel):
     matched_by: str
 
 
+class SessionRecapOut(BaseModel):
+    """Plain-language recap of a target's most recent capture session."""
+
+    n_frames: int
+    n_kept: int
+    n_set_aside: int
+    session_exposure_s: float
+    kept_exposure_s: float
+    total_kept_exposure_s: float
+    start_utc: str | None = None
+    end_utc: str | None = None
+    reject_buckets: dict[str, int] = {}
+
+
 class FrameOut(BaseModel):
     id: int
     name: str
