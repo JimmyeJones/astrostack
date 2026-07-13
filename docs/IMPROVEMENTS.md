@@ -47,6 +47,61 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**One target's QC/solve failure sinks the *entire* unattended pipeline and silently skips auto-stack
+  for every target.**~~ — **FIXED v0.110.1** (Scout 2026-07-13, branch `claude/practical-dirac-wq4kha`;
+  traced + reproduced + regression-tested). In `webapp/pipeline.py::_pipeline_body`, the per-target
+  QC/solve loop (`for safe in touched_names:`) wrapped each target only in `try/finally: proj.close()`
+  with **no `except`** — while *every* sibling per-target loop (auto-stack `pipeline.py:171`,
+  reprocess-all, editor-batch) deliberately isolates a per-item failure ("one target shouldn't sink the
+  batch"). So a single target raising inside `run_qc_and_solve` — a `ProcessPoolExecutor` spin-up
+  `OSError` (fd/resource exhaustion), a `build_qc_arglist`/`build_solve_arglist` raise, a per-target DB
+  hiccup — propagated out of the loop, past `_pipeline_body`'s outer `try/finally`, into
+  `JobManager._run` → the whole job marked **`error`** (red on Jobs/History) and the **auto-stack pass
+  never ran**, so *nothing* got auto-stacked that night even though the scan had already imported and
+  persisted every frame. On the fully-unattended "just works" config (auto_qc + auto_solve + auto_stack —
+  PRIORITY 2) this is exactly the walk-away path, and one bad target strands the whole library's
+  automation. `run_qc_and_solve` already isolates per-*frame* failures internally and treats a cancel as
+  a graceful early return (never a raise), so the escaping exceptions are genuine target-level
+  infrastructure failures — the lone loop without isolation. **Fix:** wrap each target's QC/solve in a
+  per-target `try/except` mirroring the auto-stack loop — record the failure in `summary["qc_errors"]`
+  and carry on to the next target (so the job completes `done`, healthy targets still QC and auto-stack,
+  and the scan's work isn't wasted); a re-check of `job.cancel_requested()` in the except keeps a
+  cancel-driven error classified as a **cancel**, not an error. Regression
+  `tests/webapp/test_pipeline_qc_isolation.py` (2 cases): one target raising is isolated + recorded in
+  `qc_errors` + the auto-stack pass still stacks *both* healthy targets (fail-before: the RuntimeError
+  propagated / pass-after); and a raise coinciding with a cancel is classified `cancelled`, not error.
+  Additive, no schema/API/default change (adds an optional `qc_errors` summary field, mirroring
+  `stack_errors`); only changes an error → done-with-errors classification for a partial unattended run.
+  Found by a fresh-angle adversarial watcher/pipeline/jobs audit (Scout 2026-07-13). (Broken-UX /
+  autonomy — the unattended path silently stops working. Severity: wrong *outcome* for automation,
+  though no pixel data is corrupted.)
+
+- **Watcher stability guarantee is bypassed at ingest — a still-being-copied sub can be swept into the
+  stack.** *(Traced, Scout 2026-07-13; medium confidence on real-world harm — mostly mitigated
+  downstream, so NOT a blind Builder change.)* The `StabilityTracker` (`webapp/watcher.py`) exists
+  precisely so the app "doesn't react to a file that's still being copied over SMB/NFS" — a file is only
+  *stable* once its size+mtime have been quiet for `watch_quiet_period_s`. But that stable-set only gates
+  **whether to fire** the batch callback; the pipeline it triggers (`_on_batch_ready` →
+  `submit_pipeline(root=None)` → `_pipeline_body` → `scan_and_organize` → `ingest.find_fits_files`)
+  **re-globs and ingests the *entire* incoming dir** with no size/mtime/stability check. So if files A–E
+  stabilise and trigger the pipeline while file F is *still mid-copy*, the ingest sweeps up F. `ingest_files`
+  skips a zero-byte file (`ingest.py:147`) but **not** a non-empty, header-present-but-data-truncated one:
+  `load_header` reads only the file-start header and succeeds, the frame is registered, and
+  `_copy_to_stage1` copies the truncated bytes to the Stage-1 cache. **On the next scan the frame is
+  deduped-skipped** (`_dedup_key` matches) and the cache-retry only fires when `cached_path` is NULL
+  (`ingest.py:135`) — so the truncated cached copy is **never refreshed** even after the source finishes
+  copying: a truncated sub can persist and flow into QC/stack. **Why it's mostly mitigated (hence medium
+  confidence, not high):** a truncated FITS usually fails `load_seestar_raw` at QC/stack time (→ frame
+  rejected as `qc_error`, self-healed on a clean re-QC), and the quiet period means at most the last
+  in-flight file per batch is at risk. **Why it's NOT a blind fix:** the right gate needs a design choice
+  — pass the tracker's stable-set through to the ingest (only ingest files the tracker vouched for), or
+  re-verify each file's stat is unchanged at ingest time, or re-copy to cache when the source size no
+  longer matches the cached size — each has upgrade/behaviour implications on the hot ingest path, so it
+  wants a considered change + a test that a mid-copy file is deferred to the next scan. Located:
+  `webapp/watcher.py::poll_once` (computes but discards the stable-set for ingest), `webapp/main.py`
+  `_on_batch_ready`, `webapp/pipeline.py::_pipeline_body`, `seestack/io/ingest.py::ingest_files`. (Wrong-result
+  on a live-capture race, well-mitigated — image-quality/trust; S–M code + test.)
+
 - ~~**A user-cancelled auto-ingest pipeline job is reported `done`, not `cancelled` (misleading green
   "success" for a cancelled scan).**~~ — **FIXED v0.109.27** (Builder 2026-07-12, branch
   `claude/pensive-faraday-v8rvhn`; traced + reproduced + regression-tested). The cancel-aware bodies
@@ -1136,6 +1191,29 @@ the real webapp stack→edit path.)_
   matches its own 3-channel expansion). Additive, no schema/config/API change; found by an adversarial audit
   of the render/post numeric paths.
 
+_(Scout QA audit 2026-07-13 (v0.110.0 baseline, suite green 1149 passed / 2 skipped): led the rotation
+with the **stacking engine** per the owner's current focus #1 — a fresh adversarial hand-trace of
+`stack/accumulator.py` (WeightedSum / MinMaxReject k-set insertion + tie-safety + the count≥2k+1/≥3/<3
+degrade schedule / ±inf identity-sum), `stack/weighting.py`, `stack/drizzle_path.py` (two-pass κ-σ
+`clip_reference`: float64 E[v²]−E[v]² cancellation guard, Bessel, `_MIN_REJECT_NEFF` + `_VAR_RESOLUTION_FACTOR`
++inf-tol, per-channel frame-count), `stack/mosaic.py` (wrap-safe circular-mean outlier reject, canvas
+px/MP caps, iterative worst-frame drop), `stack/output.py` (NaN=coverage percentiles over covered pixels
+only, display-space stamping, archive-basename siblings), `qc/grading.py` (modified-z + practical-worse
+floors + max-reject cap), `qc/metrics.py` (float-promoted green-channel de-Bayer against uint16 wrap),
+`calibrate/apply.py` (dark-XOR-bias, flat-floor, exposure-scaling), and the two-pass sigma-clip
+tolerance-widening in `stacker.py` (NaN std → +inf tol). **All traced clean** — consistent with the long
+clean-audit history. Fanned three adversarial breadth sub-audits across the wider tree: **align +
+windowed reproject + per-frame bg** (clean — NaN ring, inset valid-mask, y0/x0 placement, stale-mask
+discard all hold), **stacker orchestration + calibration** (clean — mem-bound `_imap_bounded`, `del wel`
+before pass 2, weight-vs-scale composition, iterated master clip convergence), and **webapp routers +
+watcher + render** (render/colormap/output NaN handling, auto-bind mismatch guards, cancel classification,
+router input validation all clean). The webapp audit surfaced **two real findings, both filed above**:
+(1) the QC/solve loop's missing per-target exception isolation — **fixed + shipped this run (v0.110.1)**,
+a clean one-file autonomy fix mirroring the sibling loops; and (2) the watcher stability-tracker bypass at
+ingest — **filed as an open bug** (needs a considered fix, mostly mitigated downstream). Also curated the
+backlog: collapsed the duplicate "Share this image"/"Share card" feature into one entry, and added two
+new ideas (a "Last night" session-recap beginner feature + a cross-session quality-drift nudge).)_
+
 _(Scout QA audit 2026-07-12 (v0.110.0 baseline, suite green): led the rotation with a fresh adversarial
 re-read of the **stacking engine + calibration core at the current HEAD**, deliberately re-reading the files
 that have *changed* since the last clean audit rather than trusting a stale pass — `stack/accumulator.py`
@@ -1987,6 +2065,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+- **NEW (Scout 2026-07-13) — cross-session quality-drift nudge: flag a *whole* soft/hazy session that
+  auto-grade can't catch.** _(S–M, autonomy/friendliness/image-quality — PRIORITY 2/3.)_ Auto-grade
+  (`qc/grading.py`) is deliberately **relative within a target's frame population** — it flags frames
+  that are outliers *versus the rest of this target*. That's correct for a mixed night, but it is blind
+  to a night where **every** sub is uniformly bad: a whole session shot slightly out of focus, or through
+  thin high haze, has a tight FWHM/transparency distribution, so nothing looks like an outlier and every
+  frame passes — quietly dragging the target's stack down. The data to catch it already exists: each
+  frame carries `fwhm_px` / `transparency_score` / `sky_adu_median` and a capture timestamp, so frames
+  group into sessions (by night), and prior sessions give a per-target baseline. Add a read-only check
+  that compares the newest session's median FWHM (and/or transparency) against the target's historical
+  best-session baseline and, when materially worse, surfaces a gentle plain-language note — *"Heads up:
+  last night's subs of M31 are softer than your usual best (5.2 px vs 3.4 px FWHM) — worth checking
+  focus."* Purely informational (never auto-rejects a whole session — that would risk nuking a legitimately
+  faint target's only data), so it's safe and needs no real-data gating like the Auto-path items. Pairs
+  naturally with the "Last night" recap (surface it there) and the readiness verdict. Additive, read-only,
+  offline; a pure `session_quality_drift(frames)` helper is testable in isolation. Distinct from
+  auto-grade (within-target outliers) — this is *across sessions*, the gap auto-grade structurally can't
+  see.
 - **⭐ OWNER-REQUESTED — "Reprocess everything" — ALL SLICES SHIPPED: (a) v0.74.0,
   (c) v0.76.0–0.77.0, (b) v0.83.0.** The stacking engine keeps improving (better rejection /
   alignment / calibration, bug fixes), but each target's existing stack was produced
@@ -2957,6 +3053,29 @@ problems. Dogfood it every big-picture run and fix root causes.
   was clamped or `notes` is missing).
 
 ### Features that serve real workflows
+- **NEW (Scout 2026-07-13) — "Last night" session recap: a friendly, persistent summary of what a
+  scan brought in and what happened to it.** _(M, friendliness/autonomy — PRIORITY 2/3; beginner bar:
+  ✔ plain-language, sane default, answers the first question a walk-away user has on return, no expert
+  knobs.)_ The north-star loop is *drop a night's subs, walk away, come back to a result* — but on
+  return today the only trace of what actually happened is the **transient** Jobs summary (gone once the
+  job scrolls off, and still fairly jargon-y) plus raw counts scattered across the Target/History pages.
+  A beginner's very first question is *"what did last night give me?"* Add a small, persistent **session
+  recap** the app shows on return: for the most recent ingest/scan (per target, or a combined
+  "last night" card on the Dashboard), one plain-language paragraph built entirely from data already on
+  disk — *"Last night you added **240 subs of M31 (3 h 10 m)**. 228 were kept; 12 were set aside (10
+  cloudy, 2 trailed). Your total on M31 is now **8.4 h** — enough for a clean image. Ready to
+  (re)stack?"* Pulls from: the frames table (new-since-last-scan count + Σ exposure), the QC
+  `reject_reason` tally (grouped into plain buckets — cloud / trailed / soft / other), the per-target
+  integration total, and the existing stale-target "restack?" signal. Distinct from the transient Jobs
+  summary (this persists and is written for a beginner), from the per-target *readiness verdict* (that's
+  a static "is this target done?" gauge; this is "here's what changed since you were last here"), and
+  from History (per-*run*, not per-*session*). Sane default: shows the latest session automatically,
+  no config. Additive/read-only — aggregation over existing DB rows + a nullable "last scan finished
+  at" marker (or derive from the newest frame `mtime`/job record), no schema break. Slices: (a) a pure
+  `session_recap(project)` helper + one Target-page card; (b) a combined "last night across all targets"
+  Dashboard card; (c) fold in a one-click "(re)stack now" action. Why it fits: turns the walk-away →
+  come-back moment from "hunt through pages to see what happened" into "one friendly card that tells me,
+  and points me at the next click."
 - **NEW (Scout 2026-07-12) — "Is it enough yet?": a per-target integration goal + plain-language
   readiness verdict.** _(M, autonomy/friendliness — PRIORITY 2/3; beginner bar: ✔ sane default per
   object type, plain-language, answers a top beginner question with no expert knobs.)_ A beginner's
@@ -2987,9 +3106,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   date). Default = caption **off** (byte-for-byte a plain JPEG of the current view, so it's trivially
   upgrade-safe); toggling it on composites a tasteful overlay. Pure server-side render from the exported
   image + header — Pillow is already a dep, no new packages, no network. Additive endpoint + one editor
-  button. Why it fits: the whole point of the pipeline is a picture worth showing, and a beginner's very
-  next step after "it looks great" is "how do I post this?" — right now there's no good answer. Ship as one
-  slice (JPEG + optional caption); a later slice could offer a couple of caption placements/sizes.
+  button. Also surface a **copy-friendly text blurb** the user can paste alongside the image ("M31 · 3h12m ·
+  152×75s · 2026-07-11"), built from the same run metadata. Why it fits: the whole point of the pipeline is a
+  picture worth showing, and a beginner's very next step after "it looks great" is "how do I post this?" —
+  right now there's no good answer. Ship as one slice (JPEG + optional caption + copy blurb); a later slice
+  could offer a couple of caption placements/sizes. _(Absorbed the former duplicate "Share this image" entry,
+  Scout 2026-07-13.)_
 - ~~**"What am I looking at?" object info card on the Target / result page.**~~ — **SHIPPED v0.110.0**
   (Builder 2026-07-12, branch `claude/pensive-faraday-v8rvhn`). New pure/offline engine module
   `seestack/objectinfo.py::identify_object(name, ra_deg, dec_deg)` matches a captured target against the
@@ -3014,10 +3136,10 @@ problems. Dogfood it every big-picture run and fix root causes.
     endpoint exists (fetch `GET /api/targets/{safe}/identify`, render the shared card); no backend change.
     A later, larger slice could add an optional one-line "what it is" blurb field to the catalog JSON for the
     most-popular targets (absent it, type + constellation already read well).
-  - **NOTE for the Scout (dedup):** the "Share image / Share card" feature is filed **twice** in "Features
-    that serve real workflows" (the "Share card" entry near the top of that list and the "Share this image"
-    entry lower down) — near-identical scope. Worth collapsing into one entry so a Builder doesn't half-build
-    it from two descriptions.
+  - **Dedup done (Scout 2026-07-13):** the duplicate "Share this image" entry lower in this list was
+    collapsed into the single "Share card" entry above — the two had near-identical scope. The "Share card"
+    entry (with the copy-friendly text-blurb idea folded in from the removed duplicate) is now the one
+    source of truth for this feature.
 - **⭐ OWNER-REQUESTED — "Tonight" night planner: rank the best targets to shoot
   tonight, showing what you've already captured vs. what you haven't.** A
   pre-capture planning view that complements the post-capture stack/edit pipeline:
@@ -3078,18 +3200,6 @@ problems. Dogfood it every big-picture run and fix root causes.
 - Annotated sky overlay (label detected objects / show solved field). (M) —
   related to the night planner above; the planner's "plot tonight's targets" view
   can reuse this.
-- **NEW BEGINNER FEATURE — "Share this image": one-click export of the finished
-  picture with its details.** A beginner's payoff is showing off the result, but
-  today exporting is a raw PNG/TIFF with no context. Add a "Share" action on a
-  stack run / the editor that produces a nicely-sized JPEG/PNG (sensible dimensions
-  for posting) with a small, tasteful caption corner — **object name, total
-  integration time, date, frame count, and "AstroStack"** — drawn from data the app
-  already has (target name, `total_exposure_s`, run date). Offer a caption-on /
-  caption-off toggle and a copy-friendly text blurb ("M31 · 3h12m · 152×75s · 2026-07-11")
-  the user can paste alongside. Clears the beginner bar: understandable, one click,
-  sane default, no expert knowledge. Additive, read-only (renders from the existing
-  final image); pure image compositing. Slice: (a) plain sized-JPEG export + text
-  blurb first; (b) the burned-in caption corner. (M, beginner-feature/workflow)
 - **NEW BEGINNER FEATURE — per-target progress & integration goals.** A beginner
   wants to know "have I shot enough of this yet?" Add a per-target progress view:
   total accepted integration accumulated across *all* sessions, an optional
