@@ -302,6 +302,33 @@ def write_full_res_png(path: Path, rgb: np.ndarray) -> Path:
     return Path(path)
 
 
+def write_share_jpeg(path: Path, rgb: np.ndarray, *, max_long_edge: int = 2048,
+                     quality: int = 90) -> Path:
+    """Write a social-ready JPEG of an already display-stretched image (values in
+    0..1, NaN = uncovered → black), downscaled so its long edge is at most
+    ``max_long_edge`` px. A native PNG of a 100+ MP mosaic is far too big to post;
+    a ~2048 px JPEG is what image-sharing sites actually want. The image content
+    is exactly the edited result as shown — only the size and container differ."""
+    from PIL import Image
+
+    arr = np.nan_to_num(np.asarray(rgb, dtype=np.float32), nan=0.0)
+    u8 = (np.clip(arr, 0.0, 1.0) * 255.0).astype(np.uint8)
+    if u8.ndim == 2:
+        u8 = np.stack([u8, u8, u8], axis=-1)
+    img = Image.fromarray(u8, mode="RGB")
+    w, h = img.size
+    long_edge = max(w, h)
+    if long_edge > max_long_edge:
+        scale = max_long_edge / float(long_edge)
+        # LANCZOS gives the cleanest downscale for a finished picture (BOX, used for
+        # the tiny preview thumbnail, would soften star cores at this size).
+        img = img.resize((max(1, round(w * scale)), max(1, round(h * scale))),
+                         Image.LANCZOS)
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    img.save(path, format="JPEG", quality=quality, optimize=True)
+    return Path(path)
+
+
 def _to_uint16_linear(rgb: np.ndarray) -> np.ndarray:
     """
     Pack float32 stack data into 16-bit unsigned without stretching.

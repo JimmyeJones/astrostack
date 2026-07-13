@@ -1678,3 +1678,39 @@ def test_histogram_flags_empty_stack(client, solved_library):
     hb = client.get(f"/api/targets/{safe}/stack-runs/{nan_id}/editor/histogram")
     assert hb.status_code == 200
     assert hb.json()["empty"] is True
+
+
+def test_export_share_jpeg_download_and_blurb(client, solved_library):
+    """The share endpoint renders a social-sized JPEG (long edge ≤ 2048) of the
+    edited image and returns a copy-friendly caption in the job result."""
+    import io
+
+    from PIL import Image
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    # Wider than the 2048 long-edge cap so the downscale path is exercised.
+    rid = _make_run(solved_library, safe, h=40, w=2500)
+    recipe = {"ops": [{"id": "tone.stretch", "params": {"stretch": 0.6}}]}
+
+    r = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/share",
+                    json={"recipe": recipe})
+    assert r.status_code == 200
+    job = _wait_job(client, r.json()["job_id"])
+    assert job["state"] == "done", job
+    # Copy-friendly caption from the run's metadata (5 subs, from _make_run).
+    assert "5 subs" in job["result"]["blurb"]
+
+    dl = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/share/{r.json()['job_id']}")
+    assert dl.status_code == 200
+    assert dl.headers["content-type"].startswith("image/jpeg")
+    assert "attachment" in dl.headers.get("content-disposition", "")
+    img = Image.open(io.BytesIO(dl.content))
+    assert img.format == "JPEG"
+    assert max(img.size) == 2048  # downscaled from the 2500 px native width
+
+
+def test_export_share_bad_job_id_404(client, solved_library):
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe)
+    dl = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/share/nope")
+    assert dl.status_code == 404
