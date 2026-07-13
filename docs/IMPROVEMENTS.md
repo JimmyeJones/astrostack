@@ -3410,8 +3410,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
-- **NEW (Builder 2026-07-13) — harden `session_recap._parse` against mixed tz-aware/naive frame timestamps.**
-  _(S, robustness — latent, not currently reachable.)_ `seestack/session_recap.py::_parse` returns a
+- ~~**NEW (Builder 2026-07-13) — harden `session_recap._parse` against mixed tz-aware/naive frame timestamps.**~~
+  — **FIXED v0.113.2** (Builder 2026-07-13, branch `claude/pensive-faraday-4lta1b`; regression-tested).
+  `_parse` now coerces a tz-naive parse to UTC (`dt.replace(tzinfo=timezone.utc)`) so the session-split
+  sort/subtraction is always well-defined. Verified the trap *is* reachable: `fits_loader._parse_timestamp`
+  falls back to `return raw` for a header `DATE-OBS` it can't normalise (e.g. a date-only value, or one
+  carrying a `+02:00` offset), which `_parse` would read as naive — so a project mixing that with the usual
+  tz-aware `+00:00` frames would raise `TypeError: can't compare offset-naive and offset-aware datetimes` in
+  `_split_sessions`. Regression `tests/test_session_recap.py::test_handles_mixed_tz_aware_and_naive_timestamps`
+  (fails-before with the TypeError / passes-after, both frames land in one session treated as UTC). Additive,
+  pure; no schema/config/API/default change.
+  <details><summary>Original trace</summary>
+  `seestack/session_recap.py::_parse` returns a
   **tz-aware** datetime for a timestamp carrying an offset (`…+00:00`/`…Z`) but a **tz-naive** one for a bare
   `YYYY-MM-DDT…` with no zone. `session_recap` then `sort`s and subtracts these in `_split_sessions`; Python
   raises `TypeError: can't compare offset-naive and offset-aware datetimes` if a single project ever holds
@@ -3422,6 +3432,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   comparison is always well-defined regardless of what wrote the timestamp. Additive, pure, testable with a
   mixed-tz frame pair; verify first that no ingest/merge path can persist a naive timestamp (if one can, that's
   the real bug). Found while adding the cross-session drift nudge (a test hit exactly this on mixed fixtures).
+  </details>
 - **Exercise the production-only SPA-serving path in tests (test-coverage blind spot that hid a security bug).**
   *(Idea, Builder 2026-07-12 — surfaced while fixing the v0.109.24 path-traversal.)* The SPA fallback route +
   `/assets` mount in `webapp/main.py::_mount_spa` are only registered when `webapp/static` exists — i.e. the
@@ -3782,6 +3793,11 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.113.2** — Robustness (Builder 2026-07-13). Harden `session_recap._parse`: coerce a tz-naive timestamp
+  parse to UTC so `_split_sessions`' sort/subtraction never raises "can't compare offset-naive and
+  offset-aware datetimes". Reachable via `fits_loader._parse_timestamp`'s `return raw` fallback for an
+  unnormalised header `DATE-OBS`. Regression test on a mixed-tz frame pair (fails-before / passes-after).
+  Additive, pure.
 - **v0.113.1** — Autonomy/image-quality/correctness (Builder 2026-07-13). Re-QC a frame whose Stage-1 cache
   was refreshed after a mid-copy ingest: `ingest_files` now resets the frame's stale QC (computed on the
   truncated data) via new `Project.reset_frame_qc`, flags the refresh (`IngestResult.refreshed` →

@@ -19,7 +19,7 @@ groups a night that spans UTC midnight together and is robust to timezone.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from statistics import median
 
 from seestack.io.project import FrameRow, Project
@@ -101,9 +101,17 @@ def _parse(ts: str | None) -> datetime | None:
         return None
     try:
         # Python 3.11+ fromisoformat accepts a trailing 'Z'; be defensive anyway.
-        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
     except (ValueError, TypeError):
         return None
+    # Coerce a tz-naive parse to UTC so the session-splitting sort/subtraction is
+    # always well-defined. Every writer stores tz-aware UTC today, but the
+    # ``fits_loader._parse_timestamp`` fallback can persist an unnormalised header
+    # value (e.g. a date-only ``DATE-OBS``), and mixing naive + aware datetimes in
+    # one project would otherwise raise "can't compare offset-naive and aware".
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 def _split_sessions(
