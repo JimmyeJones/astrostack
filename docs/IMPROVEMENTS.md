@@ -76,9 +76,30 @@ when you take it.
   autonomy — the unattended path silently stops working. Severity: wrong *outcome* for automation,
   though no pixel data is corrupted.)
 
-- **Watcher stability guarantee is bypassed at ingest — a still-being-copied sub can be swept into the
-  stack.** *(Traced, Scout 2026-07-13; medium confidence on real-world harm — mostly mitigated
-  downstream, so NOT a blind Builder change.)* The `StabilityTracker` (`webapp/watcher.py`) exists
+- ~~**Watcher stability guarantee is bypassed at ingest — a still-being-copied sub can be swept into the
+  stack.**~~ — **FIXED v0.111.3** (Builder 2026-07-13, branch `claude/pensive-faraday-b6ko10`; traced +
+  regression-tested). Took the safest of the three suggested angles — **re-copy to cache when the source
+  size no longer matches the cached size** — which fixes the actual data-integrity path (a truncated
+  Stage-1 copy that persists into the stack) without disturbing the hot watcher→pipeline plumbing. In
+  `seestack/io/ingest.py::ingest_files`, the dedup-skip branch previously refreshed the Stage-1 copy only
+  when `cached_path` was NULL; it now also refreshes when a new `_cache_stale(cached_path, src)` helper
+  finds the cached copy's size no longer matches the (now-complete) source — the signature of a frame that
+  was swept in mid-copy. So even though a still-copying sub can still be *registered* while truncated, the
+  next scan (fired when it finally stabilises) refreshes its cache to the whole file **before** it is
+  stacked — the stack reads the complete frame, not the partial one. Byte-identical in the normal case, so
+  a routine re-scan is a cheap stat compare with no copy and no DB write (the existing
+  `test_ingest_does_not_recopy_an_already_cached_frame` guard still holds); `_cache_stale` returns False
+  on any stat error, so a NAS blip never churns. Regression
+  `tests/test_ingest.py::test_ingest_refreshes_cache_when_source_grew_after_a_mid_copy_ingest` ingests a
+  half-written source, grows it to full size, re-scans, and asserts the cache now byte-matches the complete
+  source (fails-before: the truncated cache persisted / passes-after) with no duplicate row. Additive, no
+  schema/config/API/default change. **Residual (filed as a fresh idea below):** the truncated frame's QC
+  result isn't auto-re-run when only its cache is refreshed (a dedup-skip adds 0 frames, so its target
+  isn't re-QC'd) — but this is strictly safe (a rejected partial frame is *excluded* from the stack, and an
+  accepted one now stacks the refreshed complete cache), and the existing `qc_error` self-heal recovers it
+  on any later re-QC. (Wrong-result on a live-capture race, well-mitigated — image-quality/trust.)
+  <details><summary>Original trace</summary>
+  The `StabilityTracker` (`webapp/watcher.py`) exists
   precisely so the app "doesn't react to a file that's still being copied over SMB/NFS" — a file is only
   *stable* once its size+mtime have been quiet for `watch_quiet_period_s`. But that stable-set only gates
   **whether to fire** the batch callback; the pipeline it triggers (`_on_batch_ready` →
@@ -101,6 +122,7 @@ when you take it.
   `webapp/watcher.py::poll_once` (computes but discards the stable-set for ingest), `webapp/main.py`
   `_on_batch_ready`, `webapp/pipeline.py::_pipeline_body`, `seestack/io/ingest.py::ingest_files`. (Wrong-result
   on a live-capture race, well-mitigated — image-quality/trust; S–M code + test.)
+  </details>
 
 - ~~**A user-cancelled auto-ingest pipeline job is reported `done`, not `cancelled` (misleading green
   "success" for a cancelled scan).**~~ — **FIXED v0.109.27** (Builder 2026-07-12, branch
@@ -2065,6 +2087,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+- **NEW (Builder 2026-07-13) — re-QC a frame whose Stage-1 cache was just refreshed after a mid-copy
+  ingest.** _(S, autonomy/image-quality — PRIORITY 2/4; residual from the v0.111.3 watcher-stability fix.)_
+  The v0.111.3 fix refreshes a truncated Stage-1 cache to the complete source on a re-scan, so the stack
+  reads the whole frame — but the frame's *QC result* isn't automatically re-run when only its cache is
+  refreshed (a dedup-skip adds 0 frames, so `_pipeline_body`'s `touched_names` excludes its target and the
+  auto-QC/solve pass skips it). This is strictly safe today (a truncated frame that QC'd as `qc_error` stays
+  excluded from the stack; one that QC'd as accepted now stacks the refreshed *complete* cache; and the
+  existing `qc_error` self-heal recovers it on any later re-QC). The polish: when `ingest_files` refreshes a
+  cache because the source grew, mark that frame for re-QC (e.g. clear its stale QC row / surface the
+  refreshed frame-ids so `_pipeline_body` re-QCs their targets) so a mid-copy frame is fully re-graded on
+  the complete data with no manual re-QC. Keep it additive and off the memory-bounded hot path. Located:
+  `seestack/io/ingest.py::ingest_files` (the `_cache_stale` refresh branch), `webapp/pipeline.py::_pipeline_body`.
 - **NEW (Scout 2026-07-13) — cross-session quality-drift nudge: flag a *whole* soft/hazy session that
   auto-grade can't catch.** _(S–M, autonomy/friendliness/image-quality — PRIORITY 2/3.)_ Auto-grade
   (`qc/grading.py`) is deliberately **relative within a target's frame population** — it flags frames
@@ -3088,10 +3122,32 @@ problems. Dogfood it every big-picture run and fix root causes.
   app, uploads are **unauthenticated by default** (auth stays off) — consistent with
   the current open-on-LAN model; do not change that default here. (L; slice (a) is
   the shippable M — beginner-feature/workflow, PRIORITY 3/2)
-- **NEW (Scout 2026-07-13) — "Last night" session recap: a friendly, persistent summary of what a
-  scan brought in and what happened to it.** _(M, friendliness/autonomy — PRIORITY 2/3; beginner bar:
-  ✔ plain-language, sane default, answers the first question a walk-away user has on return, no expert
-  knobs.)_ The north-star loop is *drop a night's subs, walk away, come back to a result* — but on
+- **"Last night" session recap: a friendly, persistent summary of what a scan brought in and what
+  happened to it.** — **SLICE (a) SHIPPED v0.112.0** (Builder 2026-07-13, branch
+  `claude/pensive-faraday-b6ko10`). New pure/offline engine helper
+  `seestack/session_recap.py::session_recap(project)` aggregates the frames table into a friendly
+  `SessionRecap`: it isolates the **most recent capture session** by clustering frames on their capture
+  `timestamp_utc` (a night's subs are minutes apart; the gap to the previous night is hours — the trailing
+  run separated by >6 h is "last session", which groups a UTC-midnight-spanning night together and is
+  timezone-robust), then reports subs added, kept vs. set aside, Σ exposure this session, and the target's
+  **total** kept integration across all sessions. Reject reasons are collapsed into plain buckets
+  (`bucket_reject_reason`: `trailed` / `cloudy` / `soft` / `unreadable` / `set aside by you` / `other`)
+  so a beginner reads *"8 kept; 2 set aside (2 trailed)"* not `auto:grade:sky_adu_median`. New read-only
+  endpoint `GET /api/targets/{safe}/session-recap` (returns the recap or `null` when nothing is datable);
+  the Target page renders a small **"Last session"** card (`SessionRecapCard`) below the identify card —
+  a plain-language paragraph via a pure, testable `describeSession` helper (*"Last session added 10 subs
+  (…). 8 kept; 2 set aside (2 trailed). Total on this target: …"*) plus a "% kept" badge — shown only when
+  there's something to report. Additive/read-only throughout: no schema/config/DB/default change, fully
+  offline. Tests: `tests/test_session_recap.py` (7 — session isolation across two nights, single-session,
+  reject-bucket grouping, direct bucket mapping, trailing-`Z`/unparseable-timestamp handling, null-on-no-
+  dates), `tests/webapp/test_target_session_recap.py` (3 — endpoint incl. null + 404),
+  `SessionRecapCard.test.tsx` (6 — `describeRejects` ordering, `describeSession` phrasing incl. all-kept
+  and singular, card render + null). Python (1162) + tsc + full vitest (759) + vite build all green.
+  *(Scout-filed 2026-07-13; M, friendliness/autonomy — PRIORITY 2/3.)* **Slices (b) a combined "last
+  night across all targets" Dashboard card and (c) a one-click "(re)stack now" action remain open for a
+  future run.**
+  <details><summary>Original idea</summary>
+  The north-star loop is *drop a night's subs, walk away, come back to a result* — but on
   return today the only trace of what actually happened is the **transient** Jobs summary (gone once the
   job scrolls off, and still fairly jargon-y) plus raw counts scattered across the Target/History pages.
   A beginner's very first question is *"what did last night give me?"* Add a small, persistent **session
@@ -3111,6 +3167,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   Dashboard card; (c) fold in a one-click "(re)stack now" action. Why it fits: turns the walk-away →
   come-back moment from "hunt through pages to see what happened" into "one friendly card that tells me,
   and points me at the next click."
+  </details>
 - **"Is it enough yet?": a per-target integration goal + plain-language readiness verdict.** —
   **SLICE (a) SHIPPED v0.111.0** (Builder 2026-07-13, branch `claude/pensive-faraday-4u7fxt`). A new
   pure/offline frontend helper `frontend/src/readiness.ts::integrationReadiness(exposureSeconds, type)`

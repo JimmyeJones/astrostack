@@ -11,6 +11,7 @@ from webapp import deps
 from webapp.schemas import (
     MergeRequest,
     ObjectInfoOut,
+    SessionRecapOut,
     TargetCreate,
     TargetOut,
     TargetPatch,
@@ -106,6 +107,37 @@ def identify_target(safe: str, request: Request) -> ObjectInfoOut | None:
         id=info.id, name=info.name, type=info.type,
         constellation=info.constellation, constellation_abbr=info.constellation_abbr,
         ra_deg=info.ra_deg, dec_deg=info.dec_deg, matched_by=info.matched_by,
+    )
+
+
+@router.get("/{safe}/session-recap", response_model=SessionRecapOut | None)
+def target_session_recap(safe: str, request: Request) -> SessionRecapOut | None:
+    """A friendly, plain-language recap of the target's most recent capture
+    session — how many subs it added, how many were kept vs. set aside (and why,
+    in plain buckets), and the target's total integration now. Returns ``null``
+    when there's nothing datable to report (no frame carries a capture time).
+    Read-only aggregation over the frames table; renders the "Last session" card.
+    """
+    from seestack.session_recap import session_recap
+
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        recap = session_recap(proj)
+    finally:
+        proj.close()
+        lib.close()
+    if recap is None:
+        return None
+    return SessionRecapOut(
+        n_frames=recap.n_frames,
+        n_kept=recap.n_kept,
+        n_set_aside=recap.n_set_aside,
+        session_exposure_s=recap.session_exposure_s,
+        kept_exposure_s=recap.kept_exposure_s,
+        total_kept_exposure_s=recap.total_kept_exposure_s,
+        start_utc=recap.start_utc,
+        end_utc=recap.end_utc,
+        reject_buckets=recap.reject_buckets,
     )
 
 

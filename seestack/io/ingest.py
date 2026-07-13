@@ -82,6 +82,19 @@ def _dedup_key(path: str | Path) -> str:
     return os.path.realpath(str(path))
 
 
+def _cache_stale(cached_path: str | Path, src: Path) -> bool:
+    """True if the Stage-1 cache no longer matches its source and should be
+    refreshed. A size mismatch means the source grew after it was cached — the
+    classic signature of a frame ingested while it was still being copied (its
+    cache is truncated). If either file can't be stat'd we conservatively return
+    False (leave the existing cache; a later scan retries) rather than churn.
+    """
+    try:
+        return Path(cached_path).stat().st_size != src.stat().st_size
+    except OSError:
+        return False
+
+
 def _copy_to_stage1(
     project: Project, cache: CacheManager, src: Path, frame_id: int
 ) -> Path | None:
@@ -114,8 +127,9 @@ def ingest_files(
 
     Already-ingested files (same ``source_path``) are skipped silently — but if a
     previous ingest failed to cache one (a transient copy error left
-    ``cached_path`` NULL), the copy is retried here instead of being abandoned
-    forever.
+    ``cached_path`` NULL), or the source has since grown past its cached copy (a
+    frame ingested mid-copy left a truncated cache), the Stage-1 copy is refreshed
+    here instead of the partial sub persisting into QC/stack forever.
     """
     cache.ensure_dirs()
     existing: dict[str, FrameRow] = {
@@ -132,8 +146,22 @@ def ingest_files(
             # left this frame uncached, retry the Stage-1 copy now; otherwise the
             # row is skipped on every future scan and the cache is never populated.
             recovered: Path | None = None
-            if copy_to_cache and not prior.cached_path and prior.id is not None:
-                recovered = _copy_to_stage1(project, cache, src, prior.id)
+            if copy_to_cache and prior.id is not None:
+                if not prior.cached_path:
+                    recovered = _copy_to_stage1(project, cache, src, prior.id)
+                elif _cache_stale(prior.cached_path, src):
+                    # The frame was registered while its source was still being
+                    # copied over SMB/NFS (the watcher's stability gate only decides
+                    # *when* to fire a batch — the pipeline then re-globs and ingests
+                    # the whole incoming dir, so a file still mid-copy can be swept
+                    # in). That leaves a *truncated* Stage-1 copy; the source keeps
+                    # growing afterwards, but a plain dedup-skip never refreshes the
+                    # cache, so the partial sub silently persists into QC/stack. A
+                    # size mismatch between the cached copy and the (now-complete)
+                    # source is the tell — re-copy so the stack reads the whole
+                    # frame, not the truncated one. Byte-identical in the normal
+                    # case, so this is a cheap stat compare with no copy.
+                    recovered = _copy_to_stage1(project, cache, src, prior.id)
             # frame_id stays None on a skip (a registered frame is not "added"),
             # so existing consumers that gate on frame_id don't re-list it.
             yield IngestResult(

@@ -17,6 +17,7 @@ import { formatIntegration } from "../format";
 import { integrationReadiness, readinessColor } from "../readiness";
 import { QueryError } from "../components/QueryError";
 import { ObjectInfoCard, describeObject } from "../components/ObjectInfoCard";
+import { SessionRecapCard } from "../components/SessionRecapCard";
 import { detectSolveSetupProblem } from "../components/target/solveSetup";
 import { detectMixedPointings } from "../components/target/mixedPointings";
 
@@ -896,6 +897,8 @@ export function TargetView() {
       {identity.data ? (
         <Box mt="xs"><ObjectInfoCard safe={safe} /></Box>
       ) : null}
+
+      <SessionRecapCard safe={safe} />
 
       {readiness ? (
         <Paper withBorder p="sm" radius="md" mt="xs">
