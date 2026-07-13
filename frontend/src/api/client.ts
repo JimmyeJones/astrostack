@@ -716,6 +716,15 @@ export interface CalibrationSuggestions {
   n_frames: number;
 }
 
+export interface UploadResult {
+  target: string;   // folder the files landed in ("" = Unsorted)
+  saved: { name: string; bytes: number }[];
+  skipped: { name: string; bytes: number }[];   // already present
+  rejected: { name: string; reason: string }[]; // not FITS / unsafe / no room
+  bytes_written: number;
+  job_id: string | null;
+}
+
 function encodeRecipe(recipe: Recipe): string {
   const bytes = new TextEncoder().encode(JSON.stringify(recipe));
   let bin = "";
@@ -847,6 +856,26 @@ export const api = {
 
   // pipeline
   scan: () => req<{ job_id: string }>("/api/scan", { method: "POST", body: "{}" }),
+  uploadFits: (fileList: File[], target: string) => {
+    // Multipart upload — a bare fetch, not `req`, so the browser sets the
+    // multipart boundary Content-Type (req hard-codes application/json).
+    const form = new FormData();
+    if (target.trim()) form.append("target", target.trim());
+    for (const f of fileList) form.append("files", f, f.name);
+    return (async (): Promise<UploadResult> => {
+      const res = await fetch("/api/upload", { method: "POST", body: form });
+      if (!res.ok) {
+        let detail = res.statusText;
+        try {
+          detail = (await res.json()).detail ?? detail;
+        } catch {
+          /* ignore */
+        }
+        throw new Error(`${res.status}: ${detail}`);
+      }
+      return res.json() as Promise<UploadResult>;
+    })();
+  },
   qcSolve: (safe: string) =>
     req<{ job_id: string }>(`/api/targets/${safe}/qc-solve`, { method: "POST" }),
   processTarget: (safe: string) =>

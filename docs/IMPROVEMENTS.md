@@ -3105,7 +3105,44 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 - **⭐ OWNER-REQUESTED — Bulk upload FITS through the web interface (no NAS share
-  needed).** Today the only way to get subs in is to drop Seestar target folders
+  needed).** — **SLICE (a) SHIPPED v0.115.0** (Builder 2026-07-13, branch
+  `claude/pensive-faraday-ug7r6s`). New `POST /api/upload` endpoint
+  (`webapp/routers/upload.py`) accepts a multipart FITS upload and lands each file in
+  `incoming/<target>/` (an optional, sanitised `target` form field; blank → the scanner's
+  `Unsorted` catch-all), then enqueues the ordinary `submit_pipeline` scan so ingest → QC →
+  solve runs exactly as for a NAS drop. All the required guardrails are honoured: files stream
+  to disk in 1 MiB chunks from a threadpool (never buffered whole in RAM — bounded for a
+  multi-GB upload); every name is reduced to a safe basename (`safe_component` strips a
+  `webkitdirectory` relative path / Windows backslashes / `..` traversal / NUL, and the target
+  dir is re-confirmed under `incoming/` — same traversal class as the SPA fix); only the
+  scanner's real FITS suffixes (`.fit/.fits/.fts`) are accepted, others rejected with a
+  plain-language reason; a per-file free-space check keeps a 256 MiB reserve (and an ENOSPC
+  mid-write is caught) rather than filling the NAS; each file streams to a `.part` sidecar
+  atomically renamed on completion, so a dropped connection never leaves a truncated FITS for
+  the watcher; and an already-present file is skipped (the scan's content dedup would drop it
+  anyway), enqueuing no scan when nothing new landed. Frontend: a reusable `UploadFits`
+  component (multi-select FITS via Mantine `FileButton`, optional target folder, client-side
+  non-FITS filter, plain-language result summary + "Watch progress" link) shown as a full card
+  in the Library empty state and a compact bar above a populated Library; new `api.uploadFits`
+  (bare `fetch` + `FormData` so the browser sets the multipart boundary). Uploads stay
+  **unauthenticated by default** exactly like the rest of the app (no default flip). Additive /
+  upgrade-safe: new endpoint + one component, no schema/config/API-shape/default change. Tests:
+  `tests/webapp/test_upload.py` (25 — `safe_component`/`is_fits_name`/`safe_target_dir` helpers +
+  endpoint: saves & scans, rejects non-FITS while keeping the good ones, strips a traversal
+  filename to a basename, skips an already-present file with no scan, 400s an invalid target),
+  `UploadFits.test.tsx` (helpers + the pick-filters-non-FITS → upload → summary flow). Python
+  (1210) + tsc + full vitest (761) + vite build all green. **Slices (b) robustness — per-file
+  progress, `webkitdirectory` folder-structure preservation, partial-upload cleanup — and (c)
+  nice-to-have — `.zip` unpack server-side, in-UI destination target picker — remain open for a
+  future run.**
+  _(Follow-up polish spotted shipping slice (a): the picker is a Mantine `FileButton`
+  (multi-select), not a true drag-and-drop **dropzone**. A `@mantine/dropzone` drop target
+  (drag a folder / files onto the Library) would match the filed "drag a folder" wording and
+  read as more obvious to a beginner — but it needs the `@mantine/dropzone` dep (check it's
+  already bundled before adding) and pairs naturally with slice (b)'s `webkitdirectory`
+  folder-structure preservation, so fold the two together. XS–S, frontend-only.)_
+  <details><summary>Original write-up</summary>
+  Today the only way to get subs in is to drop Seestar target folders
   into `incoming/` over an SMB/NFS share — which assumes the user can mount the NAS
   share. A browser upload (drag a folder / multi-select files → progress bar →
   done) removes that hurdle entirely and is the natural beginner on-ramp. **Reuse
@@ -3139,6 +3176,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   app, uploads are **unauthenticated by default** (auth stays off) — consistent with
   the current open-on-LAN model; do not change that default here. (L; slice (a) is
   the shippable M — beginner-feature/workflow, PRIORITY 3/2)
+  </details>
 - **"Last night" session recap: a friendly, persistent summary of what a scan brought in and what
   happened to it.** — **SLICE (a) SHIPPED v0.112.0** (Builder 2026-07-13, branch
   `claude/pensive-faraday-b6ko10`). New pure/offline engine helper
