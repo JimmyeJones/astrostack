@@ -3171,11 +3171,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   completeness), `tests/webapp/test_target_identify.py` (3, endpoint incl. null + 404), and
   `Target.test.tsx` (`describeObject` helper + card renders-on-match / hidden-on-no-match). tsc + full
   vitest (731) + vite build all green. *(Scout-filed 2026-07-12; S–M, friendliness — PRIORITY 3.)*
-  - **Follow-up slice (Builder-spotted while shipping v0.110.0; S, friendliness):** the identify endpoint +
-    `objectinfo.identify_object()` + the `describeObject` helper are generic and page-agnostic — reuse the
-    exact same card on the **History/result page** and the **editor** (where a beginner is admiring the
-    finished picture and most wants "what is this?"), not just the Target page. Pure-frontend once the
-    endpoint exists (fetch `GET /api/targets/{safe}/identify`, render the shared card); no backend change.
+  - **Follow-up slice — reuse the card on the editor — SHIPPED v0.111.2** (Builder 2026-07-13, branch
+    `claude/pensive-faraday-4u7fxt`). Extracted the identify card + `describeObject` helper out of
+    `Target.tsx` into a shared `frontend/src/components/ObjectInfoCard.tsx` (`<ObjectInfoCard safe={…} />`,
+    fetches `GET /api/targets/{safe}/identify`, renders nothing until a confident match resolves) and
+    dropped it onto the **editor** header — where a beginner is admiring the finished picture and most
+    wants "what is this?" — as well as the Target page (which now renders the shared component; its own
+    identify query is kept for the readiness card, and react-query dedupes the two to one request via the
+    shared `["identify", safe]` key). Pure-frontend, additive; no backend/schema/API change. Tests:
+    `ObjectInfoCard.test.tsx` (describeObject phrasing + renders-on-match / coords-note / hidden-on-no-match);
+    `Target.test.tsx` re-exports `describeObject` from the route so its existing tests are unchanged. tsc +
+    full vitest (747) + vite build all green. *(History-page reuse deferred — the editor is where the
+    "what is this?" question lands hardest; a future run can drop the same one-liner onto History too.)*
     A later, larger slice could add an optional one-line "what it is" blurb field to the catalog JSON for the
     most-popular targets (absent it, type + constellation already read well).
   - **Dedup done (Scout 2026-07-13):** the duplicate "Share this image" entry lower in this list was

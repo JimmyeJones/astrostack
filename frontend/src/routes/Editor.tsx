@@ -15,6 +15,7 @@ import { Link, useParams } from "react-router-dom";
 import { api, type EditOp, type OpInstance, type Recipe } from "../api/client";
 import { useUndoable } from "../hooks/useUndoable";
 import { ImageLightbox } from "../components/ImageLightbox";
+import { ObjectInfoCard } from "../components/ObjectInfoCard";
 import { Histogram } from "../components/editor/Histogram";
 import { tonalHistGuides } from "../components/editor/tonalGuides";
 import { OpList } from "../components/editor/OpList";
@@ -1066,6 +1067,11 @@ export function EditorView() {
             loading={saveRecipe.isPending} onClick={() => saveRecipe.mutate()}>Save</Button>
         </Group>
       </Group>
+
+      {/* "What am I looking at?" — the same offline catalog card as the Target
+          page, shown here where a beginner is admiring the finished picture and
+          most wants to know what it is. Renders nothing unless it matches. */}
+      <ObjectInfoCard safe={safe} />
 
       <Grid>
         {/* Preview + histogram */}
