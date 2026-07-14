@@ -3504,6 +3504,36 @@ problems. Dogfood it every big-picture run and fix root causes.
   earlier; M, beginner-feature/workflow — PRIORITY 2/3; beginner bar ✔.)* The remaining
   "N new subs since your last stack — restack?" nudge already shipped (v0.90.0), so this item's
   novel surface is complete; a future run could add a **library-wide** goals overview if wanted.
+  - **LIBRARY-WIDE OVERVIEW SHIPPED v0.119.0** (Builder 2026-07-14, branch `claude/pensive-faraday-hss3td`).
+    The filed "library-wide goals overview" follow-up: a new **"Target progress"** Dashboard card showing,
+    at a glance and with zero config, how close *every* target is to a clean image — complementing the
+    per-target "Is it enough yet?" card (v0.111.0) and the Tonight planner (which needs a site location).
+    New read-only endpoint `GET /api/library-progress` (`webapp/routers/stats.py`) returns each
+    light-collected target's `{safe, name, total_exposure_s, object_type, goal_s}` — the object type
+    resolved **offline** from the library entry via `objectinfo.identify_object` (catalog loaded once, no
+    project open), the optional user-set goal read from the existing `project_meta` kv table (cheap
+    per-target read, cached on the app with the same registry-signature + 60 s TTL pattern as
+    `/api/last-night`). The **readiness verdict itself stays a single source of truth** in
+    `frontend/src/readiness.ts` — the new pure `libraryProgress.ts::rankLibraryProgress` reuses
+    `integrationReadiness` (honouring any user goal) and orders the list so in-progress targets lead
+    (nearest-to-goal first, to surface the ones worth finishing), then targets with plenty; a
+    `describeLibraryProgress` one-liner summarises it. The `LibraryProgressCard` renders a per-target
+    mini progress bar + integration figure (capped at 6 rows with a "+N more" pointer to the Library).
+    A goal is a **suggestion, never a gate** (nothing blocks stacking). Additive / read-only / offline
+    throughout: no schema/config/DB/default/API-shape change, upgrade-safe by construction (an old
+    project simply has no stored goal → the per-type default is used). Tests:
+    `tests/webapp/test_library_progress.py` (3 — empty library, lists targets with type, surfaces a
+    user goal), `libraryProgress.test.ts` (7 — ranking, drops zero-integration, goal override,
+    summary phrasing), `LibraryProgressCard.test.tsx` (3 — ordering + plenty badge, renders-nothing,
+    the cap). Python + tsc + full vitest (789) + vite build all green. *(Beginner bar ✔ — helps a
+    non-expert OSC owner decide which target to keep shooting, plain-language, sane defaults.)*
+    _(Follow-ups spotted shipping this, left for a future run: **(1)** the endpoint already resolves each
+    target's catalog object type offline but the card doesn't surface it — showing a small "galaxy" /
+    "nebula" label next to the goal would teach a beginner *why* the goal is what it is (XS, frontend-only).
+    **(2)** the Dashboard now opens every project up to **three** times per load (stats stack roll-up +
+    `/api/last-night` frames + `/api/library-progress` goal), each independently cached — on a large library
+    a single combined roll-up that opens each project **once** and returns all three would be measurably
+    cheaper; worth folding together only with a measurement (§3). Filed under Infra below.)_
 - ~~**Tonight planner: distinguish a waxing vs waning Moon (evening vs morning problem).**~~
   — **shipped v0.97.4** (see Shipped). The Moon card now reads "Waxing gibbous (72%)" /
   "Waning gibbous", "First Quarter" / "Last Quarter", "Waxing crescent" / "Waning crescent" —
@@ -3581,6 +3611,17 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+- **NEW (Builder 2026-07-14) — consolidate the Dashboard's three per-project roll-ups into one cached pass
+  (only with a measurement).** *(spotted shipping the v0.119.0 "Target progress" card.)* The Dashboard now
+  triggers up to **three** independent passes that each open *every* project once: `/api/stats`'s stack
+  roll-up (`_rollup_stacks` → `iter_stack_runs`), `/api/last-night` (`_collect_last_night` → `iter_frames`),
+  and the new `/api/library-progress` (`_collect_progress` → the goal meta read). Each is separately cached
+  (registry-signature + TTL), so steady-state a warm Dashboard is cheap — but a cold load (or a fresh scan
+  that invalidates all three signatures at once) opens each project three times. A single combined roll-up
+  that opens each project **once** and returns stacks + last-night + progress together would cut that to 1×.
+  Gate on a real measurement (§3 / Performance) — on a small library the cost is negligible and the current
+  separation keeps each endpoint independently cacheable and testable, so this is only worth it if a large
+  library shows a real cold-load cost. Additive refactor, no behaviour change. (M, infra/perf — low priority.)
 - **NEW (Builder 2026-07-14) — two low-severity upload-endpoint tidiness notes (both benign today, filed for
   a future run).** *(spotted during the 2026-07-14 adversarial upload/webapp audit that found the now-fixed
   concurrent-same-name corruption above.)* In `webapp/routers/upload.py::upload_files`: **(1)** the rejected /

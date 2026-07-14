@@ -135,6 +135,14 @@ export interface LibrarySessionRecap {
   reject_buckets: Record<string, number>;
 }
 
+export interface TargetProgress {
+  safe: string;
+  name: string;
+  total_exposure_s: number;
+  object_type: string | null;
+  goal_s: number | null;
+}
+
 export interface DashboardStats {
   n_targets: number;
   n_frames: number;
@@ -967,6 +975,7 @@ export const api = {
   // dashboard
   getStats: () => req<DashboardStats>("/api/stats"),
   getLastNight: () => req<LibrarySessionRecap | null>("/api/last-night"),
+  getLibraryProgress: () => req<TargetProgress[]>("/api/library-progress"),
 
   // storage / housekeeping
   getStorage: () => req<StorageInfo>("/api/storage"),
