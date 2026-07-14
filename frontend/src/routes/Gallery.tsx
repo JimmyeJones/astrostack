@@ -414,6 +414,8 @@ export function GalleryView() {
         title={viewing ? `${viewing.target_name} · ${viewing.output_basename}` : undefined}
         downloadHref={viewing?.has_preview
           ? api.stackArtifactUrl(viewing.safe, viewing.run_id, "preview") : undefined}
+        jpegHref={viewing?.has_preview
+          ? api.stackArtifactUrl(viewing.safe, viewing.run_id, "jpeg") : undefined}
         rawHref={viewing?.has_fits
           ? api.stackArtifactUrl(viewing.safe, viewing.run_id, "fits") : undefined}
         onClose={() => setViewing(null)}

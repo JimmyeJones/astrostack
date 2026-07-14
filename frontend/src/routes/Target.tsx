@@ -1,6 +1,6 @@
 import {
   ActionIcon, Alert, Badge, Box, Button, Center, Grid, Group, HoverCard, Image,
-  Loader, Modal, NumberFormatter, NumberInput, Paper, Progress, Select, Stack,
+  Loader, Menu, Modal, NumberFormatter, NumberInput, Paper, Progress, Select, Stack,
   Table, TagsInput, Text, Textarea, Title, Tooltip,
 } from "@mantine/core";
 import {
@@ -912,13 +912,24 @@ export function TargetView() {
             </Button>
           ) : null}
           {latestRun?.has_preview ? (
-            <Tooltip label="Download the latest finished picture as a shareable PNG image">
-              <Button component="a" href={api.stackArtifactUrl(safe, latestRun.id, "preview")}
-                variant="default" leftSection={<IconPhotoDown size={16} />}
-                aria-label="Download latest picture">
-                <Box visibleFrom="sm">Picture</Box>
-              </Button>
-            </Tooltip>
+            <Menu shadow="md" position="bottom-end" withinPortal>
+              <Menu.Target>
+                <Tooltip label="Download the latest finished picture (PNG or JPEG)">
+                  <Button variant="default" leftSection={<IconPhotoDown size={16} />}
+                    aria-label="Download latest picture">
+                    <Box visibleFrom="sm">Picture</Box>
+                  </Button>
+                </Tooltip>
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Menu.Item component="a" href={api.stackArtifactUrl(safe, latestRun.id, "preview")}>
+                  PNG (best quality)
+                </Menu.Item>
+                <Menu.Item component="a" href={api.stackArtifactUrl(safe, latestRun.id, "jpeg")}>
+                  JPEG (smaller — best for sharing)
+                </Menu.Item>
+              </Menu.Dropdown>
+            </Menu>
           ) : null}
           <Button component={Link} to={`/targets/${safe}/stack`}
             leftSection={<IconStack2 size={16} />} aria-label="Stack">

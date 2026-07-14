@@ -695,6 +695,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
           : null}
         title={run.output_basename}
         downloadHref={run.has_preview ? api.stackArtifactUrl(safe, run.id, "preview") : undefined}
+        jpegHref={run.has_preview ? api.stackArtifactUrl(safe, run.id, "jpeg") : undefined}
         rawHref={run.has_fits ? api.stackArtifactUrl(safe, run.id, "fits") : undefined}
         onClose={() => setLight(false)}
       />

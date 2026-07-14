@@ -70,8 +70,14 @@ describe("Gallery batch apply", () => {
     await waitFor(() => expect(screen.getAllByRole("img").length).toBeGreaterThan(0));
     fireEvent.click(screen.getAllByRole("img")[0]);
 
+    // The picture control is a PNG/JPEG menu (a preview implies a jpeg too).
     const pic = await screen.findByLabelText("Download picture");
-    expect(pic).toHaveAttribute("href", "/api/targets/M_42/stack-runs/1/preview");
+    expect(pic).not.toHaveAttribute("href");
+    fireEvent.click(pic);
+    expect((await screen.findByText("PNG (best quality)")).closest("a")).toHaveAttribute(
+      "href", "/api/targets/M_42/stack-runs/1/preview");
+    expect(screen.getByText("JPEG (smaller — best for sharing)").closest("a")).toHaveAttribute(
+      "href", "/api/targets/M_42/stack-runs/1/jpeg");
     expect(screen.getByLabelText("Download raw data")).toHaveAttribute(
       "href", "/api/targets/M_42/stack-runs/1/fits");
   });

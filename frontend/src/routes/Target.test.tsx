@@ -1,7 +1,7 @@
 import { MantineProvider } from "@mantine/core";
 import { Notifications } from "@mantine/notifications";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TargetView, countNewSubsSinceStack, countQcUncheckable, describeObject } from "./Target";
@@ -74,16 +74,22 @@ describe("TargetView process action", () => {
 });
 
 describe("TargetView latest-picture download", () => {
-  it("offers a one-click PNG download of the latest stack's picture", async () => {
+  it("offers a PNG or JPEG download of the latest stack's picture", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ id: 9 })]);
     vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1), mkFrame(2)]);
 
     renderTarget();
 
-    const link = await screen.findByRole("link", { name: "Download latest picture" });
-    expect(link).toHaveAttribute(
+    // The "Picture" control is a menu trigger; opening it offers both formats.
+    const trigger = await screen.findByRole("button", { name: "Download latest picture" });
+    fireEvent.click(trigger);
+    const png = await screen.findByText("PNG (best quality)");
+    const jpeg = screen.getByText("JPEG (smaller — best for sharing)");
+    expect(png.closest("a")).toHaveAttribute(
       "href", client.api.stackArtifactUrl("M_42", 9, "preview"));
+    expect(jpeg.closest("a")).toHaveAttribute(
+      "href", client.api.stackArtifactUrl("M_42", 9, "jpeg"));
   });
 
   it("hides the picture download when the latest stack has no preview", async () => {
@@ -96,7 +102,7 @@ describe("TargetView latest-picture download", () => {
 
     await waitFor(() =>
       expect(screen.getByRole("link", { name: "History" })).toBeInTheDocument());
-    expect(screen.queryByRole("link", { name: "Download latest picture" }))
+    expect(screen.queryByRole("button", { name: "Download latest picture" }))
       .not.toBeInTheDocument();
   });
 });

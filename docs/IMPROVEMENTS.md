@@ -3994,16 +3994,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   surfaces (Target toolbar, Dashboard overlay, fullscreen lightbox) still offer PNG only — extending the PNG/JPEG
   choice there is a small, coherent follow-up once the defaulting question (which format leads) is settled. (S,
   friendliness.)
-- **Extend the PNG/JPEG picture-download choice to the quick-grab surfaces.** (XS–S, friendliness — Builder-filed
-  2026-07-14, follow-up to v0.124.0.) v0.124.0 added a `jpeg` artifact kind and offered PNG + JPEG side-by-side
-  on the History card. The other places a finished picture is downloadable — the **Target** toolbar "Picture"
-  button (v0.123.2), the **Dashboard** recent-stack overlay (v0.123.2), and the fullscreen **lightbox**
-  (`ImageLightbox`, shared by History/Gallery) — still serve PNG only. Extend the same two-format choice there so
-  "save my picture as PNG or JPEG" is consistent everywhere the picture is shown. **Open design call (defer to a
-  Scout):** whether to show two buttons, a small split/menu ("Download ▾ → PNG / JPEG"), or default one format
-  and offer the other as secondary — and *which* format leads (probably JPEG for the share-oriented lightbox,
-  PNG for the archival-feeling Target/Dashboard grab). Frontend-only, reuses the existing `jpeg` endpoint; no
-  backend change.
+- ~~**Extend the PNG/JPEG picture-download choice to the quick-grab surfaces.**~~ — **SHIPPED v0.125.0**
+  (Builder 2026-07-14, branch `claude/pensive-faraday-qakyq0`). All three remaining quick-grab surfaces now
+  offer PNG **or** JPEG, consistent with the History card. Resolved the open design call as: **roomy surfaces
+  keep two explicit buttons (History, unchanged); space-constrained surfaces use a compact PNG/JPEG menu**, with
+  PNG leading (best quality) and JPEG second (smaller — best for sharing) everywhere, so the ordering is
+  uniform. (1) `ImageLightbox` grew an optional `jpegHref` prop — when given alongside `downloadHref` the
+  picture-download control becomes a `Menu` (PNG / JPEG); with only `downloadHref` it stays the single PNG
+  anchor (backward-compatible, so the existing lightbox test is untouched). Both consumers — **History** and
+  **Gallery** — now pass `jpegHref` whenever the run has a preview (the `jpeg` artifact is a transcode of the
+  same stored preview, so availability tracks `has_preview`). (2) The **Target** toolbar "Picture" button became
+  a `Menu` trigger offering both formats. (3) The **Dashboard** recent-stack overlay icon became a `Menu`; the
+  navigation-guard `stopPropagation` moved to a wrapping `Box` (the card is a `<Link>`, and React portals bubble
+  through the React tree, so the dropdown's clicks are caught there) — a `preventDefault` on the trigger would
+  have suppressed Mantine's own open-menu handler, so only `stopPropagation` is used. Frontend-only, additive;
+  reuses the existing `jpeg` endpoint — no backend/schema/API/default change. Tests: `ImageLightbox.test.tsx`
+  (+1 — PNG/JPEG menu when a jpeg href is given; the single-PNG path still asserted), `Target.test.tsx` (menu
+  offers both formats / hidden with no preview), `Dashboard.test.tsx` (menu downloads PNG or JPEG without
+  navigating), `Gallery.test.tsx` (lightbox menu offers both). tsc + full vitest (818) + vite build green.
 - **Decide the intended duration format and unify it (or document the split).** (XS, friendliness/consistency —
   Builder-filed 2026-07-14, spotted dogfooding.) The app has two duration formatters that render the same
   quantity differently: `format.ts::formatIntegration` (Dashboard/Target/History/readiness) prints "42 min" /
