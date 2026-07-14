@@ -55,6 +55,28 @@ describe("integrationReadiness", () => {
     );
   });
 
+  it("uses a positive user goal override instead of the per-type default", () => {
+    // A galaxy defaults to 6 h; the user wants 10 h → the goal and verdict follow.
+    const r = integrationReadiness(5 * H, "galaxy", 10);
+    expect(r?.goalHours).toBe(10);
+    expect(r?.customGoal).toBe(true);
+    expect(r?.fraction).toBeCloseTo(0.5, 5);
+    expect(r?.level).toBe("solid"); // 5/10 = 0.5, would be "close" at the 6 h default
+    expect(r?.verdict).toContain("of ~10 h");
+  });
+
+  it("ignores a null / non-positive / non-finite goal override (keeps the default)", () => {
+    for (const bad of [null, undefined, 0, -3, NaN]) {
+      const r = integrationReadiness(3 * H, "galaxy", bad as number | null);
+      expect(r?.goalHours).toBe(6);
+      expect(r?.customGoal).toBe(false);
+    }
+  });
+
+  it("marks the default goal as non-custom", () => {
+    expect(integrationReadiness(3 * H, "galaxy")?.customGoal).toBe(false);
+  });
+
   it("maps each level to a distinct progress colour", () => {
     expect(readinessColor("starting")).toBe("gray");
     expect(readinessColor("solid")).toBe("blue");

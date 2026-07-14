@@ -790,6 +790,13 @@ export const api = {
     req<ObjectInfo | null>(`/api/targets/${safe}/identify`),
   sessionRecap: (safe: string) =>
     req<SessionRecap | null>(`/api/targets/${safe}/session-recap`),
+  getIntegrationGoal: (safe: string) =>
+    req<{ goal_s: number | null }>(`/api/targets/${safe}/integration-goal`),
+  setIntegrationGoal: (safe: string, goalS: number | null) =>
+    req<{ goal_s: number | null }>(`/api/targets/${safe}/integration-goal`, {
+      method: "PUT",
+      body: JSON.stringify({ goal_s: goalS }),
+    }),
 
   // frames
   listFrames: (safe: string, sort = "id", order = "asc") =>

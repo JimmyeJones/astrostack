@@ -1213,6 +1213,28 @@ the real webapp stack→edit path.)_
   matches its own 3-channel expansion). Additive, no schema/config/API change; found by an adversarial audit
   of the render/post numeric paths.
 
+_(Builder stacking-engine audit 2026-07-14 (v0.116.0 baseline, suite green 1217 passed / 2 skipped):
+per the owner's current focus #1, ran two independent adversarial deep-audits of the stack-combination
+and calibration/align math, each **fuzzed against a brute-force reference**, not just read. **(1)
+`stack/{accumulator,weighting,output}.py`** — MinMaxReject k-set bubble-insertion (k=1..3, ties/negatives),
+the count≥2k+1 / 3≤count<2k+1 / count<3 degrade schedule and its boundaries, the ±inf identity-sum
+guard, Welford variance vs `np.var(ddof=1)`, and the weighted-mean Σ(wx)/Σw — **~5,200 fuzz trials, zero
+mismatches**; `master.fits` preserves NaN, NaN→0 only in display artefacts. **(2)
+`calibrate/{apply,masters}.py` + `stack/align.py`** — flat-floor (sub-floor flat → 1.0, no blow-up),
+dark-XOR-bias, exposure-scaling direction/gating, NaN-gap preservation, windowed-reproject y0/x0 placement
+(reconstructed canvas vs full reproject: max diff 0.0 incl. a 17° rotation), the discarded post-refine
+`win_valid` (every accumulator recomputes `isfinite`, so the stale mask is inert), the order-1 subpixel NaN
+ring (zero darkened-but-finite pixels), and the iterated `_sigma_clip_mean` convergence + `mad==0→tol=0`
+spike branch. **Both traced clean — no reachable image-corruption bug**, consistent with the long clean-audit
+history. One **latent diagnostic nuance filed for the Scout** (not a corruption bug, no image effect): in
+`WeightedSumAccumulator.add`/`add_window` the per-frame `_count` (feeding the `coverage_min`/`coverage_max`
+"N frames per pixel" diagnostic) is derived from **channel 0's** valid mask, while the κ-σ pass-2 keep-mask
+is per-channel — so on a stack where R/G/B survivor counts differ at a pixel, the reported frame count
+reflects R only. The *image* stays correct per channel (each channel divides by its own weight); only the
+integer coverage diagnostic is R-biased, and "frames overlapping this pixel" is arguably the right thing to
+report anyway — so it's a one-line-comment / optional-refinement item, not a fix. No code shipped from the
+audit; the run's deliverable was the user-set integration-goal feature (v0.117.0).)_
+
 _(Scout QA audit 2026-07-13 (v0.110.0 baseline, suite green 1149 passed / 2 skipped): led the rotation
 with the **stacking engine** per the owner's current focus #1 — a fresh adversarial hand-trace of
 `stack/accumulator.py` (WeightedSum / MinMaxReject k-set insertion + tie-safety + the count≥2k+1/≥3/<3
@@ -3398,16 +3420,29 @@ problems. Dogfood it every big-picture run and fix root causes.
 - Annotated sky overlay (label detected objects / show solved field). (M) —
   related to the night planner above; the planner's "plot tonight's targets" view
   can reuse this.
-- **NEW BEGINNER FEATURE — per-target progress & integration goals.** A beginner
-  wants to know "have I shot enough of this yet?" Add a per-target progress view:
-  total accepted integration accumulated across *all* sessions, an optional
-  user-set **goal** ("I want 6 hours on M31") with a progress bar, and a gentle
-  "you've added N new subs since your last stack — restack?" nudge (the stale-target
-  signal already exists). Helps decide what to point at tonight and pairs naturally
-  with the night planner (already-targeted badges) and reprocess-everything.
-  Beginner bar: plain-language, opt-in goal, sane default of no goal. Additive
-  (a nullable `integration_goal_s` in target/library meta — upgrade-safe); mostly
-  aggregating data already stored. (M, beginner-feature/workflow)
+- **NEW BEGINNER FEATURE — per-target progress & integration goals.** — **USER-SET GOAL
+  SLICE SHIPPED v0.117.0** (Builder 2026-07-14, branch `claude/pensive-faraday-b7jimp`). The
+  readiness card (v0.111.0) already showed accumulated integration against a sane
+  per-object-type goal (Galaxy 6 h, Nebula 4 h, Cluster 1.5 h) with a progress bar + verdict;
+  this adds the filed **optional user-set goal** ("I want 6 h on M31"). New endpoints
+  `GET`/`PUT /api/targets/{safe}/integration-goal` store the goal (total accepted exposure, s)
+  in the existing key/value `project_meta` table — **no schema migration**, so it's additive /
+  upgrade-safe by construction (an old project simply has the key absent → the per-type default
+  is used exactly as before). The goal is validated (positive) and clamped to a sane 1 min–1000 h
+  range; a stale/garbage stored value is treated as unset so a hand-edited project can't 500 the
+  card. `integrationReadiness(exposureSeconds, type, goalHoursOverride?)` now takes an optional
+  override (a positive number wins over the per-type default and marks `customGoal`); the Target
+  page's "Is it enough yet?" card shows an editable goal chip ("goal ~6 h ✎" → inline hours input
+  with Save / Reset) that reads "your goal" once set. Opt-in and fully reversible (Reset clears it
+  back to the default); a **suggestion, never a gate** (nothing blocks stacking). Tests:
+  `tests/webapp/test_target_integration_goal.py` (6 — default null, set+read-back, clear reverts,
+  clamp hi/lo, non-positive 422, unknown-target 404), `readiness.test.ts` (+3 — override wins,
+  ignores null/non-positive/NaN, default is non-custom), `Target.test.tsx` (+1 — a user goal
+  overrides the default and labels it "your goal"; the existing card assertion updated for the
+  editable chip). Python (1223) + tsc + full vitest (771) + vite build all green. *(Scout-filed
+  earlier; M, beginner-feature/workflow — PRIORITY 2/3; beginner bar ✔.)* The remaining
+  "N new subs since your last stack — restack?" nudge already shipped (v0.90.0), so this item's
+  novel surface is complete; a future run could add a **library-wide** goals overview if wanted.
 - ~~**Tonight planner: distinguish a waxing vs waning Moon (evening vs morning problem).**~~
   — **shipped v0.97.4** (see Shipped). The Moon card now reads "Waxing gibbous (72%)" /
   "Waning gibbous", "First Quarter" / "Last Quarter", "Waxing crescent" / "Waning crescent" —
