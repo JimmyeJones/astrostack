@@ -50,6 +50,19 @@ describe("LibraryProgressCard", () => {
     expect(screen.getByText("plenty")).toBeInTheDocument();
   });
 
+  it("labels each row with its object type, and omits it for an unknown type", async () => {
+    vi.spyOn(client.api, "getLibraryProgress").mockResolvedValue([
+      row({ safe: "M_31", name: "M 31", object_type: "galaxy", total_exposure_s: 1 * 3600 }),
+      row({ safe: "Unsorted", name: "Unsorted", object_type: null, total_exposure_s: 1 * 3600 }),
+    ]);
+    renderCard();
+    await waitFor(() => expect(screen.getByText("Target progress")).toBeInTheDocument());
+    // The recognised galaxy shows its type next to the goal figure.
+    expect(screen.getByText(/galaxy · .* of ~6h/)).toBeInTheDocument();
+    // The unknown target shows only the goal, with no "other"/type prefix.
+    expect(screen.queryByText(/other ·/)).toBeNull();
+  });
+
   it("renders nothing when no target has collected light", async () => {
     vi.spyOn(client.api, "getLibraryProgress").mockResolvedValue([]);
     const { container } = renderCard();

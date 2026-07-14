@@ -8,10 +8,29 @@
 
 import type { TargetProgress } from "./api/client";
 import { integrationReadiness, type IntegrationReadiness } from "./readiness";
+import type { TypeBucket } from "./tonight";
 
 export interface RankedProgress {
   row: TargetProgress;
   readiness: IntegrationReadiness;
+}
+
+// A short friendly object-type word ("galaxy"/"nebula"/"cluster") for a
+// recognised bucket, so the card can show *why* a target's goal is what it is
+// (a galaxy's 6 h vs a cluster's 1.5 h). Returns null for the "Other"/unknown
+// bucket — a meaningless "other" label would only add clutter, so the caller
+// renders nothing there.
+export function objectTypeLabel(bucket: TypeBucket): string | null {
+  switch (bucket) {
+    case "Galaxy":
+      return "galaxy";
+    case "Nebula":
+      return "nebula";
+    case "Cluster":
+      return "cluster";
+    default:
+      return null;
+  }
 }
 
 // Rank targets so the ones that most reward more imaging time lead: any target

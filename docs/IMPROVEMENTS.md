@@ -3563,10 +3563,17 @@ problems. Dogfood it every big-picture run and fix root causes.
     summary phrasing), `LibraryProgressCard.test.tsx` (3 — ordering + plenty badge, renders-nothing,
     the cap). Python + tsc + full vitest (789) + vite build all green. *(Beginner bar ✔ — helps a
     non-expert OSC owner decide which target to keep shooting, plain-language, sane defaults.)*
-    _(Follow-ups spotted shipping this, left for a future run: **(1)** the endpoint already resolves each
-    target's catalog object type offline but the card doesn't surface it — showing a small "galaxy" /
-    "nebula" label next to the goal would teach a beginner *why* the goal is what it is (XS, frontend-only).
-    **(2)** the Dashboard now opens every project up to **three** times per load (stats stack roll-up +
+    _(Follow-ups spotted shipping this: **(1)** ~~the endpoint already resolves each target's catalog object
+    type offline but the card doesn't surface it — showing a small "galaxy" / "nebula" label next to the
+    goal would teach a beginner *why* the goal is what it is (XS, frontend-only).~~ **SHIPPED v0.119.3**
+    (Builder 2026-07-14, branch `claude/pensive-faraday-2ruia6`). Each "Target progress" row now shows its
+    object type next to the goal figure — "galaxy · 2.1 h of ~6h" — via a new pure `libraryProgress.ts::
+    objectTypeLabel(bucket)` that maps the readiness `bucket` (already derived from the endpoint's
+    `object_type`) to a friendly word, returning null for the `Other`/unknown bucket so an unrecognised
+    target shows only the goal (no meaningless "other" prefix). Frontend-only, additive, no
+    backend/schema/API/default change. Tests: `libraryProgress.test.ts` (+2 — friendly word per bucket, null
+    for Other) + `LibraryProgressCard.test.tsx` (+1 — a galaxy row shows the label, an unknown-type row omits
+    it). tsc + full vitest + vite build green. **(2)** the Dashboard now opens every project up to **three** times per load (stats stack roll-up +
     `/api/last-night` frames + `/api/library-progress` goal), each independently cached — on a large library
     a single combined roll-up that opens each project **once** and returns all three would be measurably
     cheaper; worth folding together only with a measurement (§3). Filed under Infra below.)_

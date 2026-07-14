@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { TargetProgress } from "./api/client";
-import { describeLibraryProgress, rankLibraryProgress } from "./libraryProgress";
+import {
+  describeLibraryProgress,
+  objectTypeLabel,
+  rankLibraryProgress,
+} from "./libraryProgress";
 
 function row(over: Partial<TargetProgress> & { safe: string }): TargetProgress {
   return {
@@ -41,6 +45,18 @@ describe("rankLibraryProgress", () => {
     ]);
     expect(withGoal[0].readiness.level).toBe("plenty");
     expect(withGoal[0].readiness.customGoal).toBe(true);
+  });
+});
+
+describe("objectTypeLabel", () => {
+  it("gives a friendly word for a recognised bucket", () => {
+    expect(objectTypeLabel("Galaxy")).toBe("galaxy");
+    expect(objectTypeLabel("Nebula")).toBe("nebula");
+    expect(objectTypeLabel("Cluster")).toBe("cluster");
+  });
+
+  it("returns null for the unknown/other bucket (no meaningless label)", () => {
+    expect(objectTypeLabel("Other")).toBeNull();
   });
 });
 
