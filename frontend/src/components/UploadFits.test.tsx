@@ -11,9 +11,9 @@ import type { UploadResult } from "../api/client";
 import * as client from "../api/client";
 
 // --- Fake HTML5 FileSystem entries for the drag-drop folder-walk helpers ---
-function fileEntry(name: string): FsEntry {
+function fileEntry(name: string, fullPath?: string): FsEntry {
   const f = new File(["x"], name, { type: "application/octet-stream" });
-  return { isFile: true, isDirectory: false, file: (ok) => ok(f) };
+  return { isFile: true, isDirectory: false, fullPath, file: (ok) => ok(f) };
 }
 function dirEntry(children: FsEntry[]): FsEntry {
   return {
@@ -109,6 +109,21 @@ describe("readEntryFiles", () => {
     ]);
     const files = await readEntryFiles(tree);
     expect(files.map((f) => f.name).sort()).toEqual(["a.fit", "b.fits", "readme.txt"]);
+  });
+  it("preserves the folder-relative path so same-named subs stay distinct", async () => {
+    // Two different subs share a basename across session folders (Seestar restarts
+    // frame numbering per session) — the relative path must survive as the name.
+    const [f1] = await readEntryFiles(
+      fileEntry("Light_0001.fit", "/M31/night1/Light_0001.fit"));
+    const [f2] = await readEntryFiles(
+      fileEntry("Light_0001.fit", "/M31/night2/Light_0001.fit"));
+    expect(f1.name).toBe("M31/night1/Light_0001.fit");
+    expect(f2.name).toBe("M31/night2/Light_0001.fit");
+    expect(f1.name).not.toBe(f2.name);
+  });
+  it("leaves a bare file's name untouched when there is no subfolder", async () => {
+    const [f] = await readEntryFiles(fileEntry("Light_0001.fit", "/Light_0001.fit"));
+    expect(f.name).toBe("Light_0001.fit");
   });
 });
 

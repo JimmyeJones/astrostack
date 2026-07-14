@@ -4078,6 +4078,30 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.119.6** — Bug fix (data integrity / autonomy — PRIORITY 2/3; Builder 2026-07-14, branch
+  `claude/pensive-faraday-x09w10`; found by a fresh adversarial audit of the bulk-upload path, traced +
+  reproduced + regression-tested). **Silent data loss on a folder upload where two different subs share a
+  basename.** The browser folder-upload path collapsed every sub to its **basename** before writing
+  (`safe_component`), so two genuinely-different subs in different session subfolders — e.g.
+  `night1/Light_0001.fit` and `night2/Light_0001.fit` (capture tools, Seestar included, restart frame
+  numbering **per session**, so this recurs constantly) — landed on one destination: the first was written,
+  the second was reported to the user as `skipped` ("already present") and its bytes were **lost**, with a
+  misleading success summary. Worse, the frontend's drag-drop walker (`readEntryFiles`) discarded each file's
+  folder-relative path (`entry.fullPath`) *before* upload, so the server never even saw what distinguished
+  the two. **Fix (frontend + backend):** (1) `readEntryFiles` now preserves each dropped file's
+  folder-relative path as the `File` name (and `uploadFits` sends `webkitRelativePath || name`), so distinct
+  subs arrive distinct; (2) a new `safe_relname` on the server **preserves** that relative subpath by
+  flattening its separators into one traversal-safe filename (`night1__Light_0001.fit`) instead of reducing
+  to the bare basename — distinct source files stay distinct (no lost data), while a genuine re-upload of the
+  *same* path still dedups (ingest keys on the source path, so no double-count), and everything still lands
+  flat in `incoming/<target>/` so the scanner's one-subfolder-per-target rule is unchanged. A `..` segment
+  anywhere now rejects the name outright (safer than the old silent strip-to-basename). Additive /
+  upgrade-safe: no schema/config/API-shape/default change; uploads stay unauthenticated-by-default as before.
+  Tests: `tests/webapp/test_upload.py` (`safe_relname` helper matrix; endpoint keeps two same-named subs from
+  different folders with correct bytes; a traversal name is rejected) and
+  `frontend/src/components/UploadFits.test.tsx` (`readEntryFiles` preserves the subpath for same-named subs
+  and leaves a bare filename untouched). Python + tsc + full vitest + vite build all green. (Wrong-outcome /
+  irreversible data loss on the beginner on-ramp.)
 - **v0.119.5** — Bug fix (friendliness/trust — PRIORITY 3; Builder 2026-07-14, branch
   `claude/pensive-faraday-x09w10`; found by a fresh adversarial audit of the recently-added
   `session_recap`/`stats` code, traced + reproduced + regression-tested). The Dashboard **"Last night"**

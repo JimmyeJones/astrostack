@@ -16,6 +16,7 @@ from synth import write_seestar_fits  # noqa: E402
 from webapp.routers.upload import (  # noqa: E402
     is_fits_name,
     safe_component,
+    safe_relname,
     safe_target_dir,
 )
 
@@ -45,6 +46,23 @@ def _fits_bytes(tmp_path: Path, name: str = "u.fit") -> bytes:
 ])
 def test_safe_component(raw: str, expected: str | None) -> None:
     assert safe_component(raw) == expected
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("Light_001.fit", "Light_001.fit"),                     # plain basename, unchanged
+    ("night1/Light_001.fit", "night1__Light_001.fit"),      # webkitdirectory relative path preserved
+    ("M31/night2/Light_001.fit", "M31__night2__Light_001.fit"),
+    ("C:\\subs\\Light_001.fit", "C:__subs__Light_001.fit"),  # Windows separators
+    ("./a/b.fit", "a__b.fit"),                              # current-dir segment dropped
+    ("  a/ b .fit ", "a__b .fit"),                          # segments stripped
+    ("../evil.fit", None),                                  # a ``..`` segment rejects the whole name
+    ("a/../b.fit", None),                                   # traversal anywhere in the path
+    ("..", None), (".", None), ("...", None), ("", None),
+    ("only/dir/", "only__dir"),                             # flattened; rejected later as non-FITS
+    ("a\0b.fit", None),                                     # embedded NUL
+])
+def test_safe_relname(raw: str, expected: str | None) -> None:
+    assert safe_relname(raw) == expected
 
 
 @pytest.mark.parametrize("name,ok", [
@@ -114,17 +132,52 @@ def test_upload_rejects_non_fits_but_keeps_the_good_ones(client, data_root, tmp_
     assert not (data_root / "incoming" / "notes.txt").exists()
 
 
-def test_upload_strips_a_traversal_filename_to_a_basename(client, data_root, tmp_path) -> None:
+def test_upload_rejects_a_traversal_filename(client, data_root, tmp_path) -> None:
+    # A ``..`` segment in the (subpath-preserving) name is rejected outright rather
+    # than silently rewritten — a legitimate folder upload never contains one, and
+    # nothing is written outside incoming/.
     body = _fits_bytes(tmp_path)
     r = client.post(
         "/api/upload",
         files=[("files", ("../../../../evil.fit", body, "application/octet-stream"))],
     )
     assert r.status_code == 200, r.text
-    assert [f["name"] for f in r.json()["saved"]] == ["evil.fit"]
-    # Written strictly inside incoming/, never at a traversed path.
-    assert (data_root / "incoming" / "evil.fit").exists()
+    payload = r.json()
+    assert payload["saved"] == []
+    assert [f["name"] for f in payload["rejected"]] == ["../../../../evil.fit"]
     assert not (tmp_path.parent / "evil.fit").exists()
+    assert not (data_root / "incoming" / "evil.fit").exists()
+
+
+def test_upload_keeps_two_same_named_subs_from_different_folders(
+    client, data_root, tmp_path
+) -> None:
+    """Regression: a folder upload where two *different* subs share a basename
+    across session subfolders (Seestar restarts frame numbering each session) must
+    keep both — before the fix the second was silently dropped as "already present"
+    (basename collision), losing real data."""
+    write_seestar_fits(tmp_path / "a.fit", width=64, height=64, n_stars=5, seed=1)
+    write_seestar_fits(tmp_path / "b.fit", width=64, height=64, n_stars=8, seed=2)
+    a = (tmp_path / "a.fit").read_bytes()
+    b = (tmp_path / "b.fit").read_bytes()
+    assert a != b  # genuinely different subs
+    r = client.post(
+        "/api/upload",
+        data={"target": "M_31"},
+        files=[
+            ("files", ("night1/Light_0001.fit", a, "application/octet-stream")),
+            ("files", ("night2/Light_0001.fit", b, "application/octet-stream")),
+        ],
+    )
+    assert r.status_code == 200, r.text
+    payload = r.json()
+    # Both saved, under distinct (subpath-preserving) names — nothing skipped.
+    assert payload["skipped"] == []
+    saved = {f["name"] for f in payload["saved"]}
+    assert saved == {"night1__Light_0001.fit", "night2__Light_0001.fit"}
+    d = data_root / "incoming" / "M_31"
+    assert (d / "night1__Light_0001.fit").read_bytes() == a
+    assert (d / "night2__Light_0001.fit").read_bytes() == b
 
 
 def test_upload_skips_a_file_already_present(client, data_root, tmp_path) -> None:

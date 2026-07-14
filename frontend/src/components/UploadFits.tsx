@@ -24,6 +24,9 @@ export function isFitsFilename(name: string): boolean {
 export interface FsEntry {
   isFile: boolean;
   isDirectory: boolean;
+  // The entry's path within the dropped item (e.g. ``/M31/night1/Light_001.fit``);
+  // this is what distinguishes two same-named subs in different session folders.
+  fullPath?: string;
   file?: (onOk: (f: File) => void, onErr?: (e: unknown) => void) => void;
   createReader?: () => {
     readEntries: (onOk: (entries: FsEntry[]) => void, onErr?: (e: unknown) => void) => void;
@@ -33,12 +36,26 @@ export interface FsEntry {
 /** Recursively collect every file under a dropped FileSystem entry. A dropped
  *  *folder* is walked depth-first; a dropped *file* yields itself. Errors on any
  *  single entry are swallowed (that branch just contributes nothing) so one
- *  unreadable file never sinks a whole-folder drop. */
+ *  unreadable file never sinks a whole-folder drop.
+ *
+ *  A file's **relative path within the dropped folder** (its ``fullPath``) is
+ *  preserved as the File's name, so two different subs that share a basename
+ *  across session subfolders (Seestar restarts frame numbering each session) stay
+ *  distinct on upload instead of one silently overwriting the other. The server
+ *  flattens/sanitises the path back into one safe filename. */
 export async function readEntryFiles(entry: FsEntry): Promise<File[]> {
   if (entry.isFile && entry.file) {
     const getFile = entry.file.bind(entry);
+    const rel = (entry.fullPath || "").replace(/^\/+/, "");
     return new Promise<File[]>((resolve) => {
-      getFile((f) => resolve([f]), () => resolve([]));
+      getFile(
+        (f) => resolve([
+          rel && rel !== f.name
+            ? new File([f], rel, { type: f.type, lastModified: f.lastModified })
+            : f,
+        ]),
+        () => resolve([]),
+      );
     });
   }
   if (entry.isDirectory && entry.createReader) {

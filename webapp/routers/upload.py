@@ -66,6 +66,41 @@ def safe_component(name: str) -> str | None:
     return base
 
 
+def safe_relname(name: str) -> str | None:
+    """Reduce a client-supplied (possibly folder-relative) name to a single safe
+    filename that **preserves** its relative subpath by flattening the separators.
+
+    A folder upload sends a relative path like ``night1/Light_001.fit``. Reducing
+    it to the bare basename (:func:`safe_component`) is unsafe *for the destination
+    name*: capture tools — Seestar included — restart frame numbering per session,
+    so two genuinely different subs in different session subfolders often share a
+    basename (``Light_0001.fit``). Collapsing them onto one destination silently
+    drops all but the first (they'd land on the same path, and the second reads as
+    "already present"). Flattening the *whole* relative path into the filename
+    (``night1__Light_001.fit``) keeps distinct source files distinct while staying
+    a single traversal-safe component (still landing flat in ``incoming/<target>/``,
+    so the scanner's one-subfolder-per-target rule is unchanged). Every segment is
+    sanitised and any ``..``/NUL rejects the whole name. Returns the safe flattened
+    name, or ``None`` when unusable.
+    """
+    if not name or "\0" in name:
+        return None
+    segments: list[str] = []
+    for seg in name.replace("\\", "/").split("/"):
+        seg = seg.strip()
+        if seg == "" or seg == ".":
+            continue  # empty / current-dir segment — safely dropped
+        if set(seg) <= {"."}:  # ``..`` (or any all-dots) — a traversal segment
+            return None
+        segments.append(seg)
+    if not segments:
+        return None
+    flat = "__".join(segments)
+    if "/" in flat or "\\" in flat or "\0" in flat:  # defence in depth
+        return None
+    return flat
+
+
 def is_fits_name(base: str) -> bool:
     """True when ``base`` is a FITS file the scanner would actually ingest."""
     return Path(base).suffix.lower() in FITS_SUFFIXES
@@ -197,7 +232,11 @@ async def upload_files(
         # multi-file POST doesn't hold spooled parts open until GC. (Starlette
         # closes form uploads only on a parse error, not on success.)
         try:
-            base = safe_component(upload.filename or "")
+            # Preserve the browser-relative subpath (flattened) so two different
+            # subs sharing a basename across session subfolders don't collide onto
+            # one destination and silently drop one (Seestar restarts per-session
+            # frame numbering). safe_relname stays a single traversal-safe name.
+            base = safe_relname(upload.filename or "")
             if base is None:
                 rejected.append(RejectedFile(name=upload.filename or "(unnamed)",
                                              reason="unsafe file name"))
