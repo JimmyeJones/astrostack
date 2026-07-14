@@ -2887,6 +2887,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+- **Scout to vet on REAL data: does the STF `_highlight_rolloff` (v0.119.1) mildly *desaturate* bright
+  coloured highlights?** (S, image-quality — PRIORITY 4) *(Builder-audit-noted 2026-07-14, from an
+  adversarial numeric audit of the v0.119.1/.2 highlight-rolloff fix — which otherwise verified clean:
+  monotonic, bounded <1, C¹ at the knee, neutral saturated stars stay neutral, background bit-for-bit
+  unchanged.)* The rolloff soft-shoulders each channel **independently** in that channel's own
+  shadow-normalized space, so on a bright *coloured* region where some channels sit above the knee (0.7) and
+  one below, only the above-knee channels are compressed while the below-knee one is untouched — which mildly
+  **desaturates** the highlight. Measured on a synthetic warm core at r≈14 px: old `[0.923, 0.865, 0.806]` →
+  new `[0.867, 0.846, 0.806]` (R u8 235→221, B unchanged). It only touches already-bright (>0.8) pixels, is
+  a large net improvement over the old hard-clip (which blew the core to featureless white), and doesn't
+  violate the code's invariant (below-knee pixels are exactly unchanged) — so it's **not** a regression to
+  fix blind. But whether a **luminance-coupled** rolloff (scale all three channels by the *luminance*'s
+  shoulder factor, preserving hue/sat while still taming the peak) reads better on a real bright galaxy core
+  (M31/M42) is worth a real-data A/B before any change — synthetic can't judge "looks better". Testable on
+  `_highlight_rolloff`/`autostretch` in isolation; additive; changing it touches the default view + Auto, so
+  real-data-gated like the SCNR / `sky_sigma` items below.
 - ~~**Stamp the finished sky-background cast into the *autonomous* auto-edit provenance, to gather a
   passive real-data signal on whether Auto's colour path lands neutral.**~~ — **SHIPPED v0.105.0**
   (Builder 2026-07-10). `_auto_edit_process_run` (webapp/pipeline.py — the shared helper behind
