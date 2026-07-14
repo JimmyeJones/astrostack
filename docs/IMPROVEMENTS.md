@@ -4078,6 +4078,28 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.119.5** — Bug fix (friendliness/trust — PRIORITY 3; Builder 2026-07-14, branch
+  `claude/pensive-faraday-x09w10`; found by a fresh adversarial audit of the recently-added
+  `session_recap`/`stats` code, traced + reproduced + regression-tested). The Dashboard **"Last night"**
+  card undercounted a target imaged early and **revisited near dawn** across a >6 h intra-target gap on a
+  normal multi-target night (shoot A at dusk → B/C for hours → back to A near dawn). `library_session_recap`
+  trimmed each target to *its own* last session (`last_session_frames`) **before** merging targets onto one
+  timeline, so A's dusk batch — severed from its dawn batch by A's own 7 h gap — was dropped even though B's
+  in-between subs bridged the whole night into one ≤6 h-step cluster; the card then understated the night's
+  sub count, integration time, the revisited target's contribution, and the night's start time. **Fix (two
+  parts):** (1) `library_session_recap` no longer pre-trims per target — it merges *all* handed datable
+  frames and lets the existing trailing-cluster gap-walk make the precise cross-target "last night" cut (an
+  older isolated session still falls away; a bridged early batch is kept). (2) A new memory-bound helper
+  `recent_session_window_frames` (keep frames within `LAST_NIGHT_WINDOW_HOURS=30 h` of a target's *own*
+  latest capture — wide enough to never sever a bridged night, small enough to never hold a target's whole
+  history) replaces the caller's `last_session_frames` pre-trim in `stats.py::_collect_last_night`, so the
+  bridged early batch survives to the merge while memory stays bounded. Pure/offline/read-only; no
+  schema/config/API-shape/default change. All prior `library_session_recap` tests stay green (the gap-walk
+  already did the correct cut — the pre-trim was redundant *and* buggy). Regressions:
+  `tests/test_session_recap.py` (revisited-target counted across a bridge; window keeps a bridged early batch
+  but drops last week's session + is empty without timestamps) and `tests/webapp/test_last_night.py`
+  (end-to-end revisit through `GET /api/last-night`). (Broken-outcome for a beginner-facing summary; no pixel
+  data affected.)
 - **v0.114.0** — Beginner feature (friendliness/workflow — PRIORITY 3; Builder 2026-07-13). "Share card"
   slice (a): a "Download share image (JPEG)" editor action renders the displayed result to a social-sized
   JPEG (long edge ≤ 2048, LANCZOS) + a copy-friendly caption blurb ("M 42 · 3h 12m · 152 subs") with a Copy

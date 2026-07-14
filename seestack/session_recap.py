@@ -19,7 +19,7 @@ groups a night that spans UTC midnight together and is robust to timezone.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from statistics import median
 
 from seestack.io.project import FrameRow, Project
@@ -159,6 +159,39 @@ def last_session_frames(
         return []
     dated.sort(key=lambda pair: pair[0])
     return [f for _dt, f in _last_session_frames(dated, gap_hours)]
+
+
+# A generous ceiling on a single capture night's span. The library "last night"
+# cut is made *precisely* by the ≤``gap_hours`` trailing-cluster walk over the
+# merged cross-target timeline (see :func:`library_session_recap`); this window is
+# only a memory bound on how many of each target's frames we carry into that
+# merge. It must be wide enough to never sever a night that another target bridges
+# — a real dusk-to-dawn run is well under this — yet small enough that we never
+# hold a target's whole history. So a frame older than this before the target's
+# *own* latest capture cannot belong to the same night and is safely dropped.
+LAST_NIGHT_WINDOW_HOURS = 30.0
+
+
+def recent_session_window_frames(
+    frames: list[FrameRow], *, window_hours: float = LAST_NIGHT_WINDOW_HOURS
+) -> list[FrameRow]:
+    """Trim ``frames`` to those captured within ``window_hours`` of the target's
+    *own* latest capture — a memory bound for the cross-target
+    :func:`library_session_recap` merge.
+
+    Unlike :func:`last_session_frames`, this does **not** cut at the target's own
+    ``gap_hours`` session boundary: a target imaged early in a night and revisited
+    near dawn (a >6 h internal gap) keeps *both* batches, so when another target
+    shot in between bridges the gap, the early batch isn't wrongly dropped before
+    the merge. The precise "last night" cut is left to the merged-timeline gap
+    walk; this only ensures every frame that could belong to it survives. Returns
+    the datable in-window frames; ``[]`` when none carry a capture timestamp."""
+    dated = [(dt, f) for f in frames if (dt := _parse(f.timestamp_utc)) is not None]
+    if not dated:
+        return []
+    latest = max(dt for dt, _ in dated)
+    cutoff = latest - timedelta(hours=window_hours)
+    return [f for dt, f in dated if dt >= cutoff]
 
 
 def _session_median_fwhm(
@@ -311,11 +344,17 @@ def library_session_recap(
 
     Pure, offline, read-only — it just aggregates the frame rows it's handed.
     """
-    # (capture-time, name, safe, frame) for every frame in each target's most
-    # recent session. Trimming per target keeps the merge small.
+    # (capture-time, name, safe, frame) for every datable frame the caller handed
+    # us. We deliberately do **not** pre-trim each target to its own last session
+    # here: a target imaged early in a night and revisited near dawn (a >6 h
+    # internal gap) would then lose its early batch *before* the merge, even when
+    # another target shot in between bridges the two into one continuous night. The
+    # trailing-cluster walk below makes the real "last night" cut over the *merged*
+    # timeline, so an older isolated session still falls away — while a bridged one
+    # is kept. The caller bounds memory with ``recent_session_window_frames``.
     merged: list[tuple[datetime, str, str, FrameRow]] = []
     for name, safe, frames in targets:
-        for f in last_session_frames(frames, gap_hours=gap_hours):
+        for f in frames:
             dt = _parse(f.timestamp_utc)
             if dt is not None:
                 merged.append((dt, name, safe, f))

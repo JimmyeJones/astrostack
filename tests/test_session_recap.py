@@ -7,6 +7,7 @@ from seestack.session_recap import (
     bucket_reject_reason,
     last_session_frames,
     library_session_recap,
+    recent_session_window_frames,
     session_recap,
 )
 
@@ -325,3 +326,53 @@ def test_library_recap_single_target_uses_its_latest_night_only():
     assert recap.n_targets == 1
     assert recap.n_frames == 5
     assert recap.targets[0].name == "M 31"
+
+
+def test_library_recap_counts_a_target_revisited_later_the_same_night():
+    """A target imaged at dusk and revisited near dawn — a >6 h *internal* gap —
+    must keep BOTH batches when another target shot in between bridges the night.
+
+    Regression: the recap used to trim each target to its own last session before
+    merging, so the revisited target's dusk batch (severed from its dawn batch by
+    its own >6 h gap) was silently dropped, undercounting the night's frames,
+    integration and start time even though a bridging target made it one night."""
+    dusk = datetime(2026, 7, 8, 22, 0, 0)          # target A at dusk
+    bridge = datetime(2026, 7, 9, 2, 0, 0)         # target B in the middle (4 h later)
+    dawn = datetime(2026, 7, 9, 5, 0, 0)           # target A again near dawn (7 h gap on A)
+    a = [_frame(dusk + timedelta(seconds=30 * i)) for i in range(3)]
+    a += [_frame(dawn + timedelta(seconds=30 * i)) for i in range(3)]
+    b = [_frame(bridge + timedelta(seconds=30 * i)) for i in range(3)]
+
+    recap = library_session_recap([("A", "A", a), ("B", "B", b)])
+    assert recap is not None
+    # All 9 frames belong to the one bridged night (each ≤6 h step); before the
+    # fix A's 3 dusk subs were dropped, giving n_frames == 6.
+    assert recap.n_frames == 9
+    assert recap.n_targets == 2
+    a_contrib = next(c for c in recap.targets if c.safe == "A")
+    assert a_contrib.n_frames == 6            # dusk (3) + dawn (3), not just dawn
+    assert recap.start_utc == dusk.isoformat()  # the night starts at A's dusk sub
+
+
+def test_recent_session_window_keeps_a_bridged_early_batch():
+    """The memory-bound window keeps a >6 h-earlier batch of the same night (so it
+    can be bridged), while dropping a genuinely prior night far outside the window."""
+    prev_night = datetime(2026, 7, 1, 22, 0, 0)    # a week ago — dropped
+    dusk = datetime(2026, 7, 8, 22, 0, 0)          # same night as dawn, 7 h earlier
+    dawn = datetime(2026, 7, 9, 5, 0, 0)
+    frames = [_frame(prev_night + timedelta(seconds=30 * i)) for i in range(4)]
+    frames += [_frame(dusk + timedelta(seconds=30 * i)) for i in range(3)]
+    frames += [_frame(dawn + timedelta(seconds=30 * i)) for i in range(3)]
+    kept = recent_session_window_frames(frames)
+    # Both same-night batches survive (dusk is only 7 h < 30 h before dawn); last
+    # week's session — far outside the window — is dropped. Unlike
+    # last_session_frames, the dusk batch is NOT severed at the target's own gap.
+    assert len(kept) == 6
+    assert all(not f.timestamp_utc.startswith("2026-07-01") for f in kept)
+    # For contrast, the per-target last-session trim would drop the dusk batch too.
+    assert len(last_session_frames(frames)) == 3
+
+
+def test_recent_session_window_empty_without_timestamps():
+    assert recent_session_window_frames([]) == []
+    assert recent_session_window_frames([_frame(None)]) == []

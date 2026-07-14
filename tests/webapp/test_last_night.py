@@ -82,3 +82,31 @@ def test_last_night_excludes_a_target_not_shot_that_night(client, built_library)
     assert body["n_targets"] == 1        # only M42 was shot last night
     assert body["targets"][0]["safe"] == m42
     assert body["n_frames"] == 6
+
+
+def test_last_night_counts_a_target_revisited_across_a_gap(client, built_library):
+    """End-to-end regression: a target imaged at dusk and revisited near dawn (a
+    >6 h gap on that target) keeps BOTH batches when another target shot in between
+    bridges the night — the card used to undercount it (only the dawn batch)."""
+    from seestack.io.library import Library
+
+    safes = {t["safe_name"] for t in client.get("/api/targets").json()}
+    m42, ngc = "M_42", "NGC_7000"
+    assert {m42, ngc} <= safes
+
+    dusk = dt.datetime(2026, 7, 8, 22, 0, 0, tzinfo=dt.timezone.utc)
+    lib = Library.open_or_create(built_library / "library")
+    try:
+        _add_night(lib, m42, dusk, n=3)                                # M42 at dusk
+        _add_night(lib, ngc, dusk + dt.timedelta(hours=4), n=3)        # NGC bridges (02:00)
+        _add_night(lib, m42, dusk + dt.timedelta(hours=7), n=3)        # M42 again near dawn (05:00)
+    finally:
+        lib.close()
+
+    body = client.get("/api/last-night").json()
+    assert body is not None
+    assert body["n_targets"] == 2
+    assert body["n_frames"] == 9         # M42 dusk (3) + NGC (3) + M42 dawn (3)
+    m42_contrib = next(t for t in body["targets"] if t["safe"] == m42)
+    assert m42_contrib["n_frames"] == 6  # both batches, not just the dawn one
+    assert body["start_utc"] == dusk.isoformat()

@@ -234,16 +234,22 @@ def _collect_last_night(lib, targets):
     target's latest night into one recap. Expensive (opens every project) — the
     caller caches it. A broken project is skipped, never 500s the dashboard."""
     from seestack.io.project import Project
-    from seestack.session_recap import last_session_frames, library_session_recap
+    from seestack.session_recap import (
+        library_session_recap,
+        recent_session_window_frames,
+    )
 
     rows: list[tuple[str, str, list]] = []
     for t in targets:
         proj = None
         try:
             proj = Project.open(lib.target_dir(t))
-            # Trim to the target's last session inside the loop so we never hold
-            # every target's full frame list at once (memory-bounded).
-            last = last_session_frames(list(proj.iter_frames()))
+            # Keep only each target's recent-night *window* inside the loop so we
+            # never hold every target's full frame list at once (memory-bounded),
+            # but — unlike a per-target last-session trim — without severing a
+            # night that another target bridges: the precise cross-target "last
+            # night" cut is made inside library_session_recap.
+            last = recent_session_window_frames(list(proj.iter_frames()))
             if last:
                 rows.append((t.name, t.safe_name, last))
         except Exception:  # noqa: BLE001 — a broken project must not 500 the dashboard
