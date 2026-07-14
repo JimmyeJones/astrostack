@@ -18,6 +18,7 @@ import { integrationReadiness, readinessColor } from "../readiness";
 import { QueryError } from "../components/QueryError";
 import { ObjectInfoCard, describeObject } from "../components/ObjectInfoCard";
 import { SessionRecapCard } from "../components/SessionRecapCard";
+import { StackHealthCard } from "../components/StackHealthCard";
 import { detectSolveSetupProblem } from "../components/target/solveSetup";
 import { detectMixedPointings } from "../components/target/mixedPointings";
 
@@ -922,6 +923,8 @@ export function TargetView() {
       ) : null}
 
       <SessionRecapCard safe={safe} />
+
+      <StackHealthCard safe={safe} />
 
       {readiness ? (
         <Paper withBorder p="sm" radius="md" mt="xs">

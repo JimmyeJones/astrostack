@@ -9,12 +9,14 @@ from fastapi.responses import FileResponse
 
 from webapp import deps
 from webapp.schemas import (
+    HealthNoteOut,
     IntegrationGoalOut,
     IntegrationGoalPatch,
     MergeRequest,
     ObjectInfoOut,
     SessionQualityDriftOut,
     SessionRecapOut,
+    StackHealthOut,
     TargetCreate,
     TargetOut,
     TargetPatch,
@@ -179,6 +181,33 @@ def target_session_recap(safe: str, request: Request) -> SessionRecapOut | None:
             if drift is not None
             else None
         ),
+    )
+
+
+@router.get("/{safe}/stack-health", response_model=StackHealthOut | None)
+def target_stack_health(safe: str, request: Request) -> StackHealthOut | None:
+    """Plain-language "How's my stack?" check on the target's current stack:
+    what's strong and the single highest-value next step, from cues we already
+    compute (the run's stamped fields + the frames' QC metrics). Returns ``null``
+    when the target has no genuine stack yet. Read-only; never a gate.
+    """
+    from webapp.pipeline import _newest_genuine_stack_run
+    from seestack.stackhealth import stack_health
+
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        run = _newest_genuine_stack_run(proj)
+        if run is None:
+            return None
+        notes = stack_health(run, proj.iter_frames())
+    finally:
+        proj.close()
+        lib.close()
+    return StackHealthOut(
+        run_id=run.id,
+        notes=[HealthNoteOut(kind=n.kind, severity=n.severity,
+                             message=n.message, action=n.action)
+               for n in notes],
     )
 
 

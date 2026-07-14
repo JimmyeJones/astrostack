@@ -1321,29 +1321,39 @@ the real webapp stack→edit path.)_
   reproduced. (Deprioritised path — file, don't rush; §1 says fix an *outright* bug in what exists, but this
   never touches the OSC user, so it ranks below any OSC-facing work.)
 
-- **Scan summary miscounts a still-copying zero-byte sub as an *error*, not a *skip*.** *(traced, Scout
-  2026-07-14 — via ingest/QC audit.)* `seestack/io/ingest.py:189–192` yields `IngestResult(skipped=True,
-  error="empty file")` for a 0-byte (mid-copy) file, and `seestack/io/scanner.py:168–173` tests
-  `if res.error is not None: n_errors += 1` **before** the `elif res.skipped:` branch — so a half-copied file
-  inflates the scan's **error** tally instead of its **skip** tally. The frame is correctly *not* ingested and
-  is retried on the next scan once it has bytes, so no data is affected — purely a scan-summary/UX accounting
-  quirk (a beginner sees a scary "N errors" for what is really "still copying, will retry"). **Fix:** give the
-  empty-file skip no `error` (leave the plain-language reason in a `skip_reason`/note field) *or* reorder the
-  scanner to check `skipped` before `error`. Severity: cosmetic. Confidence: traced. (S, friendliness.)
+- ~~**Scan summary miscounts a still-copying zero-byte sub as an *error*, not a *skip*.**~~ — **FIXED
+  v0.119.9** (Builder 2026-07-14, branch `claude/pensive-faraday-g346o7`; traced + regression-tested).
+  Applied *both* suggested fixes for defence-in-depth. (1) `seestack/io/ingest.py` no longer sets
+  `error="empty file"` on a 0-byte file — it records the plain-language reason in a **new** `skip_reason`
+  field (`"still copying (empty file)"`) with `error` left `None`, so a benign mid-copy skip is no longer
+  shaped like a failure. (2) `seestack/io/scanner.py::_ingest_into_target` now checks `res.skipped` **before**
+  `res.error`, so a skip can never inflate `n_errors` even if it carries a note. The frame was already
+  correctly *not* ingested and retried on the next scan — this only fixes the scary "N errors" a beginner saw
+  for what is really "still copying, will retry". Additive (new optional dataclass field; no schema/config/API/
+  on-disk/default change; the OSError-on-`stat` case still reports a genuine `error`). Regression
+  `tests/test_scanner.py::test_scan_counts_a_still_copying_empty_sub_as_skip_not_error`: a folder with one
+  complete + one 0-byte sub reports `n_frames_added==1`, `n_errors==0`, `n_skipped_existing==1` (fails-before:
+  the empty file counted as an error / passes-after). Severity: cosmetic (friendliness). Confidence:
+  reproduced + fixed.
 
-- **Stack-trigger endpoints accept an unvalidated `StackOptions` dict — a bad enum/range surfaces as a
-  cryptically-*errored job* instead of a `400`.** *(traced, Scout 2026-07-14 — via webapp-router audit.)*
-  `webapp/routers/stack.py::trigger_stack` (L149, `body: dict[str, Any]`) → `pipeline.submit_stack` →
-  `_stack_target` → `webapp/schemas.py::coerce_stack_options` (L462–466) only filters unknown keys and does
-  `StackOptions(**clean)` — a plain dataclass with **no** enum/bounds validation. A client bypassing the React
-  form (which *does* enforce the descriptors from `stack_option_fields()`) can send e.g. `{"tiff_mode":
-  "garbage"}`, an out-of-range `sigma_kappa`/`drizzle_scale`, or a bad `background_mode`/`drizzle_kernel`; the
-  endpoint returns `200 {job_id}` and the job later fails deep in the engine (`output.py:266` raises
-  `ValueError("unknown tiff mode: …")`). Same gap in `channel_combine` (L241) and `editor/batch` item fields.
-  Failure is contained to that one job (worker marks it `error`; no 500, no data corruption), and the normal
-  frontend path can't hit it. **Fix:** validate the coerced options against the same `stack_option_fields()`
-  enum/range descriptors up front and return `400` with a plain-language message on a bad value. Severity:
-  broken-UX (low). Confidence: traced. (S, friendliness/robustness.)
+- ~~**Stack-trigger endpoints accept an unvalidated `StackOptions` dict — a bad enum/range surfaces as a
+  cryptically-*errored job* instead of a `400`.**~~ — **FIXED v0.119.10** (Builder 2026-07-14, branch
+  `claude/pensive-faraday-g346o7`; traced + regression-tested). Added `webapp/schemas.py::
+  validate_stack_options`, which checks each client-supplied value against the same `stack_option_fields()`
+  descriptors the React form uses — a bad enum (`tiff_mode="garbage"`, `background_mode`/`drizzle_kernel`), an
+  out-of-range number (`sigma_kappa`/`drizzle_scale` beyond min/max), or a non-numeric value in a numeric field
+  raises a `ValueError` with a plain-language message (`"TIFF mode: 'garbage' is not a valid choice (expected
+  one of linear, autostretch)"`). `webapp/routers/stack.py::trigger_stack` calls it up front and turns the
+  error into a `400` instead of returning `200 {job_id}` and failing deep in the engine
+  (`output.py` → `ValueError("unknown tiff mode: …")`). Also guarded `put_stack_defaults` so a bad *stored*
+  default can't silently break every later stack. The validator skips unknown keys (coerce still drops them),
+  `NON_FORM_KEYS` calibration paths (server-resolved), and `None` ("use default"), so the normal frontend path
+  is unaffected. Additive; no schema/config/API-shape/default change (only turns a would-be errored job into an
+  explicit 400). Regression `tests/webapp/test_stack_option_validation.py` (7 cases): unit tests of the
+  validator (good values incl. unknown-key/None pass; bad enum, below-min, above-max, and non-numeric raise)
+  plus endpoint tests (bad enum → 400, out-of-range → 400, valid options still → 200). Severity: broken-UX
+  (low). Confidence: reproduced + fixed. **Residual (deprioritised):** `channel_combine` items still take raw
+  option fields — that's the mono/LRGB channel-combine path, so left unvalidated per §1.
 
 - **Dead SExtractor skew-fallback guard in 4 background/leveling helpers (needs REAL-data
   threshold validation before fixing — NOT a blind Builder change).** *(traced + reproduced,
@@ -3654,7 +3664,35 @@ problems. Dogfood it every big-picture run and fix root causes.
   related to the night planner above; the planner's "plot tonight's targets" view
   can reuse this.
 - **NEW BEGINNER FEATURE (Scout 2026-07-14) — "How's my stack?" plain-language health check on the
-  result.** After a stack finishes, a beginner has no way to know whether the image is *good* or what one
+  result.** — **SLICE (a) SHIPPED v0.120.0** (Builder 2026-07-14, branch `claude/pensive-faraday-g346o7`).
+  New pure/offline engine helper `seestack/stackhealth.py::stack_health(run, frames) -> list[HealthNote]`
+  reads cues already on disk — the run's `calstat` (→ "No darks or flats were applied … adding darks would cut
+  the background speckle"), `coverage_min/max` (→ ragged low-coverage border → **Trim border**, only when the
+  border is genuinely thin *and* the peak has ≥4 frames, so a flat single-field stack never trips it), the
+  frames' median `eccentricity_median` (→ "stars are a little elongated", gentle 0.6 floor), and the set-aside
+  subs bucketed via the shared `bucket_reject_reason` (→ reassuring "2 of 10 subs were set aside (mostly
+  trailed) — that's normal") — plus a positive summary ("solid stack — calibrated (dark+flat), round stars,
+  even coverage") and a guaranteed friendly fallback so the card always has something to say. Notes are ranked
+  **actionable-first**, reassurance/positive last; the card shows the top one or two. Deliberately **omits an
+  absolute noise verdict** — the project treats `noise_sigma` as having no absolute meaning (only within-target
+  relative; see `NoiseBadge`), so a "clean/noisy" label there would be fragile. New read-only endpoint
+  `GET /api/targets/{safe}/stack-health` (picks the newest *genuine* stack run via the shared
+  `_newest_genuine_stack_run`; returns `null` when the target has no stack yet). Frontend: a small
+  `StackHealthCard` (teal stethoscope, one line per note, gentle severity colour — never alarming) on the
+  Target page below the "Last session" card, self-hiding until there's a stack to grade. Strictly read-only,
+  never a gate. Additive/offline: no schema/config/DB/default/API-shape change, no new dependency. Tests:
+  `tests/test_stackhealth.py` (10 — calibrated positive, uncalibrated leads with the calibration action,
+  blank-calstat, ragged-border→trim, even-coverage/shallow-peak don't trip it, elongated stars, set-aside
+  reassurance with bucket, no-frames, actionable-before-reassurance ranking), `tests/webapp/
+  test_target_stack_health.py` (4 — null-without-stack, notes for a calibrated run, uncalibrated leads with the
+  action + coverage surfaced, 404), `StackHealthCard.test.tsx` (6 — `visibleNotes` cap, `noteColor`, renders
+  top notes, hides on null + empty). Python (1285) + tsc + full vitest (797) + vite build all green.
+  **Slice (b) remains open:** wire the `action` keys (`trim_border`, `calibration`) to the buttons that already
+  do those things, and drop the card onto the History/editor result too; a highlight-clip cue (needs loading
+  the stacked pixels) is a natural slice (b) add. *(Scout-filed 2026-07-14; L overall; slice (a) shipped.
+  Pillars: autonomy + friendliness + image-quality/trust — PRIORITY 2/3/4. Beginner bar ✔.)*
+  <details><summary>Original idea</summary>
+  After a stack finishes, a beginner has no way to know whether the image is *good* or what one
   thing would most improve it — the readiness card only speaks to *integration time*, not the actual pixels.
   Add a small **"How's my stack?"** card (on the Target/History/editor result) that reads the finished stack
   and, in plain language, says what's strong and the **single** highest-value next step. Reuse cues we
@@ -3673,6 +3711,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   action links to the buttons that already do them (Trim border, open editor). Additive/offline; reuses stamped
   fields + the frames table, no schema change, no new dependency. *(L overall; slice (a) is a shippable M.
   Pillars: autonomy + friendliness + image-quality/trust — PRIORITY 2/3/4. Beginner bar ✔.)*
+  </details>
 - **NEW BEGINNER FEATURE — per-target progress & integration goals.** — **USER-SET GOAL
   SLICE SHIPPED v0.117.0** (Builder 2026-07-14, branch `claude/pensive-faraday-b7jimp`). The
   readiness card (v0.111.0) already showed accumulated integration against a sane

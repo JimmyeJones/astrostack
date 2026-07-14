@@ -17,6 +17,7 @@ from webapp.schemas import (
     StackOptionField,
     StackRunOut,
     stack_option_fields,
+    validate_stack_options,
 )
 
 router = APIRouter(tags=["stack"])
@@ -136,6 +137,12 @@ def get_stack_defaults(safe: str, request: Request) -> dict[str, Any]:
 def put_stack_defaults(safe: str, body: dict[str, Any], request: Request) -> dict[str, Any]:
     valid = {fld.key for fld in stack_option_fields()}
     clean = {k: v for k, v in body.items() if k in valid}
+    # Don't persist a default that would later fail every stack cryptically.
+    try:
+        validate_stack_options(clean)
+    except ValueError as exc:
+        raise HTTPException(status_code=400,
+                            detail=f"invalid stack option: {exc}") from exc
     lib, proj = deps.open_target_project(request, safe)
     try:
         proj.set_meta(STACK_DEFAULTS_META_KEY, json.dumps(clean))
@@ -157,6 +164,13 @@ def trigger_stack(safe: str, body: dict[str, Any], request: Request) -> dict[str
     lib.close()
 
     body = dict(body or {})
+    # Reject a bad enum/range up front with a plain-language 400 rather than
+    # accepting the run and failing cryptically deep in the engine later.
+    try:
+        validate_stack_options(body)
+    except ValueError as exc:
+        raise HTTPException(status_code=400,
+                            detail=f"invalid stack option: {exc}") from exc
     # Calibration: accept only master *ids* and resolve them to server-side
     # paths here. Raw dark_path/flat_path from the client are never honoured.
     body.pop("dark_path", None)

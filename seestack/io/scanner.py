@@ -165,12 +165,14 @@ def _ingest_into_target(
     try:
         cache = CacheManager(library.target_dir(entry))
         for res in ingest_files(proj, cache, files, copy_to_cache=copy_to_cache):
-            if res.error is not None:
-                tsr.n_errors += 1
-            elif res.skipped:
+            # Check ``skipped`` first: a benign skip (e.g. a still-copying sub) is
+            # never a failure even if it carries a note, so it can't inflate n_errors.
+            if res.skipped:
                 tsr.n_skipped_existing += 1
                 if res.refreshed:
                     tsr.n_frames_refreshed += 1
+            elif res.error is not None:
+                tsr.n_errors += 1
             else:
                 tsr.n_frames_added += 1
     finally:

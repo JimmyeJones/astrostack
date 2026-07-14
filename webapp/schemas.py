@@ -92,6 +92,23 @@ class SessionRecapOut(BaseModel):
     quality_drift: SessionQualityDriftOut | None = None
 
 
+class HealthNoteOut(BaseModel):
+    """One plain-language "How's my stack?" note (see seestack.stackhealth)."""
+
+    kind: str
+    severity: str          # "good" | "info" — colour only, never alarming
+    message: str
+    action: str | None = None  # UI action key ("trim_border" | "calibration") or null
+
+
+class StackHealthOut(BaseModel):
+    """Ranked health notes for a target's current stack, or ``null`` when the
+    target has no genuine stack yet. The card shows the top one or two."""
+
+    run_id: int | None = None
+    notes: list[HealthNoteOut] = []
+
+
 class FrameOut(BaseModel):
     id: int
     name: str
@@ -464,6 +481,44 @@ def coerce_stack_options(data: dict[str, Any]) -> StackOptions:
     valid = {f.name for f in dataclasses.fields(StackOptions)}
     clean = {k: v for k, v in data.items() if k in valid}
     return StackOptions(**clean)
+
+
+def validate_stack_options(data: dict[str, Any]) -> None:
+    """Validate client-supplied stack-option *values* against the form descriptors.
+
+    ``coerce_stack_options`` only drops unknown keys — it does **no** enum/range
+    checking (``StackOptions`` is a plain dataclass), so a client bypassing the
+    React form could send e.g. ``tiff_mode="garbage"`` or an out-of-range
+    ``sigma_kappa``/``drizzle_scale`` and get a ``200 {job_id}`` back, only for the
+    job to fail cryptically deep in the engine. Endpoints call this first and turn
+    a ``ValueError`` into a plain-language ``400``.
+
+    Raises ``ValueError`` on the first bad enum choice or out-of-range number.
+    Unknown keys are ignored (coerce drops them); server-resolved calibration
+    paths (``NON_FORM_KEYS``) and ``None`` values ("use default") are skipped.
+    """
+    fields = {f.key: f for f in stack_option_fields()}
+    for key, value in data.items():
+        if key in NON_FORM_KEYS or value is None:
+            continue
+        fld = fields.get(key)
+        if fld is None:
+            continue  # unknown key — coerce_stack_options ignores it
+        if fld.type == "enum" and fld.options is not None:
+            if value not in fld.options:
+                raise ValueError(
+                    f"{fld.label}: {value!r} is not a valid choice "
+                    f"(expected one of {', '.join(map(str, fld.options))})")
+        elif fld.type in ("int", "float"):
+            # bool is a subclass of int — a checkbox value in a numeric field is wrong.
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"{fld.label}: expected a number, got {value!r}")
+            if fld.min is not None and value < fld.min:
+                raise ValueError(
+                    f"{fld.label}: {value} is below the minimum of {fld.min}")
+            if fld.max is not None and value > fld.max:
+                raise ValueError(
+                    f"{fld.label}: {value} is above the maximum of {fld.max}")
 
 
 # ---------------------------------------------------------------------------
