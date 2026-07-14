@@ -1,5 +1,5 @@
 import {
-  Alert, Box, Button, Card, FileButton, Group, Stack, Text, TextInput,
+  Alert, Box, Button, Card, FileButton, Group, Progress, Stack, Text, TextInput,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { IconFileUpload, IconUpload } from "@tabler/icons-react";
@@ -104,6 +104,29 @@ export async function collectDroppedFiles(dt: DataTransfer): Promise<File[]> {
   return Array.from(dt.files ?? []);
 }
 
+/** A running size for the upload progress readout (e.g. "1.2 GB", "480 MB"). */
+function fmtBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(0)} KB`;
+  const mb = kb / 1024;
+  if (mb < 1024) return `${mb.toFixed(mb < 10 ? 1 : 0)} MB`;
+  return `${(mb / 1024).toFixed(1)} GB`;
+}
+
+/** 0..100 progress for the upload bar; 0 (and never NaN) when the total is
+ *  unknown so the bar simply sits empty rather than jumping around. */
+export function uploadProgressPercent(loaded: number, total: number): number {
+  if (!(total > 0)) return 0;
+  return Math.min(100, Math.max(0, Math.round((loaded / total) * 100)));
+}
+
+/** Plain-language bytes line for the upload bar: "1.2 GB of 5.0 GB (24%)". */
+export function uploadProgressLabel(loaded: number, total: number): string {
+  if (!(total > 0)) return "Uploading…";
+  return `${fmtBytes(loaded)} of ${fmtBytes(total)} (${uploadProgressPercent(loaded, total)}%)`;
+}
+
 /** One plain-language line summarising an upload's outcome. */
 export function uploadSummary(r: UploadResult): string {
   const parts: string[] = [];
@@ -128,9 +151,12 @@ export function UploadFits({ compact = false }: { compact?: boolean }) {
   const [target, setTarget] = useState("");
   const [result, setResult] = useState<UploadResult | null>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [progress, setProgress] = useState<{ loaded: number; total: number } | null>(null);
 
   const upload = useMutation({
-    mutationFn: () => api.uploadFits(files, target),
+    mutationFn: () =>
+      api.uploadFits(files, target, (loaded, total) => setProgress({ loaded, total })),
+    onMutate: () => setProgress(null),
     onSuccess: (r) => {
       setResult(r);
       setFiles([]);
@@ -215,6 +241,25 @@ export function UploadFits({ compact = false }: { compact?: boolean }) {
           {files.length} FITS {files.length === 1 ? "file" : "files"} ready
           {target.trim() ? ` — will go into “${target.trim()}”` : " — will go to Unsorted"}.
         </Text>
+      ) : null}
+
+      {upload.isPending ? (
+        <Stack gap={4}>
+          <Progress
+            value={progress ? uploadProgressPercent(progress.loaded, progress.total) : 0}
+            size="sm"
+            striped
+            animated
+            aria-label="Upload progress"
+          />
+          <Text size="xs" c="dimmed">
+            {!progress
+              ? "Uploading…"
+              : uploadProgressPercent(progress.loaded, progress.total) >= 100
+                ? "Uploaded — processing on the server…"
+                : `Uploading — ${uploadProgressLabel(progress.loaded, progress.total)}`}
+          </Text>
+        </Stack>
       ) : null}
 
       {result ? (

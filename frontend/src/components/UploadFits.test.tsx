@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   UploadFits, collectDroppedFiles, isFitsFilename, readEntryFiles, uploadSummary,
+  uploadProgressLabel, uploadProgressPercent,
   type FsEntry,
 } from "./UploadFits";
 import type { UploadResult } from "../api/client";
@@ -97,6 +98,23 @@ describe("uploadSummary", () => {
   });
 });
 
+describe("upload progress helpers", () => {
+  it("computes a clamped, NaN-safe percentage", () => {
+    expect(uploadProgressPercent(0, 100)).toBe(0);
+    expect(uploadProgressPercent(25, 100)).toBe(25);
+    expect(uploadProgressPercent(100, 100)).toBe(100);
+    // Over-reporting or an unknown/zero total never breaks the bar.
+    expect(uploadProgressPercent(120, 100)).toBe(100);
+    expect(uploadProgressPercent(50, 0)).toBe(0);
+  });
+  it("formats a plain-language bytes line with friendly units", () => {
+    expect(uploadProgressLabel(1024 * 1024, 4 * 1024 * 1024)).toBe("1.0 MB of 4.0 MB (25%)");
+    expect(uploadProgressLabel(512, 1024)).toBe("512 B of 1 KB (50%)");
+    expect(uploadProgressLabel(1.5 * 1024 ** 3, 3 * 1024 ** 3)).toBe("1.5 GB of 3.0 GB (50%)");
+    expect(uploadProgressLabel(0, 0)).toBe("Uploading…");
+  });
+});
+
 describe("readEntryFiles", () => {
   it("yields a single file for a file entry", async () => {
     const files = await readEntryFiles(fileEntry("Light_001.fit"));
@@ -184,5 +202,37 @@ describe("UploadFits", () => {
     // Success alert with the scan-progress link appears.
     await waitFor(() => expect(screen.getByText(/Uploaded 1 sub/)).toBeInTheDocument());
     expect(screen.getByText(/Watch progress/)).toBeInTheDocument();
+  });
+
+  it("shows a live progress readout while the upload is in flight", async () => {
+    // Report 25% mid-flight, then hold the upload open so the pending state
+    // (and its progress bar) is observable before the mutation resolves.
+    let finish: (r: UploadResult) => void = () => {};
+    vi.spyOn(client.api, "uploadFits").mockImplementation(
+      (_files, _target, onProgress) =>
+        new Promise<UploadResult>((resolve) => {
+          onProgress?.(1024 * 1024, 4 * 1024 * 1024);
+          finish = resolve;
+        }),
+    );
+
+    renderUpload();
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const good = new File(["x"], "Light_001.fit", { type: "application/octet-stream" });
+    Object.defineProperty(input, "files", { value: [good], configurable: true });
+    fireEvent.change(input);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^Upload/ })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: /^Upload/ }));
+
+    // The plain-language progress line reflects the reported 25%.
+    await waitFor(() =>
+      expect(screen.getByText(/Uploading — 1\.0 MB of 4\.0 MB \(25%\)/)).toBeInTheDocument());
+
+    finish(result());
+    await waitFor(() => expect(screen.getByText(/Uploaded 1 sub/)).toBeInTheDocument());
+    // The progress readout is gone once it's done (only shown while in flight).
+    await waitFor(() =>
+      expect(screen.queryByText(/Uploading —/)).not.toBeInTheDocument());
   });
 });
