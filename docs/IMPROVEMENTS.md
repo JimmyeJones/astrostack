@@ -1153,6 +1153,28 @@ the real webapp stack→edit path.)_
   unchanged on export/stack) must be preserved and tested. Additive; validate on a proxy vs full-res parity check.
   (S code, editor/parity — low priority.)
 
+- ~~**`background.level_coverage` editor op's object-mask dilation is a fixed 4 px, *not* scaled by
+  `proxy_scale` → a preview↔export sky-model mismatch (the exact sibling of the fixed `background.subtract`
+  dilation).**~~ — **FIXED v0.118.2** (Builder 2026-07-14, branch `claude/pensive-faraday-cypk69`; traced +
+  regression-tested). `edit/ops/background.py::_level_coverage` threaded `proxy_scale` into `level_by_coverage`
+  (so the per-level pixel-count floor is measured in full-res-equivalent pixels) but **not**
+  `dilate_object_mask_px`, so the object-mask dilation used the function's default `4` — a full-resolution pixel
+  measure applied unscaled on the decimated live-preview proxy. On a ×4 proxy that dilated the star/nebula
+  object mask by 4 *proxy* px (≈16 full-res-equivalent px) vs exactly 4 full-res px on the export, so a
+  different sky population fed each coverage level's mode/median → a preview↔export panel-offset mismatch (and,
+  at a borderline level, a flipped "level vs skip" decision, i.e. a panel step appearing in one but not the
+  other). The sibling `_subtract`/`_final_gradient` ops already scale their dilation via `_scaled_box(ctx, 4,
+  minimum=0)`; `_level_coverage` was simply missed. **Fix:** pass `dilate_object_mask_px=_scaled_box(ctx, 4,
+  minimum=0)` (4/2/1/1 for proxy_scale 1/2/3/4) — byte-for-byte unchanged on the export/stack path
+  (`proxy_scale == 1` → 4, the existing default). Regression
+  `tests/test_bg_object_mask_dilation_parity.py::test_editor_level_coverage_op_scales_the_dilation_by_proxy_scale`
+  spies on the dilation the op hands `level_by_coverage` and asserts `[4, 1]` at export vs a ×4 proxy
+  (fail-before: `[4, 4]` / pass-after). Additive, no schema/config/API/default change. Found by a fresh-angle
+  adversarial editor-ops proxy-parity audit (Builder 2026-07-14). *(Distinct from the stack-path
+  `coverage_leveling` default-`4` nuance noted above, which is about whether to change the engine default at
+  all; this is the editor op's missing proxy-scale on the live-preview path — cleanly regression-testable.
+  Low/moderate severity, editor preview↔export parity — PRIORITY 1.)*
+
 - **Dead SExtractor skew-fallback guard in 4 background/leveling helpers (needs REAL-data
   threshold validation before fixing — NOT a blind Builder change).** *(traced + reproduced,
   Builder audit 2026-07-08; med confidence it produces a visibly-wrong result in practice.)*
