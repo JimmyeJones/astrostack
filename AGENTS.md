@@ -80,6 +80,15 @@ higher on this list wins — always:
 4. **Best-possible image quality** for the OSC Seestar workflow (clean, detailed
    final images).
 
+**⚡ IMMEDIATE PRIORITY (owner-reported 2026-07): bright galaxy cores blow out to
+white + Auto regressed.** See the ⭐ top entry in `docs/IMPROVEMENTS.md` → "Bugs
+(fix these first)". Strong lead: the STF autostretch (now the Auto + default-view
+stretch) has no highlight rolloff and clips bright HDR cores (M31). Reproduce on a
+synthetic bright-core-on-faint-disk target, give STF a highlight knee, and re-check
+the Auto recipe. This — and image quality on the **stack → Auto → result** path
+generally — is the front-of-queue focus right now. The Scout should verify it on a
+real-data dogfood.
+
 **Current focus (2026-07 — set by the owner).** The editor (priority 1) is now
 **well-hardened**: its traced bug backlog is drained and repeated adversarial
 re-audits come back clean. That rule still stands — if a *real* editor regression
