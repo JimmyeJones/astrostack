@@ -10,6 +10,9 @@ fields at a heavy proxy, e.g. the globular_cluster preset). The dilation is now 
 path (`proxy_scale == 1`) leaves the default 4, byte-for-byte unchanged.
 """
 
+import sys
+import types
+
 import numpy as np
 import pytest
 
@@ -96,6 +99,74 @@ def test_editor_subtract_op_scales_the_dilation_by_proxy_scale(monkeypatch):
     # Export unchanged (4 full-res px); ×4 proxy masks the same *physical* halo
     # with 1 proxy px — not the 4 it used before, which was a 16-px-equiv halo.
     assert seen == [4, 1]
+
+
+@pytest.fixture
+def fake_cupy(monkeypatch):
+    """Back CuPy/cupyx.scipy.ndimage with NumPy/SciPy so ``_subtract_background_gpu``
+    runs on the CPU host. Lets us exercise the GPU code path (otherwise skipped
+    whenever real CuPy is absent, which is the coverage gap that hid the fixed-5px
+    object-mask dilation bug) without a real GPU."""
+    import scipy.ndimage as ndi
+
+    cupy = types.ModuleType("cupy")
+    for name in ("asarray", "float32", "nanmedian", "abs", "indices", "stack",
+                 "nan", "where", "isfinite", "nanmean"):
+        setattr(cupy, name, getattr(np, name))
+    cupy.asnumpy = lambda a: np.asarray(a)
+
+    cupyx = types.ModuleType("cupyx")
+    cupyx_scipy = types.ModuleType("cupyx.scipy")
+    cupyx_ndi = types.ModuleType("cupyx.scipy.ndimage")
+    cupyx_ndi.map_coordinates = ndi.map_coordinates
+    cupyx_ndi.maximum_filter = ndi.maximum_filter
+    cupyx_ndi.binary_dilation = ndi.binary_dilation
+    cupyx_scipy.ndimage = cupyx_ndi
+    cupyx.scipy = cupyx_scipy
+
+    monkeypatch.setitem(sys.modules, "cupy", cupy)
+    monkeypatch.setitem(sys.modules, "cupyx", cupyx)
+    monkeypatch.setitem(sys.modules, "cupyx.scipy", cupyx_scipy)
+    monkeypatch.setitem(sys.modules, "cupyx.scipy.ndimage", cupyx_ndi)
+    return cupy
+
+
+def _bright_object_field(h=200, w=200, seed=4):
+    """Sky + a bright compact object whose dilated halo reaches nearby tiles, so
+    the object-mask dilation measurably changes the per-tile sky fit."""
+    rng = np.random.default_rng(seed)
+    img = rng.normal(100.0, 2.0, size=(h, w, 3)).astype(np.float32)
+    yy, xx = np.mgrid[0:h, 0:w]
+    obj = 5000.0 * np.exp(-(((yy - h // 2) ** 2 + (xx - w // 2) ** 2)
+                            / (2 * 6.0 ** 2)))
+    return (img + obj.astype(np.float32)[..., None]).astype(np.float32)
+
+
+@pytest.mark.filterwarnings("ignore:All-NaN slice encountered")
+@pytest.mark.filterwarnings("ignore:Mean of empty slice")
+def test_gpu_path_honours_the_dilation_option(fake_cupy):
+    """Regression: `_subtract_background_gpu` used a hardcoded 5px max-filter that
+    ignored `dilate_object_mask_px` entirely, so on a GPU host the editor's
+    proxy_scale-scaled dilation was discarded — a CPU↔GPU divergence and a
+    preview↔export parity break. It now mirrors the CPU
+    `binary_dilation(iterations=dilate_object_mask_px)`, so changing the dilation
+    changes the sky model. Fails before (fixed 5px → identical output)."""
+    from seestack.bg.per_frame import _subtract_background_gpu
+
+    img = _bright_object_field()
+
+    def run(dp):
+        return _subtract_background_gpu(
+            img.copy(), BackgroundOptions(box_size=20, dilate_object_mask_px=dp))
+
+    out1 = run(1)
+    out8 = run(8)
+    # A wider dilation masks more of the object halo → a different per-tile sky.
+    assert not np.allclose(out1, out8, equal_nan=True), (
+        "GPU path ignored dilate_object_mask_px (hardcoded dilation)")
+    # And dropping the dilation to 0 also reaches the fit (option genuinely wired).
+    out0 = run(0)
+    assert not np.allclose(out0, run(4), equal_nan=True)
 
 
 def test_editor_level_coverage_op_scales_the_dilation_by_proxy_scale(monkeypatch):

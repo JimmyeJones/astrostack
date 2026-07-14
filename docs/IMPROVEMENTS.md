@@ -76,6 +76,32 @@ when you take it.
   shares the identical hard-clip and would benefit from the same rolloff (manual path, so
   lower priority). Severity: wrong-result (owner-visible). Confidence: reproduced + fixed.
 
+- ~~**GPU background-subtract ignored `dilate_object_mask_px` (hardcoded 5px), breaking CPU↔GPU
+  consistency and the editor's preview↔export parity on a GPU host.**~~ — **FIXED v0.119.7** (Builder
+  2026-07-14, branch `claude/pensive-faraday-3ofcmn`; traced + reproduced + regression-tested). Found by a
+  fresh adversarial editor preview↔export parity audit. `bg/per_frame.py::_subtract_background_gpu` built its
+  bright-object sky mask with a **fixed** `maximum_filter(..., size=5)` (~2px dilation) and **never read
+  `options.dilate_object_mask_px`** — while the CPU sibling `_build_object_mask_for_bg` dilates by exactly
+  `binary_dilation(iterations=dilate_object_mask_px)` (default 4). Two consequences: (1) a **CPU↔GPU
+  divergence** — the same frame gets a different-sized sky-exclusion halo, hence a different background
+  subtraction, depending purely on whether a GPU is present; and (2) a **preview↔export parity break on a
+  GPU host** — the editor's `background.subtract`/`level_coverage` ops deliberately scale
+  `dilate_object_mask_px` by `proxy_scale` (4 full-res px → 1 px on a ×4 proxy) precisely so the live
+  strided-proxy preview masks the *same physical halo* as the full-res export (see the sibling parity tests),
+  but the GPU path discarded that scaling entirely, so the proxy applied a fixed 5px footprint spanning
+  `5·proxy_scale` full-res px vs 5px on the export — a differently-sized sky model in each. **Fix:** the GPU
+  path now mirrors the CPU exactly — `binary_dilation(obj_mask, iterations=int(options.dilate_object_mask_px))`
+  behind the same `> 0` guard (cupyx.scipy.ndimage has the identical API), so both backends agree on the masked
+  region and the editor's proxy-scaled dilation is honoured on GPU too. Additive; no config/schema/API/on-disk
+  change and the CPU path (this deployment's only path) is byte-for-byte untouched — it only makes the GPU code
+  path honour an existing documented parameter, aligning it with the CPU reference. **Testability:** the GPU
+  path was previously *untested on a CPU-only host* (`tests/test_bg_gpu.py` skips wholesale without CuPy — the
+  exact blind spot that hid this) — the new regression drives the **real** `_subtract_background_gpu` through a
+  NumPy/SciPy-backed CuPy/cupyx shim and asserts changing the dilation changes the sky model (fails-before with
+  the hardcoded 5px → identical output / passes-after). `tests/test_bg_object_mask_dilation_parity.py::
+  test_gpu_path_honours_the_dilation_option`. Severity: wrong-result on a GPU host (CPU-only installs
+  unaffected). Confidence: reproduced + fixed.
+
 - ~~**One target's QC/solve failure sinks the *entire* unattended pipeline and silently skips auto-stack
   for every target.**~~ — **FIXED v0.110.1** (Scout 2026-07-13, branch `claude/practical-dirac-wq4kha`;
   traced + reproduced + regression-tested). In `webapp/pipeline.py::_pipeline_body`, the per-target
@@ -3670,6 +3696,28 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+- **NEW (Builder 2026-07-14) — run the GPU bg-flatten tests on a CPU-only host via a NumPy-backed CuPy shim
+  (close the structural GPU blind spot).** *(Surfaced fixing the v0.119.7 GPU object-mask dilation bug.)*
+  `tests/test_bg_gpu.py` skips **wholesale** when CuPy is absent (`pytest.skip(..., allow_module_level=True)`),
+  so on CPU-only CI the entire `_subtract_background_gpu` path is untested — which is exactly why a
+  hardcoded-5px dilation that ignored `dilate_object_mask_px` sat there unnoticed until an adversarial parity
+  audit. The v0.119.7 regression proved the pattern works: a small `fake_cupy` fixture in
+  `tests/test_bg_object_mask_dilation_parity.py` backs `cupy`/`cupyx.scipy.ndimage` with NumPy/SciPy (same API)
+  and drives the **real** GPU function on the host. Promote that shim to a shared fixture (e.g. a `conftest`
+  helper) and run `test_bg_gpu.py`'s CPU↔GPU-parity cases through it whenever real CuPy is unavailable, so the
+  GPU code path is exercised in ordinary CI — catching the next GPU-only divergence before it ships in the
+  image. Keep the real-CuPy path preferred when present. Pure test infrastructure, no product change.
+  (S, infra/test-coverage.)
+- **NEW (Builder 2026-07-14) — accumulators reject a 2-D `(H,W)` `mask` (documented "broadcastable" but only
+  `(H,W,1)`/`(H,W,3)` work) — dead API surface today, latent trap.** *(Numeric stacking-engine audit
+  2026-07-14.)* `stack/accumulator.py`'s `add`/`add_window` docstring says the `mask` arg is "broadcastable",
+  but a 2-D `(H,W)` mask against an `(H,W,3)` image raises `ValueError` in `np.broadcast_to` (trailing dims 3 vs
+  2 don't align). **Not an image-corruption bug and not currently reachable** — no pipeline code passes `mask`
+  to any accumulator (κ-σ rejection is applied via `np.where(keep, aligned, np.nan)` *before* the mask-less
+  `add_window` call), verified by the audit. If a future path ever wired a per-pixel 2-D reject mask through
+  the accumulator it would crash rather than broadcast. If pursued: expand a 2-D mask to `(...,1)` at the top
+  of `add`/`add_window` (or tighten the docstring to state `(H,W,1)`/`(H,W,C)` only). One-liner, testable in
+  isolation; only worth doing if a run is already in that file. (XS, engine/tidiness.)
 - **NEW (Builder 2026-07-14) — consolidate the Dashboard's three per-project roll-ups into one cached pass
   (only with a measurement).** *(spotted shipping the v0.119.0 "Target progress" card.)* The Dashboard now
   triggers up to **three** independent passes that each open *every* project once: `/api/stats`'s stack

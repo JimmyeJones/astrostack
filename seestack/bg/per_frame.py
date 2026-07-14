@@ -408,11 +408,18 @@ def _subtract_background_gpu(rgb: np.ndarray, options: "BackgroundOptions") -> n
     luma_mad = cp.nanmedian(cp.abs(luma_gpu - luma_med))
     luma_std = 1.4826 * luma_mad + 1e-6
     obj_mask = luma_gpu > (luma_med + 2.0 * luma_std)
-    # Cheap morphological dilation: max-pool with a 3×3 footprint applied
-    # twice to dilate by ~2 pixels (covers star halos and nebula edges).
-    from cupyx.scipy.ndimage import maximum_filter
+    # Dilate the object mask by the configured amount so star halos and nebula
+    # edges are excluded from the sky tiles. Mirror the CPU path's
+    # ``binary_dilation(iterations=dilate_object_mask_px)`` exactly (same
+    # cross structuring element, same iteration count, same ``> 0`` guard) so
+    # the two backends agree on the masked region — and, crucially, so the
+    # editor's proxy_scale-scaled ``dilate_object_mask_px`` is honoured on the
+    # GPU path too, keeping the live preview and the full-res export in parity.
+    dilate_px = int(options.dilate_object_mask_px)
+    if dilate_px > 0:
+        from cupyx.scipy.ndimage import binary_dilation
 
-    obj_mask = maximum_filter(obj_mask.astype(cp.float32), size=5) > 0.5
+        obj_mask = binary_dilation(obj_mask, iterations=dilate_px)
 
     # Coordinate map: for each full-res pixel (y, x), compute the fractional
     # *tile* index whose centre lies at that location. Tile (i, j) is centred
