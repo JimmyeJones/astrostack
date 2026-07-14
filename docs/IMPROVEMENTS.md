@@ -47,6 +47,33 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- **⭐ OWNER-REPORTED (2026-07 — TOP PRIORITY) — bright galaxy cores blow out to
+  white, and the Auto result regressed.** The owner reports the **centre of an M31
+  (Andromeda) stack is overblown** and that **Auto-process is "not the best"**
+  anymore. Strong hypothesis (traced, not yet reproduced): both trace to the switch
+  to **STF autostretch** — `v0.109.0`/#247 made STF the no-recipe fallback view, and
+  `auto_recipe` uses `tone.stretch mode="stf"` (`seestack/edit/presets.py:374`,
+  `target_bg` 0.14–0.24). STF/MTF (`seestack/edit/stretch.py`) lifts the **sky
+  median** to `target_bg` via a midtones transfer and normalizes `x =
+  (v−shadows)/(1−shadows)` against a robust 99.5th-percentile max — but it has **no
+  highlight rolloff**, so on a high-dynamic-range target (M31 = a very bright compact
+  core + faint disk) the core saturates to ~1.0 (white, detail lost). The previous
+  default, **asinh** (`_asinh_out = asinh(x/a)/asinh(1/a)`), compresses the bright
+  end gently and preserves core structure — which is why it looked better before.
+  **What to do:** (1) **Reproduce** with a synthetic HDR target — a bright compact
+  Gaussian core (near-saturation) on a faint extended disk on sky — and measure the
+  fraction of core pixels STF pushes to ≥0.99 vs asinh at an equivalent sky lift;
+  confirm STF clips the core and asinh doesn't. (2) **Fix the root cause:** give the
+  STF stretch a **highlight rolloff / knee** so a bright core compresses instead of
+  clipping (e.g. blend an asinh-style highlight compression above a knee, or cap the
+  high end below 1.0 and soft-shoulder into it), *keeping* STF's good shadow/sky
+  behaviour. (3) Re-check the **Auto recipe** end-to-end on the HDR target so the
+  one-click result keeps core detail. This is correctness/image-quality on the
+  most-used path (Auto + the default view), so it's fix-first. Verify on the
+  Scout's real-data dogfood, not only synthetic. Severity: wrong-result
+  (owner-visible on real data). Confidence: traced (STF has no highlight
+  protection); reproduce before fixing.
+
 - ~~**One target's QC/solve failure sinks the *entire* unattended pipeline and silently skips auto-stack
   for every target.**~~ — **FIXED v0.110.1** (Scout 2026-07-13, branch `claude/practical-dirac-wq4kha`;
   traced + reproduced + regression-tested). In `webapp/pipeline.py::_pipeline_body`, the per-target
