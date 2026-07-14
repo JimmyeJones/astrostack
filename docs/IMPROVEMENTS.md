@@ -1295,9 +1295,23 @@ the real webapp stack→edit path.)_
   2026-07-14). *(Data-integrity on the new upload path — image-quality/trust. Low probability, but a corrupt
   sub is exactly the class the app must never produce.)*
 
-- **`combine_channels` RGB-only path leaves a saturated colour fringe where one channel is NaN but the
-  others cover the pixel (deprioritised mono→RGB path; OSC Seestar stacks unaffected).** *(traced +
-  reproduced, Scout 2026-07-14, branch `claude/practical-dirac-9awndt`.)* `seestack/stack/channel_combine.py`
+- ~~**`combine_channels` RGB-only path leaves a saturated colour fringe where one channel is NaN but the
+  others cover the pixel (deprioritised mono→RGB path; OSC Seestar stacks unaffected).**~~ — **FIXED
+  v0.120.1** (Builder 2026-07-14, branch `claude/pensive-faraday-n1vlsg`; traced + reproduced +
+  regression-tested). Mirrored the LRGB branch's NaN propagation in the plain-RGB (no-L) branch: after
+  assigning the supplied colour channels, any pixel that is NaN in **any supplied** channel is marked NaN
+  across all three (`rgb[nan_any, :] = np.nan`), so a mosaic/RGB-seam pixel covered in some channels but not
+  others becomes an uncovered (NaN) pixel instead of `[NaN, g, b]` (a saturated cyan/magenta speck). A
+  *wholly-absent* channel (never supplied — an intentional 0 for a bicolour SHO map) keeps its 0 wherever the
+  supplied channels all cover the pixel. Additive; no schema/config/API/default change and the LRGB path
+  (already NaN-correct) is untouched. Regression `tests/test_channel_combine.py::
+  test_rgb_partial_colour_coverage_pixel_is_fully_nan` (R NaN at a pixel G/B cover → all-NaN out, fails-before:
+  `[nan, 0.2, 0.2]`) + `test_rgb_bicolour_keeps_absent_channel_zero_over_a_partial_nan` (absent B stays 0 over a
+  covered pixel; a supplied-channel NaN still goes fully uncovered). Severity: wrong-result, **only on the
+  deprioritised mono/LRGB channel-combine path** — an OSC Seestar frame debayers to RGB with identical coverage
+  across all three channels, so this can never arise on the target user's path. Confidence: reproduced + fixed.
+  <details><summary>Original trace</summary>
+  `seestack/stack/channel_combine.py`
   lines 73–80 build the RGB result with `rgb = np.zeros(...)` then assign each supplied colour channel
   independently (`rgb[...,0] = channels["R"]·w`, etc.), so a pixel that is **NaN in one channel but finite
   in the others** (differing per-filter footprints at a mosaic/RGB seam) keeps a hard **0** in the missing
@@ -1320,6 +1334,7 @@ the real webapp stack→edit path.)_
   a regression test (`R` NaN at a pixel G/B cover → all-NaN out; a fully-absent B stays 0). Confidence:
   reproduced. (Deprioritised path — file, don't rush; §1 says fix an *outright* bug in what exists, but this
   never touches the OSC user, so it ranks below any OSC-facing work.)
+  </details>
 
 - ~~**Scan summary miscounts a still-copying zero-byte sub as an *error*, not a *skip*.**~~ — **FIXED
   v0.119.9** (Builder 2026-07-14, branch `claude/pensive-faraday-g346o7`; traced + regression-tested).
