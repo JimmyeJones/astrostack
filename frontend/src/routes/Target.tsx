@@ -1077,7 +1077,11 @@ export function TargetView() {
                       <Table.Td>{NUM(f.fwhm_px)}</Table.Td>
                       <Table.Td>{f.star_count ?? "—"}</Table.Td>
                       <Table.Td>{NUM(f.eccentricity_median)}</Table.Td>
-                      <Table.Td><NumberFormatter value={f.sky_adu_median ?? 0} decimalScale={0} /></Table.Td>
+                      <Table.Td>
+                        {f.sky_adu_median == null
+                          ? "—"
+                          : <NumberFormatter value={f.sky_adu_median} decimalScale={0} />}
+                      </Table.Td>
                       <Table.Td>
                         {f.transparency_score == null
                           ? "—"

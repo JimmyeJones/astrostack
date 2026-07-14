@@ -47,6 +47,19 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**Frames table "Sky" column shows `0` for an unmeasured frame — an un-QC'd / corrupt sub reads as
+  having the darkest (best) sky.**~~ — **FIXED v0.122.1** (Builder 2026-07-14, branch
+  `claude/pensive-faraday-4vpc3q`; found by a fresh adversarial frontend audit, regression-tested).
+  In `frontend/src/routes/Target.tsx` the Sky cell rendered `f.sky_adu_median ?? 0` — so a **null**
+  (unmeasured) sky showed as the number **0**, while every sibling metric column shows `—` for null
+  (FWHM/Ecc via the `NUM` helper, Stars via `?? "—"`, Transparency via an explicit null guard). Because
+  Sky is a **sortable** header (server-sorted) and `0` is the darkest/"cleanest" end of the scale, those
+  unmeasured frames also sorted to the top as if they had the best sky. Fixed to guard null → `—`, matching
+  the Transparency column's pattern exactly. Frontend-only, one cell; no backend/schema/API change.
+  Regression `Target.test.tsx::"shows an em-dash (not 0) for a frame with no measured sky background"`
+  (fails-before: the Sky cell renders `0` / passes-after: `—`). Severity: cosmetic/misleading-display.
+  Confidence: traced + regression-tested.
+
 - ~~**One target that fails to *open* sinks the *entire* unattended auto-stack pass (and the
   reprocess-everything batch) — one bad target silently skips auto-stack for every other target.**~~ —
   **FIXED v0.121.3** (Builder 2026-07-14, branch `claude/pensive-faraday-4vpc3q`; traced + reproduced +
