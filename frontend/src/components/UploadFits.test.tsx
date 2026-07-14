@@ -4,7 +4,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  UploadFits, collectDroppedFiles, isFitsFilename, readEntryFiles, uploadSummary,
+  UploadFits, collectDroppedFiles, commonTopFolder, isFitsFilename, readEntryFiles,
+  stripTopFolder, uploadSummary,
   type FsEntry,
 } from "./UploadFits";
 import type { UploadResult } from "../api/client";
@@ -127,6 +128,42 @@ describe("readEntryFiles", () => {
   });
 });
 
+describe("commonTopFolder", () => {
+  it("returns the shared top folder of a whole-folder drop", () => {
+    expect(commonTopFolder(["M31/Light_001.fit", "M31/Light_002.fit"])).toBe("M31");
+  });
+  it("looks through nested session subfolders to the top segment", () => {
+    expect(commonTopFolder(["M31/night1/a.fit", "M31/night2/b.fit"])).toBe("M31");
+  });
+  it("returns '' for a flat multi-select of bare filenames (nothing to derive)", () => {
+    expect(commonTopFolder(["a.fit", "b.fit"])).toBe("");
+  });
+  it("returns '' when two different top folders are dropped (ambiguous)", () => {
+    expect(commonTopFolder(["M31/a.fit", "M42/b.fit"])).toBe("");
+  });
+  it("returns '' when only some files carry a folder", () => {
+    expect(commonTopFolder(["M31/a.fit", "loose.fit"])).toBe("");
+  });
+  it("ignores backslash separators and a leading slash, and rejects traversal", () => {
+    expect(commonTopFolder(["/M31/a.fit", "M31\\b.fit"])).toBe("M31");
+    expect(commonTopFolder(["../a.fit", "../b.fit"])).toBe("");
+  });
+  it("returns '' for an empty list", () => {
+    expect(commonTopFolder([])).toBe("");
+  });
+});
+
+describe("stripTopFolder", () => {
+  it("drops the promoted top folder but keeps a deeper session subpath", () => {
+    expect(stripTopFolder("M31/Light_001.fit", "M31")).toBe("Light_001.fit");
+    expect(stripTopFolder("M31/night1/Light_001.fit", "M31")).toBe("night1/Light_001.fit");
+  });
+  it("leaves a name without that exact prefix untouched", () => {
+    expect(stripTopFolder("M42/a.fit", "M31")).toBe("M42/a.fit");
+    expect(stripTopFolder("bare.fit", "M31")).toBe("bare.fit");
+  });
+});
+
 describe("collectDroppedFiles", () => {
   it("flattens dropped folders via the entry API", async () => {
     const dt = dtWithEntries([
@@ -152,6 +189,55 @@ describe("UploadFits", () => {
     fireEvent.drop(zone, { dataTransfer: dtWithFiles([good, bad]) });
     await waitFor(() => expect(screen.getByText(/1 FITS file ready/)).toBeInTheDocument());
     expect(screen.getByRole("button", { name: /^Upload/ })).not.toBeDisabled();
+  });
+
+  it("adopts a dropped folder's name as the target and strips it off the filenames", async () => {
+    const spy = vi.spyOn(client.api, "uploadFits").mockResolvedValue(result());
+    renderUpload();
+
+    const zone = screen.getByText(/Drag your Seestar FITS files/);
+    const dt = dtWithEntries([
+      dirEntry([fileEntry("Light_001.fit", "/M31/Light_001.fit"),
+                fileEntry("Light_002.fit", "/M31/Light_002.fit")]),
+    ]);
+    fireEvent.drop(zone, { dataTransfer: dt });
+
+    // The target field is pre-filled from the dropped folder…
+    await waitFor(() =>
+      expect(screen.getByLabelText(/Target folder/)).toHaveValue("M31"));
+    await waitFor(() => expect(screen.getByText(/2 FITS files ready/)).toBeInTheDocument());
+    expect(screen.getByText(/will go into “M31”/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Upload/ }));
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+    // …and the redundant folder prefix is stripped off each uploaded filename,
+    // with the folder passed as the target instead.
+    const [filesArg, targetArg] = spy.mock.calls[0];
+    expect(filesArg.map((f) => f.name).sort()).toEqual(["Light_001.fit", "Light_002.fit"]);
+    expect(targetArg).toBe("M31");
+  });
+
+  it("does not overwrite a target the user already typed when a folder is dropped", async () => {
+    const spy = vi.spyOn(client.api, "uploadFits").mockResolvedValue(result());
+    renderUpload();
+
+    fireEvent.change(screen.getByLabelText(/Target folder/), { target: { value: "My Target" } });
+    const zone = screen.getByText(/Drag your Seestar FITS files/);
+    fireEvent.drop(zone, {
+      dataTransfer: dtWithEntries([
+        dirEntry([fileEntry("Light_001.fit", "/M31/Light_001.fit")]),
+      ]),
+    });
+
+    await waitFor(() => expect(screen.getByText(/1 FITS file ready/)).toBeInTheDocument());
+    expect(screen.getByLabelText(/Target folder/)).toHaveValue("My Target");
+    fireEvent.click(screen.getByRole("button", { name: /^Upload/ }));
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+    // The user's target wins; the folder-relative name is left intact for the
+    // server to flatten (keeping cross-session same-named subs distinct).
+    const [filesArg, targetArg] = spy.mock.calls[0];
+    expect(filesArg.map((f) => f.name)).toEqual(["M31/Light_001.fit"]);
+    expect(targetArg).toBe("My Target");
   });
 
   it("filters non-FITS on pick and uploads only the FITS files, then shows a summary", async () => {

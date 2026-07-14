@@ -104,6 +104,43 @@ export async function collectDroppedFiles(dt: DataTransfer): Promise<File[]> {
   return Array.from(dt.files ?? []);
 }
 
+/** The single top-level folder shared by every dropped file's relative name, or
+ *  "" when there isn't one. A folder drop hands us names like ``M31/Light_001.fit``
+ *  (or ``M31/night1/Light_001.fit`` for nested sessions), so a whole-folder drop of
+ *  one target shares a first path segment — that's the natural target name. Returns
+ *  "" unless **every** name carries the *same* non-empty first segment *and* at least
+ *  one has a subpath (a flat multi-select of bare filenames has no folder to derive,
+ *  and two different top folders are ambiguous), so we only ever auto-fill when it's
+ *  unambiguous. */
+export function commonTopFolder(names: string[]): string {
+  if (!names.length) return "";
+  let top: string | null = null;
+  let sawFolder = false;
+  for (const name of names) {
+    const norm = name.replace(/\\/g, "/").replace(/^\/+/, "");
+    const slash = norm.indexOf("/");
+    if (slash < 0) return "";           // a bare filename — no common folder
+    const first = norm.slice(0, slash).trim();
+    if (!first || first === "." || first === "..") return "";
+    if (top === null) top = first;
+    else if (top !== first) return "";  // two different top folders — ambiguous
+    sawFolder = true;
+  }
+  return sawFolder && top ? top : "";
+}
+
+/** Drop a leading ``top/`` segment from a folder-relative name (leaving any deeper
+ *  session subpath intact, so ``M31/night1/Light_001.fit`` → ``night1/Light_001.fit``
+ *  — the server still keeps those distinct). Names without that exact prefix are
+ *  returned unchanged. Used when a dropped folder's name is promoted to the target,
+ *  so the files land directly under ``incoming/<target>/`` instead of repeating the
+ *  folder in every filename. */
+export function stripTopFolder(name: string, top: string): string {
+  const norm = name.replace(/\\/g, "/").replace(/^\/+/, "");
+  const prefix = top + "/";
+  return norm.startsWith(prefix) ? norm.slice(prefix.length) : name;
+}
+
 /** One plain-language line summarising an upload's outcome. */
 export function uploadSummary(r: UploadResult): string {
   const parts: string[] = [];
@@ -144,7 +181,23 @@ export function UploadFits({ compact = false }: { compact?: boolean }) {
 
   const onPick = (picked: File[] | null) => {
     if (!picked) return;
-    const fits = picked.filter((f) => isFitsFilename(f.name));
+    let fits = picked.filter((f) => isFitsFilename(f.name));
+    // When a whole target folder is dropped and the user hasn't named a target,
+    // adopt the dropped folder's name as the target (still editable) and strip
+    // that redundant prefix off each file, so "drag your M 31 folder in" lands a
+    // clean "M 31" target instead of everything falling into Unsorted.
+    if (!target.trim()) {
+      const top = commonTopFolder(fits.map((f) => f.name));
+      if (top) {
+        setTarget(top);
+        fits = fits.map((f) => {
+          const stripped = stripTopFolder(f.name, top);
+          return stripped === f.name
+            ? f
+            : new File([f], stripped, { type: f.type, lastModified: f.lastModified });
+        });
+      }
+    }
     setResult(null);
     setFiles(fits);
     const dropped = picked.length - fits.length;

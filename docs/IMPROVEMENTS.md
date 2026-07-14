@@ -3466,6 +3466,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   keeps only the FITS files). tsc + full vitest (776) + vite build green. **Slice (b) remainder
   — per-file progress, `webkitdirectory` on the picker, partial-upload cleanup — and slice (c)
   remain open.**
+  — **AUTO-DERIVE THE TARGET FROM A DROPPED FOLDER SHIPPED v0.122.0** (Builder 2026-07-14, branch
+  `claude/pensive-faraday-4vpc3q`; part of slice (b) — folder-structure preservation). Before this,
+  dragging a whole Seestar target folder (e.g. `M 31/`) onto the Library left the "Target folder"
+  field blank, so every sub landed loose in **Unsorted** with the folder repeated in each flattened
+  filename (`M31__Light_001.fit`) — a beginner's folder silently vanished into the catch-all instead of
+  becoming a target. Now, when a folder is dropped and the user hasn't typed a target, `UploadFits`
+  adopts the dropped folder's name as the (still-editable) target and strips that redundant top segment
+  off each file, so the subs land cleanly in `incoming/M 31/` and the scanner makes an "M 31" target —
+  the "it just works" north star. Two new pure, exported, unit-tested helpers do it: `commonTopFolder`
+  (the single top-level folder shared by every dropped file's relative path, or "" for a flat
+  multi-select / two ambiguous folders / a partial mix — so it only ever auto-fills when unambiguous) and
+  `stripTopFolder` (drops just the promoted top segment, leaving any deeper session subpath intact so
+  cross-session same-named subs stay distinct via the existing server flatten). A user-typed target still
+  wins (no auto-fill, filenames left for the server to flatten). Frontend-only, additive; no
+  backend/schema/API/default change — the existing streaming/sanitising/dedup endpoint is reused as-is.
+  Tests: `UploadFits.test.tsx` (+9 — `commonTopFolder` shared/nested/flat/ambiguous/partial/backslash/
+  empty, `stripTopFolder` prefix + non-prefix, a component folder-drop that pre-fills the target and
+  strips the prefix off the uploaded names, and a typed-target-wins case). tsc + full vitest + vite build
+  green.
   <details><summary>Original write-up</summary>
   Today the only way to get subs in is to drop Seestar target folders
   into `incoming/` over an SMB/NFS share — which assumes the user can mount the NAS
