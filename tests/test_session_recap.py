@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 from seestack.io.project import FrameRow, Project
 from seestack.session_recap import (
     bucket_reject_reason,
+    last_session_frames,
+    library_session_recap,
     session_recap,
 )
 
@@ -254,3 +256,72 @@ def test_handles_mixed_tz_aware_and_naive_timestamps(tmp_path):
         assert recap.n_kept == 2
     finally:
         proj.close()
+
+
+# --- library_session_recap: the combined "Last night" Dashboard card ---------
+
+
+def test_last_session_frames_trims_to_the_latest_night():
+    """The helper drops undatable frames and returns only the trailing night."""
+    n1 = datetime(2026, 7, 1, 22, 0, 0)
+    n2 = datetime(2026, 7, 8, 22, 0, 0)
+    frames = [_frame(None)]  # undatable — dropped
+    frames += [_frame(n1 + timedelta(seconds=30 * i)) for i in range(3)]  # last week
+    frames += [_frame(n2 + timedelta(seconds=30 * i)) for i in range(4)]  # this night
+    last = last_session_frames(frames)
+    assert len(last) == 4
+    assert all(f.timestamp_utc.startswith("2026-07-08") for f in last)
+
+
+def test_library_recap_none_when_nothing_datable():
+    assert library_session_recap([("M31", "M31", [_frame(None)])]) is None
+    assert library_session_recap([]) is None
+
+
+def test_library_recap_combines_two_targets_shot_the_same_night():
+    """Two targets shot back-to-back on one night merge into a single recap; a
+    third target last shot a week earlier drops out of 'last night'."""
+    night = datetime(2026, 7, 8, 21, 0, 0)
+    m31 = [_frame(night + timedelta(seconds=30 * i)) for i in range(6)]
+    m31 += [_frame(night + timedelta(minutes=4), accept=False, reject_reason="auto:grade:fwhm")]
+    # Shot later the same night (well within the 6 h gap) — combines with M31.
+    m42_start = night + timedelta(hours=2)
+    m42 = [_frame(m42_start + timedelta(seconds=30 * i)) for i in range(4)]
+    m42 += [_frame(m42_start + timedelta(minutes=3), accept=False, reject_reason="auto:streak")]
+    # An old target whose only session was a week ago — must be excluded.
+    old = [_frame(datetime(2026, 7, 1, 22, 0, 0) + timedelta(seconds=30 * i)) for i in range(5)]
+
+    recap = library_session_recap([
+        ("M 31", "M_31", m31),
+        ("M 42", "M_42", m42),
+        ("NGC 7000", "NGC_7000", old),
+    ])
+    assert recap is not None
+    assert recap.n_targets == 2  # the old target dropped out
+    assert recap.n_frames == 12  # 7 (M31) + 5 (M42)
+    assert recap.n_kept == 10
+    assert recap.n_set_aside == 2
+    assert recap.reject_buckets == {"soft": 1, "trailed": 1}
+    assert {c.safe for c in recap.targets} == {"M_31", "M_42"}
+    # Biggest capture leads the card.
+    assert recap.targets[0].safe == "M_31"
+    assert recap.targets[0].n_frames == 7
+    assert recap.targets[1].n_frames == 5
+    # Night span runs from M31's first sub to M42's last.
+    assert recap.start_utc == night.isoformat()
+    assert recap.end_utc == (m42_start + timedelta(minutes=3)).isoformat()
+    assert recap.session_exposure_s == 120.0  # 12 subs × 10 s
+    assert recap.kept_exposure_s == 100.0     # 10 kept × 10 s
+
+
+def test_library_recap_single_target_uses_its_latest_night_only():
+    """One target, two nights: the recap covers only the most recent night."""
+    n1 = datetime(2026, 7, 1, 22, 0, 0)
+    n2 = datetime(2026, 7, 8, 22, 0, 0)
+    frames = [_frame(n1 + timedelta(seconds=30 * i)) for i in range(3)]
+    frames += [_frame(n2 + timedelta(seconds=30 * i)) for i in range(5)]
+    recap = library_session_recap([("M 31", "M_31", frames)])
+    assert recap is not None
+    assert recap.n_targets == 1
+    assert recap.n_frames == 5
+    assert recap.targets[0].name == "M 31"

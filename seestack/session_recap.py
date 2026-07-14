@@ -144,6 +144,23 @@ def _last_session_frames(
     return sessions[-1] if sessions else []
 
 
+def last_session_frames(
+    frames: list[FrameRow], *, gap_hours: float = DEFAULT_SESSION_GAP_HOURS
+) -> list[FrameRow]:
+    """The frames of a target's most recent capture session, in capture order.
+
+    A convenience wrapper over the session split: parses each frame's capture
+    time, drops undatable frames, and returns the trailing ``gap_hours``-separated
+    cluster. Used to trim a target down to just its latest night before combining
+    it across the library (see :func:`library_session_recap`) so the caller never
+    has to hold every target's full frame list at once."""
+    dated = [(dt, f) for f in frames if (dt := _parse(f.timestamp_utc)) is not None]
+    if not dated:
+        return []
+    dated.sort(key=lambda pair: pair[0])
+    return [f for _dt, f in _last_session_frames(dated, gap_hours)]
+
+
 def _session_median_fwhm(
     session_pairs: list[tuple[datetime, FrameRow]]
 ) -> tuple[float | None, int]:
@@ -243,4 +260,129 @@ def session_recap(
         end_utc=session_pairs[-1][1].timestamp_utc,
         reject_buckets=buckets,
         quality_drift=_fwhm_quality_drift(sessions),
+    )
+
+
+@dataclass
+class TargetNightContribution:
+    """What one target contributed to the library's most recent night."""
+
+    name: str            # the target's display name (e.g. "M 31")
+    safe: str            # its URL-safe id, for linking back to the target page
+    n_frames: int        # subs captured this night (kept + set aside)
+    n_kept: int          # accepted this night
+    n_set_aside: int     # rejected this night
+    exposure_s: float    # Σ exposure of every sub this night
+    kept_exposure_s: float  # Σ exposure of the kept subs this night
+
+
+@dataclass
+class LibrarySessionRecap:
+    """The whole library's most recent capture night, combined across targets —
+    the Dashboard answer to *what did last night give me?* across everything you
+    shot, not just one target. Times are ISO 8601 UTC strings."""
+
+    n_targets: int                      # targets shot this night
+    n_frames: int                       # subs captured this night, all targets
+    n_kept: int                         # accepted this night, all targets
+    n_set_aside: int                    # rejected this night, all targets
+    session_exposure_s: float           # Σ exposure this night, all targets
+    kept_exposure_s: float              # Σ exposure of the kept subs this night
+    start_utc: str | None               # earliest capture this night
+    end_utc: str | None                 # latest capture this night
+    targets: list[TargetNightContribution] = field(default_factory=list)
+    reject_buckets: dict[str, int] = field(default_factory=dict)  # merged buckets
+
+
+def library_session_recap(
+    targets: list[tuple[str, str, list[FrameRow]]],
+    *,
+    gap_hours: float = DEFAULT_SESSION_GAP_HOURS,
+) -> LibrarySessionRecap | None:
+    """Combine every target's most-recent capture session into one recap of the
+    library's latest night. ``targets`` is ``(name, safe, frames)`` per target.
+
+    Each target's most recent session is found with the same gap rule
+    :func:`session_recap` uses; those per-target last sessions are then merged
+    onto one timeline and the trailing ``gap_hours``-separated cluster is "last
+    night". So two targets shot the same night combine into one recap, while a
+    target *not* shot that night (its last session was earlier) drops out. Returns
+    ``None`` when no frame across the library carries a capture timestamp.
+
+    Pure, offline, read-only — it just aggregates the frame rows it's handed.
+    """
+    # (capture-time, name, safe, frame) for every frame in each target's most
+    # recent session. Trimming per target keeps the merge small.
+    merged: list[tuple[datetime, str, str, FrameRow]] = []
+    for name, safe, frames in targets:
+        for f in last_session_frames(frames, gap_hours=gap_hours):
+            dt = _parse(f.timestamp_utc)
+            if dt is not None:
+                merged.append((dt, name, safe, f))
+
+    if not merged:
+        return None
+
+    merged.sort(key=lambda item: item[0])
+    # The trailing cluster: walk back from the newest capture while consecutive
+    # captures stay within the gap — the same session split, applied to the merged
+    # timeline, so same-night targets group and older last-sessions fall away.
+    gap_s = gap_hours * 3600.0
+    start_idx = len(merged) - 1
+    for i in range(len(merged) - 1, 0, -1):
+        if (merged[i][0] - merged[i - 1][0]).total_seconds() <= gap_s:
+            start_idx = i - 1
+        else:
+            break
+    night = merged[start_idx:]
+
+    # Group the night's frames by target, preserving each target's first-capture
+    # order so ties read in the order they were actually shot.
+    order: list[tuple[str, str]] = []
+    by_target: dict[tuple[str, str], list[FrameRow]] = {}
+    for _dt, name, safe, f in night:
+        key = (name, safe)
+        if key not in by_target:
+            by_target[key] = []
+            order.append(key)
+        by_target[key].append(f)
+
+    contributions: list[TargetNightContribution] = []
+    buckets: dict[str, int] = {}
+    n_frames = n_kept = n_set_aside = 0
+    session_exposure_s = kept_exposure_s = 0.0
+    for name, safe in order:
+        rows = by_target[(name, safe)]
+        kept = [f for f in rows if f.accept]
+        set_aside = [f for f in rows if not f.accept]
+        exp = sum(f.exposure_s or 0.0 for f in rows)
+        kept_exp = sum(f.exposure_s or 0.0 for f in kept)
+        for f in set_aside:
+            b = bucket_reject_reason(f.reject_reason)
+            buckets[b] = buckets.get(b, 0) + 1
+        contributions.append(TargetNightContribution(
+            name=name, safe=safe,
+            n_frames=len(rows), n_kept=len(kept), n_set_aside=len(set_aside),
+            exposure_s=exp, kept_exposure_s=kept_exp,
+        ))
+        n_frames += len(rows)
+        n_kept += len(kept)
+        n_set_aside += len(set_aside)
+        session_exposure_s += exp
+        kept_exposure_s += kept_exp
+
+    # Biggest capture leads the card; a stable sort keeps equal counts in shot order.
+    contributions.sort(key=lambda c: c.n_frames, reverse=True)
+
+    return LibrarySessionRecap(
+        n_targets=len(contributions),
+        n_frames=n_frames,
+        n_kept=n_kept,
+        n_set_aside=n_set_aside,
+        session_exposure_s=session_exposure_s,
+        kept_exposure_s=kept_exposure_s,
+        start_utc=night[0][3].timestamp_utc,
+        end_utc=night[-1][3].timestamp_utc,
+        targets=contributions,
+        reject_buckets=buckets,
     )
