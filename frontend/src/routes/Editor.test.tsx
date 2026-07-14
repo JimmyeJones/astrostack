@@ -140,6 +140,24 @@ describe("EditorView", () => {
     expect(screen.getByText("Download full-res PNG")).toBeInTheDocument();
   });
 
+  it("shows a recoverable error, not an endless spinner, when the run is missing", async () => {
+    // A deleted stack run (or a stale "View result" link) 404s from getRecipe.
+    // Before the isError guard the editor chrome rendered but the preview never
+    // seeded, so the panel spun a Loader forever — a dead-end. It must show the
+    // shared QueryError with a Retry instead.
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES]);
+    vi.spyOn(client.api, "getRecipe").mockRejectedValue(new Error("run 3 not found"));
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+
+    renderEditor();
+
+    expect(await screen.findByText("Couldn't load this page")).toBeInTheDocument();
+    expect(screen.getByText("run 3 not found")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    // The editor's own chrome never rendered — no toolbar, no forever-loader trap.
+    expect(screen.queryByText("Add operation")).not.toBeInTheDocument();
+  });
+
   it("does not fetch the histogram until the saved recipe has loaded", async () => {
     // The histogram query must be gated on `seeded` exactly like the live
     // preview: before the saved recipe loads, the debounced recipe is the empty

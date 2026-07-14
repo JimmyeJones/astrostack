@@ -2139,6 +2139,21 @@ problems. Dogfood it every big-picture run and fix root causes.
 - **Editor bug hunt (ongoing)** — there are undocumented issues. Each big-picture
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
+  _(Builder note 2026-07-14, found dogfooding the beginner editor flow — **SHIPPED v0.121.6**
+  (branch `claude/pensive-faraday-47ditq`): the editor showed an **endless spinner with no error**
+  when its run was missing/deleted (a stale "View result" link, or the stack run deleted from
+  History). `EditorView`'s render guard checked only `saved.isLoading`; on a `getRecipe` 404
+  `isLoading` is false but `saved.data` is undefined, so the chrome rendered while the preview
+  never seeded (the seed effect needs `saved.data`) — the panel fell through to a `<Loader/>`
+  forever. There was no `saved.isError` branch anywhere, unlike the sibling `Target.tsx` route
+  (which shows a `QueryError` + Retry for exactly this deleted/stale-link case). Fix: after the
+  loading guard, show the shared `QueryError` (Retry) when `saved.isError && !saved.data` — and
+  the same for `opsSchema` (the editor can't function without the op schema) — each gated on
+  `!data` so a background-refetch blip never blanks a working editor. Frontend-only, additive; no
+  backend/schema/API/default change. Regression `Editor.test.tsx::"shows a recoverable error, not
+  an endless spinner, when the run is missing"` (getRecipe rejects → asserts the error card + Retry
+  appear and the editor chrome does not; fails before as it spins). (S, editor/error-handling —
+  PRIORITY 1.))_
   _(~~Builder note 2026-07-12, found in an adversarial frontend-editor-route audit: "Compare a
   look" → "Switch to this look" (`adoptLook`) silently dropped the user's crop/geometry — it set
   the look's **raw** ops, while the split preview the user was judging renders the look on the
