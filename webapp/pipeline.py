@@ -152,23 +152,31 @@ def _pipeline_body(
                     summary["cancelled"] = True
                     break
                 safe = entry.safe_name
-                attempt_n = _auto_stack_frame_count(lib, safe)
-                if attempt_n is None:
-                    skipped.append(safe)
-                    continue
-                if settings.mixed_pointing_guard and _mixed_pointing_check(
-                        lib, safe) is not None:
-                    # Looks like two+ targets in one folder — don't burn a
-                    # walk-away stack on one pointing. Skip without marking the
-                    # attempt, so the next scan re-checks (and stacks once the
-                    # user rejects the odd-target frames), rather than stranding it.
-                    mixed_skipped.append(safe)
-                    continue
-                # Record the attempt *before* stacking so that if this stack
-                # crashes the whole process, the watcher won't re-trigger the
-                # identical stack on restart (crash-loop guard).
-                _mark_auto_stack_attempt(lib, safe, attempt_n)
+                # Isolate the *whole* per-target body — the pre-stack helpers
+                # (frame-count, mixed-pointing check, mark-attempt) all open the
+                # target's project DB, which raises if that DB is missing/corrupt
+                # (a target deleted on the NAS directly, a partial delete, a
+                # restored-from-backup mismatch). Keeping them outside the try let
+                # one broken target sink the entire auto-stack pass and silently
+                # skip every other target — exactly the failure the sibling QC loop
+                # above isolates. Record and carry on, like the _stack_target path.
                 try:
+                    attempt_n = _auto_stack_frame_count(lib, safe)
+                    if attempt_n is None:
+                        skipped.append(safe)
+                        continue
+                    if settings.mixed_pointing_guard and _mixed_pointing_check(
+                            lib, safe) is not None:
+                        # Looks like two+ targets in one folder — don't burn a
+                        # walk-away stack on one pointing. Skip without marking the
+                        # attempt, so the next scan re-checks (and stacks once the
+                        # user rejects the odd-target frames), rather than stranding it.
+                        mixed_skipped.append(safe)
+                        continue
+                    # Record the attempt *before* stacking so that if this stack
+                    # crashes the whole process, the watcher won't re-trigger the
+                    # identical stack on restart (crash-loop guard).
+                    _mark_auto_stack_attempt(lib, safe, attempt_n)
                     res = _stack_target(
                         settings, jm, job, lib, safe,
                         auto_bind_calibration=settings.auto_bind_calibration)
@@ -711,46 +719,49 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
                     break
                 safe = entry.safe_name
                 name = entry.name or safe
-                if stale_only and _last_stack_version_for_target(lib, safe) == APP_VERSION:
-                    # Up to date on the current build — nothing would change, skip it.
-                    skipped += 1
-                    job.set_progress("reprocess", i + 1, total, f"{i + 1}/{total} targets")
+                # Isolate the *whole* per-target body, not just the stack. Every
+                # pre-stack helper here (`_last_stack_version_for_target`,
+                # `_refresh_target`, `_last_stack_options_for_target`,
+                # `lib.open_target`) opens the target's project DB, which raises if
+                # that DB is missing/corrupt (a target removed on the NAS directly, a
+                # partial delete, a restored-from-backup mismatch). Leaving them
+                # outside the try let one broken target sink the whole reprocess job,
+                # breaking this batch's documented "a bad target is isolated, the
+                # batch carries on" promise. Record it in ``failed`` and move on.
+                try:
+                    if stale_only and _last_stack_version_for_target(lib, safe) == APP_VERSION:
+                        # Up to date on the current build — nothing would change, skip it.
+                        skipped += 1
+                        continue
+                    # Persistent label; the inner run_stack progress updates
+                    # phase/done/total per frame but leaves detail untouched.
+                    job.detail = f"Target {i + 1}/{total}: {name}"
                     jm.maybe_flush(job)
-                    continue
-                # Persistent label; the inner run_stack progress updates
-                # phase/done/total per frame but leaves detail untouched.
-                job.detail = f"Target {i + 1}/{total}: {name}"
-                jm.maybe_flush(job)
-                if deep_rescan and not job.cancel_requested():
-                    # Re-derive QC/solve/grade with the current engine first, so the
-                    # restack below stacks the freshly-graded frame set.
-                    _refresh_target(settings, jm, job, lib, safe)
-                    rescanned += 1
-                    if job.cancel_requested():
-                        cancelled = True
-                        break
-                reuse = _last_stack_options_for_target(lib, safe)
-                # Write to a fresh, version-tagged basename so the reprocessed run
-                # lands *alongside* the target's existing output instead of
-                # archiving/orphaning its ``master`` (the reused options carry the
-                # old run's output_name). This is what makes the batch genuinely
-                # non-destructive.
-                proj = lib.open_target(safe)
-                try:
-                    existing = {r.output_basename for r in proj.iter_stack_runs()
-                                if r.output_basename}
-                finally:
-                    proj.close()
-                fresh_name = _reprocess_output_basename(existing, APP_VERSION)
-                try:
+                    if deep_rescan and not job.cancel_requested():
+                        # Re-derive QC/solve/grade with the current engine first, so the
+                        # restack below stacks the freshly-graded frame set.
+                        _refresh_target(settings, jm, job, lib, safe)
+                        rescanned += 1
+                        if job.cancel_requested():
+                            cancelled = True
+                            break
+                    reuse = _last_stack_options_for_target(lib, safe)
+                    # Write to a fresh, version-tagged basename so the reprocessed run
+                    # lands *alongside* the target's existing output instead of
+                    # archiving/orphaning its ``master`` (the reused options carry the
+                    # old run's output_name). This is what makes the batch genuinely
+                    # non-destructive.
+                    proj = lib.open_target(safe)
+                    try:
+                        existing = {r.output_basename for r in proj.iter_stack_runs()
+                                    if r.output_basename}
+                    finally:
+                        proj.close()
+                    fresh_name = _reprocess_output_basename(existing, APP_VERSION)
                     res = _stack_target(
                         settings, jm, job, lib, safe,
                         options=reuse, output_name=fresh_name,
                         auto_bind_calibration=settings.auto_bind_calibration)
-                except Exception as exc:  # noqa: BLE001 — isolate one bad target
-                    log.exception("reprocess-all: target %s failed", safe)
-                    failed.append({"target": safe, "error": f"{type(exc).__name__}: {exc}"})
-                else:
                     if res.get("cancelled"):
                         cancelled = True
                         break
@@ -763,8 +774,12 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
                         # Best-effort: a failure here never fails the batch.
                         if _auto_edit_process_run(lib, safe, run_id) is not None:
                             auto_edited += 1
-                job.set_progress("reprocess", i + 1, total, f"{i + 1}/{total} targets")
-                jm.maybe_flush(job)
+                except Exception as exc:  # noqa: BLE001 — isolate one bad target
+                    log.exception("reprocess-all: target %s failed", safe)
+                    failed.append({"target": safe, "error": f"{type(exc).__name__}: {exc}"})
+                finally:
+                    job.set_progress("reprocess", i + 1, total, f"{i + 1}/{total} targets")
+                    jm.maybe_flush(job)
             return {
                 "total": total,
                 "stacked": stacked,

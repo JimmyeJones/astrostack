@@ -47,6 +47,34 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**One target that fails to *open* sinks the *entire* unattended auto-stack pass (and the
+  reprocess-everything batch) — one bad target silently skips auto-stack for every other target.**~~ —
+  **FIXED v0.121.3** (Builder 2026-07-14, branch `claude/pensive-faraday-4vpc3q`; traced + reproduced +
+  regression-tested). Found by a fresh adversarial webapp-autonomy audit — the *same* "one bad target sinks
+  the batch" class as the QC/solve isolation gap fixed in v0.110.1, in the two sibling loops that were still
+  exposed. In `webapp/pipeline.py`, both the unattended **auto-stack** loop (`_pipeline_body`) and the
+  **reprocess-everything** loop (`submit_reprocess_all`) wrapped only `_stack_target` in their per-target
+  `try/except`, but each iteration's *pre-stack* helpers all open the target's project DB *before* the try:
+  auto-stack's `_auto_stack_frame_count` / `_mixed_pointing_check` / `_mark_auto_stack_attempt`, and
+  reprocess-all's `_last_stack_version_for_target` / `_refresh_target` / `_last_stack_options_for_target` /
+  `lib.open_target`. `Project.open` raises `FileNotFoundError` when `project.sqlite` is missing (or
+  `RuntimeError` on a schema-too-new DB) — a realistic live-NAS state: a target still registered in
+  `library.sqlite` but whose folder/DB was deleted directly, a partial delete, or a restored-from-backup
+  mismatch. Because the loop iterates **all** `lib.list_targets()` (name-sorted), one such stale target raised
+  straight out of the pass: the pipeline job went **red** and **every other target's auto-stack was silently
+  skipped** — the walk-away "drop files → great image" workflow stopped for the whole library until the stale
+  entry was cleaned up. `submit_reprocess_all` even documents "a bad target is isolated, the batch carries on",
+  which this broke. **Fix:** widen each loop's `try/except` to cover the *whole* per-target body (the pre-stack
+  opens included), mirroring the QC loop — record the broken target in `stack_errors` / `failed` and carry on;
+  reprocess-all routes its per-target progress update through a `finally` so the counter still advances past a
+  broken target. Additive, no schema/config/API/default change; only converts an escaping exception into a
+  recorded-and-skipped target so the healthy targets still process. Regression
+  `tests/webapp/test_pipeline_stack_isolation.py` (3 cases: a broken target is isolated in auto-stack while the
+  healthy target still stacks; the same for reprocess-all with the broken target recorded in `failed`; and
+  reprocess-all's progress counter still reaches 2/2 over a broken target). All three fail-before with the exact
+  `FileNotFoundError` / pass-after. Severity: wrong *outcome* for automation (no pixel data corrupted, but the
+  unattended path silently stops). Confidence: reproduced + fixed.
+
 - ~~**⭐ OWNER-REPORTED (2026-07 — TOP PRIORITY) — bright galaxy cores blow out to
   white, and the Auto result regressed.**~~ — **FIXED v0.119.1** (Builder 2026-07-14,
   branch `claude/pensive-faraday-r22s3k`; traced + reproduced + regression-tested).
