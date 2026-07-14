@@ -3561,7 +3561,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   mixed-tz frame pair; verify first that no ingest/merge path can persist a naive timestamp (if one can, that's
   the real bug). Found while adding the cross-session drift nudge (a test hit exactly this on mixed fixtures).
   </details>
-- **Exercise the production-only SPA-serving path in tests (test-coverage blind spot that hid a security bug).**
+- ~~**Exercise the production-only SPA-serving path in tests (test-coverage blind spot that hid a security bug).**~~
+  — **SHIPPED v0.118.1** (Builder 2026-07-14, branch `claude/pensive-faraday-07rvx7`). New
+  `tests/webapp/test_spa_serving_e2e.py` boots the **full** `create_app()` (routers + auth-gate middleware +
+  lifespan) over a materialised `webapp/static/` tree — a fixture mirroring `client` that patches
+  `main.STATIC_DIR` before `create_app()` so `_mount_spa` installs the real serving path — and asserts the
+  four prod-only behaviours the filed gap named: (a) `/` and an unknown client route return the SPA shell
+  through the whole stack (not the dev "Frontend not built" placeholder), plus a real asset serves via the
+  `/assets` StaticFiles mount and the API routes still win over the catch-all; (b)/(c) a percent-encoded
+  `../` traversal falls back to the shell (never the out-of-root secret) through the full middleware chain;
+  and (d) — the interaction no test previously covered — with **auth on**, unauthenticated `/`, a client
+  route, and `/assets/app.js` are all 401-challenged (and a traversal attempt never leaks pre-auth) while
+  correct credentials serve the content and `/api/health` stays open for the Docker healthcheck. Pure
+  test-only addition, no product change; closes the "only broken in the shipped image" structural blind spot
+  that let the v0.109.24 path-traversal reach production. 5 tests, green. *(Original write-up kept below.)*
+  <details><summary>Original write-up</summary>
   *(Idea, Builder 2026-07-12 — surfaced while fixing the v0.109.24 path-traversal.)* The SPA fallback route +
   `/assets` mount in `webapp/main.py::_mount_spa` are only registered when `webapp/static` exists — i.e. the
   production Docker image, which builds the frontend into `webapp/static/`. The dev/test tree has no `static`
@@ -3576,6 +3590,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   (c) traversal is blocked; (d) with auth **on**, static/asset requests follow the intended allow/deny policy.
   Cheap, additive, no product change; prevents a whole class of "only broken in the shipped image" regressions.
   (S, infra/security — test coverage.)
+  </details>
 - ~~**Minor state-classification tidy-up: a Process-target job cancelled *during the stack* is reported `done`, not
   `cancelled`.**~~ — **SHIPPED v0.109.18** (Builder 2026-07-11). `submit_process_target` now checks the stack
   step's returned `cancelled` sentinel and, when set, surfaces `cancelled:True`/`stacked:False` at the top level of
