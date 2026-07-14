@@ -97,6 +97,48 @@ describe("Dashboard plate-solving readiness banner", () => {
   });
 });
 
+describe("Dashboard recent-stack picture download", () => {
+  function statsWithRecentStack(): DashboardStats {
+    return {
+      ...mkStats(),
+      n_stack_runs: 1, n_targets_with_stacks: 1,
+      recent_stacks: [{
+        safe: "m31", target_name: "M31", run_id: 7, output_basename: "m31_stack",
+        timestamp_utc: "2026-07-14T00:00:00Z", n_frames_used: 100,
+        has_preview: true, preview_url: "/api/targets/m31/stack-runs/7/preview",
+      }],
+    };
+  }
+
+  it("offers a one-click PNG download on a recent-stack card without navigating", async () => {
+    vi.spyOn(client.api, "getStats").mockResolvedValue(statsWithRecentStack());
+    vi.spyOn(client.api, "getSystem").mockResolvedValue(mkSystem({}));
+
+    const clicked: string[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(
+      function (this: HTMLAnchorElement) { clicked.push(this.href); });
+
+    renderDashboard();
+    const btn = await screen.findByLabelText("Download picture of M31");
+    fireEvent.click(btn);
+
+    // The transient download anchor was clicked with the run's preview URL.
+    expect(clicked).toHaveLength(1);
+    expect(clicked[0]).toContain(client.api.stackArtifactUrl("m31", 7, "preview"));
+  });
+
+  it("shows no download control when the recent stack has no preview", async () => {
+    const stats = statsWithRecentStack();
+    stats.recent_stacks[0].has_preview = false;
+    vi.spyOn(client.api, "getStats").mockResolvedValue(stats);
+    vi.spyOn(client.api, "getSystem").mockResolvedValue(mkSystem({}));
+
+    renderDashboard();
+    await waitFor(() => expect(screen.getByText("M31")).toBeInTheDocument());
+    expect(screen.queryByLabelText("Download picture of M31")).not.toBeInTheDocument();
+  });
+});
+
 describe("Dashboard integration stat", () => {
   it("shows an em-dash, not \"0.0h\", on a fresh empty library", async () => {
     // A first-time user lands on the Dashboard with zero integration. The card

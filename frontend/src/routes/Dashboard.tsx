@@ -1,8 +1,9 @@
 import {
-  Alert, Badge, Button, Card, Center, Group, Image, Loader, Paper, SimpleGrid, Stack, Text, Title,
+  ActionIcon, Alert, Badge, Box, Button, Card, Center, Group, Image, Loader, Paper,
+  SimpleGrid, Stack, Text, Title, Tooltip,
 } from "@mantine/core";
 import {
-  IconActivity, IconClock, IconLayoutGrid, IconPhoto, IconStack2, IconStars,
+  IconActivity, IconClock, IconLayoutGrid, IconPhoto, IconPhotoDown, IconStack2, IconStars,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
@@ -24,6 +25,19 @@ import { QueryError } from "../components/QueryError";
 // store never breaks the page.
 const ASTAP_DISMISS_KEY = "astrostack.dashboard.astapBannerDismissed";
 const FOLDER_DISMISS_KEY = "astrostack.dashboard.folderBannerDismissed";
+
+// Trigger a picture download without navigating: the recent-stack card is itself
+// a <Link>, so we can't nest a download <a> inside it. Programmatically click a
+// transient anchor instead (the endpoint serves a Content-Disposition attachment,
+// so this saves the PNG rather than opening it).
+export function triggerPictureDownload(href: string): void {
+  const a = document.createElement("a");
+  a.href = href;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
 
 function loadDismissedSig(key: string): string | null {
   try {
@@ -188,7 +202,25 @@ export function Dashboard() {
               component={Link} to={`/targets/${s.safe}/history`}>
               <Card.Section>
                 {s.has_preview ? (
-                  <Image src={s.preview_url} h={140} alt={s.target_name} />
+                  <Box style={{ position: "relative" }}>
+                    <Image src={s.preview_url} h={140} alt={s.target_name} />
+                    <Tooltip label="Download this picture (PNG)">
+                      <ActionIcon
+                        variant="filled" color="dark" radius="xl"
+                        aria-label={`Download picture of ${s.target_name}`}
+                        style={{ position: "absolute", top: 6, right: 6, opacity: 0.85 }}
+                        onClick={(e) => {
+                          // Don't let the click bubble to the card's Link navigation.
+                          e.preventDefault();
+                          e.stopPropagation();
+                          triggerPictureDownload(
+                            api.stackArtifactUrl(s.safe, s.run_id, "preview"));
+                        }}
+                      >
+                        <IconPhotoDown size={16} />
+                      </ActionIcon>
+                    </Tooltip>
+                  </Box>
                 ) : (
                   <Center h={140} bg="dark.6">
                     <IconStack2 size={36} color="var(--mantine-color-dark-3)" />

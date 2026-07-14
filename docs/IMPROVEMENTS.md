@@ -3962,14 +3962,21 @@ problems. Dogfood it every big-picture run and fix root causes.
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
-- **Surface the new "Download picture" (PNG) affordance beyond History/Gallery.** (XS, friendliness —
-  Builder-filed 2026-07-14, follow-up to v0.123.0.) v0.123.0 added a one-click PNG download of the finished
-  picture on the History card and in the History/Gallery fullscreen viewers. The **Target page's latest-result
-  card** and the **Dashboard's newest-stack card** also show the preview but still link only into History for a
-  download — a beginner who lands on the Target/Dashboard hub can't grab the picture without a detour. Add the
-  same `stackArtifactUrl(safe, run_id, "preview")` download button (or reuse the lightbox) on those two cards for
-  a consistent "save my picture" everywhere the picture is shown. Frontend-only, additive, reuses the existing
-  endpoint; no schema/API change.
+- ~~**Surface the new "Download picture" (PNG) affordance beyond History/Gallery.**~~ — **SHIPPED v0.123.2**
+  (Builder 2026-07-14, branch `claude/pensive-faraday-xi1hcw`). v0.123.0 added a one-click PNG download of the
+  finished picture on the History card and in the History/Gallery fullscreen viewers, but the Target page's
+  action toolbar and the Dashboard's recent-stack cards only linked into History — a beginner who lands on the
+  Target/Dashboard hub had to detour to grab the picture. Now: (1) the **Target** page shows a "Picture" button
+  next to "Edit" whenever the latest stack run has a preview (`api.stackArtifactUrl(safe, latestRun.id,
+  "preview")`, plain `<a>` download, mirroring the History card); (2) each **Dashboard** recent-stack card with
+  a preview shows a small download `ActionIcon` overlaid top-right on the thumbnail — because the card is itself
+  a `<Link>`, the control `preventDefault`/`stopPropagation`s the card navigation and triggers the download via
+  a transient anchor (new exported `triggerPictureDownload` helper) rather than nesting an `<a>` inside the
+  card's `<a>`. Frontend-only, additive; reuses the existing endpoint, no schema/API/default change. Tests:
+  `Target.test.tsx` (+2 — the Picture link points at the run's preview URL; hidden when the latest run has no
+  preview), `Dashboard.test.tsx` (+2 — clicking the card's download control fires a download to the run's
+  preview URL without navigating; hidden with no preview). tsc + full vitest (817) + vite build green.
+  (XS, friendliness.)
 - **Offer a JPEG (not just PNG) option for the finished-picture download.** (S, friendliness — Builder-filed
   2026-07-14, follow-up to v0.123.0.) The v0.123.0 "Download picture" serves the stored PNG preview. A PNG of a
   full-res stack can be large and PNG isn't ideal for messaging apps / social; a **JPEG** (quality ~90, the same
