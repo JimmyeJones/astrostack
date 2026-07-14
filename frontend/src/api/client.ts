@@ -899,7 +899,11 @@ export const api = {
     // multipart boundary Content-Type (req hard-codes application/json).
     const form = new FormData();
     if (target.trim()) form.append("target", target.trim());
-    for (const f of fileList) form.append("files", f, f.name);
+    // Send the file's folder-relative path when we have one (a folder drop bakes
+    // it into ``name``; a ``webkitdirectory`` input exposes ``webkitRelativePath``)
+    // so the server can keep two same-named subs from different session folders
+    // distinct instead of dropping one as a duplicate.
+    for (const f of fileList) form.append("files", f, f.webkitRelativePath || f.name);
     return (async (): Promise<UploadResult> => {
       const res = await fetch("/api/upload", { method: "POST", body: form });
       if (!res.ok) {
