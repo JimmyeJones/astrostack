@@ -490,3 +490,109 @@ def test_v1_schema_migrates_to_v2(tmp_path):
         assert {"ra_hint_deg", "dec_hint_deg"} <= cols
     finally:
         proj.close()
+
+
+def _legacy_frames_db(db_path, *, user_version: int):
+    """A project whose ``frames`` table predates the QC columns (no
+    transparency_score / streak_* / eccentricity_median / user_override /
+    aligned_cache_path / mosaic_panel_id) but carries a real frame row."""
+    import sqlite3
+
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        f"""
+        PRAGMA user_version = {user_version};
+        CREATE TABLE project_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE frames (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_path TEXT NOT NULL UNIQUE,
+            cached_path TEXT,
+            timestamp_utc TEXT,
+            exposure_s REAL, gain REAL, sensor_temp_c REAL,
+            width_px INTEGER, height_px INTEGER, bayer_pattern TEXT,
+            ra_hint_deg REAL, dec_hint_deg REAL,
+            wcs_json TEXT, ra_center_deg REAL, dec_center_deg REAL,
+            pixscale_arcsec REAL, rotation_deg REAL,
+            fwhm_px REAL, star_count INTEGER, sky_adu_median REAL,
+            accept INTEGER NOT NULL DEFAULT 1, reject_reason TEXT
+        );
+        CREATE TABLE stack_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp_utc TEXT NOT NULL, output_basename TEXT NOT NULL,
+            fits_path TEXT, tiff_path TEXT, preview_path TEXT,
+            n_frames_used INTEGER NOT NULL, canvas_h INTEGER NOT NULL,
+            canvas_w INTEGER NOT NULL, coverage_min INTEGER NOT NULL DEFAULT 0,
+            coverage_max INTEGER NOT NULL DEFAULT 0, options_json TEXT NOT NULL,
+            notes TEXT
+        );
+        INSERT INTO project_meta(key, value) VALUES('name', 'OldProject');
+        INSERT INTO frames(source_path, accept) VALUES('/data/f1.fit', 1);
+        """
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_legacy_frames_table_backfills_qc_columns_and_reads(tmp_path):
+    """A project created before the QC frame columns existed must still be
+    readable after an in-place upgrade. Regression: the migration only ALTERed
+    frames for the v3 ra/dec hints, so a genuine pre-QC-columns frames table
+    stamped current but never gained transparency_score / streak_* / etc. —
+    then every `iter_frames()` raised `IndexError: No item with that key` and,
+    because the version was already stamped, re-opening never repaired it."""
+    from seestack.io.project import SCHEMA_VERSION
+
+    db_path = tmp_path / "old.sqlite"
+    _legacy_frames_db(db_path, user_version=3)
+
+    proj = Project(tmp_path)
+    proj.db_path = db_path
+    proj._open()
+    proj._check_schema()
+    try:
+        # The missing QC columns are backfilled additively.
+        cols = {r[1] for r in proj._conn.execute("PRAGMA table_info(frames)")}
+        assert {
+            "aligned_cache_path", "eccentricity_median", "transparency_score",
+            "streak_detected", "streak_count", "mosaic_panel_id", "user_override",
+        } <= cols
+        # The pre-existing frame row survives and now reads without raising, its
+        # backfilled columns coming back as the schema defaults.
+        frames = list(proj.iter_frames())
+        assert len(frames) == 1
+        f = frames[0]
+        assert f.source_path == "/data/f1.fit"
+        assert f.transparency_score is None
+        assert f.eccentricity_median is None
+        assert f.streak_detected is False   # NOT NULL DEFAULT 0
+        assert f.streak_count == 0
+        assert f.user_override is False
+        assert proj._conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    finally:
+        proj.close()
+
+
+def test_current_version_but_missing_column_self_heals(tmp_path):
+    """A DB a *previous* build already stamped at the current version but which
+    is missing a later frames column must still self-heal on open — the column
+    backfill runs even when `user_version == SCHEMA_VERSION`, so an
+    already-bricked project recovers rather than staying unreadable forever."""
+    from seestack.io.project import SCHEMA_VERSION
+
+    db_path = tmp_path / "bricked.sqlite"
+    # Stamp it at the current version despite the pre-QC-columns frames shape —
+    # exactly what the buggy migration did on the first upgrade open.
+    _legacy_frames_db(db_path, user_version=SCHEMA_VERSION)
+
+    proj = Project(tmp_path)
+    proj.db_path = db_path
+    proj._open()
+    proj._check_schema()
+    try:
+        frames = list(proj.iter_frames())
+        assert len(frames) == 1
+        assert frames[0].source_path == "/data/f1.fit"
+        cols = {r[1] for r in proj._conn.execute("PRAGMA table_info(frames)")}
+        assert "transparency_score" in cols and "user_override" in cols
+    finally:
+        proj.close()

@@ -1295,6 +1295,56 @@ the real webapp stack→edit path.)_
   2026-07-14). *(Data-integrity on the new upload path — image-quality/trust. Low probability, but a corrupt
   sub is exactly the class the app must never produce.)*
 
+- **`combine_channels` RGB-only path leaves a saturated colour fringe where one channel is NaN but the
+  others cover the pixel (deprioritised mono→RGB path; OSC Seestar stacks unaffected).** *(traced +
+  reproduced, Scout 2026-07-14, branch `claude/practical-dirac-9awndt`.)* `seestack/stack/channel_combine.py`
+  lines 73–80 build the RGB result with `rgb = np.zeros(...)` then assign each supplied colour channel
+  independently (`rgb[...,0] = channels["R"]·w`, etc.), so a pixel that is **NaN in one channel but finite
+  in the others** (differing per-filter footprints at a mosaic/RGB seam) keeps a hard **0** in the missing
+  channel while the others stretch normally → a bright cyan/magenta speck instead of a neutral or uncovered
+  (black) pixel. The **LRGB** branch already fixes exactly this via `scale = np.where(np.isnan(cur), np.nan,
+  scale)` (line 108, "keeps the NaN = no coverage invariant clean at mosaic edges where per-filter footprints
+  differ") — the plain-RGB branch is the one that was never given the same NaN-propagation. It then flows
+  straight into the render/quantize code, which assumes each pixel is all-finite or all-NaN
+  (`render/thumbnail.py::autostretch` L337/L358, `asinh_stretch` L250/L269, `stack/output.py::_to_uint16_linear`
+  L355) — the per-pixel `finite_any = isfinite(img).any(axis=2)` gate treats the pixel as "covered" so it's
+  never blacked out, and the NaN channel lands on 0 in the PNG preview *and* every export product.
+  **Reproduced:** `combine_channels({'R','G','B'})` with `R[4,4]=NaN`, G/B≈0.2 → export autostretch
+  `[0.0, 0.134, 0.064]` vs neighbour `[0.021, 0.017, 0.146]` (a cyan speck); `_to_uint16_linear` →
+  `[0, 42756, 34008]`. **Severity:** wrong-result, but *only* on the **deprioritised mono/LRGB channel-combine
+  workflow* — a one-shot-colour Seestar frame debayers to RGB with **identical** coverage across all three
+  channels, so this NaN mismatch can never arise on the target user's path (byte-identical there). **Fix
+  (small, safe):** mirror the LRGB intent in the RGB-only branch — after assigning the *supplied* colour
+  channels, mark any pixel that is NaN in **any supplied** channel as NaN across all three (do **not** touch a
+  wholly-absent channel, which is an intentional 0 for a bicolour SHO map — the line-74 comment). One helper +
+  a regression test (`R` NaN at a pixel G/B cover → all-NaN out; a fully-absent B stays 0). Confidence:
+  reproduced. (Deprioritised path — file, don't rush; §1 says fix an *outright* bug in what exists, but this
+  never touches the OSC user, so it ranks below any OSC-facing work.)
+
+- **Scan summary miscounts a still-copying zero-byte sub as an *error*, not a *skip*.** *(traced, Scout
+  2026-07-14 — via ingest/QC audit.)* `seestack/io/ingest.py:189–192` yields `IngestResult(skipped=True,
+  error="empty file")` for a 0-byte (mid-copy) file, and `seestack/io/scanner.py:168–173` tests
+  `if res.error is not None: n_errors += 1` **before** the `elif res.skipped:` branch — so a half-copied file
+  inflates the scan's **error** tally instead of its **skip** tally. The frame is correctly *not* ingested and
+  is retried on the next scan once it has bytes, so no data is affected — purely a scan-summary/UX accounting
+  quirk (a beginner sees a scary "N errors" for what is really "still copying, will retry"). **Fix:** give the
+  empty-file skip no `error` (leave the plain-language reason in a `skip_reason`/note field) *or* reorder the
+  scanner to check `skipped` before `error`. Severity: cosmetic. Confidence: traced. (S, friendliness.)
+
+- **Stack-trigger endpoints accept an unvalidated `StackOptions` dict — a bad enum/range surfaces as a
+  cryptically-*errored job* instead of a `400`.** *(traced, Scout 2026-07-14 — via webapp-router audit.)*
+  `webapp/routers/stack.py::trigger_stack` (L149, `body: dict[str, Any]`) → `pipeline.submit_stack` →
+  `_stack_target` → `webapp/schemas.py::coerce_stack_options` (L462–466) only filters unknown keys and does
+  `StackOptions(**clean)` — a plain dataclass with **no** enum/bounds validation. A client bypassing the React
+  form (which *does* enforce the descriptors from `stack_option_fields()`) can send e.g. `{"tiff_mode":
+  "garbage"}`, an out-of-range `sigma_kappa`/`drizzle_scale`, or a bad `background_mode`/`drizzle_kernel`; the
+  endpoint returns `200 {job_id}` and the job later fails deep in the engine (`output.py:266` raises
+  `ValueError("unknown tiff mode: …")`). Same gap in `channel_combine` (L241) and `editor/batch` item fields.
+  Failure is contained to that one job (worker marks it `error`; no 500, no data corruption), and the normal
+  frontend path can't hit it. **Fix:** validate the coerced options against the same `stack_option_fields()`
+  enum/range descriptors up front and return `400` with a plain-language message on a bad value. Severity:
+  broken-UX (low). Confidence: traced. (S, friendliness/robustness.)
+
 - **Dead SExtractor skew-fallback guard in 4 background/leveling helpers (needs REAL-data
   threshold validation before fixing — NOT a blind Builder change).** *(traced + reproduced,
   Builder audit 2026-07-08; med confidence it produces a visibly-wrong result in practice.)*
@@ -3603,6 +3653,26 @@ problems. Dogfood it every big-picture run and fix root causes.
 - Annotated sky overlay (label detected objects / show solved field). (M) —
   related to the night planner above; the planner's "plot tonight's targets" view
   can reuse this.
+- **NEW BEGINNER FEATURE (Scout 2026-07-14) — "How's my stack?" plain-language health check on the
+  result.** After a stack finishes, a beginner has no way to know whether the image is *good* or what one
+  thing would most improve it — the readiness card only speaks to *integration time*, not the actual pixels.
+  Add a small **"How's my stack?"** card (on the Target/History/editor result) that reads the finished stack
+  and, in plain language, says what's strong and the **single** highest-value next step. Reuse cues we
+  **already compute** — no new heavy analysis: the run's stamped `noise_sigma` (→ "clean" vs "a bit noisy —
+  more subs will smooth it"), `coverage_min/max` + `is_mosaic` (→ "ragged low-coverage border — Trim border,
+  or dither/frame more evenly"), the frames table's median FWHM/eccentricity (→ "some trailing — a few soft
+  subs were set aside" / "stars are a touch elongated"), whether any calibration was applied (`calstat` NULL →
+  "no darks/flats used — darks would cut the background speckle"), and a quick highlight-clip check on the
+  stacked pixels (→ "bright core is clipping — the editor's highlight rolloff will recover it"). Each cue maps
+  to **one** friendly sentence + at most one suggested action, and the card shows the *top* one or two, never a
+  wall of warnings. Strictly a **read-only suggestion, never a gate** (mirrors "Is it enough yet?"). Why it
+  fits the beginner bar: it turns the opaque "is this any good?" moment into concrete, sane guidance — the
+  exact hand-holding a non-expert wants after their first stack — with a plain-language explanation and no new
+  knobs. Ship in slices: **(a)** a pure engine helper `stack_health(run, frames) -> list[HealthNote]` (each
+  note = severity + plain sentence + optional action key) + a read-only endpoint + the card; **(b)** wire the
+  action links to the buttons that already do them (Trim border, open editor). Additive/offline; reuses stamped
+  fields + the frames table, no schema change, no new dependency. *(L overall; slice (a) is a shippable M.
+  Pillars: autonomy + friendliness + image-quality/trust — PRIORITY 2/3/4. Beginner bar ✔.)*
 - **NEW BEGINNER FEATURE — per-target progress & integration goals.** — **USER-SET GOAL
   SLICE SHIPPED v0.117.0** (Builder 2026-07-14, branch `claude/pensive-faraday-b7jimp`). The
   readiness card (v0.111.0) already showed accumulated integration against a sane
@@ -3740,6 +3810,16 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+- **NEW (Scout 2026-07-14) — a schema-completeness drift test so a `frames`/`stack_runs` column can never
+  again be added without an upgrade being safe.** *(Surfaced fixing the v0.119.8 migration-brick bug — every
+  later frame column reached `SCHEMA_SQL` with no `ALTER`, bricking older projects until the runtime
+  `_reconcile_table_columns` backfill was added.)* The runtime reconcile now repairs any drift, but a **cheap
+  guard test** would catch the mismatch at commit time and document the invariant: assert that (a) every column
+  `_row_to_frame`/`_INSERT_COLS`/`StackRunRow` reads exists in `SCHEMA_SQL` (build the schema in `:memory:`,
+  compare against `PRAGMA table_info`), and (b) a project created at the *oldest* supported `user_version` (or a
+  representative pre-QC-columns fixture) opens and round-trips a frame **and** a stack-run read without raising.
+  This turns "did someone forget the migration?" from a latent live-install brick into a red test. Pure test
+  infrastructure, no product change. (S, infra/upgrade-safety — reinforces §9.)
 - **NEW (Builder 2026-07-14) — run the GPU bg-flatten tests on a CPU-only host via a NumPy-backed CuPy shim
   (close the structural GPU blind spot).** *(Surfaced fixing the v0.119.7 GPU object-mask dilation bug.)*
   `tests/test_bg_gpu.py` skips **wholesale** when CuPy is absent (`pytest.skip(..., allow_module_level=True)`),
@@ -4186,6 +4266,34 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.119.8** — Bug fix (**upgrade-safety / data-integrity — §9, top priority class**; Scout 2026-07-14,
+  branch `claude/practical-dirac-9awndt`; found by an adversarial ingest/QC audit, **traced + reproduced +
+  regression-tested**). **A project created before the QC frame columns existed was permanently bricked on an
+  in-place upgrade.** `seestack/io/project.py::_migrate_schema` only ever `ALTER`ed the `frames` table for the
+  v3 `ra_hint_deg`/`dec_hint_deg` hints — every later frame column (`aligned_cache_path`, `eccentricity_median`,
+  `transparency_score`, `streak_detected`, `streak_count`, `mosaic_panel_id`, `user_override`) reached the base
+  `SCHEMA_SQL` with **no matching migration**. So a genuine older `project.sqlite` whose `frames` table predates
+  those columns opened, got its `user_version` stamped to the current `SCHEMA_VERSION` (9) — and then **every**
+  `iter_frames()`/`get_frame()` raised `IndexError: No item with that key` because `_row_to_frame` reads
+  `row["transparency_score"]` etc. Worse, once the version was stamped, `_check_schema` returned early on
+  re-open, so the failure was **permanent** — a live install's target would silently become unopenable after
+  pulling the new image (exactly the §9 "never lose data/settings on upgrade" guarantee). Reproduced against a
+  v3-shaped frames table (built the way the repo's own migration tests model a v3 project): open succeeds,
+  stamps 9, first frame read raises `IndexError`; re-open still raises. **Fix (correct-by-construction):** a new
+  `_reconcile_table_columns()` reads the authoritative column set of `frames`/`stack_runs` from `SCHEMA_SQL`
+  once at import (`_EXPECTED_COLUMNS`) and, on **every** open, additively `ALTER TABLE … ADD COLUMN`s any column
+  the on-disk table lacks (name/type/notnull/default reconstructed from `PRAGMA table_info`; each wrapped so a
+  reconcile can never itself fail an open). `_check_schema` now runs it **even when `user_version ==
+  SCHEMA_VERSION`**, so it *self-heals* a DB a past build already stamped-but-broke, not only a forward
+  migration. Never drops/renames/rewrites — a current-schema project matches exactly, so it's a no-op there
+  (byte-identical). This also closes the whole *class* of bug: any future additive column that reaches the
+  schema without a hand-written `ALTER` is now backfilled automatically. Regressions in `tests/test_history.py`:
+  `test_legacy_frames_table_backfills_qc_columns_and_reads` (a pre-QC-columns frames row survives + reads its
+  backfilled columns as schema defaults) and `test_current_version_but_missing_column_self_heals` (an
+  already-stamped-current-but-missing-column DB recovers on open) — both fail-before (IndexError) / pass-after.
+  Additive, no schema-version bump needed, no config/API/on-disk-layout/default change; the version-specific
+  migration blocks are untouched (reconcile is a safety net after them). §9 upgrade-safety hardened, not
+  weakened. (PR: this branch.)
 - **v0.119.6** — Bug fix (data integrity / autonomy — PRIORITY 2/3; Builder 2026-07-14, branch
   `claude/pensive-faraday-x09w10`; found by a fresh adversarial audit of the bulk-upload path, traced +
   reproduced + regression-tested). **Silent data loss on a folder upload where two different subs share a
