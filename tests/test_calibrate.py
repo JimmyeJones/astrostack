@@ -437,6 +437,34 @@ def test_dark_exposure_scaling_flows_through_align_one(tmp_path):
     np.testing.assert_allclose(np.mean((ai - bi)[finite]), 60.0, atol=1.0)
 
 
+def test_apply_raw_empty_bundle_returns_a_fresh_array():
+    # apply_raw documents "returns a new array — the input is not modified", but
+    # an empty bundle applied to an already-float32 input used to alias ``raw``
+    # (np.asarray + astype(copy=False) are both no-ops), so a consumer mutating
+    # the result in place would silently corrupt the shared source frame.
+    cal = CalibrationMasters()
+    assert cal.is_empty
+    raw = np.full((3, 3), 500.0, dtype=np.float32)
+    out = cal.apply_raw(raw)
+    assert out is not raw  # fails before the fix (aliases raw)
+    np.testing.assert_array_equal(out, raw)  # same values, different buffer
+    out[0, 0] = -1.0
+    assert raw[0, 0] == 500.0  # mutating the result never touches the input
+
+
+def test_apply_raw_with_masters_does_not_double_copy(tmp_path):
+    # The empty-path copy must not add a hot-path copy when a master applies: a
+    # dark subtraction already yields a fresh array, so the result is never the
+    # input and no extra copy is taken.
+    dark = np.full((3, 3), 50.0, dtype=np.float32)
+    save_master(tmp_path / "d.fits", dark, MasterMeta("dark", 5, 3, 3, "mean"))
+    cal = CalibrationMasters.load(dark_path=str(tmp_path / "d.fits"))
+    raw = np.full((3, 3), 200.0, dtype=np.float32)
+    out = cal.apply_raw(raw)
+    assert out is not raw
+    np.testing.assert_allclose(out, 150.0)
+
+
 def test_flat_floor_guards_divide(tmp_path):
     # A flat with a near-zero pixel must not explode the calibrated output.
     flat = np.full((3, 3), 100.0, dtype=np.float32)
