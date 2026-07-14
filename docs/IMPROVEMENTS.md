@@ -1430,6 +1430,21 @@ the real webapp stack→edit path.)_
   matches its own 3-channel expansion). Additive, no schema/config/API change; found by an adversarial audit
   of the render/post numeric paths.
 
+_(Builder stacking-engine audit 2026-07-14 (v0.121.5 baseline, suite green 1300 passed / 2 skipped):
+per the owner's current focus #1, ran a fresh repro-driven adversarial audit across `stack/align.py`
+(windowed vs full reproject — **max abs diff 0.0** where finite, window origin exact, only the documented
+3px `FRAME_EDGE_INSET_PX` ring dropped), `stack/accumulator.py` (MinMaxReject brute-forced over 600 random
+k=1..3 trials with NaNs/ties vs a sorted reference — no mismatch; WeightedSum weighted-mean matched to
+float32 with exact NaN-mask agreement), `stack/drizzle_path.py` (running weighted-mean result() correct — no
+flux deflation; two-pass κ-σ rejects only injected outliers; `unresolved`/`neff` gates only ever set
+`tol=+inf`, keep-biased), and `calibrate/{apply,masters}.py` (dark-XOR-bias no double-subtract, flat-floor,
+exposure-scaling direction, and `_sigma_clip_mean`'s `mad==0→tol=0` convergence all correct) + `photometric.py`
+scale direction. **Traced clean — no reachable image-corruption bug**, consistent with the long clean-audit
+history. Re-confirmed the known diagnostic-only nuance (`WeightedSumAccumulator.frame_coverage` counts channel
+0 only, feeding only the `coverage_min/max` diagnostic, never pixel values). No code shipped from the audit;
+the run's deliverable was 3 dogfood-found fixes (v0.121.6 editor endless-spinner dead-end, v0.121.7 Dashboard
+integration format, v0.121.8 first-run upload on-ramp).)_
+
 _(Builder stacking-engine audit 2026-07-14 (v0.116.0 baseline, suite green 1217 passed / 2 skipped):
 per the owner's current focus #1, ran two independent adversarial deep-audits of the stack-combination
 and calibration/align math, each **fuzzed against a brute-force reference**, not just read. **(1)
@@ -3925,6 +3940,15 @@ problems. Dogfood it every big-picture run and fix root causes.
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
+- **Decide the intended duration format and unify it (or document the split).** (XS, friendliness/consistency —
+  Builder-filed 2026-07-14, spotted dogfooding.) The app has two duration formatters that render the same
+  quantity differently: `format.ts::formatIntegration` (Dashboard/Target/History/readiness) prints "42 min" /
+  "2.3 h", while `Library.tsx::expo` (target cards) prints "1h 30m" / "2h 0m". Both are correct and NaN-safe;
+  the split may be intentional (precise h+m on a card vs. rounded summary elsewhere), but a beginner sees
+  "1h 30m" on a Library card and "1.5 h" for the same target's integration on the Dashboard. Scout call:
+  either standardise on one (probably keep `expo`'s h+m for cards but confirm), or leave a one-line comment on
+  each explaining the deliberate difference so a future run doesn't "fix" it into a regression. Pure helpers,
+  fully unit-testable; no backend/schema change.
 
 ### Performance (only with a measurement)
 - Profile the stack hot path on a large synthetic target; find a safe win that
