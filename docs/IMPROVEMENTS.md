@@ -3989,6 +3989,34 @@ problems. Dogfood it every big-picture run and fix root causes.
   the accumulator it would crash rather than broadcast. If pursued: expand a 2-D mask to `(...,1)` at the top
   of `add`/`add_window` (or tighten the docstring to state `(H,W,1)`/`(H,W,C)` only). One-liner, testable in
   isolation; only worth doing if a run is already in that file. (XS, engine/tidiness.)
+- **NEW (Builder 2026-07-14) — the κ-σ two-pass stack branch lacks the `if n_used == 0: raise` guard its
+  sibling paths all have (robustness gap, effectively unreachable).** *(Numeric stacking-engine audit
+  2026-07-14.)* In `stack/stacker.py` (~L1116–1124) the two-pass κ-σ combine writes its result without the
+  `if n_used == 0: raise` guard that every sibling path has (min/max ~L1032, single-pass ~L1150, pass-1 ~L1070).
+  If pass 2 somehow aligned **zero** frames while pass 1 succeeded, an all-NaN master would be written instead
+  of raising a clear error. It's essentially unreachable deterministically — both passes read the same files
+  with deterministic alignment, so `n_used_p2 == n_used_p1 > 0` — and the failure mode is a *visibly* broken
+  all-NaN image, not silent pixel corruption, so it's a robustness/consistency gap, not a live bug. If pursued:
+  add the same `n_used == 0` guard for symmetry with the other three combine paths. (XS, engine/robustness —
+  low priority, only if a run is already in that combine branch.)
+- **NEW (Builder 2026-07-14) — the Target page's `trailedAccepted` badge count is recomputed client-side and
+  can drift from the server's `trailed_frame_ids`.** *(Adversarial frontend audit 2026-07-14, low confidence.)*
+  `frontend/src/routes/Target.tsx` (~L466–475) recomputes the trailed-frame count in the browser
+  (`Math.max(med + 3*mad, 0.6)` threshold) and its own comment says it must "mirror … keep in sync" with the
+  server's `trailed_frame_ids`. If the server's threshold ever drifts, the badge / confirm-dialog count would
+  disagree with the number the one-click reject action actually removes. Duplicated-logic risk only — no
+  divergence confirmed today (the thresholds currently match). If pursued: have the badge consume the server's
+  `trailed_frame_ids` count directly instead of re-deriving it, so there's a single source of truth. (S,
+  friendliness/consistency — low priority.)
+- **NEW (Builder 2026-07-14) — `frontend/src/routes/Editor.test.tsx` is flaky under load (spurious ~20 s
+  timeouts), for the Scout/infra to stabilise.** Running the full `vitest run` (or `Editor.test.tsx` alone) on a
+  resource-constrained host, 2–3 tests intermittently fail with 20 s timeouts — the failing set *changes* run to
+  run (observed: "splits the preview … 'Split this op'", "passes the recipe so the coverage overlay follows the
+  crop geometry", "shows the proposed crop over the coverage heatmap on a mosaic"). Confirmed pre-existing on a
+  clean `origin/main` (not tied to any one change), so it's environmental/timing, not a product regression — but
+  it makes the local green-gate noisy and could occasionally flake CI. Likely fixes: raise the per-test timeout
+  for the heaviest editor render tests, or reduce their fake-render/query fan-out so they settle faster under
+  contention. (S, infra/test-stability — a Scout QA/infra item.)
 - **NEW (Builder 2026-07-14) — consolidate the Dashboard's three per-project roll-ups into one cached pass
   (only with a measurement).** *(spotted shipping the v0.119.0 "Target progress" card.)* The Dashboard now
   triggers up to **three** independent passes that each open *every* project once: `/api/stats`'s stack
