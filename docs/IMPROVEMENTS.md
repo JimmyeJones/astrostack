@@ -3977,13 +3977,33 @@ problems. Dogfood it every big-picture run and fix root causes.
   preview), `Dashboard.test.tsx` (+2 — clicking the card's download control fires a download to the run's
   preview URL without navigating; hidden with no preview). tsc + full vitest (817) + vite build green.
   (XS, friendliness.)
-- **Offer a JPEG (not just PNG) option for the finished-picture download.** (S, friendliness — Builder-filed
-  2026-07-14, follow-up to v0.123.0.) The v0.123.0 "Download picture" serves the stored PNG preview. A PNG of a
-  full-res stack can be large and PNG isn't ideal for messaging apps / social; a **JPEG** (quality ~90, the same
-  format the editor Share export already produces) is smaller and more universally share-friendly. Idea: add a
-  `jpeg` artifact kind (server-side transcode of the preview, or a small on-the-fly render) and offer it as a
-  second choice next to PNG, defaulting to whichever a beginner is most likely to want (probably JPEG for
-  sharing, PNG for quality). Additive, no default/behaviour change to existing downloads; testable server-side.
+- ~~**Offer a JPEG (not just PNG) option for the finished-picture download.**~~ — **SHIPPED v0.124.0** (Builder
+  2026-07-14, branch `claude/pensive-faraday-xi1hcw`). Added a `jpeg` artifact kind to the stack-run download
+  route (`webapp/routers/stack.py::download_stack_run`) that serves an **on-the-fly transcode of the stored
+  preview PNG** at the same resolution — no separate file on disk, no re-render from the linear FITS. New engine
+  helper `seestack/stack/output.py::png_bytes_to_jpeg(png_data, quality=90)` does the transcode (flattening any
+  alpha onto black, matching the preview's NaN→black convention). The History card now offers both a **PNG**
+  (best quality) and a **JPEG** (smaller — best for sharing) button where it previously had a single "Picture"
+  button, so a beginner can grab the messaging-friendly format without opening the editor. Additive/upgrade-safe:
+  a new read-only artifact kind, no schema/config/default change and existing PNG/FITS/TIFF downloads are
+  untouched. Tests: `tests/test_sharecard.py` (+2 — `png_bytes_to_jpeg` same-resolution transcode + transparency
+  flattened to black), `tests/webapp/test_stack_render.py` (+3 — the `/jpeg` endpoint transcodes a rendered
+  preview with the right content-type/attachment filename, 404s when the preview file is missing, 404s for an
+  unknown run), `History.test.tsx` (PNG+JPEG links point at the right URLs; both hidden with no preview). Python
+  + tsc + full vitest (817) + vite build green. **Follow-up (filed as a fresh UX idea below):** the quick-grab
+  surfaces (Target toolbar, Dashboard overlay, fullscreen lightbox) still offer PNG only — extending the PNG/JPEG
+  choice there is a small, coherent follow-up once the defaulting question (which format leads) is settled. (S,
+  friendliness.)
+- **Extend the PNG/JPEG picture-download choice to the quick-grab surfaces.** (XS–S, friendliness — Builder-filed
+  2026-07-14, follow-up to v0.124.0.) v0.124.0 added a `jpeg` artifact kind and offered PNG + JPEG side-by-side
+  on the History card. The other places a finished picture is downloadable — the **Target** toolbar "Picture"
+  button (v0.123.2), the **Dashboard** recent-stack overlay (v0.123.2), and the fullscreen **lightbox**
+  (`ImageLightbox`, shared by History/Gallery) — still serve PNG only. Extend the same two-format choice there so
+  "save my picture as PNG or JPEG" is consistent everywhere the picture is shown. **Open design call (defer to a
+  Scout):** whether to show two buttons, a small split/menu ("Download ▾ → PNG / JPEG"), or default one format
+  and offer the other as secondary — and *which* format leads (probably JPEG for the share-oriented lightbox,
+  PNG for the archival-feeling Target/Dashboard grab). Frontend-only, reuses the existing `jpeg` endpoint; no
+  backend change.
 - **Decide the intended duration format and unify it (or document the split).** (XS, friendliness/consistency —
   Builder-filed 2026-07-14, spotted dogfooding.) The app has two duration formatters that render the same
   quantity differently: `format.ts::formatIntegration` (Dashboard/Target/History/readiness) prints "42 min" /

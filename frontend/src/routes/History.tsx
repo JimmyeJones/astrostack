@@ -627,12 +627,22 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
             </Tooltip>
           )}
           {run.has_preview && (
-            <Tooltip label="Download the finished picture as a shareable PNG image">
+            <Tooltip label="Download the finished picture as a PNG (best quality)">
               <Button
                 size="xs" variant="light" leftSection={<IconPhotoDown size={14} />}
                 component="a" href={api.stackArtifactUrl(safe, run.id, "preview")}
               >
-                Picture
+                PNG
+              </Button>
+            </Tooltip>
+          )}
+          {run.has_preview && (
+            <Tooltip label="Download the finished picture as a JPEG (smaller — best for sharing)">
+              <Button
+                size="xs" variant="light" leftSection={<IconPhotoDown size={14} />}
+                component="a" href={api.stackArtifactUrl(safe, run.id, "jpeg")}
+              >
+                JPEG
               </Button>
             </Tooltip>
           )}

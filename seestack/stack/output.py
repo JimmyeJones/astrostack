@@ -329,6 +329,33 @@ def write_share_jpeg(path: Path, rgb: np.ndarray, *, max_long_edge: int = 2048,
     return Path(path)
 
 
+def png_bytes_to_jpeg(png_data: bytes, *, quality: int = 90) -> bytes:
+    """Transcode an already-rendered display PNG (e.g. the stored stack preview)
+    to a smaller, more share-friendly JPEG at the **same** resolution.
+
+    JPEG has no alpha channel, so any transparency is flattened onto black —
+    which matches the preview's own convention (uncovered/NaN pixels are already
+    black). Used to offer a JPEG download of the finished picture alongside the
+    PNG without re-rendering from the linear FITS: a PNG of a large stack is
+    heavy and PNG isn't ideal for messaging apps, while a quality-90 JPEG is
+    smaller and universally share-friendly. Returns the encoded JPEG bytes."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    with Image.open(BytesIO(png_data)) as src:
+        if src.mode in ("RGBA", "LA", "P"):
+            rgba = src.convert("RGBA")
+            flat = Image.new("RGB", rgba.size, (0, 0, 0))
+            flat.paste(rgba, mask=rgba.split()[-1])
+            img = flat
+        else:
+            img = src.convert("RGB")
+        buf = BytesIO()
+        img.save(buf, format="JPEG", quality=quality, optimize=True)
+    return buf.getvalue()
+
+
 def _to_uint16_linear(rgb: np.ndarray) -> np.ndarray:
     """
     Pack float32 stack data into 16-bit unsigned without stretching.

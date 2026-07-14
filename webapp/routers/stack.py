@@ -695,10 +695,11 @@ def stack_run_options(safe: str, run_id: int, request: Request) -> dict[str, Any
 
 
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/{kind}")
-def download_stack_run(safe: str, run_id: int, kind: str, request: Request) -> FileResponse:
-    if kind not in _KIND_FIELDS:
+def download_stack_run(safe: str, run_id: int, kind: str, request: Request) -> Response:
+    # "jpeg" is a share-friendly transcode of the stored preview PNG (no separate
+    # file on disk), served at the same resolution; the rest map to stored paths.
+    if kind not in _KIND_FIELDS and kind != "jpeg":
         raise HTTPException(status_code=404, detail="Unknown artifact")
-    attr, media = _KIND_FIELDS[kind]
     lib, proj = deps.open_target_project(request, safe)
     try:
         run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
@@ -707,6 +708,18 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request) -> F
         lib.close()
     if run is None:
         raise HTTPException(status_code=404, detail="No such run")
+    if kind == "jpeg":
+        from seestack.stack.output import png_bytes_to_jpeg
+        png_path = run.preview_path
+        if not png_path or not Path(png_path).exists():
+            raise HTTPException(status_code=404, detail="No preview for this run")
+        data = png_bytes_to_jpeg(Path(png_path).read_bytes())
+        filename = f"{run.output_basename}.jpg"
+        return Response(
+            content=data, media_type="image/jpeg",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    attr, media = _KIND_FIELDS[kind]
     path = getattr(run, attr)
     if not path or not Path(path).exists():
         raise HTTPException(status_code=404, detail=f"No {kind} for this run")
