@@ -52,6 +52,20 @@ class ObjectInfoOut(BaseModel):
     matched_by: str
 
 
+class IntegrationGoalOut(BaseModel):
+    """A user-set per-target integration goal (total accepted exposure), in
+    seconds, or ``null`` when the user hasn't set one (the readiness card then
+    falls back to its sane per-object-type default)."""
+
+    goal_s: float | None = None
+
+
+class IntegrationGoalPatch(BaseModel):
+    """Set (positive value) or clear (``null``) a target's integration goal."""
+
+    goal_s: float | None = None
+
+
 class SessionQualityDriftOut(BaseModel):
     """A cross-session softness nudge: the newest session is materially softer
     than the target's best previous one (higher FWHM = softer stars)."""

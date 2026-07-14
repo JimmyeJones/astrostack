@@ -195,10 +195,34 @@ describe("TargetView readiness card", () => {
 
     await waitFor(() =>
       expect(screen.getByText("Is it enough yet?")).toBeInTheDocument());
-    expect(screen.getByText("goal ~6 h")).toBeInTheDocument();
+    // The goal chip is editable, so it carries the default per-type goal + a
+    // pencil affordance; verdict scores against the same 6 h default.
+    expect(screen.getByText(/goal ~6 h/)).toBeInTheDocument();
     expect(
       screen.getByText(/3\.0 h of ~6 h — a solid start/),
     ).toBeInTheDocument();
+  });
+
+  it("uses a user-set goal over the default and labels it 'your goal'", async () => {
+    // 5 h on a galaxy would be "close" at the 6 h default, but the user set a
+    // 10 h goal, so it scores against 10 h (still "solid") and reads "your goal".
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ total_exposure_s: 5 * 3600 }),
+    );
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M31", name: "Andromeda Galaxy", type: "galaxy",
+      constellation: "Andromeda", constellation_abbr: "And",
+      ra_deg: 10, dec_deg: 41, matched_by: "name",
+    });
+    vi.spyOn(client.api, "getIntegrationGoal").mockResolvedValue({ goal_s: 10 * 3600 });
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(screen.getByText(/your goal ~10 h/)).toBeInTheDocument());
+    expect(screen.getByText(/5\.0 h of ~10 h/)).toBeInTheDocument();
   });
 
   it("stays hidden until any light has been collected", async () => {

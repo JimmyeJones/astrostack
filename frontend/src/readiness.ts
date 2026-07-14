@@ -29,6 +29,9 @@ export type ReadinessLevel = "starting" | "solid" | "close" | "plenty";
 export interface IntegrationReadiness {
   bucket: TypeBucket;
   goalHours: number;
+  // True when goalHours came from a user-set goal rather than the per-type
+  // default — lets the card label it "your goal" instead of "goal".
+  customGoal: boolean;
   hours: number;
   // hours / goalHours clamped to [0, 1] — ready to drive a progress bar.
   fraction: number;
@@ -43,18 +46,25 @@ function fmtGoal(h: number): string {
   return Number.isInteger(h) ? `${h}` : `${h.toFixed(1)}`;
 }
 
-// Judge accumulated integration against the per-type goal. `type` is the
-// catalog object type (from the identify card) or null/empty when the target
-// isn't recognised; `exposureSeconds` is the accepted-sub total the target
-// already reports. Returns null when there's no integration yet — nothing
-// useful to say — so the caller can simply render nothing.
+// Judge accumulated integration against a goal. `type` is the catalog object
+// type (from the identify card) or null/empty when the target isn't recognised;
+// `exposureSeconds` is the accepted-sub total the target already reports. When
+// `goalHoursOverride` is a positive number the user has set their own goal for
+// this target and it wins over the per-type default (Galaxy 6 h, …). Returns
+// null when there's no integration yet — nothing useful to say — so the caller
+// can simply render nothing.
 export function integrationReadiness(
   exposureSeconds: number,
   type: string | null | undefined,
+  goalHoursOverride?: number | null,
 ): IntegrationReadiness | null {
   if (!Number.isFinite(exposureSeconds) || exposureSeconds <= 0) return null;
   const bucket = objectTypeBucket(type);
-  const goalHours = GOAL_HOURS[bucket];
+  const customGoal =
+    typeof goalHoursOverride === "number" &&
+    Number.isFinite(goalHoursOverride) &&
+    goalHoursOverride > 0;
+  const goalHours = customGoal ? goalHoursOverride! : GOAL_HOURS[bucket];
   const hours = exposureSeconds / 3600;
   const ratio = hours / goalHours;
   const fraction = Math.max(0, Math.min(1, ratio));
@@ -81,7 +91,7 @@ export function integrationReadiness(
       ? `${so_far} — ${phrase}.`
       : `${so_far} of ~${fmtGoal(goalHours)} h — ${phrase}.`;
 
-  return { bucket, goalHours, hours, fraction, level, verdict };
+  return { bucket, goalHours, customGoal, hours, fraction, level, verdict };
 }
 
 // A compact hint for a target already in the library, for the Tonight planner's

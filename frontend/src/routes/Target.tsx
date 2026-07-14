@@ -297,6 +297,9 @@ export function TargetView() {
   const [bayer, setBayer] = useState<string | undefined>(undefined);
   const [rejectMetric, setRejectMetric] = useState("fwhm_px");
   const [rejectPct, setRejectPct] = useState(10);
+  // Inline editor for the "Is it enough yet?" integration goal (hours).
+  const [editingGoal, setEditingGoal] = useState(false);
+  const [goalHoursInput, setGoalHoursInput] = useState<number | "">("");
   // Ids touched by the last bulk *reject* so we can offer a one-click undo of an
   // over-aggressive cut (a 30% reject_worst, or reject_streaked that went too far).
   const [lastReject, setLastReject] = useState<{ ids: number[]; label: string } | null>(null);
@@ -308,6 +311,22 @@ export function TargetView() {
   const identity = useQuery({
     queryKey: ["identify", safe],
     queryFn: () => api.identifyTarget(safe),
+  });
+  // The user's own integration goal for this target (opt-in). null → the
+  // readiness card uses its sane per-object-type default.
+  const goal = useQuery({
+    queryKey: ["integration-goal", safe],
+    queryFn: () => api.getIntegrationGoal(safe),
+  });
+  const setGoal = useMutation({
+    mutationFn: (goalS: number | null) => api.setIntegrationGoal(safe, goalS),
+    onSuccess: (r) => {
+      qc.setQueryData(["integration-goal", safe], r);
+      notifications.show({
+        message: r.goal_s ? "Saved your integration goal" : "Cleared your goal",
+        color: "violet",
+      });
+    },
   });
   const rejectedCount = target.data
     ? target.data.n_frames - target.data.n_frames_accepted
@@ -495,9 +514,13 @@ export function TargetView() {
   const readiness = useMemo(
     () =>
       target.data
-        ? integrationReadiness(target.data.total_exposure_s, identity.data?.type)
+        ? integrationReadiness(
+            target.data.total_exposure_s,
+            identity.data?.type,
+            goal.data?.goal_s != null ? goal.data.goal_s / 3600 : null,
+          )
         : null,
-    [target.data, identity.data],
+    [target.data, identity.data, goal.data],
   );
 
   // Frames QC couldn't read at all (corrupt/truncated FITS): make them visible —
@@ -908,9 +931,43 @@ export function TargetView() {
             <Stack gap={6} style={{ flex: 1, minWidth: 0 }}>
               <Group gap="xs" justify="space-between" wrap="nowrap">
                 <Text size="sm" fw={500}>Is it enough yet?</Text>
-                <Text size="xs" c="dimmed" style={{ whiteSpace: "nowrap" }}>
-                  goal ~{readiness.goalHours} h
-                </Text>
+                {editingGoal ? (
+                  <Group gap={4} wrap="nowrap">
+                    <NumberInput size="xs" w={78} min={0.25} max={1000} step={0.5}
+                      suffix=" h" hideControls
+                      aria-label="Integration goal (hours)"
+                      value={goalHoursInput}
+                      onChange={(v) =>
+                        setGoalHoursInput(v === "" ? "" : Number(v))}
+                    />
+                    <Button size="compact-xs" variant="light" loading={setGoal.isPending}
+                      onClick={() => {
+                        const h = Number(goalHoursInput);
+                        if (Number.isFinite(h) && h > 0) {
+                          setGoal.mutate(Math.round(h * 3600));
+                          setEditingGoal(false);
+                        }
+                      }}>Save</Button>
+                    {goal.data?.goal_s != null ? (
+                      <Button size="compact-xs" variant="subtle" color="gray"
+                        onClick={() => {
+                          setGoal.mutate(null);
+                          setEditingGoal(false);
+                        }}>Reset</Button>
+                    ) : null}
+                  </Group>
+                ) : (
+                  <Text size="xs" c="dimmed"
+                    style={{ whiteSpace: "nowrap", cursor: "pointer" }}
+                    title="Set your own integration goal for this target"
+                    onClick={() => {
+                      setGoalHoursInput(Number(readiness.goalHours.toFixed(2)));
+                      setEditingGoal(true);
+                    }}>
+                    {readiness.customGoal ? "your goal" : "goal"} ~{readiness.goalHours} h
+                    {" "}✎
+                  </Text>
+                )}
               </Group>
               <Progress value={readiness.fraction * 100}
                 color={readinessColor(readiness.level)} size="sm" radius="xl" />
