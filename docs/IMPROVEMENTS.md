@@ -1336,19 +1336,24 @@ the real webapp stack→edit path.)_
   the empty file counted as an error / passes-after). Severity: cosmetic (friendliness). Confidence:
   reproduced + fixed.
 
-- **Stack-trigger endpoints accept an unvalidated `StackOptions` dict — a bad enum/range surfaces as a
-  cryptically-*errored job* instead of a `400`.** *(traced, Scout 2026-07-14 — via webapp-router audit.)*
-  `webapp/routers/stack.py::trigger_stack` (L149, `body: dict[str, Any]`) → `pipeline.submit_stack` →
-  `_stack_target` → `webapp/schemas.py::coerce_stack_options` (L462–466) only filters unknown keys and does
-  `StackOptions(**clean)` — a plain dataclass with **no** enum/bounds validation. A client bypassing the React
-  form (which *does* enforce the descriptors from `stack_option_fields()`) can send e.g. `{"tiff_mode":
-  "garbage"}`, an out-of-range `sigma_kappa`/`drizzle_scale`, or a bad `background_mode`/`drizzle_kernel`; the
-  endpoint returns `200 {job_id}` and the job later fails deep in the engine (`output.py:266` raises
-  `ValueError("unknown tiff mode: …")`). Same gap in `channel_combine` (L241) and `editor/batch` item fields.
-  Failure is contained to that one job (worker marks it `error`; no 500, no data corruption), and the normal
-  frontend path can't hit it. **Fix:** validate the coerced options against the same `stack_option_fields()`
-  enum/range descriptors up front and return `400` with a plain-language message on a bad value. Severity:
-  broken-UX (low). Confidence: traced. (S, friendliness/robustness.)
+- ~~**Stack-trigger endpoints accept an unvalidated `StackOptions` dict — a bad enum/range surfaces as a
+  cryptically-*errored job* instead of a `400`.**~~ — **FIXED v0.119.10** (Builder 2026-07-14, branch
+  `claude/pensive-faraday-g346o7`; traced + regression-tested). Added `webapp/schemas.py::
+  validate_stack_options`, which checks each client-supplied value against the same `stack_option_fields()`
+  descriptors the React form uses — a bad enum (`tiff_mode="garbage"`, `background_mode`/`drizzle_kernel`), an
+  out-of-range number (`sigma_kappa`/`drizzle_scale` beyond min/max), or a non-numeric value in a numeric field
+  raises a `ValueError` with a plain-language message (`"TIFF mode: 'garbage' is not a valid choice (expected
+  one of linear, autostretch)"`). `webapp/routers/stack.py::trigger_stack` calls it up front and turns the
+  error into a `400` instead of returning `200 {job_id}` and failing deep in the engine
+  (`output.py` → `ValueError("unknown tiff mode: …")`). Also guarded `put_stack_defaults` so a bad *stored*
+  default can't silently break every later stack. The validator skips unknown keys (coerce still drops them),
+  `NON_FORM_KEYS` calibration paths (server-resolved), and `None` ("use default"), so the normal frontend path
+  is unaffected. Additive; no schema/config/API-shape/default change (only turns a would-be errored job into an
+  explicit 400). Regression `tests/webapp/test_stack_option_validation.py` (7 cases): unit tests of the
+  validator (good values incl. unknown-key/None pass; bad enum, below-min, above-max, and non-numeric raise)
+  plus endpoint tests (bad enum → 400, out-of-range → 400, valid options still → 200). Severity: broken-UX
+  (low). Confidence: reproduced + fixed. **Residual (deprioritised):** `channel_combine` items still take raw
+  option fields — that's the mono/LRGB channel-combine path, so left unvalidated per §1.
 
 - **Dead SExtractor skew-fallback guard in 4 background/leveling helpers (needs REAL-data
   threshold validation before fixing — NOT a blind Builder change).** *(traced + reproduced,
