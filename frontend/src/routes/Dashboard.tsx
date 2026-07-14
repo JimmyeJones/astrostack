@@ -8,6 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
+import { formatIntegration } from "../format";
 import { astapReadiness, astapReadinessSignature } from "../components/dashboard/astapReadiness";
 import { folderReadiness, folderReadinessSignature } from "../components/dashboard/folderReadiness";
 import { LastNightCard } from "../components/LastNightCard";
@@ -151,7 +152,7 @@ export function Dashboard() {
           label="Targets" value={String(data.n_targets)}
           sub={`${data.n_targets_with_stacks} stacked`} />
         <StatCard icon={<IconClock size={22} color="var(--mantine-color-violet-4)" />}
-          label="Integration" value={`${data.integration_hours.toFixed(1)}h`} />
+          label="Integration" value={formatIntegration(data.integration_hours * 3600)} />
         <StatCard icon={<IconPhoto size={22} color="var(--mantine-color-violet-4)" />}
           label="Frames" value={String(data.n_frames)}
           sub={`${data.n_frames_accepted} kept · ${accept}`} />

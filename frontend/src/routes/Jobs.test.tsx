@@ -25,7 +25,7 @@ function renderJobs() {
     <MantineProvider>
       <Notifications />
       <QueryClientProvider client={qc}>
-        <JobsView />
+        <MemoryRouter><JobsView /></MemoryRouter>
       </QueryClientProvider>
     </MantineProvider>,
   );
@@ -116,6 +116,9 @@ describe("JobsView", () => {
     renderJobs();
     await waitFor(() => expect(screen.getByText("No jobs running.")).toBeInTheDocument());
     expect(screen.getByText(/Scan incoming/)).toBeInTheDocument();
+    // Also point the no-NAS beginner at the Library upload on-ramp.
+    const uploadLink = screen.getByRole("link", { name: "Upload FITS files" });
+    expect(uploadLink).toHaveAttribute("href", "/library");
   });
 
   it("cancels a job and refreshes the list on success", async () => {

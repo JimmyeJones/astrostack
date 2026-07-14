@@ -96,3 +96,30 @@ describe("Dashboard plate-solving readiness banner", () => {
     expect(screen.queryByText("Plate-solving isn't set up yet")).not.toBeInTheDocument();
   });
 });
+
+describe("Dashboard integration stat", () => {
+  it("shows an em-dash, not \"0.0h\", on a fresh empty library", async () => {
+    // A first-time user lands on the Dashboard with zero integration. The card
+    // must read "—" like its sibling stat cards, not a bare "0.0h" — and use the
+    // shared formatIntegration units the rest of the app uses.
+    vi.spyOn(client.api, "getStats").mockResolvedValue(mkStats());
+    vi.spyOn(client.api, "getSystem").mockResolvedValue(mkSystem({}));
+
+    renderDashboard();
+
+    await waitFor(() => expect(screen.getByText("Integration")).toBeInTheDocument());
+    expect(screen.queryByText("0.0h")).not.toBeInTheDocument();
+    expect(screen.getByText("—")).toBeInTheDocument();
+  });
+
+  it("formats a real integration total with shared friendly units", async () => {
+    vi.spyOn(client.api, "getStats")
+      .mockResolvedValue({ ...mkStats(), integration_hours: 2.3 });
+    vi.spyOn(client.api, "getSystem").mockResolvedValue(mkSystem({}));
+
+    renderDashboard();
+
+    // 2.3 h, spaced like formatIntegration everywhere else (not "2.3h").
+    await waitFor(() => expect(screen.getByText("2.3 h")).toBeInTheDocument());
+  });
+});

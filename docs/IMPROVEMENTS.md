@@ -1430,6 +1430,21 @@ the real webapp stack→edit path.)_
   matches its own 3-channel expansion). Additive, no schema/config/API change; found by an adversarial audit
   of the render/post numeric paths.
 
+_(Builder stacking-engine audit 2026-07-14 (v0.121.5 baseline, suite green 1300 passed / 2 skipped):
+per the owner's current focus #1, ran a fresh repro-driven adversarial audit across `stack/align.py`
+(windowed vs full reproject — **max abs diff 0.0** where finite, window origin exact, only the documented
+3px `FRAME_EDGE_INSET_PX` ring dropped), `stack/accumulator.py` (MinMaxReject brute-forced over 600 random
+k=1..3 trials with NaNs/ties vs a sorted reference — no mismatch; WeightedSum weighted-mean matched to
+float32 with exact NaN-mask agreement), `stack/drizzle_path.py` (running weighted-mean result() correct — no
+flux deflation; two-pass κ-σ rejects only injected outliers; `unresolved`/`neff` gates only ever set
+`tol=+inf`, keep-biased), and `calibrate/{apply,masters}.py` (dark-XOR-bias no double-subtract, flat-floor,
+exposure-scaling direction, and `_sigma_clip_mean`'s `mad==0→tol=0` convergence all correct) + `photometric.py`
+scale direction. **Traced clean — no reachable image-corruption bug**, consistent with the long clean-audit
+history. Re-confirmed the known diagnostic-only nuance (`WeightedSumAccumulator.frame_coverage` counts channel
+0 only, feeding only the `coverage_min/max` diagnostic, never pixel values). No code shipped from the audit;
+the run's deliverable was 3 dogfood-found fixes (v0.121.6 editor endless-spinner dead-end, v0.121.7 Dashboard
+integration format, v0.121.8 first-run upload on-ramp).)_
+
 _(Builder stacking-engine audit 2026-07-14 (v0.116.0 baseline, suite green 1217 passed / 2 skipped):
 per the owner's current focus #1, ran two independent adversarial deep-audits of the stack-combination
 and calibration/align math, each **fuzzed against a brute-force reference**, not just read. **(1)
@@ -2139,6 +2154,21 @@ problems. Dogfood it every big-picture run and fix root causes.
 - **Editor bug hunt (ongoing)** — there are undocumented issues. Each big-picture
   run, use the editor end-to-end and fix what's broken/ugly: op failures, export
   mismatch, undo/state glitches, mobile layout, error handling. (ongoing, editor)
+  _(Builder note 2026-07-14, found dogfooding the beginner editor flow — **SHIPPED v0.121.6**
+  (branch `claude/pensive-faraday-47ditq`): the editor showed an **endless spinner with no error**
+  when its run was missing/deleted (a stale "View result" link, or the stack run deleted from
+  History). `EditorView`'s render guard checked only `saved.isLoading`; on a `getRecipe` 404
+  `isLoading` is false but `saved.data` is undefined, so the chrome rendered while the preview
+  never seeded (the seed effect needs `saved.data`) — the panel fell through to a `<Loader/>`
+  forever. There was no `saved.isError` branch anywhere, unlike the sibling `Target.tsx` route
+  (which shows a `QueryError` + Retry for exactly this deleted/stale-link case). Fix: after the
+  loading guard, show the shared `QueryError` (Retry) when `saved.isError && !saved.data` — and
+  the same for `opsSchema` (the editor can't function without the op schema) — each gated on
+  `!data` so a background-refetch blip never blanks a working editor. Frontend-only, additive; no
+  backend/schema/API/default change. Regression `Editor.test.tsx::"shows a recoverable error, not
+  an endless spinner, when the run is missing"` (getRecipe rejects → asserts the error card + Retry
+  appear and the editor chrome does not; fails before as it spins). (S, editor/error-handling —
+  PRIORITY 1.))_
   _(~~Builder note 2026-07-12, found in an adversarial frontend-editor-route audit: "Compare a
   look" → "Switch to this look" (`adoptLook`) silently dropped the user's crop/geometry — it set
   the look's **raw** ops, while the split preview the user was judging renders the look on the
@@ -2790,6 +2820,27 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+- ~~**Point the brand-new (no-NAS) beginner at the Upload on-ramp instead of a dead-end.**~~ —
+  **SHIPPED v0.121.8** (Builder 2026-07-14, branch `claude/pensive-faraday-47ditq`; found dogfooding the
+  first-run flow). Two related misdirections for a user with zero targets/jobs: (1) the Library empty-state
+  card's copy said "Upload your Seestar FITS files below" but its **only prominent button was "View jobs"** —
+  sending a brand-new user (who has no jobs) to an empty Jobs page, away from the `UploadFits` card sitting
+  right below it. Removed that button; the upload card is the CTA and Jobs stays one click away in the global
+  nav. (2) The Jobs empty-state only mentioned "Scan incoming" (the NAS path), ignoring the browser-upload
+  on-ramp built for beginners *without* a mounted share — added a sentence linking to the Library upload
+  ("No NAS share? Upload FITS files from your computer in the Library instead."). Frontend-only, additive; no
+  backend/schema/API/default change. Tests: `Library.test.tsx` (empty library shows the upload picker and no
+  "View jobs" button), `Jobs.test.tsx` (empty state links "Upload FITS files" → `/library`). (XS,
+  friendliness/onboarding.)
+- ~~**Dashboard "Integration" stat reads a bare "0.0h" on a fresh install and uses off-format units.**~~ —
+  **SHIPPED v0.121.7** (Builder 2026-07-14, branch `claude/pensive-faraday-47ditq`; found dogfooding the
+  landing page). The Dashboard's Integration StatCard rendered `${data.integration_hours.toFixed(1)}h`, so a
+  brand-new user's very first screen showed an ugly **"0.0h"** (while every sibling stat card shows "—" for
+  empty), and it used a different unit format than the shared `formatIntegration` helper the Library/Target/
+  History surfaces use ("2.3h" vs "2.3 h"; "0.7h" vs "42 min"). Fix: render
+  `formatIntegration(data.integration_hours * 3600)` — "—" for zero, and the app-wide friendly units
+  otherwise. Frontend-only, additive; no backend/schema/API/default change. Tests in `Dashboard.test.tsx`
+  (empty library shows "—" not "0.0h"; a 2.3 h total renders "2.3 h"). (XS, friendliness/consistency.)
 - ~~**NEW (Scout 2026-07-12) — post-hoc "N of your M subs didn't align" note on a silently
   half-complete stack.**~~ — **ALREADY SHIPPED** (Builder note 2026-07-13): this is already implemented on
   the History card. The stacker stamps `NOFFERED`/`NALIGNFL` into the master header, the `…/stack-runs/{id}/info`
@@ -3889,6 +3940,15 @@ problems. Dogfood it every big-picture run and fix root causes.
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
+- **Decide the intended duration format and unify it (or document the split).** (XS, friendliness/consistency —
+  Builder-filed 2026-07-14, spotted dogfooding.) The app has two duration formatters that render the same
+  quantity differently: `format.ts::formatIntegration` (Dashboard/Target/History/readiness) prints "42 min" /
+  "2.3 h", while `Library.tsx::expo` (target cards) prints "1h 30m" / "2h 0m". Both are correct and NaN-safe;
+  the split may be intentional (precise h+m on a card vs. rounded summary elsewhere), but a beginner sees
+  "1h 30m" on a Library card and "1.5 h" for the same target's integration on the Dashboard. Scout call:
+  either standardise on one (probably keep `expo`'s h+m for cards but confirm), or leave a one-line comment on
+  each explaining the deliberate difference so a future run doesn't "fix" it into a regression. Pure helpers,
+  fully unit-testable; no backend/schema change.
 
 ### Performance (only with a measurement)
 - Profile the stack hot path on a large synthetic target; find a safe win that

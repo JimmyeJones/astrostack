@@ -16,6 +16,7 @@ import { api, type EditOp, type OpInstance, type Recipe } from "../api/client";
 import { useUndoable } from "../hooks/useUndoable";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { ObjectInfoCard } from "../components/ObjectInfoCard";
+import { QueryError } from "../components/QueryError";
 import { Histogram } from "../components/editor/Histogram";
 import { tonalHistGuides } from "../components/editor/tonalGuides";
 import { OpList } from "../components/editor/OpList";
@@ -1037,6 +1038,19 @@ export function EditorView() {
 
   if (opsSchema.isLoading || saved.isLoading) {
     return <Center h={300}><Loader /></Center>;
+  }
+
+  // A missing/deleted run (a stale "View result" link, or the run deleted from
+  // History) 404s from api.getRecipe, and the editor's op schema can 404/500 on
+  // an old backend. Without this branch the chrome renders but the preview never
+  // seeds (the seed effect needs saved.data), so the panel spins a Loader
+  // forever — a dead-end. Show the recoverable error the sibling routes do,
+  // gated on !data so a background-refetch blip never blanks a working editor.
+  if (saved.isError && !saved.data) {
+    return <QueryError error={saved.error} onRetry={() => saved.refetch()} />;
+  }
+  if (opsSchema.isError && !opsSchema.data) {
+    return <QueryError error={opsSchema.error} onRetry={() => opsSchema.refetch()} />;
   }
 
   return (
