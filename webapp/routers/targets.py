@@ -185,18 +185,33 @@ def target_session_recap(safe: str, request: Request) -> SessionRecapOut | None:
 
 
 @router.get("/{safe}/stack-health", response_model=StackHealthOut | None)
-def target_stack_health(safe: str, request: Request) -> StackHealthOut | None:
-    """Plain-language "How's my stack?" check on the target's current stack:
-    what's strong and the single highest-value next step, from cues we already
-    compute (the run's stamped fields + the frames' QC metrics). Returns ``null``
-    when the target has no genuine stack yet. Read-only; never a gate.
+def target_stack_health(
+    safe: str, request: Request, run_id: int | None = None
+) -> StackHealthOut | None:
+    """Plain-language "How's my stack?" check on a stack: what's strong and the
+    single highest-value next step, from cues we already compute (the run's
+    stamped fields + the frames' QC metrics). With no ``run_id`` it grades the
+    target's newest genuine stack (the Target-page card); with ``run_id`` it
+    grades that specific run (the History card for a run you're viewing). Returns
+    ``null`` when there's no matching genuine stack. Read-only; never a gate.
     """
-    from webapp.pipeline import _newest_genuine_stack_run
+    from webapp.pipeline import _newest_genuine_stack_run, _stack_options_from_run_json
     from seestack.stackhealth import stack_health
 
     lib, proj = deps.open_target_project(request, safe)
     try:
-        run = _newest_genuine_stack_run(proj)
+        if run_id is None:
+            run = _newest_genuine_stack_run(proj)
+        else:
+            # Grade the specific run — but only if it's a genuine stack (skip
+            # editor-export/combine runs, whose stamped fields don't describe a
+            # stack), matching the newest-genuine path's contract.
+            run = next(
+                (r for r in proj.iter_stack_runs()
+                 if r.id == run_id
+                 and _stack_options_from_run_json(r.options_json) is not None),
+                None,
+            )
         if run is None:
             return None
         notes = stack_health(run, proj.iter_frames())

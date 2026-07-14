@@ -3032,6 +3032,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+- **"How's my stack?" highlight-clip cue — needs REAL-data threshold tuning before shipping (NOT a blind
+  change).** (M, image-quality/trust — PRIORITY 4) *(Builder-filed 2026-07-14, deferred slice-(b) part of the
+  "How's my stack?" health check; slices (a) v0.120.0 + actionable/History (b) v0.121.0 shipped.)* The original
+  health-check idea listed a "bright core is clipping — the editor's highlight rolloff will recover it" cue that
+  reads the **stacked pixels** (the other cues read only stamped run fields + the frames table, so `stack_health`
+  stayed pure/offline). Deferred deliberately: (1) it needs loading `master.fits` pixels, so it can't live in the
+  pure `stack_health(run, frames)` helper — it must be computed webapp-side (where the master is loaded) and
+  passed in as an optional pre-computed cue, and gated so it doesn't load pixels on every Target-page render;
+  and (2) **detecting genuine clipping in a *linear, background-subtracted* master needs a real-data-validated
+  threshold** — a saturated core shows as a flat plateau of near-max pixels, but the master's max/scale varies
+  per target and the background subtraction shifts values, so any "fraction of pixels within ε of max" rule
+  risks false-positives (or misses) without validating on real Seestar stacks of both a clipped bright-core
+  target (e.g. M42's trapezium / M31's core) and an unclipped faint target. Same real-data gating the SCNR /
+  `sky_sigma` / streak-detector items carry. When built: a conservative plateau detector (many finite pixels at
+  the exact global max with ~zero local spread = saturation), a `HealthNote(kind="highlight_clip")` that is
+  reassuring not alarming (the editor's v0.119.1 rolloff already recovers it in the display), and a webapp-side
+  computation behind the existing endpoint. Additive; the note only ever *adds* guidance, never gates.
 - **Scout to vet on REAL data: does the STF `_highlight_rolloff` (v0.119.1) mildly *desaturate* bright
   coloured highlights?** (S, image-quality — PRIORITY 4) *(Builder-audit-noted 2026-07-14, from an
   adversarial numeric audit of the v0.119.1/.2 highlight-rolloff fix — which otherwise verified clean:
@@ -3702,10 +3719,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   test_target_stack_health.py` (4 — null-without-stack, notes for a calibrated run, uncalibrated leads with the
   action + coverage surfaced, 404), `StackHealthCard.test.tsx` (6 — `visibleNotes` cap, `noteColor`, renders
   top notes, hides on null + empty). Python (1285) + tsc + full vitest (797) + vite build all green.
-  **Slice (b) remains open:** wire the `action` keys (`trim_border`, `calibration`) to the buttons that already
-  do those things, and drop the card onto the History/editor result too; a highlight-clip cue (needs loading
-  the stacked pixels) is a natural slice (b) add. *(Scout-filed 2026-07-14; L overall; slice (a) shipped.
-  Pillars: autonomy + friendliness + image-quality/trust — PRIORITY 2/3/4. Beginner bar ✔.)*
+  **Slice (b) — actionable notes + History surface — SHIPPED v0.121.0** (Builder 2026-07-14, branch
+  `claude/pensive-faraday-n1vlsg`). Two parts of slice (b) landed: (1) the health notes' `action` keys are now
+  **clickable one-click links** — a new pure `noteAction(action, safe, runId)` helper maps `trim_border` → the
+  editor on that run (`/targets/{safe}/edit/{runId}`, where Trim border lives) and `calibration` → the
+  Calibration page (build master darks/flats); the card renders the link under its note (reassurance/positive
+  notes have none), so a beginner goes straight from "what to fix" to the page that fixes it. (2) The card now
+  surfaces **per-run on the History page** (inside the run's expanded info panel) — the `GET
+  …/stack-health` endpoint took an optional backward-compatible `?run_id=` (no param = newest genuine, as
+  before; with it = that specific genuine run, skipping editor/combine runs), the `StackHealthCard` took an
+  optional `runId` prop, and it's rendered in each `RunCard` gated on `showInfo` so it only queries when the
+  user opens a run's details (no N background queries). Additive/read-only; no schema/config/default change, the
+  new query param is optional, and the Target-page card is unchanged. Tests: `StackHealthCard.test.tsx`
+  (`noteAction` mapping for trim_border/calibration/none + the rendered link), `test_target_stack_health.py`
+  (grades a specific run by id / newest by default / null for an unknown run_id), History suite still green.
+  **Slice (b) remainder still open:** a highlight-clip cue (needs loading the stacked pixels + real-data
+  threshold tuning — filed as its own idea below, gated like the other pixel-threshold items) and the editor
+  result surface. *(Scout-filed 2026-07-14; L overall; slice (a) shipped v0.120.0, slice (b) part shipped
+  v0.121.0. Pillars: autonomy + friendliness + image-quality/trust — PRIORITY 2/3/4. Beginner bar ✔.)*
   <details><summary>Original idea</summary>
   After a stack finishes, a beginner has no way to know whether the image is *good* or what one
   thing would most improve it — the readiness card only speaks to *integration time*, not the actual pixels.

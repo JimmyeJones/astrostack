@@ -59,6 +59,27 @@ def test_stack_health_uncalibrated_leads_with_calibration_action(
     assert "coverage" in kinds  # ragged border also surfaced
 
 
+def test_stack_health_grades_a_specific_run_by_id(client, solved_library, data_root):
+    # The History card grades a *specific* run via ?run_id=, not just the newest.
+    old = _add_run(data_root, "M_42", timestamp_utc="2026-07-13T00:00:00+00:00",
+                   calstat=None)  # older, uncalibrated
+    new = _add_run(data_root, "M_42", timestamp_utc="2026-07-14T00:00:00+00:00",
+                   calstat="dark+flat")  # newer, calibrated
+    # Default (no run_id) grades the newest genuine run.
+    assert client.get("/api/targets/M_42/stack-health").json()["run_id"] == new
+    # ?run_id= grades that specific run, and sees its own (uncalibrated) fields.
+    body = client.get(f"/api/targets/M_42/stack-health?run_id={old}").json()
+    assert body["run_id"] == old
+    assert body["notes"][0]["kind"] == "calibration"
+
+
+def test_stack_health_null_for_unknown_run_id(client, solved_library, data_root):
+    _add_run(data_root, "M_42")
+    r = client.get("/api/targets/M_42/stack-health?run_id=99999")
+    assert r.status_code == 200
+    assert r.json() is None
+
+
 def test_stack_health_unknown_target_404(client):
     r = client.get("/api/targets/does_not_exist/stack-health")
     assert r.status_code == 404
