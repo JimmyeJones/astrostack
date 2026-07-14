@@ -79,6 +79,22 @@ describe("LastNightCard", () => {
     expect(screen.getByText("M 42 · 4 subs")).toBeInTheDocument();
   });
 
+  it("labels the night by when it began, not the morning after (session crosses UTC midnight)", async () => {
+    // A European-timezone session (e.g. 23:00–03:00 local) runs past UTC
+    // midnight, so end_utc lands on the next day. The card must still name the
+    // night it *started* — otherwise "Last night" reads as tomorrow's date.
+    vi.spyOn(client.api, "getLastNight").mockResolvedValue(
+      recap({
+        start_utc: "2026-07-14T22:00:00+00:00",
+        end_utc: "2026-07-15T02:00:00+00:00",
+      }),
+    );
+    renderCard();
+    await waitFor(() =>
+      expect(screen.getByText("Last night · 2026-07-14")).toBeInTheDocument());
+    expect(screen.queryByText("Last night · 2026-07-15")).toBeNull();
+  });
+
   it("omits the chip row for a single-target night", async () => {
     vi.spyOn(client.api, "getLastNight").mockResolvedValue(
       recap({ n_targets: 1, n_frames: 6, n_kept: 6, n_set_aside: 0,
