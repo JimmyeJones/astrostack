@@ -1175,6 +1175,27 @@ the real webapp stack→edit path.)_
   all; this is the editor op's missing proxy-scale on the live-preview path — cleanly regression-testable.
   Low/moderate severity, editor preview↔export parity — PRIORITY 1.)*
 
+- ~~**Bulk-upload endpoint corrupts a file when two concurrent POSTs upload the *same* filename (a
+  double-submit / retried request) — both streamed into one shared `<name>.part`.**~~ — **FIXED v0.118.3**
+  (Builder 2026-07-14, branch `claude/pensive-faraday-cypk69`; traced + regression-tested). In
+  `webapp/routers/upload.py::_stream_to_disk` the temp sidecar was a **fixed** `dest.name + ".part"`, so two
+  simultaneous uploads of the same filename to the same target both opened and wrote the *same* `.part`
+  concurrently — interleaving their bytes — then both `os.replace`d it: the first rename succeeds, the second
+  crashes `FileNotFoundError` (the shared temp was already moved), and either way the landed FITS is a
+  scrambled mix of the two streams rather than a whole sub. Plausible for the target user: a slow bulk upload
+  the beginner clicks twice, or a browser-retried request. **Fix:** give each request a **unique** sidecar via
+  `tempfile.mkstemp(suffix=".part", prefix=dest.name + ".", dir=dest.parent)` so the two streams are
+  independent; the final `os.replace` is atomic, so the loser is overwritten by a *complete* file (and the
+  duplicate is dropped by the pipeline's content dedup) — never a corrupt interleave. The `.part` suffix still
+  keeps the sidecar out of the scanner's FITS glob, so an orphan from a hard crash is never ingested.
+  Regression `tests/webapp/test_upload.py::test_stream_to_disk_concurrent_same_name_never_corrupts` runs two
+  interleaved `_stream_to_disk` streams to one dest and asserts the landed file is a whole copy of exactly one
+  upload with no `.part` orphan (fail-before: the second rename raised `FileNotFoundError` on the shared temp /
+  pass-after). Additive, no schema/config/API/default change; the existing orphan-check test was strengthened
+  to a `*.part` glob. Found by a fresh-angle adversarial audit of the newest webapp endpoints (Builder
+  2026-07-14). *(Data-integrity on the new upload path — image-quality/trust. Low probability, but a corrupt
+  sub is exactly the class the app must never produce.)*
+
 - **Dead SExtractor skew-fallback guard in 4 background/leveling helpers (needs REAL-data
   threshold validation before fixing — NOT a blind Builder change).** *(traced + reproduced,
   Builder audit 2026-07-08; med confidence it produces a visibly-wrong result in practice.)*
@@ -3560,6 +3581,17 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+- **NEW (Builder 2026-07-14) — two low-severity upload-endpoint tidiness notes (both benign today, filed for
+  a future run).** *(spotted during the 2026-07-14 adversarial upload/webapp audit that found the now-fixed
+  concurrent-same-name corruption above.)* In `webapp/routers/upload.py::upload_files`: **(1)** the rejected /
+  deduped-skip / disk-space `continue` branches skip the `try/finally: await upload.close()`, so those
+  `UploadFile`s aren't explicitly closed — harmless in practice (FastAPI has already buffered every part before
+  the handler runs and closes them all at request teardown), so it only delays cleanup within the request.
+  **(2)** a `.part` sidecar can orphan if `os.replace` *itself* fails after a fully-written temp (the replace
+  is outside the `try` that unlinks on error) — rare, and the leftover carries a `.part` suffix (never
+  ingested) and is overwritten on the next attempt. Both are XS defensive polish (close the upload on every
+  path; wrap the replace so a failure cleans up its own temp), not correctness bugs; only worth doing if a run
+  is already in this file. (XS, infra — low priority.)
 - ~~**NEW (Builder 2026-07-13) — harden `session_recap._parse` against mixed tz-aware/naive frame timestamps.**~~
   — **FIXED v0.113.2** (Builder 2026-07-13, branch `claude/pensive-faraday-4lta1b`; regression-tested).
   `_parse` now coerces a tz-naive parse to UTC (`dt.replace(tzinfo=timezone.utc)`) so the session-split
