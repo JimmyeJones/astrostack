@@ -46,6 +46,26 @@ describe("ImageLightbox", () => {
     expect(screen.getByText("100%")).toBeInTheDocument();
   });
 
+  it("offers no download when neither href is given", () => {
+    renderLightbox();
+    expect(screen.queryByLabelText("Download picture")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Download raw data")).not.toBeInTheDocument();
+  });
+
+  it("downloads the picture (PNG) being shown, not a scientific file", () => {
+    renderLightbox({ downloadHref: "/api/run/1/preview" });
+    const pic = screen.getByLabelText("Download picture");
+    expect(pic).toHaveAttribute("href", "/api/run/1/preview");
+    // No raw-data download unless one is explicitly provided.
+    expect(screen.queryByLabelText("Download raw data")).not.toBeInTheDocument();
+  });
+
+  it("offers the raw FITS as a distinct secondary download", () => {
+    renderLightbox({ downloadHref: "/api/run/1/preview", rawHref: "/api/run/1/fits" });
+    expect(screen.getByLabelText("Download picture")).toHaveAttribute("href", "/api/run/1/preview");
+    expect(screen.getByLabelText("Download raw data")).toHaveAttribute("href", "/api/run/1/fits");
+  });
+
   it("does not crash on a pointermove that arrives after pointerup", () => {
     // Regression: the pan updater used to read drag.current inside setState,
     // which could run after pointerup had nulled it → crash.

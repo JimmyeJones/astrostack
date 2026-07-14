@@ -169,6 +169,23 @@ describe("HistoryView", () => {
     await waitFor(() => expect(screen.getByText(/42 min/)).toBeInTheDocument());
   });
 
+  it("offers a Picture (PNG) download of the finished image when a preview exists", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ has_preview: true })]);
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    const pic = screen.getByRole("link", { name: "Picture" });
+    expect(pic).toHaveAttribute("href", "/api/targets/M_42/stack-runs/1/preview");
+  });
+
+  it("does not offer a Picture download when the run has no preview", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ has_preview: false })]);
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    expect(screen.queryByRole("link", { name: "Picture" })).not.toBeInTheDocument();
+    // The FITS (raw-data) download is still offered.
+    expect(screen.getByRole("link", { name: "FITS" })).toBeInTheDocument();
+  });
+
   it("offers Compare linking to the previous run on all but the oldest card", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
       mkRun({ id: 3, output_basename: "newest_run" }),

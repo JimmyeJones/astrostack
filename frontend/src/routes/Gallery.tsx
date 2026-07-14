@@ -412,7 +412,9 @@ export function GalleryView() {
       <ImageLightbox
         src={viewing ? viewing.preview_url : null}
         title={viewing ? `${viewing.target_name} · ${viewing.output_basename}` : undefined}
-        downloadHref={viewing?.has_fits
+        downloadHref={viewing?.has_preview
+          ? api.stackArtifactUrl(viewing.safe, viewing.run_id, "preview") : undefined}
+        rawHref={viewing?.has_fits
           ? api.stackArtifactUrl(viewing.safe, viewing.run_id, "fits") : undefined}
         onClose={() => setViewing(null)}
       />

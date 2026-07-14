@@ -5,7 +5,7 @@ import {
 } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
-import { IconAdjustments, IconCheck, IconCopy, IconDeviceFloppy, IconDownload, IconGitCompare, IconInfoCircle, IconPencil, IconSparkles, IconTrash, IconX } from "@tabler/icons-react";
+import { IconAdjustments, IconCheck, IconCopy, IconDeviceFloppy, IconDownload, IconGitCompare, IconInfoCircle, IconPencil, IconPhotoDown, IconSparkles, IconTrash, IconX } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api, type StackRun, type StackPhotometricSummary, type StackDarkScalingSummary, type StackRejectionSummary, type StackFrameAccounting } from "../api/client";
@@ -626,13 +626,25 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
               </Button>
             </Tooltip>
           )}
+          {run.has_preview && (
+            <Tooltip label="Download the finished picture as a shareable PNG image">
+              <Button
+                size="xs" variant="light" leftSection={<IconPhotoDown size={14} />}
+                component="a" href={api.stackArtifactUrl(safe, run.id, "preview")}
+              >
+                Picture
+              </Button>
+            </Tooltip>
+          )}
           {run.has_fits && (
-            <Button
-              size="xs" variant="light" leftSection={<IconDownload size={14} />}
-              component="a" href={api.stackArtifactUrl(safe, run.id, "fits")}
-            >
-              FITS
-            </Button>
+            <Tooltip label="Download the raw scientific data (FITS) — for re-processing, not sharing">
+              <Button
+                size="xs" variant="light" leftSection={<IconDownload size={14} />}
+                component="a" href={api.stackArtifactUrl(safe, run.id, "fits")}
+              >
+                FITS
+              </Button>
+            </Tooltip>
           )}
           {run.has_tiff && (
             <Button
@@ -672,7 +684,8 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
               : previewSrc)
           : null}
         title={run.output_basename}
-        downloadHref={run.has_fits ? api.stackArtifactUrl(safe, run.id, "fits") : undefined}
+        downloadHref={run.has_preview ? api.stackArtifactUrl(safe, run.id, "preview") : undefined}
+        rawHref={run.has_fits ? api.stackArtifactUrl(safe, run.id, "fits") : undefined}
         onClose={() => setLight(false)}
       />
     </Card>

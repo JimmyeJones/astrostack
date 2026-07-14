@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActionIcon, Group, Modal, Text, Tooltip } from "@mantine/core";
 import {
-  IconArrowsMaximize, IconDownload, IconZoomIn, IconZoomOut,
+  IconArrowsMaximize, IconDatabase, IconPhotoDown, IconZoomIn, IconZoomOut,
 } from "@tabler/icons-react";
 
 interface Transform {
@@ -49,11 +49,16 @@ export function computePinch(
  *    effect keyed on `src` couldn't reliably find the node.
  */
 export function ImageLightbox({
-  src, title, downloadHref, onClose,
+  src, title, downloadHref, rawHref, onClose,
 }: {
   src: string | null;
   title?: string;
+  /** The picture being shown (a shareable PNG/JPEG) — the download the viewer
+   * most likely wants: what they're looking at, not a 100 MB scientific file. */
   downloadHref?: string;
+  /** Optional secondary download for the raw scientific data (FITS), offered
+   * next to the picture download so power users keep access to it. */
+  rawHref?: string;
   onClose: () => void;
 }) {
   const [t, setT] = useState<Transform>(RESET);
@@ -230,8 +235,12 @@ export function ImageLightbox({
             onClick={() => setT(RESET)} aria-label="Reset zoom">
             <IconArrowsMaximize size={20} /></ActionIcon></Tooltip>
           {downloadHref ? (
-            <Tooltip label="Download"><ActionIcon size="lg" variant="subtle" color="gray"
-              component="a" href={downloadHref} aria-label="Download"><IconDownload size={20} /></ActionIcon></Tooltip>
+            <Tooltip label="Download picture (PNG)"><ActionIcon size="lg" variant="subtle" color="gray"
+              component="a" href={downloadHref} aria-label="Download picture"><IconPhotoDown size={20} /></ActionIcon></Tooltip>
+          ) : null}
+          {rawHref ? (
+            <Tooltip label="Download raw data (FITS)"><ActionIcon size="lg" variant="subtle" color="gray"
+              component="a" href={rawHref} aria-label="Download raw data"><IconDatabase size={20} /></ActionIcon></Tooltip>
           ) : null}
           <ActionIcon size="lg" variant="subtle" color="gray" onClick={onClose} aria-label="Close">✕</ActionIcon>
         </Group>
