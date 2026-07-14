@@ -47,6 +47,47 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**Frames table "Sky" column shows `0` for an unmeasured frame — an un-QC'd / corrupt sub reads as
+  having the darkest (best) sky.**~~ — **FIXED v0.122.1** (Builder 2026-07-14, branch
+  `claude/pensive-faraday-4vpc3q`; found by a fresh adversarial frontend audit, regression-tested).
+  In `frontend/src/routes/Target.tsx` the Sky cell rendered `f.sky_adu_median ?? 0` — so a **null**
+  (unmeasured) sky showed as the number **0**, while every sibling metric column shows `—` for null
+  (FWHM/Ecc via the `NUM` helper, Stars via `?? "—"`, Transparency via an explicit null guard). Because
+  Sky is a **sortable** header (server-sorted) and `0` is the darkest/"cleanest" end of the scale, those
+  unmeasured frames also sorted to the top as if they had the best sky. Fixed to guard null → `—`, matching
+  the Transparency column's pattern exactly. Frontend-only, one cell; no backend/schema/API change.
+  Regression `Target.test.tsx::"shows an em-dash (not 0) for a frame with no measured sky background"`
+  (fails-before: the Sky cell renders `0` / passes-after: `—`). Severity: cosmetic/misleading-display.
+  Confidence: traced + regression-tested.
+
+- ~~**One target that fails to *open* sinks the *entire* unattended auto-stack pass (and the
+  reprocess-everything batch) — one bad target silently skips auto-stack for every other target.**~~ —
+  **FIXED v0.121.3** (Builder 2026-07-14, branch `claude/pensive-faraday-4vpc3q`; traced + reproduced +
+  regression-tested). Found by a fresh adversarial webapp-autonomy audit — the *same* "one bad target sinks
+  the batch" class as the QC/solve isolation gap fixed in v0.110.1, in the two sibling loops that were still
+  exposed. In `webapp/pipeline.py`, both the unattended **auto-stack** loop (`_pipeline_body`) and the
+  **reprocess-everything** loop (`submit_reprocess_all`) wrapped only `_stack_target` in their per-target
+  `try/except`, but each iteration's *pre-stack* helpers all open the target's project DB *before* the try:
+  auto-stack's `_auto_stack_frame_count` / `_mixed_pointing_check` / `_mark_auto_stack_attempt`, and
+  reprocess-all's `_last_stack_version_for_target` / `_refresh_target` / `_last_stack_options_for_target` /
+  `lib.open_target`. `Project.open` raises `FileNotFoundError` when `project.sqlite` is missing (or
+  `RuntimeError` on a schema-too-new DB) — a realistic live-NAS state: a target still registered in
+  `library.sqlite` but whose folder/DB was deleted directly, a partial delete, or a restored-from-backup
+  mismatch. Because the loop iterates **all** `lib.list_targets()` (name-sorted), one such stale target raised
+  straight out of the pass: the pipeline job went **red** and **every other target's auto-stack was silently
+  skipped** — the walk-away "drop files → great image" workflow stopped for the whole library until the stale
+  entry was cleaned up. `submit_reprocess_all` even documents "a bad target is isolated, the batch carries on",
+  which this broke. **Fix:** widen each loop's `try/except` to cover the *whole* per-target body (the pre-stack
+  opens included), mirroring the QC loop — record the broken target in `stack_errors` / `failed` and carry on;
+  reprocess-all routes its per-target progress update through a `finally` so the counter still advances past a
+  broken target. Additive, no schema/config/API/default change; only converts an escaping exception into a
+  recorded-and-skipped target so the healthy targets still process. Regression
+  `tests/webapp/test_pipeline_stack_isolation.py` (3 cases: a broken target is isolated in auto-stack while the
+  healthy target still stacks; the same for reprocess-all with the broken target recorded in `failed`; and
+  reprocess-all's progress counter still reaches 2/2 over a broken target). All three fail-before with the exact
+  `FileNotFoundError` / pass-after. Severity: wrong *outcome* for automation (no pixel data corrupted, but the
+  unattended path silently stops). Confidence: reproduced + fixed.
+
 - ~~**⭐ OWNER-REPORTED (2026-07 — TOP PRIORITY) — bright galaxy cores blow out to
   white, and the Auto result regressed.**~~ — **FIXED v0.119.1** (Builder 2026-07-14,
   branch `claude/pensive-faraday-r22s3k`; traced + reproduced + regression-tested).
@@ -3438,6 +3479,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   keeps only the FITS files). tsc + full vitest (776) + vite build green. **Slice (b) remainder
   — per-file progress, `webkitdirectory` on the picker, partial-upload cleanup — and slice (c)
   remain open.**
+  — **AUTO-DERIVE THE TARGET FROM A DROPPED FOLDER SHIPPED v0.122.0** (Builder 2026-07-14, branch
+  `claude/pensive-faraday-4vpc3q`; part of slice (b) — folder-structure preservation). Before this,
+  dragging a whole Seestar target folder (e.g. `M 31/`) onto the Library left the "Target folder"
+  field blank, so every sub landed loose in **Unsorted** with the folder repeated in each flattened
+  filename (`M31__Light_001.fit`) — a beginner's folder silently vanished into the catch-all instead of
+  becoming a target. Now, when a folder is dropped and the user hasn't typed a target, `UploadFits`
+  adopts the dropped folder's name as the (still-editable) target and strips that redundant top segment
+  off each file, so the subs land cleanly in `incoming/M 31/` and the scanner makes an "M 31" target —
+  the "it just works" north star. Two new pure, exported, unit-tested helpers do it: `commonTopFolder`
+  (the single top-level folder shared by every dropped file's relative path, or "" for a flat
+  multi-select / two ambiguous folders / a partial mix — so it only ever auto-fills when unambiguous) and
+  `stripTopFolder` (drops just the promoted top segment, leaving any deeper session subpath intact so
+  cross-session same-named subs stay distinct via the existing server flatten). A user-typed target still
+  wins (no auto-fill, filenames left for the server to flatten). Frontend-only, additive; no
+  backend/schema/API/default change — the existing streaming/sanitising/dedup endpoint is reused as-is.
+  Tests: `UploadFits.test.tsx` (+9 — `commonTopFolder` shared/nested/flat/ambiguous/partial/backslash/
+  empty, `stripTopFolder` prefix + non-prefix, a component folder-drop that pre-fills the target and
+  strips the prefix off the uploaded names, and a typed-target-wins case). tsc + full vitest + vite build
+  green.
   <details><summary>Original write-up</summary>
   Today the only way to get subs in is to drop Seestar target folders
   into `incoming/` over an SMB/NFS share — which assumes the user can mount the NAS
@@ -3929,6 +3989,34 @@ problems. Dogfood it every big-picture run and fix root causes.
   the accumulator it would crash rather than broadcast. If pursued: expand a 2-D mask to `(...,1)` at the top
   of `add`/`add_window` (or tighten the docstring to state `(H,W,1)`/`(H,W,C)` only). One-liner, testable in
   isolation; only worth doing if a run is already in that file. (XS, engine/tidiness.)
+- **NEW (Builder 2026-07-14) — the κ-σ two-pass stack branch lacks the `if n_used == 0: raise` guard its
+  sibling paths all have (robustness gap, effectively unreachable).** *(Numeric stacking-engine audit
+  2026-07-14.)* In `stack/stacker.py` (~L1116–1124) the two-pass κ-σ combine writes its result without the
+  `if n_used == 0: raise` guard that every sibling path has (min/max ~L1032, single-pass ~L1150, pass-1 ~L1070).
+  If pass 2 somehow aligned **zero** frames while pass 1 succeeded, an all-NaN master would be written instead
+  of raising a clear error. It's essentially unreachable deterministically — both passes read the same files
+  with deterministic alignment, so `n_used_p2 == n_used_p1 > 0` — and the failure mode is a *visibly* broken
+  all-NaN image, not silent pixel corruption, so it's a robustness/consistency gap, not a live bug. If pursued:
+  add the same `n_used == 0` guard for symmetry with the other three combine paths. (XS, engine/robustness —
+  low priority, only if a run is already in that combine branch.)
+- **NEW (Builder 2026-07-14) — the Target page's `trailedAccepted` badge count is recomputed client-side and
+  can drift from the server's `trailed_frame_ids`.** *(Adversarial frontend audit 2026-07-14, low confidence.)*
+  `frontend/src/routes/Target.tsx` (~L466–475) recomputes the trailed-frame count in the browser
+  (`Math.max(med + 3*mad, 0.6)` threshold) and its own comment says it must "mirror … keep in sync" with the
+  server's `trailed_frame_ids`. If the server's threshold ever drifts, the badge / confirm-dialog count would
+  disagree with the number the one-click reject action actually removes. Duplicated-logic risk only — no
+  divergence confirmed today (the thresholds currently match). If pursued: have the badge consume the server's
+  `trailed_frame_ids` count directly instead of re-deriving it, so there's a single source of truth. (S,
+  friendliness/consistency — low priority.)
+- **NEW (Builder 2026-07-14) — `frontend/src/routes/Editor.test.tsx` is flaky under load (spurious ~20 s
+  timeouts), for the Scout/infra to stabilise.** Running the full `vitest run` (or `Editor.test.tsx` alone) on a
+  resource-constrained host, 2–3 tests intermittently fail with 20 s timeouts — the failing set *changes* run to
+  run (observed: "splits the preview … 'Split this op'", "passes the recipe so the coverage overlay follows the
+  crop geometry", "shows the proposed crop over the coverage heatmap on a mosaic"). Confirmed pre-existing on a
+  clean `origin/main` (not tied to any one change), so it's environmental/timing, not a product regression — but
+  it makes the local green-gate noisy and could occasionally flake CI. Likely fixes: raise the per-test timeout
+  for the heaviest editor render tests, or reduce their fake-render/query fan-out so they settle faster under
+  contention. (S, infra/test-stability — a Scout QA/infra item.)
 - **NEW (Builder 2026-07-14) — consolidate the Dashboard's three per-project roll-ups into one cached pass
   (only with a measurement).** *(spotted shipping the v0.119.0 "Target progress" card.)* The Dashboard now
   triggers up to **three** independent passes that each open *every* project once: `/api/stats`'s stack

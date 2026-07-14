@@ -493,6 +493,29 @@ describe("TargetView streaked badge", () => {
     expect(screen.queryByText(/streaked/)).not.toBeInTheDocument();
   });
 
+  it("shows an em-dash (not 0) for a frame with no measured sky background", async () => {
+    // An un-QC'd / corrupt frame has a null sky_adu_median. Rendering it as the
+    // number 0 (the darkest, "best" sky) is misleading — every sibling metric
+    // column shows — for null, and Sky is a sortable header, so a 0 would sort it
+    // to the cleanest end. It must read — like the others.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget({ n_frames: 1 }));
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      mkFrame(1, {
+        // Only the sky is unmeasured; the other metrics stay present so a stray 0
+        // could only come from the Sky cell.
+        sky_adu_median: null, fwhm_px: 2.5, star_count: 100,
+        eccentricity_median: 0.4, transparency_score: 5000,
+      }),
+    ]);
+
+    renderTarget();
+
+    await screen.findAllByText("Ecc.");
+    // Before the fix the Sky cell rendered the number 0; after, it renders —.
+    expect(screen.queryByText("0")).not.toBeInTheDocument();
+  });
+
   it("gives the metric column headers plain-language hint tooltips", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
