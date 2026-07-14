@@ -3696,6 +3696,28 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+- **NEW (Builder 2026-07-14) — run the GPU bg-flatten tests on a CPU-only host via a NumPy-backed CuPy shim
+  (close the structural GPU blind spot).** *(Surfaced fixing the v0.119.7 GPU object-mask dilation bug.)*
+  `tests/test_bg_gpu.py` skips **wholesale** when CuPy is absent (`pytest.skip(..., allow_module_level=True)`),
+  so on CPU-only CI the entire `_subtract_background_gpu` path is untested — which is exactly why a
+  hardcoded-5px dilation that ignored `dilate_object_mask_px` sat there unnoticed until an adversarial parity
+  audit. The v0.119.7 regression proved the pattern works: a small `fake_cupy` fixture in
+  `tests/test_bg_object_mask_dilation_parity.py` backs `cupy`/`cupyx.scipy.ndimage` with NumPy/SciPy (same API)
+  and drives the **real** GPU function on the host. Promote that shim to a shared fixture (e.g. a `conftest`
+  helper) and run `test_bg_gpu.py`'s CPU↔GPU-parity cases through it whenever real CuPy is unavailable, so the
+  GPU code path is exercised in ordinary CI — catching the next GPU-only divergence before it ships in the
+  image. Keep the real-CuPy path preferred when present. Pure test infrastructure, no product change.
+  (S, infra/test-coverage.)
+- **NEW (Builder 2026-07-14) — accumulators reject a 2-D `(H,W)` `mask` (documented "broadcastable" but only
+  `(H,W,1)`/`(H,W,3)` work) — dead API surface today, latent trap.** *(Numeric stacking-engine audit
+  2026-07-14.)* `stack/accumulator.py`'s `add`/`add_window` docstring says the `mask` arg is "broadcastable",
+  but a 2-D `(H,W)` mask against an `(H,W,3)` image raises `ValueError` in `np.broadcast_to` (trailing dims 3 vs
+  2 don't align). **Not an image-corruption bug and not currently reachable** — no pipeline code passes `mask`
+  to any accumulator (κ-σ rejection is applied via `np.where(keep, aligned, np.nan)` *before* the mask-less
+  `add_window` call), verified by the audit. If a future path ever wired a per-pixel 2-D reject mask through
+  the accumulator it would crash rather than broadcast. If pursued: expand a 2-D mask to `(...,1)` at the top
+  of `add`/`add_window` (or tighten the docstring to state `(H,W,1)`/`(H,W,C)` only). One-liner, testable in
+  isolation; only worth doing if a run is already in that file. (XS, engine/tidiness.)
 - **NEW (Builder 2026-07-14) — consolidate the Dashboard's three per-project roll-ups into one cached pass
   (only with a measurement).** *(spotted shipping the v0.119.0 "Target progress" card.)* The Dashboard now
   triggers up to **three** independent passes that each open *every* project once: `/api/stats`'s stack
