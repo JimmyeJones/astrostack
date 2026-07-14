@@ -235,6 +235,48 @@ def test_render_404_without_fits(client, solved_library):
     assert r.status_code == 404
 
 
+def test_jpeg_download_transcodes_the_preview(client, solved_library):
+    """A run's finished picture can be downloaded as a share-friendly JPEG, served
+    as an on-the-fly transcode of the stored preview PNG (no separate file)."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    # Render a real preview PNG (the placeholder is just the magic bytes).
+    assert client.post(f"/api/targets/{safe}/stack-runs/{run_id}/preview",
+                       json={"stretch": 0.5, "black": 0.35}).status_code == 200
+
+    r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/jpeg")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/jpeg"
+    assert r.content[:2] == b"\xff\xd8"                       # JPEG SOI marker
+    assert 'filename="master.jpg"' in r.headers.get("content-disposition", "")
+
+
+def test_jpeg_download_404_when_no_preview(client, solved_library):
+    """No preview PNG on disk → a clear 404 rather than a 500 transcode error."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)  # placeholder preview only
+    from pathlib import Path
+    # Point the run's preview at a missing file to simulate a run with no preview.
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            Path(run.preview_path).unlink()
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/jpeg")
+    assert r.status_code == 404
+
+
+def test_jpeg_download_404_for_unknown_run(client, solved_library):
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    r = client.get(f"/api/targets/{safe}/stack-runs/99999/jpeg")
+    assert r.status_code == 404
+
+
 def test_stack_info_reads_provenance_cards(client, solved_library):
     """The info endpoint surfaces the provenance header cards (integration time,
     frame count, method) from the run's master FITS."""

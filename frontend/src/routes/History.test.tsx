@@ -169,19 +169,22 @@ describe("HistoryView", () => {
     await waitFor(() => expect(screen.getByText(/42 min/)).toBeInTheDocument());
   });
 
-  it("offers a Picture (PNG) download of the finished image when a preview exists", async () => {
+  it("offers PNG and JPEG downloads of the finished image when a preview exists", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ has_preview: true })]);
     renderHistory();
     await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
-    const pic = screen.getByRole("link", { name: "Picture" });
-    expect(pic).toHaveAttribute("href", "/api/targets/M_42/stack-runs/1/preview");
+    const png = screen.getByRole("link", { name: "PNG" });
+    expect(png).toHaveAttribute("href", "/api/targets/M_42/stack-runs/1/preview");
+    const jpeg = screen.getByRole("link", { name: "JPEG" });
+    expect(jpeg).toHaveAttribute("href", "/api/targets/M_42/stack-runs/1/jpeg");
   });
 
-  it("does not offer a Picture download when the run has no preview", async () => {
+  it("does not offer a picture download when the run has no preview", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ has_preview: false })]);
     renderHistory();
     await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
-    expect(screen.queryByRole("link", { name: "Picture" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "PNG" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "JPEG" })).not.toBeInTheDocument();
     // The FITS (raw-data) download is still offered.
     expect(screen.getByRole("link", { name: "FITS" })).toBeInTheDocument();
   });

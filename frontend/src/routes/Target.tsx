@@ -5,8 +5,8 @@ import {
 } from "@mantine/core";
 import {
   IconAlertTriangle, IconArrowBackUp, IconCheck, IconDeviceFloppy, IconHistory,
-  IconNotes, IconPhoto, IconSparkles, IconStack2, IconTelescope, IconTargetArrow,
-  IconWand, IconX,
+  IconNotes, IconPhoto, IconPhotoDown, IconSparkles, IconStack2, IconTelescope,
+  IconTargetArrow, IconWand, IconX,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
@@ -910,6 +910,15 @@ export function TargetView() {
               leftSection={<IconWand size={16} />} aria-label="Edit latest stack">
               <Box visibleFrom="sm">Edit</Box>
             </Button>
+          ) : null}
+          {latestRun?.has_preview ? (
+            <Tooltip label="Download the latest finished picture as a shareable PNG image">
+              <Button component="a" href={api.stackArtifactUrl(safe, latestRun.id, "preview")}
+                variant="default" leftSection={<IconPhotoDown size={16} />}
+                aria-label="Download latest picture">
+                <Box visibleFrom="sm">Picture</Box>
+              </Button>
+            </Tooltip>
           ) : null}
           <Button component={Link} to={`/targets/${safe}/stack`}
             leftSection={<IconStack2 size={16} />} aria-label="Stack">

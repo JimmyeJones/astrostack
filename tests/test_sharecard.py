@@ -3,7 +3,7 @@
 import numpy as np
 
 from seestack.sharecard import format_duration, share_blurb
-from seestack.stack.output import write_share_jpeg
+from seestack.stack.output import png_bytes_to_jpeg, write_share_jpeg
 
 
 def test_format_duration_buckets():
@@ -62,3 +62,41 @@ def test_write_share_jpeg_keeps_small_image_native_and_blackens_nan(tmp_path):
     with Image.open(out) as img:
         assert img.size == (50, 40)            # not upscaled
         assert img.getpixel((0, 0)) == (0, 0, 0) or max(img.getpixel((0, 0))) < 8
+
+
+def test_png_bytes_to_jpeg_transcodes_at_same_resolution(tmp_path):
+    """The finished-picture JPEG download transcodes the stored preview PNG to a
+    JPEG at the same size (only the container/size on disk differ)."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    # A stored preview PNG (RGB), as render writes it.
+    src = Image.new("RGB", (50, 40), (30, 120, 200))
+    buf = BytesIO()
+    src.save(buf, format="PNG")
+
+    jpeg = png_bytes_to_jpeg(buf.getvalue())
+    assert jpeg[:2] == b"\xff\xd8"              # JPEG SOI marker
+    with Image.open(BytesIO(jpeg)) as img:
+        assert img.format == "JPEG"
+        assert img.mode == "RGB"
+        assert img.size == (50, 40)             # same resolution, not resized
+
+
+def test_png_bytes_to_jpeg_flattens_transparency_onto_black(tmp_path):
+    """JPEG has no alpha — a transparent (uncovered) region flattens to black,
+    matching the preview's own NaN→black convention, and never crashes."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    src = Image.new("RGBA", (8, 8), (200, 200, 200, 255))
+    src.putpixel((0, 0), (123, 45, 67, 0))       # fully transparent corner
+    buf = BytesIO()
+    src.save(buf, format="PNG")
+
+    jpeg = png_bytes_to_jpeg(buf.getvalue())
+    with Image.open(BytesIO(jpeg)) as img:
+        assert img.mode == "RGB"
+        assert max(img.getpixel((0, 0))) < 8     # transparent → black, not the RGBA colour

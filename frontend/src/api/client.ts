@@ -897,7 +897,7 @@ export const api = {
     if (opts.mosaic_canvas) p.set("mosaic_canvas", opts.mosaic_canvas);
     return req<StackEstimate>(`/api/targets/${safe}/stack-estimate?${p.toString()}`);
   },
-  stackArtifactUrl: (safe: string, id: number, kind: "preview" | "fits" | "tiff") =>
+  stackArtifactUrl: (safe: string, id: number, kind: "preview" | "jpeg" | "fits" | "tiff") =>
     `/api/targets/${safe}/stack-runs/${id}/${kind}`,
   stackRenderUrl: (safe: string, id: number, stretch: number, black: number) =>
     `/api/targets/${safe}/stack-runs/${id}/render?stretch=${stretch}&black=${black}`,

@@ -1451,6 +1451,16 @@ def _auto_bind_calibration(settings: Settings, proj: Any, opts_dict: dict[str, A
     if bound:
         opts_dict.update(bound)
         log.info("auto-bound calibration masters: %s", ", ".join(sorted(bound)))
+    # A stray ``scale_dark_to_light`` left in the global defaults is only
+    # meaningful when auto-bind itself bound a bias-scaled dark; otherwise it
+    # asks the engine to exposure-scale a dark with no bias to scale against —
+    # a no-op that misrepresents the run's calibration intent (and, if a plain
+    # matched-exposure dark was just bound, contradicts it). This function only
+    # runs when no calibration path was pre-set, so any flag here is a leftover
+    # from ``default_stack_options`` (whose paths are stripped) — drop it unless
+    # we set it ourselves.
+    if opts_dict.get("scale_dark_to_light") and not bound.get("scale_dark_to_light"):
+        opts_dict.pop("scale_dark_to_light", None)
 
 
 def _stack_target(

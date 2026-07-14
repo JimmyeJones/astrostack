@@ -663,6 +663,84 @@ def test_auto_bind_still_uncalibrated_when_no_dark_is_bindable(tmp_path):
     assert "bias_path" not in bound
 
 
+def _fake_proj_with_frames(exposure_s=30.0, gain=80.0, width=4, height=4):
+    """A minimal stand-in for a Project exposing ``iter_frames`` for
+    ``_auto_bind_calibration`` — just the frame attributes it reads."""
+    from types import SimpleNamespace
+
+    frame = SimpleNamespace(exposure_s=exposure_s, gain=gain, sensor_temp_c=None,
+                            width_px=width, height_px=height)
+
+    class _Proj:
+        def iter_frames(self, accepted_only=False):  # noqa: ARG002
+            return [frame, frame]
+
+    return _Proj()
+
+
+def test_auto_bind_clears_a_stray_scale_dark_to_light_flag(tmp_path):
+    """A leftover ``scale_dark_to_light=True`` in the global defaults (a bool flag
+    survives the calibration-path strip) must be cleared when auto-bind binds a
+    plain matched-exposure dark with no bias — otherwise the engine is asked to
+    exposure-scale a dark it has no bias to scale against. (Tidiness/autonomy: the
+    engine no-ops the scaling, but the run's calibration intent is misrepresented.)"""
+    from types import SimpleNamespace
+
+    from webapp.pipeline import _auto_bind_calibration
+
+    root = tmp_path / "lib"
+    dark = _register(root, "dark", exposure_s=30.0, gain=80.0)
+    settings = SimpleNamespace(resolved_library_root=root)
+    proj = _fake_proj_with_frames(exposure_s=30.0, gain=80.0)
+
+    # Global default carried the flag with no dark; the path strip keeps the bool.
+    opts = {"scale_dark_to_light": True}
+    _auto_bind_calibration(settings, proj, opts)
+
+    assert Path(opts["dark_path"]).name == dark["filename"]  # a plain dark was bound
+    assert "bias_path" not in opts
+    assert "scale_dark_to_light" not in opts  # the stray flag was cleared
+
+
+def test_auto_bind_keeps_scale_dark_to_light_when_it_binds_a_bias_scaled_dark(tmp_path):
+    """The clearing is precise: when auto-bind *itself* binds a bias-scaled dark
+    (exposure mismatch recovered via a confident bias), the flag it set stays."""
+    from types import SimpleNamespace
+
+    from webapp.pipeline import _auto_bind_calibration
+
+    root = tmp_path / "lib"
+    _register(root, "dark", exposure_s=30.0, gain=80.0)
+    _register(root, "bias", exposure_s=0.0, gain=80.0)
+    settings = SimpleNamespace(resolved_library_root=root)
+    proj = _fake_proj_with_frames(exposure_s=10.0, gain=80.0)  # exposure mismatch
+
+    opts: dict = {}
+    _auto_bind_calibration(settings, proj, opts)
+
+    assert "dark_path" in opts and "bias_path" in opts
+    assert opts["scale_dark_to_light"] is True
+
+
+def test_auto_bind_clears_a_stray_flag_even_when_no_dark_binds(tmp_path):
+    """When no master binds at all, a stray ``scale_dark_to_light`` (no dark to
+    scale) is still meaningless and gets cleared."""
+    from types import SimpleNamespace
+
+    from webapp.pipeline import _auto_bind_calibration
+
+    root = tmp_path / "lib"  # empty library — nothing to bind
+    root.mkdir(parents=True, exist_ok=True)
+    settings = SimpleNamespace(resolved_library_root=root)
+    proj = _fake_proj_with_frames(exposure_s=30.0, gain=80.0)
+
+    opts = {"scale_dark_to_light": True}
+    _auto_bind_calibration(settings, proj, opts)
+
+    assert "dark_path" not in opts
+    assert "scale_dark_to_light" not in opts
+
+
 def test_auto_bind_recovers_a_flat_when_the_top_pick_fails_its_gate(tmp_path):
     """The closest flat by match distance is from a different-sized camera, so it
     fails the dimension gate, while a slightly-further same-dimension flat binds

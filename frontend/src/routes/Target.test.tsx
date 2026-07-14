@@ -73,6 +73,34 @@ describe("TargetView process action", () => {
   });
 });
 
+describe("TargetView latest-picture download", () => {
+  it("offers a one-click PNG download of the latest stack's picture", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ id: 9 })]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1), mkFrame(2)]);
+
+    renderTarget();
+
+    const link = await screen.findByRole("link", { name: "Download latest picture" });
+    expect(link).toHaveAttribute(
+      "href", client.api.stackArtifactUrl("M_42", 9, "preview"));
+  });
+
+  it("hides the picture download when the latest stack has no preview", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns")
+      .mockResolvedValue([mkRun({ id: 9, has_preview: false })]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1), mkFrame(2)]);
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(screen.getByRole("link", { name: "History" })).toBeInTheDocument());
+    expect(screen.queryByRole("link", { name: "Download latest picture" }))
+      .not.toBeInTheDocument();
+  });
+});
+
 describe("TargetView getting-started callout", () => {
   it("nudges a fresh target (frames but no stack yet) toward one-click Process", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
