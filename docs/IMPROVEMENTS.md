@@ -3895,16 +3895,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
-- **NEW (Scout 2026-07-14) — a schema-completeness drift test so a `frames`/`stack_runs` column can never
-  again be added without an upgrade being safe.** *(Surfaced fixing the v0.119.8 migration-brick bug — every
-  later frame column reached `SCHEMA_SQL` with no `ALTER`, bricking older projects until the runtime
-  `_reconcile_table_columns` backfill was added.)* The runtime reconcile now repairs any drift, but a **cheap
-  guard test** would catch the mismatch at commit time and document the invariant: assert that (a) every column
-  `_row_to_frame`/`_INSERT_COLS`/`StackRunRow` reads exists in `SCHEMA_SQL` (build the schema in `:memory:`,
-  compare against `PRAGMA table_info`), and (b) a project created at the *oldest* supported `user_version` (or a
-  representative pre-QC-columns fixture) opens and round-trips a frame **and** a stack-run read without raising.
-  This turns "did someone forget the migration?" from a latent live-install brick into a red test. Pure test
-  infrastructure, no product change. (S, infra/upgrade-safety — reinforces §9.)
+- ~~**NEW (Scout 2026-07-14) — a schema-completeness drift test so a `frames`/`stack_runs` column can never
+  again be added without an upgrade being safe.**~~ — **SHIPPED v0.121.1** (Builder 2026-07-14, branch
+  `claude/pensive-faraday-4tspys`). New `tests/test_project_schema_drift.py` (4 tests) documents and guards the
+  §9 invariant the v0.119.8 brick violated. Part (a) — three commit-time guards: every column `FrameRow`
+  (i.e. `_row_to_frame`) reads and `_INSERT_COLS` writes exists in `SCHEMA_SQL` (built in `:memory:`, compared
+  against `PRAGMA table_info`); the same for `StackRunRow`/`stack_runs`; and every reader column is covered by
+  `_EXPECTED_COLUMNS` (the set the runtime `_reconcile_table_columns` backfill restores) — so a field added to a
+  read contract without the column reaching the schema goes **red** instead of shipping a latent live-install
+  brick (verified: adding a phantom `FrameRow` field trips the guard). Part (b) — an end-to-end round-trip:
+  a hand-built project.sqlite at an *old* `user_version` (1) with a pre-QC-columns `frames` table (no hint/QC/
+  streak columns) and **no** `stack_runs` table opens via `Project.open` (migrate + reconcile) and round-trips
+  a frame read *and* a stack-run write/read without raising, with backfilled columns defaulting cleanly. Pure
+  test infrastructure, no product change; full suite green. (S, infra/upgrade-safety — reinforces §9.)
 - **NEW (Builder 2026-07-14) — run the GPU bg-flatten tests on a CPU-only host via a NumPy-backed CuPy shim
   (close the structural GPU blind spot).** *(Surfaced fixing the v0.119.7 GPU object-mask dilation bug.)*
   `tests/test_bg_gpu.py` skips **wholesale** when CuPy is absent (`pytest.skip(..., allow_module_level=True)`),
