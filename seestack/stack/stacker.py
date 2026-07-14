@@ -1303,8 +1303,12 @@ def run_stack(
 
     # Coverage min/max for diagnostics — an honest *frame* count (unweighted)
     # when available, so quality weighting doesn't understate it; else the
-    # coverage map (channels share the valid mask in our pipeline).
-    cov_2d = frame_cov if frame_cov is not None else coverage[..., 0]
+    # coverage map (channels share the valid mask in our pipeline). Mirror the
+    # history-record slice above: guard ``ndim == 3`` so a future path returning
+    # a 2-D coverage map alongside ``frame_cov=None`` takes the whole map, not a
+    # wrong ``[..., 0]`` slice.
+    cov_2d = frame_cov if frame_cov is not None else (
+        coverage[..., 0] if coverage.ndim == 3 else coverage)
     return StackResult(
         output_dir=project.project_dir / "output",
         fits_path=paths["fits"],

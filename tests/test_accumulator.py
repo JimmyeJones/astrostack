@@ -323,3 +323,51 @@ def test_min_max_reject_windowed_matches_full():
     np.testing.assert_allclose(fr[1:5, 1:5], wr[1:5, 1:5], rtol=1e-5)
     # Windowed accumulator never touched the margin.
     assert np.isnan(wr[0, 0])
+
+
+def test_weighted_sum_accepts_a_2d_per_pixel_mask():
+    """The docstring promises a "broadcastable" mask; a natural per-pixel 2-D
+    ``(H, W)`` mask against an ``(H, W, C)`` image must mask that pixel across
+    *all* channels rather than raising a broadcasting ``ValueError`` (trailing
+    dims ``W`` vs ``C`` don't align). Regression for the latent accumulator trap."""
+    acc = WeightedSumAccumulator((2, 2, 3))
+    img = np.full((2, 2, 3), 10.0, dtype=np.float32)
+    mask2d = np.array([[True, False], [True, True]])  # skip pixel (0, 1) everywhere
+    acc.add(img, mask=mask2d)  # would raise ValueError before the fix
+    acc.add(img, mask=mask2d)
+    out = acc.result()
+    # Unmasked pixels averaged normally over two frames…
+    np.testing.assert_allclose(out[0, 0], 10.0)
+    np.testing.assert_allclose(out[1, 1], 10.0)
+    # …and the masked pixel got no coverage on any channel → NaN, count 0.
+    assert np.isnan(out[0, 1]).all()
+    assert acc.frame_coverage[0, 1] == 0
+    assert (acc.frame_coverage[[0, 1, 1], [0, 0, 1]] == 2).all()
+    # A same-shape (H, W, C) mask still behaves identically (unchanged contract).
+    acc3 = WeightedSumAccumulator((2, 2, 3))
+    acc3.add(img, mask=np.broadcast_to(mask2d[..., None], (2, 2, 3)))
+    np.testing.assert_array_equal(acc3.frame_coverage, acc.frame_coverage // 2)
+
+
+def test_weighted_sum_window_accepts_a_2d_per_pixel_mask():
+    """``add_window`` honours the same 2-D per-pixel mask contract as ``add``."""
+    acc = WeightedSumAccumulator((4, 4, 3))
+    win = np.full((2, 2, 3), 7.0, dtype=np.float32)
+    mask2d = np.array([[True, False], [False, True]])
+    acc.add_window(win, 1, 1, mask=mask2d)  # would raise ValueError before the fix
+    cov = acc.frame_coverage
+    assert cov[1, 1] == 1 and cov[2, 2] == 1
+    assert cov[1, 2] == 0 and cov[2, 1] == 0
+    assert cov[0, 0] == 0  # window never touched the margin
+
+
+def test_min_max_reject_accepts_a_2d_per_pixel_mask():
+    """The MinMaxReject accumulator shares the mask contract via ``_add_into``."""
+    acc = MinMaxRejectAccumulator((2, 2, 3))
+    img = np.full((2, 2, 3), 5.0, dtype=np.float32)
+    mask2d = np.array([[True, True], [False, True]])
+    for _ in range(3):
+        acc.add(img, mask=mask2d)  # would raise ValueError before the fix
+    out = acc.result()
+    np.testing.assert_allclose(out[0, 0], 5.0)
+    assert np.isnan(out[1, 0]).all()  # masked pixel never covered → NaN

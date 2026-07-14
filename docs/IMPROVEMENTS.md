@@ -3919,16 +3919,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   GPU code (nh/nw ≥ 2, no CPU fallback). The real-CuPy path stays preferred: `test_bg_gpu.py` still runs there
   and is untouched; the dilation-parity test now consumes the shared fixture (local copy removed). Pure test
   infrastructure, no product change; full suite green. (S, infra/test-coverage.)
-- **NEW (Builder 2026-07-14) — accumulators reject a 2-D `(H,W)` `mask` (documented "broadcastable" but only
-  `(H,W,1)`/`(H,W,3)` work) — dead API surface today, latent trap.** *(Numeric stacking-engine audit
-  2026-07-14.)* `stack/accumulator.py`'s `add`/`add_window` docstring says the `mask` arg is "broadcastable",
-  but a 2-D `(H,W)` mask against an `(H,W,3)` image raises `ValueError` in `np.broadcast_to` (trailing dims 3 vs
-  2 don't align). **Not an image-corruption bug and not currently reachable** — no pipeline code passes `mask`
-  to any accumulator (κ-σ rejection is applied via `np.where(keep, aligned, np.nan)` *before* the mask-less
-  `add_window` call), verified by the audit. If a future path ever wired a per-pixel 2-D reject mask through
-  the accumulator it would crash rather than broadcast. If pursued: expand a 2-D mask to `(...,1)` at the top
-  of `add`/`add_window` (or tighten the docstring to state `(H,W,1)`/`(H,W,C)` only). One-liner, testable in
-  isolation; only worth doing if a run is already in that file. (XS, engine/tidiness.)
+- ~~**NEW (Builder 2026-07-14) — accumulators reject a 2-D `(H,W)` `mask` (documented "broadcastable" but only
+  `(H,W,1)`/`(H,W,3)` work) — dead API surface today, latent trap.**~~ — **FIXED v0.121.3** (Builder 2026-07-14,
+  branch `claude/pensive-faraday-yiosal`; regression-tested). Made the documented "broadcastable" contract
+  genuinely true (rather than tighten the docstring): a new shared `accumulator._mask_bool(mask, shape)` helper
+  appends a trailing axis to a mask carrying one fewer axis than the image (`(H,W)` → `(H,W,1)`) before
+  `np.broadcast_to`, so a natural per-pixel 2-D mask masks that pixel across **all** channels instead of raising
+  `ValueError` (NumPy aligns *trailing* dims, so `W` vs `C` couldn't align). Wired through both mask-taking
+  accumulators at all three sites — `WeightedSumAccumulator.add`/`add_window` and `MinMaxRejectAccumulator.
+  _add_into` (shared by its `add`/`add_window`). Still not on any live pipeline path (κ-σ rejection is applied
+  via `np.where(keep, aligned, np.nan)` before the mask-less `add_window`, verified unchanged), so a same-shape
+  `(H,W,C)` mask behaves byte-for-byte as before — this only *adds* the 2-D case a future per-pixel-reject path
+  would want. Additive, no schema/config/API/default change. Regression `tests/test_accumulator.py` (+3:
+  `test_weighted_sum_accepts_a_2d_per_pixel_mask` — masked pixel gets zero coverage on every channel + a
+  same-shape mask still matches; `test_weighted_sum_window_accepts_a_2d_per_pixel_mask`;
+  `test_min_max_reject_accepts_a_2d_per_pixel_mask` — each raised `ValueError` before / passes after).
+  (XS, engine/tidiness — hardening per focus #1.)
 - **NEW (Builder 2026-07-14) — consolidate the Dashboard's three per-project roll-ups into one cached pass
   (only with a measurement).** *(spotted shipping the v0.119.0 "Target progress" card.)* The Dashboard now
   triggers up to **three** independent passes that each open *every* project once: `/api/stats`'s stack
@@ -4023,18 +4029,17 @@ problems. Dogfood it every big-picture run and fix root causes.
   stack step is running classified it `done` with `stacked:True`/`run_id:None` instead of `cancelled`. No data
   impact (no `stack_runs` row is written, no crash-loop marker is set, nothing is stranded) — a cosmetic job-state
   label on the Jobs page.
-- **Latent robustness (not a live bug): `stacker.py`'s `coverage_min/max` diagnostic slice lacks its sibling's
-  `ndim==3` guard.** *(Traced, Builder engine audit 2026-07-11.)* At ~L1307 `run_stack` computes
-  `cov_2d = frame_cov if frame_cov is not None else coverage[..., 0]` **without** the `coverage.ndim == 3` guard
-  its sibling at ~L1275 carries. It's safe *today* — the only path that returns `frame_cov=None` (min/max reject)
-  always produces a 3-D `coverage`, so the `[..., 0]` slice is never handed a 2-D array — but it's an asymmetric
-  latent trap: if a future stacking path ever returned `frame_cov=None` alongside a 2-D coverage map, this line
-  would silently take a wrong slice for the `coverage_min`/`coverage_max` provenance (a mis-reported, not
-  corrupt, diagnostic). Harmonise it to match L1275 (add the `coverage.ndim == 3` guard). One-line consistency
-  fix, no behaviour change today; only worth doing if a run is already in `stacker.py`. (S, engine/tidiness.)
-  Found alongside a full re-trace of the accumulator/stacker/mosaic/drizzle/calibrate combine paths, which
-  otherwise came back clean (NaN=coverage, divisor guards, weight accounting, wrap-safe RA, and the pass-1
-  free-before-pass-2 OOM guard all held).
+- ~~**Latent robustness (not a live bug): `stacker.py`'s `coverage_min/max` diagnostic slice lacks its sibling's
+  `ndim==3` guard.**~~ — **FIXED v0.121.4** (Builder 2026-07-14, branch `claude/pensive-faraday-yiosal`). At
+  ~L1307 `run_stack`'s `StackResult` `cov_2d = frame_cov if frame_cov is not None else coverage[..., 0]` now
+  carries the `coverage.ndim == 3` guard its history-record sibling at ~L1275 already had — the two lines are now
+  identical, so a future stacking path returning `frame_cov=None` alongside a 2-D coverage map would take the
+  whole map, not a wrong `[..., 0]` slice for the `coverage_min`/`coverage_max` diagnostic. **No reachable
+  behaviour change today** (the only `frame_cov=None` path, min/max reject, always produces a 3-D `coverage`), so
+  there is no standalone fail-before regression to add — the reachable 3-D path is exercised by the existing
+  stack-pipeline suite (still green) and the guarded sibling expression it now mirrors was already covered. Pure
+  one-line consistency harmonisation, no schema/config/API/default change. (S, engine/tidiness — hardening per
+  focus #1.)
 - ~~**Tidiness: `stretch_suggestion` omits `already_display` from its `EditContext`.**~~ — **SHIPPED v0.109.1**
   (Builder 2026-07-11). `webapp/routers/editor.py::stretch_suggestion` now threads
   `already_display=_run_display_space(run)` into its ctx like every sibling suggestion endpoint, closing the
@@ -4353,6 +4358,18 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.121.4** — Engine robustness (stacking-engine hardening — focus #1; Builder 2026-07-14, branch
+  `claude/pensive-faraday-yiosal`). Harmonised `stacker.py`'s `StackResult` `coverage_min/max` slice (~L1307) to
+  carry the same `coverage.ndim == 3` guard its history-record sibling (~L1275) already had, so a future
+  `frame_cov=None` + 2-D-coverage path can't silently take a wrong `[..., 0]` slice. No reachable behaviour
+  change today (the reachable path stays 3-D); existing stack-pipeline suite green.
+- **v0.121.3** — Engine robustness (stacking-engine hardening — focus #1; Builder 2026-07-14, branch
+  `claude/pensive-faraday-yiosal`). Made the accumulators' documented "broadcastable" `mask` contract true: a
+  shared `accumulator._mask_bool` expands a per-pixel 2-D `(H,W)` mask to `(H,W,1)` before broadcasting so it
+  masks across all channels instead of raising `ValueError`, wired through `WeightedSumAccumulator.add`/
+  `add_window` + `MinMaxRejectAccumulator._add_into`. Not on any live path today (same-shape masks byte-for-byte
+  unchanged); closes a latent trap for any future per-pixel-reject path. +3 regression tests in
+  `tests/test_accumulator.py` (fail-before with `ValueError` / pass-after).
 - **v0.119.8** — Bug fix (**upgrade-safety / data-integrity — §9, top priority class**; Scout 2026-07-14,
   branch `claude/practical-dirac-9awndt`; found by an adversarial ingest/QC audit, **traced + reproduced +
   regression-tested**). **A project created before the QC frame columns existed was permanently bricked on an
