@@ -76,6 +76,32 @@ when you take it.
   shares the identical hard-clip and would benefit from the same rolloff (manual path, so
   lower priority). Severity: wrong-result (owner-visible). Confidence: reproduced + fixed.
 
+- ~~**GPU background-subtract ignored `dilate_object_mask_px` (hardcoded 5px), breaking CPU↔GPU
+  consistency and the editor's preview↔export parity on a GPU host.**~~ — **FIXED v0.119.7** (Builder
+  2026-07-14, branch `claude/pensive-faraday-3ofcmn`; traced + reproduced + regression-tested). Found by a
+  fresh adversarial editor preview↔export parity audit. `bg/per_frame.py::_subtract_background_gpu` built its
+  bright-object sky mask with a **fixed** `maximum_filter(..., size=5)` (~2px dilation) and **never read
+  `options.dilate_object_mask_px`** — while the CPU sibling `_build_object_mask_for_bg` dilates by exactly
+  `binary_dilation(iterations=dilate_object_mask_px)` (default 4). Two consequences: (1) a **CPU↔GPU
+  divergence** — the same frame gets a different-sized sky-exclusion halo, hence a different background
+  subtraction, depending purely on whether a GPU is present; and (2) a **preview↔export parity break on a
+  GPU host** — the editor's `background.subtract`/`level_coverage` ops deliberately scale
+  `dilate_object_mask_px` by `proxy_scale` (4 full-res px → 1 px on a ×4 proxy) precisely so the live
+  strided-proxy preview masks the *same physical halo* as the full-res export (see the sibling parity tests),
+  but the GPU path discarded that scaling entirely, so the proxy applied a fixed 5px footprint spanning
+  `5·proxy_scale` full-res px vs 5px on the export — a differently-sized sky model in each. **Fix:** the GPU
+  path now mirrors the CPU exactly — `binary_dilation(obj_mask, iterations=int(options.dilate_object_mask_px))`
+  behind the same `> 0` guard (cupyx.scipy.ndimage has the identical API), so both backends agree on the masked
+  region and the editor's proxy-scaled dilation is honoured on GPU too. Additive; no config/schema/API/on-disk
+  change and the CPU path (this deployment's only path) is byte-for-byte untouched — it only makes the GPU code
+  path honour an existing documented parameter, aligning it with the CPU reference. **Testability:** the GPU
+  path was previously *untested on a CPU-only host* (`tests/test_bg_gpu.py` skips wholesale without CuPy — the
+  exact blind spot that hid this) — the new regression drives the **real** `_subtract_background_gpu` through a
+  NumPy/SciPy-backed CuPy/cupyx shim and asserts changing the dilation changes the sky model (fails-before with
+  the hardcoded 5px → identical output / passes-after). `tests/test_bg_object_mask_dilation_parity.py::
+  test_gpu_path_honours_the_dilation_option`. Severity: wrong-result on a GPU host (CPU-only installs
+  unaffected). Confidence: reproduced + fixed.
+
 - ~~**One target's QC/solve failure sinks the *entire* unattended pipeline and silently skips auto-stack
   for every target.**~~ — **FIXED v0.110.1** (Scout 2026-07-13, branch `claude/practical-dirac-wq4kha`;
   traced + reproduced + regression-tested). In `webapp/pipeline.py::_pipeline_body`, the per-target
