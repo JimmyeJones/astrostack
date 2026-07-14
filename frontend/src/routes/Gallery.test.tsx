@@ -58,6 +58,24 @@ describe("Gallery batch apply", () => {
     });
   });
 
+  it("downloads the finished picture (and raw FITS) from the fullscreen view", async () => {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [{ ...item(1), has_preview: true, preview_url: "/p/1.png" }],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+
+    renderGallery();
+    // Open the fullscreen viewer by clicking the card preview.
+    await waitFor(() => expect(screen.getAllByRole("img").length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByRole("img")[0]);
+
+    const pic = await screen.findByLabelText("Download picture");
+    expect(pic).toHaveAttribute("href", "/api/targets/M_42/stack-runs/1/preview");
+    expect(screen.getByLabelText("Download raw data")).toHaveAttribute(
+      "href", "/api/targets/M_42/stack-runs/1/fits");
+  });
+
   it("shows the integration time on a card", async () => {
     vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [item(1)] });
     vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);

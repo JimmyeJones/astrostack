@@ -4437,6 +4437,24 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.123.0** — Beginner feature / friendliness (PRIORITY 3 — "enjoy & share a good image"; Builder 2026-07-14,
+  branch `claude/pensive-faraday-lb2btt`; spotted dogfooding the History/Gallery download surface). A beginner
+  can now **download their finished picture as a shareable PNG** in one click — previously the only download
+  options were the raw 100 MB+ FITS or a large TIFF (scientific formats, useless for sharing/printing), and the
+  fullscreen viewer's "Download" button confusingly saved a FITS rather than the image you were looking at. No
+  backend change was needed (the `preview` artifact was already served as a download with a `{basename}.png`
+  filename): **(1)** the History card gains a plain-language **"Picture"** download button (gated on
+  `has_preview`, placed before FITS/TIFF, tooltip "Download the finished picture as a shareable PNG image"), with
+  the FITS button re-tooltipped as "raw scientific data … for re-processing, not sharing"; **(2)** the shared
+  `ImageLightbox` now downloads the **picture being shown** (PNG) as its primary action (`IconPhotoDown`, "Download
+  picture (PNG)") with the raw FITS offered as a clearly-labelled *secondary* download (`IconDatabase`, "Download
+  raw data (FITS)") via a new optional `rawHref` prop — so History and Gallery's fullscreen viewers now save the
+  actual image, not a scientific file, while power users keep FITS access. Frontend-only, additive, no
+  schema/config/API/default change; the Editor lightbox (no download href) is unaffected. Tests:
+  `ImageLightbox.test.tsx` (+3 — no-download default, primary picture href, distinct secondary raw href),
+  `History.test.tsx` (+2 — Picture button hrefs to the preview when `has_preview`, absent otherwise with FITS still
+  offered), `Gallery.test.tsx` (+1 — the fullscreen view downloads the picture + raw FITS). tsc + full vitest (816)
+  + vite build green.
 - **v0.121.5** — Engine robustness (calibration-engine contract-hardening — focus #1; Builder 2026-07-14, branch
   `claude/pensive-faraday-irqhx4`). `calibrate/apply.py::apply_raw` now honours its documented "returns a new
   array" contract on the empty-bundle path: it copies at the return only when the result would alias `raw`, so a
