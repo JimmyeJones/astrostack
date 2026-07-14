@@ -3665,17 +3665,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   Gate on a real measurement (§3 / Performance) — on a small library the cost is negligible and the current
   separation keeps each endpoint independently cacheable and testable, so this is only worth it if a large
   library shows a real cold-load cost. Additive refactor, no behaviour change. (M, infra/perf — low priority.)
-- **NEW (Builder 2026-07-14) — two low-severity upload-endpoint tidiness notes (both benign today, filed for
-  a future run).** *(spotted during the 2026-07-14 adversarial upload/webapp audit that found the now-fixed
-  concurrent-same-name corruption above.)* In `webapp/routers/upload.py::upload_files`: **(1)** the rejected /
-  deduped-skip / disk-space `continue` branches skip the `try/finally: await upload.close()`, so those
-  `UploadFile`s aren't explicitly closed — harmless in practice (FastAPI has already buffered every part before
-  the handler runs and closes them all at request teardown), so it only delays cleanup within the request.
-  **(2)** a `.part` sidecar can orphan if `os.replace` *itself* fails after a fully-written temp (the replace
-  is outside the `try` that unlinks on error) — rare, and the leftover carries a `.part` suffix (never
-  ingested) and is overwritten on the next attempt. Both are XS defensive polish (close the upload on every
-  path; wrap the replace so a failure cleans up its own temp), not correctness bugs; only worth doing if a run
-  is already in this file. (XS, infra — low priority.)
+- ~~**NEW (Builder 2026-07-14) — two low-severity upload-endpoint tidiness notes (both benign today, filed for
+  a future run).**~~ — **FIXED v0.119.4** (Builder 2026-07-14, branch `claude/pensive-faraday-2ruia6`;
+  regression-tested). Both filed defensive gaps in `webapp/routers/upload.py` closed together, hardening the
+  live-NAS beginner upload on-ramp: **(1)** the per-file loop body is now wrapped in a single
+  `try/finally: await upload.close()`, so every part is closed on *every* path — reject, skip, disk-space,
+  and success — not only the streamed one (Starlette closes form uploads only on a *parse error*, not on a
+  successful request, so a skipped/rejected part previously leaked its spooled temp open until GC).
+  **(2)** the final `os.replace` is now wrapped so a rename that fails *after* a complete temp is on disk
+  (a cross-device dest, a permission / NAS blip) unlinks its own `.part` sidecar rather than orphaning it,
+  mirroring the mid-write cleanup already above it. Both are additive/defensive, no schema/config/API/default
+  change. Regression tests: `tests/webapp/test_upload.py` (+2 —
+  `test_stream_to_disk_cleans_up_the_temp_when_the_rename_fails` monkeypatches `os.replace` to raise and
+  asserts no orphaned `.part`; `test_upload_closes_every_part_on_all_paths` tracks `UploadFile.close` across a
+  saved+skipped+rejected POST and asserts all parts are closed the same number of times — the skipped/rejected
+  ones were closed once fewer before the fix). (XS, infra.)
 - ~~**NEW (Builder 2026-07-13) — harden `session_recap._parse` against mixed tz-aware/naive frame timestamps.**~~
   — **FIXED v0.113.2** (Builder 2026-07-13, branch `claude/pensive-faraday-4lta1b`; regression-tested).
   `_parse` now coerces a tz-naive parse to UTC (`dt.replace(tzinfo=timezone.utc)`) so the session-split

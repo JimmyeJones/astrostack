@@ -206,3 +206,68 @@ def test_stream_to_disk_concurrent_same_name_never_corrupts(tmp_path) -> None:
     assert sorted(written) == [len(body_a), len(body_b)]
     # Both unique sidecars were renamed/cleaned up — no orphan left behind.
     assert list(tmp_path.glob("*.part")) == []
+
+
+def test_stream_to_disk_cleans_up_the_temp_when_the_rename_fails(tmp_path, monkeypatch) -> None:
+    """Regression: an ``os.replace`` that fails *after* the temp is fully written
+    (a cross-device dest, a permission / NAS blip) must not orphan the ``.part``
+    sidecar — the failure now cleans up its own complete temp."""
+    import asyncio
+
+    from webapp.routers import upload as upload_mod
+
+    dest = tmp_path / "Light_001.fit"
+
+    def _boom(_src, _dst) -> None:
+        raise OSError("rename failed")
+
+    monkeypatch.setattr(upload_mod.os, "replace", _boom)
+
+    with pytest.raises(OSError):
+        asyncio.run(upload_mod._stream_to_disk(_FakeUpload([b"AAAA" * 256]), dest))
+
+    # The rename failed, so nothing landed — and the fully-written temp was
+    # removed rather than left as an orphaned .part (fails-before: it stayed).
+    assert not dest.exists()
+    assert list(tmp_path.glob("*.part")) == []
+
+
+def test_upload_closes_every_part_on_all_paths(client, data_root, tmp_path, monkeypatch) -> None:
+    """Regression: each uploaded part is closed on *every* branch — saved, skipped,
+    and rejected — not only the streamed-to-disk one. Starlette closes form uploads
+    only on a parse error, so a rejected part previously leaked open until GC."""
+    from starlette.datastructures import UploadFile
+
+    closed: list[str] = []
+    orig_close = UploadFile.close
+
+    async def _tracking_close(self) -> None:
+        closed.append(self.filename or "")
+        await orig_close(self)
+
+    monkeypatch.setattr(UploadFile, "close", _tracking_close)
+
+    good = _fits_bytes(tmp_path, "good.fit")
+    dup = _fits_bytes(tmp_path, "dup.fit")
+    # Pre-place the dup so it takes the "already present" skip branch.
+    (data_root / "incoming" / "M_close").mkdir(parents=True, exist_ok=True)
+    (data_root / "incoming" / "M_close" / "dup.fit").write_bytes(dup)
+
+    r = client.post(
+        "/api/upload",
+        data={"target": "M_close"},
+        files=[
+            ("files", ("good.fit", good, "application/octet-stream")),  # saved
+            ("files", ("dup.fit", dup, "application/octet-stream")),    # skipped
+            ("files", ("notes.txt", b"x", "text/plain")),               # rejected
+        ],
+    )
+    assert r.status_code == 200, r.text
+    # The framework also closes each part at request teardown, so counting is
+    # relative: now that the endpoint closes on *every* path, all three parts get
+    # the same number of closes. Before the fix the saved part was closed once
+    # more than the skipped/rejected ones (endpoint + framework vs framework
+    # only), so the counts were unequal (fails-before).
+    counts = {n: closed.count(n) for n in ("good.fit", "dup.fit", "notes.txt")}
+    assert all(c >= 1 for c in counts.values())
+    assert len(set(counts.values())) == 1, counts
