@@ -42,6 +42,10 @@ class IngestResult:
     cached_path: Path | None
     skipped: bool
     error: str | None = None
+    # Plain-language reason a file was *skipped* (not an error): e.g. a still-copying
+    # zero-byte sub. Distinct from ``error`` so a benign skip isn't miscounted as a
+    # failure in the scan summary. Only set when ``skipped`` is True.
+    skip_reason: str | None = None
     # True when a dedup-skipped frame's Stage-1 cache was *refreshed* because the
     # source grew past the cached size (a mid-copy-truncated sub whose source
     # later finished). Its QC was reset, so the caller should re-QC its target.
@@ -188,8 +192,12 @@ def ingest_files(
         try:
             if src.stat().st_size == 0:
                 log.info("skipping empty file %s", src)
+                # A 0-byte file is a still-copying / stalled transfer, not a failure:
+                # it is retried on the next scan once it has bytes. Record it as a
+                # *skip* with a plain-language reason, not an ``error`` (which would
+                # inflate the scary "N errors" count a beginner sees for a mid-copy sub).
                 yield IngestResult(source_path=src, frame_id=None, cached_path=None,
-                                   skipped=True, error="empty file")
+                                   skipped=True, skip_reason="still copying (empty file)")
                 continue
         except OSError as exc:
             yield IngestResult(source_path=src, frame_id=None, cached_path=None,

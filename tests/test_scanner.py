@@ -131,6 +131,26 @@ def test_scan_counts_a_cache_refresh_as_refreshed_not_added(tmp_path):
         lib.close()
 
 
+def test_scan_counts_a_still_copying_empty_sub_as_skip_not_error(tmp_path):
+    """A 0-byte (still-copying / stalled-transfer) sub is a benign skip that will
+    be retried once it has bytes — not a failure. It must land in the scan's
+    n_skipped tally, never inflate the scary n_errors count a beginner sees."""
+    scan_root = tmp_path / "seestar"
+    (scan_root / "M 42").mkdir(parents=True)
+    write_seestar_fits(scan_root / "M 42" / "Light_001.fit", n_stars=5, seed=1)
+    (scan_root / "M 42" / "Light_002.fit").write_bytes(b"")  # still copying
+
+    lib = Library.create(tmp_path / "lib")
+    try:
+        result = scan_and_organize(lib, scan_root)
+        m42 = next(t for t in result.targets if t.safe_name == "M_42")
+        assert m42.n_frames_added == 1          # the complete sub ingested
+        assert m42.n_errors == 0                # the empty one is NOT an error...
+        assert m42.n_skipped_existing == 1      # ...it is a skip (retried next scan)
+    finally:
+        lib.close()
+
+
 def test_scan_empty_root_produces_no_targets(tmp_path):
     empty = tmp_path / "empty"
     empty.mkdir()

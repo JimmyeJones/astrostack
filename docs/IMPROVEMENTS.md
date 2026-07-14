@@ -1321,15 +1321,20 @@ the real webapp stack→edit path.)_
   reproduced. (Deprioritised path — file, don't rush; §1 says fix an *outright* bug in what exists, but this
   never touches the OSC user, so it ranks below any OSC-facing work.)
 
-- **Scan summary miscounts a still-copying zero-byte sub as an *error*, not a *skip*.** *(traced, Scout
-  2026-07-14 — via ingest/QC audit.)* `seestack/io/ingest.py:189–192` yields `IngestResult(skipped=True,
-  error="empty file")` for a 0-byte (mid-copy) file, and `seestack/io/scanner.py:168–173` tests
-  `if res.error is not None: n_errors += 1` **before** the `elif res.skipped:` branch — so a half-copied file
-  inflates the scan's **error** tally instead of its **skip** tally. The frame is correctly *not* ingested and
-  is retried on the next scan once it has bytes, so no data is affected — purely a scan-summary/UX accounting
-  quirk (a beginner sees a scary "N errors" for what is really "still copying, will retry"). **Fix:** give the
-  empty-file skip no `error` (leave the plain-language reason in a `skip_reason`/note field) *or* reorder the
-  scanner to check `skipped` before `error`. Severity: cosmetic. Confidence: traced. (S, friendliness.)
+- ~~**Scan summary miscounts a still-copying zero-byte sub as an *error*, not a *skip*.**~~ — **FIXED
+  v0.119.9** (Builder 2026-07-14, branch `claude/pensive-faraday-g346o7`; traced + regression-tested).
+  Applied *both* suggested fixes for defence-in-depth. (1) `seestack/io/ingest.py` no longer sets
+  `error="empty file"` on a 0-byte file — it records the plain-language reason in a **new** `skip_reason`
+  field (`"still copying (empty file)"`) with `error` left `None`, so a benign mid-copy skip is no longer
+  shaped like a failure. (2) `seestack/io/scanner.py::_ingest_into_target` now checks `res.skipped` **before**
+  `res.error`, so a skip can never inflate `n_errors` even if it carries a note. The frame was already
+  correctly *not* ingested and retried on the next scan — this only fixes the scary "N errors" a beginner saw
+  for what is really "still copying, will retry". Additive (new optional dataclass field; no schema/config/API/
+  on-disk/default change; the OSError-on-`stat` case still reports a genuine `error`). Regression
+  `tests/test_scanner.py::test_scan_counts_a_still_copying_empty_sub_as_skip_not_error`: a folder with one
+  complete + one 0-byte sub reports `n_frames_added==1`, `n_errors==0`, `n_skipped_existing==1` (fails-before:
+  the empty file counted as an error / passes-after). Severity: cosmetic (friendliness). Confidence:
+  reproduced + fixed.
 
 - **Stack-trigger endpoints accept an unvalidated `StackOptions` dict — a bad enum/range surfaces as a
   cryptically-*errored job* instead of a `400`.** *(traced, Scout 2026-07-14 — via webapp-router audit.)*
