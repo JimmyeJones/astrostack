@@ -11,6 +11,7 @@ import { api } from "../api/client";
 import { astapReadiness, astapReadinessSignature } from "../components/dashboard/astapReadiness";
 import { folderReadiness, folderReadinessSignature } from "../components/dashboard/folderReadiness";
 import { LastNightCard } from "../components/LastNightCard";
+import { LibraryProgressCard } from "../components/LibraryProgressCard";
 import { QueryError } from "../components/QueryError";
 
 // Dismissal of the first-run readiness banners, keyed to the *specific* problem
@@ -163,6 +164,8 @@ export function Dashboard() {
       </SimpleGrid>
 
       <LastNightCard />
+
+      <LibraryProgressCard />
 
       <Group justify="space-between" mt="sm">
         <Title order={4}>Recent stacks</Title>

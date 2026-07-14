@@ -86,6 +86,111 @@ class LastNightResponse(BaseModel):
     reject_buckets: dict[str, int] = {}
 
 
+# The library-progress roll-up opens each project once to read its (optional)
+# user-set integration goal, so it's cached on the app like the roll-ups above.
+# The signature keys on each target's activity + accepted-frame count so a fresh
+# scan invalidates it; a short TTL backstops a goal edit (which doesn't bump
+# ``last_activity_utc``) so a just-changed goal shows within a minute.
+_PROGRESS_CACHE_TTL_S = 60.0
+
+# Project-meta key holding a target's user-set integration goal (accepted-sub
+# exposure, seconds). Mirrors ``routers.targets._GOAL_META_KEY`` — kept in sync
+# by hand (a tiny stable constant); read-only here.
+_GOAL_META_KEY = "integration_goal_s"
+
+
+class TargetProgressOut(BaseModel):
+    """One target's inputs for the Dashboard "Target progress" overview. The
+    readiness verdict itself is computed client-side (single source of truth in
+    ``readiness.ts``) from these — accumulated integration, the catalog object
+    type (for the per-type goal), and any user-set goal override."""
+
+    safe: str
+    name: str
+    total_exposure_s: float
+    object_type: str | None = None
+    goal_s: float | None = None
+
+
+def _read_goal_s(proj) -> float | None:  # noqa: ANN001
+    """Parse a target's stored integration goal, tolerating a stale/garbage value
+    (treated as unset) so a hand-edited project can never 500 the overview."""
+    raw = proj.get_meta(_GOAL_META_KEY)
+    if raw is None:
+        return None
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if not (val > 0) or val != val:  # non-positive or NaN → unset
+        return None
+    return val
+
+
+def _collect_progress(lib, targets) -> list[TargetProgressOut]:
+    """For every target that has collected some light, gather the inputs the
+    readiness overview needs: total integration, the offline catalog object type,
+    and any user-set goal. Opens each project only for the cheap goal-meta read
+    (the object type is resolved offline from the library entry). A broken
+    project is skipped, never 500s the dashboard."""
+    from seestack.io.project import Project
+    from seestack.nightplan import load_catalog
+    from seestack.objectinfo import identify_object
+
+    catalog = load_catalog()
+    rows: list[TargetProgressOut] = []
+    for t in targets:
+        # Nothing to say for a target with no accepted light yet — mirrors the
+        # readiness card, which renders nothing at zero integration.
+        if not (t.total_exposure_s and t.total_exposure_s > 0):
+            continue
+        info = identify_object(t.name, t.ra_deg, t.dec_deg, catalog=catalog)
+        goal_s: float | None = None
+        proj = None
+        try:
+            proj = Project.open(lib.target_dir(t))
+            goal_s = _read_goal_s(proj)
+        except Exception:  # noqa: BLE001 — a broken project must not 500 the dashboard
+            pass
+        finally:
+            if proj is not None:
+                proj.close()
+        rows.append(TargetProgressOut(
+            safe=t.safe_name,
+            name=t.name,
+            total_exposure_s=t.total_exposure_s,
+            object_type=info.type if info is not None else None,
+            goal_s=goal_s,
+        ))
+    return rows
+
+
+@router.get("/api/library-progress", response_model=list[TargetProgressOut])
+def get_library_progress(request: Request) -> list[TargetProgressOut]:
+    """Per-target integration progress for the Dashboard "Target progress" card —
+    how close each target is to a clean image, across the whole library. Returns
+    an empty list until some light has been collected. Read-only aggregation over
+    the registry + a cheap per-target goal read, cached on the app between scans.
+    """
+    lib = deps.open_library(request)
+    try:
+        targets = lib.list_targets()
+        sig = tuple(sorted(
+            (t.safe_name, t.last_activity_utc or "", t.n_frames_accepted)
+            for t in targets
+        ))
+        cache = getattr(request.app.state, "progress_cache", None)
+        now = time.monotonic()
+        if cache and cache["sig"] == sig and (now - cache["at"]) < _PROGRESS_CACHE_TTL_S:
+            rows = cache["data"]
+        else:
+            rows = _collect_progress(lib, targets)
+            request.app.state.progress_cache = {"sig": sig, "at": now, "data": rows}
+    finally:
+        lib.close()
+    return rows
+
+
 def _rollup_stacks(lib, targets) -> tuple[list[RecentStack], int, int]:
     """Open each target's project and collect its stack runs. Expensive — this
     is what the cache below is protecting."""
