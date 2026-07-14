@@ -110,7 +110,7 @@ describe("Dashboard recent-stack picture download", () => {
     };
   }
 
-  it("offers a one-click PNG download on a recent-stack card without navigating", async () => {
+  it("offers a PNG or JPEG download on a recent-stack card without navigating", async () => {
     vi.spyOn(client.api, "getStats").mockResolvedValue(statsWithRecentStack());
     vi.spyOn(client.api, "getSystem").mockResolvedValue(mkSystem({}));
 
@@ -120,11 +120,18 @@ describe("Dashboard recent-stack picture download", () => {
 
     renderDashboard();
     const btn = await screen.findByLabelText("Download picture of M31");
-    fireEvent.click(btn);
+    fireEvent.click(btn); // opens the format menu, does not navigate
 
-    // The transient download anchor was clicked with the run's preview URL.
+    // Pick JPEG from the menu → the transient anchor gets the jpeg URL.
+    fireEvent.click(await screen.findByText("JPEG (smaller — best for sharing)"));
     expect(clicked).toHaveLength(1);
-    expect(clicked[0]).toContain(client.api.stackArtifactUrl("m31", 7, "preview"));
+    expect(clicked[0]).toContain(client.api.stackArtifactUrl("m31", 7, "jpeg"));
+
+    // Re-open and pick PNG → the preview URL.
+    fireEvent.click(screen.getByLabelText("Download picture of M31"));
+    fireEvent.click(await screen.findByText("PNG (best quality)"));
+    expect(clicked).toHaveLength(2);
+    expect(clicked[1]).toContain(client.api.stackArtifactUrl("m31", 7, "preview"));
   });
 
   it("shows no download control when the recent stack has no preview", async () => {

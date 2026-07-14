@@ -1,5 +1,5 @@
 import {
-  ActionIcon, Alert, Badge, Box, Button, Card, Center, Group, Image, Loader, Paper,
+  ActionIcon, Alert, Badge, Box, Button, Card, Center, Group, Image, Loader, Menu, Paper,
   SimpleGrid, Stack, Text, Title, Tooltip,
 } from "@mantine/core";
 import {
@@ -204,22 +204,39 @@ export function Dashboard() {
                 {s.has_preview ? (
                   <Box style={{ position: "relative" }}>
                     <Image src={s.preview_url} h={140} alt={s.target_name} />
-                    <Tooltip label="Download this picture (PNG)">
-                      <ActionIcon
-                        variant="filled" color="dark" radius="xl"
-                        aria-label={`Download picture of ${s.target_name}`}
-                        style={{ position: "absolute", top: 6, right: 6, opacity: 0.85 }}
-                        onClick={(e) => {
-                          // Don't let the click bubble to the card's Link navigation.
-                          e.preventDefault();
-                          e.stopPropagation();
-                          triggerPictureDownload(
-                            api.stackArtifactUrl(s.safe, s.run_id, "preview"));
-                        }}
-                      >
-                        <IconPhotoDown size={16} />
-                      </ActionIcon>
-                    </Tooltip>
+                    {/* The card is a <Link>; a wrapper stops every click inside
+                        the menu (trigger *and* the portalled dropdown, which
+                        bubbles through the React tree) from navigating. Guarding
+                        here rather than on the trigger keeps the trigger's onClick
+                        free for Mantine's open-menu handler. */}
+                    <Box
+                      style={{ position: "absolute", top: 6, right: 6 }}
+                      onClick={(e) => { e.stopPropagation(); }}
+                    >
+                      <Menu shadow="md" position="bottom-end" withinPortal>
+                        <Menu.Target>
+                          <Tooltip label="Download this picture (PNG or JPEG)">
+                            <ActionIcon
+                              variant="filled" color="dark" radius="xl"
+                              aria-label={`Download picture of ${s.target_name}`}
+                              style={{ opacity: 0.85 }}
+                            >
+                              <IconPhotoDown size={16} />
+                            </ActionIcon>
+                          </Tooltip>
+                        </Menu.Target>
+                        <Menu.Dropdown>
+                          <Menu.Item onClick={() => triggerPictureDownload(
+                            api.stackArtifactUrl(s.safe, s.run_id, "preview"))}>
+                            PNG (best quality)
+                          </Menu.Item>
+                          <Menu.Item onClick={() => triggerPictureDownload(
+                            api.stackArtifactUrl(s.safe, s.run_id, "jpeg"))}>
+                            JPEG (smaller — best for sharing)
+                          </Menu.Item>
+                        </Menu.Dropdown>
+                      </Menu>
+                    </Box>
                   </Box>
                 ) : (
                   <Center h={140} bg="dark.6">

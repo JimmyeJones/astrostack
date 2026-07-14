@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActionIcon, Group, Modal, Text, Tooltip } from "@mantine/core";
+import { ActionIcon, Group, Menu, Modal, Text, Tooltip } from "@mantine/core";
 import {
   IconArrowsMaximize, IconDatabase, IconPhotoDown, IconZoomIn, IconZoomOut,
 } from "@tabler/icons-react";
@@ -49,13 +49,17 @@ export function computePinch(
  *    effect keyed on `src` couldn't reliably find the node.
  */
 export function ImageLightbox({
-  src, title, downloadHref, rawHref, onClose,
+  src, title, downloadHref, jpegHref, rawHref, onClose,
 }: {
   src: string | null;
   title?: string;
-  /** The picture being shown (a shareable PNG/JPEG) — the download the viewer
+  /** The picture being shown (a shareable PNG) — the download the viewer
    * most likely wants: what they're looking at, not a 100 MB scientific file. */
   downloadHref?: string;
+  /** Optional JPEG of the same picture (smaller — best for sharing). When given
+   * alongside `downloadHref`, the picture-download control becomes a small menu
+   * offering PNG or JPEG; when absent it stays a single PNG download. */
+  jpegHref?: string;
   /** Optional secondary download for the raw scientific data (FITS), offered
    * next to the picture download so power users keep access to it. */
   rawHref?: string;
@@ -234,7 +238,18 @@ export function ImageLightbox({
           <Tooltip label="Reset"><ActionIcon size="lg" variant="subtle" color="gray"
             onClick={() => setT(RESET)} aria-label="Reset zoom">
             <IconArrowsMaximize size={20} /></ActionIcon></Tooltip>
-          {downloadHref ? (
+          {downloadHref && jpegHref ? (
+            <Menu shadow="md" position="bottom-end" withinPortal>
+              <Menu.Target>
+                <Tooltip label="Download picture"><ActionIcon size="lg" variant="subtle" color="gray"
+                  aria-label="Download picture"><IconPhotoDown size={20} /></ActionIcon></Tooltip>
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Menu.Item component="a" href={downloadHref}>PNG (best quality)</Menu.Item>
+                <Menu.Item component="a" href={jpegHref}>JPEG (smaller — best for sharing)</Menu.Item>
+              </Menu.Dropdown>
+            </Menu>
+          ) : downloadHref ? (
             <Tooltip label="Download picture (PNG)"><ActionIcon size="lg" variant="subtle" color="gray"
               component="a" href={downloadHref} aria-label="Download picture"><IconPhotoDown size={20} /></ActionIcon></Tooltip>
           ) : null}

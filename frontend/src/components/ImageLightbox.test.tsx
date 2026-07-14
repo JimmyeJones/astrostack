@@ -60,6 +60,18 @@ describe("ImageLightbox", () => {
     expect(screen.queryByLabelText("Download raw data")).not.toBeInTheDocument();
   });
 
+  it("offers a PNG-or-JPEG menu when a jpeg href is also given", async () => {
+    renderLightbox({ downloadHref: "/api/run/1/preview", jpegHref: "/api/run/1/jpeg" });
+    // The picture control is now a menu trigger (button), not a bare anchor.
+    const trigger = screen.getByLabelText("Download picture");
+    expect(trigger).not.toHaveAttribute("href");
+    fireEvent.click(trigger);
+    const png = await screen.findByText("PNG (best quality)");
+    const jpeg = screen.getByText("JPEG (smaller — best for sharing)");
+    expect(png.closest("a")).toHaveAttribute("href", "/api/run/1/preview");
+    expect(jpeg.closest("a")).toHaveAttribute("href", "/api/run/1/jpeg");
+  });
+
   it("offers the raw FITS as a distinct secondary download", () => {
     renderLightbox({ downloadHref: "/api/run/1/preview", rawHref: "/api/run/1/fits" });
     expect(screen.getByLabelText("Download picture")).toHaveAttribute("href", "/api/run/1/preview");
