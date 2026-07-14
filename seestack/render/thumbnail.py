@@ -269,6 +269,7 @@ def autostretch(
     *,
     target_bg: float = 0.20,
     sigma_factor: float = -2.0,
+    protect_highlights: bool = True,
 ) -> np.ndarray:
     """
     PixInsight-style "Screen Transfer Function" (STF) autostretch.
@@ -337,7 +338,14 @@ def autostretch(
         shadows = max(0.0, med + sigma_factor * sigma)
         rng = max(1.0 - shadows, 1e-6)
         # Apply the stretch only to covered pixels; uncovered stay 0.
-        x = np.clip((chan[finite] - shadows) / rng, 0.0, 1.0)
+        xr = (chan[finite] - shadows) / rng
+        # Soft-shoulder the highlights instead of hard-clipping them to flat
+        # white — otherwise a bright HDR core (which sits above the 99.5th-pct
+        # ceiling, so xr > 1) clips to a featureless white blob. The rolloff
+        # leaves the sky/mid-tones untouched (they're far below the knee), so it
+        # only recovers core detail. `protect_highlights=False` restores the old
+        # hard-clip behaviour for callers that want it.
+        x = _highlight_rolloff(xr) if protect_highlights else np.clip(xr, 0.0, 1.0)
         norm_med = max((med - shadows) / rng, 1e-6)
         m = _midtones_for(norm_med, target_bg)
         out_chan = out[..., c]
@@ -364,6 +372,37 @@ def _mtf(x: np.ndarray, m: float) -> np.ndarray:
     if abs(m - 0.5) < 1e-9:
         return x
     return (m - 1.0) * x / ((2.0 * m - 1.0) * x - m)
+
+
+#: Where the STF highlight rolloff starts, in the per-channel shadow-normalized
+#: space that feeds the midtones transfer. Values below the knee pass through
+#: unchanged (so the sky, nebula, and ordinary stars are untouched); values above
+#: it — a bright HDR core that sits above the robust 99.5th-percentile ceiling —
+#: are soft-compressed into ``[knee, 1)`` instead of hard-clipping to flat white.
+_HIGHLIGHT_KNEE = 0.7
+
+
+def _highlight_rolloff(x: np.ndarray, knee: float = _HIGHLIGHT_KNEE) -> np.ndarray:
+    """Soft-shoulder the highlights of a shadow-normalized channel.
+
+    Without this the STF stretch hard-clips every value above the 99.5th-
+    percentile normalization ceiling to ``1.0``, so a bright high-dynamic-range
+    core (an M31/M42-style compact core on a faint disk) loses *all* internal
+    structure and renders as a flat white blob. Here everything at or below
+    ``knee`` is returned unchanged, and the open-ended highlight range
+    ``[knee, +inf)`` is mapped monotonically onto ``[knee, 1)`` with a Reinhard
+    shoulder (``t / (1 + t)``) so the core keeps a smooth, resolvable gradient
+    and only the very brightest pixel approaches (but never reaches) pure white.
+    The sky/mid-tones — which sit far below the knee — are bit-for-bit unchanged,
+    so this only ever *adds* highlight detail, never shifts the background.
+    """
+    out = np.clip(x, 0.0, knee)                     # below-knee unchanged; floor at 0
+    over = x > knee
+    if np.any(over):
+        span = 1.0 - knee
+        t = (x[over] - knee) / span                 # >= 0, open-ended
+        out[over] = knee + span * (t / (1.0 + t))   # -> [knee, 1), asymptotic
+    return out
 
 
 def _midtones_for(median: float, target: float) -> float:

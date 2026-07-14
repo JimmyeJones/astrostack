@@ -47,32 +47,34 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
-- **⭐ OWNER-REPORTED (2026-07 — TOP PRIORITY) — bright galaxy cores blow out to
-  white, and the Auto result regressed.** The owner reports the **centre of an M31
-  (Andromeda) stack is overblown** and that **Auto-process is "not the best"**
-  anymore. Strong hypothesis (traced, not yet reproduced): both trace to the switch
-  to **STF autostretch** — `v0.109.0`/#247 made STF the no-recipe fallback view, and
-  `auto_recipe` uses `tone.stretch mode="stf"` (`seestack/edit/presets.py:374`,
-  `target_bg` 0.14–0.24). STF/MTF (`seestack/edit/stretch.py`) lifts the **sky
-  median** to `target_bg` via a midtones transfer and normalizes `x =
-  (v−shadows)/(1−shadows)` against a robust 99.5th-percentile max — but it has **no
-  highlight rolloff**, so on a high-dynamic-range target (M31 = a very bright compact
-  core + faint disk) the core saturates to ~1.0 (white, detail lost). The previous
-  default, **asinh** (`_asinh_out = asinh(x/a)/asinh(1/a)`), compresses the bright
-  end gently and preserves core structure — which is why it looked better before.
-  **What to do:** (1) **Reproduce** with a synthetic HDR target — a bright compact
-  Gaussian core (near-saturation) on a faint extended disk on sky — and measure the
-  fraction of core pixels STF pushes to ≥0.99 vs asinh at an equivalent sky lift;
-  confirm STF clips the core and asinh doesn't. (2) **Fix the root cause:** give the
-  STF stretch a **highlight rolloff / knee** so a bright core compresses instead of
-  clipping (e.g. blend an asinh-style highlight compression above a knee, or cap the
-  high end below 1.0 and soft-shoulder into it), *keeping* STF's good shadow/sky
-  behaviour. (3) Re-check the **Auto recipe** end-to-end on the HDR target so the
-  one-click result keeps core detail. This is correctness/image-quality on the
-  most-used path (Auto + the default view), so it's fix-first. Verify on the
-  Scout's real-data dogfood, not only synthetic. Severity: wrong-result
-  (owner-visible on real data). Confidence: traced (STF has no highlight
-  protection); reproduce before fixing.
+- ~~**⭐ OWNER-REPORTED (2026-07 — TOP PRIORITY) — bright galaxy cores blow out to
+  white, and the Auto result regressed.**~~ — **FIXED v0.119.1** (Builder 2026-07-14,
+  branch `claude/pensive-faraday-r22s3k`; traced + reproduced + regression-tested).
+  Root cause confirmed: the STF autostretch (`seestack/render/thumbnail.py::autostretch`
+  — the no-recipe fallback view *and* the `auto_recipe` `tone.stretch mode="stf"` op)
+  **hard-clipped** every value above its robust 99.5th-percentile normalization ceiling
+  to `1.0` (`x = np.clip((chan−shadows)/rng, 0, 1)`), so a bright compact HDR core (which
+  sits *above* the ceiling) lost **all** internal structure and rendered as a featureless
+  white blob. Reproduced on a synthetic HDR target (bright Gaussian core on a faint disk
+  on sky): the central core came out `std=0.0`, every pixel at `0.99999` — flat white.
+  **Fix:** added a highlight rolloff (`_highlight_rolloff`, knee `0.7` in the per-channel
+  shadow-normalized space) that soft-shoulders the open-ended highlight range
+  `[knee, +inf) → [knee, 1)` with a Reinhard shoulder (`t/(1+t)`), so the core keeps a
+  smooth resolvable gradient and only the very brightest pixel approaches (but never
+  reaches) pure white. Everything at/below the knee — sky, nebula, ordinary stars — is
+  **bit-for-bit unchanged** (verified: sky corner `array_equal`, so no background shift
+  and no colour cast introduced), so it only *adds* core detail. On a normal star field
+  the change is imperceptible (max |Δ| ≈ 0.001). Default-on via `protect_highlights=True`
+  (old hard-clip still reachable with `=False` for the fail-before test). Because the STF
+  op and the editor/pipeline fallback both call `autostretch`, the Auto recipe and the
+  default view both benefit with no further wiring. Regression
+  `tests/test_stf_highlight_rolloff.py` (6 cases): the flat-white fail-before guard, core
+  detail recovered (fewer white pixels + higher core std + max<1.0), background untouched,
+  and the helper's monotonic/bounded/below-knee-identity/negative-floor properties.
+  Additive, no schema/config/API/default-flip; only changes rendered highlight pixels on
+  an over-bright core (the reported defect). **Follow-up filed below:** `asinh_stretch`
+  shares the identical hard-clip and would benefit from the same rolloff (manual path, so
+  lower priority). Severity: wrong-result (owner-visible). Confidence: reproduced + fixed.
 
 - ~~**One target's QC/solve failure sinks the *entire* unattended pipeline and silently skips auto-stack
   for every target.**~~ — **FIXED v0.110.1** (Scout 2026-07-13, branch `claude/practical-dirac-wq4kha`;
@@ -1870,6 +1872,20 @@ to **Shipped**.)_
 ### ⭐ Editor — make it excellent (PRIORITY 1)
 The editor is where a good stack becomes a good *picture*, and it has real
 problems. Dogfood it every big-picture run and fix root causes.
+- **Give the manual `asinh` stretch the same highlight rolloff STF just got.**
+  (S, PRIORITY 1/4 — image quality.) `seestack/render/thumbnail.py::asinh_stretch`
+  has the **identical hard-clip** the STF path had before v0.119.1: it computes
+  `x = np.clip((chan−shadows)/rng, 0, 1)` then `arcsinh(x/a)/asinh(1/a)`, so any
+  bright HDR core above the 99.5th-percentile ceiling clips to a flat white blob
+  exactly like STF did (verified in the fix's investigation — asinh at stretch=0.5
+  pushes the same 0.5% of core pixels to ≥0.99 with zero internal std). STF was
+  fixed first because it's the owner-reported default/Auto path; asinh is the
+  *manual* op, so lower priority — but a beginner who switches to asinh still hits
+  it. Fix: reuse the shared `_highlight_rolloff` helper (already in `thumbnail.py`)
+  in the asinh per-channel loop behind a `protect_highlights=True` default, and add
+  a mirror regression test. Low risk (helper is proven, sky/mid-tones untouched),
+  but check the asinh suggester (`seestack/edit/stretch.py`) — its median-based
+  math is unaffected (median ≪ knee), so only near-white pixels change.
 - **Live preview** — the preview must show **every** enabled action (that's the
   whole point of it). **DONE (v0.57.0):** the last hold-out, Deconvolution, was
   `proxy_safe=False` and got *skipped* in preview (only a badge told you it was
