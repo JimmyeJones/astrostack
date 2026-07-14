@@ -1,5 +1,5 @@
 import {
-  Badge, Button, Card, Group, Image, Select, SimpleGrid, Stack, Text, TextInput,
+  Badge, Card, Group, Image, Select, SimpleGrid, Stack, Text, TextInput,
   Title, Loader, Center, Chip,
 } from "@mantine/core";
 import { IconChevronRight, IconSearch, IconStars } from "@tabler/icons-react";
@@ -200,9 +200,6 @@ export function Library() {
                 Upload your Seestar FITS files below, or drop target folders into the watched
                 dataset over your NAS share.
               </Text>
-              <Button component={Link} to="/jobs" variant="light">
-                View jobs
-              </Button>
             </Stack>
           </Card>
           <UploadFits />

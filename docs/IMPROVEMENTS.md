@@ -2805,6 +2805,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+- ~~**Point the brand-new (no-NAS) beginner at the Upload on-ramp instead of a dead-end.**~~ —
+  **SHIPPED v0.121.8** (Builder 2026-07-14, branch `claude/pensive-faraday-47ditq`; found dogfooding the
+  first-run flow). Two related misdirections for a user with zero targets/jobs: (1) the Library empty-state
+  card's copy said "Upload your Seestar FITS files below" but its **only prominent button was "View jobs"** —
+  sending a brand-new user (who has no jobs) to an empty Jobs page, away from the `UploadFits` card sitting
+  right below it. Removed that button; the upload card is the CTA and Jobs stays one click away in the global
+  nav. (2) The Jobs empty-state only mentioned "Scan incoming" (the NAS path), ignoring the browser-upload
+  on-ramp built for beginners *without* a mounted share — added a sentence linking to the Library upload
+  ("No NAS share? Upload FITS files from your computer in the Library instead."). Frontend-only, additive; no
+  backend/schema/API/default change. Tests: `Library.test.tsx` (empty library shows the upload picker and no
+  "View jobs" button), `Jobs.test.tsx` (empty state links "Upload FITS files" → `/library`). (XS,
+  friendliness/onboarding.)
 - ~~**Dashboard "Integration" stat reads a bare "0.0h" on a fresh install and uses off-format units.**~~ —
   **SHIPPED v0.121.7** (Builder 2026-07-14, branch `claude/pensive-faraday-47ditq`; found dogfooding the
   landing page). The Dashboard's Integration StatCard rendered `${data.integration_hours.toFixed(1)}h`, so a

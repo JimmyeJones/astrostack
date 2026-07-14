@@ -98,4 +98,18 @@ describe("Library", () => {
     expect(screen.queryByText("Orion Nebula")).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText("Search name, tag or note…")).toHaveValue("andro");
   });
+
+  it("points an empty library at upload, not an empty jobs page", async () => {
+    // A brand-new user has zero targets *and* zero jobs. The empty state's only
+    // prominent button used to be "View jobs", which sent them to an empty page
+    // away from the upload card the copy points them at. The upload on-ramp must
+    // be the CTA, with no misdirecting "View jobs" button.
+    vi.spyOn(client.api, "listTargets").mockResolvedValue([]);
+    renderLibrary();
+
+    await waitFor(() => expect(screen.getByText("No targets yet.")).toBeInTheDocument());
+    expect(screen.queryByRole("link", { name: "View jobs" })).not.toBeInTheDocument();
+    // The upload card is present (its file picker button anchors it).
+    expect(screen.getByRole("button", { name: /Choose FITS files/i })).toBeInTheDocument();
+  });
 });

@@ -1,5 +1,5 @@
 import {
-  ActionIcon, Badge, Button, Center, Group, Loader, Paper, Progress, Stack, Text, Title,
+  ActionIcon, Anchor, Badge, Button, Center, Group, Loader, Paper, Progress, Stack, Text, Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { IconActivity, IconDownload, IconPhoto, IconX } from "@tabler/icons-react";
@@ -338,7 +338,9 @@ export function JobsView() {
             <Text c="dimmed">No jobs running.</Text>
             <Text c="dimmed" size="sm" ta="center" maw={420}>
               Click “Scan incoming” in the header to import and process your Seestar
-              frames — ingest, quality check and plate-solve run here as jobs.
+              frames — ingest, quality check and plate-solve run here as jobs. No NAS
+              share? <Anchor component={Link} to="/library">Upload FITS files</Anchor> from your
+              computer in the Library instead.
             </Text>
           </Stack>
         </Paper>
