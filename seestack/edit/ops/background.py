@@ -81,9 +81,17 @@ def _level_coverage(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarr
     # full-res-equivalent pixels: the live-preview proxy is strided, so without
     # this a mosaic panel would be leveled in the full-res export yet skipped in
     # the preview (a visible preview↔export panel-step mismatch).
-    return level_by_coverage(rgb, ctx.coverage,
-                             object_sigma=float(params.get("object_sigma", 2.0)),
-                             proxy_scale=ctx.proxy_scale)
+    return level_by_coverage(
+        rgb, ctx.coverage,
+        object_sigma=float(params.get("object_sigma", 2.0)),
+        # The object-mask dilation is a full-res pixel measure too — scale it by
+        # proxy_scale (floor 0 so a small dilation can vanish on a heavy proxy)
+        # so the sky fit masks the same physical halo preview↔export, exactly as
+        # the sibling background.subtract op already does. Left unscaled, a ×4
+        # proxy dilated by the hardcoded 4 masks a 16-full-res-px halo vs 4 px on
+        # the export, feeding a different sky population into each level's median.
+        dilate_object_mask_px=_scaled_box(ctx, 4, minimum=0),
+        proxy_scale=ctx.proxy_scale)
 
 
 _MODE = ["per_channel", "luminance"]

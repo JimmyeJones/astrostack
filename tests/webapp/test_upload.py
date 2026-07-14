@@ -89,8 +89,8 @@ def test_upload_saves_fits_to_incoming_and_kicks_a_scan(client, data_root, tmp_p
     landed = data_root / "incoming" / "M_99" / "Light_001.fit"
     assert landed.exists()
     assert landed.read_bytes() == body
-    # No orphan .part sidecar left behind.
-    assert not (data_root / "incoming" / "M_99" / "Light_001.fit.part").exists()
+    # No orphan .part sidecar left behind (the temp name is now unique, so glob).
+    assert list((data_root / "incoming" / "M_99").glob("*.part")) == []
 
 
 def test_upload_rejects_non_fits_but_keeps_the_good_ones(client, data_root, tmp_path) -> None:
@@ -151,3 +151,58 @@ def test_upload_rejects_an_invalid_target_folder_name(client, tmp_path) -> None:
     )
     assert r.status_code == 400
     assert "target" in r.json()["detail"].lower()
+
+
+class _FakeUpload:
+    """Minimal UploadFile stand-in that yields its body chunk-by-chunk, awaiting
+    between chunks so two concurrent streams genuinely interleave."""
+
+    def __init__(self, chunks: list[bytes]) -> None:
+        self._chunks = chunks
+        self._i = 0
+
+    async def read(self, _n: int) -> bytes:
+        import asyncio
+        await asyncio.sleep(0)  # yield control → force interleaving
+        if self._i >= len(self._chunks):
+            return b""
+        c = self._chunks[self._i]
+        self._i += 1
+        return c
+
+    async def close(self) -> None:
+        pass
+
+
+def test_stream_to_disk_concurrent_same_name_never_corrupts(tmp_path) -> None:
+    """Regression: two concurrent POSTs of the *same* filename used to stream into
+    one shared ``<name>.part`` at once, interleaving into a corrupt file both then
+    renamed into place. With a unique per-request temp file, the winner is a
+    *complete* copy of exactly one upload — never a scrambled mix."""
+    import asyncio
+
+    from webapp.routers.upload import _stream_to_disk
+
+    dest = tmp_path / "Light_001.fit"
+    body_a = b"AAAAAAAA" * 2048   # 16 KiB, distinct byte from B
+    body_b = b"BBBBBBBB" * 2048
+
+    def _chunks(b: bytes, n: int = 1024) -> list[bytes]:
+        return [b[i:i + n] for i in range(0, len(b), n)]
+
+    async def _run() -> list[int]:
+        return await asyncio.gather(
+            _stream_to_disk(_FakeUpload(_chunks(body_a)), dest),
+            _stream_to_disk(_FakeUpload(_chunks(body_b)), dest),
+        )
+
+    written = asyncio.run(_run())
+
+    final = dest.read_bytes()
+    # The landed file is a whole, uncorrupted copy of one upload (last rename
+    # wins) — not an interleave of the two (which would fail both checks).
+    assert final in (body_a, body_b)
+    assert len(final) == len(body_a)
+    assert sorted(written) == [len(body_a), len(body_b)]
+    # Both unique sidecars were renamed/cleaned up — no orphan left behind.
+    assert list(tmp_path.glob("*.part")) == []

@@ -96,3 +96,38 @@ def test_editor_subtract_op_scales_the_dilation_by_proxy_scale(monkeypatch):
     # Export unchanged (4 full-res px); ×4 proxy masks the same *physical* halo
     # with 1 proxy px — not the 4 it used before, which was a 16-px-equiv halo.
     assert seen == [4, 1]
+
+
+def test_editor_level_coverage_op_scales_the_dilation_by_proxy_scale(monkeypatch):
+    """Regression: the editor's background.level_coverage op now passes an
+    object-mask dilation scaled by proxy_scale (4 full-res px → 1 px on a ×4
+    proxy), where it previously left `level_by_coverage`'s default 4 on both the
+    proxy and the export — so on a ×N proxy it dilated the mask by N× the physical
+    halo, feeding a different sky population into each coverage level's median (a
+    preview↔export panel-offset mismatch). Sibling of the background.subtract fix
+    above. Spy on the dilation the op hands to level_by_coverage at each scale."""
+    import seestack.bg.coverage_leveling as cov_mod
+    import seestack.edit.ops.background as bg_ops
+    from seestack.edit.registry import EditContext
+
+    seen: list[int] = []
+
+    def _spy(rgb, coverage, *, object_sigma=2.0, dilate_object_mask_px=4,
+             proxy_scale=1.0, **kw):
+        seen.append(dilate_object_mask_px)
+        return rgb.astype(np.float32, copy=True)
+
+    monkeypatch.setattr(cov_mod, "level_by_coverage", _spy)
+
+    img = _star_field(seed=3)
+    cov = np.ones(img.shape[:2], dtype=np.int32)
+    export = EditContext(proxy_scale=1.0, is_proxy=False, wcs=None, coverage=cov)
+    img4 = img[::4, ::4]
+    proxy4 = EditContext(proxy_scale=4.0, is_proxy=True, wcs=None,
+                         coverage=cov[::4, ::4])
+    bg_ops._level_coverage(img, {}, export)
+    bg_ops._level_coverage(img4, {}, proxy4)
+
+    # Export unchanged (4 full-res px); ×4 proxy masks the same *physical* halo
+    # with 1 proxy px — not the 4 it used before (a 16-full-res-px-equiv halo).
+    assert seen == [4, 1]

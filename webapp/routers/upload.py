@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Annotated
 
@@ -117,10 +118,23 @@ async def _stream_to_disk(upload: UploadFile, dest: Path) -> int:
     Blocking file I/O runs in a threadpool so the event loop stays responsive.
     On any failure the partial ``.part`` is removed so a dropped connection never
     leaves a truncated FITS in ``incoming/`` for the watcher to ingest.
+
+    The sidecar gets a **unique** name (``tempfile.mkstemp``) rather than a fixed
+    ``<name>.part``: two concurrent POSTs of the *same* filename (a double-submit,
+    a retried request) would otherwise stream into one shared ``.part`` at once —
+    interleaving their bytes into a corrupt file that both then rename into place.
+    A per-request temp file makes each write independent; the final ``os.replace``
+    is atomic, so the loser is simply overwritten by a *complete* file (and the
+    duplicate is dropped by the pipeline's content dedup) — never a scrambled sub.
+    The ``.part`` suffix keeps the sidecar out of the scanner's FITS glob, so even
+    an orphan from a hard crash is never ingested.
     """
-    tmp = dest.with_name(dest.name + ".part")
+    fd, tmp_name = await run_in_threadpool(
+        tempfile.mkstemp, suffix=".part", prefix=dest.name + ".",
+        dir=str(dest.parent))
+    tmp = Path(tmp_name)
     written = 0
-    fh = await run_in_threadpool(open, tmp, "wb")
+    fh = os.fdopen(fd, "wb")
     try:
         while True:
             chunk = await upload.read(_CHUNK)
