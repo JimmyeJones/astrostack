@@ -10,9 +10,6 @@ fields at a heavy proxy, e.g. the globular_cluster preset). The dilation is now 
 path (`proxy_scale == 1`) leaves the default 4, byte-for-byte unchanged.
 """
 
-import sys
-import types
-
 import numpy as np
 import pytest
 
@@ -99,36 +96,6 @@ def test_editor_subtract_op_scales_the_dilation_by_proxy_scale(monkeypatch):
     # Export unchanged (4 full-res px); ×4 proxy masks the same *physical* halo
     # with 1 proxy px — not the 4 it used before, which was a 16-px-equiv halo.
     assert seen == [4, 1]
-
-
-@pytest.fixture
-def fake_cupy(monkeypatch):
-    """Back CuPy/cupyx.scipy.ndimage with NumPy/SciPy so ``_subtract_background_gpu``
-    runs on the CPU host. Lets us exercise the GPU code path (otherwise skipped
-    whenever real CuPy is absent, which is the coverage gap that hid the fixed-5px
-    object-mask dilation bug) without a real GPU."""
-    import scipy.ndimage as ndi
-
-    cupy = types.ModuleType("cupy")
-    for name in ("asarray", "float32", "nanmedian", "abs", "indices", "stack",
-                 "nan", "where", "isfinite", "nanmean"):
-        setattr(cupy, name, getattr(np, name))
-    cupy.asnumpy = lambda a: np.asarray(a)
-
-    cupyx = types.ModuleType("cupyx")
-    cupyx_scipy = types.ModuleType("cupyx.scipy")
-    cupyx_ndi = types.ModuleType("cupyx.scipy.ndimage")
-    cupyx_ndi.map_coordinates = ndi.map_coordinates
-    cupyx_ndi.maximum_filter = ndi.maximum_filter
-    cupyx_ndi.binary_dilation = ndi.binary_dilation
-    cupyx_scipy.ndimage = cupyx_ndi
-    cupyx.scipy = cupyx_scipy
-
-    monkeypatch.setitem(sys.modules, "cupy", cupy)
-    monkeypatch.setitem(sys.modules, "cupyx", cupyx)
-    monkeypatch.setitem(sys.modules, "cupyx.scipy", cupyx_scipy)
-    monkeypatch.setitem(sys.modules, "cupyx.scipy.ndimage", cupyx_ndi)
-    return cupy
 
 
 def _bright_object_field(h=200, w=200, seed=4):
