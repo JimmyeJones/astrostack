@@ -1,8 +1,9 @@
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { StackHealthCard, noteColor, visibleNotes } from "./StackHealthCard";
+import { StackHealthCard, noteAction, noteColor, visibleNotes } from "./StackHealthCard";
 import type { HealthNote, StackHealth } from "../api/client";
 import * as client from "../api/client";
 
@@ -14,7 +15,9 @@ function renderCard(safe = "M_42") {
   return render(
     <MantineProvider>
       <QueryClientProvider client={new QueryClient()}>
-        <StackHealthCard safe={safe} />
+        <MemoryRouter>
+          <StackHealthCard safe={safe} />
+        </MemoryRouter>
       </QueryClientProvider>
     </MantineProvider>,
   );
@@ -39,6 +42,22 @@ describe("noteColor", () => {
   });
 });
 
+describe("noteAction", () => {
+  it("wires trim_border to the editor for this run", () => {
+    expect(noteAction("trim_border", "M_42", 7)).toEqual({
+      label: "Open the editor to trim the border →",
+      href: "/targets/M_42/edit/7",
+    });
+  });
+  it("wires calibration to the Calibration page", () => {
+    expect(noteAction("calibration", "M_42", 7)?.href).toBe("/calibration");
+  });
+  it("returns null for a note with no wired action", () => {
+    expect(noteAction(null, "M_42", 7)).toBeNull();
+    expect(noteAction("something_else", "M_42", 7)).toBeNull();
+  });
+});
+
 describe("StackHealthCard", () => {
   it("renders the top notes for a graded stack", async () => {
     const health: StackHealth = {
@@ -55,6 +74,9 @@ describe("StackHealthCard", () => {
       expect(screen.getByText("How's my stack?")).toBeInTheDocument());
     expect(screen.getByText("No darks or flats were applied.")).toBeInTheDocument();
     expect(screen.getByText("Round stars.")).toBeInTheDocument();
+    // The actionable note surfaces a one-click link to the wired page.
+    const link = screen.getByRole("link", { name: /set up master darks/i });
+    expect(link).toHaveAttribute("href", "/calibration");
   });
 
   it("renders nothing when there is no stack to grade", async () => {

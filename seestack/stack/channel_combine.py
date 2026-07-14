@@ -79,6 +79,23 @@ def combine_channels(
     if "B" in channels:
         rgb[..., 2] = channels["B"] * w("B")
 
+    if "L" not in channels:
+        # A pixel that is NaN in *any supplied* colour channel is uncovered there,
+        # so its colour is undefined — mark it NaN across all three channels rather
+        # than leaving a hard 0 in the missing channel(s), which renders as a
+        # saturated colour speck (a cyan/magenta fringe) instead of an uncovered
+        # pixel. This mirrors the LRGB branch below (``scale = np.where(isnan(cur),
+        # nan, scale)``) and keeps the "NaN = no coverage" invariant clean at
+        # mosaic/RGB seams where per-filter footprints differ. A wholly-absent
+        # channel (never supplied — an intentional 0 for a bicolour SHO map) keeps
+        # its 0 wherever the supplied channels all cover the pixel.
+        supplied_idx = [i for i, c in enumerate(("R", "G", "B")) if c in channels]
+        nan_any = np.zeros((h, wid), dtype=bool)
+        for i in supplied_idx:
+            nan_any |= np.isnan(rgb[..., i])
+        if nan_any.any():
+            rgb[nan_any, :] = np.nan
+
     if "L" in channels:
         # LRGB: keep RGB's colour ratios but set the luminance to L.
         lum_target = channels["L"] * w("L")

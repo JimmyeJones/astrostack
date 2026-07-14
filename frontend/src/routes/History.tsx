@@ -18,6 +18,7 @@ import { autoColorCalCaption } from "../components/editor/colorCal";
 import { RejectionBadge } from "../components/RejectionBadge";
 import { NoiseReadout, NoiseDelta, CleanestBadge, cleanestRunId, hasNoise } from "../components/NoiseBadge";
 import { ImageLightbox } from "../components/ImageLightbox";
+import { StackHealthCard } from "../components/StackHealthCard";
 import { Sparkline } from "../components/Sparkline";
 
 export type RunSort = "newest" | "cleanest";
@@ -655,7 +656,14 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
         </Tooltip>
       </Group>
 
-      {showInfo && run.has_fits ? <StackInfoPanel safe={safe} runId={run.id} /> : null}
+      {showInfo && run.has_fits ? (
+        <>
+          <StackInfoPanel safe={safe} runId={run.id} />
+          {/* "How's my stack?" for *this* run — self-hides for non-genuine
+              (editor/combine) runs the endpoint declines to grade. */}
+          <StackHealthCard safe={safe} runId={run.id} />
+        </>
+      ) : null}
 
       <ImageLightbox
         src={light

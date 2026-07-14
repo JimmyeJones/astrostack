@@ -1295,9 +1295,23 @@ the real webapp stack→edit path.)_
   2026-07-14). *(Data-integrity on the new upload path — image-quality/trust. Low probability, but a corrupt
   sub is exactly the class the app must never produce.)*
 
-- **`combine_channels` RGB-only path leaves a saturated colour fringe where one channel is NaN but the
-  others cover the pixel (deprioritised mono→RGB path; OSC Seestar stacks unaffected).** *(traced +
-  reproduced, Scout 2026-07-14, branch `claude/practical-dirac-9awndt`.)* `seestack/stack/channel_combine.py`
+- ~~**`combine_channels` RGB-only path leaves a saturated colour fringe where one channel is NaN but the
+  others cover the pixel (deprioritised mono→RGB path; OSC Seestar stacks unaffected).**~~ — **FIXED
+  v0.120.1** (Builder 2026-07-14, branch `claude/pensive-faraday-n1vlsg`; traced + reproduced +
+  regression-tested). Mirrored the LRGB branch's NaN propagation in the plain-RGB (no-L) branch: after
+  assigning the supplied colour channels, any pixel that is NaN in **any supplied** channel is marked NaN
+  across all three (`rgb[nan_any, :] = np.nan`), so a mosaic/RGB-seam pixel covered in some channels but not
+  others becomes an uncovered (NaN) pixel instead of `[NaN, g, b]` (a saturated cyan/magenta speck). A
+  *wholly-absent* channel (never supplied — an intentional 0 for a bicolour SHO map) keeps its 0 wherever the
+  supplied channels all cover the pixel. Additive; no schema/config/API/default change and the LRGB path
+  (already NaN-correct) is untouched. Regression `tests/test_channel_combine.py::
+  test_rgb_partial_colour_coverage_pixel_is_fully_nan` (R NaN at a pixel G/B cover → all-NaN out, fails-before:
+  `[nan, 0.2, 0.2]`) + `test_rgb_bicolour_keeps_absent_channel_zero_over_a_partial_nan` (absent B stays 0 over a
+  covered pixel; a supplied-channel NaN still goes fully uncovered). Severity: wrong-result, **only on the
+  deprioritised mono/LRGB channel-combine path** — an OSC Seestar frame debayers to RGB with identical coverage
+  across all three channels, so this can never arise on the target user's path. Confidence: reproduced + fixed.
+  <details><summary>Original trace</summary>
+  `seestack/stack/channel_combine.py`
   lines 73–80 build the RGB result with `rgb = np.zeros(...)` then assign each supplied colour channel
   independently (`rgb[...,0] = channels["R"]·w`, etc.), so a pixel that is **NaN in one channel but finite
   in the others** (differing per-filter footprints at a mosaic/RGB seam) keeps a hard **0** in the missing
@@ -1320,6 +1334,7 @@ the real webapp stack→edit path.)_
   a regression test (`R` NaN at a pixel G/B cover → all-NaN out; a fully-absent B stays 0). Confidence:
   reproduced. (Deprioritised path — file, don't rush; §1 says fix an *outright* bug in what exists, but this
   never touches the OSC user, so it ranks below any OSC-facing work.)
+  </details>
 
 - ~~**Scan summary miscounts a still-copying zero-byte sub as an *error*, not a *skip*.**~~ — **FIXED
   v0.119.9** (Builder 2026-07-14, branch `claude/pensive-faraday-g346o7`; traced + regression-tested).
@@ -3017,6 +3032,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+- **"How's my stack?" highlight-clip cue — needs REAL-data threshold tuning before shipping (NOT a blind
+  change).** (M, image-quality/trust — PRIORITY 4) *(Builder-filed 2026-07-14, deferred slice-(b) part of the
+  "How's my stack?" health check; slices (a) v0.120.0 + actionable/History (b) v0.121.0 shipped.)* The original
+  health-check idea listed a "bright core is clipping — the editor's highlight rolloff will recover it" cue that
+  reads the **stacked pixels** (the other cues read only stamped run fields + the frames table, so `stack_health`
+  stayed pure/offline). Deferred deliberately: (1) it needs loading `master.fits` pixels, so it can't live in the
+  pure `stack_health(run, frames)` helper — it must be computed webapp-side (where the master is loaded) and
+  passed in as an optional pre-computed cue, and gated so it doesn't load pixels on every Target-page render;
+  and (2) **detecting genuine clipping in a *linear, background-subtracted* master needs a real-data-validated
+  threshold** — a saturated core shows as a flat plateau of near-max pixels, but the master's max/scale varies
+  per target and the background subtraction shifts values, so any "fraction of pixels within ε of max" rule
+  risks false-positives (or misses) without validating on real Seestar stacks of both a clipped bright-core
+  target (e.g. M42's trapezium / M31's core) and an unclipped faint target. Same real-data gating the SCNR /
+  `sky_sigma` / streak-detector items carry. When built: a conservative plateau detector (many finite pixels at
+  the exact global max with ~zero local spread = saturation), a `HealthNote(kind="highlight_clip")` that is
+  reassuring not alarming (the editor's v0.119.1 rolloff already recovers it in the display), and a webapp-side
+  computation behind the existing endpoint. Additive; the note only ever *adds* guidance, never gates.
 - **Scout to vet on REAL data: does the STF `_highlight_rolloff` (v0.119.1) mildly *desaturate* bright
   coloured highlights?** (S, image-quality — PRIORITY 4) *(Builder-audit-noted 2026-07-14, from an
   adversarial numeric audit of the v0.119.1/.2 highlight-rolloff fix — which otherwise verified clean:
@@ -3687,10 +3719,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   test_target_stack_health.py` (4 — null-without-stack, notes for a calibrated run, uncalibrated leads with the
   action + coverage surfaced, 404), `StackHealthCard.test.tsx` (6 — `visibleNotes` cap, `noteColor`, renders
   top notes, hides on null + empty). Python (1285) + tsc + full vitest (797) + vite build all green.
-  **Slice (b) remains open:** wire the `action` keys (`trim_border`, `calibration`) to the buttons that already
-  do those things, and drop the card onto the History/editor result too; a highlight-clip cue (needs loading
-  the stacked pixels) is a natural slice (b) add. *(Scout-filed 2026-07-14; L overall; slice (a) shipped.
-  Pillars: autonomy + friendliness + image-quality/trust — PRIORITY 2/3/4. Beginner bar ✔.)*
+  **Slice (b) — actionable notes + History surface — SHIPPED v0.121.0** (Builder 2026-07-14, branch
+  `claude/pensive-faraday-n1vlsg`). Two parts of slice (b) landed: (1) the health notes' `action` keys are now
+  **clickable one-click links** — a new pure `noteAction(action, safe, runId)` helper maps `trim_border` → the
+  editor on that run (`/targets/{safe}/edit/{runId}`, where Trim border lives) and `calibration` → the
+  Calibration page (build master darks/flats); the card renders the link under its note (reassurance/positive
+  notes have none), so a beginner goes straight from "what to fix" to the page that fixes it. (2) The card now
+  surfaces **per-run on the History page** (inside the run's expanded info panel) — the `GET
+  …/stack-health` endpoint took an optional backward-compatible `?run_id=` (no param = newest genuine, as
+  before; with it = that specific genuine run, skipping editor/combine runs), the `StackHealthCard` took an
+  optional `runId` prop, and it's rendered in each `RunCard` gated on `showInfo` so it only queries when the
+  user opens a run's details (no N background queries). Additive/read-only; no schema/config/default change, the
+  new query param is optional, and the Target-page card is unchanged. Tests: `StackHealthCard.test.tsx`
+  (`noteAction` mapping for trim_border/calibration/none + the rendered link), `test_target_stack_health.py`
+  (grades a specific run by id / newest by default / null for an unknown run_id), History suite still green.
+  **Slice (b) remainder still open:** a highlight-clip cue (needs loading the stacked pixels + real-data
+  threshold tuning — filed as its own idea below, gated like the other pixel-threshold items) and the editor
+  result surface. *(Scout-filed 2026-07-14; L overall; slice (a) shipped v0.120.0, slice (b) part shipped
+  v0.121.0. Pillars: autonomy + friendliness + image-quality/trust — PRIORITY 2/3/4. Beginner bar ✔.)*
   <details><summary>Original idea</summary>
   After a stack finishes, a beginner has no way to know whether the image is *good* or what one
   thing would most improve it — the readiness card only speaks to *integration time*, not the actual pixels.

@@ -80,6 +80,31 @@ def test_rgb_uncovered_pixel_stays_nan():
     assert np.all(np.isfinite(out[0, 0]))
 
 
+def test_rgb_partial_colour_coverage_pixel_is_fully_nan():
+    # Regression: on the plain-RGB (no L) path, a pixel covered in G/B but NOT R
+    # (differing per-filter footprints at a mosaic/RGB seam) must become fully
+    # uncovered (all NaN), not [NaN, g, b] — the latter keeps a hard 0 in the
+    # missing channel and renders as a saturated cyan/magenta speck instead of an
+    # uncovered pixel. Mirrors the LRGB branch's NaN propagation.
+    r = np.array([[0.4, np.nan]], np.float32)
+    g = np.array([[0.2, 0.2]], np.float32)
+    b = np.array([[0.2, 0.2]], np.float32)
+    out = combine_channels({"R": r, "G": g, "B": b})
+    assert np.all(np.isnan(out[0, 1]))  # not [nan, 0.2, 0.2] — no colour fringe
+    assert np.all(np.isfinite(out[0, 0]))
+
+
+def test_rgb_bicolour_keeps_absent_channel_zero_over_a_partial_nan():
+    # The absent (never-supplied) channel of a bicolour map is an intentional 0
+    # and must stay 0 wherever the *supplied* channels cover the pixel — only a
+    # pixel that is NaN in a supplied channel goes fully uncovered.
+    r = np.array([[0.4, np.nan]], np.float32)
+    g = np.array([[0.2, 0.2]], np.float32)  # no blue supplied
+    out = combine_channels({"R": r, "G": g})
+    np.testing.assert_allclose(out[0, 0], [0.4, 0.2, 0.0])  # absent B stays 0
+    assert np.all(np.isnan(out[0, 1]))  # R uncovered → whole pixel NaN
+
+
 def test_lum_only_preserves_nan():
     lum = np.array([[0.3, np.nan]], np.float32)
     out = combine_channels({"L": lum})

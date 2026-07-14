@@ -810,8 +810,11 @@ export const api = {
     req<ObjectInfo | null>(`/api/targets/${safe}/identify`),
   sessionRecap: (safe: string) =>
     req<SessionRecap | null>(`/api/targets/${safe}/session-recap`),
-  stackHealth: (safe: string) =>
-    req<StackHealth | null>(`/api/targets/${safe}/stack-health`),
+  stackHealth: (safe: string, runId?: number) =>
+    req<StackHealth | null>(
+      `/api/targets/${safe}/stack-health` +
+        (runId != null ? `?run_id=${runId}` : ""),
+    ),
   getIntegrationGoal: (safe: string) =>
     req<{ goal_s: number | null }>(`/api/targets/${safe}/integration-goal`),
   setIntegrationGoal: (safe: string, goalS: number | null) =>
