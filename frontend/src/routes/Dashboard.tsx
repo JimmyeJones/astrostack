@@ -10,6 +10,7 @@ import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { astapReadiness, astapReadinessSignature } from "../components/dashboard/astapReadiness";
 import { folderReadiness, folderReadinessSignature } from "../components/dashboard/folderReadiness";
+import { LastNightCard } from "../components/LastNightCard";
 import { QueryError } from "../components/QueryError";
 
 // Dismissal of the first-run readiness banners, keyed to the *specific* problem
@@ -160,6 +161,8 @@ export function Dashboard() {
         <StatCard icon={<IconLayoutGrid size={22} color="var(--mantine-color-violet-4)" />}
           label="Free disk" value={free} sub={usedSub} />
       </SimpleGrid>
+
+      <LastNightCard />
 
       <Group justify="space-between" mt="sm">
         <Title order={4}>Recent stacks</Title>

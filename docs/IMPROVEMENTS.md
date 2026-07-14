@@ -3198,9 +3198,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   dates), `tests/webapp/test_target_session_recap.py` (3 — endpoint incl. null + 404),
   `SessionRecapCard.test.tsx` (6 — `describeRejects` ordering, `describeSession` phrasing incl. all-kept
   and singular, card render + null). Python (1162) + tsc + full vitest (759) + vite build all green.
-  *(Scout-filed 2026-07-13; M, friendliness/autonomy — PRIORITY 2/3.)* **Slices (b) a combined "last
-  night across all targets" Dashboard card and (c) a one-click "(re)stack now" action remain open for a
-  future run.**
+  *(Scout-filed 2026-07-13; M, friendliness/autonomy — PRIORITY 2/3.)* **SLICE (b) SHIPPED v0.116.0**
+  (Builder 2026-07-14, branch `claude/pensive-faraday-qu4ex3`): a combined **"Last night"** Dashboard card
+  that answers *what did last night give me?* across every target you shot, not just one. A new pure engine
+  helper `session_recap.library_session_recap(targets)` (with a public `last_session_frames` trim helper)
+  merges each target's most-recent session onto one timeline and takes the trailing 6 h-gap cluster as "last
+  night" — using the identical session rule as the per-target recap — so two targets shot the same night
+  combine into one recap and a target *not* shot that night drops out. New read-only endpoint
+  `GET /api/last-night` (in `stats.py`, cached on the app between scans via the same registry-signature
+  pattern as `/api/stats`, and memory-bounded — each project is trimmed to its last session inside the loop,
+  never holding every target's full frame list at once). The Dashboard renders a small violet card below the
+  stat grid — plain-language paragraph via a pure `describeLibraryNight` helper (*"Last night you captured
+  240 subs across 2 targets (3 h 10 m). 228 kept; 12 set aside (10 cloudy, 2 trailed)."*) + a "% kept" badge
+  + per-target chips (biggest first) linking to each target, shown only for a multi-target night. Additive /
+  read-only throughout: no schema/config/DB/default/API-shape change, fully offline. Tests:
+  `tests/test_session_recap.py` (+4 — trim helper, none-when-empty, two-targets-same-night combine +
+  old-target-excluded + biggest-leads + merged buckets + span, single-target-latest-night-only),
+  `tests/webapp/test_last_night.py` (3 — null-empty, combine two targets, exclude a target not shot that
+  night), `LastNightCard.test.tsx` (6 — `describeLibraryNight` phrasing multi/single/singular, card render +
+  chips, single-target omits chips, null). **Slice (c) a one-click "(re)stack now" action remains open** —
+  though the Target page already carries "Process target" / "Restack" CTAs, so its marginal value is small.
   <details><summary>Original idea</summary>
   The north-star loop is *drop a night's subs, walk away, come back to a result* — but on
   return today the only trace of what actually happened is the **transient** Jobs summary (gone once the

@@ -112,6 +112,29 @@ export interface SessionRecap {
   quality_drift: SessionQualityDrift | null;
 }
 
+export interface TargetNight {
+  name: string;
+  safe: string;
+  n_frames: number;
+  n_kept: number;
+  n_set_aside: number;
+  exposure_s: number;
+  kept_exposure_s: number;
+}
+
+export interface LibrarySessionRecap {
+  n_targets: number;
+  n_frames: number;
+  n_kept: number;
+  n_set_aside: number;
+  session_exposure_s: number;
+  kept_exposure_s: number;
+  start_utc: string | null;
+  end_utc: string | null;
+  targets: TargetNight[];
+  reject_buckets: Record<string, number>;
+}
+
 export interface DashboardStats {
   n_targets: number;
   n_frames: number;
@@ -936,6 +959,7 @@ export const api = {
 
   // dashboard
   getStats: () => req<DashboardStats>("/api/stats"),
+  getLastNight: () => req<LibrarySessionRecap | null>("/api/last-night"),
 
   // storage / housekeeping
   getStorage: () => req<StorageInfo>("/api/storage"),

@@ -53,6 +53,39 @@ class StatsResponse(BaseModel):
     disk: dict
 
 
+# The combined "Last night" card opens each project to read its frames, so it's
+# cached on the app like the stack roll-up above. The signature keys on each
+# target's last-activity stamp, which bumps whenever new frames are ingested, so
+# a fresh scan invalidates it promptly; the TTL backstops changes the signature
+# can't see.
+_LAST_NIGHT_CACHE_TTL_S = 60.0
+
+
+class TargetNightOut(BaseModel):
+    name: str
+    safe: str
+    n_frames: int
+    n_kept: int
+    n_set_aside: int
+    exposure_s: float
+    kept_exposure_s: float
+
+
+class LastNightResponse(BaseModel):
+    """The library's most recent capture night, combined across targets."""
+
+    n_targets: int
+    n_frames: int
+    n_kept: int
+    n_set_aside: int
+    session_exposure_s: float
+    kept_exposure_s: float
+    start_utc: str | None = None
+    end_utc: str | None = None
+    targets: list[TargetNightOut] = []
+    reject_buckets: dict[str, int] = {}
+
+
 def _rollup_stacks(lib, targets) -> tuple[list[RecentStack], int, int]:
     """Open each target's project and collect its stack runs. Expensive — this
     is what the cache below is protecting."""
@@ -89,6 +122,76 @@ def _rollup_stacks(lib, targets) -> tuple[list[RecentStack], int, int]:
                 proj.close()
     recent.sort(key=lambda r: r.timestamp_utc, reverse=True)
     return recent, n_stack_runs, n_targets_with_stacks
+
+
+def _collect_last_night(lib, targets):
+    """Open each project, trim it to its most recent session, and combine every
+    target's latest night into one recap. Expensive (opens every project) — the
+    caller caches it. A broken project is skipped, never 500s the dashboard."""
+    from seestack.io.project import Project
+    from seestack.session_recap import last_session_frames, library_session_recap
+
+    rows: list[tuple[str, str, list]] = []
+    for t in targets:
+        proj = None
+        try:
+            proj = Project.open(lib.target_dir(t))
+            # Trim to the target's last session inside the loop so we never hold
+            # every target's full frame list at once (memory-bounded).
+            last = last_session_frames(list(proj.iter_frames()))
+            if last:
+                rows.append((t.name, t.safe_name, last))
+        except Exception:  # noqa: BLE001 — a broken project must not 500 the dashboard
+            pass
+        finally:
+            if proj is not None:
+                proj.close()
+    return library_session_recap(rows)
+
+
+@router.get("/api/last-night", response_model=LastNightResponse | None)
+def get_last_night(request: Request) -> LastNightResponse | None:
+    """The library's most recent capture night, combined across every target —
+    the Dashboard "what did last night give me?" card. Returns ``null`` when no
+    frame anywhere carries a capture timestamp. Read-only aggregation over the
+    frames table, cached on the app between scans."""
+    lib = deps.open_library(request)
+    try:
+        targets = lib.list_targets()
+        sig = tuple(sorted(
+            (t.safe_name, t.last_activity_utc or "") for t in targets
+        ))
+        cache = getattr(request.app.state, "last_night_cache", None)
+        now = time.monotonic()
+        if cache and cache["sig"] == sig and (now - cache["at"]) < _LAST_NIGHT_CACHE_TTL_S:
+            recap = cache["data"]
+        else:
+            recap = _collect_last_night(lib, targets)
+            request.app.state.last_night_cache = {"sig": sig, "at": now, "data": recap}
+    finally:
+        lib.close()
+
+    if recap is None:
+        return None
+    return LastNightResponse(
+        n_targets=recap.n_targets,
+        n_frames=recap.n_frames,
+        n_kept=recap.n_kept,
+        n_set_aside=recap.n_set_aside,
+        session_exposure_s=recap.session_exposure_s,
+        kept_exposure_s=recap.kept_exposure_s,
+        start_utc=recap.start_utc,
+        end_utc=recap.end_utc,
+        targets=[
+            TargetNightOut(
+                name=c.name, safe=c.safe,
+                n_frames=c.n_frames, n_kept=c.n_kept, n_set_aside=c.n_set_aside,
+                exposure_s=c.exposure_s, kept_exposure_s=c.kept_exposure_s,
+            )
+            for c in recap.targets
+        ],
+        reject_buckets=recap.reject_buckets,
+    )
 
 
 @router.get("/api/stats", response_model=StatsResponse)
