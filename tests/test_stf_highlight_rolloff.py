@@ -15,7 +15,7 @@ mid-tones bit-for-bit unchanged.
 import numpy as np
 import pytest
 
-from seestack.render.thumbnail import _highlight_rolloff, autostretch
+from seestack.render.thumbnail import _highlight_rolloff, asinh_stretch, autostretch
 
 
 def _hdr_target(h=300, w=300):
@@ -90,3 +90,20 @@ def test_negative_inputs_floor_at_black():
     y = _highlight_rolloff(np.array([-5.0, -0.1, 0.0, 0.3]), knee=0.7)
     assert y[0] == 0.0 and y[1] == 0.0
     assert y[3] == pytest.approx(0.3)
+
+
+def test_asinh_stretch_also_protects_the_core():
+    """The manual asinh stretch shares the same hard-clip and gets the same
+    rolloff: an HDR core keeps internal detail and stops short of pure white,
+    while the sky stays untouched and bright stars still read as (near) white."""
+    img = _hdr_target()
+    old = asinh_stretch(img, protect_highlights=False)[..., 0]
+    new = asinh_stretch(img, protect_highlights=True)[..., 0]
+
+    # Fewer blown pixels and the core regains structure.
+    assert np.mean(new >= 0.99) < np.mean(old >= 0.99)
+    assert new[140:161, 140:161].std() > old[140:161, 140:161].std()
+    assert new.max() < 1.0
+
+    # The sky corner (below the knee) is bit-for-bit unchanged.
+    assert np.array_equal(new[:30, :30], old[:30, :30])

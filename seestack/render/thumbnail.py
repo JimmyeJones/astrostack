@@ -192,6 +192,7 @@ def asinh_stretch(
     *,
     stretch: float = 0.5,
     black: float = 0.35,
+    protect_highlights: bool = True,
 ) -> np.ndarray:
     """Asinh (inverse-hyperbolic-sine) stretch — the astrophotographer's stretch.
 
@@ -258,7 +259,13 @@ def asinh_stretch(
         # cuts well into the signal (median + 4σ).
         shadows = float(np.clip(med + (b * 6.0 - 2.0) * sigma, 0.0, 0.999))
         rng = max(1.0 - shadows, 1e-6)
-        x = np.clip((chan[finite] - shadows) / rng, 0.0, 1.0)
+        # Soft-shoulder the highlights rather than hard-clipping them: a bright
+        # HDR core sits above the 99.5th-pct ceiling (xr > 1) and would otherwise
+        # clip to a flat white blob, exactly the STF blow-out fixed in v0.119.1.
+        # The rolloff leaves the sky/mid-tones untouched, so it only recovers
+        # core detail; `protect_highlights=False` restores the old hard clip.
+        xr = (chan[finite] - shadows) / rng
+        x = _highlight_rolloff(xr) if protect_highlights else np.clip(xr, 0.0, 1.0)
         out[..., c][finite] = np.clip(np.arcsinh(x / a) / denom, 0.0, 1.0)
 
     return out

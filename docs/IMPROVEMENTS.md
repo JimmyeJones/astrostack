@@ -1872,20 +1872,13 @@ to **Shipped**.)_
 ### ⭐ Editor — make it excellent (PRIORITY 1)
 The editor is where a good stack becomes a good *picture*, and it has real
 problems. Dogfood it every big-picture run and fix root causes.
-- **Give the manual `asinh` stretch the same highlight rolloff STF just got.**
-  (S, PRIORITY 1/4 — image quality.) `seestack/render/thumbnail.py::asinh_stretch`
-  has the **identical hard-clip** the STF path had before v0.119.1: it computes
-  `x = np.clip((chan−shadows)/rng, 0, 1)` then `arcsinh(x/a)/asinh(1/a)`, so any
-  bright HDR core above the 99.5th-percentile ceiling clips to a flat white blob
-  exactly like STF did (verified in the fix's investigation — asinh at stretch=0.5
-  pushes the same 0.5% of core pixels to ≥0.99 with zero internal std). STF was
-  fixed first because it's the owner-reported default/Auto path; asinh is the
-  *manual* op, so lower priority — but a beginner who switches to asinh still hits
-  it. Fix: reuse the shared `_highlight_rolloff` helper (already in `thumbnail.py`)
-  in the asinh per-channel loop behind a `protect_highlights=True` default, and add
-  a mirror regression test. Low risk (helper is proven, sky/mid-tones untouched),
-  but check the asinh suggester (`seestack/edit/stretch.py`) — its median-based
-  math is unaffected (median ≪ knee), so only near-white pixels change.
+- ~~**Give the manual `asinh` stretch the same highlight rolloff STF just got.**~~
+  — **SHIPPED v0.119.2** (Builder 2026-07-14, same branch). `asinh_stretch` shared
+  the identical hard-clip, so it got the same `_highlight_rolloff` behind a
+  `protect_highlights=True` default; the asinh suggester (`edit/stretch.py`) is
+  median-based (median ≪ knee) so it's unaffected, and the existing hot-pixel /
+  edit-stretch regression tests stay green. Mirror regression added to
+  `tests/test_stf_highlight_rolloff.py::test_asinh_stretch_also_protects_the_core`.
 - **Live preview** — the preview must show **every** enabled action (that's the
   whole point of it). **DONE (v0.57.0):** the last hold-out, Deconvolution, was
   `proxy_safe=False` and got *skipped* in preview (only a badge told you it was
