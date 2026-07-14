@@ -3163,6 +3163,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   read as more obvious to a beginner — but it needs the `@mantine/dropzone` dep (check it's
   already bundled before adding) and pairs naturally with slice (b)'s `webkitdirectory`
   folder-structure preservation, so fold the two together. XS–S, frontend-only.)_
+  — **DRAG-AND-DROP DROPZONE SHIPPED v0.118.0** (Builder 2026-07-14, branch
+  `claude/pensive-faraday-07rvx7`). Delivered the drop target **without** adding the
+  `@mantine/dropzone` dep (it isn't bundled, and a UI dep is avoidable here): `UploadFits`
+  now wraps its controls in a native HTML5 drop zone (dashed border that highlights blue on
+  drag-over, with a plain-language hint) and two new pure, exported helpers walk the drop —
+  `readEntryFiles(entry)` recurses a dropped **folder** depth-first via the FileSystem-entry
+  API (pumping the `DirectoryReader` until an empty batch, swallowing per-entry errors so one
+  unreadable file never sinks the drop), and `collectDroppedFiles(dataTransfer)` flattens all
+  dropped folders/files and falls back to `dataTransfer.files` when the entry API is absent.
+  Dropped files funnel through the same `onPick` FITS filter as the picker, so the existing
+  streaming/sanitising/dedup endpoint (slice a) is reused unchanged — this makes "drag a whole
+  Seestar target folder onto the Library" actually work, matching the card's existing "or a
+  whole folder" copy. Frontend-only, additive, no backend/schema/API/default change; drops are
+  ignored mid-upload. Tests: `UploadFits.test.tsx` (+5 — `readEntryFiles` single-file + nested
+  folder walk, `collectDroppedFiles` folder-flatten + files-fallback, and a component drop that
+  keeps only the FITS files). tsc + full vitest (776) + vite build green. **Slice (b) remainder
+  — per-file progress, `webkitdirectory` on the picker, partial-upload cleanup — and slice (c)
+  remain open.**
   <details><summary>Original write-up</summary>
   Today the only way to get subs in is to drop Seestar target folders
   into `incoming/` over an SMB/NFS share — which assumes the user can mount the NAS
@@ -3543,7 +3561,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   mixed-tz frame pair; verify first that no ingest/merge path can persist a naive timestamp (if one can, that's
   the real bug). Found while adding the cross-session drift nudge (a test hit exactly this on mixed fixtures).
   </details>
-- **Exercise the production-only SPA-serving path in tests (test-coverage blind spot that hid a security bug).**
+- ~~**Exercise the production-only SPA-serving path in tests (test-coverage blind spot that hid a security bug).**~~
+  — **SHIPPED v0.118.1** (Builder 2026-07-14, branch `claude/pensive-faraday-07rvx7`). New
+  `tests/webapp/test_spa_serving_e2e.py` boots the **full** `create_app()` (routers + auth-gate middleware +
+  lifespan) over a materialised `webapp/static/` tree — a fixture mirroring `client` that patches
+  `main.STATIC_DIR` before `create_app()` so `_mount_spa` installs the real serving path — and asserts the
+  four prod-only behaviours the filed gap named: (a) `/` and an unknown client route return the SPA shell
+  through the whole stack (not the dev "Frontend not built" placeholder), plus a real asset serves via the
+  `/assets` StaticFiles mount and the API routes still win over the catch-all; (b)/(c) a percent-encoded
+  `../` traversal falls back to the shell (never the out-of-root secret) through the full middleware chain;
+  and (d) — the interaction no test previously covered — with **auth on**, unauthenticated `/`, a client
+  route, and `/assets/app.js` are all 401-challenged (and a traversal attempt never leaks pre-auth) while
+  correct credentials serve the content and `/api/health` stays open for the Docker healthcheck. Pure
+  test-only addition, no product change; closes the "only broken in the shipped image" structural blind spot
+  that let the v0.109.24 path-traversal reach production. 5 tests, green. *(Original write-up kept below.)*
+  <details><summary>Original write-up</summary>
   *(Idea, Builder 2026-07-12 — surfaced while fixing the v0.109.24 path-traversal.)* The SPA fallback route +
   `/assets` mount in `webapp/main.py::_mount_spa` are only registered when `webapp/static` exists — i.e. the
   production Docker image, which builds the frontend into `webapp/static/`. The dev/test tree has no `static`
@@ -3558,6 +3590,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   (c) traversal is blocked; (d) with auth **on**, static/asset requests follow the intended allow/deny policy.
   Cheap, additive, no product change; prevents a whole class of "only broken in the shipped image" regressions.
   (S, infra/security — test coverage.)
+  </details>
 - ~~**Minor state-classification tidy-up: a Process-target job cancelled *during the stack* is reported `done`, not
   `cancelled`.**~~ — **SHIPPED v0.109.18** (Builder 2026-07-11). `submit_process_target` now checks the stack
   step's returned `cancelled` sentinel and, when set, surfaces `cancelled:True`/`stacked:False` at the top level of
