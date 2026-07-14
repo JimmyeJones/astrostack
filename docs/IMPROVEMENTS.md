@@ -3664,7 +3664,35 @@ problems. Dogfood it every big-picture run and fix root causes.
   related to the night planner above; the planner's "plot tonight's targets" view
   can reuse this.
 - **NEW BEGINNER FEATURE (Scout 2026-07-14) — "How's my stack?" plain-language health check on the
-  result.** After a stack finishes, a beginner has no way to know whether the image is *good* or what one
+  result.** — **SLICE (a) SHIPPED v0.120.0** (Builder 2026-07-14, branch `claude/pensive-faraday-g346o7`).
+  New pure/offline engine helper `seestack/stackhealth.py::stack_health(run, frames) -> list[HealthNote]`
+  reads cues already on disk — the run's `calstat` (→ "No darks or flats were applied … adding darks would cut
+  the background speckle"), `coverage_min/max` (→ ragged low-coverage border → **Trim border**, only when the
+  border is genuinely thin *and* the peak has ≥4 frames, so a flat single-field stack never trips it), the
+  frames' median `eccentricity_median` (→ "stars are a little elongated", gentle 0.6 floor), and the set-aside
+  subs bucketed via the shared `bucket_reject_reason` (→ reassuring "2 of 10 subs were set aside (mostly
+  trailed) — that's normal") — plus a positive summary ("solid stack — calibrated (dark+flat), round stars,
+  even coverage") and a guaranteed friendly fallback so the card always has something to say. Notes are ranked
+  **actionable-first**, reassurance/positive last; the card shows the top one or two. Deliberately **omits an
+  absolute noise verdict** — the project treats `noise_sigma` as having no absolute meaning (only within-target
+  relative; see `NoiseBadge`), so a "clean/noisy" label there would be fragile. New read-only endpoint
+  `GET /api/targets/{safe}/stack-health` (picks the newest *genuine* stack run via the shared
+  `_newest_genuine_stack_run`; returns `null` when the target has no stack yet). Frontend: a small
+  `StackHealthCard` (teal stethoscope, one line per note, gentle severity colour — never alarming) on the
+  Target page below the "Last session" card, self-hiding until there's a stack to grade. Strictly read-only,
+  never a gate. Additive/offline: no schema/config/DB/default/API-shape change, no new dependency. Tests:
+  `tests/test_stackhealth.py` (10 — calibrated positive, uncalibrated leads with the calibration action,
+  blank-calstat, ragged-border→trim, even-coverage/shallow-peak don't trip it, elongated stars, set-aside
+  reassurance with bucket, no-frames, actionable-before-reassurance ranking), `tests/webapp/
+  test_target_stack_health.py` (4 — null-without-stack, notes for a calibrated run, uncalibrated leads with the
+  action + coverage surfaced, 404), `StackHealthCard.test.tsx` (6 — `visibleNotes` cap, `noteColor`, renders
+  top notes, hides on null + empty). Python (1285) + tsc + full vitest (797) + vite build all green.
+  **Slice (b) remains open:** wire the `action` keys (`trim_border`, `calibration`) to the buttons that already
+  do those things, and drop the card onto the History/editor result too; a highlight-clip cue (needs loading
+  the stacked pixels) is a natural slice (b) add. *(Scout-filed 2026-07-14; L overall; slice (a) shipped.
+  Pillars: autonomy + friendliness + image-quality/trust — PRIORITY 2/3/4. Beginner bar ✔.)*
+  <details><summary>Original idea</summary>
+  After a stack finishes, a beginner has no way to know whether the image is *good* or what one
   thing would most improve it — the readiness card only speaks to *integration time*, not the actual pixels.
   Add a small **"How's my stack?"** card (on the Target/History/editor result) that reads the finished stack
   and, in plain language, says what's strong and the **single** highest-value next step. Reuse cues we
@@ -3683,6 +3711,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   action links to the buttons that already do them (Trim border, open editor). Additive/offline; reuses stamped
   fields + the frames table, no schema change, no new dependency. *(L overall; slice (a) is a shippable M.
   Pillars: autonomy + friendliness + image-quality/trust — PRIORITY 2/3/4. Beginner bar ✔.)*
+  </details>
 - **NEW BEGINNER FEATURE — per-target progress & integration goals.** — **USER-SET GOAL
   SLICE SHIPPED v0.117.0** (Builder 2026-07-14, branch `claude/pensive-faraday-b7jimp`). The
   readiness card (v0.111.0) already showed accumulated integration against a sane

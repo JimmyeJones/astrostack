@@ -92,6 +92,23 @@ class SessionRecapOut(BaseModel):
     quality_drift: SessionQualityDriftOut | None = None
 
 
+class HealthNoteOut(BaseModel):
+    """One plain-language "How's my stack?" note (see seestack.stackhealth)."""
+
+    kind: str
+    severity: str          # "good" | "info" — colour only, never alarming
+    message: str
+    action: str | None = None  # UI action key ("trim_border" | "calibration") or null
+
+
+class StackHealthOut(BaseModel):
+    """Ranked health notes for a target's current stack, or ``null`` when the
+    target has no genuine stack yet. The card shows the top one or two."""
+
+    run_id: int | None = None
+    notes: list[HealthNoteOut] = []
+
+
 class FrameOut(BaseModel):
     id: int
     name: str

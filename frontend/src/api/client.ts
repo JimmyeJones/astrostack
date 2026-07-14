@@ -112,6 +112,18 @@ export interface SessionRecap {
   quality_drift: SessionQualityDrift | null;
 }
 
+export interface HealthNote {
+  kind: string;
+  severity: "good" | "info";
+  message: string;
+  action: string | null;
+}
+
+export interface StackHealth {
+  run_id: number | null;
+  notes: HealthNote[];
+}
+
 export interface TargetNight {
   name: string;
   safe: string;
@@ -798,6 +810,8 @@ export const api = {
     req<ObjectInfo | null>(`/api/targets/${safe}/identify`),
   sessionRecap: (safe: string) =>
     req<SessionRecap | null>(`/api/targets/${safe}/session-recap`),
+  stackHealth: (safe: string) =>
+    req<StackHealth | null>(`/api/targets/${safe}/stack-health`),
   getIntegrationGoal: (safe: string) =>
     req<{ goal_s: number | null }>(`/api/targets/${safe}/integration-goal`),
   setIntegrationGoal: (safe: string, goalS: number | null) =>
