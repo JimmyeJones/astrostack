@@ -111,6 +111,37 @@ CREATE INDEX IF NOT EXISTS idx_frames_panel  ON frames(mosaic_panel_id);
 CREATE INDEX IF NOT EXISTS idx_frames_ts     ON frames(timestamp_utc);
 """
 
+# Tables whose columns are reconciled additively on open (see
+# ``Project._reconcile_table_columns``). ``project_meta`` is a static key/value
+# table, so it's excluded — only the two evolving tables matter.
+_RECONCILED_TABLES = ("frames", "stack_runs")
+
+
+def _authoritative_columns() -> dict[str, list[tuple]]:
+    """The columns each reconciled table *should* have, read from the
+    authoritative :data:`SCHEMA_SQL` via a throwaway in-memory DB.
+
+    Each entry is ``(name, type, notnull, dflt_value)`` — exactly the fields
+    ``ALTER TABLE ADD COLUMN`` needs to re-add a missing column. Computed once
+    at import so :meth:`Project._reconcile_table_columns` is a few cheap
+    ``PRAGMA`` reads per open, not a schema rebuild."""
+    ref = sqlite3.connect(":memory:")
+    try:
+        ref.executescript(SCHEMA_SQL)
+        cols: dict[str, list[tuple]] = {}
+        for table in _RECONCILED_TABLES:
+            # PRAGMA table_info rows are (cid, name, type, notnull, dflt_value, pk).
+            cols[table] = [
+                (r[1], r[2], r[3], r[4])
+                for r in ref.execute(f"PRAGMA table_info({table})").fetchall()
+            ]
+        return cols
+    finally:
+        ref.close()
+
+
+_EXPECTED_COLUMNS = _authoritative_columns()
+
 
 @dataclass
 class FrameRow:
@@ -218,15 +249,55 @@ class Project:
     def _check_schema(self) -> None:
         assert self._conn is not None
         version = self._conn.execute("PRAGMA user_version").fetchone()[0]
-        if version == SCHEMA_VERSION:
-            return
+        if version > SCHEMA_VERSION:
+            raise RuntimeError(
+                f"Project schema version {version} is newer than this Seestack "
+                f"build ({SCHEMA_VERSION}). Upgrade Seestack to open this project."
+            )
         if version < SCHEMA_VERSION:
             self._migrate_schema(from_version=version)
-            return
-        raise RuntimeError(
-            f"Project schema version {version} is newer than this Seestack "
-            f"build ({SCHEMA_VERSION}). Upgrade Seestack to open this project."
-        )
+        # Always reconcile columns, even at the current version. The
+        # version-specific migration steps only ALTER the columns they knew
+        # about, so a project created before a *frames* column was added — but
+        # whose ``user_version`` a later build already stamped current — is
+        # missing that column with no migration left to run, and every
+        # ``_row_to_frame`` read of it raises ``IndexError``. This additive
+        # backfill closes that gap for good and self-heals such a DB on open;
+        # for an up-to-date project every column already exists, so it's a no-op.
+        self._reconcile_table_columns()
+
+    def _reconcile_table_columns(self) -> None:
+        """Additively add any column the authoritative :data:`SCHEMA_SQL`
+        defines but an on-disk table lacks — never drops, renames or rewrites.
+
+        This makes the schema correct-by-construction against column drift: any
+        additive column (past or future) that reached the base schema without a
+        matching ``ALTER`` migration is repaired here rather than bricking an
+        older project. A current-schema DB matches exactly, so nothing is added.
+        """
+        assert self._conn is not None
+        for table, want in _EXPECTED_COLUMNS.items():
+            have = {
+                r[1]
+                for r in self._conn.execute(f"PRAGMA table_info({table})").fetchall()
+            }
+            if not have:
+                continue  # table absent entirely — handled by the base-schema recreate
+            for name, ctype, notnull, dflt in want:
+                if name in have:
+                    continue
+                coldef = f"{name} {ctype}".strip() if ctype else name
+                if notnull:
+                    coldef += " NOT NULL"
+                if dflt is not None:
+                    coldef += f" DEFAULT {dflt}"
+                try:
+                    self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {coldef}")
+                    log.info("Backfilled missing column %s.%s on open", table, name)
+                except sqlite3.OperationalError as exc:
+                    # e.g. a NOT NULL column with no default can't be added to a
+                    # populated table; never let reconciliation itself fail an open.
+                    log.warning("Could not backfill %s.%s: %s", table, name, exc)
 
     def _migrate_schema(self, *, from_version: int) -> None:
         """
