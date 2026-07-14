@@ -3486,9 +3486,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   whole folder" copy. Frontend-only, additive, no backend/schema/API/default change; drops are
   ignored mid-upload. Tests: `UploadFits.test.tsx` (+5 — `readEntryFiles` single-file + nested
   folder walk, `collectDroppedFiles` folder-flatten + files-fallback, and a component drop that
-  keeps only the FITS files). tsc + full vitest (776) + vite build green. **Slice (b) remainder
-  — per-file progress, `webkitdirectory` on the picker, partial-upload cleanup — and slice (c)
-  remain open.**
+  keeps only the FITS files). tsc + full vitest (776) + vite build green.
+  — **UPLOAD PROGRESS BAR SHIPPED v0.122.0** (Builder 2026-07-14, branch
+  `claude/pensive-faraday-4qb5a3`). The slice-(b) "a beginner uploading 5 GB needs to see it
+  working" gap: the upload previously showed only a spinner with **no** progress at all — a
+  beginner sending several GB over the browser had no way to tell it was moving or stalled.
+  `api.uploadFits` now streams via `XMLHttpRequest` (fetch exposes no upload-progress event)
+  with an optional `onProgress(loaded, total)` callback wired to `xhr.upload.onprogress`; the
+  request body, multipart boundary, sanitising/streaming endpoint (slice a), and the thrown
+  `${status}: ${detail}` error shape are all unchanged, so it's a drop-in swap. `UploadFits`
+  renders a live Mantine `Progress` bar + a plain-language readout ("Uploading — 1.2 GB of
+  5.0 GB (24%)", then "Uploaded — processing on the server…" at 100% while the scan kicks off)
+  only while the upload is in flight. Two new pure, exported, unit-tested helpers do the
+  formatting — `uploadProgressPercent` (clamped 0..100, NaN/zero-total-safe) and
+  `uploadProgressLabel` (friendly B/KB/MB/GB units). Frontend-only, additive; no
+  backend/schema/API/default change. Tests: `UploadFits.test.tsx` (+3 — percent clamp/NaN-safety,
+  label unit formatting, and a component test that a mid-flight 25% report shows the live
+  readout and it clears once done). tsc + full vitest + vite build green. **Slice (b) remainder
+  — true *per-file* progress, `webkitdirectory` on the picker, partial-upload cleanup — and
+  slice (c) remain open.**
   <details><summary>Original write-up</summary>
   Today the only way to get subs in is to drop Seestar target folders
   into `incoming/` over an SMB/NFS share — which assumes the user can mount the NAS

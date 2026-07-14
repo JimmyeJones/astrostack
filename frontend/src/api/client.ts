@@ -911,9 +911,15 @@ export const api = {
 
   // pipeline
   scan: () => req<{ job_id: string }>("/api/scan", { method: "POST", body: "{}" }),
-  uploadFits: (fileList: File[], target: string) => {
-    // Multipart upload — a bare fetch, not `req`, so the browser sets the
-    // multipart boundary Content-Type (req hard-codes application/json).
+  uploadFits: (
+    fileList: File[],
+    target: string,
+    onProgress?: (loaded: number, total: number) => void,
+  ) => {
+    // Multipart upload via XHR (not fetch) so we can report *upload* progress —
+    // fetch exposes no upload-progress event, and a beginner sending several GB
+    // over the browser needs to see it moving. The browser still sets the
+    // multipart boundary Content-Type from the FormData body.
     const form = new FormData();
     if (target.trim()) form.append("target", target.trim());
     // Send the file's folder-relative path when we have one (a folder drop bakes
@@ -921,19 +927,35 @@ export const api = {
     // so the server can keep two same-named subs from different session folders
     // distinct instead of dropping one as a duplicate.
     for (const f of fileList) form.append("files", f, f.webkitRelativePath || f.name);
-    return (async (): Promise<UploadResult> => {
-      const res = await fetch("/api/upload", { method: "POST", body: form });
-      if (!res.ok) {
-        let detail = res.statusText;
-        try {
-          detail = (await res.json()).detail ?? detail;
-        } catch {
-          /* ignore */
-        }
-        throw new Error(`${res.status}: ${detail}`);
+    return new Promise<UploadResult>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", "/api/upload");
+      if (onProgress) {
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) onProgress(e.loaded, e.total);
+        };
       }
-      return res.json() as Promise<UploadResult>;
-    })();
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            resolve(JSON.parse(xhr.responseText) as UploadResult);
+          } catch {
+            reject(new Error("The server sent back a response we couldn't read."));
+          }
+          return;
+        }
+        let detail = xhr.statusText;
+        try {
+          detail = JSON.parse(xhr.responseText).detail ?? detail;
+        } catch {
+          /* ignore — keep the status text */
+        }
+        reject(new Error(`${xhr.status}: ${detail}`));
+      };
+      xhr.onerror = () =>
+        reject(new Error("Upload failed — check your connection and try again."));
+      xhr.send(form);
+    });
   },
   qcSolve: (safe: string) =>
     req<{ job_id: string }>(`/api/targets/${safe}/qc-solve`, { method: "POST" }),
