@@ -6,6 +6,7 @@ import { api } from "../api/client";
 import { formatIntegration } from "../format";
 import {
   describeLibraryProgress,
+  objectTypeLabel,
   rankLibraryProgress,
   type RankedProgress,
 } from "../libraryProgress";
@@ -19,6 +20,9 @@ function ProgressRow({ r }: { r: RankedProgress }) {
   const { row, readiness } = r;
   const color = readinessColor(readiness.level);
   const pct = Math.round(readiness.fraction * 100);
+  // Show the object type ("galaxy"/"nebula"/…) next to the goal so a beginner
+  // sees why the goal differs per target; omitted for an unrecognised type.
+  const typeLabel = objectTypeLabel(readiness.bucket);
   return (
     <div>
       <Group gap="xs" justify="space-between" wrap="nowrap" mb={2}>
@@ -28,6 +32,7 @@ function ProgressRow({ r }: { r: RankedProgress }) {
         </Text>
         <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
           <Text size="xs" c="dimmed">
+            {typeLabel ? `${typeLabel} · ` : ""}
             {formatIntegration(row.total_exposure_s)} of ~{readiness.goalHours}h
           </Text>
           {readiness.level === "plenty" && (

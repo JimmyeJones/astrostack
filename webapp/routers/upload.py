@@ -147,7 +147,15 @@ async def _stream_to_disk(upload: UploadFile, dest: Path) -> int:
         await run_in_threadpool(tmp.unlink, True)  # missing_ok
         raise
     await run_in_threadpool(fh.close)
-    await run_in_threadpool(os.replace, tmp, dest)
+    try:
+        await run_in_threadpool(os.replace, tmp, dest)
+    except BaseException:
+        # The rename itself can fail (a cross-device dest, a permission or NAS
+        # blip) *after* a complete temp is on disk. Clean up the fully-written
+        # sidecar so a failed upload leaves no orphaned ``.part`` behind, rather
+        # than only unlinking on a mid-write failure above.
+        await run_in_threadpool(tmp.unlink, True)  # missing_ok
+        raise
     return written
 
 
@@ -184,47 +192,53 @@ async def upload_files(
     bytes_written = 0
 
     for upload in files:
-        base = safe_component(upload.filename or "")
-        if base is None:
-            rejected.append(RejectedFile(name=upload.filename or "(unnamed)",
-                                         reason="unsafe file name"))
-            continue
-        if not is_fits_name(base):
-            rejected.append(RejectedFile(
-                name=base,
-                reason="not a FITS file (accepts .fit, .fits, .fts)"))
-            continue
-
-        dest = dest_dir / base
-        if dest.exists():
-            skipped.append(UploadedFile(name=base, bytes=dest.stat().st_size))
-            continue
-
-        # Disk-space guard: refuse a write that would drop free space below the
-        # reserve, rather than silently filling the NAS. size is best-effort
-        # (Starlette populates it for the spooled upload); when unknown we let
-        # the write proceed and rely on the ENOSPC handling below.
-        size = getattr(upload, "size", None)
+        # Close each upload's spooled temp on *every* path — reject, skip,
+        # disk-space, or success — not only the streamed one, so a large
+        # multi-file POST doesn't hold spooled parts open until GC. (Starlette
+        # closes form uploads only on a parse error, not on success.)
         try:
-            free = shutil.disk_usage(dest_dir).free
-        except OSError:
-            free = None
-        if size is not None and free is not None and free - size < _DISK_RESERVE_BYTES:
-            rejected.append(RejectedFile(name=base, reason="not enough disk space"))
-            continue
+            base = safe_component(upload.filename or "")
+            if base is None:
+                rejected.append(RejectedFile(name=upload.filename or "(unnamed)",
+                                             reason="unsafe file name"))
+                continue
+            if not is_fits_name(base):
+                rejected.append(RejectedFile(
+                    name=base,
+                    reason="not a FITS file (accepts .fit, .fits, .fts)"))
+                continue
 
-        try:
-            n = await _stream_to_disk(upload, dest)
-        except OSError as e:
-            reason = ("not enough disk space" if getattr(e, "errno", None) == 28
-                      else f"could not be saved ({e})")
-            rejected.append(RejectedFile(name=base, reason=reason))
-            continue
+            dest = dest_dir / base
+            if dest.exists():
+                skipped.append(UploadedFile(name=base, bytes=dest.stat().st_size))
+                continue
+
+            # Disk-space guard: refuse a write that would drop free space below
+            # the reserve, rather than silently filling the NAS. size is
+            # best-effort (Starlette populates it for the spooled upload); when
+            # unknown we let the write proceed and rely on the ENOSPC handling
+            # below.
+            size = getattr(upload, "size", None)
+            try:
+                free = shutil.disk_usage(dest_dir).free
+            except OSError:
+                free = None
+            if size is not None and free is not None and free - size < _DISK_RESERVE_BYTES:
+                rejected.append(RejectedFile(name=base, reason="not enough disk space"))
+                continue
+
+            try:
+                n = await _stream_to_disk(upload, dest)
+            except OSError as e:
+                reason = ("not enough disk space" if getattr(e, "errno", None) == 28
+                          else f"could not be saved ({e})")
+                rejected.append(RejectedFile(name=base, reason=reason))
+                continue
+
+            saved.append(UploadedFile(name=base, bytes=n))
+            bytes_written += n
         finally:
             await upload.close()
-
-        saved.append(UploadedFile(name=base, bytes=n))
-        bytes_written += n
 
     job_id: str | None = None
     if saved:
