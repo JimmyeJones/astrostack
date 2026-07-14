@@ -4029,18 +4029,17 @@ problems. Dogfood it every big-picture run and fix root causes.
   stack step is running classified it `done` with `stacked:True`/`run_id:None` instead of `cancelled`. No data
   impact (no `stack_runs` row is written, no crash-loop marker is set, nothing is stranded) — a cosmetic job-state
   label on the Jobs page.
-- **Latent robustness (not a live bug): `stacker.py`'s `coverage_min/max` diagnostic slice lacks its sibling's
-  `ndim==3` guard.** *(Traced, Builder engine audit 2026-07-11.)* At ~L1307 `run_stack` computes
-  `cov_2d = frame_cov if frame_cov is not None else coverage[..., 0]` **without** the `coverage.ndim == 3` guard
-  its sibling at ~L1275 carries. It's safe *today* — the only path that returns `frame_cov=None` (min/max reject)
-  always produces a 3-D `coverage`, so the `[..., 0]` slice is never handed a 2-D array — but it's an asymmetric
-  latent trap: if a future stacking path ever returned `frame_cov=None` alongside a 2-D coverage map, this line
-  would silently take a wrong slice for the `coverage_min`/`coverage_max` provenance (a mis-reported, not
-  corrupt, diagnostic). Harmonise it to match L1275 (add the `coverage.ndim == 3` guard). One-line consistency
-  fix, no behaviour change today; only worth doing if a run is already in `stacker.py`. (S, engine/tidiness.)
-  Found alongside a full re-trace of the accumulator/stacker/mosaic/drizzle/calibrate combine paths, which
-  otherwise came back clean (NaN=coverage, divisor guards, weight accounting, wrap-safe RA, and the pass-1
-  free-before-pass-2 OOM guard all held).
+- ~~**Latent robustness (not a live bug): `stacker.py`'s `coverage_min/max` diagnostic slice lacks its sibling's
+  `ndim==3` guard.**~~ — **FIXED v0.121.4** (Builder 2026-07-14, branch `claude/pensive-faraday-yiosal`). At
+  ~L1307 `run_stack`'s `StackResult` `cov_2d = frame_cov if frame_cov is not None else coverage[..., 0]` now
+  carries the `coverage.ndim == 3` guard its history-record sibling at ~L1275 already had — the two lines are now
+  identical, so a future stacking path returning `frame_cov=None` alongside a 2-D coverage map would take the
+  whole map, not a wrong `[..., 0]` slice for the `coverage_min`/`coverage_max` diagnostic. **No reachable
+  behaviour change today** (the only `frame_cov=None` path, min/max reject, always produces a 3-D `coverage`), so
+  there is no standalone fail-before regression to add — the reachable 3-D path is exercised by the existing
+  stack-pipeline suite (still green) and the guarded sibling expression it now mirrors was already covered. Pure
+  one-line consistency harmonisation, no schema/config/API/default change. (S, engine/tidiness — hardening per
+  focus #1.)
 - ~~**Tidiness: `stretch_suggestion` omits `already_display` from its `EditContext`.**~~ — **SHIPPED v0.109.1**
   (Builder 2026-07-11). `webapp/routers/editor.py::stretch_suggestion` now threads
   `already_display=_run_display_space(run)` into its ctx like every sibling suggestion endpoint, closing the
@@ -4359,6 +4358,11 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.121.4** — Engine robustness (stacking-engine hardening — focus #1; Builder 2026-07-14, branch
+  `claude/pensive-faraday-yiosal`). Harmonised `stacker.py`'s `StackResult` `coverage_min/max` slice (~L1307) to
+  carry the same `coverage.ndim == 3` guard its history-record sibling (~L1275) already had, so a future
+  `frame_cov=None` + 2-D-coverage path can't silently take a wrong `[..., 0]` slice. No reachable behaviour
+  change today (the reachable path stays 3-D); existing stack-pipeline suite green.
 - **v0.121.3** — Engine robustness (stacking-engine hardening — focus #1; Builder 2026-07-14, branch
   `claude/pensive-faraday-yiosal`). Made the accumulators' documented "broadcastable" `mask` contract true: a
   shared `accumulator._mask_bool` expands a per-pixel 2-D `(H,W)` mask to `(H,W,1)` before broadcasting so it
