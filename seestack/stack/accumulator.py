@@ -35,6 +35,23 @@ import numpy as np
 log = logging.getLogger(__name__)
 
 
+def _mask_bool(mask: np.ndarray, shape: tuple[int, ...]) -> np.ndarray:
+    """Broadcast an optional accumulator ``mask`` up to ``shape`` as a bool array.
+
+    The public docstrings promise the mask may be "the same shape, or
+    broadcastable". NumPy broadcasting aligns *trailing* dimensions, so a
+    natural per-pixel 2-D ``(H, W)`` mask against a 3-D ``(H, W, C)`` image would
+    otherwise raise (``W`` vs ``C`` don't align). Treat a mask carrying one fewer
+    axis than the image as per-pixel-across-channels by appending a trailing axis
+    (``(H, W)`` → ``(H, W, 1)``) before broadcasting, so that documented case
+    actually works instead of crashing.
+    """
+    m = np.asanyarray(mask)
+    if m.ndim == len(shape) - 1:
+        m = m[..., np.newaxis]
+    return np.broadcast_to(m, shape).astype(bool, copy=False)
+
+
 class WeightedSumAccumulator:
     """``sum / weight`` streaming accumulator with NaN-safe reductions."""
 
@@ -66,8 +83,9 @@ class WeightedSumAccumulator:
         image
             Same shape as the accumulator. NaNs are treated as missing.
         mask
-            Optional bool array (same shape, or broadcastable). False entries
-            are skipped *in addition to* NaN entries.
+            Optional bool array (same shape, or broadcastable — including a
+            per-pixel 2-D ``(H, W)`` mask against an ``(H, W, C)`` image). False
+            entries are skipped *in addition to* NaN entries.
         weight
             Per-frame scalar weight (1.0 = standard mean). Higher weights
             give the frame more influence in the final ``sum/weight``
@@ -78,7 +96,7 @@ class WeightedSumAccumulator:
             raise ValueError(f"image shape {image.shape} != accumulator {self.shape}")
         valid = np.isfinite(image)
         if mask is not None:
-            valid &= np.broadcast_to(mask, image.shape).astype(bool, copy=False)
+            valid &= _mask_bool(mask, image.shape)
         contribution = np.where(valid, image, 0.0).astype(self._sum.dtype, copy=False)
         if weight != 1.0:
             contribution = contribution * np.float32(weight)
@@ -108,7 +126,7 @@ class WeightedSumAccumulator:
         wh, ww = window_image.shape[:2]
         valid = np.isfinite(window_image)
         if mask is not None:
-            valid &= np.broadcast_to(mask, window_image.shape).astype(bool, copy=False)
+            valid &= _mask_bool(mask, window_image.shape)
         contribution = np.where(valid, window_image, 0.0).astype(self._sum.dtype, copy=False)
         valid_w = valid.astype(self._weight.dtype, copy=False)
         if weight != 1.0:
@@ -220,7 +238,7 @@ class MinMaxRejectAccumulator:
                   mask: np.ndarray | None) -> None:
         valid = np.isfinite(image)
         if mask is not None:
-            valid &= np.broadcast_to(mask, image.shape).astype(bool, copy=False)
+            valid &= _mask_bool(mask, image.shape)
         if not valid.any():
             return
         # Contributions of invalid pixels are neutralised: 0 for the sum, and the

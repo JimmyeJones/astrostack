@@ -3919,16 +3919,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   GPU code (nh/nw ≥ 2, no CPU fallback). The real-CuPy path stays preferred: `test_bg_gpu.py` still runs there
   and is untouched; the dilation-parity test now consumes the shared fixture (local copy removed). Pure test
   infrastructure, no product change; full suite green. (S, infra/test-coverage.)
-- **NEW (Builder 2026-07-14) — accumulators reject a 2-D `(H,W)` `mask` (documented "broadcastable" but only
-  `(H,W,1)`/`(H,W,3)` work) — dead API surface today, latent trap.** *(Numeric stacking-engine audit
-  2026-07-14.)* `stack/accumulator.py`'s `add`/`add_window` docstring says the `mask` arg is "broadcastable",
-  but a 2-D `(H,W)` mask against an `(H,W,3)` image raises `ValueError` in `np.broadcast_to` (trailing dims 3 vs
-  2 don't align). **Not an image-corruption bug and not currently reachable** — no pipeline code passes `mask`
-  to any accumulator (κ-σ rejection is applied via `np.where(keep, aligned, np.nan)` *before* the mask-less
-  `add_window` call), verified by the audit. If a future path ever wired a per-pixel 2-D reject mask through
-  the accumulator it would crash rather than broadcast. If pursued: expand a 2-D mask to `(...,1)` at the top
-  of `add`/`add_window` (or tighten the docstring to state `(H,W,1)`/`(H,W,C)` only). One-liner, testable in
-  isolation; only worth doing if a run is already in that file. (XS, engine/tidiness.)
+- ~~**NEW (Builder 2026-07-14) — accumulators reject a 2-D `(H,W)` `mask` (documented "broadcastable" but only
+  `(H,W,1)`/`(H,W,3)` work) — dead API surface today, latent trap.**~~ — **FIXED v0.121.3** (Builder 2026-07-14,
+  branch `claude/pensive-faraday-yiosal`; regression-tested). Made the documented "broadcastable" contract
+  genuinely true (rather than tighten the docstring): a new shared `accumulator._mask_bool(mask, shape)` helper
+  appends a trailing axis to a mask carrying one fewer axis than the image (`(H,W)` → `(H,W,1)`) before
+  `np.broadcast_to`, so a natural per-pixel 2-D mask masks that pixel across **all** channels instead of raising
+  `ValueError` (NumPy aligns *trailing* dims, so `W` vs `C` couldn't align). Wired through both mask-taking
+  accumulators at all three sites — `WeightedSumAccumulator.add`/`add_window` and `MinMaxRejectAccumulator.
+  _add_into` (shared by its `add`/`add_window`). Still not on any live pipeline path (κ-σ rejection is applied
+  via `np.where(keep, aligned, np.nan)` before the mask-less `add_window`, verified unchanged), so a same-shape
+  `(H,W,C)` mask behaves byte-for-byte as before — this only *adds* the 2-D case a future per-pixel-reject path
+  would want. Additive, no schema/config/API/default change. Regression `tests/test_accumulator.py` (+3:
+  `test_weighted_sum_accepts_a_2d_per_pixel_mask` — masked pixel gets zero coverage on every channel + a
+  same-shape mask still matches; `test_weighted_sum_window_accepts_a_2d_per_pixel_mask`;
+  `test_min_max_reject_accepts_a_2d_per_pixel_mask` — each raised `ValueError` before / passes after).
+  (XS, engine/tidiness — hardening per focus #1.)
 - **NEW (Builder 2026-07-14) — consolidate the Dashboard's three per-project roll-ups into one cached pass
   (only with a measurement).** *(spotted shipping the v0.119.0 "Target progress" card.)* The Dashboard now
   triggers up to **three** independent passes that each open *every* project once: `/api/stats`'s stack
@@ -4353,6 +4359,13 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.121.3** — Engine robustness (stacking-engine hardening — focus #1; Builder 2026-07-14, branch
+  `claude/pensive-faraday-yiosal`). Made the accumulators' documented "broadcastable" `mask` contract true: a
+  shared `accumulator._mask_bool` expands a per-pixel 2-D `(H,W)` mask to `(H,W,1)` before broadcasting so it
+  masks across all channels instead of raising `ValueError`, wired through `WeightedSumAccumulator.add`/
+  `add_window` + `MinMaxRejectAccumulator._add_into`. Not on any live path today (same-shape masks byte-for-byte
+  unchanged); closes a latent trap for any future per-pixel-reject path. +3 regression tests in
+  `tests/test_accumulator.py` (fail-before with `ValueError` / pass-after).
 - **v0.119.8** — Bug fix (**upgrade-safety / data-integrity — §9, top priority class**; Scout 2026-07-14,
   branch `claude/practical-dirac-9awndt`; found by an adversarial ingest/QC audit, **traced + reproduced +
   regression-tested**). **A project created before the QC frame columns existed was permanently bricked on an
