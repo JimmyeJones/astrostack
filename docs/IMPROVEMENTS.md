@@ -4264,16 +4264,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   fit really raises, then that the op surfaces no error and flattens the covered strip while preserving NaN)
   + `test_ladder_first_rung_matches_strict_fit` (byte-for-byte parity on a normal frame). Additive,
   upgrade-safe (no config/DB/API/on-disk change).
-  **(2) still open:** `seestack/calibrate/apply.py::apply_raw` returns the
+  ~~**(2)** `seestack/calibrate/apply.py::apply_raw` returns the
   *caller's own* float32 array when `is_empty` (no masters apply) — `asarray(...).astype(copy=False)` is a
-  no-op, so the documented "returns a new array" contract is violated by aliasing. No corruption today (every
-  traced consumer treats it read-only), but a future in-place consumer would mutate shared frame data. A
-  one-line `np.array(..., copy=True)` on the empty path would harden the contract; verify no hot-path
-  double-copy cost first. **Builder note 2026-07-10:** the stacker sets `calibration = None` when
-  `is_empty` (`stacker.py:737-738`), so the hot path never even *calls* `apply_raw` on an empty bundle —
-  the aliasing is unreachable from the stack/align path today, which is why it's a pure latent
-  contract-hardening (and why the "double-copy cost" concern is moot: the empty branch is never on the hot
-  path). Low value; left for whenever a run is already in that file.
+  no-op, so the documented "returns a new array" contract is violated by aliasing.~~ — **FIXED v0.121.5**
+  (Builder 2026-07-14, branch `claude/pensive-faraday-irqhx4`; regression-tested). `apply_raw` now copies at
+  the return **only when the result would alias `raw`** (`if result is raw: result = result.copy()`) — the
+  otherwise-aliasing empty-bundle-on-float32 path. Any applied master already yields a fresh array (subtraction/
+  division), so `result is raw` is False on every real calibration path and no hot-path double-copy is taken;
+  the stacker also sets `calibration = None` when `is_empty` so the empty branch is off the stack hot path
+  entirely. Closes the latent contract violation so a future in-place consumer can never corrupt a shared source
+  frame. Regression tests `tests/test_calibrate.py::test_apply_raw_empty_bundle_returns_a_fresh_array`
+  (fails-before: `out is raw`; passes-after: distinct buffer, mutating the result leaves the input untouched)
+  and `test_apply_raw_with_masters_does_not_double_copy` (a master path still returns a fresh, correct array).
+  Additive, upgrade-safe (no config/DB/API/on-disk change).
 - ~~Add a retention/pruning policy for `jobs.sqlite`~~ — **done, then made
   configurable** (`JobManager._evict_old` + the `job_history_limit` setting,
   v0.51.1). (S, scale)
@@ -4358,6 +4361,12 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.121.5** — Engine robustness (calibration-engine contract-hardening — focus #1; Builder 2026-07-14, branch
+  `claude/pensive-faraday-irqhx4`). `calibrate/apply.py::apply_raw` now honours its documented "returns a new
+  array" contract on the empty-bundle path: it copies at the return only when the result would alias `raw`, so a
+  future in-place consumer can't corrupt a shared source frame — with no hot-path double-copy (a real master path
+  already yields a fresh array). Regression `tests/test_calibrate.py::test_apply_raw_empty_bundle_returns_a_fresh_array`
+  (+ a no-double-copy guard). Closes latent trap (2) from the 2026-07-10 engine audit.
 - **v0.121.4** — Engine robustness (stacking-engine hardening — focus #1; Builder 2026-07-14, branch
   `claude/pensive-faraday-yiosal`). Harmonised `stacker.py`'s `StackResult` `coverage_min/max` slice (~L1307) to
   carry the same `coverage.ndim == 3` guard its history-record sibling (~L1275) already had, so a future

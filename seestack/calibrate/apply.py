@@ -206,4 +206,13 @@ class CalibrationMasters:
             out = out - self.bias
         if self.flat_norm is not None and self.flat_norm.shape == out.shape:
             out = out / self.flat_norm
-        return out.astype(np.float32, copy=False)
+        result = out.astype(np.float32, copy=False)
+        # Honour the "returns a new array" contract even on the no-masters path:
+        # if nothing above produced a fresh array (an empty bundle applied to an
+        # already-float32 input aliases ``raw``), copy so a caller that mutates
+        # the result in place can never corrupt the shared source frame. Any
+        # applied master already yields a fresh array, so this only copies on the
+        # otherwise-aliasing empty path — never a hot-path double-copy.
+        if result is raw:
+            result = result.copy()
+        return result
