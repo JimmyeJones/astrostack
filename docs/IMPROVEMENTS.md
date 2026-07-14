@@ -3163,6 +3163,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   read as more obvious to a beginner — but it needs the `@mantine/dropzone` dep (check it's
   already bundled before adding) and pairs naturally with slice (b)'s `webkitdirectory`
   folder-structure preservation, so fold the two together. XS–S, frontend-only.)_
+  — **DRAG-AND-DROP DROPZONE SHIPPED v0.118.0** (Builder 2026-07-14, branch
+  `claude/pensive-faraday-07rvx7`). Delivered the drop target **without** adding the
+  `@mantine/dropzone` dep (it isn't bundled, and a UI dep is avoidable here): `UploadFits`
+  now wraps its controls in a native HTML5 drop zone (dashed border that highlights blue on
+  drag-over, with a plain-language hint) and two new pure, exported helpers walk the drop —
+  `readEntryFiles(entry)` recurses a dropped **folder** depth-first via the FileSystem-entry
+  API (pumping the `DirectoryReader` until an empty batch, swallowing per-entry errors so one
+  unreadable file never sinks the drop), and `collectDroppedFiles(dataTransfer)` flattens all
+  dropped folders/files and falls back to `dataTransfer.files` when the entry API is absent.
+  Dropped files funnel through the same `onPick` FITS filter as the picker, so the existing
+  streaming/sanitising/dedup endpoint (slice a) is reused unchanged — this makes "drag a whole
+  Seestar target folder onto the Library" actually work, matching the card's existing "or a
+  whole folder" copy. Frontend-only, additive, no backend/schema/API/default change; drops are
+  ignored mid-upload. Tests: `UploadFits.test.tsx` (+5 — `readEntryFiles` single-file + nested
+  folder walk, `collectDroppedFiles` folder-flatten + files-fallback, and a component drop that
+  keeps only the FITS files). tsc + full vitest (776) + vite build green. **Slice (b) remainder
+  — per-file progress, `webkitdirectory` on the picker, partial-upload cleanup — and slice (c)
+  remain open.**
   <details><summary>Original write-up</summary>
   Today the only way to get subs in is to drop Seestar target folders
   into `incoming/` over an SMB/NFS share — which assumes the user can mount the NAS

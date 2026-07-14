@@ -1,5 +1,5 @@
 import {
-  Alert, Button, Card, FileButton, Group, Stack, Text, TextInput,
+  Alert, Box, Button, Card, FileButton, Group, Stack, Text, TextInput,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { IconFileUpload, IconUpload } from "@tabler/icons-react";
@@ -15,6 +15,76 @@ const FITS_ACCEPT = ".fit,.fits,.fts";
  *  uploading a stray .txt/.jpg the user grabbed alongside their subs. */
 export function isFitsFilename(name: string): boolean {
   return /\.(fit|fits|fts)$/i.test(name);
+}
+
+/** Minimal shape of the (non-standard but universally-supported) HTML5
+ *  FileSystem entry a drag-drop hands us via ``webkitGetAsEntry``. Kept as a
+ *  local structural type so we can traverse — and unit-test — folder drops
+ *  without pulling in a dependency. */
+export interface FsEntry {
+  isFile: boolean;
+  isDirectory: boolean;
+  file?: (onOk: (f: File) => void, onErr?: (e: unknown) => void) => void;
+  createReader?: () => {
+    readEntries: (onOk: (entries: FsEntry[]) => void, onErr?: (e: unknown) => void) => void;
+  };
+}
+
+/** Recursively collect every file under a dropped FileSystem entry. A dropped
+ *  *folder* is walked depth-first; a dropped *file* yields itself. Errors on any
+ *  single entry are swallowed (that branch just contributes nothing) so one
+ *  unreadable file never sinks a whole-folder drop. */
+export async function readEntryFiles(entry: FsEntry): Promise<File[]> {
+  if (entry.isFile && entry.file) {
+    const getFile = entry.file.bind(entry);
+    return new Promise<File[]>((resolve) => {
+      getFile((f) => resolve([f]), () => resolve([]));
+    });
+  }
+  if (entry.isDirectory && entry.createReader) {
+    const reader = entry.createReader();
+    const children: FsEntry[] = [];
+    // The Directory reader returns entries in batches; it must be pumped until
+    // it hands back an empty batch (that's how the API signals "done").
+    await new Promise<void>((resolve) => {
+      const pump = () => {
+        reader.readEntries((batch) => {
+          if (!batch.length) { resolve(); return; }
+          children.push(...batch);
+          pump();
+        }, () => resolve());
+      };
+      pump();
+    });
+    const nested = await Promise.all(children.map(readEntryFiles));
+    return nested.flat();
+  }
+  return [];
+}
+
+/** Flatten a drag-drop's payload into a plain File list — walking any dropped
+ *  folders (so "drag a whole Seestar target folder onto the Library" works) and
+ *  falling back to ``dataTransfer.files`` when the FileSystem-entry API is
+ *  unavailable. FITS filtering happens downstream in ``onPick``. */
+export async function collectDroppedFiles(dt: DataTransfer): Promise<File[]> {
+  const items = dt.items;
+  const entries: FsEntry[] = [];
+  if (items && items.length && typeof (items[0] as unknown as {
+    webkitGetAsEntry?: unknown;
+  }).webkitGetAsEntry === "function") {
+    for (let i = 0; i < items.length; i++) {
+      const getEntry = (items[i] as unknown as {
+        webkitGetAsEntry?: () => FsEntry | null;
+      }).webkitGetAsEntry;
+      const entry = getEntry ? getEntry.call(items[i]) : null;
+      if (entry) entries.push(entry);
+    }
+  }
+  if (entries.length) {
+    const nested = await Promise.all(entries.map(readEntryFiles));
+    return nested.flat();
+  }
+  return Array.from(dt.files ?? []);
 }
 
 /** One plain-language line summarising an upload's outcome. */
@@ -40,6 +110,7 @@ export function UploadFits({ compact = false }: { compact?: boolean }) {
   const [files, setFiles] = useState<File[]>([]);
   const [target, setTarget] = useState("");
   const [result, setResult] = useState<UploadResult | null>(null);
+  const [dragActive, setDragActive] = useState(false);
 
   const upload = useMutation({
     mutationFn: () => api.uploadFits(files, target),
@@ -68,8 +139,34 @@ export function UploadFits({ compact = false }: { compact?: boolean }) {
     }
   };
 
+  const onDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setDragActive(false);
+    if (upload.isPending) return;
+    void collectDroppedFiles(e.dataTransfer).then((dropped) => {
+      if (dropped.length) onPick(dropped);
+    });
+  };
+
   const body = (
+    <Box
+      onDragOver={(e) => { e.preventDefault(); if (!dragActive) setDragActive(true); }}
+      onDragLeave={(e) => { e.preventDefault(); setDragActive(false); }}
+      onDrop={onDrop}
+      p="xs"
+      style={(theme) => ({
+        borderRadius: theme.radius.sm,
+        border: `1px dashed ${dragActive ? theme.colors.blue[5] : theme.colors.gray[4]}`,
+        background: dragActive ? theme.colors.blue[0] : undefined,
+        transition: "background 120ms, border-color 120ms",
+      })}
+    >
     <Stack gap="xs">
+      <Text size="xs" c={dragActive ? "blue" : "dimmed"}>
+        {dragActive
+          ? "Drop your FITS files or folder here…"
+          : "Drag your Seestar FITS files (or a whole target folder) here, or choose them below."}
+      </Text>
       <Group gap="xs" wrap="wrap" align="flex-end">
         <FileButton onChange={onPick} accept={FITS_ACCEPT} multiple>
           {(props) => (
@@ -126,6 +223,7 @@ export function UploadFits({ compact = false }: { compact?: boolean }) {
         </Alert>
       ) : null}
     </Stack>
+    </Box>
   );
 
   if (compact) return body;
