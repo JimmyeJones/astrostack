@@ -3342,15 +3342,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   trail before shipping — a synthetic can't stand in for the true width/brightness/straightness distributions.
   Additive, testable on `detect_streaks` in isolation; keep the v0.106.2 rail as the belt-and-braces backstop
   even after the detector improves.
-- **Minor: the auto-bind skip-guard ignores a stray `scale_dark_to_light` flag.** (S, autonomy/tidiness —
-  PRIORITY 2) *(Builder-audit-noted 2026-07-11.)* `pipeline.py::_auto_bind_calibration` skips only when a
-  calibration *path* is already set; it doesn't consider a leftover `scale_dark_to_light: True` in
-  `settings.default_stack_options`. If a user set that flag globally with no dark path, auto-bind can add a
-  matched-exposure `dark_path` (no scale flag, no bias) while the stray `scale_dark_to_light=True` survives —
-  asking the engine to exposure-scale a dark with no bias. Impact is negligible (needs an unusual global config
-  *and* the matched-exposure branch means the scale factor is ~1, and `_effective_dark` no-ops without a bias
-  anyway), so it's a tidiness item, not a bug. If pursued: clear a stray `scale_dark_to_light` when the
-  auto-bind branch didn't itself set a bias-scaled dark. Additive, testable in isolation.
+- ~~**Minor: the auto-bind skip-guard ignores a stray `scale_dark_to_light` flag.**~~ — **SHIPPED v0.123.1**
+  (Builder 2026-07-14, branch `claude/pensive-faraday-xi1hcw`; regression-tested). `pipeline.py::
+  _auto_bind_calibration` skipped only when a calibration *path* was already set; it ignored a leftover
+  `scale_dark_to_light: True` in `settings.default_stack_options` (a bool flag survives `strip_non_form_keys`,
+  which only strips calibration *paths*). So if a user set that flag globally with no dark path, auto-bind could
+  add a matched-exposure `dark_path` (no scale flag, no bias) while the stray `scale_dark_to_light=True`
+  survived — asking the engine to exposure-scale a dark with no bias. **Fix:** after the bind, clear a stray
+  `scale_dark_to_light` unless auto-bind *itself* set it (i.e. it bound a bias-scaled dark). Because this
+  function only runs when no calibration path was pre-set, any flag present is a leftover from the (path-
+  stripped) global defaults with no matching dark+bias, so clearing it is always correct. Impact was negligible
+  (`_effective_dark` already no-ops the scaling without a bias), so this is tidiness/intent-clarity, not a
+  data-integrity bug. Additive, no schema/config/API/default change. Regression `tests/webapp/
+  test_calibration.py` (+3, driving the real `_auto_bind_calibration`): a plain matched dark clears the stray
+  flag (fail-before / pass-after), a bias-scaled dark *keeps* the flag it set (positive control), and an
+  empty-library bind clears the stray flag too. (S, autonomy/tidiness — PRIORITY 2.)
 - ~~**When Auto's colour calibration silently gives up (too few stars), fall back to a *background-neutral*
   white balance instead of leaving a colour cast.**~~ — **SHIPPED v0.107.9** (Builder 2026-07-11; implemented +
   regression-tested). `post/color_cal.py::calibrate_color`'s two give-up paths (no usable stars detected; too few
