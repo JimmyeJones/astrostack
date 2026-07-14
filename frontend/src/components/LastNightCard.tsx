@@ -45,7 +45,13 @@ export function LastNightCard() {
   const r = q.data;
   if (!r || r.n_frames === 0) return null;
   const keptPct = r.n_frames > 0 ? Math.round((r.n_kept / r.n_frames) * 100) : 0;
-  const night = r.end_utc ? r.end_utc.slice(0, 10) : null;
+  // Label the night by when it *began*, not when the last sub landed: an
+  // observing session that runs past UTC midnight (routine anywhere east of the
+  // Atlantic) has an `end_utc` on the following morning's date, so `end_utc`
+  // would tag "Last night" with tomorrow. The session's start date is the "night
+  // of" a person means. (Still UTC-based — the true local date needs the
+  // observer's longitude, which we don't reliably have here.)
+  const night = r.start_utc ? r.start_utc.slice(0, 10) : r.end_utc ? r.end_utc.slice(0, 10) : null;
   return (
     <Paper withBorder p="sm" radius="md">
       <Group gap="sm" wrap="nowrap" align="flex-start">

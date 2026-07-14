@@ -1452,6 +1452,28 @@ integer coverage diagnostic is R-biased, and "frames overlapping this pixel" is 
 report anyway — so it's a one-line-comment / optional-refinement item, not a fix. No code shipped from the
 audit; the run's deliverable was the user-set integration-goal feature (v0.117.0).)_
 
+_(Builder audit 2026-07-14 (v0.121.2 baseline, suite green 1295 passed / 2 skipped): ran two independent
+adversarial deep-audits in parallel, both **fuzzed / empirically probed**, not just read. **(1) Numeric
+stacking core** — `stack/{accumulator,weighting,stacker,drizzle_path,output}.py` + `calibrate/{apply,masters}.py`
++ `align.py`, each fuzzed against a brute-force NumPy reference across randomized inputs incl. all-NaN/zero-coverage
+pixels, single-frame, ties, negatives, ±inf, and every count boundary: WeightedSum (Σwx/Σw, max rel err 3.9e-6),
+MinMaxReject (all three count bands, tie-safety, ±inf identity), Welford (ddof=1 vs np.std), the two-pass
+sigma-clip (NaN-std→+inf tol keeps single-coverage pixels), `_sigma_clip_mean` (incl. the `mad==0` quantized
+tol=0 branch), drizzle surface-brightness conservation + the two-pass κ-σ `clip_reference` variance (E[v²]−E[v]²
+in float64, Bessel, neff/ULP gates — confirmed it rejects a lone spike only once n makes it statistically
+possible, correctly silent at n=9). **All match to float32 rounding; NaN=coverage preserved through every
+reduction.** **(2) Recently-shipped feature code** — `stackhealth.py` (note branches + ranking, empty-list
+guards, `coverage_min/max` INTEGER-NOT-NULL so old runs read 0 not None), `session_recap.py` (drift thresholds
+fire exactly at ratio 1.25 ∧ abs 0.6, session-gap boundary, 30 h per-target window re-cut by the merged gap
+walk, tz-mixed paths), `nightplan.py` (`_score` at min_alt==alt_cap and >alt_cap → no div-by-zero, moon
+denominator, horizon single-point/wraparound, dark-window tie-break), `webapp/calibration.py` auto-bind
+(ascending-distance candidate walk, confidence gates only tighten), `webapp/routers/upload.py` (traversal,
+per-file disk re-measure, unique .part + atomic replace, close-on-every-path), and the integration-goal
+seconds↔hours conversions. **Both traced clean — no reachable image-corruption or feature bug** (consistent with
+the long clean-audit history). Fuzz/probe scripts kept in the run scratchpad. **One real friendliness finding
+shipped this run (v0.121.3):** the Dashboard "Last night" card's off-by-one UTC date label — see Friendliness →
+Shipped. One cosmetic non-bug dismissed (the same UTC-date ambiguity is fundamental without observer longitude).)_
+
 _(Scout QA audit 2026-07-13 (v0.110.0 baseline, suite green 1149 passed / 2 skipped): led the rotation
 with the **stacking engine** per the owner's current focus #1 — a fresh adversarial hand-trace of
 `stack/accumulator.py` (WeightedSum / MinMaxReject k-set insertion + tie-safety + the count≥2k+1/≥3/<3
@@ -2790,6 +2812,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+- ~~**NEW (Builder 2026-07-14) — the Dashboard "Last night" card labelled the wrong calendar date when a
+  session ran past UTC midnight.**~~ — **FIXED v0.121.3** (Builder 2026-07-14, branch
+  `claude/pensive-faraday-56xh8m`; regression-tested). `frontend/.../LastNightCard.tsx` derived its
+  "Last night · {date}" label from `end_utc.slice(0,10)` — the UTC date of the *last* sub — so an observing
+  session that runs past UTC midnight (routine anywhere east of the Atlantic: e.g. a European 23:00–03:00
+  local session is ~22:00 → ~02:00 UTC, straddling midnight) had an `end_utc` on the following morning's
+  date, tagging "Last night" with **tomorrow**. Switched the label to the session's **start** date
+  (`start_utc`, already in the `LibrarySessionRecap` payload — no backend change), which is the "night of" a
+  person means; the common same-UTC-day case is unchanged, and a stack with only `end_utc` still falls back to
+  it. Still UTC-based by design (the true local date needs the observer's longitude, which isn't reliably
+  present here) — but this removes the jarring "labelled with a date after the night even ended" case for a
+  large fraction of users. Frontend-only, additive, no schema/API/default change. Regression
+  `LastNightCard.test.tsx::"labels the night by when it began, not the morning after (session crosses UTC
+  midnight)"` (start 2026-07-14T22:00Z / end 2026-07-15T02:00Z → asserts the label reads 2026-07-14, not
+  2026-07-15; fails-before with the old `end_utc` slice / passes-after). Surfaced by an adversarial audit of
+  the recently-shipped feature code (both that and a parallel numeric stacking-engine audit otherwise traced
+  clean). (XS, friendliness/trust — PRIORITY 3.)
 - ~~**NEW (Scout 2026-07-12) — post-hoc "N of your M subs didn't align" note on a silently
   half-complete stack.**~~ — **ALREADY SHIPPED** (Builder note 2026-07-13): this is already implemented on
   the History card. The stacker stamps `NOFFERED`/`NALIGNFL` into the master header, the `…/stack-runs/{id}/info`
@@ -3895,6 +3934,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+- **NEW (Builder 2026-07-14) — `Editor.test.tsx` intermittently reddens the frontend suite on a
+  CPU-constrained runner (sync assertion races a lagging async render).** *(Diagnosed while shipping the
+  v0.121.3 Last-night date fix — the full-suite run flaked 2–3 tests every time in a constrained container,
+  though `main`'s CI passes on its faster runner.)* Under full-suite load, ~2–3 of the 64 `Editor.test.tsx`
+  cases fail **fast** (~500 ms, *not* at the 20 s async-util / 30 s test ceilings the config already raised) —
+  e.g. *"splits the preview … via 'Split this op'"* → `Unable to find a label with the text of: split
+  divider`, and *"passes the recipe so the coverage overlay follows the crop geometry"* → `editCoverageMapUrl`
+  called 0 times. **Each passes reliably in isolation** (`vitest run … -t "Split this op"` → green, 1.1 s), so
+  the code is correct; the failure is a **synchronous `expect(...)` firing before the async state update it
+  depends on has rendered** (a debounced recipe re-render / a mocked re-fetch), amplified when ~60 prior tests
+  in the same file leave the event loop busy. React even logs the tell: *"An update to EditorView … was not
+  wrapped in act(...)"*. The existing anti-flake work (`fileParallelism:false`, `asyncUtilTimeout:20000`,
+  `testTimeout:30000`) targets *slow-settle* timeouts, which is a different failure mode than these
+  *fast* races — raising ceilings can't help a synchronous assertion that never waits. **Fix (not blind — needs
+  care):** find the specific post-action synchronous assertions in the ~3 flaky cases and wrap each in
+  `await waitFor(...)` / swap `getBy*`→`findBy*` so it retries until the divider/overlay/mock-call lands
+  (mirroring how the neighbouring stable tests already assert), rather than any global config change. Verify by
+  running the *whole file* (not `-t`-filtered) several times and confirming 0 failures. Low risk (test-only,
+  no product change) but fiddly — each racing assertion must be found and confirmed. Pre-existing (reproduces
+  on a clean `origin/main` checkout); unrelated to any recent product change. (S–M, infra/test-flakiness.)
 - ~~**NEW (Scout 2026-07-14) — a schema-completeness drift test so a `frames`/`stack_runs` column can never
   again be added without an upgrade being safe.**~~ — **SHIPPED v0.121.1** (Builder 2026-07-14, branch
   `claude/pensive-faraday-4tspys`). New `tests/test_project_schema_drift.py` (4 tests) documents and guards the
