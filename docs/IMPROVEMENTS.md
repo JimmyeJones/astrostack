@@ -2805,6 +2805,15 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+- ~~**Dashboard "Integration" stat reads a bare "0.0h" on a fresh install and uses off-format units.**~~ —
+  **SHIPPED v0.121.7** (Builder 2026-07-14, branch `claude/pensive-faraday-47ditq`; found dogfooding the
+  landing page). The Dashboard's Integration StatCard rendered `${data.integration_hours.toFixed(1)}h`, so a
+  brand-new user's very first screen showed an ugly **"0.0h"** (while every sibling stat card shows "—" for
+  empty), and it used a different unit format than the shared `formatIntegration` helper the Library/Target/
+  History surfaces use ("2.3h" vs "2.3 h"; "0.7h" vs "42 min"). Fix: render
+  `formatIntegration(data.integration_hours * 3600)` — "—" for zero, and the app-wide friendly units
+  otherwise. Frontend-only, additive; no backend/schema/API/default change. Tests in `Dashboard.test.tsx`
+  (empty library shows "—" not "0.0h"; a 2.3 h total renders "2.3 h"). (XS, friendliness/consistency.)
 - ~~**NEW (Scout 2026-07-12) — post-hoc "N of your M subs didn't align" note on a silently
   half-complete stack.**~~ — **ALREADY SHIPPED** (Builder note 2026-07-13): this is already implemented on
   the History card. The stacker stamps `NOFFERED`/`NALIGNFL` into the master header, the `…/stack-runs/{id}/info`
