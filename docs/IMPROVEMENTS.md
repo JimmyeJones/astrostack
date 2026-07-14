@@ -3956,6 +3956,21 @@ problems. Dogfood it every big-picture run and fix root causes.
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
+- **Surface the new "Download picture" (PNG) affordance beyond History/Gallery.** (XS, friendliness —
+  Builder-filed 2026-07-14, follow-up to v0.123.0.) v0.123.0 added a one-click PNG download of the finished
+  picture on the History card and in the History/Gallery fullscreen viewers. The **Target page's latest-result
+  card** and the **Dashboard's newest-stack card** also show the preview but still link only into History for a
+  download — a beginner who lands on the Target/Dashboard hub can't grab the picture without a detour. Add the
+  same `stackArtifactUrl(safe, run_id, "preview")` download button (or reuse the lightbox) on those two cards for
+  a consistent "save my picture" everywhere the picture is shown. Frontend-only, additive, reuses the existing
+  endpoint; no schema/API change.
+- **Offer a JPEG (not just PNG) option for the finished-picture download.** (S, friendliness — Builder-filed
+  2026-07-14, follow-up to v0.123.0.) The v0.123.0 "Download picture" serves the stored PNG preview. A PNG of a
+  full-res stack can be large and PNG isn't ideal for messaging apps / social; a **JPEG** (quality ~90, the same
+  format the editor Share export already produces) is smaller and more universally share-friendly. Idea: add a
+  `jpeg` artifact kind (server-side transcode of the preview, or a small on-the-fly render) and offer it as a
+  second choice next to PNG, defaulting to whichever a beginner is most likely to want (probably JPEG for
+  sharing, PNG for quality). Additive, no default/behaviour change to existing downloads; testable server-side.
 - **Decide the intended duration format and unify it (or document the split).** (XS, friendliness/consistency —
   Builder-filed 2026-07-14, spotted dogfooding.) The app has two duration formatters that render the same
   quantity differently: `format.ts::formatIntegration` (Dashboard/Target/History/readiness) prints "42 min" /
