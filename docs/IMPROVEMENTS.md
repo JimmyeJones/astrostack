@@ -302,6 +302,50 @@ when you take it.
   used only a mild 40× outlier where the MTF self-correction still holds; the clamps break it at the larger (and
   realistic full-well) outlier magnitudes measured here.
 
+_Builder audit log 2026-07-14 (baseline green on current `origin/main` v0.119.7: 1261 passed / 2 skipped):
+with the Bugs list drained of ready work (the two open entries — the algebraically-dead SExtractor
+skew-fallback guard and the sky-atlas WCS rotation sign — are explicitly REAL-data-gated, not blind-fixable)
+and the Ideas backlog shipped-or-gated (the image-quality items are all "Scout to vet on REAL data"; the
+remaining autonomy/feature items need a real-data classifier or owner sign-off), and with beginner-feature
+cadence already healthy (share-image v0.114, last-night v0.116, integration-goal v0.117, upload/dropzone
+v0.118, target-progress v0.119 all shipped in the prior few days), spent the run on the §2 big-picture
+correctness audit aimed at the owner's current focus #1 (QA/harden the stacking engine) rather than
+manufacturing churn. Ran **four parallel adversarial audits**, each required to *reproduce* any suspected
+defect numerically against the live engine before filing: **(1) combine numerics**
+(`stack/{accumulator,stacker,weighting,photometric,drizzle_path,reference}.py`), **(2) alignment + mosaic**
+(`stack/{align,mosaic}.py` — windowed reproject inset valid-mask, order-1 sub-pixel-shift NaN propagation on
+full **and** windowed paths, RA 0/360 wrap circular mean, excluded-frame accounting), **(3) calibration**
+(`calibrate/{apply,masters}.py`, `bg/per_frame.py`, `webapp/calibration.py` recommend/auto-bind/resolve), and
+**(4) QC/grading + editor render** (`qc/{metrics,grading,streaks,runner}.py`, `render/thumbnail.py`,
+`edit/ops/{tone,detail}.py`). **All four traced clean, with runnable reproductions.** Combine: WeightedSum/
+Welford(ddof=1)/MinMaxReject accumulators match independent NaN-aware references (maxerr ≤2e-5), `add`==`add_window`
+byte-for-byte, both κ-σ passes apply photometric scale/weight identically, the drizzle catastrophic-cancellation
+variance guard holds, frame accounting `n_offered − n_align_failed == n_frames_used`. Align/mosaic: windowed
+reproject is byte-identical to full-canvas on commonly-valid pixels (the 3px edge inset correctly dropped),
+sub-pixel shift never turns a NaN gap into 0 nor leaks valid data across a coverage boundary (dual order-1 shift
+with data `cval=0`/mask `cval=1`, reject weight >1e-6), the RA=0 seam mosaic doesn't fling a good frame out as an
+outlier. Calibration: `_effective_dark` == `bias + (dark−bias)·t_light/t_dark` exactly, dark-XOR-bias holds (no
+double-subtraction), the `_FLAT_FLOOR=0.1` guard prevents divide-by-~0, auto-bind only binds confidently-matching
+masters, client `*_path` keys are popped + resolved server-side. QC/render: Bayer-green extraction correct per
+pattern (float32-before-add prevents uint16 wrap), modified-z one-sided/direction-aware with MAD→meanAD→skip
+fallback and the `MAX_REJECT_FRACTION` rail, streak/qc_error heal contracts hold, `_highlight_rolloff` is
+monotonic/bounded<1/identity-below-knee/C¹ at the knee, the STF/asinh stretches are hot-pixel-robust (99.5th-pct
+scale) and NaN=coverage is preserved through every edit op at proxy_scale 1 and 4. **Three observations
+investigated and discarded as non-defects** (recorded so a future run doesn't chase them): (a) the dead
+sky-mode fallback guard is algebraically almost-never-true but the estimate it guards (`2.5·median − 1.5·mean`,
+the correct SExtractor mode) produces correct sky-zeroing — no wrong output, and it's already the filed
+REAL-data-gated Bugs entry; (b) the GPU `_subtract_background_gpu` fully-masked-tile fills sky with a
+luminance-scale value applied to R/B — a possible CPU↔GPU scale mismatch, but **unreachable/unverifiable on a
+CPU-only host** (no CuPy), so discarded per §2 (filed nowhere as a bug; a future run with a GPU host should
+re-check it against the CPU neighbour-interpolation reference); (c) `generate_thumbnail`→`_downsample_rgb`
+normalizes the *raw-frame preview* by global min/max through a uint8 round-trip (hot-pixel-sensitive), but
+this is the deliberately-lossy raw thumbnail path, not QC/grading or the stack final-render, with the
+global-min/max choice documented for colour-balance preservation. No new verified bug filed (per §2, no
+manufacturing) — combine, align/mosaic, calibration, and QC/render all held, consistent with the mature
+audit history. **Next rotation** (not re-covered from a fresh angle this run): `webapp/{watcher,jobs,pipeline}.py`
+orchestration and the `io/{scanner,ingest,merge}.py` ingest path; and the two GPU-only seams above want a
+real GPU host to verify._
+
 _Scout audit log 2026-07-12 (baseline green on current `origin/main` v0.109.26: 978 passed / 2 skipped):
 led the rotation with the **stacking engine** per the owner's current focus #1, then fanned three
 adversarial breadth audits across the less-recently-covered subsystems. **(1) Stacking + calibration —
