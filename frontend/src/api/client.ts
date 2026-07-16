@@ -33,6 +33,11 @@ export interface PlannedTarget {
   target_safe: string | null;
   frames_accepted: number | null;
   total_exposure_s: number | null;
+  // "Will it fit in one Seestar frame?" — major-axis size (arcmin) and the
+  // verdict, for catalog candidates the bundled catalog has a size for. Absent
+  // on library rows and older backends. See FramingHint.
+  size_arcmin?: number | null;
+  framing?: FramingHint | null;
 }
 
 export interface NightPlan {

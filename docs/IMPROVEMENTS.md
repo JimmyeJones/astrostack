@@ -4093,11 +4093,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   FoV overrides, popular-target verdicts, catalog sizes sane), `tests/test_objectinfo.py` (+2 — size+framing
   threaded through / omitted when sizeless), `tests/webapp/test_target_identify.py` (+M42 mosaic verdict),
   `ObjectInfoCard.test.tsx` (+3 — `framingSentence`/`framingColor` + card shows/omits the line). Python
-  (1332) + tsc + full vitest + vite build all green. **Follow-ups left for a future run:** (b′) on the
-  Target page, prefer a plate-solved frame's *actual* field size when available (a mosaic result is larger
-  than one frame, so the catalog "mosaic" verdict would otherwise mislead a target already shot as a mosaic);
-  (c) surface the same hint pre-capture on the **Tonight planner** next to a suggested target; and authoring
-  more vetted sizes for the remaining 39 sizeless catalog entries. _(Original idea kept below.)_
+  (1332) + tsc + full vitest + vite build all green. **SLICE (c) SHIPPED v0.131.0** (Builder 2026-07-16,
+  same branch): the same framing hint now also nudges **pre-capture** on the **Tonight planner**. `PlannedTarget`
+  gained nullable `size_arcmin` + `framing`, populated for catalog candidates (library rows carry none — the
+  Target page already shows their hint, and a mosaic result confuses the single-frame verdict); they flow
+  through the plan endpoint's `asdict` serialization automatically. A new pure `tonight.ts::framingRowBadge`
+  turns the verdict into a compact table badge — **"Needs mosaic"** (orange) / **"Mosaic for margin"** (yellow)
+  with a full-sentence tooltip — rendered on each planner row, badging **only** the actionable `mosaic`/`tight`
+  cases (the reassuring `fits` stays silent so it never clutters the dense plan table). So a beginner scanning
+  tonight's suggestions sees "M31 → Needs mosaic" *before* pointing at it — catching the wasted-session mistake
+  the idea's north-star value targets. Frontend + engine only, additive; no schema/config/DB/default/API-shape
+  change. Tests: `tests/test_nightplan.py` (+1 — catalog rows carry the framing verdict), `tests/webapp/test_plan.py`
+  (+M31 mosaic verdict on the endpoint), `tonight.test.ts` (+2 — `framingRowBadge` badges only too-big verdicts
+  + tooltip), `Tonight.test.tsx` (+1 — an oversized catalog row shows the "Needs mosaic" badge). Full Python +
+  frontend suites + build green. **Follow-ups still open:** (b′) on the Target page, prefer a plate-solved
+  frame's *actual* field size when available (a mosaic result is larger than one frame, so the catalog "mosaic"
+  verdict would otherwise mislead a target already shot as a mosaic); and authoring more vetted sizes for the
+  remaining 39 sizeless catalog entries. _(Original idea kept below.)_
   <details><summary>Original idea</summary>
   (M, autonomy/friendliness — PRIORITY 2/3; beginner bar ✔.) A very common beginner surprise: the Seestar's
   field of view is only ~1.3° across, but M31 (~3°), the Veil, the North America Nebula, the Pleiades, etc.

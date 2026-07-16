@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  compassPoint, filterByTypeBucket, formatClock, formatMinutes, isoDate,
-  minAltOptions, MAX_PLAN_LOOKAHEAD_DAYS, moonCueForTarget, moonPhaseLabel,
+  compassPoint, filterByTypeBucket, formatClock, formatMinutes, framingRowBadge,
+  isoDate, minAltOptions, MAX_PLAN_LOOKAHEAD_DAYS, moonCueForTarget, moonPhaseLabel,
   moonWindowNote, notUpTonightNote, objectTypeBucket, partitionByUpTonight,
   planDateBounds, planNightLabel, scoreColor, splitTargets, typeFilterOptions,
   usableWindowNote,
@@ -212,6 +212,26 @@ describe("splitTargets", () => {
     ]);
     expect(already.map((t) => t.id)).toEqual(["A", "C"]);
     expect(fresh.map((t) => t.id)).toEqual(["B", "D"]);
+  });
+});
+
+describe("framingRowBadge", () => {
+  it("badges only the too-big verdicts, silent for fits and absent hints", () => {
+    expect(framingRowBadge(null)).toBeNull();
+    expect(framingRowBadge(undefined)).toBeNull();
+    expect(framingRowBadge({ level: "fits", text: "fits comfortably …" })).toBeNull();
+  });
+
+  it("nudges to mosaic with a full-sentence tooltip for oversized targets", () => {
+    const mosaic = framingRowBadge({ level: "mosaic", text: "is bigger than one frame." });
+    expect(mosaic).not.toBeNull();
+    expect(mosaic!.label).toBe("Needs mosaic");
+    expect(mosaic!.color).toBe("orange");
+    expect(mosaic!.tooltip).toBe("This target is bigger than one frame.");
+
+    const tight = framingRowBadge({ level: "tight", text: "is about as wide as one frame." });
+    expect(tight!.label).toBe("Mosaic for margin");
+    expect(tight!.color).toBe("yellow");
   });
 });
 
