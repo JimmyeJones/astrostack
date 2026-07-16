@@ -47,6 +47,7 @@ import { levelsAtIdentity, resetLevelsPoints } from "../components/editor/levels
 import { curvePointsMatch, isIdentityCurve } from "../components/editor/curveMatch";
 import { coalesceFwhm, measuredContextText } from "../components/editor/measuredContext";
 import { calibrationSummaryText } from "../components/calibrationSummary";
+import { canSharePictureFiles, sharePicture } from "../share";
 import { OpParamPanel } from "../components/editor/OpParamPanel";
 import { PresetMenu } from "../components/editor/PresetMenu";
 import { HintLabel } from "../components/StackOptionControl";
@@ -676,6 +677,9 @@ export function EditorView() {
   // Share: render a social-sized JPEG of the current look and reveal a
   // copy-friendly caption blurb (the beginner's "how do I post this?" step).
   const [shareProgress, setShareProgress] = useState<string | null>(null);
+  // Feature-detect OS file sharing once (stable per browser); gates the
+  // editor's "Share to app" button so desktop browsers without it never see it.
+  const [canShareToApp] = useState(() => canSharePictureFiles());
   const [shareBlurb, setShareBlurb] = useState<string | null>(null);
   const downloadShare = useMutation({
     mutationFn: async () => {
@@ -705,6 +709,52 @@ export function EditorView() {
       a.remove();
       setShareBlurb(blurb);
       notifications.show({ message: "Share image ready", color: "teal" });
+      if (opErrors) notifications.show({ message: opErrors, color: "orange", autoClose: 10000 });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+    onSettled: () => setShareProgress(null),
+  });
+
+  // Share the finished picture straight to another app via the OS share sheet
+  // (mobile/tablet). Renders only when this browser can share files (see the
+  // button gate below); it renders the same share JPEG the download uses, then
+  // hands it to `navigator.share` instead of downloading. A user cancel is
+  // silent; only a genuine failure shows a message.
+  const shareToApp = useMutation({
+    mutationFn: async () => {
+      setShareProgress("Preparing…");
+      const { job_id } = await api.exportShare(safe, rid, recipe);
+      for (;;) {
+        const j = await api.getJob(job_id);
+        if (j.state === "done") {
+          return {
+            jobId: job_id,
+            filename: typeof j.result?.filename === "string" ? j.result.filename : "astrophoto.jpg",
+            blurb: typeof j.result?.blurb === "string" ? j.result.blurb : null,
+            opErrors: opErrorsMessage(j.result?.op_errors),
+          };
+        }
+        if (["error", "cancelled", "interrupted"].includes(j.state)) {
+          throw new Error(j.error || "Share image failed");
+        }
+        setShareProgress(pngProgressLabel(j));
+        await new Promise((r) => setTimeout(r, 500));
+      }
+    },
+    onSuccess: async ({ jobId, filename, blurb, opErrors }) => {
+      setShareBlurb(blurb);
+      const outcome = await sharePicture({
+        url: api.editShareUrl(safe, rid, jobId),
+        filename,
+        title: blurb ?? undefined,
+        text: blurb ?? undefined,
+      });
+      if (outcome === "error") {
+        notifications.show({
+          message: "Couldn't share this picture — try the JPEG download instead.",
+          color: "red",
+        });
+      }
       if (opErrors) notifications.show({ message: opErrors, color: "orange", autoClose: 10000 });
     },
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
@@ -1973,11 +2023,17 @@ export function EditorView() {
               {downloadPng.isPending && pngProgress ? (
                 <Text size="xs" c="dimmed" ta="center" mt={4}>{pngProgress}</Text>
               ) : null}
-              <Button mt="xs" fullWidth variant="light" leftSection={<IconShare size={16} />}
+              <Button mt="xs" fullWidth variant="light" leftSection={<IconPhotoDown size={16} />}
                 loading={downloadShare.isPending} onClick={() => downloadShare.mutate()}>
                 Download share image (JPEG)
               </Button>
-              {downloadShare.isPending && shareProgress ? (
+              {canShareToApp ? (
+                <Button mt="xs" fullWidth variant="light" leftSection={<IconShare size={16} />}
+                  loading={shareToApp.isPending} onClick={() => shareToApp.mutate()}>
+                  Share to app
+                </Button>
+              ) : null}
+              {(downloadShare.isPending || shareToApp.isPending) && shareProgress ? (
                 <Text size="xs" c="dimmed" ta="center" mt={4}>{shareProgress}</Text>
               ) : null}
               {shareBlurb ? (
