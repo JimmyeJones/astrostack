@@ -111,6 +111,7 @@ def build_master(
     max_frames: int = 64,
     progress: ProgressFn | None = None,
     should_stop: Callable[[], bool] | None = None,
+    skipped: list[tuple[str, str]] | None = None,
 ) -> tuple[np.ndarray, MasterMeta] | None:
     """Combine raw FITS frames into a master.
 
@@ -134,6 +135,14 @@ def build_master(
         promptly and returns ``None`` **before any master is written** — no
         partial output is produced. A dark/flat set can be many frames, so a
         long build stays responsive to the Jobs-page Cancel button.
+    skipped
+        Optional list to collect ``(filename, reason)`` for every frame that was
+        dropped during the build — ``"unreadable"`` (failed to load) or
+        ``"wrong size"`` (not a 2-D frame, or a shape that doesn't match the
+        first). Lets the caller tell the user *how many* of their frames were
+        actually used vs. silently set aside, instead of a bare success. Frames
+        dropped by ``max_frames`` sampling are **not** recorded here — that's an
+        intentional memory bound, not a skip. Default ``None`` = don't collect.
 
     Returns
     -------
@@ -175,15 +184,21 @@ def build_master(
             raw, info = load_seestar_raw(p, debayer=False, out_dtype=np.float32)
         except Exception as exc:  # noqa: BLE001 — one bad file shouldn't sink the build
             log.warning("master %s: skipping %s (%s)", kind, p.name, exc)
+            if skipped is not None:
+                skipped.append((p.name, "unreadable"))
             continue
         if raw.ndim != 2:
             log.warning("master %s: skipping %s (not a 2D Bayer frame)", kind, p.name)
+            if skipped is not None:
+                skipped.append((p.name, "wrong size"))
             continue
         if ref_shape is None:
             ref_shape = raw.shape
         elif raw.shape != ref_shape:
             log.warning("master %s: skipping %s (shape %s != %s)",
                         kind, p.name, raw.shape, ref_shape)
+            if skipped is not None:
+                skipped.append((p.name, "wrong size"))
             continue
         arrays.append(raw)
         if info.exposure_s is not None:

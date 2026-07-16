@@ -2,7 +2,7 @@ import {
   ActionIcon, Anchor, Badge, Button, Center, Group, Loader, Paper, Progress, Stack, Text, Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { IconActivity, IconDownload, IconPhoto, IconX } from "@tabler/icons-react";
+import { IconActivity, IconDownload, IconFlask, IconPhoto, IconX } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { type ReactNode, useRef } from "react";
@@ -177,6 +177,28 @@ export function processTargetSummary(r: Record<string, unknown>): {
   return { line, stacked };
 }
 
+/** Plain-language outcome of a finished "Build master" job (pure, tested). A
+ * beginner building a master from a Dark/Flat folder should see how many of
+ * their frames were actually combined — and, when some were set aside (wrong
+ * size / unreadable), how many and why — rather than a bare "done" hiding a
+ * silently smaller master. */
+export function buildMasterSummary(r: Record<string, unknown>): string {
+  const kind = typeof r.kind === "string" && r.kind ? r.kind : "master";
+  const n = Number(r.n_frames ?? 0) || 0;
+  const skipped = Number(r.n_skipped ?? 0) || 0;
+  let line = `Built a master ${kind} from ${n} frame${n === 1 ? "" : "s"}`;
+  if (skipped > 0) {
+    const buckets = r.skipped_buckets && typeof r.skipped_buckets === "object"
+      ? (r.skipped_buckets as Record<string, unknown>) : {};
+    const parts = Object.entries(buckets)
+      .filter(([, c]) => (Number(c) || 0) > 0)
+      .map(([reason, c]) => `${Number(c)} ${reason}`);
+    const detail = parts.length ? ` (${parts.join(", ")})` : "";
+    line += ` · ${skipped} frame${skipped === 1 ? "" : "s"} set aside${detail}`;
+  }
+  return `${line}.`;
+}
+
 /** Result-specific actions for finished editor jobs (download / view). */
 function JobResultActions({ job }: { job: Job }) {
   if (job.state !== "done" || !job.result) return null;
@@ -217,6 +239,22 @@ function JobResultActions({ job }: { job: Job }) {
         {failed.length ? (
           <Text size="xs" c="red">Failed: {failed.join(", ")}</Text>
         ) : null}
+      </Stack>
+    );
+  }
+  if (job.kind === "build_master") {
+    const skipped = Number(r.n_skipped ?? 0) || 0;
+    return (
+      <Stack gap={4} mt="xs">
+        <Text size="sm" c={skipped > 0 ? "orange" : undefined}>
+          {buildMasterSummary(r)}
+        </Text>
+        <Group>
+          <Button size="xs" variant="light" leftSection={<IconFlask size={14} />}
+            component={Link} to="/calibration">
+            View masters
+          </Button>
+        </Group>
       </Stack>
     );
   }

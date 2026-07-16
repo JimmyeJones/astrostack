@@ -3017,6 +3017,31 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+- ~~**A finished "Build master" job showed no outcome at all — and silently dropped wrong-size/unreadable
+  frames without telling the user.**~~ — **SHIPPED v0.135.0** (Builder 2026-07-16, branch
+  `claude/pensive-faraday-h477bm`; found dogfooding the calibration flow). Two related trust gaps for a
+  beginner building a master dark/flat/bias from a folder: (1) `webapp/routers/Jobs.tsx::JobResultActions`
+  had **no `build_master` case**, so a completed build showed a bare "done" with no plain-language summary
+  (unlike Process-target / Reprocess, which say what happened) — the user had no confirmation of what was
+  built or where to find it; and (2) `build_master` (`seestack/calibrate/masters.py`) **silently skips**
+  frames that fail to load or don't match the first frame's shape (logging only a server-side warning), so a
+  beginner who drops 20 flats where 5 are the wrong size gets a master quietly combined from 15 with no
+  indication. **Fix:** `build_master` gained an optional `skipped: list[tuple[name, reason]]` out-param
+  (default `None` = unchanged) that records each dropped frame as `"unreadable"` or `"wrong size"`;
+  `submit_build_master` passes it and returns `n_skipped` + a bucketed `skipped_buckets` in the job result;
+  and the Jobs page renders a pure, tested `buildMasterSummary` line — *"Built a master dark from 15 frames ·
+  5 frames set aside (3 wrong size, 2 unreadable)."* (amber when any were set aside) with a "View masters"
+  link to the Calibration page. Additive/upgrade-safe: the engine out-param and the two new result keys are
+  purely additive (no signature break — the return tuple is unchanged, existing callers/tests untouched), no
+  schema/config/API-shape/default change; frames dropped by the `max_frames` memory-bound sampling are
+  deliberately **not** counted as skips. Tests: `tests/test_calibrate.py` (+2 — `skipped` collects a
+  wrong-size + an unreadable frame with the right reasons and combines only the good ones; stays empty on a
+  clean set), `tests/webapp/test_calibration.py` (+2 — the build job's result carries `n_frames`/`n_skipped`/
+  `skipped_buckets` end-to-end via the endpoint; zero on a clean set), `Jobs.test.tsx` (+6 —
+  `buildMasterSummary` phrasing incl. singular / set-aside detail / missing buckets / missing kind, and a
+  component render showing the amber line + masters link). Python + tsc + full vitest + vite build green.
+  *(S engine+webapp+frontend, friendliness/trust — PRIORITY 3; beginner bar ✔ — helps a Seestar owner trust
+  what their calibration build actually did, sane default, plain language.)*
 - ~~**Two beginner-facing surfaces leaked raw engine slugs/codes instead of the plain-language name the
   rest of the app shows.**~~ — **SHIPPED v0.131.10** (Builder 2026-07-16, branch `claude/pensive-faraday-kv77w1`;
   found by a fresh jargon-sweep of the non-editor routes). Two un-filed jargon leaks a beginner would notice:

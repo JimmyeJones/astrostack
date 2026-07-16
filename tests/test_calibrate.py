@@ -169,6 +169,39 @@ def test_build_master_rejects_mismatched_shape(tmp_path):
     assert meta.n_frames == 1
 
 
+def test_build_master_collects_skipped_frames(tmp_path):
+    # The optional `skipped` out-param lets the caller tell the user how many of
+    # their frames were set aside (and why) — a wrong-size frame and an unreadable
+    # one are recorded with plain-language reasons; the master uses only the good ones.
+    good1 = tmp_path / "good1.fits"
+    good2 = tmp_path / "good2.fits"
+    wrong = tmp_path / "wrong.fits"
+    bad = tmp_path / "bad.fits"
+    _write_raw(good1, np.full((4, 4), 100.0, dtype=np.float32))
+    _write_raw(good2, np.full((4, 4), 100.0, dtype=np.float32))
+    _write_raw(wrong, np.full((2, 2), 100.0, dtype=np.float32))  # mismatched shape
+    bad.write_bytes(b"not a fits file at all")               # fails to load
+    skipped: list[tuple[str, str]] = []
+    master, meta = build_master(
+        [good1, good2, wrong, bad], kind="dark", method="mean", skipped=skipped,
+    )
+    assert master.shape == (4, 4)
+    assert meta.n_frames == 2                       # only the two good frames combined
+    reasons = {name: reason for name, reason in skipped}
+    assert reasons == {"wrong.fits": "wrong size", "bad.fits": "unreadable"}
+
+
+def test_build_master_skipped_stays_empty_on_a_clean_set(tmp_path):
+    paths = []
+    for i in range(3):
+        p = tmp_path / f"f_{i}.fits"
+        _write_raw(p, np.full((4, 4), 50.0, dtype=np.float32))
+        paths.append(p)
+    skipped: list[tuple[str, str]] = []
+    build_master(paths, kind="flat", method="median", skipped=skipped)
+    assert skipped == []
+
+
 def test_build_master_cancel_mid_load_returns_none_and_writes_nothing(tmp_path):
     # A long dark/flat build must honour a mid-build cancel: build_master returns
     # None (no partial master) as soon as should_stop() trips, and it stops

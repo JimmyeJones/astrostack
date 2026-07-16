@@ -5,7 +5,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  JobRow, JobsView, friendlyJobError, jobKindLabel, processTargetSummary, reprocessSummary,
+  JobRow, JobsView, buildMasterSummary, friendlyJobError, jobKindLabel, processTargetSummary,
+  reprocessSummary,
 } from "./Jobs";
 import * as client from "../api/client";
 import type { Job } from "../api/client";
@@ -190,6 +191,70 @@ describe("JobsView process_target result actions", () => {
     expect(
       screen.getByText(/no frames could be plate-solved yet/),
     ).toBeInTheDocument();
+  });
+});
+
+describe("buildMasterSummary", () => {
+  it("reports the frame count on a clean build", () => {
+    expect(buildMasterSummary({ kind: "dark", n_frames: 15, n_skipped: 0 }))
+      .toBe("Built a master dark from 15 frames.");
+  });
+
+  it("singularises a one-frame build", () => {
+    expect(buildMasterSummary({ kind: "bias", n_frames: 1, n_skipped: 0 }))
+      .toBe("Built a master bias from 1 frame.");
+  });
+
+  it("names how many frames were set aside and why", () => {
+    expect(buildMasterSummary({
+      kind: "flat", n_frames: 15, n_skipped: 5,
+      skipped_buckets: { "wrong size": 3, unreadable: 2 },
+    })).toBe(
+      "Built a master flat from 15 frames · 5 frames set aside (3 wrong size, 2 unreadable).",
+    );
+  });
+
+  it("still counts set-aside frames when the buckets are absent", () => {
+    expect(buildMasterSummary({ kind: "dark", n_frames: 8, n_skipped: 1 }))
+      .toBe("Built a master dark from 8 frames · 1 frame set aside.");
+  });
+
+  it("falls back to 'master' when the kind is missing", () => {
+    expect(buildMasterSummary({ n_frames: 4 })).toBe("Built a master master from 4 frames.");
+  });
+});
+
+describe("JobsView build_master result actions", () => {
+  function renderJobsRouted() {
+    const qc = new QueryClient();
+    return render(
+      <MantineProvider>
+        <Notifications />
+        <QueryClientProvider client={qc}>
+          <MemoryRouter>
+            <JobsView />
+          </MemoryRouter>
+        </QueryClientProvider>
+      </MantineProvider>,
+    );
+  }
+
+  it("shows the plain-language build outcome with skip accounting and a masters link", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "bm-1", kind: "build_master", state: "done",
+        result: {
+          id: 1, name: "My Dark", kind: "dark", n_frames: 15,
+          n_skipped: 2, skipped_buckets: { "wrong size": 2 },
+        },
+      }),
+    ]);
+    renderJobsRouted();
+    expect(await screen.findByText(
+      "Built a master dark from 15 frames · 2 frames set aside (2 wrong size).",
+    )).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: "View masters" });
+    expect(link).toHaveAttribute("href", "/calibration");
   });
 });
 
