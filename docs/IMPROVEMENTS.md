@@ -47,6 +47,21 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**`GET /api/targets/{safe}/frames` didn't clamp `offset`/`limit` — a negative page
+  silently returned the wrong window.**~~ — **FIXED v0.131.6** (Builder 2026-07-16, branch
+  `claude/pensive-faraday-xp00ow`; traced + regression-tested). Found by the same routers audit.
+  `webapp/routers/frames.py::list_frames` sliced `frames[offset : offset + limit]` with the raw query
+  params, so a negative `offset` or `limit` triggered Python negative-index slicing and silently returned
+  the wrong page — `offset=-1` → the last frame only; `limit=-1` → every frame *but* the last — instead of
+  the requested window. This is the exact class the codebase already guards everywhere else (`jobs.py`
+  `limit`, `stats.py` `recent_limit` — which even comments on the identical "negative slice silently drops
+  rows" trap — `logs.py`, `frame_preview` `size`); `list_frames` was the lone endpoint that didn't. **Fix:**
+  clamp `offset = max(0, offset)` and `limit = max(0, limit)` before slicing, mirroring the siblings.
+  Additive, no schema/API/default change (a well-formed request is byte-for-byte identical). Regression
+  `tests/webapp/test_api.py::test_list_frames_clamps_negative_pagination` (`offset=-1` returns the full
+  window, `limit=-1` returns empty — both fail-before / pass-after). Severity: wrong-result on a
+  deliberately-negative param (low). Confidence: reproduced + fixed.
+
 - ~~**Global `default_stack_options` bypassed value validation — a bad enum / out-of-range value
   set via the settings PUT/import path poisoned every target's Stack form and 400'd every stack.**~~
   — **FIXED v0.131.5** (Builder 2026-07-16, branch `claude/pensive-faraday-xp00ow`; traced + reproduced +

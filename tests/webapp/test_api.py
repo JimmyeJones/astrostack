@@ -78,6 +78,21 @@ def test_list_and_sort_frames(client, built_library):
     assert ids == sorted(ids, reverse=True)
 
 
+def test_list_frames_clamps_negative_pagination(client, built_library):
+    # Regression: offset/limit were sliced directly, so a negative value hit
+    # Python negative-index slicing and silently returned the wrong window (the
+    # same class of bug stats/jobs/logs already clamp). Clamp to >= 0 so a
+    # negative page never drops/reorders frames.
+    all_ids = [f["id"] for f in client.get("/api/targets/M_42/frames").json()]
+    assert len(all_ids) == 3
+    # offset=-1 would otherwise slice frames[-1:...] → the last frame only.
+    r = client.get("/api/targets/M_42/frames", params={"offset": -1})
+    assert [f["id"] for f in r.json()] == all_ids
+    # limit=-1 would otherwise slice frames[0:-1] → every frame but the last.
+    r = client.get("/api/targets/M_42/frames", params={"limit": -1})
+    assert r.json() == []
+
+
 def test_accept_reject_frame(client, built_library):
     frames = client.get("/api/targets/M_42/frames").json()
     fid = frames[0]["id"]
