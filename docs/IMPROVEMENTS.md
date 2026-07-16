@@ -4822,6 +4822,37 @@ problems. Dogfood it every big-picture run and fix root causes.
   (fails-before: `out is raw`; passes-after: distinct buffer, mutating the result leaves the input untouched)
   and `test_apply_raw_with_masters_does_not_double_copy` (a master path still returns a fresh, correct array).
   Additive, upgrade-safe (no config/DB/API/on-disk change).
+- **Scout to vet: four low-severity latent gaps flagged by a fresh three-front stacking-engine audit
+  (Builder 2026-07-16) — filed, not blind-fixed, because none is triggerable by real inputs today.** The audit
+  swept `stack/stacker.py` + `stack/align.py`, `stack/drizzle_path.py` + `stack/mosaic.py`, and
+  `calibrate/apply.py` + `calibrate/masters.py`; the hot paths (weighted-sum / Welford / min-max accumulation,
+  σ-clip keep-mask polarity + NaN-widened tolerance, photometric multiply, reproject valid-mask insetting,
+  drizzle super-res WCS scaling + two-pass clip statistics, dark/bias pedestal selection + exposure scaling,
+  flat normalization + floor, sigma-clip master combine) all verified **correct and NaN/coverage-aware** — no
+  pixel- or coverage-corrupting bug found. The four latent observations, each low-confidence-of-reachability:
+  (S each, correctness/robustness — focus #1)
+  - **(1)** `calibrate/masters.py:203-205` — the `median` and `mean` master-combine methods use plain
+    `np.median`/`np.mean`, **not** NaN-aware, unlike the `sigma_mean` sibling (`nanmedian`) and the flat path.
+    A single NaN/inf pixel in an input frame would silently propagate into the master (and thence every
+    calibrated light at that pixel). **Not triggerable on real inputs**: `load_seestar_raw` yields integer
+    sensor readouts cast to float32 (finite by construction), so no NaN/inf ever reaches the combine. A pure
+    consistency/defensiveness fix (make all three methods `nan`-aware) would be byte-for-byte identical on every
+    real calibration set — worth doing only if a Scout judges it more than churn (it changes nothing a user sees).
+  - **(2)** `stack/drizzle_path.py:300-303` — `frame_coverage` (`self._count`) is derived from **channel-0's**
+    `out_wht` only, while the finite-mask and clip-reject masks are computed per channel; a pixel kept in
+    channels 1/2 but NaN/clip-rejected in channel 0 is undercounted. **Diagnostic-only** (`coverage_min`/
+    `coverage_max` "frames per pixel"), never the image or the weight maps — and consistent with
+    `WeightedSumAccumulator`'s own `valid[..., 0]` count. Same disposition as the accumulator's documented
+    channel-0 count.
+  - **(3)** `stack/align.py:407,466,161` — `_apply_subpixel_shift_windowed` shifts a window padded only `pad=2`
+    px while the sub-pixel correction is capped at ±5 px, so a frame legitimately needing a 3–5 px shift can
+    lose a thin strip of real edge data (coverage reduction at frame edges, **not** wrong pixel values). Only
+    with `subpixel_refine` on (off by default) and near-cap shifts; in a dithered stack neighbours cover those
+    edges. If ever taken: widen the window pad to ≥ the shift cap.
+  - **(4)** `stack/align.py:261` / non-windowed `reproject_rgb` — a CPU(`cval=nan`)↔GPU(`cval=0.0`) boundary-pixel
+    discrepancy at `inset=0`. **Test-only path** (`reproject_rgb`/`_apply_subpixel_shift` are exercised only by
+    `tests/`); the production windowed path uses `inset=3` and never samples out-of-bounds inside the valid
+    region. Informational.
 - ~~Add a retention/pruning policy for `jobs.sqlite`~~ — **done, then made
   configurable** (`JobManager._evict_old` + the `job_history_limit` setting,
   v0.51.1). (S, scale)
@@ -4906,6 +4937,23 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.132.0** — Beginner feature / friendliness (PRIORITY 3 — "should I wait or walk away?"; Builder 2026-07-16,
+  branch `claude/pensive-faraday-hmlp4a`). The **Jobs page now shows a plain-language "time left" estimate** next
+  to each running step ("aligning 1200/3000 · ~2 min left") — the first thing a beginner who dropped a night's
+  subs and kicked off a long stack wants to know. A stack runs several steps and each step restarts its own
+  `done`/`total` (a two-pass sigma-clip stack streams every frame once per pass), so a naive whole-job estimate
+  from the job's start time would be wrong; the new pure `frontend/src/jobEta.ts` instead estimates only the
+  **current step**, anchoring on the first observation of that step and projecting from the rate since, and the
+  readout sits right beside that step's name + count so it reads unambiguously as "this step" (not the whole
+  job). Fully division-guarded (a missing/empty/complete observation, or an implausible >24 h early guess, shows
+  *nothing* — never a wrong number or a throw, so a bad estimate can't erode trust); coarse rounding (5 s / whole
+  minutes / h+min) keeps it from jittering between the 1.5 s polls; and it never appears on a queued/finished job.
+  Frontend-only, additive, off-nothing: no backend/schema/API/default change (reuses the existing `phase`/`done`/
+  `total` the Jobs poll already returns). Tests: `jobEta.test.ts` (18 — anchor reset on step change/restart/
+  resize, rate projection + all the null guards, friendly formatting, label incl. the >24 h suppression) +
+  `Jobs.test.tsx` (+3 — the estimate renders beside a running step's count, is omitted when unavailable, and
+  never leaks onto a queued job). tsc + full vitest + vite build green. (S, beginner-feature — PRIORITY 3;
+  beginner bar ✔.)
 - **v0.131.3** — Stacking-engine correctness (drizzle edge/floor polish — focus #1; Builder 2026-07-16, branch
   `claude/pensive-faraday-d9xp84`). `stack/drizzle_path.py`: (1) `add_frame`'s in-bounds mask now keys on the
   astropy pixel-*edge* extent `[-0.5, N-0.5]` instead of centre indices `[0, N-1]`, so an input pixel whose

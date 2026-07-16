@@ -5,9 +5,10 @@ import { notifications } from "@mantine/notifications";
 import { IconActivity, IconDownload, IconPhoto, IconX } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { type ReactNode } from "react";
+import { type ReactNode, useRef } from "react";
 import { api, type Job } from "../api/client";
 import { QueryError } from "../components/QueryError";
+import { type EtaSample, etaLabel, updateEtaAnchor } from "../jobEta";
 
 const COLOR: Record<string, string> = {
   running: "violet",
@@ -257,7 +258,9 @@ function JobError({ raw, kind }: { raw: string; kind?: string | null }) {
   );
 }
 
-function JobRow({ job, onCancel }: { job: Job; onCancel: () => void }) {
+export function JobRow(
+  { job, onCancel, eta }: { job: Job; onCancel: () => void; eta?: string | null },
+) {
   const pct = job.total ? Math.round((job.done / job.total) * 100) : 0;
   const active = job.state === "running" || job.state === "queued";
   return (
@@ -271,6 +274,9 @@ function JobRow({ job, onCancel }: { job: Job; onCancel: () => void }) {
         <Group>
           <Text size="sm" c="dimmed">
             {job.phase} {job.total ? `${job.done}/${job.total}` : ""}
+            {/* Per-step "time left" — shown next to this step's count so it reads
+                unambiguously as the current step, not the whole job. */}
+            {job.state === "running" && eta ? ` · ${eta}` : ""}
           </Text>
           {active ? (
             <ActionIcon variant="subtle" color="red" onClick={onCancel} aria-label="Cancel job">
@@ -285,6 +291,37 @@ function JobRow({ job, onCancel }: { job: Job; onCancel: () => void }) {
       <JobResultActions job={job} />
     </Paper>
   );
+}
+
+// Per-job "time left" for the running jobs. We can't estimate this whole-job
+// (each step restarts its own done/total — see jobEta.ts), so we anchor on the
+// first observation of the *current* step and project from the rate since then.
+// The anchors persist across the 1.5 s poll in a ref (a display cache, not
+// render-affecting state); finished jobs are pruned so it can't grow unbounded.
+function useJobEtas(jobs: Job[]): Record<string, string | null> {
+  const store = useRef<Map<string, { anchor: EtaSample; cur: EtaSample }>>(new Map());
+  const now = Date.now();
+  const out: Record<string, string | null> = {};
+  const live = new Set<string>();
+  for (const j of jobs) {
+    if (j.state !== "running") continue;
+    live.add(j.id);
+    const obs = { phase: j.phase ?? "", total: j.total ?? 0, done: j.done ?? 0 };
+    const rec = store.current.get(j.id);
+    // Reuse the stored observation timestamp while nothing has changed, so the
+    // estimate doesn't drift upward on re-renders between polls.
+    const cur: EtaSample =
+      rec && rec.cur.phase === obs.phase && rec.cur.total === obs.total && rec.cur.done === obs.done
+        ? rec.cur
+        : { ...obs, tMs: now };
+    const anchor = updateEtaAnchor(rec ? rec.anchor : null, cur);
+    store.current.set(j.id, { anchor, cur });
+    out[j.id] = etaLabel(anchor, cur);
+  }
+  for (const id of [...store.current.keys()]) {
+    if (!live.has(id)) store.current.delete(id);
+  }
+  return out;
 }
 
 export function JobsView() {
@@ -306,6 +343,8 @@ export function JobsView() {
   const finished = (data ?? []).filter(
     (j) => !["running", "queued"].includes(j.state),
   ).length;
+  // Computed every render (before the early returns) so the hook order is stable.
+  const etas = useJobEtas(data ?? []);
 
   if (isError && !data) {
     return <QueryError error={error} onRetry={() => refetch()} />;
@@ -345,7 +384,9 @@ export function JobsView() {
           </Stack>
         </Paper>
       ) : (
-        jobs.map((j) => <JobRow key={j.id} job={j} onCancel={() => cancel.mutate(j.id)} />)
+        jobs.map((j) => (
+          <JobRow key={j.id} job={j} onCancel={() => cancel.mutate(j.id)} eta={etas[j.id]} />
+        ))
       )}
     </Stack>
   );

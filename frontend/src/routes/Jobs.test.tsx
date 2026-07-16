@@ -5,7 +5,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  JobsView, friendlyJobError, jobKindLabel, processTargetSummary, reprocessSummary,
+  JobRow, JobsView, friendlyJobError, jobKindLabel, processTargetSummary, reprocessSummary,
 } from "./Jobs";
 import * as client from "../api/client";
 import type { Job } from "../api/client";
@@ -190,6 +190,34 @@ describe("JobsView process_target result actions", () => {
     expect(
       screen.getByText(/no frames could be plate-solved yet/),
     ).toBeInTheDocument();
+  });
+});
+
+describe("JobRow time-left estimate", () => {
+  function renderRow(job: Job, eta?: string | null) {
+    return render(
+      <MantineProvider>
+        <MemoryRouter>
+          <JobRow job={job} onCancel={() => {}} eta={eta} />
+        </MemoryRouter>
+      </MantineProvider>,
+    );
+  }
+
+  it("shows the per-step estimate next to a running step's count", () => {
+    renderRow(mkJob({ state: "running", phase: "aligning", done: 40, total: 100 }), "~2 min left");
+    expect(screen.getByText(/aligning 40\/100 · ~2 min left/)).toBeInTheDocument();
+  });
+
+  it("omits the estimate when none is available yet", () => {
+    renderRow(mkJob({ state: "running", phase: "aligning", done: 0, total: 100 }), null);
+    expect(screen.queryByText(/left/)).not.toBeInTheDocument();
+  });
+
+  it("never shows an estimate on a queued (not-yet-started) job", () => {
+    // A stale eta must not leak onto a job that isn't running.
+    renderRow(mkJob({ state: "queued", phase: "", done: 0, total: 0 }), "~5 min left");
+    expect(screen.queryByText(/left/)).not.toBeInTheDocument();
   });
 });
 
