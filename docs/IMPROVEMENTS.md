@@ -4320,8 +4320,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   same self-hiding `ProgressReelCard` now also renders on the **editor** result (below the "How's my stack?"
   card), where the Process-target deep-link lands — so the delight moment appears exactly where a beginner
   admires the finished picture, not only on History. Frontend-only, additive; tsc + full vitest + vite build
-  green. **Follow-up left for a future run:** wire the native OS **Share** sheet for the clip (the download
-  button ships now; sharing an animation file needs the `share.ts` plumbing extended from JPEG to webp/apng).
+  green. **Follow-up — SHARE-THE-CLIP SHIPPED v0.133.0** (Builder 2026-07-16, branch
+  `claude/pensive-faraday-rtfcye`): the `ProgressReelCard` now offers a native OS **Share clip** control next to
+  "Download clip" (progressive enhancement — renders only where the browser can share *files*, exactly like the
+  picture Share button, so desktop browsers without file-share keep just the download link and never see a dead
+  button). The existing `share.ts::sharePicture` was already format-agnostic (it types the shared `File` from the
+  fetched blob's own mime, so a webp/apng clip shares correctly) — the only gaps were a `.jpg`-hardcoded filename
+  and picture-specific button copy. Added: (1) a pure, unit-tested `shareClipText(name, format)` helper that builds
+  a friendly clip caption ("<name> coming together") + a filename with the reel's real extension (`webp`/`png`,
+  defaulting to `webp`); (2) the progress-info endpoint (`webapp/routers/stack.py::stack_progress_info`) now also
+  returns the reel's `format` ("webp"/"png", "" when unavailable) so the UI names the shared/downloaded file
+  correctly — additive, no schema/API-shape break; and (3) `SharePictureButton` grew optional
+  `tooltip`/`ariaLabel`/`errorMessage` props (defaulting to the current picture copy, so every existing caller is
+  byte-identical) so the reel can say "Share this clip". Frontend + one additive backend field; no
+  schema/config/default change. Tests: `share.test.ts` (+4 — clip caption, webp/png extension, unrecognised-format
+  + blank-name fallbacks), `ProgressReelCard.test.tsx` (+1 — the Share control appears when file-share is
+  supported, stays absent otherwise), `test_stack_render.py` (+1 progress-info reports `format=png` for an APNG
+  reel, + the existing webp/unavailable cases now assert `format`). tsc + full vitest (880) + vite build + Python
+  green. *(Beginner bar ✔ — one obvious button that posts the "my galaxy appearing" clip straight to
+  Messages/Instagram, no new astro knowledge, no deps.)*
 
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)

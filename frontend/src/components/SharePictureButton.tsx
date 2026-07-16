@@ -24,6 +24,9 @@ export function SharePictureButton({
   variant = "light",
   iconOnly = false,
   label = "Share",
+  tooltip = "Share this picture to another app",
+  ariaLabel = "Share picture",
+  errorMessage = "Couldn't share this picture — try downloading it instead.",
 }: {
   /** The picture to share — the small, share-friendly JPEG artifact URL. */
   url: string;
@@ -38,6 +41,12 @@ export function SharePictureButton({
   /** Render a compact icon button (for the lightbox toolbar) instead of a labelled button. */
   iconOnly?: boolean;
   label?: string;
+  /** Tooltip copy — override for non-picture shares (e.g. a clip). */
+  tooltip?: string;
+  /** Accessible label — override for non-picture shares. */
+  ariaLabel?: string;
+  /** Notification shown on a genuine share failure — override per content type. */
+  errorMessage?: string;
 }) {
   // Feature-detect once at mount (stable per browser); render nothing if files
   // can't be shared here.
@@ -50,24 +59,21 @@ export function SharePictureButton({
     const outcome = await sharePicture({ url, filename, title, text });
     setBusy(false);
     if (outcome === "error") {
-      notifications.show({
-        message: "Couldn't share this picture — try downloading it instead.",
-        color: "red",
-      });
+      notifications.show({ message: errorMessage, color: "red" });
     }
     // "shared" / "cancelled" / "unsupported" → stay quiet (success or user cancel).
   };
 
   if (iconOnly) {
     return (
-      <Tooltip label="Share this picture">
+      <Tooltip label={tooltip}>
         <ActionIcon
           size="lg"
           variant="subtle"
           color="gray"
           loading={busy}
           onClick={doShare}
-          aria-label="Share picture"
+          aria-label={ariaLabel}
         >
           <IconShare size={20} />
         </ActionIcon>
@@ -76,14 +82,14 @@ export function SharePictureButton({
   }
 
   return (
-    <Tooltip label="Share this picture to another app">
+    <Tooltip label={tooltip}>
       <Button
         size={size}
         variant={variant}
         leftSection={<IconShare size={size === "xs" ? 14 : 16} />}
         loading={busy}
         onClick={doShare}
-        aria-label="Share picture"
+        aria-label={ariaLabel}
       >
         {label}
       </Button>

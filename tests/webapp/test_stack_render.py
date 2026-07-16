@@ -723,6 +723,29 @@ def test_progress_info_reports_available_reel(client, solved_library):
         f"/api/targets/{safe}/stack-runs/{run_id}/progress-info").json()
     assert body["available"] is True
     assert body["frames"] == 6
+    # ``format`` lets the UI name a shared/downloaded clip with the right extension.
+    assert body["format"] == "webp"
+
+
+def test_progress_info_reports_apng_format(client, solved_library):
+    """An APNG-fallback reel reports format=png so the UI names the clip right."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            _write_reel_beside(run.fits_path, n=5, suffix="_progress.png")
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    body = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/progress-info").json()
+    assert body["available"] is True
+    assert body["format"] == "png"
 
 
 def test_progress_info_unavailable_without_reel(client, solved_library):
@@ -731,7 +754,7 @@ def test_progress_info_unavailable_without_reel(client, solved_library):
     _, run_id = _make_run_with_fits(solved_library, safe)
     body = client.get(
         f"/api/targets/{safe}/stack-runs/{run_id}/progress-info").json()
-    assert body == {"available": False, "frames": 0}
+    assert body == {"available": False, "frames": 0, "format": ""}
 
 
 def test_progress_reel_serves_the_animation(client, solved_library):

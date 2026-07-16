@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { canSharePictureFiles, sharePicture, sharePictureText } from "./share";
+import {
+  canSharePictureFiles,
+  sharePicture,
+  sharePictureText,
+  shareClipText,
+} from "./share";
 
 /** Install a fake Web Share API on `navigator`; returns a cleanup fn. */
 function stubShare(opts: {
@@ -143,5 +148,29 @@ describe("sharePictureText", () => {
 
   it("never produces a bare '.jpg' filename from punctuation-only names", () => {
     expect(sharePictureText("***", null).filename).toBe("astrophoto.jpg");
+  });
+});
+
+describe("shareClipText", () => {
+  it("captions the clip and uses the reel's extension", () => {
+    const { title, text, filename } = shareClipText("M 31", "webp");
+    expect(title).toBe("M 31 coming together");
+    expect(text).toBe("Watch M 31 build up from noise, stacked with AstroStack");
+    expect(filename).toBe("m-31-progress.webp");
+  });
+
+  it("uses a .png extension for an APNG reel", () => {
+    expect(shareClipText("NGC 7000", "png").filename).toBe("ngc-7000-progress.png");
+  });
+
+  it("defaults to .webp for a missing or unrecognised format", () => {
+    expect(shareClipText("M31", null).filename).toBe("m31-progress.webp");
+    expect(shareClipText("M31", "gif").filename).toBe("m31-progress.webp");
+  });
+
+  it("falls back to a sensible default for a blank name", () => {
+    const { title, filename } = shareClipText("", "webp");
+    expect(title).toBe("My astrophoto coming together");
+    expect(filename).toBe("my-astrophoto-progress.webp");
   });
 });

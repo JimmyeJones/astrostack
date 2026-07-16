@@ -401,7 +401,7 @@ async def stack_progress_info(
     _, fits_path = _run_fits_path(request, safe, run_id)
     reel = _run_progress_reel(fits_path)
     if reel is None:
-        return {"available": False, "frames": 0}
+        return {"available": False, "frames": 0, "format": ""}
 
     def probe() -> int:
         from PIL import Image
@@ -412,7 +412,10 @@ async def stack_progress_info(
             return 0
 
     frames = await run_in_threadpool(probe)
-    return {"available": frames > 1, "frames": frames}
+    # ``format`` (``webp``/``png``) lets the UI name a shared/downloaded clip with
+    # the right extension; the reel itself carries the correct media type.
+    return {"available": frames > 1, "frames": frames,
+            "format": reel.suffix.lstrip(".")}
 
 
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/progress")

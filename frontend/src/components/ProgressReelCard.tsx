@@ -3,6 +3,8 @@ import { Button, Group, Image, Paper, Stack, Text, ThemeIcon } from "@mantine/co
 import { IconDownload, IconMovie, IconSparkles } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
+import { SharePictureButton } from "./SharePictureButton";
+import { shareClipText } from "../share";
 
 /**
  * "Watch your picture come together" — a small looping animation of the stack
@@ -18,7 +20,16 @@ import { api } from "../api/client";
  * doesn't fetch every animation up front; the animation `<img>` is only
  * requested once the user chooses to watch it.
  */
-export function ProgressReelCard({ safe, runId }: { safe: string; runId: number }) {
+export function ProgressReelCard({
+  safe,
+  runId,
+  name,
+}: {
+  safe: string;
+  runId: number;
+  /** Display name for the share caption/filename; falls back to `safe`. */
+  name?: string;
+}) {
   const [playing, setPlaying] = useState(false);
   const info = useQuery({
     queryKey: ["progress-reel", safe, runId],
@@ -28,6 +39,7 @@ export function ProgressReelCard({ safe, runId }: { safe: string; runId: number 
   if (!info.data?.available) return null;
 
   const src = api.stackProgressUrl(safe, runId);
+  const clip = shareClipText(name || safe, info.data.format);
   return (
     <Paper withBorder p="sm" radius="md" mt="xs">
       <Group gap="sm" wrap="nowrap" align="flex-start">
@@ -51,6 +63,16 @@ export function ProgressReelCard({ safe, runId }: { safe: string; runId: number 
                   component="a" href={src} download>
                   Download clip
                 </Button>
+                <SharePictureButton
+                  url={src}
+                  filename={clip.filename}
+                  title={clip.title}
+                  text={clip.text}
+                  label="Share clip"
+                  tooltip="Share this clip to another app"
+                  ariaLabel="Share clip"
+                  errorMessage="Couldn't share this clip — try downloading it instead."
+                />
               </Group>
             </>
           ) : (
