@@ -577,6 +577,69 @@ describe("StackView", () => {
     expect(screen.queryByText(/drops the single highest and lowest/)).not.toBeInTheDocument();
   });
 
+  it("warns that min/max rejection ignores quality weighting when both are on", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+      { key: "min_max_reject", label: "Min/max rejection", type: "bool", group: "simple",
+        default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+      { key: "quality_weighted", label: "Quality weighting", type: "bool", group: "simple",
+        default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+    ]);
+    // Both min/max reject and quality weighting on, ≥3 frames, non-drizzle path:
+    // the engine stamps weights_applied=False here, so the weighting is a no-op.
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue(
+      { min_max_reject: true, quality_weighted: true });
+    const frames = Array.from({ length: 6 }, (_, i) => mkFrame(i + 1));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    await waitFor(() =>
+      expect(screen.getByText(/Min\/max rejection and quality weighting don't combine/))
+        .toBeInTheDocument());
+  });
+
+  it("clears the min/max+weighting warning in one click by turning weighting off", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+      { key: "min_max_reject", label: "Min/max rejection", type: "bool", group: "simple",
+        default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+      { key: "quality_weighted", label: "Quality weighting", type: "bool", group: "simple",
+        default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+    ]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue(
+      { min_max_reject: true, quality_weighted: true });
+    const frames = Array.from({ length: 6 }, (_, i) => mkFrame(i + 1));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    const btn = await screen.findByRole("button", { name: "Turn off quality weighting" });
+    fireEvent.click(btn);
+    await waitFor(() =>
+      expect(screen.queryByText(/don't combine/)).not.toBeInTheDocument());
+  });
+
+  it("does not warn about min/max+weighting when only min/max reject is on", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+      { key: "min_max_reject", label: "Min/max rejection", type: "bool", group: "simple",
+        default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+      { key: "quality_weighted", label: "Quality weighting", type: "bool", group: "simple",
+        default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+    ]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue(
+      { min_max_reject: true, quality_weighted: false });
+    const frames = Array.from({ length: 6 }, (_, i) => mkFrame(i + 1));
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+
+    renderStack();
+
+    const toggle = await screen.findByLabelText("Min/max rejection");
+    await waitFor(() => expect(toggle).toBeChecked());
+    expect(screen.queryByText(/don't combine/)).not.toBeInTheDocument();
+  });
+
   it("warns when the min/max reject k is too high for the frame count", async () => {
     vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
       { key: "min_max_reject", label: "Min/max rejection", type: "bool", group: "simple",

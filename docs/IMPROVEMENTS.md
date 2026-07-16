@@ -3041,18 +3041,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
-- **NEW (Builder audit 2026-07-16) — warn on the Stack form when `min_max_reject` + `quality_weighted`
-  are *both* on: min/max silently ignores per-frame weights.** (S, friendliness/trust — PRIORITY 3.)
-  *(Traced by an adversarial accumulation-path audit that otherwise verified the reduction math correct with
-  five numerical repros.)* `MinMaxRejectAccumulator` (`seestack/stack/accumulator.py`) is an order statistic —
-  it accepts a `weight` arg but never uses it — so a user who enables both min/max rejection and quality
-  weighting gets an **unweighted** combine, silently discarding the quality weighting they asked for. It is
-  **not truly silent** (the docstring says so, and `stacker.py` correctly stamps `weights_applied=False` into
-  provenance) and it is **not a bug** (min/max genuinely can't weight), so this is a friendliness nudge, not a
-  fix: add a small amber "Min/max rejection ignores quality weighting — they don't combine" note on the Stack
-  form when both toggles are on (mirroring the form's existing data-driven nudges), so the user chooses one
-  rejection strategy knowingly. Frontend-only, additive, no engine change. *(A beginner rarely enables min/max
-  manually, so this is low-priority polish — filed for completeness.)*
+- ~~**NEW (Builder audit 2026-07-16) — warn on the Stack form when `min_max_reject` + `quality_weighted`
+  are *both* on: min/max silently ignores per-frame weights.**~~ — **SHIPPED v0.135.2** (Builder 2026-07-16,
+  branch `claude/pensive-faraday-7huucb`). `MinMaxRejectAccumulator` (`seestack/stack/accumulator.py`) is an
+  order statistic — it accepts a `weight` arg but never uses it (docstring confirms), so `stacker.py` stamps
+  `weights_applied = not (min_max_reject and not drizzle and n >= 3)` into provenance: on that exact path a
+  user's quality weighting is a silent no-op. **Fix (frontend-only, mirrors the engine gate):** a new amber
+  advisory `minMaxIgnoresWeightingHint` on the Stack form fires when `min_max_reject && quality_weighted &&
+  !drizzle && solvedAccepted >= 3`, explaining the two don't combine (min/max is an order statistic that
+  ignores weights) with a one-click "Turn off quality weighting" button — so the user picks one rejection
+  strategy knowingly instead of losing the weighting they asked for with no on-screen signal. Additive, no
+  engine/schema/config/API/default change. Tests: `Stack.test.tsx` (+3 — the warning shows when both are on,
+  clears in one click via the button, and stays absent when only min/max is on). tsc + full vitest + vite
+  build green. *(S, friendliness/trust — PRIORITY 3; low-severity polish, but a real "your setting silently
+  did nothing" trust gap.)*
 - ~~**A finished "Build master" job showed no outcome at all — and silently dropped wrong-size/unreadable
   frames without telling the user.**~~ — **SHIPPED v0.135.0** (Builder 2026-07-16, branch
   `claude/pensive-faraday-h477bm`; found dogfooding the calibration flow). Two related trust gaps for a
