@@ -432,6 +432,20 @@ export function StackView() {
       ? `${streakedAccepted} of your frames carry a satellite/plane streak, but min/max reject is set to drop only the ${minMaxK === 1 ? "single" : minMaxK} highest and lowest value${minMaxK === 1 ? "" : "s"} at each pixel (k=${minMaxK}). Raising k to ${streakKSuggested} drops the ${streakKSuggested} highest and lowest — enough to trim all ${streakedAccepted} trails where they cross a pixel.`
       : null;
 
+  // Min/max reject + quality weighting don't combine: MinMaxRejectAccumulator is
+  // an order statistic (it drops the k highest/lowest values at each pixel), so
+  // it ignores per-frame weights entirely — the stacker even stamps
+  // weights_applied=False into provenance on this exact path (min/max on, not
+  // drizzle, ≥3 frames). A user who turns on both expects the best subs to count
+  // for more and gets an unweighted combine instead, with no on-screen signal.
+  // Surface the tradeoff so they pick one rejection strategy knowingly. This
+  // mirrors the engine's `weights_applied` gate (stacker.py). Advisory only.
+  const minMaxIgnoresWeightingHint =
+    !frames.isLoading && !!values.min_max_reject && !!values.quality_weighted
+    && !values.drizzle && solvedAccepted >= 3
+      ? "Min/max rejection and quality weighting don't combine: min/max is an order statistic (it drops the highest and lowest values at each pixel), so it ignores per-frame weights — your quality weighting won't affect this stack. Use sigma clipping if you want quality weighting to count, or keep min/max and turn quality weighting off."
+      : null;
+
   const streakNoRejectionWarning =
     streakedAccepted > 0 && !rejectionOn && !minMaxRejectHint
       ? `${streakedAccepted} accepted frame${streakedAccepted === 1 ? " has" : "s have"} a detected satellite/plane streak, but this stack has no per-pixel rejection enabled — the trail${streakedAccepted === 1 ? "" : "s"} will show in the result. Turn on ${values.drizzle ? "“Drizzle outlier rejection”" : "sigma clipping"} (or reject those frames) to remove ${streakedAccepted === 1 ? "it" : "them"}.`
@@ -893,6 +907,16 @@ export function StackView() {
               <Button size="compact-xs" variant="light" mt={6}
                 onClick={() => set("min_max_reject_count", streakKSuggested)}>
                 Set k = {streakKSuggested}
+              </Button>
+            </Alert>
+          ) : null}
+
+          {minMaxIgnoresWeightingHint ? (
+            <Alert color="yellow" variant="light" py={6} px="sm">
+              <Text size="xs">{minMaxIgnoresWeightingHint}</Text>
+              <Button size="compact-xs" variant="light" mt={6}
+                onClick={() => set("quality_weighted", false)}>
+                Turn off quality weighting
               </Button>
             </Alert>
           ) : null}
