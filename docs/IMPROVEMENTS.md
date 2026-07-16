@@ -4106,10 +4106,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   change. Tests: `tests/test_nightplan.py` (+1 — catalog rows carry the framing verdict), `tests/webapp/test_plan.py`
   (+M31 mosaic verdict on the endpoint), `tonight.test.ts` (+2 — `framingRowBadge` badges only too-big verdicts
   + tooltip), `Tonight.test.tsx` (+1 — an oversized catalog row shows the "Needs mosaic" badge). Full Python +
-  frontend suites + build green. **Follow-ups still open:** (b′) on the Target page, prefer a plate-solved
-  frame's *actual* field size when available (a mosaic result is larger than one frame, so the catalog "mosaic"
-  verdict would otherwise mislead a target already shot as a mosaic); and authoring more vetted sizes for the
-  remaining 39 sizeless catalog entries. _(Original idea kept below.)_
+  frontend suites + build green. **CATALOG NOW FULLY SIZED — v0.131.2** (Builder 2026-07-16, branch
+  `claude/pensive-faraday-6bwguj`): authored vetted major-axis `size_arcmin` for the **remaining 39 sizeless
+  catalog entries** (37 Messier: mostly the small Virgo/Coma galaxies M49/M58–M61/M84–M100/M105/M109, plus
+  globulars M19/M54/M55/M62/M69/M70/M72/M75/M79/M107, open clusters M18/M21/M26/M41, the double star M40 and
+  asterism M73; and 2 non-Messier nebulae IC 434 Horsehead + NGC 2024 Flame). All 37 Messier objects are
+  small (<44′), so they get a robust reassuring **"fits comfortably"** verdict that no plausible size
+  uncertainty flips; the two Orion nebulae were **web-verified** (IC 434 ~90′ major axis → correctly
+  **"needs mosaic"**, NGC 2024 30′×30′ → "fits"). So every one of the 157 catalog objects now surfaces a
+  framing line on the Target/editor/History `ObjectInfoCard` — removing the visible gap where M31/M45 showed
+  a "will it fit?" line but M87/M96 showed none. Additive data-only (new optional field values on existing
+  entries), no schema/config/API/default change; upgrade-safe by construction. Tests: `tests/test_framing.py`
+  (`test_every_catalog_object_now_carries_a_size` guards the catalog stays fully sized so a future addition
+  without a vetted size is caught), and `tests/test_objectinfo.py`'s no-size test rewritten to a synthetic
+  sizeless entry (the real catalog no longer has one). **Follow-up still open:** (b′) on the Target page,
+  prefer a plate-solved frame's *actual* field size when available (a mosaic result is larger than one frame,
+  so the catalog "mosaic" verdict would otherwise mislead a target already shot as a mosaic). _(Original idea
+  kept below.)_
   <details><summary>Original idea</summary>
   (M, autonomy/friendliness — PRIORITY 2/3; beginner bar ✔.) A very common beginner surprise: the Seestar's
   field of view is only ~1.3° across, but M31 (~3°), the Veil, the North America Nebula, the Pleiades, etc.

@@ -87,3 +87,11 @@ def test_catalog_sizes_are_sane_when_present():
         if obj.size_arcmin is None:
             continue
         assert 0 < obj.size_arcmin <= 600, obj.id
+
+
+def test_every_catalog_object_now_carries_a_size():
+    # The bundled catalog is fully sized, so every identified target gets a
+    # framing hint (uniform "will it fit?" line — no silent gaps). A future
+    # addition without a vetted size trips this, prompting the author to add one.
+    unsized = [o.id for o in load_catalog() if o.size_arcmin is None]
+    assert unsized == [], f"catalog objects missing a vetted size_arcmin: {unsized}"
