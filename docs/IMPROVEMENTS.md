@@ -4008,6 +4008,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   present and lists just the buckets that actually appear; a stale selection is inert (falls back to
   All). Unit-tested helpers `objectTypeBucket`/`typeFilterOptions`/`filterByTypeBucket` plus component
   tests (filter narrows the list; the control hides for a single type).
+- **NEW BEGINNER FEATURE IDEA (Builder-filed 2026-07-16) — "Will it fit?" framing / field-of-view hint.**
+  (M, autonomy/friendliness — PRIORITY 2/3; beginner bar ✔.) A very common beginner surprise: the Seestar's
+  field of view is only ~1.3° across, but M31 (~3°), the Veil, the North America Nebula, the Pleiades, etc.
+  are *larger than one frame* — so a beginner who points at them gets a cropped result and doesn't know
+  they needed **mosaic mode**. A small, plain-language hint — "M31 is bigger than the Seestar's single
+  frame; shoot it in mosaic mode to capture it all" (or, for a small target, "fits comfortably in one
+  frame") — would remove that surprise on both the **Tonight planner** (pre-capture, next to a suggested
+  target) and the **Target page** (post-capture, explaining a cut-off object). It's offline and additive:
+  compare the target's angular size against the Seestar's known FoV and emit one of a few friendly verdicts.
+  **The real work / dependency is the data:** the bundled catalogs (`seestack/data/messier.json`,
+  `nightplan.load_catalog()`, `objectinfo`) currently carry **no angular-size field** — so this needs a
+  major-axis size (arcmin) added to the catalog JSONs (~157–267 objects), sourced/verified carefully (a
+  wrong size gives wrong advice). That data-authoring is the bulk of the effort and the main risk; the
+  logic + UI on top is small. **Slices:** (a) add a nullable `size_arcmin` to the catalog schema + a pure
+  `framingHint(size_arcmin, fov_arcmin)` helper + tests, populating sizes for the most-popular OSC targets
+  first (absent a size, no hint — never guess); (b) surface the hint on the Target page (using a
+  plate-solved frame's *actual* field size when available, catalog size otherwise); (c) surface it in the
+  Tonight planner. Feasibility: fully offline, no new dependency, additive/reversible; the size data must be
+  vetted before the hint graduates from "for known-size targets only". Serves the north-star "it just
+  works" by catching a mistake *before* a wasted session.
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
