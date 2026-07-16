@@ -80,6 +80,11 @@ export interface Target {
   tags: string[];
 }
 
+export interface FramingHint {
+  level: "fits" | "tight" | "mosaic";
+  text: string;
+}
+
 export interface ObjectInfo {
   id: string;
   name: string;
@@ -89,6 +94,11 @@ export interface ObjectInfo {
   ra_deg: number;
   dec_deg: number;
   matched_by: "name" | "coords";
+  // Major-axis size (arcmin) and the "will it fit in one frame?" verdict, when
+  // the catalog records a size for this object; absent otherwise (older backends
+  // omit both — treat as "no framing hint").
+  size_arcmin?: number | null;
+  framing?: FramingHint | null;
 }
 
 export interface SessionQualityDrift {

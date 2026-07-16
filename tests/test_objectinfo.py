@@ -78,3 +78,24 @@ def test_every_catalog_object_resolves_a_constellation_name():
 
     for obj in load_catalog():
         assert obj.con in CONSTELLATION_NAMES, obj.con
+
+
+def test_identify_carries_size_and_framing_when_the_catalog_has_a_size():
+    # A large, sized target (M31, ~178') surfaces its size + a "mosaic" verdict.
+    info = identify_object("M31")
+    assert info is not None
+    assert info.size_arcmin == 178.0
+    assert info.framing is not None
+    assert info.framing.level == "mosaic"
+
+
+def test_identify_omits_framing_when_the_catalog_has_no_size():
+    # An object we didn't vet a size for identifies fine but carries no framing
+    # hint (we never guess a size).
+    from seestack.nightplan import load_catalog
+
+    unsized = next(o for o in load_catalog() if o.size_arcmin is None)
+    info = identify_object(unsized.id)
+    assert info is not None
+    assert info.size_arcmin is None
+    assert info.framing is None

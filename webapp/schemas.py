@@ -39,6 +39,13 @@ class TargetPatch(BaseModel):
     tags: list[str] | None = None
 
 
+class FramingHintOut(BaseModel):
+    """A "will it fit in one Seestar frame?" verdict for a matched target."""
+
+    level: str  # "fits" | "tight" | "mosaic"
+    text: str
+
+
 class ObjectInfoOut(BaseModel):
     """Friendly identity for a target matched against the bundled catalog."""
 
@@ -50,6 +57,11 @@ class ObjectInfoOut(BaseModel):
     ra_deg: float
     dec_deg: float
     matched_by: str
+    # Major-axis angular size (arcmin) and the framing verdict derived from it,
+    # when the catalog records a size for this object; ``null`` otherwise. Old
+    # backends omit both, so the UI treats absent as "no framing hint".
+    size_arcmin: float | None = None
+    framing: FramingHintOut | None = None
 
 
 class IntegrationGoalOut(BaseModel):

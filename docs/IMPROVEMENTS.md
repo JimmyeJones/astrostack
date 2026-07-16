@@ -4069,7 +4069,36 @@ problems. Dogfood it every big-picture run and fix root causes.
   present and lists just the buckets that actually appear; a stale selection is inert (falls back to
   All). Unit-tested helpers `objectTypeBucket`/`typeFilterOptions`/`filterByTypeBucket` plus component
   tests (filter narrows the list; the control hides for a single type).
-- **NEW BEGINNER FEATURE IDEA (Builder-filed 2026-07-16) — "Will it fit?" framing / field-of-view hint.**
+- **NEW BEGINNER FEATURE (Builder-filed 2026-07-16) — "Will it fit?" framing / field-of-view hint.**
+  — **SLICES (a)+(b) SHIPPED v0.130.0** (Builder 2026-07-16, branch `claude/pensive-faraday-yv0g2n`).
+  Delivered the "will it fit in one Seestar frame?" hint end-to-end from catalog data, off catalog
+  angular size (the solved-actual-field-size refinement and the Tonight-planner surfacing are left as
+  follow-ups — see below). **Engine:** new pure/offline `seestack/framing.py::framing_hint(size_arcmin)`
+  compares a target's major-axis size against the Seestar S50 single-frame field (`SEESTAR_FOV_LONG_ARCMIN`
+  = 77′, `SEESTAR_FOV_SHORT_ARCMIN` = 44′) and returns one of three plain-language verdicts —
+  `fits` ("fits comfortably in a single Seestar frame — no mosaic needed"), `tight` ("is about as wide as
+  a single Seestar frame — shoot it in mosaic mode to frame it with some margin"), `mosaic` ("is bigger
+  than the Seestar's single frame — shoot it in mosaic mode to capture all of it") — or `None` when no size
+  is known (never guesses). `CatalogObject` gained an optional nullable `size_arcmin`, parsed from a new
+  optional `size_arcmin` field on the bundled catalog JSONs; curated **major-axis sizes were authored for
+  118 of the 157 popular OSC targets** (73 Messier + 45 non-Messier) from standard catalog values, the rest
+  left sizeless (no hint). `ObjectInfo` now threads `size_arcmin` + the computed `framing`. **Webapp:**
+  `ObjectInfoOut` gained nullable `size_arcmin` + a nested `framing {level, text}`, populated by the
+  `/api/targets/{safe}/identify` router. **Frontend:** `ObjectInfoCard` (shown on Target, editor & History)
+  renders the framing sentence below the identity line — prefixed with the object's name, coloured as a
+  gentle mosaic nudge for the too-big cases (`framingSentence`/`framingColor` helpers). Additive /
+  upgrade-safe: new optional catalog field + two nullable API fields + one card line; no
+  schema/config/DB/default/API-shape change; old backends (no `framing`) render no hint. Tests:
+  `tests/test_framing.py` (10 — boundaries inclusive at both frame edges, None on unknown/≤0 size, custom
+  FoV overrides, popular-target verdicts, catalog sizes sane), `tests/test_objectinfo.py` (+2 — size+framing
+  threaded through / omitted when sizeless), `tests/webapp/test_target_identify.py` (+M42 mosaic verdict),
+  `ObjectInfoCard.test.tsx` (+3 — `framingSentence`/`framingColor` + card shows/omits the line). Python
+  (1332) + tsc + full vitest + vite build all green. **Follow-ups left for a future run:** (b′) on the
+  Target page, prefer a plate-solved frame's *actual* field size when available (a mosaic result is larger
+  than one frame, so the catalog "mosaic" verdict would otherwise mislead a target already shot as a mosaic);
+  (c) surface the same hint pre-capture on the **Tonight planner** next to a suggested target; and authoring
+  more vetted sizes for the remaining 39 sizeless catalog entries. _(Original idea kept below.)_
+  <details><summary>Original idea</summary>
   (M, autonomy/friendliness — PRIORITY 2/3; beginner bar ✔.) A very common beginner surprise: the Seestar's
   field of view is only ~1.3° across, but M31 (~3°), the Veil, the North America Nebula, the Pleiades, etc.
   are *larger than one frame* — so a beginner who points at them gets a cropped result and doesn't know
@@ -4089,6 +4118,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   Tonight planner. Feasibility: fully offline, no new dependency, additive/reversible; the size data must be
   vetted before the hint graduates from "for known-size targets only". Serves the north-star "it just
   works" by catching a mistake *before* a wasted session.
+  </details>
 - ~~**NEW BEGINNER FEATURE (Scout 2026-07-16) — "Watch your picture appear": a shareable
   stack-progress animation built from the quick-look snapshots.**~~ — **ALL THREE SLICES SHIPPED
   v0.129.0** (Builder 2026-07-16, branch `claude/pensive-faraday-3tbfb2`). Delivered end-to-end as one

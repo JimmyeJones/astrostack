@@ -2,7 +2,12 @@ import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ObjectInfoCard, describeObject } from "./ObjectInfoCard";
+import {
+  ObjectInfoCard,
+  describeObject,
+  framingColor,
+  framingSentence,
+} from "./ObjectInfoCard";
 import * as client from "../api/client";
 
 function renderCard(safe = "M_31") {
@@ -31,12 +36,31 @@ describe("describeObject", () => {
   });
 });
 
+describe("framingSentence / framingColor", () => {
+  it("prefixes the display name onto the backend verb phrase", () => {
+    expect(
+      framingSentence("M 31", { level: "mosaic", text: "is bigger than one frame." }),
+    ).toBe("M 31 is bigger than one frame.");
+    // No framing hint → empty string (card renders nothing).
+    expect(framingSentence("M 13", null)).toBe("");
+    expect(framingSentence("M 13", undefined)).toBe("");
+  });
+
+  it("nudges to mosaic in a warmer colour for the too-big cases", () => {
+    expect(framingColor("mosaic")).toBe("orange.6");
+    expect(framingColor("tight")).toBe("yellow.7");
+    expect(framingColor("fits")).toBe("dimmed");
+  });
+});
+
 describe("ObjectInfoCard", () => {
   it("renders the catalog card on a confident match", async () => {
     vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
       id: "M31", name: "Andromeda Galaxy", type: "galaxy",
       constellation: "Andromeda", constellation_abbr: "And",
       ra_deg: 10, dec_deg: 41, matched_by: "name",
+      size_arcmin: 178,
+      framing: { level: "mosaic", text: "is bigger than the Seestar's single frame — shoot it in mosaic mode to capture all of it." },
     });
     renderCard();
     await waitFor(() =>
@@ -45,6 +69,22 @@ describe("ObjectInfoCard", () => {
     expect(
       screen.getByText("A galaxy in the constellation Andromeda."),
     ).toBeInTheDocument();
+    // The framing hint renders below, prefixed with the object's name.
+    expect(
+      screen.getByText(/Andromeda Galaxy is bigger than the Seestar's single frame/),
+    ).toBeInTheDocument();
+  });
+
+  it("omits the framing line when the catalog has no size", async () => {
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M13", name: "", type: "globular cluster",
+      constellation: "Hercules", constellation_abbr: "Her",
+      ra_deg: 250, dec_deg: 36, matched_by: "name",
+    });
+    renderCard();
+    await waitFor(() =>
+      expect(screen.getAllByText("M13").length).toBeGreaterThan(0));
+    expect(screen.queryByText(/mosaic mode/)).toBeNull();
   });
 
   it("notes when the match came from the plate-solved position", async () => {

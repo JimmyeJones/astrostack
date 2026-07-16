@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 
 from webapp import deps
 from webapp.schemas import (
+    FramingHintOut,
     HealthNoteOut,
     IntegrationGoalOut,
     IntegrationGoalPatch,
@@ -138,6 +139,9 @@ def identify_target(safe: str, request: Request) -> ObjectInfoOut | None:
         id=info.id, name=info.name, type=info.type,
         constellation=info.constellation, constellation_abbr=info.constellation_abbr,
         ra_deg=info.ra_deg, dec_deg=info.dec_deg, matched_by=info.matched_by,
+        size_arcmin=info.size_arcmin,
+        framing=(FramingHintOut(level=info.framing.level, text=info.framing.text)
+                 if info.framing is not None else None),
     )
 
 
