@@ -897,6 +897,44 @@ def test_build_master_endpoint(client, data_root, tmp_path):
     assert client.get("/api/calibration/masters").json() == []
 
 
+def test_build_master_cancel_is_classified_cancelled(client, data_root, tmp_path, monkeypatch):
+    """Cancelling a Build-master job stops it and marks the job 'cancelled' (not a
+    misleading 'done'), and no master is registered. A dark/flat set can be many
+    frames, so the build must honour the Jobs-page Cancel button."""
+    import threading
+
+    from seestack.calibrate import masters as masters_mod
+
+    darks = tmp_path / "darks"
+    _write_darks(darks, n=8)
+
+    started = threading.Event()
+
+    def blocking_build_master(*args, should_stop=None, **kwargs):
+        # Stand in for a long build: block until the test asks to cancel, then
+        # honour it exactly like the real per-frame checkpoint (return None).
+        started.set()
+        while not (should_stop is not None and should_stop()):
+            time.sleep(0.01)
+        return None
+
+    monkeypatch.setattr(masters_mod, "build_master", blocking_build_master)
+
+    r = client.post("/api/calibration/masters",
+                    json={"kind": "dark", "source_dir": str(darks)})
+    assert r.status_code == 200, r.text
+    job_id = r.json()["job_id"]
+
+    assert started.wait(10), "build never started"
+    c = client.post(f"/api/jobs/{job_id}/cancel")
+    assert c.status_code == 200, c.text
+
+    job = _wait_job(client, job_id)
+    assert job["state"] == "cancelled", job
+    # No partial master was written to the store.
+    assert client.get("/api/calibration/masters").json() == []
+
+
 def test_build_master_bad_kind(client, tmp_path):
     darks = tmp_path / "d"
     _write_darks(darks, n=1)

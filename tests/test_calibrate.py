@@ -130,6 +130,55 @@ def test_build_master_rejects_mismatched_shape(tmp_path):
     assert meta.n_frames == 1
 
 
+def test_build_master_cancel_mid_load_returns_none_and_writes_nothing(tmp_path):
+    # A long dark/flat build must honour a mid-build cancel: build_master returns
+    # None (no partial master) as soon as should_stop() trips, and it stops
+    # promptly rather than loading every remaining frame.
+    paths = []
+    for i in range(6):
+        p = tmp_path / f"dark_{i}.fits"
+        _write_raw(p, np.full((4, 4), 100.0, dtype=np.float32))
+        paths.append(p)
+
+    calls = {"n": 0}
+
+    def should_stop():
+        # Allow the first two per-frame checkpoints, then request cancel.
+        calls["n"] += 1
+        return calls["n"] > 2
+
+    # Track how many frames were actually touched via the progress callback.
+    seen = []
+
+    def progress(stage, i, total):
+        seen.append((stage, i))
+
+    result = build_master(
+        paths, kind="dark", method="median",
+        progress=progress, should_stop=should_stop,
+    )
+    assert result is None  # cancelled → no master, no meta
+    # Stopped promptly: it never reached the later frames or the combine stage.
+    assert not any(stage == "Combining" for stage, _ in seen)
+    assert max((i for _, i in seen), default=0) <= 2
+
+
+def test_build_master_should_stop_never_true_builds_normally(tmp_path):
+    # A should_stop that never fires leaves behaviour identical to the default.
+    paths = []
+    for i in range(3):
+        p = tmp_path / f"dark_{i}.fits"
+        _write_raw(p, np.full((4, 4), 100.0, dtype=np.float32), exptime=30.0)
+        paths.append(p)
+    result = build_master(
+        paths, kind="dark", method="median", should_stop=lambda: False,
+    )
+    assert result is not None
+    master, meta = result
+    np.testing.assert_allclose(master, 100.0)
+    assert meta.n_frames == 3
+
+
 def test_build_master_empty_raises(tmp_path):
     with pytest.raises(ValueError):
         build_master([], kind="dark")
