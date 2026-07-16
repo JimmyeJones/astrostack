@@ -97,7 +97,7 @@ const METRIC_LABEL: Record<string, string> = {
   eccentricity_median: "eccentricity", sky_adu_median: "sky level",
   transparency_score: "transparency",
 };
-function rejectReasonLabel(reason: string): string {
+export function rejectReasonLabel(reason: string): string {
   if (reason === "user") return "Manual reject";
   if (reason === "bulk:streaked") return "Streaked (bulk)";
   if (reason === "bulk:trailed") return "Trailed (bulk)";
@@ -1098,7 +1098,7 @@ export function TargetView() {
                         <Group gap={6} wrap="nowrap">
                           <span>{f.timestamp_utc?.replace("T", " ").slice(0, 19) ?? "—"}</span>
                           {!f.accept && f.reject_reason ? (
-                            <Tooltip label={`Rejected — ${f.reject_reason}`}>
+                            <Tooltip label={`Rejected — ${rejectReasonLabel(f.reject_reason)}`}>
                               <Badge size="xs" color="gray" variant="light" style={{ flexShrink: 0 }}>
                                 {rejectReasonLabel(f.reject_reason)}
                               </Badge>

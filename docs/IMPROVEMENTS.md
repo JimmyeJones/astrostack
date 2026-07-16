@@ -2966,6 +2966,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+- ~~**Two beginner-facing surfaces leaked raw engine slugs/codes instead of the plain-language name the
+  rest of the app shows.**~~ — **SHIPPED v0.131.10** (Builder 2026-07-16, branch `claude/pensive-faraday-kv77w1`;
+  found by a fresh jargon-sweep of the non-editor routes). Two un-filed jargon leaks a beginner would notice:
+  (1) the **Stack page heading** rendered `Stack — {safe}` using the URL-safe *slug*, so a target named "NGC
+  7000" (safe key `NGC_7000`) showed the biggest heading on a core workflow page as "Stack — NGC_7000" — every
+  sibling surface (Target header, Library cards, Gallery, Combine) already uses the friendly `name`. Added a
+  `getTarget` query mirroring the Target page and render `target.data?.name ?? safe` (falls back to the slug
+  while loading / on 404, never blank). (2) The Target-page frames-table **reject-reason tooltip** printed the
+  raw `f.reject_reason` (`qc:fwhm`, `auto:grade:star_count`, `solve_failed:…`) while the badge it wraps was
+  already humanized via `rejectReasonLabel` — so a beginner hovering *precisely to learn why a frame was
+  dropped* got the engine code. Wrapped the tooltip label in the same `rejectReasonLabel` helper (now exported).
+  Frontend-only, additive; no backend/schema/API/default change; both degrade gracefully. Tests:
+  `Stack.test.tsx` (+2 — the heading shows the friendly name; falls back to the slug when `getTarget` rejects)
+  and `Target.test.tsx` (a `rejectReasonLabel` unit test over the codes the badge+tooltip now share; the badge's
+  in-row rendering is already covered). tsc + full vitest + vite build green. *(S+XS, friendliness/plain-language
+  — PRIORITY 3; matches the standing "audit every screen for jargon" direction.)*
 - ~~**Point the brand-new (no-NAS) beginner at the Upload on-ramp instead of a dead-end.**~~ —
   **SHIPPED v0.121.8** (Builder 2026-07-14, branch `claude/pensive-faraday-47ditq`; found dogfooding the
   first-run flow). Two related misdirections for a user with zero targets/jobs: (1) the Library empty-state
@@ -4369,20 +4385,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   either standardise on one (probably keep `expo`'s h+m for cards but confirm), or leave a one-line comment on
   each explaining the deliberate difference so a future run doesn't "fix" it into a regression. Pure helpers,
   fully unit-testable; no backend/schema change.
-- **Cancelling a non-cancel-aware job (Build master / editor PNG / editor Share) does nothing — it runs to
-  completion.** (S, friendliness/trust — PRIORITY 3 — Builder-filed 2026-07-16, spotted fixing the v0.131.8
-  cancel-race.) The job bodies `submit_build_master`, `submit_editor_png`, and `submit_editor_share` never
-  check `job.cancel_requested()`, so the Jobs-page Cancel button on one of them sets the `_cancel` event but
-  the body ignores it and keeps working; the worker then (correctly, post-v0.131.8) marks it `done` because
-  real output was produced. So a user who cancels a master build waits out the whole build anyway with no
-  feedback that cancel was a no-op. Master-building can be genuinely long (many darks/flats), so it's the
-  worthwhile one: thread the job's cancel check into `build_master`'s per-frame accumulation loop (a coarse
-  `if job.cancel_requested(): return None` between frames, mirroring how the stacker already honours cancel),
-  so a mid-build cancel stops promptly and is classified `cancelled` (no partial master written). Editor
-  PNG/Share are fast enough that they're likely fine to leave (or just disable/hide their Cancel affordance).
-  Additive, off the hot path; testable by cancelling a multi-frame master build and asserting an early return.
-  A Scout should confirm the master-build loop has a natural per-frame checkpoint and that a cancelled build
-  leaves no half-written output before a Builder takes it.
+- ~~**Cancelling a non-cancel-aware job (Build master / editor PNG / editor Share) does nothing — it runs to
+  completion.**~~ — **SHIPPED v0.131.9** (Builder 2026-07-16, branch `claude/pensive-faraday-kv77w1`). Took the
+  worthwhile slice: **Build-master** now honours cancel. `seestack/calibrate/masters.py::build_master` grew an
+  optional `should_stop: Callable[[], bool] | None` predicate polled once per input frame (and again just
+  before the final combine); when it trips the build returns `None` **before any master is written** — no
+  partial output — and stops promptly instead of loading every remaining dark/flat (a set can be dozens of
+  frames). `submit_build_master` passes `should_stop=job.cancel_requested` and, on a `None` result, returns the
+  `{"cancelled": True}` sentinel so `JobManager._run` classifies the job **`cancelled`**, not a misleading
+  `done`. So the Jobs-page Cancel on a long master build now stops it (and reads honestly). Editor PNG/Share
+  were deliberately left as-is — they're sub-second, nothing to cancel. Upgrade-safe/additive: a new
+  optional-with-default engine param (existing callers unpack a tuple exactly as before; the return type is now
+  `tuple | None` only when a caller opts into `should_stop`), no schema/config/API-shape/default change; off the
+  memory-bounded hot path. Tests: `tests/test_calibrate.py` (a mid-load cancel returns `None`, writes nothing,
+  and stops before the combine / a never-firing `should_stop` builds identically) and
+  `tests/webapp/test_calibration.py::test_build_master_cancel_is_classified_cancelled` (a blocking build cancelled
+  via `POST /api/jobs/{id}/cancel` ends `cancelled` with no master registered). *(S, friendliness/trust —
+  PRIORITY 3; Builder-filed 2026-07-16.)*
 
 ### Performance (only with a measurement)
 - Profile the stack hot path on a large synthetic target; find a safe win that

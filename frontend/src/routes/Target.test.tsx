@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { TargetView, countNewSubsSinceStack, countQcUncheckable, describeObject } from "./Target";
+import { TargetView, countNewSubsSinceStack, countQcUncheckable, describeObject, rejectReasonLabel } from "./Target";
 import * as client from "../api/client";
 import type { Frame, Target } from "../api/client";
 
@@ -739,6 +739,21 @@ describe("TargetView reject breakdown + undo", () => {
     await waitFor(() =>
       expect(screen.getByText("Auto: streak")).toBeInTheDocument());
     expect(screen.getByText("Plate-solve failed")).toBeInTheDocument();
+  });
+
+  it("rejectReasonLabel humanizes raw engine codes (used by the row badge + its tooltip)", () => {
+    // Both the badge and its hover tooltip now pass reject_reason through this
+    // helper, so a beginner never sees the raw `qc:fwhm` / `solve_failed:…` code.
+    expect(rejectReasonLabel("solve_failed:no stars")).toBe("Plate-solve failed");
+    expect(rejectReasonLabel("qc:fwhm_px")).toBe("QC: FWHM");
+    expect(rejectReasonLabel("auto:grade:star_count")).toBe("Auto-grade: star count");
+    expect(rejectReasonLabel("bulk:streaked")).toBe("Streaked (bulk)");
+    expect(rejectReasonLabel("user")).toBe("Manual reject");
+    expect(rejectReasonLabel("qc_error:OSError")).toBe("QC error");
+    // None of the plain-language labels is the raw code it came from.
+    for (const raw of ["solve_failed:x", "qc:fwhm_px", "auto:grade:star_count"]) {
+      expect(rejectReasonLabel(raw)).not.toBe(raw);
+    }
   });
 
   it("shows an actionable setup banner when ASTAP is missing for the whole target", async () => {

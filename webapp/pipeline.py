@@ -233,10 +233,16 @@ def submit_build_master(
         if not paths:
             raise FileNotFoundError(f"No FITS files found in {source_dir}")
         job.set_progress("loading", 0, len(paths), f"{len(paths)} frames")
-        array, meta = build_master(
+        built = build_master(
             paths, kind=kind, method=method, sigma=sigma,
             progress=_progress(jm, job),
+            should_stop=job.cancel_requested,
         )
+        if built is None:
+            # Cancelled mid-build (no master was written). Surface a cancellation
+            # sentinel so the worker classifies the job 'cancelled', not 'done'.
+            return {"cancelled": True}
+        array, meta = built
         entry = calibration.register_master(
             settings.resolved_library_root, name=name or "", array=array, meta=meta,
         )

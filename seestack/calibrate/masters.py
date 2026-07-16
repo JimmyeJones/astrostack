@@ -106,7 +106,8 @@ def build_master(
     sigma: float = 3.0,
     max_frames: int = 64,
     progress: ProgressFn | None = None,
-) -> tuple[np.ndarray, MasterMeta]:
+    should_stop: Callable[[], bool] | None = None,
+) -> tuple[np.ndarray, MasterMeta] | None:
     """Combine raw FITS frames into a master.
 
     Parameters
@@ -123,10 +124,16 @@ def build_master(
     max_frames
         Cap on frames actually loaded (evenly sampled across the input) to
         bound peak memory.
+    should_stop
+        Optional cancellation predicate polled once per input frame (and again
+        before the final combine). When it returns ``True`` the build aborts
+        promptly and returns ``None`` **before any master is written** — no
+        partial output is produced. A dark/flat set can be many frames, so a
+        long build stays responsive to the Jobs-page Cancel button.
 
     Returns
     -------
-    (master_2d_float32, MasterMeta)
+    (master_2d_float32, MasterMeta), or ``None`` if cancelled via ``should_stop``.
     """
     from seestack.io.fits_loader import load_seestar_raw
 
@@ -146,6 +153,7 @@ def build_master(
         paths = sampled
 
     progress = progress or (lambda *a: None)
+    should_stop = should_stop or (lambda: False)
     total = len(paths)
 
     arrays: list[np.ndarray] = []
@@ -155,6 +163,9 @@ def build_master(
     temps: list[float] = []
     patterns: list[str] = []
     for i, p in enumerate(paths, start=1):
+        if should_stop():
+            log.info("master %s: build cancelled after %d/%d frames", kind, i - 1, total)
+            return None
         progress("Loading", i, total)
         try:
             raw, info = load_seestar_raw(p, debayer=False, out_dtype=np.float32)
@@ -183,6 +194,9 @@ def build_master(
     if not arrays:
         raise ValueError("no usable calibration frames (all failed to load or mismatched)")
 
+    if should_stop():
+        log.info("master %s: build cancelled before combine", kind)
+        return None
     progress("Combining", 0, 1)
     stack = np.stack(arrays, axis=0)  # (N, H, W)
     if method == "median":
