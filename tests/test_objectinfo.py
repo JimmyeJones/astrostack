@@ -90,12 +90,16 @@ def test_identify_carries_size_and_framing_when_the_catalog_has_a_size():
 
 
 def test_identify_omits_framing_when_the_catalog_has_no_size():
-    # An object we didn't vet a size for identifies fine but carries no framing
-    # hint (we never guess a size).
-    from seestack.nightplan import load_catalog
+    # An object we haven't vetted a size for identifies fine but carries no
+    # framing hint (we never guess a size). The bundled catalog is now fully
+    # sized, so exercise the no-size wiring with a synthetic sizeless entry.
+    from seestack.nightplan import CatalogObject
 
-    unsized = next(o for o in load_catalog() if o.size_arcmin is None)
-    info = identify_object(unsized.id)
+    unsized = CatalogObject(
+        id="NGC 99999", name="Testium Nebula", ra_deg=10.0, dec_deg=20.0,
+        type="galaxy", con="And", size_arcmin=None,
+    )
+    info = identify_object("Testium Nebula", catalog=(unsized,))
     assert info is not None
     assert info.size_arcmin is None
     assert info.framing is None

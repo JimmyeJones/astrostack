@@ -437,12 +437,20 @@ def _downsample_rgb(rgb: np.ndarray, target_h: int, target_w: int) -> np.ndarray
     """
     from PIL import Image
 
-    lo = float(rgb.min())
-    hi = float(rgb.max())
-    if hi <= lo:
+    # NaN-aware range so a NaN=no-coverage pixel (should a future caller point
+    # this at a stacked/reprojected FITS) doesn't poison min()/max() into NaN and
+    # collapse the whole frame to black — mirroring the sibling autostretch/
+    # asinh_stretch reductions. For an ordinary raw-sub input (no NaN) this is
+    # byte-for-byte the old behaviour.
+    lo = float(np.nanmin(rgb)) if np.isfinite(rgb).any() else float("nan")
+    hi = float(np.nanmax(rgb)) if np.isfinite(rgb).any() else float("nan")
+    if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
         return np.zeros((target_h, target_w, 3), dtype=np.float32)
 
-    u8 = ((rgb - lo) / (hi - lo) * 255).astype(np.uint8)
+    # NaN pixels floor to `lo` (no coverage → darkest), finite pixels are
+    # unchanged; the clip is a no-op for a finite in-range input.
+    norm = np.clip(np.nan_to_num((rgb - lo) / (hi - lo), nan=0.0), 0.0, 1.0)
+    u8 = (norm * 255).astype(np.uint8)
     img = Image.fromarray(u8, mode="RGB").resize((target_w, target_h), Image.BOX)
     out = np.asarray(img, dtype=np.float32) / 255.0
     return out * (hi - lo) + lo

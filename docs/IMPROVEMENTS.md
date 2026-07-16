@@ -4106,10 +4106,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   change. Tests: `tests/test_nightplan.py` (+1 — catalog rows carry the framing verdict), `tests/webapp/test_plan.py`
   (+M31 mosaic verdict on the endpoint), `tonight.test.ts` (+2 — `framingRowBadge` badges only too-big verdicts
   + tooltip), `Tonight.test.tsx` (+1 — an oversized catalog row shows the "Needs mosaic" badge). Full Python +
-  frontend suites + build green. **Follow-ups still open:** (b′) on the Target page, prefer a plate-solved
-  frame's *actual* field size when available (a mosaic result is larger than one frame, so the catalog "mosaic"
-  verdict would otherwise mislead a target already shot as a mosaic); and authoring more vetted sizes for the
-  remaining 39 sizeless catalog entries. _(Original idea kept below.)_
+  frontend suites + build green. **CATALOG NOW FULLY SIZED — v0.131.2** (Builder 2026-07-16, branch
+  `claude/pensive-faraday-6bwguj`): authored vetted major-axis `size_arcmin` for the **remaining 39 sizeless
+  catalog entries** (37 Messier: mostly the small Virgo/Coma galaxies M49/M58–M61/M84–M100/M105/M109, plus
+  globulars M19/M54/M55/M62/M69/M70/M72/M75/M79/M107, open clusters M18/M21/M26/M41, the double star M40 and
+  asterism M73; and 2 non-Messier nebulae IC 434 Horsehead + NGC 2024 Flame). All 37 Messier objects are
+  small (<44′), so they get a robust reassuring **"fits comfortably"** verdict that no plausible size
+  uncertainty flips; the two Orion nebulae were **web-verified** (IC 434 ~90′ major axis → correctly
+  **"needs mosaic"**, NGC 2024 30′×30′ → "fits"). So every one of the 157 catalog objects now surfaces a
+  framing line on the Target/editor/History `ObjectInfoCard` — removing the visible gap where M31/M45 showed
+  a "will it fit?" line but M87/M96 showed none. Additive data-only (new optional field values on existing
+  entries), no schema/config/API/default change; upgrade-safe by construction. Tests: `tests/test_framing.py`
+  (`test_every_catalog_object_now_carries_a_size` guards the catalog stays fully sized so a future addition
+  without a vetted size is caught), and `tests/test_objectinfo.py`'s no-size test rewritten to a synthetic
+  sizeless entry (the real catalog no longer has one). **Follow-up still open:** (b′) on the Target page,
+  prefer a plate-solved frame's *actual* field size when available (a mosaic result is larger than one frame,
+  so the catalog "mosaic" verdict would otherwise mislead a target already shot as a mosaic). _(Original idea
+  kept below.)_
   <details><summary>Original idea</summary>
   (M, autonomy/friendliness — PRIORITY 2/3; beginner bar ✔.) A very common beginner surprise: the Seestar's
   field of view is only ~1.3° across, but M31 (~3°), the Veil, the North America Nebula, the Pleiades, etc.
@@ -4241,21 +4254,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
-- **NEW (Scout 2026-07-16) — harden `_downsample_rgb` against a NaN input (latent, not currently
-  reachable; small safe robustness fix).** (XS code + XS test, robustness — low priority.) *(Found by an
-  adversarial render-path audit this run; the one non-NaN-aware reduction in `render/thumbnail.py`.)*
-  `render/thumbnail.py::_downsample_rgb` (~L235 region — the raw-sub thumbnail path) computes its
-  normalization range with plain `lo = float(rgb.min())` / `hi = float(rgb.max())`. If `rgb` ever
-  contains a NaN both become NaN, the `hi <= lo` guard is False (NaN comparisons), and the whole frame
-  collapses to a black thumbnail (all-NaN → downstream `autostretch` sees no finite pixels → all-black).
-  **Not triggerable today**: this path only consumes a raw debayered sub (integer Seestar raw → no NaN);
-  every *stack/mosaic/reprojected* array (which does carry NaN=no-coverage) goes through the sibling
-  `autostretch`, which is already `nanmin`/`nanpercentile`-based. Fix is a one-line swap to
-  `np.nanmin`/`np.nanmax` (mirroring `autostretch`/`asinh_stretch`) plus a regression that a NaN-bearing
-  input still produces a finite, non-black thumbnail. File-and-forget defensive hardening — no user
-  impact today, just removes a foot-gun for any future caller that points the thumbnail at a NaN FITS.
-  Confidence: traced. **(Also noted, no action:** `_downsample_rgb` quantizes to uint8 *before* the
-  stretch, so a faint-sky raw-sub preview can posterize — cosmetic, thumbnail-only; not worth a change.)
+- ~~**NEW (Scout 2026-07-16) — harden `_downsample_rgb` against a NaN input (latent, not currently
+  reachable; small safe robustness fix).**~~ — **FIXED v0.131.1** (Builder 2026-07-16, branch
+  `claude/pensive-faraday-6bwguj`; regression-tested). `render/thumbnail.py::_downsample_rgb` now reduces
+  its global normalization range NaN-aware (`np.nanmin`/`np.nanmax`, gated on `np.isfinite(rgb).any()` so an
+  all-NaN frame still returns the black placeholder rather than warning) and floors NaN pixels to `lo` via
+  `np.nan_to_num(...)` before the uint8 round-trip — mirroring the sibling `autostretch`/`asinh_stretch`
+  reductions. So a future caller that points the raw-sub thumbnail path at a stack/mosaic/reprojected FITS
+  (which carries NaN=no-coverage) no longer collapses the whole frame to black; the finite region renders
+  and no-coverage pixels sit at the floor. **Byte-for-byte unchanged for the ordinary raw-sub input** (no
+  NaN → `nanmin`≡`min`, `nan_to_num` a no-op, the added clip a no-op for in-range values), verified by a
+  round-trip equality test. Additive, no schema/config/API/default change. Regression in
+  `tests/test_thumbnail.py` (`test_downsample_rgb_survives_nan_input` — a half-NaN frame stays finite and
+  non-black, fails-before as the old `min()`/`max()` → NaN → all-black; `test_downsample_rgb_finite_input_is_unchanged`
+  — a finite input matches the pre-fix Pillow round-trip exactly). Confidence: traced + fixed.
+  **(Also noted, no action:** `_downsample_rgb` quantizes to uint8 *before* the stretch, so a faint-sky
+  raw-sub preview can posterize — cosmetic, thumbnail-only; not worth a change.)
 - ~~**NEW (Scout 2026-07-14) — a schema-completeness drift test so a `frames`/`stack_runs` column can never
   again be added without an upgrade being safe.**~~ — **SHIPPED v0.121.1** (Builder 2026-07-14, branch
   `claude/pensive-faraday-4tspys`). New `tests/test_project_schema_drift.py` (4 tests) documents and guards the
