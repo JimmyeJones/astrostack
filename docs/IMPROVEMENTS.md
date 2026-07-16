@@ -3709,6 +3709,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   readout and it clears once done). tsc + full vitest + vite build green. **Slice (b) remainder
   — true *per-file* progress, `webkitdirectory` on the picker, partial-upload cleanup — and
   slice (c) remain open.**
+  — **FOLDER PICKER (`webkitdirectory`) SHIPPED v0.134.0** (Builder 2026-07-16, branch
+  `claude/pensive-faraday-rtfcye`): the slice-(b) "`webkitdirectory` on the picker" gap. `UploadFits`
+  already walked a folder *drop*, but a beginner who finds drag-drop awkward (a deep Finder folder, a
+  touchpad, a tablet) had only the multi-*file* picker — no way to pick a whole target folder by
+  clicking. Added a **"Choose a folder…"** button that drives a hidden native
+  `<input type="file" webkitdirectory multiple>` (Mantine's `FileButton` can't set `webkitdirectory`;
+  the attribute is set via a ref callback to avoid a non-standard JSX prop). A new pure, exported,
+  unit-tested `filesFromFolderInput(list)` helper preserves each file's `webkitRelativePath`
+  (`M31/night1/Light_001.fit`) as the File's name — **exactly like the folder drop already does** — so
+  the server's `safe_relname` flattening keeps same-basename subs from different session subfolders
+  distinct (Seestar restarts frame numbering each session) instead of one silently overwriting another.
+  Picked files funnel through the same `onPick` FITS filter and the unchanged streaming/sanitising
+  endpoint (slice a). Frontend-only, additive; no backend/schema/API/default change. Tests:
+  `UploadFits.test.tsx` (+3 — `filesFromFolderInput` preserves the relative subpath / falls back to the
+  bare name, and a component folder-pick that keeps only the FITS file with its relative path through to
+  the upload call). tsc + full vitest (882) + vite build green. *(Beginner bar ✔ — one obvious "pick my
+  Seestar folder" button, sane default, no new concepts.)* **Slice (b) remainder — true *per-file*
+  progress, partial-upload cleanup — and slice (c) remain open.**
   <details><summary>Original write-up</summary>
   Today the only way to get subs in is to drop Seestar target folders
   into `incoming/` over an SMB/NFS share — which assumes the user can mount the NAS

@@ -4,8 +4,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  UploadFits, collectDroppedFiles, isFitsFilename, readEntryFiles, uploadSummary,
-  uploadProgressLabel, uploadProgressPercent,
+  UploadFits, collectDroppedFiles, filesFromFolderInput, isFitsFilename,
+  readEntryFiles, uploadSummary, uploadProgressLabel, uploadProgressPercent,
   type FsEntry,
 } from "./UploadFits";
 import type { UploadResult } from "../api/client";
@@ -161,6 +161,31 @@ describe("collectDroppedFiles", () => {
   });
 });
 
+function withRelPath(name: string, rel: string): File {
+  const f = new File(["x"], name, { type: "application/octet-stream" });
+  Object.defineProperty(f, "webkitRelativePath", { value: rel, configurable: true });
+  return f;
+}
+
+describe("filesFromFolderInput", () => {
+  it("preserves each file's relative subpath (webkitRelativePath) as its name", () => {
+    const out = filesFromFolderInput([
+      withRelPath("Light_0001.fit", "M31/night1/Light_0001.fit"),
+      withRelPath("Light_0001.fit", "M31/night2/Light_0001.fit"),
+    ]);
+    // Same-basename subs from different session folders stay distinct on upload.
+    expect(out.map((f) => f.name)).toEqual([
+      "M31/night1/Light_0001.fit",
+      "M31/night2/Light_0001.fit",
+    ]);
+  });
+
+  it("falls back to the bare name when there's no relative path", () => {
+    const out = filesFromFolderInput([new File(["x"], "Light_5.fit")]);
+    expect(out.map((f) => f.name)).toEqual(["Light_5.fit"]);
+  });
+});
+
 describe("UploadFits", () => {
   it("accepts a drag-drop of files, keeping only the FITS ones", async () => {
     renderUpload();
@@ -170,6 +195,26 @@ describe("UploadFits", () => {
     fireEvent.drop(zone, { dataTransfer: dtWithFiles([good, bad]) });
     await waitFor(() => expect(screen.getByText(/1 FITS file ready/)).toBeInTheDocument());
     expect(screen.getByRole("button", { name: /^Upload/ })).not.toBeDisabled();
+  });
+
+  it("accepts a folder pick, keeping FITS files with their relative paths", async () => {
+    const spy = vi.spyOn(client.api, "uploadFits").mockResolvedValue(result());
+    renderUpload();
+
+    // The folder picker is the hidden webkitdirectory input (button-driven).
+    const folderInput = document.querySelector(
+      'input[webkitdirectory]') as HTMLInputElement;
+    expect(folderInput).not.toBeNull();
+    const good = withRelPath("Light_0001.fit", "M31/night1/Light_0001.fit");
+    const bad = withRelPath("notes.txt", "M31/notes.txt");
+    Object.defineProperty(folderInput, "files", { value: [good, bad], configurable: true });
+    fireEvent.change(folderInput);
+
+    await waitFor(() => expect(screen.getByText(/1 FITS file ready/)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /^Upload/ }));
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+    // Only the FITS file, and its relative subpath is preserved for the server.
+    expect(spy.mock.calls[0][0].map((f) => f.name)).toEqual(["M31/night1/Light_0001.fit"]);
   });
 
   it("filters non-FITS on pick and uploads only the FITS files, then shows a summary", async () => {

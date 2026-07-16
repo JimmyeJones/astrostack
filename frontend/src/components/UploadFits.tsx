@@ -2,9 +2,9 @@ import {
   Alert, Box, Button, Card, FileButton, Group, Progress, Stack, Text, TextInput,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { IconFileUpload, IconUpload } from "@tabler/icons-react";
+import { IconFileUpload, IconFolder, IconUpload } from "@tabler/icons-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type UploadResult } from "../api/client";
 
@@ -104,6 +104,23 @@ export async function collectDroppedFiles(dt: DataTransfer): Promise<File[]> {
   return Array.from(dt.files ?? []);
 }
 
+/** Turn a folder picker's (`webkitdirectory`) FileList into a plain File list,
+ *  preserving each file's **relative path within the chosen folder**
+ *  (`webkitRelativePath`, e.g. ``M31/night1/Light_001.fit``) as the File's name —
+ *  exactly like a folder *drop* does. Seestar restarts frame numbering each
+ *  session, so two different subs in different session subfolders often share a
+ *  basename; keeping the relative path stops one silently overwriting the other
+ *  (the server flattens it into one safe filename). Falls back to the bare name
+ *  when the browser gives no relative path. */
+export function filesFromFolderInput(list: ArrayLike<File>): File[] {
+  return Array.from(list).map((f) => {
+    const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath || "";
+    return rel && rel !== f.name
+      ? new File([f], rel, { type: f.type, lastModified: f.lastModified })
+      : f;
+  });
+}
+
 /** A running size for the upload progress readout (e.g. "1.2 GB", "480 MB"). */
 function fmtBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -152,6 +169,7 @@ export function UploadFits({ compact = false }: { compact?: boolean }) {
   const [result, setResult] = useState<UploadResult | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [progress, setProgress] = useState<{ loaded: number; total: number } | null>(null);
+  const folderInput = useRef<HTMLInputElement | null>(null);
 
   const upload = useMutation({
     mutationFn: () =>
@@ -180,6 +198,16 @@ export function UploadFits({ compact = false }: { compact?: boolean }) {
         color: "yellow",
       });
     }
+  };
+
+  // A folder pick (`webkitdirectory`) arrives as a flat FileList whose entries
+  // carry their relative subpath in `webkitRelativePath`; preserve that as each
+  // File's name (like a folder drop) before the shared FITS filter in `onPick`.
+  const onFolderPick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const list = e.currentTarget.files;
+    if (list && list.length) onPick(filesFromFolderInput(list));
+    // Reset so picking the *same* folder again re-fires onChange.
+    e.currentTarget.value = "";
   };
 
   const onDrop = (e: React.DragEvent<HTMLDivElement>) => {
@@ -218,6 +246,28 @@ export function UploadFits({ compact = false }: { compact?: boolean }) {
             </Button>
           )}
         </FileButton>
+        {/* Folder picker — the button-driven counterpart to a folder *drop*, for
+            when drag-drop is awkward (deep folder, touchpad, tablet). Mantine's
+            FileButton can't set `webkitdirectory`, so drive a hidden native input;
+            the attribute is set via a ref callback to avoid a non-standard JSX prop. */}
+        <input
+          ref={(el) => {
+            folderInput.current = el;
+            if (el) el.setAttribute("webkitdirectory", "");
+          }}
+          type="file"
+          multiple
+          onChange={onFolderPick}
+          style={{ display: "none" }}
+          aria-hidden
+        />
+        <Button
+          variant="light"
+          leftSection={<IconFolder size={16} />}
+          onClick={() => folderInput.current?.click()}
+        >
+          Choose a folder…
+        </Button>
         <TextInput
           label="Target folder (optional)"
           placeholder="e.g. M31"
