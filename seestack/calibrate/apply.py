@@ -22,6 +22,22 @@ log = logging.getLogger(__name__)
 _FLAT_FLOOR = 0.1
 
 
+def _sanitize_pedestal(arr: np.ndarray) -> np.ndarray:
+    """Replace non-finite master dark/bias pixels with 0.0 (= no correction).
+
+    ``build_master`` legitimately produces a NaN pixel where *no* input frame
+    had finite data ("genuinely no data" — see ``masters.py``), and an imported
+    third-party master can carry NaN/inf too. Subtracting such a pixel straight
+    from the light (``light − dark``) would turn real, good signal into NaN/inf
+    at that pixel of **every** calibrated frame — a permanent hole (NaN spreads
+    through debayer and reads as zero coverage in the stack) or a reduction-
+    poisoning ``±inf``. A no-data *pedestal* pixel means "no correction here",
+    so it must subtract 0, mirroring the flat's floor-to-1.0 at load time
+    (``flat_norm``). Done once at load, off the per-frame hot path.
+    """
+    return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+
+
 @dataclass
 class CalibrationMasters:
     """Loaded master dark / flat ready to apply to raw frames.
@@ -90,11 +106,11 @@ class CalibrationMasters:
         bias_exposure_s = None
         if dark_path:
             dark, dark_meta = load_master(dark_path)
-            dark = np.asarray(dark, dtype=np.float32)
+            dark = _sanitize_pedestal(np.asarray(dark, dtype=np.float32))
             dark_exposure_s = dark_meta.exposure_s
         if bias_path:
             bias, bias_meta = load_master(bias_path)
-            bias = np.asarray(bias, dtype=np.float32)
+            bias = _sanitize_pedestal(np.asarray(bias, dtype=np.float32))
             bias_exposure_s = bias_meta.exposure_s
         if flat_path:
             flat, _ = load_master(flat_path)
