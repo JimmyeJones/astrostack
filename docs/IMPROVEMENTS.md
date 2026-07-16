@@ -47,6 +47,32 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**Global `default_stack_options` bypassed value validation — a bad enum / out-of-range value
+  set via the settings PUT/import path poisoned every target's Stack form and 400'd every stack.**~~
+  — **FIXED v0.131.5** (Builder 2026-07-16, branch `claude/pensive-faraday-xp00ow`; traced + reproduced +
+  regression-tested). Found by a fresh adversarial webapp routers/schemas audit. The per-target
+  `PUT /api/targets/{safe}/stack-defaults` runs `validate_stack_options` before persisting (so a bad
+  enum/range is rejected with a plain-language 400, not "accepted then failed cryptically deep in the
+  engine" — the validator's own stated purpose). But the **global** `default_stack_options` reached
+  storage through `webapp/routers/settings.py` completely unvalidated: `_sanitize_patch` only stripped
+  the calibration `NON_FORM_KEYS`, and `store.update` persists `default_stack_options` as an opaque
+  `dict[str, Any]`. So `PUT /api/settings {"default_stack_options": {"mosaic_canvas": "garbage"}}` (or
+  `{"sigma_kappa": 999}`) returned **200** and persisted globally. The poison then (1) seeds every
+  target's Stack form via `get_stack_defaults`, so the form re-POSTs it and `trigger_stack` **400s every
+  stack attempt for every target**, and (2) flows through the unattended auto-stack chain (which
+  `coerce_stack_options` without validating) **straight into the engine** — exactly the cryptic failure
+  `validate_stack_options` exists to prevent. `POST /api/settings/import` shared the identical gap.
+  **Fix:** `_sanitize_patch` (the shared helper for both the PUT and import paths) now runs
+  `validate_stack_options` on the stripped `default_stack_options` sub-dict and raises `HTTPException(422)`
+  on a bad value, mirroring the per-target endpoint's contract. Upgrade-safe: it validates only the
+  *incoming* patch — an existing `config.json` with an out-of-range value still loads via the resilient
+  loader unchanged (§9), and a legitimate in-bounds form submission / backup round-trips as before.
+  Additive, no schema/config/API-shape/default change. Regressions in `tests/webapp/test_api.py`:
+  `test_settings_put_rejects_a_bad_default_stack_option` (bad enum + out-of-range → 422, no partial apply,
+  valid still round-trips) and `test_settings_import_rejects_a_bad_default_stack_option` (import path shares
+  the guard) — both fail-before (200, poison persisted) / pass-after. Severity: broken-UX/autonomy (every
+  stack blocked until the bad default is cleared; no pixel data corrupted). Confidence: reproduced + fixed.
+
 - ~~**Batch editor apply: a single malformed item sinks the *whole* job and hides the
   exports that already succeeded.**~~ — **FIXED v0.131.4** (Builder 2026-07-16, branch
   `claude/pensive-faraday-xp00ow`; traced + reproduced + regression-tested). Found by a fresh

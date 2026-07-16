@@ -19,16 +19,37 @@ _AUTH_KEYS = ("auth_password_hash", "auth_salt", "auth_username")
 
 
 def _sanitize_patch(clean: dict[str, Any]) -> dict[str, Any]:
-    """Drop calibration master *paths* from a persisted default_stack_options.
+    """Sanitise *and validate* a persisted default_stack_options in a settings patch.
 
-    Those paths are resolved server-side from master ids and must never be set
-    from raw client input (a settings PUT body or an imported backup) — otherwise
-    a raw path would leak into every default-based stack. Mutates and returns
-    *clean*."""
+    Two guards, both mirroring the per-target stack-defaults endpoint
+    (``put_stack_defaults``) so the global default is held to the same contract:
+
+    * **Drop calibration master paths.** ``NON_FORM_KEYS`` (``dark_path`` etc.) are
+      resolved server-side from master ids and must never be set from raw client
+      input (a settings PUT body or an imported backup) — otherwise a raw path
+      would leak into every default-based stack.
+    * **Reject an out-of-range / bad-enum value with a 422.** ``store.update``
+      persists ``default_stack_options`` as an opaque ``dict[str, Any]``, so
+      without this a client could PUT e.g. ``{"mosaic_canvas": "garbage"}`` or an
+      out-of-range ``sigma_kappa`` and get a 200. That poisoned default is then
+      served into *every* target's Stack form (``get_stack_defaults``) and 400s
+      every subsequent stack — and the unattended auto-stack chain feeds it
+      straight to the engine, the exact cryptic-deep-failure ``validate_stack_options``
+      exists to prevent. The per-target ``PUT .../stack-defaults`` already validates;
+      this closes the same gap on the global path.
+
+    Mutates and returns *clean*. Raises ``HTTPException(422)`` on a bad value."""
     dso = clean.get("default_stack_options")
     if isinstance(dso, dict):
-        from webapp.schemas import strip_non_form_keys
-        clean["default_stack_options"] = strip_non_form_keys(dso)
+        from webapp.schemas import strip_non_form_keys, validate_stack_options
+        stripped = strip_non_form_keys(dso)
+        try:
+            validate_stack_options(stripped)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"invalid default stack option: {exc}") from exc
+        clean["default_stack_options"] = stripped
     return clean
 
 
