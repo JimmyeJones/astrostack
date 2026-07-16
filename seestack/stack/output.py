@@ -430,18 +430,24 @@ def _archive_existing_outputs(out_dir: Path, out_basename: str) -> dict[str, str
     n = 2
     while any(
         (out_dir / f"{archived_basename}{suffix}").exists()
-        for suffix in (".fits", ".tif", "_preview.png", "_coverage.fits")
+        for suffix in (".fits", ".tif", "_preview.png", "_coverage.fits",
+                       "_progress.webp", "_progress.png")
     ):
         archived_basename = f"{out_basename}_{stamp}_{n}"
         n += 1
 
     # (original suffix, archived suffix) — same for all, but explicit so the
-    # compound _preview / _coverage names rebuild from the new basename cleanly.
+    # compound _preview / _coverage / _progress names rebuild from the new
+    # basename cleanly. The "watch it appear" reel (webp or apng fallback) is
+    # archived like coverage — kept a sibling of its FITS, resolved from the
+    # basename, not recorded in a dedicated history column.
     artefacts = {
         "fits": ".fits",
         "tiff": ".tif",
         "preview": "_preview.png",
         "coverage": "_coverage.fits",
+        "progress_webp": "_progress.webp",
+        "progress_apng": "_progress.png",
     }
     mapping: dict[str, str] = {}
     for kind, suffix in artefacts.items():
@@ -452,7 +458,9 @@ def _archive_existing_outputs(out_dir: Path, out_basename: str) -> dict[str, str
         try:
             orig.rename(dst)
             log.info("archived previous %s → %s", orig.name, dst.name)
-            if kind != "coverage":
+            # coverage + progress reel resolve from the FITS basename (no
+            # dedicated history column), so they aren't in the repoint map.
+            if kind not in ("coverage", "progress_webp", "progress_apng"):
                 mapping[str(orig)] = str(dst)
         except OSError as exc:
             log.warning("could not archive %s: %s", orig, exc)

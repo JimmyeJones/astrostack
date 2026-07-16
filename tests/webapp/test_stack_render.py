@@ -687,6 +687,102 @@ def test_stack_info_advises_a_bias_when_only_a_mismatched_dark_exists(
     assert "30s" in advice and "10s" in advice
 
 
+def _write_reel_beside(fits_path: str, n: int = 5, suffix: str = "_progress.webp"):
+    """Write a tiny animated reel next to a run's FITS (sibling pattern)."""
+    from pathlib import Path
+
+    from PIL import Image
+    frames = [Image.fromarray(
+        (np.random.default_rng(i).random((16, 24, 3)) * 255).astype(np.uint8), "RGB")
+        for i in range(n)]
+    fp = Path(fits_path)
+    stem = fp.name[:-len(fp.suffix)] if fp.suffix else fp.name
+    out = fp.with_name(f"{stem}{suffix}")
+    fmt = "WEBP" if suffix.endswith(".webp") else "PNG"
+    frames[0].save(out, format=fmt, save_all=True, append_images=frames[1:],
+                   duration=300, loop=0)
+    return out
+
+
+def test_progress_info_reports_available_reel(client, solved_library):
+    """A run with a reel sibling reports available + its frame count."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            _write_reel_beside(run.fits_path, n=6)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    body = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/progress-info").json()
+    assert body["available"] is True
+    assert body["frames"] == 6
+
+
+def test_progress_info_unavailable_without_reel(client, solved_library):
+    """The common case (stacked without save_progress): available=false, not 404."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    body = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/progress-info").json()
+    assert body == {"available": False, "frames": 0}
+
+
+def test_progress_reel_serves_the_animation(client, solved_library):
+    """The reel endpoint streams the WEBP animation with the right media type."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            _write_reel_beside(run.fits_path, n=5)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/progress")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/webp"
+    assert r.content[:4] == b"RIFF"                     # WEBP container magic
+
+
+def test_progress_reel_404_without_reel(client, solved_library):
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    assert client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/progress").status_code == 404
+
+
+def test_progress_reel_apng_fallback_is_served(client, solved_library):
+    """When only an APNG reel exists (a Pillow build without WEBP), it's served
+    as image/png — the browser still animates it in an <img>."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            _write_reel_beside(run.fits_path, n=4, suffix="_progress.png")
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/progress")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/png"
+
+
 def test_stack_info_no_calibration_advice_without_a_near_miss_master(
         client, solved_library):
     """With no library master that's a fixable near-miss, the advice field is

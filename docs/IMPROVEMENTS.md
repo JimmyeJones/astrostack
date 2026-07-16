@@ -4089,33 +4089,46 @@ problems. Dogfood it every big-picture run and fix root causes.
   Tonight planner. Feasibility: fully offline, no new dependency, additive/reversible; the size data must be
   vetted before the hint graduates from "for known-size targets only". Serves the north-star "it just
   works" by catching a mistake *before* a wasted session.
-- **NEW BEGINNER FEATURE (Scout 2026-07-16) — "Watch your picture appear": a shareable
-  stack-progress animation built from the quick-look snapshots.** (M, pillar: enjoy/share —
-  PRIORITY 3 friendliness + owner-requested "new beginner features" cadence.) *The single most
-  delightful thing about stacking, for a beginner, is watching a noisy single sub resolve into a
-  clean deep-sky image as frames pile on — but today that magic is invisible: the stacker already
-  writes a `<name>_quicklook.png` every `quick_look_interval` frames during pass 1, then
-  **overwrites it each time** (`stacker.py::_save_quick_look`), so only the last snapshot survives.*
-  **Idea:** keep the intermediate snapshots (or accumulate them into one file) and offer a short
-  looping animation — "watch your image come together" — from ~5–15 frames of the stack building up,
-  plus a one-tap **Share** (reusing the existing Web Share / download-picture plumbing shipped in
-  v0.126–0.127). A beginner gets an emotionally rewarding, genuinely social artifact ("here's my
-  galaxy appearing out of noise") with zero new astro knowledge required. **Why it clears the
-  beginner bar:** sane default (auto-generate whenever a stack produced ≥3 quick-look snapshots; off
-  otherwise), plain-language, not pro/niche tooling, purely additive and downstream of the finished
-  stack. **Feasible slices:** (a) engine — stop overwriting: write snapshots to
-  `output/<name>_progress/NNN.png` (bounded count, e.g. keep at most ~12 evenly-spaced frames so a
-  5,000-sub stack doesn't fill the disk), gated behind a new default-off `StackOptions.save_progress`
-  so existing behaviour is byte-identical and it's upgrade-safe; (b) engine/webapp — assemble an
-  animated GIF or WEBP (Pillow can do both, already a dependency) and expose it on the History/Target
-  page next to the master; (c) frontend — a small autoplay `<img>`/player with the existing Share
-  button. Each slice is independently shippable; (a) alone is a safe, testable Builder task (a
-  regression that N snapshots land, capped, and that `save_progress=False` leaves output untouched).
-  Respects guardrails: no new heavy deps, no schema/DB change, memory-bounded (snapshots are already
-  small autostretched PNGs), default-off. **Note for the Builder:** the quick-look PNGs are
-  autostretched with the *thumbnail* `target_bg`, so the animation's brightness will drift as the
-  black point re-solves per snapshot — either accept that (it reads as "getting cleaner") or fix the
-  stretch reference to the final frame for a steadier look; pick during build.
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-16) — "Watch your picture appear": a shareable
+  stack-progress animation built from the quick-look snapshots.**~~ — **ALL THREE SLICES SHIPPED
+  v0.129.0** (Builder 2026-07-16, branch `claude/pensive-faraday-3tbfb2`). Delivered end-to-end as one
+  coherent feature, all gated behind a new default-off `StackOptions.save_progress` (byte-for-byte
+  unchanged output when off; upgrade-safe by construction — no schema/DB/config/API-shape change, new
+  option carries a form descriptor so the drift test passes). **(a) Engine:** the three pass-1
+  accumulator consumers (min/max, κ-σ pass 1, single-pass) now share one `_QuickLook` helper (replacing
+  the duplicated `ql_state` blocks and the old `_save_quick_look`) that drives *both* the legacy
+  overwritten `_quicklook.png` (unchanged cadence) and the reel. With `save_progress` on it collects up
+  to `_PROGRESS_MAX_FRAMES=12` evenly-spaced snapshots (interval `max(1, n // 12)`, so a 5,000-sub stack
+  still yields ~a dozen — bounded), each autostretched + downscaled to ≤800 px and held in memory (tiny
+  regardless of a mosaic's canvas), then assembled by `assemble_progress_reel` into one looping animation
+  beside the master — **WEBP** when the Pillow build has it (small, full-colour), **APNG** fallback
+  otherwise (both animate in a plain `<img>`). Written *after* `write_stack_outputs` archives the prior
+  run's reel, so it's just another basename sibling: `_archive_existing_outputs` now archives
+  `_progress.{webp,png}` alongside the FITS/preview/coverage (resolved from the basename, not a history
+  column — so a re-stack's archived runs keep serving *their own* reel). Sanitises `output_name` like
+  `write_stack_outputs` (never escapes `output/`), skips assembly below `_PROGRESS_MIN_FRAMES=3` (nothing
+  to "watch"), and is entirely best-effort — a broken encoder is swallowed and never fails the stack.
+  Drizzle is intentionally excluded (it never had quick-look). Chose to accept the per-snapshot black-point
+  drift (it reads as "getting cleaner"), per the Scout's note. **(b) Webapp:** two read-only endpoints on
+  `stack.py` — `…/stack-runs/{id}/progress-info` (a lightweight `{available, frames}` probe so the UI
+  decides without downloading; `available:false`, not 404, for the common save_progress-off case) and
+  `…/stack-runs/{id}/progress` (streams the reel with the right media type, or 404), both resolving the
+  reel sibling from the run's FITS stem. **(c) Frontend:** a new `ProgressReelCard` (self-hides unless the
+  run has a multi-frame reel) on each History run card — starts collapsed with a "Play" button (so
+  History's list of runs doesn't fetch every animation up front), then reveals the looping `<img>` + a
+  "Download clip" button. Tests: `tests/test_progress_reel.py` (9 — off writes no reel, on writes an
+  animated reel, bounded ≤12 regardless of frame count, restack archives the previous reel as a sibling,
+  skipped when <3 snapshots, quicklook+reel coexist, empty-assemble returns None, a broken assembler never
+  fails the stack, traversal-safe basename), `tests/webapp/test_stack_render.py` (+5 — progress-info
+  available/unavailable, reel served as webp, 404 without a reel, APNG fallback served as png),
+  `ProgressReelCard.test.tsx` (2 — renders nothing without a reel; shows the blurb + reveals the animation
+  and download link on Play). Python (1322) + tsc + full vitest (844) + vite build all green. *(Beginner
+  bar ✔ — a delightful, plain-language, purely additive "here's my galaxy appearing out of noise" moment,
+  no new astro knowledge and no heavy deps.)* **Follow-up left for a future run:** surface the reel on the
+  editor result too (the Process-target deep-link lands there), and wire the native OS **Share** sheet for
+  the clip (the download button ships now; sharing an animation file needs the `share.ts` plumbing extended
+  from JPEG to webp/apng).
+
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)

@@ -369,6 +369,66 @@ async def render_stack_run(
                     headers={"Cache-Control": "no-store"})
 
 
+# The "watch your picture come together" progress reel is written as a sibling
+# of each run's FITS (``{stem}_progress.webp`` — or ``.png`` APNG when the Pillow
+# build lacks WEBP), resolved from the basename exactly like the coverage map, so
+# a re-stack's archived runs keep serving their own reel.
+_PROGRESS_MEDIA = {".webp": "image/webp", ".png": "image/png"}
+
+
+def _run_progress_reel(fits_path: str | None) -> Path | None:
+    """Resolve the progress-reel sibling for a run's FITS path, if it exists."""
+    if not fits_path:
+        return None
+    fp = Path(fits_path)
+    stem = fp.name[:-len(fp.suffix)] if fp.suffix else fp.name
+    for suffix in ("_progress.webp", "_progress.png"):
+        cand = fp.with_name(f"{stem}{suffix}")
+        if cand.exists():
+            return cand
+    return None
+
+
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/progress-info")
+async def stack_progress_info(
+    safe: str, run_id: int, request: Request,
+) -> dict[str, Any]:
+    """Whether this run has a "watch it appear" reel, and how many frames.
+
+    Lightweight probe so the UI can decide whether to show the player without
+    downloading the animation. ``available`` is false (not a 404) when the run
+    simply wasn't stacked with ``save_progress`` on — the common case."""
+    _, fits_path = _run_fits_path(request, safe, run_id)
+    reel = _run_progress_reel(fits_path)
+    if reel is None:
+        return {"available": False, "frames": 0}
+
+    def probe() -> int:
+        from PIL import Image
+        try:
+            with Image.open(reel) as im:
+                return int(getattr(im, "n_frames", 1))
+        except Exception:  # noqa: BLE001 — a broken reel just reads as unavailable
+            return 0
+
+    frames = await run_in_threadpool(probe)
+    return {"available": frames > 1, "frames": frames}
+
+
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/progress")
+def stack_progress_reel(
+    safe: str, run_id: int, request: Request,
+) -> FileResponse:
+    """Serve the run's progress-reel animation (WEBP or APNG), or 404."""
+    _, fits_path = _run_fits_path(request, safe, run_id)
+    reel = _run_progress_reel(fits_path)
+    if reel is None:
+        raise HTTPException(status_code=404, detail="No progress reel for this run")
+    media = _PROGRESS_MEDIA.get(reel.suffix, "application/octet-stream")
+    return FileResponse(reel, media_type=media,
+                        filename=f"{Path(fits_path).stem}_progress{reel.suffix}")
+
+
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/render-suggestion")
 async def render_stretch_suggestion(
     safe: str, run_id: int, request: Request,

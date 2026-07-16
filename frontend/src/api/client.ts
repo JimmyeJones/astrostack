@@ -904,6 +904,12 @@ export const api = {
   stackRenderSuggestion: (safe: string, id: number) =>
     req<{ stretch: number | null; black: number | null; target_bg?: number }>(
       `/api/targets/${safe}/stack-runs/${id}/render-suggestion`),
+  // "Watch your picture come together" progress reel (opt-in save_progress).
+  stackProgressInfo: (safe: string, id: number) =>
+    req<{ available: boolean; frames: number }>(
+      `/api/targets/${safe}/stack-runs/${id}/progress-info`),
+  stackProgressUrl: (safe: string, id: number) =>
+    `/api/targets/${safe}/stack-runs/${id}/progress`,
   saveStackPreview: (safe: string, id: number, stretch: number, black: number) =>
     req<{ ok: boolean }>(`/api/targets/${safe}/stack-runs/${id}/preview`, {
       method: "POST", body: JSON.stringify({ stretch, black }),
