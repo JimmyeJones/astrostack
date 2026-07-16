@@ -1520,22 +1520,32 @@ the real webapp stack→edit path.)_
   clean — WCS parse, solve-success detection (returncode + sidecar), RA-wrap in the center consumers, hint
   unit conversion, and setup-error classification all held.
 
-- **Queued-job cancel vs. worker-start race can report a non-cancel-aware job "cancelled" while it
-  actually runs to completion.** *(Traced, Builder webapp audit 2026-07-16; low confidence it's
-  reachable in practice, low severity.)* `webapp/jobs.py::cancel` reads `job.state` **without holding
-  `_lock`** and, if it sees `"queued"`, writes `state="cancelled"` + `finished_utc` and persists.
-  Meanwhile `_run` does `queue.get()` → checks `if job.state == "cancelled": continue` → sets
-  `state="running"`. If a cancel lands in the window *after* the worker passed the `== "cancelled"` check
-  but *before* it set `"running"`, `cancel()` still sees `"queued"`, marks the job cancelled and persists a
-  terminal row — then the worker overwrites `state="running"` and runs the body. For a **cancel-aware**
-  body this is benign (the `_cancel` event is set, so it returns early). For a **non-cancel-aware** body
-  (`submit_build_master`, `submit_editor_png`, `submit_editor_share`) the body ignores `_cancel`, runs to
-  completion, and `_persist` writes `done` — so the user was told the job was cancelled (and briefly saw a
-  `cancelled` row) but a master/PNG was actually produced. **Fix (needs care):** take `_lock` in `cancel()`
-  when reading+transitioning `job.state`, or have the worker re-check `cancel_requested()` immediately after
-  flipping to `running` and short-circuit. Low priority — narrow timing window, no data corruption, only a
-  transiently-wrong job-state label — but a genuine lock-discipline gap. (S code + a threaded test,
-  friendliness/trust.) Found by an adversarial webapp pipeline/jobs/watcher audit.
+- ~~**Queued-job cancel vs. worker-start race can report a non-cancel-aware job "cancelled" while it
+  actually runs to completion.**~~ — **FIXED v0.131.8** (Builder 2026-07-16, branch
+  `claude/pensive-faraday-wgck3h`; traced + reproduced + regression-tested). `webapp/jobs.py::cancel` read
+  `job.state` **without holding `_lock`** and, if it saw `"queued"`, wrote `state="cancelled"` +
+  `finished_utc` and persisted. Meanwhile `_run` did `queue.get()` → checked `if job.state == "cancelled":
+  continue` → set `state="running"` — **also unlocked**. If a cancel landed in the window *after* the worker
+  passed the `== "cancelled"` check but *before* it set `"running"`, `cancel()` still saw `"queued"`, marked
+  the job cancelled and persisted a terminal row — then the worker overwrote `state="running"` and ran the
+  body. For a **cancel-aware** body this is benign (the `_cancel` event is set, so it returns early). For a
+  **non-cancel-aware** body (`submit_build_master`, `submit_editor_png`, `submit_editor_share`) the body
+  ignored `_cancel`, ran to completion, and `_persist` wrote `done` — so the user was told the job was
+  cancelled (and briefly saw a `cancelled` row) but a master/PNG was actually produced. **Fix:** both sides
+  now read+transition `job.state` under `_lock` — `cancel()` holds it across the read and the
+  queued→cancelled write, and `_run`'s claim holds it across the `== "cancelled"` check and the flip to
+  `running` (computing `started_utc` before the flip so the whole decision is made while the state is still
+  observably `queued`). Exactly one side wins: if the worker already claimed the job, `cancel()` sees
+  `running` and only sets the `_cancel` event (a cancel-aware body honours it; a non-cancel-aware one
+  finishes — its work is real); if the cancel wins, the worker sees `cancelled` and skips the body. DB I/O
+  stays outside the lock. Additive, no schema/config/API/default change; only tightens lock discipline
+  around an existing transition. Regression `tests/webapp/test_job_cancel.py::
+  test_cancel_cannot_race_worker_claim_into_a_cancelled_row` deterministically pauses the worker inside the
+  claim window (via a one-shot `_utc` patch, under the lock) and fires `cancel()` from another thread:
+  fail-before the cancel doesn't serialize and marks the running job cancelled / pass-after it blocks on the
+  lock, the job is never observed `cancelled`, and the non-cancel-aware body completes `done`. Severity:
+  narrow timing window, no data corruption, only a transiently-wrong job-state label (low). Confidence:
+  reproduced + fixed.
 
 - ~~**`render.autostretch` crashes on a 2-D (mono) input while its sibling `asinh_stretch` handles it —
   latent API-contract gap, not currently user-reachable.**~~ — **FIXED v0.103.20** (Builder 2026-07-10;
