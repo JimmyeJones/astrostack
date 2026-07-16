@@ -50,20 +50,39 @@ when you take it.
 - **⭐ OWNER-REPORTED (2026-07 — HIGH PRIORITY) — Sky map: irregular mosaics render
   as a black rectangle, and the overlay placement/orientation is off.** Two traced
   bugs on the Sky map page (`frontend/src/routes/AladinSky.tsx` +
-  `webapp/routers/sky.py`):
-  1. **Black rectangular background around a non-rectangular mosaic.** The sky
-     overlay uses the run's `preview_path` PNG, which `render_stack_png` /
-     `_write_preview_png` (`seestack/render/thumbnail.py:184`,
-     `seestack/stack/output.py:271`) writes as **opaque `mode="RGB"`** with the
-     uncovered/NaN pixels `nan_to_num`'d to 0 (black). So an irregular union-mosaic
-     footprint (or any frame with uncovered corners) shows as a **black box** on the
-     sky instead of its true shape. **Fix:** serve the sky overlay as **RGBA with
-     `alpha=0` on uncovered (NaN / zero-coverage) pixels** — a dedicated transparent
-     overlay render, or add an alpha channel keyed off the coverage mask — so the
-     mosaic shows its real footprint. Keep "NaN = no coverage" end-to-end; don't
-     turn gaps into black. (The editor's coverage overlay already renders NaN-aware;
-     reuse that machinery.)
-  2. **Placement / orientation is approximate.** `_tan_wcs`
+  `webapp/routers/sky.py`). **Bug 1 (black box) FIXED v0.134.1; Bug 2 (placement)
+  remains open — it needs real-frame validation (rotation-sign convention), so it is
+  NOT a blind Builder change (see the pre-existing "_tan_wcs rotation sign" open bug
+  below).**
+  1. ~~**Black rectangular background around a non-rectangular mosaic.**~~ — **FIXED
+     v0.134.1** (Builder 2026-07-16, branch `claude/pensive-faraday-rtfcye`; traced +
+     regression-tested). The sky overlay used the run's opaque `preview_path` PNG
+     (`mode="RGB"`, uncovered/NaN pixels `nan_to_num`'d to 0 = black), so an irregular
+     union-mosaic footprint (or any frame with uncovered corners) showed as a **black
+     box** on the sky. **Fix:** a new `GET …/stack-runs/{id}/sky-overlay` endpoint
+     serves the *same* preview pixels as **RGBA with `alpha=0` on uncovered pixels**,
+     and `sky.py` points `preview_url` at it. Two pure engine helpers do the work
+     (`seestack/render/thumbnail.py`): `stack_coverage_mask(fits)` builds the "NaN = no
+     coverage" boolean footprint from the master FITS (covered = any channel finite),
+     and `overlay_rgba_png(preview_png, mask)` keeps the preview's RGB verbatim (exact
+     colour parity with the finished picture) and drives alpha off the mask resized
+     nearest to the preview's grid — so the mosaic shows its true footprint while a
+     fully-covered stack stays all-opaque (unchanged). **Placement is deliberately
+     untouched:** the overlay keeps the preview's exact dimensions, so the WCS
+     `sky.py` builds from `_png_size(preview_path)` still places it identically — this
+     fix is strictly the transparency, Bug 2 is separate. Upgrade-safe/additive: a new
+     read-only endpoint, no schema/config/default/existing-API change; falls back to
+     the opaque preview when a run has no FITS to derive coverage from (older/edited
+     runs) so it never 404s where the old `preview` URL worked. Tests:
+     `test_thumbnail.py` (+4 — `stack_coverage_mask` NaN/any-channel semantics,
+     `overlay_rgba_png` transparent-uncovered / mask-resize-to-preview-grid /
+     all-covered-opaque), `test_stack_render.py` (+2 — the endpoint serves RGBA with
+     the uncovered half transparent at the preview's grid; 404 without a preview),
+     `test_sky.py` (preview_url now points at `sky-overlay`). Severity: broken-UX
+     (ugly on an owner-used page; no data corruption). Confidence: reproduced + fixed.
+  2. **Placement / orientation is approximate.** _(STILL OPEN — needs real-frame
+     validation of the rotation-sign convention; NOT a blind Builder change, same
+     real-data gating as the "_tan_wcs rotation sign" bug below.)_ `_tan_wcs`
      (`webapp/routers/sky.py:74`) builds the overlay WCS from a *single
      representative frame's* pixscale + rotation (`_representative_pixscale_rotation`
      = the first frame) centred on the run RA/Dec, with a **best-effort rotation
@@ -3741,6 +3760,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   readout and it clears once done). tsc + full vitest + vite build green. **Slice (b) remainder
   — true *per-file* progress, `webkitdirectory` on the picker, partial-upload cleanup — and
   slice (c) remain open.**
+  — **FOLDER PICKER (`webkitdirectory`) SHIPPED v0.134.0** (Builder 2026-07-16, branch
+  `claude/pensive-faraday-rtfcye`): the slice-(b) "`webkitdirectory` on the picker" gap. `UploadFits`
+  already walked a folder *drop*, but a beginner who finds drag-drop awkward (a deep Finder folder, a
+  touchpad, a tablet) had only the multi-*file* picker — no way to pick a whole target folder by
+  clicking. Added a **"Choose a folder…"** button that drives a hidden native
+  `<input type="file" webkitdirectory multiple>` (Mantine's `FileButton` can't set `webkitdirectory`;
+  the attribute is set via a ref callback to avoid a non-standard JSX prop). A new pure, exported,
+  unit-tested `filesFromFolderInput(list)` helper preserves each file's `webkitRelativePath`
+  (`M31/night1/Light_001.fit`) as the File's name — **exactly like the folder drop already does** — so
+  the server's `safe_relname` flattening keeps same-basename subs from different session subfolders
+  distinct (Seestar restarts frame numbering each session) instead of one silently overwriting another.
+  Picked files funnel through the same `onPick` FITS filter and the unchanged streaming/sanitising
+  endpoint (slice a). Frontend-only, additive; no backend/schema/API/default change. Tests:
+  `UploadFits.test.tsx` (+3 — `filesFromFolderInput` preserves the relative subpath / falls back to the
+  bare name, and a component folder-pick that keeps only the FITS file with its relative path through to
+  the upload call). tsc + full vitest (882) + vite build green. *(Beginner bar ✔ — one obvious "pick my
+  Seestar folder" button, sane default, no new concepts.)* **Slice (b) remainder — true *per-file*
+  progress, partial-upload cleanup — and slice (c) remain open.**
   <details><summary>Original write-up</summary>
   Today the only way to get subs in is to drop Seestar target folders
   into `incoming/` over an SMB/NFS share — which assumes the user can mount the NAS
@@ -4352,8 +4389,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   same self-hiding `ProgressReelCard` now also renders on the **editor** result (below the "How's my stack?"
   card), where the Process-target deep-link lands — so the delight moment appears exactly where a beginner
   admires the finished picture, not only on History. Frontend-only, additive; tsc + full vitest + vite build
-  green. **Follow-up left for a future run:** wire the native OS **Share** sheet for the clip (the download
-  button ships now; sharing an animation file needs the `share.ts` plumbing extended from JPEG to webp/apng).
+  green. **Follow-up — SHARE-THE-CLIP SHIPPED v0.133.0** (Builder 2026-07-16, branch
+  `claude/pensive-faraday-rtfcye`): the `ProgressReelCard` now offers a native OS **Share clip** control next to
+  "Download clip" (progressive enhancement — renders only where the browser can share *files*, exactly like the
+  picture Share button, so desktop browsers without file-share keep just the download link and never see a dead
+  button). The existing `share.ts::sharePicture` was already format-agnostic (it types the shared `File` from the
+  fetched blob's own mime, so a webp/apng clip shares correctly) — the only gaps were a `.jpg`-hardcoded filename
+  and picture-specific button copy. Added: (1) a pure, unit-tested `shareClipText(name, format)` helper that builds
+  a friendly clip caption ("<name> coming together") + a filename with the reel's real extension (`webp`/`png`,
+  defaulting to `webp`); (2) the progress-info endpoint (`webapp/routers/stack.py::stack_progress_info`) now also
+  returns the reel's `format` ("webp"/"png", "" when unavailable) so the UI names the shared/downloaded file
+  correctly — additive, no schema/API-shape break; and (3) `SharePictureButton` grew optional
+  `tooltip`/`ariaLabel`/`errorMessage` props (defaulting to the current picture copy, so every existing caller is
+  byte-identical) so the reel can say "Share this clip". Frontend + one additive backend field; no
+  schema/config/default change. Tests: `share.test.ts` (+4 — clip caption, webp/png extension, unrecognised-format
+  + blank-name fallbacks), `ProgressReelCard.test.tsx` (+1 — the Share control appears when file-share is
+  supported, stays absent otherwise), `test_stack_render.py` (+1 progress-info reports `format=png` for an APNG
+  reel, + the existing webp/unavailable cases now assert `format`). tsc + full vitest (880) + vite build + Python
+  green. *(Beginner bar ✔ — one obvious button that posts the "my galaxy appearing" clip straight to
+  Messages/Instagram, no new astro knowledge, no deps.)*
 
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)

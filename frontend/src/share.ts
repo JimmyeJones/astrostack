@@ -108,3 +108,23 @@ export function sharePictureText(
   const filename = `${slugify(clean) || "astrophoto"}.jpg`;
   return { title, text, filename };
 }
+
+/**
+ * Build a friendly caption + filename for a shared **progress-reel clip** (the
+ * "watch your picture come together" animation), so the shared file arrives
+ * labelled and with the right extension. `format` is the reel's encoding
+ * (`webp` or `png`); anything unrecognised falls back to `webp` so we never
+ * share an extension-less file. The clip's own blob mime type is authoritative
+ * for the OS — the extension is just for a tidy filename.
+ */
+export function shareClipText(
+  name: string | null | undefined,
+  format?: string | null,
+): { title: string; text: string; filename: string } {
+  const clean = (name ?? "").trim() || "My astrophoto";
+  const ext = (format ?? "").trim().toLowerCase() === "png" ? "png" : "webp";
+  const title = `${clean} coming together`;
+  const text = `Watch ${clean} build up from noise, stacked with AstroStack`;
+  const filename = `${slugify(clean) || "astrophoto"}-progress.${ext}`;
+  return { title, text, filename };
+}

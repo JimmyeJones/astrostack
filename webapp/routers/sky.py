@@ -140,7 +140,12 @@ def get_sky(request: Request) -> SkyResponse:
                     width_deg=width_deg,
                     height_deg=height_deg,
                     rotation_deg=rotation or 0.0,
-                    preview_url=f"/api/targets/{t.safe_name}/stack-runs/{run.id}/preview",
+                    # Transparent (RGBA) overlay: uncovered/NaN pixels are alpha=0
+                    # so an irregular mosaic shows its true footprint on the sky,
+                    # not the opaque black rectangle the plain `preview` PNG is.
+                    # Same pixel grid as the preview, so `wcs` (built from the
+                    # preview size above) still places it correctly.
+                    preview_url=f"/api/targets/{t.safe_name}/stack-runs/{run.id}/sky-overlay",
                     timestamp_utc=run.timestamp_utc,
                     run_id=run.id,
                     wcs=wcs,

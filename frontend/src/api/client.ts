@@ -921,7 +921,7 @@ export const api = {
       `/api/targets/${safe}/stack-runs/${id}/render-suggestion`),
   // "Watch your picture come together" progress reel (opt-in save_progress).
   stackProgressInfo: (safe: string, id: number) =>
-    req<{ available: boolean; frames: number }>(
+    req<{ available: boolean; frames: number; format?: string }>(
       `/api/targets/${safe}/stack-runs/${id}/progress-info`),
   stackProgressUrl: (safe: string, id: number) =>
     `/api/targets/${safe}/stack-runs/${id}/progress`,

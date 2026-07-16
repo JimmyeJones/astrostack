@@ -15,12 +15,17 @@ function renderCard(safe = "M_42", runId = 7) {
   );
 }
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  const nav = navigator as unknown as Record<string, unknown>;
+  delete nav.canShare;
+  delete nav.share;
+});
 
 describe("ProgressReelCard", () => {
   it("renders nothing when the run has no reel", async () => {
     vi.spyOn(client.api, "stackProgressInfo").mockResolvedValue({
-      available: false, frames: 0,
+      available: false, frames: 0, format: "",
     });
     const { container } = renderCard();
     await waitFor(() => expect(client.api.stackProgressInfo).toHaveBeenCalled());
@@ -29,7 +34,7 @@ describe("ProgressReelCard", () => {
 
   it("shows the reel and reveals the animation on Play", async () => {
     vi.spyOn(client.api, "stackProgressInfo").mockResolvedValue({
-      available: true, frames: 8,
+      available: true, frames: 8, format: "webp",
     });
     renderCard("M_42", 7);
     await waitFor(() =>
@@ -45,5 +50,23 @@ describe("ProgressReelCard", () => {
     expect(img).toHaveAttribute("src", "/api/targets/M_42/stack-runs/7/progress");
     const dl = screen.getByRole("link", { name: /download clip/i });
     expect(dl).toHaveAttribute("href", "/api/targets/M_42/stack-runs/7/progress");
+    // On a browser without file-share, the Share control is absent (progressive
+    // enhancement) — only the download link is offered.
+    expect(screen.queryByRole("button", { name: "Share clip" })).not.toBeInTheDocument();
+  });
+
+  it("offers a Share clip control when the browser can share files", async () => {
+    const nav = navigator as unknown as Record<string, unknown>;
+    nav.canShare = () => true;
+    nav.share = async () => {};
+    vi.spyOn(client.api, "stackProgressInfo").mockResolvedValue({
+      available: true, frames: 8, format: "webp",
+    });
+    renderCard("M_42", 7);
+    await waitFor(() =>
+      expect(screen.getByText("Watch your picture appear")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /play/i }));
+    // The Share control appears alongside Download once the clip is revealed.
+    expect(await screen.findByRole("button", { name: "Share clip" })).toBeInTheDocument();
   });
 });
