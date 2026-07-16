@@ -4376,15 +4376,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   (+1 — PNG/JPEG menu when a jpeg href is given; the single-PNG path still asserted), `Target.test.tsx` (menu
   offers both formats / hidden with no preview), `Dashboard.test.tsx` (menu downloads PNG or JPEG without
   navigating), `Gallery.test.tsx` (lightbox menu offers both). tsc + full vitest (818) + vite build green.
-- **Decide the intended duration format and unify it (or document the split).** (XS, friendliness/consistency —
-  Builder-filed 2026-07-14, spotted dogfooding.) The app has two duration formatters that render the same
-  quantity differently: `format.ts::formatIntegration` (Dashboard/Target/History/readiness) prints "42 min" /
-  "2.3 h", while `Library.tsx::expo` (target cards) prints "1h 30m" / "2h 0m". Both are correct and NaN-safe;
-  the split may be intentional (precise h+m on a card vs. rounded summary elsewhere), but a beginner sees
-  "1h 30m" on a Library card and "1.5 h" for the same target's integration on the Dashboard. Scout call:
-  either standardise on one (probably keep `expo`'s h+m for cards but confirm), or leave a one-line comment on
-  each explaining the deliberate difference so a future run doesn't "fix" it into a regression. Pure helpers,
-  fully unit-testable; no backend/schema change.
+- ~~**Decide the intended duration format and unify it (or document the split).**~~ — **SHIPPED v0.131.11**
+  (Builder 2026-07-16, branch `claude/pensive-faraday-el9gag`). Resolved the judgment call in favour of
+  **consistency**: `Library.tsx::expo` now delegates to the app-wide `format.ts::formatIntegration`, so the
+  Library target cards speak the same integration-time vocabulary as every other surface
+  (Dashboard/Target/History/readiness) — a beginner no longer sees "1h 30m" on a card and "1.5 h" for the same
+  target elsewhere. The unification also fixes a small honesty wart: `expo` rounded to whole minutes first, so a
+  target with a handful of very short subs showed "0m"/"1m" (e.g. `expo(20) → "0m"`) where `formatIntegration`
+  shows the honest "20 s". `expo` is kept as a thin, documented re-export (its one call site + unit test import
+  it) rather than churning the call site. Frontend-only, additive; no backend/schema/API/default change. Tests:
+  the `expo` unit test in `Library.test.tsx` now pins the delegated output (`20 s` / `2 min` / `1.0 h` / `1.5 h`
+  / `—`), and `format.test.ts` already covers the shared helper. tsc + full vitest (853) + vite build green.
+  *(XS, friendliness/consistency — PRIORITY 3; Builder-filed 2026-07-14.)*
 - ~~**Cancelling a non-cancel-aware job (Build master / editor PNG / editor Share) does nothing — it runs to
   completion.**~~ — **SHIPPED v0.131.9** (Builder 2026-07-16, branch `claude/pensive-faraday-kv77w1`). Took the
   worthwhile slice: **Build-master** now honours cancel. `seestack/calibrate/masters.py::build_master` grew an

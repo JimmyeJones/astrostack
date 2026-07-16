@@ -9,16 +9,15 @@ import { Link } from "react-router-dom";
 import { api, type Target } from "../api/client";
 import { QueryError } from "../components/QueryError";
 import { UploadFits } from "../components/UploadFits";
+import { formatIntegration } from "../format";
 
+// Target-card exposure. Delegates to the app-wide `formatIntegration` so the
+// Library card speaks the same integration-time vocabulary as every other
+// surface (Dashboard / Target / History / readiness) — a beginner shouldn't see
+// "1h 30m" on a card and "1.5 h" for the same target elsewhere, and the shared
+// helper also shows sub-minute totals honestly ("20 s" rather than "0m").
 export function expo(seconds: number): string {
-  if (!seconds) return "—";
-  // Round to whole minutes first, then split into h/m — rounding the minutes
-  // remainder independently could yield a nonsensical "1h 60m" (e.g. 7190 s,
-  // 1h 59.8m, rounds the remainder to 60).
-  const totalMin = Math.round(seconds / 60);
-  const h = Math.floor(totalMin / 60);
-  const m = totalMin % 60;
-  return h ? `${h}h ${m}m` : `${m}m`;
+  return formatIntegration(seconds);
 }
 
 type SortKey = "name" | "recent" | "exposure" | "frames";
