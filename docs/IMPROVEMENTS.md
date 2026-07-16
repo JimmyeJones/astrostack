@@ -4937,6 +4937,28 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.132.1** — Stacking-engine correctness (PRIORITY 1 — data-integrity of a beginner-facing diagnostic;
+  Builder 2026-07-16, branch `claude/pensive-faraday-vgnbsy`). **Honest per-pixel frame count under
+  per-channel κ-σ rejection.** `WeightedSumAccumulator.add`/`add_window` (the default OSC sigma-clip path)
+  and the drizzle two-pass reject path both counted a frame's contribution to a pixel by **channel 0 (red)
+  only** (`covered = valid[..., 0]` / a strict increase in channel-0's drizzle `out_wht`). In the standard
+  path this is harmless (a debayered frame's channels share a valid mask, so any==channel-0), but pass-2 κ-σ
+  builds a **per-channel** `keep` mask — a pixel whose red alone is clipped (an outlier) while green/blue
+  still contribute was then *not* counted, so `frame_coverage` (→ the `coverage_min`/`coverage_max`
+  "N frames per pixel" diagnostic) was biased **low**. That number feeds `stackhealth.py`'s beginner
+  "How's my stack?" note — an understated `coverage_min` can trip a **false "the edges have far fewer frames …
+  trim border" warning** on an otherwise even stack — and the History "coverage N–M frames" display. **Fix:**
+  count a frame wherever it contributed to **any** channel (`valid.any(axis=2)`; drizzle ORs the three
+  channels' weight increases via one reusable snapshot + a bool plane, staying memory-bounded). Byte-for-byte
+  unchanged for the common all-or-nothing case (ordinary + unweighted stacks, the existing parity tests still
+  hold); only the pixel image is *never* touched — this is a diagnostic-count fix. Additive, no
+  schema/config/API/default change (the `coverage_min`/`coverage_max` columns are just computed more
+  accurately going forward; old run rows are untouched). Regression tests: `tests/test_accumulator.py`
+  (2 — a red-only-clipped frame still counts, direct + windowed) and `tests/test_drizzle_reject.py`
+  (1 — a red-only outlier block clipped in pass 2 still counts the frame, 17 not 16) — all fail-before
+  (16)/pass-after (17). Found by a fresh adversarial stacking-engine correctness audit (the audit otherwise
+  traced the image-forming hot path clean). Severity: wrong beginner-facing diagnostic (broken-UX/trust; no
+  pixel data affected). Confidence: reproduced + fixed.
 - **v0.132.0** — Beginner feature / friendliness (PRIORITY 3 — "should I wait or walk away?"; Builder 2026-07-16,
   branch `claude/pensive-faraday-hmlp4a`). The **Jobs page now shows a plain-language "time left" estimate** next
   to each running step ("aligning 1200/3000 · ~2 min left") — the first thing a beginner who dropped a night's

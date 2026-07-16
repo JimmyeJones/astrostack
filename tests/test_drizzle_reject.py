@@ -154,6 +154,48 @@ def test_rejection_counts_tallies_the_clip():
     assert rejected / contributed == pytest.approx(600 / contributed)
 
 
+def test_frame_coverage_counts_a_frame_clipped_in_one_channel_only():
+    """Regression: under per-channel κ-σ rejection, ``frame_coverage`` must count
+    a frame wherever it contributed to **any** channel — not only channel 0 (red).
+
+    16 clean frames + one whose *red* alone spikes in a block (G/B stay clean).
+    Pass 2 zero-weights that frame's red at the block (an outlier) but keeps its
+    green/blue. Reading channel-0's weight increase alone (the old behaviour)
+    would miss the frame there and report 16 instead of 17 frames/pixel — biasing
+    the coverage_min/max "N frames per pixel" diagnostic low and risking a false
+    "ragged edges" health note on an otherwise even stack."""
+    wcs = _wcs()
+    clean = np.full((80, 100, 3), 100.0, dtype=np.float32)
+    frames = [clean.copy() for _ in range(16)]
+    dirty = clean.copy()
+    dirty[30:40, 40:60, 0] = 5000.0  # RED only — an outlier the clip will drop
+    frames.append(dirty)
+
+    params = DrizzleParams(scale=1.0, pixfrac=1.0)
+    shape = frames[0].shape[:2]
+    stats = DrizzleStacker(wcs, shape, params, compute_stats=True)
+    for f in frames:
+        stats.add_frame(f, wcs)
+    clip = stats.clip_reference(3.0)
+
+    final = DrizzleStacker(wcs, shape, params)
+    for f in frames:
+        final.add_frame(f, wcs, clip=clip)
+
+    fc = final.frame_coverage
+    assert fc is not None
+    # The dirty frame's red was clipped in the block, but its green/blue landed —
+    # so all 17 frames still count there (was 16 when only red was read).
+    assert int(fc[32:38, 42:58].min()) == 17
+    # And the block matches everywhere else: uniform 17-frame coverage interior.
+    assert int(fc[10:70, 10:90].min()) == 17
+    # Sanity: the image did drop the red outlier (block red ≈ clean 100, not the
+    # contaminated (16·100 + 5000)/17 ≈ 388), while G/B stay clean.
+    result = final.result()
+    assert result[35, 50, 0] == pytest.approx(100.0, rel=1e-2)
+    assert result[35, 50, 1] == pytest.approx(100.0, rel=1e-2)
+
+
 def test_rejection_counts_zero_without_clip():
     """Single-pass drizzle (no clip) rejects nothing, so the tally stays zero —
     the stacker then stamps no rejection provenance for a plain drizzle."""

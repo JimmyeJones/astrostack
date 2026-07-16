@@ -65,8 +65,11 @@ class WeightedSumAccumulator:
         # ``coverage_min``/``coverage_max`` diagnostics — reported to the user as
         # "N frames per pixel" — must read this instead. A cheap 2-D uint32 plane
         # (⅓ of one channel-plane); byte-for-byte equal to ``coverage[..., 0]``
-        # when every weight is 1.0 (the default), so unweighted stacks are
-        # unaffected. See :meth:`frame_coverage`.
+        # for an unweighted stack whose frames are all-or-nothing per pixel (the
+        # common case — a debayered frame's channels share a valid mask), so
+        # ordinary stacks are unaffected. A frame counts when it contributed to
+        # **any** channel, so per-channel κ-σ rejection (which can drop just one
+        # channel at a pixel) no longer under-counts it. See :meth:`frame_coverage`.
         self._count = np.zeros(shape[:2], dtype=np.uint32)
 
     def add(
@@ -105,7 +108,13 @@ class WeightedSumAccumulator:
         if weight != 1.0:
             valid_weighted = valid_weighted * np.float32(weight)
         self._weight += valid_weighted
-        covered = valid[..., 0] if valid.ndim == 3 else valid
+        # Count a frame at a pixel when it contributed to *any* channel — not just
+        # channel 0. Under per-channel κ-σ rejection a pixel can keep G/B but drop
+        # R; ``valid[..., 0]`` would then miss the frame and under-count coverage
+        # (biasing the "N frames per pixel" diagnostic low). ``any(axis=2)`` equals
+        # ``valid[..., 0]`` in the common all-or-nothing case, so ordinary stacks
+        # are byte-for-byte unchanged.
+        covered = valid.any(axis=2) if valid.ndim == 3 else valid
         self._count += covered.astype(np.uint32, copy=False)
 
     def add_window(
@@ -135,7 +144,9 @@ class WeightedSumAccumulator:
         # In-place add into the canvas sub-views.
         self._sum[y0:y0 + wh, x0:x0 + ww] += contribution
         self._weight[y0:y0 + wh, x0:x0 + ww] += valid_w
-        covered = valid[..., 0] if valid.ndim == 3 else valid
+        # Any-channel contribution (see :meth:`add`): don't under-count a frame
+        # whose red channel alone was κ-σ-clipped at a pixel.
+        covered = valid.any(axis=2) if valid.ndim == 3 else valid
         self._count[y0:y0 + wh, x0:x0 + ww] += covered.astype(np.uint32, copy=False)
 
     def result(self) -> np.ndarray:
@@ -161,8 +172,10 @@ class WeightedSumAccumulator:
 
         Unlike :attr:`coverage` (Σ weights), this counts how many frames
         actually contributed to each pixel, so ``coverage_min``/``coverage_max``
-        report honest "frames per pixel" even with quality weighting on. Equal
-        to ``coverage[..., 0]`` for an unweighted stack."""
+        report honest "frames per pixel" even with quality weighting on. A frame
+        counts when it contributed to **any** channel, so per-channel κ-σ
+        rejection doesn't understate it. Equal to ``coverage[..., 0]`` for an
+        unweighted stack whose frames are all-or-nothing per pixel."""
         return self._count
 
     @property
