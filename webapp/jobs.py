@@ -349,13 +349,27 @@ class JobManager:
     def cancel(self, job_id: str) -> bool:
         with self._lock:
             job = self._jobs.get(job_id)
-        if job is None or job.state in _TERMINAL:
-            return False
-        job._cancel.set()
-        if job.state == "queued":
-            # Not yet picked up — mark cancelled immediately.
-            job.state = "cancelled"
-            job.finished_utc = _utc()
+            if job is None or job.state in _TERMINAL:
+                return False
+            job._cancel.set()
+            # Read + transition ``job.state`` under the lock so this can't race the
+            # worker flipping ``queued``→``running`` in ``_run`` (which takes the
+            # same lock for that transition). Without it, a cancel landing in the
+            # window after the worker's "am I cancelled?" check but before it set
+            # ``running`` would still see ``queued``, mark the job cancelled, and
+            # then the worker would run the body anyway — telling the user a job was
+            # cancelled while a master/PNG was actually produced. Holding the lock
+            # makes exactly one side win: if the worker already claimed it we fall
+            # through here and only set the ``_cancel`` event (a cancel-aware body
+            # honours it; a non-cancel-aware one finishes — its work is real).
+            was_queued = job.state == "queued"
+            if was_queued:
+                # Not yet picked up — mark cancelled immediately.
+                job.state = "cancelled"
+                job.finished_utc = _utc()
+        # Persist outside the lock (DB I/O): the worker will observe ``cancelled``
+        # and skip the body, so nothing else touches this job.
+        if was_queued:
             self._persist(job)
         return True
 
@@ -373,10 +387,18 @@ class JobManager:
             job, fn = self._queue.get()
             if job is None:  # stop sentinel
                 break
-            if job.state == "cancelled":  # cancelled while queued
-                continue
-            job.state = "running"
-            job.started_utc = _utc()
+            # Claim the job under the lock: check "cancelled while queued" and flip
+            # to "running" atomically w.r.t. ``cancel`` (which takes the same lock
+            # to read+transition ``job.state``). This closes the queued-cancel race
+            # — a cancel can no longer slip between this check and the flip and
+            # leave a job both marked ``cancelled`` and run to completion. Compute
+            # ``started_utc`` *before* flipping the state so the whole decision is
+            # made while the state is still observably ``queued``.
+            with self._lock:
+                if job.state == "cancelled":  # cancelled while queued
+                    continue
+                job.started_utc = _utc()
+                job.state = "running"
             self._persist(job)
             try:
                 result = fn(job)

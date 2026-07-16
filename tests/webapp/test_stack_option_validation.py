@@ -40,6 +40,22 @@ def test_validate_rejects_non_numeric_for_numeric_field():
         validate_stack_options({"sigma_kappa": "lots"})
 
 
+def test_validate_rejects_fractional_float_for_int_field():
+    # An int-typed option (e.g. max_workers) must be a whole number. A fractional
+    # float would otherwise slip past coerce_stack_options (no coercion) into the
+    # engine as a float.
+    with pytest.raises(ValueError, match="whole number"):
+        validate_stack_options({"max_workers": 3.5})
+    with pytest.raises(ValueError, match="whole number"):
+        validate_stack_options({"min_max_reject_count": 2.7})
+
+
+def test_validate_accepts_integral_float_for_int_field():
+    # A float that happens to be integral (3.0 — how JSON often carries an int)
+    # is a valid whole number and must still be accepted.
+    validate_stack_options({"max_workers": 3.0, "background_box_size": 128.0})
+
+
 # --- endpoint: bad options -> 400, not a submitted-then-errored job --------
 
 

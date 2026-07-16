@@ -529,6 +529,13 @@ def validate_stack_options(data: dict[str, Any]) -> None:
             # bool is a subclass of int — a checkbox value in a numeric field is wrong.
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 raise ValueError(f"{fld.label}: expected a number, got {value!r}")
+            # An ``int``-typed option must be a whole number. ``coerce_stack_options``
+            # does no coercion (StackOptions is a plain dataclass), so a fractional
+            # float (e.g. ``max_workers=3.5``) would otherwise slip through and reach
+            # the engine as a float. An *integral* float (``3.0``) is fine.
+            if fld.type == "int" and isinstance(value, float) and not value.is_integer():
+                raise ValueError(
+                    f"{fld.label}: expected a whole number, got {value!r}")
             if fld.min is not None and value < fld.min:
                 raise ValueError(
                     f"{fld.label}: {value} is below the minimum of {fld.min}")

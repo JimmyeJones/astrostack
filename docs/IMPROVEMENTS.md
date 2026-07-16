@@ -1520,22 +1520,32 @@ the real webapp stack→edit path.)_
   clean — WCS parse, solve-success detection (returncode + sidecar), RA-wrap in the center consumers, hint
   unit conversion, and setup-error classification all held.
 
-- **Queued-job cancel vs. worker-start race can report a non-cancel-aware job "cancelled" while it
-  actually runs to completion.** *(Traced, Builder webapp audit 2026-07-16; low confidence it's
-  reachable in practice, low severity.)* `webapp/jobs.py::cancel` reads `job.state` **without holding
-  `_lock`** and, if it sees `"queued"`, writes `state="cancelled"` + `finished_utc` and persists.
-  Meanwhile `_run` does `queue.get()` → checks `if job.state == "cancelled": continue` → sets
-  `state="running"`. If a cancel lands in the window *after* the worker passed the `== "cancelled"` check
-  but *before* it set `"running"`, `cancel()` still sees `"queued"`, marks the job cancelled and persists a
-  terminal row — then the worker overwrites `state="running"` and runs the body. For a **cancel-aware**
-  body this is benign (the `_cancel` event is set, so it returns early). For a **non-cancel-aware** body
-  (`submit_build_master`, `submit_editor_png`, `submit_editor_share`) the body ignores `_cancel`, runs to
-  completion, and `_persist` writes `done` — so the user was told the job was cancelled (and briefly saw a
-  `cancelled` row) but a master/PNG was actually produced. **Fix (needs care):** take `_lock` in `cancel()`
-  when reading+transitioning `job.state`, or have the worker re-check `cancel_requested()` immediately after
-  flipping to `running` and short-circuit. Low priority — narrow timing window, no data corruption, only a
-  transiently-wrong job-state label — but a genuine lock-discipline gap. (S code + a threaded test,
-  friendliness/trust.) Found by an adversarial webapp pipeline/jobs/watcher audit.
+- ~~**Queued-job cancel vs. worker-start race can report a non-cancel-aware job "cancelled" while it
+  actually runs to completion.**~~ — **FIXED v0.131.8** (Builder 2026-07-16, branch
+  `claude/pensive-faraday-wgck3h`; traced + reproduced + regression-tested). `webapp/jobs.py::cancel` read
+  `job.state` **without holding `_lock`** and, if it saw `"queued"`, wrote `state="cancelled"` +
+  `finished_utc` and persisted. Meanwhile `_run` did `queue.get()` → checked `if job.state == "cancelled":
+  continue` → set `state="running"` — **also unlocked**. If a cancel landed in the window *after* the worker
+  passed the `== "cancelled"` check but *before* it set `"running"`, `cancel()` still saw `"queued"`, marked
+  the job cancelled and persisted a terminal row — then the worker overwrote `state="running"` and ran the
+  body. For a **cancel-aware** body this is benign (the `_cancel` event is set, so it returns early). For a
+  **non-cancel-aware** body (`submit_build_master`, `submit_editor_png`, `submit_editor_share`) the body
+  ignored `_cancel`, ran to completion, and `_persist` wrote `done` — so the user was told the job was
+  cancelled (and briefly saw a `cancelled` row) but a master/PNG was actually produced. **Fix:** both sides
+  now read+transition `job.state` under `_lock` — `cancel()` holds it across the read and the
+  queued→cancelled write, and `_run`'s claim holds it across the `== "cancelled"` check and the flip to
+  `running` (computing `started_utc` before the flip so the whole decision is made while the state is still
+  observably `queued`). Exactly one side wins: if the worker already claimed the job, `cancel()` sees
+  `running` and only sets the `_cancel` event (a cancel-aware body honours it; a non-cancel-aware one
+  finishes — its work is real); if the cancel wins, the worker sees `cancelled` and skips the body. DB I/O
+  stays outside the lock. Additive, no schema/config/API/default change; only tightens lock discipline
+  around an existing transition. Regression `tests/webapp/test_job_cancel.py::
+  test_cancel_cannot_race_worker_claim_into_a_cancelled_row` deterministically pauses the worker inside the
+  claim window (via a one-shot `_utc` patch, under the lock) and fires `cancel()` from another thread:
+  fail-before the cancel doesn't serialize and marks the running job cancelled / pass-after it blocks on the
+  lock, the job is never observed `cancelled`, and the non-cancel-aware body completes `done`. Severity:
+  narrow timing window, no data corruption, only a transiently-wrong job-state label (low). Confidence:
+  reproduced + fixed.
 
 - ~~**`render.autostretch` crashes on a 2-D (mono) input while its sibling `asinh_stretch` handles it —
   latent API-contract gap, not currently user-reachable.**~~ — **FIXED v0.103.20** (Builder 2026-07-10;
@@ -4359,22 +4369,40 @@ problems. Dogfood it every big-picture run and fix root causes.
   either standardise on one (probably keep `expo`'s h+m for cards but confirm), or leave a one-line comment on
   each explaining the deliberate difference so a future run doesn't "fix" it into a regression. Pure helpers,
   fully unit-testable; no backend/schema change.
+- **Cancelling a non-cancel-aware job (Build master / editor PNG / editor Share) does nothing — it runs to
+  completion.** (S, friendliness/trust — PRIORITY 3 — Builder-filed 2026-07-16, spotted fixing the v0.131.8
+  cancel-race.) The job bodies `submit_build_master`, `submit_editor_png`, and `submit_editor_share` never
+  check `job.cancel_requested()`, so the Jobs-page Cancel button on one of them sets the `_cancel` event but
+  the body ignores it and keeps working; the worker then (correctly, post-v0.131.8) marks it `done` because
+  real output was produced. So a user who cancels a master build waits out the whole build anyway with no
+  feedback that cancel was a no-op. Master-building can be genuinely long (many darks/flats), so it's the
+  worthwhile one: thread the job's cancel check into `build_master`'s per-frame accumulation loop (a coarse
+  `if job.cancel_requested(): return None` between frames, mirroring how the stacker already honours cancel),
+  so a mid-build cancel stops promptly and is classified `cancelled` (no partial master written). Editor
+  PNG/Share are fast enough that they're likely fine to leave (or just disable/hide their Cancel affordance).
+  Additive, off the hot path; testable by cancelling a multi-frame master build and asserting an early return.
+  A Scout should confirm the master-build loop has a natural per-frame checkpoint and that a cancelled build
+  leaves no half-written output before a Builder takes it.
 
 ### Performance (only with a measurement)
 - Profile the stack hot path on a large synthetic target; find a safe win that
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
-- **`validate_stack_options` accepts a non-integer float for `int`-typed fields.** *(Traced, Builder
-  routers audit 2026-07-16; low severity — muted impact.)* `webapp/schemas.py::validate_stack_options`
-  treats `int` and `float` fields identically (accepts any `int|float`, rejecting only `bool`), so an
-  `int`-declared option (`max_workers`, `min_max_reject_count`, `background_box_size`,
-  `quick_look_interval`) passes a value like `3.5`, and `coerce_stack_options` (a plain dataclass) does no
-  coercion, so the float reaches the engine. Impact is muted (`ThreadPoolExecutor(max_workers=3.5)`
-  tolerates a float; most others are range-guarded and used numerically), so this is a robustness tidy, not
-  a crash. Fix: add a `float.is_integer()` check (reject / floor) for `fld.type == "int"` in
-  `validate_stack_options`. (XS, robustness.) Found alongside the v0.131.5 `default_stack_options`
-  validation fix.
+- ~~**`validate_stack_options` accepts a non-integer float for `int`-typed fields.**~~ — **FIXED v0.131.7**
+  (Builder 2026-07-16, branch `claude/pensive-faraday-wgck3h`; regression-tested). `webapp/schemas.py::
+  validate_stack_options` treated `int` and `float` fields identically (accepted any `int|float`, rejecting
+  only `bool`), so an `int`-declared option (`max_workers`, `min_max_reject_count`, `background_box_size`,
+  `final_gradient_box_size`, `quick_look_interval`) passed a value like `3.5`, and `coerce_stack_options`
+  (a plain dataclass) does no coercion, so the float reached the engine. **Fix:** added a
+  `float.is_integer()` check for `fld.type == "int"` — a fractional float now raises a plain-language
+  `ValueError` ("expected a whole number"), while an *integral* float (`3.0`, how JSON often carries an int)
+  and a genuine `int` are still accepted. Mirrors the endpoint's existing up-front-400 contract. Additive,
+  no schema/config/API/default change (a well-formed integral request round-trips unchanged). Regressions in
+  `tests/webapp/test_stack_option_validation.py`: `test_validate_rejects_fractional_float_for_int_field`
+  (`max_workers=3.5`, `min_max_reject_count=2.7` → ValueError, fail-before/pass-after) and
+  `test_validate_accepts_integral_float_for_int_field` (`3.0`/`128.0` still accepted). Severity: robustness
+  tidy (muted impact — the float was tolerated numerically downstream). Confidence: reproduced + fixed.
 - ~~**NEW (Scout 2026-07-16) — harden `_downsample_rgb` against a NaN input (latent, not currently
   reachable; small safe robustness fix).**~~ — **FIXED v0.131.1** (Builder 2026-07-16, branch
   `claude/pensive-faraday-6bwguj`; regression-tested). `render/thumbnail.py::_downsample_rgb` now reduces
