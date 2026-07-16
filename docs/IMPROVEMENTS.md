@@ -4369,6 +4369,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   either standardise on one (probably keep `expo`'s h+m for cards but confirm), or leave a one-line comment on
   each explaining the deliberate difference so a future run doesn't "fix" it into a regression. Pure helpers,
   fully unit-testable; no backend/schema change.
+- **Cancelling a non-cancel-aware job (Build master / editor PNG / editor Share) does nothing — it runs to
+  completion.** (S, friendliness/trust — PRIORITY 3 — Builder-filed 2026-07-16, spotted fixing the v0.131.8
+  cancel-race.) The job bodies `submit_build_master`, `submit_editor_png`, and `submit_editor_share` never
+  check `job.cancel_requested()`, so the Jobs-page Cancel button on one of them sets the `_cancel` event but
+  the body ignores it and keeps working; the worker then (correctly, post-v0.131.8) marks it `done` because
+  real output was produced. So a user who cancels a master build waits out the whole build anyway with no
+  feedback that cancel was a no-op. Master-building can be genuinely long (many darks/flats), so it's the
+  worthwhile one: thread the job's cancel check into `build_master`'s per-frame accumulation loop (a coarse
+  `if job.cancel_requested(): return None` between frames, mirroring how the stacker already honours cancel),
+  so a mid-build cancel stops promptly and is classified `cancelled` (no partial master written). Editor
+  PNG/Share are fast enough that they're likely fine to leave (or just disable/hide their Cancel affordance).
+  Additive, off the hot path; testable by cancelling a multi-frame master build and asserting an early return.
+  A Scout should confirm the master-build loop has a natural per-frame checkpoint and that a cancelled build
+  leaves no half-written output before a Builder takes it.
 
 ### Performance (only with a measurement)
 - Profile the stack hot path on a large synthetic target; find a safe win that
