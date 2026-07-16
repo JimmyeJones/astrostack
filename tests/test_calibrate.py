@@ -56,6 +56,45 @@ def test_build_master_mean(tmp_path):
     np.testing.assert_allclose(master, 20.0)
 
 
+@pytest.mark.parametrize("method", ["median", "mean", "sigma_mean"])
+def test_build_master_is_nan_aware(tmp_path, method):
+    # A user-supplied float FITS calibration frame carrying a NaN/inf pixel must
+    # not poison the whole master at that pixel — NaN = "no data", so the combine
+    # ignores it and averages the finite samples (engine invariant). Before the
+    # NaN-aware fix, plain np.median/np.mean propagated the NaN into the master
+    # (and thence every calibrated light) for the median/mean methods.
+    paths = []
+    for i in range(4):
+        arr = np.full((2, 2), 100.0, dtype=np.float32)
+        if i == 0:
+            arr[0, 0] = np.nan  # one bad pixel in one frame
+            arr[0, 1] = np.inf  # ...and a non-finite spike
+        p = tmp_path / f"dark_{i}.fits"
+        _write_raw(p, arr, exptime=30.0)
+        paths.append(p)
+    master, _ = build_master(paths, kind="dark", method=method, sigma=3.0)
+    # The affected pixels fall back to the finite samples (all 100.0), and every
+    # other pixel is untouched — no NaN/inf anywhere in the master.
+    assert np.all(np.isfinite(master)), "non-finite input poisoned the master"
+    np.testing.assert_allclose(master, 100.0)
+
+
+def test_build_master_all_nan_pixel_stays_nan(tmp_path):
+    # If *no* frame has a finite sample at a pixel, that pixel is genuinely
+    # "no data" and must stay NaN (not be folded to 0), per the coverage invariant.
+    paths = []
+    for i in range(3):
+        arr = np.full((2, 2), 50.0, dtype=np.float32)
+        arr[0, 0] = np.nan  # no finite sample at (0, 0) in any frame
+        p = tmp_path / f"f_{i}.fits"
+        _write_raw(p, arr)
+        paths.append(p)
+    master, _ = build_master(paths, kind="dark", method="mean")
+    assert np.isnan(master[0, 0])
+    np.testing.assert_allclose(master[1:, :], 50.0)
+    np.testing.assert_allclose(master[0, 1], 50.0)
+
+
 def test_sigma_clip_mean_rejects_outlier_when_mad_is_zero():
     # Regression: a per-pixel MAD of 0 means a *majority* of frames sit exactly
     # at the median, NOT that there are no outliers. A minority cosmic-ray/hot-

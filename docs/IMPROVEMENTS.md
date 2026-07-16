@@ -4917,13 +4917,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   flat normalization + floor, sigma-clip master combine) all verified **correct and NaN/coverage-aware** — no
   pixel- or coverage-corrupting bug found. The four latent observations, each low-confidence-of-reachability:
   (S each, correctness/robustness — focus #1)
-  - **(1)** `calibrate/masters.py:203-205` — the `median` and `mean` master-combine methods use plain
+  - ~~**(1)** `calibrate/masters.py:203-205` — the `median` and `mean` master-combine methods use plain
     `np.median`/`np.mean`, **not** NaN-aware, unlike the `sigma_mean` sibling (`nanmedian`) and the flat path.
     A single NaN/inf pixel in an input frame would silently propagate into the master (and thence every
-    calibrated light at that pixel). **Not triggerable on real inputs**: `load_seestar_raw` yields integer
-    sensor readouts cast to float32 (finite by construction), so no NaN/inf ever reaches the combine. A pure
-    consistency/defensiveness fix (make all three methods `nan`-aware) would be byte-for-byte identical on every
-    real calibration set — worth doing only if a Scout judges it more than churn (it changes nothing a user sees).
+    calibrated light at that pixel).~~ — **FIXED v0.134.2** (Builder 2026-07-16, branch
+    `claude/pensive-faraday-h477bm`; regression-tested). Judged **more than churn**: the combine sits on the
+    calibration data-integrity path (focus #1) and the input is a *user-supplied* file, so it is not strictly
+    "not triggerable" — a float FITS calibration frame carrying a NaN/inf pixel (an exported master re-used as
+    an input, a partially-corrupt file) does reach `np.stack` and, for `mean`, a single NaN at a pixel poisons
+    that pixel in the master → every calibrated light. **Fix:** mask any non-finite sample to NaN once
+    (`finite_stack = np.where(np.isfinite(stack), stack, np.nan)` — handles inf too, which `nanmean` alone does
+    not) and run all three methods over it (`nanmedian`/`nanmean`; `_sigma_clip_mean` now also gets the masked
+    stack and its `full_med` fallback uses `nanmedian`), so a non-finite sample is ignored and the finite ones
+    still combine, matching the engine's "NaN = no data" invariant. An all-non-finite pixel stays NaN =
+    genuinely no data. **Byte-for-byte identical on every real integer-readout calibration set** (`np.isfinite`
+    is all-True there, so the mask is a no-op). Additive, upgrade-safe (no config/DB/API/on-disk change).
+    Regressions in `tests/test_calibrate.py`: `test_build_master_is_nan_aware` (parametrised over
+    median/mean/sigma_mean — a NaN + an inf pixel in one input frame no longer poison the master;
+    fail-before under mean/median) and `test_build_master_all_nan_pixel_stays_nan` (an all-non-finite pixel
+    stays NaN, not folded to 0). Severity: data-integrity on a non-finite user input (low reachability).
   - **(2)** `stack/drizzle_path.py:300-303` — `frame_coverage` (`self._count`) is derived from **channel-0's**
     `out_wht` only, while the finite-mask and clip-reject masks are computed per channel; a pixel kept in
     channels 1/2 but NaN/clip-rejected in channel 0 is undercounted. **Diagnostic-only** (`coverage_min`/

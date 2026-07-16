@@ -26,6 +26,7 @@ peak memory. For Seestar-sized mosaics (~8 MB/frame as float32) 64 frames is
 from __future__ import annotations
 
 import logging
+import warnings
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -94,7 +95,10 @@ def _sigma_clip_mean(stack: np.ndarray, sigma: float, max_iters: int = 5) -> np.
     # median where nothing survived, exactly as the single-round version did.
     with np.errstate(invalid="ignore"):
         out = np.nanmean(np.where(kept, stack, np.nan), axis=0)
-    full_med = np.median(stack, axis=0)
+        # NaN-aware so the fallback is genuinely finite wherever *any* sample is
+        # finite (a plain median would return NaN at a pixel that has even one NaN
+        # input, defeating the "always-finite" fallback on a partially-NaN stack).
+        full_med = np.nanmedian(stack, axis=0)
     return np.where(np.isfinite(out), out, full_med).astype(np.float32, copy=False)
 
 
@@ -199,12 +203,26 @@ def build_master(
         return None
     progress("Combining", 0, 1)
     stack = np.stack(arrays, axis=0)  # (N, H, W)
-    if method == "median":
-        master = np.median(stack, axis=0).astype(np.float32, copy=False)
-    elif method == "mean":
-        master = np.mean(stack, axis=0).astype(np.float32, copy=False)
-    else:  # sigma_mean
-        master = _sigma_clip_mean(stack, sigma)
+    # NaN-aware combine (the engine invariant: a non-finite sample is "no data",
+    # don't fold it into a value). Real Seestar raws are finite integer readouts
+    # cast to float32, so masking is a no-op and this is byte-for-byte identical to
+    # a plain median/mean on them — but a user-supplied float FITS calibration frame
+    # carrying a NaN/inf pixel would otherwise poison that pixel in the master (and
+    # thence every calibrated light). Treat NaN *and* inf uniformly (nanmean ignores
+    # NaN but not inf), mirroring the `sigma_mean` path and the flat build. An
+    # all-non-finite pixel (no finite sample anywhere) stays NaN = genuinely no data.
+    finite_stack = np.where(np.isfinite(stack), stack, np.nan)
+    with np.errstate(invalid="ignore"), warnings.catch_warnings():
+        # An all-non-finite pixel legitimately reduces to NaN ("no data"); numpy
+        # warns "Mean/Median of empty slice" there — expected, not an error.
+        warnings.filterwarnings("ignore", r"(Mean|All-NaN|Degrees of freedom).*",
+                                RuntimeWarning)
+        if method == "median":
+            master = np.nanmedian(finite_stack, axis=0).astype(np.float32, copy=False)
+        elif method == "mean":
+            master = np.nanmean(finite_stack, axis=0).astype(np.float32, copy=False)
+        else:  # sigma_mean
+            master = _sigma_clip_mean(finite_stack, sigma)
     progress("Combining", 1, 1)
 
     h, w = ref_shape
