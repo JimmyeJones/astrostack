@@ -80,14 +80,17 @@ higher on this list wins — always:
 4. **Best-possible image quality** for the OSC Seestar workflow (clean, detailed
    final images).
 
-**⚡ IMMEDIATE PRIORITY (owner-reported 2026-07): bright galaxy cores blow out to
-white + Auto regressed.** See the ⭐ top entry in `docs/IMPROVEMENTS.md` → "Bugs
-(fix these first)". Strong lead: the STF autostretch (now the Auto + default-view
-stretch) has no highlight rolloff and clips bright HDR cores (M31). Reproduce on a
-synthetic bright-core-on-faint-disk target, give STF a highlight knee, and re-check
-the Auto recipe. This — and image quality on the **stack → Auto → result** path
-generally — is the front-of-queue focus right now. The Scout should verify it on a
-real-data dogfood.
+**⚡ IMMEDIATE PRIORITY (owner-reported 2026-07): Sky map placement + black-box
+background.** See the ⭐ top entry in `docs/IMPROVEMENTS.md` → "Bugs (fix these
+first)". Two traced bugs on the Sky map page: (1) an irregular mosaic shows as a
+**black rectangle** because the overlay uses the opaque `mode="RGB"` preview PNG
+(uncovered NaN → black) instead of an RGBA image with `alpha=0` on uncovered
+pixels; (2) overlay **placement/orientation is off** because `_tan_wcs`
+(`webapp/routers/sky.py`) extrapolates the WCS from a single frame's pixscale +
+best-effort rotation instead of the stack's own canvas geometry. Fix both, verify
+on a real irregular mosaic, and pin the rotation sign with a test. This is the
+front-of-queue focus right now. (The earlier bright-core/STF-autostretch immediate
+priority was **fixed in v0.119.1**.)
 
 **Current focus (2026-07 — set by the owner).** The editor (priority 1) is now
 **well-hardened**: its traced bug backlog is drained and repeated adversarial
