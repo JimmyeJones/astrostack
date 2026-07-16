@@ -122,6 +122,21 @@ def test_curated_extras_appear_in_a_plan():
     assert dbl.max_altitude_deg > 30.0  # genuinely up that night
 
 
+def test_catalog_plan_rows_carry_a_framing_hint():
+    """A sized catalog candidate surfaces its "will it fit?" verdict pre-capture."""
+    plan = plan_tonight(LONDON, JAN_EVENING)
+    by_id = {t.id: t for t in plan.targets}
+    # M31 (~178', bigger than a single Seestar frame) → a mosaic framing hint.
+    m31 = by_id["M31"]
+    assert m31.size_arcmin == 178.0
+    assert m31.framing is not None
+    assert m31.framing.level == "mosaic"
+    # A compact target fits comfortably (no mosaic nudge).
+    m57 = by_id["M57"]
+    assert m57.framing is not None
+    assert m57.framing.level == "fits"
+
+
 def test_dark_window_is_astronomical_in_winter():
     plan = plan_tonight(LONDON, JAN_EVENING)
     dw = plan.dark_window

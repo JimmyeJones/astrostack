@@ -79,6 +79,14 @@ def test_tonight_with_settings_location(client, solved_library):
     assert near_m42 and all(t["already_targeted"] for t in near_m42)
     # The catalog fills in "not yet targeted" candidates too.
     assert any(not t["already_targeted"] for t in targets)
+    # A sized catalog candidate carries its "will it fit?" framing hint so the
+    # planner can nudge toward mosaic mode pre-capture.
+    by_id = {t["id"]: t for t in targets}
+    if "M31" in by_id:  # Andromeda is up from London in January
+        m31 = by_id["M31"]
+        assert m31["size_arcmin"] == 178.0
+        assert m31["framing"]["level"] == "mosaic"
+        assert "mosaic" in m31["framing"]["text"]
 
 
 def test_tonight_min_alt_override_changes_usable_window(client, solved_library):

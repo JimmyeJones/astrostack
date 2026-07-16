@@ -99,6 +99,20 @@ describe("TonightView", () => {
     expect(screen.getByText(/M13/)).toBeInTheDocument();
   });
 
+  it("badges an oversized catalog suggestion with a mosaic-mode nudge", async () => {
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
+      targets: [target({
+        id: "M31", name: "Andromeda Galaxy", already_targeted: false, score: 70,
+        size_arcmin: 178,
+        framing: { level: "mosaic", text: "is bigger than the Seestar's single frame." },
+      })],
+    }));
+    renderTonight();
+    await waitFor(() =>
+      expect(screen.getByText(/Andromeda Galaxy/)).toBeInTheDocument());
+    expect(screen.getByText("Needs mosaic")).toBeInTheDocument();
+  });
+
   it("shows the active minimum-altitude floor even when it isn't a round preset", async () => {
     // A 45° floor is reachable from the step-5 Settings input but isn't one of
     // the picker's presets — the Select must still render it, not blank out.

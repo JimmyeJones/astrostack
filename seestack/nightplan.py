@@ -36,6 +36,8 @@ from pathlib import Path
 
 import numpy as np
 
+from seestack.framing import FramingHint, framing_hint
+
 log = logging.getLogger(__name__)
 
 _DATA_DIR = Path(__file__).parent / "data"
@@ -253,6 +255,13 @@ class PlannedTarget:
     target_safe: str | None = None
     frames_accepted: int | None = None
     total_exposure_s: float | None = None
+    # "Will it fit in one Seestar frame?" — major-axis size (arcmin) and the
+    # verdict derived from it, for catalog candidates the bundled catalog has a
+    # size for; ``None`` otherwise (library rows carry none — the Target page
+    # already shows their framing, and a mosaic result would confuse the
+    # single-frame catalog verdict). See :mod:`seestack.framing`.
+    size_arcmin: float | None = None
+    framing: FramingHint | None = None
 
 
 @dataclass
@@ -710,6 +719,8 @@ def plan_tonight(observer: Observer, when_utc: datetime, *,
                 moon_up_fraction=o.moon_up_fraction,
                 usable_start_utc=o.usable_start_utc.isoformat() if o.usable_start_utc else None,
                 usable_end_utc=o.usable_end_utc.isoformat() if o.usable_end_utc else None,
+                size_arcmin=obj.size_arcmin,
+                framing=framing_hint(obj.size_arcmin),
             ))
 
     plan.targets.sort(key=lambda p: (-p.score, -p.max_altitude_deg))

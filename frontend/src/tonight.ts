@@ -1,7 +1,22 @@
 // Pure helpers for the 'Tonight' night-planner page — kept out of the component
 // so they're easy to unit-test without rendering.
 
-import type { NightPlan, PlannedTarget } from "./api/client";
+import type { FramingHint, NightPlan, PlannedTarget } from "./api/client";
+
+// A compact "will it fit in one frame?" table badge for a catalog planner row —
+// a pre-capture nudge so a beginner picks mosaic mode *before* pointing at an
+// oversized target. Only the actionable verdicts get a badge: `mosaic` (won't
+// fit at all) and `tight` (about as wide as a frame); the reassuring `fits` case
+// returns null so it never clutters a dense plan table. `tooltip` carries the
+// full sentence for hover. Null when there's no framing hint at all.
+export function framingRowBadge(
+  framing: FramingHint | null | undefined,
+): { label: string; color: string; tooltip: string } | null {
+  if (!framing || framing.level === "fits") return null;
+  const label = framing.level === "mosaic" ? "Needs mosaic" : "Mosaic for margin";
+  const color = framing.level === "mosaic" ? "orange" : "yellow";
+  return { label, color, tooltip: `This target ${framing.text}` };
+}
 
 // A short, friendly Moon-phase label from the illuminated fraction (0..1).
 //

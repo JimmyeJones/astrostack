@@ -11,10 +11,10 @@ import { QueryError } from "../components/QueryError";
 import { formatIntegration } from "../format";
 import { readinessRowHint } from "../readiness";
 import {
-  filterByTypeBucket, formatClock, formatMinutes, minAltOptions, moonCueForTarget,
-  moonPhaseLabel, moonWindowNote, notUpTonightNote, partitionByUpTonight,
-  planDateBounds, planNightLabel, scoreColor, splitTargets, typeFilterOptions,
-  usableWindowNote,
+  filterByTypeBucket, formatClock, formatMinutes, framingRowBadge, minAltOptions,
+  moonCueForTarget, moonPhaseLabel, moonWindowNote, notUpTonightNote,
+  partitionByUpTonight, planDateBounds, planNightLabel, scoreColor, splitTargets,
+  typeFilterOptions, usableWindowNote,
 } from "../tonight";
 
 function ScoreBadge({ score }: { score: number }) {
@@ -35,6 +35,10 @@ function TargetRow({ t }: { t: PlannedTarget }) {
   const readyHint = t.already_targeted
     ? readinessRowHint(t.total_exposure_s ?? 0, t.type)
     : null;
+  // Pre-capture "will it fit?" nudge for a catalog candidate that's bigger than
+  // (or as wide as) a single Seestar frame — so a beginner reaches for mosaic
+  // mode before pointing. Only the too-big cases badge; "fits" stays silent.
+  const framingBadge = framingRowBadge(t.framing);
   return (
     <Table.Tr>
       <Table.Td>
@@ -55,6 +59,14 @@ function TargetRow({ t }: { t: PlannedTarget }) {
           <Badge mt={4} size="xs" variant="light" color={readyHint.color}>
             {readyHint.label}
           </Badge>
+        ) : null}
+        {framingBadge ? (
+          <Tooltip label={framingBadge.tooltip} multiline w={240} withArrow>
+            <Badge mt={4} ml={readyHint ? 4 : 0} size="xs" variant="light"
+              color={framingBadge.color}>
+              {framingBadge.label}
+            </Badge>
+          </Tooltip>
         ) : null}
       </Table.Td>
       <Table.Td>{t.max_altitude_deg.toFixed(0)}°</Table.Td>
