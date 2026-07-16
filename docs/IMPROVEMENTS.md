@@ -3843,10 +3843,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   new query param is optional, and the Target-page card is unchanged. Tests: `StackHealthCard.test.tsx`
   (`noteAction` mapping for trim_border/calibration/none + the rendered link), `test_target_stack_health.py`
   (grades a specific run by id / newest by default / null for an unknown run_id), History suite still green.
+  **Slice (b) — editor result surface — SHIPPED v0.128.0** (Builder 2026-07-16, branch
+  `claude/pensive-faraday-v69lo2`). The same `StackHealthCard` now renders on the **editor** result
+  surface (below the `ObjectInfoCard`, where a beginner is crafting/admiring the picture and most wants
+  "is this any good, and what next?"), reusing the shipped component + the `GET …/stack-health?run_id=`
+  endpoint (v0.121.0) to grade the exact run being edited. A new `inEditor` prop drops the redundant
+  `trim_border` **self-link** (that note would otherwise link back to the very editor page the user is on,
+  where the "Trim border" button already lives in the op list) — the note text still guides them to the
+  button, and the off-page `calibration` link is kept. Read-only, self-hides until there's a genuine stack
+  to grade; frontend-only, additive, no backend/schema/API/default change. Tests: `StackHealthCard.test.tsx`
+  (+2 — `noteAction` drops the trim_border self-link in-editor but keeps calibration; the card shows a
+  trim_border note's text without the link in editor mode) and `Editor.test.tsx` (+1 — the card surfaces on
+  the result, grades the edited run, and renders no self-link). tsc + full vitest + vite build green.
   **Slice (b) remainder still open:** a highlight-clip cue (needs loading the stacked pixels + real-data
-  threshold tuning — filed as its own idea below, gated like the other pixel-threshold items) and the editor
-  result surface. *(Scout-filed 2026-07-14; L overall; slice (a) shipped v0.120.0, slice (b) part shipped
-  v0.121.0. Pillars: autonomy + friendliness + image-quality/trust — PRIORITY 2/3/4. Beginner bar ✔.)*
+  threshold tuning — filed as its own idea below, gated like the other pixel-threshold items). *(Scout-filed
+  2026-07-14; L overall; slice (a) shipped v0.120.0, slice (b) parts shipped v0.121.0 + v0.128.0. Pillars:
+  autonomy + friendliness + image-quality/trust — PRIORITY 2/3/4. Beginner bar ✔.)*
   <details><summary>Original idea</summary>
   After a stack finishes, a beginner has no way to know whether the image is *good* or what one
   thing would most improve it — the readiness card only speaks to *integration time*, not the actual pixels.
@@ -4217,14 +4229,13 @@ problems. Dogfood it every big-picture run and fix root causes.
   `tests/webapp/test_editor.py::test_stretch_suggestion_threads_already_display` captures the ctx for a
   display-space run and asserts `already_display is True` (fails before / passes after). One-line consistency
   fix, no behaviour change today. *(Original write-up kept below.)*
-- **Tidiness: `stretch_suggestion` omits `already_display` from its `EditContext`.** *(Traced, Scout
-  2026-07-11 — latent, not a live bug.)* Every sibling suggestion endpoint threads `already_display` into the
-  ctx it builds, but `webapp/routers/editor.py::stretch_suggestion` (~L809) doesn't. It's harmless *today* only
-  because that call also passes `auto_stretch=False`, and `already_display` is read solely by the auto-stretch
-  fallback (`if not stretched and auto_stretch and not ctx.already_display`, `edit/pipeline.py:81`). But if that
-  call ever flips to `auto_stretch=True`, a re-edited display-space run would double-stretch in the stretch
-  measurement only — a silent, hard-to-spot divergence. One-line consistency fix (pass `already_display` like
-  the siblings) closes the trap. (S, tidiness/safety.)
+- ~~**Tidiness: `stretch_suggestion` omits `already_display` from its `EditContext`.**~~ — **ALREADY
+  FIXED (curated by Builder 2026-07-16).** `webapp/routers/editor.py::stretch_suggestion` now threads
+  `already_display=_run_display_space(run)` into the `EditContext` it builds (editor.py:811), exactly like
+  its sibling suggestion endpoints (`denoise_suggestion`, `levels_suggestion`, `curve_suggestion`, …), so
+  the latent double-stretch trap is closed. A later run landed the one-line consistency fix; this stale
+  backlog entry is retired to keep the list honest. *(Traced, Scout 2026-07-11 — was latent, not a live
+  bug.)*
 - ~~**Low-priority: manual re-stacks (not just reprocess) still overwrite the target's
   `master` output.**~~ — **FIXED v0.81.8** (see Shipped). Took the "newest run stays
   `master`, older run renamed+rerowed" direction the note preferred: `write_stack_outputs`

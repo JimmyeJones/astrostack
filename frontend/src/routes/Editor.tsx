@@ -16,6 +16,7 @@ import { api, type EditOp, type OpInstance, type Recipe } from "../api/client";
 import { useUndoable } from "../hooks/useUndoable";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { ObjectInfoCard } from "../components/ObjectInfoCard";
+import { StackHealthCard } from "../components/StackHealthCard";
 import { QueryError } from "../components/QueryError";
 import { Histogram } from "../components/editor/Histogram";
 import { tonalHistGuides } from "../components/editor/tonalGuides";
@@ -1174,6 +1175,14 @@ export function EditorView() {
           page, shown here where a beginner is admiring the finished picture and
           most wants to know what it is. Renders nothing unless it matches. */}
       <ObjectInfoCard safe={safe} />
+
+      {/* "How's my stack?" — the same plain-language health check the Target and
+          History pages show, surfaced here on the result the beginner is actually
+          working on, so "is this any good, and what next?" is answered right where
+          they're crafting the picture. `inEditor` drops the redundant Trim-border
+          self-link (that button is in the op list on this very page). Read-only,
+          self-hides until there's a genuine stack to grade. */}
+      <StackHealthCard safe={safe} runId={rid} inEditor />
 
       <Grid>
         {/* Preview + histogram */}

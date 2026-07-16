@@ -140,6 +140,32 @@ describe("EditorView", () => {
     expect(screen.getByText("Download full-res PNG")).toBeInTheDocument();
   });
 
+  it("surfaces the 'How's my stack?' health check on the result, without a redundant Trim-border self-link", async () => {
+    // The health card is shown here too (as on Target/History), so a beginner
+    // gets "is this any good, and what next?" right where they craft the picture.
+    // In the editor the Trim-border button is already on the page, so a
+    // trim_border note must NOT render a link back to this same page.
+    mockEditorQueries();
+    vi.spyOn(client.api, "stackHealth").mockResolvedValue({
+      run_id: 3,
+      notes: [{ kind: "trim_border", severity: "info",
+        message: "Ragged low-coverage border — Trim border to clean it up.",
+        action: "trim_border" }],
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    expect(await screen.findByText("How's my stack?")).toBeInTheDocument();
+    expect(screen.getByText(/Ragged low-coverage border/)).toBeInTheDocument();
+    // No self-link back to the editor page we're already on.
+    expect(screen.queryByRole("link", { name: /trim the border/i })).toBeNull();
+    // It graded the run being edited.
+    expect(client.api.stackHealth).toHaveBeenCalledWith("M_42", 3);
+  });
+
   it("shows a recoverable error, not an endless spinner, when the run is missing", async () => {
     // A deleted stack run (or a stale "View result" link) 404s from getRecipe.
     // Before the isError guard the editor chrome rendered but the preview never
