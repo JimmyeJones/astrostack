@@ -72,9 +72,13 @@ when you take it.
   detail recovered (fewer white pixels + higher core std + max<1.0), background untouched,
   and the helper's monotonic/bounded/below-knee-identity/negative-floor properties.
   Additive, no schema/config/API/default-flip; only changes rendered highlight pixels on
-  an over-bright core (the reported defect). **Follow-up filed below:** `asinh_stretch`
-  shares the identical hard-clip and would benefit from the same rolloff (manual path, so
-  lower priority). Severity: wrong-result (owner-visible). Confidence: reproduced + fixed.
+  an over-bright core (the reported defect). **Follow-up (now DONE — corrected by Scout
+  2026-07-16):** the `asinh_stretch` sibling was subsequently given the *same* rolloff —
+  `render/thumbnail.py::asinh_stretch` now takes `protect_highlights: bool = True` and applies
+  `_highlight_rolloff(xr)` before the asinh curve (thumbnail.py:195,268), so it no longer
+  hard-clips highlights. Verified in code + re-confirmed by an adversarial render audit this run;
+  no open asinh-rolloff follow-up remains. Severity: wrong-result (owner-visible). Confidence:
+  reproduced + fixed.
 
 - ~~**GPU background-subtract ignored `dilate_object_mask_px` (hardcoded 5px), breaking CPU↔GPU
   consistency and the editor's preview↔export parity on a GPU host.**~~ — **FIXED v0.119.7** (Builder
@@ -301,6 +305,43 @@ when you take it.
   **this corrects the 2026-07-11 audit note below that recorded `hi = nanmax` as "not a fragility"** — that probe
   used only a mild 40× outlier where the MTF self-correction still holds; the clamps break it at the larger (and
   realistic full-well) outlier magnitudes measured here.
+
+_Scout audit log 2026-07-16 (baseline green on current `origin/main` v0.127.0: 1308 passed / 2 skipped):
+led the rotation with the **stacking engine** per the owner's current focus #1, combining hand-traces with
+four parallel adversarial subagent audits (each required to justify any finding by a concrete failing
+scenario, no speculation) and a live end-to-end dogfood. **All traced clean — no new verified bug filed;
+the engine is genuinely mature.** (1) **Hand-traced**: `stack/accumulator.py` (WeightedSum / Welford ddof=1
+NaN-signal-for-single-coverage / MinMaxReject k-trim tie-safety + count-band degrade + `rejection_counts`),
+`stack/align.py` (windowed reproject inset valid-mask — verified the 3px inset guarantees the order-1
+interp stencil never reaches out-of-frame on real-sized frames, so the CPU `cval=nan` / GPU `cval=0`
+difference is inert; order-1 sub-pixel-shift NaN propagation on full **and** windowed paths),
+`stack/stacker.py` (κ-σ pass-1/pass-2 `consume_clipped` keep-mask `|x−mean|≤κσ`, NaN-std→+inf-tol keep-all,
+`frame_cov` fallback correct on every branch incl. the min/max path's 3-D `coverage[...,0]`, `_pass`
+photometric `win_rgb *= scale` in place, memory-bounded `_imap_bounded`, lucky-imaging sort, mosaic-canvas
+excluded-frame accounting), `stack/output.py` (NaN-safe uint16/PNG/JPEG writes, `_to_uint16_linear`
+covered-pixel percentiles), and `bg/coverage_leveling.py`. (2) **Four subagent audits — all clean**:
+`drizzle_path.py` (two-pass κ-σ var=E[v²]−E[v]² in float64, Bessel + `_MIN_REJECT_NEFF` + `_VAR_RESOLUTION_FACTOR`
+gates, NaN→zero-weight, frame-count support tracking); `calibrate/{apply,masters}.py` (float32-domain
+dark-XOR-bias so no uint underflow, flat floor >0.1, exposure-scaled dark direction, sigma-clip combine);
+`mosaic.py`/`pointings.py`/`reference.py`/`photometric.py` (RA 0/360 wrap circular-mean everywhere, canvas
+px/MP caps + off-by-one, scale direction `ref/transparency` boosts hazy frames, deterministic tie-breaks);
+and `render/thumbnail.py` (the owner's Auto/STF path — `_highlight_rolloff` C¹-continuous/monotonic/bounded<1,
+no sky cast, NaN excluded per-channel, preview↔export share one function). (3) **Dogfood**: ran real
+end-to-end `run_stack` on synthetic Seestar FITS across no-reject / κ-σ / min-max / quality-weighted paths —
+NaN=coverage preserved at the reprojection border, output finite, and at **n=12** a genuine transient streak
+is correctly clipped by κ-σ (mean 48.70→46.33) while real star cores are preserved (max unchanged); at n=6 κ-σ
+correctly does *nothing* to a lone outlier (the documented n<11 limitation — min-max is the answer there).
+**Curation done this run:** (a) corrected a **stale doc note** — the fixed owner-bug entry said `asinh_stretch`
+still shares the hard-clip and "would benefit from the same rolloff"; verified in code + audit that
+`asinh_stretch(protect_highlights=True)` already applies `_highlight_rolloff`, so that follow-up is DONE (no
+open item remains); (b) filed two low-priority items — a verified-by-trace, cosmetic-only pair of drizzle
+edge/floor nits (half-pixel in-bounds mask + Bessel-before-floor gate; NOT in "fix first" as drizzle is a
+non-default power-user path), and a latent, not-currently-reachable `_downsample_rgb` NaN-fragility (one-line
+`nanmin`/`nanmax` hardening); (c) added one new beginner feature ("Watch your picture appear" — a shareable
+stack-progress animation from the quick-look snapshots). The two open Bugs (dead SExtractor skew-guard in 4
+bg/leveling helpers; sky-atlas WCS rotation sign) remain correctly REAL-data-gated — not blind-fixable.
+**Next rotation (not re-covered from a fresh angle this run):** `webapp/{watcher,jobs,pipeline}.py` orchestration
+and the `io/{scanner,ingest,merge}.py` ingest path; and the two GPU-only reproject/bg seams want a real GPU host._
 
 _Builder audit log 2026-07-14 (baseline green on current `origin/main` v0.119.7: 1261 passed / 2 skipped):
 with the Bugs list drained of ready work (the two open entries — the algebraically-dead SExtractor
@@ -3438,6 +3479,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   (never the give-up "none" path). Pure frontend read of a field already returned; additive, no behaviour change.
   Regression tests in `colorCal.test.ts` (appends the note for a clamped star/background solve; absent when nothing
   was clamped or `notes` is missing).
+- **Drizzle edge/floor polish — two verified-by-trace, cosmetic-only nits in `stack/drizzle_path.py`
+  (NOT a "fix first" bug — the drizzle path is opt-in, off by default, and neither affects the
+  interior image).** (S code + S test each; image-quality/correctness — PRIORITY 4, low.) *(Scout audit
+  2026-07-16, traced; deliberately filed here, not in "Bugs (fix these first)", because both are
+  cosmetic and drizzle is a non-default power-user path.)* **(1) Half-pixel-too-tight in-bounds mask
+  (`drizzle_path.py:193-196`).** `add_frame` masks input pixels to `pixmap ∈ [0, w_out-1] × [0,
+  h_out-1]`, but astropy 0-based pixel *centres* validly span `[-0.5, w_out-0.5]`. Input pixels whose
+  centres land in the outermost ½-pixel band get `wmap=0`, so their drizzle footprint isn't deposited
+  even though it overlaps the edge output column/row — a slight coverage/intensity falloff in the
+  extreme outer ≤½-px ring of the drizzle canvas (matters at most at a mosaic panel's outer edge; the
+  interior is untouched). Fix: widen the bounds to `>= -0.5` / `<= w_out-0.5` (and `h_out`). **(2)
+  Bessel-inflated variance in the resolution-floor gate (`drizzle_path.py:290,304`).** In
+  `clip_reference`, `var` is multiplied by the Bessel factor (line 290) *before* the
+  `unresolved = var <= _VAR_RESOLUTION_FACTOR·m²` float32-cancellation-floor test (line 304), so the
+  floor sees an up-to-1.5×-inflated variance at `neff≈3`, shrinking the intended 16× margin to ~10×.
+  Still a large margin (no reproducible failure), but the floor test should compare the *raw* `m2−m²`
+  against the factor. Both are one-line changes with a targeted test (deposit a frame whose data
+  reaches the exact canvas edge → assert edge coverage; a low-`neff` bright-flat region → assert
+  `tol=+inf` unchanged). Confidence: traced (two independent reads agree). Leave for a run that's
+  already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
 - **⭐ OWNER-REQUESTED — Bulk upload FITS through the web interface (no NAS share
@@ -4028,6 +4089,33 @@ problems. Dogfood it every big-picture run and fix root causes.
   Tonight planner. Feasibility: fully offline, no new dependency, additive/reversible; the size data must be
   vetted before the hint graduates from "for known-size targets only". Serves the north-star "it just
   works" by catching a mistake *before* a wasted session.
+- **NEW BEGINNER FEATURE (Scout 2026-07-16) — "Watch your picture appear": a shareable
+  stack-progress animation built from the quick-look snapshots.** (M, pillar: enjoy/share —
+  PRIORITY 3 friendliness + owner-requested "new beginner features" cadence.) *The single most
+  delightful thing about stacking, for a beginner, is watching a noisy single sub resolve into a
+  clean deep-sky image as frames pile on — but today that magic is invisible: the stacker already
+  writes a `<name>_quicklook.png` every `quick_look_interval` frames during pass 1, then
+  **overwrites it each time** (`stacker.py::_save_quick_look`), so only the last snapshot survives.*
+  **Idea:** keep the intermediate snapshots (or accumulate them into one file) and offer a short
+  looping animation — "watch your image come together" — from ~5–15 frames of the stack building up,
+  plus a one-tap **Share** (reusing the existing Web Share / download-picture plumbing shipped in
+  v0.126–0.127). A beginner gets an emotionally rewarding, genuinely social artifact ("here's my
+  galaxy appearing out of noise") with zero new astro knowledge required. **Why it clears the
+  beginner bar:** sane default (auto-generate whenever a stack produced ≥3 quick-look snapshots; off
+  otherwise), plain-language, not pro/niche tooling, purely additive and downstream of the finished
+  stack. **Feasible slices:** (a) engine — stop overwriting: write snapshots to
+  `output/<name>_progress/NNN.png` (bounded count, e.g. keep at most ~12 evenly-spaced frames so a
+  5,000-sub stack doesn't fill the disk), gated behind a new default-off `StackOptions.save_progress`
+  so existing behaviour is byte-identical and it's upgrade-safe; (b) engine/webapp — assemble an
+  animated GIF or WEBP (Pillow can do both, already a dependency) and expose it on the History/Target
+  page next to the master; (c) frontend — a small autoplay `<img>`/player with the existing Share
+  button. Each slice is independently shippable; (a) alone is a safe, testable Builder task (a
+  regression that N snapshots land, capped, and that `save_progress=False` leaves output untouched).
+  Respects guardrails: no new heavy deps, no schema/DB change, memory-bounded (snapshots are already
+  small autostretched PNGs), default-off. **Note for the Builder:** the quick-look PNGs are
+  autostretched with the *thumbnail* `target_bg`, so the animation's brightness will drift as the
+  black point re-solves per snapshot — either accept that (it reads as "getting cleaner") or fix the
+  stretch reference to the final frame for a steadier look; pick during build.
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
@@ -4096,6 +4184,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+- **NEW (Scout 2026-07-16) — harden `_downsample_rgb` against a NaN input (latent, not currently
+  reachable; small safe robustness fix).** (XS code + XS test, robustness — low priority.) *(Found by an
+  adversarial render-path audit this run; the one non-NaN-aware reduction in `render/thumbnail.py`.)*
+  `render/thumbnail.py::_downsample_rgb` (~L235 region — the raw-sub thumbnail path) computes its
+  normalization range with plain `lo = float(rgb.min())` / `hi = float(rgb.max())`. If `rgb` ever
+  contains a NaN both become NaN, the `hi <= lo` guard is False (NaN comparisons), and the whole frame
+  collapses to a black thumbnail (all-NaN → downstream `autostretch` sees no finite pixels → all-black).
+  **Not triggerable today**: this path only consumes a raw debayered sub (integer Seestar raw → no NaN);
+  every *stack/mosaic/reprojected* array (which does carry NaN=no-coverage) goes through the sibling
+  `autostretch`, which is already `nanmin`/`nanpercentile`-based. Fix is a one-line swap to
+  `np.nanmin`/`np.nanmax` (mirroring `autostretch`/`asinh_stretch`) plus a regression that a NaN-bearing
+  input still produces a finite, non-black thumbnail. File-and-forget defensive hardening — no user
+  impact today, just removes a foot-gun for any future caller that points the thumbnail at a NaN FITS.
+  Confidence: traced. **(Also noted, no action:** `_downsample_rgb` quantizes to uint8 *before* the
+  stretch, so a faint-sky raw-sub preview can posterize — cosmetic, thumbnail-only; not worth a change.)
 - ~~**NEW (Scout 2026-07-14) — a schema-completeness drift test so a `frames`/`stack_runs` column can never
   again be added without an upgrade being safe.**~~ — **SHIPPED v0.121.1** (Builder 2026-07-14, branch
   `claude/pensive-faraday-4tspys`). New `tests/test_project_schema_drift.py` (4 tests) documents and guards the
