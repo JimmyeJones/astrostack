@@ -8,6 +8,7 @@ import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { api, type GalleryItem, type StackOptionField } from "../api/client";
+import { sharePictureText } from "../share";
 import { formatIntegration } from "../format";
 import { HazyNightBadge } from "../components/HazyNightBadge";
 import { CalibrationBadge } from "../components/CalibrationBadge";
@@ -418,6 +419,15 @@ export function GalleryView() {
           ? api.stackArtifactUrl(viewing.safe, viewing.run_id, "jpeg") : undefined}
         rawHref={viewing?.has_fits
           ? api.stackArtifactUrl(viewing.safe, viewing.run_id, "fits") : undefined}
+        {...(viewing?.has_preview
+          ? (() => {
+              const { title, text, filename } = sharePictureText(
+                viewing.target_name,
+                new Date(viewing.timestamp_utc).toLocaleDateString(),
+              );
+              return { shareFilename: filename, shareTitle: title, shareText: text };
+            })()
+          : {})}
         onClose={() => setViewing(null)}
       />
     </Stack>
