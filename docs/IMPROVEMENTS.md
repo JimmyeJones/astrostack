@@ -1520,6 +1520,23 @@ the real webapp stack→edit path.)_
   clean — WCS parse, solve-success detection (returncode + sidecar), RA-wrap in the center consumers, hint
   unit conversion, and setup-error classification all held.
 
+- **Queued-job cancel vs. worker-start race can report a non-cancel-aware job "cancelled" while it
+  actually runs to completion.** *(Traced, Builder webapp audit 2026-07-16; low confidence it's
+  reachable in practice, low severity.)* `webapp/jobs.py::cancel` reads `job.state` **without holding
+  `_lock`** and, if it sees `"queued"`, writes `state="cancelled"` + `finished_utc` and persists.
+  Meanwhile `_run` does `queue.get()` → checks `if job.state == "cancelled": continue` → sets
+  `state="running"`. If a cancel lands in the window *after* the worker passed the `== "cancelled"` check
+  but *before* it set `"running"`, `cancel()` still sees `"queued"`, marks the job cancelled and persists a
+  terminal row — then the worker overwrites `state="running"` and runs the body. For a **cancel-aware**
+  body this is benign (the `_cancel` event is set, so it returns early). For a **non-cancel-aware** body
+  (`submit_build_master`, `submit_editor_png`, `submit_editor_share`) the body ignores `_cancel`, runs to
+  completion, and `_persist` writes `done` — so the user was told the job was cancelled (and briefly saw a
+  `cancelled` row) but a master/PNG was actually produced. **Fix (needs care):** take `_lock` in `cancel()`
+  when reading+transitioning `job.state`, or have the worker re-check `cancel_requested()` immediately after
+  flipping to `running` and short-circuit. Low priority — narrow timing window, no data corruption, only a
+  transiently-wrong job-state label — but a genuine lock-discipline gap. (S code + a threaded test,
+  friendliness/trust.) Found by an adversarial webapp pipeline/jobs/watcher audit.
+
 - ~~**`render.autostretch` crashes on a 2-D (mono) input while its sibling `asinh_stretch` handles it —
   latent API-contract gap, not currently user-reachable.**~~ — **FIXED v0.103.20** (Builder 2026-07-10;
   traced + regression-tested). `seestack/render/thumbnail.py::autostretch` did `img = rgb.astype(np.float32,
@@ -2138,6 +2155,19 @@ to **Shipped**.)_
 ### ⭐ Editor — make it excellent (PRIORITY 1)
 The editor is where a good stack becomes a good *picture*, and it has real
 problems. Dogfood it every big-picture run and fix root causes.
+- **Background-mesh box floor (`_scaled_box` `minimum=16`) is the one pixel-scale divergence with
+  no honest advisory.** *(Traced, Builder editor-parity audit 2026-07-16; low confidence it's a
+  visible defect — arguably a defensible tradeoff.)* `seestack/edit/ops/background.py::_scaled_box`
+  floors the proxy-scaled box/mesh size at 16 px so `Background2D` still tiles the small proxy. On a
+  heavily decimated proxy (a ~150 MP mosaic → `proxy_scale≈10`) even the default `box_size=128` scales
+  to `round(128/10)=13`, floored up to 16 = 160 full-res-equivalent px, so the preview's sky mesh is
+  ~25% coarser than the export's (which fits 128). Unlike the deconv/star-reduce sub-pixel floors —
+  which *surface* the divergence to the user via `deconv_understates_on_proxy` /
+  `star_reduce_overstates_on_proxy` — this one is silent. Effect is subtle (both are broad meshes) and
+  only bites at high decimation, so it's low priority; if confirmed visible on a real large mosaic, add
+  a sibling honest-advisory note (`bg_mesh_coarser_on_proxy`) rather than changing the floor (a smaller
+  floor risks a degenerate proxy mesh). (S, editor/parity-honesty — PRIORITY 1.) Found by an
+  adversarial editor preview↔export parity audit (which otherwise traced clean).
 - ~~**Give the manual `asinh` stretch the same highlight rolloff STF just got.**~~
   — **SHIPPED v0.119.2** (Builder 2026-07-14, same branch). `asinh_stretch` shared
   the identical hard-clip, so it got the same `_highlight_rolloff` behind a
@@ -4335,6 +4365,16 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+- **`validate_stack_options` accepts a non-integer float for `int`-typed fields.** *(Traced, Builder
+  routers audit 2026-07-16; low severity — muted impact.)* `webapp/schemas.py::validate_stack_options`
+  treats `int` and `float` fields identically (accepts any `int|float`, rejecting only `bool`), so an
+  `int`-declared option (`max_workers`, `min_max_reject_count`, `background_box_size`,
+  `quick_look_interval`) passes a value like `3.5`, and `coerce_stack_options` (a plain dataclass) does no
+  coercion, so the float reaches the engine. Impact is muted (`ThreadPoolExecutor(max_workers=3.5)`
+  tolerates a float; most others are range-guarded and used numerically), so this is a robustness tidy, not
+  a crash. Fix: add a `float.is_integer()` check (reject / floor) for `fld.type == "int"` in
+  `validate_stack_options`. (XS, robustness.) Found alongside the v0.131.5 `default_stack_options`
+  validation fix.
 - ~~**NEW (Scout 2026-07-16) — harden `_downsample_rgb` against a NaN input (latent, not currently
   reachable; small safe robustness fix).**~~ — **FIXED v0.131.1** (Builder 2026-07-16, branch
   `claude/pensive-faraday-6bwguj`; regression-tested). `render/thumbnail.py::_downsample_rgb` now reduces
