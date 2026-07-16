@@ -47,6 +47,30 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**Batch editor apply: a single malformed item sinks the *whole* job and hides the
+  exports that already succeeded.**~~ — **FIXED v0.131.4** (Builder 2026-07-16, branch
+  `claude/pensive-faraday-xp00ow`; traced + reproduced + regression-tested). Found by a fresh
+  adversarial webapp pipeline/jobs/watcher audit. `webapp/pipeline.py::submit_editor_batch`'s per-item
+  loop parsed the item fields **outside** the per-item `try` — `rid = int(item.get("run_id"))` at
+  pipeline.py:1132 — while the inner `try/except` (whose comment reads "one item shouldn't sink the
+  batch") wrapped only `_apply_editor_to_run`. The `POST /api/editor/batch` endpoint accepts an
+  **unvalidated** `items: list[dict]` (`webapp/routers/editor.py::BatchRequest`), so an item missing (or
+  carrying a non-numeric) `run_id` reached the loop and `int(None)` raised a `TypeError` that escaped the
+  loop → escaped `body` → `JobManager._run` marked the **whole job `error`** with `result=None`. Two
+  harms: (1) the documented per-item isolation was violated (all remaining items skipped), and (2) any
+  items already exported earlier in the same batch had really written new `stack_runs` rows + output files
+  to disk, but the job reported a bare `error` with **no record** of those successes — a
+  data-visibility/accounting loss, not just skipped work. **Fix:** moved the `run_id` parse (and the
+  progress update) *inside* the per-item `try`, so a malformed item is recorded in `errors[f"{safe}:
+  {run_id}"]` and the batch carries on — exactly like a failed export — and the good items' records
+  survive in `exported`. The error key uses the raw `run_id` value so a malformed one still keys uniquely.
+  Additive, no schema/config/API/default change; only converts a job-killing crash into the isolated
+  per-item error the loop already promised. Regression
+  `tests/webapp/test_pipeline_cancel_state.py::test_editor_batch_isolates_a_malformed_item` (a batch of one
+  good + one `run_id`-less item: fail-before the good export's record is lost to a `TypeError` /
+  pass-after the good item exports and the bad one is isolated into `errors`). Severity: wrong outcome for
+  a batch export (broken-UX / trust; no pixel data corrupted). Confidence: reproduced + fixed.
+
 - ~~**⭐ OWNER-REPORTED (2026-07 — TOP PRIORITY) — bright galaxy cores blow out to
   white, and the Auto result regressed.**~~ — **FIXED v0.119.1** (Builder 2026-07-14,
   branch `claude/pensive-faraday-r22s3k`; traced + reproduced + regression-tested).
