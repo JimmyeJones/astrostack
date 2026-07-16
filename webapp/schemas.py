@@ -418,6 +418,10 @@ _DESCRIPTORS: list[dict[str, Any]] = [
     {"key": "quick_look_interval", "label": "Quick-look every N frames", "type": "int",
      "group": "advanced", "min": 0, "max": 1000, "step": 10,
      "help": "Save a preview every N frames during pass 1. 0 = off."},
+    {"key": "save_progress", "label": "Save a “watch it appear” clip", "type": "bool",
+     "group": "advanced",
+     "help": "Keep a short looping animation of your picture coming together as frames "
+             "stack, shown on the result. A fun beginner extra; off by default."},
     {"key": "max_workers", "label": "Max workers", "type": "int", "group": "advanced",
      "min": 1, "max": 64, "step": 1, "help": "Blank = all CPU cores."},
     {"key": "use_gpu", "label": "Use GPU (if available)", "type": "bool", "group": "advanced",

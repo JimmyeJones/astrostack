@@ -251,6 +251,12 @@ class StackOptions:
     # Save an autostretched preview PNG every N frames during pass 1. Useful
     # for 10k-frame runs so the user can peek at progress. 0 disables.
     quick_look_interval: int = 0
+    # Keep a short "watch your picture come together" progress reel: a handful
+    # of evenly-spaced autostretched snapshots collected during pass 1 and
+    # assembled into a small looping animation next to the master. Off by
+    # default (byte-for-byte unchanged output when off); a friendly beginner
+    # extra, purely downstream of the finished stack.
+    save_progress: bool = False
     # Photometric color calibration (post-stack).
     color_calibration: bool = False
     color_calibration_mode: str = "gray_star"  # 'gray_star' | 'gaia'
@@ -922,6 +928,12 @@ def run_stack(
     # path (which falls back to its weight map).
     frame_cov: np.ndarray | None = None
 
+    # Periodic pass-1 previews: the legacy quick-look PNG and, when
+    # ``save_progress`` is on, the "watch it appear" reel. Wired into the
+    # standard (non-drizzle) accumulator paths below; assembled after the
+    # outputs are written (post-archive).
+    ql = _QuickLook(project.project_dir, options.output_name, options, n)
+
     # ---- 3a. Drizzle path (alternate accumulator) --------------------------
     if options.drizzle:
         from seestack.io.wcs_io import wcs_from_text, wcs_to_text
@@ -1007,15 +1019,10 @@ def run_stack(
     # can't in a small stack. Needs ≥3 frames to spare two samples.
     elif options.min_max_reject and n >= 3:
         mmr = MinMaxRejectAccumulator(canvas_3, reject_count=options.min_max_reject_count)
-        ql_state_mmr = {"counter": 0}
 
         def consume_min_max(aligned: np.ndarray, y0: int, x0: int, weight: float) -> None:
             mmr.add_window(aligned, y0, x0)
-            if options.quick_look_interval > 0:
-                ql_state_mmr["counter"] += 1
-                if ql_state_mmr["counter"] % options.quick_look_interval == 0:
-                    _save_quick_look(project.project_dir, mmr.result(),
-                                     options.output_name, ql_state_mmr["counter"])
+            ql.on_frame(mmr.result)
 
         n_used = _pass(
             frames, ref, dst_wcs_text, dst_shape, weights,
@@ -1045,15 +1052,10 @@ def run_stack(
     # done after one pass.
     elif options.sigma_clip and n >= 4:
         wel = WelfordAccumulator(canvas_3)
-        ql_state = {"counter": 0}
 
         def consume_pass1(aligned: np.ndarray, y0: int, x0: int, _weight: float) -> None:
             wel.add_window(aligned, y0, x0)
-            if options.quick_look_interval > 0:
-                ql_state["counter"] += 1
-                if ql_state["counter"] % options.quick_look_interval == 0:
-                    _save_quick_look(project.project_dir, wel.mean(),
-                                     options.output_name, ql_state["counter"])
+            ql.on_frame(wel.mean)
 
         n_used_p1 = _pass(
             frames, ref, dst_wcs_text, dst_shape, weights,
@@ -1125,15 +1127,10 @@ def run_stack(
     else:
         # Single-pass weighted mean.
         wsum = WeightedSumAccumulator(canvas_3)
-        ql_state_single = {"counter": 0}
 
         def consume_one_pass(aligned: np.ndarray, y0: int, x0: int, weight: float) -> None:
             wsum.add_window(aligned, y0, x0, weight=weight)
-            if options.quick_look_interval > 0:
-                ql_state_single["counter"] += 1
-                if ql_state_single["counter"] % options.quick_look_interval == 0:
-                    _save_quick_look(project.project_dir, wsum.result(),
-                                     options.output_name, ql_state_single["counter"])
+            ql.on_frame(wsum.result)
 
         n_used = _pass(
             frames, ref, dst_wcs_text, dst_shape, weights,
@@ -1245,6 +1242,10 @@ def run_stack(
         tiff_mode=options.tiff_mode,
         header_meta=header_meta,
     )
+    # Assemble the "watch it appear" reel now that the previous run's reel (if
+    # any) has been archived aside by write_stack_outputs — so this becomes the
+    # current ``{base}_progress`` sibling. Best-effort; never fails the stack.
+    ql.finish()
     progress("Saving", 1, 1)
 
     # If this run archived a previous output set (a re-stack of an already-stacked
@@ -1590,44 +1591,152 @@ def _align_for_stack(
     return win_rgb, y0, x0
 
 
-def _save_quick_look(
-    project_dir: Path,
-    rgb: np.ndarray,
-    out_basename: str,
-    counter: int,
-) -> None:
-    """
-    Write a small autostretched PNG of the current accumulator state.
+# Keep at most this many evenly-spaced snapshots in the progress reel, so a
+# 5,000-sub run doesn't hoard memory or produce a bloated animation — ~a dozen
+# frames make a smooth "watch it appear" clip.
+_PROGRESS_MAX_FRAMES = 12
+# Don't bother assembling a reel from fewer than this — too few frames to read
+# as an animation (a 2-frame stack has nothing to "watch come together").
+_PROGRESS_MIN_FRAMES = 3
+# Downscale reel frames to this width so the in-memory buffer stays tiny
+# regardless of a mosaic's full canvas size (bounded ~a dozen small frames).
+_PROGRESS_FRAME_WIDTH = 800
 
-    Called periodically during pass 1 so the user can peek at how the stack
-    is shaping up. Single file (overwritten) so it doesn't accumulate noise
-    in the output folder.
-    """
-    try:
-        from PIL import Image
-        from seestack.render.thumbnail import autostretch
 
-        # Pass NaN straight through — autostretch is nan-aware and must compute
-        # its stats over covered pixels only (a mosaic's no-data gaps would
-        # otherwise wreck the colour balance).
-        stretched = autostretch(rgb.astype(np.float32, copy=False))
-        h, w = stretched.shape[:2]
-        max_w = 1024
-        if w > max_w:
-            new_w = max_w
-            new_h = max(1, int(round(h * (new_w / w))))
-            u8 = (np.clip(stretched, 0, 1) * 255).astype(np.uint8)
-            preview = Image.fromarray(u8, "RGB").resize((new_w, new_h), Image.BOX)
-        else:
-            u8 = (np.clip(stretched, 0, 1) * 255).astype(np.uint8)
-            preview = Image.fromarray(u8, "RGB")
-        out_dir = Path(project_dir) / "output"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        ql_path = out_dir / f"{out_basename}_quicklook.png"
-        preview.save(ql_path, format="PNG")
-        log.debug("Quick-look saved (%d frames in) → %s", counter, ql_path)
-    except Exception as exc:  # noqa: BLE001 — never fail the stack over a peek
-        log.warning("Quick-look save failed: %s", exc)
+def _render_preview(rgb: np.ndarray, max_w: int):
+    """Autostretch + downscale an accumulator state to a small RGB PIL image.
+
+    NaN is passed straight through — ``autostretch`` is nan-aware and must
+    compute its stats over covered pixels only (a mosaic's no-data gaps would
+    otherwise wreck the colour balance).
+    """
+    from PIL import Image
+    from seestack.render.thumbnail import autostretch
+
+    stretched = autostretch(rgb.astype(np.float32, copy=False))
+    u8 = (np.clip(stretched, 0, 1) * 255).astype(np.uint8)
+    h, w = u8.shape[:2]
+    if w > max_w:
+        new_w = max_w
+        new_h = max(1, int(round(h * (new_w / w))))
+        return Image.fromarray(u8, "RGB").resize((new_w, new_h), Image.BOX)
+    return Image.fromarray(u8, "RGB")
+
+
+class _QuickLook:
+    """Periodic previews of the accumulator during pass 1.
+
+    Drives two independent, best-effort outputs that share the (expensive)
+    autostretch when a frame is due for both:
+
+    * the legacy single overwritten ``{base}_quicklook.png`` — a live peek for
+      very long runs, every ``quick_look_interval`` frames (unchanged); and
+    * the opt-in ``save_progress`` reel — up to ``_PROGRESS_MAX_FRAMES``
+      evenly-spaced snapshots held in memory and, once the stack finishes,
+      assembled by :func:`assemble_progress_reel` into a small looping
+      "watch your picture come together" animation beside the master.
+
+    Neither may ever fail the stack, so every save is guarded.
+    """
+
+    def __init__(self, project_dir: Path, out_basename: str,
+                 options: "StackOptions", total_frames: int) -> None:
+        from seestack.stack.output import safe_basename
+
+        self.project_dir = Path(project_dir)
+        # Sanitise like write_stack_outputs: output_name is free-text from the
+        # web API, so it must never place a separator/``..`` into the reel path.
+        self.out_basename = safe_basename(out_basename)
+        self.counter = 0
+        self.ql_interval = max(0, int(options.quick_look_interval))
+        # Aim for ~a dozen evenly-spaced snapshots regardless of stack size.
+        self.progress_interval = (
+            max(1, total_frames // _PROGRESS_MAX_FRAMES)
+            if getattr(options, "save_progress", False) and total_frames > 0
+            else 0
+        )
+        self.progress_frames: list = []
+
+    @property
+    def enabled(self) -> bool:
+        return self.ql_interval > 0 or self.progress_interval > 0
+
+    def on_frame(self, result_fn) -> None:
+        """Called once per accumulated frame with a lazy accumulator-result fn."""
+        if not self.enabled:
+            return
+        self.counter += 1
+        want_ql = self.ql_interval > 0 and self.counter % self.ql_interval == 0
+        want_progress = (
+            self.progress_interval > 0
+            and len(self.progress_frames) < _PROGRESS_MAX_FRAMES
+            and self.counter % self.progress_interval == 0
+        )
+        if not (want_ql or want_progress):
+            return
+        try:
+            rgb = result_fn()
+            if want_ql:
+                out_dir = self.project_dir / "output"
+                out_dir.mkdir(parents=True, exist_ok=True)
+                _render_preview(rgb, 1024).save(
+                    out_dir / f"{self.out_basename}_quicklook.png", format="PNG")
+                log.debug("Quick-look saved (%d frames in)", self.counter)
+            if want_progress:
+                # Keep a small downscaled copy in memory; assembled after the
+                # stack so we never touch a stale on-disk reel mid-run.
+                self.progress_frames.append(_render_preview(rgb, _PROGRESS_FRAME_WIDTH))
+        except Exception as exc:  # noqa: BLE001 — never fail the stack over a peek
+            log.warning("Quick-look/progress save failed: %s", exc)
+
+    def finish(self) -> Path | None:
+        """Assemble the collected reel beside the master. Returns its path.
+
+        Written *after* :func:`write_stack_outputs` has archived any previous
+        run's reel aside, so this becomes the current ``{base}_progress`` sibling
+        (mirroring how ``master.fits`` is written post-archive). No-op unless
+        enough snapshots were gathered.
+        """
+        if len(self.progress_frames) < _PROGRESS_MIN_FRAMES:
+            return None
+        try:
+            out_dir = self.project_dir / "output"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            return assemble_progress_reel(self.progress_frames, out_dir, self.out_basename)
+        except Exception as exc:  # noqa: BLE001 — a reel is a nicety, never critical
+            log.warning("Progress reel assembly failed: %s", exc)
+            return None
+
+
+def assemble_progress_reel(frames: list, out_dir: Path, out_basename: str) -> Path | None:
+    """Write ``frames`` (PIL RGB images) as one looping animation beside master.
+
+    Prefers animated WEBP (small, full colour) and falls back to APNG when the
+    Pillow build lacks WEBP — both animate in a plain ``<img>`` and download as
+    a shareable clip. The last frame holds a little longer so the finished look
+    lands. Returns the written path, or ``None`` if there's nothing to write.
+    """
+    from PIL import Image, features
+
+    if not frames:
+        return None
+    # Normalise to a common size (frames can differ by a rounding pixel as the
+    # canvas grows) so the animation encoder is happy.
+    base = frames[0]
+    norm = [f if f.size == base.size else f.resize(base.size, Image.BOX) for f in frames]
+    # Per-frame durations (ms): steady build, longer hold on the finished frame.
+    durations = [400] * (len(norm) - 1) + [1400]
+    out_dir = Path(out_dir)
+    if features.check("webp"):
+        path = out_dir / f"{out_basename}_progress.webp"
+        norm[0].save(path, format="WEBP", save_all=True, append_images=norm[1:],
+                     duration=durations, loop=0, minimize_size=True)
+    else:
+        path = out_dir / f"{out_basename}_progress.png"
+        norm[0].save(path, format="PNG", save_all=True, append_images=norm[1:],
+                     duration=durations, loop=0)
+    log.info("Progress reel saved (%d frames) → %s", len(norm), path.name)
+    return path
 
 
 def make_test_reference_choice(frame: FrameRow) -> ReferenceChoice:

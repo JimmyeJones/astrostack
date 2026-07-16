@@ -19,6 +19,7 @@ import { RejectionBadge } from "../components/RejectionBadge";
 import { NoiseReadout, NoiseDelta, CleanestBadge, cleanestRunId, hasNoise } from "../components/NoiseBadge";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { StackHealthCard } from "../components/StackHealthCard";
+import { ProgressReelCard } from "../components/ProgressReelCard";
 import { SharePictureButton } from "../components/SharePictureButton";
 import { sharePictureText } from "../share";
 import { Sparkline } from "../components/Sparkline";
@@ -697,6 +698,10 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
           <StackHealthCard safe={safe} runId={run.id} />
         </>
       ) : null}
+
+      {/* "Watch your picture appear" reel — self-hides unless this run was
+          stacked with save_progress on (the opt-in default-off extra). */}
+      {run.has_fits ? <ProgressReelCard safe={safe} runId={run.id} /> : null}
 
       <ImageLightbox
         src={light
