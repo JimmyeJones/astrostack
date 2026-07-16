@@ -47,6 +47,30 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**Non-finite master dark/bias pixels poisoned every calibrated light — a NaN "no-data"
+  pixel annihilated real signal into a permanent stack hole, an inf poisoned reductions.**~~ —
+  **FIXED v0.135.1** (Builder 2026-07-16, branch `claude/pensive-faraday-r8ystu`; traced + reproduced +
+  regression-tested). Found by a fresh adversarial audit of `seestack/calibrate/`. The flat path already
+  sanitizes non-finite normalized values to `1.0` (= no correction) at load (`apply.py:119`), but the master
+  **dark** and **bias** were subtracted verbatim (`out = out - dark` / `out = out - self.bias`,
+  `apply.py:204/206`) with **no** finite guard. A master dark can *legitimately* carry a NaN pixel — commit
+  #328's own `build_master` produces one where no input frame was finite there ("genuinely no data"), and its
+  comment even warns such a pixel "would otherwise poison that pixel in the master (and thence every
+  calibrated light)" — and an imported third-party master can carry NaN/inf too. Subtracting it turned real,
+  good light at that pixel into **NaN** (which spreads through debayer and reads as zero coverage in the
+  stack → a permanent hole) or **±inf** (which pollutes any sum/mean reduction it touches) in *every*
+  calibrated frame. Reproduced end-to-end through the real save→load→apply path: a NaN dark pixel drove a
+  finite 1500-ADU light to `nan`, an inf pixel to `-inf`. **Fix:** a `_sanitize_pedestal` helper
+  (`np.nan_to_num(..., nan=0.0, posinf=0.0, neginf=0.0)`) sanitizes the dark/bias to `0.0` (= no correction)
+  once **at load** (mirroring the flat's floor-to-1.0), off the per-frame hot path — so a no-data pedestal
+  pixel now means "leave the light unchanged there", not "annihilate it". Additive/upgrade-safe: no
+  schema/config/API-shape/default change; an all-finite master (the common case) is byte-for-byte unchanged.
+  Regressions in `tests/test_calibrate.py` (`test_apply_dark_nonfinite_pixel_does_not_poison_the_light` —
+  NaN + inf dark pixels leave the light finite and uncorrected while an ordinary pixel still calibrates;
+  `..._bias_...` for the bias-only path) — both fail-before (NaN/-inf present) / pass-after. Severity:
+  wrong-result / data-integrity on the stacking hot path (silently corrupts the final image), so fixed first
+  per the stacking-engine focus. Confidence: reproduced + fixed.
+
 - **⭐ OWNER-REPORTED (2026-07 — HIGH PRIORITY) — Sky map: irregular mosaics render
   as a black rectangle, and the overlay placement/orientation is off.** Two traced
   bugs on the Sky map page (`frontend/src/routes/AladinSky.tsx` +

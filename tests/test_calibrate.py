@@ -291,6 +291,40 @@ def test_apply_dark_subtraction(tmp_path):
     np.testing.assert_allclose(raw, 200.0)
 
 
+def test_apply_dark_nonfinite_pixel_does_not_poison_the_light(tmp_path):
+    # A master dark legitimately carries a NaN "no-data" pixel (build_master
+    # produces one where no input frame was finite there) and can carry an inf
+    # from an imported master. Subtracting it verbatim would turn real signal
+    # into NaN/inf at that pixel of *every* calibrated light — a permanent hole
+    # / a reduction-poisoning value. A no-data pedestal pixel means "no
+    # correction", so it must leave the light unchanged there (subtract 0).
+    dark = np.full((4, 4), 50.0, dtype=np.float32)
+    dark[1, 2] = np.nan  # genuinely no data
+    dark[3, 0] = np.inf  # e.g. a broken third-party master
+    save_master(tmp_path / "dark.fits", dark,
+                MasterMeta("dark", 10, 4, 4, "median"))
+    cal = CalibrationMasters.load(dark_path=str(tmp_path / "dark.fits"))
+    raw = np.full((4, 4), 200.0, dtype=np.float32)
+    out = cal.apply_raw(raw)
+    assert np.isfinite(out).all()  # fails before: NaN + -inf present
+    assert out[1, 2] == 200.0  # no-data → uncorrected real signal, not NaN
+    assert out[3, 0] == 200.0  # inf → uncorrected, not -inf
+    np.testing.assert_allclose(out[0, 0], 150.0)  # ordinary pixel still 200-50
+
+
+def test_apply_bias_nonfinite_pixel_does_not_poison_the_light(tmp_path):
+    # Same guard on the bias-only pedestal path (light - bias, no dark).
+    bias = np.full((4, 4), 30.0, dtype=np.float32)
+    bias[2, 1] = np.nan
+    save_master(tmp_path / "bias.fits", bias, MasterMeta("bias", 0, 4, 4, "median"))
+    cal = CalibrationMasters.load(bias_path=str(tmp_path / "bias.fits"))
+    raw = np.full((4, 4), 200.0, dtype=np.float32)
+    out = cal.apply_raw(raw)
+    assert np.isfinite(out).all()
+    assert out[2, 1] == 200.0  # no-data → uncorrected, not NaN
+    np.testing.assert_allclose(out[0, 0], 170.0)  # 200 - 30
+
+
 def test_apply_flat_division_normalizes(tmp_path):
     # A flat with a 2x brighter half divides that half down to match.
     flat = np.ones((4, 4), dtype=np.float32)
