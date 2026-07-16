@@ -4124,10 +4124,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   `ProgressReelCard.test.tsx` (2 — renders nothing without a reel; shows the blurb + reveals the animation
   and download link on Play). Python (1322) + tsc + full vitest (844) + vite build all green. *(Beginner
   bar ✔ — a delightful, plain-language, purely additive "here's my galaxy appearing out of noise" moment,
-  no new astro knowledge and no heavy deps.)* **Follow-up left for a future run:** surface the reel on the
-  editor result too (the Process-target deep-link lands there), and wire the native OS **Share** sheet for
-  the clip (the download button ships now; sharing an animation file needs the `share.ts` plumbing extended
-  from JPEG to webp/apng).
+  no new astro knowledge and no heavy deps.)* **Editor surfacing — SHIPPED v0.129.1** (same branch): the
+  same self-hiding `ProgressReelCard` now also renders on the **editor** result (below the "How's my stack?"
+  card), where the Process-target deep-link lands — so the delight moment appears exactly where a beginner
+  admires the finished picture, not only on History. Frontend-only, additive; tsc + full vitest + vite build
+  green. **Follow-up left for a future run:** wire the native OS **Share** sheet for the clip (the download
+  button ships now; sharing an animation file needs the `share.ts` plumbing extended from JPEG to webp/apng).
 
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)

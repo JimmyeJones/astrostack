@@ -17,6 +17,7 @@ import { useUndoable } from "../hooks/useUndoable";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { ObjectInfoCard } from "../components/ObjectInfoCard";
 import { StackHealthCard } from "../components/StackHealthCard";
+import { ProgressReelCard } from "../components/ProgressReelCard";
 import { QueryError } from "../components/QueryError";
 import { Histogram } from "../components/editor/Histogram";
 import { tonalHistGuides } from "../components/editor/tonalGuides";
@@ -1183,6 +1184,12 @@ export function EditorView() {
           self-link (that button is in the op list on this very page). Read-only,
           self-hides until there's a genuine stack to grade. */}
       <StackHealthCard safe={safe} runId={rid} inEditor />
+
+      {/* "Watch your picture appear" reel — the Process-target deep-link lands
+          here, so this is where the "my galaxy came out of the noise" delight
+          moment belongs. Self-hides unless this run was stacked with
+          save_progress on. */}
+      <ProgressReelCard safe={safe} runId={rid} />
 
       <Grid>
         {/* Preview + histogram */}
