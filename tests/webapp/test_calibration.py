@@ -57,6 +57,41 @@ def test_build_master_source_dir_that_raises_is_400_not_500(client, monkeypatch)
     assert "not a folder" in r.json()["detail"]
 
 
+def test_build_master_job_reports_skipped_frames(client, tmp_path):
+    """A build from a folder mixing good frames with a wrong-size and an
+    unreadable one finishes `done` with the good frames combined and a
+    plain-language skip accounting in the job result — so the Jobs page can tell
+    the user how many of their frames were actually used, not just 'done'."""
+    src = tmp_path / "darks"
+    _write_darks(src, n=3, shape=(8, 8))              # three good frames
+    # one wrong-size frame + one unreadable file in the same folder
+    fits.PrimaryHDU(data=np.full((4, 4), 100.0, dtype=np.float32)).writeto(
+        src / "wrong.fit", overwrite=True)
+    (src / "bad.fit").write_bytes(b"not a fits file")
+
+    r = client.post("/api/calibration/masters",
+                    json={"kind": "dark", "source_dir": str(src)})
+    assert r.status_code == 200
+    body = _wait_job(client, r.json()["job_id"])
+    assert body["state"] == "done"
+    result = body["result"]
+    assert result["n_frames"] == 3                    # only the good frames combined
+    assert result["n_skipped"] == 2
+    assert result["skipped_buckets"] == {"wrong size": 1, "unreadable": 1}
+
+
+def test_build_master_job_reports_zero_skipped_on_a_clean_set(client, tmp_path):
+    src = tmp_path / "flats"
+    _write_darks(src, n=3, shape=(8, 8))
+    r = client.post("/api/calibration/masters",
+                    json={"kind": "flat", "source_dir": str(src)})
+    assert r.status_code == 200
+    body = _wait_job(client, r.json()["job_id"])
+    assert body["state"] == "done"
+    assert body["result"]["n_skipped"] == 0
+    assert body["result"]["skipped_buckets"] == {}
+
+
 def test_store_register_list_resolve_delete(tmp_path):
     from seestack.calibrate.masters import MasterMeta
 

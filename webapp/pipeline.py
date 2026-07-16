@@ -233,10 +233,12 @@ def submit_build_master(
         if not paths:
             raise FileNotFoundError(f"No FITS files found in {source_dir}")
         job.set_progress("loading", 0, len(paths), f"{len(paths)} frames")
+        skipped: list[tuple[str, str]] = []
         built = build_master(
             paths, kind=kind, method=method, sigma=sigma,
             progress=_progress(jm, job),
             should_stop=job.cancel_requested,
+            skipped=skipped,
         )
         if built is None:
             # Cancelled mid-build (no master was written). Surface a cancellation
@@ -246,10 +248,17 @@ def submit_build_master(
         entry = calibration.register_master(
             settings.resolved_library_root, name=name or "", array=array, meta=meta,
         )
+        # Bucket the dropped frames so the Jobs page can tell the user how many of
+        # their frames were actually used vs. set aside (and why) — not just a bare
+        # "done" with a silently smaller master.
+        skipped_buckets: dict[str, int] = {}
+        for _fname, reason in skipped:
+            skipped_buckets[reason] = skipped_buckets.get(reason, 0) + 1
         return {
             "id": entry["id"], "name": entry["name"], "kind": entry["kind"],
             "n_frames": entry["n_frames"], "width_px": entry["width_px"],
             "height_px": entry["height_px"],
+            "n_skipped": len(skipped), "skipped_buckets": skipped_buckets,
         }
 
     return jm.submit("build_master", body)

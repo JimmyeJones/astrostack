@@ -3017,6 +3017,31 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+- ~~**A finished "Build master" job showed no outcome at all — and silently dropped wrong-size/unreadable
+  frames without telling the user.**~~ — **SHIPPED v0.135.0** (Builder 2026-07-16, branch
+  `claude/pensive-faraday-h477bm`; found dogfooding the calibration flow). Two related trust gaps for a
+  beginner building a master dark/flat/bias from a folder: (1) `webapp/routers/Jobs.tsx::JobResultActions`
+  had **no `build_master` case**, so a completed build showed a bare "done" with no plain-language summary
+  (unlike Process-target / Reprocess, which say what happened) — the user had no confirmation of what was
+  built or where to find it; and (2) `build_master` (`seestack/calibrate/masters.py`) **silently skips**
+  frames that fail to load or don't match the first frame's shape (logging only a server-side warning), so a
+  beginner who drops 20 flats where 5 are the wrong size gets a master quietly combined from 15 with no
+  indication. **Fix:** `build_master` gained an optional `skipped: list[tuple[name, reason]]` out-param
+  (default `None` = unchanged) that records each dropped frame as `"unreadable"` or `"wrong size"`;
+  `submit_build_master` passes it and returns `n_skipped` + a bucketed `skipped_buckets` in the job result;
+  and the Jobs page renders a pure, tested `buildMasterSummary` line — *"Built a master dark from 15 frames ·
+  5 frames set aside (3 wrong size, 2 unreadable)."* (amber when any were set aside) with a "View masters"
+  link to the Calibration page. Additive/upgrade-safe: the engine out-param and the two new result keys are
+  purely additive (no signature break — the return tuple is unchanged, existing callers/tests untouched), no
+  schema/config/API-shape/default change; frames dropped by the `max_frames` memory-bound sampling are
+  deliberately **not** counted as skips. Tests: `tests/test_calibrate.py` (+2 — `skipped` collects a
+  wrong-size + an unreadable frame with the right reasons and combines only the good ones; stays empty on a
+  clean set), `tests/webapp/test_calibration.py` (+2 — the build job's result carries `n_frames`/`n_skipped`/
+  `skipped_buckets` end-to-end via the endpoint; zero on a clean set), `Jobs.test.tsx` (+6 —
+  `buildMasterSummary` phrasing incl. singular / set-aside detail / missing buckets / missing kind, and a
+  component render showing the amber line + masters link). Python + tsc + full vitest + vite build green.
+  *(S engine+webapp+frontend, friendliness/trust — PRIORITY 3; beginner bar ✔ — helps a Seestar owner trust
+  what their calibration build actually did, sane default, plain language.)*
 - ~~**Two beginner-facing surfaces leaked raw engine slugs/codes instead of the plain-language name the
   rest of the app shows.**~~ — **SHIPPED v0.131.10** (Builder 2026-07-16, branch `claude/pensive-faraday-kv77w1`;
   found by a fresh jargon-sweep of the non-editor routes). Two un-filed jargon leaks a beginner would notice:
@@ -4917,13 +4942,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   flat normalization + floor, sigma-clip master combine) all verified **correct and NaN/coverage-aware** — no
   pixel- or coverage-corrupting bug found. The four latent observations, each low-confidence-of-reachability:
   (S each, correctness/robustness — focus #1)
-  - **(1)** `calibrate/masters.py:203-205` — the `median` and `mean` master-combine methods use plain
+  - ~~**(1)** `calibrate/masters.py:203-205` — the `median` and `mean` master-combine methods use plain
     `np.median`/`np.mean`, **not** NaN-aware, unlike the `sigma_mean` sibling (`nanmedian`) and the flat path.
     A single NaN/inf pixel in an input frame would silently propagate into the master (and thence every
-    calibrated light at that pixel). **Not triggerable on real inputs**: `load_seestar_raw` yields integer
-    sensor readouts cast to float32 (finite by construction), so no NaN/inf ever reaches the combine. A pure
-    consistency/defensiveness fix (make all three methods `nan`-aware) would be byte-for-byte identical on every
-    real calibration set — worth doing only if a Scout judges it more than churn (it changes nothing a user sees).
+    calibrated light at that pixel).~~ — **FIXED v0.134.2** (Builder 2026-07-16, branch
+    `claude/pensive-faraday-h477bm`; regression-tested). Judged **more than churn**: the combine sits on the
+    calibration data-integrity path (focus #1) and the input is a *user-supplied* file, so it is not strictly
+    "not triggerable" — a float FITS calibration frame carrying a NaN/inf pixel (an exported master re-used as
+    an input, a partially-corrupt file) does reach `np.stack` and, for `mean`, a single NaN at a pixel poisons
+    that pixel in the master → every calibrated light. **Fix:** mask any non-finite sample to NaN once
+    (`finite_stack = np.where(np.isfinite(stack), stack, np.nan)` — handles inf too, which `nanmean` alone does
+    not) and run all three methods over it (`nanmedian`/`nanmean`; `_sigma_clip_mean` now also gets the masked
+    stack and its `full_med` fallback uses `nanmedian`), so a non-finite sample is ignored and the finite ones
+    still combine, matching the engine's "NaN = no data" invariant. An all-non-finite pixel stays NaN =
+    genuinely no data. **Byte-for-byte identical on every real integer-readout calibration set** (`np.isfinite`
+    is all-True there, so the mask is a no-op). Additive, upgrade-safe (no config/DB/API/on-disk change).
+    Regressions in `tests/test_calibrate.py`: `test_build_master_is_nan_aware` (parametrised over
+    median/mean/sigma_mean — a NaN + an inf pixel in one input frame no longer poison the master;
+    fail-before under mean/median) and `test_build_master_all_nan_pixel_stays_nan` (an all-non-finite pixel
+    stays NaN, not folded to 0). Severity: data-integrity on a non-finite user input (low reachability).
   - **(2)** `stack/drizzle_path.py:300-303` — `frame_coverage` (`self._count`) is derived from **channel-0's**
     `out_wht` only, while the finite-mask and clip-reject masks are computed per channel; a pixel kept in
     channels 1/2 but NaN/clip-rejected in channel 0 is undercounted. **Diagnostic-only** (`coverage_min`/
