@@ -1,7 +1,7 @@
 import { Badge, Group, Paper, Stack, Text } from "@mantine/core";
 import { IconStars } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
-import { api } from "../api/client";
+import { api, type FramingHint } from "../api/client";
 
 /** A plain-language one-liner for the object card, e.g.
  *  "A galaxy in the constellation Andromeda." Constellation is dropped when the
@@ -11,6 +11,25 @@ export function describeObject(type: string, constellation: string): string {
   const article = /^[aeiou]/i.test(t) ? "An" : "A";
   const where = constellation ? ` in the constellation ${constellation}` : "";
   return `${article} ${t}${where}.`;
+}
+
+/** Full "will it fit?" sentence for the card: the target's display name prefixed
+ *  onto the backend's verb phrase — "M 31 is bigger than the Seestar's single
+ *  frame …". Returns "" when there's no framing hint. */
+export function framingSentence(
+  displayName: string,
+  framing: FramingHint | null | undefined,
+): string {
+  if (!framing) return "";
+  return `${displayName} ${framing.text}`;
+}
+
+/** Mantine text colour for a framing verdict: a gentle nudge to mosaic mode for
+ *  the too-big cases, plain dimmed for the reassuring "fits" case. */
+export function framingColor(level: FramingHint["level"]): string {
+  if (level === "mosaic") return "orange.6";
+  if (level === "tight") return "yellow.7";
+  return "dimmed";
 }
 
 /**
@@ -44,6 +63,11 @@ export function ObjectInfoCard({ safe }: { safe: string }) {
               ? " Identified from this target's plate-solved position."
               : ""}
           </Text>
+          {d.framing ? (
+            <Text size="sm" c={framingColor(d.framing.level)}>
+              {framingSentence(d.name || d.id, d.framing)}
+            </Text>
+          ) : null}
         </Stack>
       </Group>
     </Paper>

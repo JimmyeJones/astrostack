@@ -159,6 +159,10 @@ class CatalogObject:
     dec_deg: float
     type: str
     con: str
+    # Major-axis angular size in arcminutes, when the catalog records it — used by
+    # the "will it fit in one frame?" framing hint (:mod:`seestack.framing`).
+    # ``None`` for the many entries without a vetted size (we never guess a size).
+    size_arcmin: float | None = None
 
 
 @dataclass
@@ -282,6 +286,8 @@ def _load_catalog_file(path: Path) -> list[CatalogObject]:
         CatalogObject(
             id=o["id"], name=o.get("name", ""), ra_deg=float(o["ra_deg"]),
             dec_deg=float(o["dec_deg"]), type=o.get("type", ""), con=o.get("con", ""),
+            size_arcmin=(float(o["size_arcmin"]) if o.get("size_arcmin") is not None
+                         else None),
         )
         for o in raw["objects"]
     ]

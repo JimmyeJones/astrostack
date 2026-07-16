@@ -17,6 +17,11 @@ def test_identify_known_target_by_name(client, solved_library):
     assert info["type"] == "nebula"
     assert info["constellation"] == "Orion"
     assert info["matched_by"] == "name"
+    # M42 (~85') is bigger than the single Seestar frame → a mosaic framing hint.
+    assert info["size_arcmin"] == 85.0
+    assert info["framing"] is not None
+    assert info["framing"]["level"] == "mosaic"
+    assert "mosaic" in info["framing"]["text"]
 
 
 def test_identify_returns_null_for_an_unmatched_target(client, solved_library):
