@@ -3479,11 +3479,27 @@ problems. Dogfood it every big-picture run and fix root causes.
   (never the give-up "none" path). Pure frontend read of a field already returned; additive, no behaviour change.
   Regression tests in `colorCal.test.ts` (appends the note for a clamped star/background solve; absent when nothing
   was clamped or `notes` is missing).
-- **Drizzle edge/floor polish — two verified-by-trace, cosmetic-only nits in `stack/drizzle_path.py`
+- ~~**Drizzle edge/floor polish — two verified-by-trace, cosmetic-only nits in `stack/drizzle_path.py`
   (NOT a "fix first" bug — the drizzle path is opt-in, off by default, and neither affects the
-  interior image).** (S code + S test each; image-quality/correctness — PRIORITY 4, low.) *(Scout audit
-  2026-07-16, traced; deliberately filed here, not in "Bugs (fix these first)", because both are
-  cosmetic and drizzle is a non-default power-user path.)* **(1) Half-pixel-too-tight in-bounds mask
+  interior image).**~~ — **SHIPPED v0.131.3** (Builder 2026-07-16, branch `claude/pensive-faraday-d9xp84`;
+  both traced nits fixed + regression-tested). **(1)** `add_frame`'s in-bounds mask now keys on the pixel
+  *edges* `[-0.5, N-0.5]` (astropy 0-based pixel-centre extent) instead of the tighter centre indices
+  `[0, N-1]`, so an input pixel whose centre lands in the outer ≤½-px band — legitimately inside the first/last
+  output pixel — has its drizzle footprint deposited instead of dropped. Fixes the slight coverage/intensity
+  falloff in the extreme edge ring (matters at a mosaic panel's outer edge; the interior is untouched). The
+  `intersects` off-canvas stray-sub semantics are preserved (a wholly-off-canvas frame still maps far beyond
+  `±½px`). **(2)** The κ-σ resolution-floor test in `clip_reference` now judges the *raw* `m2 − m²` rather than
+  the Bessel-inflated variance — extracted the per-channel math into a pure `_clip_tolerance(m, m2, wht, kappa)`
+  helper so the small-sample / float32-floor logic is unit-testable on hand-built moments. The Bessel small-sample
+  correction still widens the clip *tolerance* (correct), but no longer lifts a low-`neff≈3` pixel out of the
+  16×-ULP floor (it shrank the intended margin to ~10×). Regressions in `tests/test_drizzle_reject.py`:
+  `test_edge_footprint_deposited_within_half_pixel_band` (a +0.4-px-shifted frame's edge row/column is now
+  covered — fails-before: dropped) and `test_resolution_floor_uses_raw_variance_not_bessel_inflated` (a bright
+  pixel with raw variance just inside the floor is floored at every `neff` — fails-before: Bessel inflation
+  re-enables a spurious clip at `neff=3`), plus a positive control that the tol still carries Bessel widening and
+  the existing edge-tally comment/bound updated to the corrected full-coverage behaviour. Additive, upgrade-safe
+  (no config/DB/API/on-disk change); drizzle is opt-in and the interior image is byte-for-byte unchanged.
+  *(original write-up kept below for provenance.)* **(1) Half-pixel-too-tight in-bounds mask
   (`drizzle_path.py:193-196`).** `add_frame` masks input pixels to `pixmap ∈ [0, w_out-1] × [0,
   h_out-1]`, but astropy 0-based pixel *centres* validly span `[-0.5, w_out-0.5]`. Input pixels whose
   centres land in the outermost ½-pixel band get `wmap=0`, so their drizzle footprint isn't deposited
@@ -4735,6 +4751,15 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.131.3** — Stacking-engine correctness (drizzle edge/floor polish — focus #1; Builder 2026-07-16, branch
+  `claude/pensive-faraday-d9xp84`). `stack/drizzle_path.py`: (1) `add_frame`'s in-bounds mask now keys on the
+  astropy pixel-*edge* extent `[-0.5, N-0.5]` instead of centre indices `[0, N-1]`, so an input pixel whose
+  centre falls in the outer ≤½-px band deposits its footprint instead of being dropped (fixes edge-ring
+  coverage/intensity falloff; off-canvas stray-sub `intersects` semantics preserved); (2) the κ-σ resolution
+  floor now judges the raw `m2−m²` (extracted to a testable `_clip_tolerance` helper) rather than the
+  Bessel-inflated variance, so a low-`neff` bright pixel stays floored. Additive, upgrade-safe; interior image
+  byte-for-byte unchanged. Regressions in `tests/test_drizzle_reject.py` (edge deposit + neff-independent floor,
+  both fail-before/pass-after).
 - **v0.123.0** — Beginner feature / friendliness (PRIORITY 3 — "enjoy & share a good image"; Builder 2026-07-14,
   branch `claude/pensive-faraday-lb2btt`; spotted dogfooding the History/Gallery download surface). A beginner
   can now **download their finished picture as a shareable PNG** in one click — previously the only download
