@@ -8,7 +8,11 @@ pytest.importorskip("PIL")
 import numpy as np  # noqa: E402
 
 from seestack.gui.thumbnail import generate_thumbnail  # noqa: E402
-from seestack.render.thumbnail import _downsample_rgb  # noqa: E402
+from seestack.render.thumbnail import (  # noqa: E402
+    _downsample_rgb,
+    overlay_rgba_png,
+    stack_coverage_mask,
+)
 from tests.synth import write_seestar_fits  # noqa: E402
 
 
@@ -61,3 +65,90 @@ def test_generate_thumbnail(tmp_path):
     with Image.open(result) as im:
         assert im.format == "PNG"
         assert max(im.size) <= 256
+
+
+def test_stack_coverage_mask_marks_nan_uncovered(tmp_path):
+    """The coverage mask is True on covered pixels and False on NaN (mosaic gaps)."""
+    from astropy.io import fits
+
+    h = w = 16
+    cube = np.ones((3, h, w), dtype=np.float32)
+    cube[:, :, w // 2:] = np.nan            # right half uncovered
+    fp = tmp_path / "m.fits"
+    fits.PrimaryHDU(data=cube).writeto(fp)
+
+    mask = stack_coverage_mask(fp)
+    assert mask.shape == (h, w)
+    assert mask[:, : w // 2].all()          # left half covered
+    assert not mask[:, w // 2:].any()       # right half uncovered
+
+    # A pixel finite in *any* channel counts as covered (per-channel κ-σ can drop
+    # one channel at a pixel without meaning "no data there").
+    cube2 = np.full((3, 4, 4), np.nan, dtype=np.float32)
+    cube2[0, 1, 1] = 0.5
+    fp2 = tmp_path / "m2.fits"
+    fits.PrimaryHDU(data=cube2).writeto(fp2)
+    assert stack_coverage_mask(fp2)[1, 1]
+    assert not stack_coverage_mask(fp2)[0, 0]
+
+
+def test_overlay_rgba_png_makes_uncovered_transparent():
+    """overlay_rgba_png keeps the preview RGB verbatim and punches alpha=0 on
+    uncovered pixels (so a mosaic shows its footprint, not a black box)."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    # A tiny 4×4 opaque "preview": left half red, right half black.
+    rgb = np.zeros((4, 4, 3), dtype=np.uint8)
+    rgb[:, :2] = (200, 30, 30)
+    buf = BytesIO()
+    Image.fromarray(rgb, mode="RGB").save(buf, format="PNG")
+    preview_png = buf.getvalue()
+
+    # Coverage: only the left half is real data.
+    mask = np.zeros((4, 4), dtype=bool)
+    mask[:, :2] = True
+
+    out = overlay_rgba_png(preview_png, mask)
+    im = Image.open(BytesIO(out))
+    assert im.mode == "RGBA"
+    arr = np.asarray(im)
+    assert arr.shape == (4, 4, 4)
+    # RGB preserved on the covered half; alpha opaque there, transparent elsewhere.
+    assert (arr[:, :2, :3] == (200, 30, 30)).all()
+    assert (arr[:, :2, 3] == 255).all()
+    assert (arr[:, 2:, 3] == 0).all()
+
+
+def test_overlay_rgba_png_resizes_mask_to_preview_grid():
+    """A full-res coverage mask is resized (nearest) to the preview's dimensions,
+    so a decimated preview and a full-size FITS mask still line up."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    buf = BytesIO()
+    Image.fromarray(np.full((8, 8, 3), 120, np.uint8), mode="RGB").save(buf, format="PNG")
+    preview_png = buf.getvalue()          # 8×8 preview
+
+    mask = np.ones((16, 16), dtype=bool)  # 16×16 full-res mask, bottom uncovered
+    mask[8:, :] = False
+
+    out = Image.open(BytesIO(overlay_rgba_png(preview_png, mask)))
+    assert out.size == (8, 8)             # matches the preview, not the mask
+    alpha = np.asarray(out)[..., 3]
+    assert (alpha[:4, :] == 255).all()    # top (covered) opaque
+    assert (alpha[4:, :] == 0).all()      # bottom (uncovered) transparent
+
+
+def test_overlay_rgba_png_all_covered_is_fully_opaque():
+    """A fully-covered stack (no NaN) is unchanged — every pixel opaque."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    buf = BytesIO()
+    Image.fromarray(np.full((5, 5, 3), 80, np.uint8), mode="RGB").save(buf, format="PNG")
+    out = Image.open(BytesIO(overlay_rgba_png(buf.getvalue(), np.ones((5, 5), bool))))
+    assert (np.asarray(out)[..., 3] == 255).all()

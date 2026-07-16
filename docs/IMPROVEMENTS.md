@@ -50,20 +50,39 @@ when you take it.
 - **⭐ OWNER-REPORTED (2026-07 — HIGH PRIORITY) — Sky map: irregular mosaics render
   as a black rectangle, and the overlay placement/orientation is off.** Two traced
   bugs on the Sky map page (`frontend/src/routes/AladinSky.tsx` +
-  `webapp/routers/sky.py`):
-  1. **Black rectangular background around a non-rectangular mosaic.** The sky
-     overlay uses the run's `preview_path` PNG, which `render_stack_png` /
-     `_write_preview_png` (`seestack/render/thumbnail.py:184`,
-     `seestack/stack/output.py:271`) writes as **opaque `mode="RGB"`** with the
-     uncovered/NaN pixels `nan_to_num`'d to 0 (black). So an irregular union-mosaic
-     footprint (or any frame with uncovered corners) shows as a **black box** on the
-     sky instead of its true shape. **Fix:** serve the sky overlay as **RGBA with
-     `alpha=0` on uncovered (NaN / zero-coverage) pixels** — a dedicated transparent
-     overlay render, or add an alpha channel keyed off the coverage mask — so the
-     mosaic shows its real footprint. Keep "NaN = no coverage" end-to-end; don't
-     turn gaps into black. (The editor's coverage overlay already renders NaN-aware;
-     reuse that machinery.)
-  2. **Placement / orientation is approximate.** `_tan_wcs`
+  `webapp/routers/sky.py`). **Bug 1 (black box) FIXED v0.134.1; Bug 2 (placement)
+  remains open — it needs real-frame validation (rotation-sign convention), so it is
+  NOT a blind Builder change (see the pre-existing "_tan_wcs rotation sign" open bug
+  below).**
+  1. ~~**Black rectangular background around a non-rectangular mosaic.**~~ — **FIXED
+     v0.134.1** (Builder 2026-07-16, branch `claude/pensive-faraday-rtfcye`; traced +
+     regression-tested). The sky overlay used the run's opaque `preview_path` PNG
+     (`mode="RGB"`, uncovered/NaN pixels `nan_to_num`'d to 0 = black), so an irregular
+     union-mosaic footprint (or any frame with uncovered corners) showed as a **black
+     box** on the sky. **Fix:** a new `GET …/stack-runs/{id}/sky-overlay` endpoint
+     serves the *same* preview pixels as **RGBA with `alpha=0` on uncovered pixels**,
+     and `sky.py` points `preview_url` at it. Two pure engine helpers do the work
+     (`seestack/render/thumbnail.py`): `stack_coverage_mask(fits)` builds the "NaN = no
+     coverage" boolean footprint from the master FITS (covered = any channel finite),
+     and `overlay_rgba_png(preview_png, mask)` keeps the preview's RGB verbatim (exact
+     colour parity with the finished picture) and drives alpha off the mask resized
+     nearest to the preview's grid — so the mosaic shows its true footprint while a
+     fully-covered stack stays all-opaque (unchanged). **Placement is deliberately
+     untouched:** the overlay keeps the preview's exact dimensions, so the WCS
+     `sky.py` builds from `_png_size(preview_path)` still places it identically — this
+     fix is strictly the transparency, Bug 2 is separate. Upgrade-safe/additive: a new
+     read-only endpoint, no schema/config/default/existing-API change; falls back to
+     the opaque preview when a run has no FITS to derive coverage from (older/edited
+     runs) so it never 404s where the old `preview` URL worked. Tests:
+     `test_thumbnail.py` (+4 — `stack_coverage_mask` NaN/any-channel semantics,
+     `overlay_rgba_png` transparent-uncovered / mask-resize-to-preview-grid /
+     all-covered-opaque), `test_stack_render.py` (+2 — the endpoint serves RGBA with
+     the uncovered half transparent at the preview's grid; 404 without a preview),
+     `test_sky.py` (preview_url now points at `sky-overlay`). Severity: broken-UX
+     (ugly on an owner-used page; no data corruption). Confidence: reproduced + fixed.
+  2. **Placement / orientation is approximate.** _(STILL OPEN — needs real-frame
+     validation of the rotation-sign convention; NOT a blind Builder change, same
+     real-data gating as the "_tan_wcs rotation sign" bug below.)_ `_tan_wcs`
      (`webapp/routers/sky.py:74`) builds the overlay WCS from a *single
      representative frame's* pixscale + rotation (`_representative_pixscale_rotation`
      = the first frame) centred on the run RA/Dec, with a **best-effort rotation

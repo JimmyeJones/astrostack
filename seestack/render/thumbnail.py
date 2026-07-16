@@ -187,6 +187,51 @@ def render_stack_png(
     return buf.getvalue()
 
 
+def stack_coverage_mask(fits_path: str | Path) -> np.ndarray:
+    """Boolean ``(H, W)`` coverage mask for a stacked-image FITS.
+
+    ``True`` where the pixel has real data (any channel finite), ``False`` on
+    uncovered / mosaic-gap pixels (NaN) — the "NaN = no coverage" footprint. Used
+    to make the Sky-map overlay transparent where an irregular union-mosaic doesn't
+    reach, instead of an opaque black rectangle.
+    """
+    from astropy.io import fits as _fits
+
+    arr = np.asarray(_fits.getdata(fits_path), dtype=np.float32)
+    if arr.ndim == 3:                       # (channels, H, W) → covered = any channel finite
+        return np.isfinite(arr).any(axis=0)
+    return np.isfinite(arr)                 # 2-D mono
+
+
+def overlay_rgba_png(preview_png: bytes, coverage_mask: np.ndarray) -> bytes:
+    """Compose an RGBA overlay PNG from an opaque preview PNG and a coverage mask.
+
+    The preview's RGB pixels are kept verbatim, so the overlay looks exactly like
+    the finished picture; the coverage mask (``True`` = covered) is resized —
+    nearest-neighbour, so it stays a hard 1-bit footprint — to the preview's grid
+    and drives the alpha channel, turning uncovered pixels fully transparent. So an
+    irregular mosaic shows its true footprint on the sky instead of a black box,
+    while a fully-covered stack is unchanged (every pixel opaque). Keeps the
+    preview's exact dimensions, so a WCS built for the preview grid still places it.
+    """
+    import io
+
+    from PIL import Image
+
+    mask = np.asarray(coverage_mask, dtype=bool)
+    if mask.ndim != 2:
+        raise ValueError("coverage_mask must be 2-D")
+    im = Image.open(io.BytesIO(preview_png)).convert("RGB")
+    w, h = im.size
+    alpha_img = Image.fromarray((mask.astype(np.uint8) * 255), mode="L").resize(
+        (w, h), Image.NEAREST)
+    rgba = np.dstack([np.asarray(im, dtype=np.uint8),
+                      np.asarray(alpha_img, dtype=np.uint8)])
+    buf = io.BytesIO()
+    Image.fromarray(rgba, mode="RGBA").save(buf, format="PNG")
+    return buf.getvalue()
+
+
 def asinh_stretch(
     rgb: np.ndarray,
     *,

@@ -88,7 +88,9 @@ def test_sky_places_stacked_image(client, solved_library):
     assert abs(img["width_deg"] - 1.3333) < 1e-2
     assert abs(img["height_deg"] - 0.75) < 1e-2
     assert img["rotation_deg"] == 12.0
-    assert img["preview_url"].endswith(f"/stack-runs/{img['run_id']}/preview")
+    # The overlay is the transparent (RGBA) sky-overlay render, so an irregular
+    # mosaic shows its true footprint instead of an opaque black rectangle.
+    assert img["preview_url"].endswith(f"/stack-runs/{img['run_id']}/sky-overlay")
     assert img["ra_deg"] is not None and img["dec_deg"] is not None
 
     # WCS for the preview PNG (960×540 here) so Aladin can place it.

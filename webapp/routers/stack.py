@@ -369,6 +369,47 @@ async def render_stack_run(
                     headers={"Cache-Control": "no-store"})
 
 
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/sky-overlay")
+async def sky_overlay(safe: str, run_id: int, request: Request) -> Response:
+    """The run's preview as an RGBA PNG with uncovered (NaN / no-coverage) pixels
+    transparent, for the Sky map.
+
+    The stored preview PNG is opaque RGB with NaN→black, so an irregular
+    union-mosaic footprint shows as an ugly black rectangle on the sky. This serves
+    the same preview pixels with an alpha channel keyed off the stack's coverage
+    mask, so the mosaic shows its true shape. Same pixel grid/dimensions as the
+    preview, so the WCS built for the preview grid still places it (unchanged
+    placement). Falls back to the opaque preview when there's no FITS to derive
+    coverage from (older/edited runs), so it never regresses to a 404."""
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
+    finally:
+        proj.close()
+        lib.close()
+    if run is None:
+        raise HTTPException(status_code=404, detail="No such run")
+    preview_path = run.preview_path
+    if not preview_path or not Path(preview_path).exists():
+        raise HTTPException(status_code=404, detail="No preview for this run")
+    fits_path = run.fits_path
+
+    from seestack.render.thumbnail import overlay_rgba_png, stack_coverage_mask
+
+    def work() -> bytes:
+        preview = Path(preview_path).read_bytes()
+        if fits_path and Path(fits_path).exists():
+            try:
+                return overlay_rgba_png(preview, stack_coverage_mask(fits_path))
+            except Exception:  # noqa: BLE001 — a broken FITS just serves the opaque preview
+                return preview
+        return preview
+
+    png = await run_in_threadpool(work)
+    return Response(content=png, media_type="image/png",
+                    headers={"Cache-Control": "no-store"})
+
+
 # The "watch your picture come together" progress reel is written as a sibling
 # of each run's FITS (``{stem}_progress.webp`` — or ``.png`` APNG when the Pillow
 # build lacks WEBP), resolved from the basename exactly like the coverage map, so

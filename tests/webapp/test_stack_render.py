@@ -757,6 +757,86 @@ def test_progress_info_unavailable_without_reel(client, solved_library):
     assert body == {"available": False, "frames": 0, "format": ""}
 
 
+def _make_run_with_mosaic_preview(data_root, safe: str) -> str:
+    """Register a run whose FITS has an uncovered (NaN) right half and a matching
+    real opaque preview PNG — the shape the Sky-map black-box bug is about."""
+    from io import BytesIO
+
+    from PIL import Image
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        tdir = lib.target_dir(lib.find_target(safe))
+        h = w = 32
+        cube = np.ones((3, h, w), dtype=np.float32) * 0.3
+        cube[:, :, w // 2:] = np.nan            # right half uncovered (mosaic gap)
+        fits_path = tdir / "mosaic.fits"
+        fits.PrimaryHDU(data=cube).writeto(fits_path, overwrite=True)
+        # A real opaque preview: NaN→black on the right, as the stored preview is.
+        rgb = np.zeros((h, w, 3), dtype=np.uint8)
+        rgb[:, : w // 2] = (60, 90, 120)
+        preview_path = tdir / "mosaic_preview.png"
+        buf = BytesIO()
+        Image.fromarray(rgb, mode="RGB").save(buf, format="PNG")
+        preview_path.write_bytes(buf.getvalue())
+        proj = lib.open_target(safe)
+        try:
+            run_id = proj.add_stack_run(StackRunRow(
+                id=None, timestamp_utc="2026-05-01T00:00:00Z",
+                output_basename="mosaic", fits_path=str(fits_path), tiff_path=None,
+                preview_path=str(preview_path), n_frames_used=3,
+                canvas_h=h, canvas_w=w, coverage_min=0, coverage_max=3,
+                options_json="{}",
+            ))
+        finally:
+            proj.close()
+        return str(run_id)
+    finally:
+        lib.close()
+
+
+def test_sky_overlay_makes_uncovered_transparent(client, solved_library):
+    """The Sky-map overlay serves the preview as RGBA with uncovered/NaN pixels
+    transparent, so an irregular mosaic shows its footprint, not a black box."""
+    from io import BytesIO
+
+    from PIL import Image
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _make_run_with_mosaic_preview(solved_library, safe)
+
+    resp = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/sky-overlay")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "image/png"
+    im = Image.open(BytesIO(resp.content))
+    assert im.mode == "RGBA"
+    assert im.size == (32, 32)             # same grid as the preview → WCS still fits
+    arr = np.asarray(im)
+    # Covered (left) half opaque with the preview colour; uncovered (right) half
+    # fully transparent instead of a black rectangle.
+    assert (arr[:, :16, 3] == 255).all()
+    assert (arr[:, 16:, 3] == 0).all()
+    assert (arr[:, :16, :3] == (60, 90, 120)).all()
+
+
+def test_sky_overlay_404_without_preview(client, solved_library):
+    """No preview on disk → 404 (nothing to overlay), like the other artifacts."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)  # placeholder preview only
+    # Point the run at a non-existent preview by deleting the placeholder.
+    from pathlib import Path
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            Path(run.preview_path).unlink(missing_ok=True)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    resp = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/sky-overlay")
+    assert resp.status_code == 404
+
+
 def test_progress_reel_serves_the_animation(client, solved_library):
     """The reel endpoint streams the WEBP animation with the right media type."""
     safe = client.get("/api/targets").json()[0]["safe_name"]
