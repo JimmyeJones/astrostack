@@ -32,13 +32,15 @@ afterEach(() => {
 });
 
 describe("expo", () => {
-  it("formats exposure and rolls minutes into hours (never '1h 60m')", () => {
+  it("speaks the shared app-wide integration vocabulary (formatIntegration)", () => {
+    // expo now delegates to formatIntegration so the Library card is consistent
+    // with the Dashboard/Target/History surfaces (and shows sub-minute totals
+    // honestly instead of rounding a real "20 s" down to "0m").
     expect(expo(0)).toBe("—");
-    expect(expo(90)).toBe("2m");
-    expect(expo(3600)).toBe("1h 0m");
-    expect(expo(5400)).toBe("1h 30m");
-    // 7190 s = 1h 59.8m: the minutes remainder rounds to 60 and must roll over.
-    expect(expo(7190)).toBe("2h 0m");
+    expect(expo(20)).toBe("20 s");
+    expect(expo(90)).toBe("2 min");
+    expect(expo(3600)).toBe("1.0 h");
+    expect(expo(5400)).toBe("1.5 h");
   });
 });
 
