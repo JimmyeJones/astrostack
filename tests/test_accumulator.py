@@ -62,6 +62,40 @@ def test_weighted_sum_frame_coverage_windowed():
     assert fc[0, 0] == 0  # outside the window — untouched
 
 
+def test_weighted_sum_frame_coverage_counts_any_channel_not_just_red():
+    """A frame that contributed to *any* channel counts toward the frame count —
+    regression for per-channel κ-σ rejection. When pass 2 clips only the red
+    channel at a pixel (G/B still contribute), reading channel 0 alone would
+    under-count the frame and bias the "N frames per pixel" coverage_min/max
+    diagnostic low (which can trip a false "ragged edges" health warning on an
+    otherwise even stack)."""
+    acc = WeightedSumAccumulator((2, 2, 3))
+    a = np.full((2, 2, 3), 5.0)
+    a[0, 0, 0] = np.nan          # red κ-σ-clipped at (0,0); green/blue kept
+    b = np.full((2, 2, 3), 7.0)
+    acc.add(a)
+    acc.add(b)
+    fc = acc.frame_coverage
+    # Frame a still contributed G+B at (0,0), so both frames count there.
+    assert fc[0, 0] == 2, "a frame whose red alone was clipped must still count"
+    assert (fc == 2).all()       # every pixel saw both frames in some channel
+    # The image itself is unaffected: (0,0) red is b only (7), G/B average to 6.
+    out = acc.result()
+    np.testing.assert_allclose(out[0, 0], [7.0, 6.0, 6.0])
+
+
+def test_weighted_sum_frame_coverage_any_channel_windowed():
+    """The windowed add path shares the any-channel frame count."""
+    acc = WeightedSumAccumulator((4, 4, 3))
+    w = np.full((2, 2, 3), 9.0)
+    w[0, 0, 0] = np.nan          # red-only gap inside the window
+    acc.add_window(w, y0=1, x0=1, weight=0.4)
+    acc.add_window(np.full((2, 2, 3), 9.0), y0=1, x0=1, weight=0.4)
+    fc = acc.frame_coverage
+    assert (fc[1:3, 1:3] == 2).all()  # incl. the red-only-gap pixel at (1,1)
+    assert fc[0, 0] == 0
+
+
 def test_weighted_sum_with_nans():
     acc = WeightedSumAccumulator((2, 2))
     a = np.array([[1.0, np.nan], [3.0, 4.0]])

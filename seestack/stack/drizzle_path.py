@@ -172,10 +172,13 @@ class DrizzleStacker:
         # count only at unit weight *and* pixfrac=1/scale=1 — with quality
         # weighting on, or any pixfrac<1 / scale≠1, it is not an integer frame
         # count and understates it. The *support* of a frame's deposit is
-        # independent of its scalar weight, so a strict increase in channel-0's
+        # independent of its scalar weight, so a strict increase in a channel's
         # accumulated weight after a frame is added marks exactly the output
-        # pixels that frame contributed to (a clip-rejected or out-of-bounds
-        # pixel leaves the weight unchanged, so it correctly doesn't count).
+        # pixels that channel contributed to (a clip-rejected or out-of-bounds
+        # pixel leaves the weight unchanged, so it correctly doesn't count). We
+        # OR the three channels' increases so a frame counts wherever it
+        # contributed to **any** channel — per-channel κ-σ rejection can drop one
+        # channel at a pixel, and reading channel 0 alone would under-count it.
         # Mirrors ``WeightedSumAccumulator.frame_coverage``. The statistics-only
         # accumulator never surfaces this (its output is discarded), so it skips
         # the per-frame copy.
@@ -256,10 +259,16 @@ class DrizzleStacker:
             # coordinates clamp harmlessly — their weight is already 0.
             xi = np.clip(np.rint(pixmap[..., 0]), 0, w_out - 1).astype(np.intp)
             yi = np.clip(np.rint(pixmap[..., 1]), 0, h_out - 1).astype(np.intp)
-        # Snapshot channel-0's accumulated weight so a strict post-add increase
-        # marks this frame's output footprint for the unweighted frame count.
-        prev_wht0 = (
-            self._drizzlers[0].out_wht.copy() if self._count is not None else None
+        # Track this frame's output footprint for the unweighted frame count:
+        # an output pixel counts once if **any** channel deposited weight there.
+        # Reading channel 0 alone would under-count a pixel where per-channel κ-σ
+        # rejection dropped just the red channel but kept G/B (the same channel-0
+        # bias fixed in ``WeightedSumAccumulator``). We OR each channel's strict
+        # post-add weight increase into one bool plane, snapshotting each
+        # channel's ``out_wht`` right before its own ``add_image`` — so only one
+        # float snapshot is live at a time (memory-bounded, as before).
+        deposited = (
+            np.zeros(self.out_shape, dtype=bool) if self._count is not None else None
         )
         for c in range(3):
             vals = rgb[..., c]
@@ -280,6 +289,9 @@ class DrizzleStacker:
                 self._n_contributed += int(contributing.sum())
                 self._n_rejected += int(np.count_nonzero(contributing & rejected))
             ch = np.where(finite, vals, 0.0).astype(np.float32, copy=False)
+            prev_wht = (
+                self._drizzlers[c].out_wht.copy() if deposited is not None else None
+            )
             self._drizzlers[c].add_image(
                 data=ch,
                 exptime=1.0,
@@ -288,6 +300,8 @@ class DrizzleStacker:
                 pixfrac=self.params.pixfrac,
                 in_units="counts",
             )
+            if deposited is not None:
+                deposited |= self._drizzlers[c].out_wht > prev_wht
             if self._sq_drizzlers is not None:
                 self._sq_drizzlers[c].add_image(
                     data=ch * ch,
@@ -298,9 +312,7 @@ class DrizzleStacker:
                     in_units="counts",
                 )
         if self._count is not None:
-            self._count += (
-                self._drizzlers[0].out_wht > prev_wht0
-            ).astype(np.uint32, copy=False)
+            self._count += deposited.astype(np.uint32, copy=False)
         self._n_added += 1
         return intersects
 
