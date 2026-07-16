@@ -63,6 +63,50 @@ _MIN_REJECT_NEFF = 3.0
 _VAR_RESOLUTION_FACTOR = 16.0 * float(np.finfo(np.float32).eps)
 
 
+def _clip_tolerance(
+    m: np.ndarray, m2: np.ndarray, wht: np.ndarray, kappa: float
+) -> tuple[np.ndarray, np.ndarray]:
+    """Per-output-pixel ``(mean, tol)`` for one channel from drizzled moments.
+
+    ``m`` is the weighted mean of the contributions, ``m2`` the weighted mean of
+    their squares, and ``wht`` the accumulated weight (which doubles as the
+    effective sample count ``neff``). Returns the mean (NaN where uncovered) and
+    the κ·σ clip tolerance (``+inf`` — never reject — wherever ``neff`` is below
+    :data:`_MIN_REJECT_NEFF` or the variance is below the float32 resolution
+    floor). Extracted from :meth:`DrizzleStacker.clip_reference` so the
+    small-sample / resolution-floor logic is unit-testable on hand-built moments.
+    """
+    # Weighted population variance as ``E[x²] − E[x]²``, computed in float64:
+    # ``m`` and ``m2`` are ~counts² for a bright pixel (e.g. 5e4 counts →
+    # m² ≈ 2.5e9), where float32's ~7-digit precision can't resolve a small true
+    # variance from the two large operands — a catastrophic-cancellation trap.
+    m64 = m.astype(np.float64)
+    var = np.clip(m2.astype(np.float64) - m64 * m64, 0.0, None)
+    neff = wht
+    # Bessel small-sample correction, applied only to the *clip tolerance* — not
+    # to the resolution-floor test below, which must judge the raw ``m2 − m²``.
+    # (Inflating the variance before the floor test would shrink the intended
+    # 16× margin by up to 1.5× at neff≈3.) Guard the blow-up at neff≤1, where the
+    # tolerance becomes +inf anyway.
+    bessel = np.where(neff > 1.0, neff / np.maximum(neff - 1.0, 1e-6), 1.0)
+    t = (float(kappa) * np.sqrt(var * bessel)).astype(np.float32)
+    covered = wht > 0
+    # A variance at/below the float32 resolution of m² is indistinguishable from
+    # cancellation noise — the mean-of-squares ``m2`` is itself accumulated in
+    # float32 by the drizzle library, so a true variance below ULP(m²) is already
+    # lost before we subtract and no float64 arithmetic here can recover it.
+    # Clipping against such a tol would collapse it toward 0 and reject *every*
+    # real contribution, punching a NaN hole through a bright, flat region (a
+    # near-saturated star core or a smooth bright nebula) — the opposite of this
+    # pass's job. Treat it like the low-neff case and never reject there
+    # (tol = +inf); the threshold scales with brightness so dim sky/nebula
+    # (var ≫ ULP(m²)) is byte-for-byte unchanged.
+    unresolved = var <= _VAR_RESOLUTION_FACTOR * (m64 * m64)
+    t[~covered | (neff < _MIN_REJECT_NEFF) | unresolved] = np.inf
+    mean_c = np.where(covered, m, np.nan).astype(np.float32)
+    return mean_c, t
+
+
 @dataclass
 class DrizzleParams:
     """Parameters for one drizzle accumulator."""
@@ -188,11 +232,17 @@ class DrizzleStacker:
         # coordinate in the output. Compute once per frame, share across
         # channels (saves ~3× the WCS transform cost).
         pixmap = _build_pixmap(in_wcs, self.out_wcs, rgb.shape[0], rgb.shape[1])
-        # Mask out-of-bounds pixels with a weight map of 0.
+        # Mask out-of-bounds pixels with a weight map of 0. Astropy 0-based pixel
+        # *centres* validly span ``[-0.5, N-0.5]`` (a pixel centred at, say,
+        # ``-0.4`` still lies inside output pixel 0's ``[-0.5, 0.5]`` extent), so
+        # the canvas bounds are the half-open-pixel edges, not the centre indices
+        # ``[0, N-1]``. Using the tighter index range dropped the drizzle
+        # footprint of any input pixel whose centre landed in the outer ≤½-px
+        # band — a slight coverage/intensity falloff in the extreme edge ring.
         h_out, w_out = self.out_shape
         in_bounds = (
-            (pixmap[..., 0] >= 0) & (pixmap[..., 0] <= w_out - 1)
-            & (pixmap[..., 1] >= 0) & (pixmap[..., 1] <= h_out - 1)
+            (pixmap[..., 0] >= -0.5) & (pixmap[..., 0] <= w_out - 0.5)
+            & (pixmap[..., 1] >= -0.5) & (pixmap[..., 1] <= h_out - 0.5)
         )
         # Whether this frame's footprint intersects the output canvas at all —
         # the drizzle analogue of ``align_one`` returning a non-``None`` window.
@@ -271,39 +321,13 @@ class DrizzleStacker:
         mean = np.full((h, w, 3), np.nan, dtype=np.float32)
         tol = np.full((h, w, 3), np.inf, dtype=np.float32)
         for c in range(3):
-            m = self._drizzlers[c].out_img
-            m2 = self._sq_drizzlers[c].out_img
-            wht = self._drizzlers[c].out_wht
-            # Weighted population variance as ``E[x²] − E[x]²``; the accumulated
-            # weight doubles as an effective sample count (unit frame weights ×
-            # pixfrac overlap ≈ number of contributing frames). Compute the
-            # difference in float64: ``m`` and ``m2`` are ~counts² for a bright
-            # pixel (e.g. 5e4 counts → m² ≈ 2.5e9), where float32's ~7-digit
-            # precision can't resolve a small true variance from the two large
-            # operands — a catastrophic-cancellation trap.
-            m64 = m.astype(np.float64)
-            var = np.clip(m2.astype(np.float64) - m64 * m64, 0.0, None)
-            neff = wht
-            # Bessel factor only where it's meaningful; below the neff gate the
-            # tolerance becomes +inf anyway, so avoid a blow-up/overflow there.
-            bessel = np.where(neff > 1.0, neff / np.maximum(neff - 1.0, 1e-6), 1.0)
-            var = var * bessel
-            t = (float(kappa) * np.sqrt(var)).astype(np.float32)
-            covered = wht > 0
-            # A variance at/below the float32 resolution of m² is indistinguishable
-            # from cancellation noise — the mean-of-squares ``m2`` is itself
-            # accumulated in float32 by the drizzle library, so a true variance
-            # below ULP(m²) is already lost before we subtract and no float64
-            # arithmetic here can recover it. Clipping against such a tol would
-            # collapse it toward 0 and reject *every* real contribution, punching a
-            # NaN hole through a bright, flat region (a near-saturated star core or
-            # a smooth bright nebula) — the opposite of this pass's job. Treat it
-            # like the low-neff case and never reject there (tol = +inf); the
-            # threshold scales with brightness so dim sky/nebula (var ≫ ULP(m²)) is
-            # byte-for-byte unchanged.
-            unresolved = var <= _VAR_RESOLUTION_FACTOR * (m64 * m64)
-            t[~covered | (neff < _MIN_REJECT_NEFF) | unresolved] = np.inf
-            mean[..., c] = np.where(covered, m, np.nan)
+            mean_c, t = _clip_tolerance(
+                self._drizzlers[c].out_img,
+                self._sq_drizzlers[c].out_img,
+                self._drizzlers[c].out_wht,
+                kappa,
+            )
+            mean[..., c] = mean_c
             tol[..., c] = t
         return mean, tol
 

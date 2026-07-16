@@ -17,9 +17,27 @@ pytest.importorskip("drizzle")
 
 from seestack.io.project import FrameRow, Project  # noqa: E402
 from seestack.io.wcs_io import wcs_from_text  # noqa: E402
-from seestack.stack.drizzle_path import DrizzleParams, DrizzleStacker  # noqa: E402
+from seestack.stack.drizzle_path import (  # noqa: E402
+    _MIN_REJECT_NEFF,
+    _VAR_RESOLUTION_FACTOR,
+    DrizzleParams,
+    DrizzleStacker,
+    _clip_tolerance,
+)
 from seestack.stack.stacker import StackOptions, run_stack  # noqa: E402
 from tests.synth import make_synth_wcs_text, write_seestar_fits  # noqa: E402
+
+
+def _plain_wcs(dx=0.0, dy=0.0, width=40, height=30):
+    """A bare TAN WCS whose reference pixel is offset by ``(dx, dy)`` px."""
+    from astropy.wcs import WCS
+
+    w = WCS(naxis=2)
+    w.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+    w.wcs.crval = [83.6, -5.4]
+    w.wcs.crpix = [width / 2 + 0.5 + dx, height / 2 + 0.5 + dy]
+    w.wcs.cdelt = [-5.0 / 3600.0, 5.0 / 3600.0]
+    return w
 
 
 def _wcs(width=100, height=80):
@@ -123,12 +141,12 @@ def test_rejection_counts_tallies_the_clip():
         final.add_frame(f, wcs, clip=clip)
 
     contributed, rejected = final.rejection_counts()
-    # Every frame is fully finite; only the far edge row/column falls outside the
-    # drizzle bounds mask (a tiny float overshoot past the canvas edge — those
-    # pixels genuinely get zero weight in the accumulation too), so the tally is
-    # ~all of 16 × 80×100×3, never more.
+    # Every frame is fully finite and the identity WCS maps every input-pixel
+    # centre inside the canvas extent [-0.5, N-0.5] (the tiny float overshoot at
+    # the far edge lands well within the outer ½-px band the bounds mask now
+    # admits), so the tally is all of 16 × 80×100×3, never more.
     full = 16 * 80 * 100 * 3
-    assert 0.97 * full <= contributed <= full
+    assert 0.999 * full <= contributed <= full
     # Only the dirty frame's outlier block (interior, unaffected by the edge
     # mask) is clipped; the clean frames agree with the mean everywhere (σ=0 →
     # tol=0, exact equality is kept), so exactly 10×20×3 samples are rejected.
@@ -145,6 +163,56 @@ def test_rejection_counts_zero_without_clip():
     for f in frames:
         final.add_frame(f, wcs)  # clip=None
     assert final.rejection_counts() == (0, 0)
+
+
+def test_edge_footprint_deposited_within_half_pixel_band():
+    """An input pixel whose centre maps into the outer ½-px band [-0.5, 0) still
+    lies inside the first output pixel's [-0.5, 0.5] extent, so its drizzle
+    footprint must be deposited — the bounds mask keys on the pixel *edges*, not
+    the centre indices [0, N-1]. A +0.4-px shift lands input row/column 0 at
+    output −0.4; with a tight pixfrac (so neighbours don't bleed across), output
+    row/column 0 is covered *only* by that band."""
+    out_wcs = _plain_wcs()
+    in_wcs = _plain_wcs(dx=0.4, dy=0.4)  # input pixel (0,0) → output (−0.4, −0.4)
+    frame = np.full((30, 40, 3), 100.0, dtype=np.float32)
+    st = DrizzleStacker(out_wcs, (30, 40), DrizzleParams(scale=1.0, pixfrac=0.1))
+    st.add_frame(frame, in_wcs)
+
+    wht = st._drizzlers[0].out_wht
+    # The corner and the whole first row/column draw their coverage from the
+    # ½-px band; the tighter (index-only) mask dropped them entirely.
+    assert wht[0, 0] > 0.0, "corner in the ½-px band must be deposited"
+    assert np.all(wht[0, :] > 0.0), "top edge row must be covered"
+    assert np.all(wht[:, 0] > 0.0), "left edge column must be covered"
+
+
+def test_resolution_floor_uses_raw_variance_not_bessel_inflated():
+    """The float32 resolution floor (never clip a variance below ULP(m²)) must
+    judge the *raw* ``m2 − m²``, independent of the Bessel small-sample
+    correction. A bright pixel whose raw variance sits just inside the floor has
+    to be floored (tol = +inf) at every ``neff`` — before the fix the Bessel
+    factor (up to 1.5× at neff≈3) inflated the variance *before* the floor test,
+    lifting a low-coverage pixel out of the floor and re-enabling a spurious clip
+    against cancellation noise."""
+    m = np.array([[100.0]], dtype=np.float32)  # bright: m² = 1e4
+    # Raw variance comfortably inside the floor (0.8× the threshold), yet Bessel
+    # at neff=3 (×1.5) would push it to 1.2× — over the threshold — pre-fix.
+    var_raw = 0.8 * _VAR_RESOLUTION_FACTOR * (100.0**2)
+    m2 = (m.astype(np.float64) ** 2 + var_raw).astype(np.float32)
+    for neff in (_MIN_REJECT_NEFF, 5.0, 100.0):
+        wht = np.array([[neff]], dtype=np.float32)
+        _, tol = _clip_tolerance(m, m2, wht, kappa=3.0)
+        assert np.isinf(tol[0, 0]), f"floor must hold at neff={neff}"
+
+    # Sanity: a variance well *above* the floor still yields a finite, positive
+    # tolerance (the floor only disables clipping in the unresolved regime), and
+    # that tolerance carries the Bessel inflation as intended.
+    big_var = 100.0  # ≫ floor
+    m2_big = (m.astype(np.float64) ** 2 + big_var).astype(np.float32)
+    _, tol_lo = _clip_tolerance(m, m2_big, np.array([[3.0]], np.float32), kappa=3.0)
+    _, tol_hi = _clip_tolerance(m, m2_big, np.array([[999.0]], np.float32), kappa=3.0)
+    assert np.isfinite(tol_lo[0, 0]) and tol_lo[0, 0] > 0
+    assert tol_lo[0, 0] > tol_hi[0, 0], "small-sample tol must be Bessel-widened"
 
 
 def _build_project(tmp_path, frames_spec) -> Project:
