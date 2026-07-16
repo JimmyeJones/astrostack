@@ -3793,6 +3793,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   supported + captions given, omitted when unsupported). tsc + full vitest (838) + vite build green.
   *(S–M, friendliness/workflow — PRIORITY 3; serves the §1.3 "sharing a finished picture" beginner
   pillar; beginner bar ✔.)*
+  - **Editor result surface added — SHIPPED v0.127.0** (Builder 2026-07-16, same branch). The editor is
+    the *primary* "I just made a beautiful picture" moment, so it gets the native share too — completing
+    the sharing story on the finished-edit surface. The editor already generated a share-sized JPEG + a
+    copy-friendly caption blurb via the `…/editor/share` job (v0.114.0, downloaded to disk); a new
+    **"Share to app"** button (shown only when `canSharePictureFiles()` at mount) runs that same job and
+    hands the rendered JPEG to `sharePicture()` (using the run's caption blurb as the share title/text)
+    instead of downloading, so a beginner posts their *edited* result in one tap. The existing "Download
+    share image (JPEG)" button is unchanged (its icon switched to the download glyph now that share has
+    its own). Frontend-only, additive; reuses the existing share job/artifact, no backend/schema/API/
+    default change. Test: `Editor.test.tsx` ("shares the finished picture to another app via the OS share
+    sheet" — stubs `navigator.share`, mocks the share job, asserts the right File + caption reach the
+    sheet). tsc + full vitest (839) + vite build green.
 - **NEW BEGINNER FEATURE (Scout 2026-07-14) — "How's my stack?" plain-language health check on the
   result.** — **SLICE (a) SHIPPED v0.120.0** (Builder 2026-07-14, branch `claude/pensive-faraday-g346o7`).
   New pure/offline engine helper `seestack/stackhealth.py::stack_health(run, frames) -> list[HealthNote]`

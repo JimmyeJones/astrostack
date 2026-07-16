@@ -275,6 +275,35 @@ describe("EditorView", () => {
     expect(screen.getByLabelText("Copy caption")).toBeInTheDocument();
   });
 
+  it("shares the finished picture to another app via the OS share sheet", async () => {
+    const nav = navigator as unknown as Record<string, unknown>;
+    nav.canShare = () => true;
+    const share = vi.fn(async (_d?: ShareData) => {});
+    nav.share = share;
+    mockEditorQueries();
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/jpeg" }),
+    })));
+    vi.spyOn(client.api, "exportShare").mockResolvedValue({ job_id: "share1" });
+    vi.spyOn(client.api, "getJob").mockResolvedValue({
+      id: "share1", kind: "editor_share", target: "M_42", state: "done",
+      phase: "", done: 1, total: 1, detail: "", created_utc: null,
+      started_utc: null, finished_utc: null, error: null,
+      result: { filename: "m42.jpg", blurb: "M 42 · 3h 12m · 152 subs" },
+    });
+
+    renderEditor();
+
+    const btn = await screen.findByText("Share to app");
+    fireEvent.click(btn);
+    await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
+    const data = share.mock.calls[0][0] as ShareData;
+    expect(data.files?.[0].name).toBe("m42.jpg");
+    expect(data.title).toBe("M 42 · 3h 12m · 152 subs");
+    delete nav.canShare;
+    delete nav.share;
+  });
+
   it("threads an AbortSignal into the live-preview fetch so stale renders can be cancelled", async () => {
     mockEditorQueries();
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => ({
