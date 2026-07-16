@@ -26,14 +26,24 @@ export function noteColor(severity: string): string {
  * note). `trim_border` opens the non-destructive editor on this run (where Trim
  * border lives); `calibration` opens the Calibration page (build master darks/
  * flats). Both are read-only navigations — nothing is changed until the user acts.
+ *
+ * When the card is rendered *inside* the editor (`inEditor`), the `trim_border`
+ * link would just point at the page the user is already on — and the "Trim
+ * border" button is right there in the op list — so we drop that redundant
+ * self-link and let the note text guide them to the button. The `calibration`
+ * link still points off to the Calibration page, so it's kept.
  */
 export function noteAction(
   action: string | null,
   safe: string,
   runId: number | null,
+  inEditor = false,
 ): { label: string; href: string } | null {
   switch (action) {
     case "trim_border":
+      // In the editor the Trim border button is already on-screen, so a link
+      // back to this same page adds nothing — show the note text alone there.
+      if (inEditor) return null;
       // Opening the editor needs a concrete run to edit.
       return runId != null
         ? { label: "Open the editor to trim the border →",
@@ -52,8 +62,14 @@ export function noteAction(
  * beginner hits after a stack finishes, using cues we already compute (the run's
  * stamped fields + the frames' QC metrics). Read-only suggestion, never a gate.
  * Renders nothing until the target has a genuine stack to grade.
+ *
+ * `inEditor` tunes the action links for the editor surface, where the user is
+ * already on the page a `trim_border` note would otherwise link to (see
+ * `noteAction`).
  */
-export function StackHealthCard({ safe, runId }: { safe: string; runId?: number }) {
+export function StackHealthCard(
+  { safe, runId, inEditor = false }: { safe: string; runId?: number; inEditor?: boolean },
+) {
   const health = useQuery({
     queryKey: ["stack-health", safe, runId ?? null],
     queryFn: () => api.stackHealth(safe, runId),
@@ -70,7 +86,7 @@ export function StackHealthCard({ safe, runId }: { safe: string; runId?: number 
         <Stack gap={6} style={{ flex: 1, minWidth: 0 }}>
           <Text size="sm" fw={500}>How's my stack?</Text>
           {notes.map((n, i) => {
-            const act = noteAction(n.action, safe, data.run_id);
+            const act = noteAction(n.action, safe, data.run_id, inEditor);
             return (
               <Group key={i} gap={8} wrap="nowrap" align="flex-start">
                 <ThemeIcon size={18} radius="xl" variant="light" color={noteColor(n.severity)}

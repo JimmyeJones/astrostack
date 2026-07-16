@@ -11,12 +11,12 @@ function note(over: Partial<HealthNote> = {}): HealthNote {
   return { kind: "solid", severity: "good", message: "Looks solid.", action: null, ...over };
 }
 
-function renderCard(safe = "M_42") {
+function renderCard(safe = "M_42", inEditor = false) {
   return render(
     <MantineProvider>
       <QueryClientProvider client={new QueryClient()}>
         <MemoryRouter>
-          <StackHealthCard safe={safe} />
+          <StackHealthCard safe={safe} inEditor={inEditor} />
         </MemoryRouter>
       </QueryClientProvider>
     </MantineProvider>,
@@ -56,6 +56,13 @@ describe("noteAction", () => {
     expect(noteAction(null, "M_42", 7)).toBeNull();
     expect(noteAction("something_else", "M_42", 7)).toBeNull();
   });
+  it("drops the redundant trim_border self-link inside the editor, keeps calibration", () => {
+    // In the editor the Trim border button is already on the page, so the
+    // trim_border note shouldn't link back to the same page…
+    expect(noteAction("trim_border", "M_42", 7, true)).toBeNull();
+    // …but an off-page action (calibration) is still worth linking.
+    expect(noteAction("calibration", "M_42", 7, true)?.href).toBe("/calibration");
+  });
 });
 
 describe("StackHealthCard", () => {
@@ -91,5 +98,19 @@ describe("StackHealthCard", () => {
     const { container } = renderCard();
     await waitFor(() => expect(client.api.stackHealth).toHaveBeenCalled());
     expect(container.querySelector(".mantine-Paper-root")).toBeNull();
+  });
+
+  it("in the editor, shows a trim_border note's text but not the redundant self-link", async () => {
+    vi.spyOn(client.api, "stackHealth").mockResolvedValue({
+      run_id: 7,
+      notes: [note({ kind: "trim_border", severity: "info",
+        message: "Ragged low-coverage border — Trim border to clean it up.",
+        action: "trim_border" })],
+    });
+    renderCard("M_42", true);
+    await waitFor(() =>
+      expect(screen.getByText(/Ragged low-coverage border/)).toBeInTheDocument());
+    // The note is still shown, but with no link back to the page we're already on.
+    expect(screen.queryByRole("link", { name: /trim the border/i })).toBeNull();
   });
 });
