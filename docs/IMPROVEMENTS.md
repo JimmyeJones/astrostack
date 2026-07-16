@@ -4365,16 +4365,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
-- **`validate_stack_options` accepts a non-integer float for `int`-typed fields.** *(Traced, Builder
-  routers audit 2026-07-16; low severity — muted impact.)* `webapp/schemas.py::validate_stack_options`
-  treats `int` and `float` fields identically (accepts any `int|float`, rejecting only `bool`), so an
-  `int`-declared option (`max_workers`, `min_max_reject_count`, `background_box_size`,
-  `quick_look_interval`) passes a value like `3.5`, and `coerce_stack_options` (a plain dataclass) does no
-  coercion, so the float reaches the engine. Impact is muted (`ThreadPoolExecutor(max_workers=3.5)`
-  tolerates a float; most others are range-guarded and used numerically), so this is a robustness tidy, not
-  a crash. Fix: add a `float.is_integer()` check (reject / floor) for `fld.type == "int"` in
-  `validate_stack_options`. (XS, robustness.) Found alongside the v0.131.5 `default_stack_options`
-  validation fix.
+- ~~**`validate_stack_options` accepts a non-integer float for `int`-typed fields.**~~ — **FIXED v0.131.7**
+  (Builder 2026-07-16, branch `claude/pensive-faraday-wgck3h`; regression-tested). `webapp/schemas.py::
+  validate_stack_options` treated `int` and `float` fields identically (accepted any `int|float`, rejecting
+  only `bool`), so an `int`-declared option (`max_workers`, `min_max_reject_count`, `background_box_size`,
+  `final_gradient_box_size`, `quick_look_interval`) passed a value like `3.5`, and `coerce_stack_options`
+  (a plain dataclass) does no coercion, so the float reached the engine. **Fix:** added a
+  `float.is_integer()` check for `fld.type == "int"` — a fractional float now raises a plain-language
+  `ValueError` ("expected a whole number"), while an *integral* float (`3.0`, how JSON often carries an int)
+  and a genuine `int` are still accepted. Mirrors the endpoint's existing up-front-400 contract. Additive,
+  no schema/config/API/default change (a well-formed integral request round-trips unchanged). Regressions in
+  `tests/webapp/test_stack_option_validation.py`: `test_validate_rejects_fractional_float_for_int_field`
+  (`max_workers=3.5`, `min_max_reject_count=2.7` → ValueError, fail-before/pass-after) and
+  `test_validate_accepts_integral_float_for_int_field` (`3.0`/`128.0` still accepted). Severity: robustness
+  tidy (muted impact — the float was tolerated numerically downstream). Confidence: reproduced + fixed.
 - ~~**NEW (Scout 2026-07-16) — harden `_downsample_rgb` against a NaN input (latent, not currently
   reachable; small safe robustness fix).**~~ — **FIXED v0.131.1** (Builder 2026-07-16, branch
   `claude/pensive-faraday-6bwguj`; regression-tested). `render/thumbnail.py::_downsample_rgb` now reduces
