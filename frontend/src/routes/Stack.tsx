@@ -43,6 +43,10 @@ export function StackView() {
   const job = useJobEvents(jobId);
 
   const schema = useQuery({ queryKey: ["schema"], queryFn: api.optionsSchema });
+  // Show the target's friendly name in the heading, not the URL-safe slug
+  // (a target named "NGC 7000" has safe key "NGC_7000"). Falls back to the
+  // slug while loading / on 404, so it never renders blank.
+  const target = useQuery({ queryKey: ["target", safe], queryFn: () => api.getTarget(safe) });
   const defaults = useQuery({
     queryKey: ["stack-defaults", safe],
     queryFn: () => api.getStackDefaults(safe),
@@ -613,7 +617,7 @@ export function StackView() {
   return (
     <Stack maw={720}>
       <Group justify="space-between">
-        <Title order={2}>Stack — {safe}</Title>
+        <Title order={2}>Stack — {target.data?.name ?? safe}</Title>
         <Button component={Link} to={`/targets/${safe}`} variant="subtle">
           Back to frames
         </Button>

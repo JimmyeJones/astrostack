@@ -1281,4 +1281,30 @@ describe("StackView", () => {
     await waitFor(() =>
       expect(screen.queryByText(/needs lots of dithered frames/)).not.toBeInTheDocument());
   });
+
+  it("titles the page with the target's friendly name, not the URL slug", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      { safe: "NGC_7000", name: "NGC 7000" } as never);
+
+    renderStackAt("/targets/NGC_7000/stack");
+
+    await waitFor(() =>
+      expect(screen.getByText("Stack — NGC 7000")).toBeInTheDocument());
+    expect(screen.queryByText("Stack — NGC_7000")).not.toBeInTheDocument();
+  });
+
+  it("falls back to the slug in the title when the target record can't be loaded", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
+    vi.spyOn(client.api, "getTarget").mockRejectedValue(new Error("404"));
+
+    renderStackAt("/targets/M_42/stack");
+
+    await waitFor(() =>
+      expect(screen.getByText("Stack — M_42")).toBeInTheDocument());
+  });
 });

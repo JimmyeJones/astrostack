@@ -2966,6 +2966,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+- ~~**Two beginner-facing surfaces leaked raw engine slugs/codes instead of the plain-language name the
+  rest of the app shows.**~~ — **SHIPPED v0.131.10** (Builder 2026-07-16, branch `claude/pensive-faraday-kv77w1`;
+  found by a fresh jargon-sweep of the non-editor routes). Two un-filed jargon leaks a beginner would notice:
+  (1) the **Stack page heading** rendered `Stack — {safe}` using the URL-safe *slug*, so a target named "NGC
+  7000" (safe key `NGC_7000`) showed the biggest heading on a core workflow page as "Stack — NGC_7000" — every
+  sibling surface (Target header, Library cards, Gallery, Combine) already uses the friendly `name`. Added a
+  `getTarget` query mirroring the Target page and render `target.data?.name ?? safe` (falls back to the slug
+  while loading / on 404, never blank). (2) The Target-page frames-table **reject-reason tooltip** printed the
+  raw `f.reject_reason` (`qc:fwhm`, `auto:grade:star_count`, `solve_failed:…`) while the badge it wraps was
+  already humanized via `rejectReasonLabel` — so a beginner hovering *precisely to learn why a frame was
+  dropped* got the engine code. Wrapped the tooltip label in the same `rejectReasonLabel` helper (now exported).
+  Frontend-only, additive; no backend/schema/API/default change; both degrade gracefully. Tests:
+  `Stack.test.tsx` (+2 — the heading shows the friendly name; falls back to the slug when `getTarget` rejects)
+  and `Target.test.tsx` (a `rejectReasonLabel` unit test over the codes the badge+tooltip now share; the badge's
+  in-row rendering is already covered). tsc + full vitest + vite build green. *(S+XS, friendliness/plain-language
+  — PRIORITY 3; matches the standing "audit every screen for jargon" direction.)*
 - ~~**Point the brand-new (no-NAS) beginner at the Upload on-ramp instead of a dead-end.**~~ —
   **SHIPPED v0.121.8** (Builder 2026-07-14, branch `claude/pensive-faraday-47ditq`; found dogfooding the
   first-run flow). Two related misdirections for a user with zero targets/jobs: (1) the Library empty-state
