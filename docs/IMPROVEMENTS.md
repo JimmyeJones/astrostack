@@ -47,6 +47,38 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- **⭐ OWNER-REPORTED (2026-07 — HIGH PRIORITY) — Sky map: irregular mosaics render
+  as a black rectangle, and the overlay placement/orientation is off.** Two traced
+  bugs on the Sky map page (`frontend/src/routes/AladinSky.tsx` +
+  `webapp/routers/sky.py`):
+  1. **Black rectangular background around a non-rectangular mosaic.** The sky
+     overlay uses the run's `preview_path` PNG, which `render_stack_png` /
+     `_write_preview_png` (`seestack/render/thumbnail.py:184`,
+     `seestack/stack/output.py:271`) writes as **opaque `mode="RGB"`** with the
+     uncovered/NaN pixels `nan_to_num`'d to 0 (black). So an irregular union-mosaic
+     footprint (or any frame with uncovered corners) shows as a **black box** on the
+     sky instead of its true shape. **Fix:** serve the sky overlay as **RGBA with
+     `alpha=0` on uncovered (NaN / zero-coverage) pixels** — a dedicated transparent
+     overlay render, or add an alpha channel keyed off the coverage mask — so the
+     mosaic shows its real footprint. Keep "NaN = no coverage" end-to-end; don't
+     turn gaps into black. (The editor's coverage overlay already renders NaN-aware;
+     reuse that machinery.)
+  2. **Placement / orientation is approximate.** `_tan_wcs`
+     (`webapp/routers/sky.py:74`) builds the overlay WCS from a *single
+     representative frame's* pixscale + rotation (`_representative_pixscale_rotation`
+     = the first frame) centred on the run RA/Dec, with a **best-effort rotation
+     sign** (its own docstring admits this) and equal scale on both axes. For a
+     mosaic — whose canvas spans many frames/rotations and is *not* one frame's grid
+     — the overlay lands mis-placed / mis-rotated. **Fix:** derive the overlay WCS
+     from the **stack's own canvas geometry** (the mosaic canvas centre + true pixel
+     scale + the orientation used when the canvas was built — the stacker/mosaic code
+     already computes a canvas WCS; thread it onto the run record, or recompute from
+     the footprint) instead of extrapolating from frame 0. Pin the rotation sign with
+     a known-orientation regression test.
+  Verify on a real irregular mosaic loaded on the Sky page: the footprint should be
+  its true shape, transparent background, at the correct RA/Dec/orientation.
+  Severity: broken-UX (wrong/ugly on an owner-used page). Confidence: traced.
+
 - ~~**`GET /api/targets/{safe}/frames` didn't clamp `offset`/`limit` — a negative page
   silently returned the wrong window.**~~ — **FIXED v0.131.6** (Builder 2026-07-16, branch
   `claude/pensive-faraday-xp00ow`; traced + regression-tested). Found by the same routers audit.
