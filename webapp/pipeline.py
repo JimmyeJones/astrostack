@@ -1129,10 +1129,16 @@ def submit_editor_batch(settings: Settings, jm: JobManager, items: list[dict],
                     cancelled = True
                     break
                 safe = str(item.get("safe"))
-                rid = int(item.get("run_id"))
-                job.set_progress("batch", i, total, f"{safe} run {rid}")
-                jm.maybe_flush(job)
                 try:
+                    # Parse the per-item fields *inside* the try: a malformed item
+                    # (missing / non-numeric run_id) must be isolated like any other
+                    # per-item failure, not raise out of the loop and sink the whole
+                    # job — which would also discard the records of the items already
+                    # exported earlier in the batch (their new runs are on disk, but
+                    # the job would report a bare 'error' with result=None).
+                    rid = int(item.get("run_id"))
+                    job.set_progress("batch", i, total, f"{safe} run {rid}")
+                    jm.maybe_flush(job)
                     res = _apply_editor_to_run(
                         lib, safe, rid, recipe_dict,
                         output_name=output_name, tiff_mode=tiff_mode,
@@ -1140,8 +1146,9 @@ def submit_editor_batch(settings: Settings, jm: JobManager, items: list[dict],
                     )
                     exported.append(res)
                 except Exception as exc:  # noqa: BLE001 — one item shouldn't sink the batch
-                    log.warning("batch edit failed for %s/%s: %s", safe, rid, exc)
-                    errors[f"{safe}:{rid}"] = str(exc)
+                    rid_repr = item.get("run_id")
+                    log.warning("batch edit failed for %s/%s: %s", safe, rid_repr, exc)
+                    errors[f"{safe}:{rid_repr}"] = str(exc)
         finally:
             lib.close()
         result: dict[str, Any] = {"exported": exported, "errors": errors}

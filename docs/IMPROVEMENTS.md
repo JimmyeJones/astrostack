@@ -47,6 +47,71 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**`GET /api/targets/{safe}/frames` didn't clamp `offset`/`limit` — a negative page
+  silently returned the wrong window.**~~ — **FIXED v0.131.6** (Builder 2026-07-16, branch
+  `claude/pensive-faraday-xp00ow`; traced + regression-tested). Found by the same routers audit.
+  `webapp/routers/frames.py::list_frames` sliced `frames[offset : offset + limit]` with the raw query
+  params, so a negative `offset` or `limit` triggered Python negative-index slicing and silently returned
+  the wrong page — `offset=-1` → the last frame only; `limit=-1` → every frame *but* the last — instead of
+  the requested window. This is the exact class the codebase already guards everywhere else (`jobs.py`
+  `limit`, `stats.py` `recent_limit` — which even comments on the identical "negative slice silently drops
+  rows" trap — `logs.py`, `frame_preview` `size`); `list_frames` was the lone endpoint that didn't. **Fix:**
+  clamp `offset = max(0, offset)` and `limit = max(0, limit)` before slicing, mirroring the siblings.
+  Additive, no schema/API/default change (a well-formed request is byte-for-byte identical). Regression
+  `tests/webapp/test_api.py::test_list_frames_clamps_negative_pagination` (`offset=-1` returns the full
+  window, `limit=-1` returns empty — both fail-before / pass-after). Severity: wrong-result on a
+  deliberately-negative param (low). Confidence: reproduced + fixed.
+
+- ~~**Global `default_stack_options` bypassed value validation — a bad enum / out-of-range value
+  set via the settings PUT/import path poisoned every target's Stack form and 400'd every stack.**~~
+  — **FIXED v0.131.5** (Builder 2026-07-16, branch `claude/pensive-faraday-xp00ow`; traced + reproduced +
+  regression-tested). Found by a fresh adversarial webapp routers/schemas audit. The per-target
+  `PUT /api/targets/{safe}/stack-defaults` runs `validate_stack_options` before persisting (so a bad
+  enum/range is rejected with a plain-language 400, not "accepted then failed cryptically deep in the
+  engine" — the validator's own stated purpose). But the **global** `default_stack_options` reached
+  storage through `webapp/routers/settings.py` completely unvalidated: `_sanitize_patch` only stripped
+  the calibration `NON_FORM_KEYS`, and `store.update` persists `default_stack_options` as an opaque
+  `dict[str, Any]`. So `PUT /api/settings {"default_stack_options": {"mosaic_canvas": "garbage"}}` (or
+  `{"sigma_kappa": 999}`) returned **200** and persisted globally. The poison then (1) seeds every
+  target's Stack form via `get_stack_defaults`, so the form re-POSTs it and `trigger_stack` **400s every
+  stack attempt for every target**, and (2) flows through the unattended auto-stack chain (which
+  `coerce_stack_options` without validating) **straight into the engine** — exactly the cryptic failure
+  `validate_stack_options` exists to prevent. `POST /api/settings/import` shared the identical gap.
+  **Fix:** `_sanitize_patch` (the shared helper for both the PUT and import paths) now runs
+  `validate_stack_options` on the stripped `default_stack_options` sub-dict and raises `HTTPException(422)`
+  on a bad value, mirroring the per-target endpoint's contract. Upgrade-safe: it validates only the
+  *incoming* patch — an existing `config.json` with an out-of-range value still loads via the resilient
+  loader unchanged (§9), and a legitimate in-bounds form submission / backup round-trips as before.
+  Additive, no schema/config/API-shape/default change. Regressions in `tests/webapp/test_api.py`:
+  `test_settings_put_rejects_a_bad_default_stack_option` (bad enum + out-of-range → 422, no partial apply,
+  valid still round-trips) and `test_settings_import_rejects_a_bad_default_stack_option` (import path shares
+  the guard) — both fail-before (200, poison persisted) / pass-after. Severity: broken-UX/autonomy (every
+  stack blocked until the bad default is cleared; no pixel data corrupted). Confidence: reproduced + fixed.
+
+- ~~**Batch editor apply: a single malformed item sinks the *whole* job and hides the
+  exports that already succeeded.**~~ — **FIXED v0.131.4** (Builder 2026-07-16, branch
+  `claude/pensive-faraday-xp00ow`; traced + reproduced + regression-tested). Found by a fresh
+  adversarial webapp pipeline/jobs/watcher audit. `webapp/pipeline.py::submit_editor_batch`'s per-item
+  loop parsed the item fields **outside** the per-item `try` — `rid = int(item.get("run_id"))` at
+  pipeline.py:1132 — while the inner `try/except` (whose comment reads "one item shouldn't sink the
+  batch") wrapped only `_apply_editor_to_run`. The `POST /api/editor/batch` endpoint accepts an
+  **unvalidated** `items: list[dict]` (`webapp/routers/editor.py::BatchRequest`), so an item missing (or
+  carrying a non-numeric) `run_id` reached the loop and `int(None)` raised a `TypeError` that escaped the
+  loop → escaped `body` → `JobManager._run` marked the **whole job `error`** with `result=None`. Two
+  harms: (1) the documented per-item isolation was violated (all remaining items skipped), and (2) any
+  items already exported earlier in the same batch had really written new `stack_runs` rows + output files
+  to disk, but the job reported a bare `error` with **no record** of those successes — a
+  data-visibility/accounting loss, not just skipped work. **Fix:** moved the `run_id` parse (and the
+  progress update) *inside* the per-item `try`, so a malformed item is recorded in `errors[f"{safe}:
+  {run_id}"]` and the batch carries on — exactly like a failed export — and the good items' records
+  survive in `exported`. The error key uses the raw `run_id` value so a malformed one still keys uniquely.
+  Additive, no schema/config/API/default change; only converts a job-killing crash into the isolated
+  per-item error the loop already promised. Regression
+  `tests/webapp/test_pipeline_cancel_state.py::test_editor_batch_isolates_a_malformed_item` (a batch of one
+  good + one `run_id`-less item: fail-before the good export's record is lost to a `TypeError` /
+  pass-after the good item exports and the bad one is isolated into `errors`). Severity: wrong outcome for
+  a batch export (broken-UX / trust; no pixel data corrupted). Confidence: reproduced + fixed.
+
 - ~~**⭐ OWNER-REPORTED (2026-07 — TOP PRIORITY) — bright galaxy cores blow out to
   white, and the Auto result regressed.**~~ — **FIXED v0.119.1** (Builder 2026-07-14,
   branch `claude/pensive-faraday-r22s3k`; traced + reproduced + regression-tested).
@@ -1455,6 +1520,23 @@ the real webapp stack→edit path.)_
   clean — WCS parse, solve-success detection (returncode + sidecar), RA-wrap in the center consumers, hint
   unit conversion, and setup-error classification all held.
 
+- **Queued-job cancel vs. worker-start race can report a non-cancel-aware job "cancelled" while it
+  actually runs to completion.** *(Traced, Builder webapp audit 2026-07-16; low confidence it's
+  reachable in practice, low severity.)* `webapp/jobs.py::cancel` reads `job.state` **without holding
+  `_lock`** and, if it sees `"queued"`, writes `state="cancelled"` + `finished_utc` and persists.
+  Meanwhile `_run` does `queue.get()` → checks `if job.state == "cancelled": continue` → sets
+  `state="running"`. If a cancel lands in the window *after* the worker passed the `== "cancelled"` check
+  but *before* it set `"running"`, `cancel()` still sees `"queued"`, marks the job cancelled and persists a
+  terminal row — then the worker overwrites `state="running"` and runs the body. For a **cancel-aware**
+  body this is benign (the `_cancel` event is set, so it returns early). For a **non-cancel-aware** body
+  (`submit_build_master`, `submit_editor_png`, `submit_editor_share`) the body ignores `_cancel`, runs to
+  completion, and `_persist` writes `done` — so the user was told the job was cancelled (and briefly saw a
+  `cancelled` row) but a master/PNG was actually produced. **Fix (needs care):** take `_lock` in `cancel()`
+  when reading+transitioning `job.state`, or have the worker re-check `cancel_requested()` immediately after
+  flipping to `running` and short-circuit. Low priority — narrow timing window, no data corruption, only a
+  transiently-wrong job-state label — but a genuine lock-discipline gap. (S code + a threaded test,
+  friendliness/trust.) Found by an adversarial webapp pipeline/jobs/watcher audit.
+
 - ~~**`render.autostretch` crashes on a 2-D (mono) input while its sibling `asinh_stretch` handles it —
   latent API-contract gap, not currently user-reachable.**~~ — **FIXED v0.103.20** (Builder 2026-07-10;
   traced + regression-tested). `seestack/render/thumbnail.py::autostretch` did `img = rgb.astype(np.float32,
@@ -2073,6 +2155,19 @@ to **Shipped**.)_
 ### ⭐ Editor — make it excellent (PRIORITY 1)
 The editor is where a good stack becomes a good *picture*, and it has real
 problems. Dogfood it every big-picture run and fix root causes.
+- **Background-mesh box floor (`_scaled_box` `minimum=16`) is the one pixel-scale divergence with
+  no honest advisory.** *(Traced, Builder editor-parity audit 2026-07-16; low confidence it's a
+  visible defect — arguably a defensible tradeoff.)* `seestack/edit/ops/background.py::_scaled_box`
+  floors the proxy-scaled box/mesh size at 16 px so `Background2D` still tiles the small proxy. On a
+  heavily decimated proxy (a ~150 MP mosaic → `proxy_scale≈10`) even the default `box_size=128` scales
+  to `round(128/10)=13`, floored up to 16 = 160 full-res-equivalent px, so the preview's sky mesh is
+  ~25% coarser than the export's (which fits 128). Unlike the deconv/star-reduce sub-pixel floors —
+  which *surface* the divergence to the user via `deconv_understates_on_proxy` /
+  `star_reduce_overstates_on_proxy` — this one is silent. Effect is subtle (both are broad meshes) and
+  only bites at high decimation, so it's low priority; if confirmed visible on a real large mosaic, add
+  a sibling honest-advisory note (`bg_mesh_coarser_on_proxy`) rather than changing the floor (a smaller
+  floor risks a degenerate proxy mesh). (S, editor/parity-honesty — PRIORITY 1.) Found by an
+  adversarial editor preview↔export parity audit (which otherwise traced clean).
 - ~~**Give the manual `asinh` stretch the same highlight rolloff STF just got.**~~
   — **SHIPPED v0.119.2** (Builder 2026-07-14, same branch). `asinh_stretch` shared
   the identical hard-clip, so it got the same `_highlight_rolloff` behind a
@@ -4270,6 +4365,16 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+- **`validate_stack_options` accepts a non-integer float for `int`-typed fields.** *(Traced, Builder
+  routers audit 2026-07-16; low severity — muted impact.)* `webapp/schemas.py::validate_stack_options`
+  treats `int` and `float` fields identically (accepts any `int|float`, rejecting only `bool`), so an
+  `int`-declared option (`max_workers`, `min_max_reject_count`, `background_box_size`,
+  `quick_look_interval`) passes a value like `3.5`, and `coerce_stack_options` (a plain dataclass) does no
+  coercion, so the float reaches the engine. Impact is muted (`ThreadPoolExecutor(max_workers=3.5)`
+  tolerates a float; most others are range-guarded and used numerically), so this is a robustness tidy, not
+  a crash. Fix: add a `float.is_integer()` check (reject / floor) for `fld.type == "int"` in
+  `validate_stack_options`. (XS, robustness.) Found alongside the v0.131.5 `default_stack_options`
+  validation fix.
 - ~~**NEW (Scout 2026-07-16) — harden `_downsample_rgb` against a NaN input (latent, not currently
   reachable; small safe robustness fix).**~~ — **FIXED v0.131.1** (Builder 2026-07-16, branch
   `claude/pensive-faraday-6bwguj`; regression-tested). `render/thumbnail.py::_downsample_rgb` now reduces

@@ -131,3 +131,39 @@ def test_editor_batch_cancel_is_classified_cancelled(solved_library):
     result = pipeline.submit_editor_batch(settings, _JM(), items, {"ops": []})
     assert result.get("cancelled") is True
     assert result["exported"] == []
+
+
+def test_editor_batch_isolates_a_malformed_item(solved_library, monkeypatch):
+    # A batch item with a missing / non-numeric run_id must be isolated into
+    # ``errors`` like any other per-item failure — not raise out of the loop and
+    # sink the whole job. Regression: ``rid = int(item.get("run_id"))`` ran
+    # *outside* the per-item try, so one malformed item (which the unvalidated
+    # ``items: list[dict]`` API permits) crashed the body → the job was marked
+    # 'error' with result=None, discarding the records of the items that had
+    # already exported successfully earlier in the batch.
+    settings = Settings(data_root=str(solved_library))
+
+    applied: list[tuple] = []
+
+    def fake_apply(lib, safe, run_id, recipe_dict, **kw):  # noqa: ANN001
+        applied.append((safe, run_id))
+        return {"safe": safe, "run_id": run_id, "output_basename": "x"}
+
+    monkeypatch.setattr(pipeline, "_apply_editor_to_run", fake_apply)
+
+    class _JM(_FakeJM):
+        def submit(self, kind, fn, **kw):  # noqa: ANN001
+            return fn(Job(kind=kind))
+
+    # First item is well-formed; the second is missing run_id.
+    items = [{"safe": "M_42", "run_id": 1}, {"safe": "M_42"}]
+    result = pipeline.submit_editor_batch(settings, _JM(), items, {"ops": []})
+
+    # The good item still exported and its record is preserved...
+    assert applied == [("M_42", 1)]
+    assert result["exported"] == [
+        {"safe": "M_42", "run_id": 1, "output_basename": "x"}
+    ]
+    # ...and the malformed item is isolated into errors, not a crashed job.
+    assert any("M_42" in key for key in result["errors"])
+    assert result.get("cancelled") is not True

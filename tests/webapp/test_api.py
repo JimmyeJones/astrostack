@@ -78,6 +78,21 @@ def test_list_and_sort_frames(client, built_library):
     assert ids == sorted(ids, reverse=True)
 
 
+def test_list_frames_clamps_negative_pagination(client, built_library):
+    # Regression: offset/limit were sliced directly, so a negative value hit
+    # Python negative-index slicing and silently returned the wrong window (the
+    # same class of bug stats/jobs/logs already clamp). Clamp to >= 0 so a
+    # negative page never drops/reorders frames.
+    all_ids = [f["id"] for f in client.get("/api/targets/M_42/frames").json()]
+    assert len(all_ids) == 3
+    # offset=-1 would otherwise slice frames[-1:...] → the last frame only.
+    r = client.get("/api/targets/M_42/frames", params={"offset": -1})
+    assert [f["id"] for f in r.json()] == all_ids
+    # limit=-1 would otherwise slice frames[0:-1] → every frame but the last.
+    r = client.get("/api/targets/M_42/frames", params={"limit": -1})
+    assert r.json() == []
+
+
 def test_accept_reject_frame(client, built_library):
     frames = client.get("/api/targets/M_42/frames").json()
     fid = frames[0]["id"]
@@ -376,6 +391,37 @@ def test_settings_put_strips_calibration_paths_from_default_stack_options(client
     assert stored.get("sigma_kappa") == 2.5
     for k in ("dark_path", "flat_path", "bias_path", "flat_dark_path"):
         assert k not in stored, f"{k} should have been stripped, got {stored}"
+
+
+def test_settings_put_rejects_a_bad_default_stack_option(client):
+    # Regression: default_stack_options is persisted as an opaque dict, so a bad
+    # enum / out-of-range value used to be accepted (200) and then poison every
+    # target's Stack form and 400 every stack. The global path must validate the
+    # values exactly like the per-target PUT .../stack-defaults endpoint does.
+    r = client.put("/api/settings",
+                   json={"default_stack_options": {"mosaic_canvas": "garbage"}})
+    assert r.status_code == 422
+    r = client.put("/api/settings",
+                   json={"default_stack_options": {"sigma_kappa": 999}})
+    assert r.status_code == 422
+    # A rejected patch must not partially apply — the stored default is unchanged.
+    assert "garbage" not in str(
+        client.get("/api/settings").json()["default_stack_options"])
+    # A valid default_stack_options still round-trips.
+    r = client.put("/api/settings",
+                   json={"default_stack_options": {"sigma_kappa": 2.5,
+                                                   "mosaic_canvas": "reference"}})
+    assert r.status_code == 200
+    stored = client.get("/api/settings").json()["default_stack_options"]
+    assert stored["sigma_kappa"] == 2.5 and stored["mosaic_canvas"] == "reference"
+
+
+def test_settings_import_rejects_a_bad_default_stack_option(client):
+    # The import path shares _sanitize_patch, so a backup carrying a poisoned
+    # default_stack_options is rejected with a 422 rather than restored.
+    r = client.post("/api/settings/import",
+                    json={"default_stack_options": {"drizzle_scale": 999}})
+    assert r.status_code == 422
 
 
 def test_settings_rejects_out_of_bounds_values(client):

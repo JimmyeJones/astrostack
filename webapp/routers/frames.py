@@ -104,6 +104,13 @@ def list_frames(
 ) -> list[FrameOut]:
     if sort not in _SORTABLE:
         sort = "id"
+    # Clamp the pagination window like every other int query param in the routers
+    # (jobs `limit`, stats `recent_limit`, frame_preview `size`): a negative
+    # `offset`/`limit` would trigger Python negative-index slicing and silently
+    # return the wrong window (e.g. offset=-1 → the last frame only; limit=-1 →
+    # every frame but the last) instead of the requested page.
+    offset = max(0, offset)
+    limit = max(0, limit)
     lib, proj = deps.open_target_project(request, safe)
     try:
         frames = list(proj.iter_frames(accepted_only=accepted_only))
