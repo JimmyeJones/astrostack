@@ -3041,8 +3041,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+- **NEW (Builder audit 2026-07-16) — warn on the Stack form when `min_max_reject` + `quality_weighted`
+  are *both* on: min/max silently ignores per-frame weights.** (S, friendliness/trust — PRIORITY 3.)
+  *(Traced by an adversarial accumulation-path audit that otherwise verified the reduction math correct with
+  five numerical repros.)* `MinMaxRejectAccumulator` (`seestack/stack/accumulator.py`) is an order statistic —
+  it accepts a `weight` arg but never uses it — so a user who enables both min/max rejection and quality
+  weighting gets an **unweighted** combine, silently discarding the quality weighting they asked for. It is
+  **not truly silent** (the docstring says so, and `stacker.py` correctly stamps `weights_applied=False` into
+  provenance) and it is **not a bug** (min/max genuinely can't weight), so this is a friendliness nudge, not a
+  fix: add a small amber "Min/max rejection ignores quality weighting — they don't combine" note on the Stack
+  form when both toggles are on (mirroring the form's existing data-driven nudges), so the user chooses one
+  rejection strategy knowingly. Frontend-only, additive, no engine change. *(A beginner rarely enables min/max
+  manually, so this is low-priority polish — filed for completeness.)*
 - ~~**A finished "Build master" job showed no outcome at all — and silently dropped wrong-size/unreadable
   frames without telling the user.**~~ — **SHIPPED v0.135.0** (Builder 2026-07-16, branch
+  `claude/pensive-faraday-h477bm`; found dogfooding the calibration flow). Two related trust gaps for a
   `claude/pensive-faraday-h477bm`; found dogfooding the calibration flow). Two related trust gaps for a
   beginner building a master dark/flat/bias from a folder: (1) `webapp/routers/Jobs.tsx::JobResultActions`
   had **no `build_master` case**, so a completed build showed a bare "done" with no plain-language summary
@@ -3345,6 +3358,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+- **NEW (Builder audit 2026-07-16) — engine-audit residue: two low-confidence, NOT-currently-reachable
+  notes to keep a future audit from re-flagging them.** (XS each, image-quality/correctness — PRIORITY 4.)
+  *(From two independent adversarial stacking-engine audits this run — both otherwise verified the core
+  reduction/rejection/mosaic/drizzle/calibrate math correct, backed by numerical repros; the one provable bug
+  they found, the non-finite dark/bias poisoning, shipped v0.135.1.)* **(1) GPU vs CPU reproject `cval`
+  asymmetry** — `align.py` uses `cval=0.0` on the GPU reproject and `cval=nan` on the CPU one (~L498 vs L523).
+  Confirmed *not reachable for real data*: `FRAME_EDGE_INSET_PX=3` guarantees the bilinear stencil never
+  touches out-of-bounds within the valid mask for any frame ≥13 px, so GPU and CPU agree; it could only differ
+  on ≤12 px synthetic frames, GPU-only. Harmless, but making both `nan` would remove the latent divergence and
+  a foot-gun for future edits. **(2) `level_by_coverage` docstring imprecision** — `stacker.py` (~L1175) runs
+  it unconditionally and its docstring calls the single-coverage-level case "effectively a no-op", but it
+  actually subtracts a per-level sky-mode *constant* (a pedestal shift, brightness-relative-preserving, which
+  is intended) — so the wording is misleading, not the behaviour. A one-line docstring correction only; judging
+  whether the sky estimate itself is *good* needs real data (see the SExtractor-skew and `sky_sigma` items).
+  Neither cleared the churn bar to change this run; recorded so they aren't mistaken for new findings later.
 - **"How's my stack?" highlight-clip cue — needs REAL-data threshold tuning before shipping (NOT a blind
   change).** (M, image-quality/trust — PRIORITY 4) *(Builder-filed 2026-07-14, deferred slice-(b) part of the
   "How's my stack?" health check; slices (a) v0.120.0 + actionable/History (b) v0.121.0 shipped.)* The original
