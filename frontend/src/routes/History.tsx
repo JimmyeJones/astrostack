@@ -19,6 +19,8 @@ import { RejectionBadge } from "../components/RejectionBadge";
 import { NoiseReadout, NoiseDelta, CleanestBadge, cleanestRunId, hasNoise } from "../components/NoiseBadge";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { StackHealthCard } from "../components/StackHealthCard";
+import { SharePictureButton } from "../components/SharePictureButton";
+import { sharePictureText } from "../share";
 import { Sparkline } from "../components/Sparkline";
 
 export type RunSort = "newest" | "cleanest";
@@ -646,6 +648,15 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
               </Button>
             </Tooltip>
           )}
+          {run.has_preview && (
+            <SharePictureButton
+              url={api.stackArtifactUrl(safe, run.id, "jpeg")}
+              {...sharePictureText(
+                run.output_basename,
+                new Date(run.timestamp_utc).toLocaleDateString(),
+              )}
+            />
+          )}
           {run.has_fits && (
             <Tooltip label="Download the raw scientific data (FITS) — for re-processing, not sharing">
               <Button
@@ -697,6 +708,15 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
         downloadHref={run.has_preview ? api.stackArtifactUrl(safe, run.id, "preview") : undefined}
         jpegHref={run.has_preview ? api.stackArtifactUrl(safe, run.id, "jpeg") : undefined}
         rawHref={run.has_fits ? api.stackArtifactUrl(safe, run.id, "fits") : undefined}
+        {...(run.has_preview
+          ? (() => {
+              const { title, text, filename } = sharePictureText(
+                run.output_basename,
+                new Date(run.timestamp_utc).toLocaleDateString(),
+              );
+              return { shareFilename: filename, shareTitle: title, shareText: text };
+            })()
+          : {})}
         onClose={() => setLight(false)}
       />
     </Card>

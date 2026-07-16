@@ -72,6 +72,26 @@ describe("ImageLightbox", () => {
     expect(jpeg.closest("a")).toHaveAttribute("href", "/api/run/1/jpeg");
   });
 
+  it("shows a Share icon when the browser can share files and share captions are given", () => {
+    const nav = navigator as unknown as Record<string, unknown>;
+    nav.canShare = () => true;
+    nav.share = async () => {};
+    renderLightbox({ jpegHref: "/api/run/1/jpeg", shareFilename: "m42.jpg", shareTitle: "M42" });
+    expect(screen.getByLabelText("Share picture")).toBeInTheDocument();
+    delete nav.canShare;
+    delete nav.share;
+  });
+
+  it("omits the Share icon on a browser that can't share files", () => {
+    const nav = navigator as unknown as Record<string, unknown>;
+    nav.canShare = () => false;
+    nav.share = async () => {};
+    renderLightbox({ jpegHref: "/api/run/1/jpeg", shareFilename: "m42.jpg" });
+    expect(screen.queryByLabelText("Share picture")).not.toBeInTheDocument();
+    delete nav.canShare;
+    delete nav.share;
+  });
+
   it("offers the raw FITS as a distinct secondary download", () => {
     renderLightbox({ downloadHref: "/api/run/1/preview", rawHref: "/api/run/1/fits" });
     expect(screen.getByLabelText("Download picture")).toHaveAttribute("href", "/api/run/1/preview");

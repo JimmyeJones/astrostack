@@ -3,6 +3,7 @@ import { ActionIcon, Group, Menu, Modal, Text, Tooltip } from "@mantine/core";
 import {
   IconArrowsMaximize, IconDatabase, IconPhotoDown, IconZoomIn, IconZoomOut,
 } from "@tabler/icons-react";
+import { SharePictureButton } from "./SharePictureButton";
 
 interface Transform {
   scale: number;
@@ -49,7 +50,7 @@ export function computePinch(
  *    effect keyed on `src` couldn't reliably find the node.
  */
 export function ImageLightbox({
-  src, title, downloadHref, jpegHref, rawHref, onClose,
+  src, title, downloadHref, jpegHref, rawHref, shareFilename, shareTitle, shareText, onClose,
 }: {
   src: string | null;
   title?: string;
@@ -58,11 +59,18 @@ export function ImageLightbox({
   downloadHref?: string;
   /** Optional JPEG of the same picture (smaller — best for sharing). When given
    * alongside `downloadHref`, the picture-download control becomes a small menu
-   * offering PNG or JPEG; when absent it stays a single PNG download. */
+   * offering PNG or JPEG; when absent it stays a single PNG download. Also the
+   * source for the OS "Share" control (small, share-friendly). */
   jpegHref?: string;
   /** Optional secondary download for the raw scientific data (FITS), offered
    * next to the picture download so power users keep access to it. */
   rawHref?: string;
+  /** Filename + caption for the OS share sheet. When `shareFilename` and
+   * `jpegHref` are both present (and the browser supports file sharing) a
+   * "Share" icon appears in the toolbar; otherwise it's silently omitted. */
+  shareFilename?: string;
+  shareTitle?: string;
+  shareText?: string;
   onClose: () => void;
 }) {
   const [t, setT] = useState<Transform>(RESET);
@@ -252,6 +260,11 @@ export function ImageLightbox({
           ) : downloadHref ? (
             <Tooltip label="Download picture (PNG)"><ActionIcon size="lg" variant="subtle" color="gray"
               component="a" href={downloadHref} aria-label="Download picture"><IconPhotoDown size={20} /></ActionIcon></Tooltip>
+          ) : null}
+          {jpegHref && shareFilename ? (
+            <SharePictureButton
+              url={jpegHref} filename={shareFilename} title={shareTitle} text={shareText} iconOnly
+            />
           ) : null}
           {rawHref ? (
             <Tooltip label="Download raw data (FITS)"><ActionIcon size="lg" variant="subtle" color="gray"

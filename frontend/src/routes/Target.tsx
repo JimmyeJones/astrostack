@@ -19,6 +19,8 @@ import { QueryError } from "../components/QueryError";
 import { ObjectInfoCard, describeObject } from "../components/ObjectInfoCard";
 import { SessionRecapCard } from "../components/SessionRecapCard";
 import { StackHealthCard } from "../components/StackHealthCard";
+import { SharePictureButton } from "../components/SharePictureButton";
+import { sharePictureText } from "../share";
 import { detectSolveSetupProblem } from "../components/target/solveSetup";
 import { detectMixedPointings } from "../components/target/mixedPointings";
 
@@ -930,6 +932,16 @@ export function TargetView() {
                 </Menu.Item>
               </Menu.Dropdown>
             </Menu>
+          ) : null}
+          {latestRun?.has_preview ? (
+            <SharePictureButton
+              url={api.stackArtifactUrl(safe, latestRun.id, "jpeg")}
+              variant="default"
+              {...sharePictureText(
+                target.data?.name,
+                new Date(latestRun.timestamp_utc).toLocaleDateString(),
+              )}
+            />
           ) : null}
           <Button component={Link} to={`/targets/${safe}/stack`}
             leftSection={<IconStack2 size={16} />} aria-label="Stack">

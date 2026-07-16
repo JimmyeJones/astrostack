@@ -3768,26 +3768,31 @@ problems. Dogfood it every big-picture run and fix root causes.
 - Annotated sky overlay (label detected objects / show solved field). (M) —
   related to the night planner above; the planner's "plot tonight's targets" view
   can reuse this.
-- **NEW BEGINNER FEATURE (Builder-filed 2026-07-14, spotted shipping v0.125.0) — "Share this
-  picture" via the native Web Share sheet.** (S–M, friendliness/workflow — PRIORITY 3; serves the
-  §1.3 "sharing a finished picture" beginner pillar.) Now that PNG/JPEG *download* is consistent on
-  every surface (v0.123–0.125), the natural next beginner step is *sharing*: on a phone/tablet a
-  beginner wants to post their result straight to Instagram/Messages/WhatsApp, not "download → find
-  the file in the camera roll → open the app → attach". The browser already gives us this for free via
-  the **Web Share API** (`navigator.canShare({ files })` / `navigator.share({ files: [File], title,
-  text })`), which opens the OS share sheet. Slice: add a "Share" button next to the existing
-  Picture/PNG/JPEG controls (Target toolbar, History card, lightbox) that fetches the run's `jpeg`
-  artifact (share-friendly, small), wraps it in a `File`, and calls `navigator.share`; **progressive
-  enhancement** — render the button only when `navigator.canShare?.({ files: [...] })` is truthy (so
-  desktop Chrome/Firefox without file-share support simply don't see it and keep the download menu),
-  and fall back to nothing/download on any reject or `AbortError` (user cancelled). Pre-fill `title`
-  with the target name + date so the shared post is captioned. Why it fits the beginner bar: one obvious
-  tap turns "I made a nice picture" into "I shared it", with a sane default (JPEG) and no new knobs.
-  **Feasibility/guardrails:** frontend-only, additive, **no new dependency and no outbound network of
-  our own** (the OS handles delivery); reuses the existing `jpeg` endpoint; nothing changes on
-  unsupported browsers; testable by mocking `navigator.canShare`/`navigator.share`. Not pro/niche — it's
-  the mobile-capture-night sharing moment the owner called out. (Distinct from a server-side "share
-  link" — that would need hosting/auth/sign-off; this is purely the local OS share sheet.)
+- ~~**NEW BEGINNER FEATURE (Builder-filed 2026-07-14, spotted shipping v0.125.0) — "Share this
+  picture" via the native Web Share sheet.**~~ — **SHIPPED v0.126.0** (Builder 2026-07-16, branch
+  `claude/pensive-faraday-n6p4i1`). Delivered exactly as filed, frontend-only. New pure, unit-tested
+  module `frontend/src/share.ts`: `canSharePictureFiles()` (feature-detects file-level Web Share by
+  probing `navigator.canShare({ files: [emptyJpeg] })` — false on any absence/throw, so text-only-share
+  browsers never see the control), `sharePicture({url, filename, title, text})` (fetches the run's JPEG,
+  wraps it in a `File`, calls `navigator.share`; never throws — resolves to `shared`/`cancelled`/
+  `unsupported`/`error` so a user `AbortError` cancel stays silent and only a genuine fetch/share failure
+  is surfaced), and `sharePictureText(name, dateLabel)` (builds the "M 31 · 15/01/2026" caption title +
+  text + a slugified `m-31.jpg` filename, with a safe fallback so a blank/punctuation name never yields a
+  bare `.jpg`). New shared component `frontend/src/components/SharePictureButton.tsx` renders **nothing**
+  until support is confirmed at mount (progressive enhancement), shows a labelled Button (Target/History)
+  or an icon (lightbox, via `iconOnly`), and notifies only on a real failure. Wired onto four surfaces
+  next to the existing Picture/PNG/JPEG controls: the **Target** toolbar, each **History** run card, the
+  **Gallery** lightbox, and the **ImageLightbox** toolbar itself (new optional `shareFilename`/
+  `shareTitle`/`shareText` props → a Share icon that only appears when both a JPEG and a caption are
+  given *and* the browser can share files). All reuse the existing `…/jpeg` artifact — no new endpoint,
+  no new dependency, no outbound network of our own (the OS delivers). Additive / upgrade-safe: no
+  backend/schema/config/API/default change. Tests: `share.test.ts` (14 — feature-detect true/false/throw,
+  each share outcome incl. cancel-vs-error and the unshareable-file case, caption/filename phrasing),
+  `SharePictureButton.test.tsx` (4 — hidden when unsupported, shares on click with the right File + title,
+  message on genuine failure, silent on cancel), `ImageLightbox.test.tsx` (+2 — Share icon shows when
+  supported + captions given, omitted when unsupported). tsc + full vitest (838) + vite build green.
+  *(S–M, friendliness/workflow — PRIORITY 3; serves the §1.3 "sharing a finished picture" beginner
+  pillar; beginner bar ✔.)*
 - **NEW BEGINNER FEATURE (Scout 2026-07-14) — "How's my stack?" plain-language health check on the
   result.** — **SLICE (a) SHIPPED v0.120.0** (Builder 2026-07-14, branch `claude/pensive-faraday-g346o7`).
   New pure/offline engine helper `seestack/stackhealth.py::stack_health(run, frames) -> list[HealthNote]`
