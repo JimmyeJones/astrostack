@@ -6,13 +6,13 @@ import { notifications } from "@mantine/notifications";
 import { IconActivity, IconDownload, IconFlask, IconPhoto, IconX } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import { api, type Job } from "../api/client";
 import { QueryError } from "../components/QueryError";
 import { type EtaSample, etaLabel, updateEtaAnchor } from "../jobEta";
 import {
-  isJobNotifyEnabled, justFinishedJobs, notificationsSupported, requestNotificationPermission,
-  setJobNotifyEnabled, showJobNotification,
+  isJobNotifyEnabled, notificationsSupported, requestNotificationPermission,
+  setJobNotifyEnabled,
 } from "../jobNotify";
 
 const COLOR: Record<string, string> = {
@@ -367,27 +367,16 @@ function useJobEtas(jobs: Job[]): Record<string, string | null> {
   return out;
 }
 
-/** Opt-in desktop notifications when a job finishes while this page is open.
+/** The "Notify me when done" opt-in toggle.
  *
- * Watches successive job polls and, when enabled, fires a browser notification
- * for each job that transitions from in-progress to done/error — so a beginner
- * who kicked off a stack and switched to another tab gets told when it's ready.
- * Returns the toggle state + a setter that handles the permission request. */
-function useJobFinishNotifications(jobs: Job[] | undefined) {
+ * This only owns the switch state + the permission request; the actual
+ * notification firing lives in the always-mounted `GlobalJobNotifier` (App.tsx),
+ * so a job pings regardless of which page is open — and, being the single firing
+ * site, a job can never double-notify. The toggle persists to localStorage, which
+ * the global watcher reads fresh each poll, so flipping it here takes effect
+ * app-wide with no shared React state. */
+function useJobFinishNotifications() {
   const [enabled, setEnabled] = useState(isJobNotifyEnabled);
-  const prevJobs = useRef<Job[]>([]);
-
-  useEffect(() => {
-    if (!jobs) return;
-    if (enabled) {
-      for (const j of justFinishedJobs(prevJobs.current, jobs)) {
-        showJobNotification(j, jobKindLabel(j.kind));
-      }
-    }
-    // Track the latest snapshot even while disabled, so enabling mid-session
-    // only ever fires for jobs that finish *after* the switch is flipped.
-    prevJobs.current = jobs;
-  }, [jobs, enabled]);
 
   const toggle = async (on: boolean) => {
     if (!on) {
@@ -421,7 +410,7 @@ export function JobsView() {
     queryFn: api.listJobs,
     refetchInterval: 1500,
   });
-  const notify = useJobFinishNotifications(data);
+  const notify = useJobFinishNotifications();
   const cancel = useMutation({
     mutationFn: (id: string) => api.cancelJob(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["jobs"] }),
