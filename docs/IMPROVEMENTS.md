@@ -47,6 +47,31 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**κ-σ two-pass stack path had no `n_used == 0` guard — pass 2 aligning zero frames wrote a silent
+  all-NaN master recorded as a *successful* run.**~~ — **FIXED v0.136.4** (Builder 2026-07-17, branch
+  `claude/pensive-faraday-y006wo`; traced + reproduced + regression-tested). Found by a fresh adversarial
+  audit of the stacking hot path (`seestack/stack/*`, which otherwise traced clean). Every combine branch in
+  `stacker.py` guards an empty aligned-frame result and raises — min/max (`if n_used == 0: raise`, ~L1039),
+  κ-σ pass 1 (~L1072), single-pass mean (~L1147) — **except** the κ-σ pass-2 branch, which did only
+  `n_used = min(n_used_p1, n_used_p2)` (~L1118) with no guard. If pass 1 aligned ≥1 frame but pass 2 aligned
+  **none** (e.g. the cached/source frames became unreadable *between* the two passes on a long run — a
+  cache-eviction/cleanup job deleting `cached_path` mid-stack), `wsum` stayed empty, `wsum.result()` was
+  all-NaN, and execution fell through to `level_by_coverage`, output writing, and a `stack_runs` row recorded
+  as a **successful** run with `n_frames_used=0` and an all-NaN master on disk. The drizzle two-pass path's
+  own comment explicitly calls out this exact hazard ("if *every* frame is off-canvas it would slip past the
+  `n_used == 0` guard and write an all-NaN image to disk") and guards against it; the κ-σ path was the lone
+  gap. **Fix:** add the symmetric `if n_used == 0: raise ValueError("pass 2 produced no usable frames")`
+  guard right after the `min()`, so the run fails honestly (classified `no_alignment` by the job layer, which
+  already maps "no usable frames"/"could be aligned" messages) instead of writing a silent all-NaN master.
+  Additive/upgrade-safe: no schema/config/API-shape/default change; a stack where pass 2 aligns ≥1 frame (the
+  universal real case) is byte-for-byte unchanged. Regression
+  `tests/test_stack_pipeline.py::test_sigma_clip_raises_when_pass2_aligns_nothing` (patches `_pass` so pass 2
+  returns 0 while pass 1 runs for real: fail-before it writes an all-NaN master and records a run /
+  pass-after it raises and records no run). Severity: data-integrity on the stacking hot path (silent
+  corrupt master + false "success" in History) — fixed first per the stacking-engine focus; reachability is
+  low (a cross-pass filesystem race, not triggerable by frame content or config), confidence
+  reproduced + fixed.
+
 - ~~**Tonight planner: the date picker's own farthest date 422'd for eastern-hemisphere users — an
   off-by-a-timezone-day on the look-ahead upper bound.**~~ — **FIXED v0.136.3** (Builder 2026-07-17, branch
   `claude/pensive-faraday-97esvc`; traced + reproduced + regression-tested). Found by a fresh adversarial
@@ -3440,6 +3465,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+- **NEW (Builder audit 2026-07-17) — calibrate `flat_dark` is not `_sanitize_pedestal`'d, unlike dark/bias
+  (latent, fail-safe today; small blind-safe hardening for consistency).** (XS, image-quality/robustness —
+  PRIORITY 4.) *(From a fresh adversarial calibrate audit this run, which otherwise traced the apply/build
+  path clean.)* The v0.135.1 fix runs the master **dark** and **bias** through `_sanitize_pedestal`
+  (`nan_to_num`) at load (`apply.py:109/113`) so a non-finite pedestal pixel means "no correction" rather than
+  poisoning the light. The **flat-dark** subtracted from the master flat (`apply.py:119-122`) is *not*
+  sanitized. It's fail-safe today: a NaN flat-dark pixel → the flat's floor (`np.isfinite(fn) & (fn > 0.1)`,
+  `apply.py:135`) catches it → that pixel becomes 1.0 (no-op); a `±inf` pixel makes the flat's `nanmean`
+  non-finite so the *entire* flat is silently dropped — but the logged reason then says "non-positive mean"
+  when the real cause is an inf, so the warning is **slightly misleading**. Reachable only with an *imported
+  third-party* non-finite flat-dark (real Seestar integer raws can't produce one), and it never injects
+  NaN/inf into a light — so it's a robustness/consistency tidy, not a corruption bug. **Fix (blind-safe):**
+  `_sanitize_pedestal` the flat-dark before subtracting (mirroring dark/bias), and make the "flat dropped"
+  log name the real cause. Testable headlessly on `apply.py` in isolation with a synthetic non-finite
+  flat-dark. Left unfixed this run to avoid churn on a fail-safe path; filed for a future run / the Scout.
 - **NEW (Builder audit 2026-07-16) — engine-audit residue: two low-confidence, NOT-currently-reachable
   notes to keep a future audit from re-flagging them.** (XS each, image-quality/correctness — PRIORITY 4.)
   *(From two independent adversarial stacking-engine audits this run — both otherwise verified the core

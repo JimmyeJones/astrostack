@@ -1116,6 +1116,15 @@ def run_stack(
             photometric_scales=pscales,
         )
         n_used = min(n_used_p1, n_used_p2)
+        # Pass 1 succeeded but pass 2 aligned nothing (e.g. the cached/source
+        # frames became unreadable *between* the two passes on a long run) →
+        # ``wsum`` is empty and ``result()`` is all-NaN. Guard it exactly like
+        # the min/max, pass-1, and single-pass branches do: raise rather than
+        # fall through to writing a silent all-NaN master recorded as a
+        # *successful* run with ``n_frames_used=0`` (the same hazard the drizzle
+        # two-pass path already guards against).
+        if n_used == 0:
+            raise ValueError("pass 2 produced no usable frames")
         result_image = wsum.result()
         coverage = wsum.coverage
         frame_cov = wsum.frame_coverage
