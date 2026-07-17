@@ -82,7 +82,8 @@ def _build_object_mask(rgb: np.ndarray, options: FinalGradientOptions) -> np.nda
     from scipy.ndimage import binary_dilation
 
     luma = 0.299 * rgb[..., 0] + 0.587 * rgb[..., 1] + 0.114 * rgb[..., 2]
-    # Replace NaN with median so sigma_clipped_stats works.
+    # Normalise every non-finite pixel (NaN *or* inf) to NaN; sigma_clipped_stats
+    # auto-clips NaN, so the stats below are computed over the finite sky only.
     finite = np.isfinite(luma)
     if not finite.any():
         return np.zeros(luma.shape, dtype=bool)

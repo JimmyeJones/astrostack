@@ -165,6 +165,10 @@ class CatalogObject:
     # the "will it fit in one frame?" framing hint (:mod:`seestack.framing`).
     # ``None`` for the many entries without a vetted size (we never guess a size).
     size_arcmin: float | None = None
+    # A plain-language, beginner-friendly one-liner about the object ("what am I
+    # looking at?"), curated for the popular targets; ``""`` when the catalog has
+    # none (the object-info card then reads fine from type + constellation alone).
+    blurb: str = ""
 
 
 @dataclass
@@ -297,6 +301,7 @@ def _load_catalog_file(path: Path) -> list[CatalogObject]:
             dec_deg=float(o["dec_deg"]), type=o.get("type", ""), con=o.get("con", ""),
             size_arcmin=(float(o["size_arcmin"]) if o.get("size_arcmin") is not None
                          else None),
+            blurb=o.get("blurb", ""),
         )
         for o in raw["objects"]
     ]

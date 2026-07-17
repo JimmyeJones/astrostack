@@ -142,6 +142,7 @@ def identify_target(safe: str, request: Request) -> ObjectInfoOut | None:
         size_arcmin=info.size_arcmin,
         framing=(FramingHintOut(level=info.framing.level, text=info.framing.text)
                  if info.framing is not None else None),
+        blurb=info.blurb,
     )
 
 

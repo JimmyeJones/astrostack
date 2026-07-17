@@ -1638,6 +1638,25 @@ the real webapp stack→edit path.)_
   matches its own 3-channel expansion). Additive, no schema/config/API change; found by an adversarial audit
   of the render/post numeric paths.
 
+_(Builder stacking-engine audit 2026-07-17 (v0.135.3 baseline, suite green 1375 passed / 2 skipped):
+another fresh repro-driven adversarial pass across `stack/{align,stacker,accumulator,mosaic,drizzle_path}.py`,
+`calibrate/{apply,masters}.py`, and `bg/{per_frame,final_gradient,coverage_leveling}.py`. Every core numeric
+path was checked with numpy repro scripts against independent brute-force references, not read-only:
+accumulators (WeightedSum/MinMaxReject/Welford full+windowed, weighted+unweighted) matched to float32 with
+exact NaN-mask agreement and `frame_coverage` = the brute contribution count; κ-σ pass-1/pass-2 matched
+astropy sigma-clipping and left a pixel NaN-in-2-of-12-frames **finite** (never a polluting 0); drizzle
+two-pass rejection + surface-brightness conservation (~500 in→out at scale 1.0/1.5/2.0) held; reproject/window
+origin had no off-by-one (`src[y,x]`→`dst[y+dy,x+dx]` exact, identity reproject bit-for-bit + the documented
+3px inset); mosaic footprints all fell within the half-open canvas bounds (no edge coverage clipped);
+calibration `(raw−dark)/flat_norm` correct with a NaN dark pixel sanitized to 0 (light unchanged). No
+`np.random`/unseeded nondeterminism anywhere in scope. **Traced clean — no reachable image-corruption bug**,
+consistent with the long clean-audit history; the two only-suspicious spots were the already-known/gated ones
+(the dead SExtractor skew-fallback guard in the 4 bg helpers, and the `_tan_wcs` rotation sign). The one
+code change from the audit was cosmetic: `final_gradient._build_object_mask`'s stale "Replace NaN with median"
+comment (the code actually keeps NaN and relies on `sigma_clipped_stats` auto-clipping it) was corrected to
+match the code (v0.136.1), so a future auditor isn't misled into "fixing" correct code. The run's shipped
+deliverable was the v0.136.0 beginner object-info blurb feature above.)_
+
 _(Builder stacking-engine audit 2026-07-14 (v0.121.5 baseline, suite green 1300 passed / 2 skipped):
 per the owner's current focus #1, ran a fresh repro-driven adversarial audit across `stack/align.py`
 (windowed vs full reproject — **max abs diff 0.0** where finite, window origin exact, only the documented
@@ -4048,8 +4067,23 @@ problems. Dogfood it every big-picture run and fix root causes.
     `Target.test.tsx` re-exports `describeObject` from the route so its existing tests are unchanged. tsc +
     full vitest (747) + vite build all green. *(History-page reuse deferred — the editor is where the
     "what is this?" question lands hardest; a future run can drop the same one-liner onto History too.)*
-    A later, larger slice could add an optional one-line "what it is" blurb field to the catalog JSON for the
-    most-popular targets (absent it, type + constellation already read well).
+  - **Beginner "what it is" blurb — SHIPPED v0.136.0** (Builder 2026-07-17, branch
+    `claude/pensive-faraday-9hg7jz`). The follow-up slice: a curated, plain-language one-liner about the
+    object now rides through the whole identify path onto the `ObjectInfoCard`, so a beginner reads *why*
+    their target is worth shooting, not just its type/constellation (*"The brightest nebula in the sky and a
+    vast stellar nursery about 1,340 light-years away — the classic first target for almost every
+    beginner."*). Added an optional `blurb` field to the bundled catalog JSON (`messier.json` +
+    `deepsky_popular.json`) for **66** of the most popular/iconic Seestar targets (all 32 named Messier
+    showpieces + 34 popular NGC/IC), threaded it through `CatalogObject` → `objectinfo.ObjectInfo`/`_to_info`
+    → `schemas.ObjectInfoOut` → the `GET …/identify` endpoint → the `ObjectInfo` client type, and rendered it
+    as a non-dimmed line on the card (below the type one-liner, above the framing hint) only when present.
+    Fully additive/upgrade-safe: `blurb` defaults to `""` everywhere, so an un-curated target (and any older
+    backend) reads exactly as before from type + constellation; no schema/config/DB/default/API-shape change,
+    no new dependency, offline. Tests: `test_objectinfo.py` (+5 — blurb carried through identify, empty when
+    absent, the iconic set all carry one, every curated blurb is a clean ≥20-char sentence),
+    `test_target_identify.py` (endpoint surfaces M42's blurb), `ObjectInfoCard.test.tsx` (+1 — blurb renders
+    on match / omitted when the catalog has none). Python + tsc + full vitest + vite build all green. Beginner
+    bar ✔ (helps a non-expert understand and enjoy their picture, sane default, plain language, no new knob).
   - **Dedup done (Scout 2026-07-13):** the duplicate "Share this image" entry lower in this list was
     collapsed into the single "Share card" entry above — the two had near-identical scope. The "Share card"
     entry (with the copy-friendly text-blurb idea folded in from the removed duplicate) is now the one
