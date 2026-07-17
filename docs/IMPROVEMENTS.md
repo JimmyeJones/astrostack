@@ -47,6 +47,34 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**Editor "Wavelet (recommended)" denoise was a near-no-op on any real starfield — the default
+  denoise method silently left the sky noise intact whenever a bright star or core was present.**~~ —
+  **FIXED v0.136.2** (Builder 2026-07-17, branch `claude/pensive-faraday-97esvc`; traced + reproduced +
+  regression-tested). Found by a fresh adversarial audit of the editor ops (`seestack/edit/ops/`). `_denoise`
+  (`detail.py:71`) deliberately normalises by the 0.5–99.5th percentile and **does not clip the highlights**
+  ("stars may exceed 1") to avoid crushing the sky into ~0 of the range — the right call for the *range*, but
+  it backfires for the **default** `method="wavelet"`: `denoise_wavelet(..., method="BayesShrink")` sets each
+  wavelet subband's soft threshold from the signal variance (`T = σ_noise² / σ_signal`), so an unclipped star
+  (`norm ≫ 1`, often 100–400) inflates `σ_signal` and drives `T → ~0` — soft-thresholding then removes almost
+  nothing and the sky noise survives. The *noise* estimate is unaffected (it's the signal-variance term that's
+  poisoned), so the earlier "single hot star sets max()" percentile fix doesn't help here. Reproduced at the op
+  level against a noise-free reference in a guaranteed star-free patch: with a sparse realistic starfield the
+  recommended wavelet reduced sky RMS by only **~2%** (vs **~75%** with stars removed, and TV/bilateral ~80%);
+  so a beginner who picks the default denoise on essentially any real Seestar stack got a **silently-broken**
+  result — a wrong image on a default Priority-1 editor path. **Fix:** clip the highlights to the sky's own
+  range **for the wavelet estimate only** (`clipped = np.minimum(norm, 1.0)`), run BayesShrink on that so the
+  threshold reflects the sky noise, then reinstate the unclipped star pixels (`full = np.where(norm > 1.0,
+  norm, full)`) before the strength blend so the stars are never crushed toward the clip. After the fix the
+  wavelet denoise reduces sky RMS ~75% (matching the stars-removed control) while the brightest star is
+  preserved bit-for-bit. TV/bilateral paths are byte-for-byte untouched; the sub-2px degenerate guard and the
+  NaN=coverage restore are unchanged. Additive, no schema/config/API/default change (same op, same params —
+  only the recommended method now actually denoises); the Auto recipe and every auto-edit chain that use
+  wavelet denoise silently benefit. Regression `tests/test_edit_engine.py::
+  test_wavelet_denoise_still_smooths_the_sky_with_bright_stars_present` (a sparse starfield: fail-before the
+  wavelet barely denoises the star-free sky (~2%) / pass-after ≥40% reduction with the brightest star
+  preserved). Severity: wrong-result on a default editor path (image-quality/trust) — fixed first per the
+  editor-is-Priority-1 rule. Confidence: reproduced + fixed.
+
 - ~~**Non-finite master dark/bias pixels poisoned every calibrated light — a NaN "no-data"
   pixel annihilated real signal into a permanent stack hole, an inf poisoned reductions.**~~ —
   **FIXED v0.135.1** (Builder 2026-07-16, branch `claude/pensive-faraday-r8ystu`; traced + reproduced +

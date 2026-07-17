@@ -106,6 +106,39 @@ def test_wavelet_denoise_actually_runs_wavelet():
     assert not np.allclose(wav, tv, atol=1e-4)        # wavelet ≠ the TV fallback
 
 
+def test_wavelet_denoise_still_smooths_the_sky_with_bright_stars_present():
+    # Regression: the default/recommended "wavelet" method used to be a near-no-op
+    # on any real starfield. BayesShrink sets each subband's soft threshold from
+    # the signal variance, so an *unclipped* bright star (norm ≫ 1) inflated that
+    # variance and drove the threshold to ~0 — leaving the sky noise essentially
+    # untouched (measured ~2% reduction with a star present vs ~90% without).
+    # After the fix the wavelet estimate clips the highlights, so the sky is
+    # denoised properly while the star pixels are reinstated unchanged.
+    op = get_op("detail.denoise")
+    rng = np.random.default_rng(42)
+    h, w, sky, sigma = 160, 160, 80.0, 4.0
+    img = (sky + rng.standard_normal((h, w, 3)) * sigma).astype("float32")
+    # A realistic *sparse* set of bright single-pixel stars (< 0.5% of pixels, so
+    # the 99.5th-percentile normalisation ceiling lands in the sky, and the stars
+    # are the norm≫1 outliers that poisoned BayesShrink) — all in the right half,
+    # leaving the left half a guaranteed star-free patch to measure sky noise over.
+    star_rng = np.random.default_rng(3)
+    for _ in range(12):
+        cy = int(star_rng.integers(5, h - 5)); cx = int(star_rng.integers(w // 2, w - 5))
+        img[cy, cx, :] = float(star_rng.uniform(3000.0, 9000.0))
+
+    patch = (slice(10, 50), slice(0, 40))  # star-free
+    in_rms = float(np.sqrt(np.mean((img[patch] - sky) ** 2)))
+    out = np.asarray(op.apply(img.copy(), {"method": "wavelet", "strength": 1.0}, EditContext()))
+    out_rms = float(np.sqrt(np.mean((out[patch] - sky) ** 2)))
+
+    # Fails before the fix (~2% reduction), passes after (~75%). A conservative
+    # 40% floor keeps it robust to scikit-image/PyWavelets version wobble.
+    assert out_rms < 0.6 * in_rms, f"wavelet barely denoised the sky: {in_rms:.3f} -> {out_rms:.3f}"
+    # The bright star pixels must be preserved, not crushed toward the clip ceiling.
+    assert float(out[:, w // 2:, :].max()) >= 0.95 * float(img[:, w // 2:, :].max())
+
+
 @pytest.mark.parametrize("shape", [(1, 40, 3), (40, 1, 3)])
 @pytest.mark.parametrize("method", ["wavelet", "bilateral", "tv"])
 def test_denoise_on_a_one_px_thin_image_is_a_safe_noop(shape, method):
