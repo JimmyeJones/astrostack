@@ -4,7 +4,11 @@ import { IconActivity, IconDatabase, IconFileText, IconFlask, IconGauge, IconLay
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { NavLink as RouterNavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
+import { useEffect, useRef } from "react";
+import type { Job } from "./api/client";
 import { api } from "./api/client";
+import { isJobNotifyEnabled, justFinishedJobs, showJobNotification } from "./jobNotify";
+import { jobKindLabel } from "./routes/Jobs";
 
 // Shows the running backend build, so you can confirm a rebuild actually took
 // effect (the version bumps with each shipped change).
@@ -16,6 +20,40 @@ function AppVersion() {
       AstroStack v{data.version}
     </Text>
   );
+}
+
+// Always-mounted, route-independent "your job finished" watcher — slice (b) of the
+// opt-in desktop-notification feature. The Jobs page (slice a) only fired while it
+// was the mounted route, so a beginner who kicked off a stack and then browsed to
+// the Target/Editor/Gallery page (a very common flow) wasn't told until they came
+// back. This lives in the top-level layout, so a job finishing *anywhere* pings.
+//
+// It is the single place notifications fire (the Jobs page no longer does), so a
+// job can't double-notify. The opt-in is read fresh from localStorage on every poll
+// via `isJobNotifyEnabled()`, so the Jobs-page toggle (which writes that key)
+// controls it with no shared React state — flip it on and the next poll starts
+// firing; flip it off and firing stops. `justFinishedJobs` only fires on an
+// in-progress→done/error transition, and the baseline is tracked every poll even
+// while disabled, so enabling mid-session never bursts for already-finished jobs.
+export function GlobalJobNotifier() {
+  const { data } = useQuery({
+    queryKey: ["jobs"],
+    queryFn: api.listJobs,
+    // Gentler than the Jobs page's 1.5 s live poll; the always-mounted
+    // ActiveJobsBadge already refreshes this shared query, so this adds no real load.
+    refetchInterval: 8000,
+  });
+  const prevJobs = useRef<Job[]>([]);
+  useEffect(() => {
+    if (!data) return;
+    if (isJobNotifyEnabled()) {
+      for (const j of justFinishedJobs(prevJobs.current, data)) {
+        showJobNotification(j, jobKindLabel(j.kind));
+      }
+    }
+    prevJobs.current = data;
+  }, [data]);
+  return null;
 }
 
 function ActiveJobsBadge() {
@@ -136,6 +174,7 @@ export function App() {
       </AppShell.Navbar>
 
       <AppShell.Main>
+        <GlobalJobNotifier />
         <Outlet />
       </AppShell.Main>
     </AppShell>

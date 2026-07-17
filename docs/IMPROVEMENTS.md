@@ -3886,20 +3886,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
-- **NEW BEGINNER FEATURE (Builder-filed 2026-07-17) — "Notify me when done": slice (b) global cross-route
-  watcher.** — **SLICE (a) SHIPPED v0.137.0** (opt-in desktop notification when a job finishes *while the Jobs
-  page is open*; see Shipped). Slice (b): today the ping only fires while the Jobs page is mounted, so a
-  beginner who starts a stack and then browses to the Target/Editor/Gallery page (a very common flow — you kick
-  off "Process target" and go look at other subs) won't be notified until they return to Jobs. Lift the
-  finish-detection into a small **always-mounted** watcher (a hook in `App.tsx`/the top-level layout) that polls
-  `listJobs` on a gentle interval (e.g. 5–10 s, longer than the Jobs page's 1.5 s so it's cheap) and fires the
-  same `showJobNotification` for any in-progress→done/error transition, regardless of the current route — gated
-  on the same opt-in + permission the switch already sets, so it stays off by default. Reuse the shipped pure
-  `jobNotify.ts` helpers unchanged (they're route-agnostic by design); the only new work is the global poll
-  placement and making sure it and the Jobs-page effect don't double-fire (share one source of truth — e.g. the
-  global watcher owns notifications and the Jobs page stops firing when the watcher is active, or de-dupe by the
-  Notification `tag` which is already per-job). Frontend-only, additive, off by default. *(S, autonomy/
-  friendliness — PRIORITY 2/3; beginner bar ✔ — completes the "walk away and get told" promise.)*
+- ~~**NEW BEGINNER FEATURE (Builder-filed 2026-07-17) — "Notify me when done": slice (b) global cross-route
+  watcher.**~~ — **SLICE (b) SHIPPED v0.138.0** (Builder 2026-07-17, branch `claude/pensive-faraday-r77f44`).
+  Slice (a) fired the opt-in "your job finished" desktop notification only while the Jobs page was mounted, so a
+  beginner who kicked off a stack and then browsed to the Target/Editor/Gallery page (a very common flow) wasn't
+  told until they returned to Jobs. Lifted the finish-detection into a small **always-mounted** `GlobalJobNotifier`
+  in the top-level layout (`App.tsx`, rendered in `AppShell.Main` so it lives for the whole app session): it polls
+  the shared `["jobs"]` query (`refetchInterval: 8000` — gentler than the Jobs page's 1.5 s; the always-mounted
+  `ActiveJobsBadge` already refreshes this query, so it adds no real load) and fires the same route-agnostic
+  `showJobNotification` for each in-progress→done/error transition, gated on the **same** opt-in + browser
+  permission the Jobs-page switch already sets. **Single source of truth / no double-fire:** the watcher is now the
+  *only* place notifications fire — the Jobs-page hook (`useJobFinishNotifications`) was reduced to owning just the
+  toggle UI + permission request, dropping its own firing effect. The opt-in is read fresh from localStorage
+  (`isJobNotifyEnabled()`) on every poll, so the Jobs-page toggle (which writes that key) controls the global
+  watcher with no shared React state — flip it on and the next poll starts firing, off and it stops. The baseline
+  is tracked every poll even while disabled, so enabling mid-session never bursts for already-finished jobs (the
+  pure `justFinishedJobs` guard, unchanged). Frontend-only, additive, **off by default** — no backend/schema/
+  API/default change. Tests: `App.test.tsx` (+2 — the watcher fires exactly one ping on a running→done transition
+  with *no route page mounted*, and stays silent while the opt-in is off) reusing the already-tested
+  `jobNotify.ts` helpers; existing `Jobs.test.tsx` toggle tests unchanged. tsc + full vitest + vite build green.
+  *(S, autonomy/friendliness — PRIORITY 2/3; beginner bar ✔ — completes the "walk away and get told" promise.)*
 - **⭐ OWNER-REQUESTED — Bulk upload FITS through the web interface (no NAS share
   needed).** — **SLICE (a) SHIPPED v0.115.0** (Builder 2026-07-13, branch
   `claude/pensive-faraday-ug7r6s`). New `POST /api/upload` endpoint
