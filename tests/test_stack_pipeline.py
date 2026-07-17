@@ -220,6 +220,42 @@ def test_stack_records_noise_sigma(tmp_path):
         proj.close()
 
 
+def test_sigma_clip_raises_when_pass2_aligns_nothing(tmp_path, monkeypatch):
+    """The κ-σ two-pass path must guard an empty pass-2 result exactly like its
+    sibling combine paths (min/max, pass-1, single-pass) do.
+
+    If pass 1 aligns frames but pass 2 aligns *none* — e.g. the cached/source
+    frames become unreadable between the two passes on a long run — the weighted
+    sum is empty and its result is all-NaN. Before the fix the κ-σ branch did
+    only ``n_used = min(n_used_p1, n_used_p2)`` with no guard, so it fell through
+    and wrote a silent all-NaN master recorded as a *successful* run with
+    ``n_frames_used=0`` (the exact hazard the drizzle two-pass path guards
+    against). run_stack must instead raise.
+    """
+    import seestack.stack.stacker as st
+
+    proj = _build_project(tmp_path, n=4)
+    real_pass = st._pass
+
+    def flaky_pass(*args, **kwargs):
+        # Pass 1 runs for real (aligns the frames + fills the Welford stats);
+        # pass 2 simulates every frame failing to align this time.
+        if str(kwargs.get("phase_label", "")).startswith("Pass 2"):
+            return 0
+        return real_pass(*args, **kwargs)
+
+    monkeypatch.setattr(st, "_pass", flaky_pass)
+    try:
+        with pytest.raises(ValueError, match="no usable frames"):
+            run_stack(proj, StackOptions(sigma_clip=True, max_workers=2,
+                                         output_name="p2empty"))
+        # And nothing was recorded as a run — no all-NaN master masquerading as
+        # a successful stack.
+        assert list(proj.iter_stack_runs()) == []
+    finally:
+        proj.close()
+
+
 def test_subpixel_refine_actually_runs(tmp_path, monkeypatch):
     """Regression: sub-pixel refine used `canvas_3` before it was defined, so it
     raised NameError that the surrounding except swallowed — silently disabling
