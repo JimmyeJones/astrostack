@@ -1638,6 +1638,25 @@ the real webapp stack→edit path.)_
   matches its own 3-channel expansion). Additive, no schema/config/API change; found by an adversarial audit
   of the render/post numeric paths.
 
+_(Builder stacking-engine audit 2026-07-17 (v0.135.3 baseline, suite green 1375 passed / 2 skipped):
+another fresh repro-driven adversarial pass across `stack/{align,stacker,accumulator,mosaic,drizzle_path}.py`,
+`calibrate/{apply,masters}.py`, and `bg/{per_frame,final_gradient,coverage_leveling}.py`. Every core numeric
+path was checked with numpy repro scripts against independent brute-force references, not read-only:
+accumulators (WeightedSum/MinMaxReject/Welford full+windowed, weighted+unweighted) matched to float32 with
+exact NaN-mask agreement and `frame_coverage` = the brute contribution count; κ-σ pass-1/pass-2 matched
+astropy sigma-clipping and left a pixel NaN-in-2-of-12-frames **finite** (never a polluting 0); drizzle
+two-pass rejection + surface-brightness conservation (~500 in→out at scale 1.0/1.5/2.0) held; reproject/window
+origin had no off-by-one (`src[y,x]`→`dst[y+dy,x+dx]` exact, identity reproject bit-for-bit + the documented
+3px inset); mosaic footprints all fell within the half-open canvas bounds (no edge coverage clipped);
+calibration `(raw−dark)/flat_norm` correct with a NaN dark pixel sanitized to 0 (light unchanged). No
+`np.random`/unseeded nondeterminism anywhere in scope. **Traced clean — no reachable image-corruption bug**,
+consistent with the long clean-audit history; the two only-suspicious spots were the already-known/gated ones
+(the dead SExtractor skew-fallback guard in the 4 bg helpers, and the `_tan_wcs` rotation sign). The one
+code change from the audit was cosmetic: `final_gradient._build_object_mask`'s stale "Replace NaN with median"
+comment (the code actually keeps NaN and relies on `sigma_clipped_stats` auto-clipping it) was corrected to
+match the code (v0.136.1), so a future auditor isn't misled into "fixing" correct code. The run's shipped
+deliverable was the v0.136.0 beginner object-info blurb feature above.)_
+
 _(Builder stacking-engine audit 2026-07-14 (v0.121.5 baseline, suite green 1300 passed / 2 skipped):
 per the owner's current focus #1, ran a fresh repro-driven adversarial audit across `stack/align.py`
 (windowed vs full reproject — **max abs diff 0.0** where finite, window origin exact, only the documented
