@@ -1709,6 +1709,48 @@ the real webapp stack→edit path.)_
   matches its own 3-channel expansion). Additive, no schema/config/API change; found by an adversarial audit
   of the render/post numeric paths.
 
+_(Builder triple adversarial audit 2026-07-17 (v0.138.0 baseline, suite green 1385 passed / 2 skipped):
+with the stacking engine repeatedly traced clean, this run fanned **three parallel repro-driven adversarial
+audits** across the parts of the tree *outside* the much-audited stack path, each required to **reproduce** any
+finding with a runnable script (not just read). **(1) Editor ops** (`edit/ops/*`, `registry/pipeline/recipe/
+proxy/starmask`) — every op run on NaN-gap images (no gap ever became finite/zero), neutral-param identity
+(max diff ≤6e-8), numeric output vs independent reimplementations (curves/levels/saturation/scnr/wb/
+neutralize/star-reduce/boost all exact), edge inputs (1×1, slivers, all-NaN), sign/threshold audit, and
+proxy↔export parity (sharpen bit-exact; `coverage_trim._max_rectangle` vs brute force over 400 masks, 0
+mismatches); the repo's own 95 edit tests pass. **(2) `io/qc/nightplan/framing/objectinfo/session_recap/
+render/post/solve`** — ~22 targeted repros: debayer linear-ramp exactness for all 4 Bayer patterns, sexagesimal
+parse vs `astropy.Angle` (3000 fuzz, ~2e-5° float-only), WCS round-trip + footprint geometry, RA-seam median/
+unwrap across 0°/360°, autostretch MTF-inverse + STF sky-median landing + NaN→black, nightplan moon phase vs
+ephemeris + dark-window widest-run vs brute force (20k cases) + horizon seam interp, grading z-score
+direction/floors/25%-cap, project/library DB round-trip + additive self-heal from an old `user_version=3` DB,
+and ASTAP `-ra`(hours)/`-spd`(dec+90) + returncode-and-sidecar solve gating. **(3) Webapp routers** (all 18
+non-editor routers + `schemas/config/deps/jobs/watcher/calibration/main`, cross-checked against the frontend's
+`api/client.ts` contract) — ~30 endpoint probes: frames PATCH/bulk/reject-summary/sort, stack-runs prune,
+integration-goal round-trip+clamp, settings-default validation (422 on out-of-range/bad-enum, `NON_FORM_KEYS`
+stripped), planner `date`↔`when` night parity, sky-map angular sizing (pre-drizzle `canvas_w`×pixscale —
+correct even for drizzle), auth (constant-time PBKDF2, only `/api/health` un-gated), and upload
+path-traversal sanitization. **All three traced clean — no reproducible correctness bug**, consistent with the
+long clean-audit history; the editor and webapp remain well-hardened and the code carries defensive comments
+citing prior audits. **Four latent observations filed for the Scout to triage** (none a
+wrong-response-for-a-valid-request a user would hit, so none shipped as a fix, to avoid churning `main`): (i)
+the "is this run reusable?" predicate is duplicated and the copies **disagree on the empty-options edge case**
+— `gallery.py::_is_reusable` treats a parsed-empty options dict as reusable while `stack.py::_run_is_reusable`
+/ `pipeline._stack_options_from_run_json` treat null/empty as not-reusable; currently **unreachable**
+(`stack_runs.options_json` is `TEXT NOT NULL` and every writer emits a real dict-JSON), so it's a latent
+two-copies-diverge hygiene item — consolidate to one shared helper if a future run is already in these files.
+(ii) `webapp/pipeline.py::submit_qc_solve` passes `run_qc=settings.auto_qc or True` / `run_solve=settings.
+auto_solve or True` — the `or True` makes the setting **dead code** (always True). Behaviour is correct (that
+explicit "QC & solve" action is meant to always run both), but the `settings.auto_*` reference is misleading
+and should just be `True`. (iii) `frames.list_frames` clamps only the **lower** bound of `limit` (no upper
+cap, unlike its sibling endpoints) — returns correct data, but a missing DoS cap and a >2000-sub visibility
+limit (the frontend hardcodes `limit=2000`). (iv) minor label nuance: `session_recap.bucket_reject_reason`
+maps `auto:grade:star_count`/`eccentricity_median` to the `"soft"` bucket while `grading._reason_text`
+describes them as "likely cloud"/"wind shake" — defensible (both degrade sharpness) and shown by the deliberate
+`"grade"` catch-all in the same group. **No code shipped this run** — the bug backlog's open items are all
+real-data-gated (Sky-map placement `_tan_wcs` sign, the dead SExtractor skew-guard, the pixel-threshold
+image-quality items), the feature backlog is shipped down to real-data-gated remainders, and per AGENTS.md §2 a
+clean run that leaves `main` green beats manufacturing marginal work.)_
+
 _(Builder stacking-engine audit 2026-07-17 (v0.135.3 baseline, suite green 1375 passed / 2 skipped):
 another fresh repro-driven adversarial pass across `stack/{align,stacker,accumulator,mosaic,drizzle_path}.py`,
 `calibrate/{apply,masters}.py`, and `bg/{per_frame,final_gradient,coverage_leveling}.py`. Every core numeric
