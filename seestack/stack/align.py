@@ -66,6 +66,14 @@ REF_PATCH_SIZE = 512
 # — this inset only handles the genuinely-bad outermost ring.
 FRAME_EDGE_INSET_PX = 3
 
+# The sub-pixel refine step (``_apply_subpixel_shift[_windowed]``) applies at
+# most this many pixels of correction — a measured shift larger than this is
+# treated as a bad plate-solve and skipped. The windowed reproject pads its
+# footprint window by at least this much when refinement is active, so a
+# near-cap shift can't push real footprint-edge data off the window edge (a
+# ``pad`` smaller than the shift would silently clip a thin strip of coverage).
+SUBPIXEL_SHIFT_CAP_PX = 5
+
 
 def align_one(
     fits_path: str,
@@ -139,12 +147,22 @@ def align_one(
     if src_wcs is None or dst_wcs is None:
         raise ValueError(f"missing WCS for {fits_path}")
 
-    result = reproject_rgb_windowed(rgb, src_wcs, dst_wcs, dst_shape, use_gpu=use_gpu)
+    # When a sub-pixel refine shift (up to SUBPIXEL_SHIFT_CAP_PX px) will follow,
+    # widen the reproject window pad to at least that cap so the shift can't push
+    # real footprint-edge data off the window edge (which would silently clip a
+    # thin strip of coverage). Otherwise keep the default 2 px pad.
+    will_refine = (
+        subpixel_refine and ref_patch is not None and ref_patch_origin is not None
+    )
+    pad = SUBPIXEL_SHIFT_CAP_PX if will_refine else 2
+    result = reproject_rgb_windowed(
+        rgb, src_wcs, dst_wcs, dst_shape, use_gpu=use_gpu, pad=pad,
+    )
     if result is None:
         return None
     win_rgb, win_valid, y0, x0 = result
 
-    if subpixel_refine and ref_patch is not None and ref_patch_origin is not None:
+    if will_refine:
         win_rgb = _apply_subpixel_shift_windowed(
             win_rgb, y0, x0, ref_patch, ref_patch_origin,
         )
@@ -209,6 +227,7 @@ def reproject_rgb_windowed(
     *,
     order: int = 1,
     use_gpu: bool | None = None,
+    pad: int = 2,
 ) -> tuple[np.ndarray, np.ndarray, int, int] | None:
     """
     Reproject only the canvas sub-rectangle the source frame actually covers.
@@ -216,6 +235,12 @@ def reproject_rgb_windowed(
     Returns ``(window_rgb, window_valid, y0, x0)`` or ``None`` if the frame
     doesn't intersect the canvas. The window arrays are sized to the
     footprint bounding box, not the full canvas.
+
+    ``pad`` widens the window that many pixels beyond the footprint bbox on
+    every side (the extra border is uncovered/NaN). It defaults to 2; the
+    caller widens it to ``SUBPIXEL_SHIFT_CAP_PX`` when a sub-pixel refine shift
+    (up to that many px) will follow, so the shift can't push real
+    footprint-edge data off the window edge.
     """
     from astropy.wcs.utils import pixel_to_pixel
 
@@ -224,7 +249,7 @@ def reproject_rgb_windowed(
     # outer border of the source frame can't contribute to the stack.
     inset = FRAME_EDGE_INSET_PX if min(h_src, w_src) > 4 * FRAME_EDGE_INSET_PX else 0
     bbox = _footprint_bbox_on_canvas(
-        src_wcs, dst_wcs, h_src, w_src, dst_shape, inset=inset,
+        src_wcs, dst_wcs, h_src, w_src, dst_shape, inset=inset, pad=pad,
     )
     if bbox is None:
         return None
@@ -373,9 +398,10 @@ def _apply_subpixel_shift(
         return aligned
 
     dy, dx = float(shift[0]), float(shift[1])
-    # Sanity check: > 5 pixels of "sub-pixel" shift means alignment was already
-    # off — apply nothing and let sigma-clipping pick up the slack.
-    if abs(dy) > 5.0 or abs(dx) > 5.0:
+    # Sanity check: > SUBPIXEL_SHIFT_CAP_PX pixels of "sub-pixel" shift means
+    # alignment was already off — apply nothing and let sigma-clipping pick up
+    # the slack.
+    if abs(dy) > SUBPIXEL_SHIFT_CAP_PX or abs(dx) > SUBPIXEL_SHIFT_CAP_PX:
         return aligned
 
     out = np.empty_like(aligned)
@@ -463,7 +489,7 @@ def _apply_subpixel_shift_windowed(
         return win_rgb
 
     dy, dx = float(shift[0]), float(shift[1])
-    if abs(dy) > 5.0 or abs(dx) > 5.0:
+    if abs(dy) > SUBPIXEL_SHIFT_CAP_PX or abs(dx) > SUBPIXEL_SHIFT_CAP_PX:
         return win_rgb
 
     out = np.empty_like(win_rgb)

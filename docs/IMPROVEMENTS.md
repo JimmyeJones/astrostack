@@ -5021,11 +5021,29 @@ problems. Dogfood it every big-picture run and fix root causes.
     `coverage_max` "frames per pixel"), never the image or the weight maps — and consistent with
     `WeightedSumAccumulator`'s own `valid[..., 0]` count. Same disposition as the accumulator's documented
     channel-0 count.
-  - **(3)** `stack/align.py:407,466,161` — `_apply_subpixel_shift_windowed` shifts a window padded only `pad=2`
+  - ~~**(3)** `stack/align.py:407,466,161` — `_apply_subpixel_shift_windowed` shifts a window padded only `pad=2`
     px while the sub-pixel correction is capped at ±5 px, so a frame legitimately needing a 3–5 px shift can
-    lose a thin strip of real edge data (coverage reduction at frame edges, **not** wrong pixel values). Only
-    with `subpixel_refine` on (off by default) and near-cap shifts; in a dithered stack neighbours cover those
-    edges. If ever taken: widen the window pad to ≥ the shift cap.
+    lose a thin strip of real edge data (coverage reduction at frame edges, **not** wrong pixel values).~~
+    — **FIXED v0.135.3** (Builder 2026-07-16, branch `claude/pensive-faraday-5rsa35`; regression-tested).
+    Took the filed remedy ("widen the window pad to ≥ the shift cap"). The ±5 px cap is now a named module
+    constant `SUBPIXEL_SHIFT_CAP_PX = 5` (used by both `_apply_subpixel_shift` and `_apply_subpixel_shift_windowed`
+    in place of the two magic `5.0` literals), and `reproject_rgb_windowed` gained a `pad` parameter (default 2,
+    threaded to `_footprint_bbox_on_canvas`). `align_one` computes `will_refine` once and, when a sub-pixel
+    refine will actually run (`subpixel_refine` **and** a ref patch is present), reprojects the window with
+    `pad=SUBPIXEL_SHIFT_CAP_PX` instead of 2 — so a shift up to the cap only *translates* the footprint inside
+    the (uncovered/NaN) pad border rather than pushing its trailing rows off the window edge. When refinement
+    won't run, the pad stays 2, so the default install (`subpixel_refine` off) is **byte-for-byte unchanged**
+    (window size, origin, and pixels identical). Additive, upgrade-safe: no config/DB/API-shape/default change,
+    off the memory-bounded concern (a 3-px-wider window is a handful of NaN pixels). Regressions in
+    `tests/test_subpixel_align.py`: `test_reproject_windowed_honours_pad` (the pad param widens the window +6 px
+    each dim, moves the origin out 3 px, and the extra border is NaN), `test_align_one_widens_the_window_when_refining`
+    (drives the real `align_one` end-to-end: refine-active window is +6 px each dim vs the plain window —
+    fail-before both were pad=2 so identical), and `test_windowed_refine_pad_preserves_trailing_edge_coverage`
+    (a ~4 px shift clips the footprint's trailing bright band off a 2-px-padded window but preserves it on a
+    5-px-padded one). Severity: coverage loss at frame edges (image-quality/data-integrity), only with the
+    off-by-default refine on and near-cap shifts, well-mitigated in a dithered stack. Confidence: reproduced
+    (via the windowed-shift repro) + fixed. Latent gap (4) (test-only CPU↔GPU `cval` at `inset=0`) left as
+    informational — the production windowed path never samples out-of-bounds inside the valid region.
   - **(4)** `stack/align.py:261` / non-windowed `reproject_rgb` — a CPU(`cval=nan`)↔GPU(`cval=0.0`) boundary-pixel
     discrepancy at `inset=0`. **Test-only path** (`reproject_rgb`/`_apply_subpixel_shift` are exercised only by
     `tests/`); the production windowed path uses `inset=3` and never samples out-of-bounds inside the valid
