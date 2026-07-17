@@ -187,7 +187,14 @@ def get_tonight(
         except ValueError as exc:
             raise HTTPException(status_code=422, detail="Bad 'date' (expected YYYY-MM-DD)") from exc
         today = datetime.now(timezone.utc).date()
-        if not (today - timedelta(days=1) <= plan_date <= today + timedelta(days=_MAX_LOOKAHEAD_DAYS)):
+        # Both bounds carry one day of timezone slack: `today` is UTC's calendar
+        # day, but the frontend date picker offers `local_today ± N` from the
+        # *browser's* local date. A viewer west of UTC (local date trailing UTC)
+        # can still ask for "tonight" (the −1 on the min); a viewer east of UTC in
+        # their local morning (local date leading UTC by a day) picks a max of
+        # `UTC_today + N + 1`, so the upper bound needs the symmetric +1 or the
+        # farthest date the app's own picker allows would 422 for them.
+        if not (today - timedelta(days=1) <= plan_date <= today + timedelta(days=_MAX_LOOKAHEAD_DAYS + 1)):
             raise HTTPException(
                 status_code=422,
                 detail=f"'date' must be within the next {_MAX_LOOKAHEAD_DAYS} days",

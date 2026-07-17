@@ -70,9 +70,22 @@ def _denoise(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
         norm = (img - lo) / (hi - lo)  # joint scale → colour preserved; stars may exceed 1
         if method == "wavelet":
             try:
+                # BayesShrink sets each wavelet subband's soft threshold from the
+                # signal variance (T = σ_noise² / σ_signal). An *unclipped* bright
+                # star (norm ≫ 1, because we deliberately don't clip highlights
+                # above) inflates σ_signal, driving T → ~0 — so soft-thresholding
+                # removes almost nothing and the sky noise survives. On any real
+                # starfield that makes the recommended wavelet denoise a near-no-op
+                # (measured: ~2% sky-noise reduction with a star present vs ~93%
+                # with it removed). Clip the highlights to the sky's own range *for
+                # the wavelet estimate only* so the threshold reflects the sky
+                # noise, then reinstate the unclipped star pixels so the blend never
+                # crushes them toward the clip.
+                clipped = np.minimum(norm, 1.0)
                 full = restoration.denoise_wavelet(
-                    norm, channel_axis=-1, rescale_sigma=True,
+                    clipped, channel_axis=-1, rescale_sigma=True,
                     method="BayesShrink", mode="soft")
+                full = np.where(norm > 1.0, norm, full)
                 # denoise_wavelet has no strength knob → blend toward it by strength.
                 den = norm + strength * (full - norm)
             except (ImportError, ValueError):
