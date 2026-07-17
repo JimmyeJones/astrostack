@@ -452,6 +452,35 @@ def test_flat_dark_shape_mismatch_is_skipped(tmp_path):
     np.testing.assert_allclose(cal.apply_raw(raw), 300.0, rtol=1e-5)
 
 
+def test_flat_dark_nonfinite_pixel_does_not_drop_the_whole_flat(tmp_path):
+    # An imported third-party flat-dark carrying an inf pixel used to make the
+    # flat's nanmean non-finite, silently dropping the *entire* flat (so the
+    # flat correction vanished everywhere). Sanitizing the flat-dark to 0 at
+    # that pixel (= no subtraction there, mirroring the master dark/bias) keeps
+    # the flat usable; only the one no-data pixel is left uncorrected.
+    flat = np.empty((4, 4), dtype=np.float32)
+    flat[:, :2] = 200.0  # left  = 100 pedestal + 100 signal
+    flat[:, 2:] = 300.0  # right = 100 pedestal + 200 signal
+    flat_dark = np.full((4, 4), 100.0, dtype=np.float32)
+    flat_dark[0, 0] = np.inf  # broken third-party pixel
+    flat_dark[3, 3] = np.nan  # genuinely no data
+    save_master(tmp_path / "flat.fits", flat, MasterMeta("flat", 10, 4, 4, "median"))
+    save_master(tmp_path / "fd.fits", flat_dark, MasterMeta("dark", 10, 4, 4, "median"))
+
+    cal = CalibrationMasters.load(
+        flat_path=str(tmp_path / "flat.fits"),
+        flat_dark_path=str(tmp_path / "fd.fits"),
+    )
+    # Fails before: the inf propagated into the flat → nanmean inf → flat dropped
+    # → flat_norm is None → no flat correction at all.
+    assert cal.flat_norm is not None
+    raw = np.full((4, 4), 300.0, dtype=np.float32)
+    out = cal.apply_raw(raw)
+    assert np.isfinite(out).all()
+    # The bulk of the flat still corrects (left/right differ), unlike a dropped flat.
+    assert not np.allclose(out, 300.0)
+
+
 def test_empty_calibration():
     cal = CalibrationMasters()
     assert cal.is_empty

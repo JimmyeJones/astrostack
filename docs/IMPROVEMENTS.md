@@ -3302,21 +3302,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   seed-signature check) and only when a note was actually stored, so a hand-built recipe never
   surfaces it and it fades the moment the user hand-edits. Closes the trust gap on the surface the
   Process-target deep-link (v0.85.3) actually lands the user on.
-- **NEW (Builder audit 2026-07-17) — frames-table sort pins *unmeasured* frames to the top when
-  sorting a metric descending ("worst first").** (S, friendliness — PRIORITY 3; low-confidence, a
-  judgment call.) `webapp/routers/frames.py::list_frames` sorts with `key=lambda f: (v is None, v)` and
-  `reverse=(order == "desc")`. The `(v is None, v)` idiom is the standard *nulls-last* trick and works
-  for ascending, but `reverse=True` inverts it, so a **descending** sort by e.g. FWHM (`order=desc` =
-  "blurriest first") puts frames whose metric is `None` (unmeasured / unsolved / `qc_error`) **first** —
-  a beginner sorting "show me the worst subs" sees a block of *unmeasured* frames pinned at the top
-  instead of the actually-blurriest measured ones. Arguable either way (nulls-first-on-desc is a
-  defensible convention, and there's no documented "nulls last" intent), but it's inconsistent with the
-  ascending behaviour the same code implements. If confirmed worth changing: sort so nulls stay **last
-  regardless of direction** (e.g. sort the finite-valued rows and append the null-valued rows), and pin
-  it with an asc+desc test. Scout to decide whether the current convention is fine or worth flipping
-  before a Builder touches a user-facing sort order. Found by an adversarial webapp/frontend audit
-  (which otherwise traced the routers, stats roll-ups, session-recap/library-progress aggregations, and
-  the frontend pure helpers clean).
+- ~~**NEW (Builder audit 2026-07-17) — frames-table sort pins *unmeasured* frames to the top when
+  sorting a metric descending ("worst first").**~~ — **FIXED v0.136.6** (Builder 2026-07-17, branch
+  `claude/pensive-faraday-ghypg3`). `webapp/routers/frames.py::list_frames` sorted with
+  `key=lambda f: (v is None, v)` + `reverse=(order == "desc")`; the `(v is None, v)` nulls-last trick only
+  holds ascending, so a **descending** sort (e.g. FWHM "blurriest first") inverted it and pinned frames whose
+  metric is `None` (unmeasured / unsolved / `qc_error`) to the **top** — a beginner sorting "show me the worst
+  subs" saw a block of *unmeasured* frames instead of the actually-blurriest measured ones. **Fix:** partition
+  measured/unmeasured, sort only the measured rows by the metric (respecting direction), and append the
+  unmeasured rows (in their stable order) so nulls stay **last regardless of direction**. Additive/upgrade-safe:
+  no schema/config/API-shape/default change; the ascending order and measured-value ranking are unchanged.
+  Regression `tests/webapp/test_api.py::test_frame_sort_keeps_unmeasured_last_in_both_directions` (asc →
+  `[2.0, 5.0, None]`, desc → `[5.0, 2.0, None]`; fail-before the None was pinned first on desc). Severity:
+  broken-UX/friendliness on a beginner-facing sort (no data effect). Confidence: reproduced + fixed.
 - Guided "getting started" / empty states that tell a first-timer exactly what to
   do next; audit every screen for jargon and add plain-language "why" tooltips;
   reduce visible option clutter (progressive disclosure). (M, friendliness)
@@ -3465,21 +3463,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
-- **NEW (Builder audit 2026-07-17) — calibrate `flat_dark` is not `_sanitize_pedestal`'d, unlike dark/bias
-  (latent, fail-safe today; small blind-safe hardening for consistency).** (XS, image-quality/robustness —
-  PRIORITY 4.) *(From a fresh adversarial calibrate audit this run, which otherwise traced the apply/build
-  path clean.)* The v0.135.1 fix runs the master **dark** and **bias** through `_sanitize_pedestal`
-  (`nan_to_num`) at load (`apply.py:109/113`) so a non-finite pedestal pixel means "no correction" rather than
-  poisoning the light. The **flat-dark** subtracted from the master flat (`apply.py:119-122`) is *not*
-  sanitized. It's fail-safe today: a NaN flat-dark pixel → the flat's floor (`np.isfinite(fn) & (fn > 0.1)`,
-  `apply.py:135`) catches it → that pixel becomes 1.0 (no-op); a `±inf` pixel makes the flat's `nanmean`
-  non-finite so the *entire* flat is silently dropped — but the logged reason then says "non-positive mean"
-  when the real cause is an inf, so the warning is **slightly misleading**. Reachable only with an *imported
-  third-party* non-finite flat-dark (real Seestar integer raws can't produce one), and it never injects
-  NaN/inf into a light — so it's a robustness/consistency tidy, not a corruption bug. **Fix (blind-safe):**
-  `_sanitize_pedestal` the flat-dark before subtracting (mirroring dark/bias), and make the "flat dropped"
-  log name the real cause. Testable headlessly on `apply.py` in isolation with a synthetic non-finite
-  flat-dark. Left unfixed this run to avoid churn on a fail-safe path; filed for a future run / the Scout.
+- ~~**NEW (Builder audit 2026-07-17) — calibrate `flat_dark` is not `_sanitize_pedestal`'d, unlike dark/bias
+  (latent, fail-safe today; small blind-safe hardening for consistency).**~~ — **FIXED v0.136.5**
+  (Builder 2026-07-17, branch `claude/pensive-faraday-ghypg3`). The v0.135.1 fix runs the master **dark** and
+  **bias** through `_sanitize_pedestal` (`nan_to_num`) at load so a non-finite pedestal pixel means "no
+  correction"; the **flat-dark** subtracted from the master flat was *not* sanitized. A `±inf` flat-dark pixel
+  propagated into the flat, made the flat's `nanmean` non-finite, and silently dropped the **entire** flat (so
+  the flat correction vanished everywhere) — and the logged reason then said "non-positive mean" when the real
+  cause was an inf. **Fix:** `_sanitize_pedestal` the flat-dark before subtracting (mirroring dark/bias, so a
+  no-data pixel subtracts 0 = no correction there), and split the flat-drop warning so a non-finite mean names
+  the real cause distinctly from a genuinely non-positive one. Additive/upgrade-safe: an all-finite flat-dark
+  (the common case, and all real Seestar integer raws) is byte-for-byte unchanged. Regression
+  `tests/test_calibrate.py::test_flat_dark_nonfinite_pixel_does_not_drop_the_whole_flat` (an inf+NaN flat-dark:
+  fail-before drops the whole flat / pass-after keeps it, only the no-data pixels left uncorrected). Severity:
+  robustness/consistency tidy on a fail-safe path (reachable only via an imported non-finite flat-dark; never
+  injected NaN/inf into a light). Confidence: reproduced + fixed.
 - **NEW (Builder audit 2026-07-16) — engine-audit residue: two low-confidence, NOT-currently-reachable
   notes to keep a future audit from re-flagging them.** (XS each, image-quality/correctness — PRIORITY 4.)
   *(From two independent adversarial stacking-engine audits this run — both otherwise verified the core
@@ -5267,6 +5265,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.136.6** — Friendliness (PRIORITY 3 — beginner-facing frames table; Builder 2026-07-17, branch
+  `claude/pensive-faraday-ghypg3`). Frames-table sort now keeps **unmeasured (None-metric) frames last in
+  both directions**: a descending "worst first" sort used to invert the nulls-last trick and pin a block of
+  unmeasured/unsolved subs to the top instead of the actually-worst measured frames. Partition + sort measured,
+  append unmeasured. Regression `test_api.py::test_frame_sort_keeps_unmeasured_last_in_both_directions`.
+- **v0.136.5** — Calibration-engine robustness (PRIORITY 4 — image-quality/consistency; Builder 2026-07-17,
+  branch `claude/pensive-faraday-ghypg3`). Sanitize the master **flat-dark** through `_sanitize_pedestal` at
+  load (mirroring dark/bias): a non-finite flat-dark pixel now subtracts 0 (= no correction there) instead of
+  propagating an inf that made the flat's `nanmean` non-finite and silently dropped the *entire* flat; the
+  flat-drop warning now names a non-finite mean distinctly from a genuinely non-positive one. Regression
+  `test_calibrate.py::test_flat_dark_nonfinite_pixel_does_not_drop_the_whole_flat`.
 - **v0.132.1** — Stacking-engine correctness (PRIORITY 1 — data-integrity of a beginner-facing diagnostic;
   Builder 2026-07-16, branch `claude/pensive-faraday-vgnbsy`). **Honest per-pixel frame count under
   per-channel κ-σ rejection.** `WeightedSumAccumulator.add`/`add_window` (the default OSC sigma-clip path)

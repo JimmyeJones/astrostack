@@ -118,11 +118,18 @@ def list_frames(
         proj.close()
         lib.close()
 
-    def key(f: FrameRow):
-        v = getattr(f, sort)
-        return (v is None, v)
-
-    frames.sort(key=key, reverse=(order == "desc"))
+    # Keep unmeasured (None) frames *last* regardless of direction. The old
+    # `(v is None, v)` + `reverse=` idiom is nulls-last only ascending: a
+    # descending sort ("blurriest / worst first") inverted it and pinned a block
+    # of unmeasured/unsolved subs to the top, hiding the actually-worst measured
+    # frames a beginner asked to see. Sort the measured rows and append the
+    # unmeasured ones (in their stable order) so both directions rank real
+    # values first.
+    reverse = order == "desc"
+    measured = [f for f in frames if getattr(f, sort) is not None]
+    unmeasured = [f for f in frames if getattr(f, sort) is None]
+    measured.sort(key=lambda f: getattr(f, sort), reverse=reverse)
+    frames = measured + unmeasured
     return [_to_out(f) for f in frames[offset : offset + limit]]
 
 
