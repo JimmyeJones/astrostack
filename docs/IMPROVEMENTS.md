@@ -4048,8 +4048,23 @@ problems. Dogfood it every big-picture run and fix root causes.
     `Target.test.tsx` re-exports `describeObject` from the route so its existing tests are unchanged. tsc +
     full vitest (747) + vite build all green. *(History-page reuse deferred — the editor is where the
     "what is this?" question lands hardest; a future run can drop the same one-liner onto History too.)*
-    A later, larger slice could add an optional one-line "what it is" blurb field to the catalog JSON for the
-    most-popular targets (absent it, type + constellation already read well).
+  - **Beginner "what it is" blurb — SHIPPED v0.136.0** (Builder 2026-07-17, branch
+    `claude/pensive-faraday-9hg7jz`). The follow-up slice: a curated, plain-language one-liner about the
+    object now rides through the whole identify path onto the `ObjectInfoCard`, so a beginner reads *why*
+    their target is worth shooting, not just its type/constellation (*"The brightest nebula in the sky and a
+    vast stellar nursery about 1,340 light-years away — the classic first target for almost every
+    beginner."*). Added an optional `blurb` field to the bundled catalog JSON (`messier.json` +
+    `deepsky_popular.json`) for **66** of the most popular/iconic Seestar targets (all 32 named Messier
+    showpieces + 34 popular NGC/IC), threaded it through `CatalogObject` → `objectinfo.ObjectInfo`/`_to_info`
+    → `schemas.ObjectInfoOut` → the `GET …/identify` endpoint → the `ObjectInfo` client type, and rendered it
+    as a non-dimmed line on the card (below the type one-liner, above the framing hint) only when present.
+    Fully additive/upgrade-safe: `blurb` defaults to `""` everywhere, so an un-curated target (and any older
+    backend) reads exactly as before from type + constellation; no schema/config/DB/default/API-shape change,
+    no new dependency, offline. Tests: `test_objectinfo.py` (+5 — blurb carried through identify, empty when
+    absent, the iconic set all carry one, every curated blurb is a clean ≥20-char sentence),
+    `test_target_identify.py` (endpoint surfaces M42's blurb), `ObjectInfoCard.test.tsx` (+1 — blurb renders
+    on match / omitted when the catalog has none). Python + tsc + full vitest + vite build all green. Beginner
+    bar ✔ (helps a non-expert understand and enjoy their picture, sane default, plain language, no new knob).
   - **Dedup done (Scout 2026-07-13):** the duplicate "Share this image" entry lower in this list was
     collapsed into the single "Share card" entry above — the two had near-identical scope. The "Share card"
     entry (with the copy-friendly text-blurb idea folded in from the removed duplicate) is now the one

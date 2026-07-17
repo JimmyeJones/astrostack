@@ -61,6 +61,7 @@ describe("ObjectInfoCard", () => {
       ra_deg: 10, dec_deg: 41, matched_by: "name",
       size_arcmin: 178,
       framing: { level: "mosaic", text: "is bigger than the Seestar's single frame — shoot it in mosaic mode to capture all of it." },
+      blurb: "The nearest large spiral galaxy to our own, about 2.5 million light-years away.",
     });
     renderCard();
     await waitFor(() =>
@@ -69,10 +70,30 @@ describe("ObjectInfoCard", () => {
     expect(
       screen.getByText("A galaxy in the constellation Andromeda."),
     ).toBeInTheDocument();
+    // The curated beginner blurb renders below the one-liner.
+    expect(
+      screen.getByText(/nearest large spiral galaxy to our own/),
+    ).toBeInTheDocument();
     // The framing hint renders below, prefixed with the object's name.
     expect(
       screen.getByText(/Andromeda Galaxy is bigger than the Seestar's single frame/),
     ).toBeInTheDocument();
+  });
+
+  it("omits the blurb line when the catalog has none", async () => {
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "NGC 663", name: "", type: "open cluster",
+      constellation: "Cassiopeia", constellation_abbr: "Cas",
+      ra_deg: 26, dec_deg: 61, matched_by: "name",
+    });
+    const { container } = renderCard();
+    await waitFor(() =>
+      expect(screen.getAllByText("NGC 663").length).toBeGreaterThan(0));
+    // Only the one dimmed type/constellation line — no extra blurb paragraph.
+    expect(
+      screen.getByText("An open cluster in the constellation Cassiopeia."),
+    ).toBeInTheDocument();
+    expect(container.textContent).not.toContain("light-years");
   });
 
   it("omits the framing line when the catalog has no size", async () => {

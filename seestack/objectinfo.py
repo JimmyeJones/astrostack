@@ -74,6 +74,7 @@ class ObjectInfo:
     matched_by: str         # "name" or "coords" — how we identified it
     size_arcmin: float | None = None   # major-axis size, when the catalog has one
     framing: FramingHint | None = None  # "will it fit in one frame?" verdict
+    blurb: str = ""         # plain-language "what am I looking at?" one-liner, "" if none
 
 
 def _norm_name(s: str) -> str:
@@ -147,4 +148,5 @@ def _to_info(obj: CatalogObject, matched_by: str) -> ObjectInfo:
         matched_by=matched_by,
         size_arcmin=obj.size_arcmin,
         framing=framing_hint(obj.size_arcmin),
+        blurb=obj.blurb,
     )

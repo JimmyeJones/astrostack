@@ -103,3 +103,46 @@ def test_identify_omits_framing_when_the_catalog_has_no_size():
     assert info is not None
     assert info.size_arcmin is None
     assert info.framing is None
+
+
+def test_identify_carries_the_beginner_blurb_when_the_catalog_has_one():
+    # A curated popular target (M42) surfaces its plain-language "what am I
+    # looking at?" one-liner all the way through identify.
+    info = identify_object("M42")
+    assert info is not None
+    assert info.blurb
+    assert "nebula" in info.blurb.lower()
+
+
+def test_identify_blurb_is_empty_when_the_catalog_has_none():
+    # An object without a curated blurb identifies fine but carries "" (the card
+    # then reads from type + constellation alone — no missing/None crash).
+    from seestack.nightplan import CatalogObject
+
+    plain = CatalogObject(
+        id="NGC 99999", name="Testium Nebula", ra_deg=10.0, dec_deg=20.0,
+        type="galaxy", con="And",
+    )
+    info = identify_object("Testium Nebula", catalog=(plain,))
+    assert info is not None
+    assert info.blurb == ""
+
+
+def test_popular_iconic_targets_all_carry_a_blurb():
+    # The showpiece beginner targets a Seestar owner actually shoots must each
+    # have a curated one-liner (guards against a future catalog edit dropping one).
+    for name in ("M31", "M42", "M45", "M51", "M13", "NGC 7000", "IC 434"):
+        info = identify_object(name)
+        assert info is not None, name
+        assert info.blurb, f"{name} lost its blurb"
+
+
+def test_every_catalog_blurb_is_a_clean_sentence():
+    # A curated blurb, when present, should be a non-trivial sentence (real
+    # content, ends with a period) — catches an accidental blank/stub entry.
+    from seestack.nightplan import load_catalog
+
+    for obj in load_catalog():
+        if obj.blurb:
+            assert len(obj.blurb) >= 20, obj.id
+            assert obj.blurb.rstrip().endswith("."), obj.id

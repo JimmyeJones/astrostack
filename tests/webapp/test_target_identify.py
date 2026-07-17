@@ -22,6 +22,9 @@ def test_identify_known_target_by_name(client, solved_library):
     assert info["framing"] is not None
     assert info["framing"]["level"] == "mosaic"
     assert "mosaic" in info["framing"]["text"]
+    # M42 is a curated popular target, so it carries a beginner blurb too.
+    assert info["blurb"]
+    assert "nebula" in info["blurb"].lower()
 
 
 def test_identify_returns_null_for_an_unmatched_target(client, solved_library):

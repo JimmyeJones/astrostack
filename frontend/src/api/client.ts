@@ -104,6 +104,10 @@ export interface ObjectInfo {
   // omit both — treat as "no framing hint").
   size_arcmin?: number | null;
   framing?: FramingHint | null;
+  // A plain-language, beginner-friendly one-liner about the object ("what am I
+  // looking at?"), for the popular targets; absent/"" when the catalog has none
+  // (older backends omit it — the card reads fine from type + constellation).
+  blurb?: string;
 }
 
 export interface SessionQualityDrift {

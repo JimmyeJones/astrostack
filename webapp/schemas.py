@@ -62,6 +62,10 @@ class ObjectInfoOut(BaseModel):
     # backends omit both, so the UI treats absent as "no framing hint".
     size_arcmin: float | None = None
     framing: FramingHintOut | None = None
+    # A plain-language, beginner-friendly one-liner about the object ("what am I
+    # looking at?"), for the popular targets; ``""`` when the catalog has none.
+    # Old backends omit it, so the UI treats absent/empty as "no blurb".
+    blurb: str = ""
 
 
 class IntegrationGoalOut(BaseModel):

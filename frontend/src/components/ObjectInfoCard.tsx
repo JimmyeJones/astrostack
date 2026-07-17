@@ -63,6 +63,9 @@ export function ObjectInfoCard({ safe }: { safe: string }) {
               ? " Identified from this target's plate-solved position."
               : ""}
           </Text>
+          {d.blurb ? (
+            <Text size="sm">{d.blurb}</Text>
+          ) : null}
           {d.framing ? (
             <Text size="sm" c={framingColor(d.framing.level)}>
               {framingSentence(d.name || d.id, d.framing)}
