@@ -877,6 +877,14 @@ def run_stack(
                 use_gpu=options.use_gpu,
                 suppress_hot_pixels=options.suppress_hot_pixels,
                 hot_pixel_sigma=options.hot_pixel_sigma,
+                # Build the reference patch in the *same* domain as the frames it
+                # will be phase-correlated against (below, via _align_for_stack):
+                # calibrated when calibration is applied, and mono-luminance for a
+                # mono stack. Omitting these made the reference OSC-debayered /
+                # uncalibrated while every frame was mono / calibrated — a domain
+                # mismatch that degrades the measured sub-pixel shift.
+                calibration=calibration,
+                mono=options.mono,
             )
             if ref_result is None:
                 raise ValueError("reference frame did not intersect the canvas")

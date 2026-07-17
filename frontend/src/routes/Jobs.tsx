@@ -1,14 +1,19 @@
 import {
-  ActionIcon, Anchor, Badge, Button, Center, Group, Loader, Paper, Progress, Stack, Text, Title,
+  ActionIcon, Anchor, Badge, Button, Center, Group, Loader, Paper, Progress, Stack, Switch,
+  Text, Title, Tooltip,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { IconActivity, IconDownload, IconFlask, IconPhoto, IconX } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { type ReactNode, useRef } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { api, type Job } from "../api/client";
 import { QueryError } from "../components/QueryError";
 import { type EtaSample, etaLabel, updateEtaAnchor } from "../jobEta";
+import {
+  isJobNotifyEnabled, justFinishedJobs, notificationsSupported, requestNotificationPermission,
+  setJobNotifyEnabled, showJobNotification,
+} from "../jobNotify";
 
 const COLOR: Record<string, string> = {
   running: "violet",
@@ -362,6 +367,53 @@ function useJobEtas(jobs: Job[]): Record<string, string | null> {
   return out;
 }
 
+/** Opt-in desktop notifications when a job finishes while this page is open.
+ *
+ * Watches successive job polls and, when enabled, fires a browser notification
+ * for each job that transitions from in-progress to done/error — so a beginner
+ * who kicked off a stack and switched to another tab gets told when it's ready.
+ * Returns the toggle state + a setter that handles the permission request. */
+function useJobFinishNotifications(jobs: Job[] | undefined) {
+  const [enabled, setEnabled] = useState(isJobNotifyEnabled);
+  const prevJobs = useRef<Job[]>([]);
+
+  useEffect(() => {
+    if (!jobs) return;
+    if (enabled) {
+      for (const j of justFinishedJobs(prevJobs.current, jobs)) {
+        showJobNotification(j, jobKindLabel(j.kind));
+      }
+    }
+    // Track the latest snapshot even while disabled, so enabling mid-session
+    // only ever fires for jobs that finish *after* the switch is flipped.
+    prevJobs.current = jobs;
+  }, [jobs, enabled]);
+
+  const toggle = async (on: boolean) => {
+    if (!on) {
+      setJobNotifyEnabled(false);
+      setEnabled(false);
+      return;
+    }
+    const perm = await requestNotificationPermission();
+    if (perm === "granted") {
+      setJobNotifyEnabled(true);
+      setEnabled(true);
+    } else {
+      setJobNotifyEnabled(false);
+      setEnabled(false);
+      notifications.show({
+        color: "gray",
+        message: perm === "unsupported"
+          ? "This browser doesn't support desktop notifications."
+          : "Your browser blocked notifications — allow them for this site to get a ping when a job finishes.",
+      });
+    }
+  };
+
+  return { enabled, toggle, supported: notificationsSupported() };
+}
+
 export function JobsView() {
   const qc = useQueryClient();
   const { data, isLoading, isError, error, refetch } = useQuery({
@@ -369,6 +421,7 @@ export function JobsView() {
     queryFn: api.listJobs,
     refetchInterval: 1500,
   });
+  const notify = useJobFinishNotifications(data);
   const cancel = useMutation({
     mutationFn: (id: string) => api.cancelJob(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["jobs"] }),
@@ -401,12 +454,27 @@ export function JobsView() {
     <Stack>
       <Group justify="space-between">
         <Title order={2}>Jobs</Title>
-        {finished > 0 ? (
-          <Button size="xs" variant="subtle" color="gray" loading={clear.isPending}
-            onClick={() => clear.mutate()}>
-            Clear {finished} finished
-          </Button>
-        ) : null}
+        <Group gap="md">
+          {notify.supported ? (
+            <Tooltip
+              label="Get a desktop notification when a job finishes, so you can switch tabs while it runs."
+              multiline w={240} withArrow
+            >
+              <Switch
+                size="sm"
+                checked={notify.enabled}
+                onChange={(e) => { void notify.toggle(e.currentTarget.checked); }}
+                label="Notify me when done"
+              />
+            </Tooltip>
+          ) : null}
+          {finished > 0 ? (
+            <Button size="xs" variant="subtle" color="gray" loading={clear.isPending}
+              onClick={() => clear.mutate()}>
+              Clear {finished} finished
+            </Button>
+          ) : null}
+        </Group>
       </Group>
       {jobs.length === 0 ? (
         <Paper withBorder p="xl">

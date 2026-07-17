@@ -276,6 +276,49 @@ def test_subpixel_refine_actually_runs(tmp_path, monkeypatch):
     assert calls["n"] >= 1  # was 0 before the fix
 
 
+def test_subpixel_reference_patch_matches_frame_alignment_domain(tmp_path, monkeypatch):
+    """Regression: the sub-pixel-refine reference patch must be built in the SAME
+    domain (mono / calibration) as the frames it is phase-correlated against.
+
+    The reference patch is built by calling `align_one`, then every frame is
+    `align_one`'d and cross-correlated against that patch. The reference call
+    omitted `mono=`/`calibration=`, so for a mono stack the reference was
+    OSC-debayered (a different luminance representation) while every frame was
+    mono-luminance, and for a calibrated stack the reference was uncalibrated —
+    a domain mismatch that degrades the measured sub-pixel shift. Assert the
+    reference-patch call shares the per-frame calls' `mono`/`calibration`."""
+    import seestack.stack.stacker as st
+
+    real_align_one = st.align_one
+    ref_call: dict = {}
+    frame_call: dict = {}
+
+    def spy(**kwargs):
+        # The per-frame alignment (via _align_for_stack) passes subpixel_refine=;
+        # the one setup call that builds the reference patch does not.
+        if "subpixel_refine" in kwargs:
+            frame_call.update(kwargs)
+        else:
+            ref_call.update(kwargs)
+        return real_align_one(**kwargs)
+
+    monkeypatch.setattr(st, "align_one", spy)
+
+    proj = _build_project(tmp_path, n=3)
+    try:
+        run_stack(proj, StackOptions(sigma_clip=False, subpixel_refine=True,
+                                     mono=True, max_workers=1, output_name="spmono"))
+    finally:
+        proj.close()
+
+    assert ref_call, "reference-patch align_one call was not made"
+    assert frame_call, "per-frame align_one call was not made"
+    # Same colour domain and same calibration as the frames it aligns against.
+    assert ref_call["mono"] is True
+    assert ref_call["mono"] == frame_call["mono"]
+    assert ref_call["calibration"] == frame_call["calibration"]
+
+
 def test_output_name_is_sanitized_against_path_traversal(tmp_path):
     from seestack.stack.output import safe_basename
 
