@@ -5265,6 +5265,20 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.136.7** — Stacking-engine correctness (PRIORITY 1 — sub-pixel alignment consistency; Builder 2026-07-17,
+  branch `claude/pensive-faraday-ql4ddd`). **Build the sub-pixel-refine reference patch in the same domain as
+  the frames it is phase-correlated against.** `run_stack` (`seestack/stack/stacker.py:868`) built the reference
+  patch via `align_one(...)` **without** `calibration=`/`mono=`, whereas every frame it is later cross-correlated
+  against (`_align_for_stack`) passes both — so for a **mono** stack the reference was OSC-debayered (a different
+  luminance representation from the mono frames' `raw`-replicated luminance) and for a **calibrated** stack the
+  reference was uncalibrated. That domain mismatch degrades the measured sub-pixel shift (off-by-default
+  `subpixel_refine`; benign but a genuine inconsistency in the stacking hot path, found by a fresh adversarial
+  engine audit which otherwise traced clean). Fix threads `calibration=calibration, mono=options.mono` into that
+  one call so the reference matches the frames. Additive/upgrade-safe: no schema/config/API/default change; a
+  non-mono, uncalibrated stack (where both were already the defaults) is byte-for-byte unchanged. Regression
+  `tests/test_stack_pipeline.py::test_subpixel_reference_patch_matches_frame_alignment_domain` (spies on
+  `align_one`: fail-before the reference call omits `mono`/`calibration` / pass-after it shares the per-frame
+  calls' domain).
 - **v0.136.6** — Friendliness (PRIORITY 3 — beginner-facing frames table; Builder 2026-07-17, branch
   `claude/pensive-faraday-ghypg3`). Frames-table sort now keeps **unmeasured (None-metric) frames last in
   both directions**: a descending "worst first" sort used to invert the nulls-last trick and pin a block of
