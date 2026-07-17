@@ -192,6 +192,21 @@ def test_tonight_rejects_a_far_future_date(client, solved_library):
     assert r.status_code == 422
 
 
+def test_tonight_accepts_the_pickers_farthest_date_across_the_tz_boundary(client, solved_library):
+    # The date picker offers up to `local_today + 60`; for a viewer east of UTC in
+    # their local morning that is `UTC_today + 61`. The backend must accept it (one
+    # day of slack on the upper bound, mirroring the min) — before the fix the
+    # farthest date the app's own picker allowed 422'd for eastern-hemisphere users.
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    from webapp.routers.plan import _MAX_LOOKAHEAD_DAYS
+    edge = (datetime.now(timezone.utc) + timedelta(days=_MAX_LOOKAHEAD_DAYS + 1)).date().isoformat()
+    r = client.get("/api/plan/tonight", params={"date": edge})
+    assert r.status_code == 200, r.text
+    # One day past the picker's own max is still rejected (the cap still bites).
+    beyond = (datetime.now(timezone.utc) + timedelta(days=_MAX_LOOKAHEAD_DAYS + 2)).date().isoformat()
+    assert client.get("/api/plan/tonight", params={"date": beyond}).status_code == 422
+
+
 def test_tonight_rejects_a_past_date(client, solved_library):
     client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
     past = (datetime.now(timezone.utc) - timedelta(days=10)).date().isoformat()

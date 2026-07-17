@@ -47,6 +47,24 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**Tonight planner: the date picker's own farthest date 422'd for eastern-hemisphere users — an
+  off-by-a-timezone-day on the look-ahead upper bound.**~~ — **FIXED v0.136.3** (Builder 2026-07-17, branch
+  `claude/pensive-faraday-97esvc`; traced + reproduced + regression-tested). Found by a fresh adversarial
+  webapp/frontend audit. `GET /api/plan/tonight?date=…` validates the pick against `datetime.now(timezone.utc)
+  .date()` and deliberately adds **one day of slack to the lower** bound (`today - 1`) so a viewer *west* of
+  UTC — whose local calendar day trails UTC — can still ask for "tonight", but added **no** slack to the
+  **upper** bound (`today + _MAX_LOOKAHEAD_DAYS`). The frontend picker (`tonight.ts::planDateBounds`) computes
+  its `max` from the **browser's local** date (`local_today + 60`). For a viewer *east* of UTC in their local
+  morning (e.g. UTC+10, 00:00–10:00 local) `local_today == UTC_today + 1`, so the picker offers up to
+  `UTC_today + 61` — which the backend 422'd: the farthest date the app's own picker allowed was rejected for
+  a large user population (Asia/Australia) at a common time of day. **Fix:** give the upper bound the symmetric
+  one-day slack the lower bound already has (`today + _MAX_LOOKAHEAD_DAYS + 1`), so the picker's max is always
+  accepted while the cap still bites one day beyond it. Additive/upgrade-safe: only widens the accepted range
+  by a day, no schema/config/API-shape/default change; the far-future/past/malformed 422s are unchanged.
+  Regression `tests/webapp/test_plan.py::test_tonight_accepts_the_pickers_farthest_date_across_the_tz_boundary`
+  (`UTC_today + 61` now 200s (fail-before 422) while `UTC_today + 62` still 422s). Severity: broken-UX on a
+  beginner-facing input for eastern-hemisphere users (no data effect). Confidence: reproduced + fixed.
+
 - ~~**Editor "Wavelet (recommended)" denoise was a near-no-op on any real starfield — the default
   denoise method silently left the sky noise intact whenever a bright star or core was present.**~~ —
   **FIXED v0.136.2** (Builder 2026-07-17, branch `claude/pensive-faraday-97esvc`; traced + reproduced +
@@ -3259,6 +3277,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   seed-signature check) and only when a note was actually stored, so a hand-built recipe never
   surfaces it and it fades the moment the user hand-edits. Closes the trust gap on the surface the
   Process-target deep-link (v0.85.3) actually lands the user on.
+- **NEW (Builder audit 2026-07-17) — frames-table sort pins *unmeasured* frames to the top when
+  sorting a metric descending ("worst first").** (S, friendliness — PRIORITY 3; low-confidence, a
+  judgment call.) `webapp/routers/frames.py::list_frames` sorts with `key=lambda f: (v is None, v)` and
+  `reverse=(order == "desc")`. The `(v is None, v)` idiom is the standard *nulls-last* trick and works
+  for ascending, but `reverse=True` inverts it, so a **descending** sort by e.g. FWHM (`order=desc` =
+  "blurriest first") puts frames whose metric is `None` (unmeasured / unsolved / `qc_error`) **first** —
+  a beginner sorting "show me the worst subs" sees a block of *unmeasured* frames pinned at the top
+  instead of the actually-blurriest measured ones. Arguable either way (nulls-first-on-desc is a
+  defensible convention, and there's no documented "nulls last" intent), but it's inconsistent with the
+  ascending behaviour the same code implements. If confirmed worth changing: sort so nulls stay **last
+  regardless of direction** (e.g. sort the finite-valued rows and append the null-valued rows), and pin
+  it with an asc+desc test. Scout to decide whether the current convention is fine or worth flipping
+  before a Builder touches a user-facing sort order. Found by an adversarial webapp/frontend audit
+  (which otherwise traced the routers, stats roll-ups, session-recap/library-progress aggregations, and
+  the frontend pure helpers clean).
 - Guided "getting started" / empty states that tell a first-timer exactly what to
   do next; audit every screen for jargon and add plain-language "why" tooltips;
   reduce visible option clutter (progressive disclosure). (M, friendliness)
