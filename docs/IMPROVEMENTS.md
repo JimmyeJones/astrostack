@@ -3465,21 +3465,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
-- **NEW (Builder audit 2026-07-17) — calibrate `flat_dark` is not `_sanitize_pedestal`'d, unlike dark/bias
-  (latent, fail-safe today; small blind-safe hardening for consistency).** (XS, image-quality/robustness —
-  PRIORITY 4.) *(From a fresh adversarial calibrate audit this run, which otherwise traced the apply/build
-  path clean.)* The v0.135.1 fix runs the master **dark** and **bias** through `_sanitize_pedestal`
-  (`nan_to_num`) at load (`apply.py:109/113`) so a non-finite pedestal pixel means "no correction" rather than
-  poisoning the light. The **flat-dark** subtracted from the master flat (`apply.py:119-122`) is *not*
-  sanitized. It's fail-safe today: a NaN flat-dark pixel → the flat's floor (`np.isfinite(fn) & (fn > 0.1)`,
-  `apply.py:135`) catches it → that pixel becomes 1.0 (no-op); a `±inf` pixel makes the flat's `nanmean`
-  non-finite so the *entire* flat is silently dropped — but the logged reason then says "non-positive mean"
-  when the real cause is an inf, so the warning is **slightly misleading**. Reachable only with an *imported
-  third-party* non-finite flat-dark (real Seestar integer raws can't produce one), and it never injects
-  NaN/inf into a light — so it's a robustness/consistency tidy, not a corruption bug. **Fix (blind-safe):**
-  `_sanitize_pedestal` the flat-dark before subtracting (mirroring dark/bias), and make the "flat dropped"
-  log name the real cause. Testable headlessly on `apply.py` in isolation with a synthetic non-finite
-  flat-dark. Left unfixed this run to avoid churn on a fail-safe path; filed for a future run / the Scout.
+- ~~**NEW (Builder audit 2026-07-17) — calibrate `flat_dark` is not `_sanitize_pedestal`'d, unlike dark/bias
+  (latent, fail-safe today; small blind-safe hardening for consistency).**~~ — **FIXED v0.136.5**
+  (Builder 2026-07-17, branch `claude/pensive-faraday-ghypg3`). The v0.135.1 fix runs the master **dark** and
+  **bias** through `_sanitize_pedestal` (`nan_to_num`) at load so a non-finite pedestal pixel means "no
+  correction"; the **flat-dark** subtracted from the master flat was *not* sanitized. A `±inf` flat-dark pixel
+  propagated into the flat, made the flat's `nanmean` non-finite, and silently dropped the **entire** flat (so
+  the flat correction vanished everywhere) — and the logged reason then said "non-positive mean" when the real
+  cause was an inf. **Fix:** `_sanitize_pedestal` the flat-dark before subtracting (mirroring dark/bias, so a
+  no-data pixel subtracts 0 = no correction there), and split the flat-drop warning so a non-finite mean names
+  the real cause distinctly from a genuinely non-positive one. Additive/upgrade-safe: an all-finite flat-dark
+  (the common case, and all real Seestar integer raws) is byte-for-byte unchanged. Regression
+  `tests/test_calibrate.py::test_flat_dark_nonfinite_pixel_does_not_drop_the_whole_flat` (an inf+NaN flat-dark:
+  fail-before drops the whole flat / pass-after keeps it, only the no-data pixels left uncorrected). Severity:
+  robustness/consistency tidy on a fail-safe path (reachable only via an imported non-finite flat-dark; never
+  injected NaN/inf into a light). Confidence: reproduced + fixed.
 - **NEW (Builder audit 2026-07-16) — engine-audit residue: two low-confidence, NOT-currently-reachable
   notes to keep a future audit from re-flagging them.** (XS each, image-quality/correctness — PRIORITY 4.)
   *(From two independent adversarial stacking-engine audits this run — both otherwise verified the core
@@ -5267,6 +5267,12 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.136.5** — Calibration-engine robustness (PRIORITY 4 — image-quality/consistency; Builder 2026-07-17,
+  branch `claude/pensive-faraday-ghypg3`). Sanitize the master **flat-dark** through `_sanitize_pedestal` at
+  load (mirroring dark/bias): a non-finite flat-dark pixel now subtracts 0 (= no correction there) instead of
+  propagating an inf that made the flat's `nanmean` non-finite and silently dropped the *entire* flat; the
+  flat-drop warning now names a non-finite mean distinctly from a genuinely non-positive one. Regression
+  `test_calibrate.py::test_flat_dark_nonfinite_pixel_does_not_drop_the_whole_flat`.
 - **v0.132.1** — Stacking-engine correctness (PRIORITY 1 — data-integrity of a beginner-facing diagnostic;
   Builder 2026-07-16, branch `claude/pensive-faraday-vgnbsy`). **Honest per-pixel frame count under
   per-channel κ-σ rejection.** `WeightedSumAccumulator.add`/`add_window` (the default OSC sigma-clip path)

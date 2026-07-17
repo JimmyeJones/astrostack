@@ -117,7 +117,13 @@ class CalibrationMasters:
             flat = np.asarray(flat, dtype=np.float32)
             if flat_dark_path:
                 flat_dark, _ = load_master(flat_dark_path)
-                flat_dark = np.asarray(flat_dark, dtype=np.float32)
+                # Sanitize non-finite flat-dark pixels to 0 (= no subtraction
+                # there), mirroring the master dark/bias. Without this an imported
+                # third-party flat-dark carrying an inf makes the flat's nanmean
+                # non-finite and silently drops the *whole* flat (below), while a
+                # NaN would only be masked out later by the flat floor.
+                flat_dark = _sanitize_pedestal(
+                    np.asarray(flat_dark, dtype=np.float32))
                 if flat_dark.shape == flat.shape:
                     flat = flat - flat_dark
                 else:
@@ -127,7 +133,9 @@ class CalibrationMasters:
                         flat_dark.shape, flat.shape,
                     )
             mean = float(np.nanmean(flat))
-            if not np.isfinite(mean) or mean <= 0:
+            if not np.isfinite(mean):
+                log.warning("flat master %s has a non-finite mean; ignoring it", flat_path)
+            elif mean <= 0:
                 log.warning("flat master %s has non-positive mean; ignoring it", flat_path)
             else:
                 fn = flat / mean
