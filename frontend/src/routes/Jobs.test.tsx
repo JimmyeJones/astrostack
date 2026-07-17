@@ -47,6 +47,31 @@ describe("JobsView", () => {
     await waitFor(() => expect(screen.getByText("job already finished")).toBeInTheDocument());
   });
 
+  it("offers a 'notify me when done' toggle that requests permission when supported", async () => {
+    // jsdom has no Notification API by default; stub it as supported.
+    const requestPermission = vi.fn().mockResolvedValue("granted");
+    vi.stubGlobal("Notification", Object.assign(vi.fn(), { permission: "default", requestPermission }));
+    try {
+      vi.spyOn(client.api, "listJobs").mockResolvedValue([mkJob()]);
+      renderJobs();
+      await waitFor(() => expect(screen.getByText("Stacking")).toBeInTheDocument());
+
+      const toggle = screen.getByLabelText("Notify me when done");
+      expect(toggle).toBeInTheDocument();
+      fireEvent.click(toggle);
+      await waitFor(() => expect(requestPermission).toHaveBeenCalledOnce());
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("hides the notify toggle where the browser has no Notification API", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([mkJob()]);
+    renderJobs();
+    await waitFor(() => expect(screen.getByText("Stacking")).toBeInTheDocument());
+    expect(screen.queryByLabelText("Notify me when done")).not.toBeInTheDocument();
+  });
+
   it("summarises a reprocess-all batch, listing failed targets", async () => {
     vi.spyOn(client.api, "listJobs").mockResolvedValue([
       mkJob({

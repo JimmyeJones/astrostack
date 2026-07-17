@@ -3886,6 +3886,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+- **NEW BEGINNER FEATURE (Builder-filed 2026-07-17) — "Notify me when done": slice (b) global cross-route
+  watcher.** — **SLICE (a) SHIPPED v0.137.0** (opt-in desktop notification when a job finishes *while the Jobs
+  page is open*; see Shipped). Slice (b): today the ping only fires while the Jobs page is mounted, so a
+  beginner who starts a stack and then browses to the Target/Editor/Gallery page (a very common flow — you kick
+  off "Process target" and go look at other subs) won't be notified until they return to Jobs. Lift the
+  finish-detection into a small **always-mounted** watcher (a hook in `App.tsx`/the top-level layout) that polls
+  `listJobs` on a gentle interval (e.g. 5–10 s, longer than the Jobs page's 1.5 s so it's cheap) and fires the
+  same `showJobNotification` for any in-progress→done/error transition, regardless of the current route — gated
+  on the same opt-in + permission the switch already sets, so it stays off by default. Reuse the shipped pure
+  `jobNotify.ts` helpers unchanged (they're route-agnostic by design); the only new work is the global poll
+  placement and making sure it and the Jobs-page effect don't double-fire (share one source of truth — e.g. the
+  global watcher owns notifications and the Jobs page stops firing when the watcher is active, or de-dupe by the
+  Notification `tag` which is already per-job). Frontend-only, additive, off by default. *(S, autonomy/
+  friendliness — PRIORITY 2/3; beginner bar ✔ — completes the "walk away and get told" promise.)*
 - **⭐ OWNER-REQUESTED — Bulk upload FITS through the web interface (no NAS share
   needed).** — **SLICE (a) SHIPPED v0.115.0** (Builder 2026-07-13, branch
   `claude/pensive-faraday-ug7r6s`). New `POST /api/upload` endpoint
@@ -5265,6 +5279,24 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.137.0** — NEW BEGINNER FEATURE / autonomy (PRIORITY 2/3 — "drop files, walk away, get told when it's
+  ready"; Builder 2026-07-17, branch `claude/pensive-faraday-ql4ddd`). **Opt-in "Notify me when done" desktop
+  notifications on the Jobs page.** The north-star flow is "drop subs, walk away" — but a beginner who kicks off
+  a stack / process-target and switches to another browser tab had no way to know it finished except sitting and
+  watching the progress bar. Slice (a): a new pure/testable `frontend/src/jobNotify.ts` (`justFinishedJobs(prev,
+  curr)` detects the in-progress→done/error transition between polls — never bursting on a fresh load or firing
+  for a user-cancelled job; `jobNotificationText` plain-language title/body; thin Notification-API/localStorage
+  wrappers) + a **`Notify me when done` switch** in the Jobs header that requests browser permission on enable
+  and persists the opt-in. While the Jobs page is open (the route the user lands on after starting a job), each
+  job that finishes fires one desktop notification. **Off by default**, hidden entirely where the browser has no
+  Notification API, and it changes **no** processing behaviour — purely mirrors a finish. Frontend-only,
+  additive/upgrade-safe: no backend/schema/config/API/default change. Tests: `jobNotify.test.ts` (11 —
+  transition detection incl. fresh-load/cancelled/still-running guards, done-vs-error phrasing, permission +
+  persistence helpers, `showJobNotification` fires only when granted) and `Jobs.test.tsx` (+2 — the toggle
+  requests permission when supported / is hidden when unsupported). tsc + full vitest (905) + vite build green.
+  *(Beginner bar ✔ — one obvious toggle, plain language, no new astro concepts, no deps.)* **Follow-up (slice b)
+  filed in Ideas:** a global cross-route watcher so the ping also fires while the user is on a *different* page
+  (today it only fires while the Jobs page is mounted).
 - **v0.136.7** — Stacking-engine correctness (PRIORITY 1 — sub-pixel alignment consistency; Builder 2026-07-17,
   branch `claude/pensive-faraday-ql4ddd`). **Build the sub-pixel-refine reference patch in the same domain as
   the frames it is phase-correlated against.** `run_stack` (`seestack/stack/stacker.py:868`) built the reference
