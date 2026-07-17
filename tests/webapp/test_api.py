@@ -78,6 +78,42 @@ def test_list_and_sort_frames(client, built_library):
     assert ids == sorted(ids, reverse=True)
 
 
+def test_frame_sort_keeps_unmeasured_last_in_both_directions(client, built_library, data_root):
+    # Regression: a descending sort ("worst first") used to invert the nulls-last
+    # trick and pin unmeasured frames to the top, hiding the actually-worst
+    # measured subs a beginner asked to see. Unmeasured (None-metric) frames must
+    # stay last regardless of direction.
+    from seestack.io.library import Library
+
+    frames = client.get("/api/targets/M_42/frames").json()
+    assert len(frames) == 3
+    ids = [f["id"] for f in frames]
+    # Two frames get an FWHM; the third is left unmeasured (None).
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target("M_42")
+        try:
+            proj.update_frame(ids[0], fwhm_px=2.0)
+            proj.update_frame(ids[1], fwhm_px=5.0)
+            proj.update_frame(ids[2], fwhm_px=None)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    def fwhm_order(order):
+        rows = client.get(
+            "/api/targets/M_42/frames", params={"sort": "fwhm_px", "order": order}
+        ).json()
+        return [(f["id"], f["fwhm_px"]) for f in rows]
+
+    asc = fwhm_order("asc")
+    assert [f for _, f in asc] == [2.0, 5.0, None]  # measured ascending, null last
+    desc = fwhm_order("desc")
+    assert [f for _, f in desc] == [5.0, 2.0, None]  # worst measured first, null STILL last
+    assert desc[-1][0] == ids[2]  # the unmeasured frame is not pinned to the top
+
+
 def test_list_frames_clamps_negative_pagination(client, built_library):
     # Regression: offset/limit were sliced directly, so a negative value hit
     # Python negative-index slicing and silently returned the wrong window (the
