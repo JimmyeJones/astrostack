@@ -4410,7 +4410,36 @@ problems. Dogfood it every big-picture run and fix root causes.
   handle any number of objects — but the current 157-object list already covers the
   popular OSC targets, so only worth it if the owner wants more suggestions. (L, autonomy/workflow)
 - **NEW BEGINNER FEATURE (Scout 2026-07-21, reshaped from the old one-line "annotated sky overlay" idea) —
-  "What's in this picture?": label the catalog objects that fall inside a finished stack.** A beginner
+  "What's in this picture?": label the catalog objects that fall inside a finished stack.** — **SLICES
+  (a)+(b)+(c) SHIPPED v0.141.0** (Builder 2026-07-21, branch `claude/pensive-faraday-d04mpi`). Delivered
+  the full first slice across engine + backend + frontend. **(a) engine:** new pure/offline
+  `seestack/annotate.py::objects_in_field(wcs, width_px, height_px, *, margin=0, catalog=None)` →
+  `list[FieldObject]` (catalog_id, name, type, ra/dec, x_px/y_px), vectorised world→pixel-projecting the
+  bundled deep-sky catalog and keeping only objects whose centre lands inside the frame (drops non-finite /
+  behind-projection points, so it's RA-seam and pole safe). **Correction to the filed premise:** the WCS is
+  **not** on `stack_runs` (no such column) — the stacker merges the canvas WCS into the master **FITS
+  header**, so a new `seestack/io/wcs_io.py::celestial_wcs_from_fits(path)` reads the 2-D celestial WCS +
+  dims from the run's FITS (guarding `has_celestial` so a header with no WCS yields `None`, not a silent
+  identity WCS). **(b) backend:** read-only `GET /api/targets/{safe}/stack-runs/{id}/annotations` →
+  `{width, height, objects[]}`, computed in a threadpool from the run's FITS header (empty `objects` when the
+  run has no FITS / no WCS — never 404s where the run exists; 404 only for an unknown run). **(c) frontend:**
+  a reusable `AnnotatedImage` component (with a pure, unit-tested `objectMarkerLayout` contain-fit/letterbox
+  helper so labels land exactly on the object at any box size, re-laid-out on resize via `ResizeObserver`)
+  overlaying small labelled markers, wired to an **"Identify"** toggle on each History run card (off by
+  default; lazily fetches only when asked; plain-language "Found N catalog objects" / "No catalog objects
+  fall inside this field" readout). Additive/upgrade-safe: one new engine module + one io helper + one
+  read-only endpoint + one component + a UI toggle — no schema/config/default/existing-API change. Tests:
+  `tests/test_annotate.py` (6 — centre→centre pixel, just-outside excluded + margin keeps it,
+  behind-projection dropped, RA-seam handled by the projection not naive RA math, None/empty-frame → [],
+  real-catalog-around-M31), `tests/webapp/test_stack_annotations.py` (3 — lists objects in the field from a
+  real WCS-headed master FITS, empty when the run has no WCS, 404 unknown run),
+  `AnnotatedImage.test.tsx` (7 — layout math incl. letterbox + off-image visibility + not-ready guards,
+  label fallback, bare vs shown render), `History.test.tsx` (+2 — Identify lazily fetches and shows the
+  found/none readout). Python + tsc + full vitest + vite build all green. **Slice (d) — a burned-in
+  labelled variant of the share JPEG — and extending the overlay to the Gallery lightbox (pan/zoom) and the
+  editor result surface remain open follow-ups.** *(Original write-up below.)*
+  <details><summary>Original idea</summary>
+  A beginner
   who stacks a wide field (or a mosaic) captures more than the one object they aimed at — a nearby galaxy,
   an NGC cluster, a named nebula — and has no idea what the other fuzzy blobs are. Because every stack
   already stores its solved output WCS (`stack_runs.wcs_json`) and we already ship an **offline** deep-sky
@@ -4434,6 +4463,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   default/existing-API change. Ship (a)+(b)+(c) as the first Builder run; (d) later. *(M overall; slice (a)
   is a clean S starting point — friendliness/workflow, PRIORITY 3; also feeds the night planner's
   "plot tonight's targets" view, which can reuse `objects_in_field`.)*
+  </details>
 - ~~**NEW BEGINNER FEATURE (Builder-filed 2026-07-14, spotted shipping v0.125.0) — "Share this
   picture" via the native Web Share sheet.**~~ — **SHIPPED v0.126.0** (Builder 2026-07-16, branch
   `claude/pensive-faraday-n6p4i1`). Delivered exactly as filed, frontend-only. New pure, unit-tested
@@ -5522,6 +5552,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.141.0** — NEW BEGINNER FEATURE / friendliness (PRIORITY 3 — "annotated results"; Builder 2026-07-21,
+  branch `claude/pensive-faraday-d04mpi`). **"What's in this picture?" — label the catalog objects inside a
+  finished stack.** Engine `seestack/annotate.py::objects_in_field` projects the bundled offline deep-sky
+  catalog through a run's output WCS (read from the master FITS header via new
+  `wcs_io.celestial_wcs_from_fits` — corrected the filed premise that the WCS lived on `stack_runs`) and
+  returns the objects whose centre lands in-frame; read-only `GET …/stack-runs/{id}/annotations`; a reusable
+  `AnnotatedImage` overlay (pure contain-fit/letterbox `objectMarkerLayout`) wired to an **"Identify"** toggle
+  on each History run card (off by default, lazy fetch, plain "Found N" readout). RA-seam/pole safe, offline,
+  additive — no schema/config/default/API change. Tests: `test_annotate.py` (6), `test_stack_annotations.py`
+  (3), `AnnotatedImage.test.tsx` (7), `History.test.tsx` (+2). Slice (d) burned-in labelled JPEG + Gallery
+  lightbox / editor surfaces remain open follow-ups.
 - **v0.139.0** — NEW BEGINNER FEATURE / autonomy (PRIORITY 2/3 — pre-stack reassurance; Builder 2026-07-21,
   branch `claude/pensive-faraday-c78iq5`). **"First look" — the sharpest accepted sub, shown the moment QC
   finishes and before the stack runs.** Pure `qc.grading.best_frame` (lowest FWHM, tie-broken by star count) →

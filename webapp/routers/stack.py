@@ -410,6 +410,50 @@ async def sky_overlay(safe: str, run_id: int, request: Request) -> Response:
                     headers={"Cache-Control": "no-store"})
 
 
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/annotations")
+async def stack_run_annotations(safe: str, run_id: int, request: Request) -> dict[str, Any]:
+    """The catalog deep-sky objects that fall inside this run's field.
+
+    Turns "what are these other fuzzy blobs?" into named objects: projects the
+    bundled offline deep-sky catalog (Messier + popular NGC/IC) through the run's
+    solved output WCS — read from its master FITS header, which the stacker merges
+    the canvas WCS into — and returns those whose centre lands inside the frame.
+    Pure and offline: no network, no new dependency. Pixel coordinates are on the
+    run's own FITS grid (``width`` × ``height``); the frontend positions a label
+    over any scaled preview via ``x_px / width``. Returns an empty ``objects`` list
+    (never 404s where a run exists) when the run has no FITS or an unsolved /
+    degenerate WCS, so the caller never has to special-case an unsolved run.
+
+    Runs the header read + projection in a threadpool so it never blocks the job
+    worker."""
+    _, fits_path = _run_fits_path(request, safe, run_id)  # raises 404 for an unknown run
+
+    def work() -> dict[str, Any]:
+        from seestack.annotate import objects_in_field
+        from seestack.io.wcs_io import celestial_wcs_from_fits
+
+        wcs, width, height = celestial_wcs_from_fits(fits_path) if fits_path else (None, 0, 0)
+        objs = objects_in_field(wcs, width, height)
+        return {
+            "width": width,
+            "height": height,
+            "objects": [
+                {
+                    "catalog_id": o.catalog_id,
+                    "name": o.name,
+                    "type": o.type,
+                    "ra_deg": o.ra_deg,
+                    "dec_deg": o.dec_deg,
+                    "x_px": o.x_px,
+                    "y_px": o.y_px,
+                }
+                for o in objs
+            ],
+        }
+
+    return await run_in_threadpool(work)
+
+
 # The "watch your picture come together" progress reel is written as a sibling
 # of each run's FITS (``{stem}_progress.webp`` — or ``.png`` APNG when the Pillow
 # build lacks WEBP), resolved from the basename exactly like the coverage map, so

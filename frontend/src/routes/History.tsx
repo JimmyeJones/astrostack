@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  ActionIcon, Alert, Badge, Button, Card, Center, Group, Image, Loader, SegmentedControl,
+  ActionIcon, Alert, Badge, Button, Card, Center, Group, Loader, SegmentedControl,
   SimpleGrid, Slider, Stack, Table, Text, TextInput, Title, Tooltip,
 } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
-import { IconAdjustments, IconCheck, IconCopy, IconDeviceFloppy, IconDownload, IconGitCompare, IconInfoCircle, IconPencil, IconPhotoDown, IconSparkles, IconTrash, IconX } from "@tabler/icons-react";
+import { IconAdjustments, IconCheck, IconCopy, IconDeviceFloppy, IconDownload, IconGitCompare, IconInfoCircle, IconPencil, IconPhotoDown, IconSparkles, IconTags, IconTrash, IconX } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api, type StackRun, type StackPhotometricSummary, type StackDarkScalingSummary, type StackRejectionSummary, type StackFrameAccounting } from "../api/client";
@@ -18,6 +18,7 @@ import { autoColorCalCaption } from "../components/editor/colorCal";
 import { RejectionBadge } from "../components/RejectionBadge";
 import { NoiseReadout, NoiseDelta, CleanestBadge, cleanestRunId, hasNoise } from "../components/NoiseBadge";
 import { ImageLightbox } from "../components/ImageLightbox";
+import { AnnotatedImage } from "../components/AnnotatedImage";
 import { StackHealthCard } from "../components/StackHealthCard";
 import { ProgressReelCard } from "../components/ProgressReelCard";
 import { SharePictureButton } from "../components/SharePictureButton";
@@ -457,6 +458,16 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
   const [black, setBlack] = useState(DEFAULT_BLACK);
   const [cacheBust, setCacheBust] = useState(0);
   const [light, setLight] = useState(false);
+  // "What's in this picture?" — lazily fetch the catalog objects in this run's
+  // field only once the user asks (needs the FITS-header WCS, so gated on has_fits).
+  const [identify, setIdentify] = useState(false);
+  const annotations = useQuery({
+    queryKey: ["annotations", safe, run.id],
+    queryFn: () => api.stackAnnotations(safe, run.id),
+    enabled: identify && run.has_fits,
+    staleTime: Infinity,
+  });
+  const objects = annotations.data?.objects ?? [];
   const [dStretch] = useDebouncedValue(stretch, 250);
   const [dBlack] = useDebouncedValue(black, 250);
   // Suggest the initial asinh sliders from the run's own data (fetched lazily
@@ -506,14 +517,25 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
     <Card withBorder padding="md" radius="md">
       <Card.Section>
         {run.has_preview || (adjust && run.has_fits) ? (
-          <Image
-            src={imgSrc} h={180} fit="contain" bg="#000"
-            style={{ cursor: "zoom-in" }} onClick={() => setLight(true)}
+          <AnnotatedImage
+            src={imgSrc} alt={run.output_basename}
+            imgWidth={annotations.data?.width ?? run.canvas_w}
+            imgHeight={annotations.data?.height ?? run.canvas_h}
+            objects={objects} show={identify} height={180}
+            onClick={() => setLight(true)}
           />
         ) : (
           <Center h={180} bg="dark.6"><Text c="dimmed">No preview</Text></Center>
         )}
       </Card.Section>
+
+      {identify && !annotations.isLoading && annotations.isSuccess ? (
+        <Text size="xs" c={objects.length ? "cyan.4" : "dimmed"} mt={6}>
+          {objects.length
+            ? `Found ${objects.length} catalog object${objects.length === 1 ? "" : "s"} in this field`
+            : "No catalog objects fall inside this field"}
+        </Text>
+      ) : null}
 
       <Group justify="space-between" mt="sm" wrap="nowrap">
         <Text fw={600}>{run.output_basename}</Text>
@@ -626,6 +648,18 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
                 onClick={() => setShowInfo((s) => !s)}
               >
                 Info
+              </Button>
+            </Tooltip>
+          )}
+          {run.has_fits && (
+            <Tooltip label="Label the catalog objects that fall inside this picture (Messier / NGC / IC)">
+              <Button
+                size="xs" variant={identify ? "filled" : "light"} color="cyan"
+                leftSection={<IconTags size={14} />}
+                onClick={() => setIdentify((v) => !v)}
+                loading={identify && annotations.isLoading}
+              >
+                Identify
               </Button>
             </Tooltip>
           )}
