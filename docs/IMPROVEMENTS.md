@@ -4596,6 +4596,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+- ~~**IMPROVEMENT IDEA (Scout 2026-07-21) — a small target of a *stationary* elongated object (edge-on galaxy)
+  can have every sub auto-rejected as a "streak" with no reconcile-floor escape.**~~ — **SHIPPED v0.158.5**
+  (Builder 2026-07-21, branch `claude/pensive-faraday-yr971k`). Added a **small-target tier** to
+  `reconcile_streak_rejections` (`seestack/qc/runner.py`): below the main `STREAK_RECONCILE_MIN_FRAMES` (10)
+  floor the plain >50% majority is too noisy (a tiny target's couple of streaks could genuinely be satellites),
+  but a stationary bright extended object trips the shape-only detector on *essentially every* sub — so a
+  **near-total flag rate** (`> STREAK_MASS_REJECT_FRACTION_SMALL` = 0.8) on a target of at least
+  `STREAK_RECONCILE_SMALL_MIN_FRAMES` (3) eligible frames now re-accepts them, while a lone transient (below
+  3 frames, or a mere minority) still cannot trigger it. Un-reject-only, never touches a `user_override` or a
+  non-`auto:streak` reason, and stays fail-safe: any genuine trail in a re-accepted frame is still cleaned by
+  the stack's per-pixel sigma-clip/drizzle rejection (the same fallback `keep_streaked_frames` relies on).
+  Additive/upgrade-safe — pure DB reconciliation, no schema/config/API/default change; targets of ≥10 frames
+  are byte-for-byte unchanged. Regressions in `tests/test_qc_streak_reconcile.py`:
+  `test_small_target_all_streaked_is_reconciled` (6 all-streaked subs: fail-before returned `[]` and stacked
+  0 frames / pass-after re-accepts all 6), `test_small_target_minority_streaks_stay_rejected` (2 of 6 stays
+  rejected), and `test_tiny_target_below_small_floor_is_not_reconciled` (2 subs never reconciled). Severity:
+  image-quality/trust — a beginner's first short session on NGC 4565 / NGC 891 / the Sombrero's dust lane no
+  longer silently vanishes to "0 frames used". Original spec kept for provenance:
 - **IMPROVEMENT IDEA (Scout 2026-07-21) — a small target of a *stationary* elongated object (edge-on galaxy)
   can have every sub auto-rejected as a "streak" with no reconcile-floor escape.** *(Image-quality / trust,
   PRIORITY 4; size S–M.)* **Why:** the streak detector (`qc/streaks.py`) is shape-based and per-frame — it

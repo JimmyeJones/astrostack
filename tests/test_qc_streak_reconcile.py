@@ -14,6 +14,7 @@ pytest.importorskip("astropy")
 from seestack.io.project import FrameRow, Project
 from seestack.qc.runner import (
     STREAK_RECONCILE_MIN_FRAMES,
+    STREAK_RECONCILE_SMALL_MIN_FRAMES,
     reconcile_streak_rejections,
 )
 
@@ -83,12 +84,48 @@ def test_reconcile_respects_user_override(tmp_path):
         proj.close()
 
 
-def test_small_target_is_not_reconciled(tmp_path):
-    """Below the minimum frame count a majority isn't meaningful (a tiny target's
-    couple of streaks could genuinely be satellites), so leave them rejected."""
+def test_small_target_minority_streaks_stay_rejected(tmp_path):
+    """On a small target a *bare* majority isn't meaningful (a couple of streaks
+    could genuinely be satellites), so a minority-flagged short session is left
+    rejected — only a near-total flag rate reconciles a small target."""
     proj = Project.create(tmp_path / "p", name="T")
     try:
-        n = STREAK_RECONCILE_MIN_FRAMES - 1
+        _add(proj, 4, reason=None, accept=True)           # clean subs
+        streak = _add(proj, 2, reason="auto:streak")      # 2 of 6 = minority
+        restored = reconcile_streak_rejections(proj)
+        assert restored == []
+        assert proj.get_frame(streak[0]).accept is False
+    finally:
+        proj.close()
+
+
+def test_small_target_all_streaked_is_reconciled(tmp_path):
+    """A beginner's first short session on an edge-on galaxy (well under the main
+    floor) flags a 'streak' on *every* sub → the whole target would vanish. A
+    near-total flag rate is unambiguous (a lone satellite can't hit every sub),
+    so the small-target tier re-accepts them. Fails before the small tier existed
+    (the <10-frame target returned no reconciliation and stacked 0 frames)."""
+    proj = Project.create(tmp_path / "p", name="Needle")
+    try:
+        n = STREAK_RECONCILE_MIN_FRAMES - 4  # 6 subs: below the main floor
+        streak = _add(proj, n, reason="auto:streak")
+        restored = reconcile_streak_rejections(proj)
+        assert set(restored) == set(streak)
+        for fid in streak:
+            f = proj.get_frame(fid)
+            assert f.accept is True
+            assert f.reject_reason is None
+            assert f.streak_detected is True  # flag kept for the UI count
+    finally:
+        proj.close()
+
+
+def test_tiny_target_below_small_floor_is_not_reconciled(tmp_path):
+    """Below even the small floor there's no meaningful fraction (a single
+    transient could be the whole flagged set), so leave them rejected."""
+    proj = Project.create(tmp_path / "p", name="T")
+    try:
+        n = STREAK_RECONCILE_SMALL_MIN_FRAMES - 1  # 2 subs, both streaked
         streak = _add(proj, n, reason="auto:streak")
         restored = reconcile_streak_rejections(proj)
         assert restored == []
