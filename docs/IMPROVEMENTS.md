@@ -3296,6 +3296,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   optionally auto-enable `scale_dark_to_light` on the unattended path when a bias is bound. _(M, split as
   above; PRIORITY 2 autonomy / P4 image-quality — prevents a silently-wrong calibration; builds on the shipped
   `scale_dark_to_light` infra, so low-risk.)_
+  _(Builder note 2026-07-21 — **slices (b) and (c) are already shipped; only (a) remains and is pure dedup —
+  low value, do not build blindly.** While scoping this item I traced both surfaces and both already handle the
+  mismatch: **(b) interactive stack setup** — `frontend/src/routes/Stack.tsx` already computes `darkExpMismatch`
+  (>25% via `expMismatch`) and renders the plain-language warning *"This dark was shot at Xs but your subs are
+  Ys — a mismatched dark leaves residual thermal signal or over-subtracts…"*, **plus a one-click "Scale this
+  dark to your subs' exposure" button** that sets `scale_dark_to_light` (shown when a bias is selected), and a
+  proactive nudge to add a bias when none is. **(c) unattended auto-bind** — `webapp/calibration.py::
+  auto_bind_master_paths` already, when a dark's gain/temp confidently match but its *exposure* is off, binds
+  `dark_path + bias_path + scale_dark_to_light=True` (the exposure-scaling recovery) if a confident bias exists,
+  and otherwise **leaves the dark off** rather than risk an over/under-subtraction — i.e. the unattended path
+  already never applies a mismatched raw dark. So the only unbuilt piece is **(a)** — extracting the duplicated
+  threshold (frontend `expMismatch` 25% + backend `_AUTO_BIND_EXP_MISMATCH_FRAC` 0.25) into one shared pure
+  `dark_exposure_mismatch()` helper. That's a **maintainability dedup**, not a new user capability, and the two
+  copies don't currently disagree — so it doesn't clear the churn bar on its own. Left filed; a future run
+  already touching these files could fold the helper in, but the beginner-facing value here is **already
+  delivered**. Recommend closing this item as largely-shipped rather than treating it as ready feature work.)_
 - ~~**NEW (Scout 2026-07-21) — auto-pick the outlier-rejection method from the frame count, so a beginner
   never has to know κ-σ vs min/max.**~~ — **SHIPPED v0.143.0** (Builder 2026-07-21, branch
   `claude/pensive-faraday-q5qgdb`). Added an opt-in `StackOptions.auto_reject` (default **False** →
