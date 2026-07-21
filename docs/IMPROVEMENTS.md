@@ -4955,22 +4955,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
-- **IDEA (Builder 2026-07-21, filed while shipping the deepening reel) — "Time to re-stack?" nudge: tell the
-  beginner when they've gathered enough new subs to be worth re-stacking.** *(Autonomy / PRIORITY 2; size S–M.)*
-  The deepening reel (v0.157.0) rewards re-stacking a target as nights accumulate — but nothing *tells* the
-  beginner when it's worth doing. Every target already knows its accepted-sub count and its last stack's
-  `n_frames_used` (the newest `stack_runs` row). When the target has meaningfully more accepted subs than went
-  into its most recent stack (e.g. **≥25%** more, or an absolute floor like ≥60 subs — pick from real data), a
-  small read-only nudge on the Target page — *"You've added ~120 accepted subs since your last stack of M31.
-  Re-stack for a cleaner, deeper result (and another frame in your 'night after night' reel)."* — closes the
-  loop between "I shot more" and "so re-stack". **Distinct from** the readiness card (goal-gap: *should I shoot
-  more?*) and the next-session card (*when's the next window?*): this is *"you already shot more — now combine
-  it"*. **Beginner bar ✔:** one line, zero knobs, plain language, directly actionable; serves autonomy ("it told
-  me the obvious next step"). **Guardrails:** additive/read-only; self-hide when the target has never been
-  stacked, when the extra subs are below the threshold, or when a stack job is already running. **Builder slice:**
-  a pure `restackAdvice(acceptedSubs, lastStackSubs)` helper → `{worth, addedSubs, addedPct} | null` (unit-tested
-  for below-threshold / first-stack / worth cases) + a small card reusing the accepted-count the Target page
-  already loads and the newest run from the stack-runs list — no new endpoint needed.
+- ~~**IDEA (Builder 2026-07-21, filed while shipping the deepening reel) — "Time to re-stack?" nudge.**~~ —
+  **ALREADY COVERED (withdrawn same day by the Builder who filed it).** On a closer read this already exists as
+  the Target page's **"Multi-night nudge"** (`newSubsSinceStack` / `countNewSubsSinceStack` in `Target.tsx`,
+  ~L505): when accepted+solved subs have arrived *since* the newest genuine stack ran, it prompts a one-click
+  re-stack — the same "you already shot more, now combine it" loop this idea described (and via a timestamp
+  comparison, arguably better than the count-delta sketch). No new work needed; recorded here only so a future
+  Builder doesn't re-implement it. (The deepening reel v0.157.0 does make that existing nudge more rewarding —
+  each re-stack now adds a frame to the "night after night" animation.)
 - **IDEA (Builder 2026-07-21) — date/sub labels burned into the deepening-reel frames.** *(Friendliness /
   PRIORITY 3; size S.)* The v0.157.0 "night after night" reel animates a target's stacks getting deeper, with the
   provenance (dates + sub counts) shown as a *static* caption under the animation. A nice, low-risk enhancement:
