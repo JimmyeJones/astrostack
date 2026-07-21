@@ -47,6 +47,35 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**Master *flat* with an `inf` pixel silently dropped the *entire* flat correction — all
+  vignetting/dust survived into the final image.**~~ — **FIXED v0.142.2** (Scout 2026-07-21, branch
+  `claude/practical-dirac-msab41`; traced + reproduced + regression-tested). Found by a fresh adversarial
+  audit of `seestack/calibrate/`. The master **flat** was the lone non-finite input **not** sanitised at
+  load: `CalibrationMasters.load` (`apply.py:130`) cast it to float32 verbatim, then `mean =
+  float(np.nanmean(flat))` (`apply.py:149`). `nanmean` ignores NaN but **not `inf`**, so a single `inf`
+  pixel made the mean non-finite → the `not np.isfinite(mean)` guard dropped the **whole** flat
+  (`flat_norm=None`), so the final stack kept *all* its vignetting and dust shadows, uncorrected — a
+  wrong image. A `NaN` pixel was already tolerated (ignored by `nanmean`, floored to 1.0 = no correction
+  there), and the master **dark**/**bias** (v0.135.1) and **flat-dark** (v0.136.5) were already sanitised
+  — the flat-dark fix's own comment even anticipates "an imported third-party flat-dark carrying an inf
+  makes the flat's nanmean non-finite and silently drops the whole flat" — but the flat *itself* was
+  never covered, so an `inf` in the flat master (vs the flat-dark) still dropped it. **Reproduced** through
+  the real save→load path: an 8×8 flat with one `inf` pixel → `flat_norm is None` (whole flat dropped);
+  the same flat with a `NaN` instead is kept and the pixel floored to 1.0. **Fix:** map non-finite flat
+  pixels to `NaN` at load (`flat = np.where(np.isfinite(flat), flat, np.nan)`), so an `inf` flows through
+  the existing NaN handling identically — ignored by `nanmean`, floored to 1.0 later. (A flat is
+  *multiplicative*, so `_sanitize_pedestal`'s 0.0 sentinel would be wrong here — NaN is the right "no
+  data" value.) Additive/upgrade-safe: an all-finite flat (the common case, and every `build_master`
+  output — which already emits NaN, not inf, for no-data pixels) is byte-for-byte unchanged; only a
+  hand-crafted/imported flat FITS carrying an `inf` is affected. Regression
+  `tests/test_calibrate.py::test_flat_nonfinite_pixel_does_not_drop_the_whole_flat` (an inf+NaN flat:
+  fail-before drops the whole flat / pass-after keeps it, both no-data pixels floored to 1.0, the real
+  vignetting still corrected). Severity: wrong-result/data-integrity on the calibrate path (silently
+  corrupts the final image), so fixed first per the stacking-engine focus; reachability **low/latent**
+  (no in-repo path emits an inf flat — `build_master` converts inf→NaN, and `register_master` only saves
+  its output — so it bites only a third-party/hand-crafted master, matching the flat-dark item's profile).
+  Confidence: reproduced + fixed.
+
 - ~~**κ-σ two-pass stack path had no `n_used == 0` guard — pass 2 aligning zero frames wrote a silent
   all-NaN master recorded as a *successful* run.**~~ — **FIXED v0.136.4** (Builder 2026-07-17, branch
   `claude/pensive-faraday-y006wo`; traced + reproduced + regression-tested). Found by a fresh adversarial
