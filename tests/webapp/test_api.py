@@ -442,6 +442,23 @@ def test_stack_defaults_roundtrip(client, built_library):
     assert client.get("/api/targets/M_42/stack-defaults").json()["sigma_kappa"] == 2.0
 
 
+def test_stack_defaults_auto_reject_on_for_never_configured_target(client, built_library):
+    # A never-configured target's Stack form should default the smart
+    # "Auto outlier removal" (auto_reject) ON, so a beginner's first stack picks
+    # the right rejection method by sub count instead of plain kappa-sigma (which
+    # is blind to a lone trail below ~11 frames). The engine dataclass default
+    # stays False — this is a form-value seed only.
+    body = client.get("/api/targets/M_42/stack-defaults").json()
+    assert body["auto_reject"] is True
+
+    # Saving *any* per-target defaults means the user has taken control: their
+    # saved form wins and we no longer seed auto_reject on (respects their choice).
+    client.put("/api/targets/M_42/stack-defaults", json={"sigma_kappa": 2.0})
+    saved = client.get("/api/targets/M_42/stack-defaults").json()
+    assert saved["auto_reject"] is False
+    assert saved["sigma_kappa"] == 2.0
+
+
 def test_settings_roundtrip(client):
     r = client.get("/api/settings")
     assert r.status_code == 200

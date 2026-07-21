@@ -127,6 +127,17 @@ def get_stack_defaults(safe: str, request: Request) -> dict[str, Any]:
     if raw:
         with contextlib.suppress(json.JSONDecodeError):
             merged.update(json.loads(raw))
+    # For a *never-configured* target (no per-target saved defaults and no
+    # global default_stack_options), turn smart auto outlier removal on in the
+    # form the beginner sees. auto_reject (v0.143.0) picks min/max vs kappa-sigma
+    # from the sub count, so a short first-light stack actually drops a lone
+    # satellite/plane trail plain kappa-sigma is blind to below ~11 frames. This
+    # only seeds the returned form values — the persisted engine default and any
+    # explicitly-saved config are untouched, so a user who ever saved defaults
+    # keeps exactly what they saved and the unattended path is byte-for-byte
+    # unchanged (§9 upgrade-safe: no stored default flips).
+    if not raw and not settings.default_stack_options:
+        merged.setdefault("auto_reject", True)
     # Fill any missing keys from the dataclass defaults via the schema.
     for fld in stack_option_fields():
         merged.setdefault(fld.key, fld.default)

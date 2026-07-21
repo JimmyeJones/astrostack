@@ -3167,6 +3167,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+- ~~**NEW (Scout 2026-07-21d) — make smart `auto_reject` the *beginner default* so a default stack actually
+  removes a lone satellite/plane trail on small sub counts.**~~ — **SHIPPED v0.149.0** (Builder 2026-07-21,
+  branch `claude/pensive-faraday-dircmw`). Implemented the Scout's upgrade-safe approach **(a)**: in
+  `get_stack_defaults` (`webapp/routers/stack.py`), when a target has **no** saved per-target defaults **and**
+  the global `default_stack_options` is empty (a never-configured install), the returned Stack form now seeds
+  `auto_reject=True` (`merged.setdefault("auto_reject", True)` before the dataclass-default fill). Only the
+  *returned form values* change — the persisted engine dataclass default stays `False`, `default_stack_options`
+  is untouched, and the unattended auto-stack path (which reads `settings.default_stack_options` directly) is
+  byte-for-byte unchanged — so an existing install with any saved config keeps exactly what it had, and old run
+  records are unaffected (§9 upgrade-safe: no stored-default flip). A beginner's first manual stack now picks
+  min/max vs κ-σ by sub count, so a short first-light stack of 6–10 subs with one satellite trail actually drops
+  it. The "Auto outlier removal" checkbox already exists on the Stack form (descriptor-driven), so the user sees
+  and controls it — unchecking reverts. Regression `tests/webapp/test_api.py::
+  test_stack_defaults_auto_reject_on_for_never_configured_target` (a never-configured target returns
+  `auto_reject=True`; after saving *any* per-target default the form falls back to the dataclass `False`, so a
+  user who took control keeps their choice). _(PRIORITY 2 autonomy — turns the shipped-but-dormant smart default
+  into the beginner's real default, upgrade-safely.)_ Original spec kept for provenance:
 - **NEW (Scout 2026-07-21d) — make smart `auto_reject` the *beginner default* so a default stack actually
   removes a lone satellite/plane trail on small sub counts.** `StackOptions.auto_reject` (shipped v0.143.0)
   resolves rejection from the sub count — order-statistic min/max below the κ-effective threshold
