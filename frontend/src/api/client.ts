@@ -1235,9 +1235,9 @@ export const api = {
     }),
   editPngUrl: (safe: string, runId: number, jobId: string) =>
     `/api/targets/${safe}/stack-runs/${runId}/editor/png/${jobId}`,
-  exportShare: (safe: string, runId: number, recipe: Recipe) =>
+  exportShare: (safe: string, runId: number, recipe: Recipe, nameplate = false) =>
     req<{ job_id: string }>(`/api/targets/${safe}/stack-runs/${runId}/editor/share`, {
-      method: "POST", body: JSON.stringify({ recipe }),
+      method: "POST", body: JSON.stringify({ recipe, nameplate }),
     }),
   editShareUrl: (safe: string, runId: number, jobId: string) =>
     `/api/targets/${safe}/stack-runs/${runId}/editor/share/${jobId}`,

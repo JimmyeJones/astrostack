@@ -64,6 +64,37 @@ def test_write_share_jpeg_keeps_small_image_native_and_blackens_nan(tmp_path):
         assert img.getpixel((0, 0)) == (0, 0, 0) or max(img.getpixel((0, 0))) < 8
 
 
+def test_write_share_jpeg_bakes_the_nameplate_footer_when_requested(tmp_path):
+    from PIL import Image
+
+    from seestack.nameplate import NameplateFields
+
+    rgb = np.full((300, 400, 3), 0.5, dtype="float32")
+    fields = NameplateFields(target="M 31", integration_s=11520, n_frames=152,
+                             camera="ZWO Seestar S50")
+
+    plain = write_share_jpeg(tmp_path / "plain.jpg", rgb)
+    with_bar = write_share_jpeg(tmp_path / "bar.jpg", rgb, nameplate=fields)
+
+    with Image.open(plain) as p, Image.open(with_bar) as b:
+        assert p.size == b.size == (400, 300)      # same pixels, only the footer differs
+        pa, ba = np.asarray(p), np.asarray(b)
+        # The footer band is visibly darker with the nameplate; the top is unchanged.
+        assert ba[-20:].mean() < pa[-20:].mean() - 8
+        assert abs(int(ba[:20].mean()) - int(pa[:20].mean())) <= 1
+
+
+def test_write_share_jpeg_without_nameplate_is_unchanged(tmp_path):
+    """Passing no nameplate (the default) leaves the share pixels exactly as before."""
+    from PIL import Image
+
+    rgb = np.full((40, 50, 3), 0.5, dtype="float32")
+    out = write_share_jpeg(tmp_path / "none.jpg", rgb, nameplate=None)
+    with Image.open(out) as img:
+        arr = np.asarray(img)
+        assert arr.min() > 120 and arr.max() < 140   # uniform grey, no bar drawn
+
+
 def test_png_bytes_to_jpeg_transcodes_at_same_resolution(tmp_path):
     """The finished-picture JPEG download transcodes the stored preview PNG to a
     JPEG at the same size (only the container/size on disk differ)."""

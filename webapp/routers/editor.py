@@ -1195,8 +1195,15 @@ def download_png(safe: str, run_id: int, job_id: str, request: Request) -> FileR
     return FileResponse(png_path, media_type="image/png", filename=filename)
 
 
+class ShareRequest(PngRequest):
+    # Bake a tasteful acquisition footer (target, integration, date, gear) onto
+    # the shared JPEG. Off by default so an existing share is byte-for-byte
+    # unchanged unless the user opts in.
+    nameplate: bool = False
+
+
 @router.post("/api/targets/{safe}/stack-runs/{run_id}/editor/share")
-def export_share(safe: str, run_id: int, body: PngRequest, request: Request) -> dict:
+def export_share(safe: str, run_id: int, body: ShareRequest, request: Request) -> dict:
     """Kick off a social-ready JPEG render (long edge ≤ 2048 px) of the recipe.
     Poll the job, then GET .../editor/share/{job_id} to download it. The job
     result also carries a copy-friendly caption ``blurb``."""
@@ -1204,7 +1211,8 @@ def export_share(safe: str, run_id: int, body: PngRequest, request: Request) -> 
 
     settings = deps.get_settings(request)
     jm = deps.get_job_manager(request)
-    job = pipeline.submit_editor_share(settings, jm, safe, run_id, body.recipe or {})
+    job = pipeline.submit_editor_share(settings, jm, safe, run_id, body.recipe or {},
+                                       nameplate=body.nameplate)
     return {"job_id": job.id}
 
 

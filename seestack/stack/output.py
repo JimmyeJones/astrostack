@@ -303,12 +303,17 @@ def write_full_res_png(path: Path, rgb: np.ndarray) -> Path:
 
 
 def write_share_jpeg(path: Path, rgb: np.ndarray, *, max_long_edge: int = 2048,
-                     quality: int = 90) -> Path:
+                     quality: int = 90, nameplate: "Any | None" = None) -> Path:
     """Write a social-ready JPEG of an already display-stretched image (values in
     0..1, NaN = uncovered → black), downscaled so its long edge is at most
     ``max_long_edge`` px. A native PNG of a 100+ MP mosaic is far too big to post;
     a ~2048 px JPEG is what image-sharing sites actually want. The image content
-    is exactly the edited result as shown — only the size and container differ."""
+    is exactly the edited result as shown — only the size and container differ.
+
+    When ``nameplate`` is a :class:`seestack.nameplate.NameplateFields`, a
+    tasteful acquisition footer (target · integration · date · gear) is baked
+    onto the *downscaled* image so the caption is crisp at the output resolution.
+    Passing ``None`` (the default) leaves the pixels exactly as before."""
     from PIL import Image
 
     arr = np.nan_to_num(np.asarray(rgb, dtype=np.float32), nan=0.0)
@@ -324,6 +329,9 @@ def write_share_jpeg(path: Path, rgb: np.ndarray, *, max_long_edge: int = 2048,
         # the tiny preview thumbnail, would soften star cores at this size).
         img = img.resize((max(1, round(w * scale)), max(1, round(h * scale))),
                          Image.LANCZOS)
+    if nameplate is not None:
+        from seestack.nameplate import draw_nameplate
+        img = draw_nameplate(img, nameplate)
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     img.save(path, format="JPEG", quality=quality, optimize=True)
     return Path(path)
