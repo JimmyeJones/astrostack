@@ -1751,6 +1751,38 @@ real-data-gated (Sky-map placement `_tan_wcs` sign, the dead SExtractor skew-gua
 image-quality items), the feature backlog is shipped down to real-data-gated remainders, and per AGENTS.md §2 a
 clean run that leaves `main` green beats manufacturing marginal work.)_
 
+_(Scout stacking-engine audit 2026-07-21 (v0.138.0 baseline, suite green 1385 passed / 2 skipped):
+led the rotation with the stacking engine per the owner's current focus #1. Two parallel repro-driven
+adversarial audits (each required to reproduce any finding with a runnable numpy script, not just read),
+plus my own line-by-line trace of `stack/{align,accumulator,mosaic,drizzle_path,weighting}.py`,
+`webapp/{watcher,pipeline,calibration}.py` and the auto-bind/mixed-pointing walk-away paths. **(1)
+`stack/{drizzle_path,stacker,photometric,pointings}.py`** — κ-σ pass-1/pass-2 (Welford mean/std vs
+`numpy` mean/std(ddof=1); `variance()`→NaN at n<2 widening the pass-2 tol to +inf so single-coverage
+mosaic edges aren't clipped; `n_used = min(p1,p2)`, no off-by-one/biased mean), min/max order-statistic
+reject (k=1/k=2 exact, the ≥2k+1 / 3≤n<2k+1 / 1–2 / 0 degrade bands disjoint and correct, ±inf seeds
+never poison an uncovered pixel), drizzle two-pass reject + flux conservation (scale 1/pixfrac 1 → mean
+preserved, uncovered→NaN not 0, off-canvas frame `intersects=False`), `_clip_tolerance` float64
+variance + resolution-floor + Bessel, per-channel-vs-per-pixel `_count` (`valid.any(axis=2)` so a
+one-channel-clipped frame still counts), weight application, and `photometric.compute_photometric_scales`
+direction. **(2) `calibrate/{masters,apply}.py` + `stack/output.py` + `render/thumbnail.py`** — median/
+mean/sigma-mean master combine (5000-ADU hot pixel rejected to 100.0; all-non-finite pixel stays NaN),
+`(raw−dark)/flat_norm` with `_sanitize_pedestal` (NaN/±inf pedestal → 0 = no-op, light unchanged),
+dark-XOR-bias no double-subtract, exposure-scaling direction, FITS `(C,H,W)` round-trip preserving NaN,
+`_to_uint16_linear` covered-pixel percentiles + uncovered→0, and **preview↔export parity byte-identical**
+(both call `_autostretch_for_export`; History's asinh path is a documented interactive-slider difference,
+not a numeric inconsistency). **Both traced clean — no reproducible correctness bug**, consistent with the
+long clean-audit history; the code carries dense defensive comments citing prior audits. The only spots that
+looked alarming are correct-by-design (a lone outlier surviving at small n is the documented single-pass
+κ-σ/drizzle limitation; the drizzle resolution floor deliberately disables rejection on near-saturated flat
+regions to avoid punching NaN holes). Re-confirmed the already-known, non-corrupting `coverage[...,0]`
+channel-0 nuance now also touches `bg/coverage_leveling.py::level_by_coverage` (it bins sky-levels on
+channel-0 weight, so a pixel where per-channel κ-σ fully clipped R but kept G/B is assigned R's coverage
+bin) — a second-order sky-offset misbinning on the rare per-channel-clipped pixel, **not** a
+wrong-value/corruption bug, so not filed as a fix (already documented as the channel-0 diagnostic nuance in
+the two prior audits). **No code shipped this run** — every open bug is real-data-gated and the engine is
+hardened; this run's deliverable is the clean-audit record + backlog curation + new beginner-feature ideas
+below, per AGENTS.md §2 (a clean, green run beats manufactured churn).)_
+
 _(Builder stacking-engine audit 2026-07-17 (v0.135.3 baseline, suite green 1375 passed / 2 skipped):
 another fresh repro-driven adversarial pass across `stack/{align,stacker,accumulator,mosaic,drizzle_path}.py`,
 `calibrate/{apply,masters}.py`, and `bg/{per_frame,final_gradient,coverage_leveling}.py`. Every core numeric
@@ -2716,6 +2748,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+- **NEW (Scout 2026-07-21) — "Walk-away mode": one Settings toggle that turns on the whole unattended
+  bundle, instead of five buried advanced switches.** The full "drop subs in, walk away, come back to a
+  finished, calibrated, edited picture" promise already exists in code — but it's spread across five
+  separate opt-in settings a beginner has to find and understand individually: `auto_stack`,
+  `auto_bind_calibration`, `auto_grade_frames`, `auto_edit_on_autostack`, and (arguably) `mixed_pointing_guard`
+  (all default **off**, correctly, for upgrade-safety). A non-expert never discovers them, so the walk-away
+  experience the app was built for goes unused. Add a single prominent **"Walk-away mode (recommended for
+  a hands-off night)"** toggle on the Settings page with a plain-language explanation of what it does
+  ("stack automatically, use your saved calibration masters, drop obviously-bad subs, and finish the
+  picture for you — all without you lifting a finger"); flipping it **on** sets the sensible bundle of the
+  existing opt-ins, flipping it **off** restores them. **Crucially upgrade-safe:** this is a UI convenience
+  over the *existing* settings — it changes **no defaults** (an upgraded install with the master toggle
+  untouched behaves exactly as today), adds no new persisted field if it's derived from the existing five
+  (or one additive boolean that only *drives* them), and every underlying switch stays individually
+  editable for anyone who wants finer control. Consider a first-run nudge ("Want AstroStack to do it all
+  automatically? Turn on Walk-away mode") so a beginner is *offered* the full autonomy without hunting.
+  Beginner bar ✔ (collapses five expert decisions into one explained yes/no; sane default off; reversible).
+  *(S–M, autonomy/friendliness — PRIORITY 2/3; pure surfacing of already-shipped capability — high value,
+  low risk.)*
 - ~~**NEW (Builder 2026-07-13) — re-QC a frame whose Stage-1 cache was just refreshed after a mid-copy
   ingest.**~~ — **SHIPPED v0.113.1** (Builder 2026-07-13, branch `claude/pensive-faraday-0ishjc`). The
   v0.111.3 fix refreshes a truncated Stage-1 cache to the complete source on a re-scan, but the frame's QC
@@ -4306,9 +4357,31 @@ problems. Dogfood it every big-picture run and fix root causes.
   further (a broader Caldwell/NGC/IC set, or a southern-sky pack) — the loader + scorer
   handle any number of objects — but the current 157-object list already covers the
   popular OSC targets, so only worth it if the owner wants more suggestions. (L, autonomy/workflow)
-- Annotated sky overlay (label detected objects / show solved field). (M) —
-  related to the night planner above; the planner's "plot tonight's targets" view
-  can reuse this.
+- **NEW BEGINNER FEATURE (Scout 2026-07-21, reshaped from the old one-line "annotated sky overlay" idea) —
+  "What's in this picture?": label the catalog objects that fall inside a finished stack.** A beginner
+  who stacks a wide field (or a mosaic) captures more than the one object they aimed at — a nearby galaxy,
+  an NGC cluster, a named nebula — and has no idea what the other fuzzy blobs are. Because every stack
+  already stores its solved output WCS (`stack_runs.wcs_json`) and we already ship an **offline** deep-sky
+  catalog (`seestack/nightplan.load_catalog` — 157 Messier + popular NGC/IC, plus `objectinfo`'s
+  constellation map), we can compute exactly which catalog objects land inside the field and where, then
+  draw their names on the result. Pure, offline, additive; no network, no new dep (Pillow is already used
+  for the share JPEG). This is AGENTS.md §1's explicit "annotated results" beginner pillar. **Slices —**
+  **(a) engine (S):** a pure `seestack/annotate.py::objects_in_field(wcs, width_px, height_px, *, margin=0)`
+  that world→pixel-projects every catalog object and returns `[{catalog_id, name, type, x_px, y_px}]` for
+  those whose centre lands within the frame (drop off-canvas / behind-projection NaN ones); unit-test it
+  against a hand-built TAN WCS (object at field centre → centre pixel; object just outside → excluded; RA-seam
+  safe). **(b) backend (S):** read-only `GET /api/targets/{safe}/stack-runs/{id}/annotations` → the object
+  list computed from that run's `wcs_json` + the master's dims (empty list when the run has no WCS — never
+  404s where a preview exists). **(c) frontend (S–M):** an **"Identify objects"** toggle on the result
+  viewer (History card / Gallery lightbox / editor result), off by default, that overlays small labelled
+  markers (an SVG layer positioned over the `<img>` from the returned pixel coords, scaling with the preview)
+  — one obvious switch, plain names, no astro knowledge needed. **(d) optional nice-to-have (S):** a
+  burned-in labelled variant of the share JPEG for posting ("M 31, with M 32 & M 110 labelled"). Beginner
+  bar ✔ (turns "what are these blobs?" into named objects with one toggle; sane default off; offline;
+  reversible). Upgrade-safe: new read-only endpoint + one engine module + a UI toggle, no schema/config/
+  default/existing-API change. Ship (a)+(b)+(c) as the first Builder run; (d) later. *(M overall; slice (a)
+  is a clean S starting point — friendliness/workflow, PRIORITY 3; also feeds the night planner's
+  "plot tonight's targets" view, which can reuse `objects_in_field`.)*
 - ~~**NEW BEGINNER FEATURE (Builder-filed 2026-07-14, spotted shipping v0.125.0) — "Share this
   picture" via the native Web Share sheet.**~~ — **SHIPPED v0.126.0** (Builder 2026-07-16, branch
   `claude/pensive-faraday-n6p4i1`). Delivered exactly as filed, frontend-only. New pure, unit-tested
@@ -4682,6 +4755,27 @@ problems. Dogfood it every big-picture run and fix root causes.
   reel, + the existing webp/unavailable cases now assert `format`). tsc + full vitest (880) + vite build + Python
   green. *(Beginner bar ✔ — one obvious button that posts the "my galaxy appearing" clip straight to
   Messages/Instagram, no new astro knowledge, no deps.)*
+
+- **NEW BEGINNER FEATURE (Scout 2026-07-21) — "First look": show the sharpest sub as an instant preview
+  the moment a scan finishes ingesting + QC-ing, before the stack even runs.** A beginner drops a night's
+  subs and then waits — often minutes — for the stack to finish before they see *anything*, with no
+  reassurance the night worked, the target was framed, or focus was good. QC already measures every sub and
+  the per-frame preview endpoint (`GET …/frames/{id}/preview`) already renders an autostretched thumbnail —
+  so the moment QC finishes we can surface the single **best** sub ("First look — your sharpest sub of 240,
+  captured 21:14") right on the Target/Dashboard hub, giving instant "yes, it worked" gratification and
+  letting them catch a bad framing/focus night *before* they wait on a stack. **Slices —** **(a) backend
+  (S):** a tiny read-only helper picking the best accepted sub by the existing QC composite (lowest FWHM /
+  highest star count, reusing the auto-grade z-score ranking already in `qc/grading.py`) exposed as
+  `GET /api/targets/{safe}/best-frame` → `{frame_id, captured_utc, fwhm_px, star_count}` (null when nothing
+  is QC'd yet). **(b) frontend (S):** a small **"First look"** card on the Target page (and optionally the
+  Dashboard's per-target tiles) that renders that frame's existing `/preview` thumbnail with a one-line
+  plain-language caption, shown only when a best sub exists and *no* finished stack is on the target yet (so
+  it's the pre-stack reassurance, gracefully superseded by the real picture once stacking lands). Reuses the
+  existing preview render + QC metrics end-to-end — no new render path, no heavy work, offline. Beginner
+  bar ✔ (one glance confirms the night worked; no knobs, no astro terms; sane default; purely additive).
+  Upgrade-safe: one read-only endpoint + one card, no schema/config/default/existing-API change.
+  *(S–M, autonomy/friendliness — PRIORITY 2/3; complements "How's my stack?" (post-stack) with a
+  pre-stack instant look.)*
 
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
