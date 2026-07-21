@@ -591,6 +591,101 @@ async def save_stack_preview(
     return {"ok": True, "stretch": stretch, "black": black}
 
 
+_BAYER_PATTERNS = {"RGGB", "BGGR", "GRBG", "GBRG"}
+
+
+def _pick_reference_sub(proj: Any) -> Any | None:
+    """Choose a *good* single accepted sub to stand in for "one raw frame".
+
+    Picks the sharpest accepted frame (lowest measured FWHM), tie-broken by id so
+    the choice is deterministic, so the comparison is honest — a genuinely good
+    frame, not a cloud-ruined one — rather than stacked in our favour. Falls back
+    to the first accepted frame (then any frame) when no FWHM is measured, and
+    returns ``None`` only when the target has no frames at all.
+    """
+    frames = list(proj.iter_frames(accepted_only=True))
+    if not frames:
+        frames = list(proj.iter_frames())
+    if not frames:
+        return None
+    with_fwhm = [f for f in frames if f.fwhm_px is not None]
+    if with_fwhm:
+        return min(with_fwhm, key=lambda f: (f.fwhm_px, f.id or 0))
+    return frames[0]
+
+
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/one-sub-vs-stack")
+def one_sub_vs_stack_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
+    """Whether a "one frame vs your stack" reveal is available for this run, plus
+    the plain-language caption fields the card fills in from the run's own data.
+
+    A beginner drops hundreds of subs in and gets one clean picture, but never sees
+    the *before* — this powers a read-only card that puts a single noisy sub next to
+    the finished stack so they can see (and share) exactly what stacking bought them.
+
+    ``available`` is ``false`` (not a 404, where the run exists) when the run has no
+    stored preview to compare against, or the target has no frame to render — so the
+    card self-hides on an older/edited run instead of erroring. Every caption field
+    is best-effort (``null`` when its datum is missing) so the card degrades to a
+    shorter line rather than printing blanks.
+    """
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
+        if run is None:
+            raise HTTPException(status_code=404, detail="No such run")
+        has_preview = bool(run.preview_path and Path(run.preview_path).exists())
+        ref = _pick_reference_sub(proj) if has_preview else None
+        sub_exposure_s = ref.exposure_s if ref is not None else None
+    finally:
+        proj.close()
+        lib.close()
+    return {
+        "available": has_preview and ref is not None,
+        "n_frames": run.n_frames_used,
+        "sub_exposure_s": sub_exposure_s,
+        "integration_s": run.total_exposure_s,
+    }
+
+
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/reference-sub")
+async def reference_sub_png(safe: str, run_id: int, request: Request) -> Response:
+    """Render the run's representative single sub, stretched to match the stack
+    preview, as PNG — the "before" half of the one-frame-vs-stack reveal.
+
+    Debayers the sharpest accepted frame and applies the identical export
+    autostretch that produced the run's stored preview, so the only visible
+    difference between this and the stack is noise/detail (never brightness). Runs
+    in a threadpool so it never blocks the job worker.
+    """
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
+        if run is None:
+            raise HTTPException(status_code=404, detail="No such run")
+        ref = _pick_reference_sub(proj)
+        if ref is None:
+            raise HTTPException(status_code=404, detail="No frame to render for this run")
+        src = ref.cached_path or ref.source_path
+        if not src or not Path(src).exists():
+            raise HTTPException(status_code=404, detail="Frame file not found on disk")
+        pattern = (ref.bayer_pattern or "RGGB").upper()
+        if pattern not in _BAYER_PATTERNS:
+            pattern = "RGGB"
+        src_path = str(src)
+    finally:
+        proj.close()
+        lib.close()
+
+    from seestack.render.thumbnail import render_sub_preview
+
+    png = await run_in_threadpool(
+        render_sub_preview, src_path, bayer_pattern=pattern, max_width=1024,
+    )
+    return Response(content=png, media_type="image/png",
+                    headers={"Cache-Control": "no-store"})
+
+
 # Human-relevant provenance cards, in display order. Keys not present in a
 # given FITS are simply skipped, so this works for old stacks (no provenance),
 # newer stacks, channel-combines (NCOMBINE/STACKMTD) and editor exports

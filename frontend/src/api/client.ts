@@ -999,6 +999,17 @@ export const api = {
   stackRenderSuggestion: (safe: string, id: number) =>
     req<{ stretch: number | null; black: number | null; target_bg?: number }>(
       `/api/targets/${safe}/stack-runs/${id}/render-suggestion`),
+  // "One frame vs your stack" reveal — a single raw sub next to the finished
+  // stack, so a beginner sees what stacking bought them.
+  oneSubVsStack: (safe: string, id: number) =>
+    req<{
+      available: boolean;
+      n_frames: number | null;
+      sub_exposure_s: number | null;
+      integration_s: number | null;
+    }>(`/api/targets/${safe}/stack-runs/${id}/one-sub-vs-stack`),
+  stackReferenceSubUrl: (safe: string, id: number) =>
+    `/api/targets/${safe}/stack-runs/${id}/reference-sub`,
   // "Watch your picture come together" progress reel (opt-in save_progress).
   stackProgressInfo: (safe: string, id: number) =>
     req<{ available: boolean; frames: number; format?: string }>(

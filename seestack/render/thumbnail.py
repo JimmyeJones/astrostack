@@ -110,6 +110,49 @@ def generate_thumbnail(
     return out_path
 
 
+def render_sub_preview(
+    fits_path: str | Path,
+    *,
+    bayer_pattern: str | None = None,
+    max_width: int = 1024,
+) -> bytes:
+    """Render a single raw Seestar sub to PNG bytes, stretched to *match* the
+    stored stack preview.
+
+    Reads one raw Bayer light, debayers it, decimates to ``max_width`` and applies
+    the **same** conservative export STF stretch (:func:`~seestack.stack.output.
+    _autostretch_for_export`, sky → ~6 % grey) that produced the run's stored
+    ``*_preview.png``. Rendering both sides of a "one frame vs your stack"
+    comparison through the identical stretch is what makes the reveal *honest* — the
+    only visible difference is the noise/detail stacking bought, not a brightness
+    offset from a different tone curve.
+
+    Pure inputs/outputs (no shared state), so it can run in a worker thread.
+    """
+    import io
+
+    from PIL import Image
+
+    from seestack.io.fits_loader import bilinear_debayer, load_seestar_raw
+    from seestack.stack.output import _autostretch_for_export
+
+    rgb, info = load_seestar_raw(fits_path, debayer=False, out_dtype=np.float32)
+    pattern = bayer_pattern or info.bayer_pattern or "RGGB"
+    rgb = bilinear_debayer(rgb, pattern=pattern)
+
+    h, w = rgb.shape[:2]
+    if w > max_width:
+        target_w = max_width
+        target_h = max(1, int(round(h * (max_width / w))))
+        rgb = _downsample_rgb(rgb, target_h, target_w)
+
+    stretched = _autostretch_for_export(rgb)
+    out = (np.clip(np.nan_to_num(stretched), 0.0, 1.0) * 255).astype(np.uint8)
+    buf = io.BytesIO()
+    Image.fromarray(out, mode="RGB").save(buf, format="PNG")
+    return buf.getvalue()
+
+
 def load_stack_rgb(
     fits_path: str | Path, *, max_width: int = 1024,
 ) -> tuple[np.ndarray, bool]:
