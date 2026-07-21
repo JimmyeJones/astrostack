@@ -32,16 +32,25 @@ _CLEARABLE = ("stage1", "stage2", "thumbs", "all")
 
 
 def _dir_bytes(path: Path) -> int:
-    """Total size of files under ``path`` (recursive). 0 if missing."""
+    """Total size of files under ``path`` (recursive). 0 if missing.
+
+    Best-effort: a file that vanished/permission-denied is skipped, and an
+    unreadable *subdirectory* encountered mid-walk (e.g. a NAS mount that went
+    permission-denied) returns the partial total rather than raising — the
+    storage page must never 500 on one flaky mount.
+    """
     if not path.exists():
         return 0
     total = 0
-    for p in path.rglob("*"):
-        try:
-            if p.is_file():
-                total += p.stat().st_size
-        except OSError:
-            continue
+    try:
+        for p in path.rglob("*"):
+            try:
+                if p.is_file():
+                    total += p.stat().st_size
+            except OSError:
+                continue
+    except OSError:
+        pass
     return total
 
 
@@ -85,9 +94,19 @@ def get_storage(request: Request) -> StorageResponse:
     try:
         for t in lib.list_targets():
             tdir = lib.target_dir(t)
-            cm = CacheManager(tdir)
-            stage1 = cm.stats("stage1").bytes_total
-            stage2 = cm.stats("stage2").bytes_total
+            try:
+                cm = CacheManager(tdir)
+                stage1 = cm.stats("stage1").bytes_total
+                stage2 = cm.stats("stage2").bytes_total
+            except OSError:
+                # An unreadable/vanished target cache dir (a NAS mount that went
+                # permission-denied, a dataset unmounted mid-scan) must not 500
+                # the whole storage page — the same per-target resilience
+                # gallery.py / sky.py / stats.py already apply for a broken
+                # project DB. Report 0 for the parts we can't read and keep
+                # listing every other target. (_dir_bytes below is already
+                # best-effort and never raises.)
+                stage1 = stage2 = 0
             thumbs = _dir_bytes(thumbs_dir(tdir))
             output = _dir_bytes(tdir / "output")
             total = _dir_bytes(tdir)
