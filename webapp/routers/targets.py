@@ -10,6 +10,8 @@ from fastapi.responses import FileResponse
 from webapp import deps
 from webapp.schemas import (
     BestFrameOut,
+    FocusTrendOut,
+    FocusTrendPointOut,
     FramingHintOut,
     HealthNoteOut,
     IntegrationGoalOut,
@@ -227,6 +229,41 @@ def target_nights(safe: str, request: Request) -> list[NightSummaryOut]:
         )
         for n in nights
     ]
+
+
+@router.get("/{safe}/focus-trend", response_model=FocusTrendOut | None)
+def target_focus_trend(safe: str, request: Request) -> FocusTrendOut | None:
+    """Star-sharpness (FWHM) through the target's most recent capture night — the
+    "Focus & sharpness" card. The Seestar shoots unattended for hours, and a
+    beginner has no easy way to see whether their stars stayed sharp all night or
+    drifted soft partway through (dew on the lens, temperature/focus drift). This
+    returns each accepted, measured sub's FWHM over capture time plus a plain
+    verdict (steady / softened / improved), all from data already stored. Purely
+    informational and read-only — it never rejects anything. ``null`` when the
+    latest session has too few measured subs to trend (the card self-hides)."""
+    from seestack.session_recap import focus_trend
+
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        trend = focus_trend(proj)
+    finally:
+        proj.close()
+        lib.close()
+    if trend is None:
+        return None
+    return FocusTrendOut(
+        verdict=trend.verdict,
+        points=[
+            FocusTrendPointOut(t_utc=p.t_utc, fwhm_px=p.fwhm_px) for p in trend.points
+        ],
+        n_points=trend.n_points,
+        median_fwhm_px=trend.median_fwhm_px,
+        early_fwhm_px=trend.early_fwhm_px,
+        late_fwhm_px=trend.late_fwhm_px,
+        start_utc=trend.start_utc,
+        end_utc=trend.end_utc,
+        soft_after_utc=trend.soft_after_utc,
+    )
 
 
 @router.get("/{safe}/stack-health", response_model=StackHealthOut | None)

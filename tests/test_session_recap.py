@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from seestack.io.project import FrameRow, Project
 from seestack.session_recap import (
     bucket_reject_reason,
+    focus_trend,
     last_session_frames,
     library_session_recap,
     recent_session_window_frames,
@@ -493,3 +494,114 @@ def test_night_verdict_pure_helper():
     assert _night_verdict(best + FWHM_DRIFT_ABS_PX * 0.5, best, 0.0) == "sharp"
     # The best night itself is sharp, never soft.
     assert _night_verdict(best, best, 0.0) == "sharp"
+
+
+# --- Focus & sharpness through the night (focus_trend) ----------------------
+
+def _focus_proj(proj, fwhms, *, base=None, step_min=3, accept=None):
+    """Add a run of subs `step_min` minutes apart in one session, with the given
+    per-frame FWHMs (None = unmeasured). `accept` optionally overrides accept per
+    frame (default: all accepted)."""
+    base = base or datetime(2026, 7, 10, 22, 0, 0)
+    for i, fw in enumerate(fwhms):
+        acc = True if accept is None else accept[i]
+        proj.add_frame(_frame(base + timedelta(minutes=step_min * i),
+                              fwhm_px=fw, accept=acc))
+
+
+def test_focus_trend_steady_night(tmp_path):
+    proj = Project.create(tmp_path / "t", "M31")
+    try:
+        _focus_proj(proj, [2.8, 3.0, 2.7, 2.9, 2.8, 3.1, 2.7, 2.9])
+        tr = focus_trend(proj)
+        assert tr is not None
+        assert tr.verdict == "steady"
+        assert tr.n_points == 8 and len(tr.points) == 8
+        assert tr.soft_after_utc is None
+        assert 2.7 <= tr.median_fwhm_px <= 3.1
+        # Points are in capture order, oldest first.
+        assert tr.points[0].t_utc == tr.start_utc
+        assert tr.points[-1].t_utc == tr.end_utc
+    finally:
+        proj.close()
+
+
+def test_focus_trend_flags_a_softening_night(tmp_path):
+    proj = Project.create(tmp_path / "t", "M31")
+    try:
+        # Sharp early, clearly soft late (dew/focus drift): last third ≫ first.
+        _focus_proj(proj, [2.6, 2.7, 2.5, 2.8, 3.6, 4.2, 4.5, 4.8, 5.0])
+        tr = focus_trend(proj)
+        assert tr is not None
+        assert tr.verdict == "softened"
+        assert tr.late_fwhm_px > tr.early_fwhm_px
+        # It names when the soft stretch began (start of the last third).
+        assert tr.soft_after_utc is not None
+        assert tr.start_utc < tr.soft_after_utc <= tr.end_utc
+    finally:
+        proj.close()
+
+
+def test_focus_trend_flags_an_improving_night(tmp_path):
+    proj = Project.create(tmp_path / "t", "M31")
+    try:
+        # Soft early (focus settling in), sharp late — the symmetric case.
+        _focus_proj(proj, [5.0, 4.8, 4.5, 4.2, 3.6, 2.8, 2.5, 2.7, 2.6])
+        tr = focus_trend(proj)
+        assert tr is not None
+        assert tr.verdict == "improved"
+        assert tr.early_fwhm_px > tr.late_fwhm_px
+        assert tr.soft_after_utc is None
+    finally:
+        proj.close()
+
+
+def test_focus_trend_needs_enough_measured_subs(tmp_path):
+    proj = Project.create(tmp_path / "t", "M31")
+    try:
+        _focus_proj(proj, [2.8, 3.0, 2.7, 2.9, 2.8])  # only 5 < FOCUS_TREND_MIN_FRAMES
+        assert focus_trend(proj) is None
+    finally:
+        proj.close()
+
+
+def test_focus_trend_ignores_rejected_and_unmeasured_subs(tmp_path):
+    proj = Project.create(tmp_path / "t", "M31")
+    try:
+        # 8 accepted+measured (enough) plus rejected/unmeasured noise that must
+        # not enter the trend.
+        fwhms = [2.8, 3.0, 2.7, 2.9, None, 9.9, 2.8, 3.1, 2.7, 2.9]
+        accept = [True, True, True, True, True, False, True, True, True, True]
+        _focus_proj(proj, fwhms, accept=accept)
+        tr = focus_trend(proj)
+        assert tr is not None
+        assert tr.n_points == 8  # the None + the rejected 9.9 are excluded
+        assert all(p.fwhm_px < 4.0 for p in tr.points)
+    finally:
+        proj.close()
+
+
+def test_focus_trend_uses_only_the_latest_session(tmp_path):
+    proj = Project.create(tmp_path / "t", "M31")
+    try:
+        # An old soft night, then a >6h gap, then a sharp latest night.
+        old = datetime(2026, 7, 8, 22, 0, 0)
+        _focus_proj(proj, [5.0] * 8, base=old)
+        latest = datetime(2026, 7, 10, 22, 0, 0)
+        _focus_proj(proj, [2.7, 2.8, 2.9, 2.7, 2.8, 2.9, 2.7, 2.8], base=latest)
+        tr = focus_trend(proj)
+        assert tr is not None
+        assert tr.verdict == "steady"
+        assert tr.median_fwhm_px < 3.0  # measured from the latest (sharp) night only
+    finally:
+        proj.close()
+
+
+def test_focus_trend_none_without_timestamps(tmp_path):
+    proj = Project.create(tmp_path / "t", "M31")
+    try:
+        for i in range(8):
+            proj.add_frame(_frame(None, fwhm_px=2.8 + i * 0.01))
+        assert focus_trend(proj) is None
+    finally:
+        proj.close()

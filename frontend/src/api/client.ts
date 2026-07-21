@@ -176,6 +176,23 @@ export interface NightSummary {
   reject_buckets: Record<string, number>;
 }
 
+export interface FocusTrendPoint {
+  t_utc: string;
+  fwhm_px: number;
+}
+
+export interface FocusTrend {
+  verdict: string; // "steady" | "softened" | "improved"
+  points: FocusTrendPoint[];
+  n_points: number;
+  median_fwhm_px: number;
+  early_fwhm_px: number;
+  late_fwhm_px: number;
+  start_utc: string | null;
+  end_utc: string | null;
+  soft_after_utc: string | null;
+}
+
 export interface LibrarySessionRecap {
   n_targets: number;
   n_frames: number;
@@ -900,6 +917,8 @@ export const api = {
     req<BestFrame>(`/api/targets/${safe}/best-frame`),
   targetNights: (safe: string) =>
     req<NightSummary[]>(`/api/targets/${safe}/nights`),
+  focusTrend: (safe: string) =>
+    req<FocusTrend | null>(`/api/targets/${safe}/focus-trend`),
   getIntegrationGoal: (safe: string) =>
     req<{ goal_s: number | null }>(`/api/targets/${safe}/integration-goal`),
   setIntegrationGoal: (safe: string, goalS: number | null) =>

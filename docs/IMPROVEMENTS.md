@@ -4736,6 +4736,29 @@ problems. Dogfood it every big-picture run and fix root causes.
   (reuse `assemble_progress_reel`), exposed as a read-only endpoint; (b) the Target/History card that reveals
   the `<img>` + caption (mirror the existing `ProgressReelCard` reveal pattern so History's run list doesn't
   fetch every animation up front). Keeps the beginner-feature pipeline stocked.
+- ~~**NEW (Scout 2026-07-21) — "Focus & sharpness through the night" trend card (per-session FWHM sparkline +
+  plain verdict).**~~ — **SHIPPED v0.152.0** (Builder 2026-07-21, branch `claude/pensive-faraday-fvpbvd`).
+  Built exactly the Scout's slice across all three layers. **Engine:** `seestack/session_recap.py::focus_trend`
+  returns the target's most recent session's accepted, measured subs as `[FocusTrendPoint(t_utc, fwhm_px)]` in
+  capture order plus a `verdict` — `"steady"` / `"softened"` / `"improved"` — decided by comparing the median
+  FWHM of the night's first third vs last third against the *same* belt-and-braces floors the cross-session
+  drift nudge uses (`FOCUS_TREND_DRIFT_RATIO=1.25` **and** `FOCUS_TREND_DRIFT_ABS_PX=0.6`, so it never cries
+  drift over ordinary within-night seeing wobble). A "softened" verdict also names `soft_after_utc` (when the
+  soft stretch began). Self-hides (returns `None`) below `FOCUS_TREND_MIN_FRAMES=6` measured subs. Reuses the
+  existing timezone-robust `_split_sessions`/`_last_session_frames`, so it inherits the midnight-safe grouping.
+  **Webapp:** `GET /api/targets/{safe}/focus-trend` → `FocusTrendOut | None` (read-only aggregation over the
+  frames table; `null` = card self-hides). **Frontend:** a `FocusTrendCard` on the Target page draws an inline
+  SVG sparkline (higher line = sharper; no chart dependency) + a verdict badge + a plain-language sentence, all
+  from pure, unit-tested helpers in `focusTrend.ts` (`describeFocusTrend`, `focusVerdictBadge`, `formatClockUtc`,
+  `sparklinePoints`). Distinct from the cross-session drift nudge (whole-night vs a prior night) — this shows the
+  *shape* of sharpness *within* the latest night, so a beginner can spot a dew/focus drift and act on the next
+  clear night. Additive/upgrade-safe: read-only, off nothing, no schema/config/API-shape/default change. Tests:
+  `tests/test_session_recap.py` (+7 — steady / softened+soft_after / improved / min-frame gate / ignores
+  rejected+unmeasured / latest-session-only / no-timestamps), `tests/webapp/test_target_focus_trend.py` (+3 —
+  null self-hide / softened serialisation & point order / steady no-marker), and frontend
+  `focusTrend.test.ts` (+10) & `FocusTrendCard.test.tsx` (+2 — sparkline+verdict render / null self-hides).
+  Beginner bar ✔ (one card, zero knobs, auto verdict + plain language, actionable next-night advice).
+  *(Original spec kept below for provenance.)*
 - **NEW (Scout 2026-07-21) — "Focus & sharpness through the night" trend card (per-session FWHM sparkline +
   plain verdict).** *(Beginner feature; PRIORITY 3 friendliness / trust; size M.)* The app already measures
   per-frame **FWHM** (star size = sharpness) and each frame's **timestamp**, and shows them as a sortable
