@@ -48,7 +48,12 @@ from seestack.stack.align import align_one, extract_reference_patch
 from seestack.stack.output import _sanitize_basename
 from seestack.stack.reference import ReferenceChoice, pick_reference_frame
 from seestack.stack.photometric import PhotometricStats, compute_photometric_scales
-from seestack.stack.weighting import WeightingStats, compute_frame_weights, unit_weights
+from seestack.stack.weighting import (
+    WeightingStats,
+    combine_weights_with_photometric,
+    compute_frame_weights,
+    unit_weights,
+)
 
 if TYPE_CHECKING:
     from seestack.calibrate.apply import CalibrationMasters
@@ -898,6 +903,19 @@ def run_stack(
         if pstats.n_scaled == 0:
             pscales = None
 
+    # Inverse-variance combine weight: gain-matching a hazy frame up by ``s``
+    # amplifies its noise by ``s`` too, so the *weighted-sum* combine down-weights
+    # it by ``1/s²`` (and a scaled-down transparent frame is trusted more). Only
+    # the final weighted combines (single-pass mean, κ-σ pass 2, drizzle final)
+    # use these; the rejection-reference passes (κ-σ pass 1, min/max, drizzle
+    # statistics) keep the plain quality ``weights``. When photometric scaling is
+    # off (``pscales`` is None), this returns ``weights`` unchanged → byte-for-byte
+    # identical stack. NB: the weighted-sum accumulator's coverage map is Σ of the
+    # weights fed in, so an opt-in photometric run's ``master_coverage.fits`` (and
+    # the editor's coverage-leveling binning off it) shifts with the 1/s² factor —
+    # a benign diagnostic change, gated behind the off-by-default flag.
+    combine_weights = combine_weights_with_photometric(weights, pscales)
+
     # Pre-compute the reference patch for sub-pixel alignment, by aligning
     # the reference frame to itself once and extracting a central luminance
     # window. This happens before the parallel passes so every worker can
@@ -1033,7 +1051,7 @@ def run_stack(
                  params.pixfrac, params.scale, params.kernel, clip is not None,
                  drizzler.output_canvas_shape[1], drizzler.output_canvas_shape[0])
         n_used = _drizzle_pass(
-            frames, ref, drizzler, weights,
+            frames, ref, drizzler, combine_weights,
             options=options,
             phase_label="Drizzle 2/2 (outlier-clipped)" if clip is not None else "Drizzle",
             clip=clip,
@@ -1159,7 +1177,7 @@ def run_stack(
             wsum.add_window(np.where(keep, aligned, np.nan), y0, x0, weight=weight)
 
         n_used_p2 = _pass(
-            frames, ref, dst_wcs_text, dst_shape, weights,
+            frames, ref, dst_wcs_text, dst_shape, combine_weights,
             options=options,
             phase_label="Pass 2/2 (clipped sum)",
             consumer=consume_clipped,
@@ -1197,7 +1215,7 @@ def run_stack(
             ql.on_frame(wsum.result)
 
         n_used = _pass(
-            frames, ref, dst_wcs_text, dst_shape, weights,
+            frames, ref, dst_wcs_text, dst_shape, combine_weights,
             options=options,
             phase_label="Stacking",
             consumer=consume_one_pass,

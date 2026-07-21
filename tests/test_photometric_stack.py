@@ -88,6 +88,45 @@ def test_photometric_normalize_brightens_a_dim_frame_and_records_provenance(tmp_
     assert "PHOTNORM" not in base_hdr
 
 
+def _coverage_max(fits_path) -> float:
+    """Peak per-pixel coverage (Σ of the combine weights) from the run's
+    ``*_coverage.fits`` sidecar."""
+    from pathlib import Path
+    cov_path = Path(fits_path).with_name(Path(fits_path).stem + "_coverage.fits")
+    with fits.open(cov_path) as hdul:
+        return float(np.nanmax(np.asarray(hdul[0].data, dtype=np.float64)))
+
+
+def test_photometric_scale_downweights_the_amplified_frame_in_the_combine(tmp_path):
+    # Inverse-variance combine: a hazy frame gain-matched ×2 has its noise
+    # amplified ×2, so the weighted-sum combine must down-weight it by 1/s² = 1/4.
+    # The accumulator's coverage map is Σ of the per-frame combine weights, so a
+    # fully-covered pixel reads 3·1 + 1·0.25 = 3.25 with normalization on vs 4.0
+    # off — a direct, deterministic proof the 1/s² reaches the accumulator (not
+    # just the pixels). Quality weighting stays off so every base weight is 1.0.
+    proj = _build_project(tmp_path, n=4)
+    try:
+        ids = [f.id for f in proj.iter_frames()]
+        for fid in ids[:3]:
+            proj.update_frame(fid, transparency_score=5000.0)
+        proj.update_frame(ids[3], transparency_score=1250.0)  # → scale clamped to 2×
+
+        base = run_stack(proj, StackOptions(
+            sigma_clip=False, max_workers=2, output_name="cov_base",
+            photometric_normalize=False))
+        norm = run_stack(proj, StackOptions(
+            sigma_clip=False, max_workers=2, output_name="cov_norm",
+            photometric_normalize=True))
+    finally:
+        proj.close()
+
+    # Off: all four frames at weight 1 → peak coverage is the frame count, 4.
+    assert _coverage_max(base.fits_path) == pytest.approx(4.0, abs=0.02)
+    # On: the ×2 frame contributes 1/4, so peak coverage drops to 3.25 — proof
+    # the amplified frame is trusted less in the combine, not at full weight.
+    assert _coverage_max(norm.fits_path) == pytest.approx(3.25, abs=0.02)
+
+
 def test_photometric_normalize_off_by_default(tmp_path):
     # The default StackOptions must not normalize — no PHOTNORM provenance, so an
     # existing live install's stacks are byte-for-byte unaffected until opted in.

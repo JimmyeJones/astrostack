@@ -135,3 +135,39 @@ def compute_frame_weights(
 def unit_weights(frames: list[FrameRow]) -> dict[int, float]:
     """All frames get weight 1.0 — used when quality weighting is off."""
     return {f.id: 1.0 for f in frames if f.id is not None}
+
+
+def combine_weights_with_photometric(
+    weights: dict[int, float],
+    photometric_scales: dict[int, float] | None,
+) -> dict[int, float]:
+    """Fold photometric gain-matching into the *weighted-sum* combine weight.
+
+    Photometric normalization multiplies a hazy frame's pixels by ``s`` (> 1) to
+    gain-match its signal to the run's median — which multiplies that frame's
+    per-pixel noise σ by the same ``s`` (scaling an image scales its noise).
+    A minimum-variance (inverse-variance) combine weights a frame with noise
+    ``s·σ`` by ``∝ 1/(s·σ)²``, so a photometrically-scaled frame carries an extra
+    ``1/s²`` relative to an unscaled one. Without it a scaled-up hazy sub enters
+    the mean trusting its *amplified* noise at close to full quality weight,
+    raising the stacked background RMS more than an inverse-variance combine
+    would; a scaled-*down* transparent sub (``s`` < 1, less noise) is
+    symmetrically under-trusted.
+
+    Returns ``weights`` **unchanged** (same object) when no photometric scaling is
+    active, so a run with ``photometric_normalize`` off is byte-for-byte
+    identical. Only the weighted-sum / κ-σ-pass-2 combine and the drizzle final
+    weight-map should use these; the unweighted κ-σ pass-1 mean/σ, the min/max
+    order statistic, and the drizzle *statistics* (clip-reference) pass keep the
+    plain quality ``weights`` by design — they mirror the standard path, where the
+    rejection reference is computed before the inverse-variance combine.
+    """
+    if not photometric_scales:
+        return weights
+    combined = dict(weights)
+    for fid, s in photometric_scales.items():
+        # A neutral (1.0) or unmeasurable scale leaves the frame's weight as-is;
+        # only a genuinely applied scale carries the variance correction.
+        if s and s > 0 and abs(s - 1.0) > 1e-9:
+            combined[fid] = weights.get(fid, 1.0) / (s * s)
+    return combined
