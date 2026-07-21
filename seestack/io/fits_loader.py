@@ -433,4 +433,37 @@ def _parse_timestamp(h) -> str | None:
             return dt.isoformat()
         except ValueError:
             continue
-    return raw  # fall back to whatever the header had
+    # Tolerant fallback for other *legal* FITS forms — a trailing 'Z' and >6
+    # fractional-second digits are both valid but not covered above. Returning
+    # the un-normalised raw string here (as we used to) meant two headers for the
+    # same instant could be stored differently (one '…+00:00', one raw '…Z'),
+    # which silently breaks the lexicographic ordering/equality that callers do
+    # on ``timestamp_utc``. Normalise to the same tz-aware ISO form, or None.
+    norm = _normalise_iso_datetime(raw)
+    return norm.isoformat() if norm is not None else None
+
+
+def _normalise_iso_datetime(raw: str) -> datetime | None:
+    """Parse a lenient ISO-8601 datetime to a tz-aware UTC ``datetime``, or None.
+
+    Handles a trailing ``Z`` (UTC) and fractional seconds with more than the 6
+    digits ``datetime`` accepts. A value with no timezone is assumed to be UTC
+    (Seestar and most capture software write UTC ``DATE-OBS``)."""
+    import re
+
+    s = raw.strip()
+    # Trailing 'Z' means UTC; fromisoformat only learned it in 3.11 but this
+    # keeps the intent explicit and works regardless.
+    if s.endswith(("Z", "z")):
+        s = s[:-1] + "+00:00"
+    # Clamp over-long fractional seconds (e.g. 7+ digits) to microseconds.
+    m = re.match(r"(.*\.\d{6})\d+(.*)$", s)
+    if m:
+        s = m.group(1) + m.group(2)
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
