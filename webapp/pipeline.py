@@ -885,6 +885,55 @@ def _carry_provenance(fits_path: str) -> dict[str, Any]:
     return carry
 
 
+# The Seestar S50 is the one camera this app is built for (AGENTS.md §1), so the
+# acquisition nameplate can name the gear without a header field for it.
+_SEESTAR_CAMERA = "ZWO Seestar S50"
+
+
+def _nameplate_fields(fits_path: str, entry: Any, run: Any) -> Any:
+    """Build a :class:`NameplateFields` for a run's share export, preferring the
+    stamped FITS provenance and falling back to the library/run record. Every
+    field is best-effort — a missing/unparseable one is simply left ``None`` and
+    the nameplate omits that part (never a blank line)."""
+    from seestack.nameplate import NameplateFields
+
+    prov = _carry_provenance(fits_path)  # key -> (value, comment)
+
+    def _num(key: str, default: Any = None) -> Any:
+        card = prov.get(key)
+        try:
+            return float(card[0]) if card is not None else default
+        except (TypeError, ValueError):
+            return default
+
+    target = None
+    obj = prov.get("OBJECT")
+    if obj is not None and str(obj[0]).strip():
+        target = str(obj[0]).strip()
+    else:
+        target = getattr(entry, "name", None)
+
+    n_card = prov.get("NFRAMES")
+    try:
+        n_frames = int(n_card[0]) if n_card is not None else getattr(run, "n_frames_used", None)
+    except (TypeError, ValueError):
+        n_frames = getattr(run, "n_frames_used", None)
+
+    date_iso = None
+    date_card = prov.get("DATE-OBS")
+    if date_card is not None and str(date_card[0]).strip():
+        date_iso = str(date_card[0]).strip()
+
+    return NameplateFields(
+        target=target,
+        integration_s=_num("EXPTOTAL", getattr(run, "total_exposure_s", None)),
+        n_frames=n_frames,
+        sub_exposure_s=_num("EXPOSURE"),
+        date_iso=date_iso,
+        camera=_SEESTAR_CAMERA,
+    )
+
+
 def _render_recipe_fullres(fits_path: str, recipe_dict: dict, progress,
                            errors: list[str] | None = None) -> tuple[Any, Any]:
     """Apply an editor recipe to a full-res FITS. Returns ``(out_rgb, recipe)``
@@ -1088,10 +1137,15 @@ def submit_editor_png(settings: Settings, jm: JobManager, safe: str, run_id: int
 
 
 def submit_editor_share(settings: Settings, jm: JobManager, safe: str, run_id: int,
-                        recipe_dict: dict) -> Job:
+                        recipe_dict: dict, *, nameplate: bool = False) -> Job:
     """Render an editor recipe to a social-ready JPEG (long edge ≤ 2048 px) of the
     image exactly as shown — for posting/sharing rather than re-processing. The
-    JPEG path + a copy-friendly caption blurb are returned in the job result."""
+    JPEG path + a copy-friendly caption blurb are returned in the job result.
+
+    When ``nameplate`` is set, a tasteful acquisition footer (target, integration,
+    date, gear — read from the run's own FITS provenance) is baked onto the shared
+    image. Off by default, so the shared pixels are byte-for-byte as before unless
+    the user opts in."""
     def body(job: Job) -> dict[str, Any]:
         from datetime import datetime, timezone
 
@@ -1116,7 +1170,8 @@ def submit_editor_share(settings: Settings, jm: JobManager, safe: str, run_id: i
                 ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
                 jpeg = (Path(proj.project_dir) / "output"
                         / f"{safe_basename(run.output_basename)}_share_{ts}.jpg")
-                write_share_jpeg(jpeg, out)
+                plate = _nameplate_fields(run.fits_path, entry, run) if nameplate else None
+                write_share_jpeg(jpeg, out, nameplate=plate)
                 blurb = share_blurb(entry.name, run.n_frames_used, run.total_exposure_s)
             finally:
                 proj.close()

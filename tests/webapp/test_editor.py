@@ -1709,6 +1709,64 @@ def test_export_share_jpeg_download_and_blurb(client, solved_library):
     assert max(img.size) == 2048  # downscaled from the 2500 px native width
 
 
+def test_export_share_bakes_the_nameplate_when_requested(client, solved_library):
+    """With ``nameplate=true`` the share JPEG carries a baked-on acquisition footer
+    (built from the run's own metadata); without it the pixels are unchanged."""
+    import io
+
+    import numpy as np
+    from PIL import Image
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, h=120, w=400)
+    recipe = {"ops": [{"id": "tone.stretch", "params": {"stretch": 0.6}}]}
+
+    def _render(nameplate: bool):
+        r = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/share",
+                        json={"recipe": recipe, "nameplate": nameplate})
+        assert r.status_code == 200
+        job = _wait_job(client, r.json()["job_id"])
+        assert job["state"] == "done", job
+        dl = client.get(
+            f"/api/targets/{safe}/stack-runs/{rid}/editor/share/{r.json()['job_id']}")
+        assert dl.status_code == 200
+        return np.asarray(Image.open(io.BytesIO(dl.content)).convert("RGB"))
+
+    plain = _render(False)
+    plated = _render(True)
+    assert plain.shape == plated.shape
+    # White caption text lands in the footer band — bright pixels the plain render
+    # (dark sky at the bottom edge) doesn't have; the top of the frame is untouched.
+    assert plated[-30:].max() >= 240
+    assert plated[-30:].max() > int(plain[-30:].max())
+    assert np.array_equal(plain[:20], plated[:20])
+
+
+def test_export_share_defaults_to_no_nameplate(client, solved_library):
+    """Omitting the flag renders the historical (bare) share image."""
+    import io
+
+    import numpy as np
+    from PIL import Image
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, h=120, w=400)
+    recipe = {"ops": [{"id": "tone.stretch", "params": {"stretch": 0.6}}]}
+
+    def _render(body):
+        r = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/share", json=body)
+        assert r.status_code == 200
+        job = _wait_job(client, r.json()["job_id"])
+        assert job["state"] == "done", job
+        dl = client.get(
+            f"/api/targets/{safe}/stack-runs/{rid}/editor/share/{r.json()['job_id']}")
+        return np.asarray(Image.open(io.BytesIO(dl.content)).convert("RGB"))
+
+    # No flag at all vs an explicit false must render identically (no footer).
+    assert np.array_equal(_render({"recipe": recipe}),
+                          _render({"recipe": recipe, "nameplate": False}))
+
+
 def test_export_share_bad_job_id_404(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
     rid = _make_run(solved_library, safe)

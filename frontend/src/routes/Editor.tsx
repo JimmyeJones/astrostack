@@ -1,6 +1,6 @@
 import {
-  ActionIcon, Alert, Badge, Button, Center, CopyButton, Grid, Group, Loader, Menu, Paper, Select,
-  Stack, Text, TextInput, Title, Tooltip,
+  ActionIcon, Alert, Badge, Button, Center, Checkbox, CopyButton, Grid, Group, Loader, Menu, Paper,
+  Select, Stack, Text, TextInput, Title, Tooltip,
 } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import {
@@ -683,10 +683,13 @@ export function EditorView() {
   // editor's "Share to app" button so desktop browsers without it never see it.
   const [canShareToApp] = useState(() => canSharePictureFiles());
   const [shareBlurb, setShareBlurb] = useState<string | null>(null);
+  // Bake the acquisition details onto the shared image (off by default so the
+  // shared pixels are unchanged unless the user chooses the caption look).
+  const [nameplate, setNameplate] = useState(false);
   const downloadShare = useMutation({
     mutationFn: async () => {
       setShareProgress("Preparing…");
-      const { job_id } = await api.exportShare(safe, rid, recipe);
+      const { job_id } = await api.exportShare(safe, rid, recipe, nameplate);
       for (;;) {
         const j = await api.getJob(job_id);
         if (j.state === "done") {
@@ -725,7 +728,7 @@ export function EditorView() {
   const shareToApp = useMutation({
     mutationFn: async () => {
       setShareProgress("Preparing…");
-      const { job_id } = await api.exportShare(safe, rid, recipe);
+      const { job_id } = await api.exportShare(safe, rid, recipe, nameplate);
       for (;;) {
         const j = await api.getJob(job_id);
         if (j.state === "done") {
@@ -2039,6 +2042,10 @@ export function EditorView() {
               {downloadPng.isPending && pngProgress ? (
                 <Text size="xs" c="dimmed" ta="center" mt={4}>{pngProgress}</Text>
               ) : null}
+              <Checkbox mt="sm" size="xs" checked={nameplate}
+                onChange={(e) => setNameplate(e.currentTarget.checked)}
+                label="Add caption bar (target, exposure, date)"
+                description="Bakes a tidy nameplate onto the shared picture — no typing." />
               <Button mt="xs" fullWidth variant="light" leftSection={<IconPhotoDown size={16} />}
                 loading={downloadShare.isPending} onClick={() => downloadShare.mutate()}>
                 Download share image (JPEG)

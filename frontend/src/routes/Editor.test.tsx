@@ -301,6 +301,36 @@ describe("EditorView", () => {
     expect(screen.getByLabelText("Copy caption")).toBeInTheDocument();
   });
 
+  it("threads the caption-bar toggle into the share render (off by default)", async () => {
+    mockEditorQueries();
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+    const exportShare = vi.spyOn(client.api, "exportShare")
+      .mockResolvedValue({ job_id: "share1" });
+    vi.spyOn(client.api, "getJob").mockResolvedValue({
+      id: "share1", kind: "editor_share", target: "M_42", state: "done",
+      phase: "", done: 1, total: 1, detail: "", created_utc: null,
+      started_utc: null, finished_utc: null, error: null,
+      result: { blurb: "M 42 · 3h 12m · 152 subs" },
+    });
+
+    renderEditor();
+
+    // Default: the caption bar is off.
+    const dl = await screen.findByText("Download share image (JPEG)");
+    fireEvent.click(dl);
+    await waitFor(() => expect(exportShare).toHaveBeenCalled());
+    expect(exportShare.mock.calls[0][3]).toBe(false);
+
+    // Ticking the checkbox opts the next share into the nameplate.
+    exportShare.mockClear();
+    fireEvent.click(screen.getByLabelText("Add caption bar (target, exposure, date)"));
+    fireEvent.click(screen.getByText("Download share image (JPEG)"));
+    await waitFor(() => expect(exportShare).toHaveBeenCalled());
+    expect(exportShare.mock.calls[0][3]).toBe(true);
+  });
+
   it("shares the finished picture to another app via the OS share sheet", async () => {
     const nav = navigator as unknown as Record<string, unknown>;
     nav.canShare = () => true;

@@ -4520,9 +4520,37 @@ problems. Dogfood it every big-picture run and fix root causes.
   needs no new column — likely the smaller, safer slice. Beginner bar ✔ (same one-button affordance, extended to the
   place a beginner most wants it — their finished edit). Additive/upgrade-safe (nullable/new surface, off by default).
   _(S–M; PRIORITY 3 friendliness / enjoy-share — completes the "pin my favourite picture" story for edited results.)_
-- **NEW BEGINNER FEATURE (Scout 2026-07-21 #6) — "Acquisition nameplate": auto-render the shot's own
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-21 #6) — "Acquisition nameplate": auto-render the shot's own
   details onto the shared image, so a beginner's post looks like a "real" astrophoto without any
-  editing.** Astrophotographers traditionally caption a finished image with its *acquisition data* —
+  editing.**~~ — **SHIPPED v0.146.0** (Builder 2026-07-21, branch `claude/pensive-faraday-1nzegs`; all three
+  slices). A new **"Add caption bar (target, exposure, date)"** checkbox in the editor's share panel bakes a
+  tasteful footer nameplate onto the share JPEG — *"M 31 · 4h 12m (505×30s) · 19 Jul 2026 · ZWO Seestar S50"* —
+  built entirely from data the run already carries, no typing. **(a)** Pure engine module `seestack/nameplate.py`
+  (`NameplateFields`, `nameplate_line`, `format_acq_date`, `draw_nameplate`): each part is best-effort and
+  omitted when its datum is missing (folds the `(N×exp)` detail into the integration, degrades to a bare
+  duration/sub-count, drops an unparseable date), so a provenance-less run yields a tidy line — or an empty one,
+  in which case `draw_nameplate` is a clean no-op. Uses Pillow's built-in **scalable** font
+  (`ImageFont.load_default(size=…)`, guaranteed by the `Pillow>=10.2` pin) — **no bundled font asset, no
+  network** — drawn on the *downscaled* share image (crisp at output res) as a translucent dark strip with the
+  font shrunk to fit a narrow share. **(b)** `write_share_jpeg(..., nameplate=…)` (default `None` → byte-for-byte
+  the old pixels); `webapp/pipeline.py::_nameplate_fields` reads the run's FITS provenance
+  (`OBJECT`/`NFRAMES`/`EXPTOTAL`/`EXPOSURE`/`DATE-OBS`) with a library/run-record fallback and the fixed Seestar
+  camera; `submit_editor_share(..., nameplate=False)`. **(c)** A dedicated `ShareRequest(nameplate: bool=False)`
+  on the share endpoint; `api.exportShare(…, nameplate=false)`; the editor checkbox threads it into both the
+  download and OS-share paths. **Deviation from the Scout's "default on":** shipped **default OFF** — turning it
+  on would change what an existing install's shared images look like, which trips the §9/§10 "new features off by
+  default / defaults don't change behaviour" guardrail. The value is undiminished (a beginner ticks it once); a
+  future run can revisit a default flip with owner sign-off. **Beginner bar ✔** (one plain-language toggle, sane
+  default, no knobs; makes the shared picture look finished). Additive/upgrade-safe: a display-time overlay that
+  never touches the stored FITS/preview or the linear science data; new optional param + new request field + new
+  frontend control, no schema/config/API-shape/existing-default change. Tests: `tests/test_nameplate.py` (+8 —
+  date parsing incl. out-of-range/missing, the full/degraded/empty caption line, footer darkening + white text +
+  size preserved, empty→no-op, long-caption-on-a-tiny-image fit), `tests/test_sharecard.py` (+2 — the
+  `write_share_jpeg` nameplate footer / `None`-unchanged), `tests/webapp/test_editor.py` (+2 — the endpoint bakes
+  the footer on `nameplate=true` via the run's own metadata & leaves it off otherwise / omitted flag ≡ false),
+  `frontend/.../Editor.test.tsx` (+1 — the toggle threads `false` by default and `true` once ticked into the
+  share render). Python 1455 + tsc + vitest + vite build green. **Original spec kept for provenance:**
+  Astrophotographers traditionally caption a finished image with its *acquisition data* —
   target, total integration, sub count, date, gear — and beginners love the look but have no way to make
   one; they post a bare JPEG with no context. The app **already knows every field**: `run_stack` stamps
   `OBJECT` / `NFRAMES` / `EXPTOTAL` / `EXPOSURE` into the master FITS header (see
