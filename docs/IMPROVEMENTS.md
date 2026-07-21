@@ -721,6 +721,39 @@ when you take it.
   used only a mild 40× outlier where the MTF self-correction still holds; the clamps break it at the larger (and
   realistic full-well) outlier magnitudes measured here.
 
+_Scout audit log 2026-07-21d (baseline green on current `origin/main` v0.146.0: 1458 passed / 2 skipped):
+led the rotation with the **stacking engine** per the owner's focus #1, combining **two parallel adversarial
+subagent audits** (each required to trace any finding to a concrete failure path and cross-check the existing
+tests) with my own hand-trace of the surrounding files. **All traced clean — no new verified bug filed; the
+engine remains genuinely mature, consistent with the ~20 prior clean re-audits.** (1) **Subagent A —
+`stack/{drizzle_path,mosaic}.py`**: NaN=no-coverage preserved end-to-end (empty set / all-NaN frame / all-off-
+canvas → all-NaN, never 0); the newest weight-vs-frame-count κ-σ gate (commit 098ff33) keys on the integer
+`_count`, not the pixfrac-deflated `out_wht`; var clamped ≥0 so float rounding can't reject spuriously;
+half-open pixel window `[-0.5, N-0.5]` with x↔w/y↔h paired consistently (no off-by-one/axis swap); WCS CRPIX/
+CDELT rescale validated by the flux-conservation drizzle test; mosaic RA 0°/360° wrap + bbox→CRPIX math + size
+caps all correct (45 drizzle/mosaic tests pass). (2) **Subagent B — `stack/align.py` + `calibrate/{apply,
+masters}.py`**: reproject WCS direction (dst→src sample coords, src→dst footprint bbox) correct; CPU `cval=nan`
+vs GPU `cval=0.0` reconciled by the explicit `aligned[~valid]=nan` so out-of-bounds is NaN on both backends;
+sub-pixel NaN-mask re-masking (order-1 NaN-weight shift >1e-6) never leaves a darkened covered boundary;
+calibrate order `(raw−pedestal)/flat_norm` with dark XOR bias, flat divisor floored (no div-by-zero/inf), the
+prior non-finite-master / inf-flat / no-data-dark sanitizers intact; `build_master`/`_sigma_clip_mean` NaN-
+aware (all-NaN pixel → NaN, never a zeroed gap) (58 relevant tests pass). (3) **Hand-traced this run**:
+`stack/{accumulator,weighting,photometric,reference,pointings,output}.py`, `bg/coverage_leveling.py`, and
+`render/thumbnail.py` — the WeightedSum/MinMaxReject/Welford NaN/coverage semantics, geometric-mean quality
+weighting with per-factor guards, photometric scale application (in-place per-frame, applied identically in
+every pass so pass-1 σ and pass-2 clip stay consistent), reference-pick RA-unwrap, single-linkage mixed-
+pointing clustering, FITS/TIFF/PNG display-space parity + basename sanitisation, per-coverage sky-leveling
+gapped-extrapolation clamp, and the asinh/STF highlight-rolloff + 99.5th-pct-ceiling stretches all hold.
+**Autonomy gap surfaced (filed as an idea, not a bug):** `StackOptions.auto_reject` — the smart "pick κ-σ vs
+min/max from the sub count" toggle the owner shipped v0.143.0 *specifically so a beginner never has to choose*
+— defaults **False** (dataclass) and `Settings.default_stack_options` is an empty dict, so **every default
+stack a beginner triggers still uses plain κ-σ**, which is mathematically blind to a lone satellite/plane trail
+below ~11 subs (a very common short-session / first-light case). Filed an upgrade-safe way to make it the
+beginner default (Autonomy section) rather than flip the engine default (§9). No small obviously-safe bug found
+to ship this run. Also filed one new beginner feature ("North up" one-click orientation for the shared image).
+The two open real-data-gated items (sky-atlas `_tan_wcs` rotation sign; SExtractor skew-fallback in the
+deprioritised channel-combine path) remain correctly gated._
+
 _Scout audit log 2026-07-21c (baseline green on current `origin/main` v0.145.0: 1438 passed / 2 skipped):
 led the rotation with the **stacking engine** per the owner's focus #1 — hand-traced every file in
 `seestack/stack/*` (`accumulator`, `weighting`, `drizzle_path`, `align`, `mosaic`, `photometric`,
@@ -3134,6 +3167,33 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+- **NEW (Scout 2026-07-21d) — make smart `auto_reject` the *beginner default* so a default stack actually
+  removes a lone satellite/plane trail on small sub counts.** `StackOptions.auto_reject` (shipped v0.143.0)
+  resolves rejection from the sub count — order-statistic min/max below the κ-effective threshold
+  (`_auto_kappa_min_frames(3.0) = 11`), weight-respecting κ-σ at/above it — *precisely so a beginner never has
+  to know κ-σ vs min/max* (its own help text says so). **But it defaults `False` in the dataclass and
+  `Settings.default_stack_options` is an empty dict, so every default stack a beginner triggers still uses plain
+  κ-σ** (`sigma_clip=True`). κ-σ is mathematically blind to a *lone* outlier below ~11 frames (a single point's
+  z-score against stats that include it stays below κ), so a short session / first-light stack of, say, 6–10
+  subs with one satellite trail silently keeps the trail — a wrong-ish image on the exact path autonomy is meant
+  to own. Verified: `get_stack_defaults` (`webapp/routers/stack.py:126`) starts from `settings.default_stack_
+  options` (empty) merged over the dataclass defaults, and `default_stack_options` is `Field(default_factory=
+  dict)` (`webapp/config.py:148`), so nothing turns it on. **The §9 tension is real** — flipping the *dataclass*
+  default would change what a running install's default stack does (a default-behaviour flip §9 forbids) and
+  would alter old run records' byte-for-byte options. So do it at the **webapp default layer, not the engine
+  default**, in one of two upgrade-safe shapes: (a) in `get_stack_defaults`, when the target has **no saved
+  per-target defaults and `default_stack_options` is empty**, default `auto_reject` to `True` in the returned
+  form values only (the persisted engine default and any explicitly-saved config are untouched; a user who ever
+  saved defaults keeps exactly what they saved); or (b) seed `default_stack_options={"auto_reject": True}` at
+  **first-run bootstrap for a *fresh* install only** (guard on a brand-new state dir / config absent), so
+  existing installs are byte-for-byte unchanged and only new users get the smart default. Prefer (a) — it needs
+  no bootstrap plumbing, is trivially reversible (uncheck the box), and the Stack form already shows the
+  "Auto outlier removal" checkbox so the user sees and controls it. Add an upgrade test that an *existing*
+  config with a saved `default_stack_options` (or a saved per-target default) is unaffected, and that a
+  never-configured target now returns `auto_reject=True`. Keep the dataclass default `False` (run records +
+  `estimate_stack` + any script that constructs `StackOptions()` directly stay identical). _(S–M; PRIORITY 2
+  autonomy — turns a shipped-but-dormant smart default into the beginner's real default, upgrade-safely; this is
+  the "smarter, well-defaulted auto-stack" §1 explicitly asks for.)_
 - **NEW (Scout 2026-07-21b) — auto-detect a master-dark ↔ light *exposure* mismatch and guide the fix, so a
   beginner reusing a dark library doesn't silently get a wrong calibration.** `CalibrationMasters.validate`
   (`seestack/calibrate/apply.py`) only checks the master's *shape* against the frames — it never compares the
@@ -4525,6 +4585,39 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+- **NEW BEGINNER FEATURE (Scout 2026-07-21 #9) — "North up": one-click orient the shared/exported image so
+  celestial North points up, the way every reference photo of the object is drawn.** A Seestar frames the sky
+  at whatever angle the mount happened to sit, so a beginner's finished picture often comes out rotated relative
+  to every catalog/Wikipedia image of the same object — which makes it look "off" and hard to compare, and is
+  the #1 thing that separates a snapshot from a "real" astrophoto. **The app already knows the exact rotation:**
+  the stacked `master.fits` carries the output WCS (the CD matrix), and the sky-map work already extracts a
+  `rotation_deg` from it (`webapp/routers/sky.py` / the `SkyImage` geometry helpers) — the North position angle
+  is `atan2(CD1_2, CD1_1)`-style trig on that same matrix, no plate-solve needed at view time. **Feature:** a
+  **"North up"** toggle on the share/download panel (and the History result view) that rotates the display image
+  by the stored North angle before it's written, so the shared JPEG/PNG comes out conventionally oriented. Reuse
+  the existing render path: `load_stack_rgb` → stretch → `PIL.Image.rotate(angle, expand=True, fillcolor=black)`
+  — the exposed corners fill with the **same black as uncovered/NaN pixels** (the app's existing convention), so
+  it looks intentional, not broken. **Sane default + honest behaviour to get right:** (1) show it only when the
+  run has a WCS *and* the correction is more than a couple of degrees (a near-North-up frame needs no rotation —
+  don't add interpolation blur or black corners for nothing); (2) when the angle is within ~1° of a multiple of
+  90°, snap to the exact 90° step so that common case is **lossless** (pure transpose/flip, no resample, no new
+  corners); (3) label it plainly — *"Rotate so North is up (like reference photos of this object)."* **Beginner
+  bar ✔:** one toggle, zero angles to type, a sane auto-detected default, plain language; it makes the shared
+  picture look "correct" and directly comparable to reference images — serves the *understand + enjoy + share*
+  pillars §1 calls out (`annotated results` / making a beginner's result feel legit). **Distinct from** the
+  nameplate (adds a caption), "Set as cover" (picks which image), and the sky-map overlay (places it on an atlas)
+  — this reorients the picture itself. **Well-grounded / low-risk:** the WCS + rotation extraction already exist
+  and are tested; the change is a render-time PIL rotate, read-only, touches nothing on disk permanently, no new
+  dep/network. **Guardrails:** additive/reversible (a render-time export option, off unless the toggle is on and
+  a meaningful correction exists), best-effort (no WCS or an un-parseable CD → hide the toggle, never a broken
+  render; a display-space editor export that lost its WCS simply doesn't offer it). Split for the Builder: (a) a
+  small pure helper `north_angle_deg(wcs)` + a `rotate_north_up(rgb, angle)` (with the 90°-snap lossless path)
+  in `render/` or `seestack/`, unit-tested against a known-orientation synthetic WCS pinning the **sign** (a
+  frame rotated +30° must rotate −30° back to North-up — the exact sign hazard the sky-map `_tan_wcs` item
+  flags, so pin it with a test); (b) wire the toggle into the share/download endpoint + the frontend panel,
+  reusing `write_share_jpeg`/`write_full_res_png`. _(M, split as above; PRIORITY 3 friendliness /
+  understand-enjoy-share — beginner feature; reuses the shipped WCS geometry + share-render infra, so low-risk.
+  Keeps the beginner-feature pipeline stocked.)_
 - **NEW BEGINNER FEATURE (Scout 2026-07-21 #8) — "One frame vs your stack": a side-by-side / split-slider
   reveal of a single raw sub next to the finished stack, so a beginner *sees* — and can share — exactly what
   stacking bought them.** Stacking is the whole point of the app, but a beginner never sees the *before*: they
