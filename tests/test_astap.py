@@ -1,5 +1,7 @@
 """ASTAP wrapper — discovery and ini parsing (no real solve)."""
 
+import subprocess
+
 import pytest
 
 from seestack.solve.astap import (
@@ -174,6 +176,51 @@ def test_adaptive_ladder_stops_on_fatal_error(tmp_path, monkeypatch):
     result = solver.solve(frame)
     assert not result.solved
     assert n["calls"] == 1  # stopped after the first (fatal) attempt
+
+
+def test_adaptive_ladder_survives_a_timeout_on_the_first_rung(tmp_path, monkeypatch):
+    # A timeout on the slow full-res first rung must NOT abort the ladder: the
+    # faster downsampled rungs run on fewer pixels and can still solve the frame.
+    frame = tmp_path / "frame.fits"
+    frame.write_bytes(b"")
+    solver = _make_solver(tmp_path)
+    wcs = frame.with_suffix(".wcs")
+    ini = frame.with_suffix(".ini")
+
+    def fake_run(cmd, **kwargs):
+        # First rung (no -z) runs long and times out; a downsampled rung solves.
+        if "-z" not in cmd:
+            raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout", 60))
+        wcs.write_text("CRVAL1=10\n")
+        ini.write_text("CRVAL1=10\nCRVAL2=20\nCDELT2=0.0007\nCROTA2=0\n")
+
+        class _P:
+            stdout = ""
+            stderr = ""
+            returncode = 0
+        return _P()
+
+    monkeypatch.setattr("seestack.solve.astap.subprocess.run", fake_run)
+    result = solver.solve(frame)
+    assert result.solved  # rescued by a later rung instead of giving up on the timeout
+
+
+def test_adaptive_ladder_raises_only_after_every_rung_times_out(tmp_path, monkeypatch):
+    # If *every* rung times out the failure is surfaced — but only after the whole
+    # ladder has been tried, not on the first timeout.
+    frame = tmp_path / "frame.fits"
+    frame.write_bytes(b"")
+    solver = _make_solver(tmp_path)
+    n = {"calls": 0}
+
+    def fake_run(cmd, **kwargs):
+        n["calls"] += 1
+        raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout", 60))
+
+    monkeypatch.setattr("seestack.solve.astap.subprocess.run", fake_run)
+    with pytest.raises(ASTAPError):
+        solver.solve(frame)
+    assert n["calls"] == len(ASTAPSolver._SOLVE_LADDER)  # tried every rung first
 
 
 def test_solve_once_emits_z_and_s_flags(tmp_path, monkeypatch):

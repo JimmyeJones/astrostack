@@ -3543,6 +3543,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+- ~~**IMPROVEMENT IDEA (Scout 2026-07-21) — a plate-solve timeout on the full-resolution rung should fall
+  through to the faster downsampled retry rungs instead of giving up.**~~ — **SHIPPED v0.158.6** (Builder
+  2026-07-21, branch `claude/pensive-faraday-yr971k`). `ASTAPSolver.solve` (`seestack/solve/astap.py`) now
+  wraps each `_solve_once` rung in `try/except ASTAPError`: a per-rung failure (most often a `TimeoutExpired`
+  on the slow full-res first rung) logs the attempt and falls through to the next, coarser, *faster* rung — the
+  exact frame the ×2/×4 downsample ladder exists to rescue — and the error is surfaced **only after every rung
+  is exhausted** (`raise ASTAPError` with the combined attempts log, preserving the raise-on-total-timeout
+  contract). Contract-safe: the caller (`solve/runner.py::run_solve`) already turns both a raised `ASTAPError`
+  and an unsolved result into `SolveResult(solved=False)` with `accept` untouched, so the only behaviour change
+  is that a first-rung timeout can now *succeed* on a later rung instead of being thrown away. Regressions in
+  `tests/test_astap.py`: `test_adaptive_ladder_survives_a_timeout_on_the_first_rung` (rung 0 times out, a
+  downsampled rung solves → `result.solved`; fails-before because the timeout raised immediately) and
+  `test_adaptive_ladder_raises_only_after_every_rung_times_out` (all rungs time out → raises, but only after
+  trying all `len(_SOLVE_LADDER)` rungs; fails-before with 1 call). Additive/upgrade-safe: pure control-flow in
+  the solver, no schema/config/API/default change. Original spec kept for provenance:
 - **IMPROVEMENT IDEA (Scout 2026-07-21) — a plate-solve timeout on the full-resolution rung should fall
   through to the faster downsampled retry rungs instead of giving up.** *(Autonomy / image-quality, PRIORITY 2;
   size S.)* **Why:** `solve/astap.py::solve()` tries a ladder of rungs — full-res, then downsample ×2/×4 — to

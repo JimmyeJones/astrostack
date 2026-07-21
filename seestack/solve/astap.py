@@ -185,15 +185,28 @@ class ASTAPSolver:
 
         attempts_log: list[str] = []
         last: ASTAPResult | None = None
+        last_error: ASTAPError | None = None
         for i, params in enumerate(self._SOLVE_LADDER):
-            result = self._solve_once(
-                fits_path,
-                downsample=params.get("downsample"),
-                max_stars=params.get("max_stars"),
-                ra_hint_deg=ra_hint_deg,
-                dec_hint_deg=dec_hint_deg,
-                radius_deg=radius_deg,
-            )
+            try:
+                result = self._solve_once(
+                    fits_path,
+                    downsample=params.get("downsample"),
+                    max_stars=params.get("max_stars"),
+                    ra_hint_deg=ra_hint_deg,
+                    dec_hint_deg=dec_hint_deg,
+                    radius_deg=radius_deg,
+                )
+            except ASTAPError as exc:
+                # A per-rung failure — most often a *timeout* on the slow full-res
+                # first rung — must not abort the ladder. The coarser downsampled
+                # rungs run faster (fewer pixels) and often solve exactly the
+                # noisy/star-poor frame the ladder exists to rescue, so fall
+                # through and try them; only surface the error if *every* rung
+                # fails this way. ``accept`` is untouched on total failure (the
+                # caller turns an unsolved solve into ``solved=False`` either way).
+                last_error = exc
+                attempts_log.append(f"[attempt {i + 1} {params}] {exc}")
+                continue
             last = result
             if result.solved:
                 if i > 0:
@@ -206,6 +219,10 @@ class ASTAPSolver:
         if last is not None:
             last.log_tail = "\n".join(attempts_log)[-2000:]
             return last
+        if last_error is not None:
+            # Every rung raised (e.g. all timed out) — surface only after the
+            # whole ladder is exhausted, preserving the raise-on-timeout contract.
+            raise ASTAPError("\n".join(attempts_log)[-2000:]) from last_error
         # Defensive: ladder was empty (shouldn't happen).
         raise ASTAPError("no solve attempts were configured")
 
