@@ -695,6 +695,38 @@ when you take it.
   used only a mild 40× outlier where the MTF self-correction still holds; the clamps break it at the larger (and
   realistic full-well) outlier magnitudes measured here.
 
+_Scout audit log 2026-07-21 (baseline green on current `origin/main` v0.143.0: 1427 passed / 2 skipped):
+led the rotation with the **stacking engine + calibration + the auto-calibration autonomy path** per the
+owner's current focus #1, by adversarial hand-trace, and dogfooded the stack→result journey. **All traced
+clean — no new verified bug filed; the engine is genuinely mature, consistent with the ~20 prior clean
+re-audits.** Read adversarially: (1) `stack/accumulator.py` — WeightedSum (any-channel `frame_coverage`,
+window==full parity), Welford (ddof=1, NaN-std single-coverage signal), **MinMaxReject** k-set insertion
+sort (mins ascending / maxs descending, ±inf identities never displace a real value), the three count-band
+`result()` degrade (`≥2k+1` full k-trim / `3≤n<2k+1` single drop / `1–2` plain mean / `0` NaN), and
+`rejection_counts` structural tally; (2) `stack/stacker.py` — κ-σ pass-1/pass-2 `consume_clipped` keep-mask
+`|x−mean|≤κσ` with NaN-std→+inf-tol keep-all, the pass-2 `n_used==0` guard (v0.136.4), the min/max path
+leaving `frame_cov=None` so `coverage[...,0]` (a true pre-rejection per-channel frame count on that path) is
+used — verified correct, not a bug — `_resolve_auto_reject`/`_auto_kappa_min_frames` (the just-shipped
+v0.143.0 method auto-pick), and all header-provenance branches (REJ*/WGT*/PHOT*/DARKSCAL/NOFFERED); (3)
+`stack/{drizzle_path,mosaic,align,photometric,weighting}.py` — drizzle var=E[v²]−E[v]² float64 + Bessel +
+`_MIN_REJECT_NEFF` + `_VAR_RESOLUTION_FACTOR` gates + neff-from-frame-count (not pixfrac-deflated weight),
+half-open-pixel in-bounds mask, mosaic RA-wrap circular-mean everywhere + px/MP caps + iterative-outlier-drop,
+windowed-reproject 3px inset valid-mask + order-1 sub-pixel-shift dual NaN propagation (data `cval=0` / mask
+`cval=1`, reject >1e-6), geometric-mean quality weights floored at 0.1, photometric ref/transparency scale
+direction; (4) `calibrate/apply.py` — `_sanitize_pedestal` non-finite dark/bias→0 + flat non-finite→NaN→1.0
+(v0.142.3), dark-XOR-bias (no double-subtract), `_effective_dark` == `bias+(dark−bias)·t_light/t_dark` with the
+no-data-mask restore-0; (5) `webapp/calibration.py` autonomy — `_match_distance`/`recommend_masters` and the
+`auto_bind_master_paths` confidence gates (dark exposure ±25% + gain/temp, flat/bias gain/temp, dimension gate,
+iterate-candidates-past-a-failed-top-pick, bias-only-when-no-dark). **Dogfood**: baseline suite green
+end-to-end. **Curation this run:** the two open Bugs (dead SExtractor skew-guard in 4 bg/leveling helpers;
+sky-atlas WCS rotation sign — now largely superseded by the v0.142.4 stored-canvas-WCS placement fix and only
+reached on the headerless-fallback path) both remain correctly REAL-data-gated — not blind-fixable — so
+neither is a Builder-ready item. Added one improvement idea (auto-tune `min_max_reject_count` k from the
+frame count, extending v0.143.0's method auto-pick) and one new beginner feature ("Acquisition nameplate" —
+auto-render the shot's own provenance onto the shared image). **Next rotation (not re-covered fresh this
+run):** `webapp/{watcher,jobs,pipeline}.py` orchestration and the `io/{scanner,ingest,merge}.py` ingest path;
+the two GPU-only reproject/bg seams still want a real GPU host._
+
 _Scout audit log 2026-07-16 (baseline green on current `origin/main` v0.127.0: 1308 passed / 2 skipped):
 led the rotation with the **stacking engine** per the owner's current focus #1, combining hand-traces with
 four parallel adversarial subagent audits (each required to justify any finding by a concrete failing
@@ -3028,6 +3060,31 @@ problems. Dogfood it every big-picture run and fix root causes.
   Upgrade-safe/additive: new field defaulting to today's behaviour, form descriptor added (drift test green),
   no schema/API/on-disk/default change. Beginner bar ✔ (one explained yes/no removes a real κ-σ-vs-min/max
   decision a non-expert can't be expected to make). _(PRIORITY 2 autonomy + P4 image quality.)_
+- **NEW IMPROVEMENT (Scout 2026-07-21) — when auto-reject resolves to min/max, also auto-scale the *number*
+  of extremes it drops (`min_max_reject_count` k) to the frame count, so a long multi-night session with
+  several trails crossing the same pixel is actually cleaned.** v0.143.0's `auto_reject` picks the *method*
+  (min/max below the κ-effective frame count, κ-σ at/above it) but always leaves `min_max_reject_count=1` —
+  the classic single min/max drop. That's correct for a *lone* trail, but the §1 owner routinely stacks
+  **thousands of subs across many nights**, where 2–3 satellite/plane trails can cross the *same* output
+  pixel over a session; a k=1 drop removes only the single brightest and leaves the rest as a residual
+  streak. The engine already fully supports k>1 — `MinMaxRejectAccumulator(reject_count=k)` keeps k sorted
+  min/max planes and degrades gracefully (`count≥2k+1` full k-trim → single drop → plain mean; verified
+  clean in this run's audit) and the peak-memory guard already charges `2+2k` planes
+  (`_min_max_reject_arrays`). **Idea:** inside `_resolve_auto_reject`, when it selects min/max, also set k
+  from n on a gentle, conservative curve — e.g. `k=1` up to a few hundred frames, `k=2` into the low
+  thousands, capped small (≤3) so a modest stack never over-trims (dropping 2k of n samples must stay a
+  small fraction; keep k ≤ ~n/8). Purely a refinement of the already-opt-in `auto_reject` path — **off by
+  default**, no effect unless the user turned auto-reject on and it resolved to min/max, so no default flip
+  and byte-for-byte unchanged for everyone else. **Well-grounded / low-risk:** one small change to the
+  existing `_resolve_auto_reject` (which already returns a `replace(options, …)` copy), the accumulator +
+  memory guard already handle any k, and the resolved k is persisted in the run record like the method is.
+  **Guardrails:** the k-vs-n curve must be conservative (never trim a meaningful fraction of a small stack —
+  cap k so `2k ≤ n/4`); validate on a real long session that a genuine multi-trail pixel is cleaned while a
+  clean stack is unchanged. Tests: extend `tests/test_stack_pipeline.py` — `_resolve_auto_reject` returns
+  k=1 for small n and a capped k>1 for large n; a synthetic stack with two planted trails at one pixel and
+  a high frame count clips both under the auto-scaled k (fail-before with k=1 one residual survives).
+  _(S code / S–M validation; PRIORITY 2 autonomy + P4 image quality — extends the shipped auto_reject so the
+  "just works" method-pick also gets the *strength* right for the owner's high-frame-count workflow.)_
 - ~~**NEW (Scout 2026-07-21) — "Walk-away mode": one Settings toggle that turns on the whole unattended
   bundle, instead of five buried advanced switches.**~~ — **SHIPPED v0.140.0** (Builder 2026-07-21, branch
   `claude/pensive-faraday-i5lui7`). Added a single prominent **"Walk-away mode"** Switch at the top of the
@@ -4325,6 +4382,34 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+- **NEW BEGINNER FEATURE (Scout 2026-07-21 #6) — "Acquisition nameplate": auto-render the shot's own
+  details onto the shared image, so a beginner's post looks like a "real" astrophoto without any
+  editing.** Astrophotographers traditionally caption a finished image with its *acquisition data* —
+  target, total integration, sub count, date, gear — and beginners love the look but have no way to make
+  one; they post a bare JPEG with no context. The app **already knows every field**: `run_stack` stamps
+  `OBJECT` / `NFRAMES` / `EXPTOTAL` / `EXPOSURE` into the master FITS header (see
+  `stacker.py::_build_output_header_meta`), and the camera is a fixed "ZWO Seestar S50". **Feature:** an
+  optional, on-by-default tasteful footer/corner nameplate baked into the share export — *"M31 · Andromeda
+  Galaxy   ·   4h 12m (505×30s)   ·   19 Jul 2026   ·   ZWO Seestar S50"* — rendered onto the same
+  display-space pixels `write_share_jpeg` / `png_bytes_to_jpeg` already produce (`seestack/stack/output.py`).
+  A single "Add caption bar" toggle in the share flow (default on, one clean template — no fonts/positions/
+  colours to pick), plus an obvious "off" for a clean image. **Beginner bar ✔:** plain-language, one toggle,
+  a sane default, no expert knobs, and it directly makes the thing a beginner *shares* look finished and
+  credible — serves the "enjoy / share a good image" pillar (P3) the owner called out in §1. **Distinct
+  from the existing "Share card" idea** (line ~ below), which adds a *user-typed* caption + social export:
+  this auto-generates the *provenance the app already recorded* as an image overlay, needing zero typing —
+  the two compose (nameplate = the facts; caption = the words). **Well-grounded / low-risk:** all data is
+  already in the FITS header / `stack_runs` row; the render is a pure Pillow `ImageDraw` text bar over the
+  existing share bytes with a bundled font (no network, no new heavy dep). **Guardrails:** additive and
+  reversible (a render-time overlay, never touches the stored FITS/preview or the linear science data);
+  off-switch for a bare image; every field is best-effort — omit a line whose header key is missing rather
+  than printing a blank, so an older/edited run without provenance still exports cleanly. Split for the
+  Builder: (a) a pure `render_nameplate(rgb_or_pngbytes, fields) -> bytes` helper next to `write_share_jpeg`
+  + tests (all-fields, missing-field omission, tiny-image scaling, NaN=black background unaffected);
+  (b) wire the share/download endpoint(s) to read the run's provenance and pass it through, gated on the
+  toggle; (c) the share-flow toggle (default on). _(M, split as above; PRIORITY 3 friendliness / share —
+  beginner feature; keeps the pipeline stocked. Builds directly on shipped share-export + FITS-provenance
+  infra, so low-risk.)_
 - **NEW BEGINNER FEATURE (Scout 2026-07-21 #5) — "Night by night": a per-target breakdown of every
   imaging night, so a beginner can see which nights were good and set a clouded-out night aside.** The
   §1 owner shoots one target across *many* nights (the Seestar writes a new folder per night). Today the
