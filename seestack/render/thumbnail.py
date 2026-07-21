@@ -258,6 +258,39 @@ def _apply_north_up(disp: np.ndarray, fits_path: str | Path) -> np.ndarray:
     return np.clip(rotate_image_north_up(disp, angle), 0.0, 1.0)
 
 
+def orient_preview_north_up(preview_png: bytes, fits_path: str | Path) -> bytes:
+    """Rotate an already-rendered stack *preview* PNG so celestial North is up,
+    using the run's own master-FITS WCS, and return it re-encoded as PNG.
+
+    Lets the share/download path offer a North-up picture without re-rendering
+    from the linear FITS: the stored preview is already the finished display
+    image (exact colour parity with what the user saw), and the North rotation is
+    invariant under the uniform downscale between the FITS and its preview, so the
+    FITS-derived angle applies to the preview unchanged. When the run has no usable
+    WCS or the correction is sub-threshold (:data:`~seestack.render.orient.
+    NORTH_UP_MIN_DEG`), the **original bytes are returned untouched** — so a
+    no-correction request is byte-for-byte the un-oriented preview and never
+    needlessly resamples. Exposed corners fill with black (the app's uncovered/NaN
+    convention), matching the JPEG flatten in :func:`~seestack.stack.output.
+    png_bytes_to_jpeg`."""
+    import io
+
+    from PIL import Image
+
+    from seestack.render.orient import NORTH_UP_MIN_DEG, rotate_image_north_up
+
+    angle = stack_north_up_deg(fits_path)
+    if angle is None or abs(angle) < NORTH_UP_MIN_DEG:
+        return preview_png
+    with Image.open(io.BytesIO(preview_png)) as src:
+        rgb = np.asarray(src.convert("RGB"), dtype=np.float32) / 255.0
+    rotated = np.clip(rotate_image_north_up(rgb, angle), 0.0, 1.0)
+    u8 = (rotated * 255).astype(np.uint8)
+    buf = io.BytesIO()
+    Image.fromarray(u8, mode="RGB").save(buf, format="PNG")
+    return buf.getvalue()
+
+
 def stack_coverage_mask(fits_path: str | Path) -> np.ndarray:
     """Boolean ``(H, W)`` coverage mask for a stacked-image FITS.
 

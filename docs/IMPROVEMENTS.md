@@ -4659,6 +4659,31 @@ problems. Dogfood it every big-picture run and fix root causes.
   reusing `write_share_jpeg`/`write_full_res_png`. _(M, split as above; PRIORITY 3 friendliness /
   understand-enjoy-share — beginner feature; reuses the shipped WCS geometry + share-render infra, so low-risk.
   Keeps the beginner-feature pipeline stocked.)_
+- ~~**NEW (Builder 2026-07-21, follow-up to the shipped North-up view slice v0.148.0) — offer the North-up
+  orientation on the *download/share* image, not just the History Adjust view.**~~ — **SHIPPED v0.150.0**
+  (Builder 2026-07-21, branch `claude/pensive-faraday-dircmw`). The share-friendly **JPEG** download
+  (`download_stack_run` `kind="jpeg"`) now takes an optional `north_up=` query param: when on, it rotates the
+  stored preview bytes so celestial North points up (using the run's own master-FITS WCS) before JPEG-encoding,
+  so a beginner posts a conventionally-oriented picture. **Engine:** new pure helper
+  `render.thumbnail.orient_preview_north_up(preview_png, fits_path)` decodes the finished preview, reuses the
+  shipped `stack_north_up_deg` + `rotate_image_north_up` (same sign, already pinned by the v0.148.0 astropy
+  marker test), and **returns the original bytes untouched** when the run has no usable WCS or the correction is
+  sub-threshold — so the ordinary download is byte-for-byte unchanged and never needlessly resamples. The North
+  rotation is invariant under the uniform FITS→preview downscale, so the FITS-derived angle applies to the
+  preview directly. **Frontend:** `api.stackArtifactUrl(safe, id, kind, northUp)` appends `north_up=true` **only**
+  for `kind="jpeg"` (the stored PNG/FITS/TIFF stay WCS-aligned so the Sky-map overlay still places the preview);
+  the existing History Adjust-panel "Rotate so North is up" `Switch` now also governs the JPEG download button,
+  the Share-picture button, and the lightbox JPEG link (its description updated to say so). **Deliberately not on
+  the PNG/FITS/TIFF** (must stay WCS-aligned) and the editor-export surface is left for a separate slice (a
+  display-space editor export that applied a geometry op no longer matches its master WCS — filed below).
+  Additive/upgrade-safe: new optional param off by default, no schema/config/API-shape/existing-default change, a
+  broken FITS falls back to the un-oriented preview (never a 500). Tests: `tests/test_thumbnail.py` (+2 —
+  `orient_preview_north_up` re-orients on a real 30° WCS correction / byte-for-byte no-op with no WCS or a
+  near-aligned frame), `tests/webapp/test_stack_render.py` (+2 — the JPEG endpoint reorients with `north_up=true`
+  on a rotated-WCS run / graceful no-op without a WCS), `stackRenderUrl.test.ts` (+2 — `stackArtifactUrl` appends
+  north_up only for jpeg), `History.test.tsx` (+1 — the JPEG link carries north_up once the toggle is on).
+  Python + tsc + vitest + vite build green. _(PRIORITY 3 friendliness / enjoy-share — completes the "share it
+  oriented like the reference photos" story.)_ Original spec kept for provenance:
 - **NEW (Builder 2026-07-21, follow-up to the shipped North-up view slice v0.148.0) — offer the North-up
   orientation on the *download/share* image, not just the History Adjust view.** v0.148.0 orients the live
   render + lightbox (`render` endpoint `north_up=`) but deliberately leaves the canonical JPEG/PNG downloads and

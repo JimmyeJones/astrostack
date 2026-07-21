@@ -277,6 +277,60 @@ def test_jpeg_download_404_for_unknown_run(client, solved_library):
     assert r.status_code == 404
 
 
+def _add_rotated_wcs(fits_path, rot_deg: float) -> None:
+    """Stamp a celestial TAN WCS rotated by ``rot_deg`` onto a run's master FITS."""
+    th = np.radians(rot_deg)
+    cdelt = 0.001
+    with fits.open(fits_path, mode="update") as hdul:
+        hdr = hdul[0].header
+        h, w = hdul[0].data.shape[-2:]
+        hdr["CTYPE1"] = "RA---TAN"
+        hdr["CTYPE2"] = "DEC--TAN"
+        hdr["CRPIX1"] = (w - 1) / 2 + 1
+        hdr["CRPIX2"] = (h - 1) / 2 + 1
+        hdr["CRVAL1"] = 150.0
+        hdr["CRVAL2"] = 20.0
+        hdr["CD1_1"] = -cdelt * np.cos(th)
+        hdr["CD1_2"] = cdelt * np.sin(th)
+        hdr["CD2_1"] = cdelt * np.sin(th)
+        hdr["CD2_2"] = cdelt * np.cos(th)
+
+
+def test_jpeg_download_north_up_reorients_the_share_image(client, solved_library):
+    """north_up=true rotates the shared JPEG so celestial North is up (using the
+    run's own WCS) — a different image from the un-oriented JPEG when a real field
+    rotation exists."""
+    from pathlib import Path
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    preview_path, run_id = _make_run_with_fits(solved_library, safe)
+    fits_path = Path(preview_path).parent / "master.fits"
+    _add_rotated_wcs(fits_path, rot_deg=30.0)
+    assert client.post(f"/api/targets/{safe}/stack-runs/{run_id}/preview",
+                       json={"stretch": 0.5, "black": 0.35}).status_code == 200
+
+    plain = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/jpeg")
+    oriented = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/jpeg?north_up=true")
+    assert plain.status_code == oriented.status_code == 200
+    assert oriented.headers["content-type"] == "image/jpeg"
+    assert oriented.content[:2] == b"\xff\xd8"
+    # A real 30° correction changes the pixels — the oriented share is distinct.
+    assert oriented.content != plain.content
+
+
+def test_jpeg_download_north_up_is_a_noop_without_a_wcs(client, solved_library):
+    """A run with no usable WCS can't be oriented → north_up=true serves the same
+    bytes as the plain JPEG (graceful no-op, never a broken/500 render)."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)  # FITS carries no WCS
+    assert client.post(f"/api/targets/{safe}/stack-runs/{run_id}/preview",
+                       json={"stretch": 0.5, "black": 0.35}).status_code == 200
+
+    plain = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/jpeg")
+    oriented = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/jpeg?north_up=true")
+    assert plain.status_code == oriented.status_code == 200
+    assert oriented.content == plain.content
+
+
 def test_stack_info_reads_provenance_cards(client, solved_library):
     """The info endpoint surfaces the provenance header cards (integration time,
     frame count, method) from the run's master FITS."""

@@ -989,8 +989,13 @@ export const api = {
     if (opts.mosaic_canvas) p.set("mosaic_canvas", opts.mosaic_canvas);
     return req<StackEstimate>(`/api/targets/${safe}/stack-estimate?${p.toString()}`);
   },
-  stackArtifactUrl: (safe: string, id: number, kind: "preview" | "jpeg" | "fits" | "tiff") =>
-    `/api/targets/${safe}/stack-runs/${id}/${kind}`,
+  stackArtifactUrl: (
+    safe: string, id: number, kind: "preview" | "jpeg" | "fits" | "tiff",
+    northUp = false,
+  ) =>
+    `/api/targets/${safe}/stack-runs/${id}/${kind}` +
+    // Only the share-friendly JPEG honours north_up (rotate so North is up).
+    (northUp && kind === "jpeg" ? "?north_up=true" : ""),
   // "What's in this picture?" — catalog objects that fall inside a run's field.
   stackAnnotations: (safe: string, id: number) =>
     req<StackAnnotations>(`/api/targets/${safe}/stack-runs/${id}/annotations`),

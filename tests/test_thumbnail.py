@@ -204,3 +204,93 @@ def test_overlay_rgba_png_all_covered_is_fully_opaque():
     Image.fromarray(np.full((5, 5, 3), 80, np.uint8), mode="RGB").save(buf, format="PNG")
     out = Image.open(BytesIO(overlay_rgba_png(buf.getvalue(), np.ones((5, 5), bool))))
     assert (np.asarray(out)[..., 3] == 255).all()
+
+
+def _fits_with_rotated_wcs(path, rot_deg: float, w: int = 20, h: int = 30):
+    """A 3-channel stack FITS carrying a celestial TAN WCS rotated by ``rot_deg``
+    (RA-left parity), so North-up orientation has a known, non-trivial correction."""
+    from astropy.io import fits
+
+    cube = np.zeros((3, h, w), dtype=np.float32)
+    cube[:, : h // 2, :] = 0.8              # top half bright so a rotation is visible
+    hdu = fits.PrimaryHDU(data=cube)
+    th = np.radians(rot_deg)
+    cdelt = 0.001
+    hdu.header["CTYPE1"] = "RA---TAN"
+    hdu.header["CTYPE2"] = "DEC--TAN"
+    hdu.header["CRPIX1"] = (w - 1) / 2 + 1
+    hdu.header["CRPIX2"] = (h - 1) / 2 + 1
+    hdu.header["CRVAL1"] = 150.0
+    hdu.header["CRVAL2"] = 20.0
+    hdu.header["CD1_1"] = -cdelt * np.cos(th)
+    hdu.header["CD1_2"] = cdelt * np.sin(th)
+    hdu.header["CD2_1"] = cdelt * np.sin(th)
+    hdu.header["CD2_2"] = cdelt * np.cos(th)
+    hdu.writeto(path, overwrite=True)
+
+
+def _preview_png(w: int = 20, h: int = 30) -> bytes:
+    from io import BytesIO
+
+    from PIL import Image
+
+    rgb = np.zeros((h, w, 3), dtype=np.uint8)
+    rgb[: h // 2, :] = (30, 200, 60)        # top half green, mirroring the FITS
+    buf = BytesIO()
+    Image.fromarray(rgb, mode="RGB").save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def test_orient_preview_north_up_rotates_with_a_real_correction(tmp_path):
+    """A run whose WCS has a meaningful field rotation → the preview is re-oriented
+    (different pixels/geometry from the input)."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    from seestack.render.thumbnail import orient_preview_north_up
+
+    fp = tmp_path / "master.fits"
+    _fits_with_rotated_wcs(fp, rot_deg=30.0)
+    preview = _preview_png()
+
+    out = orient_preview_north_up(preview, fp)
+    assert out != preview                    # actually re-encoded/rotated
+    im = Image.open(BytesIO(out))
+    # A 30° rotate expands the canvas (bicubic + expand, black corners).
+    assert im.size != (20, 30)
+
+
+def test_orient_preview_north_up_noop_without_a_meaningful_correction(tmp_path):
+    """No WCS (or a sub-threshold correction) returns the original bytes untouched
+    — a byte-for-byte no-op, so the ordinary share/download is unchanged."""
+    from astropy.io import fits
+
+    from seestack.render.thumbnail import orient_preview_north_up
+
+    preview = _preview_png()
+
+    # (a) A FITS with no celestial WCS at all → original bytes back.
+    plain = tmp_path / "plain.fits"
+    fits.PrimaryHDU(data=np.zeros((3, 30, 20), np.float32)).writeto(plain, overwrite=True)
+    assert orient_preview_north_up(preview, plain) is preview
+
+    # (b) A frame already oriented North-up in array terms (correction below
+    # NORTH_UP_MIN_DEG) → also untouched. Dec increases as the row *decreases*
+    # (CD2_2 < 0), so screen-up is already North with a near-zero correction.
+    aligned = tmp_path / "aligned.fits"
+    cdelt = 0.001
+    fits.PrimaryHDU(data=np.zeros((3, 30, 20), np.float32)).writeto(aligned, overwrite=True)
+    with fits.open(aligned, mode="update") as hdul:
+        hdr = hdul[0].header
+        hdr["CTYPE1"] = "RA---TAN"
+        hdr["CTYPE2"] = "DEC--TAN"
+        hdr["CRPIX1"] = (20 - 1) / 2 + 1
+        hdr["CRPIX2"] = (30 - 1) / 2 + 1
+        hdr["CRVAL1"] = 150.0
+        hdr["CRVAL2"] = 20.0
+        hdr["CD1_1"] = -cdelt
+        hdr["CD1_2"] = 0.0
+        hdr["CD2_1"] = 0.0
+        hdr["CD2_2"] = -cdelt
+    assert orient_preview_north_up(preview, aligned) is preview
