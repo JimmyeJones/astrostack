@@ -581,25 +581,39 @@ def _downsample_rgb(rgb: np.ndarray, target_h: int, target_w: int) -> np.ndarray
     """
     Resize an RGB float image to (target_h, target_w) using Pillow's box filter.
 
-    Crucially this uses ONE global normalization for all three channels so the
-    color balance is preserved through the uint8 round-trip Pillow needs.
+    Each channel is box-averaged in Pillow's **float** (``"F"``) mode, keeping full
+    float precision — there is *no* uint8 round-trip. A prior version first
+    normalised the whole frame to ``[0, 1]`` against its global min/max and
+    quantised to uint8 before resizing. On a real raw Seestar sub the max is a
+    saturated star (or hot pixel) at ~65535, while the sky sits a few thousand
+    ADU up with only ~80 ADU of noise — so the sky collapsed into 1–2 uint8
+    levels and its texture was destroyed *before* the downstream autostretch
+    could reveal it. That silently flattened the raw-sub side of the "one frame
+    vs your stack" reveal (``render_sub_preview``), hiding the very single-sub
+    noise the comparison exists to show, and posterised the faint sky in every
+    raw-sub thumbnail. Box downsampling is a per-channel *linear* average, so
+    resizing each channel independently in float preserves colour ratios exactly
+    (the old shared-normalisation trick is unnecessary without the uint8 step).
     """
     from PIL import Image
 
-    # NaN-aware range so a NaN=no-coverage pixel (should a future caller point
-    # this at a stacked/reprojected FITS) doesn't poison min()/max() into NaN and
-    # collapse the whole frame to black — mirroring the sibling autostretch/
-    # asinh_stretch reductions. For an ordinary raw-sub input (no NaN) this is
-    # byte-for-byte the old behaviour.
-    lo = float(np.nanmin(rgb)) if np.isfinite(rgb).any() else float("nan")
-    hi = float(np.nanmax(rgb)) if np.isfinite(rgb).any() else float("nan")
-    if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+    # An all-non-finite frame has no data to show → black placeholder (matches
+    # the sibling autostretch/asinh_stretch degenerate handling).
+    if not np.isfinite(rgb).any():
         return np.zeros((target_h, target_w, 3), dtype=np.float32)
-
-    # NaN pixels floor to `lo` (no coverage → darkest), finite pixels are
-    # unchanged; the clip is a no-op for a finite in-range input.
-    norm = np.clip(np.nan_to_num((rgb - lo) / (hi - lo), nan=0.0), 0.0, 1.0)
-    u8 = (norm * 255).astype(np.uint8)
-    img = Image.fromarray(u8, mode="RGB").resize((target_w, target_h), Image.BOX)
-    out = np.asarray(img, dtype=np.float32) / 255.0
-    return out * (hi - lo) + lo
+    # NaN = no coverage (should a future caller point this at a stacked/
+    # reprojected FITS). Floor NaN to the frame min (darkest) so a no-coverage
+    # pixel doesn't poison the box average of its finite neighbours, mirroring
+    # the sibling reductions. For an ordinary raw-sub input (no NaN) this is a
+    # no-op.
+    floor = float(np.nanmin(rgb))
+    filled = np.nan_to_num(rgb.astype(np.float32, copy=False), nan=floor)
+    chans = [
+        np.asarray(
+            Image.fromarray(np.ascontiguousarray(filled[..., c], dtype=np.float32),
+                            mode="F").resize((target_w, target_h), Image.BOX),
+            dtype=np.float32,
+        )
+        for c in range(filled.shape[2])
+    ]
+    return np.stack(chans, axis=-1)
