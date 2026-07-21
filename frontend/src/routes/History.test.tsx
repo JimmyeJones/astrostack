@@ -169,6 +169,41 @@ describe("HistoryView", () => {
     await waitFor(() => expect(screen.getByText(/42 min/)).toBeInTheDocument());
   });
 
+  it("labels the catalog objects in the field when Identify is toggled", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ has_preview: true })]);
+    const annot = vi.spyOn(client.api, "stackAnnotations").mockResolvedValue({
+      width: 1000, height: 600,
+      objects: [
+        { catalog_id: "M31", name: "Andromeda Galaxy", type: "galaxy",
+          ra_deg: 10.68, dec_deg: 41.27, x_px: 500, y_px: 300 },
+      ],
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+
+    // Not fetched until the user asks.
+    expect(annot).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Identify" }));
+
+    await waitFor(() => expect(annot).toHaveBeenCalledWith("M_42", 1));
+    await waitFor(() =>
+      expect(screen.getByText(/Found 1 catalog object in this field/)).toBeInTheDocument());
+  });
+
+  it("says so plainly when no catalog objects fall in the field", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ has_preview: true })]);
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue({
+      width: 1000, height: 600, objects: [],
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Identify" }));
+    await waitFor(() =>
+      expect(screen.getByText(/No catalog objects fall inside this field/)).toBeInTheDocument());
+  });
+
   it("offers PNG and JPEG downloads of the finished image when a preview exists", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ has_preview: true })]);
     renderHistory();

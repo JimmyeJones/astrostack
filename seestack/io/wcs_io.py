@@ -61,6 +61,39 @@ def wcs_text_from_sidecar(wcs_path: str | Path) -> str | None:
         return None
 
 
+def celestial_wcs_from_fits(fits_path: str | Path):  # noqa: ANN201 — returns (WCS|None, int, int)
+    """Read a 2-D celestial WCS and pixel dims from a FITS file's header.
+
+    Returns ``(wcs, width_px, height_px)`` — the celestial (RA/Dec) WCS plus the
+    image's ``NAXIS1``/``NAXIS2`` — or ``(None, 0, 0)`` when the file is missing,
+    unreadable, or carries no celestial WCS. The stack output FITS is a
+    ``(3, H, W)`` cube with only the 2-D celestial keys merged in (see
+    :func:`seestack.stack.output._write_fits`), so we take ``wcs.celestial`` and
+    guard ``has_celestial`` — a header with no WCS yields ``None`` rather than a
+    silent identity WCS."""
+    p = Path(fits_path)
+    if not p.exists():
+        return None, 0, 0
+    import warnings
+
+    from astropy.io import fits
+    from astropy.wcs import WCS, FITSFixedWarning
+
+    try:
+        header = fits.getheader(p)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", FITSFixedWarning)
+            wcs = WCS(header).celestial
+        if not wcs.has_celestial or wcs.naxis != 2:
+            return None, 0, 0
+        width = int(header.get("NAXIS1", 0) or 0)
+        height = int(header.get("NAXIS2", 0) or 0)
+        return wcs, width, height
+    except Exception as exc:  # noqa: BLE001 — a bad/missing header just means "no WCS"
+        log.warning("WCS read from FITS failed (%s): %s", p, exc)
+        return None, 0, 0
+
+
 def footprint_radec_deg(wcs, width_px: int, height_px: int) -> list[tuple[float, float]] | None:
     """
     Return the four corners of the frame in RA/Dec degrees, in image order

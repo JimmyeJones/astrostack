@@ -400,6 +400,24 @@ export interface StackProcessingStep {
   label: string;
 }
 
+/** One catalog deep-sky object that falls inside a stack's field. */
+export interface FieldObject {
+  catalog_id: string;   // catalog designation, e.g. "M31" / "NGC 891"
+  name: string;         // friendly name when the catalog has one, else ""
+  type: string;         // "galaxy" / "nebula" / …
+  ra_deg: number;
+  dec_deg: number;
+  x_px: number;         // 0-based pixel x on the FITS grid (width_px below)
+  y_px: number;         // 0-based pixel y on the FITS grid (height_px below)
+}
+
+/** "What's in this picture?" — objects + the grid their pixel coords live on. */
+export interface StackAnnotations {
+  width: number;        // the run's FITS pixel width (x_px domain)
+  height: number;       // the run's FITS pixel height (y_px domain)
+  objects: FieldObject[];
+}
+
 export interface StackRunInfo {
   run_id: number;
   integration_s: number | null;
@@ -928,6 +946,9 @@ export const api = {
   },
   stackArtifactUrl: (safe: string, id: number, kind: "preview" | "jpeg" | "fits" | "tiff") =>
     `/api/targets/${safe}/stack-runs/${id}/${kind}`,
+  // "What's in this picture?" — catalog objects that fall inside a run's field.
+  stackAnnotations: (safe: string, id: number) =>
+    req<StackAnnotations>(`/api/targets/${safe}/stack-runs/${id}/annotations`),
   stackRenderUrl: (safe: string, id: number, stretch: number, black: number) =>
     `/api/targets/${safe}/stack-runs/${id}/render?stretch=${stretch}&black=${black}`,
   stackRenderSuggestion: (safe: string, id: number) =>
