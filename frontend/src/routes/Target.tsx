@@ -25,6 +25,7 @@ import { DeepeningReelCard } from "../components/DeepeningReelCard";
 import { SessionRecapCard } from "../components/SessionRecapCard";
 import { StackHealthCard } from "../components/StackHealthCard";
 import { FirstLookCard } from "../components/FirstLookCard";
+import { WallpaperMenu } from "../components/WallpaperMenu";
 import { SharePictureButton } from "../components/SharePictureButton";
 import { sharePictureText } from "../share";
 import { detectSolveSetupProblem } from "../components/target/solveSetup";
@@ -948,6 +949,9 @@ export function TargetView() {
                 new Date(latestRun.timestamp_utc).toLocaleDateString(),
               )}
             />
+          ) : null}
+          {latestRun?.has_preview ? (
+            <WallpaperMenu safe={safe} runId={latestRun.id} size="sm" variant="default" />
           ) : null}
           <Button component={Link} to={`/targets/${safe}/stack`}
             leftSection={<IconStack2 size={16} />} aria-label="Stack">

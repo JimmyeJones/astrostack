@@ -92,7 +92,27 @@ describe("TargetView latest-picture download", () => {
       "href", client.api.stackArtifactUrl("M_42", 9, "jpeg"));
   });
 
-  it("hides the picture download when the latest stack has no preview", async () => {
+  it("offers a wallpaper download of the latest stack's picture", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ id: 9 })]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1), mkFrame(2)]);
+
+    renderTarget();
+
+    // The "Wallpaper" control is a menu trigger; opening it offers the three
+    // aspect presets, each linking the server-side wallpaper endpoint.
+    const trigger = await screen.findByRole("button", { name: /Wallpaper/ });
+    fireEvent.click(trigger);
+    const phone = await screen.findByText("Phone");
+    expect(phone.closest("a")).toHaveAttribute(
+      "href", client.api.stackWallpaperUrl("M_42", 9, "phone"));
+    expect(screen.getByText("Desktop").closest("a")).toHaveAttribute(
+      "href", client.api.stackWallpaperUrl("M_42", 9, "desktop"));
+    expect(screen.getByText("Square").closest("a")).toHaveAttribute(
+      "href", client.api.stackWallpaperUrl("M_42", 9, "square"));
+  });
+
+  it("hides the picture and wallpaper downloads when the latest stack has no preview", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
     vi.spyOn(client.api, "listStackRuns")
       .mockResolvedValue([mkRun({ id: 9, has_preview: false })]);
@@ -103,6 +123,8 @@ describe("TargetView latest-picture download", () => {
     await waitFor(() =>
       expect(screen.getByRole("link", { name: "History" })).toBeInTheDocument());
     expect(screen.queryByRole("button", { name: "Download latest picture" }))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Wallpaper/ }))
       .not.toBeInTheDocument();
   });
 });

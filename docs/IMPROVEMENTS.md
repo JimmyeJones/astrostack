@@ -5099,15 +5099,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   *(Original spec kept for provenance.)*
 - **IDEA (Builder 2026-07-21, filed while shipping the wallpaper export) — surface the "Make it your wallpaper"
   menu on the Target/Gallery result surfaces too, and let it honour "North up".** *(Friendliness / PRIORITY 3;
-  size S.)* The v0.158.0 wallpaper export (`WallpaperMenu` + `GET …/wallpaper?aspect=`) currently lives only on
-  the **History** run card. A beginner who lands on the **Target** page hero or the **Gallery** tile — arguably
-  the more "enjoy my finished picture" surfaces — can't reach it without opening History. Two low-risk follow-ups:
-  (a) mount the same `WallpaperMenu` next to the existing Share/JPEG controls on the Target result card and the
-  Gallery lightbox (pure frontend — the component + endpoint already exist); (b) optionally thread the existing
-  `north_up` orientation through the wallpaper endpoint so the cropped wallpaper can point celestial North up like
-  the JPEG download does — this needs the endpoint to orient the preview *before* computing the target pixel (the
-  rotation moves the pixel), so it's a small but real bit of care, not a pure pass-through. Both additive/read-only.
-  Beginner bar ✔ (reaches the delight from where the beginner actually looks at their picture).
+  size S.)* **PARTIALLY SHIPPED v0.158.3** (Builder 2026-07-21, branch `claude/pensive-faraday-kodolb`) — slice
+  **(a)-Target done**: the `WallpaperMenu` now sits next to the Picture/Share controls on the **Target** page
+  toolbar (guarded by `latestRun?.has_preview`, styled to match the toolbar via a new optional `variant` prop on
+  the component, default `"light"` so the History card is byte-for-byte unchanged), so a beginner can make a
+  wallpaper from the target's main "enjoy my picture" surface without opening History. Tests:
+  `Target.test.tsx` +2 (offers the three aspect presets with a preview; hides them without one). **Still open:**
+  (a)-**Gallery lightbox** — mount the same menu on the Gallery lightbox (pure frontend; the lightbox needs the
+  run id + `has_preview` for the shown image); and (b) optionally thread the existing `north_up` orientation
+  through the wallpaper endpoint so the cropped wallpaper can point celestial North up like the JPEG download
+  does — this needs the endpoint to orient the preview *before* computing the target pixel (the rotation moves the
+  pixel), so it's a small but real bit of care, not a pure pass-through. Both additive/read-only. Beginner bar ✔
+  (reaches the delight from where the beginner actually looks at their picture).
 - **NEW BEGINNER FEATURE (Scout 2026-07-21 #11) — "Make it your wallpaper": one-tap export of a finished stack
   cropped + sized to a phone or desktop background, auto-centred on the target.** *(Beginner feature; PRIORITY 3
   friendliness / "enjoy + share" pillar; size S–M.)* Making your own astrophoto your phone lock-screen is one of
