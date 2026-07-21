@@ -133,6 +133,63 @@ def test_apply_solve_result_failure_doesnt_clobber_accept(tmp_path):
         proj.close()
 
 
+def test_apply_solve_result_clears_stale_solve_failed_reason(tmp_path):
+    """A frame that failed a solve, then succeeds on retry, has its stale
+    ``solve_failed:`` reject reason cleared — not left contradicting the WCS.
+
+    Regression: the success branch wrote WCS + coords but never cleared a prior
+    ``solve_failed:`` reason, so after a user installed the missing ASTAP star
+    database and re-ran solve, every now-solved frame kept a "plate-solve failed"
+    chip and still inflated the Target page's solve-failure banner.
+    """
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        fid = proj.add_frame(FrameRow(source_path="x.fit"))
+        # First pass fails (star database missing) — stores a solve_failed reason,
+        # accept untouched.
+        apply_solve_result_to_db(proj, SolveResult(
+            frame_id=fid, fits_path="x.fit", solved=False,
+            wcs_text=None, ra_center_deg=None, dec_center_deg=None,
+            pixscale_arcsec=None, rotation_deg=None, error="no star database found",
+        ))
+        f = proj.get_frame(fid)
+        assert f is not None and (f.reject_reason or "").startswith("solve_failed:")
+        # Retry succeeds — WCS lands and the stale reason must be gone.
+        apply_solve_result_to_db(proj, SolveResult(
+            frame_id=fid, fits_path="x.fit", solved=True,
+            wcs_text="CRVAL1=1.0", ra_center_deg=83.63, dec_center_deg=-5.39,
+            pixscale_arcsec=2.5, rotation_deg=12.0, error=None,
+        ))
+        f = proj.get_frame(fid)
+        assert f is not None
+        assert f.wcs_json == "CRVAL1=1.0"
+        assert f.reject_reason is None
+    finally:
+        proj.close()
+
+
+def test_apply_solve_result_preserves_a_user_reject_on_success(tmp_path):
+    """A successful solve never un-rejects a user/QC/streak decision — only a
+    ``solve_failed:`` reason is self-healed."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        fid = proj.add_frame(FrameRow(source_path="x.fit"))
+        proj.update_frame(fid, accept=False, reject_reason="user")
+        apply_solve_result_to_db(proj, SolveResult(
+            frame_id=fid, fits_path="x.fit", solved=True,
+            wcs_text="CRVAL1=1.0", ra_center_deg=83.63, dec_center_deg=-5.39,
+            pixscale_arcsec=2.5, rotation_deg=12.0, error=None,
+        ))
+        f = proj.get_frame(fid)
+        assert f is not None
+        assert f.wcs_json == "CRVAL1=1.0"
+        # The user's reject stands.
+        assert f.reject_reason == "user"
+        assert f.accept is False
+    finally:
+        proj.close()
+
+
 def test_classify_solve_setup_error():
     """The setup classifier spots ASTAP/database missing but not per-frame fails."""
     # ASTAP binary missing — the installer message.
