@@ -192,6 +192,96 @@ when you take it.
   Verify on a real irregular mosaic loaded on the Sky page: the footprint should be
   its true shape, transparent background, at the correct RA/Dec/orientation.
   Severity: broken-UX (wrong/ugly on an owner-used page). Confidence: traced.
+  _(Scout 2026-07-21 — **concrete non-blind fix path for the placement half, sidesteps the
+  rotation-sign gate entirely.** The stack's **true canvas WCS is already stored in
+  `master.fits`**: `run_stack` writes `write_stack_outputs(..., wcs_text=dst_wcs_text)` and
+  `output.py::_write_fits` merges every WCS card (CD/CDELT/CRPIX/CRVAL/CTYPE) into the master
+  header (`output.py:181-191`). For a mosaic that `dst_wcs_text` is `compute_mosaic_canvas`'s
+  astropy-built union WCS (`mosaic.py:338` → `CanvasResult.wcs_text`); for a single target it is
+  the reference frame's own solved `ref.wcs_json`. Either way it is a **real, already-validated
+  WCS** — the exact geometry the pixels were reprojected onto — not a hand-rolled rotation matrix.
+  So `sky.py` should **read the WCS from `run.fits_path`'s header and rescale it to the preview-PNG
+  grid** (multiply CD/CDELT by `full_w / preview_w`, rescale CRPIX by the same factor — `astropy.wcs`
+  does this cleanly, mirroring `drizzle_path._compute_output_canvas`'s CRPIX/CD scaling) instead of
+  `_tan_wcs` extrapolating scale+rotation from frame 0 centred on the target RA/Dec. This fixes
+  **both** the placement (canvas geometry, not frame-0's) **and** the rotation sign in one shot —
+  there is no hand-rolled `CROTA2→CD` sign to get wrong because we consume the stored WCS verbatim,
+  so the "needs a real solved frame to validate the sign" gate no longer applies to the primary
+  path. Keep `_tan_wcs` only as the fallback for a run whose master FITS is missing/headerless.
+  Builder slice: (a) a pure helper `wcs_dict_rescaled_to_preview(fits_path, preview_w, preview_h)`
+  reading the header WCS and rescaling it, unit-tested against a known CD matrix; (b) point
+  `get_sky` at it with the `_tan_wcs` fallback; (c) a regression test that a mosaic master's stored
+  CD survives the rescale (determinant scales by `(full_w/preview_w)²`, orientation preserved).
+  M code / S validation — the validation shrinks to "does the rescaled stored WCS place a real
+  mosaic correctly", which a synthetic-with-known-WCS test can largely settle. Serves the
+  ⭐ owner-reported page; correctness/friendliness.)_
+
+- **Exposure-scaled master dark re-poisons "no-data" pixels — a genuinely-no-data dark pixel
+  (sanitized to 0) is turned into a spurious `−bias·(ratio−1)` pedestal on the `scale_dark_to_light`
+  path, injecting wrong signal into every calibrated light there.** *(Reproduced, Scout 2026-07-21;
+  fresh adversarial audit of `seestack/calibrate/`.)* The prior non-finite-master fix (v0.135.1)
+  sanitizes a no-data master-dark pixel to `0.0` at load (`apply.py:109`, via `_sanitize_pedestal`) so
+  the **unscaled** path correctly applies *no correction* there (`out = raw − 0 = raw`). But
+  `_effective_dark` (`apply.py:200-208`), reached when `scale_dark_to_light` is on and a finite master
+  bias is present, treats that sanitized `0` as a **real** dark measurement and scales it:
+  `bias + (dark − bias)·ratio = bias + (0 − bias)·ratio = bias·(1 − ratio)`. For `ratio = t_light /
+  t_dark > 1` this is a large **negative** effective dark, so `apply_raw` does `out = raw − (negative)
+  = raw + bias·(ratio−1)` — it *adds* a spurious pedestal into the calibrated light at that pixel of
+  **every** frame, exactly the "no-data pedestal must mean no correction" invariant the v0.135.1 fix
+  established, silently violated on the scaling path. **Repro** (kept in session scratch; run under
+  `.venv`): `dark = _sanitize_pedestal([[nan, 100]]) → [[0, 100]]`, `bias = [[200, 50]]`,
+  `dark_exposure_s=10`, `scale_dark_to_light=True`, `raw=[[1500,1500]]`, `light_exposure_s=20`
+  (ratio 2). Effective dark = `[[−200, 150]]`; `out = [[1700, 1350]]`. Pixel 0 (no-data dark) should
+  be **1500** (the unscaled path gives exactly that) but comes out **1700** — a +200 injection; pixel 1
+  (finite dark, control) scales correctly. **Fix (one file, clear):** restore the no-correction
+  invariant on the scaled path. Track a `dark` no-data mask at load (the `~np.isfinite` of the raw
+  master *before* `_sanitize_pedestal`) and, in `_effective_dark`, force those pixels back to `0.0`
+  after computing the scaled dark (so a no-data dark still subtracts 0, matching the unscaled path) —
+  or equivalently skip scaling where the dark was no-data. Regression: a no-data dark pixel with a
+  finite bias + `scale_dark_to_light` leaves the light finite **and uncorrected** (fail-before injects
+  `bias·(ratio−1)` / pass-after `out == raw`), while a finite-dark pixel still scales. Additive /
+  upgrade-safe: only changes behaviour at no-data dark pixels on the off-by-default scaling path; an
+  all-finite master (real Seestar integer darks) is byte-for-byte unchanged. Severity: wrong-result /
+  data-integrity on the calibrate path (silently corrupts calibrated pixels). **Reachability low** —
+  gated on off-by-default `scale_dark_to_light` **and** a no-data dark pixel coexisting with a finite
+  bias pixel (realistic for imported/synthetic masters; a real Seestar dark is all-finite), so not
+  front-of-queue, but a concrete correctness violation at the "dark-scaling × NaN-as-no-data"
+  intersection. Confidence: reproduced.
+
+- **Drizzle two-pass κ-σ rejection is silently disabled on low/moderate-coverage output pixels — the
+  reject-enable gate uses accumulated *weight* (`out_wht`) as a stand-in for *sample count*, which the
+  file's own comments say understates the frame count whenever `pixfrac < 1` (the default) or
+  `scale > 1`.** *(Traced, Scout 2026-07-21; fresh adversarial audit of `seestack/stack/drizzle_path.py`.)*
+  `_clip_tolerance` sets `neff = wht` (`drizzle_path.py:85`) and disables rejection (`tol = +inf`)
+  wherever `neff < _MIN_REJECT_NEFF` (`= 3.0`, `drizzle_path.py:105`). But `out_wht` is the accumulated
+  weight = Σ(quality-weight × footprint-overlap area), and the class comment (`drizzle_path.py:170-181`)
+  states plainly that it "understates" the true frame count for any `pixfrac<1 / scale≠1` — which is
+  exactly why a **separate** `_count` uint32 plane was built for the coverage diagnostic. The gate,
+  however, still consumes the uncorrected `wht`. **Trace:** default `pixfrac=0.8`, `scale=1`, unit
+  weight → each frame deposits ≈ `0.8² = 0.64` weight per covered output pixel, so an output pixel
+  covered by 4 frames has `wht ≈ 2.56 < 3.0` → **rejection never fires there**; a satellite / plane
+  trail / cosmic-ray in one of those 4 frames survives into the master. So the documented "rejection
+  needs ≥3 frames" is silently raised to ~5 frames at the *default* pixfrac, and to ~7–8 with the
+  recommended super-res config (`scale=2, pixfrac=0.8`, where each frame's drop spreads across ~4
+  output pixels). The affected region is precisely the **low-coverage** edges (mosaic panel borders,
+  coverage gaps) where a lingering trail is most visible. Secondary effect from the same root: the
+  Bessel small-sample correction (`neff/(neff−1)`, `drizzle_path.py:91`) also treats `wht` as a count,
+  inflating `tol` by a further ~11% at `wht≈2.56`-for-4-frames — another nudge toward under-rejection.
+  Direction is **under-rejection** (retains outliers), never signal destruction (it can't carve NaN
+  holes or eat star cores), so it degrades trust rather than corrupting bright structure. **Fix:** feed
+  the reject gate (and Bessel term) the **true per-output-pixel frame count**, not `out_wht`. The
+  statistics-pass drizzler runs with `compute_stats=True`, where `_count` is currently `None`
+  (`drizzle_path.py:185-187`) — so the fix is to also accumulate the unweighted frame-count plane in
+  stats mode (the same "strict `out_wht` increase after each `add_image`" trick the main accumulator
+  already uses, `drizzle_path.py:262-315`) and thread it into `clip_reference` / `_clip_tolerance` as
+  `neff`. Regression: a low-coverage pixel (e.g. 4 frames at `pixfrac=0.8`) with one gross outlier is
+  now clipped (fail-before keeps it because `wht<3` / pass-after rejects it because frame-count≥3),
+  while a genuinely 2-frame pixel still keeps-all. Severity: wrong-result (contaminated master in
+  low-coverage regions) — but only when `drizzle` + `drizzle_reject` are both on with `pixfrac<1`
+  (the default pixfrac), a relatively advanced combo, so moderate not front-of-queue. Additive /
+  upgrade-safe (only enables rejection where it was wrongly skipped; well-covered pixels unchanged).
+  Confidence: traced (the STScI `drizzle` lib isn't installed here so I couldn't execute-verify the
+  weight-per-frame magnitude, but the `neff = wht` misuse is provable from the code + its own comments).
 
 - ~~**`GET /api/targets/{safe}/frames` didn't clamp `offset`/`limit` — a negative page
   silently returned the wrong window.**~~ — **FIXED v0.131.6** (Builder 2026-07-16, branch
@@ -2799,6 +2889,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+- **NEW (Scout 2026-07-21) — auto-pick the outlier-rejection method from the frame count, so a beginner
+  never has to know κ-σ vs min/max.** Today `sigma_clip` (κ-σ) and `min_max_reject` are separate toggles
+  the user chooses, but they have a hard, count-dependent trade-off a non-expert can't be expected to
+  know: κ-σ **mathematically cannot reject a lone outlier below ~11 frames** (the largest z-score of a
+  point against stats that include it is `(n−1)/√n < κ=3`, as `stacker.py`/`drizzle_path.py` comments
+  already note), so a satellite/plane trail in a small stack survives κ-σ but is caught by the
+  order-statistic min/max drop; conversely min/max ignores quality weights and needlessly trims a sample
+  on huge stacks where κ-σ is strictly better. **Idea:** an `rejection_method="auto"` default that picks
+  min/max for small stacks (roughly `n < ~10-15`) and κ-σ above that — a single well-defaulted decision
+  that gives the beginner the *right* rejection for their data with zero knobs, and still lets an expert
+  force either. Upgrade-safe: add a new enum value defaulting to today's behaviour path for existing
+  configs (don't flip a running install's effective method silently — gate "auto" behind the new default
+  only for fresh installs / explicit opt-in, or make "auto" resolve to κ-σ at the counts where it already
+  fires so no existing large-stack result changes). Ship with a plain-language Stack-form line ("Auto —
+  picks the best outlier removal for your number of subs"). _(M, PRIORITY 2 autonomy + P4 image quality;
+  reduces a real decision the §1 user shouldn't have to make.)_
 - ~~**NEW (Scout 2026-07-21) — "Walk-away mode": one Settings toggle that turns on the whole unattended
   bundle, instead of five buried advanced switches.**~~ — **SHIPPED v0.140.0** (Builder 2026-07-21, branch
   `claude/pensive-faraday-i5lui7`). Added a single prominent **"Walk-away mode"** Switch at the top of the
@@ -4031,6 +4137,29 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+- **NEW BEGINNER FEATURE (Scout 2026-07-21 #3) — "Same object? Combine these into one deep picture":
+  auto-suggest merging same-target folders shot on different nights.** The Seestar app writes a
+  **new folder per night**, so a beginner who shoots M31 across three clear nights ends up with three
+  *separate* AstroStack targets — each a shallow stack — instead of one deep one, and never realises
+  their subs are being split. `merge_targets` (webapp endpoint + `seestack/io/merge.py`) already does
+  the merge *manually*, and the dedup/pointing-hint bugs on that path are fixed — but nothing tells a
+  non-expert it's the thing to do. **Feature:** on the Library / Dashboard, detect targets whose
+  plate-solved centres are the **same sky object** (RA/Dec within a small tolerance — the app already
+  has RA/Dec per target and wrap/pole-safe angular-sep helpers in `mosaic.py`/`coords.py`) and surface
+  a friendly, dismissible nudge — *"These 3 targets look like the same object (M31). Combine them into
+  one deep stack?"* — with a one-click action that calls the existing `merge_targets` then offers a
+  restack, so the deep image "just happens". **Beginner bar ✔:** plain-language, one obvious action,
+  a sane default (only nudges on a confident same-object match, never auto-merges destructively), and
+  it directly makes the picture *better* (more integration) with less effort — no expert knobs. Serves
+  autonomy (P2) + friendliness (P3) + image quality (P4) at once, and pays off hardest for exactly the
+  "thousands of subs across many nights" owner in §1. **Guardrails:** merge is user-confirmed and the
+  underlying op is already non-destructive/reversible-ish; match tolerance must be tight enough not to
+  fuse two genuinely different nearby targets — surface the matched name/coords so the user can decline.
+  Split for the Builder: (a) a pure `find_same_object_target_groups(targets, tol_deg)` helper +
+  tests (clusters by angular sep, wrap/pole-safe, singletons excluded); (b) a read-only
+  `GET /api/targets/merge-suggestions` surfacing the groups; (c) a Library/Dashboard nudge card wired to
+  the existing merge + restack flow. _(M–L, split as above; PRIORITY 2–3, beginner feature — keeps the
+  pipeline stocked.)_
 - ~~**NEW BEGINNER FEATURE (Builder-filed 2026-07-17) — "Notify me when done": slice (b) global cross-route
   watcher.**~~ — **SLICE (b) SHIPPED v0.138.0** (Builder 2026-07-17, branch `claude/pensive-faraday-r77f44`).
   Slice (a) fired the opt-in "your job finished" desktop notification only while the Jobs page was mounted, so a
