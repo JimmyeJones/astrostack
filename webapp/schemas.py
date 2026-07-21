@@ -169,6 +169,28 @@ class FocusTrendOut(BaseModel):
     soft_after_utc: str | None = None
 
 
+class TransparencyTrendPointOut(BaseModel):
+    """One accepted, measured sub on the transparency-trend sparkline."""
+
+    t_utc: str
+    transparency: float
+
+
+class TransparencyTrendOut(BaseModel):
+    """Sky-clarity (transparency) over capture time for the target's latest
+    session, plus a plain-language verdict ("clear" | "degraded" | "cleared")."""
+
+    verdict: str
+    points: list[TransparencyTrendPointOut]
+    n_points: int
+    median_transparency: float
+    early_transparency: float
+    late_transparency: float
+    start_utc: str | None = None
+    end_utc: str | None = None
+    degraded_after_utc: str | None = None
+
+
 class HealthNoteOut(BaseModel):
     """One plain-language "How's my stack?" note (see seestack.stackhealth)."""
 

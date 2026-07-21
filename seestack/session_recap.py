@@ -412,6 +412,125 @@ def focus_trend(
 
 
 # ---------------------------------------------------------------------------
+# "Clouds & haze through the night" — the transparency sibling of focus_trend.
+# ---------------------------------------------------------------------------
+
+# Same self-hide floor as the focus card — fewer measured subs than this and the
+# sparkline is just noise, so the card doesn't appear.
+TRANSPARENCY_TREND_MIN_FRAMES = 6
+
+# The night is called "degraded"/"cleared" only when the median star flux between
+# its first and last third changes by at least this ratio. Unlike FWHM (a known px
+# scale, where the focus card pairs a relative *and* an absolute floor), the
+# ``transparency_score`` is median star flux in arbitrary per-target ADU units, so
+# an absolute floor would be meaningless across cameras/gains/targets. A *relative*
+# ratio is scale-free and the right tool here; 1.4 (a ~40% swing in recorded flux
+# between the start and end of a night) is deliberately conservative so ordinary
+# transparency wobble reads as a calm "clear", and only a genuine cloud/haze/airmass
+# change trips the verdict. (Tuneable against real stored transparency once we have
+# a distribution to fit — same real-data caveat the Scout flagged for this metric.)
+TRANSPARENCY_TREND_DROP_RATIO = 1.4
+
+
+@dataclass
+class TransparencyTrendPoint:
+    """One accepted, measured sub on the transparency-trend sparkline."""
+
+    t_utc: str            # capture time (ISO 8601 UTC, as stored)
+    transparency: float   # median star flux (higher = clearer sky)
+
+
+@dataclass
+class TransparencyTrend:
+    """The most recent session's sky-clarity (transparency) trend over capture
+    time, plus a plain-language verdict. Read-only and purely informational — it
+    never rejects a frame; it just shows the user how the sky held up (and, when
+    it didn't, that the hazy subs were already auto-down-weighted in the stack).
+
+    ``verdict`` is one of:
+      "clear"    — transparency held roughly steady across the night.
+      "degraded" — the sky grew materially murkier later in the night
+                   (clouds / haze rolling in, or the target sinking into
+                   thicker air) — those later subs came through a worse sky.
+      "cleared"  — it started hazy and cleared up; the later subs did the
+                   heavy lifting.
+    A session with too few measured subs to judge returns ``None`` instead.
+    """
+
+    verdict: str
+    points: list[TransparencyTrendPoint]
+    n_points: int
+    median_transparency: float      # median clarity over the session
+    early_transparency: float       # median of the first third (night's start)
+    late_transparency: float        # median of the last third (night's end)
+    start_utc: str | None           # first measured sub this session
+    end_utc: str | None             # last measured sub this session
+    degraded_after_utc: str | None  # when the sky went murky (only for "degraded")
+
+
+def transparency_trend(
+    project: Project, *, gap_hours: float = DEFAULT_SESSION_GAP_HOURS
+) -> TransparencyTrend | None:
+    """Sky-clarity (transparency) trend across the target's most recent capture
+    session, or ``None`` when too few of that session's accepted subs carry a
+    usable ``transparency_score`` to trend (e.g. an older project predating the
+    metric, or a starless field). Read-only aggregation over the ``frames``
+    table — mirrors :func:`focus_trend`, but for *higher = better* transparency."""
+    dated = [
+        (dt, f)
+        for f in project.iter_frames()
+        if (dt := _parse(f.timestamp_utc)) is not None
+    ]
+    if not dated:
+        return None
+    dated.sort(key=lambda pair: pair[0])
+    session_pairs = _last_session_frames(dated, gap_hours)
+    # Only accepted, measured subs — the ones that actually feed the stack — so the
+    # trend reflects the sky the picture was built from, not rejected outliers.
+    measured = [
+        f
+        for _dt, f in session_pairs
+        if f.accept and f.transparency_score is not None and f.transparency_score > 0
+    ]
+    if len(measured) < TRANSPARENCY_TREND_MIN_FRAMES:
+        return None
+
+    points = [
+        TransparencyTrendPoint(t_utc=f.timestamp_utc, transparency=float(f.transparency_score))
+        for f in measured
+    ]
+    scores = [p.transparency for p in points]
+    n = len(scores)
+    third = n // 3  # ≥ 2 since n ≥ TRANSPARENCY_TREND_MIN_FRAMES (6)
+    early = float(median(scores[:third]))
+    late = float(median(scores[-third:]))
+
+    degraded_after: str | None = None
+    # Higher transparency = clearer, so "degraded" is a *drop* (late materially
+    # below early) and "cleared" is a *rise* — the direction flip vs the focus card.
+    if early > 0 and early >= late * TRANSPARENCY_TREND_DROP_RATIO:
+        verdict = "degraded"
+        # The last third is where it's clearly murky; name when that stretch began.
+        degraded_after = points[n - third].t_utc
+    elif late > 0 and late >= early * TRANSPARENCY_TREND_DROP_RATIO:
+        verdict = "cleared"
+    else:
+        verdict = "clear"
+
+    return TransparencyTrend(
+        verdict=verdict,
+        points=points,
+        n_points=n,
+        median_transparency=float(median(scores)),
+        early_transparency=early,
+        late_transparency=late,
+        start_utc=points[0].t_utc,
+        end_utc=points[-1].t_utc,
+        degraded_after_utc=degraded_after,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Per-target "Nights" breakdown — every capture night that went into a target,
 # so a beginner (who shoots one target across many nights — the Seestar writes a
 # new folder per night) can see which nights were good and, later, set a bad one

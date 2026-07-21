@@ -193,6 +193,23 @@ export interface FocusTrend {
   soft_after_utc: string | null;
 }
 
+export interface TransparencyTrendPoint {
+  t_utc: string;
+  transparency: number;
+}
+
+export interface TransparencyTrend {
+  verdict: string; // "clear" | "degraded" | "cleared"
+  points: TransparencyTrendPoint[];
+  n_points: number;
+  median_transparency: number;
+  early_transparency: number;
+  late_transparency: number;
+  start_utc: string | null;
+  end_utc: string | null;
+  degraded_after_utc: string | null;
+}
+
 export interface LibrarySessionRecap {
   n_targets: number;
   n_frames: number;
@@ -919,6 +936,8 @@ export const api = {
     req<NightSummary[]>(`/api/targets/${safe}/nights`),
   focusTrend: (safe: string) =>
     req<FocusTrend | null>(`/api/targets/${safe}/focus-trend`),
+  transparencyTrend: (safe: string) =>
+    req<TransparencyTrend | null>(`/api/targets/${safe}/transparency-trend`),
   getIntegrationGoal: (safe: string) =>
     req<{ goal_s: number | null }>(`/api/targets/${safe}/integration-goal`),
   setIntegrationGoal: (safe: string, goalS: number | null) =>

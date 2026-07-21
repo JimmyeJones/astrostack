@@ -19,6 +19,7 @@ import { QueryError } from "../components/QueryError";
 import { ObjectInfoCard, describeObject } from "../components/ObjectInfoCard";
 import { NightsCard } from "../components/NightsCard";
 import { FocusTrendCard } from "../components/FocusTrendCard";
+import { TransparencyTrendCard } from "../components/TransparencyTrendCard";
 import { SessionRecapCard } from "../components/SessionRecapCard";
 import { StackHealthCard } from "../components/StackHealthCard";
 import { FirstLookCard } from "../components/FirstLookCard";
@@ -962,6 +963,8 @@ export function TargetView() {
       <NightsCard safe={safe} />
 
       <FocusTrendCard safe={safe} />
+
+      <TransparencyTrendCard safe={safe} />
 
       <StackHealthCard safe={safe} />
 
