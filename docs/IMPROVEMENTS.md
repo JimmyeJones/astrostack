@@ -4955,6 +4955,31 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+- **IDEA (Builder 2026-07-21, filed while shipping the deepening reel) — "Time to re-stack?" nudge: tell the
+  beginner when they've gathered enough new subs to be worth re-stacking.** *(Autonomy / PRIORITY 2; size S–M.)*
+  The deepening reel (v0.157.0) rewards re-stacking a target as nights accumulate — but nothing *tells* the
+  beginner when it's worth doing. Every target already knows its accepted-sub count and its last stack's
+  `n_frames_used` (the newest `stack_runs` row). When the target has meaningfully more accepted subs than went
+  into its most recent stack (e.g. **≥25%** more, or an absolute floor like ≥60 subs — pick from real data), a
+  small read-only nudge on the Target page — *"You've added ~120 accepted subs since your last stack of M31.
+  Re-stack for a cleaner, deeper result (and another frame in your 'night after night' reel)."* — closes the
+  loop between "I shot more" and "so re-stack". **Distinct from** the readiness card (goal-gap: *should I shoot
+  more?*) and the next-session card (*when's the next window?*): this is *"you already shot more — now combine
+  it"*. **Beginner bar ✔:** one line, zero knobs, plain language, directly actionable; serves autonomy ("it told
+  me the obvious next step"). **Guardrails:** additive/read-only; self-hide when the target has never been
+  stacked, when the extra subs are below the threshold, or when a stack job is already running. **Builder slice:**
+  a pure `restackAdvice(acceptedSubs, lastStackSubs)` helper → `{worth, addedSubs, addedPct} | null` (unit-tested
+  for below-threshold / first-stack / worth cases) + a small card reusing the accepted-count the Target page
+  already loads and the newest run from the stack-runs list — no new endpoint needed.
+- **IDEA (Builder 2026-07-21) — date/sub labels burned into the deepening-reel frames.** *(Friendliness /
+  PRIORITY 3; size S.)* The v0.157.0 "night after night" reel animates a target's stacks getting deeper, with the
+  provenance (dates + sub counts) shown as a *static* caption under the animation. A nice, low-risk enhancement:
+  overlay each frame with its own small date + sub-count label (e.g. bottom-corner "28 Jun · 120 subs") so a
+  *shared/downloaded* clip — which travels without the surrounding card — still tells the story frame by frame.
+  Pure render addition in `seestack/render/deepening.py` (draw the label per frame before assembling, from the
+  same `iter_stack_runs` rows the info endpoint already reads), guarded so a missing date/count simply omits its
+  clause. Beginner bar ✔ (self-explanatory shareable). Guardrails: additive/opt-in-safe (label only; the
+  underlying pixels/stretch unchanged); keep the label subtle so it never obscures the picture.
 - **NEW BEGINNER FEATURE (Scout 2026-07-21 #11) — "Make it your wallpaper": one-tap export of a finished stack
   cropped + sized to a phone or desktop background, auto-centred on the target.** *(Beginner feature; PRIORITY 3
   friendliness / "enjoy + share" pillar; size S–M.)* Making your own astrophoto your phone lock-screen is one of
@@ -5150,6 +5175,34 @@ problems. Dogfood it every big-picture run and fix root causes.
   `{curvePoints, hereIndex, verdictText}` (unit-tested for steep / plateau / too-few cases); (b) an
   `IntegrationMeterCard` (Mantine sparkline + verdict) mounted on Target, reusing the accepted-frame count the
   page already loads — no new endpoint needed. Keeps the beginner-feature pipeline stocked.
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-21) — "Your target, night after night": a looping timelapse of the
+  same object getting deeper each time you re-stack.**~~ — **SHIPPED v0.157.0** (Builder 2026-07-21, branch
+  `claude/pensive-faraday-fd04bo`). Built across all three layers, re-rendering from the archived **master
+  FITS** (not the archived preview PNGs) so a single common stretch can be applied — the robust fair-comparison
+  path the spec flagged. **Engine:** new `seestack/render/deepening.py` — `render_deepening_frames(fits_paths,
+  *, max_width)` loads each stack via the shared `load_stack_rgb`, solves **one** STF stretch from the deepest
+  (last) linear frame (`_solve_stf_params` mirrors `thumbnail.autostretch`'s maths exactly, verified byte-for-
+  byte by a parity test, but *returns* the coefficients so the whole series shares them via `_apply_stf_params`),
+  renders every frame under it (display-space editor exports shown verbatim, NaN gaps → black), and unifies all
+  frames to the deepest frame's size; `write_deepening_reel`/`build_deepening_reel` write the looping WEBP (APNG
+  fallback) — the same animation-writer idiom as the progress reel, with a slower per-night cadence + a longer
+  hold on the finished frame. **Webapp:** `GET /api/targets/{safe}/deepening-reel/info` (lightweight — no
+  render; `available:false` when a target has <2 stacks on disk, so the card self-hides) and `GET
+  /api/targets/{safe}/deepening-reel` (builds + caches the reel beside the outputs, keyed by a content
+  signature of the ordered FITS series so it rebuilds only when a stack is added/re-run/deleted). Runs are
+  ordered oldest→newest by `timestamp_utc`, drawn from `iter_stack_runs` (the archive repoints each prior run's
+  row to its timestamped FITS, so the whole series is enumerable). **Frontend:** a `DeepeningReelCard` on the
+  Target page (mirrors `ProgressReelCard`'s collapsed-until-Play reveal so the page doesn't build the animation
+  up front) + pure, unit-tested `deepeningReel.ts` helpers (`deepeningCaption` = "M31 · 3 stacks · 120 → 1,240
+  subs · 28 Jun → 28 Jul", `deepeningBlurb`, `deepeningClip`, each clause dropped rather than blanked when data
+  is missing). Additive/upgrade-safe: read-only, off nothing, no schema/config/API-shape/default change; the
+  cached reel is a sibling artifact like the progress reel/coverage map. Tests: `tests/test_deepening_reel.py`
+  (+9 — autostretch parity, one-shared-stretch-across-depths / no-flicker, display-space verbatim, unify-to-
+  deepest-size, <2→empty, skip-bad-frame, writes-a-3-frame-animation, degenerate-frame), `tests/webapp/
+  test_deepening_reel.py` (+5 — self-hide with one stack, series metadata + chronological sort, serves a
+  multi-frame animation + cache reuse, rebuilds when a stack is added, unknown-target 404), frontend
+  `deepeningReel.test.ts` (+8) & `DeepeningReelCard.test.tsx` (+2). Beginner bar ✔ (one card, zero knobs, auto
+  caption + plain language, the most share-worthy multi-night arc). *(Original spec kept below for provenance.)*
 - **NEW BEGINNER FEATURE (Scout 2026-07-21) — "Your target, night after night": a looping timelapse of the
   same object getting deeper each time you re-stack.** *(Beginner feature; PRIORITY 3 friendliness /
   enjoy-share; size M.)* When a beginner shoots the same target across several clear nights and re-stacks, the

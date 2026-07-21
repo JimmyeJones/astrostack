@@ -21,6 +21,7 @@ import { NightsCard } from "../components/NightsCard";
 import { FocusTrendCard } from "../components/FocusTrendCard";
 import { TransparencyTrendCard } from "../components/TransparencyTrendCard";
 import { NextSessionCard } from "../components/NextSessionCard";
+import { DeepeningReelCard } from "../components/DeepeningReelCard";
 import { SessionRecapCard } from "../components/SessionRecapCard";
 import { StackHealthCard } from "../components/StackHealthCard";
 import { FirstLookCard } from "../components/FirstLookCard";
@@ -968,6 +969,10 @@ export function TargetView() {
       <TransparencyTrendCard safe={safe} />
 
       <StackHealthCard safe={safe} />
+
+      {/* "Night after night" — the same target getting deeper across re-stacks
+          (self-hides until there are ≥2 stacks to compare). */}
+      <DeepeningReelCard safe={safe} name={target.data?.name} />
 
       {/* Pre-stack reassurance: the sharpest sub, shown until a finished picture
           exists — then the real stack supersedes it. */}

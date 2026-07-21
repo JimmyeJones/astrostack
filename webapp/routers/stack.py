@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -534,6 +535,118 @@ def stack_progress_reel(
     media = _PROGRESS_MEDIA.get(reel.suffix, "application/octet-stream")
     return FileResponse(reel, media_type=media,
                         filename=f"{Path(fits_path).stem}_progress{reel.suffix}")
+
+
+# --- "Night after night" cross-run deepening reel ---------------------------
+# Unlike the per-run progress reel (frames piling on *within one stack*), this is
+# a per-*target* animation across successive re-stacks: the same object getting
+# cleaner and deeper as more subs / more nights pile on. It's rendered on demand
+# from the master FITS the app already archives (each re-stack keeps the previous
+# master as a timestamped sibling and repoints its history row), and cached beside
+# the outputs with a content signature so it's rebuilt only when a stack is
+# added/re-run/deleted. Purely additive + read-only (see seestack.render.deepening).
+
+
+def _deepening_runs(proj) -> list:
+    """A target's stack runs that still have a master FITS on disk, ordered
+    oldest → newest — the chronological deepening series."""
+    runs = [r for r in proj.iter_stack_runs()
+            if r.fits_path and Path(r.fits_path).exists()]
+    runs.sort(key=lambda r: (r.timestamp_utc or "", r.id or 0))
+    return runs
+
+
+def _deepening_signature(runs: list) -> str:
+    """Content signature of the ordered FITS series — a cached reel is reused
+    until the series changes (a new/re-run/deleted stack), then rebuilt."""
+    import hashlib
+
+    parts = []
+    for r in runs:
+        try:
+            st = os.stat(r.fits_path)
+            parts.append(f"{r.id}:{st.st_mtime_ns}:{st.st_size}")
+        except OSError:
+            parts.append(f"{r.id}:0:0")
+    return hashlib.sha1("|".join(parts).encode()).hexdigest()
+
+
+def _build_or_get_deepening_reel(runs: list) -> Path | None:
+    """Return the cached deepening reel for ``runs`` (oldest → newest), rebuilding
+    it when the series signature has changed. Blocking (loads + encodes FITS), so
+    callers dispatch it to a threadpool."""
+    if len(runs) < 2:
+        return None
+    newest = runs[-1]
+    out_dir = Path(newest.fits_path).parent
+    basename = newest.output_basename or "master"
+    sig = _deepening_signature(runs)
+    sig_file = out_dir / f"{basename}_deepening.sig"
+    for suffix in ("_deepening.webp", "_deepening.png"):
+        cand = out_dir / f"{basename}{suffix}"
+        if cand.exists() and sig_file.exists():
+            with contextlib.suppress(OSError):
+                if sig_file.read_text().strip() == sig:
+                    return cand
+    # (Re)build: clear any stale reel of either format first so a format change
+    # (WEBP↔APNG) can't leave two files that the resolver disagrees on.
+    for suffix in ("_deepening.webp", "_deepening.png"):
+        with contextlib.suppress(OSError):
+            (out_dir / f"{basename}{suffix}").unlink()
+    from seestack.render.deepening import build_deepening_reel
+
+    path = build_deepening_reel([r.fits_path for r in runs], out_dir, basename)
+    if path is None:
+        return None
+    with contextlib.suppress(OSError):
+        sig_file.write_text(sig)
+    return path
+
+
+@router.get("/api/targets/{safe}/deepening-reel/info")
+def deepening_reel_info(safe: str, request: Request) -> dict[str, Any]:
+    """Whether this target has a multi-stack "night after night" reel, plus the
+    caption figures (how many stacks, first/last sub counts + dates). Lightweight
+    (no render): ``available`` is false — not a 404 — when the target has fewer
+    than two stacks on disk, so the card simply self-hides."""
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        runs = _deepening_runs(proj)
+    finally:
+        proj.close()
+        lib.close()
+    if len(runs) < 2:
+        return {"available": False, "n_stacks": len(runs)}
+    from PIL import features
+
+    return {
+        "available": True,
+        "n_stacks": len(runs),
+        "first_subs": runs[0].n_frames_used,
+        "last_subs": runs[-1].n_frames_used,
+        "first_utc": runs[0].timestamp_utc,
+        "last_utc": runs[-1].timestamp_utc,
+        "format": "webp" if features.check("webp") else "png",
+    }
+
+
+@router.get("/api/targets/{safe}/deepening-reel")
+async def deepening_reel(safe: str, request: Request) -> FileResponse:
+    """Serve the target's "night after night" deepening animation (WEBP or APNG),
+    building/caching it on demand. 404 when the target has fewer than two stacks."""
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        runs = _deepening_runs(proj)
+    finally:
+        proj.close()
+        lib.close()
+    if len(runs) < 2:
+        raise HTTPException(status_code=404, detail="Not enough stacks for a deepening reel")
+    reel = await run_in_threadpool(_build_or_get_deepening_reel, runs)
+    if reel is None:
+        raise HTTPException(status_code=404, detail="Could not build a deepening reel")
+    media = _PROGRESS_MEDIA.get(reel.suffix, "application/octet-stream")
+    return FileResponse(reel, media_type=media, filename=reel.name)
 
 
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/render-suggestion")
