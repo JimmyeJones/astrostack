@@ -3160,6 +3160,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   a high frame count clips both under the auto-scaled k (fail-before with k=1 one residual survives).
   _(S code / S–M validation; PRIORITY 2 autonomy + P4 image quality — extends the shipped auto_reject so the
   "just works" method-pick also gets the *strength* right for the owner's high-frame-count workflow.)_
+  _(Builder note 2026-07-21 — **premise is self-defeating; do NOT build as specified.** `auto_reject` resolves
+  to min/max only **below** `_auto_kappa_min_frames(κ)` — n<11 at the default κ=3 (`stacker.py::_resolve_auto_reject`);
+  a "thousands of subs across many nights" session is n≫11, so it resolves to **κ-σ**, not min/max, and never
+  reaches the k it wants to scale. Within the min/max regime (n<11) the idea's own conservative cap (`2k ≤ n/4`,
+  i.e. `k ≤ n/8`) forces `k=1` for every n<11 (n/8 < 1.375), so the auto-scale curve would be a **no-op** exactly
+  where it fires. To actually clean multi-trail pixels on a huge stack you'd need k>1 under **κ-σ** (a different
+  change — κ-σ ignores min_max_reject_count entirely), or to raise the min/max→κ-σ crossover, both of which change
+  the shipped v0.143.0 behaviour and need real-data justification. Left filed as a caution, not ready work.)_
 - ~~**NEW (Scout 2026-07-21) — "Walk-away mode": one Settings toggle that turns on the whole unattended
   bundle, instead of five buried advanced switches.**~~ — **SHIPPED v0.140.0** (Builder 2026-07-21, branch
   `claude/pensive-faraday-i5lui7`). Added a single prominent **"Walk-away mode"** Switch at the top of the
@@ -4470,31 +4478,48 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
-- **NEW BEGINNER FEATURE (Scout 2026-07-21 #7) — "Set as cover": let a beginner pin their *favourite* result
-  as a target's showcase image, instead of the app always showing the newest stack.** Today the Library/
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-21 #7) — "Set as cover": let a beginner pin their *favourite* result
+  as a target's showcase image, instead of the app always showing the newest stack.**~~ — **SHIPPED v0.145.0**
+  (Builder 2026-07-21, branch `claude/pensive-faraday-w0qyz5`). A **"★ Set as cover"** button on every
+  preview-bearing History run pins that run as the target's showcase; the Library / Dashboard / Target tile
+  (all served by `target_thumbnail`) then shows the pinned image, and the pinned run's button becomes a filled
+  **"Cover"** that clears the pin (back to newest). **Backend:** additive **nullable** `cover_stack_run_id`
+  column on the library `targets` table (`LIBRARY_SCHEMA_VERSION` 3→4; the existing generic `_ensure_columns`
+  self-heal `ALTER TABLE`s it onto any older DB on open, so an upgrade is byte-for-byte the newest-stack
+  behaviour until the user pins something). `Library.set_target_cover(safe, run_id | None)`; `target_thumbnail`
+  resolves the pinned run's `preview_path` through the target's own project (so it tracks the run across a
+  re-stack archive via the existing `repoint_stack_runs`) and **falls back to `last_stack_preview`** when
+  nothing is pinned, the pinned run was pruned, or its file is gone — never a broken image. New
+  `PUT /api/targets/{safe}/cover` validates the run exists (404 otherwise); `StackRunOut.is_cover` +
+  `TargetOut.cover_stack_run_id` expose the state. **Frontend:** the History RunCard button + `api.setTargetCover`,
+  invalidating `runs`/`targets`/`target`. Additive/upgrade-safe (new nullable column + read-only-default field +
+  one new endpoint; no schema/API-shape/default change). Beginner bar ✔ (one obvious button, plain language,
+  unpinned = today's behaviour). Tests: `tests/test_library_cover.py` (+3 — set/clear round-trip, missing
+  target, old-DB migration), `tests/webapp/test_target_cover.py` (+4 — pin serves the pinned pixels & flags
+  `is_cover` / clear→newest, unknown-run 404, pruned-run graceful fallback, missing-target 404),
+  `History.test.tsx` (+3 — pin from a preview run, clear from the current cover, no button without a preview).
+  Python 1445 + tsc + vitest 950 + vite build green. **Slice left for a future run:** the editor-export surface
+  pins a *stack run*; an edited export isn't a `stack_runs` row, so pinning an edited picture as the cover needs
+  a separate mechanism — filed below in Ideas. Original spec kept for provenance:
+  Today the Library/
   Dashboard tile and the Target-page card show `entry.last_stack_preview` — the **newest** genuine stack's
   preview (`webapp/routers/targets.py::target_thumbnail`, resolved from `library.targets.last_stack_preview`).
   That's usually right, but a beginner who *edited* a stack into a lovely picture, or who re-stacked and
   preferred the *earlier* result, has no way to make the nice one the face of the target: a later plain
-  re-stack silently demotes their best image to an archived row. **Feature:** a single **"★ Set as cover"**
-  action on any result (the Target result card, a History row, and the editor export surface) that pins that
-  run's preview as the target's showcase; the tile/card then shows the pinned image, with a plain **"Use
-  newest instead"** to clear it. **Beginner bar ✔:** one obvious button, plain language, a sane default
-  (unpinned = today's newest-stack behaviour, unchanged), no expert knobs — it directly serves the "enjoy /
-  share a good image" pillar (P3) by letting the beginner choose which picture represents their target.
-  **Well-grounded / low-risk / upgrade-safe:** additive **nullable** `cover_run_id` (or `cover_preview_path`)
-  column on the library `targets` table via the existing additive-migration pattern (`SCHEMA_VERSION` bump +
-  `_migrate_schema` `ALTER TABLE`; see `io/library.py`) — old DBs migrate with the column defaulting NULL, so
-  every existing install keeps the exact newest-stack behaviour until the user pins something. Resolve the tile
-  to the pinned run's preview when set and it still exists, else fall back to `last_stack_preview` (so a pinned
-  run that was later pruned/archived degrades gracefully to newest, never a broken image). No engine change, no
-  API-shape break (add a field to the target payload; the pin/unpin is a small new `POST`), no default flip.
-  Split for the Builder: (a) the DB column + migration + upgrade test (an old target DB migrates clean, tile
-  unchanged until pinned); (b) the pin/unpin endpoints + thumbnail resolution with the graceful fallback + a
-  test that a pruned pinned run falls back to newest; (c) the "★ Set as cover" / "Use newest instead" UI on the
-  result card, History, and editor export. _(M, split as above; PRIORITY 3 friendliness / enjoy-share —
-  beginner feature; keeps the pipeline stocked. Builds on the existing library-preview + additive-migration
-  infra, so low-risk.)_
+  re-stack silently demotes their best image to an archived row.
+- **NEW (Builder 2026-07-21, follow-up to shipped "Set as cover" v0.145.0) — let the cover also be an *edited*
+  export, not only a raw stack run.** v0.145.0 pins a **`stack_runs` row** as the target's cover (`cover_stack_run_id`
+  resolved through the run's `preview_path`). But the #7 spec's motivating case — "a beginner who *edited* a stack
+  into a lovely picture" — isn't fully served: an editor export is **not** a `stack_runs` row, so an edited picture
+  can't be pinned yet. **Idea:** extend the cover to accept an edited result. Two shapes to weigh: (a) when the
+  editor exports/saves, record the edited render as its own light-weight "result" the cover can point at (a new
+  nullable `cover_preview_path` alongside `cover_stack_run_id`, set directly to the edited PNG — the thumbnail
+  resolver already falls back gracefully if the file is gone); or (b) have the editor "Save as preview" flow (which
+  already re-renders a run's `preview_path`) offer a "★ Set as cover" in the same step, so the *edited* pixels
+  become the pinned run's preview and the existing run-id cover just works. (b) reuses everything already shipped and
+  needs no new column — likely the smaller, safer slice. Beginner bar ✔ (same one-button affordance, extended to the
+  place a beginner most wants it — their finished edit). Additive/upgrade-safe (nullable/new surface, off by default).
+  _(S–M; PRIORITY 3 friendliness / enjoy-share — completes the "pin my favourite picture" story for edited results.)_
 - **NEW BEGINNER FEATURE (Scout 2026-07-21 #6) — "Acquisition nameplate": auto-render the shot's own
   details onto the shared image, so a beginner's post looks like a "real" astrophoto without any
   editing.** Astrophotographers traditionally caption a finished image with its *acquisition data* —

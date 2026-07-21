@@ -204,6 +204,40 @@ describe("HistoryView", () => {
       expect(screen.getByText(/No catalog objects fall inside this field/)).toBeInTheDocument());
   });
 
+  it("pins a run as the target's cover from a preview run", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ has_preview: true })]);
+    const setCover = vi.spyOn(client.api, "setTargetCover")
+      .mockResolvedValue({} as never);
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Set as cover" }));
+    await waitFor(() => expect(setCover).toHaveBeenCalledWith("M_42", 1));
+  });
+
+  it("clears the cover when the current cover run's button is clicked", async () => {
+    vi.spyOn(client.api, "listStackRuns")
+      .mockResolvedValue([mkRun({ has_preview: true, is_cover: true })]);
+    const setCover = vi.spyOn(client.api, "setTargetCover")
+      .mockResolvedValue({} as never);
+
+    renderHistory();
+    // The pinned run shows the filled "Cover" affordance, not "Set as cover".
+    await waitFor(() => expect(screen.getByRole("button", { name: "Cover" })).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "Set as cover" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cover" }));
+    await waitFor(() => expect(setCover).toHaveBeenCalledWith("M_42", null));
+  });
+
+  it("shows no cover button when a run has no preview to show", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ has_preview: false })]);
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "Set as cover" })).not.toBeInTheDocument();
+  });
+
   it("offers PNG and JPEG downloads of the finished image when a preview exists", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ has_preview: true })]);
     renderHistory();

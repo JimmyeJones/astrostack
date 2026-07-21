@@ -32,11 +32,20 @@ class TargetOut(BaseModel):
     has_preview: bool = False
     notes: str | None = None
     tags: list[str] = []
+    # Run id (in this target's project) the user pinned as the showcase "cover"
+    # image, or None to show the newest stack (the default). Lets the UI mark
+    # which History run is the current cover.
+    cover_stack_run_id: int | None = None
 
 
 class TargetPatch(BaseModel):
     notes: str | None = None
     tags: list[str] | None = None
+
+
+class SetCoverRequest(BaseModel):
+    # The run id to pin as the target's cover. Null clears the pin (use newest).
+    run_id: int | None = None
 
 
 class FramingHintOut(BaseModel):
@@ -245,6 +254,10 @@ class StackRunOut(BaseModel):
     has_fits: bool = False
     has_tiff: bool = False
     has_preview: bool = False
+    # True when this run is the target's pinned showcase "cover" (the image the
+    # Library/Dashboard tile shows). False when unpinned (the default) — the tile
+    # then shows the newest stack. Only ever one run per target is the cover.
+    is_cover: bool = False
     notes: str | None = None
     # Effective integration time in seconds (None for pre-schema-4 runs), so the
     # UI can show "2.3 h · 840 subs" on a card without reading the FITS header.
