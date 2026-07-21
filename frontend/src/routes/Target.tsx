@@ -14,7 +14,7 @@ import { Link, useParams } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
 import { api, type Frame } from "../api/client";
 import { formatIntegration } from "../format";
-import { integrationReadiness, readinessColor } from "../readiness";
+import { integrationReadiness, readinessColor, noiseReductionHint } from "../readiness";
 import { QueryError } from "../components/QueryError";
 import { ObjectInfoCard, describeObject } from "../components/ObjectInfoCard";
 import { NightsCard } from "../components/NightsCard";
@@ -1018,6 +1018,14 @@ export function TargetView() {
               <Progress value={readiness.fraction * 100}
                 color={readinessColor(readiness.level)} size="sm" radius="xl" />
               <Text size="sm" c="dimmed">{readiness.verdict}</Text>
+              {/* The honest √N diminishing-returns figure: how much more a single
+                  extra hour would cut background noise, so "keep shooting?" gets a
+                  physics-based answer, not just a goal-fraction. */}
+              {noiseReductionHint(target.data?.total_exposure_s ?? 0) ? (
+                <Text size="xs" c="dimmed">
+                  {noiseReductionHint(target.data?.total_exposure_s ?? 0)}
+                </Text>
+              ) : null}
             </Stack>
           </Group>
         </Paper>
