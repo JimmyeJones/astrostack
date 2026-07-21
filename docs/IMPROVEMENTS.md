@@ -4869,9 +4869,15 @@ problems. Dogfood it every big-picture run and fix root causes.
   (`seestack/calibrate/masters.py`) — those pixels are deterministic sensor defects, independent of the sky — and
   correct **only those** (from their neighbours), leaving every real star untouched. Cosmic-ray / one-frame
   transients then fall to the existing **multi-frame κ-σ** rejection (which *can* tell a persistent star from a
-  single-frame spike). This is distinct from the bug's minimal in-place fix (neighbour-max gating, dark-free): it
-  needs darks and a new map, but it's strictly more correct and more autonomous ("it knew which pixels were
-  broken"). **Shape:** (a) a pure `hot_pixel_map(master_dark, master_bias, sigma)` → boolean defect mask
+  single-frame spike). This is distinct from the ⭐ bug's shipped in-place fix (cross-channel / all-channel
+  star-safety gate, v0.158.9, dark-free): it needs darks and a new map, but it's strictly more correct and more
+  autonomous ("it knew which pixels were broken"). **Extra motivation confirmed while shipping the ⭐ fix:** the
+  per-frame pass runs *after* `bilinear_debayer`, so a single hot CFA site has already smeared into a 3×3 halo by
+  the time it's seen — the star-safe fix can therefore only knock it down to *halo* level (~0.5× peak for an
+  R/B site, ~0.25× for a G site), not erase it (this is exactly what `test_drizzle_suppresses_hot_pixels` and
+  `test_debayered_single_cfa_hot_pixel_is_suppressed` assert). A raw-Bayer-domain defect map (applied in
+  `apply_raw`, *before* debayer) would remove the defect while it's still a single pixel — fully erasing it AND
+  never risking a star — so it dominates the post-debayer pass on both axes. **Shape:** (a) a pure `hot_pixel_map(master_dark, master_bias, sigma)` → boolean defect mask
   (unit-testable on a synthetic dark with injected hot/dead pixels); (b) apply it in `apply_raw` (raw-Bayer
   domain, before debayer) by replacing masked pixels with a same-Bayer-phase neighbour median; (c) when no dark
   is present, fall back to the (fixed, star-aware) per-frame filter. **Guardrails:** additive, default-safe (a
