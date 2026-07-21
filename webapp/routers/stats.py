@@ -191,6 +191,100 @@ def get_library_progress(request: Request) -> list[TargetProgressOut]:
     return rows
 
 
+# The "Your sky, so far" summary is registry-only (no per-target SQLite opened),
+# so it's already cheap; we cache it mainly to avoid re-``stat``-ing every
+# target's preview file on each render. The signature keys on each target's
+# activity + accepted-frame count + latest preview, so a fresh scan or a new
+# stack invalidates it promptly; the TTL backstops changes the signature misses.
+_SUMMARY_CACHE_TTL_S = 60.0
+
+
+class SummaryTargetOut(BaseModel):
+    """A standout or hero target in the "Your sky, so far" summary."""
+
+    safe: str
+    name: str
+    total_exposure_s: float
+    integration_hours: float
+    n_frames_accepted: int
+    thumbnail_url: str | None = None
+
+
+class LibrarySummaryResponse(BaseModel):
+    """Whole-library personal-progress roll-up for the "Your sky, so far" page."""
+
+    n_targets_imaged: int
+    n_subs_kept: int
+    total_integration_s: float
+    integration_hours: float
+    first_light_utc: str | None = None
+    longest_target: SummaryTargetOut | None = None
+    most_imaged_target: SummaryTargetOut | None = None
+    heroes: list[SummaryTargetOut] = []
+
+
+def _summary_target_out(t) -> SummaryTargetOut:  # noqa: ANN001 — SummaryTarget
+    return SummaryTargetOut(
+        safe=t.safe,
+        name=t.name,
+        total_exposure_s=t.total_exposure_s,
+        integration_hours=round(t.total_exposure_s / 3600.0, 2),
+        n_frames_accepted=t.n_frames_accepted,
+        # The target thumbnail endpoint serves the latest stack preview; only
+        # offer it for a target we know still has one on disk.
+        thumbnail_url=(f"/api/targets/{t.safe}/thumbnail" if t.has_preview else None),
+    )
+
+
+@router.get("/api/library/summary", response_model=LibrarySummaryResponse)
+def get_library_summary(request: Request) -> LibrarySummaryResponse:
+    """The "Your sky, so far" whole-library progress summary — total kept
+    integration, subs kept, targets imaged, first-light date, the standout
+    targets, and a hero grid of finished pictures. Registry-only, read-only
+    aggregation over data already on disk; cached on the app between scans.
+    Returns zeroed tallies (and ``null`` standouts) until some light is
+    collected."""
+    from seestack.library_summary import summarize_library
+
+    lib = deps.open_library(request)
+    try:
+        targets = lib.list_targets()
+        sig = tuple(sorted(
+            (t.safe_name, t.last_activity_utc or "", t.n_frames_accepted,
+             t.last_stack_preview or "")
+            for t in targets
+        ))
+        cache = getattr(request.app.state, "summary_cache", None)
+        now = time.monotonic()
+        if cache and cache["sig"] == sig and (now - cache["at"]) < _SUMMARY_CACHE_TTL_S:
+            summary = cache["data"]
+        else:
+            summary = summarize_library(
+                targets,
+                preview_exists=lambda p: bool(p) and Path(p).exists(),
+            )
+            request.app.state.summary_cache = {"sig": sig, "at": now, "data": summary}
+    finally:
+        lib.close()
+
+    return LibrarySummaryResponse(
+        n_targets_imaged=summary.n_targets_imaged,
+        n_subs_kept=summary.n_subs_kept,
+        total_integration_s=summary.total_integration_s,
+        integration_hours=round(summary.total_integration_s / 3600.0, 2),
+        first_light_utc=summary.first_light_utc,
+        longest_target=(
+            _summary_target_out(summary.longest_target)
+            if summary.longest_target else None
+        ),
+        most_imaged_target=(
+            _summary_target_out(summary.most_imaged_target)
+            if summary.most_imaged_target else None
+        ),
+        heroes=[_summary_target_out(h) for h in summary.heroes],
+    )
+
+
 def _rollup_stacks(lib, targets) -> tuple[list[RecentStack], int, int]:
     """Open each target's project and collect its stack runs. Expensive — this
     is what the cache below is protecting."""

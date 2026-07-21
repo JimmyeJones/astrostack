@@ -1,6 +1,6 @@
 import { AppShell, Badge, Box, Burger, Button, Group, NavLink, ScrollArea, Text, Title } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
-import { IconActivity, IconDatabase, IconFileText, IconFlask, IconGauge, IconLayoutGrid, IconMoon, IconPalette, IconPhoto, IconRadar2, IconSettings, IconStars, IconTelescope } from "@tabler/icons-react";
+import { IconActivity, IconDatabase, IconFileText, IconFlask, IconGauge, IconLayoutGrid, IconMoon, IconPalette, IconPhoto, IconRadar2, IconSettings, IconSparkles, IconStars, IconTelescope } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { NavLink as RouterNavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
@@ -112,6 +112,7 @@ export function App() {
     { to: "/library", label: "Library", icon: <IconStars size={18} /> },
     { to: "/telescope", label: "Telescope", icon: <IconTelescope size={18} /> },
     { to: "/gallery", label: "Gallery", icon: <IconLayoutGrid size={18} /> },
+    { to: "/sky-so-far", label: "Your sky, so far", icon: <IconSparkles size={18} /> },
     { to: "/tonight", label: "Tonight", icon: <IconMoon size={18} /> },
     { to: "/sky", label: "Sky Map", icon: <IconRadar2 size={18} /> },
     { to: "/jobs", label: "Jobs", icon: <IconActivity size={18} /> },
