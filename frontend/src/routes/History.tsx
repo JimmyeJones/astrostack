@@ -5,7 +5,7 @@ import {
 } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
-import { IconAdjustments, IconCheck, IconCopy, IconDeviceFloppy, IconDownload, IconGitCompare, IconInfoCircle, IconPencil, IconPhotoDown, IconSparkles, IconTags, IconTrash, IconX } from "@tabler/icons-react";
+import { IconAdjustments, IconCheck, IconCopy, IconDeviceFloppy, IconDownload, IconGitCompare, IconInfoCircle, IconPencil, IconPhotoDown, IconSparkles, IconStar, IconStarFilled, IconTags, IconTrash, IconX } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api, type StackRun, type StackPhotometricSummary, type StackDarkScalingSummary, type StackRejectionSummary, type StackFrameAccounting } from "../api/client";
@@ -505,6 +505,22 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
     onError: () => notifications.show({ message: "Could not save preview", color: "red" }),
   });
 
+  // Pin this run as the target's showcase "cover" — the picture the Library /
+  // Dashboard tile shows — or clear it back to the newest stack.
+  const cover = useMutation({
+    mutationFn: (pin: boolean) => api.setTargetCover(safe, pin ? run.id : null),
+    onSuccess: (_data, pin) => {
+      qc.invalidateQueries({ queryKey: ["runs", safe] });
+      qc.invalidateQueries({ queryKey: ["targets"] });
+      qc.invalidateQueries({ queryKey: ["target", safe] });
+      notifications.show({
+        message: pin ? "Set as the target's cover" : "Cover cleared — showing the newest stack",
+        color: "teal",
+      });
+    },
+    onError: () => notifications.show({ message: "Could not update cover", color: "red" }),
+  });
+
   const previewSrc = `${api.stackArtifactUrl(safe, run.id, "preview")}${cacheBust ? `?v=${cacheBust}` : ""}`;
   // While the first suggestion fetch is still in flight, keep showing the STF
   // preview thumbnail rather than briefly rendering at the fixed defaults and
@@ -660,6 +676,20 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
                 loading={identify && annotations.isLoading}
               >
                 Identify
+              </Button>
+            </Tooltip>
+          )}
+          {run.has_preview && (
+            <Tooltip label={run.is_cover
+              ? "This is the target's cover — show the newest stack instead"
+              : "Make this picture the target's cover (shown on the Library tile)"}>
+              <Button
+                size="xs" variant={run.is_cover ? "filled" : "light"} color="yellow"
+                leftSection={run.is_cover ? <IconStarFilled size={14} /> : <IconStar size={14} />}
+                loading={cover.isPending}
+                onClick={() => cover.mutate(!run.is_cover)}
+              >
+                {run.is_cover ? "Cover" : "Set as cover"}
               </Button>
             </Tooltip>
           )}

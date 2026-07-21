@@ -19,6 +19,7 @@ from webapp.schemas import (
     ObjectInfoOut,
     SessionQualityDriftOut,
     SessionRecapOut,
+    SetCoverRequest,
     StackHealthOut,
     TargetCreate,
     TargetOut,
@@ -67,6 +68,7 @@ def _to_out(entry) -> TargetOut:  # noqa: ANN001
         has_preview=bool(entry.last_stack_preview and Path(entry.last_stack_preview).exists()),
         notes=entry.notes,
         tags=list(entry.tags),
+        cover_stack_run_id=entry.cover_stack_run_id,
     )
 
 
@@ -363,16 +365,75 @@ def delete_target(safe: str, request: Request, remove_files: bool = False) -> di
         lib.close()
 
 
+def _cover_preview_path(lib, entry) -> Path | None:  # noqa: ANN001
+    """The pinned cover run's preview path, or ``None`` to fall back to newest.
+
+    Resolves the target's ``cover_stack_run_id`` through its own project so the
+    path always tracks the run (e.g. after a re-stack archives it — the run's
+    ``preview_path`` is repointed). Returns ``None`` when nothing is pinned, the
+    pinned run was pruned, or its preview file is gone, so the caller degrades
+    gracefully to the newest stack rather than serving a broken image."""
+    if entry is None or entry.cover_stack_run_id is None:
+        return None
+    try:
+        proj = lib.open_target(entry.safe_name)
+    except Exception:  # noqa: BLE001 — a missing/broken project just falls back
+        return None
+    try:
+        run = next((r for r in proj.iter_stack_runs()
+                    if r.id == entry.cover_stack_run_id), None)
+    finally:
+        proj.close()
+    if run is None or not run.preview_path:
+        return None
+    path = Path(run.preview_path)
+    return path if path.exists() else None
+
+
 @router.get("/{safe}/thumbnail")
 def target_thumbnail(safe: str, request: Request) -> FileResponse:
     lib = deps.open_library(request)
     try:
         entry = lib.find_target(safe)
-        if entry is None or not entry.last_stack_preview:
+        if entry is None:
             raise HTTPException(status_code=404, detail="No preview")
-        path = Path(entry.last_stack_preview)
+        # A pinned cover wins; otherwise show the newest stack's preview.
+        path = _cover_preview_path(lib, entry)
+        if path is None:
+            if not entry.last_stack_preview:
+                raise HTTPException(status_code=404, detail="No preview")
+            path = Path(entry.last_stack_preview)
         if not path.exists():
             raise HTTPException(status_code=404, detail="No preview")
         return FileResponse(path, media_type="image/png")
+    finally:
+        lib.close()
+
+
+@router.put("/{safe}/cover", response_model=TargetOut)
+def set_target_cover(safe: str, body: SetCoverRequest, request: Request) -> TargetOut:
+    """Pin a stack run as the target's showcase "cover" (``run_id``), or clear
+    it (``run_id`` null → show the newest stack, the default). Validates the run
+    exists in this target's project so a bad id can't be pinned."""
+    lib = deps.open_library(request)
+    try:
+        entry = lib.find_target(safe)
+        if entry is None:
+            raise HTTPException(status_code=404, detail=f"No target '{safe}'")
+        if body.run_id is not None:
+            proj = lib.open_target(entry.safe_name)
+            try:
+                exists = any(r.id == body.run_id for r in proj.iter_stack_runs())
+            finally:
+                proj.close()
+            if not exists:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No stack run {body.run_id} for target '{safe}'",
+                )
+        updated = lib.set_target_cover(safe, body.run_id)
+        if updated is None:  # pragma: no cover — found above, re-checked defensively
+            raise HTTPException(status_code=404, detail=f"No target '{safe}'")
+        return _to_out(updated)
     finally:
         lib.close()

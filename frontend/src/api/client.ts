@@ -83,6 +83,7 @@ export interface Target {
   has_preview: boolean;
   notes: string | null;
   tags: string[];
+  cover_stack_run_id?: number | null;
 }
 
 export interface FramingHint {
@@ -361,6 +362,7 @@ export interface StackRun {
   has_fits: boolean;
   has_tiff: boolean;
   has_preview: boolean;
+  is_cover?: boolean;
   notes: string | null;
   total_exposure_s?: number | null;
   reusable?: boolean;
@@ -959,6 +961,13 @@ export const api = {
   listStackRuns: (safe: string) => req<StackRun[]>(`/api/targets/${safe}/stack-runs`),
   deleteStackRun: (safe: string, id: number) =>
     req(`/api/targets/${safe}/stack-runs/${id}`, { method: "DELETE" }),
+  // Pin a run as the target's showcase "cover" (or clear with run_id null).
+  setTargetCover: (safe: string, run_id: number | null) =>
+    req<Target>(`/api/targets/${safe}/cover`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ run_id }),
+    }),
   updateStackRunNotes: (safe: string, id: number, notes: string) =>
     req<{ id: number; notes: string | null }>(
       `/api/targets/${safe}/stack-runs/${id}`,

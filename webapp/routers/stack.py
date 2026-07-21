@@ -279,6 +279,9 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
     lib, proj = deps.open_target_project(request, safe)
     try:
         runs = list(proj.iter_stack_runs())
+        # The pinned "cover" run (library-level), so the History card can mark it.
+        entry = lib.find_target(safe)
+        cover_id = entry.cover_stack_run_id if entry is not None else None
     finally:
         proj.close()
         lib.close()
@@ -296,6 +299,7 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
             has_fits=bool(r.fits_path and Path(r.fits_path).exists()),
             has_tiff=bool(r.tiff_path and Path(r.tiff_path).exists()),
             has_preview=bool(r.preview_path and Path(r.preview_path).exists()),
+            is_cover=(cover_id is not None and r.id == cover_id),
             notes=r.notes,
             total_exposure_s=r.total_exposure_s,
             reusable=_run_is_reusable(r.options_json),

@@ -46,7 +46,7 @@ from seestack.io.project import Project
 
 log = logging.getLogger(__name__)
 
-LIBRARY_SCHEMA_VERSION = 3
+LIBRARY_SCHEMA_VERSION = 4
 _REGISTRY_FILENAME = "library.sqlite"
 _TARGETS_SUBDIR = "targets"
 
@@ -77,7 +77,8 @@ CREATE TABLE IF NOT EXISTS targets (
     total_exposure_s      REAL NOT NULL DEFAULT 0,
     last_stack_preview    TEXT,                     -- absolute path to latest preview
     notes                 TEXT,
-    tags                  TEXT                       -- JSON array of tag strings
+    tags                  TEXT,                      -- JSON array of tag strings
+    cover_stack_run_id    INTEGER                    -- pinned "cover" run id (in this target's project.sqlite); NULL = use newest
 );
 
 CREATE INDEX IF NOT EXISTS idx_targets_radec ON targets(ra_deg, dec_deg);
@@ -131,6 +132,9 @@ class TargetEntry:
     last_stack_preview: str | None
     notes: str | None
     tags: list[str] = field(default_factory=list)
+    # Run id (in this target's ``project.sqlite``) the user pinned as the target's
+    # showcase "cover" image. ``None`` means "show the newest stack" (the default).
+    cover_stack_run_id: int | None = None
 
 
 def make_safe_name(name: str) -> str:
@@ -399,6 +403,26 @@ class Library:
             )
         return self.find_target(name_or_safe)
 
+    def set_target_cover(self, name_or_safe: str,
+                         cover_stack_run_id: int | None) -> TargetEntry | None:
+        """Pin (or clear) the target's showcase "cover" run.
+
+        ``cover_stack_run_id`` is a run id in this target's own
+        ``project.sqlite``; the tile/card then shows that run's preview instead
+        of the newest stack. ``None`` clears the pin (back to "newest"). The
+        caller is responsible for validating the id exists; a dangling id simply
+        falls back to the newest preview at render time, so it's never fatal.
+        Returns the refreshed entry, or ``None`` if the target is unknown."""
+        assert self._conn is not None
+        entry = self.find_target(name_or_safe)
+        if entry is None:
+            return None
+        self._conn.execute(
+            "UPDATE targets SET cover_stack_run_id = ? WHERE id = ?",
+            (cover_stack_run_id, entry.id),
+        )
+        return self.find_target(name_or_safe)
+
     def list_targets(self) -> list[TargetEntry]:
         assert self._conn is not None
         rows = self._conn.execute(
@@ -619,6 +643,10 @@ def _row_to_target(row: sqlite3.Row) -> TargetEntry:
         last_stack_preview=row["last_stack_preview"],
         notes=row["notes"],
         tags=_parse_tags(row["tags"] if "tags" in row.keys() else None),
+        cover_stack_run_id=(
+            row["cover_stack_run_id"]
+            if "cover_stack_run_id" in row.keys() else None
+        ),
     )
 
 
