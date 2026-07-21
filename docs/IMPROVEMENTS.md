@@ -47,6 +47,28 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+_(Scout stacking-engine re-audit 2026-07-21 (v0.150.0 baseline, suite green 1488 passed / 2 skipped): led
+the rotation with the stacking + calibrate path per §1's current focus and traced every file adversarially —
+`stack/align.py` (windowed reproject + valid-mask inset + the two sub-pixel-shift NaN-ring propagations,
+GPU/CPU `map_coordinates` cval parity), `stack/accumulator.py` (WeightedSum/MinMaxReject/Welford — Welford
+update **order** `delta→new_mean→delta2→m2` correct in both `add` and `add_window` in-place views; MinMax
+k-set ±inf identities never form inf−inf NaN; any-channel `frame_coverage`), `stack/stacker.py` (all four
+combine branches — drizzle / min-max / κ-σ two-pass / single-pass — each guards `n_used==0` before writing;
+photometric scale applied *identically* in pass 1 and pass 2 on every path, so the κ-σ clip reference and the
+clipped sum see the same scaled values; `_resolve_auto_reject`/`eff` drives dispatch, the memory guard *and*
+the STACKER card consistently; `weights_applied` correctly suppresses WGT* provenance only on the
+weight-ignoring min-max path), `stack/drizzle_path.py` (float64 `m2−m²` variance, Bessel-vs-resolution-floor
+split, `neff=frame count` gate under pixfrac<1/scale>1, out-of-bounds `[-0.5, N-0.5]` half-open bounds,
+any-channel deposited count), `stack/mosaic.py` (wrap-safe circular-mean centres, MAD outlier gate, px + MP
+canvas caps), `stack/reference.py`/`pointings.py`/`photometric.py`/`weighting.py`/`output.py`, and
+`calibrate/apply.py` + `masters.py` (flat/dark/bias/flat-dark non-finite sanitisation, exposure-scaled
+`_effective_dark` no-data restore, `_sigma_clip_mean` mad==0 → tol=0). **Traced clean — no reproducible
+correctness/data-integrity bug**; the engine remains well-hardened and its defensive comments cite the prior
+fixes. Consistent with the long clean-audit history — the highest marginal value has genuinely moved off the
+stack path, so the next Scout should keep rotating (webapp routers / watcher / ingest-QC / plate-solve /
+render) rather than re-tread here. The two open items below both remain correctly deferred pending real-data
+threshold validation.)_
+
 - ~~**"One frame vs your stack" reveal (and every raw-sub thumbnail) flattened the single sub's sky to
   ~2–3 tonal levels — a saturated star set the uint8 normalisation ceiling, quantising the faint sky
   away *before* the stretch could show it. The reveal dishonestly hid the very single-sub noise it
@@ -4640,6 +4662,41 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+- **NEW BEGINNER FEATURE (Scout 2026-07-21) — "Your target, night after night": a looping timelapse of the
+  same object getting deeper each time you re-stack.** *(Beginner feature; PRIORITY 3 friendliness /
+  enjoy-share; size M.)* When a beginner shoots the same target across several clear nights and re-stacks, the
+  app **already keeps every previous result**: `output.py::_archive_existing_outputs` renames each prior
+  `{base}_preview.png` (+ `.fits`) to a **timestamped** `{base}_{YYYYMMDD_HHMMSS}_preview.png` sibling rather
+  than overwriting it — so a target's `output/` folder holds a chronological series of that target's stacks,
+  oldest → newest, one per re-stack. Nothing surfaces that series. **Feature:** a read-only **"Your target,
+  night after night"** card on the Target/History page that assembles those archived previews (in timestamp
+  order) into one short looping animation — the picture visibly getting **cleaner and deeper** as more subs /
+  more nights pile on — under an auto-filled caption from the runs' own provenance (*"M31 · 3 stacks · 120 →
+  505 → 1,240 subs · Jul 12 → Jul 20"*, all from the `stack_runs` rows / FITS `NFRAMES`+`DATE`). This is the
+  most emotionally rewarding, share-worthy arc of the hobby ("look how far my picture has come") and it's the
+  one thing a multi-night beginner most wants to post. **Distinct from the three existing reveals:** the
+  "watch it appear" **progress reel** animates frames piling on **within one stack**; "One frame vs your
+  stack" (v0.147.0) is **raw-input → final-output**; the two-stack **compare dialog** is an A/B of two chosen
+  results. This is the **across-runs / across-nights** deepening arc — a different axis (time/integration),
+  and the only one built from the *archived history* the app silently keeps. **Fair-comparison detail to get
+  right (mirrors the one-sub-vs-stack fix):** re-render each frame of the timelapse from its stored preview
+  with the **same** display normalisation so the only visible change is noise-drop / new faint detail, not a
+  brightness/stretch jump between runs (the archived `_preview.png`s are each already autostretched to their
+  own data, so a later, deeper stack has a different black point — normalise the panels to a common stretch or
+  re-render from the archived FITS, otherwise the "getting deeper" story reads as a flicker). **Well-grounded /
+  low-risk:** the frames already exist on disk; the assembly is a pure reuse of the shipped
+  `assemble_progress_reel` (same webp/apng looping-animation writer the progress reel uses) over the archived
+  preview series; read-only, touches nothing on disk, no new dependency or network. **Guardrails:**
+  additive/reversible (a render-time view over existing files), best-effort — show the card only when a target
+  has **≥2** archived stacks (a single-stack target has no arc yet, so the card simply doesn't appear), and
+  fall back to a plain newest-preview still if a frame can't be loaded; omit the caption clause rather than
+  printing blanks when a run's `NFRAMES`/`DATE` is missing (older/edited runs still render). **Beginner bar
+  ✔:** one card, zero knobs, sane default (auto-assembled from history + auto caption), plain language; serves
+  the enjoy + share pillars §1 calls out (`annotated results`). Split for the Builder: (a) an engine/webapp
+  helper that lists a target's archived preview series in timestamp order and assembles the looping animation
+  (reuse `assemble_progress_reel`), exposed as a read-only endpoint; (b) the Target/History card that reveals
+  the `<img>` + caption (mirror the existing `ProgressReelCard` reveal pattern so History's run list doesn't
+  fetch every animation up front). Keeps the beginner-feature pipeline stocked.
 - **NEW (Scout 2026-07-21) — "Focus & sharpness through the night" trend card (per-session FWHM sparkline +
   plain verdict).** *(Beginner feature; PRIORITY 3 friendliness / trust; size M.)* The app already measures
   per-frame **FWHM** (star size = sharpness) and each frame's **timestamp**, and shows them as a sortable
