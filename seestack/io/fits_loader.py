@@ -173,6 +173,20 @@ def bilinear_debayer(mosaic: np.ndarray, pattern: str = "RGGB") -> np.ndarray:
     """
     if mosaic.ndim != 2:
         raise ValueError("mosaic must be 2D")
+    # Interpolate in float. The colour planes are built with ``zeros_like(mosaic)``
+    # and each missing site's neighbour sum (``_shift(plane) + _shift(plane)``) is
+    # evaluated in the plane's own dtype, so an *integer* mosaic — the documented
+    # raw 16-bit Bayer input — wraps modulo 2**16 at every interpolated pixel
+    # (60000 + 60000 → 54464 → /2 = 27232 instead of 60000), silently corrupting
+    # the result. Upcast an integer mosaic to float32 for the math and restore the
+    # caller's dtype at the end so the documented "same dtype as input" contract
+    # still holds. Live callers already pass float32 (``load_seestar_raw`` forces
+    # ``out_dtype=np.float32``), so their path is byte-for-byte unchanged — this
+    # only hardens the public function against a raw-integer caller. (Same overflow
+    # class fixed in ``qc/metrics.py::green_channel``.)
+    out_dtype = mosaic.dtype
+    if np.issubdtype(out_dtype, np.integer):
+        mosaic = mosaic.astype(np.float32)
     h, w = mosaic.shape
     if h % 2 or w % 2:
         # Pad by one to keep math simple; we crop back at the end.
@@ -217,6 +231,10 @@ def bilinear_debayer(mosaic: np.ndarray, pattern: str = "RGGB") -> np.ndarray:
 
     if crop != (0, 0):
         rgb = rgb[: rgb.shape[0] - crop[0], : rgb.shape[1] - crop[1], :]
+    if rgb.dtype != out_dtype:
+        # Restore the caller's dtype (only reached for an integer input, which was
+        # upcast to float32 above); a float caller keeps its exact array.
+        rgb = rgb.astype(out_dtype)
     return rgb
 
 
