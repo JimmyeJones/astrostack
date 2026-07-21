@@ -773,4 +773,41 @@ describe("HistoryView adjustable render", () => {
     await waitFor(() => expect(screen.getByText("0.50")).toBeInTheDocument());
     expect(screen.getByText("0.35")).toBeInTheDocument();
   });
+
+  it("offers the North-up toggle only when the run's WCS yields a correction", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ has_fits: true, has_preview: true }),
+    ]);
+    vi.spyOn(client.api, "stackRenderSuggestion").mockResolvedValue({
+      stretch: 0.5, black: 0.35, north_up_deg: 33.0,
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Adjust" }));
+
+    // The toggle appears; ticking it threads north_up into the render image.
+    const toggle = await screen.findByText("Rotate so North is up");
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      const rotated = Array.from(document.querySelectorAll("img")).some(
+        (img) => (img.getAttribute("src") || "").includes("north_up=true"));
+      expect(rotated).toBe(true);
+    });
+  });
+
+  it("hides the North-up toggle when the run has no orientation correction", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ has_fits: true, has_preview: true }),
+    ]);
+    vi.spyOn(client.api, "stackRenderSuggestion").mockResolvedValue({
+      stretch: 0.5, black: 0.35, north_up_deg: null,
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Adjust" }));
+    await waitFor(() => expect(screen.getByText("0.50")).toBeInTheDocument());
+    expect(screen.queryByLabelText("Rotate so North is up")).not.toBeInTheDocument();
+  });
 });

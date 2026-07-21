@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ActionIcon, Alert, Badge, Button, Card, Center, Group, Loader, SegmentedControl,
-  SimpleGrid, Slider, Stack, Table, Text, TextInput, Title, Tooltip,
+  SimpleGrid, Slider, Stack, Switch, Table, Text, TextInput, Title, Tooltip,
 } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
@@ -455,6 +455,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
   const qc = useQueryClient();
   const [adjust, setAdjust] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
+  const [northUp, setNorthUp] = useState(false);
   const [stretch, setStretch] = useState(DEFAULT_STRETCH);
   const [black, setBlack] = useState(DEFAULT_BLACK);
   const [cacheBust, setCacheBust] = useState(0);
@@ -483,6 +484,12 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
   });
   const sugStretch = suggestion.data?.stretch;
   const sugBlack = suggestion.data?.black;
+  // "North up" is offered only when the run's WCS yields a real orientation
+  // correction (the endpoint returns null otherwise); apply it only while it's
+  // both available and toggled on.
+  const northUpDeg = suggestion.data?.north_up_deg;
+  const canNorthUp = typeof northUpDeg === "number";
+  const applyNorthUp = northUp && canNorthUp;
   const defStretch = typeof sugStretch === "number" ? sugStretch : DEFAULT_STRETCH;
   const defBlack = typeof sugBlack === "number" ? sugBlack : DEFAULT_BLACK;
   // Apply the suggestion the first time it arrives, but only while the user
@@ -527,7 +534,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
   // preview thumbnail rather than briefly rendering at the fixed defaults and
   // then jumping to the anchored sliders.
   const imgSrc = adjust && run.has_fits && !suggestion.isLoading
-    ? api.stackRenderUrl(safe, run.id, dStretch, dBlack)
+    ? api.stackRenderUrl(safe, run.id, dStretch, dBlack, applyNorthUp)
     : previewSrc;
 
   return (
@@ -599,6 +606,13 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
               label={(v) => v.toFixed(2)} size="sm"
             />
           </div>
+          {canNorthUp ? (
+            <Switch
+              size="sm" checked={northUp} onChange={(e) => setNorthUp(e.currentTarget.checked)}
+              label="Rotate so North is up"
+              description="Orient the picture like reference photos of this object."
+            />
+          ) : null}
           <Group gap="xs" mt={4}>
             <Button
               size="xs" leftSection={<IconDeviceFloppy size={14} />}
@@ -775,7 +789,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
       <ImageLightbox
         src={light
           ? (adjust && run.has_fits
-              ? `${api.stackRenderUrl(safe, run.id, dStretch, dBlack)}&size=2048`
+              ? `${api.stackRenderUrl(safe, run.id, dStretch, dBlack, applyNorthUp)}&size=2048`
               : previewSrc)
           : null}
         title={run.output_basename}
