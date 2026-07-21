@@ -147,6 +147,28 @@ class NightSummaryOut(BaseModel):
     reject_buckets: dict[str, int] = {}
 
 
+class FocusTrendPointOut(BaseModel):
+    """One accepted, measured sub on the focus-trend sparkline."""
+
+    t_utc: str
+    fwhm_px: float
+
+
+class FocusTrendOut(BaseModel):
+    """Star-sharpness (FWHM) over capture time for the target's latest session,
+    plus a plain-language verdict ("steady" | "softened" | "improved")."""
+
+    verdict: str
+    points: list[FocusTrendPointOut]
+    n_points: int
+    median_fwhm_px: float
+    early_fwhm_px: float
+    late_fwhm_px: float
+    start_utc: str | None = None
+    end_utc: str | None = None
+    soft_after_utc: str | None = None
+
+
 class HealthNoteOut(BaseModel):
     """One plain-language "How's my stack?" note (see seestack.stackhealth)."""
 

@@ -297,6 +297,121 @@ def session_recap(
 
 
 # ---------------------------------------------------------------------------
+# "Focus & sharpness through the night" — a per-frame FWHM-vs-time trend for the
+# target's most recent capture session, so a beginner can see at a glance whether
+# their stars stayed sharp all night or drifted soft partway through (dew on the
+# lens, temperature/focus drift — a common Seestar failure on a long unattended
+# run). Read-only aggregation over the same session split; every number comes from
+# the frames table (``fwhm_px`` + ``timestamp_utc``), so it needs no new capture
+# step and no pixels. Distinct from the cross-session drift nudge (whole-night vs
+# a prior night) — this is the shape of sharpness *within* the latest night.
+# ---------------------------------------------------------------------------
+
+# Need at least this many measured, accepted subs in the session to draw a trend
+# worth reading — fewer and a "sparkline" is just noise, so the card self-hides.
+FOCUS_TREND_MIN_FRAMES = 6
+
+# The night is called "softened"/"improved" only when the change between its first
+# and last third clears BOTH a relative and an absolute floor — the same
+# belt-and-braces the cross-session drift nudge uses, so we never cry drift over
+# ordinary within-night seeing wobble. Otherwise the verdict is a calm "steady".
+FOCUS_TREND_DRIFT_RATIO = 1.25   # last third ≥ 25% softer (or sharper) than the first, AND
+FOCUS_TREND_DRIFT_ABS_PX = 0.6   # ≥ 0.6 px different in absolute terms — both must hold
+
+
+@dataclass
+class FocusTrendPoint:
+    """One accepted, measured sub on the focus-trend sparkline."""
+
+    t_utc: str            # capture time (ISO 8601 UTC, as stored)
+    fwhm_px: float        # star size = sharpness (higher = softer)
+
+
+@dataclass
+class FocusTrend:
+    """The most recent session's star-sharpness (FWHM) trend over capture time,
+    plus a plain-language verdict. Read-only and purely informational — it never
+    rejects a frame, it just shows the user how their focus held up.
+
+    ``verdict`` is one of:
+      "steady"   — sharpness held roughly flat across the night.
+      "softened" — the stars grew materially softer later in the night
+                   (dew / temperature / focus drift) — worth a dew heater or a
+                   quick refocus next time.
+      "improved" — the stars started soft and sharpened up (focus settled in).
+    A session with too few measured subs to judge returns ``None`` instead.
+    """
+
+    verdict: str
+    points: list[FocusTrendPoint]
+    n_points: int
+    median_fwhm_px: float          # median sharpness over the session
+    early_fwhm_px: float           # median of the first third (night's start)
+    late_fwhm_px: float            # median of the last third (night's end)
+    start_utc: str | None          # first measured sub this session
+    end_utc: str | None            # last measured sub this session
+    soft_after_utc: str | None     # when it began to soften (only for "softened")
+
+
+def focus_trend(
+    project: Project, *, gap_hours: float = DEFAULT_SESSION_GAP_HOURS
+) -> FocusTrend | None:
+    """Star-sharpness (FWHM) trend across the target's most recent capture
+    session, or ``None`` when too few of that session's accepted subs carry a
+    usable FWHM to trend. Read-only aggregation over the ``frames`` table."""
+    dated = [
+        (dt, f)
+        for f in project.iter_frames()
+        if (dt := _parse(f.timestamp_utc)) is not None
+    ]
+    if not dated:
+        return None
+    dated.sort(key=lambda pair: pair[0])
+    session_pairs = _last_session_frames(dated, gap_hours)
+    # Only accepted, measured subs — the ones that actually feed the stack — so the
+    # trend reflects the sharpness the picture was built from, not rejected outliers.
+    measured = [
+        f
+        for _dt, f in session_pairs
+        if f.accept and f.fwhm_px is not None and f.fwhm_px > 0
+    ]
+    if len(measured) < FOCUS_TREND_MIN_FRAMES:
+        return None
+
+    points = [
+        FocusTrendPoint(t_utc=f.timestamp_utc, fwhm_px=float(f.fwhm_px))
+        for f in measured
+    ]
+    fwhms = [p.fwhm_px for p in points]
+    n = len(fwhms)
+    third = n // 3  # ≥ 2 since n ≥ FOCUS_TREND_MIN_FRAMES (6)
+    early = float(median(fwhms[:third]))
+    late = float(median(fwhms[-third:]))
+
+    soft_after: str | None = None
+    if late >= early * FOCUS_TREND_DRIFT_RATIO and late - early >= FOCUS_TREND_DRIFT_ABS_PX:
+        verdict = "softened"
+        # The last third is where it's clearly soft; name when that stretch began.
+        soft_after = points[n - third].t_utc
+    elif early >= late * FOCUS_TREND_DRIFT_RATIO and early - late >= FOCUS_TREND_DRIFT_ABS_PX:
+        verdict = "improved"
+    else:
+        verdict = "steady"
+
+    return FocusTrend(
+        verdict=verdict,
+        points=points,
+        n_points=n,
+        median_fwhm_px=float(median(fwhms)),
+        early_fwhm_px=early,
+        late_fwhm_px=late,
+        start_utc=points[0].t_utc,
+        end_utc=points[-1].t_utc,
+        soft_after_utc=soft_after,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Per-target "Nights" breakdown — every capture night that went into a target,
 # so a beginner (who shoots one target across many nights — the Seestar writes a
 # new folder per night) can see which nights were good and, later, set a bad one

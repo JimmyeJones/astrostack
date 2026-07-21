@@ -4802,6 +4802,29 @@ problems. Dogfood it every big-picture run and fix root causes.
   (reuse `assemble_progress_reel`), exposed as a read-only endpoint; (b) the Target/History card that reveals
   the `<img>` + caption (mirror the existing `ProgressReelCard` reveal pattern so History's run list doesn't
   fetch every animation up front). Keeps the beginner-feature pipeline stocked.
+- ~~**NEW (Scout 2026-07-21) — "Focus & sharpness through the night" trend card (per-session FWHM sparkline +
+  plain verdict).**~~ — **SHIPPED v0.152.0** (Builder 2026-07-21, branch `claude/pensive-faraday-fvpbvd`).
+  Built exactly the Scout's slice across all three layers. **Engine:** `seestack/session_recap.py::focus_trend`
+  returns the target's most recent session's accepted, measured subs as `[FocusTrendPoint(t_utc, fwhm_px)]` in
+  capture order plus a `verdict` — `"steady"` / `"softened"` / `"improved"` — decided by comparing the median
+  FWHM of the night's first third vs last third against the *same* belt-and-braces floors the cross-session
+  drift nudge uses (`FOCUS_TREND_DRIFT_RATIO=1.25` **and** `FOCUS_TREND_DRIFT_ABS_PX=0.6`, so it never cries
+  drift over ordinary within-night seeing wobble). A "softened" verdict also names `soft_after_utc` (when the
+  soft stretch began). Self-hides (returns `None`) below `FOCUS_TREND_MIN_FRAMES=6` measured subs. Reuses the
+  existing timezone-robust `_split_sessions`/`_last_session_frames`, so it inherits the midnight-safe grouping.
+  **Webapp:** `GET /api/targets/{safe}/focus-trend` → `FocusTrendOut | None` (read-only aggregation over the
+  frames table; `null` = card self-hides). **Frontend:** a `FocusTrendCard` on the Target page draws an inline
+  SVG sparkline (higher line = sharper; no chart dependency) + a verdict badge + a plain-language sentence, all
+  from pure, unit-tested helpers in `focusTrend.ts` (`describeFocusTrend`, `focusVerdictBadge`, `formatClockUtc`,
+  `sparklinePoints`). Distinct from the cross-session drift nudge (whole-night vs a prior night) — this shows the
+  *shape* of sharpness *within* the latest night, so a beginner can spot a dew/focus drift and act on the next
+  clear night. Additive/upgrade-safe: read-only, off nothing, no schema/config/API-shape/default change. Tests:
+  `tests/test_session_recap.py` (+7 — steady / softened+soft_after / improved / min-frame gate / ignores
+  rejected+unmeasured / latest-session-only / no-timestamps), `tests/webapp/test_target_focus_trend.py` (+3 —
+  null self-hide / softened serialisation & point order / steady no-marker), and frontend
+  `focusTrend.test.ts` (+10) & `FocusTrendCard.test.tsx` (+2 — sparkline+verdict render / null self-hides).
+  Beginner bar ✔ (one card, zero knobs, auto verdict + plain language, actionable next-night advice).
+  *(Original spec kept below for provenance.)*
 - **NEW (Scout 2026-07-21) — "Focus & sharpness through the night" trend card (per-session FWHM sparkline +
   plain verdict).** *(Beginner feature; PRIORITY 3 friendliness / trust; size M.)* The app already measures
   per-frame **FWHM** (star size = sharpness) and each frame's **timestamp**, and shows them as a sortable
@@ -4829,6 +4852,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   the same two images the reveal already renders; a pure `noise_ratio(sub_rgb, stack_rgb)` helper (NaN-aware,
   percentile-clipped so stars don't dominate) is unit-testable against a known-σ synthetic. Additive, read-only,
   no schema/config change. (Depends on v0.148.1 being in — it now is.)
+  _(Builder note 2026-07-21 — considered this run alongside the shipped Focus-trend card and left it for a focused
+  future run because the honesty of the number hinges on two design choices worth getting right rather than
+  rushing: **(1) measure in the LINEAR domain, not the display images.** The reveal's two PNGs are each passed
+  through `_autostretch_for_export` (a non-linear STF), which compresses the sky and would distort a σ ratio; the
+  honest "cut noise ~N×" must be measured on the linear sub (debayered, pre-stretch) vs the linear master
+  (`load_stack_rgb` with `display_space=False` — **gate out edited/display-space exports**, whose linear σ is
+  meaningless). Our stacker combines by weighted **mean**, so a linear master's background σ ≈ sub σ / √N_eff, and
+  the ratio should land near √(n_frames) — a good sanity check for the E2E test. **(2) Avoid a decimation bias:**
+  `render_sub_preview` box-**averages** the sub down while `load_stack_rgb` **strides** the master — averaging
+  reduces the sub's noise more than striding reduces the stack's, biasing the ratio *down*. Measure both on
+  full-res (or identically-strided, never box-averaged) linear arrays, bounded by an equal central crop for memory.
+  A robust, gradient-insensitive estimator (e.g. MAD of nearest-neighbour pixel differences ÷ √2 over the
+  low-signal population) keeps a background gradient from inflating σ. Put the pure `noise_ratio` in an engine
+  module (unit-test against two known-σ synthetics → recovers the ratio) and expose it as its own best-effort
+  endpoint (`.../one-sub-vs-stack/noise` → `{ratio|null}`) so the info endpoint stays cheap and the badge is
+  lazy; null → the card simply omits the number. Off nothing, additive.)_
 - **PARTLY SHIPPED (v0.148.0, Builder 2026-07-21, branch `claude/pensive-faraday-dvg3ul`) — "North up" view slice.**
   Shipped the engine + the History **view** orientation: a **"Rotate so North is up"** toggle in the History
   card's *Adjust* panel reorients the live render + the full-screen lightbox so celestial North points up (like

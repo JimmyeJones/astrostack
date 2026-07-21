@@ -18,6 +18,7 @@ import { integrationReadiness, readinessColor } from "../readiness";
 import { QueryError } from "../components/QueryError";
 import { ObjectInfoCard, describeObject } from "../components/ObjectInfoCard";
 import { NightsCard } from "../components/NightsCard";
+import { FocusTrendCard } from "../components/FocusTrendCard";
 import { SessionRecapCard } from "../components/SessionRecapCard";
 import { StackHealthCard } from "../components/StackHealthCard";
 import { FirstLookCard } from "../components/FirstLookCard";
@@ -959,6 +960,8 @@ export function TargetView() {
       <SessionRecapCard safe={safe} />
 
       <NightsCard safe={safe} />
+
+      <FocusTrendCard safe={safe} />
 
       <StackHealthCard safe={safe} />
 
