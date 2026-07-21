@@ -314,58 +314,64 @@ def patch_frame(safe: str, frame_id: int, body: FramePatch, request: Request) ->
 @router.post("/bulk")
 def bulk_frames(safe: str, body: BulkFrameAction, request: Request) -> dict:
     lib, proj = deps.open_target_project(request, safe)
+    # Nest proj-close inside lib-close (as patch_frame / auto_grade_apply do) so the
+    # library handle is released on *every* exit — including when a mid-loop
+    # update_frame raises (a read-only/locked project DB, the NAS-went-read-only
+    # state the app is built to survive). Splitting the two into sibling try/finally
+    # blocks leaked the Library connection whenever the first block raised, because
+    # the second (lib.close) block was then skipped.
     try:
-        # Track exactly which frames this action touched so the client can offer
-        # a one-click undo of an over-aggressive bulk reject.
-        changed_ids: list[int] = []
-        if body.action in ("accept", "reject") and body.ids:
-            accept = body.action == "accept"
-            for fid in body.ids:
-                proj.update_frame(
-                    fid, accept=accept, user_override=True,
-                    reject_reason=None if accept else "user",
-                )
-                changed_ids.append(fid)
-        elif body.action == "reject_worst":
-            frames = [f for f in proj.iter_frames(accepted_only=True)
-                      if getattr(f, body.metric) is not None]
-            # Higher FWHM/ecc/sky is worse; higher star_count / transparency is
-            # better (so their "worst" are the *lowest* values).
-            higher_is_better = {"star_count", "transparency_score"}
-            reverse = body.metric not in higher_is_better
-            frames.sort(key=lambda f: getattr(f, body.metric), reverse=reverse)
-            n = int(len(frames) * max(0.0, min(1.0, body.fraction)))
-            for f in frames[:n]:
-                proj.update_frame(
-                    f.id, accept=False, user_override=True,
-                    reject_reason=f"bulk:{body.metric}",
-                )
-                changed_ids.append(f.id)
-        elif body.action == "reject_streaked":
-            # Drop every accepted frame still flagged with a satellite/plane
-            # trail. Pairs with the "N streaked" badge for users who'd rather
-            # discard the streaked subs than rely on per-pixel rejection.
-            for f in proj.iter_frames(accepted_only=True):
-                if f.streak_detected:
+        try:
+            # Track exactly which frames this action touched so the client can offer
+            # a one-click undo of an over-aggressive bulk reject.
+            changed_ids: list[int] = []
+            if body.action in ("accept", "reject") and body.ids:
+                accept = body.action == "accept"
+                for fid in body.ids:
+                    proj.update_frame(
+                        fid, accept=accept, user_override=True,
+                        reject_reason=None if accept else "user",
+                    )
+                    changed_ids.append(fid)
+            elif body.action == "reject_worst":
+                frames = [f for f in proj.iter_frames(accepted_only=True)
+                          if getattr(f, body.metric) is not None]
+                # Higher FWHM/ecc/sky is worse; higher star_count / transparency is
+                # better (so their "worst" are the *lowest* values).
+                higher_is_better = {"star_count", "transparency_score"}
+                reverse = body.metric not in higher_is_better
+                frames.sort(key=lambda f: getattr(f, body.metric), reverse=reverse)
+                n = int(len(frames) * max(0.0, min(1.0, body.fraction)))
+                for f in frames[:n]:
                     proj.update_frame(
                         f.id, accept=False, user_override=True,
-                        reject_reason="bulk:streaked",
+                        reject_reason=f"bulk:{body.metric}",
                     )
                     changed_ids.append(f.id)
-        elif body.action == "reject_trailed":
-            # Drop every accepted frame whose stars are a strong eccentricity
-            # outlier for this target (a bad-tracking / wind / bumped-mount sub).
-            # Pairs with the "N trailed" badge on the Target view.
-            trailed = set(trailed_frame_ids(list(proj.iter_frames(accepted_only=True))))
-            for fid in trailed:
-                proj.update_frame(
-                    fid, accept=False, user_override=True,
-                    reject_reason="bulk:trailed",
-                )
-                changed_ids.append(fid)
-    finally:
-        proj.close()
-    try:
+            elif body.action == "reject_streaked":
+                # Drop every accepted frame still flagged with a satellite/plane
+                # trail. Pairs with the "N streaked" badge for users who'd rather
+                # discard the streaked subs than rely on per-pixel rejection.
+                for f in proj.iter_frames(accepted_only=True):
+                    if f.streak_detected:
+                        proj.update_frame(
+                            f.id, accept=False, user_override=True,
+                            reject_reason="bulk:streaked",
+                        )
+                        changed_ids.append(f.id)
+            elif body.action == "reject_trailed":
+                # Drop every accepted frame whose stars are a strong eccentricity
+                # outlier for this target (a bad-tracking / wind / bumped-mount sub).
+                # Pairs with the "N trailed" badge on the Target view.
+                trailed = set(trailed_frame_ids(list(proj.iter_frames(accepted_only=True))))
+                for fid in trailed:
+                    proj.update_frame(
+                        fid, accept=False, user_override=True,
+                        reject_reason="bulk:trailed",
+                    )
+                    changed_ids.append(fid)
+        finally:
+            proj.close()
         if changed_ids:
             # Same registry refresh as the accept/reject PATCH — bulk actions
             # change the accepted count too.
