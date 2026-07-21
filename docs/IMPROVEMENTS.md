@@ -4339,7 +4339,26 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 - **NEW BEGINNER FEATURE (Scout 2026-07-21 #5) — "Night by night": a per-target breakdown of every
-  imaging night, so a beginner can see which nights were good and set a clouded-out night aside.** The
+  imaging night, so a beginner can see which nights were good and set a clouded-out night aside.** —
+  **SLICES (a)+(b)+(c) SHIPPED v0.144.0** (Builder 2026-07-21, branch `claude/pensive-faraday-enl8ut`).
+  New read-only **"Nights"** card on the Target page listing every capture night (newest first): date,
+  subs kept/total, integration, median FWHM, and a one-word verdict (**sharp / soft / hazy**) with a
+  gentle "sharpest" nod on the best night. **Backend:** pure `seestack/session_recap.py::nights_breakdown(project)`
+  reuses the shipped `_split_sessions` + `_session_median_fwhm` + `bucket_reject_reason` infra — a night is
+  "hazy" when ≥`NIGHT_HAZY_CLOUD_FRACTION` (40%) of its subs were set aside as cloudy, "soft" when its median
+  FWHM clears the *same* relative+absolute floors the cross-session drift nudge uses (so the two always agree),
+  "sharp" otherwise, and "" when too few measured to judge; the `_night_verdict` helper is unit-tested directly.
+  Read-only `GET /api/targets/{safe}/nights` → `list[NightSummaryOut]`. **Frontend:** `NightsCard` (renders only
+  when a target spans ≥2 nights — a single night is already the "Last session" card, so it never duplicates it),
+  with pure `formatNightDate` (tz-stable, reads the date off the ISO string) + `verdictBadge` helpers.
+  Beginner bar ✔ — plain-language, informational-only (never auto-rejects), directly helps spot a bad night.
+  Upgrade-safe/additive: one read-only endpoint + one card + one schema, no schema/config/API/default change.
+  Tests: `tests/test_session_recap.py` (+6 — empty, newest-first rollups, soft-vs-best + best nod, hazy cloud
+  precedence, no-verdict on thin data, pure `_night_verdict`), `tests/webapp/test_target_nights.py` (+3 —
+  default single night, two-nights newest-first, verdict+buckets serialisation), `NightsCard.test.tsx` (+7).
+  Python 1438 + tsc + vitest 951 + vite build green. **Slice (d) — the opt-in bulk "set this night aside"
+  reject + re-stack — is deliberately left for a future run (the only non-read-only slice).** Original spec:
+  The
   §1 owner shoots one target across *many* nights (the Seestar writes a new folder per night). Today the
   Target page has a **"Last session"** card (`session_recap`, one night) and the Library has a
   library-wide recap — but there is **no per-target view of *all* the nights that went into this

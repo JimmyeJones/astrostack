@@ -161,6 +161,20 @@ export interface TargetNight {
   kept_exposure_s: number;
 }
 
+export interface NightSummary {
+  start_utc: string | null;
+  end_utc: string | null;
+  n_frames: number;
+  n_kept: number;
+  n_set_aside: number;
+  exposure_s: number;
+  kept_exposure_s: number;
+  median_fwhm_px: number | null;
+  verdict: string; // "sharp" | "soft" | "hazy" | "" (too few measured)
+  is_best: boolean;
+  reject_buckets: Record<string, number>;
+}
+
 export interface LibrarySessionRecap {
   n_targets: number;
   n_frames: number;
@@ -882,6 +896,8 @@ export const api = {
     ),
   bestFrame: (safe: string) =>
     req<BestFrame>(`/api/targets/${safe}/best-frame`),
+  targetNights: (safe: string) =>
+    req<NightSummary[]>(`/api/targets/${safe}/nights`),
   getIntegrationGoal: (safe: string) =>
     req<{ goal_s: number | null }>(`/api/targets/${safe}/integration-goal`),
   setIntegrationGoal: (safe: string, goalS: number | null) =>

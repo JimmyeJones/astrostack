@@ -376,3 +376,120 @@ def test_recent_session_window_keeps_a_bridged_early_batch():
 def test_recent_session_window_empty_without_timestamps():
     assert recent_session_window_frames([]) == []
     assert recent_session_window_frames([_frame(None)]) == []
+
+
+# --- Per-target "Nights" breakdown -----------------------------------------
+
+from seestack.session_recap import (  # noqa: E402
+    FWHM_DRIFT_ABS_PX,
+    FWHM_DRIFT_RATIO,
+    NIGHT_HAZY_CLOUD_FRACTION,
+    _night_verdict,
+    nights_breakdown,
+)
+
+
+def test_nights_breakdown_empty_when_nothing_datable(tmp_path):
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        proj.add_frame(_frame(None))
+        assert nights_breakdown(proj) == []
+    finally:
+        proj.close()
+
+
+def test_nights_breakdown_lists_every_night_newest_first(tmp_path):
+    """Three nights → three summaries, newest first, with per-night rollups."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        for wk, (n_keep, fwhm) in enumerate([(5, 3.0), (5, 3.1), (6, 3.0)]):
+            base = datetime(2026, 7, 1 + 7 * wk, 22, 0, 0)
+            for i in range(n_keep):
+                proj.add_frame(_frame(base + timedelta(seconds=30 * i), fwhm_px=fwhm))
+        nights = nights_breakdown(proj)
+        assert len(nights) == 3
+        # Newest first: the last-added night (2026-07-15) leads.
+        assert nights[0].start_utc.startswith("2026-07-15")
+        assert nights[2].start_utc.startswith("2026-07-01")
+        assert [n.n_frames for n in nights] == [6, 5, 5]
+        assert all(n.n_set_aside == 0 for n in nights)
+        assert nights[0].kept_exposure_s == 60.0  # 6 subs × 10 s
+    finally:
+        proj.close()
+
+
+def test_nights_breakdown_flags_a_soft_night_against_the_best(tmp_path):
+    """A night materially softer than the target's sharpest night → 'soft', and
+    the sharpest night is nodded 'best' (with ≥2 judgeable nights)."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        sharp = datetime(2026, 7, 1, 22, 0, 0)
+        for i in range(5):  # sharpest night: FWHM 3.0
+            proj.add_frame(_frame(sharp + timedelta(seconds=30 * i), fwhm_px=3.0))
+        soft = datetime(2026, 7, 8, 22, 0, 0)
+        for i in range(5):  # 4.0 ≥ 3.0×1.25 and ≥ 3.0+0.6 → soft
+            proj.add_frame(_frame(soft + timedelta(seconds=30 * i), fwhm_px=4.0))
+        nights = nights_breakdown(proj)
+        newest, oldest = nights[0], nights[1]
+        assert newest.start_utc.startswith("2026-07-08")
+        assert newest.verdict == "soft"
+        assert newest.is_best is False
+        assert oldest.verdict == "sharp"
+        assert oldest.is_best is True
+        assert oldest.median_fwhm_px == 3.0
+    finally:
+        proj.close()
+
+
+def test_nights_breakdown_flags_a_cloudy_night_hazy(tmp_path):
+    """A night that lost ≥40% of its subs to cloud → 'hazy', which takes
+    precedence over a sharpness judgement even if the survivors are sharp."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        base = datetime(2026, 7, 8, 22, 0, 0)
+        for i in range(5):  # 5 kept, sharp survivors
+            proj.add_frame(_frame(base + timedelta(seconds=30 * i), fwhm_px=3.0))
+        for i in range(5):  # 5 set aside as cloudy → 50% ≥ 40%
+            proj.add_frame(_frame(base + timedelta(minutes=5, seconds=i),
+                                  accept=False, reject_reason="auto:grade:transparency"))
+        nights = nights_breakdown(proj)
+        assert len(nights) == 1
+        assert nights[0].reject_buckets == {"cloudy": 5}
+        assert nights[0].verdict == "hazy"
+        # A lone night has no baseline to be "best" against.
+        assert nights[0].is_best is False
+    finally:
+        proj.close()
+
+
+def test_nights_breakdown_no_verdict_when_too_few_measured(tmp_path):
+    """A night with fewer than the min measured accepted subs and no cloud
+    problem gets no verdict (we don't judge sharpness on thin data)."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        base = datetime(2026, 7, 8, 22, 0, 0)
+        for i in range(3):  # only 3 measured accepted subs (< the min of 4)
+            proj.add_frame(_frame(base + timedelta(seconds=30 * i), fwhm_px=3.0))
+        nights = nights_breakdown(proj)
+        assert len(nights) == 1
+        assert nights[0].median_fwhm_px is None
+        assert nights[0].verdict == ""
+    finally:
+        proj.close()
+
+
+def test_night_verdict_pure_helper():
+    # Hazy overrides everything once the cloud fraction clears the floor.
+    assert _night_verdict(3.0, 3.0, NIGHT_HAZY_CLOUD_FRACTION) == "hazy"
+    assert _night_verdict(None, None, 1.0) == "hazy"
+    # No median and no cloud problem → no verdict.
+    assert _night_verdict(None, 3.0, 0.0) == ""
+    # Soft only when BOTH the relative and absolute floors are cleared.
+    best = 3.0
+    soft = best * FWHM_DRIFT_RATIO + 0.01
+    assert soft - best >= FWHM_DRIFT_ABS_PX
+    assert _night_verdict(soft, best, 0.0) == "soft"
+    # Just under either floor stays sharp.
+    assert _night_verdict(best + FWHM_DRIFT_ABS_PX * 0.5, best, 0.0) == "sharp"
+    # The best night itself is sharp, never soft.
+    assert _night_verdict(best, best, 0.0) == "sharp"

@@ -296,6 +296,135 @@ def session_recap(
     )
 
 
+# ---------------------------------------------------------------------------
+# Per-target "Nights" breakdown — every capture night that went into a target,
+# so a beginner (who shoots one target across many nights — the Seestar writes a
+# new folder per night) can see which nights were good and, later, set a bad one
+# aside. Read-only aggregation over the same session split the last-session recap
+# uses, so it inherits its timezone-robust, midnight-safe grouping.
+# ---------------------------------------------------------------------------
+
+# A night's one-word verdict is advisory — a plain label + a gentle highlight,
+# never a gate and never changes data — grounded only in metrics already stored:
+#   "hazy"  — a large share of the night's subs were set aside as *cloudy* (the
+#             transparency/sky reject bucket): the sky, not focus, was the problem.
+#   "soft"  — its median FWHM is materially worse than the target's *sharpest*
+#             night, reusing the same relative+absolute floors the cross-session
+#             drift nudge already uses, so the two always agree.
+#   "sharp" — a usable median FWHM and neither hazy nor soft.
+#   ""      — too few measured subs to judge sharpness (and not hazy).
+NIGHT_HAZY_CLOUD_FRACTION = 0.4  # ≥ 40% of the night's subs lost to cloud → "hazy"
+
+
+@dataclass
+class NightSummary:
+    """One capture night's rollup for the per-target "Nights" breakdown. Times
+    are ISO 8601 UTC strings (as stored on the frames)."""
+
+    start_utc: str | None           # earliest capture this night
+    end_utc: str | None             # latest capture this night
+    n_frames: int                   # subs captured this night (kept + set aside)
+    n_kept: int                     # accepted this night
+    n_set_aside: int                # rejected this night
+    exposure_s: float               # Σ exposure of every sub this night
+    kept_exposure_s: float          # Σ exposure of the kept subs this night
+    median_fwhm_px: float | None    # median FWHM over accepted, measured subs, or None
+    verdict: str                    # "sharp" | "soft" | "hazy" | "" (too few measured)
+    is_best: bool                   # the target's sharpest night (only when ≥2 judgeable)
+    reject_buckets: dict[str, int] = field(default_factory=dict)  # plain bucket → count
+
+
+def _night_verdict(
+    median_fwhm: float | None, best_fwhm: float | None, cloud_fraction: float
+) -> str:
+    """One-word plain verdict for a night, from already-stored metrics only.
+
+    Hazy (a big chunk of the night lost to cloud) takes precedence over any
+    sharpness judgement; then a night materially softer than the target's best is
+    "soft" (same floors as the drift nudge); a night with a usable median FWHM
+    that is neither is "sharp"; otherwise "" (not enough measured to judge)."""
+    if cloud_fraction >= NIGHT_HAZY_CLOUD_FRACTION:
+        return "hazy"
+    if median_fwhm is None:
+        return ""
+    if (best_fwhm is not None
+            and median_fwhm >= best_fwhm * FWHM_DRIFT_RATIO
+            and median_fwhm - best_fwhm >= FWHM_DRIFT_ABS_PX):
+        return "soft"
+    return "sharp"
+
+
+def nights_breakdown(
+    project: Project, *, gap_hours: float = DEFAULT_SESSION_GAP_HOURS
+) -> list[NightSummary]:
+    """Every capture night that went into this target, **newest first**.
+
+    Groups the target's frames into capture-time sessions (the same 6 h-gap split
+    the last-session recap uses) and rolls each night up into a small, friendly
+    summary: subs kept vs set aside (and why, in plain buckets), integration, the
+    night's median FWHM over its accepted subs, and a one-word verdict grounded in
+    those metrics. Purely informational and read-only — it never rejects anything;
+    a later slice can offer an opt-in "set this night aside" on top of it.
+
+    Returns ``[]`` when nothing is datable (no frame carries a capture time).
+    """
+    dated: list[tuple[datetime, FrameRow]] = [
+        (dt, f) for f in project.iter_frames()
+        if (dt := _parse(f.timestamp_utc)) is not None
+    ]
+    if not dated:
+        return []
+    dated.sort(key=lambda pair: pair[0])
+    sessions = _split_sessions(dated, gap_hours)
+
+    # The target's sharpest night is the baseline both the "soft" verdict and the
+    # "best" nod use — computed once over the nights that carry a usable median.
+    medians = [m for s in sessions if (m := _session_median_fwhm(s)[0]) is not None]
+    best_fwhm = min(medians) if medians else None
+    n_judgeable = len(medians)
+
+    out: list[NightSummary] = []
+    for session_pairs in sessions:
+        rows = [f for _dt, f in session_pairs]
+        kept = [f for f in rows if f.accept]
+        set_aside = [f for f in rows if not f.accept]
+        buckets: dict[str, int] = {}
+        for f in set_aside:
+            b = bucket_reject_reason(f.reject_reason)
+            buckets[b] = buckets.get(b, 0) + 1
+        median_fwhm, _n = _session_median_fwhm(session_pairs)
+        cloud_fraction = buckets.get("cloudy", 0) / len(rows) if rows else 0.0
+        verdict = _night_verdict(median_fwhm, best_fwhm, cloud_fraction)
+        # The "best" nod is a positive highlight, so only a genuinely good
+        # ("sharp") night earns it — never a clouded ("hazy") night whose few
+        # survivors happen to be sharp. ``best_fwhm`` is the min over the
+        # judgeable nights, so ``<=`` flags exactly the sharpest; we only nod
+        # "best" when there's more than one judgeable night to compare against.
+        is_best = (
+            n_judgeable >= 2
+            and verdict == "sharp"
+            and median_fwhm is not None
+            and best_fwhm is not None
+            and median_fwhm <= best_fwhm
+        )
+        out.append(NightSummary(
+            start_utc=session_pairs[0][1].timestamp_utc,
+            end_utc=session_pairs[-1][1].timestamp_utc,
+            n_frames=len(rows),
+            n_kept=len(kept),
+            n_set_aside=len(set_aside),
+            exposure_s=sum(f.exposure_s or 0.0 for f in rows),
+            kept_exposure_s=sum(f.exposure_s or 0.0 for f in kept),
+            median_fwhm_px=median_fwhm,
+            verdict=verdict,
+            is_best=is_best,
+            reject_buckets=buckets,
+        ))
+
+    out.reverse()  # newest night first
+    return out
+
+
 @dataclass
 class TargetNightContribution:
     """What one target contributed to the library's most recent night."""
