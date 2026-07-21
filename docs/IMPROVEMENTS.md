@@ -4657,6 +4657,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   toggle; (c) the share-flow toggle (default on). _(M, split as above; PRIORITY 3 friendliness / share —
   beginner feature; keeps the pipeline stocked. Builds directly on shipped share-export + FITS-provenance
   infra, so low-risk.)_
+- **NEW (Builder 2026-07-21, follow-up to shipped nameplate v0.146.0) — offer the acquisition nameplate on the
+  *non-editor* "Download JPEG" path too, so a beginner who never opens the editor still gets the captioned
+  look.** v0.146.0 wired the nameplate into the **editor** share flow (`editor/share` → `write_share_jpeg`).
+  But the History / Target **"Download JPEG"** button uses a *different* surface — `stack.py`'s
+  `download_image?kind=jpeg` transcodes the stored preview PNG via `png_bytes_to_jpeg`
+  (`webapp/routers/stack.py:863`) and never touches the editor — so the most direct "I just want to share my
+  finished picture" path is exactly the one still missing the caption bar. **Idea:** thread the same opt-in
+  nameplate through that path: give `png_bytes_to_jpeg(..., nameplate=None)` the same optional
+  `NameplateFields` param `write_share_jpeg` already has (draw the footer on the transcoded RGB before
+  encoding — `draw_nameplate` already takes a PIL image), and have the `download_image` endpoint build the
+  fields from the run's provenance (reuse `pipeline._nameplate_fields`, or lift it to a shared helper) when a
+  `nameplate=1` query param / request flag is set. The pure `draw_nameplate` + `NameplateFields` engine work
+  is **already shipped and tested** — this is just extending it to the second encoder + one endpoint + a small
+  frontend affordance on the History/Target JPEG button. **Beginner bar ✔** (same one-toggle affordance,
+  extended to the place a beginner most reaches for a shareable file). Additive/upgrade-safe: new optional
+  param defaulting to today's behaviour (no nameplate), off by default, no schema/API-shape/default change.
+  _(S, PRIORITY 3 friendliness / share — completes the nameplate story for the non-editor download; builds
+  directly on the shipped v0.146.0 engine helpers so it's low-risk.)_
 - **NEW BEGINNER FEATURE (Scout 2026-07-21 #5) — "Night by night": a per-target breakdown of every
   imaging night, so a beginner can see which nights were good and set a clouded-out night aside.** —
   **SLICES (a)+(b)+(c) SHIPPED v0.144.0** (Builder 2026-07-21, branch `claude/pensive-faraday-enl8ut`).
