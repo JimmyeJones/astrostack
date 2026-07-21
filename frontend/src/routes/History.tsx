@@ -23,6 +23,7 @@ import { StackHealthCard } from "../components/StackHealthCard";
 import { ProgressReelCard } from "../components/ProgressReelCard";
 import { OneFrameVsStackCard } from "../components/OneFrameVsStackCard";
 import { SharePictureButton } from "../components/SharePictureButton";
+import { WallpaperMenu } from "../components/WallpaperMenu";
 import { sharePictureText } from "../share";
 import { Sparkline } from "../components/Sparkline";
 
@@ -739,6 +740,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
               )}
             />
           )}
+          {run.has_preview && <WallpaperMenu safe={safe} runId={run.id} />}
           {run.has_fits && (
             <Tooltip label="Download the raw scientific data (FITS) — for re-processing, not sharing">
               <Button

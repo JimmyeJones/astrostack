@@ -130,16 +130,16 @@ when you take it.
   _(Filed, not fixed this run: low value — desktop-only path — and the SIMBAD coord-column format varies by
   astroquery version, so a correct fix wants a network check the Scout deferred rather than rush.)_
 
-- **Upload leaves an orphaned `.part` sidecar when the final `close()` flush fails.** Location: `webapp/
-  routers/upload.py:184` — `await run_in_threadpool(fh.close)` sits **outside** the `try/except BaseException`
-  (lines 173-183) that unlinks the temp on a mid-stream failure, so a buffered-write `ENOSPC` surfacing at the
-  final flush leaks the `tempfile.mkstemp(suffix=".part")` sidecar, contradicting the module's stated "on any
-  failure the partial `.part` is removed" guarantee. **Severity: cosmetic** — the caller still reports "not
-  enough disk space" gracefully, the `.part` suffix keeps it out of the scanner glob so it is never ingested
-  (no data corruption); the only cost is leaked disk that accumulates over repeated ENOSPC uploads. Confidence:
-  traced. **Fix:** move the `fh.close()` inside the guarded block (unlink the temp if the flush raises).
-  _(Found by this run's adversarial webapp-router audit; low value — leave to a Builder or bundle with nearby
-  upload work.)_
+- ~~**Upload leaves an orphaned `.part` sidecar when the final `close()` flush fails.**~~ — **FIXED v0.158.1**
+  (Builder 2026-07-21, branch `claude/pensive-faraday-m66efc`). Location: `webapp/routers/upload.py:184` —
+  `await run_in_threadpool(fh.close)` sat **outside** the `try/except BaseException` that unlinks the temp on a
+  mid-stream failure, so a buffered-write `ENOSPC` surfacing at the final flush leaked the
+  `tempfile.mkstemp(suffix=".part")` sidecar, contradicting the module's stated "on any failure the partial
+  `.part` is removed" guarantee. **Fix:** moved the `fh.close()` into a `finally` **inside** the guarded block, so
+  the last-flush flush runs exactly once on every path and a raising close still unlinks the temp. Regression
+  `tests/webapp/test_upload.py::test_stream_to_disk_cleans_up_the_temp_when_the_final_flush_fails` (patches
+  `os.fdopen` to raise `OSError(ENOSPC)` on `close()`; fails-before with an orphaned `.part`, passes-after with
+  none). Severity was cosmetic (leaked disk over repeated ENOSPC uploads; never ingested, no corruption).
 
 _(Scout re-audit 2026-07-21 (v0.157.0 baseline, suite green 1539 passed / 2 skipped): ran four parallel
 adversarial subagent audits + my own hand-trace/verification across the whole rotation. **(1) Stacking engine
@@ -5074,6 +5074,41 @@ problems. Dogfood it every big-picture run and fix root causes.
   same `iter_stack_runs` rows the info endpoint already reads), guarded so a missing date/count simply omits its
   clause. Beginner bar ✔ (self-explanatory shareable). Guardrails: additive/opt-in-safe (label only; the
   underlying pixels/stretch unchanged); keep the label subtle so it never obscures the picture.
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-21 #11) — "Make it your wallpaper": one-tap export of a finished stack
+  cropped + sized to a phone or desktop background, auto-centred on the target.**~~ — **SHIPPED v0.158.0**
+  (Builder 2026-07-21, branch `claude/pensive-faraday-m66efc`). Built exactly the Scout's slice across engine +
+  webapp + frontend. **Engine:** new pure `seestack/wallpaper.py` — `wallpaper_crop_box(img_w, img_h, aspect_w,
+  aspect_h, target_px=None)` returns the largest target-aspect rectangle that fits, centred on the target pixel
+  and clamped inside the image (falls back to image centre for a `None`/non-finite target; degenerate inputs
+  yield the whole image); `wallpaper_target_pixel(fits_path, ra, dec, preview_w, preview_h)` maps the target's
+  RA/Dec through the stack's stored celestial WCS to a **preview-grid** pixel (rescaled with the same
+  area-resampling convention as `wcs_dict_rescaled_to_preview`), returning `None` when there's no WCS/position;
+  `render_wallpaper_jpeg(preview_png, preset, target_px)` crops + downscales to the device size **without ever
+  upsampling** (a small preview stays native-resolution, correct shape) and returns share-friendly JPEG bytes;
+  `png_size` + a `WALLPAPER_PRESETS` table (phone 1170×2532 / desktop 1920×1080 / square 1440×1440). **Webapp:**
+  `GET /api/targets/{safe}/stack-runs/{run_id}/wallpaper?aspect=phone|desktop|square` — read-only, transcodes the
+  stored preview PNG (no re-render from linear FITS), centres on the target via the run's WCS + the library
+  target position, 400 on an unknown aspect, 404 on a missing run/preview. Registered **before** the `/{kind}`
+  artifact route so the literal `wallpaper` segment isn't swallowed as an artifact kind. **Frontend:** a
+  `WallpaperMenu` (Phone/Desktop/Square download links via `api.stackWallpaperUrl`) next to the Share/JPEG
+  controls on the History run card. Additive/upgrade-safe: read-only, off nothing, no schema/config/API-shape/
+  default change; the crop never up-samples so it can't invent detail. Tests: `tests/test_wallpaper.py` (+13 —
+  crop-box shapes/centring/clamp/degenerate, WCS target-pixel maps/rescales/None, render downscale/no-upsample,
+  png_size), `tests/webapp/test_wallpaper.py` (+5 — three aspects, unknown-aspect 400, missing-run 404,
+  default-phone, WCS-centring end-to-end via a gradient preview), frontend `WallpaperMenu.test.tsx` (+2). Beginner
+  bar ✔ (one tap, three obvious presets, zero astro knobs, plain language; serves the enjoy + share pillars).
+  *(Original spec kept for provenance.)*
+- **IDEA (Builder 2026-07-21, filed while shipping the wallpaper export) — surface the "Make it your wallpaper"
+  menu on the Target/Gallery result surfaces too, and let it honour "North up".** *(Friendliness / PRIORITY 3;
+  size S.)* The v0.158.0 wallpaper export (`WallpaperMenu` + `GET …/wallpaper?aspect=`) currently lives only on
+  the **History** run card. A beginner who lands on the **Target** page hero or the **Gallery** tile — arguably
+  the more "enjoy my finished picture" surfaces — can't reach it without opening History. Two low-risk follow-ups:
+  (a) mount the same `WallpaperMenu` next to the existing Share/JPEG controls on the Target result card and the
+  Gallery lightbox (pure frontend — the component + endpoint already exist); (b) optionally thread the existing
+  `north_up` orientation through the wallpaper endpoint so the cropped wallpaper can point celestial North up like
+  the JPEG download does — this needs the endpoint to orient the preview *before* computing the target pixel (the
+  rotation moves the pixel), so it's a small but real bit of care, not a pure pass-through. Both additive/read-only.
+  Beginner bar ✔ (reaches the delight from where the beginner actually looks at their picture).
 - **NEW BEGINNER FEATURE (Scout 2026-07-21 #11) — "Make it your wallpaper": one-tap export of a finished stack
   cropped + sized to a phone or desktop background, auto-centred on the target.** *(Beginner feature; PRIORITY 3
   friendliness / "enjoy + share" pillar; size S–M.)* Making your own astrophoto your phone lock-screen is one of

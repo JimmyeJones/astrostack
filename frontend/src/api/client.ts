@@ -1063,6 +1063,11 @@ export const api = {
     `/api/targets/${safe}/stack-runs/${id}/${kind}` +
     // Only the share-friendly JPEG honours north_up (rotate so North is up).
     (northUp && kind === "jpeg" ? "?north_up=true" : ""),
+  // "Make it your wallpaper" — the finished preview cropped to a device aspect
+  // (phone/desktop/square), auto-centred on the target, downloaded as a JPEG.
+  stackWallpaperUrl: (
+    safe: string, id: number, aspect: "phone" | "desktop" | "square",
+  ) => `/api/targets/${safe}/stack-runs/${id}/wallpaper?aspect=${aspect}`,
   // "What's in this picture?" — catalog objects that fall inside a run's field.
   stackAnnotations: (safe: string, id: number) =>
     req<StackAnnotations>(`/api/targets/${safe}/stack-runs/${id}/annotations`),
