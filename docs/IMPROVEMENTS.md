@@ -4525,9 +4525,35 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
-- **NEW BEGINNER FEATURE (Scout 2026-07-21 #8) — "One frame vs your stack": a side-by-side / split-slider
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-21 #8) — "One frame vs your stack": a side-by-side / split-slider
   reveal of a single raw sub next to the finished stack, so a beginner *sees* — and can share — exactly what
-  stacking bought them.** Stacking is the whole point of the app, but a beginner never sees the *before*: they
+  stacking bought them.**~~ — **SHIPPED v0.147.0** (Builder 2026-07-21, branch `claude/pensive-faraday-dvg3ul`;
+  both slices). A read-only **"One frame vs your stack"** card on every preview-bearing History run puts a
+  single raw sub next to the finished stack under a draggable split divider, with a plain-language caption the
+  app fills in from the run's own provenance (*"One 30-second frame vs your 505-frame stack — stacking cut the
+  noise and pulled out faint detail."*). **Fair comparison (the one thing to get right):** the sub is
+  auto-picked deterministically (`_pick_reference_sub` — the **sharpest accepted frame by FWHM**, tie-broken by
+  id; falls back to the first accepted, then any frame) so it's a *good* single frame, not a cloud-ruined one,
+  and it's rendered through the **identical** export STF autostretch that produced the stored stack preview
+  (new `render.thumbnail.render_sub_preview`, which reuses `output._autostretch_for_export` so the stretch is a
+  single source of truth) — so the only visible difference is noise/detail, never brightness. **Backend:** two
+  read-only endpoints — `GET …/stack-runs/{id}/one-sub-vs-stack` (info JSON: `available` + best-effort caption
+  fields `n_frames`/`sub_exposure_s`/`integration_s`, `available:false` (never a 404 where the run exists) when
+  there's no preview to compare against or no frame to render) and `GET …/stack-runs/{id}/reference-sub` (the
+  debayered sub as PNG, rendered in a threadpool). **Frontend:** `OneFrameVsStackCard` (mirrors
+  `ProgressReelCard` — self-hides when unavailable, starts collapsed so History doesn't fetch every sub up
+  front, reveals a split-slider reusing the editor's pure `splitCompare` helpers) + pure `oneFrameVsStack.ts`
+  caption helper. Additive/upgrade-safe: read-only render-time views over files that already exist (the sub +
+  the stored preview), no schema/config/API-shape/default change, no new dep/network. Beginner bar ✔ (one card,
+  one button, zero knobs, sane default + auto caption; teaches *understanding* and gives an irresistible
+  *share*). Tests: `tests/test_thumbnail.py` (+2 — `render_sub_preview` produces a real non-trivial PNG at the
+  requested width / bit-exactly matches an independent debayer→downsample→export-stretch reimplementation),
+  `tests/webapp/test_one_sub_vs_stack.py` (+5 — info available carries the caption fields / unavailable without
+  a preview / 404 unknown run; reference-sub renders a real RGB PNG / 404 unknown run),
+  `OneFrameVsStackCard.test.tsx` (+3 — self-hides when unavailable, reveals the split on click with both image
+  srcs, degrades the caption with no provenance), `oneFrameVsStack.test.ts` (+8). Python + tsc + vitest + vite
+  build green. **Original spec kept for provenance:**
+  Stacking is the whole point of the app, but a beginner never sees the *before*: they
   drop hundreds of frames in and get one clean picture, with no visceral sense of why 505 frames beat one.
   The single most convincing, delightful, share-worthy moment in this hobby is putting **one noisy 30-second
   sub** next to the **smooth, detailed stack** of the same field — the noise floor drops, faint nebulosity

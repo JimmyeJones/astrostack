@@ -21,6 +21,7 @@ import { ImageLightbox } from "../components/ImageLightbox";
 import { AnnotatedImage } from "../components/AnnotatedImage";
 import { StackHealthCard } from "../components/StackHealthCard";
 import { ProgressReelCard } from "../components/ProgressReelCard";
+import { OneFrameVsStackCard } from "../components/OneFrameVsStackCard";
 import { SharePictureButton } from "../components/SharePictureButton";
 import { sharePictureText } from "../share";
 import { Sparkline } from "../components/Sparkline";
@@ -766,6 +767,10 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
       {/* "Watch your picture appear" reel — self-hides unless this run was
           stacked with save_progress on (the opt-in default-off extra). */}
       {run.has_fits ? <ProgressReelCard safe={safe} runId={run.id} /> : null}
+
+      {/* "One frame vs your stack" reveal — self-hides unless this run has a
+          preview to compare against and a frame to render. */}
+      {run.has_preview ? <OneFrameVsStackCard safe={safe} runId={run.id} /> : null}
 
       <ImageLightbox
         src={light

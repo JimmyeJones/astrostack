@@ -67,6 +67,58 @@ def test_generate_thumbnail(tmp_path):
         assert max(im.size) <= 256
 
 
+def test_render_sub_preview_debayers_and_stretches_to_png(tmp_path):
+    """A single raw sub renders to a real, non-trivial PNG at the requested width.
+
+    Powers the "one frame vs your stack" reveal: the sub is debayered and put
+    through the same export autostretch as the stack preview so the comparison is
+    a fair before/after.
+    """
+    from io import BytesIO
+
+    from PIL import Image
+
+    from seestack.render.thumbnail import render_sub_preview
+
+    fits_path = write_seestar_fits(tmp_path / "in.fit", width=480, height=320,
+                                   n_stars=40, seed=7)
+    png = render_sub_preview(fits_path, bayer_pattern="RGGB", max_width=240)
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"
+    with Image.open(BytesIO(png)) as im:
+        assert im.format == "PNG"
+        assert im.mode == "RGB"
+        # Decimated to max_width and not a black frame (the stretch revealed data).
+        assert im.width == 240
+        assert np.asarray(im).max() > 0
+
+
+def test_render_sub_preview_matches_the_export_preview_stretch(tmp_path):
+    """The sub is stretched with the *same* export STF as the stored stack preview,
+    so the two halves of the reveal differ only in noise/detail, not brightness."""
+    from seestack.io.fits_loader import bilinear_debayer, load_seestar_raw
+    from seestack.render.thumbnail import _downsample_rgb, render_sub_preview
+    from seestack.stack.output import _autostretch_for_export
+
+    fits_path = write_seestar_fits(tmp_path / "in.fit", width=480, height=320,
+                                   n_stars=40, seed=7)
+    png = render_sub_preview(fits_path, bayer_pattern="RGGB", max_width=240)
+
+    # Reproduce the expected pixels independently through the same pipeline.
+    rgb, _ = load_seestar_raw(fits_path, debayer=False, out_dtype=np.float32)
+    rgb = bilinear_debayer(rgb, pattern="RGGB")
+    h, w = rgb.shape[:2]
+    rgb = _downsample_rgb(rgb, max(1, round(h * (240 / w))), 240)
+    expected = (np.clip(np.nan_to_num(_autostretch_for_export(rgb)), 0, 1) * 255).astype(
+        np.uint8)
+
+    from io import BytesIO
+
+    from PIL import Image
+    got = np.asarray(Image.open(BytesIO(png)))
+    assert got.shape == expected.shape
+    assert np.array_equal(got, expected)
+
+
 def test_stack_coverage_mask_marks_nan_uncovered(tmp_path):
     """The coverage mask is True on covered pixels and False on NaN (mosaic gaps)."""
     from astropy.io import fits
