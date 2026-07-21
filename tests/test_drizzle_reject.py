@@ -257,6 +257,54 @@ def test_resolution_floor_uses_raw_variance_not_bessel_inflated():
     assert tol_lo[0, 0] > tol_hi[0, 0], "small-sample tol must be Bessel-widened"
 
 
+def test_reject_gate_uses_frame_count_not_weight_when_the_drop_spreads():
+    """When a frame's drop spreads across several output pixels (``scale > 1``, or
+    the sub-pixel dither of any real stack at ``pixfrac < 1``), each frame deposits
+    a *fractional* per-output-pixel weight, so the accumulated ``out_wht``
+    understates the true frame count. The reject gate must key on the frame count
+    (``self._count``), not ``out_wht`` — otherwise a low-coverage pixel hit by ≥3
+    frames but carrying ``out_wht < 3`` has rejection silently disabled, and a
+    satellite / plane trail on a mosaic edge survives into the master.
+
+    Uses the recommended super-res config (``scale=2, pixfrac=0.8``), where one
+    input pixel spreads over ~4 output pixels so a 4-frame output pixel carries
+    ``out_wht ≈ 1`` — well under the ``_MIN_REJECT_NEFF = 3`` floor."""
+    wcs = wcs_from_text(make_synth_wcs_text(width=40, height=40))
+    stats = DrizzleStacker(wcs, (40, 40),
+                           DrizzleParams(scale=2.0, pixfrac=0.8),
+                           compute_stats=True)
+    # Four aligned frames with real spread so the variance is well above the floor.
+    for v in (100.0, 100.0, 100.0, 260.0):
+        stats.add_frame(np.full((40, 40, 3), v, dtype=np.float32), wcs)
+
+    cy, cx = 40, 40  # interior output pixel (canvas is 80×80 at scale 2)
+    # The heart of the bug: the true frame count is 4, yet the spread weight sum
+    # lands well under the _MIN_REJECT_NEFF = 3 floor.
+    assert stats.frame_coverage[cy, cx] == 4
+    assert stats.coverage[cy, cx, 0] < _MIN_REJECT_NEFF
+
+    _mean, tol = stats.clip_reference(kappa=3.0)
+    # Post-fix: rejection is enabled here (finite tol) because 4 frames ≥ 3.
+    # Fail-before: neff = out_wht ≈ 1 < 3 → tol = +inf (rejection wrongly off).
+    assert np.isfinite(tol[cy, cx, 0])
+
+
+def test_clip_tolerance_neff_override_gates_on_the_supplied_count():
+    """Unit-level: with a low ``wht`` but a supplied frame-count ``neff ≥`` the
+    floor, ``_clip_tolerance`` enables rejection; without the override the same
+    low ``wht`` disables it. Pins the ``neff`` plumbing independently of drizzle."""
+    m = np.array([[130.0]], dtype=np.float32)
+    m2 = np.array([[130.0**2 + 400.0]], dtype=np.float32)  # resolved variance
+    wht = np.array([[2.56]], dtype=np.float32)  # 4 frames at pixfrac 0.8
+    # Weight-as-count (the old behaviour): under the floor → never reject.
+    _, tol_wht = _clip_tolerance(m, m2, wht, kappa=3.0)
+    assert np.isinf(tol_wht[0, 0])
+    # True frame count as neff: at/above the floor → rejection enabled.
+    _, tol_cnt = _clip_tolerance(m, m2, wht, kappa=3.0,
+                                 neff=np.array([[4]], dtype=np.uint32))
+    assert np.isfinite(tol_cnt[0, 0]) and tol_cnt[0, 0] > 0
+
+
 def _build_project(tmp_path, frames_spec) -> Project:
     """``frames_spec``: list of dicts passed to write_seestar_fits + wcs shift."""
     proj = Project.create(tmp_path / "p", name="reject_test")
