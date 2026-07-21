@@ -163,23 +163,27 @@ sweep are now both well-hardened.)_
   Severity: broken-UX/availability (a single unreadable project hides *all* imagery on two beginner-facing pages —
   high blast radius, realistic trigger). Confidence: reproduced + fixed.
 
-- **`GET /api/settings/export` leaks a host filesystem path into the "portable, no host paths" backup via a
-  nested `default_stack_options` calibration path.** *(Data-hygiene / info-leak; PRIORITY 3; size S; confidence:
-  traced.)* Location: `webapp/routers/settings.py:99` (`_export_payload`) — and the same gap on the GET
-  `_serialize` at `settings.py:56`. `_export_payload` strips only the **top-level** `_AUTH_KEYS` + `_HOST_KEYS`,
-  but does **not** run `strip_non_form_keys()` over the nested `default_stack_options` dict — whereas the settings
-  **PUT** (`_sanitize_patch`, `settings.py:44-45`) and `/import` both do. So if the stored `default_stack_options`
-  carries a `NON_FORM_KEYS` entry (`dark_path`/`flat_path`/`flat_dark_path`/`bias_path` — a server-resolved host
-  path; reachable via a hand-edited `config.json`, which the module docstring says is human-editable, or a legacy
-  config written before the PUT-side strip guard existed), `/export` emits that raw host path — directly violating
-  the endpoint's own docstring guarantee ("no host paths … restored on any install"). The value is also useless
-  on restore because `/import` strips it, so it's pure leak with no upside. **Repro:** set
-  `default_stack_options = {"dark_path": "/mnt/host/darks/master.fit", "sigma_kappa": 3.0}` in the store, GET
-  `/api/settings/export` → the payload still contains `dark_path` with the host path. **Fix (small, one file):**
-  in `_export_payload` (and `_serialize`), if `default_stack_options` is a dict, replace it with
-  `strip_non_form_keys(default_stack_options)` before returning — mirrors the PUT/import contract exactly. Add a
-  regression test: a store whose `default_stack_options` holds a `dark_path` exports **without** it. Severity:
-  low-medium (filesystem-path disclosure, not a secret). Upgrade-safe: pure read-side filtering, additive.
+- ~~**`GET /api/settings/export` leaks a host filesystem path into the "portable, no host paths" backup via a
+  nested `default_stack_options` calibration path.**~~ — **FIXED v0.155.1** (Builder 2026-07-21, branch
+  `claude/pensive-faraday-s8zwxe`; traced + reproduced + regression-tested). *(Data-hygiene / info-leak;
+  PRIORITY 3; size S.)* Location: `webapp/routers/settings.py` (`_export_payload` + `_serialize`).
+  `_export_payload` stripped only the **top-level** `_AUTH_KEYS` + `_HOST_KEYS`, but did **not** run
+  `strip_non_form_keys()` over the nested `default_stack_options` dict — whereas the settings **PUT**
+  (`_sanitize_patch`) and `/import` both do. So if the stored `default_stack_options` carried a `NON_FORM_KEYS`
+  entry (`dark_path`/`flat_path`/`flat_dark_path`/`bias_path` — a server-resolved host path; reachable via a
+  hand-edited `config.json`, which the module docstring says is human-editable, or a legacy config written before
+  the PUT-side strip guard existed), `/export` emitted that raw host path — violating the endpoint's own docstring
+  guarantee ("no host paths … restored on any install"); the same gap leaked it in the settings GET. The value is
+  also useless on restore because `/import` strips it, so it was pure leak with no upside. **Fix:** a new
+  `_strip_nested_calibration_paths(data)` helper runs `strip_non_form_keys()` over `default_stack_options`, called
+  from **both** `_serialize` (GET) and `_export_payload` (export) — mirrors the PUT/import contract exactly.
+  Additive/upgrade-safe: pure read-side filtering, no schema/config/API-shape/default change; a config without a
+  nested path is byte-for-byte unchanged. Regression
+  `tests/webapp/test_api.py::test_settings_export_strips_calibration_paths_from_default_stack_options` seeds the
+  store (bypassing the PUT guard, as a legacy config would) with a `default_stack_options` holding `dark_path`/
+  `flat_path`, then asserts both `/export` and the settings GET emit the tunables but not the host paths —
+  fail-before (paths leak) / pass-after. Severity: low-medium (filesystem-path disclosure, not a secret).
+  Confidence: reproduced + fixed.
 
 - **Minor / low-priority (traced, filed for completeness — fix only if touching these files):**
   - `webapp/routers/storage.py:193` `prune_stack_runs` closes `proj` then `lib` in a **single** `finally` (not

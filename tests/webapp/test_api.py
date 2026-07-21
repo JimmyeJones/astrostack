@@ -555,6 +555,27 @@ def test_settings_export_excludes_secrets_and_host_paths(client):
     assert "watch_quiet_period_s" in body
 
 
+def test_settings_export_strips_calibration_paths_from_default_stack_options(client):
+    # A legacy / hand-edited config.json (written before the PUT-side strip guard,
+    # or by editing the human-readable file directly) can hold a server-resolved
+    # calibration host path in the nested default_stack_options. The "portable, no
+    # host paths" backup — and the settings GET — must filter it out on the way
+    # out, mirroring the PUT/import contract, so a raw host path never leaks.
+    client.app.state.settings_store.update({"default_stack_options": {
+        "dark_path": "/mnt/host/darks/master.fit",
+        "flat_path": "/mnt/host/flats/master.fit",
+        "sigma_kappa": 3.0}})
+    export = client.get("/api/settings/export").json()
+    dso = export.get("default_stack_options", {})
+    assert dso.get("sigma_kappa") == 3.0
+    for k in ("dark_path", "flat_path", "bias_path", "flat_dark_path"):
+        assert k not in dso, f"{k} host path leaked into the export backup: {dso}"
+    # The settings GET must strip it too (same host-path disclosure surface).
+    got = client.get("/api/settings").json().get("default_stack_options", {})
+    assert "dark_path" not in got and "flat_path" not in got
+    assert got.get("sigma_kappa") == 3.0
+
+
 def test_settings_import_roundtrip(client):
     # Change a couple of values, export, mutate live, then restore the backup.
     client.put("/api/settings", json={"auto_stack": True, "watch_quiet_period_s": 45})
