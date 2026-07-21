@@ -47,6 +47,76 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**`GET /api/storage` 500s the whole storage page when one target's cache dir is unreadable/vanished.**~~
+  — **FIXED v0.156.1** (Scout 2026-07-21, branch `claude/kind-mccarthy-8n7my1`). Symptom: an unreadable or
+  mid-scan-vanished target dir (a NAS mount that goes permission-denied, a ZFS dataset unmounted during the
+  request) makes the per-target accounting raise `OSError`/`PermissionError`, which was uncaught and blanked
+  the **entire** storage listing with a 500 — so one flaky mount hid every other target's usage and blocked the
+  cache-clear/prune housekeeping the user needs *precisely* when disk is tight. Location: `webapp/routers/
+  storage.py::get_storage` — `CacheManager(tdir)` (mkdir), `cm.stats(...)` (`list(path.iterdir())`,
+  `core/cache.py:72`) and `_dir_bytes(...)` (`path.rglob("*")` descent) all ran **outside** the loop's
+  `try/except`, which only guarded `Project.open`; the corrupt-DB case was handled (skipped) but a filesystem
+  error was not. This is the exact "one bad target blanks the whole listing" class already fixed for
+  gallery.py/sky.py in v0.153.1, missed here for FS walks. Repro (traced; suite runs as root so chmod is
+  bypassed — reproduced via monkeypatch): make one target's cache scan raise `OSError` → `GET /api/storage`
+  500s instead of listing the other targets. **Fix:** wrapped the cache-stats read in `try/except OSError`
+  (reporting 0 for the unreadable parts, keeping the target in the listing best-effort) and hardened
+  `_dir_bytes` to swallow a top-level/rglob-descent `OSError` (returns the partial total, never raises).
+  Regression `tests/webapp/test_storage.py::test_storage_survives_one_unreadable_target_dir` (fails-before with
+  500, passes-after 200 + other targets still listed). Severity: broken-UX (operational — the app explicitly
+  expects NAS mounts to vanish/go read-only, see `system._folder_status`). Confidence: traced + regression-
+  reproduced. _(Found by this run's adversarial webapp-router audit.)_
+
+- **SIMBAD `identify_target` returns an arbitrary object in the search cone, not the framed target — wrong
+  target identity + wrong bg-flatten hint.** Location: `seestack/post/target_id.py:161-162` (`row = table[0]`
+  with the comment "SIMBAD's first row is usually the closest match"). Symptom: `astroquery.simbad.
+  Simbad.query_region()` returns rows in SIMBAD's internal/catalog order, **not** sorted by angular separation,
+  so `table[0]` can be any object within the default 30′ (0.5°) cone rather than the one at the frame centre.
+  For a field like M42 (ra≈83.82, dec≈−5.39) the cone contains the Trapezium stars and several NGC/Ced
+  entries; whichever SIMBAD lists first wins, so the user can be shown "θ¹ Ori" (`otype "*"`) instead of "M 42",
+  and `_TYPE_HINTS.get("*")` → `None` silently drops the correct HII→"off" bg-flatten recommendation. (Note the
+  three-way disagreement: the docstring says "brightest", the comment says "closest", the code returns
+  "first-in-arbitrary-order".) **Severity: broken-UX / wrong-info (low priority)** — it is an *advisory*
+  (friendly name + bg hint), never the stacked pixels, **and** `identify_target` is only reachable from the
+  historical desktop Qt GUI (`seestack/gui/main_window.py:838`); the live webapp identifies targets via
+  `seestack/objectinfo.identify_object` (a local catalog, audited clean this run), so no web user hits it.
+  Confidence: traced. **Fix direction:** compute each returned row's angular separation from the query centre
+  (via `SkyCoord` from the result's own RA/DEC columns — `_get_string` already normalises the casing
+  variation) and pick the minimum, or request/sort a `distance_result` column; extract a pure
+  `_pick_nearest_row(table, ra, dec)` helper and unit-test it with a synthetic astropy `Table` (no network).
+  _(Filed, not fixed this run: low value — desktop-only path — and the SIMBAD coord-column format varies by
+  astroquery version, so a correct fix wants a network check the Scout deferred rather than rush.)_
+
+- **Upload leaves an orphaned `.part` sidecar when the final `close()` flush fails.** Location: `webapp/
+  routers/upload.py:184` — `await run_in_threadpool(fh.close)` sits **outside** the `try/except BaseException`
+  (lines 173-183) that unlinks the temp on a mid-stream failure, so a buffered-write `ENOSPC` surfacing at the
+  final flush leaks the `tempfile.mkstemp(suffix=".part")` sidecar, contradicting the module's stated "on any
+  failure the partial `.part` is removed" guarantee. **Severity: cosmetic** — the caller still reports "not
+  enough disk space" gracefully, the `.part` suffix keeps it out of the scanner glob so it is never ingested
+  (no data corruption); the only cost is leaked disk that accumulates over repeated ENOSPC uploads. Confidence:
+  traced. **Fix:** move the `fh.close()` inside the guarded block (unlink the temp if the flush raises).
+  _(Found by this run's adversarial webapp-router audit; low value — leave to a Builder or bundle with nearby
+  upload work.)_
+
+_(Scout re-audit 2026-07-21 (v0.156.0 baseline, suite green 1525 passed / 2 skipped): took the standing advice
+to rotate **off** the 20×-clean stacking hot path and swept the least-recently-audited surface with two parallel
+adversarial subagent audits + my own hand-trace. **(1) webapp routers** `sky/gallery/upload/storage/system.py`
+(+ helpers `deps.py`, `io/project.py`, `io/library.py`, `io/wcs_io.py`, `core/cache.py`): path-traversal
+(`safe_component`/`safe_relname`/`safe_target_dir` — client names reduced to one separator-free component,
+`..`/dot-only/NUL rejected, destinations `resolve()`-confirmed under `incoming/`), listing resilience, handle
+closing on early-return, pagination/clamps, upload atomicity (unique temp + atomic `os.replace`, last-complete-
+wins on concurrent same-name), and `wcs_dict_rescaled_to_preview` CD/CRPIX rescale all traced **clean** —
+**except** the one real `/api/storage` FS-scan resilience gap fixed above (v0.156.1) and the cosmetic upload
+`.part`-on-`close()` leak filed above. **(2) `post/skymap.py` + `post/target_id.py` + `framing.py` +
+`objectinfo.py`**: RA 0/360 wrap + negative-dec handling (`_angular_sep_deg` law-of-cosines with `clip(cos,-1,1)`),
+the aitoff RA-negation "increases to the left" convention + hour ticks, framing unit consistency (arcmin vs FOV),
+and `objectinfo`'s designation regex + cone match all **clean** — **except** the SIMBAD `table[0]` nearest-match
+bug filed above (desktop-GUI-only, low sev). Also newest stacking code (`weighting.py::
+combine_weights_with_photometric` inverse-variance weight) re-traced clean. Net for the run: 1 live-path fix
+shipped, 2 bugs filed. Next Scout: the remaining un-swept surface is `webapp/routers/{editor,frames,targets,
+stats,plan,seestar}.py` bodies (editor only occasionally per §1), `post/color_cal.py` re-angle, `render/*`, and
+`seestack/nightplan.py` window-edge math.)_
+
 _(Scout stacking-engine re-audit 2026-07-21 (v0.150.0 baseline, suite green 1488 passed / 2 skipped): led
 the rotation with the stacking + calibrate path per §1's current focus and traced every file adversarially —
 `stack/align.py` (windowed reproject + valid-mask inset + the two sub-pixel-shift NaN-ring propagations,
@@ -4910,6 +4980,31 @@ problems. Dogfood it every big-picture run and fix root causes.
   same `iter_stack_runs` rows the info endpoint already reads), guarded so a missing date/count simply omits its
   clause. Beginner bar ✔ (self-explanatory shareable). Guardrails: additive/opt-in-safe (label only; the
   underlying pixels/stretch unchanged); keep the label subtle so it never obscures the picture.
+- **NEW BEGINNER FEATURE (Scout 2026-07-21 #11) — "Make it your wallpaper": one-tap export of a finished stack
+  cropped + sized to a phone or desktop background, auto-centred on the target.** *(Beginner feature; PRIORITY 3
+  friendliness / "enjoy + share" pillar; size S–M.)* Making your own astrophoto your phone lock-screen is one of
+  the most common, most *delightful* things a Seestar beginner does with a good result — and today there's no
+  path to it: the share-image (v0.114) and export give the native image aspect (roughly square-ish Seestar FOV),
+  which letterboxes badly on a 9:19.5 phone or 16:9 desktop, so the beginner has to open a separate photo editor
+  and hand-crop (and usually crops the target off-centre). **Feature:** a "Make it your wallpaper" action on the
+  result/share surface that renders the finished (edited) stack cropped to a chosen aspect — **Phone** (9:19.5),
+  **Desktop** (16:9), **Square** (1:1, for socials) — auto-centred on the plate-solved **target centre** (RA/Dec
+  → pixel via the stack's own WCS, which the sky/overlay path already computes), scaled to a sane pixel size
+  (e.g. 1170×2532 phone / 1920×1080 desktop), and downloaded as a ready-to-set JPG/PNG. **Reuses existing
+  pieces, minimal new math:** the crop is a pure aspect-fit rectangle centred on the target pixel, clamped to the
+  image bounds (fall back to the image centre when there's no plate solution) — the exact `_crop` degenerate-
+  guard and proxy↔export parity rules the editor already enforces; the render is the same recipe→PNG path share/
+  export already run, only with a different output rectangle + size. **Beginner bar ✔:** one tap, three obvious
+  presets, zero astro knobs, sane default (target-centred, full-res down-scaled), plain language ("Set as your
+  phone background"); serves the enjoy + share pillars §1 calls out; **not** pro tooling. **Guardrails:**
+  additive/read-only (new endpoint + button, nothing changes for existing exports), off nothing, no schema/config/
+  default change; the crop never up-samples (clamps to native resolution) so it can't invent detail. **Builder
+  slice:** (a) a pure `wallpaper_crop_box(img_w, img_h, target_px, aspect)` helper → `(x0,y0,x1,y1)` (unit-tested
+  for centred / target-near-edge-clamped / no-target-fallback / narrower-vs-wider-than-native aspect cases);
+  (b) `GET /api/targets/{safe}/stack-runs/{id}/wallpaper?aspect=phone|desktop|square` reusing the existing
+  edited-render path with the crop box + a fixed output size (read-only; 404 when no run/preview); (c) a small
+  "Make it your wallpaper" menu on the result/share card with the three presets. Keeps the beginner-feature
+  pipeline stocked with a fresh *enjoy/share* capability (the recent additions skew planning/retrospective).
 - ~~**NEW BEGINNER FEATURE (Scout 2026-07-21) — "Plan your next night on *this* target": a per-target card that
   turns the goal-gap into one concrete, dated next session.**~~ — **SHIPPED v0.156.0** (Builder 2026-07-21,
   branch `claude/pensive-faraday-s8zwxe`). Built across all three layers, forward-looking to balance the recent
@@ -6533,6 +6628,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+- **NEW (Scout 2026-07-21) — `Project.open` should `close()` the SQLite connection when `_check_schema` raises,
+  rather than lean on CPython GC.** *(Robustness/maintainability; size S; not a live bug.)* `seestack/io/
+  project.py:218-224`: `Project.open` opens the connection in `_open()` then can raise in `_check_schema()`
+  (a newer on-disk `user_version` → `RuntimeError`, a corrupt DB, or a failing migration) **without** closing
+  the connection, and returns nothing on that path — so the routers' `if proj is not None: proj.close()` guards
+  (gallery/sky/storage/system) are dead code there (`open()` never returned the instance). Traced to be **not a
+  concrete fd leak today**: under CPython the `sqlite3.Connection` is reclaimed by refcount/GC when the caller's
+  `except` frame (which pins `open()`'s locals) is released, so it doesn't accumulate — hence filed as a
+  hardening item, not a bug. **Fix:** wrap the `_check_schema()` call in `try/except` inside `open`, `conn.
+  close()` on any exception, then re-raise — making cleanup explicit and independent of the interpreter's GC
+  strategy (matters if this is ever ported off CPython or the connection later holds an OS-level lock/WAL file).
+  Add a test that a newer-`user_version` DB raises **and** leaves no open handle (assert the file can be
+  re-opened/removed on Windows-style semantics via a mock, or that `open` re-raises with the conn closed).
+  Additive, no behaviour change on the success path. _(Surfaced by this run's router audit.)_
 - ~~**NEW (Scout 2026-07-21 #2) — `library.py` lacks a *generic* column self-heal, unlike `project.py` (latent
   upgrade fragility, not currently reachable).**~~ — **SHIPPED v0.140.1** (Builder 2026-07-21, branch
   `claude/pensive-faraday-i5lui7`). `io/library.py::_ensure_columns` was a single hard-coded `tags` ALTER; it now

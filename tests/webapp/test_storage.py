@@ -42,6 +42,31 @@ def test_storage_reports_cache_usage_and_clears(client, solved_library):
     assert not (cm.stage2 / "frame_000001.f16.mmap").exists()
 
 
+def test_storage_survives_one_unreadable_target_dir(client, solved_library, monkeypatch):
+    """A target whose cache dir is unreadable (a NAS mount gone permission-denied,
+    a dataset unmounted mid-scan) must not 500 the whole storage page — the other
+    targets must still list, matching gallery/sky/stats per-target resilience.
+
+    Simulated by making the cache scan raise ``OSError`` (chmod can't be used —
+    the test suite runs as root, which bypasses file permissions)."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+
+    def _boom(self, stage):
+        raise OSError("[Errno 13] Permission denied")
+
+    monkeypatch.setattr(CacheManager, "stats", _boom)
+
+    r = client.get("/api/storage")
+    assert r.status_code == 200
+    body = r.json()
+    row = next(t for t in body["targets"] if t["safe"] == safe)
+    # Unreadable cache parts report 0 rather than crashing the listing.
+    assert row["stage1_bytes"] == 0
+    assert row["stage2_bytes"] == 0
+    # The target is still listed (not dropped), and totals are still returned.
+    assert "disk" in body
+
+
 def test_cache_clear_bad_stage_400(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
     r = client.post(f"/api/targets/{safe}/cache/clear", params={"stage": "bogus"})
