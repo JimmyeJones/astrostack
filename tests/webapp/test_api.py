@@ -180,23 +180,14 @@ def test_patch_frame_closes_library_on_error_paths(client, built_library, monkey
     assert closed.get("lib"), "Library connection leaked on the 422 path"
 
 
-def test_bulk_frames_closes_library_when_update_raises(client, built_library, monkeypatch):
-    # Regression: POST /frames/bulk split proj-close and lib-close into sibling
-    # try/finally blocks, so a mid-loop update_frame failure (a read-only/locked
-    # project DB — the NAS-went-read-only state the app is built to survive) 500ed
-    # *and* skipped lib.close(), leaking the Library SQLite connection on every such
-    # call. Wrap open_target_project to make update_frame raise and to track whether
-    # the returned lib was closed.
+def _readonly_project_wrapper(deps_mod, closed, fail):
+    """A ``deps.open_target_project`` wrapper that tracks whether the returned lib
+    was closed and, when ``fail['on']``, makes every ``update_frame`` raise
+    ``sqlite3.OperationalError`` — the read-only/locked project DB the app is built
+    to survive. Shared by the leak- and read-only-503 regression tests below."""
     import sqlite3
 
-    import pytest
-
-    from webapp import deps
-
-    orig = deps.open_target_project
-    closed: dict[str, bool] = {}
-
-    fail = {"on": False}
+    orig = deps_mod.open_target_project
 
     def wrapper(request, safe):
         lib, proj = orig(request, safe)
@@ -215,19 +206,72 @@ def test_bulk_frames_closes_library_when_update_raises(client, built_library, mo
             proj.update_frame = boom  # simulate a read-only/locked project DB
         return lib, proj
 
-    monkeypatch.setattr(deps, "open_target_project", wrapper)
+    return wrapper
+
+
+def test_bulk_frames_readonly_db_returns_503_without_leaking(client, built_library, monkeypatch):
+    # A mid-loop update_frame failure (a read-only/locked project DB — the
+    # NAS-went-read-only state the app is built to survive) must surface as a
+    # plain-language 503, not an opaque 500, and must still close the Library
+    # connection (the sibling-try/finally leak fixed earlier).
+    from webapp import deps
+
+    closed: dict[str, bool] = {}
+    fail = {"on": False}
+    monkeypatch.setattr(
+        deps, "open_target_project", _readonly_project_wrapper(deps, closed, fail))
 
     fid = client.get("/api/targets/M_42/frames").json()[0]["id"]
     # Arm the failure and clear the tracker only *after* the read above (which also
     # goes through the wrapper) so we observe close purely from the failing POST.
     fail["on"] = True
     closed.clear()
-    with pytest.raises(sqlite3.OperationalError):
-        client.post(
-            "/api/targets/M_42/frames/bulk",
-            json={"action": "reject", "ids": [fid]},
-        )
+    r = client.post(
+        "/api/targets/M_42/frames/bulk",
+        json={"action": "reject", "ids": [fid]},
+    )
+    assert r.status_code == 503
+    assert "read-only or locked" in r.json()["detail"]
     assert closed.get("lib"), "Library connection leaked when update_frame raised"
+
+
+def test_patch_frame_readonly_db_returns_503_without_leaking(client, built_library, monkeypatch):
+    # The per-frame accept/reject a beginner uses every QC session: a read-only DB
+    # must give the same actionable 503 (and no leaked handle), not a 500.
+    from webapp import deps
+
+    closed: dict[str, bool] = {}
+    fail = {"on": False}
+    monkeypatch.setattr(
+        deps, "open_target_project", _readonly_project_wrapper(deps, closed, fail))
+
+    fid = client.get("/api/targets/M_42/frames").json()[0]["id"]
+    fail["on"] = True
+    closed.clear()
+    r = client.patch(f"/api/targets/M_42/frames/{fid}", json={"accept": False})
+    assert r.status_code == 503
+    assert "read-only or locked" in r.json()["detail"]
+    assert closed.get("lib"), "Library connection leaked when update_frame raised"
+
+
+def test_auto_grade_apply_readonly_db_returns_503(client, built_library, monkeypatch):
+    # Auto-grade apply writes its rejections through apply_grade_report; when that
+    # write hits a read-only/locked DB, the endpoint must map it to the same
+    # actionable 503, not a bare 500. Patch apply_grade_report to raise the SQLite
+    # error a read-only DB would (deterministic — independent of what the grader
+    # would actually reject on the fixture).
+    import sqlite3
+
+    import seestack.qc.grading as grading
+
+    def boom(*args, **kwargs):
+        raise sqlite3.OperationalError("attempt to write a readonly database")
+
+    monkeypatch.setattr(grading, "apply_grade_report", boom)
+
+    r = client.post("/api/targets/M_42/frames/auto-grade/apply")
+    assert r.status_code == 503
+    assert "read-only or locked" in r.json()["detail"]
 
 
 def test_bulk_reject_worst(client, built_library):

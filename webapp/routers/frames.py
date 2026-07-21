@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 from statistics import median
 from typing import Literal
@@ -30,6 +31,18 @@ from webapp.schemas import (
 router = APIRouter(prefix="/api/targets/{safe}/frames", tags=["frames"])
 
 _BAYER_PATTERNS = {"RGGB", "BGGR", "GRBG", "GBRG"}
+
+# The app is built to survive a NAS mount going read-only or a locked
+# ``project.sqlite`` (see ``system._folder_status`` and the connection-leak fixes
+# throughout this file). When a frame write actually fails in that state, SQLite
+# raises ``OperationalError`` ("attempt to write a readonly database" / "database
+# is locked"), which otherwise surfaces as an opaque 500. Map it to a 503 with
+# plain-language guidance so a beginner whose ZFS dataset unmounted mid-session
+# is told *what* to do, not just "something broke".
+STORAGE_READONLY_MSG = (
+    "This target's storage is read-only or locked — check that the library "
+    "folder / NAS mount is mounted and writable, then try again."
+)
 
 _SORTABLE = {
     "id", "timestamp_utc", "exposure_s", "fwhm_px", "star_count",
@@ -250,6 +263,8 @@ def auto_grade_apply(
             proj.close()
         if changed:
             lib.refresh_target_stats(safe)  # accepted-count badge stays honest
+    except sqlite3.OperationalError as exc:
+        raise HTTPException(status_code=503, detail=STORAGE_READONLY_MSG) from exc
     finally:
         lib.close()
     return _grade_report_out(report, changed_ids=changed)
@@ -306,6 +321,8 @@ def patch_frame(safe: str, frame_id: int, body: FramePatch, request: Request) ->
             # Keep the registry's accepted-count (Target badge, Library cards)
             # honest after a manual grade — it's only recomputed on refresh.
             lib.refresh_target_stats(safe)
+    except sqlite3.OperationalError as exc:
+        raise HTTPException(status_code=503, detail=STORAGE_READONLY_MSG) from exc
     finally:
         lib.close()
     return out
@@ -376,6 +393,8 @@ def bulk_frames(safe: str, body: BulkFrameAction, request: Request) -> dict:
             # Same registry refresh as the accept/reject PATCH — bulk actions
             # change the accepted count too.
             lib.refresh_target_stats(safe)
+    except sqlite3.OperationalError as exc:
+        raise HTTPException(status_code=503, detail=STORAGE_READONLY_MSG) from exc
     finally:
         lib.close()
     return {"changed": len(changed_ids), "changed_ids": changed_ids}

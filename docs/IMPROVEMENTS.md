@@ -4247,6 +4247,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+- ~~**IMPROVEMENT IDEA (Scout 2026-07-21) — turn "the storage went read-only" into a plain-language error, not a
+  bare 500, on the frame-write endpoints.**~~ — **SHIPPED v0.158.7** (Builder 2026-07-21, branch
+  `claude/pensive-faraday-yr971k`). The three frame-mutating endpoints in `webapp/routers/frames.py`
+  (`patch_frame`, `bulk_frames`, `auto_grade_apply`) now catch `sqlite3.OperationalError` (SQLite's
+  "attempt to write a readonly database" / "database is locked") around their writes and re-raise as
+  `HTTPException(503, STORAGE_READONLY_MSG)` — *"This target's storage is read-only or locked — check that the
+  library folder / NAS mount is mounted and writable, then try again."* — so a beginner whose ZFS dataset
+  unmounted mid-session gets actionable guidance instead of an opaque 500. The `except` sits at the outer level
+  (above the existing nested `lib.close()` finally), so both DB handles still close on the failure path (the
+  earlier connection-leak fix is preserved and re-asserted). No frontend change needed: the API client's `req`
+  wrapper already extracts the response `detail` and the route mutations already surface `e.message` in a red
+  notification, so the 503 guidance reaches the user's toast verbatim. Upgrade-safe/additive: pure error mapping
+  — success paths and response shapes unchanged, a 503 is a strict superset of the old bare-500. Tests
+  (`tests/webapp/test_api.py`): `test_bulk_frames_readonly_db_returns_503_without_leaking` and
+  `test_patch_frame_readonly_db_returns_503_without_leaking` (monkeypatch `update_frame` to raise
+  `OperationalError` → assert 503 + guidance string + no leaked lib handle; the old
+  `test_bulk_frames_closes_library_when_update_raises`, which asserted the error *propagated*, was updated to
+  the new 503 contract — its no-leak intent kept and strengthened) and `test_auto_grade_apply_readonly_db_returns_503`
+  (patches `apply_grade_report` to raise → deterministic 503). Original spec kept for provenance:
 - **IMPROVEMENT IDEA (Scout 2026-07-21) — turn "the storage went read-only" into a plain-language error, not a
   bare 500, on the frame-write endpoints.** *(Friendliness / PRIORITY 3; size S.)* **Why:** the app is explicitly
   built to survive a NAS mount going read-only or a locked `project.sqlite` (see `system._folder_status`, and the
