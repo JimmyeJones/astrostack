@@ -144,11 +144,22 @@ def apply_solve_result_to_db(project, result: SolveResult) -> None:
         reason = setup if setup is not None else raw[:120]
         project.update_frame(result.frame_id, reject_reason=f"solve_failed:{reason}")
         return
-    project.update_frame(
-        result.frame_id,
+    fields: dict = dict(
         wcs_json=result.wcs_text,
         ra_center_deg=result.ra_center_deg,
         dec_center_deg=result.dec_center_deg,
         pixscale_arcsec=result.pixscale_arcsec,
         rotation_deg=result.rotation_deg,
     )
+    # If this frame previously failed a plate-solve it carries a stale
+    # ``solve_failed:`` reject reason (the failure branch above stores one without
+    # touching accept). Now that it solves — e.g. the user installed the ASTAP
+    # star database that was missing and re-ran solve, so every frame retries and
+    # succeeds — clear that reason so it no longer shows as "plate-solve failed"
+    # and no longer inflates the Target page's solve-failure banner. Mirrors the
+    # QC path's self-heal (``qc/runner.py``): only ever clears a ``solve_failed:``
+    # reason; a user / QC / streak reject is left untouched.
+    existing = project.get_frame(result.frame_id)
+    if existing is not None and (existing.reject_reason or "").startswith("solve_failed:"):
+        fields["reject_reason"] = None
+    project.update_frame(result.frame_id, **fields)
