@@ -34,21 +34,59 @@ def test_downsample_rgb_survives_nan_input():
     assert out.max() > 0.5
 
 
-def test_downsample_rgb_finite_input_is_unchanged():
-    """The NaN guard must be byte-for-byte transparent for ordinary inputs."""
-    rng = np.random.default_rng(0)
-    rgb = rng.uniform(0.0, 1.0, size=(12, 20, 3)).astype(np.float32)
+def test_downsample_rgb_preserves_colour_ratios():
+    """The float-mode resize must keep per-channel colour balance exactly.
 
-    from PIL import Image
+    Box downsampling is a per-channel linear average, so a flat coloured input
+    must come back with its R:G:B ratios intact (no shared normalisation needed
+    now that there is no uint8 round-trip)."""
+    rgb = np.zeros((100, 120, 3), dtype=np.float32)
+    rgb[..., 0] = 1000.0
+    rgb[..., 1] = 2000.0
+    rgb[..., 2] = 4000.0
 
-    lo, hi = float(rgb.min()), float(rgb.max())
-    u8 = ((rgb - lo) / (hi - lo) * 255).astype(np.uint8)
-    ref = np.asarray(
-        Image.fromarray(u8, mode="RGB").resize((10, 6), Image.BOX), dtype=np.float32
-    ) / 255.0
-    ref = ref * (hi - lo) + lo
+    out = _downsample_rgb(rgb, 50, 60)
 
-    np.testing.assert_array_equal(_downsample_rgb(rgb, 6, 10), ref)
+    assert out.shape == (50, 60, 3)
+    np.testing.assert_allclose(out[..., 0], 1000.0, rtol=0, atol=1e-3)
+    np.testing.assert_allclose(out[..., 1], 2000.0, rtol=0, atol=1e-3)
+    np.testing.assert_allclose(out[..., 2], 4000.0, rtol=0, atol=1e-3)
+
+
+def test_downsample_rgb_keeps_faint_sky_texture_below_a_saturated_ceiling():
+    """A faint noisy sky must survive downsampling even when a saturated star
+    sets the global max — the bug that flattened the "one frame vs your stack"
+    reveal.
+
+    Before the fix, ``_downsample_rgb`` normalised to ``[0, 1]`` against the
+    saturated ceiling (~65535) and quantised to uint8, so the ~80-ADU sky noise
+    (a few thousand ADU up) collapsed into ~1 uint8 level. The downstream export
+    stretch then had almost no tonal variation left to reveal — the displayed
+    sky showed ~2 grey levels where the true single-sub noise spans dozens. The
+    symptom is measured through the real display pipeline (downsample → export
+    STF), exactly what ``render_sub_preview`` shows.
+    """
+    from seestack.stack.output import _autostretch_for_export
+
+    rng = np.random.default_rng(3)
+    h, w = 400, 600
+    rgb = (3000.0 + rng.normal(0.0, 80.0, size=(h, w, 3))).astype(np.float32)
+    # A saturated star in the right half sets the global max; the left half is
+    # star-free sky whose noise texture must survive to the displayed image.
+    rgb[100:110, 460:470, :] = 65535.0
+
+    out = _downsample_rgb(rgb, h // 2, w // 2)
+    displayed = np.clip(np.nan_to_num(_autostretch_for_export(out)), 0.0, 1.0)
+    displayed_u8 = (displayed * 255).astype(np.uint8)
+
+    # Star-free displayed sky patch (left region, clear of the star).
+    sky_levels = np.unique(displayed_u8[5:80, 5:120, 0])
+    # Fixed keeps dozens of tonal levels (real single-sub noise); the buggy uint8
+    # path crushed the sky to ~2 levels. A generous floor separates them.
+    assert sky_levels.size > 20
+    # And the saturated star kept its true peak (not clipped to a percentile),
+    # so the downstream percentile-robust stretch still sees it.
+    assert float(out.max()) > 60000.0
 
 
 def test_generate_thumbnail(tmp_path):

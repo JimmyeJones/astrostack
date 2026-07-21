@@ -47,6 +47,44 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**"One frame vs your stack" reveal (and every raw-sub thumbnail) flattened the single sub's sky to
+  ~2–3 tonal levels — a saturated star set the uint8 normalisation ceiling, quantising the faint sky
+  away *before* the stretch could show it. The reveal dishonestly hid the very single-sub noise it
+  exists to demonstrate.**~~ — **FIXED v0.148.1** (Scout 2026-07-21, branch `claude/kind-mccarthy-7hwvme`;
+  reproduced + regression-tested). Found by a fresh adversarial audit of the render path
+  (`seestack/render/thumbnail.py`). `_downsample_rgb` (`thumbnail.py:547`) normalised the whole frame to
+  `[0,1]` against its global `nanmin`/`nanmax` and quantised to **uint8** before Pillow's box resize, then
+  mapped back to float. On a real raw Seestar sub the max is a **saturated star (or hot pixel) at ~65535**,
+  while the sky sits a few thousand ADU up with only ~80 ADU of noise — so the quant step is ~257 ADU (≫ the
+  sky noise) and the entire sky collapsed into ~1 uint8 level. Its pixel-to-pixel texture was destroyed
+  *before* the downstream `autostretch`/`_autostretch_for_export` (both percentile-robust) could reveal it,
+  so through the real display pipeline a star-free sky patch showed only **~2–3 grey levels** where the true
+  single-sub noise spans dozens. This hit two beginner paths that share the helper: `generate_thumbnail`
+  (frame-review thumbnails — the previously-declined "cosmetic posterization" at IMPROVEMENTS.md:5940) **and**
+  `render_sub_preview` (`thumbnail.py:113`), the **"one frame vs your stack" reveal added in v0.147.0**, whose
+  docstring makes an explicit honesty claim ("the only visible difference is the noise/detail stacking
+  bought"). The prior decline reasoned "cosmetic, **thumbnail-only**" and never considered this
+  correctness-carrying caller: the raw-sub side rendered an artificially smooth sky while the stack side
+  (rendered via `load_stack_rgb` striding + full-float stretch, *not* `_downsample_rgb`) kept its texture, so
+  the comparison **understated how much noise stacking removed**. **Reproduced** through the real pipeline
+  (downsample → export STF): a noisy 3000-ADU sky with a saturated star → **3 unique displayed sky levels
+  (`[0,1,4]`)** before / **dozens** after. **Fix:** drop the uint8 round-trip entirely — box-resize each
+  channel in Pillow's **float** (`"F"`) mode. Box downsampling is a per-channel *linear* average, so
+  resizing channels independently preserves colour ratios **exactly** (verified: a 1000:2000:4000 input
+  round-trips unchanged), the saturated star keeps its **true peak** (65535, not clipped to a percentile) so
+  the percentile-robust stretch still handles it, and the faint sky keeps full float precision. NaN=no-coverage
+  pixels floor to the frame min before averaging (mirrors the sibling reductions; a no-op for an ordinary raw
+  sub). Additive/upgrade-safe: pure internal render (no schema/config/API/on-disk/default change; thumbnails
+  are regenerated, no stored-pixel contract). Regressions in `tests/test_thumbnail.py`:
+  `test_downsample_rgb_keeps_faint_sky_texture_below_a_saturated_ceiling` (a saturated-ceiling noisy sky:
+  fail-before 3 displayed levels / pass-after >20, star peak preserved) and
+  `test_downsample_rgb_preserves_colour_ratios` (float-mode keeps R:G:B exactly); the old
+  `_finite_input_is_unchanged` test — which pinned the buggy uint8 round-trip as an implementation detail —
+  was replaced by these stronger contract tests (not weakened: it asserted the very quantisation being fixed).
+  Severity: broken-UX / image-quality-trust on a beginner-facing comparison (a misleading picture, not a
+  corrupted stored master); reachability **high** (a bright saturated star is on essentially every real sub).
+  Confidence: reproduced + fixed.
+
 - ~~**`PATCH /api/targets/{safe}/frames/{id}` leaked the `Library` SQLite handle on its 404/422
   error paths — the manual accept/reject a beginner uses every QC session.**~~ — **FIXED v0.145.1**
   (Scout 2026-07-21, branch `claude/kind-mccarthy-3r5ap8`; traced + reproduced + regression-tested). Found
@@ -4585,6 +4623,33 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+- **NEW (Scout 2026-07-21) — "Focus & sharpness through the night" trend card (per-session FWHM sparkline +
+  plain verdict).** *(Beginner feature; PRIORITY 3 friendliness / trust; size M.)* The app already measures
+  per-frame **FWHM** (star size = sharpness) and each frame's **timestamp**, and shows them as a sortable
+  column + a rejection metric on the Target page — but there is **no time view**: a beginner can't see at a
+  glance whether their stars stayed sharp all night or **drifted soft** partway through (dew on the lens,
+  temperature/focus drift — a real, common Seestar failure on long unattended sessions). Add a small
+  **sparkline of FWHM vs capture time** (grouped per night) on the Target/session view with a one-line
+  plain verdict: e.g. *"Sharp all night ✓ (FWHM ~2.8px, steady)"* or *"Focus softened after 01:30 — likely
+  dew or temperature drift; those subs were auto-down-weighted in your stack. Next time, a dew heater / lens
+  wipe helps."* All from data we already store (`FrameRow.fwhm_px` + `timestamp_utc`), so it's a read-only
+  visualization — no new engine work, no new capture step. It clears the beginner bar (understandable,
+  actionable on the *next* clear night, sane default = auto-verdict, no expert knobs) and deepens trust by
+  showing *why* some subs counted less. **Builder slice:** (a) a `stats`/`targets` endpoint (or reuse the
+  frames list) returning `[{t, fwhm}]` for accepted frames; (b) a `FocusTrendCard` (Mantine sparkline +
+  a pure `focusVerdict(points)` helper, unit-tested for the steady / drift / too-few-points cases); (c) mount
+  it on Target. Keep it hidden when <~5 timestamped frames carry FWHM (nothing to trend). Additive/off-nothing,
+  no schema/config/API-shape change.
+- **NEW (Scout 2026-07-21, follow-on to the v0.148.1 sub-preview fix) — put a number on the "one frame vs your
+  stack" reveal: "stacking cut your noise ~N×".** *(Beginner feature / trust; PRIORITY 3; size S–M.)* Now that
+  `render_sub_preview` faithfully shows a single sub's *real* noise (v0.148.1 fixed the downsample that flattened
+  it), the reveal can be **quantitative**, not just visual: measure the background noise (robust σ over a
+  star-free/low-signal region) of the single sub vs the finished stack and show a plain badge — *"Stacking your
+  228 subs cut the background noise about 15×."* This turns the slider from "looks smoother" into a concrete,
+  shareable trust number a beginner immediately understands, and it reinforces *why* more subs help (√N). Uses
+  the same two images the reveal already renders; a pure `noise_ratio(sub_rgb, stack_rgb)` helper (NaN-aware,
+  percentile-clipped so stars don't dominate) is unit-testable against a known-σ synthetic. Additive, read-only,
+  no schema/config change. (Depends on v0.148.1 being in — it now is.)
 - **PARTLY SHIPPED (v0.148.0, Builder 2026-07-21, branch `claude/pensive-faraday-dvg3ul`) — "North up" view slice.**
   Shipped the engine + the History **view** orientation: a **"Rotate so North is up"** toggle in the History
   card's *Adjust* panel reorients the live render + the full-screen lightbox so celestial North points up (like
@@ -5939,6 +6004,11 @@ problems. Dogfood it every big-picture run and fix root causes.
   — a finite input matches the pre-fix Pillow round-trip exactly). Confidence: traced + fixed.
   **(Also noted, no action:** `_downsample_rgb` quantizes to uint8 *before* the stretch, so a faint-sky
   raw-sub preview can posterize — cosmetic, thumbnail-only; not worth a change.)
+  **→ SUPERSEDED / FIXED v0.148.1:** this decline underrated it — the same helper also feeds
+  `render_sub_preview` (the "one frame vs your stack" reveal), where the posterization is a *correctness*
+  issue (a dishonest comparison), and on a real sub a saturated star (not a rare hot pixel) sets the ceiling,
+  so it hit ~2–3 sky levels on essentially every sub. `_downsample_rgb` now box-resizes in float mode (no
+  uint8 round-trip). See the FIXED entry at the top of "Bugs (fix these first)".
 - ~~**NEW (Scout 2026-07-14) — a schema-completeness drift test so a `frames`/`stack_runs` column can never
   again be added without an upgrade being safe.**~~ — **SHIPPED v0.121.1** (Builder 2026-07-14, branch
   `claude/pensive-faraday-4tspys`). New `tests/test_project_schema_drift.py` (4 tests) documents and guards the
