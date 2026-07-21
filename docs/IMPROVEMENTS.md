@@ -4885,6 +4885,28 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-21) — "Plan your next night on *this* target": a per-target card that
+  turns the goal-gap into one concrete, dated next session.**~~ — **SHIPPED v0.156.0** (Builder 2026-07-21,
+  branch `claude/pensive-faraday-s8zwxe`). Built across all three layers, forward-looking to balance the recent
+  run of retrospective trend cards. **Engine:** `seestack/nightplan.py::next_observing_windows(observer, ra, dec,
+  *, start_utc, min_altitude_deg, horizon, nights, want, min_usable_minutes)` walks up to `nights` calendar nights
+  forward, finds each night's astronomical-dark window (`_find_dark_window`) and the single target's observability
+  over it (`_observability_batch`), and returns the first `want` nights it clears the floor for ≥`min_usable_minutes`
+  (default 45) as `NextObservingWindow`s (dark/usable bounds, max alt, Moon illumination + up-fraction, score). The
+  first night's window is clipped to `start_utc` so a mostly-spent night isn't over-promised; a whole past night is
+  skipped. **Webapp:** extracted a shared `_resolve_observer` from `get_tonight` (Settings site wins, else FITS
+  sniff) and added `GET /api/plan/next-session/{safe}` → `{location_source, observer, target_has_position,
+  min_altitude_deg, nights_scanned, windows[]}`, read-only; empty `windows` (card self-hides) when no location, no
+  position, or nothing clears the floor. Accepts an optional `when` (like `/tonight`) for deterministic planning.
+  **Frontend:** a `NextSessionCard` on the Target page, driven by pure `nextSession.ts` helpers (`describeGap` with
+  a subs-to-go estimate from the target's mean sub length, `describeWindow` = dated UTC "shoot between …, climbs to
+  N°, Moon …", `moonPhrase`, `windowsIntro`). It joins the readiness card's goal *gap* with the next dark *window*
+  and self-hides when the goal is met (no gap) or no window computes — never nags, never duplicates the "set a
+  location" prompt. Additive/upgrade-safe: read-only, off nothing, no schema/config/API-shape/default change. Tests:
+  `tests/test_nightplan.py` (+4 — upcoming-nights/chronology, never-rising empty, skips-a-past-night, clips-to-now),
+  `tests/webapp/test_plan.py` (+4 — windows for a library target, no-location self-hide, unknown-target 404,
+  never-rising empty), frontend `nextSession.test.ts` (+14) & `NextSessionCard.test.tsx` (+4). Beginner bar ✔ (one
+  card, zero knobs, plain language, directly actionable next clear night). *(Original spec kept for provenance.)*
 - **NEW BEGINNER FEATURE (Scout 2026-07-21) — "Plan your next night on *this* target": a per-target card that
   turns the goal-gap into one concrete, dated next session.** *(Beginner feature; PRIORITY 2 autonomy / 3
   friendliness; size M.)* The two hardest beginner questions after a session are answered *separately* today and

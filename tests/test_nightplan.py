@@ -19,6 +19,7 @@ from seestack.nightplan import (
     load_catalog,
     moon_illumination,
     moon_is_waxing,
+    next_observing_windows,
     plan_tonight,
 )
 
@@ -219,6 +220,70 @@ def test_high_target_outranks_low_target():
     best = plan.targets[0]
     assert best.score > 50.0
     assert best.max_altitude_deg > 60.0
+
+
+# --- next_observing_windows (the forward-looking per-target planner) ---------
+
+# M42 (Orion) — well up on January nights from London, so it should produce
+# usable windows for the next-session card; RA/Dec from the catalog.
+_M42_RA, _M42_DEC = 83.82, -5.39
+
+
+def test_next_observing_windows_finds_upcoming_nights_for_a_well_placed_target():
+    wins = next_observing_windows(
+        LONDON, _M42_RA, _M42_DEC, start_utc=JAN_EVENING,
+        min_altitude_deg=30.0, nights=5, want=3)
+    # Orion clears 30° from London on clear January nights, so several nights
+    # qualify and we get the requested count.
+    assert len(wins) == 3
+    for w in wins:
+        assert w.dark_start < w.dark_end
+        assert w.usable_start is not None and w.usable_end is not None
+        assert w.usable_start >= w.dark_start
+        assert w.minutes_above_min_alt >= 45.0
+        assert w.max_altitude_deg > 30.0
+        assert 0.0 <= w.moon_illumination <= 1.0
+    # Returned chronologically (next best time to shoot first).
+    starts = [w.dark_start for w in wins]
+    assert starts == sorted(starts)
+    # Consecutive nights: each window's darkness is roughly a day after the last.
+    for a, b in zip(starts, starts[1:]):
+        gap_h = (b - a).total_seconds() / 3600.0
+        assert 20.0 < gap_h < 28.0
+
+
+def test_next_observing_windows_empty_for_a_never_rising_target():
+    # A deep-southern object never clears 30° from London — no usable window on
+    # any night, so the card self-hides (empty list).
+    wins = next_observing_windows(
+        LONDON, 90.0, -70.0, start_utc=JAN_EVENING,
+        min_altitude_deg=30.0, nights=7, want=3)
+    assert wins == []
+
+
+def test_next_observing_windows_skips_a_night_already_past():
+    # Start the scan at dawn (after tonight's darkness is spent). Tonight's window
+    # is entirely behind us, so the first returned window must begin strictly in
+    # the future, on a *later* night.
+    dawn = datetime(2026, 1, 15, 8, 0, tzinfo=timezone.utc)
+    wins = next_observing_windows(
+        LONDON, _M42_RA, _M42_DEC, start_utc=dawn,
+        min_altitude_deg=30.0, nights=3, want=1)
+    assert len(wins) == 1
+    assert wins[0].dark_end > dawn
+    # It's the *coming* night, not the one whose darkness already ended before dawn.
+    assert wins[0].dark_start > dawn
+
+
+def test_next_observing_windows_clips_tonight_to_now():
+    # Mid-darkness: the first window must be clipped to start at "now", never
+    # reported as beginning earlier in the evening than the caller's reference.
+    midnight = datetime(2026, 1, 16, 0, 30, tzinfo=timezone.utc)
+    wins = next_observing_windows(
+        LONDON, _M42_RA, _M42_DEC, start_utc=midnight,
+        min_altitude_deg=30.0, nights=1, want=1)
+    if wins:  # tonight still has usable darkness left for Orion
+        assert wins[0].dark_start >= midnight
 
 
 def test_moon_illumination_range_and_known_phase():

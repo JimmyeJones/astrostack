@@ -23,7 +23,13 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from seestack.nightplan import HorizonProfile, LibraryTarget, Observer, plan_tonight
+from seestack.nightplan import (
+    HorizonProfile,
+    LibraryTarget,
+    Observer,
+    next_observing_windows,
+    plan_tonight,
+)
 from webapp import deps
 
 log = logging.getLogger(__name__)
@@ -141,6 +147,28 @@ def _detect_site_from_fits(request: Request) -> tuple[float, float] | None:
     return None
 
 
+def _resolve_observer(request: Request, settings) -> tuple[Observer | None, str]:  # noqa: ANN001
+    """Resolve the observer location and how it was found.
+
+    Explicit Settings location wins; otherwise sniff a solved frame's FITS header
+    (the common Seestar case). Returns ``(observer, source)`` where ``source`` is
+    ``"settings"`` / ``"fits"`` / ``"none"`` (``observer`` is ``None`` only for
+    ``"none"``) — so every planning surface resolves the site the same way and the
+    UI can explain where the location came from.
+    """
+    if settings.site_lat is not None and settings.site_lon is not None:
+        return (Observer(lat_deg=float(settings.site_lat),
+                         lon_deg=float(settings.site_lon),
+                         elevation_m=float(settings.site_elevation_m or 0.0)),
+                "settings")
+    site = _detect_site_from_fits(request)
+    if site is not None:
+        return (Observer(lat_deg=site[0], lon_deg=site[1],
+                         elevation_m=float(settings.site_elevation_m or 0.0)),
+                "fits")
+    return None, "none"
+
+
 def _library_targets(request: Request) -> list[LibraryTarget]:
     """Library targets that have a position, for the 'already targeted' set."""
     lib = deps.open_library(request)
@@ -220,19 +248,7 @@ def get_tonight(
 
     # Resolve the observer: explicit Settings location wins; otherwise sniff a
     # frame header (the common Seestar case). None → the UI prompts for a site.
-    location_source = "none"
-    observer: Observer | None = None
-    if settings.site_lat is not None and settings.site_lon is not None:
-        observer = Observer(lat_deg=float(settings.site_lat),
-                            lon_deg=float(settings.site_lon),
-                            elevation_m=float(settings.site_elevation_m or 0.0))
-        location_source = "settings"
-    else:
-        site = _detect_site_from_fits(request)
-        if site is not None:
-            observer = Observer(lat_deg=site[0], lon_deg=site[1],
-                                elevation_m=float(settings.site_elevation_m or 0.0))
-            location_source = "fits"
+    observer, location_source = _resolve_observer(request, settings)
 
     if observer is None:
         return {
@@ -259,3 +275,86 @@ def get_tonight(
     payload = asdict(plan)
     payload["location_source"] = location_source
     return payload
+
+
+# How many nights ahead to scan for a target's next good window, and how many
+# such windows to return. Two weeks covers "come back when the Moon's out of the
+# way" without turning one request into a long ephemeris grind; three windows is
+# enough to say "your next session — and the couple after it" when a goal needs
+# more than one night.
+_NEXT_SESSION_NIGHTS = 14
+_NEXT_SESSION_WANT = 3
+
+
+@router.get("/next-session/{safe}")
+def get_next_session(
+    safe: str,
+    request: Request,
+    min_alt: int | None = Query(default=None, ge=0, le=80),
+    when: str | None = Query(default=None,
+                             description="ISO-8601 UTC reference to plan from; defaults to now"),
+) -> dict[str, Any]:
+    """When to next point the scope at *this* target — the forward-looking
+    companion to ``/tonight``.
+
+    Returns the next few nights (up to ``_NEXT_SESSION_WANT``) this target clears
+    the altitude floor for a usable stretch of darkness, so the Target page can
+    turn "you're 2 h short of a good M31" into "…and Thursday 22:40 → 02:10 is
+    your next good window". Read-only and offline. ``windows`` is empty (the card
+    self-hides) when no location is set, the target has no position, or nothing is
+    well-placed in the horizon; ``target_has_position``/``location_source`` let the
+    UI explain which.
+    """
+    settings = deps.get_settings(request)
+
+    start = datetime.now(timezone.utc)
+    if when:
+        try:
+            start = datetime.fromisoformat(when)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Bad 'when' timestamp") from exc
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+
+    lib = deps.open_library(request)
+    try:
+        entry = lib.find_target(safe)
+    finally:
+        lib.close()
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Unknown target")
+
+    observer, location_source = _resolve_observer(request, settings)
+    min_altitude = min_alt if min_alt is not None else int(settings.min_target_altitude_deg)
+    has_position = entry.ra_deg is not None and entry.dec_deg is not None
+
+    base: dict[str, Any] = {
+        "location_source": location_source,
+        "observer": asdict(observer) if observer is not None else None,
+        "target_has_position": has_position,
+        "min_altitude_deg": min_altitude,
+        "nights_scanned": _NEXT_SESSION_NIGHTS,
+        "windows": [],
+    }
+    if observer is None or not has_position:
+        return base
+
+    wins = next_observing_windows(
+        observer, float(entry.ra_deg), float(entry.dec_deg),
+        start_utc=start,
+        min_altitude_deg=float(min_altitude),
+        horizon=HorizonProfile.from_pairs(settings.horizon_profile),
+        nights=_NEXT_SESSION_NIGHTS, want=_NEXT_SESSION_WANT,
+    )
+    base["windows"] = [{
+        "dark_start_utc": w.dark_start.isoformat(),
+        "dark_end_utc": w.dark_end.isoformat(),
+        "usable_start_utc": w.usable_start.isoformat() if w.usable_start else None,
+        "usable_end_utc": w.usable_end.isoformat() if w.usable_end else None,
+        "max_altitude_deg": w.max_altitude_deg,
+        "minutes_above_min_alt": w.minutes_above_min_alt,
+        "moon_illumination": w.moon_illumination,
+        "moon_up_fraction": w.moon_up_fraction,
+        "score": w.score,
+    } for w in wins]
+    return base

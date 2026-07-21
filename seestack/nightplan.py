@@ -732,6 +732,106 @@ def plan_tonight(observer: Observer, when_utc: datetime, *,
     return plan
 
 
+@dataclass
+class NextObservingWindow:
+    """When a specific target is next well-placed in a night's dark window (UTC).
+
+    The forward-looking companion to :func:`plan_tonight`: instead of ranking
+    *what* to shoot tonight, it answers "when should I next point the scope at
+    *this* object?" over the coming nights. Times are UTC; the caller formats
+    them for the viewer.
+    """
+
+    # Bounds of the night's astronomical-dark window (may be clipped to "now" for
+    # the first night so a window already mostly past isn't over-promised).
+    dark_start: datetime
+    dark_end: datetime
+    # When the target actually clears the altitude floor within that darkness —
+    # the concrete "shoot between" interval. ``None`` only defensively (a window
+    # is only returned when the target is usable, so these are normally set).
+    usable_start: datetime | None
+    usable_end: datetime | None
+    max_altitude_deg: float
+    minutes_above_min_alt: float
+    moon_illumination: float
+    # Share (0..1) of the usable window the Moon is above the horizon, or ``None``
+    # when unknown — mirrors :attr:`Observability.moon_up_fraction`.
+    moon_up_fraction: float | None
+    score: float
+
+
+def next_observing_windows(
+    observer: Observer,
+    ra_deg: float,
+    dec_deg: float,
+    *,
+    start_utc: datetime,
+    min_altitude_deg: float = 30.0,
+    horizon: HorizonProfile | None = None,
+    nights: int = 14,
+    want: int = 3,
+    min_usable_minutes: float = 45.0,
+) -> list[NextObservingWindow]:
+    """The next few nights this target is well-placed in a dark window.
+
+    Walks up to ``nights`` calendar nights forward from ``start_utc`` and, for
+    each, finds that night's astronomical-dark window (:func:`_find_dark_window`)
+    and how observable the single target is over it (:func:`_observability_batch`).
+    A night qualifies when the target clears ``min_altitude_deg`` for at least
+    ``min_usable_minutes`` of the darkness. Returns the first ``want`` qualifying
+    nights, chronologically (best time to shoot next, and the couple after it when
+    the goal needs more than one session).
+
+    Purely offline and read-only, like the rest of the planner. The first night's
+    window is clipped to ``start_utc`` so a night already mostly gone isn't
+    reported as a fresh opportunity; if a whole night's darkness is already past,
+    or the target never rises high enough, that night is simply skipped.
+    """
+    _configure_iers_offline()
+    start_utc = start_utc.astimezone(timezone.utc)
+    # Anchor the per-night scan at local solar noon on the start date, so
+    # ``_find_dark_window`` (which takes the darkness *following* its reference)
+    # lands on that calendar night regardless of the observer's longitude. Local
+    # noon in UTC is 12:00 − lon/15 h (east of Greenwich is earlier in UTC).
+    d = start_utc.date()
+    anchor = datetime(d.year, d.month, d.day, 12, 0, 0, tzinfo=timezone.utc) - timedelta(
+        hours=observer.lon_deg / 15.0)
+
+    out: list[NextObservingWindow] = []
+    for offset in range(max(0, nights)):
+        window = _find_dark_window(observer, anchor + timedelta(days=offset))
+        if window is None:
+            continue  # Sun never sets that night (high summer) — nothing to plan.
+        # Skip a window whose darkness is entirely behind us; clip the first
+        # partially-past window so "tonight" reflects only the time still to come.
+        if window.end <= start_utc:
+            continue
+        if window.start < start_utc:
+            window = DarkWindow(start=start_utc, end=window.end,
+                                sun_alt_threshold_deg=window.sun_alt_threshold_deg)
+            if window.duration_minutes <= 0:
+                continue
+        illum = moon_illumination(window.start + (window.end - window.start) / 2)
+        o = _observability_batch([ra_deg], [dec_deg], observer, window,
+                                 min_altitude_deg, illum, horizon=horizon)[0]
+        if o.minutes_above_min_alt < min_usable_minutes:
+            continue
+        out.append(NextObservingWindow(
+            dark_start=window.start,
+            dark_end=window.end,
+            usable_start=o.usable_start_utc,
+            usable_end=o.usable_end_utc,
+            max_altitude_deg=o.max_altitude_deg,
+            minutes_above_min_alt=o.minutes_above_min_alt,
+            moon_illumination=round(illum, 3),
+            moon_up_fraction=o.moon_up_fraction,
+            score=o.score,
+        ))
+        if len(out) >= max(1, want):
+            break
+    return out
+
+
 def _angular_sep_deg(ra1: float, dec1: float, ra2: float, dec2: float) -> float:
     """Great-circle angular separation (deg) between two RA/Dec points."""
     r1, d1, r2, d2 = map(np.radians, (ra1, dec1, ra2, dec2))

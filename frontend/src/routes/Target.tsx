@@ -20,6 +20,7 @@ import { ObjectInfoCard, describeObject } from "../components/ObjectInfoCard";
 import { NightsCard } from "../components/NightsCard";
 import { FocusTrendCard } from "../components/FocusTrendCard";
 import { TransparencyTrendCard } from "../components/TransparencyTrendCard";
+import { NextSessionCard } from "../components/NextSessionCard";
 import { SessionRecapCard } from "../components/SessionRecapCard";
 import { StackHealthCard } from "../components/StackHealthCard";
 import { FirstLookCard } from "../components/FirstLookCard";
@@ -1032,6 +1033,21 @@ export function TargetView() {
             </Stack>
           </Group>
         </Paper>
+      ) : null}
+
+      {/* Forward-looking companion to "Is it enough yet?": when there's still a
+          goal gap, join it with the night planner's next dark window(s) for this
+          object. Self-hides when the goal's met or no window can be computed. */}
+      {readiness ? (
+        <NextSessionCard
+          safe={safe}
+          gapSeconds={Math.max(0, (readiness.goalHours - readiness.hours) * 3600)}
+          subExposureSeconds={
+            target.data && target.data.n_frames_accepted > 0
+              ? target.data.total_exposure_s / target.data.n_frames_accepted
+              : null
+          }
+        />
       ) : null}
 
       <Grid>

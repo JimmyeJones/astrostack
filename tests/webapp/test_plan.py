@@ -220,6 +220,61 @@ def test_tonight_rejects_a_malformed_date(client, solved_library):
     assert r.status_code == 422
 
 
+def test_next_session_returns_upcoming_windows_for_a_library_target(client, solved_library):
+    # The forward-looking companion to /tonight: for a well-placed library target
+    # it returns the next few nights it's shootable, so the Target page can say
+    # "…and here's your next good window".
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    r = client.get("/api/plan/next-session/M_42", params={"when": JAN_EVENING})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["location_source"] == "settings"
+    assert body["target_has_position"] is True
+    assert body["nights_scanned"] >= 1
+    wins = body["windows"]
+    assert wins, "Orion is well up on January nights from London"
+    prev = None
+    for w in wins:
+        assert w["dark_start_utc"] < w["dark_end_utc"]
+        assert w["usable_start_utc"] is not None
+        assert w["max_altitude_deg"] > 30.0
+        assert w["minutes_above_min_alt"] >= 45.0
+        assert 0.0 <= w["moon_illumination"] <= 1.0
+        # Chronological (soonest window first).
+        if prev is not None:
+            assert w["dark_start_utc"] > prev
+        prev = w["dark_start_utc"]
+
+
+def test_next_session_without_location_self_hides(client, solved_library):
+    # No configured site and the synth frames carry no SITELAT → no windows to
+    # compute, but a clean 200 with an empty list so the card just self-hides.
+    r = client.get("/api/plan/next-session/M_42", params={"when": JAN_EVENING})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["location_source"] == "none"
+    assert body["observer"] is None
+    assert body["windows"] == []
+
+
+def test_next_session_unknown_target_404s(client, solved_library):
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    r = client.get("/api/plan/next-session/NOPE_404", params={"when": JAN_EVENING})
+    assert r.status_code == 404
+
+
+def test_next_session_never_rising_target_has_no_windows(client, solved_library):
+    # A high altitude floor Orion can't clear from London → no usable window, so
+    # the list is empty (the card self-hides) rather than 500-ing.
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    r = client.get("/api/plan/next-session/M_42",
+                   params={"when": JAN_EVENING, "min_alt": 80})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["min_altitude_deg"] == 80
+    assert body["windows"] == []
+
+
 def test_tonight_detects_site_from_fits_header(tmp_path: Path, monkeypatch):
     """With no configured site, the planner sniffs SITELAT/SITELONG from a frame."""
     import sys
