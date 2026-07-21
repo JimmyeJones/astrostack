@@ -4,7 +4,7 @@ import {
   SegmentedControl, SimpleGrid, Stack, Table, Text, TextInput, Title, Tooltip,
 } from "@mantine/core";
 import { IconMoon, IconStars, IconTelescope } from "@tabler/icons-react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type PlannedTarget } from "../api/client";
 import { QueryError } from "../components/QueryError";
@@ -85,6 +85,50 @@ function TargetRow({ t }: { t: PlannedTarget }) {
       </Table.Td>
       <Table.Td><ScoreBadge score={t.score} /></Table.Td>
     </Table.Tr>
+  );
+}
+
+// When the planner resolved the observing site from a solved frame's FITS header
+// (SITELAT/SITELONG) rather than Settings, offer to save it so planning is
+// instant next time and any other page that wants a site can reuse it. Purely
+// additive: the auto-detect keeps working if dismissed, and we only ever offer
+// when Settings has no site (location_source === "fits"), so this never
+// overwrites a location the user set themselves.
+function SaveLocationNudge({ lat, lon }: { lat: number; lon: number }) {
+  const qc = useQueryClient();
+  const [dismissed, setDismissed] = useState(false);
+  const save = useMutation({
+    mutationFn: () => api.putSettings({ site_lat: lat, site_lon: lon }),
+    // Re-plan once saved: the next fetch resolves the site from Settings, so this
+    // nudge disappears on its own (location_source flips to "settings").
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["tonight"] }),
+  });
+  if (dismissed) return null;
+  return (
+    <Alert
+      color="blue"
+      icon={<IconTelescope size={18} />}
+      title="We found your observing location"
+      withCloseButton
+      onClose={() => setDismissed(true)}
+    >
+      <Text size="sm" mb="sm">
+        Read from your Seestar's frames: <b>{lat.toFixed(2)}°, {lon.toFixed(2)}°</b>.
+        Save it to Settings so planning is instant and other pages know where you
+        observe from — the app won't have to re-read your frames each time.
+      </Text>
+      <Group gap="sm">
+        <Button size="xs" loading={save.isPending} onClick={() => save.mutate()}>
+          Save this location
+        </Button>
+        {save.isError ? (
+          <Text size="xs" c="red">
+            Couldn't save — set it under{" "}
+            <Anchor component={Link} to="/settings">Settings</Anchor> instead.
+          </Text>
+        ) : null}
+      </Group>
+    </Alert>
   );
 }
 
@@ -232,6 +276,10 @@ export function TonightView() {
   return (
     <Stack gap="lg">
       {header}
+
+      {data.location_source === "fits" && data.observer ? (
+        <SaveLocationNudge lat={data.observer.lat_deg} lon={data.observer.lon_deg} />
+      ) : null}
 
       <SimpleGrid cols={{ base: 1, sm: 3 }}>
         <Card withBorder padding="sm">

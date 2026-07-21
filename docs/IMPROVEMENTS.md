@@ -3350,6 +3350,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+- ~~**NEW (Scout 2026-07-21) — "we found where you observe from": auto-offer to save the FITS-detected
+  observing site to Settings.**~~ — **SHIPPED v0.155.0** (Builder 2026-07-21, branch
+  `claude/pensive-faraday-yntnt1`). The backend already returns the resolved `observer` lat/lon and
+  `location_source` on `GET /api/plan/tonight`, so this landed as a contained frontend autonomy nudge with no
+  engine/schema change. On the Tonight page, when the site was resolved from a solved frame's FITS header
+  (`location_source === "fits"`), a dismissible blue Alert now offers *"We found your observing location — Read
+  from your Seestar's frames: {lat}°, {lon}°. Save it to Settings…"* with a one-click **Save this location**
+  button that PATCHes `site_lat`/`site_lon` via the existing `putSettings`, then invalidates the `["tonight"]`
+  query so the next fetch resolves the site from Settings and the nudge disappears on its own (the fast Settings
+  path also drops the planner's per-request 24-header probe). Upgrade-safe/additive: the silent auto-detect
+  still works when dismissed; the write is user-initiated (no silent settings mutation); it only ever offers
+  when Settings has **no** site (never overwrites a user-set location — the `fits` source only occurs then).
+  Tests (`frontend/src/routes/Tonight.test.tsx`, +2): the nudge shows for a `fits` source and clicking Save
+  PATCHes `{site_lat, site_lon}`; it's absent when the location already comes from Settings. _(PRIORITY 2
+  autonomy — removes a config step the beginner usually doesn't know to do.)_ Original spec kept for provenance:
 - **NEW (Scout 2026-07-21) — "we found where you observe from": auto-offer to save the FITS-detected
   observing site to Settings, so the night planner and Moon/dark-window cues just work with zero config.**
   *(Autonomy / friendliness; PRIORITY 2–3; size S.)* The "Tonight" planner already resolves the observer
