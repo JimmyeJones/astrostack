@@ -265,10 +265,36 @@ when you take it.
   intersection. Confidence: reproduced.
   </details>
 
-- **Drizzle two-pass κ-σ rejection is silently disabled on low/moderate-coverage output pixels — the
+- ~~**Drizzle two-pass κ-σ rejection is silently disabled on low/moderate-coverage output pixels — the
   reject-enable gate uses accumulated *weight* (`out_wht`) as a stand-in for *sample count*, which the
   file's own comments say understates the frame count whenever `pixfrac < 1` (the default) or
-  `scale > 1`.** *(Traced, Scout 2026-07-21; fresh adversarial audit of `seestack/stack/drizzle_path.py`.)*
+  `scale > 1`.**~~ — **FIXED v0.142.2** (Builder 2026-07-21, branch `claude/pensive-faraday-3rfg1k`;
+  reproduced + regression-tested — the STScI `drizzle` lib *is* installed in this env (v2.2.0), so unlike
+  the Scout's traced-only filing I execute-verified the weight-vs-count gap). Fixed as the Scout's fix path
+  specified: `DrizzleStacker` now builds the unweighted per-output-pixel frame-count plane (`self._count`)
+  in **stats mode too** (previously `None` when `compute_stats=True`), and `clip_reference` threads it into
+  `_clip_tolerance` as `neff` — so the reject-enable gate (`neff < _MIN_REJECT_NEFF`) and the Bessel
+  small-sample term key on the *true frame count*, not the pixfrac-deflated `out_wht`. `_clip_tolerance`
+  gained an optional `neff` arg (falls back to `wht` when absent, so the direct-moment unit tests and
+  drizzle at pixfrac 1/scale 1 with unit weights are unchanged); `covered` still keys on `wht > 0`.
+  **Repro** (execute-verified): a `scale=2, pixfrac=0.8` stack, 4 aligned frames → an interior output pixel
+  has frame-count 4 but `out_wht ≈ 1.0 < 3.0`, so pre-fix `clip_reference` returned `tol = +inf` (rejection
+  wrongly disabled) / post-fix returns a finite tol (rejection enabled). Regressions in
+  `tests/test_drizzle_reject.py`: `test_reject_gate_uses_frame_count_not_weight_when_the_drop_spreads`
+  (integration: count 4, wht<3, tol finite after / the stats accumulator now exposes the count) and
+  `test_clip_tolerance_neff_override_gates_on_the_supplied_count` (unit: same low `wht` → `tol=+inf` when
+  neff defaults to wht, finite when neff=frame-count); plus `tests/test_drizzle.py::
+  test_drizzle_stats_accumulator_tracks_frame_count_to_gate_rejection` (rewritten from the old
+  "stats accumulator has no frame_coverage" test, which pinned the *buggy* design). Direction is
+  under-rejection → over-rejection-fix (enables rejection only where it was wrongly skipped;
+  well-covered pixels essentially unchanged, and it can't carve NaN holes / eat star cores). Additive /
+  upgrade-safe: only affects the opt-in `drizzle + drizzle_reject` path with a spreading drop
+  (`pixfrac<1` / `scale>1`); pixfrac 1 / scale 1 with unit weights is byte-for-byte unchanged, no
+  schema/config/default/API change. Memory-safe: one extra uint32 canvas plane in the stats pass, which is
+  `del`'d before pass 2. Severity: wrong-result (contaminated master in low-coverage regions), verified
+  reproduced. *(Original trace kept below.)*
+  <details><summary>Original trace</summary>
+  *(Traced, Scout 2026-07-21; fresh adversarial audit of `seestack/stack/drizzle_path.py`.)*
   `_clip_tolerance` sets `neff = wht` (`drizzle_path.py:85`) and disables rejection (`tol = +inf`)
   wherever `neff < _MIN_REJECT_NEFF` (`= 3.0`, `drizzle_path.py:105`). But `out_wht` is the accumulated
   weight = Σ(quality-weight × footprint-overlap area), and the class comment (`drizzle_path.py:170-181`)
@@ -299,6 +325,7 @@ when you take it.
   upgrade-safe (only enables rejection where it was wrongly skipped; well-covered pixels unchanged).
   Confidence: traced (the STScI `drizzle` lib isn't installed here so I couldn't execute-verify the
   weight-per-frame magnitude, but the `neff = wht` misuse is provable from the code + its own comments).
+  </details>
 
 - ~~**`GET /api/targets/{safe}/frames` didn't clamp `offset`/`limit` — a negative page
   silently returned the wrong window.**~~ — **FIXED v0.131.6** (Builder 2026-07-16, branch

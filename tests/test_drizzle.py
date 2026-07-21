@@ -285,15 +285,18 @@ def test_drizzle_does_not_count_an_off_canvas_stray_frame(tmp_path):
     assert result.n_align_failed == 1
 
 
-def test_drizzle_stats_accumulator_has_no_frame_coverage():
-    """The statistics-only accumulator (rejection pass 1) discards its output, so
-    it doesn't pay for frame-count tracking."""
+def test_drizzle_stats_accumulator_tracks_frame_count_to_gate_rejection():
+    """The statistics accumulator (rejection pass 1) tracks the unweighted frame
+    count: the reject gate keys on the true frame count, not the pixfrac-deflated
+    weight sum, so it must be available in stats mode (see
+    ``drizzle_path.clip_reference``)."""
     wcs = wcs_from_text(make_synth_wcs_text(width=60, height=40))
     stats = DrizzleStacker(
         wcs, (40, 60), DrizzleParams(scale=1.0, pixfrac=1.0), compute_stats=True
     )
     stats.add_frame(np.full((40, 60, 3), 100.0, dtype=np.float32), wcs)
-    assert stats.frame_coverage is None
+    assert stats.frame_coverage is not None
+    assert stats.frame_coverage[20, 30] == 1
 
 
 def test_drizzle_quality_weighted_reports_frame_count_not_weight_sum(tmp_path):
