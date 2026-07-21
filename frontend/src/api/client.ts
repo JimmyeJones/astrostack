@@ -994,11 +994,18 @@ export const api = {
   // "What's in this picture?" — catalog objects that fall inside a run's field.
   stackAnnotations: (safe: string, id: number) =>
     req<StackAnnotations>(`/api/targets/${safe}/stack-runs/${id}/annotations`),
-  stackRenderUrl: (safe: string, id: number, stretch: number, black: number) =>
-    `/api/targets/${safe}/stack-runs/${id}/render?stretch=${stretch}&black=${black}`,
+  stackRenderUrl: (
+    safe: string, id: number, stretch: number, black: number, northUp = false,
+  ) =>
+    `/api/targets/${safe}/stack-runs/${id}/render?stretch=${stretch}&black=${black}` +
+    (northUp ? "&north_up=true" : ""),
   stackRenderSuggestion: (safe: string, id: number) =>
-    req<{ stretch: number | null; black: number | null; target_bg?: number }>(
-      `/api/targets/${safe}/stack-runs/${id}/render-suggestion`),
+    req<{
+      stretch: number | null; black: number | null; target_bg?: number;
+      // The rotation (deg) that puts celestial North up, or null when the run has
+      // no usable WCS / the correction is trivial (so no "North up" toggle).
+      north_up_deg?: number | null;
+    }>(`/api/targets/${safe}/stack-runs/${id}/render-suggestion`),
   // "One frame vs your stack" reveal — a single raw sub next to the finished
   // stack, so a beginner sees what stacking bought them.
   oneSubVsStack: (safe: string, id: number) =>

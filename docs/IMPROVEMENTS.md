@@ -4585,6 +4585,30 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+- **PARTLY SHIPPED (v0.148.0, Builder 2026-07-21, branch `claude/pensive-faraday-dvg3ul`) — "North up" view slice.**
+  Shipped the engine + the History **view** orientation: a **"Rotate so North is up"** toggle in the History
+  card's *Adjust* panel reorients the live render + the full-screen lightbox so celestial North points up (like
+  reference photos of the object), derived from the run's own WCS. **Engine:** `seestack/render/orient.py` —
+  `north_up_rotation_deg(wcs, w, h)` (asks the WCS where North points at the image centre and returns the CCW
+  PIL-rotate angle; `None` for no/degenerate WCS) + `rotate_image_north_up(rgb, angle)` (lossless `np.rot90`
+  snap within 1° of a 90° step; otherwise a bicubic `expand` rotate with **black** corners = the app's
+  uncovered/NaN convention). The **rotation sign** — the one thing that must be exactly right — is pinned by an
+  **end-to-end marker test** using `astropy` itself as ground truth (place a marker at the true-North sky
+  position via the WCS, rotate by the helper's angle, assert it lands top-centre), across 9 rotations incl. the
+  celestial RA-left parity, so it doesn't depend on the ASTAP-convention unknown the sky-atlas `_tan_wcs` item
+  is gated on. **Backend:** `render_stack_png(..., north_up=)` + `stack_north_up_deg(fits)`; the `render`
+  endpoint takes `north_up=`; `render-suggestion` returns `north_up_deg` (null unless a real >`NORTH_UP_MIN_DEG`
+  correction exists) so the UI only offers the toggle when it helps. **Frontend:** the Adjust-panel `Switch`
+  (self-hides when no correction), threaded into the render image + lightbox URLs. Additive/upgrade-safe:
+  read-only, off by default, no schema/config/API-shape/existing-default change. Tests: `tests/test_orient.py`
+  (+7 incl. the parametrised sign proof), `tests/webapp/test_north_up.py` (+3 — suggestion angle / render
+  reorients (canvas grows) / no-WCS no-op), `stackRenderUrl.test.ts` (+2), `History.test.tsx` (+2 — toggle
+  shows & threads `north_up=true` / hidden with no correction). **Deliberately NOT baked into the stored
+  preview or the canonical JPEG/PNG downloads** — the stored preview must stay WCS-aligned or the Sky-map
+  overlay (which places the preview via its grid WCS) would be mis-oriented; North-up is a view/download-time
+  orientation only. **Slice left for a future run (filed below in Ideas):** offer a North-up-oriented
+  *download/share* (the share JPEG path) so a beginner can post the oriented picture, and consider the editor
+  export surface (guarding the geometry-op WCS mismatch the Scout flagged). Original spec kept for provenance:
 - **NEW BEGINNER FEATURE (Scout 2026-07-21 #9) — "North up": one-click orient the shared/exported image so
   celestial North points up, the way every reference photo of the object is drawn.** A Seestar frames the sky
   at whatever angle the mount happened to sit, so a beginner's finished picture often comes out rotated relative
@@ -4618,6 +4642,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   reusing `write_share_jpeg`/`write_full_res_png`. _(M, split as above; PRIORITY 3 friendliness /
   understand-enjoy-share — beginner feature; reuses the shipped WCS geometry + share-render infra, so low-risk.
   Keeps the beginner-feature pipeline stocked.)_
+- **NEW (Builder 2026-07-21, follow-up to the shipped North-up view slice v0.148.0) — offer the North-up
+  orientation on the *download/share* image, not just the History Adjust view.** v0.148.0 orients the live
+  render + lightbox (`render` endpoint `north_up=`) but deliberately leaves the canonical JPEG/PNG downloads and
+  the stored preview WCS-aligned (baking rotation into the stored preview would mis-place the Sky-map overlay,
+  which positions the preview via its grid WCS). The remaining beginner value is *sharing* the oriented picture:
+  add a North-up option to the **share JPEG** path (`download_stack_run` `kind="jpeg"` / the share flow) that
+  reads the run's `stack_north_up_deg` and rotates the display bytes before JPEG-encoding — reusing the shipped
+  `rotate_image_north_up` — so a beginner posts a conventionally-oriented image. The engine + sign are already
+  shipped and tested, so this is just wiring a second surface (a new `north_up` query param + a share-panel
+  toggle) with its own endpoint test. **Guard the editor-export surface separately:** a display-space editor
+  export that applied a geometry op (crop/rotate) no longer matches its master WCS, so either don't offer it
+  there or recompute from the edited framing — the Scout's #9 spec flags this. Additive/upgrade-safe (new
+  optional param, off by default). _(S–M; PRIORITY 3 friendliness / enjoy-share — completes the "share it
+  oriented like the reference photos" story the #9 spec envisioned.)_
 - ~~**NEW BEGINNER FEATURE (Scout 2026-07-21 #8) — "One frame vs your stack": a side-by-side / split-slider
   reveal of a single raw sub next to the finished stack, so a beginner *sees* — and can share — exactly what
   stacking bought them.**~~ — **SHIPPED v0.147.0** (Builder 2026-07-21, branch `claude/pensive-faraday-dvg3ul`;

@@ -351,12 +351,15 @@ _KIND_FIELDS = {
 async def render_stack_run(
     safe: str, run_id: int, request: Request,
     stretch: float = _STRETCH_DEFAULT, black: float = _BLACK_DEFAULT, size: int = 1024,
+    north_up: bool = False,
 ) -> Response:
     """Live, adjustable re-render of a run's stacked FITS (full dynamic range).
 
     ``stretch`` (0..1) → how hard the asinh curve lifts faint detail; ``black``
-    (0..1) → the black point (higher = darker background). Runs in a threadpool
-    so it never blocks the job worker.
+    (0..1) → the black point (higher = darker background). ``north_up`` rotates
+    the rendered image so celestial North points up (like reference photos of the
+    object), using the run's own WCS — a no-op when the run has no WCS or the
+    correction is trivial. Runs in a threadpool so it never blocks the job worker.
     """
     _, fits_path = _run_fits_path(request, safe, run_id)
     if not fits_path or not Path(fits_path).exists():
@@ -368,6 +371,7 @@ async def render_stack_run(
         stretch=_clamp(stretch, _STRETCH_MIN, _STRETCH_MAX),
         black=_clamp(black, _BLACK_MIN, _BLACK_MAX),
         max_width=int(_clamp(size, 128, 4096)),
+        north_up=bool(north_up),
     )
     return Response(content=png, media_type="image/png",
                     headers={"Cache-Control": "no-store"})
@@ -538,16 +542,23 @@ async def render_stretch_suggestion(
         raise HTTPException(status_code=404, detail="No FITS for this run to render")
 
     from seestack.edit.stretch import STRETCH_TARGET_BG, suggest_asinh_stretch
-    from seestack.render.thumbnail import load_stack_rgb
+    from seestack.render.orient import NORTH_UP_MIN_DEG
+    from seestack.render.thumbnail import load_stack_rgb, stack_north_up_deg
 
     def work() -> dict[str, Any]:
+        # "North up" is a pure orientation fix from the run's own WCS, so it's
+        # offered on a linear stack *or* a display-space export that kept its WCS;
+        # only surface it when there's a real, more-than-trivial correction.
+        angle = stack_north_up_deg(fits_path)
+        north_up_deg = angle if (angle is not None and abs(angle) >= NORTH_UP_MIN_DEG) else None
         rgb, display_space = load_stack_rgb(fits_path, max_width=1024)
         if display_space:
-            return {"stretch": None, "black": None}
+            return {"stretch": None, "black": None, "north_up_deg": north_up_deg}
         sug = suggest_asinh_stretch(rgb)
         if sug is None:
-            return {"stretch": None, "black": None}
-        return {"stretch": sug[0], "black": sug[1], "target_bg": STRETCH_TARGET_BG}
+            return {"stretch": None, "black": None, "north_up_deg": north_up_deg}
+        return {"stretch": sug[0], "black": sug[1], "target_bg": STRETCH_TARGET_BG,
+                "north_up_deg": north_up_deg}
 
     return await run_in_threadpool(work)
 

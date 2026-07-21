@@ -199,6 +199,7 @@ def render_stack_png(
     stretch: float = 0.5,
     black: float = 0.35,
     max_width: int = 1024,
+    north_up: bool = False,
 ) -> bytes:
     """Render a stacked-image FITS to PNG bytes with an adjustable asinh stretch.
 
@@ -224,10 +225,37 @@ def render_stack_png(
     # a linear stack gets the adjustable asinh stretch. A second stretch on an
     # already tone-mapped image would double-process it.
     stretched = rgb if display_space else asinh_stretch(rgb, stretch=stretch, black=black)
-    u8 = (np.clip(np.nan_to_num(stretched), 0.0, 1.0) * 255).astype(np.uint8)
+    disp = np.clip(np.nan_to_num(stretched), 0.0, 1.0)
+    if north_up:
+        disp = _apply_north_up(disp, fits_path)
+    u8 = (disp * 255).astype(np.uint8)
     buf = io.BytesIO()
     Image.fromarray(u8, mode="RGB").save(buf, format="PNG")
     return buf.getvalue()
+
+
+def stack_north_up_deg(fits_path: str | Path) -> float | None:
+    """The rotation (deg) that orients a stack's stored master so celestial North
+    is up, read from its own WCS — or ``None`` when the run carries no usable WCS
+    (older/edited runs). Lets the UI decide whether to offer a "North up" option
+    (only when a real, more-than-trivial correction exists)."""
+    from seestack.io.wcs_io import celestial_wcs_from_fits
+    from seestack.render.orient import north_up_rotation_deg
+
+    wcs, w, h = celestial_wcs_from_fits(fits_path)
+    return north_up_rotation_deg(wcs, w, h)
+
+
+def _apply_north_up(disp: np.ndarray, fits_path: str | Path) -> np.ndarray:
+    """Rotate a display image so North is up, using the FITS's own WCS. A missing
+    WCS or a sub-threshold correction leaves the pixels unchanged, so the render
+    never breaks or needlessly resamples."""
+    from seestack.render.orient import NORTH_UP_MIN_DEG, rotate_image_north_up
+
+    angle = stack_north_up_deg(fits_path)
+    if angle is None or abs(angle) < NORTH_UP_MIN_DEG:
+        return disp
+    return np.clip(rotate_image_north_up(disp, angle), 0.0, 1.0)
 
 
 def stack_coverage_mask(fits_path: str | Path) -> np.ndarray:
