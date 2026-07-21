@@ -64,17 +64,29 @@ _VAR_RESOLUTION_FACTOR = 16.0 * float(np.finfo(np.float32).eps)
 
 
 def _clip_tolerance(
-    m: np.ndarray, m2: np.ndarray, wht: np.ndarray, kappa: float
+    m: np.ndarray, m2: np.ndarray, wht: np.ndarray, kappa: float,
+    neff: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Per-output-pixel ``(mean, tol)`` for one channel from drizzled moments.
 
     ``m`` is the weighted mean of the contributions, ``m2`` the weighted mean of
-    their squares, and ``wht`` the accumulated weight (which doubles as the
-    effective sample count ``neff``). Returns the mean (NaN where uncovered) and
-    the κ·σ clip tolerance (``+inf`` — never reject — wherever ``neff`` is below
-    :data:`_MIN_REJECT_NEFF` or the variance is below the float32 resolution
-    floor). Extracted from :meth:`DrizzleStacker.clip_reference` so the
-    small-sample / resolution-floor logic is unit-testable on hand-built moments.
+    their squares, and ``wht`` the accumulated weight. Returns the mean (NaN
+    where uncovered) and the κ·σ clip tolerance (``+inf`` — never reject —
+    wherever the effective sample count is below :data:`_MIN_REJECT_NEFF` or the
+    variance is below the float32 resolution floor). Extracted from
+    :meth:`DrizzleStacker.clip_reference` so the small-sample / resolution-floor
+    logic is unit-testable on hand-built moments.
+
+    ``neff`` is the effective per-pixel sample count that gates rejection (and
+    drives the Bessel correction). It must be the true **frame count**, because
+    the accumulated weight ``wht`` *understates* it whenever ``pixfrac < 1`` (the
+    default) or ``scale > 1`` — each frame then deposits a fractional footprint
+    weight (e.g. ~0.64 at pixfrac 0.8), so a pixel hit by 4 frames carries
+    ``wht ≈ 2.56`` and would spuriously fall under the ``_MIN_REJECT_NEFF`` floor,
+    silently disabling rejection exactly where a satellite/trail on a
+    low-coverage edge is most visible. When ``neff`` is ``None`` we fall back to
+    ``wht`` (the direct-moment unit tests, and drizzle at pixfrac 1 / scale 1
+    with unit weights where ``wht`` *is* the frame count, are unchanged).
     """
     # Weighted population variance as ``E[x²] − E[x]²``, computed in float64:
     # ``m`` and ``m2`` are ~counts² for a bright pixel (e.g. 5e4 counts →
@@ -82,7 +94,7 @@ def _clip_tolerance(
     # variance from the two large operands — a catastrophic-cancellation trap.
     m64 = m.astype(np.float64)
     var = np.clip(m2.astype(np.float64) - m64 * m64, 0.0, None)
-    neff = wht
+    neff = wht if neff is None else neff.astype(np.float64, copy=False)
     # Bessel small-sample correction, applied only to the *clip tolerance* — not
     # to the resolution-floor test below, which must judge the raw ``m2 − m²``.
     # (Inflating the variance before the floor test would shrink the intended
@@ -179,12 +191,12 @@ class DrizzleStacker:
         # OR the three channels' increases so a frame counts wherever it
         # contributed to **any** channel — per-channel κ-σ rejection can drop one
         # channel at a pixel, and reading channel 0 alone would under-count it.
-        # Mirrors ``WeightedSumAccumulator.frame_coverage``. The statistics-only
-        # accumulator never surfaces this (its output is discarded), so it skips
-        # the per-frame copy.
-        self._count: np.ndarray | None = (
-            None if compute_stats else np.zeros(self.out_shape, dtype=np.uint32)
-        )
+        # Mirrors ``WeightedSumAccumulator.frame_coverage``. Built in **both**
+        # modes: the main accumulator surfaces it for the coverage_min/max
+        # diagnostic, and the statistics pass needs it to gate rejection on the
+        # *true frame count* rather than the (pixfrac-deflated) accumulated weight
+        # (see :meth:`clip_reference` / :func:`_clip_tolerance`).
+        self._count: np.ndarray = np.zeros(self.out_shape, dtype=np.uint32)
         # Memory-free rejection tally for the two-pass reject path (mirrors the
         # κ-σ and min/max accumulators): while pass 2 zero-weights outlier
         # contributions we sum two scalars — the covered samples that would have
@@ -267,9 +279,7 @@ class DrizzleStacker:
         # post-add weight increase into one bool plane, snapshotting each
         # channel's ``out_wht`` right before its own ``add_image`` — so only one
         # float snapshot is live at a time (memory-bounded, as before).
-        deposited = (
-            np.zeros(self.out_shape, dtype=bool) if self._count is not None else None
-        )
+        deposited = np.zeros(self.out_shape, dtype=bool)
         for c in range(3):
             vals = rgb[..., c]
             finite = np.isfinite(vals)
@@ -289,9 +299,7 @@ class DrizzleStacker:
                 self._n_contributed += int(contributing.sum())
                 self._n_rejected += int(np.count_nonzero(contributing & rejected))
             ch = np.where(finite, vals, 0.0).astype(np.float32, copy=False)
-            prev_wht = (
-                self._drizzlers[c].out_wht.copy() if deposited is not None else None
-            )
+            prev_wht = self._drizzlers[c].out_wht.copy()
             self._drizzlers[c].add_image(
                 data=ch,
                 exptime=1.0,
@@ -300,8 +308,7 @@ class DrizzleStacker:
                 pixfrac=self.params.pixfrac,
                 in_units="counts",
             )
-            if deposited is not None:
-                deposited |= self._drizzlers[c].out_wht > prev_wht
+            deposited |= self._drizzlers[c].out_wht > prev_wht
             if self._sq_drizzlers is not None:
                 self._sq_drizzlers[c].add_image(
                     data=ch * ch,
@@ -311,8 +318,7 @@ class DrizzleStacker:
                     pixfrac=self.params.pixfrac,
                     in_units="counts",
                 )
-        if self._count is not None:
-            self._count += deposited.astype(np.uint32, copy=False)
+        self._count += deposited.astype(np.uint32, copy=False)
         self._n_added += 1
         return intersects
 
@@ -324,8 +330,11 @@ class DrizzleStacker:
         ``mean`` is the weighted mean of the contributions (NaN where nothing
         landed). ``tol`` is ``kappa × σ`` of those contributions, with a
         Bessel-style small-sample correction, and ``+inf`` (never reject)
-        wherever the effective contribution count is below ``_MIN_REJECT_NEFF``
-        — clipping against one or two samples is noise, not statistics.
+        wherever the per-pixel **frame count** is below ``_MIN_REJECT_NEFF`` —
+        clipping against one or two samples is noise, not statistics. The gate
+        reads the unweighted frame count (``self._count``), not the accumulated
+        weight, which under ``pixfrac < 1`` / ``scale > 1`` deflates below the
+        frame count and would otherwise disable rejection on low-coverage pixels.
         """
         if self._sq_drizzlers is None:
             raise ValueError("clip_reference requires compute_stats=True")
@@ -338,6 +347,7 @@ class DrizzleStacker:
                 self._sq_drizzlers[c].out_img,
                 self._drizzlers[c].out_wht,
                 kappa,
+                neff=self._count,
             )
             mean[..., c] = mean_c
             tol[..., c] = t
@@ -375,7 +385,7 @@ class DrizzleStacker:
         return cov
 
     @property
-    def frame_coverage(self) -> np.ndarray | None:
+    def frame_coverage(self) -> np.ndarray:
         """Per-output-pixel **frame count** (2-D), independent of quality weights
         and pixfrac/scale.
 
@@ -383,8 +393,8 @@ class DrizzleStacker:
         how many frames actually deposited signal into each output pixel, so
         ``coverage_min``/``coverage_max`` report an honest "N frames per pixel"
         even with quality weighting on (or any pixfrac<1 / scale≠1, where the
-        weight sum is fractional). ``None`` on a statistics-only accumulator,
-        whose output is discarded."""
+        weight sum is fractional). Also gates rejection in the statistics pass
+        (see :meth:`clip_reference`)."""
         return self._count
 
     @property
