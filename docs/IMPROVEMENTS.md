@@ -4941,21 +4941,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
-- **NEW (Scout 2026-07-21 #2) — `library.py` lacks a *generic* column self-heal, unlike `project.py` (latent
-  upgrade fragility, not currently reachable).** `io/project.py` has `_reconcile_table_columns`, which adds any
-  missing column to a version-stamped-but-incomplete DB with correct defaults (a real belt-and-braces upgrade
-  safety net). `io/library.py::_ensure_columns` (~L190) instead hard-codes a **single** `tags` `ALTER TABLE`, and
-  `_row_to_target` only guards `tags` with an `in row.keys()` check. Today that's fine — evidence (the tags-only
-  guard on both the writer and reader) says `tags` was the *only* late addition to the targets table, so an old
-  library missing any *other* column can't occur. But if a future schema bump ever adds a non-`tags` targets column
-  **without** its own explicit ALTER, an old library missing it would raise `IndexError` on `list_targets` (a hard
-  failure opening the library on upgrade). **Fix (small, safe, pre-emptive):** give `library.py` the same generic
-  `_reconcile_table_columns`-style pass `project.py` already has (declare the expected targets columns + defaults;
-  add any missing one), so a future column can never strand an old library. Additive; a current library is
-  byte-for-byte unchanged (nothing missing → no ALTER). Add an upgrade test that stamps an old library missing a
-  hypothetical column and confirms it opens. (S, infra/upgrade-safety — PRIORITY: low now, but cheap insurance for
-  the "runs on a live install, upgraded in place" invariant in AGENTS.md §9.) Traced + repro'd the current
-  tags-only path is clean; the gap is latent, so filed as infra, not a bug.
+- ~~**NEW (Scout 2026-07-21 #2) — `library.py` lacks a *generic* column self-heal, unlike `project.py` (latent
+  upgrade fragility, not currently reachable).**~~ — **SHIPPED v0.140.1** (Builder 2026-07-21, branch
+  `claude/pensive-faraday-i5lui7`). `io/library.py::_ensure_columns` was a single hard-coded `tags` ALTER; it now
+  mirrors `project.py`'s generic reconcile — a module-level `_authoritative_target_columns()` reads the expected
+  `targets` columns (name/type/notnull/default) from `_REGISTRY_SCHEMA_SQL` via a throwaway in-memory DB
+  (`_EXPECTED_TARGET_COLUMNS`, computed once at import), and `_ensure_columns` additively ALTERs in any column an
+  on-disk registry lacks (guarded by a try/except so reconciliation can never itself fail an open). So a future
+  additive `targets` column can no longer strand an old library on `list_targets` — `_row_to_target` reads
+  `last_stack_preview`/`notes` by name with **no** guard, so a registry missing one would have raised `IndexError`
+  on open. Additive/upgrade-safe: a current-schema registry matches exactly (nothing missing → no ALTER), so it's
+  byte-for-byte unchanged; no schema/config/API/default change. Regression
+  `tests/test_library_tags.py::test_old_library_missing_a_non_tags_column_is_self_healed` (a version-stamped
+  registry missing `last_stack_preview`/`notes`/`tags` opens, backfills all three, and `list_targets` returns
+  cleanly — fail-before `IndexError`/pass-after). Cheap insurance for the "runs on a live install, upgraded in
+  place" invariant (AGENTS.md §9). (S, infra/upgrade-safety.)
 - **NEW (Scout 2026-07-21 #2) — `wcs_io.wcs_from_text` returns a *default* WCS instead of `None` for non-FITS
   garbage — a docstring/contract mismatch (cosmetic, unreachable with real data).** `io/wcs_io.py::wcs_from_text`
   (~L34) documents "Returns None on failure", but `astropy.io.fits.Header.fromstring` tolerates arbitrary garbage
