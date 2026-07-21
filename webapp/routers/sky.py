@@ -109,6 +109,15 @@ def get_sky(request: Request) -> SkyResponse:
             try:
                 from seestack.io.project import Project
                 proj = Project.open(lib.target_dir(t))
+            except Exception:  # noqa: BLE001 — a broken project must not 500 the sky map
+                # One unreadable/corrupt project DB — or one stamped with a newer
+                # schema after an image rollback (Project.open raises RuntimeError)
+                # — must not hide *every* target's placement. Skip it, like
+                # stats.py / storage.py already do for the same call.
+                if proj is not None:
+                    proj.close()
+                continue
+            try:
                 # Latest stack run that actually has a preview on disk. Guard the
                 # file's existence (like gallery.py / stats.py do) — a run whose
                 # preview PNG was deleted still carries a truthy preview_path, and

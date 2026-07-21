@@ -86,7 +86,17 @@ def get_gallery(request: Request) -> GalleryResponse:
             proj = None
             try:
                 proj = Project.open(lib.target_dir(t))
-                for run in proj.iter_stack_runs():
+                runs = list(proj.iter_stack_runs())
+            except Exception:  # noqa: BLE001 — a broken project must not 500 the gallery
+                # One unreadable/corrupt project DB — or one stamped with a newer
+                # schema after an image rollback (Project.open raises RuntimeError)
+                # — must not hide *every* target's images. Skip it, like
+                # stats.py / storage.py already do for the same call.
+                if proj is not None:
+                    proj.close()
+                continue
+            try:
+                for run in runs:
                     has_preview = bool(run.preview_path and Path(run.preview_path).exists())
                     options = _parse_options(run.options_json)
                     items.append(GalleryItem(

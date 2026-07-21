@@ -153,6 +153,37 @@ def test_sky_falls_back_to_tan_wcs_without_a_master_fits(client, solved_library)
     assert wcs["CRPIX1"] == pytest.approx(960 / 2 + 0.5, abs=1e-9)
 
 
+def test_sky_skips_a_broken_project_without_500ing(client, solved_library):
+    """A single unreadable/newer-schema project DB must not hide *every* target's
+    sky placement. The sky loop calls ``Project.open`` per target; without a guard
+    one ``RuntimeError`` (schema newer than this build, e.g. after an image
+    rollback) 500s the whole endpoint. It must skip the bad target instead — like
+    stats.py / storage.py already do."""
+    import sqlite3
+
+    targets = client.get("/api/targets").json()
+    assert len(targets) >= 2  # the fixture ingests two targets
+    good, bad = targets[0]["safe_name"], targets[1]["safe_name"]
+    _add_stack_run_with_preview(solved_library, good)
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        db = lib.target_dir(lib.find_target(bad)) / "project.sqlite"
+    finally:
+        lib.close()
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute("PRAGMA user_version = 999")
+        conn.commit()
+    finally:
+        conn.close()
+
+    r = client.get("/api/sky")
+    assert r.status_code == 200  # fail-before: the broken target 500s the sky map
+    # The healthy target's image is still placed.
+    assert any(im["safe"] == good for im in r.json()["images"])
+
+
 def test_sky_returns_stars(client):
     r = client.get("/api/sky")
     assert r.status_code == 200

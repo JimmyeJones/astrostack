@@ -84,6 +84,43 @@ def test_gallery_empty_when_no_runs(client):
     assert r.json()["items"] == []
 
 
+def _corrupt_project_schema(data_root, safe: str) -> None:
+    """Stamp one target's project DB with a schema newer than this build, so
+    ``Project.open`` raises ``RuntimeError`` — the realistic "opened after an
+    image rollback" failure — without leaving a truly corrupt file."""
+    import sqlite3
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        db = lib.target_dir(lib.find_target(safe)) / "project.sqlite"
+    finally:
+        lib.close()
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute("PRAGMA user_version = 999")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_gallery_skips_a_broken_project_without_500ing(client, solved_library):
+    """A single unreadable/newer-schema project DB must not hide *every* target's
+    images. The gallery loop calls ``Project.open`` per target; without a guard one
+    ``RuntimeError`` (schema newer than this build, e.g. after an image rollback)
+    500s the whole endpoint. It must skip the bad target instead — like stats.py /
+    storage.py already do."""
+    targets = client.get("/api/targets").json()
+    assert len(targets) >= 2  # the fixture ingests two targets
+    good, bad = targets[0]["safe_name"], targets[1]["safe_name"]
+    run_id = _register_run(solved_library, good, {"sigma_clip": True})
+    _corrupt_project_schema(solved_library, bad)
+
+    r = client.get("/api/gallery")
+    assert r.status_code == 200  # fail-before: the broken target 500s the gallery
+    run_ids = {it["run_id"] for it in r.json()["items"]}
+    assert run_id in run_ids  # the healthy target's run still appears
+
+
 def test_gallery_tolerates_bad_options_json(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
     lib = Library.open_or_create(solved_library / "library")
