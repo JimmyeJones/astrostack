@@ -1665,6 +1665,24 @@ the real webapp stack→edit path.)_
   adversarial audit of the plate-solving path (`solve/*` + its persistence/consumers), which otherwise traced
   clean — WCS parse, solve-success detection (returncode + sidecar), RA-wrap in the center consumers, hint
   unit conversion, and setup-error classification all held.
+  _(Scout 2026-07-21 — **reproduced the 2θ divergence + pinned the provenance**, strengthening confidence the
+  code (not the convention) is wrong, while the fix stays real-data-gated. (1) **Provenance:** the
+  `rotation_deg` fed to `_tan_wcs` is, by definition, ASTAP's **`CROTA2`** keyword — `solve/astap.py:359`
+  reads `rotation = values.get("CROTA2", 0.0)`, carried unchanged through `runner.py`→`project.py`→`sky.py`
+  (`_representative_pixscale_rotation`). So the code is converting a genuine CROTA2 with a hand-rolled matrix,
+  and the correct target is the **FITS-standard** CROTA2→CD conversion (which is exactly what `astropy.wcs`
+  applies when you set the `CROTA2` keyword). (2) **Reproduced** (astropy `WCS`, run under `.venv`): comparing
+  the code's CD matrix against the FITS-standard conversion (`CDELT1=−scale`, `CDELT2=+scale`) by the on-sky
+  position angle of the image "up" axis — at `CROTA2=30°` the code places the overlay at PA **30°** vs the
+  standard **330°** (a **60° = 2θ** error); at `CROTA2=0°` the two agree **exactly** (diff 0.0) and the CD
+  determinant is `−scale²` (correct RA-left celestial parity), so there is **no hidden global y-flip masking
+  the sign** — the divergence is purely the rotation term, genuinely reversed. (3) **Still NOT a blind fix,
+  same gate as before:** whether ASTAP actually emits a FITS-standard-signed CROTA2 on a real Seestar solve is
+  the one thing a synthetic can't settle; astropy's standard conversion assumes it does. So validate on one
+  **real** solved Seestar frame with a known non-zero field rotation before flipping both off-diagonals to
+  `−scale·sinθ`, and pin the sign with a known-orientation regression test. This is the same underlying bug as
+  Sky-map placement Bug 2 (the ⭐ owner-reported entry above) — fix them together. Repro kept in the session
+  scratchpad (`wcs_repro.py`).)_
 
 - ~~**Queued-job cancel vs. worker-start race can report a non-cancel-aware job "cancelled" while it
   actually runs to completion.**~~ — **FIXED v0.131.8** (Builder 2026-07-16, branch
@@ -1782,6 +1800,39 @@ wrong-value/corruption bug, so not filed as a fix (already documented as the cha
 the two prior audits). **No code shipped this run** — every open bug is real-data-gated and the engine is
 hardened; this run's deliverable is the clean-audit record + backlog curation + new beginner-feature ideas
 below, per AGENTS.md §2 (a clean, green run beats manufactured churn).)_
+
+_(Scout audit 2026-07-21 #2 (v0.138.0 baseline, suite green 1385 passed / 2 skipped): the stacking engine had
+already been audited clean by the earlier Scout run *today* (PR #340), so per the rotation guidance this run led
+with the parts of the tree audited *least* recently — **editor preview↔export parity** and the **DB migration /
+upgrade-safety** paths — via two parallel repro-driven adversarial audits (each required to reproduce any finding
+with a runnable script). **(1) Editor preview↔export parity + Sky-map placement** (`edit/proxy,pipeline,registry`,
+`webapp/routers/editor,sky,stack`, `frontend/src/routes`) — **traced clean on parity**: every resolution-dependent
+op threads the proxy downsample factor via `ctx.scaled_px` (sharpen radius, bilateral `sigma_spatial`, deconv
+`psf_sigma`/`ring`, star-reduce + star-mask footprints, background box/mesh + dilation, coverage-leveling
+`proxy_scale`, crop degenerate-threshold); the two truly-unrepresentable-on-a-decimated-grid ops (deconv
+understates, star-reduce overstates) are **surfaced as honest advisories**, not silently wrong; `apply_recipe`
+(preview) and `_render_recipe_fullres` (export) iterate the same ops in the same order, share the identical STF
+`autostretch` fallback + NaN restoration, and gate it on the same `display_space` flag written together by the
+export; proxy vs full-res loaders use identical transpose/channel handling; coverage striding lines up. The one
+`is_proxy`-branching op — `tone.color_calibrate` gaia mode → gray-star on the proxy, catalog colour on export —
+is **by design and disclosed in the UI** ("Gaia catalogue (on export)"), not a parity bug. **Reproduced** the
+Sky-map `_tan_wcs` rotation-sign reversal (2θ error; provenance = ASTAP `CROTA2`; no hidden flip) — but that is
+the *already-filed* real-data-gated bug, strengthened above, not a new one. **(2) DB migrations / upgrade-safety**
+(`io/project,library,merge,scanner,wcs_io`) — **traced clean**: simulated old on-disk `project.sqlite` DBs at
+**every** `user_version` 0→9 (period-accurate narrow tables) and confirmed each migrates to the current schema
+with **all frame/stack-run rows + reject/override/reason fields preserved**; `_migrate_schema` contains only
+additive `ALTER TABLE ADD COLUMN` / `CREATE TABLE IF NOT EXISTS` (no DROP/DELETE/UPDATE/table-rewrite anywhere);
+`_reconcile_table_columns` self-heals a version-stamped-but-column-missing DB with correct defaults; FrameRow
+NULL/None round-trips for all 27 fields; `reset_frame_qc` preserves a `user_override`; the library DB migrates
+v1→v3 additively; `merge.py` copies metadata intact and realpath-dedups (no double-weighting); `wcs_io`
+round-trips valid WCS. **Both audits traced clean — no new reproducible correctness bug.** Two latent
+observations filed as small infra items below (neither user-reachable): `wcs_io.wcs_from_text` returns a *default*
+WCS instead of `None` for non-FITS garbage (docstring says None; unreachable — stored `wcs_json` is always valid
+machine-generated FITS), and `library.py` has no *generic* column-reconcile (hard-codes the single `tags` ALTER —
+a latent fragility only if a future non-tags targets column ships without its own ALTER). **No code shipped** —
+every open bug is real-data-gated / display-only, and the two latent items aren't wrong-answer-for-a-valid-request
+bugs, so filing beats churning `main` (AGENTS.md §2). Deliverable: this clean-audit record + the strengthened
+sky-map rotation evidence + curation + new ideas below.)_
 
 _(Builder stacking-engine audit 2026-07-17 (v0.135.3 baseline, suite green 1375 passed / 2 skipped):
 another fresh repro-driven adversarial pass across `stack/{align,stacker,accumulator,mosaic,drizzle_path}.py`,
@@ -4776,6 +4827,27 @@ problems. Dogfood it every big-picture run and fix root causes.
   Upgrade-safe: one read-only endpoint + one card, no schema/config/default/existing-API change.
   *(S–M, autonomy/friendliness — PRIORITY 2/3; complements "How's my stack?" (post-stack) with a
   pre-stack instant look.)*
+- **NEW BEGINNER FEATURE (Scout 2026-07-21 #2) — "Your sky, so far": a friendly personal-progress / year-in-review
+  summary of everything the user has imaged.** A beginner accumulates targets, nights and integration hours over a
+  season, but the app never *reflects that back* to them — there's no single place that says "look what you've made".
+  The data already exists (the library DB + each target's `project.sqlite` frames/stack-runs), so an aggregate read-
+  only page can turn a growing library into a satisfying, shareable personal summary — the astro equivalent of a
+  "year in review": **total kept integration hours, number of targets imaged, total subs kept, your longest single
+  target (by integration), your clearest night (best median FWHM / lowest sky), most-imaged object, first light date,
+  and a small grid of your finished pictures** (one hero thumbnail per target, reusing the existing preview render).
+  This serves *enjoy* and *share* directly (a beginner loves seeing their progress add up and showing it off) and
+  gently *motivates* the next clear night. **Slices — (a) backend (S–M):** a pure aggregate helper over the library +
+  per-target DBs → `GET /api/library/summary` returning the tallies + a per-target hero list (frame_id/preview URL,
+  kept integration, best-night stats); all offline, read-only, no new schema. **(b) frontend (S):** a "Your sky, so
+  far" page (linked from the Library/Dashboard) rendering the tallies as plain-language stat cards + the hero grid,
+  with a single "Share this summary" button reusing the existing share-card/PNG export path so the whole summary can
+  go out as one image. **Beginner bar ✔** — no astro jargon, no knobs, every number is something they already
+  understand (hours, nights, pictures); sane default (just shows what's there); purely additive. Upgrade-safe: one
+  read-only endpoint + one page over existing data, no schema/config/default/existing-API change. Reuses the existing
+  preview render, session-recap-style aggregation, and share-card export — no new heavy path.
+  *(M, friendliness/enjoy-share — PRIORITY 3; a genuinely new "reflect my progress back to me" surface, distinct from
+  the per-target session recap / integration goal, which are single-target and in-flight — this is the whole-library
+  view.)*
 
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
@@ -4865,6 +4937,31 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+- **NEW (Scout 2026-07-21 #2) — `library.py` lacks a *generic* column self-heal, unlike `project.py` (latent
+  upgrade fragility, not currently reachable).** `io/project.py` has `_reconcile_table_columns`, which adds any
+  missing column to a version-stamped-but-incomplete DB with correct defaults (a real belt-and-braces upgrade
+  safety net). `io/library.py::_ensure_columns` (~L190) instead hard-codes a **single** `tags` `ALTER TABLE`, and
+  `_row_to_target` only guards `tags` with an `in row.keys()` check. Today that's fine — evidence (the tags-only
+  guard on both the writer and reader) says `tags` was the *only* late addition to the targets table, so an old
+  library missing any *other* column can't occur. But if a future schema bump ever adds a non-`tags` targets column
+  **without** its own explicit ALTER, an old library missing it would raise `IndexError` on `list_targets` (a hard
+  failure opening the library on upgrade). **Fix (small, safe, pre-emptive):** give `library.py` the same generic
+  `_reconcile_table_columns`-style pass `project.py` already has (declare the expected targets columns + defaults;
+  add any missing one), so a future column can never strand an old library. Additive; a current library is
+  byte-for-byte unchanged (nothing missing → no ALTER). Add an upgrade test that stamps an old library missing a
+  hypothetical column and confirms it opens. (S, infra/upgrade-safety — PRIORITY: low now, but cheap insurance for
+  the "runs on a live install, upgraded in place" invariant in AGENTS.md §9.) Traced + repro'd the current
+  tags-only path is clean; the gap is latent, so filed as infra, not a bug.
+- **NEW (Scout 2026-07-21 #2) — `wcs_io.wcs_from_text` returns a *default* WCS instead of `None` for non-FITS
+  garbage — a docstring/contract mismatch (cosmetic, unreachable with real data).** `io/wcs_io.py::wcs_from_text`
+  (~L34) documents "Returns None on failure", but `astropy.io.fits.Header.fromstring` tolerates arbitrary garbage
+  and yields a *valid-object* WCS with empty `ctype` / `crval [0, 0]`, so the None path never fires for malformed
+  input. Harmless in practice — stored `wcs_json` is always machine-generated valid FITS (the garbage path is
+  unreachable), and downstream `footprint_radec_deg` returns `None` for such an empty WCS anyway — so this is a
+  contract/robustness tidy, not a live bug. **Fix (small):** after parsing, treat a WCS with no celestial ctype
+  (or all-zero crval + no CD/CDELT) as a failure and return `None`, so the function honours its own docstring;
+  add a unit test that non-FITS text → `None`. (XS, infra/robustness — very low priority; file only if a run is
+  already in `wcs_io.py`.) Traced, unverified-as-user-impacting (correct-by-luck today).
 - ~~**`validate_stack_options` accepts a non-integer float for `int`-typed fields.**~~ — **FIXED v0.131.7**
   (Builder 2026-07-16, branch `claude/pensive-faraday-wgck3h`; regression-tested). `webapp/schemas.py::
   validate_stack_options` treated `int` and `float` fields identically (accepted any `int|float`, rejecting
