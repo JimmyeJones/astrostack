@@ -57,6 +57,33 @@ const HINTS: Record<string, string> = {
   horizon_profile: "Optional: map where trees, buildings or the house block your low sky, so the Tonight planner only counts a target as usable while it's actually clear of them. Each point is a compass direction (azimuth: 0°=N, 90°=E, 180°=S, 270°=W) and the minimum altitude that's unobstructed there; the planner interpolates between points. Leave empty for a flat, open horizon.",
 };
 
+// Walk-away mode: one beginner-facing toggle that drives the whole unattended
+// "drop your subs in, come back to a finished picture" bundle, instead of five
+// separate advanced switches a non-expert never finds. It is pure UI convenience
+// over the *existing* settings — flipping it on/off sets/clears these five, and
+// every one stays individually editable below. No new persisted field, so an
+// upgraded install with these untouched behaves exactly as before.
+export const WALK_AWAY_KEYS = [
+  "auto_stack",
+  "auto_edit_on_autostack",
+  "auto_bind_calibration",
+  "auto_grade_frames",
+  "mixed_pointing_guard",
+] as const;
+
+export function walkAwayEnabled(form: Record<string, unknown>): boolean {
+  return WALK_AWAY_KEYS.every((k) => Boolean(form[k]));
+}
+
+export function withWalkAway(
+  form: Record<string, unknown>,
+  on: boolean,
+): Record<string, unknown> {
+  const next = { ...form };
+  for (const k of WALK_AWAY_KEYS) next[k] = on;
+  return next;
+}
+
 type HorizonPoint = [number, number];
 
 // Editor for the Tonight planner's horizon / tree-cover mask: a small list of
@@ -465,6 +492,8 @@ export function SettingsView() {
 
   const set = (k: string, v: unknown) => setForm((p) => ({ ...p, [k]: v }));
   const bool = (k: string) => Boolean(form[k]);
+  const walkAway = walkAwayEnabled(form);
+  const setWalkAway = (on: boolean) => setForm((p) => withWalkAway(p, on));
   const num = (k: string) => (form[k] === null || form[k] === undefined ? "" : (form[k] as number));
   const lbl = (k: string, label: string) => <HintLabel label={label} hint={HINTS[k]} />;
 
@@ -553,6 +582,20 @@ export function SettingsView() {
           </SimpleGrid>
 
           <Divider label="Automatic pipeline" />
+          <Switch
+            size="md"
+            checked={walkAway}
+            onChange={(e) => setWalkAway(e.currentTarget.checked)}
+            label={<Text fw={600}>Walk-away mode</Text>}
+            description={
+              "Recommended for a hands-off night. Turns on the whole unattended "
+              + "pipeline at once — stack each target automatically, use your saved "
+              + "calibration masters, drop obviously-bad subs, skip a batch that "
+              + "looks like two different targets, and finish the picture for you — "
+              + "so you can drop your subs in and come back to a calibrated, edited "
+              + "image. You can still fine-tune any of the individual switches below."
+            }
+          />
           <Group>
             <Switch label={lbl("auto_ingest", "Ingest")} checked={bool("auto_ingest")}
               onChange={(e) => set("auto_ingest", e.currentTarget.checked)} />

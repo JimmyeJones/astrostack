@@ -2799,25 +2799,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
-- **NEW (Scout 2026-07-21) — "Walk-away mode": one Settings toggle that turns on the whole unattended
-  bundle, instead of five buried advanced switches.** The full "drop subs in, walk away, come back to a
-  finished, calibrated, edited picture" promise already exists in code — but it's spread across five
-  separate opt-in settings a beginner has to find and understand individually: `auto_stack`,
-  `auto_bind_calibration`, `auto_grade_frames`, `auto_edit_on_autostack`, and (arguably) `mixed_pointing_guard`
-  (all default **off**, correctly, for upgrade-safety). A non-expert never discovers them, so the walk-away
-  experience the app was built for goes unused. Add a single prominent **"Walk-away mode (recommended for
-  a hands-off night)"** toggle on the Settings page with a plain-language explanation of what it does
-  ("stack automatically, use your saved calibration masters, drop obviously-bad subs, and finish the
-  picture for you — all without you lifting a finger"); flipping it **on** sets the sensible bundle of the
-  existing opt-ins, flipping it **off** restores them. **Crucially upgrade-safe:** this is a UI convenience
-  over the *existing* settings — it changes **no defaults** (an upgraded install with the master toggle
-  untouched behaves exactly as today), adds no new persisted field if it's derived from the existing five
-  (or one additive boolean that only *drives* them), and every underlying switch stays individually
-  editable for anyone who wants finer control. Consider a first-run nudge ("Want AstroStack to do it all
-  automatically? Turn on Walk-away mode") so a beginner is *offered* the full autonomy without hunting.
-  Beginner bar ✔ (collapses five expert decisions into one explained yes/no; sane default off; reversible).
-  *(S–M, autonomy/friendliness — PRIORITY 2/3; pure surfacing of already-shipped capability — high value,
-  low risk.)*
+- ~~**NEW (Scout 2026-07-21) — "Walk-away mode": one Settings toggle that turns on the whole unattended
+  bundle, instead of five buried advanced switches.**~~ — **SHIPPED v0.140.0** (Builder 2026-07-21, branch
+  `claude/pensive-faraday-i5lui7`). Added a single prominent **"Walk-away mode"** Switch at the top of the
+  Settings → *Automatic pipeline* section, above the individual toggles, with a plain-language description
+  ("stack each target automatically, use your saved calibration masters, drop obviously-bad subs, skip a
+  batch that looks like two different targets, and finish the picture for you"). Flipping it **on** sets the
+  bundle of five existing opt-ins (`auto_stack`, `auto_edit_on_autostack`, `auto_bind_calibration`,
+  `auto_grade_frames`, `mixed_pointing_guard`) true; **off** clears them; and the master switch's own state
+  is *derived* — it reads "on" exactly when all five are on, so it always mirrors reality even if the user
+  fine-tunes an individual switch below (each stays editable). **Maximally upgrade-safe:** pure frontend
+  convenience over the *existing* settings — **no new persisted field, no backend change, no default flip**
+  (an upgraded install with these untouched behaves exactly as today). Implemented as three pure, exported
+  helpers in `Settings.tsx` (`WALK_AWAY_KEYS`, `walkAwayEnabled(form)`, `withWalkAway(form, on)`) wired to a
+  Mantine `Switch`; the helpers carry the logic so it's unit-tested directly. Tests: `Settings.test.tsx`
+  ("Walk-away mode" describe — off unless all five on / on exactly when all five on / turning it on sets the
+  five without touching unrelated settings and doesn't mutate the input / turning it off clears the five /
+  the bundle is exactly those five keys). Beginner bar ✔ (collapses five expert decisions into one explained
+  yes/no; reversible; individual switches still available). *(Follow-up left for a future run: the optional
+  first-run nudge — "Want AstroStack to do it all automatically? Turn on Walk-away mode" — was not built this
+  slice; file/pick it up separately.)*
 - ~~**NEW (Builder 2026-07-13) — re-QC a frame whose Stage-1 cache was just refreshed after a mid-copy
   ingest.**~~ — **SHIPPED v0.113.1** (Builder 2026-07-13, branch `claude/pensive-faraday-0ishjc`). The
   v0.111.3 fix refreshes a truncated Stage-1 cache to the complete source on a re-scan, but the frame's QC
