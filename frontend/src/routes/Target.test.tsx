@@ -235,6 +235,10 @@ describe("TargetView readiness card", () => {
     expect(
       screen.getByText(/3\.0 h of ~6 h — a solid start/),
     ).toBeInTheDocument();
+    // The honest √N companion line: at 3 h, one more hour cuts noise ~13% more.
+    expect(
+      screen.getByText(/Another clear hour would cut background noise about 13% more/),
+    ).toBeInTheDocument();
   });
 
   it("uses a user-set goal over the default and labels it 'your goal'", async () => {

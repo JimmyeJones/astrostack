@@ -4791,6 +4791,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+- **PARTLY SHIPPED (v0.153.0, Builder 2026-07-21, branch `claude/pensive-faraday-c2l3n1`) — the honest √N
+  diminishing-returns *verdict*, folded into the existing "Is it enough yet?" readiness card rather than a
+  second parallel card.** Chose to **deepen the existing card** over adding a whole new `IntegrationMeterCard`
+  because the readiness card already answers "should I keep shooting?" with a goal-fraction bar — a second card
+  answering the same question a different way would be clutter (against PRIORITY 3). New pure helper
+  `noiseReductionHint(exposureSeconds)` (`frontend/src/readiness.ts`): from the accumulated accepted integration
+  the card already loads (`total_exposure_s`), it computes how much a single extra clear hour would cut the
+  stack's background noise — `1 − √(T/(T+3600))` — and phrases it plainly with a steep/diminishing/plateau tail
+  (*"Another clear hour would cut background noise about 11% more — diminishing returns are setting in."*). It's
+  **goal-independent** (the physics doesn't care about the per-type goal), so it complements the goal verdict
+  instead of repeating it. Self-hides (returns null) with no integration yet, and once an extra hour rounds below
+  1% (~40 h+). Additive/read-only: no new card, endpoint, schema, config, or default change; the existing goal
+  verdict/bar/tests are untouched. Tests: `readiness.test.ts` (+4 — null-guards, the three regimes with pinned
+  percentages, the below-1% self-hide, and a monotonicity check) and `Target.test.tsx` (asserts the line renders
+  at 3 h → ~13%). **Slice left for a future run:** the full sparkline "you-are-here on the SNR-vs-subs curve"
+  visualization, if the owner wants the picture as well as the sentence — filed as the remaining part of this
+  item. Original spec kept below for provenance:
 - **NEW BEGINNER FEATURE (Scout 2026-07-21 #10) — "Clouds & haze through the night": a per-session
   transparency timeline + plain verdict — the sibling of the shipped Focus-trend card, for the #1 thing that
   kills a Seestar night.** *(Beginner feature; PRIORITY 3 friendliness / trust; size M.)* Clouds and haze are the

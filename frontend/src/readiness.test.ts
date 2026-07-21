@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { integrationReadiness, readinessColor, readinessRowHint } from "./readiness";
+import {
+  integrationReadiness,
+  readinessColor,
+  readinessRowHint,
+  noiseReductionHint,
+} from "./readiness";
 
 const H = 3600;
 
@@ -101,5 +106,49 @@ describe("readinessRowHint", () => {
 
   it("returns null when there's no integration", () => {
     expect(readinessRowHint(0, "galaxy")).toBeNull();
+  });
+});
+
+describe("noiseReductionHint", () => {
+  it("returns null when there's no integration yet", () => {
+    expect(noiseReductionHint(0)).toBeNull();
+    expect(noiseReductionHint(-10)).toBeNull();
+    expect(noiseReductionHint(NaN)).toBeNull();
+  });
+
+  it("reports the honest √N cut and lands in the right regime by integration", () => {
+    // 0.5 h so far: one more hour trebles the total → a big drop, steep part.
+    // 1 − √(1800/5400) = 1 − 0.577 ≈ 0.423 → ~42%.
+    const thin = noiseReductionHint(0.5 * H);
+    expect(thin).toContain("about 42% more");
+    expect(thin).toContain("steep part of the curve");
+
+    // 4 h: 1 − √(14400/18000) = 1 − 0.894 ≈ 0.106 → ~11%, diminishing returns.
+    const solid = noiseReductionHint(4 * H);
+    expect(solid).toContain("about 11% more");
+    expect(solid).toContain("Another clear hour");
+    expect(solid).toContain("diminishing returns");
+
+    // 12 h: 1 − √(43200/46800) = 1 − 0.961 ≈ 0.039 → ~4%, past the steep part.
+    const deep = noiseReductionHint(12 * H);
+    expect(deep).toContain("about 4% more");
+    expect(deep).toContain("well past the steep part");
+  });
+
+  it("says nothing once an extra hour rounds below 1%", () => {
+    // 60 h: 1 − √(216000/219600) ≈ 0.0082 → rounds to 1% (still shown)…
+    expect(noiseReductionHint(60 * H)).toContain("about 1% more");
+    // …but 200 h rounds to 0% → nothing useful to add.
+    expect(noiseReductionHint(200 * H)).toBeNull();
+  });
+
+  it("monotonically shrinks the quoted cut as integration grows", () => {
+    const pct = (s: string | null) =>
+      Number(/about (\d+)% more/.exec(s ?? "")?.[1] ?? "-1");
+    const a = pct(noiseReductionHint(1 * H));
+    const b = pct(noiseReductionHint(4 * H));
+    const c = pct(noiseReductionHint(10 * H));
+    expect(a).toBeGreaterThan(b);
+    expect(b).toBeGreaterThan(c);
   });
 });

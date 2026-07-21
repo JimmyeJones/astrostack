@@ -94,6 +94,40 @@ export function integrationReadiness(
   return { bucket, goalHours, customGoal, hours, fraction, level, verdict };
 }
 
+// The honest √N truth behind "should I keep shooting?": stacking background
+// noise falls as 1/√(integration time), so every extra hour buys progressively
+// less. From the accumulated integration alone we can say — in plain words and
+// an honest number — how much more noise one more clear hour would remove, so a
+// beginner knows whether it's worth staying out. This is *goal-independent* (the
+// physics doesn't care about the per-type goal), so it complements the goal
+// verdict rather than repeating it: the goal answers "how far toward a nice
+// image?"; this answers "does another hour still pay off?". Returns null when
+// there's no integration yet, or when the target is so deeply integrated that a
+// single extra hour changes nothing worth mentioning (nothing useful to add).
+export function noiseReductionHint(exposureSeconds: number): string | null {
+  if (!Number.isFinite(exposureSeconds) || exposureSeconds <= 0) return null;
+  // Adding Δ=1 h of integration scales the stack's background noise by
+  // √(T/(T+Δ)); the fractional *reduction* is 1 − that. Rounded to a whole
+  // percent for a plain, honest figure ("about N% more").
+  const oneHour = 3600;
+  const cutPct = Math.round(
+    (1 - Math.sqrt(exposureSeconds / (exposureSeconds + oneHour))) * 100,
+  );
+  // Past ~40 h a single extra hour rounds below 1% — say nothing rather than
+  // print "about 0%".
+  if (cutPct <= 0) return null;
+
+  let tail: string;
+  if (cutPct >= 20) {
+    tail = "you're on the steep part of the curve — worth staying out for.";
+  } else if (cutPct >= 9) {
+    tail = "diminishing returns are setting in.";
+  } else {
+    tail = "you're well past the steep part — a clean place to stop.";
+  }
+  return `Another clear hour would cut background noise about ${cutPct}% more — ${tail}`;
+}
+
 // A compact hint for a target already in the library, for the Tonight planner's
 // "add more to what you're shooting" rows: nudge the user toward starting
 // something new once a target has close-to / more-than its suggested goal, and
