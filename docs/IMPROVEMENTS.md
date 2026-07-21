@@ -142,13 +142,14 @@ when you take it.
   wrong-result / data-integrity on the stacking hot path (silently corrupts the final image), so fixed first
   per the stacking-engine focus. Confidence: reproduced + fixed.
 
-- **⭐ OWNER-REPORTED (2026-07 — HIGH PRIORITY) — Sky map: irregular mosaics render
-  as a black rectangle, and the overlay placement/orientation is off.** Two traced
+- ~~**⭐ OWNER-REPORTED (2026-07 — HIGH PRIORITY) — Sky map: irregular mosaics render
+  as a black rectangle, and the overlay placement/orientation is off.**~~ — **BOTH HALVES
+  NOW FIXED (Bug 1 v0.134.1, Bug 2 v0.142.3).** Two traced
   bugs on the Sky map page (`frontend/src/routes/AladinSky.tsx` +
   `webapp/routers/sky.py`). **Bug 1 (black box) FIXED v0.134.1; Bug 2 (placement)
-  remains open — it needs real-frame validation (rotation-sign convention), so it is
-  NOT a blind Builder change (see the pre-existing "_tan_wcs rotation sign" open bug
-  below).**
+  FIXED v0.142.3** (Builder 2026-07-21, branch `claude/pensive-faraday-q5qgdb`;
+  implemented exactly as the Scout's non-blind fix path below — consumes the stored
+  canvas WCS, so the rotation-sign gate is sidestepped).
   1. ~~**Black rectangular background around a non-rectangular mosaic.**~~ — **FIXED
      v0.134.1** (Builder 2026-07-16, branch `claude/pensive-faraday-rtfcye`; traced +
      regression-tested). The sky overlay used the run's opaque `preview_path` PNG
@@ -175,23 +176,37 @@ when you take it.
      the uncovered half transparent at the preview's grid; 404 without a preview),
      `test_sky.py` (preview_url now points at `sky-overlay`). Severity: broken-UX
      (ugly on an owner-used page; no data corruption). Confidence: reproduced + fixed.
-  2. **Placement / orientation is approximate.** _(STILL OPEN — needs real-frame
-     validation of the rotation-sign convention; NOT a blind Builder change, same
-     real-data gating as the "_tan_wcs rotation sign" bug below.)_ `_tan_wcs`
-     (`webapp/routers/sky.py:74`) builds the overlay WCS from a *single
+  2. ~~**Placement / orientation is approximate.**~~ — **FIXED v0.142.3.** `_tan_wcs`
+     (`webapp/routers/sky.py:74`) built the overlay WCS from a *single
      representative frame's* pixscale + rotation (`_representative_pixscale_rotation`
      = the first frame) centred on the run RA/Dec, with a **best-effort rotation
      sign** (its own docstring admits this) and equal scale on both axes. For a
      mosaic — whose canvas spans many frames/rotations and is *not* one frame's grid
-     — the overlay lands mis-placed / mis-rotated. **Fix:** derive the overlay WCS
-     from the **stack's own canvas geometry** (the mosaic canvas centre + true pixel
-     scale + the orientation used when the canvas was built — the stacker/mosaic code
-     already computes a canvas WCS; thread it onto the run record, or recompute from
-     the footprint) instead of extrapolating from frame 0. Pin the rotation sign with
-     a known-orientation regression test.
-  Verify on a real irregular mosaic loaded on the Sky page: the footprint should be
-  its true shape, transparent background, at the correct RA/Dec/orientation.
-  Severity: broken-UX (wrong/ugly on an owner-used page). Confidence: traced.
+     — the overlay landed mis-placed / mis-rotated. **Fix (exactly the Scout's fix
+     path below):** a new pure engine helper `wcs_dict_rescaled_to_preview(fits_path,
+     preview_w, preview_h)` (`seestack/io/wcs_io.py`) reads the stack's **stored
+     canvas WCS** from the master FITS header (via the existing
+     `celestial_wcs_from_fits`) and rescales it to the downscaled preview grid — the
+     CD-matrix columns scale by the per-axis downscale factors `s_x = full_w/preview_w`,
+     `s_y = full_h/preview_h`, and `CRPIX → (CRPIX − 0.5)/s + 0.5` (FITS pixel-centre
+     convention). `get_sky` now consumes that verbatim (with `_tan_wcs` kept only as
+     the fallback for a run whose master FITS is missing/headerless), so the overlay
+     lands at the **canvas's own** RA/Dec **and** orientation — a mosaic union WCS or a
+     rotated single-target reference WCS is reproduced exactly, with **no hand-rolled
+     rotation-sign** to get wrong (the "needs a real solved frame to validate the sign"
+     gate no longer applies to the primary path). Additive/upgrade-safe: no
+     schema/config/API-shape/default change — the `wcs` dict keeps the same keys the
+     frontend already consumes, so `AladinSky.tsx` needs no change; an older/edited run
+     with no master FITS still gets the frame-0 fallback (never regresses). Tests:
+     `tests/test_wcs_io.py` (+2 — the rescaled WCS places every preview pixel at the
+     same sky position as the full-res canvas WCS *including a 37° rotation* the frame-0
+     fallback would get wrong, determinant scales by `s_x·s_y`, orientation preserved;
+     and None-fallback for a missing FITS / bad dims), `tests/webapp/test_sky.py` (+2 —
+     the endpoint places from the stored 37°-rotated canvas WCS, not the frame-0 12°
+     fallback; and a run with no master FITS still gets a `_tan_wcs` placement).
+     Severity: broken-UX (wrong/ugly on an owner-used page). Confidence: reproduced +
+     fixed.
+  Severity: broken-UX (wrong/ugly on an owner-used page).
   _(Scout 2026-07-21 — **concrete non-blind fix path for the placement half, sidesteps the
   rotation-sign gate entirely.** The stack's **true canvas WCS is already stored in
   `master.fits`**: `run_stack` writes `write_stack_outputs(..., wcs_text=dst_wcs_text)` and
@@ -1783,6 +1798,12 @@ the real webapp stack→edit path.)_
 
 - **Sky-atlas overlay WCS uses a rotation sign that deviates from the FITS/AIPS `CROTA2→CD` convention
   (display-only; needs a real solved frame to validate before flipping — NOT a blind Builder change).**
+  **⚠ LARGELY SUPERSEDED by the v0.142.3 Sky-map placement fix (Bug 2 above):** `get_sky` now places
+  the overlay from the stack's **stored canvas WCS** (`wcs_dict_rescaled_to_preview`), so `_tan_wcs` is
+  only reached as the **fallback for a run whose master FITS is missing/headerless** (older/edited runs) —
+  the ordinary path never hits the suspect sign anymore. The remaining sign issue affects only that
+  fallback, so it's now low-impact; still real-data-gated (validate ASTAP's CROTA2 sign on a real solved
+  frame before flipping). Original trace kept for the fallback fix:
   *(Traced, Builder audit 2026-07-10; high confidence it deviates from the convention, low confidence it
   visibly matters.)* `webapp/routers/sky.py::_tan_wcs` (~L92) builds the derived TAN WCS for the sky-atlas
   preview overlay with `CD1_2 = +scale·sinθ`, `CD2_1 = +scale·sinθ`. With the RA axis flipped

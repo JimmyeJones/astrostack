@@ -94,6 +94,57 @@ def celestial_wcs_from_fits(fits_path: str | Path):  # noqa: ANN201 — returns 
         return None, 0, 0
 
 
+def wcs_dict_rescaled_to_preview(
+    fits_path: str | Path, preview_w: int, preview_h: int,
+) -> dict | None:
+    """The stack's **stored** celestial WCS, rescaled to a downscaled preview PNG.
+
+    The stack master FITS carries the *true* canvas WCS — for a mosaic that is the
+    astropy-built union canvas WCS (`compute_mosaic_canvas`), for a single target
+    the reference frame's own solved WCS — merged into its header by
+    :func:`seestack.stack.output._write_fits`. That is the exact geometry the pixels
+    were reprojected onto, so consuming it verbatim places the overlay at the right
+    RA/Dec **and** orientation with no hand-rolled rotation-sign guesswork.
+
+    The preview PNG is a uniform downscale of that canvas, so we return a WCS that
+    maps *preview-pixel* coordinates to the same sky positions. For a linear WCS
+    (world = CRVAL + M · (pixel − CRPIX)) the rescale is exact: with per-axis factors
+    ``s_x = full_w/preview_w`` and ``s_y = full_h/preview_h``, the matrix columns
+    scale by ``(s_x, s_y)`` and ``CRPIX → (CRPIX − 0.5)/s + 0.5`` (the FITS 1-based
+    pixel-centre convention PIL's area resampling also uses). Returns a dict of FITS
+    keywords in the same shape :func:`webapp.routers.sky._tan_wcs` produces, or
+    ``None`` when the master FITS is missing/headerless/carries no celestial WCS (the
+    caller then falls back to the frame-0 extrapolation).
+    """
+    if preview_w <= 0 or preview_h <= 0:
+        return None
+    wcs, full_w, full_h = celestial_wcs_from_fits(fits_path)
+    if wcs is None or full_w <= 0 or full_h <= 0:
+        return None
+    try:
+        s_x = full_w / preview_w
+        s_y = full_h / preview_h
+        m = wcs.pixel_scale_matrix  # 2×2 CD matrix (deg/px), includes sign + rotation
+        cd = m.copy()
+        cd[:, 0] *= s_x
+        cd[:, 1] *= s_y
+        crpix = wcs.wcs.crpix
+        crval = wcs.wcs.crval
+        ctype = list(wcs.wcs.ctype)
+        return {
+            "NAXIS": 2, "NAXIS1": int(preview_w), "NAXIS2": int(preview_h),
+            "CTYPE1": ctype[0], "CTYPE2": ctype[1],
+            "CRPIX1": (float(crpix[0]) - 0.5) / s_x + 0.5,
+            "CRPIX2": (float(crpix[1]) - 0.5) / s_y + 0.5,
+            "CRVAL1": float(crval[0]), "CRVAL2": float(crval[1]),
+            "CD1_1": float(cd[0, 0]), "CD1_2": float(cd[0, 1]),
+            "CD2_1": float(cd[1, 0]), "CD2_2": float(cd[1, 1]),
+        }
+    except Exception as exc:  # noqa: BLE001 — a malformed WCS just means "fall back"
+        log.warning("WCS rescale to preview failed (%s): %s", fits_path, exc)
+        return None
+
+
 def footprint_radec_deg(wcs, width_px: int, height_px: int) -> list[tuple[float, float]] | None:
     """
     Return the four corners of the frame in RA/Dec degrees, in image order
