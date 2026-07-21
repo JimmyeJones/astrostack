@@ -46,6 +46,20 @@ class FramingHintOut(BaseModel):
     text: str
 
 
+class BestFrameOut(BaseModel):
+    """The target's sharpest accepted sub, for the pre-stack "First look" card.
+
+    ``frame_id`` is ``null`` when nothing is QC'd yet (no accepted frame carries
+    a usable FWHM), so the UI shows no card. The metrics are echoed so the card
+    can caption the pick ("your sharpest sub — FWHM 2.1 px, 480 stars")."""
+
+    frame_id: int | None = None
+    captured_utc: str | None = None
+    fwhm_px: float | None = None
+    star_count: int | None = None
+    n_accepted: int = 0
+
+
 class ObjectInfoOut(BaseModel):
     """Friendly identity for a target matched against the bundled catalog."""
 

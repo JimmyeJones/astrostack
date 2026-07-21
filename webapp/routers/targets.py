@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 
 from webapp import deps
 from webapp.schemas import (
+    BestFrameOut,
     FramingHintOut,
     HealthNoteOut,
     IntegrationGoalOut,
@@ -228,6 +229,36 @@ def target_stack_health(
         notes=[HealthNoteOut(kind=n.kind, severity=n.severity,
                              message=n.message, action=n.action)
                for n in notes],
+    )
+
+
+@router.get("/{safe}/best-frame", response_model=BestFrameOut)
+def target_best_frame(safe: str, request: Request) -> BestFrameOut:
+    """The target's sharpest accepted sub, for the pre-stack "First look" card.
+
+    A beginner drops a night's subs and then waits — often minutes — for the
+    stack before seeing *anything*. The moment QC finishes we can already surface
+    the single best sub (sharpest, then most stars) so they get instant "yes, it
+    worked" reassurance and can catch a bad-framing/focus night before waiting on
+    a stack. Read-only; reuses the existing QC metrics and per-frame preview
+    endpoint. ``frame_id`` is ``null`` when nothing is QC'd yet."""
+    from seestack.qc.grading import best_frame
+
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        frames = list(proj.iter_frames(accepted_only=True))
+    finally:
+        proj.close()
+        lib.close()
+    best = best_frame(frames)
+    if best is None:
+        return BestFrameOut(n_accepted=len(frames))
+    return BestFrameOut(
+        frame_id=best.id,
+        captured_utc=best.timestamp_utc,
+        fwhm_px=best.fwhm_px,
+        star_count=best.star_count,
+        n_accepted=len(frames),
     )
 
 

@@ -4807,26 +4807,29 @@ problems. Dogfood it every big-picture run and fix root causes.
   green. *(Beginner bar ✔ — one obvious button that posts the "my galaxy appearing" clip straight to
   Messages/Instagram, no new astro knowledge, no deps.)*
 
-- **NEW BEGINNER FEATURE (Scout 2026-07-21) — "First look": show the sharpest sub as an instant preview
-  the moment a scan finishes ingesting + QC-ing, before the stack even runs.** A beginner drops a night's
-  subs and then waits — often minutes — for the stack to finish before they see *anything*, with no
-  reassurance the night worked, the target was framed, or focus was good. QC already measures every sub and
-  the per-frame preview endpoint (`GET …/frames/{id}/preview`) already renders an autostretched thumbnail —
-  so the moment QC finishes we can surface the single **best** sub ("First look — your sharpest sub of 240,
-  captured 21:14") right on the Target/Dashboard hub, giving instant "yes, it worked" gratification and
-  letting them catch a bad framing/focus night *before* they wait on a stack. **Slices —** **(a) backend
-  (S):** a tiny read-only helper picking the best accepted sub by the existing QC composite (lowest FWHM /
-  highest star count, reusing the auto-grade z-score ranking already in `qc/grading.py`) exposed as
-  `GET /api/targets/{safe}/best-frame` → `{frame_id, captured_utc, fwhm_px, star_count}` (null when nothing
-  is QC'd yet). **(b) frontend (S):** a small **"First look"** card on the Target page (and optionally the
-  Dashboard's per-target tiles) that renders that frame's existing `/preview` thumbnail with a one-line
-  plain-language caption, shown only when a best sub exists and *no* finished stack is on the target yet (so
-  it's the pre-stack reassurance, gracefully superseded by the real picture once stacking lands). Reuses the
-  existing preview render + QC metrics end-to-end — no new render path, no heavy work, offline. Beginner
-  bar ✔ (one glance confirms the night worked; no knobs, no astro terms; sane default; purely additive).
-  Upgrade-safe: one read-only endpoint + one card, no schema/config/default/existing-API change.
-  *(S–M, autonomy/friendliness — PRIORITY 2/3; complements "How's my stack?" (post-stack) with a
-  pre-stack instant look.)*
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-21) — "First look": show the sharpest sub as an instant preview
+  the moment a scan finishes ingesting + QC-ing, before the stack even runs.**~~ — **SHIPPED v0.139.0**
+  (Builder 2026-07-21, branch `claude/pensive-faraday-c78iq5`; both slices). Backend: pure
+  `seestack.qc.grading.best_frame(frames)` picks the sharpest *accepted* sub (lowest FWHM, tie-broken by star
+  count, then id for determinism; `None` when nothing carries a FWHM yet), exposed read-only as
+  `GET /api/targets/{safe}/best-frame` → `{frame_id, captured_utc, fwhm_px, star_count, n_accepted}`. Frontend:
+  a `FirstLookCard` on the Target hub renders that frame's existing `/preview` thumbnail with a plain-language
+  caption ("First look — Your sharpest sub of 240 — captured 21:14", FWHM/stars on a quiet line), shown only
+  while **no finished stack** exists (`!latestRun.has_preview`), so the real picture supersedes it once stacking
+  lands. Reuses the existing preview render + QC metrics — no new render path, offline. Upgrade-safe/additive: a
+  new read-only endpoint + one card, no schema/config/default/existing-API change. Tests: `test_qc_grading.py`
+  (+7 — sharpest pick, FWHM tie-break by stars, ignores rejected, requires a measured FWHM, empty/None,
+  deterministic full-tie), `tests/webapp/test_target_best_frame.py` (+3 — null before QC, sharpest accepted sub
+  with echoed metrics/time, ignores a rejected sharper sub + accepted-only count), `FirstLookCard.test.tsx`
+  (+9 — caption/metrics pure helpers, renders thumbnail+caption, hides pre-QC). Python 1392 + tsc + vitest 916
+  + vite build green. *(S–M, autonomy/friendliness — PRIORITY 2/3; complements "How's my stack?" (post-stack)
+  with a pre-stack instant look. Follow-up filed below: surface it on the Dashboard tiles too.)*
+- **NEW (Builder 2026-07-21) — extend "First look" to the Dashboard's per-target tiles.** v0.139.0 shipped the
+  pre-stack sharpest-sub card on the *Target* hub; the Dashboard tile for a target still being ingested/QC'd
+  shows nothing reassuring. Reuse the same `GET …/best-frame` + `/preview` thumbnail as a tiny inline preview on
+  a Dashboard tile that has QC'd subs but no finished stack yet, so the "did tonight work?" glance is answered on
+  the landing page too. Frontend-only, additive; the endpoint already exists. *(S, autonomy/friendliness —
+  PRIORITY 2/3.)*
 - **NEW BEGINNER FEATURE (Scout 2026-07-21 #2) — "Your sky, so far": a friendly personal-progress / year-in-review
   summary of everything the user has imaged.** A beginner accumulates targets, nights and integration hours over a
   season, but the app never *reflects that back* to them — there's no single place that says "look what you've made".
@@ -5518,6 +5521,14 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.139.0** — NEW BEGINNER FEATURE / autonomy (PRIORITY 2/3 — pre-stack reassurance; Builder 2026-07-21,
+  branch `claude/pensive-faraday-c78iq5`). **"First look" — the sharpest accepted sub, shown the moment QC
+  finishes and before the stack runs.** Pure `qc.grading.best_frame` (lowest FWHM, tie-broken by star count) →
+  new read-only `GET /api/targets/{safe}/best-frame`; a `FirstLookCard` on the Target hub renders that frame's
+  existing `/preview` thumbnail with a plain-language caption, shown only while no finished stack exists (the
+  real picture supersedes it). Reuses the preview render + QC metrics — no new render path, offline,
+  additive/upgrade-safe. Tests: `test_qc_grading.py` (+7), `tests/webapp/test_target_best_frame.py` (+3),
+  `FirstLookCard.test.tsx` (+9). Python 1392 + tsc + vitest 916 + vite build green.
 - **v0.137.0** — NEW BEGINNER FEATURE / autonomy (PRIORITY 2/3 — "drop files, walk away, get told when it's
   ready"; Builder 2026-07-17, branch `claude/pensive-faraday-ql4ddd`). **Opt-in "Notify me when done" desktop
   notifications on the Jobs page.** The north-star flow is "drop subs, walk away" — but a beginner who kicks off

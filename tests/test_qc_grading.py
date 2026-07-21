@@ -17,6 +17,7 @@ from seestack.qc.grading import (
     MIN_FRAMES_FOR_GRADING,
     SENSITIVITY_THRESHOLDS,
     apply_grade_report,
+    best_frame,
     grade_frames,
 )
 
@@ -333,3 +334,61 @@ def test_apply_grade_report_rejects_with_reason_and_respects_user(tmp_path):
         assert apply_grade_report(proj, report) == []
     finally:
         proj.close()
+
+
+# --- best_frame: the pre-stack "First look" pick -------------------------------
+
+def test_best_frame_picks_the_sharpest_accepted_sub():
+    frames = [
+        make_frame(1, fwhm=3.2, stars=400),
+        make_frame(2, fwhm=2.1, stars=380),  # sharpest
+        make_frame(3, fwhm=2.9, stars=500),
+    ]
+    best = best_frame(frames)
+    assert best is not None and best.id == 2
+
+
+def test_best_frame_breaks_fwhm_ties_by_star_count():
+    frames = [
+        make_frame(1, fwhm=2.5, stars=300),
+        make_frame(2, fwhm=2.5, stars=520),  # same FWHM, more stars
+        make_frame(3, fwhm=2.5, stars=410),
+    ]
+    best = best_frame(frames)
+    assert best is not None and best.id == 2
+
+
+def test_best_frame_ignores_rejected_frames():
+    frames = [
+        make_frame(1, fwhm=1.8, stars=600, accept=False),  # sharpest but rejected
+        make_frame(2, fwhm=2.6, stars=400),
+    ]
+    best = best_frame(frames)
+    assert best is not None and best.id == 2
+
+
+def test_best_frame_requires_a_measured_fwhm():
+    # Nothing QC'd yet — accepted frames but no FWHM measured -> None.
+    frames = [make_frame(1, fwhm=None, stars=None), make_frame(2, fwhm=None, stars=300)]
+    assert best_frame(frames) is None
+
+
+def test_best_frame_none_on_empty():
+    assert best_frame([]) is None
+
+
+def test_best_frame_tolerates_missing_star_count_in_tiebreak():
+    # A missing star_count must not crash the tiebreak; it ranks below a measured one.
+    frames = [
+        make_frame(1, fwhm=2.5, stars=None),
+        make_frame(2, fwhm=2.5, stars=100),
+    ]
+    best = best_frame(frames)
+    assert best is not None and best.id == 2
+
+
+def test_best_frame_is_deterministic_on_full_ties():
+    # Identical FWHM and stars -> stable pick by lowest id.
+    frames = [make_frame(3, fwhm=2.5, stars=400), make_frame(1, fwhm=2.5, stars=400)]
+    best = best_frame(frames)
+    assert best is not None and best.id == 1

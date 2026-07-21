@@ -19,6 +19,7 @@ import { QueryError } from "../components/QueryError";
 import { ObjectInfoCard, describeObject } from "../components/ObjectInfoCard";
 import { SessionRecapCard } from "../components/SessionRecapCard";
 import { StackHealthCard } from "../components/StackHealthCard";
+import { FirstLookCard } from "../components/FirstLookCard";
 import { SharePictureButton } from "../components/SharePictureButton";
 import { sharePictureText } from "../share";
 import { detectSolveSetupProblem } from "../components/target/solveSetup";
@@ -957,6 +958,10 @@ export function TargetView() {
       <SessionRecapCard safe={safe} />
 
       <StackHealthCard safe={safe} />
+
+      {/* Pre-stack reassurance: the sharpest sub, shown until a finished picture
+          exists — then the real stack supersedes it. */}
+      {!latestRun?.has_preview ? <FirstLookCard safe={safe} /> : null}
 
       {readiness ? (
         <Paper withBorder p="sm" radius="md" mt="xs">
