@@ -216,9 +216,25 @@ when you take it.
   mosaic correctly", which a synthetic-with-known-WCS test can largely settle. Serves the
   ⭐ owner-reported page; correctness/friendliness.)_
 
-- **Exposure-scaled master dark re-poisons "no-data" pixels — a genuinely-no-data dark pixel
+- ~~**Exposure-scaled master dark re-poisons "no-data" pixels — a genuinely-no-data dark pixel
   (sanitized to 0) is turned into a spurious `−bias·(ratio−1)` pedestal on the `scale_dark_to_light`
-  path, injecting wrong signal into every calibrated light there.** *(Reproduced, Scout 2026-07-21;
+  path, injecting wrong signal into every calibrated light there.**~~ — **FIXED v0.142.1** (Builder
+  2026-07-21, branch `claude/pensive-faraday-3rfg1k`; reproduced + regression-tested). Fixed exactly as
+  the Scout's fix path specified: `CalibrationMasters.load` now records the dark's no-data mask
+  (`~np.isfinite` of the raw master *before* `_sanitize_pedestal`, stored as `dark_nodata_mask`, left
+  `None` for an all-finite master so no extra array is retained), and `_effective_dark` forces those
+  pixels back to `0.0` after computing the scaled dark — so a no-data dark subtracts 0 on the scaling
+  path too, matching the unscaled path's "no correction" invariant. Regression
+  `tests/test_calibrate.py::test_dark_scaling_keeps_no_data_dark_pixel_uncorrected` reproduces the
+  Scout's numbers (no-data pixel: fail-before `out==1700` (+200 injection) / pass-after `out==1500`;
+  finite pixel still scales to 1350) plus `..._all_finite_master_is_unchanged_by_the_mask` (mask stays
+  `None`, output byte-for-byte unchanged). Additive/upgrade-safe: only changes behaviour at no-data dark
+  pixels on the off-by-default `scale_dark_to_light` path; an all-finite real-Seestar master is
+  byte-for-byte unchanged. Severity: wrong-result/data-integrity on the calibrate path; reachability low
+  (gated on the off-by-default scaling flag × a no-data dark pixel coexisting with a finite bias). Confidence:
+  reproduced + fixed. *(Original trace kept below.)*
+  <details><summary>Original trace</summary>
+  *(Reproduced, Scout 2026-07-21;
   fresh adversarial audit of `seestack/calibrate/`.)* The prior non-finite-master fix (v0.135.1)
   sanitizes a no-data master-dark pixel to `0.0` at load (`apply.py:109`, via `_sanitize_pedestal`) so
   the **unscaled** path correctly applies *no correction* there (`out = raw − 0 = raw`). But
@@ -247,6 +263,7 @@ when you take it.
   bias pixel (realistic for imported/synthetic masters; a real Seestar dark is all-finite), so not
   front-of-queue, but a concrete correctness violation at the "dark-scaling × NaN-as-no-data"
   intersection. Confidence: reproduced.
+  </details>
 
 - **Drizzle two-pass κ-σ rejection is silently disabled on low/moderate-coverage output pixels — the
   reject-enable gate uses accumulated *weight* (`out_wht`) as a stand-in for *sample count*, which the

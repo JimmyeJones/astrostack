@@ -547,6 +547,39 @@ def test_dark_exposure_scaling_scales_dark_current(tmp_path):
     np.testing.assert_allclose(cal.apply_raw(raw, light_exposure_s=30.0), 90.0)
 
 
+def test_dark_scaling_keeps_no_data_dark_pixel_uncorrected(tmp_path):
+    # A no-data dark pixel (NaN → sanitized to 0) must still mean "no correction"
+    # on the exposure-scaling path, exactly as on the unscaled path. Without the
+    # fix, _effective_dark scales the sanitized 0 into bias·(1 − ratio) and
+    # apply_raw *adds* that spurious pedestal into every calibrated light there.
+    dark = np.array([[np.nan, 100.0]], dtype=np.float32)  # pixel 0 = no data
+    bias = np.array([[200.0, 50.0]], dtype=np.float32)
+    save_master(tmp_path / "d.fits", dark,
+                MasterMeta("dark", 5, 2, 1, "median", exposure_s=10.0))
+    save_master(tmp_path / "b.fits", bias, MasterMeta("bias", 5, 2, 1, "median"))
+    cal = CalibrationMasters.load(dark_path=str(tmp_path / "d.fits"),
+                                  bias_path=str(tmp_path / "b.fits"),
+                                  scale_dark_to_light=True)
+    raw = np.full((1, 2), 1500.0, dtype=np.float32)
+    out = cal.apply_raw(raw, light_exposure_s=20.0)  # ratio = 2
+    assert np.isfinite(out).all()
+    # No-data dark pixel → uncorrected (subtract 0), not raw + bias·(ratio−1).
+    # Fail-before: 1500 − (200 + (0−200)·2) = 1500 − (−200) = 1700.
+    np.testing.assert_allclose(out[0, 0], 1500.0)
+    # Finite dark pixel still scales: dark = 50 + (100−50)·2 = 150 → 1500 − 150.
+    np.testing.assert_allclose(out[0, 1], 1350.0)
+
+
+def test_dark_scaling_all_finite_master_is_unchanged_by_the_mask(tmp_path):
+    # The common real case (an all-finite integer Seestar dark) keeps no mask and
+    # is byte-for-byte identical to before the no-data-mask fix.
+    d, b = _save_dark_and_bias(tmp_path, dark_level=110.0, bias_level=20.0, dark_exp=30.0)
+    cal = CalibrationMasters.load(dark_path=d, bias_path=b, scale_dark_to_light=True)
+    assert cal.dark_nodata_mask is None
+    raw = np.full((4, 4), 200.0, dtype=np.float32)
+    np.testing.assert_allclose(cal.apply_raw(raw, light_exposure_s=10.0), 150.0)
+
+
 def test_dark_scaling_off_by_default(tmp_path):
     # The flag defaults off, so a mismatched dark is subtracted unscaled (today's
     # behaviour) — an upgrade doesn't change any existing stack.
