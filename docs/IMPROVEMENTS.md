@@ -47,6 +47,86 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- **⭐ Always-on hot/cold-pixel suppression clips real (undersampled) star cores — dims and colour-shifts every
+  star in the final stack, a coherent per-frame bias that stacking does NOT average out.** *(Stacking-engine
+  data-integrity — treat like an editor bug per §1. Severity: wrong-result. Confidence: reproduced through the
+  real pipeline.)* **Location:** `seestack/bg/hot_pixels.py::_suppress_cpu` (L58-78) / `_suppress_gpu` (L81-100),
+  wired **on by default** (`suppress_hot_pixels=True`, `hot_pixel_sigma=5.0`) per-frame *after* debayer at
+  `seestack/stack/align.py:137,140` (standard path) and `seestack/stack/stacker.py:1581,1584` (drizzle path).
+  **Root cause:** the pass flags any pixel whose residual from its 3×3-median exceeds `sigma·MAD-σ` and replaces
+  it with the local median — but `sigma_est = 1.4826·median(|residual|)` is a **global, frame-wide** noise floor
+  dominated by flat sky, so it's tiny (noise-level). Every *undersampled* star peak (whose residual is thousands
+  of ADU) therefore blows past the 5σ rail and gets flattened to its neighbourhood median. The filter cannot tell
+  a sharp real star from a hot pixel/cosmic ray because it uses a pure local-median comparison against a
+  sky-noise floor. **Repro (reproduced, real order raw→`bilinear_debayer`→`suppress_hot_cold_pixels`, 200×200
+  field of ~30 Gaussian stars on 1000 ADU sky with Poisson+8 e⁻ read noise):** integrated star flux above sky
+  drops **−18% (FWHM 3.0 px) … −33% (2.0 px) … −46% (1.5 px)** in the R channel — and the loss is **per-channel
+  differential** (e.g. FWHM 1.5 px: R −44%, G −56%, B −51% → an ~11-point R−G gap), so stars come out both
+  **dimmer and colour-cast**. Seestar's undersampled optics routinely give 1.5–2.5 px FWHM stars, so this fires
+  on ordinary data, every frame, the same way — the stack keeps the bias. *(Sanity check that pins the cause: on
+  a **noiseless** flat sky the global MAD is ~0, `sigma_est ≤ 0`, and the pass no-ops — 0% loss; adding realistic
+  noise is exactly what turns it on. So the harm scales with a normal, noisy frame.)* **Why it matters for the
+  target user:** star colour + brightness is the first thing a beginner notices in their picture; this silently
+  degrades it on every stack with no knob touched. **Fix direction (NOT a blind Builder change — validate on a
+  real Seestar stack before flipping):** make the replacement *star-aware* so it only ever removes genuine
+  isolated defects, not PSF peaks — e.g. gate replacement on the pixel being **locally isolated** (compare to the
+  neighbourhood **max**, not the median: a hot pixel dwarfs its brightest neighbour, a star peak only modestly
+  exceeds it), or require the local median itself to sit near sky (a star's 3×3 median is elevated), or defer
+  cosmic-ray/transient rejection to the **multi-frame** κ-σ pass that already runs (which *can* tell a persistent
+  star from a one-frame spike). Keep genuine hot/dead/CR rejection working (it exists for real Seestar sensor
+  defects — don't just disable it). Pin the fix with a regression test that (a) a synthetic star PSF keeps ≥~98%
+  of its integrated flux through the pass and (b) an injected single-pixel hot spike is still removed — the
+  existing `tests/test_hot_pixels.py` only tests isolated single pixels, never a star, so the regression is
+  entirely uncovered today. A companion *defect-map-from-darks* idea (the principled long-term route) is filed
+  under Ideas → Image quality. **Upgrade-safe:** the fix is a within-function algorithm change (no config/DB/API/
+  on-disk change); it *does* change stacked pixels, so validate it improves (not regresses) a real stack and keep
+  `hot_pixel_sigma` honoured. _(Found by this run's adversarial `bg/*`+`render/*` audit; reproduced + strengthened
+  by the Scout — per-channel colour-shift measurement added.)_
+
+- ~~**`bilinear_debayer` wraps modulo 2**16 on an integer (raw 16-bit Bayer) mosaic — every interpolated pixel
+  is silently corrupted (60000+60000 → 27232 instead of 60000).**~~ — **FIXED v0.158.5** (Scout 2026-07-21,
+  branch `claude/kind-mccarthy-202bx3`; traced + reproduced + regression-tested). Location:
+  `seestack/io/fits_loader.py::bilinear_debayer` — the R/G/B planes are built with `np.zeros_like(mosaic)` and
+  each missing site's neighbour sum (`_shift(plane) + _shift(plane)`) was evaluated in the plane's own dtype, so
+  an integer mosaic overflowed at every interpolated site. **Latent** on the live pipeline (all five in-repo
+  callers pass `out_dtype=np.float32` via `load_seestar_raw`, so their path is byte-for-byte unchanged), but
+  `bilinear_debayer` is a public, documented function whose docstring promises "same dtype as input" and
+  documents a raw 16-bit Bayer mosaic input — any caller honouring that contract silently corrupted data. Same
+  overflow class as the `qc/metrics.py::green_channel` fix (v0.109.10), never applied here. **Fix:** upcast an
+  integer mosaic to float32 for the interpolation and restore the caller's dtype at the end (float callers keep
+  their exact array; an integer caller now gets a correct integer result). Regression
+  `tests/test_fits_loader.py::test_bilinear_debayer_uint16_does_not_overflow` (a uint16 constant field debayers
+  to that exact constant, dtype preserved; the float32 path is unchanged and agrees). Severity: wrong-result
+  (latent). Confidence: reproduced + fixed. _(Found by this run's adversarial `io/*` audit.)_
+
+- **`_parse_timestamp` stores the same instant two different ways depending on `DATE-OBS` format — normalises
+  three hardcoded formats to `+00:00` ISO but returns the raw string for others, so ordering/equality on
+  `timestamp_utc` can silently break.** *(Severity: broken-UX / low. Confidence: reproduced.)* Location:
+  `seestack/io/fits_loader.py:410-418`. The loop tries `%Y-%m-%dT%H:%M:%S.%f`, `…%S`, and `%Y-%m-%d %H:%M:%S`,
+  normalising each to timezone-aware ISO, but falls back to `return raw` for anything else. **Repro (reproduced):**
+  `2024-09-12T03:14:55Z` → `'2024-09-12T03:14:55Z'` (raw, un-normalised) and `2024-09-12T03:14:55.1234567`
+  (7 fractional digits — `%f` accepts ≤6) → returned raw, while `2024-09-12T03:14:55.123` →
+  `'2024-09-12T03:14:55.123000+00:00'` and `…55` → `'…55+00:00'`. Trailing-`Z` and >6-digit fractional seconds
+  are both legal FITS. Mostly latent (Seestar writes 3-digit ms, no `Z`), so low priority — but a mixed library
+  (a re-exported or third-party sub) would sort/compare inconsistently. **Fix direction:** parse via a tolerant
+  path (strip a trailing `Z`→`+00:00`, truncate >6 fractional digits, or use `astropy.time.Time`/`dateutil` which
+  is already a dep) and always return the normalised ISO (or `None`), never the raw string; unit-test the `Z` and
+  7-digit cases. _(Found by this run's adversarial `io/*` audit.)_
+
+- **Calibration exposure-scaling under-subtracts the pedestal at a master-*bias* no-data pixel (off the default
+  path).** *(Severity: wrong-result but very narrow. Confidence: reproduced.)* Location:
+  `seestack/calibrate/apply.py:233` (`scaled = self.bias + (dark - self.bias)*ratio`) with the `dark_nodata_mask`
+  restore at 241-242 covering only *dark* no-data pixels, not *bias* no-data pixels. When `scale_dark_to_light`
+  is on (**off by default**) and the master bias carries a NaN/inf (sanitised to 0) at a pixel, that pixel's
+  pedestal is wrongly scaled instead of falling back to the documented "subtract the dark unscaled" behaviour.
+  **Repro (reproduced):** dark `[[100,110]]`@30 s (finite), bias `[[NaN,20]]`, `scale_dark_to_light=True`,
+  light@10 s (ratio 1/3) → pixel 0 yields `1000 − (0 + (100−0)/3) = 966.67` vs the consistent unscaled-dark
+  fallback `900` (cf. `test_dark_scaling_neutral_without_bias`). Realistic only with an imported third-party bias
+  containing NaN/inf, so low priority. **Fix direction:** OR the bias-no-data mask into the `dark_nodata_mask`
+  restore (or compute `scaled` from a bias-sanitised-to-0 pedestal that also zeroes those pixels post-scale);
+  regression with a NaN bias pixel asserting the unscaled-dark value. _(Found by this run's adversarial
+  `calibrate/*` audit.)_
+
 - ~~**A frame that fails a plate-solve, then succeeds on a later retry, keeps its stale `solve_failed:`
   reject reason — showing a contradictory "plate-solve failed" chip on a now-solved frame and inflating the
   Target page's solve-failure banner.**~~ — **FIXED v0.158.2** (Scout 2026-07-21, branch
@@ -165,6 +245,30 @@ when you take it.
   `tests/webapp/test_upload.py::test_stream_to_disk_cleans_up_the_temp_when_the_final_flush_fails` (patches
   `os.fdopen` to raise `OSError(ENOSPC)` on `close()`; fails-before with an orphaned `.part`, passes-after with
   none). Severity was cosmetic (leaked disk over repeated ENOSPC uploads; never ingested, no corruption).
+
+_(Scout audit 2026-07-21 (v0.158.4 baseline, suite green 1563 passed / 2 skipped): ran **five** parallel
+adversarial subagent audits across the full stacking + io + calibrate + bg/render surface + my own
+reproduction of every finding. **Yield: 4 verified bugs filed** (one shipped this run). **(1) Stacking-engine
+hot path** (`stacker.py` all combine branches, photometric pass-1↔pass-2 parity, OOM guard;
+`accumulator.py` WeightedSum/MinMaxReject/Welford order; `weighting.py`/`photometric.py` inverse-variance
+`1/s²`): traced **clean** — the clean streak on the numeric core holds (near-miss checked & dismissed: the
+standard κ-σ pass-2 has no variance-resolution floor like drizzle, but its Welford-M2 + include-self clip
+bounds the standardized deviation by √(n−1), so a tiny σ can't punch a spurious NaN hole — the drizzle floor
+is needed only because drizzle tests a raw input pixel against a box-resampled mean). **(2) `align`/`mosaic`/
+`drizzle_path`/`pointings`/`reference`/`output`**: traced clean (reproject direction, NaN=no-coverage,
+coverage/alpha). **(3) `calibrate/*`**: one narrow bug — bias-no-data pedestal scaling (filed above, off the
+default path); flat floor / uint16 float-upcast / sigma-clip / raw-Bayer domain all correctly defended.
+**(4) `io/*`** (`fits_loader`/`scanner`/`ingest`/`merge`/`wcs_io`): the uint16 `bilinear_debayer` overflow
+(**fixed this run, v0.158.5**) + the `_parse_timestamp` normalisation inconsistency (filed) + three traced
+near-misses bundled into the Minor list (merge counter mislabel, `_cache_stale` symmetric shrink, symlink
+double-ingest). **(5) `bg/*`+`render/*`**: the ⭐ hot-pixel star-core clipping bug above (the run's highest-value
+find — reproduced through the real pipeline, on by default, per-channel colour-shift measured); stretch NaN
+handling, coverage leveling, final gradient, orient, colormap, and preview↔export parity all traced clean.
+Net: a genuine on-the-default-path stacking-engine data-integrity bug surfaced (hot-pixel star clipping) plus a
+shipped latent-overflow fix — the numeric combine core stays clean, but the **per-frame cleanup** stage
+(hot-pixel suppression) was the weak spot. Next Scout: the hot-pixel fix wants **real-data validation** before a
+Builder ships it; otherwise re-tread `bg/per_frame.py` sky-mode estimators (the dead SExtractor guard, still
+open) and rotate to `webapp/routers/{editor}.py` + `edit/ops/*` occasionally.)_
 
 _(Scout re-audit 2026-07-21 (v0.158.1 baseline, suite green 1559 passed / 2 skipped): ran three parallel
 adversarial subagent audits + my own hand-trace/verification. **(1) Stacking-engine hot path**
@@ -384,6 +488,22 @@ sweep are now both well-hardened.)_
     curve with a linear-in-sin approximation that is up to ~29° off in declination. In this deployment astropy is
     a hard dependency, so the exact `except` branch is dead code and never renders — noted only so a future
     dependency change doesn't ship a wrong overlay. (Cosmetic/dead-code; confidence: traced.)
+  - `seestack/io/merge.py:88-99` `MergeResult.n_skipped_missing_file` mislabels *added* frames: a frame is
+    counted `added` (L84) before the cache block, and when `old_cache.exists()` is False it does `missing += 1`
+    while the frame is **still merged** (usable via `source_path`, `cached_path=None`). So the counter reports
+    "added-but-cache-missing", not "skipped". Reporting-only; no data loss. (Cosmetic; confidence: traced.)
+  - `seestack/io/ingest.py:93-103` `_cache_stale` refreshes on source *shrink* too, not just growth: the
+    docstring justifies it as "source grew after it was cached" but the `st_size != st_size` test is symmetric,
+    so a source later truncated/replaced smaller than its cache overwrites a good Stage-1 cache and resets that
+    frame's QC. Pathological input; low severity. (Confidence: traced.)
+  - `seestack/io/scanner.py:123` + `ingest.py:143` a symlinked duplicate subdir double-ingests: if `root`
+    contains both a real subdir and a symlink to it, both pass `is_dir()` and become separate targets/projects,
+    and the per-project `realpath` dedup (built only from that project's own frames) doesn't catch the same
+    physical raws landing in a second project. Only harmful if the user later stacks both. (Edge case; traced.)
+  - `seestack/bg/per_frame.py:289-297` `_subtract_background_cpu` on the **stack path** (`errors=None`): if one
+    channel's `Background2D` fit fails it's skipped while the others subtract, then `_zero_sky_per_channel` runs —
+    a per-channel-asymmetric result that could introduce a faint colour cast. Only on a degenerate fit; the editor
+    path is correctly all-or-nothing. Documented "best-effort". (Confidence: traced.)
 
 - ~~**"One frame vs your stack" reveal (and every raw-sub thumbnail) flattened the single sub's sky to
   ~2–3 tonal levels — a saturated star set the uint8 normalisation ceiling, quantising the faint sky
@@ -3544,7 +3664,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
 - ~~**IMPROVEMENT IDEA (Scout 2026-07-21) — a plate-solve timeout on the full-resolution rung should fall
-  through to the faster downsampled retry rungs instead of giving up.**~~ — **SHIPPED v0.158.6** (Builder
+  through to the faster downsampled retry rungs instead of giving up.**~~ — **SHIPPED v0.158.7** (Builder
   2026-07-21, branch `claude/pensive-faraday-yr971k`). `ASTAPSolver.solve` (`seestack/solve/astap.py`) now
   wraps each `_solve_once` rung in `try/except ASTAPError`: a per-rung failure (most often a `TimeoutExpired`
   on the slow full-res first rung) logs the attempt and falls through to the next, coarser, *faster* rung — the
@@ -4248,7 +4368,7 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 - ~~**IMPROVEMENT IDEA (Scout 2026-07-21) — turn "the storage went read-only" into a plain-language error, not a
-  bare 500, on the frame-write endpoints.**~~ — **SHIPPED v0.158.7** (Builder 2026-07-21, branch
+  bare 500, on the frame-write endpoints.**~~ — **SHIPPED v0.158.8** (Builder 2026-07-21, branch
   `claude/pensive-faraday-yr971k`). The three frame-mutating endpoints in `webapp/routers/frames.py`
   (`patch_frame`, `bulk_frames`, `auto_grade_apply`) now catch `sqlite3.OperationalError` (SQLite's
   "attempt to write a readonly database" / "database is locked") around their writes and re-raise as
@@ -4630,8 +4750,27 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+- **IMPROVEMENT IDEA (Scout 2026-07-21) — derive hot/dead-pixel correction from a persistent defect map (the
+  master dark/bias) instead of relying only on the blind per-frame local-median filter.** *(Image quality /
+  autonomy, PRIORITY 4 + 2; size M; needs real-data validation.)* **Why:** the always-on per-frame
+  `suppress_hot_cold_pixels` is a blunt instrument — a 3×3 local-median outlier filter can't distinguish a real
+  star peak from a hot pixel/cosmic ray, which is the root of the ⭐ star-core-clipping bug filed above. The
+  *principled* long-term route is what mature stackers do: build a **defect map** of the pixels that are hot
+  (bright in every dark) or dead (stuck low) from the **master dark/bias** the calibrate path already builds
+  (`seestack/calibrate/masters.py`) — those pixels are deterministic sensor defects, independent of the sky — and
+  correct **only those** (from their neighbours), leaving every real star untouched. Cosmic-ray / one-frame
+  transients then fall to the existing **multi-frame κ-σ** rejection (which *can* tell a persistent star from a
+  single-frame spike). This is distinct from the bug's minimal in-place fix (neighbour-max gating, dark-free): it
+  needs darks and a new map, but it's strictly more correct and more autonomous ("it knew which pixels were
+  broken"). **Shape:** (a) a pure `hot_pixel_map(master_dark, master_bias, sigma)` → boolean defect mask
+  (unit-testable on a synthetic dark with injected hot/dead pixels); (b) apply it in `apply_raw` (raw-Bayer
+  domain, before debayer) by replacing masked pixels with a same-Bayer-phase neighbour median; (c) when no dark
+  is present, fall back to the (fixed, star-aware) per-frame filter. **Guardrails:** additive, default-safe (a
+  user with no darks keeps today's behaviour), no schema/config/API change beyond an optional map cache; validate
+  on a real Seestar stack that stars are preserved and true hot pixels still vanish. Pillar: image quality + a
+  step toward "just works" calibration autonomy.
 - ~~**IMPROVEMENT IDEA (Scout 2026-07-21) — a small target of a *stationary* elongated object (edge-on galaxy)
-  can have every sub auto-rejected as a "streak" with no reconcile-floor escape.**~~ — **SHIPPED v0.158.5**
+  can have every sub auto-rejected as a "streak" with no reconcile-floor escape.**~~ — **SHIPPED v0.158.6**
   (Builder 2026-07-21, branch `claude/pensive-faraday-yr971k`). Added a **small-target tier** to
   `reconcile_streak_rejections` (`seestack/qc/runner.py`): below the main `STREAK_RECONCILE_MIN_FRAMES` (10)
   floor the plain >50% majority is too noisy (a tiny target's couple of streaks could genuinely be satellites),
@@ -5173,6 +5312,35 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+- **NEW BEGINNER FEATURE (Scout 2026-07-21) — "Add it to your calendar": one-tap `.ics` download for the next
+  good observing window on a target, so a beginner doesn't miss the night.** *(Autonomy + friendliness /
+  "plan" pillar, PRIORITY 2–3; size S.)* **Why:** the shipped **"Plan your next night"** card (v0.156.0,
+  `NextSessionCard` + `nightplan.next_observing_windows`) already tells a beginner *"Your next good window: Thu
+  21 Jul, 22:40 → 02:10 — M31 climbs above 40°, Moon down."* — but that's the moment the plan evaporates: they
+  read it, close the tab, and forget. The one thing that turns a plan into a shot is a **reminder in the calendar
+  they already live in**. Nothing in the app closes that loop today. **Feature:** an "Add to calendar" button on
+  each computed window (and on the tonight/next-session card) that downloads a standards-compliant `.ics` (VEVENT)
+  event — title *"Image M31 (Andromeda Galaxy)"*, start/end = the dark window bounds (UTC, `DTSTART`/`DTEND` with
+  `Z`), a plain-language description (*"M31 climbs to 61°, Moon 12% and down. ~2 clear hours to reach your goal.
+  Bring the Seestar out."*), and `LOCATION` from the saved observing site if set. Opens in Apple/Google/Outlook
+  calendars on phone or desktop — the beginner taps it and their phone reminds them on the night. **Beginner bar
+  ✔:** one tap, zero astro knobs, plain language, sane default (the planner's own top-scored window), directly
+  serves *"help me actually get the shot"*; **not** pro tooling. **Reuses existing pieces, ~no new astro math:**
+  the window bounds + target name + site already come from `next_observing_windows` / the library target /
+  Settings; the only new code is a pure `.ics` serialiser. **Fully offline / no new dep / no sign-off:** `.ics`
+  is just text (RFC 5545) generated server- or client-side — **no** SMTP, no network, no calendar-account
+  integration (that would need owner sign-off; this deliberately avoids it by handing the user a file their own
+  calendar imports). **Guardrails:** additive, read-only, opt-in (a button; nothing changes for existing flows);
+  self-hides exactly where the card already does (no site / no goal gap / no upcoming window); no schema/config/
+  API-shape/default change. **Builder slice:** (a) a pure `to_ics(events)` helper (RFC-5545 VEVENT with proper
+  UTC stamps + text-escaping of `,`/`;`/newlines in SUMMARY/DESCRIPTION; deterministic `UID` from target+start so
+  re-adding updates rather than duplicates) — unit-test the escaping, the `DTSTART/DTEND;Z` format, and a
+  multi-window VCALENDAR; (b) `GET /api/plan/next-session/{safe}.ics` (or a `?format=ics` on the existing
+  endpoint) returning `text/calendar` with a `Content-Disposition: attachment` filename — read-only, 404 on
+  unknown target, empty-window → the same self-hide, not a blank file; (c) an "Add to calendar" link on
+  `NextSessionCard` (and optionally the tonight card) pointing at it. Keeps the beginner-feature pipeline stocked
+  with a fresh *plan/autonomy* capability that closes the "I planned it but forgot" gap the recent planning cards
+  opened.
 - **NEW BEGINNER FEATURE (Scout 2026-07-21) — "Why were some frames left out?": a plain-language breakdown of
   the frames the stack dropped, grouped by reason, with a reassuring verdict.** *(Friendliness / trust,
   PRIORITY 3; size S–M.)* **Why:** a beginner's stack quietly uses, say, 412 of 500 subs and today they see

@@ -140,3 +140,21 @@ def test_debayer_edge_does_not_wrap_opposite_side():
     rgb = bilinear_debayer(mosaic, pattern="RGGB")
     # Column 0 should stay near the background, not pick up the far-edge spike.
     assert float(rgb[:, 0].max()) < 1000.0
+
+
+def test_bilinear_debayer_uint16_does_not_overflow():
+    """An integer (raw 16-bit Bayer) mosaic must not wrap modulo 2**16 in the
+    neighbour-sum interpolation. Before the float-upcast fix, interpolated sites on
+    a bright constant uint16 mosaic wrapped (60000+60000 → 54464 → /2 = 27232),
+    silently corrupting the result; the identical float32 mosaic was correct."""
+    mosaic_u16 = np.full((6, 6), 60000, dtype=np.uint16)
+    rgb_u16 = bilinear_debayer(mosaic_u16, pattern="RGGB")
+    # Contract: dtype preserved, and a constant field debayers to that constant
+    # everywhere (no wrapped-down interpolated pixels).
+    assert rgb_u16.dtype == np.uint16
+    assert int(rgb_u16.min()) == 60000 and int(rgb_u16.max()) == 60000, (
+        int(rgb_u16.min()), int(rgb_u16.max()))
+    # The float path is unchanged and agrees with the (now-correct) integer path.
+    rgb_f32 = bilinear_debayer(mosaic_u16.astype(np.float32), pattern="RGGB")
+    assert rgb_f32.dtype == np.float32
+    assert np.allclose(rgb_f32, 60000.0)
