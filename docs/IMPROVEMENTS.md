@@ -695,6 +695,56 @@ when you take it.
   used only a mild 40× outlier where the MTF self-correction still holds; the clamps break it at the larger (and
   realistic full-well) outlier magnitudes measured here.
 
+_Scout audit log 2026-07-21b (baseline green on current `origin/main` v0.144.0: 1431 passed / 2 skipped):
+led the rotation with the **stacking engine** per the owner's current focus #1, this run combining **two
+parallel repro-driven adversarial subagent audits** (each required to *reproduce* any finding with a runnable
+`.venv` script — not just read) with my own hand-trace of the surrounding files, and a baseline dogfood.
+**All traced clean — no new verified bug filed; the engine remains genuinely mature, consistent with the ~20
+prior clean re-audits.** (1) **Subagent A — `stack/stacker.py` rejection math + accumulators + coverage-
+leveling**: full `run_stack` on a 12-frame reference stack and a 5-panel partial-overlap **union mosaic**
+confirmed the `coverage>0 ⇔ finite result` invariant holds exactly (0 corrupt pixels either direction);
+single-coverage mosaic edges preserved (pass-1 `n<2` → NaN std → `tol=κ·inf` → keep-all); `MinMaxReject`
+brute-forced against an independent trimmed-mean reference for `k∈{1,2,3}` × random 1–9 frames × random NaN
+gaps (all match <1e-2, all four count-bands verified); the `auto_reject` boundary exact
+(`_auto_kappa_min_frames(3.0)=11` → n=10 min-max / n=11 κ-σ, confirmed end-to-end); rejection tallies
+consistent (κ-σ data-driven REJFRAC, min/max structural `2k/count`); `weights_applied=False` provenance gated
+right. (2) **Subagent B — `stack/{drizzle_path,align}.py`**: two-pass drizzle reject with persistent dead-
+region + interior NaN blocks at `pixfrac=0.6`/`scale=2.0` — gaps stay NaN, no covered pixel ever returns
+exactly 0.0 (`ch=np.where(finite,vals,0.0)` avoids `0·NaN` poisoning); off-canvas frame (~10–35° away)
+deposits nothing and leaves `result()` byte-identical (`equal_nan`), the upstream `n_used==0` guard genuinely
+reachable; variance-floor correct both directions (bright 55k flat not holed / a real +50% spike still
+clipped); windowed reproject bounded to the footprint (160×200 window on a 2000×3000 canvas), NaN=no-coverage
+preserved through windowed + full reproject + the order-1 sub-pixel-shift dual NaN propagation (0 darkened
+covered pixels at NaN boundaries); error paths surface as exceptions (missing file → `FileNotFoundError`,
+missing WCS → `ValueError`) — a failed frame is skipped by the stacker, never silently zeroed. Both subagents'
+existing suites pass (82/82 and 65/65). (3) **Hand-traced this run** (the paths the prior 2026-07-21 note
+flagged as *next rotation* — `io` ingest + `qc`, plus the calibrate/mosaic/output/reference/pointings core):
+`io/fits_loader.py` (BITPIX=16 unsigned via BZERO, odd-dim edge-pad+crop, `_shift` zero-fill vs `np.roll`
+edge-contamination fix, normalized-convolution debayer for all 4 Bayer layouts), `qc/metrics.py` (green-
+channel float32-before-add anti-wraparound, DAOStarFinder threshold-in-σ, NaN-safe median FWHM/ecc/flux),
+`qc/streaks.py` (seeded Hough for idempotency, elongation≥4 star-mask), `qc/grading.py` (Iglewicz–Hoaglin
+modified-z, direction-aware one-sided, log-domain flux metrics, practical-significance floors, 25% cap,
+`user_override` never auto-rejected), `stack/{output,reference,pointings}.py` and `calibrate/{apply,masters}`,
+plus the `webapp/pipeline.py` auto-stack crash-loop-guard orchestration. **Examined, NOT a bug** (matching the
+established style — not filed, not shipped, to avoid churning `main`): (i) a drizzle frame with `weight==0.0`
+returns `True` (intersects) while depositing nothing — a mild count inconsistency, but normalized quality
+weights never hit exactly 0 and it's not a data-integrity error; (ii) `frame_coverage` float32 weight
+saturation at extreme (thousands) frame counts can miss a sub-ULP increment — affects only the diagnostic
+count, inherent to the library's float32 weight accumulation, not turnable into a wrong image value; (iii)
+`_footprint_bbox_on_canvas` uses only the 4 corners — exact for distortion-free TAN (all real Seestar WCS),
+would only under-cover under strong SIP distortion the pipeline never sees. **Curation this run:** the two
+open Bugs (dead SExtractor skew-guard in 4 bg/leveling helpers; sky-atlas `_tan_wcs` rotation sign — now
+largely superseded by the v0.142.4 stored-canvas-WCS placement fix, reached only on the headerless-fallback
+path) both remain correctly REAL-data-gated — not blind-fixable, so neither is Builder-ready. Added one new
+beginner feature ("Set as cover" — pin your favourite/edited result as a target's showcase image) and one
+autonomy/friendliness improvement idea (auto-detect a master-dark ↔ light *exposure* mismatch and guide the
+fix). (Two candidate ideas were dropped after verifying they're already shipped: the per-run reject-fraction
+trust cue is surfaced via `REJFRAC`/`RejectionBadge.tsx`, and the mosaic plate-solve-outlier drop is surfaced
+via `StackResult.excluded_frames` → `Stack.tsx`.) **Next rotation (not re-covered fresh this run):**
+`webapp/{watcher,jobs}.py`
+orchestration and the `io/{scanner,merge}.py` ingest edges; the two GPU-only reproject/bg seams still want a
+real GPU host._
+
 _Scout audit log 2026-07-21 (baseline green on current `origin/main` v0.143.0: 1427 passed / 2 skipped):
 led the rotation with the **stacking engine + calibration + the auto-calibration autonomy path** per the
 owner's current focus #1, by adversarial hand-trace, and dogfooded the stack→result journey. **All traced
@@ -3037,6 +3087,31 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+- **NEW (Scout 2026-07-21b) — auto-detect a master-dark ↔ light *exposure* mismatch and guide the fix, so a
+  beginner reusing a dark library doesn't silently get a wrong calibration.** `CalibrationMasters.validate`
+  (`seestack/calibrate/apply.py`) only checks the master's *shape* against the frames — it never compares the
+  dark's exposure to the lights'. A dark master carries dark-current that scales with integration time, so
+  subtracting a 30 s dark from 10 s subs over-subtracts (crushed shadows / dark halos), and a 10 s dark from
+  30 s subs under-subtracts (residual amp-glow / hot-pixel trails) — a *wrong image*, with no warning. The app
+  already has the machinery to fix it: `scale_dark_to_light` + `_effective_dark` rescale the dark to the
+  light's exposure **when a master bias is also present** (`dark = bias + (dark − bias)·t_light/t_dark`), but
+  it's **off by default** and silent, so a beginner never discovers it. **Idea:** at stack setup (and in the
+  auto-calibration bind path), when the chosen dark's `dark_exposure_s` and the reference light's `exposure_s`
+  are both known and differ by more than a small tolerance (say >10%), surface one plain-language line — *"Your
+  master dark is 30 s but these subs are 10 s. Mismatched darks can over- or under-correct. Best: shoot darks
+  at 10 s. Or add a master bias and turn on 'scale dark to exposure' and the app will match them for you."* —
+  and, when a bias **is** available, offer a one-click enable of `scale_dark_to_light` (or auto-enable it on
+  the fully-unattended auto-stack path, since with a bias present the scaling is strictly more correct than a
+  mismatched raw subtraction). **Beginner bar ✔:** plain language, actionable, a sane default (silent when
+  exposures match — the common case, byte-for-byte unchanged), and it prevents a real data-integrity foot-gun
+  a non-expert can't diagnose. **Grounded / upgrade-safe:** exposures are already loaded (`dark_exposure_s`,
+  `info.exposure_s`); the warning is read-only; the auto-enable is gated on a bias being present (never
+  double-subtracts) and only fires in `auto`/unattended mode so no stored default flips on a running install.
+  Split for the Builder: (a) a pure `dark_exposure_mismatch(dark_s, light_s, *, tol=0.1) -> str | None` helper
+  + tests; (b) surface it as a stack-setup / result advisory (reuse the existing advisory/notes surface); (c)
+  optionally auto-enable `scale_dark_to_light` on the unattended path when a bias is bound. _(M, split as
+  above; PRIORITY 2 autonomy / P4 image-quality — prevents a silently-wrong calibration; builds on the shipped
+  `scale_dark_to_light` infra, so low-risk.)_
 - ~~**NEW (Scout 2026-07-21) — auto-pick the outlier-rejection method from the frame count, so a beginner
   never has to know κ-σ vs min/max.**~~ — **SHIPPED v0.143.0** (Builder 2026-07-21, branch
   `claude/pensive-faraday-q5qgdb`). Added an opt-in `StackOptions.auto_reject` (default **False** →
@@ -4395,6 +4470,31 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+- **NEW BEGINNER FEATURE (Scout 2026-07-21 #7) — "Set as cover": let a beginner pin their *favourite* result
+  as a target's showcase image, instead of the app always showing the newest stack.** Today the Library/
+  Dashboard tile and the Target-page card show `entry.last_stack_preview` — the **newest** genuine stack's
+  preview (`webapp/routers/targets.py::target_thumbnail`, resolved from `library.targets.last_stack_preview`).
+  That's usually right, but a beginner who *edited* a stack into a lovely picture, or who re-stacked and
+  preferred the *earlier* result, has no way to make the nice one the face of the target: a later plain
+  re-stack silently demotes their best image to an archived row. **Feature:** a single **"★ Set as cover"**
+  action on any result (the Target result card, a History row, and the editor export surface) that pins that
+  run's preview as the target's showcase; the tile/card then shows the pinned image, with a plain **"Use
+  newest instead"** to clear it. **Beginner bar ✔:** one obvious button, plain language, a sane default
+  (unpinned = today's newest-stack behaviour, unchanged), no expert knobs — it directly serves the "enjoy /
+  share a good image" pillar (P3) by letting the beginner choose which picture represents their target.
+  **Well-grounded / low-risk / upgrade-safe:** additive **nullable** `cover_run_id` (or `cover_preview_path`)
+  column on the library `targets` table via the existing additive-migration pattern (`SCHEMA_VERSION` bump +
+  `_migrate_schema` `ALTER TABLE`; see `io/library.py`) — old DBs migrate with the column defaulting NULL, so
+  every existing install keeps the exact newest-stack behaviour until the user pins something. Resolve the tile
+  to the pinned run's preview when set and it still exists, else fall back to `last_stack_preview` (so a pinned
+  run that was later pruned/archived degrades gracefully to newest, never a broken image). No engine change, no
+  API-shape break (add a field to the target payload; the pin/unpin is a small new `POST`), no default flip.
+  Split for the Builder: (a) the DB column + migration + upgrade test (an old target DB migrates clean, tile
+  unchanged until pinned); (b) the pin/unpin endpoints + thumbnail resolution with the graceful fallback + a
+  test that a pruned pinned run falls back to newest; (c) the "★ Set as cover" / "Use newest instead" UI on the
+  result card, History, and editor export. _(M, split as above; PRIORITY 3 friendliness / enjoy-share —
+  beginner feature; keeps the pipeline stocked. Builds on the existing library-preview + additive-migration
+  infra, so low-risk.)_
 - **NEW BEGINNER FEATURE (Scout 2026-07-21 #6) — "Acquisition nameplate": auto-render the shot's own
   details onto the shared image, so a beginner's post looks like a "real" astrophoto without any
   editing.** Astrophotographers traditionally caption a finished image with its *acquisition data* —
