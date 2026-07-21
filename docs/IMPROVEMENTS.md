@@ -47,6 +47,31 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- **The night planner skips tonight's remaining darkness after local midnight — tells a pre-dawn user the next
+  window is *tomorrow* when hours of usable darkness remain *right now*.** Location: root cause in
+  `seestack/nightplan.py::_find_dark_window` (lines ~348-366) which locks onto the solar noon *following*
+  `when_utc` and scans noon→next-noon, so a night that started *before* that noon (the one the user is currently
+  inside) is excluded. Surfaces through `plan_tonight` (`_find_dark_window(observer, when_utc)`, ~line 646) and
+  `next_observing_windows` (anchor ~796-802; its partial-window clip at ~807-812 is *designed* to report
+  "a night already mostly gone" but never fires for after-midnight starts because offset 0 is always the
+  upcoming evening). Repro (reproduced): observer 40.0N, −74.0W, `start_utc = 2026-07-21T06:00Z` (02:00 local,
+  mid-darkness). Tonight's real dark window is `02:16–07:48Z` and the observer is inside it with ~1h48m still to
+  come; target M92 (RA 259.28, Dec 43.14) is usable for **115 min** in that remaining darkness (peak alt 49°).
+  Yet `next_observing_windows(...)` returns first `dark_start = 2026-07-22T02:16Z` (tomorrow) and
+  `plan_tonight`'s `dark_window` is likewise tomorrow's — tonight's 115-min window is dropped. A local-clock
+  sweep confirms the flip at ~solar midnight: 00:00/01:00 local return tonight's ongoing window; 02:00 local
+  onward jump to tomorrow. **Severity: wrong-result / broken-UX** — the answer to the feature's core question
+  ("when can I next shoot this?") is factually wrong for post-midnight callers, and pre-dawn is exactly when a
+  Seestar owner checks "can I still grab another target before it gets light?". Bounded to start times between
+  local solar midnight and dawn. Confidence: reproduced. **Fix direction (leave to Builder — needs care):** when
+  `when_utc` already sits inside (or after the start of) an ongoing dark window, report *that* window clipped to
+  `[now, dark_end]` instead of jumping to the next night; e.g. have `_find_dark_window` first try the noon
+  *preceding* `when_utc` and, if `when_utc < dark_end` for that night, return the remaining span — then make
+  `next_observing_windows`' offset-0 clip actually reachable for after-midnight calls. Add a regression test at
+  02:00 local asserting the returned window is tonight's (ends today), not tomorrow's. _(Found by this run's
+  adversarial post/planning audit; the same audit re-traced `coords.py` RA-wrap, `framing.py` arcmin/FOV units,
+  `nightplan.py` moon-illumination/rise-set/polar cases, and `post/color_cal.py` all clean.)_
+
 - ~~**`GET /api/storage` 500s the whole storage page when one target's cache dir is unreadable/vanished.**~~
   — **FIXED v0.156.1** (Scout 2026-07-21, branch `claude/kind-mccarthy-8n7my1`). Symptom: an unreadable or
   mid-scan-vanished target dir (a NAS mount that goes permission-denied, a ZFS dataset unmounted during the
@@ -66,6 +91,24 @@ when you take it.
   500, passes-after 200 + other targets still listed). Severity: broken-UX (operational — the app explicitly
   expects NAS mounts to vanish/go read-only, see `system._folder_status`). Confidence: traced + regression-
   reproduced. _(Found by this run's adversarial webapp-router audit.)_
+
+- ~~**`POST /api/targets/{safe}/frames/bulk` leaks the `Library` SQLite connection when a mid-loop
+  `update_frame` fails (read-only / locked project DB).**~~ — **FIXED v0.157.1** (Scout 2026-07-21, branch
+  `claude/kind-mccarthy-t6t1r6`). Symptom: `bulk_frames` split proj-close and lib-close into *sibling*
+  `try/finally` blocks (`finally: proj.close()` then a separate `try … finally: lib.close()`), so when a bulk
+  accept/reject's `proj.update_frame(...)` raised part-way through — a read-only or locked `project.sqlite`, the
+  exact NAS-went-read-only state the app is built to survive — the exception propagated straight out after
+  `proj.close()` and the second block (the *only* place `lib.close()` runs) was never entered. Every failed bulk
+  call leaked one Library connection/file handle; under a persistently read-only mount they accumulate. This is
+  the identical leak already fixed for `patch_frame`/`auto_grade_apply` in the same file (whose comments document
+  it) — `bulk_frames` was the one endpoint still on the un-fixed sibling pattern. Location: `webapp/routers/
+  frames.py::bulk_frames` (~314-375). **Fix:** nested proj-close inside an outer `try … finally: lib.close()`
+  (mirroring `patch_frame`), so the library handle is released on every exit including a mid-loop raise.
+  Regression `tests/webapp/test_api.py::test_bulk_frames_closes_library_when_update_raises` (monkeypatches
+  `update_frame` to raise `sqlite3.OperationalError`, asserts `lib.close()` still ran — fails-before, passes-
+  after). Severity: broken-UX / resource-leak (handle exhaustion under the failure mode the app targets; no data
+  loss — the write simply didn't happen). Confidence: traced + regression-reproduced. _(Found by this run's
+  adversarial webapp-router audit of the un-swept `editor/frames/targets/stats/plan/seestar` routers.)_
 
 - **SIMBAD `identify_target` returns an arbitrary object in the search cone, not the framed target — wrong
   target identity + wrong bg-flatten hint.** Location: `seestack/post/target_id.py:161-162` (`row = table[0]`
@@ -97,6 +140,28 @@ when you take it.
   `tests/webapp/test_upload.py::test_stream_to_disk_cleans_up_the_temp_when_the_final_flush_fails` (patches
   `os.fdopen` to raise `OSError(ENOSPC)` on `close()`; fails-before with an orphaned `.part`, passes-after with
   none). Severity was cosmetic (leaked disk over repeated ENOSPC uploads; never ingested, no corruption).
+
+_(Scout re-audit 2026-07-21 (v0.157.0 baseline, suite green 1539 passed / 2 skipped): ran four parallel
+adversarial subagent audits + my own hand-trace/verification across the whole rotation. **(1) Stacking engine
+hot path** (`stack/accumulator.py` WeightedSum/MinMaxReject/Welford, `drizzle_path.py` variance + coverage +
+half-open OOB bounds, `weighting.py`/`photometric.py` inverse-variance combine split, `mosaic.py`/`reference.py`
+RA-wrap + CRPIX geometry): traced **clean** — no wrong-pixel/crash constructible; the 21×-clean streak holds.
+**(2) `calibrate/apply.py` + `masters.py` + `render/{deepening,colormap,orient,thumbnail}.py`**: flat/dark/bias
+non-finite sanitisation, exposure-scaled dark restore, sigma-clip mean (mad==0→tol=0), rot90-vs-PIL orthogonal
+parity, viridis LUT bounds, autostretch on all-zero/all-NaN/single-pixel, NaN-floored box downsample — all
+**clean**. **(3) un-swept routers** `editor/frames/targets/stats/plan/seestar.py`: path-traversal
+(`_sanitize_basename`, whitelisted bayer, server-side master paths), one-bad-item listing resilience,
+pagination clamps, div-by-zero guards, recipe-body hardening all clean **except** the `bulk_frames` Library-leak
+fixed above (v0.157.1). **(4) `post/color_cal.py` + `nightplan.py` + `framing.py` + `coords.py`**: colour
+solvers' scale clamps, RA 0/360 wrap, arcmin/FOV units, moon illumination/rise-set/polar-night cases all clean
+**except** the after-midnight dark-window bug filed above (reproduced). Net for the run: 1 live-path fix shipped
+(bulk-leak), 1 wrong-result bug filed (night planner after midnight). Two sub-threshold non-bugs noted and *not*
+filed: drizzle `clip_reference` uses the any-channel deposit count for the per-channel Bessel/neff gate (a
+deliberate design choice, effect is a tiny tolerance shrink only on single-channel-NaN statistics-pass pixels,
+no constructible wrong image); and `load_stack_rgb` would `IndexError` on an exactly-2-channel cube, but the OSC
+pipeline never writes one (unreachable). Next Scout: remaining un-swept surface is `webapp/routers/{jobs,logs,
+pipeline,calibration}.py`, `webapp/watcher.py` body, `seestack/qc/*` and `seestack/solve/*`; re-tread the stack
+path only sparingly.)_
 
 _(Scout re-audit 2026-07-21 (v0.156.0 baseline, suite green 1525 passed / 2 skipped): took the standing advice
 to rotate **off** the 20×-clean stacking hot path and swept the least-recently-audited surface with two parallel
@@ -4099,6 +4164,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+- **IMPROVEMENT IDEA (Scout 2026-07-21) — turn "the storage went read-only" into a plain-language error, not a
+  bare 500, on the frame-write endpoints.** *(Friendliness / PRIORITY 3; size S.)* **Why:** the app is explicitly
+  built to survive a NAS mount going read-only or a locked `project.sqlite` (see `system._folder_status`, and the
+  connection-leak fixes across `frames.py`). When a write actually fails in that state — a bulk accept/reject, a
+  per-frame patch, an auto-grade apply — the user currently gets an opaque HTTP 500 with no hint *why*, so a
+  beginner whose ZFS dataset unmounted mid-session just sees "something broke". **Shape:** in the frame-mutating
+  endpoints (`patch_frame`, `bulk_frames`, `auto_grade_apply` in `webapp/routers/frames.py`), catch
+  `sqlite3.OperationalError` (readonly/locked) around the `proj.update_frame(...)` writes and re-raise as a
+  `HTTPException(503, "This target's storage is read-only or locked — check that the library folder / NAS mount
+  is mounted and writable, then try again.")`. Pair with a matching toast on the frontend. **Upgrade-safe:**
+  additive error mapping only — success paths and response shapes unchanged; a new 503 is a superset of the old
+  bare-500 behaviour. Testable: monkeypatch `update_frame` to raise `OperationalError` and assert a 503 with the
+  guidance string (the leak-regression tests added this run already set up exactly this monkeypatch). Small,
+  self-contained, and it makes the single most common "live-install" failure legible to a non-expert. Bundle it
+  with any nearby `frames.py` work.
 - **NEW (Builder 2026-07-21, follow-up to the v0.142.4 Sky-map placement fix) — derive the built-in 3D
   viewer's per-image size/rotation from the stored canvas WCS too, so both sky paths agree.** The v0.142.4
   fix made the **Aladin overlay's** `wcs` come from the stack's stored canvas WCS (`wcs_dict_rescaled_to_preview`),
@@ -4955,6 +5035,28 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+- **NEW BEGINNER FEATURE (Scout 2026-07-21) — "Did it get better?": A/B compare two finished stacks of the same
+  target, side by side with a split slider.** *(Friendliness / trust, PRIORITY 3; size M.)* **Why:** a beginner
+  who adds a second night and re-stacks, or reprocesses the same subs with different settings, has no easy way to
+  answer the one question that matters — *did the picture actually improve?* Today the History run cards list
+  runs with dates/sub-counts and thumbnails, but you can only look at one at a time and eyeball it from memory.
+  A dedicated compare lets them *see* the deeper stack pull out faint detail and knock down noise. The editor
+  already has a polished split-compare for *looks* (`splitCompare.ts` / `LookComparePicker.tsx`), but nothing
+  compares two **stack runs** — that's the gap. **Beginner bar:** clears it — it answers "is my new stack
+  better?" in plain terms, sane default (auto-pick the two newest *genuine* stack runs for the target), no expert
+  knobs. **Shape / slices —** **(a) frontend-only MVP (S–M):** on the Target/History view add a "Compare two
+  stacks" control that picks any two runs (default: the two newest) and shows their result PNGs in a split view
+  with a draggable divider — reuse the editor's `splitCompare` divider math and the existing per-run result-PNG
+  endpoint; a tiny caption strip under each side ("3 nights · 412 subs · 2026-07-18" vs "5 nights · 690 subs ·
+  2026-07-21") so the provenance is explicit. Off by default, opened on demand; no backend change if both runs
+  already expose a result PNG at the same display size. **(b) optional depth (M):** add a one-line plain-language
+  verdict from cheap, already-computed stats — e.g. "√N says ~1.3× less noise, from 1.6× more subs" using the
+  same honest-√N line already on the readiness card, or a background-RMS delta if both runs carry it — so the
+  beginner gets a *number*, not just a vibe. **Upgrade-safe:** read-only, additive, opt-in; reuses existing
+  run records + result PNGs, no schema/config/API-shape change (slice (a) may need zero new endpoints). Testable:
+  the split-divider math is pure (mirror `splitCompare.test.ts`); the run-pair picker defaults are unit-testable;
+  the verdict string is a pure function of two stat blobs. Natural companion to the shipped "Your target, night
+  after night" deepening reel (that *animates* the growth; this lets you *scrub* any two points directly).
 - ~~**IDEA (Builder 2026-07-21, filed while shipping the deepening reel) — "Time to re-stack?" nudge.**~~ —
   **ALREADY COVERED (withdrawn same day by the Builder who filed it).** On a closer read this already exists as
   the Target page's **"Multi-night nudge"** (`newSubsSinceStack` / `countNewSubsSinceStack` in `Target.tsx`,
