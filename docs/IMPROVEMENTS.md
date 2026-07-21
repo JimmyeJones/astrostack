@@ -117,6 +117,81 @@ features** (see the new transparency-trend feature filed below) rather than bug-
 remaining un-swept surface is `webapp/routers/{sky,gallery,editor,upload,storage,system}.py`, `post/skymap.py`,
 `post/target_id.py`, and `seestack/framing.py`/`objectinfo.py`.)_
 
+_(Scout re-audit 2026-07-21 (v0.153.0 baseline, suite green 1504 passed / 2 skipped): took the standing advice
+and swept the least-audited surface — the webapp routers `sky`/`gallery`/`storage`/`upload`/`system`/`settings`,
+`webapp/config.py`, and the compute modules `post/skymap.py`, `post/target_id.py`, `seestack/framing.py`,
+`seestack/objectinfo.py`. First re-verified the newest **stacking** code hands-on to be sure the hot path is still
+clean: `weighting.py::combine_weights_with_photometric` (the 1/s² inverse-variance term) and its wiring in
+`stacker.py` — confirmed the pixel gain-match (`pscales`, factor `s`, applied in-place in `_pass`/`_drizzle_pass`
+identically on every pass) and the combine weight (`combine_weights`, factor `w/s²`) are threaded **separately**,
+with pass-1 mean/σ + min/max order-stat keeping the plain quality `weights` and only the final combine (single-pass
+mean, κ-σ pass 2, drizzle final) using the inverse-variance weights — the κ-σ clip reference stays in the same
+scaled domain as the frames it clips, so the down-weight can't skew rejection; and `accumulator.py` (Welford
+update order + in-place window views, MinMax ±inf identities, any-channel `frame_coverage`) — all clean, matching
+the long clean-audit history. **Found + fixed one real broken-UX bug** (gallery/sky 500 on one broken project — see
+the FIXED entry below) and **filed one verified data-hygiene bug** (`/api/settings/export` leaks a host path via
+nested `default_stack_options` — see the open entry below), plus two minor items. The compute modules
+(`skymap`/`target_id`/`framing`/`objectinfo`) traced clean on RA-wrap / pole / cos(dec) / unit / separation math
+— the only wrinkle is the offline galactic-plane *fallback* in `skymap.py` (~29° off), but it's dead code here
+(astropy is a hard dependency, so the exact branch always runs) — noted low-pri below, not filed as a user bug.
+`config.py`'s partial-PATCH merge, resilient old-config load (drops only invalid fields), atomic write, and
+auth-key stripping all verified correct. Next Scout: rotate onto `routers/editor.py` (only occasionally) and
+`routers/frames.py`/`targets.py`, `io/scanner.py`, `bg/`, and `edit/ops/` — the stack path and this router/compute
+sweep are now both well-hardened.)_
+
+- ~~**`/api/gallery` and `/api/sky` returned HTTP 500 for the *whole* endpoint — hiding **every** target's
+  images — when a **single** target's project DB was unreadable (corrupt, or stamped with a newer schema after
+  an image rollback).**~~ — **FIXED v0.153.1** (Scout 2026-07-21, branch `claude/kind-mccarthy-fvz1ip`; traced +
+  reproduced + regression-tested). Found by the router sweep above. Both `get_gallery` (`gallery.py:88`) and
+  `get_sky` (`sky.py:111`) call `Project.open(lib.target_dir(t))` **per target inside the loop** with a
+  `try/finally` that only *closes* proj — there was **no `except`**. `Project.open` → `_check_schema`
+  (`io/project.py:249`) raises `RuntimeError` when the on-disk `user_version` exceeds this build's
+  `SCHEMA_VERSION` (the realistic case: the owner rolls the Docker image *back* to an older version after a bad
+  upgrade — AGENTS.md §9 describes exactly this in-place-upgrade/rollback model — so a project a newer build
+  stamped is now "from the future"), and raises `sqlite3.DatabaseError` on a genuinely corrupt DB. That exception
+  propagated out of the per-target loop and 500'd the entire request, so **one** bad target blanked the whole
+  Gallery grid / whole Sky map for **all** targets. The sibling read-only aggregators already guard the identical
+  call: `stats.py` wraps it in three places with `except Exception:  # noqa: BLE001 — a broken project must not
+  500 the dashboard`, and `storage.py::get_storage` does the same — gallery/sky were the two that missed it.
+  **Reproduced** (`tests/webapp/test_gallery.py::test_gallery_skips_a_broken_project_without_500ing` +
+  `tests/webapp/test_sky.py::test_sky_skips_a_broken_project_without_500ing`): with two targets, register a run
+  on one and stamp the other's `project.sqlite` with `PRAGMA user_version = 999` — pre-fix the endpoint 500s with
+  the `RuntimeError`; post-fix it returns 200 and the healthy target's image is still listed/placed. **Fix:** wrap
+  each target's `Project.open` in `except Exception: … proj.close(); continue`, mirroring stats.py/storage.py's
+  established pattern and comment (skip the broken target, keep serving the rest). Additive/upgrade-safe: pure
+  control-flow on read-only endpoints; the happy path is unchanged; no schema/config/API-shape/default change.
+  Severity: broken-UX/availability (a single unreadable project hides *all* imagery on two beginner-facing pages —
+  high blast radius, realistic trigger). Confidence: reproduced + fixed.
+
+- **`GET /api/settings/export` leaks a host filesystem path into the "portable, no host paths" backup via a
+  nested `default_stack_options` calibration path.** *(Data-hygiene / info-leak; PRIORITY 3; size S; confidence:
+  traced.)* Location: `webapp/routers/settings.py:99` (`_export_payload`) — and the same gap on the GET
+  `_serialize` at `settings.py:56`. `_export_payload` strips only the **top-level** `_AUTH_KEYS` + `_HOST_KEYS`,
+  but does **not** run `strip_non_form_keys()` over the nested `default_stack_options` dict — whereas the settings
+  **PUT** (`_sanitize_patch`, `settings.py:44-45`) and `/import` both do. So if the stored `default_stack_options`
+  carries a `NON_FORM_KEYS` entry (`dark_path`/`flat_path`/`flat_dark_path`/`bias_path` — a server-resolved host
+  path; reachable via a hand-edited `config.json`, which the module docstring says is human-editable, or a legacy
+  config written before the PUT-side strip guard existed), `/export` emits that raw host path — directly violating
+  the endpoint's own docstring guarantee ("no host paths … restored on any install"). The value is also useless
+  on restore because `/import` strips it, so it's pure leak with no upside. **Repro:** set
+  `default_stack_options = {"dark_path": "/mnt/host/darks/master.fit", "sigma_kappa": 3.0}` in the store, GET
+  `/api/settings/export` → the payload still contains `dark_path` with the host path. **Fix (small, one file):**
+  in `_export_payload` (and `_serialize`), if `default_stack_options` is a dict, replace it with
+  `strip_non_form_keys(default_stack_options)` before returning — mirrors the PUT/import contract exactly. Add a
+  regression test: a store whose `default_stack_options` holds a `dark_path` exports **without** it. Severity:
+  low-medium (filesystem-path disclosure, not a secret). Upgrade-safe: pure read-side filtering, additive.
+
+- **Minor / low-priority (traced, filed for completeness — fix only if touching these files):**
+  - `webapp/routers/storage.py:193` `prune_stack_runs` closes `proj` then `lib` in a **single** `finally` (not
+    nested like `gallery.py`/`storage.py::get_storage`), so if `proj.close()` itself raised, `lib.close()` would
+    be skipped and the Library handle would leak. Trigger is essentially unreachable (`sqlite3.Connection.close()`
+    does not raise in practice), so this is a consistency nit, not a live leak — nest the two closes if the file is
+    touched. (Cosmetic; confidence: traced.)
+  - `seestack/post/skymap.py:266` the **offline** galactic-plane fallback (astropy absent) draws the Milky Way
+    curve with a linear-in-sin approximation that is up to ~29° off in declination. In this deployment astropy is
+    a hard dependency, so the exact `except` branch is dead code and never renders — noted only so a future
+    dependency change doesn't ship a wrong overlay. (Cosmetic/dead-code; confidence: traced.)
+
 - ~~**"One frame vs your stack" reveal (and every raw-sub thumbnail) flattened the single sub's sky to
   ~2–3 tonal levels — a saturated star set the uint8 normalisation ceiling, quantising the faint sky
   away *before* the stretch could show it. The reveal dishonestly hid the very single-sub noise it
@@ -4791,6 +4866,47 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+- **NEW BEGINNER FEATURE (Scout 2026-07-21) — "Plan your next night on *this* target": a per-target card that
+  turns the goal-gap into one concrete, dated next session.** *(Beginner feature; PRIORITY 2 autonomy / 3
+  friendliness; size M.)* The two hardest beginner questions after a session are answered *separately* today and
+  never joined: the readiness card says *"you're 2 h short of a good M31"* (goal gap, from `total_exposure_s` vs
+  the per-type `goal_s`), and the **night planner** (`webapp/routers/plan.py` + `seestack/nightplan.py`) can say
+  *"the next dark window when M31 is well-placed is Thursday 22:40 → 02:10"* — but the beginner has to hold a
+  number in their head and go cross-reference a separate page. **Feature:** a small read-only **"Plan your next
+  night"** card on the Target page that *joins* them into one plain sentence anchored to this object: e.g.
+  *"About 2 clear hours to go for a good M31 (~120 more subs). Your next good window: Thu 21 Jul, 22:40 → 02:10 —
+  M31 climbs above 40°, Moon down. That window covers it."* or, when the gap is bigger than one night,
+  *"~5 h to go — more than one night. Next 3 good windows: Thu, Sat, Mon."* It is the *actionable* companion to
+  the retrospective cards (focus/haze/integration trends look **backward**; this looks **forward** and tells the
+  beginner exactly when to point the scope again). **Reuses existing pieces, no new engine math:** the goal gap =
+  `max(0, goal_s − total_exposure_s)` (readiness card already computes both); "subs to go" = gap ÷ the target's
+  median accepted sub-exposure; the window(s) come straight from `nightplan`'s existing `_find_dark_window` +
+  `_observability_batch` (already power the planner), filtered to *this* target's RA/Dec and horizon. **Beginner
+  bar ✔:** one card, zero knobs, sane default (auto-picked window from the planner's own scoring), plain language,
+  directly actionable on the next clear night; serves the autonomy + friendliness pillars ("it just told me what
+  to do next"). **Guardrails:** additive/read-only, best-effort — self-hide when the target has no goal gap (done),
+  no site location set (`site_lat`/`site_lon` unset → no windows to compute; show only the "X h to go" clause), or
+  no upcoming dark window in the planner's horizon (say *"no good window in the next N nights — try again when the
+  Moon's out of the way"* rather than blanks); off nothing; no schema/config/API-shape/default change. **Builder
+  slice:** (a) a pure `nextSessionPlan(gap_s, subExposureS, windows)` helper → `{hoursToGo, subsToGo, windows[]}`
+  (unit-tested for done / one-night / multi-night / no-location / no-window cases); (b) `GET
+  /api/targets/{safe}/next-session` → `NextSessionOut | None` reusing the nightplan observability batch for the
+  target's own RA/Dec (read-only; `null` = self-hide); (c) a `NextSessionCard` on the Target page rendering the
+  sentence + the dated window(s), reusing the readiness card's goal-gap figures the page already loads. Keeps the
+  beginner-feature pipeline stocked with a *forward-looking, autonomy* feature to balance the recent run of
+  retrospective trend cards.
+- **IMPROVEMENT IDEA (Scout 2026-07-21) — surface "N subs the auto-stack quietly demoted" on the result, so the
+  beginner trusts (and understands) quality weighting.** *(Autonomy trust / PRIORITY 3 friendliness; size S.)*
+  Quality weighting (`weighting.py`) already down-weights soft/hazy/elongated subs, and `WeightingStats` already
+  computes `n_downweighted` (frames pulled below full weight) — but the finished result never *tells* the
+  beginner it happened. A one-line trust note on the run Info panel — *"12 of your 228 subs were softer than the
+  rest, so the stacker gave them less weight (not dropped — just trusted less). Your sharp subs did the heavy
+  lifting."* — turns an invisible auto-decision into a reassuring, educational one (the same "show what the
+  autonomy did" pattern the auto-edit note and rejection "% dropped" line already follow). The number is already
+  computed and plumbed through the stack log; this just persists it to the run record (additively) and renders one
+  sentence. Distinct from the rejection "% of samples clipped" line (that's per-pixel κ-σ *rejection*; this is
+  per-*frame* quality *weighting*). Beginner bar ✔: zero knobs, plain language, builds trust in the auto-stack.
+  Guardrails: additive/read-only, self-hide when weighting is off or `n_downweighted == 0`.
 - **PARTLY SHIPPED (v0.153.0, Builder 2026-07-21, branch `claude/pensive-faraday-c2l3n1`) — the honest √N
   diminishing-returns *verdict*, folded into the existing "Is it enough yet?" readiness card rather than a
   second parallel card.** Chose to **deepen the existing card** over adding a whole new `IntegrationMeterCard`
