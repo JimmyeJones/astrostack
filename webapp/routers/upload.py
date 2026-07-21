@@ -171,17 +171,22 @@ async def _stream_to_disk(upload: UploadFile, dest: Path) -> int:
     written = 0
     fh = os.fdopen(fd, "wb")
     try:
-        while True:
-            chunk = await upload.read(_CHUNK)
-            if not chunk:
-                break
-            await run_in_threadpool(fh.write, chunk)
-            written += len(chunk)
+        try:
+            while True:
+                chunk = await upload.read(_CHUNK)
+                if not chunk:
+                    break
+                await run_in_threadpool(fh.write, chunk)
+                written += len(chunk)
+        finally:
+            # Close (flushing buffered writes) exactly once, on every path. A
+            # buffered-write ENOSPC can surface here at the *final flush*, not
+            # only mid-write — so the close must sit inside the guard that
+            # unlinks the temp, or that last-flush failure would orphan a .part.
+            await run_in_threadpool(fh.close)
     except BaseException:
-        await run_in_threadpool(fh.close)
         await run_in_threadpool(tmp.unlink, True)  # missing_ok
         raise
-    await run_in_threadpool(fh.close)
     try:
         await run_in_threadpool(os.replace, tmp, dest)
     except BaseException:

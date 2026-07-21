@@ -87,16 +87,16 @@ when you take it.
   _(Filed, not fixed this run: low value — desktop-only path — and the SIMBAD coord-column format varies by
   astroquery version, so a correct fix wants a network check the Scout deferred rather than rush.)_
 
-- **Upload leaves an orphaned `.part` sidecar when the final `close()` flush fails.** Location: `webapp/
-  routers/upload.py:184` — `await run_in_threadpool(fh.close)` sits **outside** the `try/except BaseException`
-  (lines 173-183) that unlinks the temp on a mid-stream failure, so a buffered-write `ENOSPC` surfacing at the
-  final flush leaks the `tempfile.mkstemp(suffix=".part")` sidecar, contradicting the module's stated "on any
-  failure the partial `.part` is removed" guarantee. **Severity: cosmetic** — the caller still reports "not
-  enough disk space" gracefully, the `.part` suffix keeps it out of the scanner glob so it is never ingested
-  (no data corruption); the only cost is leaked disk that accumulates over repeated ENOSPC uploads. Confidence:
-  traced. **Fix:** move the `fh.close()` inside the guarded block (unlink the temp if the flush raises).
-  _(Found by this run's adversarial webapp-router audit; low value — leave to a Builder or bundle with nearby
-  upload work.)_
+- ~~**Upload leaves an orphaned `.part` sidecar when the final `close()` flush fails.**~~ — **FIXED v0.158.1**
+  (Builder 2026-07-21, branch `claude/pensive-faraday-m66efc`). Location: `webapp/routers/upload.py:184` —
+  `await run_in_threadpool(fh.close)` sat **outside** the `try/except BaseException` that unlinks the temp on a
+  mid-stream failure, so a buffered-write `ENOSPC` surfacing at the final flush leaked the
+  `tempfile.mkstemp(suffix=".part")` sidecar, contradicting the module's stated "on any failure the partial
+  `.part` is removed" guarantee. **Fix:** moved the `fh.close()` into a `finally` **inside** the guarded block, so
+  the last-flush flush runs exactly once on every path and a raising close still unlinks the temp. Regression
+  `tests/webapp/test_upload.py::test_stream_to_disk_cleans_up_the_temp_when_the_final_flush_fails` (patches
+  `os.fdopen` to raise `OSError(ENOSPC)` on `close()`; fails-before with an orphaned `.part`, passes-after with
+  none). Severity was cosmetic (leaked disk over repeated ENOSPC uploads; never ingested, no corruption).
 
 _(Scout re-audit 2026-07-21 (v0.156.0 baseline, suite green 1525 passed / 2 skipped): took the standing advice
 to rotate **off** the 20×-clean stacking hot path and swept the least-recently-audited surface with two parallel

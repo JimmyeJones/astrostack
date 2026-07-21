@@ -285,6 +285,42 @@ def test_stream_to_disk_cleans_up_the_temp_when_the_rename_fails(tmp_path, monke
     assert list(tmp_path.glob("*.part")) == []
 
 
+def test_stream_to_disk_cleans_up_the_temp_when_the_final_flush_fails(tmp_path, monkeypatch) -> None:
+    """Regression: a buffered-write ENOSPC that surfaces at the *final* ``close()``
+    flush (not mid-stream) must not orphan the ``.part`` sidecar. The close used to
+    sit outside the unlink guard, so this last-flush failure leaked the temp."""
+    import asyncio
+
+    from webapp.routers import upload as upload_mod
+
+    dest = tmp_path / "Light_001.fit"
+    real_fdopen = upload_mod.os.fdopen
+
+    class _CloseBoomFH:
+        """Wraps the real file handle but raises ENOSPC on close (as a buffered
+        flush would), after really closing the fd so nothing is leaked."""
+
+        def __init__(self, fd: int) -> None:
+            self._real = real_fdopen(fd, "wb")
+
+        def write(self, b: bytes) -> int:
+            return self._real.write(b)
+
+        def close(self) -> None:
+            self._real.close()
+            raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(upload_mod.os, "fdopen", lambda fd, _mode: _CloseBoomFH(fd))
+
+    with pytest.raises(OSError):
+        asyncio.run(upload_mod._stream_to_disk(_FakeUpload([b"AAAA" * 256]), dest))
+
+    # The flush failed, so nothing landed — and the partial temp was removed
+    # rather than left as an orphaned .part (fails-before: it stayed).
+    assert not dest.exists()
+    assert list(tmp_path.glob("*.part")) == []
+
+
 def test_upload_closes_every_part_on_all_paths(client, data_root, tmp_path, monkeypatch) -> None:
     """Regression: each uploaded part is closed on *every* branch — saved, skipped,
     and rejected — not only the streamed-to-disk one. Starlette closes form uploads
