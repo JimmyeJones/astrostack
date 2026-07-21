@@ -47,6 +47,35 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**Master *flat* with an `inf` pixel silently dropped the *entire* flat correction — all
+  vignetting/dust survived into the final image.**~~ — **FIXED v0.142.3** (Scout 2026-07-21, branch
+  `claude/practical-dirac-msab41`; traced + reproduced + regression-tested). Found by a fresh adversarial
+  audit of `seestack/calibrate/`. The master **flat** was the lone non-finite input **not** sanitised at
+  load: `CalibrationMasters.load` (`apply.py:130`) cast it to float32 verbatim, then `mean =
+  float(np.nanmean(flat))` (`apply.py:149`). `nanmean` ignores NaN but **not `inf`**, so a single `inf`
+  pixel made the mean non-finite → the `not np.isfinite(mean)` guard dropped the **whole** flat
+  (`flat_norm=None`), so the final stack kept *all* its vignetting and dust shadows, uncorrected — a
+  wrong image. A `NaN` pixel was already tolerated (ignored by `nanmean`, floored to 1.0 = no correction
+  there), and the master **dark**/**bias** (v0.135.1) and **flat-dark** (v0.136.5) were already sanitised
+  — the flat-dark fix's own comment even anticipates "an imported third-party flat-dark carrying an inf
+  makes the flat's nanmean non-finite and silently drops the whole flat" — but the flat *itself* was
+  never covered, so an `inf` in the flat master (vs the flat-dark) still dropped it. **Reproduced** through
+  the real save→load path: an 8×8 flat with one `inf` pixel → `flat_norm is None` (whole flat dropped);
+  the same flat with a `NaN` instead is kept and the pixel floored to 1.0. **Fix:** map non-finite flat
+  pixels to `NaN` at load (`flat = np.where(np.isfinite(flat), flat, np.nan)`), so an `inf` flows through
+  the existing NaN handling identically — ignored by `nanmean`, floored to 1.0 later. (A flat is
+  *multiplicative*, so `_sanitize_pedestal`'s 0.0 sentinel would be wrong here — NaN is the right "no
+  data" value.) Additive/upgrade-safe: an all-finite flat (the common case, and every `build_master`
+  output — which already emits NaN, not inf, for no-data pixels) is byte-for-byte unchanged; only a
+  hand-crafted/imported flat FITS carrying an `inf` is affected. Regression
+  `tests/test_calibrate.py::test_flat_nonfinite_pixel_does_not_drop_the_whole_flat` (an inf+NaN flat:
+  fail-before drops the whole flat / pass-after keeps it, both no-data pixels floored to 1.0, the real
+  vignetting still corrected). Severity: wrong-result/data-integrity on the calibrate path (silently
+  corrupts the final image), so fixed first per the stacking-engine focus; reachability **low/latent**
+  (no in-repo path emits an inf flat — `build_master` converts inf→NaN, and `register_master` only saves
+  its output — so it bites only a third-party/hand-crafted master, matching the flat-dark item's profile).
+  Confidence: reproduced + fixed.
+
 - ~~**κ-σ two-pass stack path had no `n_used == 0` guard — pass 2 aligning zero frames wrote a silent
   all-NaN master recorded as a *successful* run.**~~ — **FIXED v0.136.4** (Builder 2026-07-17, branch
   `claude/pensive-faraday-y006wo`; traced + reproduced + regression-tested). Found by a fresh adversarial
@@ -3780,6 +3809,28 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+- **NEW (Scout 2026-07-21) — coverage-leveling bins by the quality-*weight* sum, not the true per-pixel
+  *frame count*, so on a quality-weighted mosaic the panel-step removal groups pixels by a fuzzed
+  coverage map.** *(Traced, from the stacking-engine audit; an improvement, not a verified corruption
+  bug.)* `level_by_coverage` (`seestack/bg/coverage_leveling.py:117`) bins pixels by
+  `cov_int = np.rint(cov2d)` where `cov2d` is the accumulator's `coverage` — i.e. `WeightedSumAccumulator._weight`,
+  the **Σ of per-frame weights** (`stacker.py:1192` passes `coverage`, not `frame_cov`). With quality
+  weighting **off** this equals the integer frame count and everything is exact. With quality weighting
+  **on**, the panel structure this pass exists to cancel traces the **frame-count** map (where footprints
+  overlap), but the binning now rounds a *weighted* sum: e.g. two adjacent regions both covered by exactly
+  5 frames can bin to 4 vs 5 (weights 0.9 → Σ=4.5) or two genuinely different-coverage regions can collide
+  into one bin — so a real panel boundary gets a *fuzzed* per-level offset instead of the clean per-count
+  one, mildly degrading the step-removal exactly on the weighted mosaics where it matters. The engine
+  **already computes the exact integer frame count** for precisely this reason —
+  `WeightedSumAccumulator.frame_coverage` (`_count`), threaded to the stacker as `frame_cov` and used for
+  the honest `coverage_min/max` diagnostics — so the fix is cheap: pass `frame_cov` (2-D true frame count)
+  to `level_by_coverage` for the binning while keeping today's behaviour byte-for-byte on the unweighted
+  path (where `frame_cov == rint(coverage)`). **Direction:** better panel-step removal on quality-weighted
+  mosaics; never destroys signal (offsets are still bounded to the measured per-level envelope). Needs a
+  regression that a weighted mosaic with two equal-frame-count panels at slightly different weights levels
+  to a single bin. Additive/upgrade-safe (unweighted stacks and single-target stacks are unchanged).
+  _(S, image quality — PRIORITY 4; matters only when quality weighting **and** a varying-coverage mosaic
+  coincide, so moderate value, but a clean use of data already computed.)_
 - **NEW (Scout 2026-07-21) — when photometric scaling is ON, fold the applied scale into the quality
   weight (inverse-variance), so a hazy sub amplified to match brightness doesn't inject its amplified
   noise at full weight.** *(Traced from a full read of `stack/photometric.py` + `stack/weighting.py` +
@@ -4229,6 +4280,37 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+- **NEW BEGINNER FEATURE (Scout 2026-07-21 #5) — "Night by night": a per-target breakdown of every
+  imaging night, so a beginner can see which nights were good and set a clouded-out night aside.** The
+  §1 owner shoots one target across *many* nights (the Seestar writes a new folder per night). Today the
+  Target page has a **"Last session"** card (`session_recap`, one night) and the Library has a
+  library-wide recap — but there is **no per-target view of *all* the nights that went into this
+  picture**. A non-expert can't tell that (say) 3 of their 7 M31 nights were hazy and are dragging the
+  stack down, and has no easy way to drop a whole bad night — only per-frame QC, which is tedious across
+  thousands of subs. **Feature:** a **"Nights"** card/tab on the Target page listing each capture night
+  (date, sub count, kept vs set-aside, total integration, median FWHM + a plain-language one-word verdict
+  — "sharp" / "soft" / "hazy" derived from the metrics already stored), newest first, with a gentle
+  highlight on a night that's clearly worse than the target's own best. Optional one-click **"Set this
+  night aside"** that rejects that night's subs in bulk (reversible — it sets the same auto-reject the QC
+  path uses, preserving any `user_override`), then offers a re-stack, so a beginner can drop a clouded
+  night and immediately get a cleaner image. **Well-grounded / low-risk:** the hard part already exists —
+  `seestack/session_recap.py::_split_sessions` groups a target's frames into capture-time sessions
+  (6 h gap) and is already reused by the Last-session card and the cross-session drift nudge; frames carry
+  `timestamp_utc` + `exposure_s` + the QC metrics, indexed on `timestamp_utc`. So this is mostly a new
+  pure `nights_breakdown(project)` helper over the existing split + a read-only
+  `GET /api/targets/{safe}/nights` + a Target-page card. **Beginner bar ✔:** plain-language, one obvious
+  optional action, sane default (informational only unless they choose to set a night aside — never
+  auto-rejects), and it directly makes the picture better (drop the bad nights) with far less effort than
+  hand-culling subs. Serves autonomy (P2) + friendliness (P3) + image quality (P4). **Guardrails:**
+  "set aside" is user-confirmed and reversible (auto-reject, never delete; `user_override` preserved);
+  a legitimately faint target's *only* nights must never be auto-culled — the action is opt-in per night,
+  and the verdict is advisory, mirroring the deliberately-conservative drift nudge. Split for the Builder:
+  (a) pure `nights_breakdown(project)` helper + tests (per-night rollups over `_split_sessions`,
+  verdict thresholds reusing the existing FWHM-drift constants; empty/one-night/no-timestamp cases);
+  (b) read-only `GET /api/targets/{safe}/nights`; (c) a "Nights" Target-page card; (d) the optional
+  bulk "set this night aside" reject + re-stack wiring (its own commit — the only non-read-only slice).
+  _(M–L, split as above; PRIORITY 2–3, beginner feature — keeps the pipeline stocked; builds directly on
+  shipped `session_recap` infra so it's low-risk.)_
 - **NEW BEGINNER FEATURE (Scout 2026-07-21 #4) — "Up now, and worth more time": tell the beginner which of
   *their own* targets is best-placed right this minute and would most benefit from more subs.** A beginner on a
   suddenly-clear night faces a blank decision: *what do I point at to get the best return tonight?* The app
