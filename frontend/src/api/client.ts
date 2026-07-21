@@ -182,6 +182,26 @@ export interface TargetProgress {
   goal_s: number | null;
 }
 
+export interface SummaryTarget {
+  safe: string;
+  name: string;
+  total_exposure_s: number;
+  integration_hours: number;
+  n_frames_accepted: number;
+  thumbnail_url: string | null;
+}
+
+export interface LibrarySummary {
+  n_targets_imaged: number;
+  n_subs_kept: number;
+  total_integration_s: number;
+  integration_hours: number;
+  first_light_utc: string | null;
+  longest_target: SummaryTarget | null;
+  most_imaged_target: SummaryTarget | null;
+  heroes: SummaryTarget[];
+}
+
 export interface DashboardStats {
   n_targets: number;
   n_frames: number;
@@ -1075,6 +1095,7 @@ export const api = {
   getStats: () => req<DashboardStats>("/api/stats"),
   getLastNight: () => req<LibrarySessionRecap | null>("/api/last-night"),
   getLibraryProgress: () => req<TargetProgress[]>("/api/library-progress"),
+  getLibrarySummary: () => req<LibrarySummary>("/api/library/summary"),
 
   // storage / housekeeping
   getStorage: () => req<StorageInfo>("/api/storage"),

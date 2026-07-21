@@ -26,6 +26,7 @@ import { CalibrationView } from "./routes/Calibration";
 import { CombineView } from "./routes/Combine";
 import { CompareView } from "./routes/Compare";
 import { TonightView } from "./routes/Tonight";
+import { SkySoFarView } from "./routes/SkySoFar";
 
 // Lazy-load the 3D sky viewer so three.js stays out of the main bundle.
 const SkyView = React.lazy(() =>
@@ -57,6 +58,7 @@ const router = createBrowserRouter([
       { path: "gallery", element: <GalleryView /> },
       { path: "compare", element: <CompareView /> },
       { path: "tonight", element: <TonightView /> },
+      { path: "sky-so-far", element: <SkySoFarView /> },
       { path: "targets/:safe", element: <TargetView /> },
       { path: "targets/:safe/stack", element: <StackView /> },
       { path: "targets/:safe/history", element: <HistoryView /> },

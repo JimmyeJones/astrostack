@@ -4990,27 +4990,40 @@ problems. Dogfood it every big-picture run and fix root causes.
   a Dashboard tile that has QC'd subs but no finished stack yet, so the "did tonight work?" glance is answered on
   the landing page too. Frontend-only, additive; the endpoint already exists. *(S, autonomy/friendliness —
   PRIORITY 2/3.)*
-- **NEW BEGINNER FEATURE (Scout 2026-07-21 #2) — "Your sky, so far": a friendly personal-progress / year-in-review
-  summary of everything the user has imaged.** A beginner accumulates targets, nights and integration hours over a
-  season, but the app never *reflects that back* to them — there's no single place that says "look what you've made".
-  The data already exists (the library DB + each target's `project.sqlite` frames/stack-runs), so an aggregate read-
-  only page can turn a growing library into a satisfying, shareable personal summary — the astro equivalent of a
-  "year in review": **total kept integration hours, number of targets imaged, total subs kept, your longest single
-  target (by integration), your clearest night (best median FWHM / lowest sky), most-imaged object, first light date,
-  and a small grid of your finished pictures** (one hero thumbnail per target, reusing the existing preview render).
-  This serves *enjoy* and *share* directly (a beginner loves seeing their progress add up and showing it off) and
-  gently *motivates* the next clear night. **Slices — (a) backend (S–M):** a pure aggregate helper over the library +
-  per-target DBs → `GET /api/library/summary` returning the tallies + a per-target hero list (frame_id/preview URL,
-  kept integration, best-night stats); all offline, read-only, no new schema. **(b) frontend (S):** a "Your sky, so
-  far" page (linked from the Library/Dashboard) rendering the tallies as plain-language stat cards + the hero grid,
-  with a single "Share this summary" button reusing the existing share-card/PNG export path so the whole summary can
-  go out as one image. **Beginner bar ✔** — no astro jargon, no knobs, every number is something they already
-  understand (hours, nights, pictures); sane default (just shows what's there); purely additive. Upgrade-safe: one
-  read-only endpoint + one page over existing data, no schema/config/default/existing-API change. Reuses the existing
-  preview render, session-recap-style aggregation, and share-card export — no new heavy path.
-  *(M, friendliness/enjoy-share — PRIORITY 3; a genuinely new "reflect my progress back to me" surface, distinct from
-  the per-target session recap / integration goal, which are single-target and in-flight — this is the whole-library
-  view.)*
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-21 #2) — "Your sky, so far": a friendly personal-progress / year-in-review
+  summary of everything the user has imaged.**~~ — **SHIPPED v0.142.0 (first slice)** (Builder 2026-07-21, branch
+  `claude/pensive-faraday-3rfg1k`). A beginner accumulates targets, nights and integration hours over a season, but
+  the app never *reflected that back* to them. New **"Your sky, so far"** page (nav link between Gallery and Tonight)
+  answers "look what I've made" at a glance: **total integration, targets imaged, subs kept, first-light month**, plus
+  two standout cards (**biggest project** by integration, **most-imaged target** by kept subs) and a **hero grid** of
+  finished pictures — each card links straight to that target. **Backend:** new pure `seestack/library_summary.py::
+  summarize_library(targets)` rolls the *registry rows alone* (no per-target `project.sqlite` opened — the tallies all
+  live on the `targets` table) into the summary; a `preview_exists` predicate keeps it pure/unit-testable while the
+  webapp passes a real `Path.exists` check. `GET /api/library/summary` (in `routers/stats.py`) serves it, cached on
+  the app between scans like the sibling roll-ups, with hero thumbnails reusing the existing
+  `/api/targets/{safe}/thumbnail` endpoint (the target's latest stack preview). Returns zeroed tallies / `null`
+  standouts / empty heroes until light is collected (friendly empty state on the page). **Beginner bar ✔** — no
+  jargon, no knobs, every number (hours, targets, subs, month, pictures) is one they already understand; purely
+  additive, off-nothing. Upgrade-safe: one read-only endpoint + one page over existing registry data, no
+  schema/config/default/existing-API change; no new heavy path (registry-only, so cheap even on a big library).
+  Tests: `tests/test_library_summary.py` (6 — empty/zero, empty-target excluded, tallies+standouts, hero ranking &
+  preview filtering, existence predicate honoured, hero cap), `tests/webapp/test_library_summary.py` (4 — empty
+  endpoint, rolls up the fixture library, hero list points at a live thumbnail), `frontend`: `format.test.ts`
+  (+`formatMonthYear`, tz-stable month/year), `SkySoFar.test.tsx` (3 — empty state, tallies/standouts/hero grid with
+  target links, no-pictures note). Python + tsc + vitest + vite build green. **Deferred follow-ups (filed as fresh
+  ideas below):** (1) the "clearest night" stat (best median FWHM / lowest sky) needs a per-target frame read, so it
+  was left out of the registry-only first slice; (2) a single **"Share this summary as one image"** button (compose
+  the tallies + hero grid into one shareable PNG via the share-card path) — the page currently reuses the existing
+  per-picture PNG/JPEG downloads. *(M → shipped as S first slice; friendliness/enjoy-share — PRIORITY 3.)*
+
+- **NEW (Builder 2026-07-21, follow-up to "Your sky, so far" v0.142.0) — add the "clearest night" stat + a
+  compose-to-one-image share button.** The v0.142.0 first slice is registry-only, so it omits two nice-to-haves from
+  the original idea: **(a)** a "your clearest night" tally (best median FWHM / lowest sky background) — needs a
+  per-target frame read (open each `project.sqlite`), so add it as a *separately-cached* enrichment behind the same
+  endpoint (or a sibling `?deep=1`), guarded so it never opens every project on a hot render; **(b)** a single
+  **"Share this summary"** button that composes the tallies + hero grid into one social-ready PNG, reusing the
+  existing share-card/PNG export path (`seestack/sharecard.py`) so the whole "year in review" can go out as one
+  image. Both additive/read-only. *(S–M each, friendliness/enjoy-share — PRIORITY 3.)*
 
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
