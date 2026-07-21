@@ -4972,6 +4972,30 @@ problems. Dogfood it every big-picture run and fix root causes.
   same `iter_stack_runs` rows the info endpoint already reads), guarded so a missing date/count simply omits its
   clause. Beginner bar ✔ (self-explanatory shareable). Guardrails: additive/opt-in-safe (label only; the
   underlying pixels/stretch unchanged); keep the label subtle so it never obscures the picture.
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-21 #11) — "Make it your wallpaper": one-tap export of a finished stack
+  cropped + sized to a phone or desktop background, auto-centred on the target.**~~ — **SHIPPED v0.158.0**
+  (Builder 2026-07-21, branch `claude/pensive-faraday-m66efc`). Built exactly the Scout's slice across engine +
+  webapp + frontend. **Engine:** new pure `seestack/wallpaper.py` — `wallpaper_crop_box(img_w, img_h, aspect_w,
+  aspect_h, target_px=None)` returns the largest target-aspect rectangle that fits, centred on the target pixel
+  and clamped inside the image (falls back to image centre for a `None`/non-finite target; degenerate inputs
+  yield the whole image); `wallpaper_target_pixel(fits_path, ra, dec, preview_w, preview_h)` maps the target's
+  RA/Dec through the stack's stored celestial WCS to a **preview-grid** pixel (rescaled with the same
+  area-resampling convention as `wcs_dict_rescaled_to_preview`), returning `None` when there's no WCS/position;
+  `render_wallpaper_jpeg(preview_png, preset, target_px)` crops + downscales to the device size **without ever
+  upsampling** (a small preview stays native-resolution, correct shape) and returns share-friendly JPEG bytes;
+  `png_size` + a `WALLPAPER_PRESETS` table (phone 1170×2532 / desktop 1920×1080 / square 1440×1440). **Webapp:**
+  `GET /api/targets/{safe}/stack-runs/{run_id}/wallpaper?aspect=phone|desktop|square` — read-only, transcodes the
+  stored preview PNG (no re-render from linear FITS), centres on the target via the run's WCS + the library
+  target position, 400 on an unknown aspect, 404 on a missing run/preview. Registered **before** the `/{kind}`
+  artifact route so the literal `wallpaper` segment isn't swallowed as an artifact kind. **Frontend:** a
+  `WallpaperMenu` (Phone/Desktop/Square download links via `api.stackWallpaperUrl`) next to the Share/JPEG
+  controls on the History run card. Additive/upgrade-safe: read-only, off nothing, no schema/config/API-shape/
+  default change; the crop never up-samples so it can't invent detail. Tests: `tests/test_wallpaper.py` (+13 —
+  crop-box shapes/centring/clamp/degenerate, WCS target-pixel maps/rescales/None, render downscale/no-upsample,
+  png_size), `tests/webapp/test_wallpaper.py` (+5 — three aspects, unknown-aspect 400, missing-run 404,
+  default-phone, WCS-centring end-to-end via a gradient preview), frontend `WallpaperMenu.test.tsx` (+2). Beginner
+  bar ✔ (one tap, three obvious presets, zero astro knobs, plain language; serves the enjoy + share pillars).
+  *(Original spec kept for provenance.)*
 - **NEW BEGINNER FEATURE (Scout 2026-07-21 #11) — "Make it your wallpaper": one-tap export of a finished stack
   cropped + sized to a phone or desktop background, auto-centred on the target.** *(Beginner feature; PRIORITY 3
   friendliness / "enjoy + share" pillar; size S–M.)* Making your own astrophoto your phone lock-screen is one of

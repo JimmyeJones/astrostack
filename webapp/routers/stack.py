@@ -1076,6 +1076,62 @@ def stack_run_options(safe: str, run_id: int, request: Request) -> dict[str, Any
     return {"run_id": run_id, "options": options}
 
 
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/wallpaper")
+def download_wallpaper(safe: str, run_id: int, request: Request,
+                       aspect: str = "phone") -> Response:
+    """Crop + size the finished stack preview into a ready-to-set wallpaper.
+
+    ``aspect`` is one of ``phone`` / ``desktop`` / ``square``. The preview is
+    cropped to that shape centred on the plate-solved target (falling back to the
+    image centre when the run has no WCS or the target has no known position),
+    downscaled to a sane device resolution without upsampling, and returned as a
+    share-friendly JPEG. Read-only: nothing on disk changes.
+
+    Registered *before* the ``/{kind}`` artifact route below so the literal
+    ``wallpaper`` path segment isn't swallowed as an artifact kind.
+    """
+    from seestack.wallpaper import (
+        WALLPAPER_PRESETS,
+        png_size,
+        render_wallpaper_jpeg,
+        wallpaper_target_pixel,
+    )
+
+    preset = WALLPAPER_PRESETS.get(aspect)
+    if preset is None:
+        raise HTTPException(status_code=400, detail="Unknown wallpaper aspect")
+
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
+        entry = lib.find_target(safe)
+    finally:
+        proj.close()
+        lib.close()
+    if run is None:
+        raise HTTPException(status_code=404, detail="No such run")
+    png_path = run.preview_path
+    if not png_path or not Path(png_path).exists():
+        raise HTTPException(status_code=404, detail="No preview for this run")
+
+    preview = Path(png_path).read_bytes()
+    # Locate the target in the preview grid from the run's own WCS; None → centre.
+    target_px = None
+    ra = entry.ra_deg if entry is not None else None
+    dec = entry.dec_deg if entry is not None else None
+    if ra is not None and dec is not None and run.fits_path:
+        size = png_size(preview)
+        if size is not None:
+            target_px = wallpaper_target_pixel(run.fits_path, ra, dec, size[0], size[1])
+
+    data = render_wallpaper_jpeg(preview, preset, target_px)
+    filename = f"{run.output_basename}_{aspect}_wallpaper.jpg"
+    return Response(
+        content=data, media_type="image/jpeg",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/{kind}")
 def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
                        north_up: bool = False) -> Response:
