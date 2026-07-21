@@ -143,6 +143,14 @@ export interface StackHealth {
   notes: HealthNote[];
 }
 
+export interface BestFrame {
+  frame_id: number | null;
+  captured_utc: string | null;
+  fwhm_px: number | null;
+  star_count: number | null;
+  n_accepted: number;
+}
+
 export interface TargetNight {
   name: string;
   safe: string;
@@ -834,6 +842,8 @@ export const api = {
       `/api/targets/${safe}/stack-health` +
         (runId != null ? `?run_id=${runId}` : ""),
     ),
+  bestFrame: (safe: string) =>
+    req<BestFrame>(`/api/targets/${safe}/best-frame`),
   getIntegrationGoal: (safe: string) =>
     req<{ goal_s: number | null }>(`/api/targets/${safe}/integration-goal`),
   setIntegrationGoal: (safe: string, goalS: number | null) =>

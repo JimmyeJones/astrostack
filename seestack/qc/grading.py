@@ -326,6 +326,36 @@ def grade_frames(
     return report
 
 
+def best_frame(frames: list[FrameRow]) -> FrameRow | None:
+    """Pick the single sharpest accepted sub for an at-a-glance "first look".
+
+    Ranks by sharpness first (**lowest FWHM** — the most direct proxy for a
+    well-focused, steady sub), tie-broken by **star count** (more detected stars
+    = better focus/transparency), then by frame id for a stable, deterministic
+    result. Only *accepted* frames carrying a finite FWHM are eligible, so the
+    pick reflects a QC'd sub the stack would actually use; a frame the user set
+    aside is never offered as the night's best look.
+
+    Returns ``None`` when no accepted frame carries a usable FWHM yet (nothing is
+    QC'd), so the caller can show its pre-QC empty state rather than a bogus pick.
+    Pure function over frame rows — no I/O.
+    """
+    def stars(f: FrameRow) -> float:
+        s = f.star_count
+        return float(s) if s is not None and math.isfinite(float(s)) else -1.0
+
+    eligible = [
+        f for f in frames
+        if f.accept and f.id is not None
+        and f.fwhm_px is not None and math.isfinite(float(f.fwhm_px))
+    ]
+    if not eligible:
+        return None
+    # min() over (FWHM asc, stars desc, id asc): sharpest, then most stars, then
+    # the earliest id as a stable deterministic tiebreak.
+    return min(eligible, key=lambda f: (float(f.fwhm_px), -stars(f), f.id))
+
+
 def apply_grade_report(project, report: GradeReport) -> list[int]:
     """
     Reject the recommended frames in ``project``. Returns the ids actually
