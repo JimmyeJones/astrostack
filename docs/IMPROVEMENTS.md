@@ -47,8 +47,34 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**A frame that fails a plate-solve, then succeeds on a later retry, keeps its stale `solve_failed:`
+  reject reason — showing a contradictory "plate-solve failed" chip on a now-solved frame and inflating the
+  Target page's solve-failure banner.**~~ — **FIXED v0.158.2** (Scout 2026-07-21, branch
+  `claude/kind-mccarthy-omw1sh`; traced + reproduced + regression-tested). Location:
+  `seestack/solve/runner.py::apply_solve_result_to_db` (success branch, ~147-154). The failure branch stores
+  `reject_reason="solve_failed:{reason}"` **without** touching `accept` (a solve failure is often transient, so
+  the frame stays acceptable) — correct. But the success branch wrote `wcs_json` + centre coords and **never
+  cleared** a prior `solve_failed:` reason. Realistic trigger (the exact case the setup-error canonicalisation
+  is built for): ASTAP or its star database is missing → **every** frame gets `solve_failed:no star database`
+  (accept untouched); the owner installs the database and re-runs solve; `build_solve_arglist` re-offers every
+  frame (none has `wcs_json`), they now solve — and each ends up with valid WCS **plus** a stale
+  `solve_failed:no star database` reason. So after a one-time setup fix, every frame still shows as
+  "plate-solve failed" and `reject_reason_counts()` still reports the whole target as failed. This is exactly
+  the stale-reason self-heal the QC path already does (`qc/runner.py` clears a stale `qc_error`/`auto:streak`
+  reason on a clean re-run). **Fix:** on a successful solve, read the existing frame and clear
+  `reject_reason` **iff** it starts with `solve_failed:` — mirroring the QC contract (only ever clears a
+  solve-failure reason; a user/QC/streak reject is left untouched; `accept` is not changed since the failure
+  path never set it). Regressions in `tests/test_solve_runner.py`:
+  `test_apply_solve_result_clears_stale_solve_failed_reason` (fail→retry-succeed clears the reason;
+  fails-before / passes-after) and `test_apply_solve_result_preserves_a_user_reject_on_success` (a manual
+  `user` reject survives a successful solve). Additive/upgrade-safe: pure control-flow on the write-back, one
+  extra `get_frame` SELECT per solved frame (negligible against subprocess solve time), no schema/config/API/
+  default change. Severity: broken-UX / wrong-status (display + banner, not the stacked pixels — `accept`
+  stays correct, so the frame stacks either way). Confidence: reproduced + fixed. _(Found by this run's
+  adversarial `qc/*` + `solve/*` audit.)_
+
 - ~~**The night planner skips tonight's remaining darkness after local midnight — tells a pre-dawn user the next
-  window is *tomorrow* when hours of usable darkness remain *right now*.**~~ — **FIXED v0.158.2** (Builder
+  window is *tomorrow* when hours of usable darkness remain *right now*.**~~ — **FIXED v0.158.3** (Builder
   2026-07-21, branch `claude/pensive-faraday-kodolb`; reproduced + regression-tested). Root cause in
   `seestack/nightplan.py::_find_dark_window`, which locked onto the solar noon *following* `when_utc` and scanned
   noon→next-noon, so a night that started *before* that noon (the one the user is currently inside) was excluded;
@@ -139,6 +165,35 @@ when you take it.
   `tests/webapp/test_upload.py::test_stream_to_disk_cleans_up_the_temp_when_the_final_flush_fails` (patches
   `os.fdopen` to raise `OSError(ENOSPC)` on `close()`; fails-before with an orphaned `.part`, passes-after with
   none). Severity was cosmetic (leaked disk over repeated ENOSPC uploads; never ingested, no corruption).
+
+_(Scout re-audit 2026-07-21 (v0.158.1 baseline, suite green 1559 passed / 2 skipped): ran three parallel
+adversarial subagent audits + my own hand-trace/verification. **(1) Stacking-engine hot path**
+(`stacker.py` all four combine branches / photometric pass-1↔pass-2 parity / memory guard,
+`accumulator.py` WeightedSum + MinMaxReject + Welford update-order in `add`/`add_window`,
+`weighting.py`/`photometric.py` the 1/s² inverse-variance term): traced **clean** — no constructible
+wrong-pixel/crash; the long clean-audit streak holds. Closest near-misses (all correctly *not* bugs): the
+κ-σ pass-2 "drop a pixel covered in p2 but not p1" asymmetry is deterministically unreachable (same
+alignment mask both passes); the OOM guard ignoring in-flight worker windows is harmless (large-canvas ⇒
+mosaic ⇒ cropped windows, never combine); `estimate_stack` vs `run_stack` frame-count skew only shifts the
+UI refusal threshold, never the pixels. **(2) Un-swept routers + watcher** (`jobs.py`/`logs.py`/`pipeline.py`/
+`calibration.py` routers, `watcher.py` StabilityTracker debounce + stranded-batch re-arm, `webapp/jobs.py`
+JobManager persist/evict/cancel): traced **clean** — no connection-leak, no one-bad-item-500, no
+handle/temp leak with a realistic trigger. Two latent robustness nits noted, *not* filed (no constructible
+trigger): `pipeline.py`/`calibration.py` close proj-then-lib without nesting (would leak lib only if
+`proj.close()` raised, which SQLite autocommit `.close()` does not in practice); `jobs.py` SSE `json.dumps`
+is unguarded but every job body returns plain JSON-safe dicts today. **(3) `qc/*` + `solve/*`** (`metrics.py`
+uint16-safe green-channel + NaN-safe medians, `grading.py` robust-z fallback chain + practical floors +
+MAX_REJECT rail + sign/direction, `streaks.py`, `astap.py` arg build + ini parse + setup-error
+canonicalisation, `solve/runner.py`): the one real bug — the stale `solve_failed:` reason above — was found
+and **fixed this run (v0.158.2)**. Three sub-threshold non-bugs noted and not filed: a `<10`-frame target of
+a *stationary* elongated object (edge-on galaxy) can be mass-rejected `auto:streak` with no reconcile-floor
+escape (documented intentional limitation; marginal-to-stack anyway); an ASTAP rung-1 `TimeoutExpired`
+aborts the faster downsample retry rungs (a missed *solve*, `accept` stays True, not a wrong stack
+decision); `detect_stars` threshold can be 0 on a perfectly flat frame (DAOStarFinder returns None →
+star_count 0, correct-enough, no crash). Net for the run: 1 live-path fix shipped (stale solve reason),
+0 new bugs filed (night-planner after-midnight bug from a prior run remains open for the Builder). Next
+Scout: remaining least-audited surface is `webapp/routers/{editor}.py` (occasionally per §1), `io/scanner.py`,
+`bg/*`, `edit/ops/*`, and `render/*`; re-tread the stack path only sparingly.)_
 
 _(Scout re-audit 2026-07-21 (v0.157.0 baseline, suite green 1539 passed / 2 skipped): ran four parallel
 adversarial subagent audits + my own hand-trace/verification across the whole rotation. **(1) Stacking engine
@@ -3488,6 +3543,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+- **IMPROVEMENT IDEA (Scout 2026-07-21) — a plate-solve timeout on the full-resolution rung should fall
+  through to the faster downsampled retry rungs instead of giving up.** *(Autonomy / image-quality, PRIORITY 2;
+  size S.)* **Why:** `solve/astap.py::solve()` tries a ladder of rungs — full-res, then downsample ×2/×4 — to
+  rescue a noisy/star-poor frame; the coarser rungs run *faster* (fewer pixels) and often succeed where full-
+  res struggles. But `_solve_once` raises `ASTAPError` on `subprocess.TimeoutExpired` (astap.py ~188-205) and
+  the ladder loop has **no try/except around the call** (~263-264), so a *timeout* on rung 1 propagates out and
+  the faster fallback rungs never run — precisely the case the ladder exists to rescue. Result: a frame that
+  would have solved (better mosaic placement, one more usable sub, and — post-v0.158.2 — no stale
+  "plate-solve failed" chip) is left unsolved just because the first, slowest attempt ran long. **Fix
+  direction:** catch a timeout (and other per-rung `ASTAPError`s) inside the ladder so it continues to the next
+  rung; only surface the failure after the *last* rung. Keep `accept` untouched on total failure (unchanged
+  contract). **Testable:** monkeypatch `_solve_once` to time out on rung 0 and succeed on rung 1, assert the
+  frame solves. Upgrade-safe: pure control-flow in the solver; no schema/config/API/default change.
+
 - ~~**NEW (Scout 2026-07-21) — "we found where you observe from": auto-offer to save the FITS-detected
   observing site to Settings.**~~ — **SHIPPED v0.155.0** (Builder 2026-07-21, branch
   `claude/pensive-faraday-yntnt1`). The backend already returns the resolved `observer` lat/lon and
@@ -4527,6 +4596,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+- **IMPROVEMENT IDEA (Scout 2026-07-21) — a small target of a *stationary* elongated object (edge-on galaxy)
+  can have every sub auto-rejected as a "streak" with no reconcile-floor escape.** *(Image-quality / trust,
+  PRIORITY 4; size S–M.)* **Why:** the streak detector (`qc/streaks.py`) is shape-based and per-frame — it
+  flags any bright, long, elongated connected component, which is exactly what an edge-on galaxy (NGC 4565,
+  NGC 891) or a bright dust lane *is* on essentially every sub. `reconcile_streak_rejections`
+  (`qc/runner.py:146-165`) is the safety net that un-rejects a mass streak-flag, but it only engages when
+  `>= 10` eligible frames exist, so on a **small** target (a first short session, `< 10` subs) it never fires
+  and the whole target is silently discarded to `auto:streak` — the beginner sees "0 frames used" on a real
+  object with no explanation. **Fix direction (needs care — leave to Builder):** either lower/scale the
+  reconcile floor for very small targets, or add a "if *nearly all* frames flagged and the flagged component
+  is in the *same* position frame-to-frame, it's a real object, not transient debris → un-flag" heuristic
+  (the streak metrics + WCS/centroid are already computed). Guard it to only ever *un*-reject (never newly
+  reject), mirroring the existing reconcile contract, and respect `user_override`. **Testable:** synthesise a
+  handful of frames with a fixed elongated bright blob, assert they aren't all left `auto:streak`. Pairs well
+  with the "Why were some frames left out?" card above, which would otherwise honestly-but-uselessly report
+  "all your frames were trailed". Upgrade-safe: un-reject-only, additive, opt-in behaviour; no schema/config/
+  API/default change.
+
 - ~~**NEW (Scout 2026-07-21) — coverage-leveling bins by the quality-*weight* sum, not the true per-pixel
   *frame count*, so on a quality-weighted mosaic the panel-step removal groups pixels by a fuzzed
   coverage map.**~~ — **SHIPPED v0.143.1** (Builder 2026-07-21, branch `claude/pensive-faraday-enl8ut`).
@@ -5034,6 +5121,31 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+- **NEW BEGINNER FEATURE (Scout 2026-07-21) — "Why were some frames left out?": a plain-language breakdown of
+  the frames the stack dropped, grouped by reason, with a reassuring verdict.** *(Friendliness / trust,
+  PRIORITY 3; size S–M.)* **Why:** a beginner's stack quietly uses, say, 412 of 500 subs and today they see
+  only the two counts — never *why* 88 were dropped or whether that's normal. That silence reads as "something
+  went wrong with my night" when usually it's healthy (a few satellite trails, some cloud, a couple of soft-
+  focus frames). The raw material already exists and is one call away: `Project.reject_reason_counts()`
+  (`io/project.py:536`) tallies rejected frames by their namespaced `reject_reason` (`qc:fwhm`,
+  `qc:eccentricity`, `qc:transparency`, `auto:streak`, `bulk:streaked`/`bulk:trailed`, `solve_failed:…`,
+  `user`). **Beginner bar:** clears it — it answers "did my night go OK?" in words a non-expert reads, ships
+  with a sane default (just shows the breakdown, no knobs), and is pure explanation, not a pro tool. **Shape /
+  slices — (a) MVP (S):** a server helper `webapp/…` that maps the namespaced reasons into ~5 friendly buckets
+  — *"Trailed frames (satellites/planes)"*, *"Cloud/haze (low transparency)"*, *"Soft focus"*, *"Couldn't
+  plate-solve"*, *"You removed these"* — each with a count and a one-line plain-language note (e.g. "A plane or
+  satellite crossed these — dropping them keeps streaks out of your picture."), plus a single headline verdict
+  from the dropped fraction (`<10%` → "This is normal — a healthy night."; `10–30%` → "A few frames didn't
+  make the cut — still a solid stack."; `>30%` → "A lot of frames were dropped — likely clouds or wind; the
+  stack still used the good ones."). Surface it as a small collapsible card on the Target/result page next to
+  the used/total count. **(b) optional depth (S):** a "show me" link that filters the frame grid to a chosen
+  bucket so a curious user can see the actual trailed/cloudy subs. **Upgrade-safe:** read-only, additive,
+  opt-in display; no schema/config/API/default change — a pure new read over data the DB already holds.
+  **Testable:** unit-test the reason→bucket mapping + verdict thresholds against a synthetic
+  `reject_reason_counts` dict (no FITS needed). **Nice thematic link:** this card is exactly what the stale
+  `solve_failed:` reject-reason bug fixed this run (v0.158.2) would have polluted — after a setup re-solve it
+  would have wrongly shouted "88 couldn't plate-solve" at a beginner whose frames all actually solved.
+
 - **NEW BEGINNER FEATURE (Scout 2026-07-21) — "Did it get better?": A/B compare two finished stacks of the same
   target, side by side with a split slider.** *(Friendliness / trust, PRIORITY 3; size M.)* **Why:** a beginner
   who adds a second night and re-stacks, or reprocesses the same subs with different settings, has no easy way to
@@ -5099,7 +5211,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   *(Original spec kept for provenance.)*
 - **IDEA (Builder 2026-07-21, filed while shipping the wallpaper export) — surface the "Make it your wallpaper"
   menu on the Target/Gallery result surfaces too, and let it honour "North up".** *(Friendliness / PRIORITY 3;
-  size S.)* **PARTIALLY SHIPPED v0.158.3** (Builder 2026-07-21, branch `claude/pensive-faraday-kodolb`) — slice
+  size S.)* **PARTIALLY SHIPPED v0.158.4** (Builder 2026-07-21, branch `claude/pensive-faraday-kodolb`) — slice
   **(a)-Target done**: the `WallpaperMenu` now sits next to the Picture/Share controls on the **Target** page
   toolbar (guarded by `latestRun?.has_preview`, styled to match the toolbar via a new optional `variant` prop on
   the component, default `"light"` so the History card is byte-for-byte unchanged), so a beginner can make a
