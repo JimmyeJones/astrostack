@@ -345,24 +345,14 @@ def _sun_altitudes(stamps_time, location):  # noqa: ANN001, ANN202
     return np.asarray(altaz.alt.deg, dtype=float)
 
 
-def _find_dark_window(observer: Observer, when_utc: datetime) -> DarkWindow | None:
-    """Astronomical dark window around the solar midnight following ``when_utc``.
+def _dark_window_after_noon(location, t_noon: datetime) -> DarkWindow | None:  # noqa: ANN001
+    """Widest astronomical-dark span in the 24 h *after* ``t_noon`` (a local noon).
 
     Scans local-noon → next local-noon so the night sits contiguously in the
     middle (never split across the array ends), then takes the widest contiguous
-    span below the deepest reachable Sun-altitude threshold.
+    span below the deepest reachable Sun-altitude threshold. Returns ``None`` when
+    the Sun never drops far enough (high-summer/polar day).
     """
-    _configure_iers_offline()
-    location = observer.earth_location()
-
-    ref = when_utc.astimezone(timezone.utc)
-    # Local solar noon nearest the reference: highest Sun altitude in ±12 h.
-    noon_stamps, noon_times = _times_grid(ref - timedelta(hours=12),
-                                          ref + timedelta(hours=12), 15.0)
-    noon_alt = _sun_altitudes(noon_times, location)
-    t_noon = noon_stamps[int(np.argmax(noon_alt))]
-
-    # Fine scan across the following 24 h (noon → next noon).
     stamps, times = _times_grid(t_noon, t_noon + timedelta(hours=24), 4.0)
     sun_alt = _sun_altitudes(times, location)
 
@@ -391,6 +381,37 @@ def _find_dark_window(observer: Observer, when_utc: datetime) -> DarkWindow | No
                           end=stamps[best_hi].astimezone(timezone.utc),
                           sun_alt_threshold_deg=threshold)
     return None  # Sun never sets tonight.
+
+
+def _find_dark_window(observer: Observer, when_utc: datetime) -> DarkWindow | None:
+    """Astronomical dark window that ``when_utc`` sits in, or the next one after it.
+
+    Anchors on the local solar noon nearest ``when_utc`` and scans the darkness
+    that *follows* that noon. But if ``when_utc`` falls before that noon — i.e. the
+    caller is in the small hours or pre-dawn — they may still be *inside* the
+    previous night's darkness (the one that began the evening before). In that case
+    return that ongoing window rather than skipping ahead to tomorrow night, so a
+    post-midnight user is told about the darkness they can still use *right now*.
+    """
+    _configure_iers_offline()
+    location = observer.earth_location()
+
+    ref = when_utc.astimezone(timezone.utc)
+    # Local solar noon nearest the reference: highest Sun altitude in ±12 h.
+    noon_stamps, noon_times = _times_grid(ref - timedelta(hours=12),
+                                          ref + timedelta(hours=12), 15.0)
+    noon_alt = _sun_altitudes(noon_times, location)
+    t_noon = noon_stamps[int(np.argmax(noon_alt))]
+
+    # When the reference is before the nearest noon (small hours / pre-dawn), the
+    # user may still be inside the *previous* night's darkness; prefer that ongoing
+    # window if ``when_utc`` hasn't passed its end yet.
+    if ref < t_noon:
+        prev = _dark_window_after_noon(location, t_noon - timedelta(hours=24))
+        if prev is not None and ref < prev.end:
+            return prev
+
+    return _dark_window_after_noon(location, t_noon)
 
 
 def moon_illumination(when_utc: datetime) -> float:
@@ -796,9 +817,16 @@ def next_observing_windows(
     d = start_utc.date()
     anchor = datetime(d.year, d.month, d.day, 12, 0, 0, tzinfo=timezone.utc) - timedelta(
         hours=observer.lon_deg / 15.0)
+    # If the caller is before that date's local noon (small hours / pre-dawn), the
+    # night they're currently inside began the *previous* evening — anchor one day
+    # earlier so offset 0 lands on that ongoing window, and scan one extra night to
+    # keep the same forward horizon. The past-window/clip guards below drop or trim
+    # it as needed, so a pre-dawn user still sees the darkness they can use tonight.
+    shift = 1 if start_utc < anchor else 0
+    anchor -= timedelta(days=shift)
 
     out: list[NextObservingWindow] = []
-    for offset in range(max(0, nights)):
+    for offset in range(max(0, nights) + shift):
         window = _find_dark_window(observer, anchor + timedelta(days=offset))
         if window is None:
             continue  # Sun never sets that night (high summer) — nothing to plan.
