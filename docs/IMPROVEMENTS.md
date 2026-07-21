@@ -2799,25 +2799,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
-- **NEW (Scout 2026-07-21) — "Walk-away mode": one Settings toggle that turns on the whole unattended
-  bundle, instead of five buried advanced switches.** The full "drop subs in, walk away, come back to a
-  finished, calibrated, edited picture" promise already exists in code — but it's spread across five
-  separate opt-in settings a beginner has to find and understand individually: `auto_stack`,
-  `auto_bind_calibration`, `auto_grade_frames`, `auto_edit_on_autostack`, and (arguably) `mixed_pointing_guard`
-  (all default **off**, correctly, for upgrade-safety). A non-expert never discovers them, so the walk-away
-  experience the app was built for goes unused. Add a single prominent **"Walk-away mode (recommended for
-  a hands-off night)"** toggle on the Settings page with a plain-language explanation of what it does
-  ("stack automatically, use your saved calibration masters, drop obviously-bad subs, and finish the
-  picture for you — all without you lifting a finger"); flipping it **on** sets the sensible bundle of the
-  existing opt-ins, flipping it **off** restores them. **Crucially upgrade-safe:** this is a UI convenience
-  over the *existing* settings — it changes **no defaults** (an upgraded install with the master toggle
-  untouched behaves exactly as today), adds no new persisted field if it's derived from the existing five
-  (or one additive boolean that only *drives* them), and every underlying switch stays individually
-  editable for anyone who wants finer control. Consider a first-run nudge ("Want AstroStack to do it all
-  automatically? Turn on Walk-away mode") so a beginner is *offered* the full autonomy without hunting.
-  Beginner bar ✔ (collapses five expert decisions into one explained yes/no; sane default off; reversible).
-  *(S–M, autonomy/friendliness — PRIORITY 2/3; pure surfacing of already-shipped capability — high value,
-  low risk.)*
+- ~~**NEW (Scout 2026-07-21) — "Walk-away mode": one Settings toggle that turns on the whole unattended
+  bundle, instead of five buried advanced switches.**~~ — **SHIPPED v0.140.0** (Builder 2026-07-21, branch
+  `claude/pensive-faraday-i5lui7`). Added a single prominent **"Walk-away mode"** Switch at the top of the
+  Settings → *Automatic pipeline* section, above the individual toggles, with a plain-language description
+  ("stack each target automatically, use your saved calibration masters, drop obviously-bad subs, skip a
+  batch that looks like two different targets, and finish the picture for you"). Flipping it **on** sets the
+  bundle of five existing opt-ins (`auto_stack`, `auto_edit_on_autostack`, `auto_bind_calibration`,
+  `auto_grade_frames`, `mixed_pointing_guard`) true; **off** clears them; and the master switch's own state
+  is *derived* — it reads "on" exactly when all five are on, so it always mirrors reality even if the user
+  fine-tunes an individual switch below (each stays editable). **Maximally upgrade-safe:** pure frontend
+  convenience over the *existing* settings — **no new persisted field, no backend change, no default flip**
+  (an upgraded install with these untouched behaves exactly as today). Implemented as three pure, exported
+  helpers in `Settings.tsx` (`WALK_AWAY_KEYS`, `walkAwayEnabled(form)`, `withWalkAway(form, on)`) wired to a
+  Mantine `Switch`; the helpers carry the logic so it's unit-tested directly. Tests: `Settings.test.tsx`
+  ("Walk-away mode" describe — off unless all five on / on exactly when all five on / turning it on sets the
+  five without touching unrelated settings and doesn't mutate the input / turning it off clears the five /
+  the bundle is exactly those five keys). Beginner bar ✔ (collapses five expert decisions into one explained
+  yes/no; reversible; individual switches still available). *(Follow-up left for a future run: the optional
+  first-run nudge — "Want AstroStack to do it all automatically? Turn on Walk-away mode" — was not built this
+  slice; file/pick it up separately.)*
 - ~~**NEW (Builder 2026-07-13) — re-QC a frame whose Stage-1 cache was just refreshed after a mid-copy
   ingest.**~~ — **SHIPPED v0.113.1** (Builder 2026-07-13, branch `claude/pensive-faraday-0ishjc`). The
   v0.111.3 fix refreshes a truncated Stage-1 cache to the complete source on a re-scan, but the frame's QC
@@ -4940,21 +4941,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
-- **NEW (Scout 2026-07-21 #2) — `library.py` lacks a *generic* column self-heal, unlike `project.py` (latent
-  upgrade fragility, not currently reachable).** `io/project.py` has `_reconcile_table_columns`, which adds any
-  missing column to a version-stamped-but-incomplete DB with correct defaults (a real belt-and-braces upgrade
-  safety net). `io/library.py::_ensure_columns` (~L190) instead hard-codes a **single** `tags` `ALTER TABLE`, and
-  `_row_to_target` only guards `tags` with an `in row.keys()` check. Today that's fine — evidence (the tags-only
-  guard on both the writer and reader) says `tags` was the *only* late addition to the targets table, so an old
-  library missing any *other* column can't occur. But if a future schema bump ever adds a non-`tags` targets column
-  **without** its own explicit ALTER, an old library missing it would raise `IndexError` on `list_targets` (a hard
-  failure opening the library on upgrade). **Fix (small, safe, pre-emptive):** give `library.py` the same generic
-  `_reconcile_table_columns`-style pass `project.py` already has (declare the expected targets columns + defaults;
-  add any missing one), so a future column can never strand an old library. Additive; a current library is
-  byte-for-byte unchanged (nothing missing → no ALTER). Add an upgrade test that stamps an old library missing a
-  hypothetical column and confirms it opens. (S, infra/upgrade-safety — PRIORITY: low now, but cheap insurance for
-  the "runs on a live install, upgraded in place" invariant in AGENTS.md §9.) Traced + repro'd the current
-  tags-only path is clean; the gap is latent, so filed as infra, not a bug.
+- ~~**NEW (Scout 2026-07-21 #2) — `library.py` lacks a *generic* column self-heal, unlike `project.py` (latent
+  upgrade fragility, not currently reachable).**~~ — **SHIPPED v0.140.1** (Builder 2026-07-21, branch
+  `claude/pensive-faraday-i5lui7`). `io/library.py::_ensure_columns` was a single hard-coded `tags` ALTER; it now
+  mirrors `project.py`'s generic reconcile — a module-level `_authoritative_target_columns()` reads the expected
+  `targets` columns (name/type/notnull/default) from `_REGISTRY_SCHEMA_SQL` via a throwaway in-memory DB
+  (`_EXPECTED_TARGET_COLUMNS`, computed once at import), and `_ensure_columns` additively ALTERs in any column an
+  on-disk registry lacks (guarded by a try/except so reconciliation can never itself fail an open). So a future
+  additive `targets` column can no longer strand an old library on `list_targets` — `_row_to_target` reads
+  `last_stack_preview`/`notes` by name with **no** guard, so a registry missing one would have raised `IndexError`
+  on open. Additive/upgrade-safe: a current-schema registry matches exactly (nothing missing → no ALTER), so it's
+  byte-for-byte unchanged; no schema/config/API/default change. Regression
+  `tests/test_library_tags.py::test_old_library_missing_a_non_tags_column_is_self_healed` (a version-stamped
+  registry missing `last_stack_preview`/`notes`/`tags` opens, backfills all three, and `list_targets` returns
+  cleanly — fail-before `IndexError`/pass-after). Cheap insurance for the "runs on a live install, upgraded in
+  place" invariant (AGENTS.md §9). (S, infra/upgrade-safety.)
 - **NEW (Scout 2026-07-21 #2) — `wcs_io.wcs_from_text` returns a *default* WCS instead of `None` for non-FITS
   garbage — a docstring/contract mismatch (cosmetic, unreachable with real data).** `io/wcs_io.py::wcs_from_text`
   (~L34) documents "Returns None on failure", but `astropy.io.fits.Header.fromstring` tolerates arbitrary garbage

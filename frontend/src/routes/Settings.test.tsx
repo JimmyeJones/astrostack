@@ -4,7 +4,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { autoCastSummaryText, Maintenance, reprocessNudgeText } from "./Settings";
+import {
+  autoCastSummaryText, Maintenance, reprocessNudgeText,
+  WALK_AWAY_KEYS, walkAwayEnabled, withWalkAway,
+} from "./Settings";
 import * as client from "../api/client";
 
 function renderMaintenance() {
@@ -96,6 +99,52 @@ describe("autoCastSummaryText", () => {
       by_cast: { green: 1 }, median_deviation: 0.02,
     });
     expect(msg).toContain("neutral on 0 of 1 auto-edited result;");
+  });
+});
+
+describe("Walk-away mode", () => {
+  it("is off unless every one of the bundled switches is on", () => {
+    expect(walkAwayEnabled({})).toBe(false);
+    // All but one on → still off (the master switch mirrors the real state).
+    const allButOne: Record<string, unknown> = {};
+    WALK_AWAY_KEYS.forEach((k) => (allButOne[k] = true));
+    allButOne[WALK_AWAY_KEYS[0]] = false;
+    expect(walkAwayEnabled(allButOne)).toBe(false);
+  });
+
+  it("is on exactly when all bundled switches are on", () => {
+    const all: Record<string, unknown> = {};
+    WALK_AWAY_KEYS.forEach((k) => (all[k] = true));
+    expect(walkAwayEnabled(all)).toBe(true);
+  });
+
+  it("turning it on sets every bundled switch true without touching others", () => {
+    const before = { auto_qc: true, keep_streaked_frames: false };
+    const after = withWalkAway(before, true);
+    WALK_AWAY_KEYS.forEach((k) => expect(after[k]).toBe(true));
+    // Unrelated settings are preserved untouched.
+    expect(after.auto_qc).toBe(true);
+    expect(after.keep_streaked_frames).toBe(false);
+    // Input is not mutated (returns a fresh object).
+    expect(before).not.toHaveProperty("auto_stack");
+  });
+
+  it("turning it off clears every bundled switch", () => {
+    const on: Record<string, unknown> = { auto_qc: true };
+    WALK_AWAY_KEYS.forEach((k) => (on[k] = true));
+    const after = withWalkAway(on, false);
+    WALK_AWAY_KEYS.forEach((k) => expect(after[k]).toBe(false));
+    expect(after.auto_qc).toBe(true);
+  });
+
+  it("bundles the five hands-off pipeline switches", () => {
+    expect([...WALK_AWAY_KEYS]).toEqual([
+      "auto_stack",
+      "auto_edit_on_autostack",
+      "auto_bind_calibration",
+      "auto_grade_frames",
+      "mixed_pointing_guard",
+    ]);
   });
 });
 

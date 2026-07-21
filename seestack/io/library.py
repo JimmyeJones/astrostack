@@ -83,6 +83,36 @@ CREATE TABLE IF NOT EXISTS targets (
 CREATE INDEX IF NOT EXISTS idx_targets_radec ON targets(ra_deg, dec_deg);
 """
 
+# The ``targets`` registry is the one evolving table (``library_meta`` is a
+# static key/value store), so it's the only one whose columns are reconciled
+# additively on open — see ``Library._ensure_columns``.
+_TARGETS_TABLE = "targets"
+
+
+def _authoritative_target_columns() -> list[tuple]:
+    """The columns the ``targets`` table *should* have, read from the
+    authoritative :data:`_REGISTRY_SCHEMA_SQL` via a throwaway in-memory DB.
+
+    Each entry is ``(name, type, notnull, dflt_value)`` — exactly the fields
+    ``ALTER TABLE ADD COLUMN`` needs to re-add a missing column. Computed once
+    at import so the per-open reconciliation is a couple of cheap ``PRAGMA``
+    reads, not a schema rebuild. Mirrors ``project.py``'s
+    ``_authoritative_columns`` so the library gets the same generic column
+    self-heal a per-target project already has."""
+    ref = sqlite3.connect(":memory:")
+    try:
+        ref.executescript(_REGISTRY_SCHEMA_SQL)
+        # PRAGMA table_info rows are (cid, name, type, notnull, dflt_value, pk).
+        return [
+            (r[1], r[2], r[3], r[4])
+            for r in ref.execute(f"PRAGMA table_info({_TARGETS_TABLE})").fetchall()
+        ]
+    finally:
+        ref.close()
+
+
+_EXPECTED_TARGET_COLUMNS = _authoritative_target_columns()
+
 
 @dataclass
 class TargetEntry:
@@ -188,13 +218,39 @@ class Library:
         self._ensure_columns()
 
     def _ensure_columns(self) -> None:
-        """Add columns introduced by later schema versions to an existing
-        ``targets`` table. ``CREATE TABLE IF NOT EXISTS`` never adds columns,
-        so each additive column needs an explicit, idempotent ALTER."""
+        """Additively add any column the authoritative registry schema defines
+        but an on-disk ``targets`` table lacks — never drops, renames or
+        rewrites. ``CREATE TABLE IF NOT EXISTS`` never adds columns, so a
+        version-stamped-but-incomplete registry (an additive column, past or
+        future, that reached the base schema without a matching ALTER migration)
+        is repaired here rather than bricking an old library on
+        ``list_targets``. This is the same belt-and-braces self-heal
+        ``Project._reconcile_table_columns`` already has. A current-schema
+        registry matches exactly, so nothing is added."""
         assert self._conn is not None
-        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(targets)")}
-        if "tags" not in cols:
-            self._conn.execute("ALTER TABLE targets ADD COLUMN tags TEXT")
+        have = {
+            r["name"]
+            for r in self._conn.execute(f"PRAGMA table_info({_TARGETS_TABLE})")
+        }
+        if not have:
+            return  # table absent entirely — handled by the base-schema recreate
+        for name, ctype, notnull, dflt in _EXPECTED_TARGET_COLUMNS:
+            if name in have:
+                continue
+            coldef = f"{name} {ctype}".strip() if ctype else name
+            if notnull:
+                coldef += " NOT NULL"
+            if dflt is not None:
+                coldef += f" DEFAULT {dflt}"
+            try:
+                self._conn.execute(
+                    f"ALTER TABLE {_TARGETS_TABLE} ADD COLUMN {coldef}"
+                )
+                log.info("Backfilled missing column %s.%s on open", _TARGETS_TABLE, name)
+            except sqlite3.OperationalError as exc:
+                # e.g. a NOT NULL column with no default can't be added to a
+                # populated table; never let reconciliation itself fail an open.
+                log.warning("Could not backfill %s.%s: %s", _TARGETS_TABLE, name, exc)
 
     def _check_schema(self) -> None:
         assert self._conn is not None
