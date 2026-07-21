@@ -54,6 +54,19 @@ describe("rejectionBadge", () => {
     expect(rejectionBadge({ editor_recipe: [], sigma_clip: true })).toBeNull();
     expect(rejectionBadge({ channel_combine: {}, drizzle: true })).toBeNull();
   });
+
+  it("notes in the tooltip when the method was auto-picked", () => {
+    // The resolved method still drives the label; auto_reject only enriches the
+    // tooltip so the user knows it was chosen for them.
+    const mm = rejectionBadge({ auto_reject: true, min_max_reject: true });
+    expect(mm?.label).toBe("min-max");
+    expect(mm?.title).toMatch(/Auto outlier removal picked this/);
+    const sc = rejectionBadge({ auto_reject: true, sigma_clip: true, sigma_kappa: 3 });
+    expect(sc?.label).toBe("σ-clip κ3");
+    expect(sc?.title).toMatch(/Auto outlier removal picked this/);
+    // Without auto_reject the tooltip carries no such note.
+    expect(rejectionBadge({ min_max_reject: true })?.title).not.toMatch(/Auto outlier removal/);
+  });
 });
 
 describe("combineMethodKey", () => {

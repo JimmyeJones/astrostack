@@ -322,6 +322,11 @@ _DESCRIPTORS: list[dict[str, Any]] = [
     # --- simple ---
     {"key": "output_name", "label": "Output name", "type": "str", "group": "simple",
      "help": "Base filename for the stacked outputs."},
+    {"key": "auto_reject", "label": "Auto outlier removal", "type": "bool", "group": "simple",
+     "help": "Picks the best outlier removal for your number of subs — min/max on "
+             "small stacks (where sigma clipping can't catch a lone satellite/plane "
+             "trail), sigma clipping on large ones — so you don't have to choose. "
+             "When on, it overrides the two options below."},
     {"key": "sigma_clip", "label": "Sigma clipping", "type": "bool", "group": "simple",
      "help": "Reject per-pixel outliers (satellites, cosmic rays, planes)."},
     {"key": "sigma_kappa", "label": "Sigma κ", "type": "float", "group": "simple",

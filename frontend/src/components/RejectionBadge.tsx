@@ -33,6 +33,11 @@ export function rejectionBadge(options?: Record<string, unknown> | null): Reject
         : "Combined with drizzle: sub-pixel resampling onto a finer grid. No per-pixel outlier rejection unless drizzle rejection was enabled.",
     };
   }
+  // When "Auto outlier removal" picked the method, the run stores auto_reject
+  // alongside the resolved sigma_clip/min_max_reject, so note that in the tooltip.
+  const autoNote = options.auto_reject
+    ? " Auto outlier removal picked this from your number of subs."
+    : "";
   if (options.min_max_reject) {
     // The default single drop shows as "min-max"; a top/bottom-k trim (k>1)
     // shows the count, e.g. "min-max ×3" for dropping the 3 highest and lowest.
@@ -40,16 +45,16 @@ export function rejectionBadge(options?: Record<string, unknown> | null): Reject
       ? Math.max(1, Math.round(options.min_max_reject_count)) : 1;
     return {
       label: k > 1 ? `min-max ×${k}` : "min-max",
-      title: k > 1
+      title: (k > 1
         ? `Combined by dropping the ${k} highest and ${k} lowest values at each pixel before averaging — removes several satellite / plane trails crossing one pixel across a session.`
-        : "Combined by dropping the single highest and lowest value at each pixel before averaging — removes a lone satellite / plane trail on small stacks where κ-σ can't.",
+        : "Combined by dropping the single highest and lowest value at each pixel before averaging — removes a lone satellite / plane trail on small stacks where κ-σ can't.") + autoNote,
     };
   }
   if (options.sigma_clip) {
     return {
       label: `σ-clip κ${num(options.sigma_kappa ?? 3)}`,
       title:
-        "Combined with κ-σ rejection: at each pixel, values beyond κ standard deviations of the mean are rejected before averaging.",
+        "Combined with κ-σ rejection: at each pixel, values beyond κ standard deviations of the mean are rejected before averaging." + autoNote,
     };
   }
   return null;

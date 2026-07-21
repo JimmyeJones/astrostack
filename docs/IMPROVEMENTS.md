@@ -2954,22 +2954,29 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
-- **NEW (Scout 2026-07-21) — auto-pick the outlier-rejection method from the frame count, so a beginner
-  never has to know κ-σ vs min/max.** Today `sigma_clip` (κ-σ) and `min_max_reject` are separate toggles
-  the user chooses, but they have a hard, count-dependent trade-off a non-expert can't be expected to
-  know: κ-σ **mathematically cannot reject a lone outlier below ~11 frames** (the largest z-score of a
-  point against stats that include it is `(n−1)/√n < κ=3`, as `stacker.py`/`drizzle_path.py` comments
-  already note), so a satellite/plane trail in a small stack survives κ-σ but is caught by the
-  order-statistic min/max drop; conversely min/max ignores quality weights and needlessly trims a sample
-  on huge stacks where κ-σ is strictly better. **Idea:** an `rejection_method="auto"` default that picks
-  min/max for small stacks (roughly `n < ~10-15`) and κ-σ above that — a single well-defaulted decision
-  that gives the beginner the *right* rejection for their data with zero knobs, and still lets an expert
-  force either. Upgrade-safe: add a new enum value defaulting to today's behaviour path for existing
-  configs (don't flip a running install's effective method silently — gate "auto" behind the new default
-  only for fresh installs / explicit opt-in, or make "auto" resolve to κ-σ at the counts where it already
-  fires so no existing large-stack result changes). Ship with a plain-language Stack-form line ("Auto —
-  picks the best outlier removal for your number of subs"). _(M, PRIORITY 2 autonomy + P4 image quality;
-  reduces a real decision the §1 user shouldn't have to make.)_
+- ~~**NEW (Scout 2026-07-21) — auto-pick the outlier-rejection method from the frame count, so a beginner
+  never has to know κ-σ vs min/max.**~~ — **SHIPPED v0.143.0** (Builder 2026-07-21, branch
+  `claude/pensive-faraday-q5qgdb`). Added an opt-in `StackOptions.auto_reject` (default **False** →
+  existing configs and run records byte-for-byte unchanged; no default flip on a running install). When on
+  (and not drizzling), `_resolve_auto_reject(options, n)` picks **min/max** below the κ-effective frame
+  count and **κ-σ** at/above it. That crossover is computed from κ itself by `_auto_kappa_min_frames(κ)` =
+  ⌈((κ+√(κ²+4))/2)²⌉ (the smallest n where a lone point's z-score `(n−1)/√n` can reach κ — 11 at the
+  default κ=3), so a lone satellite/plane trail in a small stack is actually removed (min/max), while large
+  stacks get weight-respecting κ-σ. Resolved once in both `run_stack` and `estimate_stack` (so the memory
+  guard matches the method that runs) via a dedicated `eff` copy; the **resolved** options are persisted in
+  the run record (so the History rejection badge + STACKER FITS card + any re-run reflect what actually ran)
+  with `auto_reject=True` retained to show it was auto-picked. Overrides the `sigma_clip`/`min_max_reject`
+  toggles when set; a no-op on the drizzle path (drizzle has its own two-pass rejection). Frontend: a new
+  descriptor-driven "Auto outlier removal" checkbox on the Stack form (plain-language help); the Stack form's
+  "no rejection → streak will land" warning and the min/max-suggest nudge now treat auto_reject as on, so the
+  feature never trips a spurious advisory; the RejectionBadge tooltip notes when a method was auto-picked.
+  Tests: `tests/test_stack_pipeline.py` (+4 — `_auto_kappa_min_frames` matches the z-score crossover;
+  `_resolve_auto_reject` picks by count / no-op off or on drizzle; a 6-frame streaked stack with only
+  auto_reject on resolves to min/max and clips the planted streak, persisting the resolved method +
+  auto flag; a 12-frame stack resolves to κ-σ), `frontend/.../RejectionBadge.test.tsx` (+1 — the auto note).
+  Upgrade-safe/additive: new field defaulting to today's behaviour, form descriptor added (drift test green),
+  no schema/API/on-disk/default change. Beginner bar ✔ (one explained yes/no removes a real κ-σ-vs-min/max
+  decision a non-expert can't be expected to make). _(PRIORITY 2 autonomy + P4 image quality.)_
 - ~~**NEW (Scout 2026-07-21) — "Walk-away mode": one Settings toggle that turns on the whole unattended
   bundle, instead of five buried advanced switches.**~~ — **SHIPPED v0.140.0** (Builder 2026-07-21, branch
   `claude/pensive-faraday-i5lui7`). Added a single prominent **"Walk-away mode"** Switch at the top of the
