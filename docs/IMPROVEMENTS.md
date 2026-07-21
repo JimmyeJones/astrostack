@@ -3505,6 +3505,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+- **NEW (Builder 2026-07-21, follow-up to the v0.142.4 Sky-map placement fix) — derive the built-in 3D
+  viewer's per-image size/rotation from the stored canvas WCS too, so both sky paths agree.** The v0.142.4
+  fix made the **Aladin overlay's** `wcs` come from the stack's stored canvas WCS (`wcs_dict_rescaled_to_preview`),
+  so it now sits at the canvas's true RA/Dec + orientation. But the sibling `SkyImage.width_deg` /
+  `height_deg` / `rotation_deg` fields — used by the **built-in 3D viewer** (the non-Aladin path in
+  `AladinSky.tsx`/the sphere view) — are still computed in `webapp/routers/sky.py::get_sky` from a *single
+  representative frame's* pixscale + rotation (`_representative_pixscale_rotation` = frame 0), the exact
+  frame-0 extrapolation the Aladin path just stopped using. For a mosaic the built-in viewer therefore still
+  sizes/rotates the tile from one frame's grid, not the union canvas — so the two viewers can disagree on the
+  same run. **Fix:** when the run's master FITS carries a WCS, derive `width_deg`/`height_deg` from the canvas
+  pixel scale (`sqrt|det(CD)|`·canvas_w/h) and `rotation_deg` from the CD matrix orientation
+  (`atan2(CD2_1, CD1_1)` with the RA-flip sign accounted for), falling back to the frame-0 values only when
+  no master WCS exists — mirroring the `wcs` path's fallback. Reuse the already-parsed
+  `celestial_wcs_from_fits` output. Pin the rotation/scale with a known-CD regression test. _(S, PRIORITY 3
+  friendliness + correctness; serves the ⭐ owner-reported Sky page — closes the last frame-0 extrapolation on
+  that page. Note: the built-in viewer's rotation sign is the same convention question the `_tan_wcs` fallback
+  has, but reading it from the **stored** CD sidesteps the hand-rolled sign, same as the Aladin fix did.)_
 - ~~**NEW (Builder audit 2026-07-16) — warn on the Stack form when `min_max_reject` + `quality_weighted`
   are *both* on: min/max silently ignores per-frame weights.**~~ — **SHIPPED v0.135.2** (Builder 2026-07-16,
   branch `claude/pensive-faraday-7huucb`). `MinMaxRejectAccumulator` (`seestack/stack/accumulator.py`) is an
