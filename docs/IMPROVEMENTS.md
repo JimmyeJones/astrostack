@@ -90,6 +90,33 @@ correctness/data-integrity bug found** — the engine and the ingest path remain
 standing conclusion: the highest marginal value is off the stack path; the next Scout should rotate through
 the remaining webapp routers (sky/editor/gallery), `io/merge.py`/`library.py`, `post/`, and `render/`.)_
 
+_(Scout re-audit 2026-07-21 (v0.152.0 baseline, suite green 1504 passed / 2 skipped): took the standing advice
+above and rotated **off** the stacking hot path onto the least-recently-audited surface — the beginner-facing
+compute/render/planning modules where a wrong number or corrupted picture actually reaches the user. Traced
+adversarially, end to end: `post/color_cal.py` (gray-star / Gaia / background-neutral solvers — the Gaia
+per-detection vs per-catalog-row index alignment `color[idx]`/`fluxes[use]` lines up correctly; all three
+solvers clamp scales to `[0.05, 20]` so a colour-biased field can only rescale, never invert/blank a channel;
+`_apply_scale` preserves NaN; the ThreadPoolExecutor Gaia timeout shuts down `wait=False` so it can't hang the
+stack), `io/merge.py` (realpath dedup symmetric with ingest, cache-copy size-guarded, stage-2 deliberately not
+merged, pointing hints carried), `render/orient.py` (North-up: the CCW/`rot90` `k` mapping matches PIL across
+negative angles and the near-90° snap; sign pinned by the astropy marker test), `io/project.py` +
+`io/library.py` **schema migrations** (every step additive `ALTER … ADD COLUMN` guarded by `OperationalError`,
+`_reconcile_table_columns` self-heals column drift on open without ever dropping/rewriting, foreign/empty DBs
+recreate the base schema before stamping the version), `webapp/routers/stats.py` (activity-signature caches
+invalidate on stack/scan; `recent_limit` clamped `[1,100]`; broken projects skipped not 500'd), and the whole
+night-planner path `webapp/routers/plan.py` + `seestack/nightplan.py` (local-solar-noon reference vs longitude,
+`_find_dark_window` widest-contiguous-run with the `-18→-0.833` fallbacks, `moon_illumination` =
+`(1−cos elong)/2`, `moon_is_waxing` via ecliptic-longitude delta, `moon_window` first rise/set interp-crossings,
+`_score` alt/window/Moon blend with the `min_alt ≥ alt_cap` guard, `_observability_batch` horizon-mask floor +
+`moon_up_fraction` weighting, sexagesimal `_parse_angle` sign handling incl. `-0`), plus
+`render/thumbnail.py` beyond the just-fixed `_downsample_rgb` (NaN-preserving stride in `load_stack_rgb`,
+display-space-verbatim guard, RGBA coverage overlay). **No reproducible correctness/data-integrity bug found** —
+these modules are clean and carry the same defensive-comment history as the stack path. Consistent with the long
+clean-audit record: the codebase is mature, and the highest marginal value has genuinely moved to **beginner
+features** (see the new transparency-trend feature filed below) rather than bug-hunting. Next Scout: the
+remaining un-swept surface is `webapp/routers/{sky,gallery,editor,upload,storage,system}.py`, `post/skymap.py`,
+`post/target_id.py`, and `seestack/framing.py`/`objectinfo.py`.)_
+
 - ~~**"One frame vs your stack" reveal (and every raw-sub thumbnail) flattened the single sub's sky to
   ~2–3 tonal levels — a saturated star set the uint8 normalisation ceiling, quantising the faint sky
   away *before* the stretch could show it. The reveal dishonestly hid the very single-sub noise it
@@ -3248,6 +3275,28 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+- **NEW (Scout 2026-07-21) — "we found where you observe from": auto-offer to save the FITS-detected
+  observing site to Settings, so the night planner and Moon/dark-window cues just work with zero config.**
+  *(Autonomy / friendliness; PRIORITY 2–3; size S.)* The "Tonight" planner already resolves the observer
+  location best-effort from a solved frame's FITS header (`plan.py::_detect_site_from_fits` reads `SITELAT`/
+  `SITELONG`, which the Seestar writes) when Settings has none — good. But it does that **on every request**,
+  re-opening projects and probing up to 24 frame headers each time, and the detected site is **never persisted**:
+  the beginner is never told "we know where you are", the Settings location field stays blank, and any other
+  surface that wants a site (a future per-target "best time tonight" strip, Moon-rise cues on the dashboard)
+  can't cheaply reuse it. **Feature:** when the planner detects a site from FITS and Settings has none, surface a
+  one-line, dismissible nudge — *"We found your observing location from your Seestar's frames (lat 51.5°, lon
+  −0.1°). Save it so planning is instant?"* with a one-click **Save**. Saving writes `site_lat`/`site_lon` to
+  Settings (the fields already exist), after which the planner takes the fast Settings path and the location is
+  available app-wide. **Autonomy win:** removes a manual config step the beginner usually doesn't know to do, and
+  cuts the planner's repeated 24-header probe to a one-time detection. **Upgrade-safe / guardrails:** purely
+  additive — the *auto-detect* stays as the silent fallback (unchanged behaviour when the nudge is dismissed or
+  the site can't be read), the write is user-initiated (never a silent settings mutation on a live install), and
+  it only offers when Settings has no site (never overwrites a location the user set). **Builder slice:** (a)
+  `plan.py` already returns `location_source`; add the detected `observer` lat/lon to the response when
+  `location_source=="fits"` (it's already computed) so the frontend has the value to save; (b) reuse the existing
+  Settings PATCH to persist `site_lat`/`site_lon`; (c) a small dismissible banner on the Tonight page (and/or the
+  Settings location field showing the detected value as a "use this" prefill). No new engine work, no schema
+  change (Settings fields exist), read-until-the-user-clicks-Save.
 - **NEW (Scout 2026-07-21) — surface a "match brightness across your subs" nudge when the data actually needs
   it, so the v0.151.0 inverse-variance combine reaches the beginner who benefits most.** *(Autonomy/image-quality;
   PRIORITY 2→4; size S–M.)* v0.151.0 added a genuine image-quality win: with `photometric_normalize` on, a hazy
@@ -4759,6 +4808,44 @@ problems. Dogfood it every big-picture run and fix root causes.
   at 3 h → ~13%). **Slice left for a future run:** the full sparkline "you-are-here on the SNR-vs-subs curve"
   visualization, if the owner wants the picture as well as the sentence — filed as the remaining part of this
   item. Original spec kept below for provenance:
+- **NEW BEGINNER FEATURE (Scout 2026-07-21 #10) — "Clouds & haze through the night": a per-session
+  transparency timeline + plain verdict — the sibling of the shipped Focus-trend card, for the #1 thing that
+  kills a Seestar night.** *(Beginner feature; PRIORITY 3 friendliness / trust; size M.)* Clouds and haze are the
+  single most common reason a beginner's stack comes out thin or noisy — and the app never *explains* it. But it
+  already **measures and stores** what's needed: every accepted sub carries a `transparency_score`
+  (`FrameRow.transparency_score`, written by `qc/metrics.py`) alongside its `timestamp_utc`, and the QC grader
+  already **auto-down-weights** hazy subs — the beginner just never sees *when* the sky went bad. **Feature:** a
+  small read-only **"Clouds & haze through the night"** card on the Target page — an inline SVG sparkline of
+  transparency vs capture time for the target's most recent session (higher line = clearer sky) plus one honest
+  verdict: e.g. *"Clear all night ✓ (steady transparency)"*, or *"Haze rolled in after ~01:10 — your last ~40
+  subs came through a murky sky and were auto-down-weighted in the stack. A clearer night will add more real
+  signal."*, or *"Started hazy, cleared up — the later subs did the heavy lifting."* It answers the beginner's
+  post-session *"what happened last night, and was it me or the sky?"* — and reassures them the app already
+  handled it (the hazy subs counted less), which builds trust in the auto-stack. **This is a near-direct sibling
+  of the just-shipped Focus-trend card (v0.152.0)** — reuse its exact template in `seestack/session_recap.py`:
+  the same `_last_session_frames` split, the same first-third-vs-last-third comparison with belt-and-braces
+  relative+absolute floors (so ordinary transparency wobble never cries "clouds"), and the same
+  `n < MIN_FRAMES → None` self-hide. **One direction flip to get right:** for FWHM *lower* = better, but for
+  transparency *higher* = better, so "degraded" is `late ≤ early × ratio` (a *drop*), not a rise — mirror the
+  verdict logic with the inequality reversed and pick floors suited to the `transparency_score` scale (validate
+  against real stored values; unlike FWHM's px units, transparency is a unitless ratio, so choose the ratio/abs
+  floors from the actual metric distribution rather than copying 1.25/0.6). **Distinct from** the Focus-trend card
+  (sharpness/FWHM — a focus/dew problem you fix with a dew heater) and the per-run `transparency_ratio` "hazy
+  night" badge (one whole-stack verdict): this shows the **shape of the sky's clarity across the night**, so a
+  beginner can see clouds arrive mid-session and know it wasn't their gear. **Beginner bar ✔:** one card, zero
+  knobs, auto verdict + plain language, actionable ("come back on a clearer night"); serves the trust + understand
+  pillars §1 calls out (`annotated results`, showing *why* some subs counted less). **Guardrails:**
+  additive/read-only, best-effort — self-hide below ~6 measured subs or when no accepted sub of the latest session
+  carries a `transparency_score` (older projects predate the metric); off nothing; no schema/config/API-shape
+  change. **Builder slice (mirror the Focus-trend PR exactly):** (a) `session_recap.py::transparency_trend(project)`
+  → `TransparencyTrend | None` with `[TransparencyTrendPoint(t_utc, transparency)]` + `verdict` in
+  {`"clear"`,`"degraded"`,`"cleared"`} and a `degraded_after_utc` for the "clouds rolled in" case, unit-tested for
+  clear / degraded+marker / cleared / min-frame gate / ignores rejected+unmeasured / latest-session-only; (b)
+  `GET /api/targets/{safe}/transparency-trend` → `TransparencyTrendOut | None` (read-only; `null` = self-hide);
+  (c) a `TransparencyTrendCard` on the Target page reusing the `FocusTrendCard` sparkline+verdict pattern and pure
+  `transparencyTrend.ts` helpers (`describeTransparencyTrend`, badge, `sparklinePoints`). Keeps the beginner-feature
+  pipeline stocked; low-risk because the data, the session split, and the whole card pattern already exist and are
+  tested.
 - **NEW BEGINNER FEATURE (Scout 2026-07-21 #2) — "Have I shot enough?": a plain-language integration /
   diminishing-returns meter on the target.** *(Beginner feature; PRIORITY 3 friendliness / trust; size S–M.)*
   The single most common beginner question mid-session is *"is it worth staying up for more subs, or is this
