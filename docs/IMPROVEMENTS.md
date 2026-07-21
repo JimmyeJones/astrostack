@@ -47,10 +47,39 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
-- **⭐ Always-on hot/cold-pixel suppression clips real (undersampled) star cores — dims and colour-shifts every
-  star in the final stack, a coherent per-frame bias that stacking does NOT average out.** *(Stacking-engine
-  data-integrity — treat like an editor bug per §1. Severity: wrong-result. Confidence: reproduced through the
-  real pipeline.)* **Location:** `seestack/bg/hot_pixels.py::_suppress_cpu` (L58-78) / `_suppress_gpu` (L81-100),
+- ~~**⭐ Always-on hot/cold-pixel suppression clips real (undersampled) star cores — dims and colour-shifts every
+  star in the final stack, a coherent per-frame bias that stacking does NOT average out.**~~ — **FIXED v0.158.9**
+  (Builder 2026-07-21, branch `claude/pensive-faraday-dg2fc9`; reproduced + regression-tested). Added a
+  *star-safety gate* to `suppress_hot_cold_pixels` (shared numeric core used by both the CPU/numpy and GPU/cupy
+  paths). A **bright** outlier is repaired only when it looks like a real defect, judged with two facts that
+  separate a hot pixel from an (undersampled) star — because a naive "isolated vs its own 3×3 median" test is
+  *not enough*: after a bilinear debayer an undersampled star aliases into a single-channel checkerboard whose
+  3×3 median collapses to ~sky, so a per-channel isolation test still clips it (measured −17% at FWHM 1.5 on real
+  debayered data). The two discriminators: **(1) a single CFA-site defect lands in ONE colour channel only** —
+  repair if the *other* two channels stay ~sky (`CROSS_CHANNEL_RATIO = 0.15`); **(2) a real star is extended in
+  at least one channel** — repair if **all three** channels have a near-sky neighbourhood there
+  (`ISOLATION_RATIO = 0.05`, "fully isolated"), which also covers the mono path (no debayer) and any achromatic
+  single-pixel transient. Cold/dead (dark) outliers are always repaired. Reproduced the bug through the real
+  order (raw→`bilinear_debayer`→`suppress`): integrated star-luminance loss was **−21% (FWHM 3.0) / −48% (2.0) /
+  −71% (1.5)** before, **≤0.9% / ≤3% after** across FWHM 1.5–3.0 — while still knocking every injected single-CFA
+  hot pixel down to its debayer-halo level (≤0.6× peak, as the drizzle path already expects) and fully removing
+  mono/achromatic single-pixel spikes and dead pixels. All existing `test_hot_pixels.py` **and**
+  `test_drizzle.py::test_drizzle_suppresses_hot_pixels` stay green. Regressions in `tests/test_hot_pixels.py`:
+  `test_undersampled_star_cores_keep_their_flux[3.0/2.0/1.5]` (mono/achromatic path) and
+  `test_debayered_star_cores_keep_their_flux[3.0/2.0/1.5]` (the real raw→debayer→suppress path) — both ≥95–98%
+  flux kept, fail-before at ~29–79% kept; `test_bright_outlier_gate_preserves_colour_balance` (no per-channel
+  differential → no colour cast; fail-before); and `test_debayered_single_cfa_hot_pixel_is_suppressed` +
+  `test_star_field_still_removes_an_injected_hot_pixel` (defects still repaired). Upgrade-safe: a within-function
+  algorithm change (no config/DB/API/on-disk change); `hot_pixel_sigma` still honoured; a couple of extra global
+  `median`s per channel (negligible). Severity: wrong-result (data-integrity — degraded every stack on
+  undersampled data with no knob touched). Confidence: reproduced + fixed. Fix direction was pre-validated by the
+  Scout (branch `claude/kind-mccarthy-202bx3`, commit bd8d272); the shipped cross-channel form is strictly better
+  than the validated absolute-margin form (it also handles the debayer-aliasing case the margin form clipped).
+  _(Original trace below, kept for provenance.)_
+
+  <details><summary>Original bug trace</summary>
+
+  **Location:** `seestack/bg/hot_pixels.py::_suppress_cpu` (L58-78) / `_suppress_gpu` (L81-100),
   wired **on by default** (`suppress_hot_pixels=True`, `hot_pixel_sigma=5.0`) per-frame *after* debayer at
   `seestack/stack/align.py:137,140` (standard path) and `seestack/stack/stacker.py:1581,1584` (drizzle path).
   **Root cause:** the pass flags any pixel whose residual from its 3×3-median exceeds `sigma·MAD-σ` and replaces
@@ -102,6 +131,8 @@ when you take it.
   and pin it with the two regression tests the entry already specifies (star PSF keeps ≥~98% flux; single-pixel
   spike still removed). Confidence now: **reproduced ×2 (two independent Scouts) + fix validated.**
 
+  </details>
+
 - ~~**`bilinear_debayer` wraps modulo 2**16 on an integer (raw 16-bit Bayer) mosaic — every interpolated pixel
   is silently corrupted (60000+60000 → 27232 instead of 60000).**~~ — **FIXED v0.158.5** (Scout 2026-07-21,
   branch `claude/kind-mccarthy-202bx3`; traced + reproduced + regression-tested). Location:
@@ -118,19 +149,21 @@ when you take it.
   to that exact constant, dtype preserved; the float32 path is unchanged and agrees). Severity: wrong-result
   (latent). Confidence: reproduced + fixed. _(Found by this run's adversarial `io/*` audit.)_
 
-- **`_parse_timestamp` stores the same instant two different ways depending on `DATE-OBS` format — normalises
+- ~~**`_parse_timestamp` stores the same instant two different ways depending on `DATE-OBS` format — normalises
   three hardcoded formats to `+00:00` ISO but returns the raw string for others, so ordering/equality on
-  `timestamp_utc` can silently break.** *(Severity: broken-UX / low. Confidence: reproduced.)* Location:
-  `seestack/io/fits_loader.py:410-418`. The loop tries `%Y-%m-%dT%H:%M:%S.%f`, `…%S`, and `%Y-%m-%d %H:%M:%S`,
-  normalising each to timezone-aware ISO, but falls back to `return raw` for anything else. **Repro (reproduced):**
-  `2024-09-12T03:14:55Z` → `'2024-09-12T03:14:55Z'` (raw, un-normalised) and `2024-09-12T03:14:55.1234567`
-  (7 fractional digits — `%f` accepts ≤6) → returned raw, while `2024-09-12T03:14:55.123` →
-  `'2024-09-12T03:14:55.123000+00:00'` and `…55` → `'…55+00:00'`. Trailing-`Z` and >6-digit fractional seconds
-  are both legal FITS. Mostly latent (Seestar writes 3-digit ms, no `Z`), so low priority — but a mixed library
-  (a re-exported or third-party sub) would sort/compare inconsistently. **Fix direction:** parse via a tolerant
-  path (strip a trailing `Z`→`+00:00`, truncate >6 fractional digits, or use `astropy.time.Time`/`dateutil` which
-  is already a dep) and always return the normalised ISO (or `None`), never the raw string; unit-test the `Z` and
-  7-digit cases. _(Found by this run's adversarial `io/*` audit.)_
+  `timestamp_utc` can silently break.**~~ — **FIXED v0.158.10** (Builder 2026-07-21, branch
+  `claude/pensive-faraday-dg2fc9`; reproduced + regression-tested). The three strptime formats are tried first
+  (byte-for-byte unchanged for the Seestar 3-digit-ms common case), and the old `return raw` fallback is replaced
+  by a tolerant `_normalise_iso_datetime` helper: strip a trailing `Z`→UTC, clamp >6 fractional-second digits to
+  microseconds, parse via `datetime.fromisoformat`, assume UTC when no tz is present (and convert an explicit
+  offset to UTC), always returning the same tz-aware ISO string — or `None`, never the raw garbage string. So
+  `…55Z`, `…55` and `…55 ` (space sep) now all yield the identical `2024-09-12T03:14:55+00:00`; a 7/9-digit
+  fraction is clamped not dropped-to-raw; `+02:00` is converted to UTC; unparseable → `None`. Regression
+  `tests/test_fits_loader.py::test_parse_timestamp_normalises_all_legal_forms` (fail-before: `…55Z` came back raw
+  `'…55Z'` ≠ canonical). Upgrade-safe: only affects newly-ingested non-standard headers (existing DB rows
+  untouched; the common Seestar path is unchanged); no config/DB/API change. Severity: broken-UX / low (latent
+  for pure-Seestar libraries; bites a mixed/re-exported library's sort). Confidence: reproduced + fixed. _(Found
+  by an earlier adversarial `io/*` audit.)_
 
 - **Calibration exposure-scaling under-subtracts the pedestal at a master-*bias* no-data pixel (off the default
   path).** *(Severity: wrong-result but very narrow. Confidence: reproduced.)* Location:

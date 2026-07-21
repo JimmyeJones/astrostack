@@ -6,6 +6,7 @@ import pytest
 pytest.importorskip("astropy")
 
 from seestack.io.fits_loader import (  # noqa: E402
+    _parse_timestamp,
     bilinear_debayer,
     load_header,
     load_seestar_raw,
@@ -21,6 +22,34 @@ def test_load_header(tmp_path):
     assert h.bayer_pattern == "RGGB"
     assert h.exposure_s == 10.0
     assert h.timestamp_utc and h.timestamp_utc.startswith("2024-09-12")
+
+
+def test_parse_timestamp_normalises_all_legal_forms():
+    """Regression: ``DATE-OBS`` forms that the three hardcoded strptime patterns
+    miss (a trailing 'Z', >6 fractional digits, an explicit offset) used to be
+    stored as the *raw* string, so the same instant could land in the DB two
+    different ways — silently breaking the lexicographic ``timestamp_utc``
+    ordering/equality that the gallery, sky, stats and stacker all rely on. Every
+    legal form must now normalise to the same tz-aware UTC ISO string."""
+    canonical = "2024-09-12T03:14:55+00:00"
+    # A trailing 'Z' must produce byte-for-byte the same string as no-suffix.
+    assert _parse_timestamp({"DATE-OBS": "2024-09-12T03:14:55Z"}) == canonical
+    assert _parse_timestamp({"DATE-OBS": "2024-09-12T03:14:55"}) == canonical
+    assert _parse_timestamp({"DATE-OBS": "2024-09-12 03:14:55"}) == canonical
+    # >6 fractional digits (legal FITS) are clamped, not rejected to raw.
+    assert (_parse_timestamp({"DATE-OBS": "2024-09-12T03:14:55.1234567"})
+            == "2024-09-12T03:14:55.123456+00:00")
+    assert (_parse_timestamp({"DATE-OBS": "2024-09-12T03:14:55.123456789Z"})
+            == "2024-09-12T03:14:55.123456+00:00")
+    # An explicit non-UTC offset is converted to UTC, not stored verbatim.
+    assert (_parse_timestamp({"DATE-OBS": "2024-09-12T03:14:55+02:00"})
+            == "2024-09-12T01:14:55+00:00")
+    # The common Seestar 3-digit-ms form is unchanged (tz-aware ISO).
+    assert (_parse_timestamp({"DATE-OBS": "2024-09-12T03:14:55.123"})
+            == "2024-09-12T03:14:55.123000+00:00")
+    # Genuinely unparseable → None (never the raw garbage string).
+    assert _parse_timestamp({"DATE-OBS": "not a date"}) is None
+    assert _parse_timestamp({}) is None
 
 
 def test_load_raw_no_debayer(tmp_path):
