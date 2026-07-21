@@ -129,6 +129,18 @@ class CalibrationMasters:
         if flat_path:
             flat, _ = load_master(flat_path)
             flat = np.asarray(flat, dtype=np.float32)
+            # Map non-finite flat pixels to NaN so an ``inf`` is handled exactly
+            # like a NaN below (ignored by ``nanmean`` and floored to 1.0 = no
+            # correction there) instead of poisoning the mean and dropping the
+            # *whole* flat. A flat is multiplicative, so ``_sanitize_pedestal``'s
+            # 0.0 would be wrong here — NaN is the right "no data" sentinel. This
+            # mirrors the flat-dark sanitisation just below; ``build_master``
+            # already emits NaN (not inf) for no-data pixels, so this only bites a
+            # hand-crafted/imported flat FITS carrying an inf. An all-finite flat
+            # (the common case) is byte-for-byte unchanged.
+            if not np.isfinite(flat).all():
+                flat = np.where(np.isfinite(flat), flat, np.nan).astype(
+                    np.float32, copy=False)
             if flat_dark_path:
                 flat_dark, _ = load_master(flat_dark_path)
                 # Sanitize non-finite flat-dark pixels to 0 (= no subtraction

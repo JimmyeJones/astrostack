@@ -47,6 +47,35 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**Master *flat* with an `inf` pixel silently dropped the *entire* flat correction — all
+  vignetting/dust survived into the final image.**~~ — **FIXED v0.142.3** (Scout 2026-07-21, branch
+  `claude/practical-dirac-msab41`; traced + reproduced + regression-tested). Found by a fresh adversarial
+  audit of `seestack/calibrate/`. The master **flat** was the lone non-finite input **not** sanitised at
+  load: `CalibrationMasters.load` (`apply.py:130`) cast it to float32 verbatim, then `mean =
+  float(np.nanmean(flat))` (`apply.py:149`). `nanmean` ignores NaN but **not `inf`**, so a single `inf`
+  pixel made the mean non-finite → the `not np.isfinite(mean)` guard dropped the **whole** flat
+  (`flat_norm=None`), so the final stack kept *all* its vignetting and dust shadows, uncorrected — a
+  wrong image. A `NaN` pixel was already tolerated (ignored by `nanmean`, floored to 1.0 = no correction
+  there), and the master **dark**/**bias** (v0.135.1) and **flat-dark** (v0.136.5) were already sanitised
+  — the flat-dark fix's own comment even anticipates "an imported third-party flat-dark carrying an inf
+  makes the flat's nanmean non-finite and silently drops the whole flat" — but the flat *itself* was
+  never covered, so an `inf` in the flat master (vs the flat-dark) still dropped it. **Reproduced** through
+  the real save→load path: an 8×8 flat with one `inf` pixel → `flat_norm is None` (whole flat dropped);
+  the same flat with a `NaN` instead is kept and the pixel floored to 1.0. **Fix:** map non-finite flat
+  pixels to `NaN` at load (`flat = np.where(np.isfinite(flat), flat, np.nan)`), so an `inf` flows through
+  the existing NaN handling identically — ignored by `nanmean`, floored to 1.0 later. (A flat is
+  *multiplicative*, so `_sanitize_pedestal`'s 0.0 sentinel would be wrong here — NaN is the right "no
+  data" value.) Additive/upgrade-safe: an all-finite flat (the common case, and every `build_master`
+  output — which already emits NaN, not inf, for no-data pixels) is byte-for-byte unchanged; only a
+  hand-crafted/imported flat FITS carrying an `inf` is affected. Regression
+  `tests/test_calibrate.py::test_flat_nonfinite_pixel_does_not_drop_the_whole_flat` (an inf+NaN flat:
+  fail-before drops the whole flat / pass-after keeps it, both no-data pixels floored to 1.0, the real
+  vignetting still corrected). Severity: wrong-result/data-integrity on the calibrate path (silently
+  corrupts the final image), so fixed first per the stacking-engine focus; reachability **low/latent**
+  (no in-repo path emits an inf flat — `build_master` converts inf→NaN, and `register_master` only saves
+  its output — so it bites only a third-party/hand-crafted master, matching the flat-dark item's profile).
+  Confidence: reproduced + fixed.
+
 - ~~**κ-σ two-pass stack path had no `n_used == 0` guard — pass 2 aligning zero frames wrote a silent
   all-NaN master recorded as a *successful* run.**~~ — **FIXED v0.136.4** (Builder 2026-07-17, branch
   `claude/pensive-faraday-y006wo`; traced + reproduced + regression-tested). Found by a fresh adversarial
@@ -144,10 +173,10 @@ when you take it.
 
 - ~~**⭐ OWNER-REPORTED (2026-07 — HIGH PRIORITY) — Sky map: irregular mosaics render
   as a black rectangle, and the overlay placement/orientation is off.**~~ — **BOTH HALVES
-  NOW FIXED (Bug 1 v0.134.1, Bug 2 v0.142.3).** Two traced
+  NOW FIXED (Bug 1 v0.134.1, Bug 2 v0.142.4).** Two traced
   bugs on the Sky map page (`frontend/src/routes/AladinSky.tsx` +
   `webapp/routers/sky.py`). **Bug 1 (black box) FIXED v0.134.1; Bug 2 (placement)
-  FIXED v0.142.3** (Builder 2026-07-21, branch `claude/pensive-faraday-q5qgdb`;
+  FIXED v0.142.4** (Builder 2026-07-21, branch `claude/pensive-faraday-q5qgdb`;
   implemented exactly as the Scout's non-blind fix path below — consumes the stored
   canvas WCS, so the rotation-sign gate is sidestepped).
   1. ~~**Black rectangular background around a non-rectangular mosaic.**~~ — **FIXED
@@ -176,7 +205,7 @@ when you take it.
      the uncovered half transparent at the preview's grid; 404 without a preview),
      `test_sky.py` (preview_url now points at `sky-overlay`). Severity: broken-UX
      (ugly on an owner-used page; no data corruption). Confidence: reproduced + fixed.
-  2. ~~**Placement / orientation is approximate.**~~ — **FIXED v0.142.3.** `_tan_wcs`
+  2. ~~**Placement / orientation is approximate.**~~ — **FIXED v0.142.4.** `_tan_wcs`
      (`webapp/routers/sky.py:74`) built the overlay WCS from a *single
      representative frame's* pixscale + rotation (`_representative_pixscale_rotation`
      = the first frame) centred on the run RA/Dec, with a **best-effort rotation
@@ -1798,7 +1827,7 @@ the real webapp stack→edit path.)_
 
 - **Sky-atlas overlay WCS uses a rotation sign that deviates from the FITS/AIPS `CROTA2→CD` convention
   (display-only; needs a real solved frame to validate before flipping — NOT a blind Builder change).**
-  **⚠ LARGELY SUPERSEDED by the v0.142.3 Sky-map placement fix (Bug 2 above):** `get_sky` now places
+  **⚠ LARGELY SUPERSEDED by the v0.142.4 Sky-map placement fix (Bug 2 above):** `get_sky` now places
   the overlay from the stack's **stored canvas WCS** (`wcs_dict_rescaled_to_preview`), so `_tan_wcs` is
   only reached as the **fallback for a run whose master FITS is missing/headerless** (older/edited runs) —
   the ordinary path never hits the suspect sign anymore. The remaining sign issue affects only that
@@ -1923,6 +1952,28 @@ describes them as "likely cloud"/"wind shake" — defensible (both degrade sharp
 real-data-gated (Sky-map placement `_tan_wcs` sign, the dead SExtractor skew-guard, the pixel-threshold
 image-quality items), the feature backlog is shipped down to real-data-gated remainders, and per AGENTS.md §2 a
 clean run that leaves `main` green beats manufacturing marginal work.)_
+
+_(Scout stacking-engine re-audit 2026-07-21 #4 (v0.142.2 baseline — **HEAD after today's two engine
+fixes** #347/#348, suite green **1418 passed / 2 skipped**): re-ran the focus-#1 stacking-engine audit
+*at the current HEAD* so the two fixes that landed today were themselves read in place, not trusted from
+their commit messages. Line-by-line re-trace of the just-changed files —
+`calibrate/apply.py::{_effective_dark,_sanitize_pedestal,load}` (the v0.142.1 exposure-scaling no-data-mask
+fix: `dark_nodata_mask` captured *before* `_sanitize_pedestal`, and `scaled[mask]=0` restores "no
+correction" so a genuinely-no-data dark pixel can't become a `bias·(1−ratio)` pedestal on the
+`scale_dark_to_light` path; the fresh-array write can't mutate the shared master) and
+`drizzle_path.py::{_clip_tolerance,clip_reference,add_frame}` + `stacker.py` drizzle branch (the v0.142.2
+`neff=self._count` gate: rejection now keys on the true unweighted **frame count**, not the pixfrac-deflated
+`out_wht`, so a satellite on a low-coverage edge at pixfrac 0.8 is no longer un-rejectable; Bessel applied to
+the tol only, not the resolution-floor test) — plus a full re-read of `accumulator.py`, `weighting.py`,
+`photometric.py`, `mosaic.py`, `align.py`, `output.py`, `reference.py`, `bg/coverage_leveling.py`,
+`calibrate/masters.py`. **Traced clean — no new reproducible correctness bug**; both new fixes are correct
+and their neighbours hold. Re-confirmed all **three open bugs are still valid and still real-data-gated**
+(Sky-map placement / `_tan_wcs` rotation sign — same underlying bug, with the non-blind stored-WCS fix path
+already written up in the ⭐ entry; the dead SExtractor skew-guard across the 4 bg/leveling helpers; the
+pixel-threshold image-quality items). This run's deliverable is the clean HEAD-level record + one grounded
+image-quality idea (photometric-scale × quality-weight inverse-variance) and one new beginner feature
+("Up now, worth more time"), both below. **No code shipped** — engine hardened, open items gated, green run
+beats churn (AGENTS.md §2).)_
 
 _(Scout stacking-engine audit 2026-07-21 (v0.138.0 baseline, suite green 1385 passed / 2 skipped):
 led the rotation with the stacking engine per the owner's current focus #1. Two parallel repro-driven
@@ -3786,6 +3837,54 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+- **NEW (Scout 2026-07-21) — coverage-leveling bins by the quality-*weight* sum, not the true per-pixel
+  *frame count*, so on a quality-weighted mosaic the panel-step removal groups pixels by a fuzzed
+  coverage map.** *(Traced, from the stacking-engine audit; an improvement, not a verified corruption
+  bug.)* `level_by_coverage` (`seestack/bg/coverage_leveling.py:117`) bins pixels by
+  `cov_int = np.rint(cov2d)` where `cov2d` is the accumulator's `coverage` — i.e. `WeightedSumAccumulator._weight`,
+  the **Σ of per-frame weights** (`stacker.py:1192` passes `coverage`, not `frame_cov`). With quality
+  weighting **off** this equals the integer frame count and everything is exact. With quality weighting
+  **on**, the panel structure this pass exists to cancel traces the **frame-count** map (where footprints
+  overlap), but the binning now rounds a *weighted* sum: e.g. two adjacent regions both covered by exactly
+  5 frames can bin to 4 vs 5 (weights 0.9 → Σ=4.5) or two genuinely different-coverage regions can collide
+  into one bin — so a real panel boundary gets a *fuzzed* per-level offset instead of the clean per-count
+  one, mildly degrading the step-removal exactly on the weighted mosaics where it matters. The engine
+  **already computes the exact integer frame count** for precisely this reason —
+  `WeightedSumAccumulator.frame_coverage` (`_count`), threaded to the stacker as `frame_cov` and used for
+  the honest `coverage_min/max` diagnostics — so the fix is cheap: pass `frame_cov` (2-D true frame count)
+  to `level_by_coverage` for the binning while keeping today's behaviour byte-for-byte on the unweighted
+  path (where `frame_cov == rint(coverage)`). **Direction:** better panel-step removal on quality-weighted
+  mosaics; never destroys signal (offsets are still bounded to the measured per-level envelope). Needs a
+  regression that a weighted mosaic with two equal-frame-count panels at slightly different weights levels
+  to a single bin. Additive/upgrade-safe (unweighted stacks and single-target stacks are unchanged).
+  _(S, image quality — PRIORITY 4; matters only when quality weighting **and** a varying-coverage mosaic
+  coincide, so moderate value, but a clean use of data already computed.)_
+- **NEW (Scout 2026-07-21) — when photometric scaling is ON, fold the applied scale into the quality
+  weight (inverse-variance), so a hazy sub amplified to match brightness doesn't inject its amplified
+  noise at full weight.** *(Traced from a full read of `stack/photometric.py` + `stack/weighting.py` +
+  the `_pass` hot path; theory-grounded, not yet reproduced on real data — file as an idea, gate behind
+  the existing weighting, don't blind-ship.)* Photometric normalization multiplies a hazy frame's pixels
+  by `s = ref/transparency > 1` to gain-match its signal (`_pass`: `win_rgb *= scale`), which **also
+  scales that frame's per-pixel noise by `s`** (multiplying an image multiplies its noise σ by the same
+  factor). The weighted-sum combine then averages with the **quality** weight `w` (geometric mean of the
+  QC factors). For a minimum-variance stack the optimal weight of a frame with noise `s·σ` is `∝ 1/(s·σ)²`
+  — i.e. a photometrically-scaled-up frame should carry an **extra `1/s²`** relative to an unscaled one.
+  Today `w` and `s` are computed and applied **independently** (the module docstrings correctly note they're
+  "orthogonal"), and `w`'s `transparency_factor` only *partially* tracks `s` (it's `√`-shaped and clipped,
+  and is just one of up-to-five geometric-mean factors), so a scaled-up hazy sub is *under-penalised*: its
+  amplified sky noise enters the mean at close to full weight, raising the stacked background RMS more than
+  an inverse-variance combine would. **Idea:** when `photometric_scales` is active, multiply each frame's
+  combine weight by `1/s²` (equivalently pass `w/s²` into `wsum.add_window`), so gain-matching a hazy frame
+  no longer means trusting its amplified noise. Scope carefully: this is the **weighted-sum / κ-σ pass-2**
+  combine only — the κ-σ pass-1 mean/σ and the min/max order-statistic path must stay as they are (pass-1
+  is deliberately unweighted; min/max ignores weights by design), and drizzle already multiplies its
+  weight-map by `w` so the same `w/s²` applies there. Upgrade-safe: only changes results when photometric
+  scaling is on (off by default), so no running install shifts silently; still, verify on a real hazy-night
+  OSC stack that background RMS drops (or is unchanged) and no dim real signal is lost, and add a synthetic
+  regression (two identical frames, one scaled ×2 with ×2 noise → the ×2 frame's weight drops ×4 and the
+  combined noise beats the equal-weight mean). _(M code / S–M validation; PRIORITY 4 image quality + a
+  touch of P2 autonomy — makes "gain-match hazy nights" actually improve SNR instead of quietly diluting
+  it. Found by the 2026-07-21 #4 engine re-audit, which otherwise traced clean.)_
 - ~~**NEW (Builder audit 2026-07-17) — calibrate `flat_dark` is not `_sanitize_pedestal`'d, unlike dark/bias
   (latent, fail-safe today; small blind-safe hardening for consistency).**~~ — **FIXED v0.136.5**
   (Builder 2026-07-17, branch `claude/pensive-faraday-ghypg3`). The v0.135.1 fix runs the master **dark** and
@@ -4209,6 +4308,63 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+- **NEW BEGINNER FEATURE (Scout 2026-07-21 #5) — "Night by night": a per-target breakdown of every
+  imaging night, so a beginner can see which nights were good and set a clouded-out night aside.** The
+  §1 owner shoots one target across *many* nights (the Seestar writes a new folder per night). Today the
+  Target page has a **"Last session"** card (`session_recap`, one night) and the Library has a
+  library-wide recap — but there is **no per-target view of *all* the nights that went into this
+  picture**. A non-expert can't tell that (say) 3 of their 7 M31 nights were hazy and are dragging the
+  stack down, and has no easy way to drop a whole bad night — only per-frame QC, which is tedious across
+  thousands of subs. **Feature:** a **"Nights"** card/tab on the Target page listing each capture night
+  (date, sub count, kept vs set-aside, total integration, median FWHM + a plain-language one-word verdict
+  — "sharp" / "soft" / "hazy" derived from the metrics already stored), newest first, with a gentle
+  highlight on a night that's clearly worse than the target's own best. Optional one-click **"Set this
+  night aside"** that rejects that night's subs in bulk (reversible — it sets the same auto-reject the QC
+  path uses, preserving any `user_override`), then offers a re-stack, so a beginner can drop a clouded
+  night and immediately get a cleaner image. **Well-grounded / low-risk:** the hard part already exists —
+  `seestack/session_recap.py::_split_sessions` groups a target's frames into capture-time sessions
+  (6 h gap) and is already reused by the Last-session card and the cross-session drift nudge; frames carry
+  `timestamp_utc` + `exposure_s` + the QC metrics, indexed on `timestamp_utc`. So this is mostly a new
+  pure `nights_breakdown(project)` helper over the existing split + a read-only
+  `GET /api/targets/{safe}/nights` + a Target-page card. **Beginner bar ✔:** plain-language, one obvious
+  optional action, sane default (informational only unless they choose to set a night aside — never
+  auto-rejects), and it directly makes the picture better (drop the bad nights) with far less effort than
+  hand-culling subs. Serves autonomy (P2) + friendliness (P3) + image quality (P4). **Guardrails:**
+  "set aside" is user-confirmed and reversible (auto-reject, never delete; `user_override` preserved);
+  a legitimately faint target's *only* nights must never be auto-culled — the action is opt-in per night,
+  and the verdict is advisory, mirroring the deliberately-conservative drift nudge. Split for the Builder:
+  (a) pure `nights_breakdown(project)` helper + tests (per-night rollups over `_split_sessions`,
+  verdict thresholds reusing the existing FWHM-drift constants; empty/one-night/no-timestamp cases);
+  (b) read-only `GET /api/targets/{safe}/nights`; (c) a "Nights" Target-page card; (d) the optional
+  bulk "set this night aside" reject + re-stack wiring (its own commit — the only non-read-only slice).
+  _(M–L, split as above; PRIORITY 2–3, beginner feature — keeps the pipeline stocked; builds directly on
+  shipped `session_recap` infra so it's low-risk.)_
+- **NEW BEGINNER FEATURE (Scout 2026-07-21 #4) — "Up now, and worth more time": tell the beginner which of
+  *their own* targets is best-placed right this minute and would most benefit from more subs.** A beginner on a
+  suddenly-clear night faces a blank decision: *what do I point at to get the best return tonight?* The app
+  already knows everything needed to answer it — each target's plate-solved RA/Dec, its integration time so far
+  and sub count (Library / `project.sqlite`), and the visibility maths the **Tonight planner** already runs
+  (altitude vs local time; the planner computes where a target is in the sky). **Feature:** a small
+  "Tonight's best use of your scope" card on the Dashboard/Library that ranks the user's existing targets by a
+  simple, explainable score — *is it up now* (above a sane altitude floor at the current time) **×** *would more
+  subs clearly help* (still-shallow integration counts for more than an already-deep one) — and surfaces the top
+  pick in plain language: *"M31 is high in the sky right now and you've only got 45 min on it — another hour
+  tonight would visibly cut the noise. Point here?"* One-click → open that target / start capture-night view.
+  **Beginner bar ✔:** one obvious recommendation, plain-language *why*, a sane default (only suggests targets
+  that are genuinely up and genuinely under-integrated; silent when nothing qualifies), no expert knobs, and it
+  directly makes the *next* picture better with less thinking. Distinct from the existing entries: the **Tonight
+  planner** answers "is *this* target up on *this* date" (you pick the target); this answers "given *my* library
+  and *right now*, what's the highest-value thing to shoot" (it picks for you). Complements the "per-target
+  integration goal / is-it-enough?" idea (that judges *one* target; this *ranks across* them) and the
+  same-object merge nudge (that deepens split targets; this steers tonight's capture). **Guardrails:** read-only
+  suggestion, never auto-starts capture; the altitude/now maths reuses the planner's tested helpers (don't
+  hand-roll a second ephemeris); degrade gracefully with no location set (fall back to "worth more time" ranking
+  alone, drop the up-now term) so it never errors on a fresh install. Split for the Builder: (a) a pure
+  `rank_targets_for_tonight(targets, now, location) -> [(target, score, reason)]` helper reusing the planner's
+  altitude function + a monotone "more-subs-help" curve, unit-tested (up-now gating, shallow-beats-deep,
+  no-location fallback, empty→[]); (b) a read-only `GET /api/plan/best-tonight` surfacing the ranked list;
+  (c) a dismissible Dashboard/Library card wired to open the top pick. _(M–L, split as above; PRIORITY 2
+  autonomy + P3 friendliness + P4 image quality; beginner feature — keeps the pipeline stocked.)_
 - **NEW BEGINNER FEATURE (Scout 2026-07-21 #3) — "Same object? Combine these into one deep picture":
   auto-suggest merging same-target folders shot on different nights.** The Seestar app writes a
   **new folder per night**, so a beginner who shoots M31 across three clear nights ends up with three

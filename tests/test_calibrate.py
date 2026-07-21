@@ -481,6 +481,37 @@ def test_flat_dark_nonfinite_pixel_does_not_drop_the_whole_flat(tmp_path):
     assert not np.allclose(out, 300.0)
 
 
+def test_flat_nonfinite_pixel_does_not_drop_the_whole_flat(tmp_path):
+    # An imported/third-party master *flat* carrying an inf pixel used to make
+    # the flat's nanmean non-finite, silently dropping the *entire* flat (so all
+    # vignetting/dust correction vanished). A NaN pixel was already tolerated
+    # (nanmean ignores it, floored to 1.0), but inf was not — this completes the
+    # non-finite sanitisation the master dark/bias (v0.135.1) and flat-dark
+    # (v0.136.5) already have. Mapping non-finite flat pixels to NaN keeps the
+    # flat usable; only the one no-data pixel is left uncorrected.
+    flat = np.empty((4, 4), dtype=np.float32)
+    flat[:, :2] = 1000.0  # left  half
+    flat[:, 2:] = 2000.0  # right half — a real vignetting gradient to correct
+    flat[0, 0] = np.inf   # broken imported pixel
+    flat[3, 3] = np.nan   # genuinely no data (already handled; kept as a control)
+    save_master(tmp_path / "flat.fits", flat, MasterMeta("flat", 10, 4, 4, "median"))
+
+    cal = CalibrationMasters.load(flat_path=str(tmp_path / "flat.fits"))
+    # Fails before: the inf made nanmean(flat) inf → flat dropped → flat_norm None
+    # → no flat correction anywhere.
+    assert cal.flat_norm is not None
+    # The two no-data pixels are left uncorrected (floored to 1.0), everything
+    # else normalises around the (finite) mean.
+    assert cal.flat_norm[0, 0] == 1.0  # the former inf pixel
+    assert cal.flat_norm[3, 3] == 1.0  # the NaN pixel
+    assert np.isfinite(cal.flat_norm).all()
+    raw = np.full((4, 4), 1500.0, dtype=np.float32)
+    out = cal.apply_raw(raw)
+    assert np.isfinite(out).all()
+    # The bulk of the flat still corrects (left/right differ), unlike a dropped flat.
+    assert not np.allclose(out, out.flat[0])
+
+
 def test_empty_calibration():
     cal = CalibrationMasters()
     assert cal.is_empty
