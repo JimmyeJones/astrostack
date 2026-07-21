@@ -794,6 +794,14 @@ describe("HistoryView adjustable render", () => {
         (img) => (img.getAttribute("src") || "").includes("north_up=true"));
       expect(rotated).toBe(true);
     });
+
+    // ...and the shared/downloaded JPEG link now carries north_up too, so the
+    // picture the beginner posts is oriented like reference photos.
+    await waitFor(() => {
+      const jpeg = Array.from(document.querySelectorAll("a")).find(
+        (a) => (a.getAttribute("href") || "").includes("/jpeg"));
+      expect(jpeg?.getAttribute("href")).toContain("north_up=true");
+    });
   });
 
   it("hides the North-up toggle when the run has no orientation correction", async () => {

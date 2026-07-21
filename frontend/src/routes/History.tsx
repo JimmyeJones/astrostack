@@ -610,7 +610,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
             <Switch
               size="sm" checked={northUp} onChange={(e) => setNorthUp(e.currentTarget.checked)}
               label="Rotate so North is up"
-              description="Orient the picture like reference photos of this object."
+              description="Orient the picture — and the JPEG you download or share — like reference photos of this object."
             />
           ) : null}
           <Group gap="xs" mt={4}>
@@ -719,10 +719,12 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
             </Tooltip>
           )}
           {run.has_preview && (
-            <Tooltip label="Download the finished picture as a JPEG (smaller — best for sharing)">
+            <Tooltip label={applyNorthUp
+              ? "Download a JPEG oriented so North is up (smaller — best for sharing)"
+              : "Download the finished picture as a JPEG (smaller — best for sharing)"}>
               <Button
                 size="xs" variant="light" leftSection={<IconPhotoDown size={14} />}
-                component="a" href={api.stackArtifactUrl(safe, run.id, "jpeg")}
+                component="a" href={api.stackArtifactUrl(safe, run.id, "jpeg", applyNorthUp)}
               >
                 JPEG
               </Button>
@@ -730,7 +732,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
           )}
           {run.has_preview && (
             <SharePictureButton
-              url={api.stackArtifactUrl(safe, run.id, "jpeg")}
+              url={api.stackArtifactUrl(safe, run.id, "jpeg", applyNorthUp)}
               {...sharePictureText(
                 run.output_basename,
                 new Date(run.timestamp_utc).toLocaleDateString(),
@@ -794,7 +796,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
           : null}
         title={run.output_basename}
         downloadHref={run.has_preview ? api.stackArtifactUrl(safe, run.id, "preview") : undefined}
-        jpegHref={run.has_preview ? api.stackArtifactUrl(safe, run.id, "jpeg") : undefined}
+        jpegHref={run.has_preview ? api.stackArtifactUrl(safe, run.id, "jpeg", applyNorthUp) : undefined}
         rawHref={run.has_fits ? api.stackArtifactUrl(safe, run.id, "fits") : undefined}
         {...(run.has_preview
           ? (() => {

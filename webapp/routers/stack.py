@@ -127,6 +127,17 @@ def get_stack_defaults(safe: str, request: Request) -> dict[str, Any]:
     if raw:
         with contextlib.suppress(json.JSONDecodeError):
             merged.update(json.loads(raw))
+    # For a *never-configured* target (no per-target saved defaults and no
+    # global default_stack_options), turn smart auto outlier removal on in the
+    # form the beginner sees. auto_reject (v0.143.0) picks min/max vs kappa-sigma
+    # from the sub count, so a short first-light stack actually drops a lone
+    # satellite/plane trail plain kappa-sigma is blind to below ~11 frames. This
+    # only seeds the returned form values — the persisted engine default and any
+    # explicitly-saved config are untouched, so a user who ever saved defaults
+    # keeps exactly what they saved and the unattended path is byte-for-byte
+    # unchanged (§9 upgrade-safe: no stored default flips).
+    if not raw and not settings.default_stack_options:
+        merged.setdefault("auto_reject", True)
     # Fill any missing keys from the dataclass defaults via the schema.
     for fld in stack_option_fields():
         merged.setdefault(fld.key, fld.default)
@@ -953,7 +964,8 @@ def stack_run_options(safe: str, run_id: int, request: Request) -> dict[str, Any
 
 
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/{kind}")
-def download_stack_run(safe: str, run_id: int, kind: str, request: Request) -> Response:
+def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
+                       north_up: bool = False) -> Response:
     # "jpeg" is a share-friendly transcode of the stored preview PNG (no separate
     # file on disk), served at the same resolution; the rest map to stored paths.
     if kind not in _KIND_FIELDS and kind != "jpeg":
@@ -971,7 +983,20 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request) -> R
         png_path = run.preview_path
         if not png_path or not Path(png_path).exists():
             raise HTTPException(status_code=404, detail="No preview for this run")
-        data = png_bytes_to_jpeg(Path(png_path).read_bytes())
+        preview = Path(png_path).read_bytes()
+        # north_up rotates the shared picture so celestial North points up (like
+        # reference photos of the object), using the run's own WCS — a no-op (the
+        # bytes are returned untouched) when the run has no WCS or the correction
+        # is trivial, so the ordinary download is byte-for-byte unchanged.
+        if north_up:
+            fits_path = run.fits_path
+            if fits_path and Path(fits_path).exists():
+                from seestack.render.thumbnail import orient_preview_north_up
+                try:
+                    preview = orient_preview_north_up(preview, fits_path)
+                except Exception:  # noqa: BLE001 — a broken FITS just shares the un-oriented preview
+                    pass
+        data = png_bytes_to_jpeg(preview)
         filename = f"{run.output_basename}.jpg"
         return Response(
             content=data, media_type="image/jpeg",
