@@ -146,6 +146,20 @@ def apply_qc_result_to_db(project, result: QCResult, *, auto_reject: bool = True
 STREAK_MASS_REJECT_FRACTION = 0.5
 STREAK_RECONCILE_MIN_FRAMES = 10
 
+# Small-target escape. Below the main floor the plain >50% fraction is too noisy
+# to trust — a tiny target's *couple* of streaks could genuinely be satellites,
+# so a bare majority isn't enough. But a stationary bright extended object (an
+# edge-on galaxy on a beginner's first short session, well under 10 subs) trips
+# the shape-only detector on *essentially every* sub, so a near-total flag rate
+# is still an unambiguous "not transient" signal even on a small target — a lone
+# satellite pass can't produce it. Without this, that first short session was
+# silently discarded to ``auto:streak`` with "0 frames used" and no explanation.
+# Require a higher fraction (near-all) and a floor of a few frames so a single
+# transient can never trigger it; re-accepting stays fail-safe because the
+# stack's own per-pixel sigma-clip/drizzle rejection still cleans any real trail.
+STREAK_RECONCILE_SMALL_MIN_FRAMES = 3
+STREAK_MASS_REJECT_FRACTION_SMALL = 0.8
+
 
 def reconcile_streak_rejections(project) -> list[int]:
     """Re-accept auto:streak frames when they cover a majority of the target.
@@ -162,10 +176,20 @@ def reconcile_streak_rejections(project) -> list[int]:
         if not (f.reject_reason or "").startswith("qc_error")
         and not f.user_override
     ]
-    if len(eligible) < STREAK_RECONCILE_MIN_FRAMES:
-        return []
+    n_eligible = len(eligible)
     streaked = [f for f in eligible if (f.reject_reason or "") == "auto:streak"]
-    if len(streaked) <= STREAK_MASS_REJECT_FRACTION * len(eligible):
+    n_streaked = len(streaked)
+    # Two tiers: a normal-sized target reconciles above a simple majority; a small
+    # target (below the main floor) only above a near-total flag rate — see the
+    # constants above. Below the small floor there's no meaningful fraction, so
+    # leave the frames rejected.
+    if n_eligible >= STREAK_RECONCILE_MIN_FRAMES:
+        fires = n_streaked > STREAK_MASS_REJECT_FRACTION * n_eligible
+    elif n_eligible >= STREAK_RECONCILE_SMALL_MIN_FRAMES:
+        fires = n_streaked > STREAK_MASS_REJECT_FRACTION_SMALL * n_eligible
+    else:
+        fires = False
+    if not fires:
         return []
     restored: list[int] = []
     for f in streaked:

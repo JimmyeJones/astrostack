@@ -3663,6 +3663,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+- ~~**IMPROVEMENT IDEA (Scout 2026-07-21) — a plate-solve timeout on the full-resolution rung should fall
+  through to the faster downsampled retry rungs instead of giving up.**~~ — **SHIPPED v0.158.7** (Builder
+  2026-07-21, branch `claude/pensive-faraday-yr971k`). `ASTAPSolver.solve` (`seestack/solve/astap.py`) now
+  wraps each `_solve_once` rung in `try/except ASTAPError`: a per-rung failure (most often a `TimeoutExpired`
+  on the slow full-res first rung) logs the attempt and falls through to the next, coarser, *faster* rung — the
+  exact frame the ×2/×4 downsample ladder exists to rescue — and the error is surfaced **only after every rung
+  is exhausted** (`raise ASTAPError` with the combined attempts log, preserving the raise-on-total-timeout
+  contract). Contract-safe: the caller (`solve/runner.py::run_solve`) already turns both a raised `ASTAPError`
+  and an unsolved result into `SolveResult(solved=False)` with `accept` untouched, so the only behaviour change
+  is that a first-rung timeout can now *succeed* on a later rung instead of being thrown away. Regressions in
+  `tests/test_astap.py`: `test_adaptive_ladder_survives_a_timeout_on_the_first_rung` (rung 0 times out, a
+  downsampled rung solves → `result.solved`; fails-before because the timeout raised immediately) and
+  `test_adaptive_ladder_raises_only_after_every_rung_times_out` (all rungs time out → raises, but only after
+  trying all `len(_SOLVE_LADDER)` rungs; fails-before with 1 call). Additive/upgrade-safe: pure control-flow in
+  the solver, no schema/config/API/default change. Original spec kept for provenance:
 - **IMPROVEMENT IDEA (Scout 2026-07-21) — a plate-solve timeout on the full-resolution rung should fall
   through to the faster downsampled retry rungs instead of giving up.** *(Autonomy / image-quality, PRIORITY 2;
   size S.)* **Why:** `solve/astap.py::solve()` tries a ladder of rungs — full-res, then downsample ×2/×4 — to
@@ -4352,6 +4367,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+- ~~**IMPROVEMENT IDEA (Scout 2026-07-21) — turn "the storage went read-only" into a plain-language error, not a
+  bare 500, on the frame-write endpoints.**~~ — **SHIPPED v0.158.8** (Builder 2026-07-21, branch
+  `claude/pensive-faraday-yr971k`). The three frame-mutating endpoints in `webapp/routers/frames.py`
+  (`patch_frame`, `bulk_frames`, `auto_grade_apply`) now catch `sqlite3.OperationalError` (SQLite's
+  "attempt to write a readonly database" / "database is locked") around their writes and re-raise as
+  `HTTPException(503, STORAGE_READONLY_MSG)` — *"This target's storage is read-only or locked — check that the
+  library folder / NAS mount is mounted and writable, then try again."* — so a beginner whose ZFS dataset
+  unmounted mid-session gets actionable guidance instead of an opaque 500. The `except` sits at the outer level
+  (above the existing nested `lib.close()` finally), so both DB handles still close on the failure path (the
+  earlier connection-leak fix is preserved and re-asserted). No frontend change needed: the API client's `req`
+  wrapper already extracts the response `detail` and the route mutations already surface `e.message` in a red
+  notification, so the 503 guidance reaches the user's toast verbatim. Upgrade-safe/additive: pure error mapping
+  — success paths and response shapes unchanged, a 503 is a strict superset of the old bare-500. Tests
+  (`tests/webapp/test_api.py`): `test_bulk_frames_readonly_db_returns_503_without_leaking` and
+  `test_patch_frame_readonly_db_returns_503_without_leaking` (monkeypatch `update_frame` to raise
+  `OperationalError` → assert 503 + guidance string + no leaked lib handle; the old
+  `test_bulk_frames_closes_library_when_update_raises`, which asserted the error *propagated*, was updated to
+  the new 503 contract — its no-leak intent kept and strengthened) and `test_auto_grade_apply_readonly_db_returns_503`
+  (patches `apply_grade_report` to raise → deterministic 503). Original spec kept for provenance:
 - **IMPROVEMENT IDEA (Scout 2026-07-21) — turn "the storage went read-only" into a plain-language error, not a
   bare 500, on the frame-write endpoints.** *(Friendliness / PRIORITY 3; size S.)* **Why:** the app is explicitly
   built to survive a NAS mount going read-only or a locked `project.sqlite` (see `system._folder_status`, and the
@@ -4735,6 +4769,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   user with no darks keeps today's behaviour), no schema/config/API change beyond an optional map cache; validate
   on a real Seestar stack that stars are preserved and true hot pixels still vanish. Pillar: image quality + a
   step toward "just works" calibration autonomy.
+- ~~**IMPROVEMENT IDEA (Scout 2026-07-21) — a small target of a *stationary* elongated object (edge-on galaxy)
+  can have every sub auto-rejected as a "streak" with no reconcile-floor escape.**~~ — **SHIPPED v0.158.6**
+  (Builder 2026-07-21, branch `claude/pensive-faraday-yr971k`). Added a **small-target tier** to
+  `reconcile_streak_rejections` (`seestack/qc/runner.py`): below the main `STREAK_RECONCILE_MIN_FRAMES` (10)
+  floor the plain >50% majority is too noisy (a tiny target's couple of streaks could genuinely be satellites),
+  but a stationary bright extended object trips the shape-only detector on *essentially every* sub — so a
+  **near-total flag rate** (`> STREAK_MASS_REJECT_FRACTION_SMALL` = 0.8) on a target of at least
+  `STREAK_RECONCILE_SMALL_MIN_FRAMES` (3) eligible frames now re-accepts them, while a lone transient (below
+  3 frames, or a mere minority) still cannot trigger it. Un-reject-only, never touches a `user_override` or a
+  non-`auto:streak` reason, and stays fail-safe: any genuine trail in a re-accepted frame is still cleaned by
+  the stack's per-pixel sigma-clip/drizzle rejection (the same fallback `keep_streaked_frames` relies on).
+  Additive/upgrade-safe — pure DB reconciliation, no schema/config/API/default change; targets of ≥10 frames
+  are byte-for-byte unchanged. Regressions in `tests/test_qc_streak_reconcile.py`:
+  `test_small_target_all_streaked_is_reconciled` (6 all-streaked subs: fail-before returned `[]` and stacked
+  0 frames / pass-after re-accepts all 6), `test_small_target_minority_streaks_stay_rejected` (2 of 6 stays
+  rejected), and `test_tiny_target_below_small_floor_is_not_reconciled` (2 subs never reconciled). Severity:
+  image-quality/trust — a beginner's first short session on NGC 4565 / NGC 891 / the Sombrero's dust lane no
+  longer silently vanishes to "0 frames used". Original spec kept for provenance:
 - **IMPROVEMENT IDEA (Scout 2026-07-21) — a small target of a *stationary* elongated object (edge-on galaxy)
   can have every sub auto-rejected as a "streak" with no reconcile-floor escape.** *(Image-quality / trust,
   PRIORITY 4; size S–M.)* **Why:** the streak detector (`qc/streaks.py`) is shape-based and per-frame — it
