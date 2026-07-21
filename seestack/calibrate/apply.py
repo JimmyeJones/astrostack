@@ -49,6 +49,13 @@ class CalibrationMasters:
     dark: np.ndarray | None = None
     flat_norm: np.ndarray | None = None
     bias: np.ndarray | None = None
+    # Boolean mask of master-dark pixels that were non-finite before sanitizing
+    # (= "genuinely no data"), or None when the dark is all-finite (the common
+    # real-Seestar case, so no extra array is retained). Used only on the
+    # exposure-scaling path to keep a no-data dark pixel meaning "no correction"
+    # (see :meth:`_effective_dark`); the unscaled path already subtracts the
+    # sanitized 0 there.
+    dark_nodata_mask: np.ndarray | None = None
     dark_path: str | None = None
     flat_path: str | None = None
     bias_path: str | None = None
@@ -100,13 +107,20 @@ class CalibrationMasters:
         from seestack.calibrate.masters import load_master
 
         dark = None
+        dark_nodata_mask = None
         dark_exposure_s = None
         flat_norm = None
         bias = None
         bias_exposure_s = None
         if dark_path:
             dark, dark_meta = load_master(dark_path)
-            dark = _sanitize_pedestal(np.asarray(dark, dtype=np.float32))
+            dark = np.asarray(dark, dtype=np.float32)
+            # Remember which dark pixels are genuinely no-data *before* they're
+            # sanitized to 0, so the exposure-scaling path can keep them at
+            # "no correction" instead of scaling the 0 into a spurious pedestal.
+            nodata = ~np.isfinite(dark)
+            dark_nodata_mask = nodata if bool(nodata.any()) else None
+            dark = _sanitize_pedestal(dark)
             dark_exposure_s = dark_meta.exposure_s
         if bias_path:
             bias, bias_meta = load_master(bias_path)
@@ -143,6 +157,7 @@ class CalibrationMasters:
                 flat_norm = np.where(np.isfinite(fn) & (fn > _FLAT_FLOOR), fn, 1.0
                                      ).astype(np.float32, copy=False)
         return cls(dark=dark, flat_norm=flat_norm, bias=bias,
+                   dark_nodata_mask=dark_nodata_mask,
                    dark_path=dark_path, flat_path=flat_path, bias_path=bias_path,
                    dark_exposure_s=dark_exposure_s, bias_exposure_s=bias_exposure_s,
                    scale_dark_to_light=scale_dark_to_light)
@@ -203,8 +218,17 @@ class CalibrationMasters:
                 and self.dark_exposure_s > 0 and light_exposure_s > 0):
             ratio = float(light_exposure_s) / float(self.dark_exposure_s)
             if abs(ratio - 1.0) > 1e-3:
-                return (self.bias + (dark - self.bias) * ratio).astype(
+                scaled = (self.bias + (dark - self.bias) * ratio).astype(
                     np.float32, copy=False)
+                # A genuinely no-data dark pixel (sanitized to 0) must still mean
+                # "no correction" here, exactly as on the unscaled path. Scaling
+                # turns that 0 into ``bias·(1 − ratio)`` — a spurious pedestal
+                # added into every calibrated light there — so restore 0 at those
+                # pixels. ``scaled`` is a fresh array, so the in-place write can't
+                # mutate the shared master dark/bias.
+                if self.dark_nodata_mask is not None:
+                    scaled[self.dark_nodata_mask] = 0.0
+                return scaled
         return dark
 
     def apply_raw(self, raw: np.ndarray,
