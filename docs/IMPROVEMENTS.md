@@ -48,7 +48,7 @@ fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
 - ~~**Master *flat* with an `inf` pixel silently dropped the *entire* flat correction — all
-  vignetting/dust survived into the final image.**~~ — **FIXED v0.142.2** (Scout 2026-07-21, branch
+  vignetting/dust survived into the final image.**~~ — **FIXED v0.142.3** (Scout 2026-07-21, branch
   `claude/practical-dirac-msab41`; traced + reproduced + regression-tested). Found by a fresh adversarial
   audit of `seestack/calibrate/`. The master **flat** was the lone non-finite input **not** sanitised at
   load: `CalibrationMasters.load` (`apply.py:130`) cast it to float32 verbatim, then `mean =
