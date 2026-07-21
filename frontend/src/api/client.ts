@@ -1095,6 +1095,18 @@ export const api = {
       `/api/targets/${safe}/stack-runs/${id}/progress-info`),
   stackProgressUrl: (safe: string, id: number) =>
     `/api/targets/${safe}/stack-runs/${id}/progress`,
+  // "Night after night" cross-run deepening reel (per target, ≥2 stacks).
+  deepeningReelInfo: (safe: string) =>
+    req<{
+      available: boolean;
+      n_stacks: number;
+      first_subs?: number;
+      last_subs?: number;
+      first_utc?: string | null;
+      last_utc?: string | null;
+      format?: string;
+    }>(`/api/targets/${safe}/deepening-reel/info`),
+  deepeningReelUrl: (safe: string) => `/api/targets/${safe}/deepening-reel`,
   saveStackPreview: (safe: string, id: number, stretch: number, black: number) =>
     req<{ ok: boolean }>(`/api/targets/${safe}/stack-runs/${id}/preview`, {
       method: "POST", body: JSON.stringify({ stretch, black }),
