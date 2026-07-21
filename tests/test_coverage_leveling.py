@@ -180,6 +180,56 @@ def test_smoothing_does_not_extrapolate_a_seam_onto_a_gapped_overlap_level():
     )
 
 
+def test_bins_by_true_frame_count_not_the_weighted_sum():
+    """Under quality weighting the accumulator's ``coverage`` is a Σ-of-weights,
+    not the frame count, so rounding it fuzzes the coverage bins: part of a single
+    real panel (same frame count everywhere) can round into a *separate* bin that
+    then falls below the per-level pixel floor and is skipped — leaving its panel
+    step in the image. Passing the true integer ``frame_coverage`` bins by real
+    coverage, so the whole single-count panel is one level and levels cleanly.
+    """
+    rng = np.random.default_rng(7)
+    h, w = 200, 300
+    # One real panel: every pixel is covered by exactly 6 frames (no true step).
+    frame_cov = np.full((h, w), 6, dtype=np.int32)
+    # Weighted coverage: the bulk sits at Σ≈6.0 (rounds to bin 6); a thin strip's
+    # frames were slightly downweighted to Σ≈5.4 (rounds to bin 5). Same 6 frames
+    # everywhere — the weighted map is the only thing that splits the strip off,
+    # and it's small enough (8×20 = 160 px) to fall below the 200-pixel floor.
+    coverage = np.full((h, w, 3), 6.0, dtype=np.float32)
+    strip = (slice(0, 8), slice(0, 20))
+    coverage[strip[0], strip[1], :] = 5.4
+    # A single uniform sky offset across the whole single-count panel.
+    rgb = (rng.normal(0.0, 3.0, size=(h, w, 3)).astype(np.float32) + 40.0)
+
+    # Old behaviour (bin by the weighted coverage): the strip rounds to bin 5,
+    # falls below the 200-pixel floor, is skipped, and keeps its +40 sky offset.
+    old = level_by_coverage(rgb.copy(), coverage)
+    assert float(np.median(old[strip[0], strip[1], 1])) > 30.0
+
+    # With the true frame count: the strip is part of the single 6-frame bin and
+    # is leveled with the rest of the panel → its sky lands at ~0.
+    new = level_by_coverage(rgb.copy(), coverage, frame_coverage=frame_cov)
+    assert abs(float(np.median(new[strip[0], strip[1], 1]))) < 3.0
+    assert abs(float(np.median(new[..., 1]))) < 3.0
+
+
+def test_frame_coverage_matches_coverage_on_the_unweighted_path():
+    """Byte-for-byte guard: on an unweighted stack ``frame_coverage`` equals the
+    (integer) coverage map, so passing it must not change the result at all."""
+    rng = np.random.default_rng(3)
+    h, w = 160, 220
+    rgb = rng.normal(0.0, 5.0, size=(h, w, 3)).astype(np.float32)
+    coverage = np.zeros((h, w), dtype=np.int32)
+    for cols, lvl, off in zip(np.array_split(np.arange(w), 3),
+                              (2, 5, 9), (10.0, 30.0, -15.0)):
+        coverage[:, cols] = lvl
+        rgb[:, cols, :] += off
+    without = level_by_coverage(rgb.copy(), coverage)
+    withfc = level_by_coverage(rgb.copy(), coverage, frame_coverage=coverage)
+    np.testing.assert_array_equal(without, withfc)
+
+
 def test_uncovered_region_is_left_alone():
     """coverage == 0 pixels (uncovered canvas) must not be touched."""
     rng = np.random.default_rng(1)

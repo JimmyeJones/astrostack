@@ -122,6 +122,22 @@ class SessionRecapOut(BaseModel):
     quality_drift: SessionQualityDriftOut | None = None
 
 
+class NightSummaryOut(BaseModel):
+    """One capture night in the per-target "Nights" breakdown."""
+
+    start_utc: str | None = None
+    end_utc: str | None = None
+    n_frames: int
+    n_kept: int
+    n_set_aside: int
+    exposure_s: float
+    kept_exposure_s: float
+    median_fwhm_px: float | None = None
+    verdict: str                         # "sharp" | "soft" | "hazy" | "" (too few measured)
+    is_best: bool = False
+    reject_buckets: dict[str, int] = {}
+
+
 class HealthNoteOut(BaseModel):
     """One plain-language "How's my stack?" note (see seestack.stackhealth)."""
 

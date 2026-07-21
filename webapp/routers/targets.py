@@ -15,6 +15,7 @@ from webapp.schemas import (
     IntegrationGoalOut,
     IntegrationGoalPatch,
     MergeRequest,
+    NightSummaryOut,
     ObjectInfoOut,
     SessionQualityDriftOut,
     SessionRecapOut,
@@ -188,6 +189,42 @@ def target_session_recap(safe: str, request: Request) -> SessionRecapOut | None:
             else None
         ),
     )
+
+
+@router.get("/{safe}/nights", response_model=list[NightSummaryOut])
+def target_nights(safe: str, request: Request) -> list[NightSummaryOut]:
+    """Every capture night that went into this target, newest first — the
+    "Nights" card. The §1 owner shoots one target across many nights (the Seestar
+    writes a new folder per night), and today there's no per-target view of *all*
+    the nights behind a picture. This lists each night's subs kept vs set aside,
+    integration, median FWHM, and a one-word verdict (sharp / soft / hazy) from
+    metrics already stored, so a clouded-out or soft night is easy to spot. Purely
+    informational and read-only — it never rejects anything. ``[]`` when there's
+    nothing datable (no frame carries a capture time)."""
+    from seestack.session_recap import nights_breakdown
+
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        nights = nights_breakdown(proj)
+    finally:
+        proj.close()
+        lib.close()
+    return [
+        NightSummaryOut(
+            start_utc=n.start_utc,
+            end_utc=n.end_utc,
+            n_frames=n.n_frames,
+            n_kept=n.n_kept,
+            n_set_aside=n.n_set_aside,
+            exposure_s=n.exposure_s,
+            kept_exposure_s=n.kept_exposure_s,
+            median_fwhm_px=n.median_fwhm_px,
+            verdict=n.verdict,
+            is_best=n.is_best,
+            reject_buckets=n.reject_buckets,
+        )
+        for n in nights
+    ]
 
 
 @router.get("/{safe}/stack-health", response_model=StackHealthOut | None)

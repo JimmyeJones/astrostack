@@ -17,6 +17,7 @@ import { formatIntegration } from "../format";
 import { integrationReadiness, readinessColor } from "../readiness";
 import { QueryError } from "../components/QueryError";
 import { ObjectInfoCard, describeObject } from "../components/ObjectInfoCard";
+import { NightsCard } from "../components/NightsCard";
 import { SessionRecapCard } from "../components/SessionRecapCard";
 import { StackHealthCard } from "../components/StackHealthCard";
 import { FirstLookCard } from "../components/FirstLookCard";
@@ -956,6 +957,8 @@ export function TargetView() {
       ) : null}
 
       <SessionRecapCard safe={safe} />
+
+      <NightsCard safe={safe} />
 
       <StackHealthCard safe={safe} />
 

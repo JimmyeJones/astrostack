@@ -1236,7 +1236,12 @@ def run_stack(
     from seestack.bg.coverage_leveling import level_by_coverage
 
     progress("Levelling panels", 0, 1)
-    result_image = level_by_coverage(result_image, coverage)
+    # Bin by the true per-pixel frame count (not the quality-weighted Σ-weight
+    # map) so panel-step removal groups pixels by real coverage even under
+    # quality weighting; ``frame_cov`` is None only on paths where coverage is
+    # already an exact count (min/max), where the fallback is identical.
+    result_image = level_by_coverage(
+        result_image, coverage, frame_coverage=frame_cov)
     progress("Levelling panels", 1, 1)
 
     # ---- 4.5. Final-stack gradient removal (with object masking) ----------

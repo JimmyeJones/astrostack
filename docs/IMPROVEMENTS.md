@@ -3911,9 +3911,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
-- **NEW (Scout 2026-07-21) — coverage-leveling bins by the quality-*weight* sum, not the true per-pixel
+- ~~**NEW (Scout 2026-07-21) — coverage-leveling bins by the quality-*weight* sum, not the true per-pixel
   *frame count*, so on a quality-weighted mosaic the panel-step removal groups pixels by a fuzzed
-  coverage map.** *(Traced, from the stacking-engine audit; an improvement, not a verified corruption
+  coverage map.**~~ — **SHIPPED v0.143.1** (Builder 2026-07-21, branch `claude/pensive-faraday-enl8ut`).
+  `level_by_coverage` gained an optional `frame_coverage` param (the true integer per-pixel count the
+  accumulator already computes for the honest `coverage_min/max` diagnostics); when the caller passes it,
+  binning uses it instead of the Σ-weight `coverage`. The stacker now passes `frame_cov` — so a
+  quality-weighted mosaic groups pixels by real frame count, not a fuzzed weight sum. `frame_coverage`
+  defaults to `None` (bin by `coverage`, unchanged), and on an unweighted stack `frame_coverage ==
+  coverage`, so those paths are byte-for-byte identical (regression
+  `test_frame_coverage_matches_coverage_on_the_unweighted_path`). Fail-before/pass-after regression
+  `test_bins_by_true_frame_count_not_the_weighted_sum` (a single 6-frame panel whose thin strip is
+  downweighted to Σ≈5.4: the old weighted binning rounds the strip to bin 5, drops it below the pixel
+  floor, and leaves its +40 step / the frame-count binning levels the whole panel to ~0). Additive,
+  upgrade-safe (no schema/config/API/default change; only changes results when quality weighting **and**
+  a varying-coverage mosaic coincide). Original trace:
+  *(Traced, from the stacking-engine audit; an improvement, not a verified corruption
   bug.)* `level_by_coverage` (`seestack/bg/coverage_leveling.py:117`) bins pixels by
   `cov_int = np.rint(cov2d)` where `cov2d` is the accumulator's `coverage` — i.e. `WeightedSumAccumulator._weight`,
   the **Σ of per-frame weights** (`stacker.py:1192` passes `coverage`, not `frame_cov`). With quality
@@ -4411,7 +4424,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   beginner feature; keeps the pipeline stocked. Builds directly on shipped share-export + FITS-provenance
   infra, so low-risk.)_
 - **NEW BEGINNER FEATURE (Scout 2026-07-21 #5) — "Night by night": a per-target breakdown of every
-  imaging night, so a beginner can see which nights were good and set a clouded-out night aside.** The
+  imaging night, so a beginner can see which nights were good and set a clouded-out night aside.** —
+  **SLICES (a)+(b)+(c) SHIPPED v0.144.0** (Builder 2026-07-21, branch `claude/pensive-faraday-enl8ut`).
+  New read-only **"Nights"** card on the Target page listing every capture night (newest first): date,
+  subs kept/total, integration, median FWHM, and a one-word verdict (**sharp / soft / hazy**) with a
+  gentle "sharpest" nod on the best night. **Backend:** pure `seestack/session_recap.py::nights_breakdown(project)`
+  reuses the shipped `_split_sessions` + `_session_median_fwhm` + `bucket_reject_reason` infra — a night is
+  "hazy" when ≥`NIGHT_HAZY_CLOUD_FRACTION` (40%) of its subs were set aside as cloudy, "soft" when its median
+  FWHM clears the *same* relative+absolute floors the cross-session drift nudge uses (so the two always agree),
+  "sharp" otherwise, and "" when too few measured to judge; the `_night_verdict` helper is unit-tested directly.
+  Read-only `GET /api/targets/{safe}/nights` → `list[NightSummaryOut]`. **Frontend:** `NightsCard` (renders only
+  when a target spans ≥2 nights — a single night is already the "Last session" card, so it never duplicates it),
+  with pure `formatNightDate` (tz-stable, reads the date off the ISO string) + `verdictBadge` helpers.
+  Beginner bar ✔ — plain-language, informational-only (never auto-rejects), directly helps spot a bad night.
+  Upgrade-safe/additive: one read-only endpoint + one card + one schema, no schema/config/API/default change.
+  Tests: `tests/test_session_recap.py` (+6 — empty, newest-first rollups, soft-vs-best + best nod, hazy cloud
+  precedence, no-verdict on thin data, pure `_night_verdict`), `tests/webapp/test_target_nights.py` (+3 —
+  default single night, two-nights newest-first, verdict+buckets serialisation), `NightsCard.test.tsx` (+7).
+  Python 1438 + tsc + vitest 951 + vite build green. **Slice (d) — the opt-in bulk "set this night aside"
+  reject + re-stack — is deliberately left for a future run (the only non-read-only slice).** Original spec:
+  The
   §1 owner shoots one target across *many* nights (the Seestar writes a new folder per night). Today the
   Target page has a **"Last session"** card (`session_recap`, one night) and the Library has a
   library-wide recap — but there is **no per-target view of *all* the nights that went into this
