@@ -4191,6 +4191,29 @@ problems. Dogfood it every big-picture run and fix root causes.
   to a single bin. Additive/upgrade-safe (unweighted stacks and single-target stacks are unchanged).
   _(S, image quality — PRIORITY 4; matters only when quality weighting **and** a varying-coverage mosaic
   coincide, so moderate value, but a clean use of data already computed.)_
+- ~~**NEW (Scout 2026-07-21) — when photometric scaling is ON, fold the applied scale into the quality
+  weight (inverse-variance), so a hazy sub amplified to match brightness doesn't inject its amplified
+  noise at full weight.**~~ — **SHIPPED v0.151.0** (Builder 2026-07-21, branch `claude/pensive-faraday-5edx1y`).
+  Added `weighting.combine_weights_with_photometric(weights, pscales)` — a pure helper that multiplies each
+  frame's combine weight by `1/s²` when a photometric scale `s` was applied (a frame gain-matched up by `s`
+  carries its noise up by `s`, so the minimum-variance combine trusts it `1/s²` less; a scaled-*down*
+  transparent frame, `s<1`, is symmetrically trusted more). Wired into `stacker.run_stack`: the resulting
+  `combine_weights` is used **only** at the three final weighted-sum combines (single-pass mean, κ-σ pass 2,
+  drizzle final), while the rejection-reference passes (κ-σ pass 1, min/max, drizzle statistics) keep the
+  plain quality `weights` — mirroring the standard path, where the clip reference is computed before the
+  inverse-variance combine. When photometric scaling is off (the default), the helper returns `weights`
+  unchanged, so every existing stack is **byte-for-byte identical** (`photometric_normalize` is off by
+  default — no running install shifts silently; §9 upgrade-safe, no schema/config/API/default change). The
+  accumulator already handles weights >1 (a scaled-down frame) and `level_by_coverage` bins by the unweighted
+  `frame_coverage`, so panel-levelling is unaffected; the only diagnostic consequence is that an opt-in run's
+  `master_coverage.fits` (Σ of the combine weights) reflects the `1/s²` factor, which the editor's coverage
+  op already bins robustly. Tests: `tests/test_quality_weighting.py` (+5 — helper identity-when-off,
+  scaled-up `1/s²`, scaled-down `>1`, composes with a quality-weighted base, no input mutation, plus a
+  fixed-seed Monte-Carlo proving inverse-variance cuts the combined variance below equal-weight) and
+  `tests/test_photometric_stack.py` (+1 E2E — a hazy frame scaled ×2 drops the peak coverage from 4.0 to 3.25,
+  a deterministic proof the `1/s²` reaches the accumulator). _(PRIORITY 4 image quality + P2 autonomy — makes
+  "gain-match hazy nights" actually improve SNR instead of quietly diluting it.)_ Original spec kept for
+  provenance:
 - **NEW (Scout 2026-07-21) — when photometric scaling is ON, fold the applied scale into the quality
   weight (inverse-variance), so a hazy sub amplified to match brightness doesn't inject its amplified
   noise at full weight.** *(Traced from a full read of `stack/photometric.py` + `stack/weighting.py` +

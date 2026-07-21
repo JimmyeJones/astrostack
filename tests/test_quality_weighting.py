@@ -5,7 +5,11 @@ import pytest
 
 from seestack.io.project import FrameRow
 from seestack.stack.accumulator import WeightedSumAccumulator
-from seestack.stack.weighting import compute_frame_weights, unit_weights
+from seestack.stack.weighting import (
+    combine_weights_with_photometric,
+    compute_frame_weights,
+    unit_weights,
+)
 
 
 def _f(id_, fwhm, stars, sky, transp=None, ecc=None):
@@ -172,3 +176,81 @@ def test_min_weight_floor():
     w, _ = compute_frame_weights(frames, min_weight=0.1)
     # 0.1 * 0.1 * 0.1 (= 0.001) under naïve product; geometric mean = 0.1.
     assert w[2] >= 0.1
+
+
+# ---- Inverse-variance combine weight (photometric scaling) ------------------
+
+def test_combine_weights_no_photometric_is_identity_object():
+    """With no scales the combine weight IS the quality weight (same object) —
+    the guarantee that a run with photometric scaling off is byte-for-byte
+    unchanged."""
+    w = {1: 0.8, 2: 1.0, 3: 0.5}
+    assert combine_weights_with_photometric(w, None) is w
+    assert combine_weights_with_photometric(w, {}) is w
+
+
+def test_combine_weights_scaled_up_frame_loses_1_over_s_squared():
+    """A frame gain-matched up by s carries its noise up by s too, so its combine
+    weight drops by 1/s²; a neutral (1.0) scale is untouched."""
+    w = {1: 1.0, 2: 1.0, 3: 1.0}
+    scales = {1: 1.0, 2: 2.0, 3: 1.0}  # frame 2 scaled ×2 (hazy)
+    cw = combine_weights_with_photometric(w, scales)
+    assert cw[1] == 1.0
+    assert cw[2] == pytest.approx(0.25)  # 1 / 2²
+    assert cw[3] == 1.0
+    # Pure function: the input dict is not mutated.
+    assert w == {1: 1.0, 2: 1.0, 3: 1.0}
+
+
+def test_combine_weights_scaled_down_frame_gains_weight():
+    """A transparent frame scaled *down* (s < 1) has less noise, so it is trusted
+    *more* — its combine weight rises above the base (can exceed 1.0)."""
+    w = {1: 1.0}
+    cw = combine_weights_with_photometric(w, {1: 0.5})
+    assert cw[1] == pytest.approx(4.0)  # 1 / 0.5²
+
+
+def test_combine_weights_scale_on_quality_weighted_base():
+    """The 1/s² factor composes multiplicatively with an existing quality
+    weight, not replacing it."""
+    w = {7: 0.6}
+    cw = combine_weights_with_photometric(w, {7: 2.0})
+    assert cw[7] == pytest.approx(0.6 / 4.0)  # base 0.6 × 1/s²
+
+
+def test_combine_weights_reduce_combined_noise_vs_equal_weight():
+    """The point of the fix: inverse-variance weighting a scaled (noisier) frame
+    yields a lower-variance combined estimate than equal weighting.
+
+    One 'good' frame (noise σ=1, scale 1) and one 'hazy' frame gain-matched ×2
+    (so its noise is 2σ). Closed-form combined variances:
+      equal weights      → (1² + 2²) / 2² = 1.25
+      inverse-variance   → (1 + 0.25²·4) / 1.25² = 0.8
+    A fixed-seed Monte-Carlo over the real ``WeightedSumAccumulator`` confirms it.
+    """
+    rng = np.random.default_rng(1234)
+    n_trials = 40000
+    base = {1: 1.0, 2: 1.0}
+    scales = {1: 1.0, 2: 2.0}
+    cw = combine_weights_with_photometric(base, scales)
+
+    eq_est = np.empty(n_trials, dtype=np.float64)
+    iv_est = np.empty(n_trials, dtype=np.float64)
+    for t in range(n_trials):
+        x_good = rng.normal(0.0, 1.0)   # good frame around true 0
+        x_hazy = rng.normal(0.0, 2.0)   # scaled-up frame, 2× noise, same signal
+        # Equal weighting (pre-fix): both weight 1.
+        eq = WeightedSumAccumulator((1, 1))
+        eq.add(np.full((1, 1), x_good), weight=base[1])
+        eq.add(np.full((1, 1), x_hazy), weight=base[2])
+        eq_est[t] = float(eq.result()[0, 0])
+        # Inverse-variance weighting (the fix): hazy frame down-weighted 1/s².
+        iv = WeightedSumAccumulator((1, 1))
+        iv.add(np.full((1, 1), x_good), weight=cw[1])
+        iv.add(np.full((1, 1), x_hazy), weight=cw[2])
+        iv_est[t] = float(iv.result()[0, 0])
+
+    # Inverse-variance should cut the combined variance well below equal-weight
+    # (theory 0.8 vs 1.25 = 0.64×); assert a comfortable margin so the fixed seed
+    # never makes this flaky.
+    assert iv_est.var() < 0.85 * eq_est.var()
