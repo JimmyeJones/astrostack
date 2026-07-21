@@ -26,6 +26,8 @@ from webapp.schemas import (
     TargetCreate,
     TargetOut,
     TargetPatch,
+    TransparencyTrendOut,
+    TransparencyTrendPointOut,
 )
 
 router = APIRouter(prefix="/api/targets", tags=["targets"])
@@ -263,6 +265,42 @@ def target_focus_trend(safe: str, request: Request) -> FocusTrendOut | None:
         start_utc=trend.start_utc,
         end_utc=trend.end_utc,
         soft_after_utc=trend.soft_after_utc,
+    )
+
+
+@router.get("/{safe}/transparency-trend", response_model=TransparencyTrendOut | None)
+def target_transparency_trend(safe: str, request: Request) -> TransparencyTrendOut | None:
+    """Sky clarity (transparency) through the target's most recent capture night —
+    the "Clouds & haze" card. Clouds and haze are the single most common reason a
+    beginner's stack comes out thin, and the app never *explains* when the sky went
+    bad. This returns each accepted, measured sub's transparency over capture time
+    plus a plain verdict (clear / degraded / cleared), all from data already stored,
+    and reassures the beginner that any hazy subs were already auto-down-weighted.
+    Purely informational and read-only — it never rejects anything. ``null`` when
+    the latest session has too few measured subs to trend (the card self-hides)."""
+    from seestack.session_recap import transparency_trend
+
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        trend = transparency_trend(proj)
+    finally:
+        proj.close()
+        lib.close()
+    if trend is None:
+        return None
+    return TransparencyTrendOut(
+        verdict=trend.verdict,
+        points=[
+            TransparencyTrendPointOut(t_utc=p.t_utc, transparency=p.transparency)
+            for p in trend.points
+        ],
+        n_points=trend.n_points,
+        median_transparency=trend.median_transparency,
+        early_transparency=trend.early_transparency,
+        late_transparency=trend.late_transparency,
+        start_utc=trend.start_utc,
+        end_utc=trend.end_utc,
+        degraded_after_utc=trend.degraded_after_utc,
     )
 
 

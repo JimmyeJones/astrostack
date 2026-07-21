@@ -3350,6 +3350,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+- ~~**NEW (Scout 2026-07-21) — "we found where you observe from": auto-offer to save the FITS-detected
+  observing site to Settings.**~~ — **SHIPPED v0.155.0** (Builder 2026-07-21, branch
+  `claude/pensive-faraday-yntnt1`). The backend already returns the resolved `observer` lat/lon and
+  `location_source` on `GET /api/plan/tonight`, so this landed as a contained frontend autonomy nudge with no
+  engine/schema change. On the Tonight page, when the site was resolved from a solved frame's FITS header
+  (`location_source === "fits"`), a dismissible blue Alert now offers *"We found your observing location — Read
+  from your Seestar's frames: {lat}°, {lon}°. Save it to Settings…"* with a one-click **Save this location**
+  button that PATCHes `site_lat`/`site_lon` via the existing `putSettings`, then invalidates the `["tonight"]`
+  query so the next fetch resolves the site from Settings and the nudge disappears on its own (the fast Settings
+  path also drops the planner's per-request 24-header probe). Upgrade-safe/additive: the silent auto-detect
+  still works when dismissed; the write is user-initiated (no silent settings mutation); it only ever offers
+  when Settings has **no** site (never overwrites a user-set location — the `fits` source only occurs then).
+  Tests (`frontend/src/routes/Tonight.test.tsx`, +2): the nudge shows for a `fits` source and clicking Save
+  PATCHes `{site_lat, site_lon}`; it's absent when the location already comes from Settings. _(PRIORITY 2
+  autonomy — removes a config step the beginner usually doesn't know to do.)_ Original spec kept for provenance:
 - **NEW (Scout 2026-07-21) — "we found where you observe from": auto-offer to save the FITS-detected
   observing site to Settings, so the night planner and Moon/dark-window cues just work with zero config.**
   *(Autonomy / friendliness; PRIORITY 2–3; size S.)* The "Tonight" planner already resolves the observer
@@ -4924,6 +4939,33 @@ problems. Dogfood it every big-picture run and fix root causes.
   at 3 h → ~13%). **Slice left for a future run:** the full sparkline "you-are-here on the SNR-vs-subs curve"
   visualization, if the owner wants the picture as well as the sentence — filed as the remaining part of this
   item. Original spec kept below for provenance:
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-21 #10) — "Clouds & haze through the night": a per-session
+  transparency timeline + plain verdict.**~~ — **SHIPPED v0.154.0** (Builder 2026-07-21, branch
+  `claude/pensive-faraday-yntnt1`). Built exactly the Scout's slice as the direct sibling of the shipped
+  Focus-trend card (v0.152.0), across all three layers. **Engine:** `seestack/session_recap.py::
+  transparency_trend` returns the target's most recent session's accepted, measured subs as
+  `[TransparencyTrendPoint(t_utc, transparency)]` in capture order plus a `verdict` — `"clear"` /
+  `"degraded"` / `"cleared"` — decided by comparing the median `transparency_score` of the night's first third
+  vs last third. **Direction flip handled:** higher transparency = clearer, so "degraded" is a *drop*
+  (late ≤ early ÷ ratio) and "cleared" a *rise*; a "degraded" verdict also names `degraded_after_utc` (when
+  the murky stretch began). Uses a **relative-only** ratio floor (`TRANSPARENCY_TREND_DROP_RATIO=1.4`, a ~40%
+  swing) rather than the focus card's relative+absolute pair, because `transparency_score` is median star flux
+  in arbitrary per-target ADU units so an absolute px-style floor would be meaningless across cameras/gains —
+  documented as conservative + tuneable on real data (same real-data caveat the Scout flagged). Reuses the
+  timezone-robust `_last_session_frames`, so it inherits the midnight-safe grouping; self-hides (returns
+  `None`) below `TRANSPARENCY_TREND_MIN_FRAMES=6` measured subs. **Webapp:** `GET /api/targets/{safe}/
+  transparency-trend` → `TransparencyTrendOut | None` (read-only; `null` = card self-hides). **Frontend:** a
+  `TransparencyTrendCard` on the Target page draws an inline SVG sparkline (higher line = clearer; no chart
+  dependency) + a verdict badge + a plain-language sentence that reassures the beginner the hazy subs were
+  auto-down-weighted — all from pure, unit-tested helpers in `transparencyTrend.ts`. Distinct from the per-run
+  `transparency_ratio` "hazy night" badge (one whole-stack verdict): this shows the *shape* of the sky's clarity
+  across the night. Additive/upgrade-safe: read-only, off nothing, no schema/config/API-shape/default change.
+  Tests: `tests/test_session_recap.py` (+7 — clear / degraded+marker / cleared / min-frame gate / ignores
+  rejected+unmeasured / latest-session-only / no-timestamps), `tests/webapp/test_target_transparency_trend.py`
+  (+3 — null self-hide / degraded serialisation & point order / clear no-marker), and frontend
+  `transparencyTrend.test.ts` (+9) & `TransparencyTrendCard.test.tsx` (+2). Beginner bar ✔ (one card, zero
+  knobs, auto verdict + plain language, actionable next-night advice). *(Original spec kept below for
+  provenance.)*
 - **NEW BEGINNER FEATURE (Scout 2026-07-21 #10) — "Clouds & haze through the night": a per-session
   transparency timeline + plain verdict — the sibling of the shipped Focus-trend card, for the #1 thing that
   kills a Seestar night.** *(Beginner feature; PRIORITY 3 friendliness / trust; size M.)* Clouds and haze are the

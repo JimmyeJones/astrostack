@@ -54,6 +54,26 @@ describe("TonightView", () => {
       .toHaveAttribute("href", "/settings");
   });
 
+  it("offers to save a FITS-detected location and PATCHes Settings on click", async () => {
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(
+      plan({ location_source: "fits", observer: { lat_deg: 51.5, lon_deg: -0.13, elevation_m: 0 } }));
+    const put = vi.spyOn(client.api, "putSettings").mockResolvedValue({} as client.Settings);
+    renderTonight();
+    await waitFor(() =>
+      expect(screen.getByText("We found your observing location")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Save this location" }));
+    await waitFor(() =>
+      expect(put).toHaveBeenCalledWith({ site_lat: 51.5, site_lon: -0.13 }));
+  });
+
+  it("does not offer to save when the location already comes from Settings", async () => {
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({ location_source: "settings" }));
+    renderTonight();
+    await waitFor(() =>
+      expect(screen.getByText("Add more to what you're shooting")).toBeInTheDocument());
+    expect(screen.queryByText("We found your observing location")).not.toBeInTheDocument();
+  });
+
   it("explains a polar-day night with no dark window", async () => {
     vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({ dark_window: null }));
     renderTonight();

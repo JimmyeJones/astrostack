@@ -10,18 +10,20 @@ from seestack.session_recap import (
     library_session_recap,
     recent_session_window_frames,
     session_recap,
+    transparency_trend,
 )
 
 
 def _frame(ts: datetime | None, *, exposure=10.0, accept=True, reject_reason=None,
-           fwhm_px=None):
+           fwhm_px=None, transparency_score=None):
     return FrameRow(
-        source_path=f"/x/{ts}-{accept}-{reject_reason}-{fwhm_px}-{id(ts)}.fit",
+        source_path=f"/x/{ts}-{accept}-{reject_reason}-{fwhm_px}-{transparency_score}-{id(ts)}.fit",
         timestamp_utc=ts.isoformat() if ts else None,
         exposure_s=exposure,
         accept=accept,
         reject_reason=reject_reason,
         fwhm_px=fwhm_px,
+        transparency_score=transparency_score,
     )
 
 
@@ -603,5 +605,116 @@ def test_focus_trend_none_without_timestamps(tmp_path):
         for i in range(8):
             proj.add_frame(_frame(None, fwhm_px=2.8 + i * 0.01))
         assert focus_trend(proj) is None
+    finally:
+        proj.close()
+
+
+# --- Clouds & haze through the night (transparency_trend) -------------------
+
+def _transp_proj(proj, scores, *, base=None, step_min=3, accept=None):
+    """Add a run of subs `step_min` minutes apart in one session, with the given
+    per-frame transparency scores (None = unmeasured). `accept` optionally
+    overrides accept per frame (default: all accepted)."""
+    base = base or datetime(2026, 7, 10, 22, 0, 0)
+    for i, sc in enumerate(scores):
+        acc = True if accept is None else accept[i]
+        proj.add_frame(_frame(base + timedelta(minutes=step_min * i),
+                              transparency_score=sc, accept=acc))
+
+
+def test_transparency_trend_clear_night(tmp_path):
+    proj = Project.create(tmp_path / "t", "M31")
+    try:
+        _transp_proj(proj, [1000, 1030, 980, 1010, 995, 1020, 990, 1005])
+        tr = transparency_trend(proj)
+        assert tr is not None
+        assert tr.verdict == "clear"
+        assert tr.n_points == 8 and len(tr.points) == 8
+        assert tr.degraded_after_utc is None
+        assert 980 <= tr.median_transparency <= 1030
+        # Points are in capture order, oldest first.
+        assert tr.points[0].t_utc == tr.start_utc
+        assert tr.points[-1].t_utc == tr.end_utc
+    finally:
+        proj.close()
+
+
+def test_transparency_trend_flags_clouds_rolling_in(tmp_path):
+    proj = Project.create(tmp_path / "t", "M31")
+    try:
+        # Clear early, clearly murky late (clouds/haze): last third ≪ first.
+        _transp_proj(proj, [1000, 1020, 980, 990, 700, 520, 480, 450, 420])
+        tr = transparency_trend(proj)
+        assert tr is not None
+        assert tr.verdict == "degraded"
+        assert tr.late_transparency < tr.early_transparency
+        # It names when the murky stretch began (start of the last third).
+        assert tr.degraded_after_utc is not None
+        assert tr.start_utc < tr.degraded_after_utc <= tr.end_utc
+    finally:
+        proj.close()
+
+
+def test_transparency_trend_flags_a_clearing_night(tmp_path):
+    proj = Project.create(tmp_path / "t", "M31")
+    try:
+        # Hazy early (thin cloud clearing), clear late — the symmetric case.
+        _transp_proj(proj, [420, 450, 480, 520, 700, 990, 980, 1020, 1000])
+        tr = transparency_trend(proj)
+        assert tr is not None
+        assert tr.verdict == "cleared"
+        assert tr.late_transparency > tr.early_transparency
+        assert tr.degraded_after_utc is None
+    finally:
+        proj.close()
+
+
+def test_transparency_trend_needs_enough_measured_subs(tmp_path):
+    proj = Project.create(tmp_path / "t", "M31")
+    try:
+        _transp_proj(proj, [1000, 1010, 990, 1020, 995])  # only 5 < MIN_FRAMES
+        assert transparency_trend(proj) is None
+    finally:
+        proj.close()
+
+
+def test_transparency_trend_ignores_rejected_and_unmeasured_subs(tmp_path):
+    proj = Project.create(tmp_path / "t", "M31")
+    try:
+        # 8 accepted+measured (enough) plus rejected/unmeasured noise that must
+        # not enter the trend.
+        scores = [1000, 1030, 980, 1010, None, 50, 995, 1020, 990, 1005]
+        accept = [True, True, True, True, True, False, True, True, True, True]
+        _transp_proj(proj, scores, accept=accept)
+        tr = transparency_trend(proj)
+        assert tr is not None
+        assert tr.n_points == 8  # the None + the rejected 50 are excluded
+        assert all(p.transparency > 900 for p in tr.points)
+    finally:
+        proj.close()
+
+
+def test_transparency_trend_uses_only_the_latest_session(tmp_path):
+    proj = Project.create(tmp_path / "t", "M31")
+    try:
+        # An old hazy night, then a >6h gap, then a clear latest night.
+        old = datetime(2026, 7, 8, 22, 0, 0)
+        _transp_proj(proj, [400] * 8, base=old)
+        latest = datetime(2026, 7, 10, 22, 0, 0)
+        _transp_proj(proj, [1000, 1010, 990, 1005, 1020, 995, 1000, 1015], base=latest)
+        tr = transparency_trend(proj)
+        assert tr is not None
+        assert tr.verdict == "clear"
+        assert tr.median_transparency > 900  # measured from the latest (clear) night only
+    finally:
+        proj.close()
+
+
+def test_transparency_trend_none_without_timestamps(tmp_path):
+    proj = Project.create(tmp_path / "t", "M31")
+    try:
+        for i in range(8):
+            proj.add_frame(_frame(None, transparency_score=1000 + i))
+        assert transparency_trend(proj) is None
     finally:
         proj.close()
