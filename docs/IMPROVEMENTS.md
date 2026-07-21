@@ -47,6 +47,32 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**`PATCH /api/targets/{safe}/frames/{id}` leaked the `Library` SQLite handle on its 404/422
+  error paths — the manual accept/reject a beginner uses every QC session.**~~ — **FIXED v0.145.1**
+  (Scout 2026-07-21, branch `claude/kind-mccarthy-3r5ap8`; traced + reproduced + regression-tested). Found
+  by a fresh adversarial audit of the webapp routers (`webapp/routers/*` + `pipeline.py`/`jobs.py`/
+  `schemas.py`, which otherwise traced clean). `patch_frame` (`webapp/routers/frames.py:271`) split cleanup
+  into **two sibling** `try/finally` blocks — the first closing only `proj`, the second (later) closing
+  `lib` and calling `refresh_target_stats`. Both the *no-such-frame* raise (`404`, `proj.get_frame` returns
+  `None`) and the *bad bayer pattern* raise (`422`) fire **inside** the first block, so the exception
+  propagates out after `proj.close()` and the second block that runs `lib.close()` is **skipped** — the
+  per-request `Library` connection (a live `sqlite3` handle, WAL) is orphaned. The sibling `get_frame`
+  (`:258`) and the `apply_grade` handler just above (`:243`) both close **both** in one nested `finally`;
+  `deps.open_target_project` explicitly documents "caller closes both". Reachable on the exact endpoint a
+  beginner hits to accept/reject frames — a mistyped/stale frame id (404) or any bad-bayer PATCH leaks one
+  handle each. **Reproduced** via a close-tracking wrapper around `open_target_project`: the returned
+  `lib.close()` is **not** called on the 404 or 422 path (fail-before) and **is** after the fix (pass-after).
+  **Fix:** nest the `proj`-close inside a single outer `lib`-close `finally` (mirroring `apply_grade`), so
+  the library handle is released on *every* exit while `refresh_target_stats` still runs only on the happy
+  path. Additive/upgrade-safe: pure control-flow; the success path (still closes both, still refreshes
+  stats) is byte-for-byte identical; no schema/config/API-shape/default change. Regression
+  `tests/webapp/test_api.py::test_patch_frame_closes_library_on_error_paths` (spies the returned lib's
+  `close`; asserts it's called on both the 404 and 422 paths — fail-before on the pre-fix sibling blocks /
+  pass-after). Severity: broken-UX/reliability (a connection-lifecycle contract violation on a per-session
+  beginner endpoint; under CPython refcounting the orphan is usually finalized when the request unwinds, so
+  not an unbounded leak in practice — but it releases the WAL connection non-deterministically and would
+  genuinely leak under a non-refcounting runtime or a retained traceback). Confidence: reproduced + fixed.
+
 - ~~**Master *flat* with an `inf` pixel silently dropped the *entire* flat correction — all
   vignetting/dust survived into the final image.**~~ — **FIXED v0.142.3** (Scout 2026-07-21, branch
   `claude/practical-dirac-msab41`; traced + reproduced + regression-tested). Found by a fresh adversarial
@@ -694,6 +720,27 @@ when you take it.
   **this corrects the 2026-07-11 audit note below that recorded `hi = nanmax` as "not a fragility"** — that probe
   used only a mild 40× outlier where the MTF self-correction still holds; the clamps break it at the larger (and
   realistic full-well) outlier magnitudes measured here.
+
+_Scout audit log 2026-07-21c (baseline green on current `origin/main` v0.145.0: 1438 passed / 2 skipped):
+led the rotation with the **stacking engine** per the owner's focus #1 — hand-traced every file in
+`seestack/stack/*` (`accumulator`, `weighting`, `drizzle_path`, `align`, `mosaic`, `photometric`,
+`reference`, `pointings`, `output`, and the `run_stack` reject/leveling/memory-guard dispatch) and
+`seestack/calibrate/*` (`apply`, `masters`) plus `bg/coverage_leveling.py` and `render/thumbnail.py`
+(autostretch / preview↔export parity). **The engine again traced clean** — the accumulator NaN/coverage
+semantics, κ-σ / min-max / drizzle-reject math and their `n_used==0` guards, photometric-scale application
+across every pass, mosaic canvas outlier rejection, and the memory guard all hold; consistent with the ~20
+prior clean re-audits. Then rotated to the **webapp** with two parallel adversarial subagent audits (each
+required to trace a finding to a concrete failure): (1) **routers + `pipeline`/`jobs`/`schemas`** — found
+**one real bug** (the `patch_frame` `Library`-handle leak on the 404/422 paths, filed + **fixed v0.145.1**
+above; pagination clamps, tonight-planner tz bounds, the queued-cancel race, path-traversal guards, cover
+fallback, and `validate_stack_options` all traced clean); (2) **`watcher` + `io/` (ingest/fits_loader/wcs_io)
++ `qc/*`** — **clean, no verified bug** (FITS header parsing incl. negative-dec/sexagesimal coords, debayer
+even/odd dims round-trip, QC metric NaN/None handling and constant-image path, the streak detector, the
+watcher stability state machine, and the WCS preview-rescale all verified against the installed libs). Fixed
+one small, obviously-safe bug under the full quality bar (§5) this run; left the rest of the backlog to the
+Builder. Also filed one new beginner feature (#8 "One frame vs your stack") and confirmed the two open
+real-data-gated items (sky-atlas `_tan_wcs` rotation sign; SExtractor skew-fallback in the deprioritised
+channel-combine path) remain correctly gated._
 
 _Scout audit log 2026-07-21b (baseline green on current `origin/main` v0.144.0: 1431 passed / 2 skipped):
 led the rotation with the **stacking engine** per the owner's current focus #1, this run combining **two
@@ -4478,8 +4525,42 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+- **NEW BEGINNER FEATURE (Scout 2026-07-21 #8) — "One frame vs your stack": a side-by-side / split-slider
+  reveal of a single raw sub next to the finished stack, so a beginner *sees* — and can share — exactly what
+  stacking bought them.** Stacking is the whole point of the app, but a beginner never sees the *before*: they
+  drop hundreds of frames in and get one clean picture, with no visceral sense of why 505 frames beat one.
+  The single most convincing, delightful, share-worthy moment in this hobby is putting **one noisy 30-second
+  sub** next to the **smooth, detailed stack** of the same field — the noise floor drops, faint nebulosity
+  and galaxy arms appear out of the grain. The app already has both pixels: the reference/representative sub
+  (a raw Seestar frame it can debayer via `render.thumbnail.generate_thumbnail`) and the stacked master
+  (`master.fits` / its preview). **Feature:** a read-only **"One frame vs your stack"** card on the Target /
+  History result page showing the two images with a draggable split divider (reuse the editor's existing
+  before/after split-slider component) — left = one sub, right = the stack — under a plain-language line the
+  app fills in from the run's own provenance: *"One 30-second frame vs your 505-frame stack — stacking cut
+  the noise and pulled out the faint detail."* (sub count + exposure already stamped in the FITS header /
+  `stack_runs` row). **Fair comparison is the one thing to get right:** stretch the single sub with the
+  **same** autostretch (same `target_bg`) used for the stack preview so the only visible difference is
+  noise/detail, not brightness — otherwise the sub just looks darker and the point is lost. Pick the sub
+  deterministically (the run's **reference frame**, or the sharpest accepted sub by FWHM) so it's a *good*
+  single frame, not a cloud-ruined one, making the comparison honest rather than stacked-in-our-favour.
+  **Beginner bar ✔:** one card, zero knobs, a sane default (auto-picked sub + matched stretch + auto caption),
+  plain language; it teaches *understanding* and gives an irresistible *share* ("look what stacking did!") —
+  serves the understand + enjoy + share pillars (P3) §1 calls out (`annotated results` / educational reveals).
+  **Distinct from** the "watch it appear" progress reel (which animates frames piling on) and the two-*stack*
+  compare dialog (which compares two finished results): this is the raw-input→final-output reveal, the one a
+  beginner most wants to post. **Well-grounded / low-risk:** both images already exist; the render is a pure
+  reuse of `generate_thumbnail` (sub) + `autostretch` (matched stretch) + the existing split-slider; read-only,
+  touches nothing on disk, no new dep/network. **Guardrails:** additive/reversible (a render-time view over
+  existing files), best-effort (fall back to a plain side-by-side if the sub can't be loaded, and omit the
+  caption line rather than printing blanks when a header field is missing so an older/edited run still renders).
+  Split for the Builder: (a) a read-only endpoint `GET …/stack-runs/{id}/one-sub-vs-stack` (or two small
+  endpoints) returning the auto-picked sub PNG stretched to match + the stack preview, with the caption fields;
+  (b) the Target/History card wiring the split-slider + caption. _(M, split as above; PRIORITY 3 friendliness /
+  understand-enjoy-share — beginner feature; reuses shipped thumbnail + autostretch + split-slider infra, so
+  low-risk. Keeps the beginner-feature pipeline stocked.)_
 - ~~**NEW BEGINNER FEATURE (Scout 2026-07-21 #7) — "Set as cover": let a beginner pin their *favourite* result
   as a target's showcase image, instead of the app always showing the newest stack.**~~ — **SHIPPED v0.145.0**
+  (Builder 2026-07-21, branch `claude/pensive-faraday-w0qyz5`). A **"★ Set as cover"** button on every
   (Builder 2026-07-21, branch `claude/pensive-faraday-w0qyz5`). A **"★ Set as cover"** button on every
   preview-bearing History run pins that run as the target's showcase; the Library / Dashboard / Target tile
   (all served by `target_thumbnail`) then shows the pinned image, and the pinned run's button becomes a filled
