@@ -163,23 +163,27 @@ sweep are now both well-hardened.)_
   Severity: broken-UX/availability (a single unreadable project hides *all* imagery on two beginner-facing pages —
   high blast radius, realistic trigger). Confidence: reproduced + fixed.
 
-- **`GET /api/settings/export` leaks a host filesystem path into the "portable, no host paths" backup via a
-  nested `default_stack_options` calibration path.** *(Data-hygiene / info-leak; PRIORITY 3; size S; confidence:
-  traced.)* Location: `webapp/routers/settings.py:99` (`_export_payload`) — and the same gap on the GET
-  `_serialize` at `settings.py:56`. `_export_payload` strips only the **top-level** `_AUTH_KEYS` + `_HOST_KEYS`,
-  but does **not** run `strip_non_form_keys()` over the nested `default_stack_options` dict — whereas the settings
-  **PUT** (`_sanitize_patch`, `settings.py:44-45`) and `/import` both do. So if the stored `default_stack_options`
-  carries a `NON_FORM_KEYS` entry (`dark_path`/`flat_path`/`flat_dark_path`/`bias_path` — a server-resolved host
-  path; reachable via a hand-edited `config.json`, which the module docstring says is human-editable, or a legacy
-  config written before the PUT-side strip guard existed), `/export` emits that raw host path — directly violating
-  the endpoint's own docstring guarantee ("no host paths … restored on any install"). The value is also useless
-  on restore because `/import` strips it, so it's pure leak with no upside. **Repro:** set
-  `default_stack_options = {"dark_path": "/mnt/host/darks/master.fit", "sigma_kappa": 3.0}` in the store, GET
-  `/api/settings/export` → the payload still contains `dark_path` with the host path. **Fix (small, one file):**
-  in `_export_payload` (and `_serialize`), if `default_stack_options` is a dict, replace it with
-  `strip_non_form_keys(default_stack_options)` before returning — mirrors the PUT/import contract exactly. Add a
-  regression test: a store whose `default_stack_options` holds a `dark_path` exports **without** it. Severity:
-  low-medium (filesystem-path disclosure, not a secret). Upgrade-safe: pure read-side filtering, additive.
+- ~~**`GET /api/settings/export` leaks a host filesystem path into the "portable, no host paths" backup via a
+  nested `default_stack_options` calibration path.**~~ — **FIXED v0.155.1** (Builder 2026-07-21, branch
+  `claude/pensive-faraday-s8zwxe`; traced + reproduced + regression-tested). *(Data-hygiene / info-leak;
+  PRIORITY 3; size S.)* Location: `webapp/routers/settings.py` (`_export_payload` + `_serialize`).
+  `_export_payload` stripped only the **top-level** `_AUTH_KEYS` + `_HOST_KEYS`, but did **not** run
+  `strip_non_form_keys()` over the nested `default_stack_options` dict — whereas the settings **PUT**
+  (`_sanitize_patch`) and `/import` both do. So if the stored `default_stack_options` carried a `NON_FORM_KEYS`
+  entry (`dark_path`/`flat_path`/`flat_dark_path`/`bias_path` — a server-resolved host path; reachable via a
+  hand-edited `config.json`, which the module docstring says is human-editable, or a legacy config written before
+  the PUT-side strip guard existed), `/export` emitted that raw host path — violating the endpoint's own docstring
+  guarantee ("no host paths … restored on any install"); the same gap leaked it in the settings GET. The value is
+  also useless on restore because `/import` strips it, so it was pure leak with no upside. **Fix:** a new
+  `_strip_nested_calibration_paths(data)` helper runs `strip_non_form_keys()` over `default_stack_options`, called
+  from **both** `_serialize` (GET) and `_export_payload` (export) — mirrors the PUT/import contract exactly.
+  Additive/upgrade-safe: pure read-side filtering, no schema/config/API-shape/default change; a config without a
+  nested path is byte-for-byte unchanged. Regression
+  `tests/webapp/test_api.py::test_settings_export_strips_calibration_paths_from_default_stack_options` seeds the
+  store (bypassing the PUT guard, as a legacy config would) with a `default_stack_options` holding `dark_path`/
+  `flat_path`, then asserts both `/export` and the settings GET emit the tunables but not the host paths —
+  fail-before (paths leak) / pass-after. Severity: low-medium (filesystem-path disclosure, not a secret).
+  Confidence: reproduced + fixed.
 
 - **Minor / low-priority (traced, filed for completeness — fix only if touching these files):**
   - `webapp/routers/storage.py:193` `prune_stack_runs` closes `proj` then `lib` in a **single** `finally` (not
@@ -4881,6 +4885,28 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-21) — "Plan your next night on *this* target": a per-target card that
+  turns the goal-gap into one concrete, dated next session.**~~ — **SHIPPED v0.156.0** (Builder 2026-07-21,
+  branch `claude/pensive-faraday-s8zwxe`). Built across all three layers, forward-looking to balance the recent
+  run of retrospective trend cards. **Engine:** `seestack/nightplan.py::next_observing_windows(observer, ra, dec,
+  *, start_utc, min_altitude_deg, horizon, nights, want, min_usable_minutes)` walks up to `nights` calendar nights
+  forward, finds each night's astronomical-dark window (`_find_dark_window`) and the single target's observability
+  over it (`_observability_batch`), and returns the first `want` nights it clears the floor for ≥`min_usable_minutes`
+  (default 45) as `NextObservingWindow`s (dark/usable bounds, max alt, Moon illumination + up-fraction, score). The
+  first night's window is clipped to `start_utc` so a mostly-spent night isn't over-promised; a whole past night is
+  skipped. **Webapp:** extracted a shared `_resolve_observer` from `get_tonight` (Settings site wins, else FITS
+  sniff) and added `GET /api/plan/next-session/{safe}` → `{location_source, observer, target_has_position,
+  min_altitude_deg, nights_scanned, windows[]}`, read-only; empty `windows` (card self-hides) when no location, no
+  position, or nothing clears the floor. Accepts an optional `when` (like `/tonight`) for deterministic planning.
+  **Frontend:** a `NextSessionCard` on the Target page, driven by pure `nextSession.ts` helpers (`describeGap` with
+  a subs-to-go estimate from the target's mean sub length, `describeWindow` = dated UTC "shoot between …, climbs to
+  N°, Moon …", `moonPhrase`, `windowsIntro`). It joins the readiness card's goal *gap* with the next dark *window*
+  and self-hides when the goal is met (no gap) or no window computes — never nags, never duplicates the "set a
+  location" prompt. Additive/upgrade-safe: read-only, off nothing, no schema/config/API-shape/default change. Tests:
+  `tests/test_nightplan.py` (+4 — upcoming-nights/chronology, never-rising empty, skips-a-past-night, clips-to-now),
+  `tests/webapp/test_plan.py` (+4 — windows for a library target, no-location self-hide, unknown-target 404,
+  never-rising empty), frontend `nextSession.test.ts` (+14) & `NextSessionCard.test.tsx` (+4). Beginner bar ✔ (one
+  card, zero knobs, plain language, directly actionable next clear night). *(Original spec kept for provenance.)*
 - **NEW BEGINNER FEATURE (Scout 2026-07-21) — "Plan your next night on *this* target": a per-target card that
   turns the goal-gap into one concrete, dated next session.** *(Beginner feature; PRIORITY 2 autonomy / 3
   friendliness; size M.)* The two hardest beginner questions after a session are answered *separately* today and

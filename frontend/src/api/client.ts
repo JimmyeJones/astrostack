@@ -71,6 +71,33 @@ export interface NightPlan {
   targets: PlannedTarget[];
 }
 
+// One upcoming night a target is well-placed in a dark window — the forward-
+// looking companion to the retrospective trend cards. All times are UTC ISO.
+export interface NextObservingWindow {
+  dark_start_utc: string;
+  dark_end_utc: string;
+  usable_start_utc: string | null;
+  usable_end_utc: string | null;
+  max_altitude_deg: number;
+  minutes_above_min_alt: number;
+  moon_illumination: number;
+  moon_up_fraction: number | null;
+  score: number;
+}
+
+export interface NextSession {
+  location_source: "settings" | "fits" | "none";
+  observer: { lat_deg: number; lon_deg: number; elevation_m: number } | null;
+  // False when the library has no RA/Dec for this target (never solved) — the
+  // card then can't say *when*, only *how much* is left.
+  target_has_position: boolean;
+  min_altitude_deg: number;
+  nights_scanned: number;
+  // The next few nights it's shootable, soonest first; empty when no location is
+  // set, the target has no position, or nothing clears the floor in the horizon.
+  windows: NextObservingWindow[];
+}
+
 export interface Target {
   safe_name: string;
   name: string;
@@ -938,6 +965,8 @@ export const api = {
     req<FocusTrend | null>(`/api/targets/${safe}/focus-trend`),
   transparencyTrend: (safe: string) =>
     req<TransparencyTrend | null>(`/api/targets/${safe}/transparency-trend`),
+  nextSession: (safe: string) =>
+    req<NextSession>(`/api/plan/next-session/${safe}`),
   getIntegrationGoal: (safe: string) =>
     req<{ goal_s: number | null }>(`/api/targets/${safe}/integration-goal`),
   setIntegrationGoal: (safe: string, goalS: number | null) =>

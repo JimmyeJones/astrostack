@@ -53,10 +53,29 @@ def _sanitize_patch(clean: dict[str, Any]) -> dict[str, Any]:
     return clean
 
 
+def _strip_nested_calibration_paths(data: dict[str, Any]) -> dict[str, Any]:
+    """Drop server-resolved calibration master paths from a nested
+    ``default_stack_options`` before it leaves the server.
+
+    The settings PUT/import already strip ``NON_FORM_KEYS`` (``dark_path`` etc.)
+    on the way *in* (see ``_sanitize_patch``), but a legacy or hand-edited
+    ``config.json`` — the module the store loads is documented as human-editable —
+    can still hold one that predates that guard. Filter it on the way *out* too so
+    a raw host path never surfaces in the settings GET or, worse, in the
+    "portable, no host paths" ``/export`` backup. Mutates and returns *data*.
+    """
+    dso = data.get("default_stack_options")
+    if isinstance(dso, dict):
+        from webapp.schemas import strip_non_form_keys
+        data["default_stack_options"] = strip_non_form_keys(dso)
+    return data
+
+
 def _serialize(s) -> dict[str, Any]:  # noqa: ANN001
     data = s.model_dump()
     for k in _AUTH_KEYS:
         data.pop(k, None)
+    _strip_nested_calibration_paths(data)
     # Surface resolved paths so the UI can show where things actually live.
     data["resolved_incoming_dir"] = str(s.resolved_incoming_dir)
     data["resolved_library_root"] = str(s.resolved_library_root)
@@ -101,6 +120,7 @@ def _export_payload(s) -> dict[str, Any]:  # noqa: ANN001
     data = s.model_dump()
     for k in (*_AUTH_KEYS, *_HOST_KEYS):
         data.pop(k, None)
+    _strip_nested_calibration_paths(data)
     return data
 
 
