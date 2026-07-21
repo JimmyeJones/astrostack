@@ -387,7 +387,8 @@ export function StackView() {
   // min/max reject is on with enough frames to drop an extreme (count ≥ 3).
   const rejectionOn = values.drizzle
     ? !!values.drizzle_reject
-    : ((!!values.sigma_clip && solvedAccepted >= 4)
+    : ((!!values.auto_reject && solvedAccepted >= 3)
+       || (!!values.sigma_clip && solvedAccepted >= 4)
        || (!!values.min_max_reject && solvedAccepted >= 3));
 
   // Min/max-reject nudge: below ~11 frames, κ-σ mathematically can't reject a
@@ -399,6 +400,7 @@ export function StackView() {
   const MINMAX_SUGGEST_MAX_FRAMES = 11;
   const minMaxRejectHint =
     !frames.isLoading && streakedAccepted > 0 && !values.min_max_reject
+    && !values.auto_reject  // auto already picks min/max for a small stack
     && !values.drizzle
     && solvedAccepted >= 3 && solvedAccepted < MINMAX_SUGGEST_MAX_FRAMES
       ? `You have ${streakedAccepted} streaked frame${streakedAccepted === 1 ? "" : "s"} in a small stack of ${solvedAccepted}. Sigma clipping can't reliably reject a lone satellite/plane trail below ~${MINMAX_SUGGEST_MAX_FRAMES} frames (a single outlier's deviation stays within κ), but “Min/max rejection” drops the single highest and lowest value at each pixel — removing the trail while keeping the rest.`

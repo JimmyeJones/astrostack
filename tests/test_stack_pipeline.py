@@ -944,3 +944,93 @@ def test_sigma_clip_frees_pass1_accumulator_before_pass2(tmp_path, monkeypatch):
     # must be built only after the pass-1 Welford has been freed.
     assert live_welfords_at_wsum_build, "pass 2 never built its weighted sum"
     assert live_welfords_at_wsum_build[-1] == 0
+
+
+# ---- auto_reject: pick the rejection method from the frame count -----------
+
+def test_auto_kappa_min_frames_matches_the_z_score_crossover():
+    """The κ-effective threshold is the smallest n where a lone point's z-score
+    against stats that include it, (n−1)/√n, first reaches κ. At κ=3 that's 11
+    (10/√10 ≈ 3.16 ≥ 3, but 9/√9 = 3.0 at n=9 is <3 after the −1 term: 8/3 <3),
+    and a looser κ crosses over sooner."""
+    from seestack.stack.stacker import _auto_kappa_min_frames
+
+    assert _auto_kappa_min_frames(3.0) == 11
+    # Verify it's genuinely the crossover: κ-σ can catch a lone outlier at the
+    # returned n but not at n-1.
+    for kappa in (2.0, 2.5, 3.0, 3.5):
+        n = _auto_kappa_min_frames(kappa)
+        assert (n - 1) / (n ** 0.5) >= kappa
+        assert (n - 2) / ((n - 1) ** 0.5) < kappa
+    # Looser κ ⇒ crosses over at fewer frames; never below the min/max floor of 3.
+    assert _auto_kappa_min_frames(2.0) < _auto_kappa_min_frames(3.0)
+    assert _auto_kappa_min_frames(1.0) >= 3
+
+
+def test_resolve_auto_reject_picks_by_frame_count():
+    """auto_reject resolves to min/max on small stacks and κ-σ on large ones, and
+    is a no-op when off or on the drizzle path."""
+    from seestack.stack.stacker import _resolve_auto_reject
+
+    base = StackOptions(auto_reject=True, sigma_clip=False, min_max_reject=False)
+    small = _resolve_auto_reject(base, n=6)
+    assert small.min_max_reject and not small.sigma_clip
+    large = _resolve_auto_reject(base, n=50)
+    assert large.sigma_clip and not large.min_max_reject
+    # Off → returned unchanged (same object, byte-for-byte back-compat).
+    off = StackOptions(auto_reject=False, sigma_clip=True, min_max_reject=False)
+    assert _resolve_auto_reject(off, n=6) is off
+    # Drizzle has its own rejection → auto is a no-op even when on.
+    driz = StackOptions(auto_reject=True, drizzle=True)
+    assert _resolve_auto_reject(driz, n=6) is driz
+
+
+def test_auto_reject_small_stack_removes_a_lone_streak_via_min_max(tmp_path):
+    """A 6-frame stack with a planted satellite streak: with only auto_reject on,
+    the stacker picks min/max (κ-σ is mathematically blind to a lone outlier this
+    small), so the streak is actually clipped — the beginner gets the right
+    rejection with zero knobs. The run record keeps the user's *auto* choice."""
+    import json
+
+    from astropy.io import fits
+
+    proj = _build_project(tmp_path, n=6, with_outlier=True)
+    try:
+        result = run_stack(
+            proj, StackOptions(auto_reject=True, max_workers=2,
+                               output_name="autosmall"),
+        )
+        run = next(iter(proj.iter_stack_runs()))
+    finally:
+        proj.close()
+
+    hdr = fits.getheader(result.fits_path)
+    assert hdr["STACKER"] == "min-max-reject"   # resolved to the order statistic
+    assert hdr["REJMODE"] == "min-max-reject"
+    assert hdr["REJNREJ"] > 0                    # the planted streak was clipped
+    # The persisted options record the *resolved* method (so the History
+    # rejection badge and any re-run match what actually ran) while keeping
+    # auto_reject=True to show it was auto-picked.
+    opts = json.loads(run.options_json)
+    assert opts["auto_reject"] is True
+    assert opts["min_max_reject"] is True and opts["sigma_clip"] is False
+
+
+def test_auto_reject_large_stack_uses_sigma_clip(tmp_path):
+    """A 12-frame stack: auto_reject resolves to κ-σ (large enough for it to bite,
+    and it respects quality weights, unlike min/max)."""
+    from astropy.io import fits
+
+    proj = _build_project(tmp_path, n=12, with_outlier=True)
+    try:
+        result = run_stack(
+            proj, StackOptions(auto_reject=True, sigma_kappa=2.5, max_workers=2,
+                               output_name="autolarge"),
+        )
+    finally:
+        proj.close()
+
+    hdr = fits.getheader(result.fits_path)
+    assert hdr["STACKER"] == "sigma-clip"
+    assert hdr["REJMODE"] == "sigma-clip"
+    assert hdr["REJNREJ"] > 0                    # the planted streak was clipped

@@ -171,13 +171,14 @@ when you take it.
   wrong-result / data-integrity on the stacking hot path (silently corrupts the final image), so fixed first
   per the stacking-engine focus. Confidence: reproduced + fixed.
 
-- **⭐ OWNER-REPORTED (2026-07 — HIGH PRIORITY) — Sky map: irregular mosaics render
-  as a black rectangle, and the overlay placement/orientation is off.** Two traced
+- ~~**⭐ OWNER-REPORTED (2026-07 — HIGH PRIORITY) — Sky map: irregular mosaics render
+  as a black rectangle, and the overlay placement/orientation is off.**~~ — **BOTH HALVES
+  NOW FIXED (Bug 1 v0.134.1, Bug 2 v0.142.4).** Two traced
   bugs on the Sky map page (`frontend/src/routes/AladinSky.tsx` +
   `webapp/routers/sky.py`). **Bug 1 (black box) FIXED v0.134.1; Bug 2 (placement)
-  remains open — it needs real-frame validation (rotation-sign convention), so it is
-  NOT a blind Builder change (see the pre-existing "_tan_wcs rotation sign" open bug
-  below).**
+  FIXED v0.142.4** (Builder 2026-07-21, branch `claude/pensive-faraday-q5qgdb`;
+  implemented exactly as the Scout's non-blind fix path below — consumes the stored
+  canvas WCS, so the rotation-sign gate is sidestepped).
   1. ~~**Black rectangular background around a non-rectangular mosaic.**~~ — **FIXED
      v0.134.1** (Builder 2026-07-16, branch `claude/pensive-faraday-rtfcye`; traced +
      regression-tested). The sky overlay used the run's opaque `preview_path` PNG
@@ -204,23 +205,37 @@ when you take it.
      the uncovered half transparent at the preview's grid; 404 without a preview),
      `test_sky.py` (preview_url now points at `sky-overlay`). Severity: broken-UX
      (ugly on an owner-used page; no data corruption). Confidence: reproduced + fixed.
-  2. **Placement / orientation is approximate.** _(STILL OPEN — needs real-frame
-     validation of the rotation-sign convention; NOT a blind Builder change, same
-     real-data gating as the "_tan_wcs rotation sign" bug below.)_ `_tan_wcs`
-     (`webapp/routers/sky.py:74`) builds the overlay WCS from a *single
+  2. ~~**Placement / orientation is approximate.**~~ — **FIXED v0.142.4.** `_tan_wcs`
+     (`webapp/routers/sky.py:74`) built the overlay WCS from a *single
      representative frame's* pixscale + rotation (`_representative_pixscale_rotation`
      = the first frame) centred on the run RA/Dec, with a **best-effort rotation
      sign** (its own docstring admits this) and equal scale on both axes. For a
      mosaic — whose canvas spans many frames/rotations and is *not* one frame's grid
-     — the overlay lands mis-placed / mis-rotated. **Fix:** derive the overlay WCS
-     from the **stack's own canvas geometry** (the mosaic canvas centre + true pixel
-     scale + the orientation used when the canvas was built — the stacker/mosaic code
-     already computes a canvas WCS; thread it onto the run record, or recompute from
-     the footprint) instead of extrapolating from frame 0. Pin the rotation sign with
-     a known-orientation regression test.
-  Verify on a real irregular mosaic loaded on the Sky page: the footprint should be
-  its true shape, transparent background, at the correct RA/Dec/orientation.
-  Severity: broken-UX (wrong/ugly on an owner-used page). Confidence: traced.
+     — the overlay landed mis-placed / mis-rotated. **Fix (exactly the Scout's fix
+     path below):** a new pure engine helper `wcs_dict_rescaled_to_preview(fits_path,
+     preview_w, preview_h)` (`seestack/io/wcs_io.py`) reads the stack's **stored
+     canvas WCS** from the master FITS header (via the existing
+     `celestial_wcs_from_fits`) and rescales it to the downscaled preview grid — the
+     CD-matrix columns scale by the per-axis downscale factors `s_x = full_w/preview_w`,
+     `s_y = full_h/preview_h`, and `CRPIX → (CRPIX − 0.5)/s + 0.5` (FITS pixel-centre
+     convention). `get_sky` now consumes that verbatim (with `_tan_wcs` kept only as
+     the fallback for a run whose master FITS is missing/headerless), so the overlay
+     lands at the **canvas's own** RA/Dec **and** orientation — a mosaic union WCS or a
+     rotated single-target reference WCS is reproduced exactly, with **no hand-rolled
+     rotation-sign** to get wrong (the "needs a real solved frame to validate the sign"
+     gate no longer applies to the primary path). Additive/upgrade-safe: no
+     schema/config/API-shape/default change — the `wcs` dict keeps the same keys the
+     frontend already consumes, so `AladinSky.tsx` needs no change; an older/edited run
+     with no master FITS still gets the frame-0 fallback (never regresses). Tests:
+     `tests/test_wcs_io.py` (+2 — the rescaled WCS places every preview pixel at the
+     same sky position as the full-res canvas WCS *including a 37° rotation* the frame-0
+     fallback would get wrong, determinant scales by `s_x·s_y`, orientation preserved;
+     and None-fallback for a missing FITS / bad dims), `tests/webapp/test_sky.py` (+2 —
+     the endpoint places from the stored 37°-rotated canvas WCS, not the frame-0 12°
+     fallback; and a run with no master FITS still gets a `_tan_wcs` placement).
+     Severity: broken-UX (wrong/ugly on an owner-used page). Confidence: reproduced +
+     fixed.
+  Severity: broken-UX (wrong/ugly on an owner-used page).
   _(Scout 2026-07-21 — **concrete non-blind fix path for the placement half, sidesteps the
   rotation-sign gate entirely.** The stack's **true canvas WCS is already stored in
   `master.fits`**: `run_stack` writes `write_stack_outputs(..., wcs_text=dst_wcs_text)` and
@@ -1812,6 +1827,12 @@ the real webapp stack→edit path.)_
 
 - **Sky-atlas overlay WCS uses a rotation sign that deviates from the FITS/AIPS `CROTA2→CD` convention
   (display-only; needs a real solved frame to validate before flipping — NOT a blind Builder change).**
+  **⚠ LARGELY SUPERSEDED by the v0.142.4 Sky-map placement fix (Bug 2 above):** `get_sky` now places
+  the overlay from the stack's **stored canvas WCS** (`wcs_dict_rescaled_to_preview`), so `_tan_wcs` is
+  only reached as the **fallback for a run whose master FITS is missing/headerless** (older/edited runs) —
+  the ordinary path never hits the suspect sign anymore. The remaining sign issue affects only that
+  fallback, so it's now low-impact; still real-data-gated (validate ASTAP's CROTA2 sign on a real solved
+  frame before flipping). Original trace kept for the fallback fix:
   *(Traced, Builder audit 2026-07-10; high confidence it deviates from the convention, low confidence it
   visibly matters.)* `webapp/routers/sky.py::_tan_wcs` (~L92) builds the derived TAN WCS for the sky-atlas
   preview overlay with `CD1_2 = +scale·sinθ`, `CD2_1 = +scale·sinθ`. With the RA axis flipped
@@ -2984,22 +3005,29 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
-- **NEW (Scout 2026-07-21) — auto-pick the outlier-rejection method from the frame count, so a beginner
-  never has to know κ-σ vs min/max.** Today `sigma_clip` (κ-σ) and `min_max_reject` are separate toggles
-  the user chooses, but they have a hard, count-dependent trade-off a non-expert can't be expected to
-  know: κ-σ **mathematically cannot reject a lone outlier below ~11 frames** (the largest z-score of a
-  point against stats that include it is `(n−1)/√n < κ=3`, as `stacker.py`/`drizzle_path.py` comments
-  already note), so a satellite/plane trail in a small stack survives κ-σ but is caught by the
-  order-statistic min/max drop; conversely min/max ignores quality weights and needlessly trims a sample
-  on huge stacks where κ-σ is strictly better. **Idea:** an `rejection_method="auto"` default that picks
-  min/max for small stacks (roughly `n < ~10-15`) and κ-σ above that — a single well-defaulted decision
-  that gives the beginner the *right* rejection for their data with zero knobs, and still lets an expert
-  force either. Upgrade-safe: add a new enum value defaulting to today's behaviour path for existing
-  configs (don't flip a running install's effective method silently — gate "auto" behind the new default
-  only for fresh installs / explicit opt-in, or make "auto" resolve to κ-σ at the counts where it already
-  fires so no existing large-stack result changes). Ship with a plain-language Stack-form line ("Auto —
-  picks the best outlier removal for your number of subs"). _(M, PRIORITY 2 autonomy + P4 image quality;
-  reduces a real decision the §1 user shouldn't have to make.)_
+- ~~**NEW (Scout 2026-07-21) — auto-pick the outlier-rejection method from the frame count, so a beginner
+  never has to know κ-σ vs min/max.**~~ — **SHIPPED v0.143.0** (Builder 2026-07-21, branch
+  `claude/pensive-faraday-q5qgdb`). Added an opt-in `StackOptions.auto_reject` (default **False** →
+  existing configs and run records byte-for-byte unchanged; no default flip on a running install). When on
+  (and not drizzling), `_resolve_auto_reject(options, n)` picks **min/max** below the κ-effective frame
+  count and **κ-σ** at/above it. That crossover is computed from κ itself by `_auto_kappa_min_frames(κ)` =
+  ⌈((κ+√(κ²+4))/2)²⌉ (the smallest n where a lone point's z-score `(n−1)/√n` can reach κ — 11 at the
+  default κ=3), so a lone satellite/plane trail in a small stack is actually removed (min/max), while large
+  stacks get weight-respecting κ-σ. Resolved once in both `run_stack` and `estimate_stack` (so the memory
+  guard matches the method that runs) via a dedicated `eff` copy; the **resolved** options are persisted in
+  the run record (so the History rejection badge + STACKER FITS card + any re-run reflect what actually ran)
+  with `auto_reject=True` retained to show it was auto-picked. Overrides the `sigma_clip`/`min_max_reject`
+  toggles when set; a no-op on the drizzle path (drizzle has its own two-pass rejection). Frontend: a new
+  descriptor-driven "Auto outlier removal" checkbox on the Stack form (plain-language help); the Stack form's
+  "no rejection → streak will land" warning and the min/max-suggest nudge now treat auto_reject as on, so the
+  feature never trips a spurious advisory; the RejectionBadge tooltip notes when a method was auto-picked.
+  Tests: `tests/test_stack_pipeline.py` (+4 — `_auto_kappa_min_frames` matches the z-score crossover;
+  `_resolve_auto_reject` picks by count / no-op off or on drizzle; a 6-frame streaked stack with only
+  auto_reject on resolves to min/max and clips the planted streak, persisting the resolved method +
+  auto flag; a 12-frame stack resolves to κ-σ), `frontend/.../RejectionBadge.test.tsx` (+1 — the auto note).
+  Upgrade-safe/additive: new field defaulting to today's behaviour, form descriptor added (drift test green),
+  no schema/API/on-disk/default change. Beginner bar ✔ (one explained yes/no removes a real κ-σ-vs-min/max
+  decision a non-expert can't be expected to make). _(PRIORITY 2 autonomy + P4 image quality.)_
 - ~~**NEW (Scout 2026-07-21) — "Walk-away mode": one Settings toggle that turns on the whole unattended
   bundle, instead of five buried advanced switches.**~~ — **SHIPPED v0.140.0** (Builder 2026-07-21, branch
   `claude/pensive-faraday-i5lui7`). Added a single prominent **"Walk-away mode"** Switch at the top of the

@@ -24,12 +24,13 @@ adapter wraps this into Qt signals.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import threading
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from dataclasses import dataclass, field, replace
 from itertools import islice
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -223,6 +224,17 @@ class StackOptions:
     # degrades to the proven single min/max drop. Costs 2k canvas planes (charged
     # in the memory guard). Kept small — the Stack form bounds it at 5.
     min_max_reject_count: int = 1
+    # Auto-pick the outlier-rejection method from the number of subs, so a
+    # beginner never has to know κ-σ vs min/max. When on (and not drizzling), it
+    # resolves — per :func:`_resolve_auto_reject` — to order-statistic min/max on
+    # small stacks (where κ-σ is mathematically blind to a lone satellite/plane
+    # trail: a point's z-score against stats that include it stays below κ until
+    # ~11 frames) and to weight-respecting κ-σ once the stack is large enough for
+    # it to bite. Off by default → existing configs and run records are
+    # byte-for-byte unchanged; a run with it off ignores it entirely. Overrides
+    # the ``sigma_clip``/``min_max_reject`` toggles when set. No-op on the drizzle
+    # path (drizzle has its own two-pass rejection).
+    auto_reject: bool = False
     background_flatten: bool = True
     background_box_size: int = 128
     # 'per_channel' (default, good for star fields and small targets)
@@ -378,6 +390,33 @@ class StackEstimate:
     suggested_reference_canvas: bool = False
 
 
+def _auto_kappa_min_frames(kappa: float) -> int:
+    """Smallest frame count at which κ-σ can reject a *lone* outlier.
+
+    A single point's z-score against statistics that still include it is at most
+    ``(n−1)/√n``; that first reaches ``κ`` at ``n = ⌈((κ+√(κ²+4))/2)²⌉``. Below
+    this, κ-σ is mathematically blind to a lone satellite/plane trail, so
+    ``auto`` uses the order-statistic min/max drop (which removes an extreme even
+    at n=3) instead. Floored at 3 (min/max needs ≥3 to spare two samples)."""
+    u = (kappa + math.sqrt(kappa * kappa + 4.0)) / 2.0
+    return max(3, int(math.ceil(u * u)))
+
+
+def _resolve_auto_reject(options: StackOptions, n: int) -> StackOptions:
+    """Resolve ``auto_reject`` into concrete ``sigma_clip``/``min_max_reject``.
+
+    When ``auto_reject`` is on (and not drizzling), pick order-statistic min/max
+    for small stacks — the only method that removes a lone outlier below
+    :func:`_auto_kappa_min_frames` — and weight-respecting κ-σ once the stack is
+    large enough for κ-σ to bite. Returns ``options`` unchanged when
+    ``auto_reject`` is off or drizzle is on (drizzle has its own two-pass
+    rejection), so a run that doesn't opt in is byte-for-byte identical."""
+    if not options.auto_reject or options.drizzle:
+        return options
+    use_kappa = n >= _auto_kappa_min_frames(options.sigma_kappa)
+    return replace(options, sigma_clip=use_kappa, min_max_reject=not use_kappa)
+
+
 def estimate_stack(project: Project, options: StackOptions,
                    memory_budget_gb: float | None = None) -> StackEstimate:
     """Compute the output canvas dimensions and estimated peak working memory a
@@ -427,6 +466,9 @@ def estimate_stack(project: Project, options: StackOptions,
             is_mosaic = canvas.is_mosaic
 
     n = len(frames)
+    # Resolve auto-reject so the pre-run memory estimate matches the method
+    # ``run_stack`` will actually use (min/max costs extra canvas planes).
+    options = _resolve_auto_reject(options, n)
     peak, (out_h, out_w) = _estimate_peak_bytes(
         dst_shape, drizzle=options.drizzle, drizzle_scale=options.drizzle_scale,
         drizzle_reject=options.drizzle_reject and n >= 4,
@@ -903,13 +945,18 @@ def run_stack(
             ref_patch = None
 
     n = len(frames)
+    # Effective options with ``auto_reject`` resolved to a concrete method from the
+    # frame count. The original ``options`` (with the user's choice intact) is what
+    # gets persisted in the run record; ``eff`` drives the method dispatch, the
+    # memory guard, and the STACKER provenance card so all three agree.
+    eff = _resolve_auto_reject(options, n)
     backend = "GPU (cupy)" if (
         (options.use_gpu is True) or (options.use_gpu is None and GPU_AVAILABLE)
     ) else "CPU (numpy/scipy)"
     log.info(
         "Stacking %d frames into %dx%d canvas — backend=%s, bg_flatten=%s, sigma_clip=%s",
         n, dst_shape[1], dst_shape[0], backend,
-        options.background_flatten, options.sigma_clip,
+        options.background_flatten, eff.sigma_clip,
     )
 
     # Refuse a stack that would exhaust RAM *before* allocating anything — a
@@ -919,8 +966,8 @@ def run_stack(
     _guard_stack_memory(dst_shape, drizzle=options.drizzle,
                         drizzle_scale=options.drizzle_scale,
                         drizzle_reject=options.drizzle_reject and n >= 4,
-                        reject_arrays=(_min_max_reject_arrays(options.min_max_reject_count)
-                                       if options.min_max_reject and not options.drizzle and n >= 3
+                        reject_arrays=(_min_max_reject_arrays(eff.min_max_reject_count)
+                                       if eff.min_max_reject and not options.drizzle and n >= 3
                                        else 0),
                         memory_budget_gb=memory_budget_gb)
     errors: list[str] = []
@@ -1025,8 +1072,8 @@ def run_stack(
     # Takes precedence over κ-σ on the standard path when enabled. Rejects a
     # lone per-pixel extreme (satellite/plane trail, hot/cold sample) that κ-σ
     # can't in a small stack. Needs ≥3 frames to spare two samples.
-    elif options.min_max_reject and n >= 3:
-        mmr = MinMaxRejectAccumulator(canvas_3, reject_count=options.min_max_reject_count)
+    elif eff.min_max_reject and n >= 3:
+        mmr = MinMaxRejectAccumulator(canvas_3, reject_count=eff.min_max_reject_count)
 
         def consume_min_max(aligned: np.ndarray, y0: int, x0: int, weight: float) -> None:
             mmr.add_window(aligned, y0, x0)
@@ -1058,7 +1105,7 @@ def run_stack(
     # ---- 3b. Standard path: pass 1 streaming mean + std --------------------
     # If sigma-clipping is off we go directly to the weighted sum and we're
     # done after one pass.
-    elif options.sigma_clip and n >= 4:
+    elif eff.sigma_clip and n >= 4:
         wel = WelfordAccumulator(canvas_3)
 
         def consume_pass1(aligned: np.ndarray, y0: int, x0: int, _weight: float) -> None:
@@ -1243,8 +1290,8 @@ def run_stack(
     # active path only for a non-drizzle ≥3-frame min-max-reject stack). Every
     # other path (drizzle, κ-σ pass 2, plain weighted sum, and the min/max
     # fall-back-to-mean when n < 3) does apply the weights.
-    weights_applied = not (options.min_max_reject and not options.drizzle and n >= 3)
-    header_meta = _build_output_header_meta(project, frames, options, n_used, wstats,
+    weights_applied = not (eff.min_max_reject and not options.drizzle and n >= 3)
+    header_meta = _build_output_header_meta(project, frames, eff, n_used, wstats,
                                             calibration=calibration, pstats=pstats,
                                             rstats=rej_stats,
                                             weights_applied=weights_applied)
@@ -1307,7 +1354,12 @@ def run_stack(
             canvas_w=dst_shape[1],
             coverage_min=int(cov_2d.min()),
             coverage_max=int(cov_2d.max()),
-            options_json=_json.dumps(asdict(options)),
+            # Persist the *effective* options: when auto_reject resolved to a
+            # concrete method, record that method (so the History rejection badge
+            # and any re-run reflect what actually ran) while ``auto_reject`` stays
+            # True in the record to show it was auto-picked. With auto_reject off
+            # (the default), ``eff is options`` so this is byte-for-byte unchanged.
+            options_json=_json.dumps(asdict(eff)),
             notes=color_cal_note or None,
             total_exposure_s=_integration_time_s(frames, n_used),
             transparency_ratio=_compute_transparency_ratio(project, frames),

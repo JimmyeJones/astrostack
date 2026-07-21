@@ -18,6 +18,7 @@ from pathlib import Path
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
+from seestack.io.wcs_io import wcs_dict_rescaled_to_preview
 from seestack.post.skymap import bright_star_catalog
 from webapp import deps
 
@@ -128,10 +129,22 @@ def get_sky(request: Request) -> SkyResponse:
                 height_deg = run.canvas_h * pixscale / 3600.0
                 wcs = None
                 if run.preview_path and (size := _png_size(run.preview_path)):
-                    wcs = _tan_wcs(
-                        float(t.ra_deg), float(t.dec_deg), width_deg,
-                        size[0], size[1], rotation or 0.0,
-                    )
+                    # Prefer the stack's *stored* canvas WCS (master FITS header),
+                    # rescaled to the preview grid — that is the true geometry the
+                    # pixels were reprojected onto, so it places a mosaic at the
+                    # correct RA/Dec *and* orientation (canvas geometry, not frame
+                    # 0's) with no rotation-sign guesswork. Fall back to the
+                    # single-frame TAN extrapolation only when the master FITS is
+                    # missing/headerless (older/edited runs).
+                    if run.fits_path:
+                        wcs = wcs_dict_rescaled_to_preview(
+                            run.fits_path, size[0], size[1],
+                        )
+                    if wcs is None:
+                        wcs = _tan_wcs(
+                            float(t.ra_deg), float(t.dec_deg), width_deg,
+                            size[0], size[1], rotation or 0.0,
+                        )
                 images.append(SkyImage(
                     safe=t.safe_name,
                     name=t.name,
