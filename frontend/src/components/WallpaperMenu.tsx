@@ -27,17 +27,19 @@ export function WallpaperMenu({
   safe,
   runId,
   size = "xs",
+  variant = "light",
 }: {
   safe: string;
   runId: number;
   size?: string;
+  variant?: string;
 }) {
   return (
     <Menu shadow="md" width={220} position="bottom-start">
       <Menu.Target>
         <Button
           size={size as never}
-          variant="light"
+          variant={variant}
           leftSection={<IconWallpaper size={14} />}
         >
           Wallpaper

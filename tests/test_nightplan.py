@@ -286,6 +286,46 @@ def test_next_observing_windows_clips_tonight_to_now():
         assert wins[0].dark_start >= midnight
 
 
+# A mid-latitude US site (New Jersey-ish) in July, and a pre-dawn caller who is
+# *inside* tonight's ongoing darkness. RA/Dec are M92 (a summer globular, well up).
+_US_EAST = np_plan.Observer(lat_deg=40.0, lon_deg=-74.0, elevation_m=0.0)
+_JUL_PREDAWN = datetime(2026, 7, 21, 6, 0, tzinfo=timezone.utc)  # ~01:04 local, mid-dark
+_M92_RA, _M92_DEC = 259.28, 43.14
+
+
+def test_find_dark_window_after_midnight_returns_the_ongoing_night():
+    # Called from within the small hours, the dark window must be *tonight's*
+    # ongoing darkness (which ends this morning), not tomorrow night's — the caller
+    # is standing inside it right now.
+    w = np_plan._find_dark_window(_US_EAST, _JUL_PREDAWN)
+    assert w is not None
+    # The caller sits inside the returned window.
+    assert w.start <= _JUL_PREDAWN < w.end
+    # It ends the same calendar morning, not a day later.
+    assert w.end.date() == _JUL_PREDAWN.date()
+
+
+def test_next_observing_windows_after_midnight_reports_tonight_not_tomorrow():
+    # Regression: a pre-dawn user asking "when can I next shoot M92?" must be told
+    # about the darkness still left *tonight*, not sent to tomorrow night. Before the
+    # fix the first window jumped to 2026-07-22; now it's tonight's remaining span,
+    # clipped to "now".
+    wins = next_observing_windows(
+        _US_EAST, _M92_RA, _M92_DEC, start_utc=_JUL_PREDAWN,
+        min_altitude_deg=20.0, nights=3, want=3)
+    assert wins, "M92 has usable darkness left tonight"
+    first = wins[0]
+    # The first opportunity is tonight (ends this morning), clipped to start at now.
+    assert first.dark_start >= _JUL_PREDAWN
+    assert first.dark_end.date() == _JUL_PREDAWN.date()
+    # There is real usable time left in it (the whole point of not skipping to
+    # tomorrow), and the following windows are genuinely later nights.
+    assert first.minutes_above_min_alt >= 45.0
+    starts = [w.dark_start for w in wins]
+    assert starts == sorted(starts)
+    assert wins[1].dark_start.date() > _JUL_PREDAWN.date()
+
+
 def test_moon_illumination_range_and_known_phase():
     illum = moon_illumination(JAN_EVENING)
     assert 0.0 <= illum <= 1.0

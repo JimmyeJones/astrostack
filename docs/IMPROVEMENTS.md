@@ -73,30 +73,29 @@ when you take it.
   stays correct, so the frame stacks either way). Confidence: reproduced + fixed. _(Found by this run's
   adversarial `qc/*` + `solve/*` audit.)_
 
-- **The night planner skips tonight's remaining darkness after local midnight — tells a pre-dawn user the next
-  window is *tomorrow* when hours of usable darkness remain *right now*.** Location: root cause in
-  `seestack/nightplan.py::_find_dark_window` (lines ~348-366) which locks onto the solar noon *following*
-  `when_utc` and scans noon→next-noon, so a night that started *before* that noon (the one the user is currently
-  inside) is excluded. Surfaces through `plan_tonight` (`_find_dark_window(observer, when_utc)`, ~line 646) and
-  `next_observing_windows` (anchor ~796-802; its partial-window clip at ~807-812 is *designed* to report
-  "a night already mostly gone" but never fires for after-midnight starts because offset 0 is always the
-  upcoming evening). Repro (reproduced): observer 40.0N, −74.0W, `start_utc = 2026-07-21T06:00Z` (02:00 local,
-  mid-darkness). Tonight's real dark window is `02:16–07:48Z` and the observer is inside it with ~1h48m still to
-  come; target M92 (RA 259.28, Dec 43.14) is usable for **115 min** in that remaining darkness (peak alt 49°).
-  Yet `next_observing_windows(...)` returns first `dark_start = 2026-07-22T02:16Z` (tomorrow) and
-  `plan_tonight`'s `dark_window` is likewise tomorrow's — tonight's 115-min window is dropped. A local-clock
-  sweep confirms the flip at ~solar midnight: 00:00/01:00 local return tonight's ongoing window; 02:00 local
-  onward jump to tomorrow. **Severity: wrong-result / broken-UX** — the answer to the feature's core question
-  ("when can I next shoot this?") is factually wrong for post-midnight callers, and pre-dawn is exactly when a
-  Seestar owner checks "can I still grab another target before it gets light?". Bounded to start times between
-  local solar midnight and dawn. Confidence: reproduced. **Fix direction (leave to Builder — needs care):** when
-  `when_utc` already sits inside (or after the start of) an ongoing dark window, report *that* window clipped to
-  `[now, dark_end]` instead of jumping to the next night; e.g. have `_find_dark_window` first try the noon
-  *preceding* `when_utc` and, if `when_utc < dark_end` for that night, return the remaining span — then make
-  `next_observing_windows`' offset-0 clip actually reachable for after-midnight calls. Add a regression test at
-  02:00 local asserting the returned window is tonight's (ends today), not tomorrow's. _(Found by this run's
-  adversarial post/planning audit; the same audit re-traced `coords.py` RA-wrap, `framing.py` arcmin/FOV units,
-  `nightplan.py` moon-illumination/rise-set/polar cases, and `post/color_cal.py` all clean.)_
+- ~~**The night planner skips tonight's remaining darkness after local midnight — tells a pre-dawn user the next
+  window is *tomorrow* when hours of usable darkness remain *right now*.**~~ — **FIXED v0.158.3** (Builder
+  2026-07-21, branch `claude/pensive-faraday-kodolb`; reproduced + regression-tested). Root cause in
+  `seestack/nightplan.py::_find_dark_window`, which locked onto the solar noon *following* `when_utc` and scanned
+  noon→next-noon, so a night that started *before* that noon (the one the user is currently inside) was excluded;
+  surfaced through `plan_tonight` and `next_observing_windows` (whose partial-window clip never fired for
+  after-midnight starts because offset 0 was always the upcoming evening). Repro (reproduced): observer 40.0N,
+  −74.0W, `start_utc = 2026-07-21T06:00Z` (mid-darkness) — tonight's real dark window is `02:16–07:48Z`, target
+  M92 (RA 259.28, Dec 43.14) usable **115 min** (peak 49°), yet the planner returned first `dark_start =
+  2026-07-22T02:16Z` (tomorrow). **Fix:** extracted the per-night scan into `_dark_window_after_noon(...)`;
+  `_find_dark_window` now, when `when_utc` precedes the nearest noon (small hours / pre-dawn), first checks the
+  *previous* night's window and returns it if `when_utc < prev.end` (the caller is still inside it) — otherwise
+  the next window as before. `next_observing_windows` anchors one day earlier (and scans one extra night to keep
+  the forward horizon) when the caller is before that date's local noon, so its existing offset-0 clip now
+  reaches the ongoing window and trims it to `[now, dark_end]`. Post-fix the repro returns tonight's clipped
+  `06:00–07:48Z` window (115 min, peak 49.1°) and `plan_tonight` reports tonight's `02:16–07:48Z`, not tomorrow.
+  Regressions `tests/test_nightplan.py::test_find_dark_window_after_midnight_returns_the_ongoing_night` and
+  `::test_next_observing_windows_after_midnight_reports_tonight_not_tomorrow` (both fail-before returning the
+  2026-07-22 window, pass-after). Additive/upgrade-safe: pure planning-path logic, no config/DB/API/default
+  change; evening callers (`when_utc` after local noon) are byte-for-byte unchanged. Severity: wrong-result /
+  broken-UX (the feature's core "when can I next shoot this?" answer was factually wrong for post-midnight
+  callers — exactly when a Seestar owner checks "can I still grab another target before dawn?"). Confidence:
+  reproduced + fixed.
 
 - ~~**`GET /api/storage` 500s the whole storage page when one target's cache dir is unreadable/vanished.**~~
   — **FIXED v0.156.1** (Scout 2026-07-21, branch `claude/kind-mccarthy-8n7my1`). Symptom: an unreadable or
@@ -5212,15 +5211,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   *(Original spec kept for provenance.)*
 - **IDEA (Builder 2026-07-21, filed while shipping the wallpaper export) — surface the "Make it your wallpaper"
   menu on the Target/Gallery result surfaces too, and let it honour "North up".** *(Friendliness / PRIORITY 3;
-  size S.)* The v0.158.0 wallpaper export (`WallpaperMenu` + `GET …/wallpaper?aspect=`) currently lives only on
-  the **History** run card. A beginner who lands on the **Target** page hero or the **Gallery** tile — arguably
-  the more "enjoy my finished picture" surfaces — can't reach it without opening History. Two low-risk follow-ups:
-  (a) mount the same `WallpaperMenu` next to the existing Share/JPEG controls on the Target result card and the
-  Gallery lightbox (pure frontend — the component + endpoint already exist); (b) optionally thread the existing
-  `north_up` orientation through the wallpaper endpoint so the cropped wallpaper can point celestial North up like
-  the JPEG download does — this needs the endpoint to orient the preview *before* computing the target pixel (the
-  rotation moves the pixel), so it's a small but real bit of care, not a pure pass-through. Both additive/read-only.
-  Beginner bar ✔ (reaches the delight from where the beginner actually looks at their picture).
+  size S.)* **PARTIALLY SHIPPED v0.158.4** (Builder 2026-07-21, branch `claude/pensive-faraday-kodolb`) — slice
+  **(a)-Target done**: the `WallpaperMenu` now sits next to the Picture/Share controls on the **Target** page
+  toolbar (guarded by `latestRun?.has_preview`, styled to match the toolbar via a new optional `variant` prop on
+  the component, default `"light"` so the History card is byte-for-byte unchanged), so a beginner can make a
+  wallpaper from the target's main "enjoy my picture" surface without opening History. Tests:
+  `Target.test.tsx` +2 (offers the three aspect presets with a preview; hides them without one). **Still open:**
+  (a)-**Gallery lightbox** — mount the same menu on the Gallery lightbox (pure frontend; the lightbox needs the
+  run id + `has_preview` for the shown image); and (b) optionally thread the existing `north_up` orientation
+  through the wallpaper endpoint so the cropped wallpaper can point celestial North up like the JPEG download
+  does — this needs the endpoint to orient the preview *before* computing the target pixel (the rotation moves the
+  pixel), so it's a small but real bit of care, not a pure pass-through. Both additive/read-only. Beginner bar ✔
+  (reaches the delight from where the beginner actually looks at their picture).
 - **NEW BEGINNER FEATURE (Scout 2026-07-21 #11) — "Make it your wallpaper": one-tap export of a finished stack
   cropped + sized to a phone or desktop background, auto-centred on the target.** *(Beginner feature; PRIORITY 3
   friendliness / "enjoy + share" pillar; size S–M.)* Making your own astrophoto your phone lock-screen is one of
