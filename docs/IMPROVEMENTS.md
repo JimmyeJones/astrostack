@@ -69,6 +69,27 @@ stack path, so the next Scout should keep rotating (webapp routers / watcher / i
 render) rather than re-tread here. The two open items below both remain correctly deferred pending real-data
 threshold validation.)_
 
+_(Scout re-audit 2026-07-21 (v0.151.0 baseline, suite green 1494 passed / 2 skipped): led with the
+newest stacking-engine code — the just-shipped **inverse-variance combine weight** for photometrically-
+scaled frames (`stack/weighting.py::combine_weights_with_photometric` + its wiring in `stacker.py`) — and
+traced it adversarially end-to-end. **Clean:** the pixel gain-match (`pscales`, factor `s`) and the combine
+weight (`combine_weights`, factor `w/s²`) are threaded to `_pass`/`_drizzle_pass` **separately** and
+consistently on all three final-combine branches (single-pass mean, κ-σ pass 2, drizzle final), while the
+rejection-reference passes (κ-σ pass 1, min/max, drizzle statistics) correctly keep the plain `weights`; the
+κ-σ clip reference (`mean_win`/`std_win` from pass 1) stays in the same *scaled* domain as the frames it
+clips, so the 1/s² down-weight can't skew the rejection test; the helper returns the same object unchanged
+when `pscales` is falsy (off-by-default `photometric_normalize` → byte-for-byte identical stack); and the
+guard `s and s > 0 and abs(s-1) > 1e-9` leaves neutral/unmeasured scales untouched. Then rotated onto the
+less-recently-audited **ingest journey** per the note above: `webapp/watcher.py` (StabilityTracker
+size+mtime quiet-period debounce, `_pending_batch`/stranded-batch re-arm on failed hand-off — traced clean),
+`qc/metrics.py` (float-promote-before-add green-channel avoids uint16 wrap; NaN-safe FWHM/ecc/flux
+reductions), `qc/grading.py` (robust modified-z with MAD→meanAD→skip fallback, practical-significance floors,
+`MAX_REJECT_FRACTION` rail, log-domain non-positive handling), and `solve/runner.py` (setup-error
+canonicalisation, unsolved frames keep `accept` and only annotate `reject_reason`). **No reproducible
+correctness/data-integrity bug found** — the engine and the ingest path remain well-hardened. Confirms the
+standing conclusion: the highest marginal value is off the stack path; the next Scout should rotate through
+the remaining webapp routers (sky/editor/gallery), `io/merge.py`/`library.py`, `post/`, and `render/`.)_
+
 - ~~**"One frame vs your stack" reveal (and every raw-sub thumbnail) flattened the single sub's sky to
   ~2–3 tonal levels — a saturated star set the uint8 normalisation ceiling, quantising the faint sky
   away *before* the stretch could show it. The reveal dishonestly hid the very single-sub noise it
@@ -3227,6 +3248,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+- **NEW (Scout 2026-07-21) — surface a "match brightness across your subs" nudge when the data actually needs
+  it, so the v0.151.0 inverse-variance combine reaches the beginner who benefits most.** *(Autonomy/image-quality;
+  PRIORITY 2→4; size S–M.)* v0.151.0 added a genuine image-quality win: with `photometric_normalize` on, a hazy
+  sub is gain-matched *and* correctly down-weighted by 1/s² (inverse-variance), so a multi-night stack with
+  varying sky transparency combines cleaner. But `photometric_normalize` is **off by default** (correctly — a
+  silent default flip would violate §9), so the beginner with exactly the mixed-transparency data it helps most
+  never turns it on, because nothing tells them to. **Idea:** when a target's accepted subs show a **wide
+  transparency/sky spread** — cheaply detectable from data we already store per frame (`transparency_score` /
+  `sky_adu_median` spanning, say, a robust ratio > ~1.5×, or subs drawn from ≥2 distinct nights with differing
+  medians) — show a one-line, dismissible nudge on the Stack form: *"Your subs vary in sky brightness across
+  nights — turn on 'Match brightness across subs' for a cleaner combined result."* with a one-click toggle.
+  **Crucially a *suggestion*, not a default flip:** the engine default and `default_stack_options` stay
+  untouched (byte-for-byte identical unattended/never-configured behaviour, upgrade-safe), mirroring exactly how
+  the v0.149.0 `auto_reject` beginner-default was shipped as a *returned-form* seed rather than a persisted
+  default. This closes the "great feature nobody discovers" gap without any guardrail risk. **Builder slice:**
+  (a) a pure `suggest_photometric_normalize(frames)` helper (robust spread test over the metrics already on
+  `FrameRow`, unit-tested for uniform-night → no-suggest / mixed-night → suggest / too-few-frames → no-suggest);
+  (b) return an advisory flag from `get_stack_defaults` (additive nullable field, no API-shape break); (c) a small
+  Mantine nudge on the Stack form wired to the existing `photometric_normalize` control. Additive, opt-in,
+  reversible; no schema/config/default change.
 - ~~**NEW (Scout 2026-07-21d) — make smart `auto_reject` the *beginner default* so a default stack actually
   removes a lone satellite/plane trail on small sub counts.**~~ — **SHIPPED v0.149.0** (Builder 2026-07-21,
   branch `claude/pensive-faraday-dircmw`). Implemented the Scout's upgrade-safe approach **(a)**: in
@@ -4701,6 +4742,31 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+- **NEW BEGINNER FEATURE (Scout 2026-07-21 #2) — "Have I shot enough?": a plain-language integration /
+  diminishing-returns meter on the target.** *(Beginner feature; PRIORITY 3 friendliness / trust; size S–M.)*
+  The single most common beginner question mid-session is *"is it worth staying up for more subs, or is this
+  target done?"* — and the app never answers it. Stack noise falls as **√N** (double the good subs → ~30% less
+  background noise, then steeply diminishing), so from just the **accepted-sub count** (which we already have on
+  every target) we can place the beginner on that curve and say, in plain words, whether more subs still pay off.
+  **Feature:** a small read-only card on the Target/History view: a compact SNR-vs-subs curve with a "you are
+  here" marker plus one honest verdict — e.g. *"228 good subs (~3.8 h). You're past the steep part of the curve:
+  another hour (~60 subs) would cut background noise only ~11% more — a clean stopping point."* or, for a thin
+  target, *"Only 34 good subs so far — you're on the steep part; each clear hour still buys a big noise drop.
+  Keep going for a much cleaner result."* Everything is derived from the count (× per-sub exposure for the hour
+  figure) — **pure `snr_gain(n_current, n_added)` = √((n+Δ)/n) arithmetic**, unit-testable against known ratios,
+  no new engine work, no new capture step, no schema/config change. **Distinct from** the shipped/ideated
+  reveals: the retrospective **noise-ratio badge** *measures* the finished stack's achieved σ-drop ("stacking
+  cut noise 15×"); the **noise trend** compares separate finished stacks; this is the **forward-looking "should I
+  keep shooting / did I shoot enough"** guide, the one a beginner consults *before* the next clear night to
+  decide whether to revisit the target — it answers *planning*, not *provenance*. **Beginner bar ✔:** one card,
+  zero knobs, sane default (auto-verdict from the count), plain language, actionable on the next clear night;
+  serves the trust + enjoy pillars and directly feeds the multi-night deepening arc the "night after night"
+  timelapse celebrates. **Guardrails:** additive/read-only, best-effort — hide the card when a target has too few
+  accepted subs to say anything useful (< ~20) or no exposure to convert to hours (drop the hour clause rather
+  than print blanks). **Builder slice:** (a) a pure `integrationAdvice(nAccepted, subExposureS)` helper returning
+  `{curvePoints, hereIndex, verdictText}` (unit-tested for steep / plateau / too-few cases); (b) an
+  `IntegrationMeterCard` (Mantine sparkline + verdict) mounted on Target, reusing the accepted-frame count the
+  page already loads — no new endpoint needed. Keeps the beginner-feature pipeline stocked.
 - **NEW BEGINNER FEATURE (Scout 2026-07-21) — "Your target, night after night": a looping timelapse of the
   same object getting deeper each time you re-stack.** *(Beginner feature; PRIORITY 3 friendliness /
   enjoy-share; size M.)* When a beginner shoots the same target across several clear nights and re-stacks, the
