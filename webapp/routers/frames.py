@@ -271,32 +271,37 @@ def get_frame(safe: str, frame_id: int, request: Request) -> FrameOut:
 @router.patch("/{frame_id}", response_model=FrameOut)
 def patch_frame(safe: str, frame_id: int, body: FramePatch, request: Request) -> FrameOut:
     lib, proj = deps.open_target_project(request, safe)
+    # Nest proj-close inside lib-close (as apply_grade above does) so the library
+    # handle is released on *every* exit — including the 404/no-such-frame and
+    # 422/bad-bayer-pattern raises below. Splitting the two into sibling
+    # try/finally blocks leaked the Library connection whenever the first block
+    # raised, because the second (lib.close) block was then skipped.
     try:
-        f = proj.get_frame(frame_id)
-        if f is None:
-            raise HTTPException(status_code=404, detail="No such frame")
-        patch: dict = {}
-        if body.accept is not None:
-            patch["accept"] = body.accept
-            patch["user_override"] = True
-            patch["reject_reason"] = None if body.accept else (body.reject_reason or "user")
-        if body.bayer_pattern is not None:
-            # Validate before it lands in the DB — the stored pattern later gets
-            # embedded in the preview cache filename (frame_preview), so junk
-            # here would poison that path and break debayering.
-            bp = body.bayer_pattern.upper()
-            if bp not in _BAYER_PATTERNS:
-                raise HTTPException(
-                    status_code=422,
-                    detail=f"Unknown bayer pattern: {body.bayer_pattern!r}",
-                )
-            patch["bayer_pattern"] = bp
-        if patch:
-            proj.update_frame(frame_id, **patch)
-        out = _to_out(proj.get_frame(frame_id))
-    finally:
-        proj.close()
-    try:
+        try:
+            f = proj.get_frame(frame_id)
+            if f is None:
+                raise HTTPException(status_code=404, detail="No such frame")
+            patch: dict = {}
+            if body.accept is not None:
+                patch["accept"] = body.accept
+                patch["user_override"] = True
+                patch["reject_reason"] = None if body.accept else (body.reject_reason or "user")
+            if body.bayer_pattern is not None:
+                # Validate before it lands in the DB — the stored pattern later gets
+                # embedded in the preview cache filename (frame_preview), so junk
+                # here would poison that path and break debayering.
+                bp = body.bayer_pattern.upper()
+                if bp not in _BAYER_PATTERNS:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"Unknown bayer pattern: {body.bayer_pattern!r}",
+                    )
+                patch["bayer_pattern"] = bp
+            if patch:
+                proj.update_frame(frame_id, **patch)
+            out = _to_out(proj.get_frame(frame_id))
+        finally:
+            proj.close()
         if body.accept is not None:
             # Keep the registry's accepted-count (Target badge, Library cards)
             # honest after a manual grade — it's only recomputed on refresh.

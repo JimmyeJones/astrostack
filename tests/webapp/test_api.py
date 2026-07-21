@@ -143,6 +143,43 @@ def test_accept_reject_frame(client, built_library):
     assert r.json()["accept"] is True
 
 
+def test_patch_frame_closes_library_on_error_paths(client, built_library, monkeypatch):
+    # Regression: PATCH /frames/{id} split proj-close and lib-close into sibling
+    # try/finally blocks, so the 404 (no such frame) and 422 (bad bayer pattern)
+    # raises skipped lib.close() and leaked the Library SQLite connection. Wrap
+    # open_target_project to track whether the returned lib was closed.
+    from webapp import deps
+
+    orig = deps.open_target_project
+    closed: dict[str, bool] = {}
+
+    def wrapper(request, safe):
+        lib, proj = orig(request, safe)
+        real_close = lib.close
+
+        def tracking_close():
+            closed["lib"] = True
+            return real_close()
+
+        lib.close = tracking_close  # instance attr shadows the bound method
+        return lib, proj
+
+    monkeypatch.setattr(deps, "open_target_project", wrapper)
+
+    # 404: no such frame — the first block raises before lib is ever closed.
+    closed.clear()
+    r = client.patch("/api/targets/M_42/frames/999999", json={"accept": True})
+    assert r.status_code == 404
+    assert closed.get("lib"), "Library connection leaked on the 404 path"
+
+    # 422: bad bayer pattern on a real frame — same leaked-handle path.
+    fid = client.get("/api/targets/M_42/frames").json()[0]["id"]
+    closed.clear()
+    r = client.patch(f"/api/targets/M_42/frames/{fid}", json={"bayer_pattern": "XXXX"})
+    assert r.status_code == 422
+    assert closed.get("lib"), "Library connection leaked on the 422 path"
+
+
 def test_bulk_reject_worst(client, built_library):
     # Give frames distinct fwhm so "worst" is well-defined.
     lib_frames = client.get("/api/targets/M_42/frames").json()
