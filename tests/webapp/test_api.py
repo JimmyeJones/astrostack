@@ -180,6 +180,56 @@ def test_patch_frame_closes_library_on_error_paths(client, built_library, monkey
     assert closed.get("lib"), "Library connection leaked on the 422 path"
 
 
+def test_bulk_frames_closes_library_when_update_raises(client, built_library, monkeypatch):
+    # Regression: POST /frames/bulk split proj-close and lib-close into sibling
+    # try/finally blocks, so a mid-loop update_frame failure (a read-only/locked
+    # project DB — the NAS-went-read-only state the app is built to survive) 500ed
+    # *and* skipped lib.close(), leaking the Library SQLite connection on every such
+    # call. Wrap open_target_project to make update_frame raise and to track whether
+    # the returned lib was closed.
+    import sqlite3
+
+    import pytest
+
+    from webapp import deps
+
+    orig = deps.open_target_project
+    closed: dict[str, bool] = {}
+
+    fail = {"on": False}
+
+    def wrapper(request, safe):
+        lib, proj = orig(request, safe)
+        real_close = lib.close
+
+        def tracking_close():
+            closed["lib"] = True
+            return real_close()
+
+        lib.close = tracking_close  # instance attr shadows the bound method
+
+        if fail["on"]:
+            def boom(*args, **kwargs):
+                raise sqlite3.OperationalError("attempt to write a readonly database")
+
+            proj.update_frame = boom  # simulate a read-only/locked project DB
+        return lib, proj
+
+    monkeypatch.setattr(deps, "open_target_project", wrapper)
+
+    fid = client.get("/api/targets/M_42/frames").json()[0]["id"]
+    # Arm the failure and clear the tracker only *after* the read above (which also
+    # goes through the wrapper) so we observe close purely from the failing POST.
+    fail["on"] = True
+    closed.clear()
+    with pytest.raises(sqlite3.OperationalError):
+        client.post(
+            "/api/targets/M_42/frames/bulk",
+            json={"action": "reject", "ids": [fid]},
+        )
+    assert closed.get("lib"), "Library connection leaked when update_frame raised"
+
+
 def test_bulk_reject_worst(client, built_library):
     # Give frames distinct fwhm so "worst" is well-defined.
     lib_frames = client.get("/api/targets/M_42/frames").json()
