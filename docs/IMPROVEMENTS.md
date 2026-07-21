@@ -3854,9 +3854,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
-- **NEW (Scout 2026-07-21) — coverage-leveling bins by the quality-*weight* sum, not the true per-pixel
+- ~~**NEW (Scout 2026-07-21) — coverage-leveling bins by the quality-*weight* sum, not the true per-pixel
   *frame count*, so on a quality-weighted mosaic the panel-step removal groups pixels by a fuzzed
-  coverage map.** *(Traced, from the stacking-engine audit; an improvement, not a verified corruption
+  coverage map.**~~ — **SHIPPED v0.143.1** (Builder 2026-07-21, branch `claude/pensive-faraday-enl8ut`).
+  `level_by_coverage` gained an optional `frame_coverage` param (the true integer per-pixel count the
+  accumulator already computes for the honest `coverage_min/max` diagnostics); when the caller passes it,
+  binning uses it instead of the Σ-weight `coverage`. The stacker now passes `frame_cov` — so a
+  quality-weighted mosaic groups pixels by real frame count, not a fuzzed weight sum. `frame_coverage`
+  defaults to `None` (bin by `coverage`, unchanged), and on an unweighted stack `frame_coverage ==
+  coverage`, so those paths are byte-for-byte identical (regression
+  `test_frame_coverage_matches_coverage_on_the_unweighted_path`). Fail-before/pass-after regression
+  `test_bins_by_true_frame_count_not_the_weighted_sum` (a single 6-frame panel whose thin strip is
+  downweighted to Σ≈5.4: the old weighted binning rounds the strip to bin 5, drops it below the pixel
+  floor, and leaves its +40 step / the frame-count binning levels the whole panel to ~0). Additive,
+  upgrade-safe (no schema/config/API/default change; only changes results when quality weighting **and**
+  a varying-coverage mosaic coincide). Original trace:
+  *(Traced, from the stacking-engine audit; an improvement, not a verified corruption
   bug.)* `level_by_coverage` (`seestack/bg/coverage_leveling.py:117`) bins pixels by
   `cov_int = np.rint(cov2d)` where `cov2d` is the accumulator's `coverage` — i.e. `WeightedSumAccumulator._weight`,
   the **Σ of per-frame weights** (`stacker.py:1192` passes `coverage`, not `frame_cov`). With quality

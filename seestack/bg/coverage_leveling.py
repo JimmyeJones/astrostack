@@ -43,6 +43,7 @@ def level_by_coverage(
     rgb: np.ndarray,
     coverage: np.ndarray,
     *,
+    frame_coverage: np.ndarray | None = None,
     object_sigma: float = 2.0,
     min_pixels_per_level: int = 200,
     dilate_object_mask_px: int = 4,
@@ -59,6 +60,18 @@ def level_by_coverage(
     coverage
         (H, W) or (H, W, 3) per-pixel weight from the accumulator. Pixels with
         coverage == 0 are no-data and are skipped.
+    frame_coverage
+        Optional (H, W) *true integer frame count* per pixel. The panel steps
+        this pass cancels trace the **frame-count** map (where footprints
+        overlap), so binning should use the honest count — but with quality
+        weighting on, ``coverage`` is a Σ-of-weights that no longer equals the
+        count (e.g. 5 frames at weight 0.9 → Σ=4.5), so rounding it fuzzes the
+        bins: two regions both covered by exactly 5 frames can split across bins,
+        or two genuinely different-coverage regions collide into one. When the
+        caller passes the exact per-pixel count (the accumulator already computes
+        it for the honest ``coverage_min``/``max`` diagnostics), bin by *that*.
+        Defaults to ``None`` → bin by ``coverage`` (unchanged); on an unweighted
+        stack the two are identical, so that path is byte-for-byte unchanged.
     object_sigma
         Pixels above ``median + object_sigma · σ`` of the luminance are masked
         out of the per-coverage median calculation — that's stars and
@@ -89,12 +102,17 @@ def level_by_coverage(
 
     out = rgb.astype(np.float32, copy=True)
 
-    if coverage.ndim == 3:
+    # Bin by the true per-pixel frame count when the caller provides it (quality
+    # weighting fuzzes the weighted-sum ``coverage``); otherwise fall back to the
+    # coverage map. Unweighted stacks have ``frame_coverage == coverage``, so the
+    # fallback path is byte-for-byte unchanged.
+    cov_src = frame_coverage if frame_coverage is not None else coverage
+    if cov_src.ndim == 3:
         # WeightedSumAccumulator's coverage is per-channel but identical across
         # channels for our pipeline; collapse to 2D.
-        cov2d = coverage[..., 0]
+        cov2d = cov_src[..., 0]
     else:
-        cov2d = coverage
+        cov2d = cov_src
 
     # Luminance + object mask. We dilate the mask so star halos and nebula
     # *edges* are also excluded — after stretching, even mildly bright pixels
@@ -111,8 +129,9 @@ def level_by_coverage(
     if dilate_object_mask_px > 0:
         object_mask = binary_dilation(object_mask, iterations=dilate_object_mask_px)
 
-    # Bin coverage values. For float weights round to nearest integer; with
-    # quality weighting on, exact values might be e.g. 4.7 but the
+    # Bin coverage values. ``cov2d`` is the true integer frame count when the
+    # caller passed ``frame_coverage`` (already integral); on the fallback path
+    # it's the Σ-weight map, so round to the nearest integer — the
     # **integer-rounded** bin is what carries the visible panel structure.
     cov_int = np.rint(cov2d).astype(np.int32, copy=False)
     valid_pix = (cov_int > 0) & finite
