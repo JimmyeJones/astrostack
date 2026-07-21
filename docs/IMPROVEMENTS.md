@@ -82,6 +82,25 @@ when you take it.
   on-disk change); it *does* change stacked pixels, so validate it improves (not regresses) a real stack and keep
   `hot_pixel_sigma` honoured. _(Found by this run's adversarial `bg/*`+`render/*` audit; reproduced + strengthened
   by the Scout — per-channel colour-shift measurement added.)_
+  **▶ VALIDATED + FIX PICKED (Scout 2026-07-21, run on v0.158.8 — this de-risks the Builder change).** A second
+  Scout independently reproduced the loss through the real `median_filter`-based pass (200×200 field of 40 Gaussian
+  stars, peak 8000 ADU over 1000-ADU sky, Poisson+8 e⁻ read noise) — **worse than filed: −20% (FWHM 3.0 px) /
+  −45% (2.0 px) / −73% (1.5 px)** integrated flux above sky. Then A/B-tested three star-aware fix directions on the
+  same field, each also fed an injected single hot pixel (60000) and a dead pixel (0) to confirm real defects are
+  still removed. **Winner — gate the HIGH-outlier replacement on the 3×3 median being *elevated above local sky*:**
+  a genuine hot pixel is a lone spike so its 3×3 median ≈ the local (e.g. 7×7) sky, whereas a star core has an
+  elevated 3×3 median because its neighbours are bright too. Concretely: keep the current flag (`|residual| >
+  sigma·MAD-σ`), but for a *high* outlier only replace it when `med3 − local_sky ≤ sigma·MAD-σ` (i.e. NOT star-like);
+  low outliers (dead/cold) replace as today. **Measured:** star-flux loss collapses to **−0.2% / −0.2% / −3.9%**
+  (vs current −20/−45/−73) while the injected hot pixel still goes 60000→1000 and the dead pixel 0→~985. (A simpler
+  "isolated vs brightest-neighbour" gate also helps but still lost ~11–26% at 1.5–2.0 px — the median-vs-local-sky
+  gate is clearly better; the repro/variants script is preserved in the run scratchpad.) **Builder guidance:** this
+  synthetic validation is now strong on *both* axes (star preservation AND defect removal), so the remaining
+  risk is real-Seestar confirmation only — implement the median-vs-local-sky gate, keep `hot_pixel_sigma` honoured,
+  keep the NaN=no-coverage handling (only ever flag/replace finite-residual pixels; a NaN local-sky near a mosaic
+  gap → treat as non-star / replace, matching today's conservative edge behaviour), mirror it in `_suppress_gpu`,
+  and pin it with the two regression tests the entry already specifies (star PSF keeps ≥~98% flux; single-pixel
+  spike still removed). Confidence now: **reproduced ×2 (two independent Scouts) + fix validated.**
 
 - ~~**`bilinear_debayer` wraps modulo 2**16 on an integer (raw 16-bit Bayer) mosaic — every interpolated pixel
   is silently corrupted (60000+60000 → 27232 instead of 60000).**~~ — **FIXED v0.158.5** (Scout 2026-07-21,
@@ -245,6 +264,43 @@ when you take it.
   `tests/webapp/test_upload.py::test_stream_to_disk_cleans_up_the_temp_when_the_final_flush_fails` (patches
   `os.fdopen` to raise `OSError(ENOSPC)` on `close()`; fails-before with an orphaned `.part`, passes-after with
   none). Severity was cosmetic (leaked disk over repeated ENOSPC uploads; never ingested, no corruption).
+
+_(Scout audit 2026-07-21 (v0.158.8 baseline, suite green **1570 passed / 2 skipped**): led the rotation with the
+stacking engine per §1's current focus — three parallel adversarial subagent audits + my own hand-trace/repro.
+**(1) `stack/align.py` + `stack/drizzle_path.py`**: CPU/GPU `map_coordinates` cval parity (only ever matters for
+`valid`-masked pixels, which are overwritten to NaN — verified empirically), the stale-`win_valid`-after-subpixel-
+shift contract (caller discards it; accumulator recomputes coverage from `isfinite`), NaN-blend re-masking
+(cval=1.0 mask shift, `>1e-6`→NaN, no darkened finite ring), drizzle weighted-mean semantics (no double-division),
+float64 Welford `E[v²]−E[v]²` + Bessel-only-on-tolerance vs raw-`var` resolution floor, `neff` gate on the
+unweighted uint32 frame count (not deflated `out_wht`), half-open `[-0.5,N-0.5]` in-bounds + NaN-safe clip — all
+traced **clean**. **(2) `stack/accumulator.py` + `stack/stacker.py`**: Welford update order in `add`/`add_window`
+(delta uses old mean; m2 before mean overwrite), in-place window views land in the canvas, MinMax ±inf summed
+per-side so no inf−inf, any-channel vs per-channel `frame_coverage`; all four combine branches guard `n_used==0`,
+photometric scale applied **identically** in κ-σ pass 1 & pass 2 (clip reference and clipped sum see the same
+scaled values), quality `weights` vs inverse-variance `combine_weights` threaded separately, `weights_applied`
+provenance, and the shared memory guard — all traced **clean**. (Two benign non-bugs noted: `estimate_stack`'s
+pre-run frame-count is computed before lucky-imaging/bad-solve reductions so the *UI sizing* estimate can differ
+from the run — but `run_stack`'s own guard/dispatch use the correct reduced `n`, nothing reaches the image; and a
+tiny transient float64 window temp in κ-σ pass 2, numerically harmless.) **(3) `bg/per_frame.py` +
+`bg/coverage_leveling.py` + `bg/final_gradient.py`**: coverage/NaN handling, leveling offsets gated on
+`cov>0 & finite`, the `np.clip` envelope clamp, and the final-gradient NaN-masked fit all traced **clean**. The
+audit flagged the **SExtractor mode→median fallback guard as algebraically inert** (`abs(sky−median)` is by
+construction `1.5·|median−mean|`, tested against `5.0·|median−mean|`, so `1.5X > 5X` never fires — replicated at
+`per_frame.py:369`, GPU `:452-455`, `coverage_leveling.py:173-175`, `final_gradient.py:225`). **The Scout
+verified this is a *latent* code smell, NOT a reproducible wrong-result bug, and did not file it as a bug:** I ran
+the real `sigma_clipped_stats`-fed estimator on plain sky, faint nebulosity, a large bright object, a crowded star
+field, heavily-skewed exponential sky, and a light-pollution ramp — in **every** case the upstream 3σ/maxiters=5
+clip keeps `mean−median` inside a correct `0.3·std` guard band, so the inert guard produces the **same** sky as a
+correctly-implemented guard would (mode stays in its valid slightly-skewed regime, as the docstring intends). I
+could not construct a realistic default-path input where the dead guard changes the output. It is worth a cheap
+defensive fix anyway (idea filed under Image quality — make the guard test skew against `std`, so the safety net
+actually exists if the upstream clip ever changes), but it is **not** a live data-integrity defect. Net for the
+run: **0 new bugs filed** (the numeric core stays well-hardened — consistent with the long clean streak), but the
+front-of-queue **⭐ hot-pixel star-core clipping bug was independently reproduced (×2) and its fix validated** (see
+the ▶ VALIDATED note on that entry — the median-vs-local-sky gate cuts star-flux loss from −20/−45/−73% to
+−0.2/−0.2/−3.9% while still removing hot/dead pixels), which de-risks it for the Builder. Also filed one new
+beginner feature ("What should I shoot next?"). Next Scout: rotate onto `webapp/routers/{editor}.py` + `edit/ops/*`
+(occasionally per §1), `io/scanner.py`, and `render/*`; the stack numeric core needs only sparse re-tread.)_
 
 _(Scout audit 2026-07-21 (v0.158.4 baseline, suite green 1563 passed / 2 skipped): ran **five** parallel
 adversarial subagent audits across the full stacking + io + calibrate + bg/render surface + my own
@@ -4750,6 +4806,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+- **IMPROVEMENT IDEA (Scout 2026-07-21) — make the SExtractor sky-mode fallback guard actually functional
+  (defense-in-depth; currently algebraically inert).** *(Image quality / correctness-hardening, PRIORITY 4;
+  size S.)* **Why:** the per-channel sky-zeroing uses the SExtractor mode `sky = 2.5·median − 1.5·mean`, with a
+  guard meant to fall back to the plain median when skew is "too extreme to trust". But the guard compares
+  `abs(sky − median)` — which is *by construction* exactly `1.5·|median − mean|` — against `5.0·|median − mean|`,
+  i.e. `1.5·X > 5·X`, which **never fires**. So the safety net is dead code. **This Scout verified it is NOT a
+  live wrong-result bug** (hence filed as an idea, not a bug): the upstream `sigma_clipped_stats(sigma=3,
+  maxiters=5)` keeps `mean−median` inside a correct `~0.3·std` band on every realistic input I tried (plain sky,
+  faint nebulosity, big bright object, crowded stars, exponential-skew sky, light-pollution ramp), so the mode
+  stays in its valid regime and the inert guard yields the same sky a correct guard would. But it *is* a latent
+  trap: if the upstream clip ever changes (wider sigma, fewer iters) the mode could over-subtract with no backstop.
+  **Cheap fix:** replace the self-referential threshold with a skew test against the clipped `std` — e.g. fall back
+  to median when `abs(mean − median) > 0.3·std` (the standard SExtractor trust criterion) or `sky` goes non-finite/
+  below a sane floor. Apply to all four inert copies: `seestack/bg/per_frame.py:369` (CPU default path), the GPU
+  path `:452-455`, `seestack/bg/coverage_leveling.py:173-175`, and `seestack/bg/final_gradient.py:225`. **Test:**
+  a synthetic heavily-skewed sample where the *correct* guard fires and asserts the median is used (and a
+  symmetric-sky sample where mode≈median is kept), plus a byte-for-byte parity check that realistic clipped sky is
+  unchanged from today (so it's provably a no-op on the default path — upgrade-safe: within-function algorithm
+  change, no config/DB/API/on-disk change). _(Found by this run's adversarial `bg/*` audit; verified latent, not
+  a reproducible defect.)_
 - **IMPROVEMENT IDEA (Scout 2026-07-21) — derive hot/dead-pixel correction from a persistent defect map (the
   master dark/bias) instead of relying only on the blind per-frame local-median filter.** *(Image quality /
   autonomy, PRIORITY 4 + 2; size M; needs real-data validation.)* **Why:** the always-on per-frame
@@ -5312,6 +5388,38 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+- **NEW BEGINNER FEATURE (Scout 2026-07-21) — "What should I shoot next?": suggest one or two *well-placed
+  showpiece targets you haven't captured yet*, ranked for tonight, each with a one-tap "add to calendar".**
+  *(Autonomy + friendliness / "plan + enjoy" pillar, PRIORITY 2–3; size M.)* **Why:** every planning card the app
+  has today answers "when can I next shoot a target I'm *already* working?" (`NextSessionCard`, the multi-night
+  nudge, the tonight card). Nothing helps a beginner discover a **new** target — yet "what's a good, easy thing to
+  point at tonight?" is the single most common beginner question, and the app already holds everything needed to
+  answer it: it knows the catalog, tonight's sky from the saved site, and which targets the owner has already
+  imaged. Closing that loop turns AstroStack from a *processor* into a gentle *guide*. **Feature:** a small
+  "Try something new tonight" card (Dashboard / Tonight page) that shows 1–3 crowd-pleaser deep-sky objects which
+  (a) the owner has **not** already captured (not in the library), (b) are **well-placed tonight** from the saved
+  site (good altitude during the dark window, clear of the Moon), and (c) are **beginner-friendly** (bright, large,
+  famous — a curated showpiece whitelist, e.g. M31/M42/M45/M13/M27/M57/M51/M81-82/NGC7000/etc.). Each row is plain
+  language: *"M27, the Dumbbell Nebula — a bright planetary nebula in Vulpecula. Climbs to 64°, up most of the
+  night, Moon down. A great, easy first target — point the Seestar and let it run."* plus the existing "Add to
+  calendar" `.ics` link (see the sibling idea below) so the plan doesn't evaporate. **Beginner bar ✔:** answers a
+  real beginner question, zero astro knobs, sane default (the app picks; the whitelist keeps suggestions genuinely
+  easy — no faint/niche objects), serves plan+enjoy; **not** pro tooling. **Reuses existing pieces, ~no new astro
+  math:** the catalog + coordinates come from `seestack.nightplan.load_catalog` (same one `objectinfo`/the Tonight
+  planner use), observability from `nightplan._observability_batch` / the same dark-window + Moon logic the shipped
+  planning cards already run, "haven't shot it" from the library target list, and the friendly name/type/
+  constellation from `objectinfo`. The only genuinely new code is a small curated *showpiece whitelist* (catalog
+  ids + a one-line beginner blurb each) and the ranking glue. **Fully offline / no new dep / no sign-off:** all
+  local catalog + ephemeris; self-hides when there's no saved site or no upcoming dark window (exactly like the
+  existing planning cards). **Guardrails:** additive, read-only, opt-in display; no schema/config/API-shape/default
+  change. **Builder slices — (a) engine (S–M):** a pure `suggest_targets(observer, when_utc, already_have: set[str],
+  *, limit=3)` in `nightplan.py` (or a new `seestack/suggest.py`) that filters the whitelist to not-yet-captured,
+  scores each with the existing observability blend, and returns the top N with their catalog info — unit-test the
+  whitelist filtering, the "already have" exclusion, and the tonight-ranking against a synthetic site/date (no
+  network). **(b) webapp (S):** `GET /api/plan/suggest` (site from Settings, `already_have` from the library) →
+  read-only JSON, empty list → self-hide. **(c) frontend (S):** a `SuggestTargetsCard` mirroring `NextSessionCard`,
+  with the `.ics` link per row. Keeps the beginner-feature pipeline stocked with a fresh *discovery/plan* capability
+  that no existing card covers.
 - **NEW BEGINNER FEATURE (Scout 2026-07-21) — "Add it to your calendar": one-tap `.ics` download for the next
   good observing window on a target, so a beginner doesn't miss the night.** *(Autonomy + friendliness /
   "plan" pillar, PRIORITY 2–3; size S.)* **Why:** the shipped **"Plan your next night"** card (v0.156.0,
