@@ -3752,6 +3752,45 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+- **⭐ OWNER-REQUESTED — Adaptive Auto: learn the owner's taste from feedback on the
+  auto-processed image (no ML runtime, fully offline/private).** The owner wants to
+  give feedback on the Auto result and have it get better at *their* taste over
+  time. Key insight: `auto_recipe` (`seestack/edit/presets.py`) is already
+  **data-driven** — it computes each parameter from the image (stretch `target_bg`,
+  denoise strength, sharpen radius, SCNR, saturation…). So this needs **no neural
+  net, no model download, no external API** (all of which would hit §9/§10 and send
+  the owner's images off the NAS). Instead, turn feedback into **bounded nudges to
+  those existing parameters**, stored as a personal profile. **This DEEPENS the Auto
+  result — it must live on the existing Auto/editor result, not as a new page/card
+  (see §1 "Depth over surface").** Design:
+  - **Feedback UI on the Auto result:** a thumbs-up plus a few plain-language
+    directional cues — "too dark / too bright", "highlights/core clipped", "too soft
+    / over-sharpened", "colour off / too green", "too flat / more punch", "too noisy
+    / over-smoothed". One click each; no jargon.
+  - **Each cue maps to a small, bounded bias** on the matching Auto parameter (e.g.
+    "too dark" → +step on `target_bg`; "core clipped" → stronger highlight knee;
+    "over-sharpened" → −sharpen amount; "too green" → +SCNR). Accumulate biases into
+    a per-library **`auto_preferences` profile** (EMA / clamped accumulator so recent
+    feedback weighs more and nothing can runaway).
+  - **Apply the profile on top of the data-driven values** on the next Auto run,
+    each parameter **clamped to its safe range** — still data-driven, just shifted
+    toward the owner's taste. An empty profile = today's Auto, byte-for-byte.
+  - **Transparent + reversible (a §1 trust value):** show a plain-language note
+    ("Auto is running a bit brighter for you because you marked 3 recent results too
+    dark") and a one-click **"Reset my Auto preferences."** Never drift silently.
+  Guardrails: no new/heavy/networked dependency (pure numpy over params already
+  computed); additive/upgrade-safe (a new nullable `auto_preferences` JSON in library
+  meta — old libraries read as empty = unchanged); private (images never leave the
+  NAS); off/neutral until the owner actually gives feedback. Beginner bar: clearly
+  yes ("tell it what you didn't like, it improves"). Slices: **(a)** feedback chips +
+  bounded per-library profile + `auto_recipe` applying it + reset + why-note (the
+  ask); **(b)** per-object-type profiles (galaxy/nebula/cluster — the classifier
+  already exists — so a "brighter core" taste for galaxies doesn't over-brighten a
+  cluster) + recency decay; **(c)** *optional later* a light statistical fit (image
+  features → preferred bias) — still numpy/scikit (already deps), **no neural net** —
+  with a strict no-regression parity test. Relates to and supersedes the "Personal
+  default recipe" idea. (L; slice (a) is the shippable M — autonomy/editor,
+  PRIORITY 1/2)
 - ~~**IMPROVEMENT IDEA (Scout 2026-07-21) — a plate-solve timeout on the full-resolution rung should fall
   through to the faster downsampled retry rungs instead of giving up.**~~ — **SHIPPED v0.158.7** (Builder
   2026-07-21, branch `claude/pensive-faraday-yr971k`). `ASTAPSolver.solve` (`seestack/solve/astap.py`) now
