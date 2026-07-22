@@ -1220,7 +1220,7 @@ def download_wallpaper(safe: str, run_id: int, request: Request,
 
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/{kind}")
 def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
-                       north_up: bool = False) -> Response:
+                       north_up: bool = False, nameplate: bool = False) -> Response:
     # "jpeg" is a share-friendly transcode of the stored preview PNG (no separate
     # file on disk), served at the same resolution; the rest map to stored paths.
     if kind not in _KIND_FIELDS and kind != "jpeg":
@@ -1228,6 +1228,9 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
     lib, proj = deps.open_target_project(request, safe)
     try:
         run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
+        # The library entry supplies the target-name fallback for the nameplate
+        # (fetched while the library is open, before it's closed below).
+        entry = lib.find_target(safe) if run is not None and kind == "jpeg" else None
     finally:
         proj.close()
         lib.close()
@@ -1251,7 +1254,16 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
                     preview = orient_preview_north_up(preview, fits_path)
                 except Exception:  # noqa: BLE001 — a broken FITS just shares the un-oriented preview
                     pass
-        data = png_bytes_to_jpeg(preview)
+        # nameplate bakes the same tasteful acquisition footer the editor share
+        # export offers (target · integration · date · gear) onto this direct
+        # download — drawn last so it stays at the foot of a north-up-oriented
+        # image. Best-effort provenance: a field it can't read is simply omitted,
+        # and an empty nameplate is a clean no-op, so the default download is
+        # byte-for-byte unchanged.
+        plate = None
+        if nameplate:
+            plate = pipeline._nameplate_fields(run.fits_path or "", entry, run)
+        data = png_bytes_to_jpeg(preview, nameplate=plate)
         filename = f"{run.output_basename}.jpg"
         return Response(
             content=data, media_type="image/jpeg",

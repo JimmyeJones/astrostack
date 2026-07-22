@@ -34,4 +34,15 @@ describe("stackArtifactUrl", () => {
     expect(api.stackArtifactUrl("M_31", 5, "fits", true)).toBe(
       "/api/targets/M_31/stack-runs/5/fits");
   });
+
+  it("appends nameplate=true only for the JPEG, combining with north_up", () => {
+    expect(api.stackArtifactUrl("M_31", 5, "jpeg", false, true)).toBe(
+      "/api/targets/M_31/stack-runs/5/jpeg?nameplate=true");
+    // Both toggles combine into one query string.
+    expect(api.stackArtifactUrl("M_31", 5, "jpeg", true, true)).toBe(
+      "/api/targets/M_31/stack-runs/5/jpeg?north_up=true&nameplate=true");
+    // Non-JPEG artifacts never take the caption.
+    expect(api.stackArtifactUrl("M_31", 5, "preview", false, true)).toBe(
+      "/api/targets/M_31/stack-runs/5/preview");
+  });
 });

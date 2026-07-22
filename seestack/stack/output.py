@@ -337,7 +337,8 @@ def write_share_jpeg(path: Path, rgb: np.ndarray, *, max_long_edge: int = 2048,
     return Path(path)
 
 
-def png_bytes_to_jpeg(png_data: bytes, *, quality: int = 90) -> bytes:
+def png_bytes_to_jpeg(png_data: bytes, *, quality: int = 90,
+                      nameplate: Any | None = None) -> bytes:
     """Transcode an already-rendered display PNG (e.g. the stored stack preview)
     to a smaller, more share-friendly JPEG at the **same** resolution.
 
@@ -346,7 +347,13 @@ def png_bytes_to_jpeg(png_data: bytes, *, quality: int = 90) -> bytes:
     black). Used to offer a JPEG download of the finished picture alongside the
     PNG without re-rendering from the linear FITS: a PNG of a large stack is
     heavy and PNG isn't ideal for messaging apps, while a quality-90 JPEG is
-    smaller and universally share-friendly. Returns the encoded JPEG bytes."""
+    smaller and universally share-friendly. Returns the encoded JPEG bytes.
+
+    When ``nameplate`` is a :class:`seestack.nameplate.NameplateFields`, the same
+    tasteful acquisition footer the editor share export bakes on (target ·
+    integration · date · gear) is drawn onto this download too — so the direct
+    "Download JPEG" path can be as post-ready as the editor's. Passing ``None``
+    (the default) leaves the pixels exactly as before."""
     from io import BytesIO
 
     from PIL import Image
@@ -359,6 +366,9 @@ def png_bytes_to_jpeg(png_data: bytes, *, quality: int = 90) -> bytes:
             img = flat
         else:
             img = src.convert("RGB")
+        if nameplate is not None:
+            from seestack.nameplate import draw_nameplate
+            img = draw_nameplate(img, nameplate)
         buf = BytesIO()
         img.save(buf, format="JPEG", quality=quality, optimize=True)
     return buf.getvalue()

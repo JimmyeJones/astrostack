@@ -479,6 +479,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
   const [adjust, setAdjust] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
   const [northUp, setNorthUp] = useState(false);
+  const [nameplate, setNameplate] = useState(false);
   const [stretch, setStretch] = useState(DEFAULT_STRETCH);
   const [black, setBlack] = useState(DEFAULT_BLACK);
   const [cacheBust, setCacheBust] = useState(0);
@@ -636,6 +637,11 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
               description="Orient the picture — and the JPEG you download or share — like reference photos of this object."
             />
           ) : null}
+          <Switch
+            size="sm" checked={nameplate} onChange={(e) => setNameplate(e.currentTarget.checked)}
+            label="Add a caption to the JPEG"
+            description="Bake the acquisition data (target, integration, date, gear) into the JPEG you download or share."
+          />
           <Group gap="xs" mt={4}>
             <Button
               size="xs" leftSection={<IconDeviceFloppy size={14} />}
@@ -747,7 +753,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
               : "Download the finished picture as a JPEG (smaller — best for sharing)"}>
               <Button
                 size="xs" variant="light" leftSection={<IconPhotoDown size={14} />}
-                component="a" href={api.stackArtifactUrl(safe, run.id, "jpeg", applyNorthUp)}
+                component="a" href={api.stackArtifactUrl(safe, run.id, "jpeg", applyNorthUp, nameplate)}
               >
                 JPEG
               </Button>
@@ -755,7 +761,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
           )}
           {run.has_preview && (
             <SharePictureButton
-              url={api.stackArtifactUrl(safe, run.id, "jpeg", applyNorthUp)}
+              url={api.stackArtifactUrl(safe, run.id, "jpeg", applyNorthUp, nameplate)}
               {...sharePictureText(
                 run.output_basename,
                 new Date(run.timestamp_utc).toLocaleDateString(),
@@ -820,7 +826,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
           : null}
         title={run.output_basename}
         downloadHref={run.has_preview ? api.stackArtifactUrl(safe, run.id, "preview") : undefined}
-        jpegHref={run.has_preview ? api.stackArtifactUrl(safe, run.id, "jpeg", applyNorthUp) : undefined}
+        jpegHref={run.has_preview ? api.stackArtifactUrl(safe, run.id, "jpeg", applyNorthUp, nameplate) : undefined}
         rawHref={run.has_fits ? api.stackArtifactUrl(safe, run.id, "fits") : undefined}
         {...(run.has_preview
           ? (() => {

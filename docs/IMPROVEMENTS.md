@@ -6466,9 +6466,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   toggle; (c) the share-flow toggle (default on). _(M, split as above; PRIORITY 3 friendliness / share —
   beginner feature; keeps the pipeline stocked. Builds directly on shipped share-export + FITS-provenance
   infra, so low-risk.)_
+- ~~**NEW (Builder 2026-07-21, follow-up to shipped nameplate v0.146.0) — offer the acquisition nameplate on the
+  *non-editor* "Download JPEG" path too, so a beginner who never opens the editor still gets the captioned
+  look.**~~ — **SHIPPED v0.163.0** (Builder 2026-07-22, branch `claude/pensive-faraday-2iu86x`). The History
+  "Download JPEG" / share path now offers the same acquisition-caption footer as the editor share. **Engine:**
+  `png_bytes_to_jpeg(..., nameplate=None)` gained the same optional `NameplateFields` param `write_share_jpeg`
+  already has (draws `draw_nameplate` on the transcoded RGB before encoding; `None` → byte-for-byte the old
+  pixels). **Backend:** `download_stack_run` (the `kind=jpeg` path) gained a `nameplate: bool = False` query
+  param; when set it builds the fields via the shipped `pipeline._nameplate_fields(run.fits_path, entry, run)`
+  (best-effort provenance from the master FITS, falling back to the library/run record) and draws the footer
+  **last** (after any north-up rotation, so it stays at the foot of the oriented image). **Frontend:**
+  `stackArtifactUrl` gained a `nameplate` arg (appends `nameplate=true`, composing with `north_up`), and the
+  History adjust panel gained an "Add a caption to the JPEG" Switch threaded into all three JPEG hrefs (menu
+  download, share, lightbox). Additive/upgrade-safe: new optional param defaulting to today's no-nameplate
+  behaviour, off by default, no schema/config/API-shape/existing-default change. Tests: `tests/test_sharecard.py`
+  (+1 — `png_bytes_to_jpeg` bakes the footer / empty→no-op / same size), `tests/webapp/test_stack_render.py`
+  (+1 — `?nameplate=true` yields a distinct captioned JPEG), `stackRenderUrl.test.ts` (+1 — the param, combining
+  with north_up and never on non-JPEG artifacts). _(Original spec kept for provenance below.)_
 - **NEW (Builder 2026-07-21, follow-up to shipped nameplate v0.146.0) — offer the acquisition nameplate on the
   *non-editor* "Download JPEG" path too, so a beginner who never opens the editor still gets the captioned
-  look.** v0.146.0 wired the nameplate into the **editor** share flow (`editor/share` → `write_share_jpeg`).
+  look — original spec kept for provenance.** v0.146.0 wired the nameplate into the **editor** share flow (`editor/share` → `write_share_jpeg`).
   But the History / Target **"Download JPEG"** button uses a *different* surface — `stack.py`'s
   `download_image?kind=jpeg` transcodes the stored preview PNG via `png_bytes_to_jpeg`
   (`webapp/routers/stack.py:863`) and never touches the editor — so the most direct "I just want to share my

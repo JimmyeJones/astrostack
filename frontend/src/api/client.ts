@@ -1132,11 +1132,17 @@ export const api = {
   },
   stackArtifactUrl: (
     safe: string, id: number, kind: "preview" | "jpeg" | "fits" | "tiff",
-    northUp = false,
-  ) =>
-    `/api/targets/${safe}/stack-runs/${id}/${kind}` +
-    // Only the share-friendly JPEG honours north_up (rotate so North is up).
-    (northUp && kind === "jpeg" ? "?north_up=true" : ""),
+    northUp = false, nameplate = false,
+  ) => {
+    const base = `/api/targets/${safe}/stack-runs/${id}/${kind}`;
+    if (kind !== "jpeg") return base;
+    // Only the share-friendly JPEG honours north_up (rotate so North is up) and
+    // nameplate (bake the acquisition-data caption footer).
+    const params: string[] = [];
+    if (northUp) params.push("north_up=true");
+    if (nameplate) params.push("nameplate=true");
+    return params.length ? `${base}?${params.join("&")}` : base;
+  },
   // "Make it your wallpaper" — the finished preview cropped to a device aspect
   // (phone/desktop/square), auto-centred on the target, downloaded as a JPEG.
   stackWallpaperUrl: (
