@@ -17,6 +17,8 @@ from webapp.schemas import (
     IntegrationGoalOut,
     IntegrationGoalPatch,
     MergeRequest,
+    MergeSuggestionOut,
+    MergeSuggestionTarget,
     NightSummaryOut,
     ObjectInfoOut,
     SessionQualityDriftOut,
@@ -110,6 +112,47 @@ def merge_targets(body: MergeRequest, request: Request) -> dict:
         return {"into": body.into, "frames_added": added}
     finally:
         lib.close()
+
+
+@router.get("/merge-suggestions", response_model=list[MergeSuggestionOut])
+def merge_suggestions(request: Request) -> list[MergeSuggestionOut]:
+    """Detect targets that look like the *same sky object* split across separate
+    folders/nights (the Seestar writes a new folder per night), so the Library can
+    offer a one-click "combine into one deep stack" nudge. Read-only: it only
+    reads each target's plate-solved centre + integration figures and clusters by
+    sky position; it never merges anything (the user confirms via ``POST
+    /merge``). Returns ``[]`` when nothing clusters."""
+    from seestack.io.library import find_same_object_target_groups
+    from seestack.objectinfo import identify_object
+
+    lib = deps.open_library(request)
+    try:
+        groups = find_same_object_target_groups(lib.list_targets())
+    finally:
+        lib.close()
+
+    out: list[MergeSuggestionOut] = []
+    for g in groups:
+        # Name the cluster from its deepest member (offline catalog), best-effort —
+        # a null name just drops the "(M 31)" clause in the nudge, never errors.
+        info = identify_object(g.members[0].name, g.center_ra_deg, g.center_dec_deg)
+        object_name = (info.name or info.id) if info else None
+        out.append(MergeSuggestionOut(
+            object_name=object_name,
+            center_ra_deg=g.center_ra_deg,
+            center_dec_deg=g.center_dec_deg,
+            max_sep_arcmin=g.max_sep_deg * 60.0,
+            targets=[
+                MergeSuggestionTarget(
+                    safe=m.safe_name,
+                    name=m.name,
+                    n_frames_accepted=m.n_frames_accepted,
+                    total_exposure_s=m.total_exposure_s,
+                )
+                for m in g.members
+            ],
+        ))
+    return out
 
 
 @router.get("/{safe}", response_model=TargetOut)

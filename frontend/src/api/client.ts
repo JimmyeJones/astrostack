@@ -161,6 +161,24 @@ export interface Target {
   cover_stack_run_id?: number | null;
 }
 
+export interface MergeSuggestionTarget {
+  safe: string;
+  name: string;
+  n_frames_accepted: number;
+  total_exposure_s: number;
+}
+
+// A "these look like the same object — combine them?" suggestion: a cluster of
+// ≥2 targets whose plate-solved centres agree. `targets` are ordered
+// deepest-integration first, so `targets[0].safe` is the natural merge `into`.
+export interface MergeSuggestion {
+  object_name: string | null;
+  center_ra_deg: number;
+  center_dec_deg: number;
+  max_sep_arcmin: number;
+  targets: MergeSuggestionTarget[];
+}
+
 export interface FramingHint {
   level: "fits" | "tight" | "mosaic";
   text: string;
@@ -1006,6 +1024,8 @@ export const api = {
     req(`/api/targets/${safe}?remove_files=${removeFiles}`, { method: "DELETE" }),
   mergeTargets: (into: string, sources: string[]) =>
     req("/api/targets/merge", { method: "POST", body: JSON.stringify({ into, sources }) }),
+  mergeSuggestions: () =>
+    req<MergeSuggestion[]>("/api/targets/merge-suggestions"),
   targetThumbnailUrl: (safe: string) => `/api/targets/${safe}/thumbnail`,
   identifyTarget: (safe: string) =>
     req<ObjectInfo | null>(`/api/targets/${safe}/identify`),
