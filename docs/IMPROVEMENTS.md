@@ -165,19 +165,25 @@ when you take it.
   for pure-Seestar libraries; bites a mixed/re-exported library's sort). Confidence: reproduced + fixed. _(Found
   by an earlier adversarial `io/*` audit.)_
 
-- **Calibration exposure-scaling under-subtracts the pedestal at a master-*bias* no-data pixel (off the default
-  path).** *(Severity: wrong-result but very narrow. Confidence: reproduced.)* Location:
-  `seestack/calibrate/apply.py:233` (`scaled = self.bias + (dark - self.bias)*ratio`) with the `dark_nodata_mask`
-  restore at 241-242 covering only *dark* no-data pixels, not *bias* no-data pixels. When `scale_dark_to_light`
-  is on (**off by default**) and the master bias carries a NaN/inf (sanitised to 0) at a pixel, that pixel's
-  pedestal is wrongly scaled instead of falling back to the documented "subtract the dark unscaled" behaviour.
-  **Repro (reproduced):** dark `[[100,110]]`@30 s (finite), bias `[[NaN,20]]`, `scale_dark_to_light=True`,
-  light@10 s (ratio 1/3) → pixel 0 yields `1000 − (0 + (100−0)/3) = 966.67` vs the consistent unscaled-dark
-  fallback `900` (cf. `test_dark_scaling_neutral_without_bias`). Realistic only with an imported third-party bias
-  containing NaN/inf, so low priority. **Fix direction:** OR the bias-no-data mask into the `dark_nodata_mask`
-  restore (or compute `scaled` from a bias-sanitised-to-0 pedestal that also zeroes those pixels post-scale);
-  regression with a NaN bias pixel asserting the unscaled-dark value. _(Found by this run's adversarial
-  `calibrate/*` audit.)_
+- ~~**Calibration exposure-scaling under-subtracts the pedestal at a master-*bias* no-data pixel (off the default
+  path).**~~ — **FIXED v0.159.1** (Builder 2026-07-22, branch `claude/pensive-faraday-x8myvn`; reproduced +
+  regression-tested). Location: `seestack/calibrate/apply.py` `_effective_dark`. The `dark_nodata_mask` restore
+  covered only *dark* no-data pixels; a master-*bias* no-data pixel (NaN/inf → sanitised to 0) at a finite-dark
+  pixel had no trustworthy pedestal, so the scaled formula `bias + (dark − bias)·ratio` collapsed to `dark·ratio`
+  (a scaled dark) instead of the documented "subtract the dark unscaled" fallback. **Fix:** capture a
+  `bias_nodata_mask` in `load` (before sanitising, mirroring `dark_nodata_mask`) and, on the scaling path, restore
+  the *unscaled* dark at those pixels — with the dark-no-data restore applied *after* it so a pixel that is no-data
+  in both masters still lands on 0 (no correction). **Repro (reproduced):** dark `[[100,110]]`@30 s (finite), bias
+  `[[NaN,20]]`, `scale_dark_to_light=True`, light@10 s (ratio 1/3) → pixel 0 was `966.67`, now `900` (unscaled
+  dark); finite-bias pixel still scales correctly. Regressions in `tests/test_calibrate.py`:
+  `test_dark_scaling_falls_back_to_unscaled_dark_at_a_no_data_bias_pixel` (fail-before 966.67 / pass-after 900),
+  `test_dark_scaling_no_data_dark_pixel_wins_over_no_data_bias` (both-no-data → no correction), and
+  `test_dark_scaling_all_finite_bias_keeps_no_mask` (common all-finite case retains no mask → unchanged).
+  Upgrade-safe: additive field with a None default, only reached on the off-by-default `scale_dark_to_light` path;
+  an all-finite bias (the real-Seestar case) keeps no mask and is byte-for-byte unchanged; no config/DB/API/on-disk
+  change. Severity: wrong-result but very narrow (needs an imported third-party bias carrying NaN/inf × the
+  off-by-default scaling flag). Confidence: reproduced + fixed. _(Found by an earlier adversarial `calibrate/*`
+  audit.)_
 
 - ~~**A frame that fails a plate-solve, then succeeds on a later retry, keeps its stale `solve_failed:`
   reject reason — showing a contradictory "plate-solve failed" chip on a now-solved frame and inflating the

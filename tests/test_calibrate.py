@@ -601,6 +601,54 @@ def test_dark_scaling_keeps_no_data_dark_pixel_uncorrected(tmp_path):
     np.testing.assert_allclose(out[0, 1], 1350.0)
 
 
+def test_dark_scaling_falls_back_to_unscaled_dark_at_a_no_data_bias_pixel(tmp_path):
+    # A no-data *bias* pixel (NaN → sanitized to 0) has no trustworthy pedestal to
+    # hold fixed, so the scaled formula bias + (dark − bias)·ratio collapses to
+    # dark·ratio — a scaled dark instead of the documented "subtract the dark
+    # unscaled" fallback. The fix restores the plain dark at those pixels.
+    dark = np.array([[100.0, 110.0]], dtype=np.float32)  # both finite
+    bias = np.array([[np.nan, 20.0]], dtype=np.float32)  # pixel 0 = no data
+    save_master(tmp_path / "d.fits", dark,
+                MasterMeta("dark", 5, 2, 1, "median", exposure_s=30.0))
+    save_master(tmp_path / "b.fits", bias, MasterMeta("bias", 5, 2, 1, "median"))
+    cal = CalibrationMasters.load(dark_path=str(tmp_path / "d.fits"),
+                                  bias_path=str(tmp_path / "b.fits"),
+                                  scale_dark_to_light=True)
+    assert cal.bias_nodata_mask is not None
+    raw = np.full((1, 2), 1000.0, dtype=np.float32)
+    out = cal.apply_raw(raw, light_exposure_s=10.0)  # ratio = 1/3
+    assert np.isfinite(out).all()
+    # No-data bias pixel → unscaled dark subtracted: 1000 − 100 = 900.
+    # Fail-before: 1000 − (0 + (100−0)/3) = 1000 − 33.33 = 966.67.
+    np.testing.assert_allclose(out[0, 0], 900.0)
+    # Finite bias pixel still scales: dark = 20 + (110−20)/3 = 50 → 1000 − 50.
+    np.testing.assert_allclose(out[0, 1], 950.0, rtol=1e-5)
+
+
+def test_dark_scaling_no_data_dark_pixel_wins_over_no_data_bias(tmp_path):
+    # A pixel that is no-data in BOTH masters must land on "no correction" (the
+    # dark-no-data rule), not on the unscaled-dark bias fallback.
+    dark = np.array([[np.nan, 100.0]], dtype=np.float32)  # pixel 0 = no data
+    bias = np.array([[np.nan, 20.0]], dtype=np.float32)   # pixel 0 = no data too
+    save_master(tmp_path / "d.fits", dark,
+                MasterMeta("dark", 5, 2, 1, "median", exposure_s=30.0))
+    save_master(tmp_path / "b.fits", bias, MasterMeta("bias", 5, 2, 1, "median"))
+    cal = CalibrationMasters.load(dark_path=str(tmp_path / "d.fits"),
+                                  bias_path=str(tmp_path / "b.fits"),
+                                  scale_dark_to_light=True)
+    raw = np.full((1, 2), 1000.0, dtype=np.float32)
+    out = cal.apply_raw(raw, light_exposure_s=10.0)  # ratio = 1/3
+    assert np.isfinite(out).all()
+    np.testing.assert_allclose(out[0, 0], 1000.0)  # no correction (subtract 0)
+
+
+def test_dark_scaling_all_finite_bias_keeps_no_mask(tmp_path):
+    # An all-finite bias retains no mask, so the common path is unchanged.
+    d, b = _save_dark_and_bias(tmp_path, dark_level=110.0, bias_level=20.0, dark_exp=30.0)
+    cal = CalibrationMasters.load(dark_path=d, bias_path=b, scale_dark_to_light=True)
+    assert cal.bias_nodata_mask is None
+
+
 def test_dark_scaling_all_finite_master_is_unchanged_by_the_mask(tmp_path):
     # The common real case (an all-finite integer Seestar dark) keeps no mask and
     # is byte-for-byte identical to before the no-data-mask fix.
