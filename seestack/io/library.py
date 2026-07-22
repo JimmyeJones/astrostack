@@ -184,11 +184,24 @@ class Library:
         if not lib.registry_path.exists():
             lib.targets_dir.mkdir(parents=True, exist_ok=True)
             lib._open()
-            lib._init_schema()
-            lib._adopt_existing_projects()
+            # Close the fresh connection if adopting/initialising raises, rather
+            # than leak it (the classmethod never returned the instance, so no
+            # caller can close it).
+            try:
+                lib._init_schema()
+                lib._adopt_existing_projects()
+            except Exception:
+                lib.close()
+                raise
             return lib
         lib._open()
-        lib._check_schema()
+        # Same guard for the existing-registry path: a newer-version or corrupt
+        # registry makes _check_schema raise, and the connection must be closed.
+        try:
+            lib._check_schema()
+        except Exception:
+            lib.close()
+            raise
         return lib
 
     @classmethod

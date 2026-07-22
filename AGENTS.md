@@ -399,11 +399,17 @@ cd frontend && npm install
 
 **Running the tests:** prefer the full suite headless —
 `QT_QPA_PLATFORM=offscreen python -m pytest -q` — so the Qt/GUI tests run too.
-If the Qt system libs above can't be installed in your environment, fall back to
-skipping just those three:
-`python -m pytest tests/ --ignore=tests/test_compare_dialog.py --ignore=tests/test_end_to_end.py --ignore=tests/test_footprint_view.py -q`
-(that's a fallback, not a licence to ignore GUI regressions when Qt *is*
-available). Frontend: `npx tsc --noEmit`, `npx vitest run`, `npx vite build`.
+If the Qt system libs above can't be installed in your environment (e.g. `apt`
+is blocked, so `libEGL.so.1` is missing), fall back to:
+`python -m pytest tests/ -p no:pytest-qt --ignore=tests/test_compare_dialog.py --ignore=tests/test_end_to_end.py --ignore=tests/test_footprint_view.py -q`
+**The `-p no:pytest-qt` is not optional here:** without `libEGL`, the `pytest-qt`
+plugin's `pytest_configure` hook fails at import (`ImportError: libEGL.so.1`),
+which is a collection-time **INTERNALERROR that aborts the whole run** — so
+`--ignore`-ing the three GUI files alone is *not* enough (the plugin crashes
+before any test is collected). Disabling the plugin skips it cleanly; the three
+`--ignore`d files are the ones that actually use its `qtbot` fixture. (This is a
+fallback, not a licence to ignore GUI regressions when Qt *is* available.)
+Frontend: `npx tsc --noEmit`, `npx vitest run`, `npx vite build`.
 
 Lint is not enforced in CI yet, but check before claiming quality-bar work:
 `ruff check .` has pre-existing debt — don't let it block unrelated work, and

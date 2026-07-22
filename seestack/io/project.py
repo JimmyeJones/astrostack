@@ -220,7 +220,16 @@ class Project:
         if not proj.db_path.exists():
             raise FileNotFoundError(f"No project database at {proj.db_path}")
         proj._open()
-        proj._check_schema()
+        # If schema-checking/migration raises (a newer on-disk user_version, a
+        # corrupt DB, a failing migration), close the connection we just opened
+        # before propagating — otherwise the handle leaks. The callers' guarded
+        # ``if proj is not None: proj.close()`` never runs on this path because
+        # ``open`` never returned the instance.
+        try:
+            proj._check_schema()
+        except Exception:
+            proj.close()
+            raise
         return proj
 
     def close(self) -> None:

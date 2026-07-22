@@ -15,7 +15,15 @@ cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.."
 #    Non-fatal if unavailable — fall back to the Qt-skip pytest run (AGENTS.md §7).
 if ! ldconfig -p 2>/dev/null | grep -q 'libEGL\.so\.1'; then
   if ! { apt-get update && apt-get install -y libegl1 libgl1 libxkbcommon0; }; then
-    echo "warn: could not install Qt system libs; use the Qt-skip pytest fallback (AGENTS.md §7)"
+    echo "warn: could not install Qt system libs (libEGL missing)."
+    echo "      Without libEGL the pytest-qt plugin crashes collection with an"
+    echo "      INTERNALERROR, so you MUST disable it — ignoring the 3 GUI files"
+    echo "      alone is not enough. Use the Qt-skip fallback (AGENTS.md §7):"
+    echo "      python -m pytest tests/ -p no:pytest-qt \\"
+    echo "        --ignore=tests/test_compare_dialog.py \\"
+    echo "        --ignore=tests/test_end_to_end.py \\"
+    echo "        --ignore=tests/test_footprint_view.py -q"
+    QT_LIBS_MISSING=1
   fi
 fi
 
@@ -33,5 +41,12 @@ if [ -d frontend ] && [ ! -d frontend/node_modules ]; then
 fi
 
 echo "agent env ready: $(python --version 2>&1)"
-echo "  tests:    QT_QPA_PLATFORM=offscreen python -m pytest -q"
+if [ "${QT_LIBS_MISSING:-0}" = "1" ]; then
+  echo "  tests:    python -m pytest tests/ -p no:pytest-qt \\"
+  echo "              --ignore=tests/test_compare_dialog.py \\"
+  echo "              --ignore=tests/test_end_to_end.py \\"
+  echo "              --ignore=tests/test_footprint_view.py -q   (Qt libs unavailable)"
+else
+  echo "  tests:    QT_QPA_PLATFORM=offscreen python -m pytest -q"
+fi
 echo "  frontend: (cd frontend && npx tsc --noEmit && npx vitest run && npx vite build)"

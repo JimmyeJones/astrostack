@@ -164,3 +164,40 @@ def test_open_empty_sqlite_builds_the_base_schema(tmp_path):
         assert version == SCHEMA_VERSION
     finally:
         proj.close()
+
+
+def test_open_closes_the_connection_when_schema_check_fails(tmp_path, monkeypatch):
+    """A newer on-disk ``user_version`` makes ``_check_schema`` raise; ``open``
+    must close the connection it opened before propagating, rather than leak it.
+    The classmethod never returns the instance on this path, so the callers'
+    ``if proj is not None: proj.close()`` guards can't clean it up."""
+    import sqlite3
+
+    from seestack.io import project as project_mod
+    from seestack.io.project import SCHEMA_VERSION
+
+    project_dir = tmp_path / "from_the_future"
+    proj = Project.create(project_dir, name="Future")
+    # Stamp a schema version this build is too old to open.
+    proj._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION + 1}")
+    proj.close()
+
+    # Capture every connection Project._open creates so we can assert it closed.
+    opened: list[sqlite3.Connection] = []
+    real_connect = sqlite3.connect
+
+    def tracking_connect(*args, **kwargs):
+        conn = real_connect(*args, **kwargs)
+        opened.append(conn)
+        return conn
+
+    monkeypatch.setattr(project_mod.sqlite3, "connect", tracking_connect)
+
+    with pytest.raises(RuntimeError, match="newer than this Seestack"):
+        Project.open(project_dir)
+
+    assert opened, "expected _open to have created a connection"
+    # Operating on a closed sqlite connection raises ProgrammingError — proof the
+    # handle was closed (fails before the fix, which left it open).
+    with pytest.raises(sqlite3.ProgrammingError):
+        opened[-1].execute("SELECT 1")
