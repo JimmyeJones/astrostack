@@ -52,6 +52,26 @@ _CATALOG_FILES = ("messier.json", "deepsky_popular.json")
 # dark is ideal; the fallbacks keep short summer nights usable rather than empty.
 _DARK_THRESHOLDS = (-18.0, -12.0, -6.0, -0.833)
 
+# Curated "showpiece" whitelist for the "what should I shoot next?" suggester
+# (:func:`suggest_targets`). These are the famous, bright, large crowd-pleasers a
+# beginner Seestar owner actually enjoys — deliberately *not* the whole catalog,
+# so a discovery suggestion is always something genuinely easy and rewarding
+# rather than a faint 12th-magnitude smudge. Spread across the sky (galaxies,
+# nebulae and clusters at a range of right ascensions) so something here is
+# well-placed on any clear night, north or south. Ids must match the bundled
+# catalogs exactly; any id not present is simply skipped, so the list is safe to
+# curate independently of the catalog files.
+_SHOWPIECE_IDS = frozenset({
+    # Galaxies
+    "M31", "M33", "M51", "M81", "M82", "M101", "M104", "M63", "M106",
+    "NGC 253", "NGC 4565", "NGC 891",
+    # Nebulae
+    "M42", "M8", "M20", "M16", "M17", "M27", "M57", "M97",
+    "NGC 7000", "NGC 6992", "NGC 7293", "NGC 7635", "IC 1805", "IC 5070", "NGC 3372",
+    # Star clusters
+    "M13", "M45", "M44", "M11", "M22", "M4", "M92", "NGC 869", "NGC 457", "M52",
+})
+
 
 def _configure_iers_offline() -> None:
     """Keep all time/earth-orientation maths offline and non-fatal.
@@ -858,6 +878,109 @@ def next_observing_windows(
         if len(out) >= max(1, want):
             break
     return out
+
+
+@dataclass
+class SuggestedTarget:
+    """A not-yet-captured showpiece that's well-placed tonight (for the API/UI).
+
+    The output of :func:`suggest_targets` — the "what should I shoot *new*
+    tonight?" companion to :func:`plan_tonight` (which ranks *everything*,
+    including the library) and :func:`next_observing_windows` (which plans *one*
+    known target forward). Carries the friendly catalog blurb so the UI can say
+    *what* the object is in plain language, plus tonight's observability so it can
+    say *when* and *how high*.
+    """
+
+    id: str
+    name: str
+    ra_deg: float
+    dec_deg: float
+    type: str
+    con: str
+    blurb: str
+    max_altitude_deg: float
+    transit_utc: str | None
+    minutes_above_min_alt: float
+    moon_separation_deg: float
+    moon_up_fraction: float | None
+    usable_start_utc: str | None
+    usable_end_utc: str | None
+    score: float
+    size_arcmin: float | None = None
+    framing: FramingHint | None = None
+
+
+def suggest_targets(
+    observer: Observer,
+    when_utc: datetime,
+    *,
+    library_coords: list[tuple[float, float]] | None = None,
+    min_altitude_deg: float = 30.0,
+    limit: int = 3,
+    horizon: HorizonProfile | None = None,
+    min_usable_minutes: float = 45.0,
+) -> list[SuggestedTarget]:
+    """Suggest a few not-yet-captured showpiece targets well-placed tonight.
+
+    Answers the single most common beginner question — "what's a good, easy thing
+    to point at tonight?" — that the existing planning surfaces don't: they all
+    plan a target you're *already* working. This filters the curated showpiece
+    whitelist (:data:`_SHOWPIECE_IDS`) to the famous crowd-pleasers you have **not**
+    already captured, keeps only those genuinely well-placed in tonight's dark
+    window (clearing ``min_altitude_deg`` for at least ``min_usable_minutes``), and
+    returns the best ``limit`` — sorted best-first by the same altitude/window/Moon
+    blend the other cards use.
+
+    ``library_coords`` are the ``(ra_deg, dec_deg)`` of targets the user has already
+    shot; a showpiece within ~0.75° of any of them is treated as "already have it"
+    and dropped (position match, so it's robust to however the user named the
+    folder). Purely offline and read-only, like the rest of the planner; returns an
+    empty list when the Sun never sets, nothing clears the floor, or every
+    showpiece is already in the library — so the UI simply self-hides.
+    """
+    _configure_iers_offline()
+    window = _find_dark_window(observer, when_utc)
+    if window is None:
+        return []  # Sun never sets — nothing to plan.
+    library_coords = library_coords or []
+
+    def _covered(ra: float, dec: float) -> bool:
+        return any(_angular_sep_deg(ra, dec, lra, ldec) < 0.75
+                   for lra, ldec in library_coords)
+
+    by_id = {obj.id: obj for obj in load_catalog()}
+    candidates = [by_id[cid] for cid in _SHOWPIECE_IDS if cid in by_id]
+    candidates = [o for o in candidates if not _covered(o.ra_deg, o.dec_deg)]
+    if not candidates:
+        return []
+
+    illum = moon_illumination(when_utc)
+    obs = _observability_batch(
+        [o.ra_deg for o in candidates], [o.dec_deg for o in candidates],
+        observer, window, min_altitude_deg, illum, horizon=horizon,
+    )
+
+    out: list[SuggestedTarget] = []
+    for obj, o in zip(candidates, obs, strict=True):
+        if o.minutes_above_min_alt < min_usable_minutes:
+            continue  # not up long enough tonight to be worth suggesting
+        out.append(SuggestedTarget(
+            id=obj.id, name=obj.name, ra_deg=obj.ra_deg, dec_deg=obj.dec_deg,
+            type=obj.type, con=obj.con, blurb=obj.blurb,
+            max_altitude_deg=o.max_altitude_deg,
+            transit_utc=o.transit_utc.isoformat() if o.transit_utc else None,
+            minutes_above_min_alt=o.minutes_above_min_alt,
+            moon_separation_deg=o.moon_separation_deg,
+            moon_up_fraction=o.moon_up_fraction,
+            usable_start_utc=o.usable_start_utc.isoformat() if o.usable_start_utc else None,
+            usable_end_utc=o.usable_end_utc.isoformat() if o.usable_end_utc else None,
+            score=o.score,
+            size_arcmin=obj.size_arcmin,
+            framing=framing_hint(obj.size_arcmin),
+        ))
+    out.sort(key=lambda s: (-s.score, -s.max_altitude_deg))
+    return out[:max(0, limit)]
 
 
 def _angular_sep_deg(ra1: float, dec1: float, ra2: float, dec2: float) -> float:

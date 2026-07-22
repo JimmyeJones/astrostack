@@ -15,6 +15,7 @@ import { folderReadiness, folderReadinessSignature } from "../components/dashboa
 import { LastNightCard } from "../components/LastNightCard";
 import { LibraryProgressCard } from "../components/LibraryProgressCard";
 import { QueryError } from "../components/QueryError";
+import { SuggestTargetsCard } from "../components/SuggestTargetsCard";
 
 // Dismissal of the first-run readiness banners, keyed to the *specific* problem
 // so dismissing one never suppresses a genuinely different (or returning) one:
@@ -181,6 +182,8 @@ export function Dashboard() {
       <LastNightCard />
 
       <LibraryProgressCard />
+
+      <SuggestTargetsCard />
 
       <Group justify="space-between" mt="sm">
         <Title order={4}>Recent stacks</Title>

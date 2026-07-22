@@ -318,6 +318,70 @@ def test_next_session_ics_no_window_404s(client, solved_library):
     assert r.status_code == 404
 
 
+def test_suggest_without_location_self_hides(client, solved_library):
+    # No configured site and the synth frames carry no SITELAT → nothing to
+    # suggest, but a clean 200 with an empty list so the card just self-hides.
+    r = client.get("/api/plan/suggest", params={"when": JAN_EVENING})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["location_source"] == "none"
+    assert body["observer"] is None
+    assert body["suggestions"] == []
+
+
+def test_suggest_returns_new_showpieces(client, solved_library):
+    # "Try something new tonight": with a site set, a few famous, well-placed
+    # showpieces the user hasn't captured, each with a plain-language blurb.
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    r = client.get("/api/plan/suggest", params={"when": JAN_EVENING})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["location_source"] == "settings"
+    sugg = body["suggestions"]
+    assert sugg, "expected some new showpieces up on a January night from London"
+    assert len(sugg) <= 3
+    scores = [s["score"] for s in sugg]
+    assert scores == sorted(scores, reverse=True)  # best-first
+    for s in sugg:
+        assert s["blurb"]                      # tells the beginner what it is
+        assert s["max_altitude_deg"] > 30.0    # genuinely up
+        assert s["minutes_above_min_alt"] >= 45.0
+        # The library's M_42 (Orion) is "already have it" — never suggested.
+        assert not (abs(s["ra_deg"] - 83.6) < 1.0 and abs(s["dec_deg"] + 5.4) < 1.0)
+
+
+def test_suggest_ics_downloads_a_calendar_for_a_showpiece(client, solved_library):
+    # One-tap "Add to calendar" for a *suggested* (not-yet-captured) target.
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    r = client.get("/api/plan/suggest/M81/calendar.ics", params={"when": JAN_EVENING})
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/calendar")
+    assert "attachment" in r.headers.get("content-disposition", "")
+    assert "M81-next-session.ics" in r.headers.get("content-disposition", "")
+    body = r.text
+    assert body.startswith("BEGIN:VCALENDAR")
+    assert "BEGIN:VEVENT" in body
+    assert "SUMMARY:Image Bode's Galaxy" in body
+    assert "Bring the Seestar out" in body
+
+
+def test_suggest_ics_non_showpiece_id_404s(client, solved_library):
+    # M1 is a real catalog object but NOT on the showpiece whitelist — the .ics is
+    # only meant to back the suggestion card, so it 404s rather than calendaring
+    # an arbitrary catalog row.
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    assert client.get("/api/plan/suggest/M1/calendar.ics",
+                      params={"when": JAN_EVENING}).status_code == 404
+    assert client.get("/api/plan/suggest/NOPE_404/calendar.ics",
+                      params={"when": JAN_EVENING}).status_code == 404
+
+
+def test_suggest_ics_without_location_404s(client, solved_library):
+    # No site → nothing to add; 404 rather than a blank file (the card hides it).
+    r = client.get("/api/plan/suggest/M81/calendar.ics", params={"when": JAN_EVENING})
+    assert r.status_code == 404
+
+
 def test_tonight_detects_site_from_fits_header(tmp_path: Path, monkeypatch):
     """With no configured site, the planner sniffs SITELAT/SITELONG from a frame."""
     import sys

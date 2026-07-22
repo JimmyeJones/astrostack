@@ -21,7 +21,9 @@ from seestack.nightplan import (
     moon_is_waxing,
     next_observing_windows,
     plan_tonight,
+    suggest_targets,
 )
+from seestack.nightplan import _SHOWPIECE_IDS  # noqa: E402 — internal whitelist under test
 
 # A clear January evening in London — Orion season, small waning Moon.
 LONDON = Observer(lat_deg=51.5, lon_deg=-0.13, elevation_m=30.0)
@@ -702,3 +704,78 @@ def test_polar_day_returns_empty_plan_gracefully():
     # Still reports the Moon and observer so the UI can explain why it's empty.
     assert 0.0 <= plan.moon_illumination <= 1.0
     assert plan.observer["lat_deg"] == pytest.approx(78.2)
+
+
+# --- suggest_targets ("what should I shoot *new* tonight?") ------------------
+
+
+def test_showpiece_whitelist_all_exist_and_carry_a_blurb():
+    """Every showpiece id must resolve to a catalog object that reads well as a
+    beginner suggestion: a plain-language blurb (the whole point of the discovery
+    card is telling the user *what* it is). A common name is nice-to-have — a few
+    famous objects (e.g. M106) simply have none, and the UI shows their catalog id
+    then — so it is not required, but the blurb is."""
+    by_id = {o.id: o for o in load_catalog()}
+    for cid in _SHOWPIECE_IDS:
+        assert cid in by_id, f"showpiece {cid} is not in the bundled catalog"
+        assert by_id[cid].blurb, f"showpiece {cid} has no beginner blurb"
+
+
+def test_suggest_targets_returns_well_placed_showpieces_best_first():
+    got = suggest_targets(LONDON, JAN_EVENING, limit=3)
+    assert 1 <= len(got) <= 3
+    # All suggestions are on the whitelist, genuinely up, and carry a blurb.
+    for t in got:
+        assert t.id in _SHOWPIECE_IDS
+        assert t.max_altitude_deg > 30.0
+        assert t.minutes_above_min_alt >= 45.0
+        assert t.blurb
+    # Sorted best-first by score.
+    scores = [t.score for t in got]
+    assert scores == sorted(scores, reverse=True)
+
+
+def test_suggest_targets_excludes_already_captured_by_position():
+    """A showpiece the user has already shot (matched on the sky, not by name) is
+    dropped — the card only ever suggests something *new*."""
+    m81 = next(o for o in load_catalog() if o.id == "M81")
+    # A library folder named nothing like "M81", positioned on it, still excludes it.
+    got = suggest_targets(LONDON, JAN_EVENING, limit=40,
+                          library_coords=[(m81.ra_deg, m81.dec_deg)])
+    assert "M81" not in {t.id for t in got}
+    # ...but only that one — a nearby-but-distinct showpiece is still suggested.
+    assert any(t.id != "M81" for t in got)
+
+
+def test_suggest_targets_empty_when_every_showpiece_is_owned():
+    """No suggestion to make (self-hide) once the library covers the whitelist."""
+    by_id = {o.id: o for o in load_catalog()}
+    coords = [(by_id[cid].ra_deg, by_id[cid].dec_deg)
+              for cid in _SHOWPIECE_IDS if cid in by_id]
+    assert suggest_targets(LONDON, JAN_EVENING, library_coords=coords) == []
+
+
+def test_suggest_targets_empty_on_polar_day():
+    svalbard = Observer(lat_deg=78.2, lon_deg=15.6, elevation_m=0.0)
+    assert suggest_targets(
+        svalbard, datetime(2026, 6, 21, 20, 0, tzinfo=timezone.utc)) == []
+
+
+def test_suggest_targets_is_deterministic():
+    a = suggest_targets(LONDON, JAN_EVENING, limit=3)
+    b = suggest_targets(LONDON, JAN_EVENING, limit=3)
+    assert [t.id for t in a] == [t.id for t in b]
+    assert [t.score for t in a] == [t.score for t in b]
+
+
+def test_suggest_targets_carries_a_framing_hint():
+    """A sized suggestion surfaces its "will it fit in one frame?" verdict, like
+    the catalog rows in a full plan do."""
+    # Plan from a southern-hemisphere summer evening so the big, bright Carina and
+    # Sculptor showpieces are up; assert whichever sized target we get has a hint.
+    got = suggest_targets(LONDON, JAN_EVENING, limit=10)
+    sized = [t for t in got if t.size_arcmin is not None]
+    assert sized, "expected at least one sized showpiece up in January from London"
+    for t in sized:
+        assert t.framing is not None
+        assert t.framing.level in {"fits", "tight", "mosaic"}

@@ -5604,6 +5604,34 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-21) — "What should I shoot next?": suggest one or two *well-placed
+  showpiece targets you haven't captured yet*, ranked for tonight, each with a one-tap "add to calendar".**~~
+  — **SHIPPED v0.161.0** (Builder 2026-07-22, branch `claude/pensive-faraday-6ogopr`). Built the ask end-to-end
+  across engine/webapp/frontend, reusing the existing offline planner (no new astro math, no new dependency).
+  **Engine** (`seestack/nightplan.py`): a curated `_SHOWPIECE_IDS` whitelist of 37 famous, bright, large
+  crowd-pleasers spread across the sky (galaxies/nebulae/clusters, so something's up on any clear night, north or
+  south), and a pure `suggest_targets(observer, when_utc, *, library_coords, min_altitude_deg, limit, horizon,
+  min_usable_minutes)` → `list[SuggestedTarget]` that filters the whitelist to the *not-yet-captured* showpieces
+  (position-matched to library targets within 0.75°, robust to however a folder was named), keeps only those
+  genuinely well-placed tonight (clearing the altitude floor for ≥45 min), and returns the best `limit` best-first
+  by the same altitude/window/Moon blend the other cards use. Carries the friendly catalog `blurb` + a framing
+  hint. Also filled in name+blurb for the four whitelisted Messier clusters that lacked them (M4/M11/M22/M52 — an
+  additive catalog improvement that also enriches the object-info cards everywhere). **Webapp**
+  (`webapp/routers/plan.py`): read-only `GET /api/plan/suggest` (site + library resolved server-side; empty
+  `suggestions` ⇒ the card self-hides) and `GET /api/plan/suggest/{catalog_id}/calendar.ics` — a per-suggestion
+  one-tap "Add to calendar" reusing the shipped `.ics` serialiser (only *showpiece* ids are addressable → 404
+  otherwise, so it can't calendar arbitrary catalog rows; 404 on no-location/no-window so the file is never
+  blank). **Frontend**: a self-hiding `SuggestTargetsCard` on the **Dashboard** (the beginner-friendly distilled
+  counterpart to the Tonight page's full ranked table — a short "point the Seestar here" list, not a wall of
+  rows), each row showing the id·name, type·constellation, plain-language blurb, a jargon-free observability line
+  ("Climbs to 64°, up about 7 h tonight. Moon out of the way."), a framing badge, and the per-target Add-to-
+  calendar link; plus pure phrasing helpers in `suggestTargets.ts`. Additive/upgrade-safe: all read-only, offline,
+  no schema/config/API-shape/default change; self-hides with no site set (never duplicates the Tonight "set a
+  location" prompt). Tests: `tests/test_nightplan.py` (+7: whitelist integrity, well-placed/best-first, position
+  exclusion, all-owned + polar-day self-hide, determinism, framing), `tests/webapp/test_plan.py` (+5: suggest
+  self-hide/returns-new-showpieces, .ics download + non-showpiece/no-location 404s),
+  `frontend/.../suggestTargets.test.ts` (+5) and `SuggestTargetsCard.test.tsx` (+3). Original spec kept for
+  provenance:
 - **NEW BEGINNER FEATURE (Scout 2026-07-21) — "What should I shoot next?": suggest one or two *well-placed
   showpiece targets you haven't captured yet*, ranked for tonight, each with a one-tap "add to calendar".**
   *(Autonomy + friendliness / "plan + enjoy" pillar, PRIORITY 2–3; size M.)* **Why:** every planning card the app
