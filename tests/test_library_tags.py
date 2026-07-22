@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import sqlite3
 
+import pytest
+
 from seestack.io.library import Library
 
 
@@ -39,6 +41,38 @@ def test_update_target_missing_returns_none(tmp_path):
         assert lib.update_target("nope", notes="x") is None
     finally:
         lib.close()
+
+
+def test_open_closes_the_connection_when_schema_check_fails(tmp_path, monkeypatch):
+    """A newer on-disk registry ``user_version`` makes ``_check_schema`` raise;
+    ``Library.open`` must close the connection it opened before propagating,
+    rather than leak it (the classmethod never returns the instance on this
+    path, so no caller can clean it up)."""
+    from seestack.io import library as library_mod
+    from seestack.io.library import LIBRARY_SCHEMA_VERSION
+
+    root = tmp_path / "lib"
+    lib = Library.create(root)
+    # Stamp a registry version this build is too old to open.
+    lib._conn.execute(f"PRAGMA user_version = {LIBRARY_SCHEMA_VERSION + 1}")
+    lib.close()
+
+    opened: list[sqlite3.Connection] = []
+    real_connect = sqlite3.connect
+
+    def tracking_connect(*args, **kwargs):
+        conn = real_connect(*args, **kwargs)
+        opened.append(conn)
+        return conn
+
+    monkeypatch.setattr(library_mod.sqlite3, "connect", tracking_connect)
+
+    with pytest.raises(RuntimeError, match="newer than this Seestack"):
+        Library.open(root)
+
+    assert opened, "expected _open to have created a connection"
+    with pytest.raises(sqlite3.ProgrammingError):
+        opened[-1].execute("SELECT 1")
 
 
 def test_old_library_without_tags_column_is_migrated(tmp_path):

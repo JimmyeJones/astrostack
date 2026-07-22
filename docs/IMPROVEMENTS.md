@@ -7773,8 +7773,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
-- **NEW (Scout 2026-07-21) — `Project.open` should `close()` the SQLite connection when `_check_schema` raises,
-  rather than lean on CPython GC.** *(Robustness/maintainability; size S; not a live bug.)* `seestack/io/
+- ~~**NEW (Scout 2026-07-21) — `Project.open` should `close()` the SQLite connection when `_check_schema` raises,
+  rather than lean on CPython GC.**~~ — **SHIPPED v0.170.1** (Builder 2026-07-22, branch
+  `claude/pensive-faraday-808ymd`). Wrapped the post-`_open()` schema check in `try/except` in **both**
+  `Project.open` (`seestack/io/project.py`) and `Library.open` (`seestack/io/library.py` — same latent leak on
+  its existing-registry *and* fresh-registry `_init_schema`/`_adopt_existing_projects` branches): on any
+  exception the freshly-opened connection is `close()`d before the error propagates, so cleanup is explicit and
+  no longer depends on CPython refcount/GC reclaiming the caller's `except` frame. Matters if this is ever ported
+  off CPython or the connection later holds an OS-level lock/WAL file. Additive, no behaviour change on the
+  success path (a normal open is byte-for-byte unchanged; only the already-raising path now also closes). No
+  schema/config/API/default change. Regressions (fail-before/pass-after): a newer-`user_version` DB makes
+  `_check_schema` raise `RuntimeError` and the connection is asserted closed (operating on it raises
+  `sqlite3.ProgrammingError`) — `tests/test_project.py::test_open_closes_the_connection_when_schema_check_fails`
+  and `tests/test_library_tags.py::test_open_closes_the_connection_when_schema_check_fails`. *(Robustness/
+  maintainability; not a live bug — cheap insurance for the "runs on a live install, upgraded in place"
+  invariant, AGENTS.md §9.)* Original trace below for provenance.
+  <details><summary>Original trace</summary>
+
+  *(Robustness/maintainability; size S; not a live bug.)* `seestack/io/
   project.py:218-224`: `Project.open` opens the connection in `_open()` then can raise in `_check_schema()`
   (a newer on-disk `user_version` → `RuntimeError`, a corrupt DB, or a failing migration) **without** closing
   the connection, and returns nothing on that path — so the routers' `if proj is not None: proj.close()` guards
@@ -7787,6 +7803,8 @@ problems. Dogfood it every big-picture run and fix root causes.
   Add a test that a newer-`user_version` DB raises **and** leaves no open handle (assert the file can be
   re-opened/removed on Windows-style semantics via a mock, or that `open` re-raises with the conn closed).
   Additive, no behaviour change on the success path. _(Surfaced by this run's router audit.)_
+
+  </details>
 - ~~**NEW (Scout 2026-07-21 #2) — `library.py` lacks a *generic* column self-heal, unlike `project.py` (latent
   upgrade fragility, not currently reachable).**~~ — **SHIPPED v0.140.1** (Builder 2026-07-21, branch
   `claude/pensive-faraday-i5lui7`). `io/library.py::_ensure_columns` was a single hard-coded `tags` ALTER; it now
