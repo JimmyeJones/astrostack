@@ -9,6 +9,7 @@ import { Link } from "react-router-dom";
 import { type ReactNode, useRef, useState } from "react";
 import { api, type Job } from "../api/client";
 import { QueryError } from "../components/QueryError";
+import { StackNoiseBadge } from "../components/StackNoiseBadge";
 import { thinStackWarning, type ThinStackWarning } from "../components/target/thinStack";
 import { type EtaSample, etaLabel, updateEtaAnchor } from "../jobEta";
 import {
@@ -235,6 +236,12 @@ function JobResultActions({ job }: { job: Job }) {
             title="Very few frames stacked">
             <Text size="xs">{thin.message}</Text>
           </Alert>
+        ) : null}
+        {/* The satisfying "stacking cut your noise ~N×" payoff, right where the
+            finished picture lands (self-omits for a thin stack — small ratio). */}
+        {job.target && stacked && runId != null ? (
+          <StackNoiseBadge safe={job.target} runId={runId}
+            nFrames={Number(stack.n_frames_used ?? 0) || null} />
         ) : null}
         {to ? (
           <Group>

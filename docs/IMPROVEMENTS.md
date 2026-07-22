@@ -5217,8 +5217,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   a deterministic proof the `1/s²` reaches the accumulator). _(PRIORITY 4 image quality + P2 autonomy — makes
   "gain-match hazy nights" actually improve SNR instead of quietly diluting it.)_ Original spec kept for
   provenance:
-- **NEW (Scout 2026-07-21) — when photometric scaling is ON, fold the applied scale into the quality
+- ~~**NEW (Scout 2026-07-21) — when photometric scaling is ON, fold the applied scale into the quality
   weight (inverse-variance), so a hazy sub amplified to match brightness doesn't inject its amplified
+  noise at full weight.**~~ — **SHIPPED v0.151.0** (commit `eda2d60`). Implemented exactly as proposed:
+  `weighting.combine_weights_with_photometric(weights, photometric_scales)` multiplies each
+  photometrically-scaled frame's combine weight by `1/s²`, wired into the stacker hot path
+  (`stacker.py:917` → the weighted-sum / κ-σ-pass-2 combine and the drizzle final weight-map only; the
+  unweighted κ-σ pass-1 statistics and the min/max order statistic keep the plain quality weights by
+  design). Returns `weights` unchanged when photometric scaling is off, so a running install is
+  byte-for-byte identical. Tests: `test_photometric_stack.py::test_photometric_scale_downweights_the_amplified_frame_in_the_combine`
+  and `test_quality_weighting.py` (inverse-variance combine-weight cases). _(Backlog entry was stale;
+  marked Shipped by the 2026-07-22 Builder run after tracing it to the merged implementation.)_
+  <details><summary>Original idea</summary>
+  Fold the applied scale into the quality weight (inverse-variance), so a hazy sub amplified to match brightness doesn't inject its amplified
   noise at full weight.** *(Traced from a full read of `stack/photometric.py` + `stack/weighting.py` +
   the `_pass` hot path; theory-grounded, not yet reproduced on real data — file as an idea, gate behind
   the existing weighting, don't blind-ship.)* Photometric normalization multiplies a hazy frame's pixels
@@ -5243,6 +5254,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   combined noise beats the equal-weight mean). _(M code / S–M validation; PRIORITY 4 image quality + a
   touch of P2 autonomy — makes "gain-match hazy nights" actually improve SNR instead of quietly diluting
   it. Found by the 2026-07-21 #4 engine re-audit, which otherwise traced clean.)_
+  </details>
 - ~~**NEW (Builder audit 2026-07-17) — calibrate `flat_dark` is not `_sanitize_pedestal`'d, unlike dark/bias
   (latent, fail-safe today; small blind-safe hardening for consistency).**~~ — **FIXED v0.136.5**
   (Builder 2026-07-17, branch `claude/pensive-faraday-ghypg3`). The v0.135.1 fix runs the master **dark** and
@@ -6274,17 +6286,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   NaN-aware, degenerate→None), `tests/webapp/test_one_sub_vs_stack.py` (+4: real-master ratio, display-space→null,
   no-master→null, unknown-run 404), `oneFrameVsStack.test.ts` (+5), `OneFrameVsStackCard.test.tsx` (+1 badge, +1
   omitted, +lazy-fetch assertion).
-- **NEW IDEA (Builder 2026-07-22, follow-on to the shipped "cut your noise ~N×" badge) — surface the same
-  noise-reduction number at the *moment of completion*, not only when a user digs into History's reveal.**
-  *(Beginner feature / trust; PRIORITY 3–4; size S.)* The v0.162.0 badge only appears if a beginner opens a run's
-  History card and clicks "See the difference". The most impactful place for the "stacking cut your noise ~N×"
-  payoff is where they *land*: (a) the **Jobs "Process target" completion summary** ("Stacked 300 subs → noise cut
-  ~17×") right next to the existing thin-stack heads-up, and (b) the **Target page headline** result. Both can
-  reuse the shipped, tested `.../one-sub-vs-stack/noise` endpoint + the pure `noiseReductionBadge` formatter, so
-  it's a pure frontend wiring slice (lazy fetch, null → omit) with no new engine/endpoint. Naturally composes with
-  the thin-stack warning: a thin stack shows a *small* ratio, honestly reinforcing "add more subs". Additive,
-  read-only, off nothing. _(Considered but not built this run to keep the two shipped tasks focused; genuinely
-  spotted while wiring the badge — the infra is all in place.)_
+- ~~**NEW IDEA (Builder 2026-07-22, follow-on to the shipped "cut your noise ~N×" badge) — surface the same
+  noise-reduction number at the *moment of completion*, not only when a user digs into History's reveal.**~~ —
+  **SHIPPED v0.167.0** (Builder 2026-07-22, branch `claude/pensive-faraday-58p3n9`). Built exactly the proposed
+  slice: a new reusable `frontend/src/components/StackNoiseBadge.tsx` lazily fetches the shipped, tested
+  `.../one-sub-vs-stack/noise` measurement (sharing `OneFrameVsStackCard`'s `["one-sub-vs-stack-noise", safe,
+  runId]` query key so a run is never measured twice) and renders the pure `noiseReductionBadge(ratio, nFrames)`
+  formatter as a teal "Stacking your N subs cut the background noise about 17×." line. Mounted in **both** places a
+  beginner lands on a finished stack: (a) the **Jobs "Process target" completion summary** (`JobResultActions`,
+  right after the thin-stack heads-up) and (b) the **Target page result headline** (just below the thin-stack
+  alert, when the latest run has a preview). Self-omits when the ratio is missing/unmeasurable (edited/older run,
+  display-space export) or too small to be a compelling story (< 1.5×), so a thin/gibberish stack is honestly
+  reinforced by its own "very few frames" warning instead of a weak number — the two compose cleanly. Pure
+  frontend wiring: **no new engine/endpoint, no schema/config/API-shape/default change**, additive and read-only.
+  Tests: `StackNoiseBadge.test.tsx` (+4 — whole-number ≥10× with sub count / unknown-count degrade / null ratio
+  omit / too-small ratio omit), `Jobs.test.tsx` (+2 — payoff on a healthy finished stack with the right
+  `(safe, runId)` call / omitted when the measurement is null), `Target.test.tsx` (+2 — payoff on the finished
+  stack / not measured when the latest run has no preview). Beginner bar ✔ (one plain-language, shareable trust
+  number, zero knobs, at the moment of the payoff). _(Original idea kept above; the two earlier `~N×` reveal +
+  measurement slices shipped v0.162.0 and the linear-domain endpoint before it.)_
 - ~~**NEW (Scout 2026-07-21, follow-on to the v0.148.1 sub-preview fix) — put a number on the "one frame vs your
   stack" reveal: "stacking cut your noise ~N×" — original spec kept for provenance.**~~ *(Beginner feature /
   trust; PRIORITY 3; size S–M.)* Now that
