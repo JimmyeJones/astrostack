@@ -29,6 +29,7 @@ import { WallpaperMenu } from "../components/WallpaperMenu";
 import { SharePictureButton } from "../components/SharePictureButton";
 import { sharePictureText } from "../share";
 import { detectSolveSetupProblem } from "../components/target/solveSetup";
+import { RejectionBreakdown } from "../components/target/RejectionBreakdown";
 import { detectMixedPointings } from "../components/target/mixedPointings";
 
 // Re-exported for existing tests that import it from this route module.
@@ -786,25 +787,31 @@ export function TargetView() {
             </Tooltip>
           ) : null}
           {rejectedCount > 0 ? (
-            <HoverCard width={260} shadow="md" withArrow openDelay={100}>
+            <HoverCard width={300} shadow="md" withArrow openDelay={100}>
               <HoverCard.Target>
                 <Badge variant="light" color="gray" style={{ cursor: "help" }}>
                   {rejectedCount} rejected
                 </Badge>
               </HoverCard.Target>
               <HoverCard.Dropdown>
-                <Text size="sm" fw={600} mb={4}>Why frames were rejected</Text>
-                {rejectSummary.data && Object.keys(rejectSummary.data.counts).length ? (
-                  <Stack gap={2}>
-                    {Object.entries(rejectSummary.data.counts)
-                      .sort((a, b) => b[1] - a[1])
-                      .map(([reason, n]) => (
-                        <Group key={reason} justify="space-between" gap="xs">
-                          <Text size="xs">{rejectReasonLabel(reason)}</Text>
-                          <Text size="xs" fw={600}>{n}</Text>
-                        </Group>
-                      ))}
-                  </Stack>
+                {rejectSummary.data?.summary?.buckets.length ? (
+                  // Plain-language grouped breakdown + verdict (v0.159.2+).
+                  <RejectionBreakdown summary={rejectSummary.data.summary} />
+                ) : rejectSummary.data && Object.keys(rejectSummary.data.counts).length ? (
+                  // Fallback for an older backend without the friendly summary.
+                  <>
+                    <Text size="sm" fw={600} mb={4}>Why frames were rejected</Text>
+                    <Stack gap={2}>
+                      {Object.entries(rejectSummary.data.counts)
+                        .sort((a, b) => b[1] - a[1])
+                        .map(([reason, n]) => (
+                          <Group key={reason} justify="space-between" gap="xs">
+                            <Text size="xs">{rejectReasonLabel(reason)}</Text>
+                            <Text size="xs" fw={600}>{n}</Text>
+                          </Group>
+                        ))}
+                    </Stack>
+                  </>
                 ) : (
                   <Text size="xs" c="dimmed">
                     {rejectSummary.isLoading ? "Loading…" : "No breakdown available"}

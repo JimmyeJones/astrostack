@@ -19,6 +19,7 @@ from seestack.solve.astap import (
     classify_solve_setup_error,
 )
 from webapp import deps
+from webapp.rejection_summary import summarize_rejections
 from webapp.schemas import (
     BulkFrameAction,
     FrameOut,
@@ -181,6 +182,7 @@ def reject_summary(safe: str, request: Request) -> dict:
     lib, proj = deps.open_target_project(request, safe)
     try:
         counts = proj.reject_reason_counts()
+        n_accepted = proj.count(accepted_only=True)
     finally:
         proj.close()
         lib.close()
@@ -188,6 +190,10 @@ def reject_summary(safe: str, request: Request) -> dict:
         "counts": counts,
         "total": sum(counts.values()),
         "solve_setup_problem": _solve_setup_problem(counts),
+        # Plain-language grouped breakdown + reassuring verdict for the
+        # "why were some frames left out?" beginner card. Additive: the raw
+        # ``counts``/``total`` above stay for existing consumers.
+        "summary": summarize_rejections(counts, n_accepted),
     }
 
 
