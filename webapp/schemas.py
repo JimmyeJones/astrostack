@@ -361,6 +361,28 @@ class MergeRequest(BaseModel):
     sources: list[str]
 
 
+class MergeSuggestionTarget(BaseModel):
+    """One target inside a same-object merge suggestion."""
+
+    safe: str
+    name: str
+    n_frames_accepted: int
+    total_exposure_s: float
+
+
+class MergeSuggestionOut(BaseModel):
+    """A friendly "these look like the same object — combine them?" suggestion:
+    a cluster of ≥2 targets whose plate-solved centres agree. ``targets`` are
+    ordered deepest-integration first, so ``targets[0].safe`` is the natural
+    ``into`` for the one-click merge (it keeps the most history). Read-only."""
+
+    object_name: str | None  # catalog id/common name for the cluster, or null
+    center_ra_deg: float
+    center_dec_deg: float
+    max_sep_arcmin: float    # widest pairwise separation in the group (arcmin)
+    targets: list[MergeSuggestionTarget]
+
+
 class ScanRequest(BaseModel):
     root: str | None = None  # default: settings.incoming_dir
 

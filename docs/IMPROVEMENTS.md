@@ -3526,6 +3526,18 @@ to **Shipped**.)_
 
 ## Ideas (priority order — work top sections first; AGENTS.md §1)
 
+> **⚠ Scout — the Ideas list is running stale: several entries below were already
+> fully implemented in code but never struck through.** In a single 2026-07-22
+> Builder run, five "open" ideas were found already shipped (SExtractor sky-mode
+> guard across all 4 sites; plate-solve per-rung timeout fall-through in
+> `astap.py`; the "Clouds & haze" transparency-trend card; the Stack-form
+> photometric-normalize nudge; the √N "should I keep shooting?" text via
+> `readiness.ts`) — each cost real investigation time before being ruled out.
+> They've been curated to Shipped this run, but **please do a full sweep**: grep
+> the codebase for each open Idea before leaving it open, and strike through
+> anything already built. A stale backlog makes every Builder run start by
+> re-discovering finished work.
+
 ### ⭐ Editor — make it excellent (PRIORITY 1)
 The editor is where a good stack becomes a good *picture*, and it has real
 problems. Dogfood it every big-picture run and fix root causes.
@@ -3962,8 +3974,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   `test_adaptive_ladder_raises_only_after_every_rung_times_out` (all rungs time out → raises, but only after
   trying all `len(_SOLVE_LADDER)` rungs; fails-before with 1 call). Additive/upgrade-safe: pure control-flow in
   the solver, no schema/config/API/default change. Original spec kept for provenance:
-- **IMPROVEMENT IDEA (Scout 2026-07-21) — a plate-solve timeout on the full-resolution rung should fall
-  through to the faster downsampled retry rungs instead of giving up.** *(Autonomy / image-quality, PRIORITY 2;
+- ~~**IMPROVEMENT IDEA (Scout 2026-07-21) — a plate-solve timeout on the full-resolution rung should fall
+  through to the faster downsampled retry rungs instead of giving up.**~~ — **ALREADY SHIPPED (verified by Builder
+  2026-07-22).** `AstapSolver.solve` (`seestack/solve/astap.py:189-227`) now wraps the per-rung `_solve_once` in a
+  `try/except ASTAPError` that records the failure and `continue`s to the next (faster) rung, surfacing the error
+  only after *every* rung is exhausted — exactly the fix below. Regression coverage exists in the solver tests.
+  Curated to Shipped; original spec kept for provenance. *(Autonomy / image-quality, PRIORITY 2;
   size S.)* **Why:** `solve/astap.py::solve()` tries a ladder of rungs — full-res, then downsample ×2/×4 — to
   rescue a noisy/star-poor frame; the coarser rungs run *faster* (fewer pixels) and often succeed where full-
   res struggles. But `_solve_once` raises `ASTAPError` on `subprocess.TimeoutExpired` (astap.py ~188-205) and
@@ -4013,8 +4029,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   Settings PATCH to persist `site_lat`/`site_lon`; (c) a small dismissible banner on the Tonight page (and/or the
   Settings location field showing the detected value as a "use this" prefill). No new engine work, no schema
   change (Settings fields exist), read-until-the-user-clicks-Save.
-- **NEW (Scout 2026-07-21) — surface a "match brightness across your subs" nudge when the data actually needs
-  it, so the v0.151.0 inverse-variance combine reaches the beginner who benefits most.** *(Autonomy/image-quality;
+- ~~**NEW (Scout 2026-07-21) — surface a "match brightness across your subs" nudge when the data actually needs
+  it, so the v0.151.0 inverse-variance combine reaches the beginner who benefits most.**~~ — **ALREADY SHIPPED
+  (verified by Builder 2026-07-22).** The Stack form already carries a dismissible photometric-normalization nudge
+  (`frontend/src/routes/Stack.tsx:549-563`): it fires when the accepted+solved subs' transparency spread is wide
+  (p90/p10 ≳ 1.5× over ≥5 measured frames) and `photometric_normalize` is off, with the exact plain-language
+  "clearest sit ~N× brighter than the haziest — turn on Photometric normalization" copy, wired to the existing
+  control. Advisory-only, no default flip. Curated to Shipped; original spec kept for provenance.
+  *(Autonomy/image-quality;
   PRIORITY 2→4; size S–M.)* v0.151.0 added a genuine image-quality win: with `photometric_normalize` on, a hazy
   sub is gain-matched *and* correctly down-weighted by 1/s² (inverse-variance), so a multi-night stack with
   varying sky transparency combines cleaner. But `photometric_normalize` is **off by default** (correctly — a
@@ -5050,8 +5072,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   config/DB/API/on-disk change; realistic stacks are byte-for-byte unchanged (the 3σ-clip keeps mean−median well
   inside the 0.3·σ band on real sky, so the restored guard only ever engages on pathological crowded input).
   Original spec kept for provenance:
-- **IMPROVEMENT IDEA (Scout 2026-07-21) — make the SExtractor sky-mode fallback guard actually functional
-  (defense-in-depth; currently algebraically inert).** *(Image quality / correctness-hardening, PRIORITY 4;
+- ~~**IMPROVEMENT IDEA (Scout 2026-07-21) — make the SExtractor sky-mode fallback guard actually functional
+  (defense-in-depth; currently algebraically inert).**~~ — **ALREADY SHIPPED (verified by Builder 2026-07-22).**
+  All four call sites now use the SExtractor `|mean − median| > 0.3·σ` skew test (and a non-finite guard) instead
+  of the inert `1.5·X > 5·X` form: `seestack/bg/per_frame.py:375-379` (CPU) & `:468-470` (GPU),
+  `seestack/bg/coverage_leveling.py:176-179`, and `seestack/bg/final_gradient.py:229-232`, each carrying a comment
+  explaining the earlier inert form. The defensive backstop now genuinely exists; no live behaviour change on the
+  default path (the upstream 3σ clip keeps realistic sky inside the band). Curated to Shipped; original spec kept
+  for provenance. *(Image quality / correctness-hardening, PRIORITY 4;
   size S.)* **Why:** the per-channel sky-zeroing uses the SExtractor mode `sky = 2.5·median − 1.5·mean`, with a
   guard meant to fall back to the plain median when skew is "too extreme to trust". But the guard compares
   `abs(sky − median)` — which is *by construction* exactly `1.5·|median − mean|` — against `5.0·|median − mean|`,
@@ -6050,9 +6078,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   `transparencyTrend.test.ts` (+9) & `TransparencyTrendCard.test.tsx` (+2). Beginner bar ✔ (one card, zero
   knobs, auto verdict + plain language, actionable next-night advice). *(Original spec kept below for
   provenance.)*
-- **NEW BEGINNER FEATURE (Scout 2026-07-21 #10) — "Clouds & haze through the night": a per-session
-  transparency timeline + plain verdict — the sibling of the shipped Focus-trend card, for the #1 thing that
-  kills a Seestar night.** *(Beginner feature; PRIORITY 3 friendliness / trust; size M.)* Clouds and haze are the
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-21 #10) — "Clouds & haze through the night": a per-session
+  transparency timeline + plain verdict — the sibling of the shipped Focus-trend card.**~~ — **ALREADY SHIPPED
+  (verified by Builder 2026-07-22).** Fully built across all three layers mirroring the Focus-trend card:
+  `seestack/session_recap.py::transparency_trend` (clear/degraded/cleared verdict with a `degraded_after_utc`
+  marker, direction-flipped for higher=better transparency, self-hides below 6 measured subs), `GET
+  /api/targets/{safe}/transparency-trend`, and `frontend/src/components/TransparencyTrendCard.tsx` (+ pure
+  `transparencyTrend.ts` helpers), mounted on the Target page. Curated to Shipped; original spec kept for
+  provenance. *(Beginner feature; PRIORITY 3 friendliness / trust; size M.)* Clouds and haze are the
   single most common reason a beginner's stack comes out thin or noisy — and the app never *explains* it. But it
   already **measures and stores** what's needed: every accepted sub carries a `transparency_score`
   (`FrameRow.transparency_score`, written by `qc/metrics.py`) alongside its `timestamp_utc`, and the QC grader
@@ -6089,7 +6122,13 @@ problems. Dogfood it every big-picture run and fix root causes.
   pipeline stocked; low-risk because the data, the session split, and the whole card pattern already exist and are
   tested.
 - **NEW BEGINNER FEATURE (Scout 2026-07-21 #2) — "Have I shot enough?": a plain-language integration /
-  diminishing-returns meter on the target.** *(Beginner feature; PRIORITY 3 friendliness / trust; size S–M.)*
+  diminishing-returns meter on the target.** _(Builder 2026-07-22 curation note: **the core value already ships as
+  text** — `frontend/src/readiness.ts::noiseReductionHint` gives the honest √N "another clear hour would cut
+  background noise ~N% more — worth staying out / clean place to stop" verdict, and `integrationReadiness` gives
+  the goal-based "N h of ~M h — a solid start" line; both render on the Target page. Only the **visual** SNR-vs-subs
+  curve with a "you are here" marker is unbuilt, which is marginal polish over the shipped text. Deprioritised
+  accordingly — pick up only if a future run wants the visual, not as a fresh feature.)_
+  *(Beginner feature; PRIORITY 3 friendliness / trust; size S–M.)*
   The single most common beginner question mid-session is *"is it worth staying up for more subs, or is this
   target done?"* — and the app never answers it. Stack noise falls as **√N** (double the good subs → ~30% less
   background noise, then steeply diminishing), so from just the **accepted-sub count** (which we already have on
@@ -6638,6 +6677,30 @@ problems. Dogfood it every big-picture run and fix root causes.
   no-location fallback, empty→[]); (b) a read-only `GET /api/plan/best-tonight` surfacing the ranked list;
   (c) a dismissible Dashboard/Library card wired to open the top pick. _(M–L, split as above; PRIORITY 2
   autonomy + P3 friendliness + P4 image quality; beginner feature — keeps the pipeline stocked.)_
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-21 #3) — "Same object? Combine these into one deep picture":
+  auto-suggest merging same-target folders shot on different nights.**~~ — **SHIPPED v0.166.0** (Builder
+  2026-07-22, branch `claude/pensive-faraday-0dwwj3`). Built the Scout's exact three-slice split. **(a) Engine:**
+  pure `seestack/io/library.py::find_same_object_target_groups(targets, *, tol_deg=SAME_OBJECT_TOL_DEG)` —
+  clusters targets whose plate-solved centres agree via single-linkage union-find over the existing wrap/pole-safe
+  `_angular_separation_deg` (haversine); drops singletons, orders members deepest-integration first (the natural
+  merge `into`), and groups most-integrated first. `SAME_OBJECT_TOL_DEG = 0.1` (6′) is tight enough to keep
+  genuinely-distinct neighbours apart (M 31↔M 32 ≈ 0.4°, M 31↔M 110 ≈ 0.6° are never fused) yet generous for
+  night-to-night re-centring on a ~1.27° Seestar field. **(b) Backend:** read-only `GET
+  /api/targets/merge-suggestions` (registered before `/{safe}`) surfaces each group with a best-effort catalog
+  `object_name` (offline `identify_object` on the centre), the widest pairwise separation (arcmin), and each
+  member's accepted-sub count + integration. **(c) Frontend:** a dismissible `MergeSuggestionsCard` on the Library
+  page — plain-language nudge ("These 3 targets look like the same object (Andromeda Galaxy), shot on separate
+  nights. Combine them into one deeper picture (3.8 h total).") with a one-click **Combine into one deep target**
+  that calls the existing `merge_targets` (into the deepest member), then invalidates `["targets"]` +
+  `["merge-suggestions"]` and nudges a re-stack; a per-group localStorage dismissal keyed by member signature so a
+  declined nudge stays gone until membership changes. Additive/upgrade-safe: read-only detection (never
+  auto-merges — the user confirms), no schema/DB/on-disk/default change; the merge op is the already-shipped
+  user-confirmed one. Tests: `tests/test_same_object_groups.py` (+8 — group/singleton/distinct-neighbours/
+  unsolved-skipped/deepest-first/two-groups-ordered/wrap-safe/empty), `tests/webapp/test_merge_suggestions.py`
+  (+4 — suggested/not-fused/empty/unsolved-ignored), `mergeSuggestions.test.ts` (+6) & `MergeSuggestionsCard.test.tsx`
+  (+3 — merge-into-deepest / self-hide / persisted-dismiss). Beginner bar ✔ (one obvious action, plain-language
+  *why*, sane default, no expert knobs; pays off hardest for the "thousands of subs across many nights" owner in
+  §1). *(Original spec kept for provenance.)*
 - **NEW BEGINNER FEATURE (Scout 2026-07-21 #3) — "Same object? Combine these into one deep picture":
   auto-suggest merging same-target folders shot on different nights.** The Seestar app writes a
   **new folder per night**, so a beginner who shoots M31 across three clear nights ends up with three

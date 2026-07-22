@@ -38,9 +38,10 @@ import logging
 import re
 import sqlite3
 import time
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterator
+from typing import Protocol
 
 from seestack.io.project import Project
 
@@ -698,3 +699,134 @@ def _angular_separation_deg(ra1: float, dec1: float,
          + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2)
     c = 2 * math.asin(min(1.0, math.sqrt(a)))
     return math.degrees(c)
+
+
+# ---------------------------------------------------------------------------
+# "Same object? Combine these into one deep picture" — the Seestar app writes a
+# NEW folder per night, so a beginner who shoots M 31 across three clear nights
+# ends up with three *separate* AstroStack targets — each a shallow stack —
+# instead of one deep one, and never realises their subs are being split. Manual
+# merge already exists (``merge_targets`` here + the webapp ``/merge`` endpoint);
+# this pure helper *detects* the split so a friendly nudge can offer the one-click
+# fix. It groups targets whose plate-solved centres sit within a tight tolerance
+# (same sky object), so the deep image "just happens". Read-only and offline.
+# ---------------------------------------------------------------------------
+
+# How close two targets' plate-solved centres must be to be judged the *same*
+# object. The Seestar S50's field of view is ~1.27°, and it re-centres on the
+# same catalogued target each night to within a couple of arcminutes, so a small
+# tolerance captures "same object, different nights" comfortably. It is kept well
+# below the separation of genuinely distinct-but-close neighbours a beginner might
+# shoot (M 31↔M 32 ≈ 0.4°, M 31↔M 110 ≈ 0.6°), so those are never fused. 0.1° =
+# 6 arcmin.
+SAME_OBJECT_TOL_DEG = 0.1
+
+
+class _LocatableTarget(Protocol):
+    """The minimal shape :func:`find_same_object_target_groups` reads — any
+    target-like row with a plate-solved centre and integration figures. Kept a
+    Protocol so the helper stays pure and unit-testable with a lightweight stub,
+    not a full :class:`TargetEntry`."""
+
+    safe_name: str
+    name: str
+    ra_deg: float | None
+    dec_deg: float | None
+    n_frames_accepted: int
+    total_exposure_s: float
+
+
+@dataclass
+class SameObjectGroup:
+    """A cluster of ≥2 targets whose centres agree to within the tolerance — i.e.
+    the same sky object split across separate folders/nights. ``members`` are the
+    original target objects, ordered deepest-integration first (so the natural
+    "merge into" is ``members[0]`` — it keeps the most history/identity)."""
+
+    members: list  # the caller's own target rows (see _LocatableTarget), deepest first
+    center_ra_deg: float
+    center_dec_deg: float
+    max_sep_deg: float  # widest pairwise separation in the group (confidence cue)
+
+
+def find_same_object_target_groups(
+    targets: Sequence[_LocatableTarget], *, tol_deg: float = SAME_OBJECT_TOL_DEG,
+) -> list[SameObjectGroup]:
+    """Group targets that point at the *same sky object* (centres within
+    ``tol_deg``), so a nudge can offer to merge each group into one deep stack.
+
+    Pure and offline: it only reads each target's ``ra_deg``/``dec_deg`` (skips
+    targets with no plate-solved centre) and its integration figures for
+    ordering. Clusters by single-linkage over the wrap/pole-safe haversine
+    separation (union-find); singletons are dropped, so the result is only the
+    genuine "same object in more than one folder" cases. Groups are returned
+    with the most-integrated group first, and each group's members
+    deepest-integration first. Returns ``[]`` when nothing clusters."""
+    located = [
+        t for t in targets
+        if t.ra_deg is not None and t.dec_deg is not None
+    ]
+    n = len(located)
+    if n < 2:
+        return []
+
+    # Union-find: join any two located targets whose centres are within tol.
+    parent = list(range(n))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]  # path halving
+            i = parent[i]
+        return i
+
+    def union(i: int, j: int) -> None:
+        ri, rj = find(i), find(j)
+        if ri != rj:
+            parent[ri] = rj
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            if _angular_separation_deg(
+                float(located[i].ra_deg), float(located[i].dec_deg),
+                float(located[j].ra_deg), float(located[j].dec_deg),
+            ) <= tol_deg:
+                union(i, j)
+
+    clusters: dict[int, list[int]] = {}
+    for i in range(n):
+        clusters.setdefault(find(i), []).append(i)
+
+    groups: list[SameObjectGroup] = []
+    for idxs in clusters.values():
+        if len(idxs) < 2:
+            continue
+        members = [located[i] for i in idxs]
+        # Deepest integration first, so the default "merge into" keeps the most
+        # data; ties break on accepted count then name for a stable order.
+        members.sort(
+            key=lambda t: (t.total_exposure_s or 0.0, t.n_frames_accepted or 0, t.name),
+            reverse=True,
+        )
+        # Widest pairwise separation in the cluster — an honest confidence cue the
+        # UI can show ("all within N′") and a guard the caller could tighten on.
+        max_sep = 0.0
+        for a in range(len(members)):
+            for b in range(a + 1, len(members)):
+                sep = _angular_separation_deg(
+                    float(members[a].ra_deg), float(members[a].dec_deg),
+                    float(members[b].ra_deg), float(members[b].dec_deg),
+                )
+                max_sep = max(max_sep, sep)
+        groups.append(SameObjectGroup(
+            members=members,
+            center_ra_deg=float(members[0].ra_deg),
+            center_dec_deg=float(members[0].dec_deg),
+            max_sep_deg=max_sep,
+        ))
+
+    # Most-integrated group first, so the highest-value merge leads the nudge.
+    groups.sort(
+        key=lambda g: sum(m.total_exposure_s or 0.0 for m in g.members),
+        reverse=True,
+    )
+    return groups
