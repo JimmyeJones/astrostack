@@ -561,7 +561,10 @@ def _deepening_signature(runs: list) -> str:
     until the series changes (a new/re-run/deleted stack), then rebuilt."""
     import hashlib
 
-    parts = []
+    # Version tag: bump when the *render output* changes for an unchanged series
+    # (e.g. burned-in per-frame date/sub labels, v2) so existing cached reels are
+    # rebuilt in place rather than serving a stale label-less animation.
+    parts = ["v2-labels"]
     for r in runs:
         try:
             st = os.stat(r.fits_path)
@@ -593,9 +596,14 @@ def _build_or_get_deepening_reel(runs: list) -> Path | None:
     for suffix in ("_deepening.webp", "_deepening.png"):
         with contextlib.suppress(OSError):
             (out_dir / f"{basename}{suffix}").unlink()
-    from seestack.render.deepening import build_deepening_reel
+    from seestack.render.deepening import build_deepening_reel, deepening_frame_label
 
-    path = build_deepening_reel([r.fits_path for r in runs], out_dir, basename)
+    # Per-frame provenance labels, so a downloaded/shared clip carries its own
+    # "28 Jun · 120 subs" story frame by frame (each frame from the same run row
+    # the info endpoint already reads).
+    labels = [deepening_frame_label(r.timestamp_utc, r.n_frames_used) for r in runs]
+    path = build_deepening_reel([r.fits_path for r in runs], out_dir, basename,
+                                labels=labels)
     if path is None:
         return None
     with contextlib.suppress(OSError):

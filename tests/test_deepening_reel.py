@@ -15,6 +15,7 @@ from seestack.render.deepening import (
     _apply_stf_params,
     _solve_stf_params,
     build_deepening_reel,
+    deepening_frame_label,
     render_deepening_frames,
 )
 from seestack.render.thumbnail import autostretch
@@ -135,3 +136,58 @@ def test_build_deepening_reel_writes_animation(tmp_path):
 def test_solve_handles_degenerate_frame():
     flat = np.full((16, 16, 3), np.nan, dtype=np.float32)
     assert _solve_stf_params(flat) is None
+
+
+def test_deepening_frame_label_formats_date_and_subs():
+    # Date + count → the full caption; the sub count degrades gracefully.
+    assert deepening_frame_label("2026-07-19T21:03:00", 120) == "19 Jul 2026 · 120 subs"
+    assert deepening_frame_label("2026-07-19", 1) == "19 Jul 2026 · 1 sub"
+    # Missing/garbage date drops just that part; a non-positive count drops too.
+    assert deepening_frame_label(None, 90) == "90 subs"
+    assert deepening_frame_label("not-a-date", 90) == "90 subs"
+    assert deepening_frame_label("2026-07-19", 0) == "19 Jul 2026"
+    # Nothing known → a clean empty label (a no-op when drawn).
+    assert deepening_frame_label(None, None) == ""
+    assert deepening_frame_label(None, 0) == ""
+
+
+def test_labels_are_burned_into_the_bottom_left_corner(tmp_path):
+    # A frame rendered WITH a label differs from the same frame rendered WITHOUT
+    # one — and only in the bottom-left corner (the label backing), never in the
+    # top-left sky the fair-comparison tests rely on.
+    a = _write_cube(tmp_path / "a.fits", _same_target_scene(96, 96, noise=0.04, seed=20))
+    b = _write_cube(tmp_path / "b.fits", _same_target_scene(96, 96, noise=0.01, seed=21))
+
+    plain = render_deepening_frames([a, b], max_width=96)
+    labelled = render_deepening_frames([a, b], labels=["1 Jun 2026 · 50 subs",
+                                                       "3 Jul 2026 · 400 subs"],
+                                       max_width=96)
+    assert len(plain) == len(labelled) == 2
+    for p, lab in zip(plain, labelled, strict=True):
+        pa, la = np.asarray(p), np.asarray(lab)
+        # The label lives in the bottom-left; that region must change …
+        assert not np.array_equal(pa[-24:, :48], la[-24:, :48])
+        # … while the top-left sky patch is untouched (no double-processing).
+        assert np.array_equal(pa[:24, :24], la[:24, :24])
+
+
+def test_a_frame_label_follows_its_frame_through_a_skip(tmp_path):
+    # The middle path is unreadable and drops out; the surviving two frames must
+    # keep the labels of *their own* paths (index 0 and 2), not shift onto the
+    # skipped path's label. Frame 0's label is empty (→ no backing bar), frame 1
+    # (the survivor from path 2) carries a real label (→ a bar), which pins the
+    # alignment: a naive positional zip would give frame 1 the skipped "MID".
+    good1 = _write_cube(tmp_path / "g1.fits", _same_target_scene(96, 96, noise=0.04, seed=22))
+    good2 = _write_cube(tmp_path / "g2.fits", _same_target_scene(96, 96, noise=0.01, seed=23))
+    baseline = render_deepening_frames([good1, good2], max_width=96)  # no labels
+
+    frames = render_deepening_frames(
+        [good1, str(tmp_path / "missing.fits"), good2],
+        labels=["", "MID SKIPPED", "3 Jul 2026 · 400 subs"], max_width=96)
+    assert len(frames) == 2
+    f0, f1 = np.asarray(frames[0]), np.asarray(frames[1])
+    b0, b1 = np.asarray(baseline[0]), np.asarray(baseline[1])
+    # Survivor 0 (path g1) had an empty label → unchanged from the no-label render.
+    assert np.array_equal(f0[-24:, :64], b0[-24:, :64])
+    # Survivor 1 (path g2) carries path-2's label → a backing bar appears.
+    assert not np.array_equal(f1[-24:, :64], b1[-24:, :64])

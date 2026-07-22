@@ -6,4 +6,4 @@ adds a FastAPI server, a single-worker job manager, a folder watcher that
 auto-runs the ingest→QC→solve pipeline, and a built React SPA.
 """
 
-__version__ = "0.164.0"
+__version__ = "0.165.0"
