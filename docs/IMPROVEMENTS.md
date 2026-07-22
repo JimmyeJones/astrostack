@@ -3886,6 +3886,36 @@ problems. Dogfood it every big-picture run and fix root causes.
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
 - **⭐ OWNER-REQUESTED — Adaptive Auto: learn the owner's taste from feedback on the
+  auto-processed image (no ML runtime, fully offline/private).** — **slice (b) per-object-type
+  profiles SHIPPED v0.169.0** (Builder 2026-07-22, branch `claude/pensive-faraday-a8m4u2`). The
+  taste profile now keeps, alongside its global set, an optional **per-archetype override** for
+  galaxy / nebula / cluster, so a "brighter core" taste learned on galaxies no longer also
+  brightens a star cluster. **Engine** (`seestack/edit/auto_prefs.py`): the profile grows an
+  additive `by_type` map (old flat profiles with no `by_type` read as "global-only", so they
+  behave byte-for-byte as before — regression-pinned); `record_feedback`/`apply_profile`/
+  `describe_profile`/`is_neutral` gain an optional `object_type`; a new pure
+  `effective_biases(profile, object_type)` merges the global set with the per-type override
+  (type wins per-parameter, falls back to global). `auto_recipe` self-classifies its own proxy
+  (`classify_target`, which already existed for the preset-suggestion chip) and passes the
+  archetype through, so **both** the interactive `…/editor/auto` and the unattended
+  "Process target" chain apply the right per-type taste with no extra plumbing. **Webapp**
+  (`webapp/routers/editor.py`): the feedback POST accepts optional `safe`/`run_id`; when present
+  it best-effort-classifies that run (unclassifiable ⇒ global, never sinks the feedback) and
+  records into the archetype bucket, returning a note scoped to it ("… for your galaxies …").
+  A new read-only `GET /api/targets/{safe}/stack-runs/{run_id}/editor/auto-preferences` serves
+  the profile scoped to that run's archetype so the editor's "why Auto shifted" note reflects the
+  target being edited *on load*, not only after the next tap. **Frontend:** `AutoFeedback` takes
+  `safe`/`runId`, queries the run-scoped profile, and carries the run context on each cue.
+  Upgrade-safe/additive: no config/DB/API-shape/default change; a never-configured library and
+  every existing flat profile are unchanged. Tests: `tests/test_auto_prefs.py` (+7: type routing,
+  type-overrides-global, global-applies-to-all, walk-back, archetype note, old-flat upgrade,
+  garbage/unknown-type coercion), `tests/webapp/test_editor.py` (+1: feedback scoped to a
+  monkeypatched archetype — bucket not global, run Auto reflects it), `AutoFeedback.test.tsx`
+  (+1 scoped + updated global assertion). **Remaining slices for a future run:** the two other
+  parts of (b) — **recency decay** and a **"highlights/core clipped" cue** (still needs a stretch
+  highlight-knee param) — and **(c)** an optional light statistical fit (numpy/scikit, no NN).
+  Original slice-(a) write-up kept for provenance below.
+- **⭐ OWNER-REQUESTED — Adaptive Auto: learn the owner's taste from feedback on the
   auto-processed image (no ML runtime, fully offline/private).** — **slice (a) SHIPPED
   v0.159.0** (Builder 2026-07-22, branch `claude/pensive-faraday-jwvd6c`). Implemented
   the ask end-to-end with **no neural net, no model download, no external API** (pure
@@ -3917,9 +3947,9 @@ problems. Dogfood it every big-picture run and fix root causes.
   `frontend/.../AutoFeedback.test.tsx` (+3). Upgrade-safe: additive nullable library-meta
   blob, no schema/config/API-shape/default change; Auto is neutral until the owner gives
   feedback. **Remaining slices for a future run:** **(b)** per-object-type profiles
-  (galaxy/nebula/cluster — the classifier already exists) + recency decay + a "highlights/
-  core clipped" cue (needs a stretch highlight-knee param); **(c)** *optional later* a
-  light statistical fit (numpy/scikit, no NN). Original spec kept for provenance:
+  (galaxy/nebula/cluster — the classifier already exists) — **SHIPPED v0.169.0, see the
+  top note** — its recency-decay and "highlights/core clipped"-cue sub-parts remain; **(c)**
+  *optional later* a light statistical fit (numpy/scikit, no NN). Original spec kept for provenance:
 - **⭐ OWNER-REQUESTED — Adaptive Auto: learn the owner's taste from feedback on the
   auto-processed image (no ML runtime, fully offline/private).** The owner wants to
   give feedback on the Auto result and have it get better at *their* taste over

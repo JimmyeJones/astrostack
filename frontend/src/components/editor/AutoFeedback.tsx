@@ -24,16 +24,26 @@ export const AUTO_FEEDBACK_CHIPS: { cue: string; label: string }[] = [
   { cue: "too_green", label: "Too green" },
 ];
 
-export function AutoFeedback({ onRerun }: { onRerun: () => void }) {
+export function AutoFeedback(
+  { onRerun, safe, runId }: { onRerun: () => void; safe?: string; runId?: number },
+) {
   const qc = useQueryClient();
+  const scoped = safe != null && runId != null;
+  // Query the run-scoped profile when we know the target, so the "why" note
+  // reflects this archetype's taste on load; otherwise the library-wide profile.
+  const prefsKey = scoped ? ["auto-prefs", safe, runId] : ["auto-prefs"];
   const prefs = useQuery({
-    queryKey: ["auto-prefs"],
-    queryFn: () => api.getAutoPreferences(),
+    queryKey: prefsKey,
+    queryFn: () =>
+      scoped ? api.getRunAutoPreferences(safe!, runId!) : api.getAutoPreferences(),
   });
   const feedback = useMutation({
-    mutationFn: (cue: string) => api.sendAutoFeedback(cue),
+    // Pass the run context so the cue is scoped to this target's archetype
+    // (galaxy/nebula/cluster) — taste learned on galaxies won't move clusters.
+    mutationFn: (cue: string) =>
+      api.sendAutoFeedback(cue, scoped ? { safe: safe!, runId: runId! } : undefined),
     onSuccess: (data) => {
-      qc.setQueryData(["auto-prefs"], data);
+      qc.setQueryData(prefsKey, data);
       notifications.show({
         message: "Thanks — Auto will lean that way for you", color: "violet",
       });
@@ -44,7 +54,7 @@ export function AutoFeedback({ onRerun }: { onRerun: () => void }) {
   const reset = useMutation({
     mutationFn: () => api.resetAutoPreferences(),
     onSuccess: (data) => {
-      qc.setQueryData(["auto-prefs"], data);
+      qc.setQueryData(prefsKey, data);
       notifications.show({ message: "Auto reset to its data-driven default", color: "gray" });
       onRerun();
     },

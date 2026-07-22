@@ -515,12 +515,30 @@ def _read_auto_preferences(lib) -> dict:
     return auto_prefs_mod.record_feedback(stored, "")
 
 
-def _auto_preferences_out(profile: dict) -> AutoPreferencesOut:
+def _auto_preferences_out(profile: dict,
+                          object_type: str | None = None) -> AutoPreferencesOut:
+    """The profile as the editor needs it. With ``object_type`` (the archetype of
+    the run being edited) the biases/note/neutral reflect that type's *effective*
+    taste (global set + per-type override); with ``None`` they reflect the global
+    set — so the library-wide GET stays a global view while the per-run feedback
+    response is scoped to the target the owner just judged."""
     return AutoPreferencesOut(
-        biases=dict(profile.get("biases", {})),
-        note=auto_prefs_mod.describe_profile(profile),
-        neutral=auto_prefs_mod.is_neutral(profile),
+        biases=auto_prefs_mod.effective_biases(profile, object_type),
+        note=auto_prefs_mod.describe_profile(profile, object_type),
+        neutral=auto_prefs_mod.is_neutral(profile, object_type),
     )
+
+
+def _classify_run(request: Request, safe: str, run_id: int) -> str | None:
+    """Best-effort coarse archetype (galaxy/nebula/cluster) of a run's own proxy,
+    so type-scoped feedback lands in the right bucket. Returns ``None`` — i.e. fall
+    back to the global taste — on any failure (missing run, unreadable proxy)."""
+    try:
+        project_dir, run = _run_info(request, safe, run_id)
+        rgb, _scale = get_proxy(project_dir, run.id, run.fits_path)
+        return presets_mod.classify_target(rgb).get("cls")
+    except Exception:  # noqa: BLE001 — classification is advisory; never sink feedback
+        return None
 
 
 @router.get("/api/editor/auto-preferences", response_model=AutoPreferencesOut)
@@ -533,8 +551,31 @@ def get_auto_preferences(request: Request) -> AutoPreferencesOut:
         lib.close()
 
 
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/editor/auto-preferences",
+            response_model=AutoPreferencesOut)
+def get_run_auto_preferences(safe: str, run_id: int,
+                             request: Request) -> AutoPreferencesOut:
+    """The Adaptive-Auto profile *scoped to this run's archetype* — so the editor's
+    "why Auto shifted" note reflects the taste that actually applies to the target
+    the owner is looking at (galaxy taste on a galaxy), on load, not only after the
+    next feedback tap. Falls back to the global taste when the run can't be
+    classified. Read-only."""
+    object_type = _classify_run(request, safe, run_id)
+    lib = deps.open_library(request)
+    try:
+        return _auto_preferences_out(_read_auto_preferences(lib), object_type)
+    finally:
+        lib.close()
+
+
 class AutoFeedbackIn(BaseModel):
     cue: str
+    # Optional context: the run the owner is judging. When given, the cue is scoped
+    # to that run's archetype (galaxy/nebula/cluster) so a "brighter core" taste
+    # learned on galaxies doesn't also brighten clusters. Absent (older frontend) ⇒
+    # the cue updates the global taste exactly as before.
+    safe: str | None = None
+    run_id: int | None = None
 
 
 @router.post("/api/editor/auto-preferences/feedback", response_model=AutoPreferencesOut)
@@ -542,16 +583,24 @@ def post_auto_feedback(body: AutoFeedbackIn, request: Request) -> AutoPreference
     """Record one plain-language feedback cue on the Auto result and return the
     updated profile. Unknown cues are ignored (the profile is unchanged), so a
     stale frontend can never corrupt the store; every bias is bounded, so repeated
-    feedback saturates rather than running away."""
+    feedback saturates rather than running away.
+
+    When the request carries the run's ``safe``/``run_id``, the cue is recorded into
+    that run's object-type bucket (best-effort classification; unclassifiable ⇒ the
+    global set), and the returned note is scoped to that archetype."""
     if body.cue not in auto_prefs_mod.known_cues():
         raise HTTPException(status_code=422, detail=f"unknown feedback cue: {body.cue!r}")
+    object_type = None
+    if body.safe and body.run_id is not None:
+        object_type = _classify_run(request, body.safe, body.run_id)
     lib = deps.open_library(request)
     try:
-        updated = auto_prefs_mod.record_feedback(_read_auto_preferences(lib), body.cue)
+        updated = auto_prefs_mod.record_feedback(
+            _read_auto_preferences(lib), body.cue, object_type=object_type)
         lib.set_meta(AUTO_PREFERENCES_META_KEY, json.dumps(updated))
     finally:
         lib.close()
-    return _auto_preferences_out(updated)
+    return _auto_preferences_out(updated, object_type)
 
 
 @router.delete("/api/editor/auto-preferences", response_model=AutoPreferencesOut)

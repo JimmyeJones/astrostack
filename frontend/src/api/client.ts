@@ -1459,9 +1459,16 @@ export const api = {
       body: JSON.stringify({ recipe, output_name: outputName, tiff_mode: tiffMode }),
     }),
   getAutoPreferences: () => req<AutoPreferences>("/api/editor/auto-preferences"),
-  sendAutoFeedback: (cue: string) =>
+  /** The profile scoped to a run's archetype (galaxy/nebula/cluster), so the
+   * editor's "why Auto shifted" note reflects the target being edited. */
+  getRunAutoPreferences: (safe: string, runId: number) =>
+    req<AutoPreferences>(
+      `/api/targets/${safe}/stack-runs/${runId}/editor/auto-preferences`),
+  sendAutoFeedback: (cue: string, ctx?: { safe: string; runId: number }) =>
     req<AutoPreferences>("/api/editor/auto-preferences/feedback", {
-      method: "POST", body: JSON.stringify({ cue }),
+      method: "POST",
+      body: JSON.stringify(
+        ctx ? { cue, safe: ctx.safe, run_id: ctx.runId } : { cue }),
     }),
   resetAutoPreferences: () =>
     req<AutoPreferences>("/api/editor/auto-preferences", { method: "DELETE" }),

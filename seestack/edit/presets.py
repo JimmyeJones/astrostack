@@ -367,6 +367,10 @@ def auto_recipe(rgb: np.ndarray | None = None,
     if prefs is not None:
         from seestack.edit import auto_prefs
 
+        # Per-object-type taste: classify this image (galaxy/nebula/cluster) so a
+        # bias learned on one archetype only shifts that archetype. An unclassified
+        # image (cls None) falls back to the global taste — see auto_prefs.
+        object_type = classify_target(rgb).get("cls") if rgb is not None else None
         adj = auto_prefs.apply_profile(
             prefs,
             target_bg=target_bg,
@@ -374,6 +378,7 @@ def auto_recipe(rgb: np.ndarray | None = None,
             sharpen_amount=sharpen_amount,
             denoise_strength=denoise_strength,
             scnr_amount=scnr_amount,
+            object_type=object_type,
         )
         target_bg = adj["target_bg"]
         saturation = adj["saturation"]

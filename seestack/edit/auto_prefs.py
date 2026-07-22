@@ -68,6 +68,17 @@ MAX_STEPS = 3
 
 PROFILE_VERSION = 1
 
+# The coarse object archetypes the editor's ``classify_target`` recognises. A
+# profile keeps one *global* bias set plus an optional per-type override for each
+# of these, so a "brighter core" taste learned on galaxies doesn't also brighten a
+# star cluster. Any other/unclassified image just uses the global set.
+KNOWN_OBJECT_TYPES: tuple[str, ...] = ("galaxy", "nebula", "cluster")
+
+# Friendly plurals for the per-type "why" note.
+_TYPE_PLURAL: dict[str, str] = {
+    "galaxy": "galaxies", "nebula": "nebulae", "cluster": "star clusters",
+}
+
 
 def known_cues() -> tuple[str, ...]:
     """The feedback cue keys this module understands (for validation/UX)."""
@@ -76,51 +87,95 @@ def known_cues() -> tuple[str, ...]:
 
 def empty_profile() -> dict[str, Any]:
     """A neutral profile — equivalent to no profile at all (today's Auto)."""
-    return {"version": PROFILE_VERSION, "biases": {}, "counts": {}}
+    return {"version": PROFILE_VERSION, "biases": {}, "counts": {}, "by_type": {}}
 
 
-def _coerce(profile: dict[str, Any] | None) -> dict[str, Any]:
-    """Return a sanitised copy: only known params/cues, ints clamped to bounds.
-
-    Tolerant of anything an older/garbled store might hold (a §9 upgrade-safe
-    loader never raises — an unreadable profile degrades to neutral)."""
+def _coerce_bucket(raw: Any) -> dict[str, Any]:
+    """Sanitise one bias/counts bucket (the global set or a per-type override)."""
     biases: dict[str, int] = {}
     counts: dict[str, int] = {}
-    if isinstance(profile, dict):
-        raw_b = profile.get("biases")
+    if isinstance(raw, dict):
+        raw_b = raw.get("biases")
         if isinstance(raw_b, dict):
             for param, val in raw_b.items():
                 if param in _PARAM_STEP and isinstance(val, (int, float)):
                     step = max(-MAX_STEPS, min(MAX_STEPS, int(round(val))))
                     if step:
                         biases[param] = step
-        raw_c = profile.get("counts")
+        raw_c = raw.get("counts")
         if isinstance(raw_c, dict):
             for cue, val in raw_c.items():
                 if cue in _CUE_STEP and isinstance(val, (int, float)) and val > 0:
                     counts[cue] = int(round(val))
-    return {"version": PROFILE_VERSION, "biases": biases, "counts": counts}
+    return {"biases": biases, "counts": counts}
 
 
-def record_feedback(profile: dict[str, Any] | None, cue: str) -> dict[str, Any]:
+def _coerce(profile: dict[str, Any] | None) -> dict[str, Any]:
+    """Return a sanitised copy: only known params/cues/types, ints clamped.
+
+    Tolerant of anything an older/garbled store might hold (a §9 upgrade-safe
+    loader never raises — an unreadable profile degrades to neutral). An older
+    profile with no ``by_type`` key simply yields an empty per-type map, so it
+    keeps behaving exactly as its global biases dictate."""
+    # The global set lives at the top level of the profile (back-compat with the
+    # original flat shape).
+    top = _coerce_bucket(profile)
+    by_type: dict[str, Any] = {}
+    if isinstance(profile, dict):
+        raw_t = profile.get("by_type")
+        if isinstance(raw_t, dict):
+            for otype, bucket in raw_t.items():
+                if otype in KNOWN_OBJECT_TYPES:
+                    cb = _coerce_bucket(bucket)
+                    if cb["biases"] or cb["counts"]:
+                        by_type[otype] = cb
+    return {"version": PROFILE_VERSION, "biases": top["biases"],
+            "counts": top["counts"], "by_type": by_type}
+
+
+def effective_biases(profile: dict[str, Any] | None,
+                     object_type: str | None = None) -> dict[str, int]:
+    """The biases that actually apply for an image of ``object_type``: the global
+    set, with the per-type override taking precedence per-parameter. With no
+    ``object_type`` (or an unknown one) this is just the global set — so an
+    unclassified image is never shifted by a galaxy-only taste."""
+    prof = _coerce(profile)
+    biases = dict(prof["biases"])
+    if object_type in prof["by_type"]:
+        biases.update(prof["by_type"][object_type]["biases"])
+        # A per-type override of 0 (walked back to neutral) drops the bias entirely.
+        biases = {p: s for p, s in biases.items() if s}
+    return biases
+
+
+def record_feedback(profile: dict[str, Any] | None, cue: str,
+                    object_type: str | None = None) -> dict[str, Any]:
     """Fold one feedback cue into the profile and return the updated copy.
 
     A bounded signed accumulator: pressing the same cue repeatedly saturates at
     ``±MAX_STEPS`` (never runs away); pressing the opposite cue walks the bias back
     toward neutral (so "too dark" then later "too bright" nets out). An unknown cue
-    returns the profile unchanged (sanitised)."""
+    returns the profile unchanged (sanitised).
+
+    When ``object_type`` is a known archetype the cue is recorded into that type's
+    override bucket (so taste learned on galaxies doesn't move clusters); otherwise
+    it updates the global set, exactly as before."""
     prof = _coerce(profile)
     step = _CUE_STEP.get(cue)
     if step is None:
         return prof
     param, delta = step
-    cur = prof["biases"].get(param, 0)
+    if object_type in KNOWN_OBJECT_TYPES:
+        bucket = prof["by_type"].setdefault(object_type, {"biases": {}, "counts": {}})
+    else:
+        bucket = prof
+    cur = bucket["biases"].get(param, 0)
     new = max(-MAX_STEPS, min(MAX_STEPS, cur + delta))
     if new == 0:
-        prof["biases"].pop(param, None)
+        bucket["biases"].pop(param, None)
     else:
-        prof["biases"][param] = new
-    prof["counts"][cue] = prof["counts"].get(cue, 0) + 1
+        bucket["biases"][param] = new
+    bucket["counts"][cue] = bucket["counts"].get(cue, 0) + 1
     return prof
 
 
@@ -140,11 +195,15 @@ def apply_profile(
     sharpen_amount: float,
     denoise_strength: float,
     scnr_amount: float,
+    object_type: str | None = None,
 ) -> dict[str, float]:
     """Shift the five data-driven Auto parameters toward the stored taste, each
     re-clamped to its safe range. An empty/None profile returns them unchanged
-    (so the default Auto stays byte-for-byte identical)."""
-    biases = _coerce(profile)["biases"]
+    (so the default Auto stays byte-for-byte identical).
+
+    ``object_type`` (galaxy/nebula/cluster) selects the per-type override on top of
+    the global set; ``None``/unknown uses the global set only."""
+    biases = effective_biases(profile, object_type)
     return {
         "target_bg": _nudge(target_bg, "brightness", biases),
         "saturation": _nudge(saturation, "saturation", biases),
@@ -169,17 +228,24 @@ _BIAS_PHRASE: dict[tuple[str, bool], str] = {
 }
 
 
-def is_neutral(profile: dict[str, Any] | None) -> bool:
-    """True when the profile has no active biases (Auto behaves as default)."""
-    return not _coerce(profile)["biases"]
+def is_neutral(profile: dict[str, Any] | None,
+               object_type: str | None = None) -> bool:
+    """True when the profile has no active biases for ``object_type`` (Auto behaves
+    as its data-driven default)."""
+    return not effective_biases(profile, object_type)
 
 
-def describe_profile(profile: dict[str, Any] | None) -> str | None:
+def describe_profile(profile: dict[str, Any] | None,
+                     object_type: str | None = None) -> str | None:
     """A one-line, plain-language "why" note for the UI, or ``None`` when the
-    profile is neutral. e.g. "Auto is running a bit brighter and softer for you,
-    based on your recent feedback." — so the owner always sees why Auto shifted
-    and can reset it; it never drifts silently."""
-    biases = _coerce(profile)["biases"]
+    profile is neutral for ``object_type``. e.g. "Auto is running a bit brighter
+    and softer for you, based on your recent feedback." — so the owner always sees
+    why Auto shifted and can reset it; it never drifts silently.
+
+    When ``object_type`` is given and it carries its own per-type override, the note
+    names the archetype ("… for your galaxies …") so the owner understands the
+    taste is scoped to that kind of target."""
+    biases = effective_biases(profile, object_type)
     if not biases:
         return None
     parts = [
@@ -195,4 +261,11 @@ def describe_profile(profile: dict[str, Any] | None) -> str | None:
         shifted = f"{parts[0]} and {parts[1]}"
     else:
         shifted = f"{', '.join(parts[:-1])}, and {parts[-1]}"
-    return f"Auto is running {shifted} for you, based on your recent feedback."
+    # Name the archetype only when this type actually carries its own bias override
+    # (otherwise it's the global taste, which applies to every kind of target — a
+    # bucket that walked back to neutral keeps only its counts, not a bias).
+    for_whom = "for you"
+    bucket = _coerce(profile)["by_type"].get(object_type or "", {})
+    if bucket.get("biases"):
+        for_whom = f"for your {_TYPE_PLURAL.get(object_type, object_type)}"
+    return f"Auto is running {shifted} {for_whom}, based on your recent feedback."
