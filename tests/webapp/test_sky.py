@@ -142,6 +142,40 @@ def test_sky_places_image_from_the_stored_canvas_wcs(client, solved_library):
     assert abs(wcs["CD1_2"]) > 1e-4
 
 
+def test_sky_sizes_and_rotates_from_the_stored_canvas_wcs(client, solved_library):
+    """The built-in 3D viewer's size + rotation (width_deg/height_deg/rotation_deg)
+    come from the *stored canvas WCS* too, not extrapolated from frame 0 — so the
+    two sky viewers agree. A 30° canvas rotation is reported, not the frame-0 12°."""
+    import math
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    scale = 2.5 / 3600.0
+    theta = math.radians(30.0)
+    c, s = math.cos(theta), math.sin(theta)
+    # Standard FITS CROTA2→CD (CDELT1<0 RA-flip) for θ = 30°, so the recovered
+    # rotation is a genuine +30° canvas position angle.
+    cd = [(-scale * c, -scale * s), (-scale * s, scale * c)]
+    _add_run_with_master_wcs(solved_library, safe, cd=cd, crval=(83.6, -5.4),
+                             full_w=1920, full_h=1080)
+
+    img = client.get("/api/sky").json()["images"][0]
+    # 1920 px * 2.5"/px / 3600 = 1.333° wide; 1080 → 0.75° tall (canvas geometry).
+    assert img["width_deg"] == pytest.approx(1.3333, abs=1e-3)
+    assert img["height_deg"] == pytest.approx(0.75, abs=1e-3)
+    # The stored 30° canvas rotation, not the frame-0 fallback's 12°.
+    assert img["rotation_deg"] == pytest.approx(30.0, abs=1e-3)
+
+
+def test_sky_falls_back_to_frame0_size_rotation_without_a_master_fits(client, solved_library):
+    """A run with no master FITS keeps the frame-0 pixscale/rotation for the tile
+    size + orientation — the fix never regresses older/edited runs."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _add_stack_run_with_preview(solved_library, safe)  # fits_path=None, frame-0 rot 12°
+    img = client.get("/api/sky").json()["images"][0]
+    assert img["rotation_deg"] == 12.0
+    assert img["width_deg"] == pytest.approx(1.3333, abs=1e-2)
+
+
 def test_sky_falls_back_to_tan_wcs_without_a_master_fits(client, solved_library):
     """A run with no master FITS (older/edited run) still gets a placement via the
     single-frame TAN extrapolation — the fix never regresses those runs."""

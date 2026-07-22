@@ -4007,8 +4007,16 @@ problems. Dogfood it every big-picture run and fix root causes.
   Tests (`frontend/src/routes/Tonight.test.tsx`, +2): the nudge shows for a `fits` source and clicking Save
   PATCHes `{site_lat, site_lon}`; it's absent when the location already comes from Settings. _(PRIORITY 2
   autonomy — removes a config step the beginner usually doesn't know to do.)_ Original spec kept for provenance:
-- **NEW (Scout 2026-07-21) — "we found where you observe from": auto-offer to save the FITS-detected
-  observing site to Settings, so the night planner and Moon/dark-window cues just work with zero config.**
+- ~~**NEW (Scout 2026-07-21) — "we found where you observe from": auto-offer to save the FITS-detected
+  observing site to Settings, so the night planner and Moon/dark-window cues just work with zero config.**~~
+  — **ALREADY SHIPPED (verified by Builder 2026-07-22).** The Tonight page already renders a dismissible
+  `SaveLocationNudge` (`frontend/src/routes/Tonight.tsx:97-133`, shown at `:280-282`) when
+  `location_source === "fits"` and `data.observer` is present: it displays the FITS-detected lat/lon and a
+  one-click **"Save this location"** button that PATCHes `site_lat`/`site_lon` to Settings via
+  `api.putSettings`, then invalidates the `tonight` query so the nudge self-dismisses (source flips to
+  `settings`). The `/tonight` payload already carries the detected `observer` (via `NightPlan.observer`) and
+  `location_source`, so slice (a) was already satisfied — the whole feature is live. Curated to Shipped; original
+  spec kept for provenance.
   *(Autonomy / friendliness; PRIORITY 2–3; size S.)* The "Tonight" planner already resolves the observer
   location best-effort from a solved frame's FITS header (`plan.py::_detect_site_from_fits` reads `SITELAT`/
   `SITELONG`, which the Seestar writes) when Settings has none — good. But it does that **on every request**,
@@ -4692,8 +4700,15 @@ problems. Dogfood it every big-picture run and fix root causes.
   `test_bulk_frames_closes_library_when_update_raises`, which asserted the error *propagated*, was updated to
   the new 503 contract — its no-leak intent kept and strengthened) and `test_auto_grade_apply_readonly_db_returns_503`
   (patches `apply_grade_report` to raise → deterministic 503). Original spec kept for provenance:
-- **IMPROVEMENT IDEA (Scout 2026-07-21) — turn "the storage went read-only" into a plain-language error, not a
-  bare 500, on the frame-write endpoints.** *(Friendliness / PRIORITY 3; size S.)* **Why:** the app is explicitly
+- ~~**IMPROVEMENT IDEA (Scout 2026-07-21) — turn "the storage went read-only" into a plain-language error, not a
+  bare 500, on the frame-write endpoints.**~~ — **ALREADY SHIPPED (verified by Builder 2026-07-22).** All three
+  frame-mutating endpoints in `webapp/routers/frames.py` already catch `sqlite3.OperationalError` around their
+  `proj.update_frame(...)` writes and re-raise as `HTTPException(503, STORAGE_READONLY_MSG)` — `auto_grade_apply`
+  (`:276-277`), `patch_frame` (`:334-335`), and `bulk_frames` (`:406-407`) — where the shared `STORAGE_READONLY_MSG`
+  (`:43`) is exactly the plain-language guidance the idea asked for ("This target's storage is read-only or
+  locked — check that the library folder / NAS mount is mounted and writable, then try again."). Covered by
+  `tests/webapp/test_api.py` (readonly/503 cases). Curated to Shipped; original spec kept for provenance.
+  *(Friendliness / PRIORITY 3; size S.)* **Why:** the app is explicitly
   built to survive a NAS mount going read-only or a locked `project.sqlite` (see `system._folder_status`, and the
   connection-leak fixes across `frames.py`). When a write actually fails in that state — a bulk accept/reject, a
   per-frame patch, an auto-grade apply — the user currently gets an opaque HTTP 500 with no hint *why*, so a
@@ -4707,23 +4722,29 @@ problems. Dogfood it every big-picture run and fix root causes.
   guidance string (the leak-regression tests added this run already set up exactly this monkeypatch). Small,
   self-contained, and it makes the single most common "live-install" failure legible to a non-expert. Bundle it
   with any nearby `frames.py` work.
-- **NEW (Builder 2026-07-21, follow-up to the v0.142.4 Sky-map placement fix) — derive the built-in 3D
-  viewer's per-image size/rotation from the stored canvas WCS too, so both sky paths agree.** The v0.142.4
-  fix made the **Aladin overlay's** `wcs` come from the stack's stored canvas WCS (`wcs_dict_rescaled_to_preview`),
-  so it now sits at the canvas's true RA/Dec + orientation. But the sibling `SkyImage.width_deg` /
-  `height_deg` / `rotation_deg` fields — used by the **built-in 3D viewer** (the non-Aladin path in
-  `AladinSky.tsx`/the sphere view) — are still computed in `webapp/routers/sky.py::get_sky` from a *single
-  representative frame's* pixscale + rotation (`_representative_pixscale_rotation` = frame 0), the exact
-  frame-0 extrapolation the Aladin path just stopped using. For a mosaic the built-in viewer therefore still
-  sizes/rotates the tile from one frame's grid, not the union canvas — so the two viewers can disagree on the
-  same run. **Fix:** when the run's master FITS carries a WCS, derive `width_deg`/`height_deg` from the canvas
-  pixel scale (`sqrt|det(CD)|`·canvas_w/h) and `rotation_deg` from the CD matrix orientation
-  (`atan2(CD2_1, CD1_1)` with the RA-flip sign accounted for), falling back to the frame-0 values only when
-  no master WCS exists — mirroring the `wcs` path's fallback. Reuse the already-parsed
-  `celestial_wcs_from_fits` output. Pin the rotation/scale with a known-CD regression test. _(S, PRIORITY 3
-  friendliness + correctness; serves the ⭐ owner-reported Sky page — closes the last frame-0 extrapolation on
-  that page. Note: the built-in viewer's rotation sign is the same convention question the `_tan_wcs` fallback
-  has, but reading it from the **stored** CD sidesteps the hand-rolled sign, same as the Aladin fix did.)_
+- ~~**NEW (Builder 2026-07-21, follow-up to the v0.142.4 Sky-map placement fix) — derive the built-in 3D
+  viewer's per-image size/rotation from the stored canvas WCS too, so both sky paths agree.**~~ — **SHIPPED
+  v0.168.1** (Builder 2026-07-22, branch `claude/pensive-faraday-54gw33`). The v0.142.4 fix made the **Aladin
+  overlay's** `wcs` come from the stored canvas WCS, but the sibling `SkyImage.width_deg`/`height_deg`/
+  `rotation_deg` fields (the **built-in 3D viewer**'s sphere placement, `Sky.tsx` → `projection.orientationFor`)
+  still came from a *single representative frame's* pixscale + rotation (`_representative_pixscale_rotation` =
+  frame 0), so a mosaic (or a rotated canvas) was sized/oriented from one frame's grid and the two viewers could
+  disagree. **Fix:** new pure `seestack/io/wcs_io.py::canvas_extent_from_fits(fits_path)` →
+  `(width_deg, height_deg, rotation_deg)` from the stack master's stored celestial WCS —
+  `width_deg = canvas_w · |col_x|`, `height_deg = canvas_h · |col_y|` (each column's magnitude of the deg/px
+  scale matrix), and `rotation_deg = atan2(-CD2_1, CD2_2)` (the inverse of the FITS-standard CROTA2→CD for the
+  RA-flipped CDELT1<0 convention). `get_sky` uses it when the run has a master FITS and falls back to the
+  frame-0 pixscale/rotation otherwise — mirroring the `wcs`/Aladin path's fallback, so reading from the
+  **stored** CD sidesteps the hand-rolled `_tan_wcs` rotation-sign guess entirely. The recovered rotation
+  *equals* the frame's `CROTA2` (== its stored `rotation_deg`) for a single-frame canvas — verified against
+  astropy's own CROTA2→CD for 0/12/37/−25/90° — so the built-in viewer is byte-for-byte unchanged for the
+  common single-target case and only a mosaic/rotated canvas now uses the true union-canvas geometry.
+  Additive/upgrade-safe: read-only derivation, no schema/config/API-shape/default change; older/edited runs
+  with no master FITS keep exactly today's frame-0 placement. Tests: `tests/test_wcs_io.py` (+2 —
+  `_extent_from_scale_matrix` recovers CROTA2 across angles; `canvas_extent_from_fits` reads a stored 30°
+  canvas + None-fallback), `tests/webapp/test_sky.py` (+2 — the endpoint reports the 30° canvas rotation not
+  frame-0's 12°; and the no-master-FITS fallback keeps 12°). _(S, PRIORITY 3 friendliness + correctness;
+  serves the ⭐ owner-reported Sky page — closes the last frame-0 extrapolation on that page.)_
 - ~~**NEW (Builder audit 2026-07-16) — warn on the Stack form when `min_max_reject` + `quality_weighted`
   are *both* on: min/max silently ignores per-frame weights.**~~ — **SHIPPED v0.135.2** (Builder 2026-07-16,
   branch `claude/pensive-faraday-7huucb`). `MinMaxRejectAccumulator` (`seestack/stack/accumulator.py`) is an
