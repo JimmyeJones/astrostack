@@ -358,15 +358,24 @@ def _zero_sky_per_channel(rgb: np.ndarray) -> None:
         finite = np.isfinite(ch)
         if not finite.any():
             continue
-        mean, median, _std = sigma_clipped_stats(
+        mean, median, std = sigma_clipped_stats(
             ch, mask=~finite, sigma=3.0, maxiters=5,
         )
         if not (np.isfinite(mean) and np.isfinite(median)):
             continue
-        # SExtractor sky-mode estimate. Falls back to median if the skew is
+        # SExtractor sky-mode estimate. Falls back to the median when the skew is
         # too extreme to trust (heavy bright-object contamination in the tile).
+        # Trust test = SExtractor's own criterion: the mode approximation only
+        # holds while the clipped mean and median stay within ~0.3·σ; beyond that
+        # the field is too crowded. (The earlier `abs(sky-median) > 5·abs(median-
+        # mean)` form was algebraically inert — `sky-median` is *by construction*
+        # `1.5·(median-mean)`, so `1.5·X > 5·X` never fired — leaving no real
+        # backstop. This restores it while staying a no-op on realistic clipped
+        # sky, where the 3σ-clip keeps mean−median well inside the 0.3·σ band.)
         sky = 2.5 * median - 1.5 * mean
-        if not np.isfinite(sky) or abs(sky - median) > 5.0 * abs(median - mean + 1e-9):
+        if (not np.isfinite(sky)
+                or (np.isfinite(std) and std > 0.0
+                    and abs(mean - median) > 0.3 * std)):
             sky = median
         ch -= np.float32(sky)
 
@@ -450,9 +459,15 @@ def _subtract_background_gpu(rgb: np.ndarray, options: "BackgroundOptions") -> n
         # Mode-like sky estimate per tile (SExtractor: 2.5·median − 1.5·mean).
         clipped_mean = cp.nanmean(tiles, axis=-1, keepdims=True)
         mode_est = 2.5 * med - 1.5 * clipped_mean
-        diff = cp.abs(mode_est - med)
-        cap = 5.0 * (cp.abs(med - clipped_mean) + 1e-6)
-        sky_est = cp.where(cp.isfinite(mode_est) & (diff < cap), mode_est, med)
+        # Same SExtractor trust test as the CPU path (_zero_sky_per_channel):
+        # keep the mode only while the clipped mean/median stay within 0.3·σ of
+        # each other, else fall back to the median (too crowded to trust the
+        # mode). `sigma` (the robust 1.4826·MAD spread computed above) is the
+        # per-tile σ scale — no need for a fresh nanstd (which also warns on the
+        # ≤1-valid-pixel tiles the nearest-neighbour fill handles anyway).
+        skew = cp.abs(clipped_mean - med)
+        trust = cp.isfinite(mode_est) & (skew <= 0.3 * sigma)
+        sky_est = cp.where(trust, mode_est, med)
         # If a tile was fully masked (NaN), fill from neighbouring tiles by
         # forward+backward replacement.
         sky_est = cp.where(cp.isfinite(sky_est), sky_est, luma_med)

@@ -220,9 +220,15 @@ def _subtract_luminance_with_mask(
         # amount (which would tint the post-stack background).
         sky_mask = ~mask & finite
         if sky_mask.any():
-            sc_mean, sc_med, _ = sigma_clipped_stats(out[..., c][sky_mask], sigma=3.0)
+            sc_mean, sc_med, sc_std = sigma_clipped_stats(out[..., c][sky_mask], sigma=3.0)
             sky = 2.5 * sc_med - 1.5 * sc_mean if np.isfinite(sc_mean) else sc_med
-            if not np.isfinite(sky) or abs(sky - sc_med) > 5.0 * abs(sc_med - sc_mean + 1e-9):
+            # Fall back to the median when the skew is too extreme to trust the
+            # mode (SExtractor criterion: mean−median within 0.3·σ). The earlier
+            # `abs(sky−med) > 5·abs(med−mean)` test was algebraically inert
+            # (`sky−med` == `1.5·(med−mean)`, so `1.5·X > 5·X` never fired).
+            if (not np.isfinite(sky)
+                    or (np.isfinite(sc_std) and sc_std > 0.0
+                        and abs(sc_mean - sc_med) > 0.3 * sc_std)):
                 sky = sc_med
         else:
             sky = 0.0

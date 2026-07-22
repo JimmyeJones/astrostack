@@ -4878,6 +4878,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+- ~~**IMPROVEMENT IDEA (Scout 2026-07-21) — make the SExtractor sky-mode fallback guard actually functional
+  (defense-in-depth; currently algebraically inert).**~~ — **SHIPPED v0.158.11** (Builder 2026-07-22, branch
+  `claude/pensive-faraday-jwvd6c`). Replaced the self-referential threshold (`abs(sky − median) > 5·abs(median −
+  mean)`, which is `1.5·X > 5·X` and never fires) with SExtractor's own trust criterion — fall back to the median
+  when the clipped `abs(mean − median) > 0.3·σ` (using the clipped std) — in all four inert copies:
+  `seestack/bg/per_frame.py::_zero_sky_per_channel` (CPU default path) + `_subtract_background_gpu` (GPU, using
+  the robust 1.4826·MAD `sigma` already computed there, so no new `cp.*` symbol/no warning),
+  `seestack/bg/coverage_leveling.py`, and `seestack/bg/final_gradient.py`. Guarded on `std` being finite and
+  positive so a flat channel (std 0, mean==median) is a clean no-op. Regressions in
+  `tests/test_sky_mode_guard.py`: realistic clipped sky still uses the mode (byte-for-byte no-op on the default
+  path — proves it's provably inert there), a symmetric histogram keeps mode≈median, a heavily object-crowded tile
+  (35 % of pixels lifted well above sky, surviving the 3σ clip → mean−median > 0.3·σ) now falls back to the median
+  instead of the biased mode, and a flat channel is a no-op. Upgrade-safe: within-function algorithm change, no
+  config/DB/API/on-disk change; realistic stacks are byte-for-byte unchanged (the 3σ-clip keeps mean−median well
+  inside the 0.3·σ band on real sky, so the restored guard only ever engages on pathological crowded input).
+  Original spec kept for provenance:
 - **IMPROVEMENT IDEA (Scout 2026-07-21) — make the SExtractor sky-mode fallback guard actually functional
   (defense-in-depth; currently algebraically inert).** *(Image quality / correctness-hardening, PRIORITY 4;
   size S.)* **Why:** the per-channel sky-zeroing uses the SExtractor mode `sky = 2.5·median − 1.5·mean`, with a
