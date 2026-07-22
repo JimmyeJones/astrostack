@@ -73,6 +73,55 @@ function CardMeta({ item }: { item: GalleryItem }) {
   );
 }
 
+/** Short, locale-friendly capture date for a compare side ("18 Jul 2026"), or
+ * "" for a missing/unparseable timestamp so the clause is simply dropped. */
+export function compareDateLabel(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
+/** One side of the A/B provenance strip: which stack this is (colour-keyed to the
+ * split/blink badge) and its plain-language provenance — basename, frame count,
+ * integration, date and measured noise — so a beginner scrubbing the divider can
+ * tell *which* stack is which (is A the deep 5-night one or the old 2-night one?),
+ * the exact thing the bare "A"/"B" badges couldn't answer. */
+function AbSide({ label, color, item }: { label: string; color: string; item: GalleryItem }) {
+  const date = compareDateLabel(item.timestamp_utc);
+  return (
+    <Stack gap={2} style={{ flex: 1, minWidth: 0 }} data-testid={`ab-side-${label}`}>
+      <Group gap={6} wrap="nowrap">
+        <Badge color={color} variant="filled" size="sm" style={{ flexShrink: 0 }}>{label}</Badge>
+        <Text fw={600} size="sm" truncate component={Link}
+          to={`/targets/${item.safe}/history`}>
+          {item.target_name}
+        </Text>
+      </Group>
+      <Text size="xs" c="dimmed" truncate>{item.output_basename}</Text>
+      <Text size="xs" c="dimmed" truncate>
+        {item.n_frames_used} frames
+        {item.total_exposure_s ? ` · ${formatIntegration(item.total_exposure_s)}` : ""}
+        {date ? ` · ${date}` : ""}
+        {hasNoise(item.noise_sigma) ? <> · <NoiseReadout sigma={item.noise_sigma} /></> : null}
+      </Text>
+    </Stack>
+  );
+}
+
+/** Two-column A/B provenance strip shown above the Split and Blink comparators,
+ * so those modes are as trustworthy as "Side by side" about *which* stack is
+ * which. Frontend-only; every field already rides on the gallery items. */
+function AbMetaStrip({ a, b }: { a: GalleryItem; b: GalleryItem }) {
+  return (
+    <Group align="flex-start" gap="md" wrap="nowrap"
+      style={{ width: "100%", maxWidth: 640 }}>
+      <AbSide label="A" color="blue" item={a} />
+      <AbSide label="B" color="grape" item={b} />
+    </Group>
+  );
+}
+
 /** Blink comparator: alternates the two images in one frame on a timer so a
  * subtle difference (noise, a cleaned trail, sharper stars) pops out. */
 function Blink({ a, b }: { a: GalleryItem; b: GalleryItem }) {
@@ -89,6 +138,7 @@ function Blink({ a, b }: { a: GalleryItem; b: GalleryItem }) {
   const current = showA ? a : b;
   return (
     <Stack gap="xs" align="center">
+      <AbMetaStrip a={a} b={b} />
       <div style={{ position: "relative", width: "100%", maxWidth: 640 }}>
         <Image src={current.preview_url} fit="contain" bg="#000" h={420} radius="sm" />
         <Badge
@@ -141,6 +191,7 @@ function Split({ a, b }: { a: GalleryItem; b: GalleryItem }) {
 
   return (
     <Stack gap="xs" align="center">
+      <AbMetaStrip a={a} b={b} />
       <Box
         ref={boxRef}
         onPointerDown={(e) => {
@@ -181,7 +232,7 @@ function Split({ a, b }: { a: GalleryItem; b: GalleryItem }) {
           color="grape" variant="filled">B</Badge>
       </Box>
       <Text size="xs" c="dimmed">
-        Drag the divider — left is A ({a.output_basename}), right is B ({b.output_basename}).
+        Drag the divider — left is A, right is B.
       </Text>
     </Stack>
   );

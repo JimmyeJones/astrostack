@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CompareView, parseRef, compareHref, noiseComparison } from "./Compare";
+import { CompareView, parseRef, compareHref, noiseComparison, compareDateLabel } from "./Compare";
 import * as client from "../api/client";
 import type { GalleryItem } from "../api/client";
 
@@ -54,6 +54,20 @@ describe("compareHref", () => {
     expect(compareHref(item(3, "M_42"), item(7, "NGC_7000"))).toBe(
       "/compare?a=M_42:3&b=NGC_7000:7",
     );
+  });
+});
+
+describe("compareDateLabel", () => {
+  it("formats a valid timestamp to a short date", () => {
+    // Locale-dependent exact form, but must name the year and be non-empty.
+    const out = compareDateLabel("2026-05-02T00:00:00Z");
+    expect(out).not.toBe("");
+    expect(out).toContain("2026");
+  });
+  it("returns an empty string for a missing or unparseable timestamp", () => {
+    expect(compareDateLabel(null)).toBe("");
+    expect(compareDateLabel(undefined)).toBe("");
+    expect(compareDateLabel("not-a-date")).toBe("");
   });
 });
 
@@ -128,6 +142,38 @@ describe("CompareView", () => {
     expect(screen.getByAltText("B: out7")).toBeInTheDocument();
     // Plain-language drag hint naming both stacks.
     expect(screen.getByText(/Drag the divider/)).toBeInTheDocument();
+  });
+
+  it("shows each side's provenance strip in Split mode, so A/B isn't ambiguous", async () => {
+    const a = item(3, "M_42", "Orion");
+    const b = item(7, "M_42", "OrionV2");
+    a.n_frames_used = 412;
+    b.n_frames_used = 690;
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [a, b] });
+    renderCompare("?a=M_42:3&b=M_42:7");
+    await waitFor(() => expect(screen.getByText("Split")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Split"));
+    // The A and B provenance columns each name their stack + frame count.
+    const sideA = await screen.findByTestId("ab-side-A");
+    const sideB = screen.getByTestId("ab-side-B");
+    expect(sideA).toHaveTextContent("out3");
+    expect(sideA).toHaveTextContent("412 frames");
+    expect(sideB).toHaveTextContent("out7");
+    expect(sideB).toHaveTextContent("690 frames");
+  });
+
+  it("shows the provenance strip in Blink mode too", async () => {
+    const a = item(3, "M_42", "Orion");
+    const b = item(7, "M_42", "OrionV2");
+    a.n_frames_used = 412;
+    b.n_frames_used = 690;
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [a, b] });
+    renderCompare("?a=M_42:3&b=M_42:7");
+    await waitFor(() => expect(screen.getByText("Blink")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Blink"));
+    const sideA = await screen.findByTestId("ab-side-A");
+    expect(sideA).toHaveTextContent("412 frames");
+    expect(screen.getByTestId("ab-side-B")).toHaveTextContent("690 frames");
   });
 
   it("Split falls back with guidance when a stack has no preview", async () => {
