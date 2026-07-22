@@ -1,5 +1,5 @@
 import {
-  ActionIcon, Anchor, Badge, Button, Center, Group, Loader, Paper, Progress, Stack, Switch,
+  ActionIcon, Alert, Anchor, Badge, Button, Center, Group, Loader, Paper, Progress, Stack, Switch,
   Text, Title, Tooltip,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
@@ -9,6 +9,7 @@ import { Link } from "react-router-dom";
 import { type ReactNode, useRef, useState } from "react";
 import { api, type Job } from "../api/client";
 import { QueryError } from "../components/QueryError";
+import { thinStackWarning, type ThinStackWarning } from "../components/target/thinStack";
 import { type EtaSample, etaLabel, updateEtaAnchor } from "../jobEta";
 import {
   isJobNotifyEnabled, notificationsSupported, requestNotificationPermission,
@@ -155,7 +156,7 @@ export function reprocessSummary(r: Record<string, unknown>): {
  * master was produced and, when it wasn't, why — so the user isn't left with a
  * bare "done" and no idea where the result is (or why there isn't one). */
 export function processTargetSummary(r: Record<string, unknown>): {
-  line: string; stacked: boolean;
+  line: string; stacked: boolean; thin: ThinStackWarning | null;
 } {
   const stacked = Boolean(r.stacked);
   const solved = Number(r.solved_accepted ?? 0);
@@ -166,7 +167,11 @@ export function processTargetSummary(r: Record<string, unknown>): {
     const used = Number(stack.n_frames_used ?? 0) || solved;
     let line = `Stacked ${used} frame${used === 1 ? "" : "s"} into a new master`;
     if (graded > 0) line += ` (auto-grade dropped ${graded})`;
-    return { line: `${line}.`, stacked };
+    // A thin auto-stack (≤4 combined frames) is the owner's "gibberish" case:
+    // the Jobs page would otherwise cheerfully report a green "Stacked 1 frame"
+    // with a View-result link and no hint the picture is just noise. Surface the
+    // same honest heads-up the Target page shows, right where the result lands.
+    return { line: `${line}.`, stacked, thin: thinStackWarning(used) };
   }
   const reason = typeof r.stack_skipped_reason === "string"
     ? r.stack_skipped_reason : null;
@@ -179,7 +184,7 @@ export function processTargetSummary(r: Record<string, unknown>): {
   } else {
     line = "Finished, but no stack was produced.";
   }
-  return { line, stacked };
+  return { line, stacked, thin: null };
 }
 
 /** Plain-language outcome of a finished "Build master" job (pure, tested). A
@@ -209,7 +214,7 @@ function JobResultActions({ job }: { job: Job }) {
   if (job.state !== "done" || !job.result) return null;
   const r = job.result as Record<string, unknown>;
   if (job.kind === "process_target") {
-    const { line, stacked } = processTargetSummary(r);
+    const { line, stacked, thin } = processTargetSummary(r);
     // Deep-link straight to the finished run's editor when we know its id
     // (v0.85.3+ backend); fall back to the target's History on an older backend.
     const stack = r.stack && typeof r.stack === "object"
@@ -225,6 +230,12 @@ function JobResultActions({ job }: { job: Job }) {
     return (
       <Stack gap={4} mt="xs">
         <Text size="sm">{line}</Text>
+        {thin ? (
+          <Alert color={thin.level === "single" ? "orange" : "yellow"} p="xs"
+            title="Very few frames stacked">
+            <Text size="xs">{thin.message}</Text>
+          </Alert>
+        ) : null}
         {to ? (
           <Group>
             <Button size="xs" variant="light" leftSection={<IconPhoto size={14} />}
