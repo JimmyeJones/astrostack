@@ -203,6 +203,37 @@ describe("JobsView process_target result actions", () => {
     expect(link).toHaveAttribute("href", "/targets/M_42/history");
   });
 
+  it("shows the 'cut your noise ~N×' payoff on a healthy finished stack", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "pt-noise", kind: "process_target", target: "M_42", state: "done",
+        result: { stacked: true, solved_accepted: 300, stack: { n_frames_used: 300, run_id: 9 } },
+      }),
+    ]);
+    vi.spyOn(client.api, "oneSubVsStackNoise").mockResolvedValue({ ratio: 17.1 });
+    renderJobsRouted();
+    await screen.findByRole("link", { name: "View result" });
+    await waitFor(() =>
+      expect(client.api.oneSubVsStackNoise).toHaveBeenCalledWith("M_42", 9));
+    expect(
+      screen.getByText("Stacking your 300 subs cut the background noise about 17×."),
+    ).toBeInTheDocument();
+  });
+
+  it("omits the noise payoff when the measurement is unavailable", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "pt-null", kind: "process_target", target: "M_42", state: "done",
+        result: { stacked: true, solved_accepted: 8, stack: { n_frames_used: 8, run_id: 7 } },
+      }),
+    ]);
+    vi.spyOn(client.api, "oneSubVsStackNoise").mockResolvedValue({ ratio: null });
+    renderJobsRouted();
+    await screen.findByRole("link", { name: "View result" });
+    await waitFor(() => expect(client.api.oneSubVsStackNoise).toHaveBeenCalled());
+    expect(screen.queryByTestId("stack-noise-badge")).not.toBeInTheDocument();
+  });
+
   it("offers 'Open target' (not a result link) when nothing was stacked", async () => {
     vi.spyOn(client.api, "listJobs").mockResolvedValue([
       mkJob({

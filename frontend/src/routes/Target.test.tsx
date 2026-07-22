@@ -73,6 +73,40 @@ describe("TargetView process action", () => {
   });
 });
 
+describe("TargetView noise-reduction payoff", () => {
+  it("shows the measured 'cut your noise ~N×' line on the finished stack", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns")
+      .mockResolvedValue([mkRun({ id: 9, n_frames_used: 300 })]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1), mkFrame(2)]);
+    const noise = vi
+      .spyOn(client.api, "oneSubVsStackNoise")
+      .mockResolvedValue({ ratio: 17.4 });
+
+    renderTarget();
+
+    await waitFor(() => expect(noise).toHaveBeenCalledWith("M_42", 9));
+    expect(
+      await screen.findByText(
+        "Stacking your 300 subs cut the background noise about 17×."),
+    ).toBeInTheDocument();
+  });
+
+  it("omits the payoff when the latest stack has no preview to measure", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns")
+      .mockResolvedValue([mkRun({ id: 9, has_preview: false })]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1), mkFrame(2)]);
+    const noise = vi.spyOn(client.api, "oneSubVsStackNoise");
+
+    renderTarget();
+
+    await screen.findByRole("button", { name: "Process this target" });
+    expect(noise).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("stack-noise-badge")).not.toBeInTheDocument();
+  });
+});
+
 describe("TargetView latest-picture download", () => {
   it("offers a PNG or JPEG download of the latest stack's picture", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());

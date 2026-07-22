@@ -24,6 +24,7 @@ import { NextSessionCard } from "../components/NextSessionCard";
 import { DeepeningReelCard } from "../components/DeepeningReelCard";
 import { SessionRecapCard } from "../components/SessionRecapCard";
 import { StackHealthCard } from "../components/StackHealthCard";
+import { StackNoiseBadge } from "../components/StackNoiseBadge";
 import { FirstLookCard } from "../components/FirstLookCard";
 import { WallpaperMenu } from "../components/WallpaperMenu";
 import { SharePictureButton } from "../components/SharePictureButton";
@@ -793,6 +794,12 @@ export function TargetView() {
         >
           <Text size="sm">{thinStack.message}</Text>
         </Alert>
+      ) : null}
+      {/* The concrete "stacking cut your noise ~N×" payoff, right where a beginner
+          lands on the finished picture (self-hides for a thin/unmeasurable stack). */}
+      {latestRun?.has_preview ? (
+        <StackNoiseBadge safe={safe} runId={latestRun.id}
+          nFrames={latestRun.n_frames_used ?? null} />
       ) : null}
       <Group justify="space-between" gap="xs">
         <Group gap="xs" style={{ minWidth: 0 }}>
