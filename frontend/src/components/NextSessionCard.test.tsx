@@ -60,6 +60,14 @@ describe("NextSessionCard", () => {
     expect(screen.getByText(/Thu 15 Jan.*22:40 → 02:10 UTC/)).toBeInTheDocument();
   });
 
+  it("offers an 'Add to calendar' .ics download pointing at the target's endpoint", async () => {
+    vi.spyOn(client.api, "nextSession").mockResolvedValue(session());
+    renderCard({ safe: "M_42", gapSeconds: 2 * 3600, subExposureSeconds: 10 });
+    const link = await screen.findByRole("link", { name: /Add to calendar/ });
+    expect(link).toHaveAttribute("href", "/api/plan/next-session/M_42/calendar.ics");
+    expect(link).toHaveAttribute("download");
+  });
+
   it("self-hides when the goal is already met (no gap) — never fetches", () => {
     const spy = vi.spyOn(client.api, "nextSession").mockResolvedValue(session());
     const { container } = renderCard({ gapSeconds: 0, subExposureSeconds: 10 });

@@ -994,6 +994,11 @@ export const api = {
     req<TransparencyTrend | null>(`/api/targets/${safe}/transparency-trend`),
   nextSession: (safe: string) =>
     req<NextSession>(`/api/plan/next-session/${safe}`),
+  // Download URL for the next-session windows as a .ics calendar file (one-tap
+  // "Add to calendar"). A plain href/download, not a fetch — the browser hands
+  // the file to the OS calendar.
+  nextSessionIcsUrl: (safe: string) =>
+    `/api/plan/next-session/${safe}/calendar.ics`,
   getIntegrationGoal: (safe: string) =>
     req<{ goal_s: number | null }>(`/api/targets/${safe}/integration-goal`),
   setIntegrationGoal: (safe: string, goalS: number | null) =>

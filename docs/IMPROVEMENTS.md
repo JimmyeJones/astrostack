@@ -5636,6 +5636,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   read-only JSON, empty list → self-hide. **(c) frontend (S):** a `SuggestTargetsCard` mirroring `NextSessionCard`,
   with the `.ics` link per row. Keeps the beginner-feature pipeline stocked with a fresh *discovery/plan* capability
   that no existing card covers.
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-21) — "Add it to your calendar": one-tap `.ics` download for the next
+  good observing window on a target, so a beginner doesn't miss the night.**~~ — **SHIPPED v0.160.0** (Builder
+  2026-07-22, branch `claude/pensive-faraday-4jkjc7`). New dependency-free serialiser `webapp/ics.py`
+  (`to_ics(events)` → RFC-5545 VCALENDAR: CRLF-terminated, TEXT-escaped `,`/`;`/`\`/newlines, 75-octet line
+  folding on UTF-8 char boundaries, UTC `…Z` stamps, deterministic per-(target, start) UID so re-adding updates
+  rather than duplicates, DTSTAMP pinned to the start for deterministic output). New read-only endpoint
+  `GET /api/plan/next-session/{safe}/calendar.ics` reuses the same `next_observing_windows` computation as the
+  JSON `/next-session/{safe}` and emits one plain-language VEVENT per window — *"Image M42"* / *"M42 climbs to
+  61°, about 3 clear hours of darkness to reach your goal. Moon 12% and mostly down. Bring the Seestar out."* —
+  with `LOCATION` from the saved site; 404s on unknown target / no location / no upcoming window so the file is
+  never blank. Frontend: `api.nextSessionIcsUrl(safe)` + an "Add to calendar" download link on `NextSessionCard`
+  (self-hides exactly where the card already does). Fully offline (`.ics` is just text — no calendar account,
+  SMTP or network, so no §10 sign-off), additive/read-only, no schema/config/API-shape/default change. Tests:
+  `tests/test_ics.py` (+12: escaping, Z-format, tz conversion, folding incl. multibyte, empty calendar, CRLF),
+  `tests/webapp/test_plan.py` (+4: download headers + body, and the three 404 self-hide cases),
+  `NextSessionCard.test.tsx` (+1: link href + download attr). Original spec kept for provenance:
 - **NEW BEGINNER FEATURE (Scout 2026-07-21) — "Add it to your calendar": one-tap `.ics` download for the next
   good observing window on a target, so a beginner doesn't miss the night.** *(Autonomy + friendliness /
   "plan" pillar, PRIORITY 2–3; size S.)* **Why:** the shipped **"Plan your next night"** card (v0.156.0,
