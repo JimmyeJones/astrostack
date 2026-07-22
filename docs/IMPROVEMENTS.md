@@ -4007,8 +4007,16 @@ problems. Dogfood it every big-picture run and fix root causes.
   Tests (`frontend/src/routes/Tonight.test.tsx`, +2): the nudge shows for a `fits` source and clicking Save
   PATCHes `{site_lat, site_lon}`; it's absent when the location already comes from Settings. _(PRIORITY 2
   autonomy — removes a config step the beginner usually doesn't know to do.)_ Original spec kept for provenance:
-- **NEW (Scout 2026-07-21) — "we found where you observe from": auto-offer to save the FITS-detected
-  observing site to Settings, so the night planner and Moon/dark-window cues just work with zero config.**
+- ~~**NEW (Scout 2026-07-21) — "we found where you observe from": auto-offer to save the FITS-detected
+  observing site to Settings, so the night planner and Moon/dark-window cues just work with zero config.**~~
+  — **ALREADY SHIPPED (verified by Builder 2026-07-22).** The Tonight page already renders a dismissible
+  `SaveLocationNudge` (`frontend/src/routes/Tonight.tsx:97-133`, shown at `:280-282`) when
+  `location_source === "fits"` and `data.observer` is present: it displays the FITS-detected lat/lon and a
+  one-click **"Save this location"** button that PATCHes `site_lat`/`site_lon` to Settings via
+  `api.putSettings`, then invalidates the `tonight` query so the nudge self-dismisses (source flips to
+  `settings`). The `/tonight` payload already carries the detected `observer` (via `NightPlan.observer`) and
+  `location_source`, so slice (a) was already satisfied — the whole feature is live. Curated to Shipped; original
+  spec kept for provenance.
   *(Autonomy / friendliness; PRIORITY 2–3; size S.)* The "Tonight" planner already resolves the observer
   location best-effort from a solved frame's FITS header (`plan.py::_detect_site_from_fits` reads `SITELAT`/
   `SITELONG`, which the Seestar writes) when Settings has none — good. But it does that **on every request**,
@@ -4692,8 +4700,15 @@ problems. Dogfood it every big-picture run and fix root causes.
   `test_bulk_frames_closes_library_when_update_raises`, which asserted the error *propagated*, was updated to
   the new 503 contract — its no-leak intent kept and strengthened) and `test_auto_grade_apply_readonly_db_returns_503`
   (patches `apply_grade_report` to raise → deterministic 503). Original spec kept for provenance:
-- **IMPROVEMENT IDEA (Scout 2026-07-21) — turn "the storage went read-only" into a plain-language error, not a
-  bare 500, on the frame-write endpoints.** *(Friendliness / PRIORITY 3; size S.)* **Why:** the app is explicitly
+- ~~**IMPROVEMENT IDEA (Scout 2026-07-21) — turn "the storage went read-only" into a plain-language error, not a
+  bare 500, on the frame-write endpoints.**~~ — **ALREADY SHIPPED (verified by Builder 2026-07-22).** All three
+  frame-mutating endpoints in `webapp/routers/frames.py` already catch `sqlite3.OperationalError` around their
+  `proj.update_frame(...)` writes and re-raise as `HTTPException(503, STORAGE_READONLY_MSG)` — `auto_grade_apply`
+  (`:276-277`), `patch_frame` (`:334-335`), and `bulk_frames` (`:406-407`) — where the shared `STORAGE_READONLY_MSG`
+  (`:43`) is exactly the plain-language guidance the idea asked for ("This target's storage is read-only or
+  locked — check that the library folder / NAS mount is mounted and writable, then try again."). Covered by
+  `tests/webapp/test_api.py` (readonly/503 cases). Curated to Shipped; original spec kept for provenance.
+  *(Friendliness / PRIORITY 3; size S.)* **Why:** the app is explicitly
   built to survive a NAS mount going read-only or a locked `project.sqlite` (see `system._folder_status`, and the
   connection-leak fixes across `frames.py`). When a write actually fails in that state — a bulk accept/reject, a
   per-frame patch, an auto-grade apply — the user currently gets an opaque HTTP 500 with no hint *why*, so a
