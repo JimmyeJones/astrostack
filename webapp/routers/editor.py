@@ -27,6 +27,7 @@ from seestack.edit.pipeline import apply_recipe
 from seestack.edit.proxy import coverage_path_for, get_proxy, load_coverage
 from seestack.edit.recipe import Recipe, recipe_from_dict
 from seestack.edit.registry import EditContext
+from seestack.edit import auto_prefs as auto_prefs_mod
 from seestack.edit import presets as presets_mod
 from webapp import deps
 from webapp.schemas import EditOpOut, editor_ops_schema
@@ -62,6 +63,12 @@ USER_PRESETS_META_KEY = "editor_user_presets"
 # no saved edit yet — so a repeat imager's default look is one click away on every
 # new target, without diving into the Presets menu. Off until the user sets it.
 DEFAULT_RECIPE_META_KEY = "editor_default_recipe"
+# Adaptive Auto: a per-library "taste" profile of bounded biases the owner builds
+# up by giving the one-click Auto result plain-language feedback ("too dark",
+# "over-sharpened", …). Applied on top of Auto's data-driven values (still
+# data-driven, just shifted toward the owner's taste) and fully reversible. Absent
+# / empty ⇒ today's Auto byte-for-byte, so a never-configured library is unchanged.
+AUTO_PREFERENCES_META_KEY = "editor_auto_preferences"
 
 
 # ---- helpers ---------------------------------------------------------------
@@ -182,17 +189,24 @@ def _trim_rect_for_run(run, min_frac: float = 0.5
     return (round(rect[0], 4), round(rect[1], 4), round(rect[2], 4), round(rect[3], 4))
 
 
-def build_auto_recipe_for_run(project_dir: Path, run, median_fwhm: float | None) -> Recipe:
+def build_auto_recipe_for_run(project_dir: Path, run, median_fwhm: float | None,
+                              prefs: dict | None = None) -> Recipe:
     """The one-click Auto recipe for a run, built from its own proxy — the same
     logic the ``…/editor/auto`` endpoint serves, factored out so the one-click
     "Process target" job can chain an auto-edit onto the stack it just produced
     without re-implementing it. A mosaic stack gets a coverage-leveling pass (and,
-    when meaningful, a border trim) prepended; a single-field stack is unchanged."""
+    when meaningful, a border trim) prepended; a single-field stack is unchanged.
+
+    ``prefs`` is the library's Adaptive-Auto taste profile (see
+    ``AUTO_PREFERENCES_META_KEY``): when supplied it shifts Auto's data-driven
+    values toward the owner's taste, each clamped to a safe range. ``None``/empty ⇒
+    unchanged (today's Auto)."""
     rgb, _scale = get_proxy(project_dir, run.id, run.fits_path)
     is_mosaic = _run_is_mosaic(run, load=True)
     trim = _trim_rect_for_run(run) if is_mosaic else None
     return presets_mod.auto_recipe(
-        rgb, median_fwhm=median_fwhm, is_mosaic=is_mosaic, trim_crop=trim)
+        rgb, median_fwhm=median_fwhm, is_mosaic=is_mosaic, trim_crop=trim,
+        prefs=prefs)
 
 
 def build_auto_analysis_for_run(project_dir: Path, run, median_fwhm: float | None) -> dict:
@@ -470,6 +484,87 @@ def delete_default_recipe(request: Request) -> DefaultRecipeOut:
     finally:
         lib.close()
     return DefaultRecipeOut(ops=[], count=0)
+
+
+# ---- Adaptive Auto — the personal "taste" profile --------------------------
+
+class AutoPreferencesOut(BaseModel):
+    """The library's Adaptive-Auto profile as the editor needs it: the active
+    per-parameter ``biases`` (empty when neutral), a plain-language ``note`` for
+    the "why Auto shifted" line (``None`` when neutral), and a ``neutral`` flag so
+    the UI can show/hide the "Reset" affordance. All fields are safe defaults when
+    the profile is unset — a never-configured library reads as neutral."""
+
+    biases: dict[str, int] = {}
+    note: str | None = None
+    neutral: bool = True
+
+
+def _read_auto_preferences(lib) -> dict:
+    """The stored Adaptive-Auto profile (sanitised, never raises) — a §9-safe
+    loader: an unset/garbled store degrades to a neutral profile."""
+    raw = lib.get_meta(AUTO_PREFERENCES_META_KEY)
+    if not raw:
+        return auto_prefs_mod.empty_profile()
+    try:
+        stored = json.loads(raw)
+    except (ValueError, TypeError):
+        return auto_prefs_mod.empty_profile()
+    # record_feedback with an unknown cue is a no-op that returns a *sanitised*
+    # copy — the cheapest way to coerce an arbitrary stored dict to a valid profile.
+    return auto_prefs_mod.record_feedback(stored, "")
+
+
+def _auto_preferences_out(profile: dict) -> AutoPreferencesOut:
+    return AutoPreferencesOut(
+        biases=dict(profile.get("biases", {})),
+        note=auto_prefs_mod.describe_profile(profile),
+        neutral=auto_prefs_mod.is_neutral(profile),
+    )
+
+
+@router.get("/api/editor/auto-preferences", response_model=AutoPreferencesOut)
+def get_auto_preferences(request: Request) -> AutoPreferencesOut:
+    """The library's current Adaptive-Auto taste profile (neutral if unset)."""
+    lib = deps.open_library(request)
+    try:
+        return _auto_preferences_out(_read_auto_preferences(lib))
+    finally:
+        lib.close()
+
+
+class AutoFeedbackIn(BaseModel):
+    cue: str
+
+
+@router.post("/api/editor/auto-preferences/feedback", response_model=AutoPreferencesOut)
+def post_auto_feedback(body: AutoFeedbackIn, request: Request) -> AutoPreferencesOut:
+    """Record one plain-language feedback cue on the Auto result and return the
+    updated profile. Unknown cues are ignored (the profile is unchanged), so a
+    stale frontend can never corrupt the store; every bias is bounded, so repeated
+    feedback saturates rather than running away."""
+    if body.cue not in auto_prefs_mod.known_cues():
+        raise HTTPException(status_code=422, detail=f"unknown feedback cue: {body.cue!r}")
+    lib = deps.open_library(request)
+    try:
+        updated = auto_prefs_mod.record_feedback(_read_auto_preferences(lib), body.cue)
+        lib.set_meta(AUTO_PREFERENCES_META_KEY, json.dumps(updated))
+    finally:
+        lib.close()
+    return _auto_preferences_out(updated)
+
+
+@router.delete("/api/editor/auto-preferences", response_model=AutoPreferencesOut)
+def delete_auto_preferences(request: Request) -> AutoPreferencesOut:
+    """Reset the Adaptive-Auto profile — Auto goes back to its neutral, purely
+    data-driven behaviour. One click, fully reversible (§1 trust value)."""
+    empty = auto_prefs_mod.empty_profile()
+    lib = deps.open_library(request)
+    try:
+        lib.set_meta(AUTO_PREFERENCES_META_KEY, json.dumps(empty))
+    finally:
+        lib.close()
+    return _auto_preferences_out(empty)
 
 
 # ---- recipe load/save ------------------------------------------------------
@@ -1092,6 +1187,10 @@ async def auto_process(safe: str, run_id: int, request: Request) -> dict:
     lib, proj = deps.open_target_project(request, safe)
     try:
         median_fwhm = proj.median_fwhm()
+        # The library-wide Adaptive-Auto taste profile (neutral if unset) shifts
+        # Auto's data-driven values toward the owner's taste. Read here while the
+        # library is open; neutral ⇒ today's Auto unchanged.
+        prefs = _read_auto_preferences(lib)
     finally:
         proj.close()
         lib.close()
@@ -1101,7 +1200,8 @@ async def auto_process(safe: str, run_id: int, request: Request) -> dict:
         # coverage-leveling pass (and a border trim when meaningful) prepended; a
         # single-field stack is unchanged. Uses the stacker's authoritative
         # is_mosaic verdict, never the old coverage_max>min heuristic.
-        return build_auto_recipe_for_run(project_dir, run, median_fwhm).to_dict()
+        return build_auto_recipe_for_run(
+            project_dir, run, median_fwhm, prefs=prefs).to_dict()
 
     return await run_in_threadpool(work)
 

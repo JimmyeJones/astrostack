@@ -22,6 +22,7 @@ import { QueryError } from "../components/QueryError";
 import { Histogram } from "../components/editor/Histogram";
 import { tonalHistGuides } from "../components/editor/tonalGuides";
 import { OpList } from "../components/editor/OpList";
+import { AutoFeedback } from "../components/editor/AutoFeedback";
 import { degenerateLevelsUids, extraEnabledStretchUids, hasEnabledStretch, insertOnCorrectSide, moveToCorrectSide }
   from "../components/editor/stageConflicts";
 import { autoCauseSentence, autoSummarySentence, autoValueSentence, presetSuggestionSentence } from "../components/editor/autoSummary";
@@ -1649,6 +1650,10 @@ export function EditorView() {
                 <Text size="10px" c="dimmed" mt={4}>
                   These steps were chosen from your image — tweak or remove any of them below.
                 </Text>
+                {/* Adaptive Auto: one-tap feedback teaches Auto the owner's taste
+                    over time (bounded, reversible). Re-runs Auto so the shift shows
+                    immediately. */}
+                <AutoFeedback onRerun={() => auto.mutate()} />
               </Alert>
             ) : null}
 
