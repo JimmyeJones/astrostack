@@ -112,7 +112,16 @@ when you take it.
   yet"** badge + honest "X of Y went into your picture" line appears even when nothing was rejected. Additive
   and upgrade-safe: default `n_unsolved=0` keeps every existing caller/test unchanged; no config/DB/API-shape
   change (only an added response field value). Tests: `test_rejection_summary.py` (+4), `test_api.py`
-  (+1 endpoint test on unsolved fixtures), `Target.test.tsx` (+1 badge test). (4) **STILL OPEN — the root-cause
+  (+1 endpoint test on unsolved fixtures), `Target.test.tsx` (+1 badge test). (3c) **Jobs-page thin-stack
+  heads-up SHIPPED v0.159.6 (Builder 2026-07-22, branch `claude/pensive-faraday-4jkjc7`).** The one-click
+  "Process target" job result on the **Jobs page** previously reported a cheerful green *"Stacked 1 frame into a
+  new master."* with a "View result" button and **no** hint the picture was just noise — the owner's gibberish
+  landing with a thumbs-up. `processTargetSummary` (`frontend/src/routes/Jobs.tsx`) now reuses the tested
+  `thinStackWarning(n_frames_used)` helper and returns an optional `thin` warning; `JobResultActions` renders it
+  as an orange/yellow Alert ("Very few frames stacked …") right above the View-result button whenever the
+  finished auto-stack combined ≤4 frames. Frontend-only, additive, no API/schema/default change (the job result
+  already carries `stack.n_frames_used`). Tests: `Jobs.test.tsx` (+2 thin/healthy cases, existing exact-shape
+  cases updated for the new `thin` field). (4) **STILL OPEN — the root-cause
   half (needs the owner's real faint-field data):** localise *which* stage over-drops (ASTAP solve-failure rate
   vs auto-grade vs streak vs QC) on a real sparse-star field and fix the over-rejection (and/or a server-side
   minimum-frames guard that surfaces "only N of M subs could be stacked because …" in the auto/Process job
@@ -5627,6 +5636,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   read-only JSON, empty list → self-hide. **(c) frontend (S):** a `SuggestTargetsCard` mirroring `NextSessionCard`,
   with the `.ics` link per row. Keeps the beginner-feature pipeline stocked with a fresh *discovery/plan* capability
   that no existing card covers.
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-21) — "Add it to your calendar": one-tap `.ics` download for the next
+  good observing window on a target, so a beginner doesn't miss the night.**~~ — **SHIPPED v0.160.0** (Builder
+  2026-07-22, branch `claude/pensive-faraday-4jkjc7`). New dependency-free serialiser `webapp/ics.py`
+  (`to_ics(events)` → RFC-5545 VCALENDAR: CRLF-terminated, TEXT-escaped `,`/`;`/`\`/newlines, 75-octet line
+  folding on UTF-8 char boundaries, UTC `…Z` stamps, deterministic per-(target, start) UID so re-adding updates
+  rather than duplicates, DTSTAMP pinned to the start for deterministic output). New read-only endpoint
+  `GET /api/plan/next-session/{safe}/calendar.ics` reuses the same `next_observing_windows` computation as the
+  JSON `/next-session/{safe}` and emits one plain-language VEVENT per window — *"Image M42"* / *"M42 climbs to
+  61°, about 3 clear hours of darkness to reach your goal. Moon 12% and mostly down. Bring the Seestar out."* —
+  with `LOCATION` from the saved site; 404s on unknown target / no location / no upcoming window so the file is
+  never blank. Frontend: `api.nextSessionIcsUrl(safe)` + an "Add to calendar" download link on `NextSessionCard`
+  (self-hides exactly where the card already does). Fully offline (`.ics` is just text — no calendar account,
+  SMTP or network, so no §10 sign-off), additive/read-only, no schema/config/API-shape/default change. Tests:
+  `tests/test_ics.py` (+12: escaping, Z-format, tz conversion, folding incl. multibyte, empty calendar, CRLF),
+  `tests/webapp/test_plan.py` (+4: download headers + body, and the three 404 self-hide cases),
+  `NextSessionCard.test.tsx` (+1: link href + download attr). Original spec kept for provenance:
 - **NEW BEGINNER FEATURE (Scout 2026-07-21) — "Add it to your calendar": one-tap `.ics` download for the next
   good observing window on a target, so a beginner doesn't miss the night.** *(Autonomy + friendliness /
   "plan" pillar, PRIORITY 2–3; size S.)* **Why:** the shipped **"Plan your next night"** card (v0.156.0,

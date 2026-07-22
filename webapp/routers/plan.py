@@ -21,7 +21,7 @@ from datetime import date as _date
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 from seestack.nightplan import (
     HorizonProfile,
@@ -31,6 +31,7 @@ from seestack.nightplan import (
     plan_tonight,
 )
 from webapp import deps
+from webapp.ics import IcsEvent, to_ics
 
 log = logging.getLogger(__name__)
 
@@ -358,3 +359,92 @@ def get_next_session(
         "score": w.score,
     } for w in wins]
     return base
+
+
+def _window_ics_event(safe: str, name: str, w: Any, location: str) -> IcsEvent:
+    """Turn one observing window into a plain-language calendar event.
+
+    Uses the *usable* stretch (target above the altitude floor) when the planner
+    computed one, else the whole dark window; the description is jargon-free so a
+    beginner reading the reminder on the night knows exactly what to do."""
+    start = w.usable_start or w.dark_start
+    end = w.usable_end or w.dark_end
+    hours = max(0.0, (end - start).total_seconds() / 3600.0)
+    if hours >= 1.0:
+        span = f"about {hours:.0f} clear hour{'s' if round(hours) != 1 else ''}"
+    else:
+        span = f"about {round(hours * 60)} clear minutes"
+    moon_pct = round(max(0.0, min(1.0, w.moon_illumination)) * 100)
+    moon_where = "up" if w.moon_up_fraction > 0.5 else "down"
+    description = (
+        f"{name} climbs to {round(w.max_altitude_deg)}°, {span} of darkness to "
+        f"reach your goal. Moon {moon_pct}% and mostly {moon_where}. "
+        "Bring the Seestar out."
+    )
+    # Deterministic per (target, start) so re-adding updates the same calendar
+    # entry instead of duplicating it.
+    uid = f"{safe}-{start.astimezone(timezone.utc):%Y%m%dT%H%M%SZ}@astrostack"
+    return IcsEvent(
+        uid=uid, start=start, end=end,
+        summary=f"Image {name}", description=description, location=location,
+    )
+
+
+@router.get("/next-session/{safe}/calendar.ics")
+def get_next_session_ics(
+    safe: str,
+    request: Request,
+    min_alt: int | None = Query(default=None, ge=0, le=80),
+    when: str | None = Query(default=None,
+                             description="ISO-8601 UTC reference to plan from; defaults to now"),
+) -> Response:
+    """Download the next few good observing windows for *this* target as an
+    ``.ics`` calendar file, so a beginner can one-tap "Add to calendar" and their
+    phone reminds them on the night. Read-only and offline (``.ics`` is just
+    text — no calendar account, no network). 404s on an unknown target or when
+    there's no upcoming window, so the file is never blank."""
+    settings = deps.get_settings(request)
+
+    start = datetime.now(timezone.utc)
+    if when:
+        try:
+            start = datetime.fromisoformat(when)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Bad 'when' timestamp") from exc
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+
+    lib = deps.open_library(request)
+    try:
+        entry = lib.find_target(safe)
+    finally:
+        lib.close()
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Unknown target")
+
+    observer, _ = _resolve_observer(request, settings)
+    min_altitude = min_alt if min_alt is not None else int(settings.min_target_altitude_deg)
+    has_position = entry.ra_deg is not None and entry.dec_deg is not None
+    if observer is None or not has_position:
+        raise HTTPException(status_code=404,
+                            detail="No observing window to add (set a location first)")
+
+    wins = next_observing_windows(
+        observer, float(entry.ra_deg), float(entry.dec_deg),
+        start_utc=start,
+        min_altitude_deg=float(min_altitude),
+        horizon=HorizonProfile.from_pairs(settings.horizon_profile),
+        nights=_NEXT_SESSION_NIGHTS, want=_NEXT_SESSION_WANT,
+    )
+    if not wins:
+        raise HTTPException(status_code=404, detail="No upcoming window to add")
+
+    location = f"{observer.lat_deg:.4f}, {observer.lon_deg:.4f}"
+    events = [_window_ics_event(safe, entry.name, w, location) for w in wins]
+    body = to_ics(events)
+    filename = f"{safe}-next-session.ics"
+    return Response(
+        content=body,
+        media_type="text/calendar",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

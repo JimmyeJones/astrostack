@@ -275,6 +275,49 @@ def test_next_session_never_rising_target_has_no_windows(client, solved_library)
     assert body["windows"] == []
 
 
+def test_next_session_ics_downloads_a_calendar_for_a_placed_target(client, solved_library):
+    # One-tap "Add to calendar": the same upcoming windows, served as an .ics the
+    # user's phone/desktop calendar imports.
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    r = client.get("/api/plan/next-session/M_42/calendar.ics",
+                   params={"when": JAN_EVENING})
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/calendar")
+    assert "attachment" in r.headers.get("content-disposition", "")
+    assert "M_42-next-session.ics" in r.headers.get("content-disposition", "")
+    body = r.text
+    assert body.startswith("BEGIN:VCALENDAR")
+    assert "END:VCALENDAR" in body
+    assert "BEGIN:VEVENT" in body
+    assert "SUMMARY:Image " in body
+    assert "DTSTART:" in body and "DTEND:" in body
+    # A plain-language, jargon-free description a beginner can act on.
+    assert "Bring the Seestar out" in body
+
+
+def test_next_session_ics_unknown_target_404s(client, solved_library):
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    r = client.get("/api/plan/next-session/NOPE_404/calendar.ics",
+                   params={"when": JAN_EVENING})
+    assert r.status_code == 404
+
+
+def test_next_session_ics_without_location_404s(client, solved_library):
+    # No site → nothing to add; 404 rather than a blank file (the card hides it).
+    r = client.get("/api/plan/next-session/M_42/calendar.ics",
+                   params={"when": JAN_EVENING})
+    assert r.status_code == 404
+
+
+def test_next_session_ics_no_window_404s(client, solved_library):
+    # An altitude floor Orion can't clear → no window, so the download 404s
+    # instead of handing back an event-less calendar.
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    r = client.get("/api/plan/next-session/M_42/calendar.ics",
+                   params={"when": JAN_EVENING, "min_alt": 80})
+    assert r.status_code == 404
+
+
 def test_tonight_detects_site_from_fits_header(tmp_path: Path, monkeypatch):
     """With no configured site, the planner sniffs SITELAT/SITELONG from a frame."""
     import sys

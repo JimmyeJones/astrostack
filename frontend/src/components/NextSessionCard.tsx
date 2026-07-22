@@ -1,5 +1,5 @@
-import { Group, List, Paper, Stack, Text, ThemeIcon } from "@mantine/core";
-import { IconCalendarStar } from "@tabler/icons-react";
+import { Anchor, Group, List, Paper, Stack, Text, ThemeIcon } from "@mantine/core";
+import { IconCalendarPlus, IconCalendarStar } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { describeGap, describeWindow, windowsIntro } from "./nextSession";
@@ -52,6 +52,14 @@ export function NextSessionCard({
               <List.Item key={w.dark_start_utc}>{describeWindow(w)}</List.Item>
             ))}
           </List>
+          {/* Turn the plan into a reminder the beginner won't miss: a one-tap
+              .ics download their own calendar imports (no account, no network). */}
+          <Anchor href={api.nextSessionIcsUrl(safe)} download size="xs" fw={500}>
+            <Group gap={4} wrap="nowrap">
+              <IconCalendarPlus size={13} />
+              Add to calendar
+            </Group>
+          </Anchor>
         </Stack>
       </Group>
     </Paper>
