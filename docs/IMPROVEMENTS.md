@@ -6305,6 +6305,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   stack / not measured when the latest run has no preview). Beginner bar ✔ (one plain-language, shareable trust
   number, zero knobs, at the moment of the payoff). _(Original idea kept above; the two earlier `~N×` reveal +
   measurement slices shipped v0.162.0 and the linear-domain endpoint before it.)_
+- **NEW IDEA (Builder 2026-07-22, follow-on to the shipped "cut your noise ~N×" at-completion badge) — stamp/cache
+  the measured noise-reduction ratio on the run so repeat views don't re-measure it.** *(Autonomy / performance
+  polish; PRIORITY 2–4; size S–M.)* Now that `StackNoiseBadge` fetches `.../one-sub-vs-stack/noise` **eagerly** on
+  the Target page (once per load) and on each finished Jobs card — in addition to History's lazy reveal —
+  `_measure_noise_ratio` reloads the master FITS + a representative sub and re-computes σ **every time** the number
+  is shown. It's a pure function of the (immutable) finished stack + its reference sub, so the result never changes
+  once computed. **Idea:** compute it **once** — the cleanest place is at stack time (the master + accepted subs
+  are already in memory), stamping the ratio into the stack FITS header (e.g. `NOISERAT`, alongside the existing
+  provenance cards) and/or the run record, and have the endpoint return the stamped value when present and only
+  fall back to the live measurement for older runs that predate the stamp. That removes the repeated per-view FITS
+  reload (snappier Target/Jobs render, less disk churn on a NAS) while keeping the exact same number. **Upgrade-
+  safe:** additive — a new nullable header/field with a live-measure fallback, so old stacks keep working (they
+  just measure on demand as today) and no schema/API-shape/default change (the endpoint's `{ratio}` contract is
+  unchanged). **Testable:** a stamped run returns the header value without touching the sub; an unstamped (old) run
+  still measures live; the stamped value equals the live measurement for the same data. _(Spotted while wiring the
+  at-completion badge — the measurement is correct but now runs more often than it needs to.)_
 - ~~**NEW (Scout 2026-07-21, follow-on to the v0.148.1 sub-preview fix) — put a number on the "one frame vs your
   stack" reveal: "stacking cut your noise ~N×" — original spec kept for provenance.**~~ *(Beginner feature /
   trust; PRIORITY 3; size S–M.)* Now that
