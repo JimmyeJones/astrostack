@@ -80,17 +80,20 @@ higher on this list wins — always:
 4. **Best-possible image quality** for the OSC Seestar workflow (clean, detailed
    final images).
 
-**⚡ IMMEDIATE PRIORITY (owner-reported 2026-07): Sky map placement + black-box
-background.** See the ⭐ top entry in `docs/IMPROVEMENTS.md` → "Bugs (fix these
-first)". Two traced bugs on the Sky map page: (1) an irregular mosaic shows as a
-**black rectangle** because the overlay uses the opaque `mode="RGB"` preview PNG
-(uncovered NaN → black) instead of an RGBA image with `alpha=0` on uncovered
-pixels; (2) overlay **placement/orientation is off** because `_tan_wcs`
-(`webapp/routers/sky.py`) extrapolates the WCS from a single frame's pixscale +
-best-effort rotation instead of the stack's own canvas geometry. Fix both, verify
-on a real irregular mosaic, and pin the rotation sign with a test. This is the
-front-of-queue focus right now. (The earlier bright-core/STF-autostretch immediate
-priority was **fixed in v0.119.1**.)
+**⚡ IMMEDIATE PRIORITY (owner-reported 2026-07, real data on v0.158): auto-stacked
+FINAL results come out as single-frame colour-speckle "gibberish" for faint/
+sparse-star targets** (a bright galaxy stacks cleanly — so it's data-dependent).
+See the ⭐⭐ top entry in `docs/IMPROVEMENTS.md` → "Bugs (fix these first)". The
+data-dependence points away from a render/debayer bug and toward **the auto-pipeline
+combining too few frames** (plate-solve failing on faint fields and/or over-aggressive
+auto-reject/grade — note v0.149 defaulted `auto_reject` ON for a never-configured
+form), so the "stack" is ~1 sub and noise never averages out. **Instrument the real
+accepted+solved+surviving frame count on a faint target, find the over-dropping
+stage, fix it, and add a minimum-frames guard + honest "only N of M frames stacked"
+warning.** Reproduce with synthetic noisy few-star subs (output noise must fall
+~√N). This is the front-of-queue focus right now. (Earlier immediate priorities —
+bright-core/STF autostretch and the Sky-map bugs — are both fixed; see their
+struck-through backlog entries.)
 
 **Current focus (2026-07 — set by the owner).** The editor (priority 1) is now
 **well-hardened**: its traced bug backlog is drained and repeated adversarial

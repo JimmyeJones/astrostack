@@ -47,6 +47,42 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- **⭐⭐ OWNER-REPORTED (2026-07 — TOP PRIORITY, real data on v0.158) — auto-stacked
+  FINAL results come out as single-frame colour-speckle "gibberish" for some
+  targets.** The owner's *finished* auto-stacks (History/Gallery, not a single-frame
+  preview) look like one raw noisy sub — heavy per-pixel RGB speckle — for
+  faint / sparse-star fields, while a bright galaxy target stacks cleanly. **That
+  data-dependence is the key clue: a render/debayer bug would wreck *every* stack
+  equally, so this is almost certainly the auto-pipeline combining very few
+  frames** — the "stack" is effectively 1 sub, so nothing averages the noise down.
+  Leading causes to investigate, in order:
+  1. **Too few frames reach the accumulator.** Auto-stack only combines
+     **accepted + plate-solved** frames, minus auto-grade and streak rejects
+     (`webapp/pipeline.py`). On a faint/sparse-star field, **ASTAP plate-solve may
+     fail on most subs** (few solved → thin stack), and/or **auto-reject / auto-grade
+     is too aggressive** (note v0.149 defaulted smart `auto_reject` ON for a
+     never-configured Stack form, and recent auto-grade/streak/solve-timeout changes).
+     **Instrument the real path:** for a faint target, log/surface how many frames
+     were *accepted AND solved AND survived rejection* vs total subs — if it's ~1–3
+     of hundreds, that's the bug. Then find which stage is dropping them (solve vs
+     grade vs streak vs QC) and fix the over-rejection / surface a clear "only N of M
+     frames could be stacked because …" message instead of silently shipping a
+     1-frame stack.
+  2. **Combine/coverage regression** (secondary): if many frames *are* solved+accepted
+     but the output is still single-frame-noisy, audit the accumulator / coverage /
+     κ-σ path for a regression that stops frames actually averaging (recent
+     coverage-count and rejection-gating changes are suspects).
+  3. **Auto-edit amplifying noise** (tertiary): the auto STF stretch over-stretching a
+     genuinely thin/faint stack can turn faint noise into speckle — but that's a
+     symptom of (1), not the root; fix frame count first.
+  **Reproduce first:** stack N synthetic noisy subs of a faint, few-star field and
+  confirm (a) the pipeline actually accepts+solves+stacks most of them, and (b) the
+  output noise falls ~√N (not single-frame). A minimum-frames guard + an honest
+  "thin stack: only N frames" warning is part of the fix so this can never silently
+  ship gibberish again. Severity: wrong-result on the app's **core function** (a
+  clean stack), owner-visible on real data. Confidence: traced (data-dependent →
+  frame-count, not render); reproduce to localise the dropping stage.
+
 - ~~**⭐ Always-on hot/cold-pixel suppression clips real (undersampled) star cores — dims and colour-shifts every
   star in the final stack, a coherent per-frame bias that stacking does NOT average out.**~~ — **FIXED v0.158.9**
   (Builder 2026-07-21, branch `claude/pensive-faraday-dg2fc9`; reproduced + regression-tested). Added a
