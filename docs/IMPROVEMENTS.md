@@ -5789,7 +5789,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   would have wrongly shouted "88 couldn't plate-solve" at a beginner whose frames all actually solved.
 
 - **NEW BEGINNER FEATURE (Scout 2026-07-21) — "Did it get better?": A/B compare two finished stacks of the same
-  target, side by side with a split slider.** *(Friendliness / trust, PRIORITY 3; size M.)* **Why:** a beginner
+  target, side by side with a split slider.** **▶ SPLIT-SLIDER SLICE SHIPPED v0.164.0** (Builder 2026-07-22, branch
+  `claude/pensive-faraday-vsepvf`). The two-stack Compare view (`/compare?a=…&b=…`, reachable from the History run
+  card's **Compare** button, which auto-targets the chronologically-previous run) already shipped **Side by side**
+  and **Blink**; the one named gap in this idea — the *split slider* — is now a third **Split** mode on the same
+  view. It overlays stack A on top of stack B in one frame and clips A under a draggable vertical divider (left = A,
+  right = B), reusing the editor's already-tested `splitCompare` divider geometry (`splitFraction` / `splitClipLeft`
+  / `splitLeftPct`) and the exact pointer-drag pattern from `OneFrameVsStackCard`, so you scrub one line across the
+  picture to see precisely where a deeper/re-tuned stack pulls out faint detail or knocks down noise — the most
+  direct answer to "did my new stack get better?". A/B badges pin the two sides, a plain-language hint names both
+  stacks under the frame, and it falls back with guidance ("Split needs a preview image for both stacks. Try 'Side
+  by side'.") if either run has no preview. Frontend-only, additive, opt-in (a third segmented-control option;
+  nothing else changes); the existing which-is-cleaner noise verdict (`noiseComparison`) still shows above all three
+  modes. No backend/schema/config/API-shape/default change — reuses the same gallery-resolved preview URLs the other
+  two modes use. Tests: `Compare.test.tsx` (+2 — Split overlays A-over-B with the drag hint; no-preview fallback).
+  The remaining slice (b) — an optional plain-language √N noise-delta *number* — is already largely covered by the
+  shipped `noiseComparison` verdict; leave any richer per-run stat delta for a future run. Original spec kept for
+  provenance:
+  - _(orig)_ *(Friendliness / trust, PRIORITY 3; size M.)* **Why:** a beginner
   who adds a second night and re-stacks, or reprocesses the same subs with different settings, has no easy way to
   answer the one question that matters — *did the picture actually improve?* Today the History run cards list
   runs with dates/sub-counts and thumbnails, but you can only look at one at a time and eyeball it from memory.

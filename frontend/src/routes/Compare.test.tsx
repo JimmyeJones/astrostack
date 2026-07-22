@@ -1,6 +1,6 @@
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CompareView, parseRef, compareHref, noiseComparison } from "./Compare";
@@ -113,6 +113,32 @@ describe("CompareView", () => {
     vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [a, b] });
     renderCompare("?a=M_42:3&b=M_42:7");
     await waitFor(() => expect(screen.getByText(/20% lower/)).toBeInTheDocument());
+  });
+
+  it("offers a Split mode that overlays A over B under one draggable divider", async () => {
+    const a = item(3, "M_42", "Orion");
+    const b = item(7, "M_42", "OrionV2");
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [a, b] });
+    renderCompare("?a=M_42:3&b=M_42:7");
+    // Switch to Split mode.
+    await waitFor(() => expect(screen.getByText("Split")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Split"));
+    // Both stacks are rendered as overlaid images in one frame (A over B).
+    await waitFor(() => expect(screen.getByAltText("A: out3")).toBeInTheDocument());
+    expect(screen.getByAltText("B: out7")).toBeInTheDocument();
+    // Plain-language drag hint naming both stacks.
+    expect(screen.getByText(/Drag the divider/)).toBeInTheDocument();
+  });
+
+  it("Split falls back with guidance when a stack has no preview", async () => {
+    const a = item(3, "M_42", "Orion");
+    const b = item(7, "M_42", "OrionV2");
+    b.has_preview = false;
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [a, b] });
+    renderCompare("?a=M_42:3&b=M_42:7");
+    await waitFor(() => expect(screen.getByText("Split")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Split"));
+    expect(await screen.findByText(/Split needs a preview image for both stacks/)).toBeInTheDocument();
   });
 
   it("warns when a referenced stack was deleted", async () => {

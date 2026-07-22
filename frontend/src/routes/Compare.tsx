@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  Alert, Badge, Button, Center, Group, Image, Loader, Paper, SegmentedControl,
+  Alert, Badge, Box, Button, Center, Group, Image, Loader, Paper, SegmentedControl,
   SimpleGrid, Stack, Text, Title,
 } from "@mantine/core";
 import { IconArrowLeft, IconGitCompare } from "@tabler/icons-react";
@@ -13,6 +13,7 @@ import { HazyNightBadge } from "../components/HazyNightBadge";
 import { CalibrationBadge } from "../components/CalibrationBadge";
 import { RejectionBadge } from "../components/RejectionBadge";
 import { QueryError } from "../components/QueryError";
+import { splitClipLeft, splitFraction, splitLeftPct } from "../components/editor/splitCompare";
 
 // A compare target is referenced in the URL as "<safe>:<run_id>" (safe target
 // keys never contain a colon), so a bookmarkable /compare?a=M_42:3&b=M_42:7 URL
@@ -47,7 +48,7 @@ export function noiseComparison(
   return { winner, pct: Math.round((1 - lo / hi) * 100) };
 }
 
-type CompareMode = "side" | "blink";
+type CompareMode = "side" | "split" | "blink";
 
 function CardMeta({ item }: { item: GalleryItem }) {
   return (
@@ -109,6 +110,78 @@ function Blink({ a, b }: { a: GalleryItem; b: GalleryItem }) {
       </Group>
       <Text size="xs" c="dimmed">
         Showing {showA ? "A" : "B"}: {current.target_name} · {current.output_basename}
+      </Text>
+    </Stack>
+  );
+}
+
+/** Split comparator: overlays A on top of B and clips A with a draggable vertical
+ * divider, so you scrub one line across a single frame to see exactly where the
+ * two stacks differ (faint detail emerging, noise dropping, a cleaned trail) —
+ * the most direct answer to "did my new stack actually get better?". Reuses the
+ * editor's tested split-divider geometry. Left of the divider is A, right is B. */
+function Split({ a, b }: { a: GalleryItem; b: GalleryItem }) {
+  const [frac, setFrac] = useState(0.5);
+  const dragging = useRef(false);
+  const boxRef = useRef<HTMLDivElement | null>(null);
+
+  const moveTo = (clientX: number) => {
+    const rect = boxRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setFrac(splitFraction(clientX, rect.left, rect.width));
+  };
+
+  if (!a.has_preview || !b.has_preview) {
+    return (
+      <Text size="sm" c="dimmed" ta="center" py="lg">
+        Split needs a preview image for both stacks. Try “Side by side”.
+      </Text>
+    );
+  }
+
+  return (
+    <Stack gap="xs" align="center">
+      <Box
+        ref={boxRef}
+        onPointerDown={(e) => {
+          dragging.current = true;
+          (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+          moveTo(e.clientX);
+        }}
+        onPointerMove={(e) => { if (dragging.current) moveTo(e.clientX); }}
+        onPointerUp={() => { dragging.current = false; }}
+        aria-label="Drag to reveal — left is A, right is B"
+        style={{
+          position: "relative", width: "100%", maxWidth: 640, maxHeight: 420,
+          overflow: "hidden", borderRadius: 6, cursor: "ew-resize",
+          touchAction: "none", userSelect: "none",
+        }}
+      >
+        {/* Base (right of divider): B. */}
+        <img src={b.preview_url} alt={`B: ${b.output_basename}`}
+          draggable={false}
+          style={{ display: "block", width: "100%", maxHeight: 420,
+            objectFit: "contain", background: "#000" }} />
+        {/* Overlay (left of divider): A, clipped. */}
+        <img src={a.preview_url} alt={`A: ${a.output_basename}`}
+          draggable={false}
+          style={{
+            position: "absolute", inset: 0, width: "100%", height: "100%",
+            objectFit: "contain", background: "#000", clipPath: splitClipLeft(frac),
+          }} />
+        {/* Divider. */}
+        <Box style={{
+          position: "absolute", top: 0, bottom: 0, left: splitLeftPct(frac),
+          width: 2, background: "var(--mantine-color-gray-2)",
+          transform: "translateX(-1px)", pointerEvents: "none",
+        }} />
+        <Badge style={{ position: "absolute", top: 8, left: 8, pointerEvents: "none" }}
+          color="blue" variant="filled">A</Badge>
+        <Badge style={{ position: "absolute", top: 8, right: 8, pointerEvents: "none" }}
+          color="grape" variant="filled">B</Badge>
+      </Box>
+      <Text size="xs" c="dimmed">
+        Drag the divider — left is A ({a.output_basename}), right is B ({b.output_basename}).
       </Text>
     </Stack>
   );
@@ -180,7 +253,11 @@ export function CompareView() {
         <Group gap="sm">
           <SegmentedControl
             size="xs" value={mode} onChange={(v) => setMode(v as CompareMode)}
-            data={[{ label: "Side by side", value: "side" }, { label: "Blink", value: "blink" }]}
+            data={[
+              { label: "Side by side", value: "side" },
+              { label: "Split", value: "split" },
+              { label: "Blink", value: "blink" },
+            ]}
             aria-label="Compare mode"
           />
           {backToGallery}
@@ -215,6 +292,10 @@ export function CompareView() {
             </Paper>
           ))}
         </SimpleGrid>
+      ) : mode === "split" ? (
+        <Paper withBorder p="sm" radius="md">
+          <Split a={a} b={b} />
+        </Paper>
       ) : (
         <Paper withBorder p="sm" radius="md">
           <Blink a={a} b={b} />
