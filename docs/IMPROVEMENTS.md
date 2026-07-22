@@ -7773,6 +7773,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+- ~~**NEW (Builder 2026-07-22) — the documented Qt-skip test fallback (AGENTS.md §7) is broken when `libEGL` is
+  missing.**~~ — **SHIPPED v0.170.2** (Builder 2026-07-22, branch `claude/pensive-faraday-808ymd`; hit firsthand
+  this run). When `apt` is blocked so `libEGL.so.1` can't be installed, the `pytest-qt` plugin's
+  `pytest_configure` hook fails at import (`ImportError: libEGL.so.1`) — a **collection-time INTERNALERROR that
+  aborts the entire run**, before any test is collected. So the previously-documented fallback (`python -m pytest
+  tests/ --ignore=…` the three GUI files) did **not** work: the crash is in the plugin's global configure, not in
+  those test files. Every future unattended run that hits blocked apt would waste time rediscovering this. Fix
+  (docs + tooling only, no product change): the §7 fallback command now leads with `-p no:pytest-qt` (which skips
+  the plugin cleanly; the three `--ignore`d files are the ones that actually use its `qtbot` fixture), with a note
+  explaining *why* the flag isn't optional; and `scripts/agent-setup.sh` now prints that exact working command
+  (and sets a `QT_LIBS_MISSING` flag so its closing "tests:" hint shows the Qt-skip form) when the libEGL install
+  fails. No `webapp`/engine/frontend change. *(Infra/maintainability — makes the zero-touch dev loop reliable when
+  the container's apt is unavailable.)*
 - ~~**NEW (Scout 2026-07-21) — `Project.open` should `close()` the SQLite connection when `_check_schema` raises,
   rather than lean on CPython GC.**~~ — **SHIPPED v0.170.1** (Builder 2026-07-22, branch
   `claude/pensive-faraday-808ymd`). Wrapped the post-`_open()` schema check in `try/except` in **both**
