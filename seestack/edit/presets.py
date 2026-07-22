@@ -281,7 +281,8 @@ def classify_target(rgb: np.ndarray | None) -> dict[str, Any]:
 def auto_recipe(rgb: np.ndarray | None = None,
                 median_fwhm: float | None = None,
                 is_mosaic: bool = False,
-                trim_crop: tuple[float, float, float, float] | None = None) -> Recipe:
+                trim_crop: tuple[float, float, float, float] | None = None,
+                prefs: dict[str, Any] | None = None) -> Recipe:
     """One-click auto-process built from the image, not hardcoded.
 
     Always: background/gradient removal → photometric colour balance → a proper
@@ -356,6 +357,30 @@ def auto_recipe(rgb: np.ndarray | None = None,
             base = suggested if suggested is not None else 0.5
             denoise_strength = round(base * noise_frac, 3)
 
+    # SCNR before the saturation boost caps the green channel to the R/B neutral
+    # so the boost lifts real colour, not the residual OSC green cast. Gentle
+    # (0.7) and monotone — it can only *reduce* excess green, never invent colour.
+    scnr_amount = 0.7
+    # Adaptive Auto: shift these five data-driven values toward the owner's stored
+    # taste, each re-clamped to a safe range. An empty/absent profile returns them
+    # unchanged, so a never-configured library's Auto is byte-for-byte identical.
+    if prefs is not None:
+        from seestack.edit import auto_prefs
+
+        adj = auto_prefs.apply_profile(
+            prefs,
+            target_bg=target_bg,
+            saturation=saturation,
+            sharpen_amount=sharpen_amount,
+            denoise_strength=denoise_strength,
+            scnr_amount=scnr_amount,
+        )
+        target_bg = adj["target_bg"]
+        saturation = adj["saturation"]
+        sharpen_amount = adj["sharpen_amount"]
+        denoise_strength = adj["denoise_strength"]
+        scnr_amount = adj["scnr_amount"]
+
     ops: list[tuple[str, dict]] = []
     if is_mosaic:
         # Equalise per-panel sky steps before the gradient fit — the coverage map
@@ -372,10 +397,8 @@ def auto_recipe(rgb: np.ndarray | None = None,
     if denoise_strength >= 0.05:
         ops.append(("detail.denoise", {"method": "wavelet", "strength": denoise_strength}))
     ops.append(("tone.stretch", {"mode": "stf", "target_bg": target_bg}))
-    # SCNR before the saturation boost: cap the green channel to the R/B neutral
-    # so the boost lifts real colour, not the residual OSC green cast. Gentle
-    # (0.7) and monotone — it can only *reduce* excess green, never invent colour.
-    ops.append(("tone.scnr", {"amount": 0.7}))
+    if scnr_amount >= 0.05:  # a bias can dial the green removal down to nothing
+        ops.append(("tone.scnr", {"amount": round(scnr_amount, 3)}))
     ops.append(("tone.saturation", {"amount": round(saturation, 3)}))
     # A gentle contrast curve — the built-in galaxy/nebula presets ship an S-curve,
     # but the general Auto recipe was the flat exception (denoise → stretch → SCNR →

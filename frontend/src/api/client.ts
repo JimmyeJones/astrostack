@@ -713,6 +713,17 @@ export interface Preset {
   ops: { id: string; params: Record<string, unknown>; enabled?: boolean; uid?: string }[];
 }
 
+/** The library's Adaptive-Auto "taste" profile: the active per-parameter `biases`
+ * the owner built up by giving Auto plain-language feedback, a plain-language
+ * `note` explaining how Auto shifted (`null` when neutral), and a `neutral` flag.
+ * An unset profile reads as neutral — Auto then behaves exactly as its data-driven
+ * default. Served by `…/editor/auto-preferences`. */
+export interface AutoPreferences {
+  biases: Record<string, number>;
+  note: string | null;
+  neutral: boolean;
+}
+
 /** The measured cues Auto-process read from a run's own data to build its recipe
  * (the *causal inputs* behind the ops), served by `…/editor/auto-analysis`. Every
  * field is nullable so it degrades gracefully: sky/noise are null when the proxy
@@ -1353,6 +1364,13 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ recipe, output_name: outputName, tiff_mode: tiffMode }),
     }),
+  getAutoPreferences: () => req<AutoPreferences>("/api/editor/auto-preferences"),
+  sendAutoFeedback: (cue: string) =>
+    req<AutoPreferences>("/api/editor/auto-preferences/feedback", {
+      method: "POST", body: JSON.stringify({ cue }),
+    }),
+  resetAutoPreferences: () =>
+    req<AutoPreferences>("/api/editor/auto-preferences", { method: "DELETE" }),
   getDefaultRecipe: () => req<DefaultRecipe>("/api/editor/default-recipe"),
   putDefaultRecipe: (ops: OpInstance[]) =>
     req<DefaultRecipe>("/api/editor/default-recipe", {

@@ -1653,6 +1653,7 @@ def _auto_edit_process_run(lib: Library, safe: str, run_id: int) -> int | None:
         AUTO_EDIT_NOTE_PREFIX,
         AUTO_EDIT_SKYCAST_PREFIX,
         RECIPE_META_PREFIX,
+        _read_auto_preferences,
         build_auto_analysis_for_run,
         build_auto_recipe_for_run,
         render_run_display_array,
@@ -1672,8 +1673,12 @@ def _auto_edit_process_run(lib: Library, safe: str, run_id: int) -> int | None:
             if run is None or not run.fits_path or not Path(run.fits_path).exists():
                 return None
             median_fwhm = proj.median_fwhm()
+            # Apply the library's Adaptive-Auto taste profile (neutral if unset)
+            # so an unattended "Process target" auto-edit matches what the owner
+            # would get clicking Auto interactively.
+            prefs = _read_auto_preferences(lib)
             recipe = build_auto_recipe_for_run(
-                proj.project_dir, run, median_fwhm)
+                proj.project_dir, run, median_fwhm, prefs=prefs)
             proj.set_meta(f"{RECIPE_META_PREFIX}{run_id}", recipe.to_json())
             # Stamp a plain-language "what Auto did (and why)" note so the History
             # Info panel can explain this silently-applied edit — the same reasoning

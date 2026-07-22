@@ -664,6 +664,61 @@ def test_default_recipe_empty_put_clears(client, built_library):
     assert client.get("/api/editor/default-recipe").json()["count"] == 0
 
 
+# ---- Adaptive Auto: the per-library taste profile --------------------------
+
+def test_auto_preferences_unset_is_neutral(client, built_library):
+    body = client.get("/api/editor/auto-preferences").json()
+    assert body["neutral"] is True
+    assert body["biases"] == {}
+    assert body["note"] is None
+
+
+def test_auto_feedback_records_and_resets(client, built_library):
+    # A "too dark" cue biases brightness up and yields a plain-language note.
+    r = client.post("/api/editor/auto-preferences/feedback", json={"cue": "too_dark"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["neutral"] is False
+    assert body["biases"]["brightness"] == 1
+    assert body["note"] and "brighter" in body["note"]
+    # It persists across a fresh GET.
+    assert client.get("/api/editor/auto-preferences").json()["biases"]["brightness"] == 1
+    # Reset clears it back to neutral.
+    d = client.delete("/api/editor/auto-preferences").json()
+    assert d["neutral"] is True and d["biases"] == {}
+    assert client.get("/api/editor/auto-preferences").json()["neutral"] is True
+
+
+def test_auto_feedback_unknown_cue_is_rejected(client, built_library):
+    r = client.post("/api/editor/auto-preferences/feedback", json={"cue": "make_it_pop"})
+    assert r.status_code == 422
+    # The store is untouched — a stale/garbage cue can't corrupt the profile.
+    assert client.get("/api/editor/auto-preferences").json()["neutral"] is True
+
+
+def test_auto_feedback_shifts_the_auto_recipe(client, solved_library):
+    """The point of the feature: feedback changes what one-click Auto emits — a
+    'too dark' bias raises the STF stretch's target sky level — while an unset
+    profile is byte-for-byte the neutral Auto."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="adaptive")
+
+    def stretch_target_bg():
+        ops = client.post(
+            f"/api/targets/{safe}/stack-runs/{rid}/editor/auto").json()["ops"]
+        return next(o for o in ops if o["id"] == "tone.stretch")["params"]["target_bg"]
+
+    base = stretch_target_bg()
+    # Two "too dark" clicks nudge brightness up by two bounded steps.
+    for _ in range(2):
+        client.post("/api/editor/auto-preferences/feedback", json={"cue": "too_dark"})
+    biased = stretch_target_bg()
+    assert biased > base
+    # Reset restores the neutral, purely data-driven Auto.
+    client.delete("/api/editor/auto-preferences")
+    assert stretch_target_bg() == base
+
+
 def test_edit_preview_and_histogram(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
     rid = _make_run(solved_library, safe, is_mosaic=True)

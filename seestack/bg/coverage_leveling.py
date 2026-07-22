@@ -163,15 +163,19 @@ def level_by_coverage(
         ok = True
         for c in range(3):
             sky_pixels = out[..., c][region_sky_mask]
-            sc_mean, sc_med, _ = sigma_clipped_stats(sky_pixels, sigma=3.0, maxiters=5)
+            sc_mean, sc_med, sc_std = sigma_clipped_stats(sky_pixels, sigma=3.0, maxiters=5)
             if not (np.isfinite(sc_mean) and np.isfinite(sc_med)):
                 ok = False
                 break
             mode_est = 2.5 * sc_med - 1.5 * sc_mean
-            # If the skew is implausibly extreme, fall back to the median —
-            # the SExtractor approximation only holds for mild positive skew.
+            # If the skew is implausibly extreme, fall back to the median — the
+            # SExtractor approximation only holds for mild positive skew. Its own
+            # trust criterion (mean−median within 0.3·σ) is used here; the earlier
+            # `abs(mode−med) > 5·abs(med−mean)` form was algebraically inert (that
+            # is exactly `1.5·X > 5·X`, never true), so the backstop was dead.
             if (not np.isfinite(mode_est)
-                    or abs(mode_est - sc_med) > 5.0 * abs(sc_med - sc_mean + 1e-9)):
+                    or (np.isfinite(sc_std) and sc_std > 0.0
+                        and abs(sc_mean - sc_med) > 0.3 * sc_std)):
                 mode_est = sc_med
             ch_offsets.append(float(mode_est))
         if ok:

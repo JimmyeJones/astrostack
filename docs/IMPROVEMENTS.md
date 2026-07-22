@@ -3753,6 +3753,41 @@ problems. Dogfood it every big-picture run and fix root causes.
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
 - **⭐ OWNER-REQUESTED — Adaptive Auto: learn the owner's taste from feedback on the
+  auto-processed image (no ML runtime, fully offline/private).** — **slice (a) SHIPPED
+  v0.159.0** (Builder 2026-07-22, branch `claude/pensive-faraday-jwvd6c`). Implemented
+  the ask end-to-end with **no neural net, no model download, no external API** (pure
+  numpy over the params `auto_recipe` already computes). **Engine:** new pure module
+  `seestack/edit/auto_prefs.py` — a per-library profile of **bounded, signed biases**
+  keyed by nine plain-language cues (too dark/bright, too soft/over-sharpened, too
+  noisy/over-smoothed, colours too weak/strong, too green). Each cue nudges one of five
+  data-driven Auto parameters (`target_bg`, `saturation`, sharpen amount, denoise
+  strength, SCNR amount) by a small step, a bounded signed accumulator that saturates at
+  ±`MAX_STEPS` (3) so it can never run away, and the opposite cue walks it back toward
+  neutral. `auto_recipe` gained an optional `prefs` arg that applies the profile *on top
+  of* the measured values, each **re-clamped to a safe range** — so it stays data-driven,
+  just shifted toward the owner's taste. An empty/absent profile ⇒ today's Auto
+  **byte-for-byte** (regression-pinned), so a never-configured library is unchanged.
+  `describe_profile` yields the plain-language "why" note. **Webapp:** `editor.py` meta
+  key `editor_auto_preferences` + a §9-safe loader (garbled store → neutral, never
+  raises) + three endpoints modelled on the default-recipe CRUD — `GET
+  /api/editor/auto-preferences`, `POST …/feedback` (records one cue; unknown cue → 422,
+  store untouched), `DELETE …` (reset). The profile is threaded into
+  `build_auto_recipe_for_run`, so **both** the interactive `…/editor/auto` endpoint **and**
+  the unattended "Process target" auto-edit chain (`webapp/pipeline.py`) apply the owner's
+  taste. **Frontend:** `AutoFeedback` component (one-tap chips + why-note + Reset) mounted
+  in the editor's "What Auto-process did" alert; tapping a chip records feedback and
+  immediately re-runs Auto so the shift shows on the preview. Transparent + reversible
+  (the why-note + one-click Reset). Tests: `tests/test_auto_prefs.py` (accumulator bounds,
+  opposite-cue walk-back, safe-range clamp, garbage tolerance, byte-for-byte default,
+  recipe integration), `tests/webapp/test_editor.py` (+4: unset neutral, feedback records/
+  persists/resets, unknown cue 422, feedback shifts the served Auto recipe),
+  `frontend/.../AutoFeedback.test.tsx` (+3). Upgrade-safe: additive nullable library-meta
+  blob, no schema/config/API-shape/default change; Auto is neutral until the owner gives
+  feedback. **Remaining slices for a future run:** **(b)** per-object-type profiles
+  (galaxy/nebula/cluster — the classifier already exists) + recency decay + a "highlights/
+  core clipped" cue (needs a stretch highlight-knee param); **(c)** *optional later* a
+  light statistical fit (numpy/scikit, no NN). Original spec kept for provenance:
+- **⭐ OWNER-REQUESTED — Adaptive Auto: learn the owner's taste from feedback on the
   auto-processed image (no ML runtime, fully offline/private).** The owner wants to
   give feedback on the Auto result and have it get better at *their* taste over
   time. Key insight: `auto_recipe` (`seestack/edit/presets.py`) is already
@@ -4878,6 +4913,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+- ~~**IMPROVEMENT IDEA (Scout 2026-07-21) — make the SExtractor sky-mode fallback guard actually functional
+  (defense-in-depth; currently algebraically inert).**~~ — **SHIPPED v0.158.11** (Builder 2026-07-22, branch
+  `claude/pensive-faraday-jwvd6c`). Replaced the self-referential threshold (`abs(sky − median) > 5·abs(median −
+  mean)`, which is `1.5·X > 5·X` and never fires) with SExtractor's own trust criterion — fall back to the median
+  when the clipped `abs(mean − median) > 0.3·σ` (using the clipped std) — in all four inert copies:
+  `seestack/bg/per_frame.py::_zero_sky_per_channel` (CPU default path) + `_subtract_background_gpu` (GPU, using
+  the robust 1.4826·MAD `sigma` already computed there, so no new `cp.*` symbol/no warning),
+  `seestack/bg/coverage_leveling.py`, and `seestack/bg/final_gradient.py`. Guarded on `std` being finite and
+  positive so a flat channel (std 0, mean==median) is a clean no-op. Regressions in
+  `tests/test_sky_mode_guard.py`: realistic clipped sky still uses the mode (byte-for-byte no-op on the default
+  path — proves it's provably inert there), a symmetric histogram keeps mode≈median, a heavily object-crowded tile
+  (35 % of pixels lifted well above sky, surviving the 3σ clip → mean−median > 0.3·σ) now falls back to the median
+  instead of the biased mode, and a flat channel is a no-op. Upgrade-safe: within-function algorithm change, no
+  config/DB/API/on-disk change; realistic stacks are byte-for-byte unchanged (the 3σ-clip keeps mean−median well
+  inside the 0.3·σ band on real sky, so the restored guard only ever engages on pathological crowded input).
+  Original spec kept for provenance:
 - **IMPROVEMENT IDEA (Scout 2026-07-21) — make the SExtractor sky-mode fallback guard actually functional
   (defense-in-depth; currently algebraically inert).** *(Image quality / correctness-hardening, PRIORITY 4;
   size S.)* **Why:** the per-channel sky-zeroing uses the SExtractor mode `sky = 2.5·median − 1.5·mean`, with a
