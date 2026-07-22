@@ -1172,22 +1172,28 @@ def stack_run_options(safe: str, run_id: int, request: Request) -> dict[str, Any
 
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/wallpaper")
 def download_wallpaper(safe: str, run_id: int, request: Request,
-                       aspect: str = "phone") -> Response:
+                       aspect: str = "phone", north_up: bool = False) -> Response:
     """Crop + size the finished stack preview into a ready-to-set wallpaper.
 
     ``aspect`` is one of ``phone`` / ``desktop`` / ``square``. The preview is
     cropped to that shape centred on the plate-solved target (falling back to the
     image centre when the run has no WCS or the target has no known position),
     downscaled to a sane device resolution without upsampling, and returned as a
-    share-friendly JPEG. Read-only: nothing on disk changes.
+    share-friendly JPEG. ``north_up`` first rotates the picture so celestial North
+    points up (like every reference photo of the object), using the run's own WCS —
+    a no-op when the run has no WCS or the correction is trivial, so the ordinary
+    request is byte-for-byte unchanged. Read-only: nothing on disk changes.
 
     Registered *before* the ``/{kind}`` artifact route below so the literal
     ``wallpaper`` path segment isn't swallowed as an artifact kind.
     """
+    from seestack.render.orient import NORTH_UP_MIN_DEG
+    from seestack.render.thumbnail import orient_preview_north_up, stack_north_up_deg
     from seestack.wallpaper import (
         WALLPAPER_PRESETS,
         png_size,
         render_wallpaper_jpeg,
+        rotate_point_north_up,
         wallpaper_target_pixel,
     )
 
@@ -1217,6 +1223,21 @@ def download_wallpaper(safe: str, run_id: int, request: Request,
         size = png_size(preview)
         if size is not None:
             target_px = wallpaper_target_pixel(run.fits_path, ra, dec, size[0], size[1])
+
+    # North-up rotates the picture *and* moves the target pixel, so re-centre the
+    # crop on the rotated position. Only when a real WCS + more-than-trivial angle
+    # exists; otherwise the preview (and target pixel) are left untouched.
+    if north_up and run.fits_path and Path(run.fits_path).exists():
+        try:
+            angle = stack_north_up_deg(run.fits_path)
+            if angle is not None and abs(angle) >= NORTH_UP_MIN_DEG:
+                size = png_size(preview)
+                preview = orient_preview_north_up(preview, run.fits_path)
+                if target_px is not None and size is not None:
+                    target_px = rotate_point_north_up(
+                        target_px[0], target_px[1], size[0], size[1], angle)
+        except Exception:  # noqa: BLE001 — a broken FITS just yields the un-oriented wallpaper
+            pass
 
     data = render_wallpaper_jpeg(preview, preset, target_px)
     filename = f"{run.output_basename}_{aspect}_wallpaper.jpg"

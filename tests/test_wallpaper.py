@@ -9,10 +9,12 @@ from astropy.io import fits
 from astropy.wcs import WCS
 from PIL import Image
 
+from seestack.render.orient import rotate_image_north_up
 from seestack.wallpaper import (
     WALLPAPER_PRESETS,
     png_size,
     render_wallpaper_jpeg,
+    rotate_point_north_up,
     wallpaper_crop_box,
     wallpaper_target_pixel,
 )
@@ -123,6 +125,41 @@ def test_target_pixel_none_without_wcs_or_position(tmp_path):
     assert wallpaper_target_pixel(fp, 10.0, 10.0, 20, 20) is None   # no WCS
     fp2, ra0, dec0, w, h = _wcs_fits(tmp_path)
     assert wallpaper_target_pixel(fp2, None, dec0, w, h) is None     # no RA
+
+
+def _rotate_marker_argmax(px, py, w, h, angle):
+    """Ground truth: mark one bright pixel, rotate the image with the *same*
+    routine the wallpaper uses, and read back where the mark landed."""
+    img = np.zeros((h, w, 3), dtype=np.float32)
+    img[py, px, :] = 1.0
+    rot = rotate_image_north_up(img, angle)
+    lum = rot.sum(axis=2)
+    ry, rx = np.unravel_index(int(np.argmax(lum)), lum.shape)
+    return (float(rx), float(ry)), (rot.shape[1], rot.shape[0])  # (x,y), (w,h)
+
+
+def test_rotate_point_matches_lossless_90_step():
+    # A near-90° angle snaps to a lossless rot90 — the helper must track the same
+    # 90° turn the image takes, including the swapped canvas size.
+    w, h = 40, 24
+    for angle in (90.0, 90.4, -90.0, 180.0, -179.7):
+        (gx, gy), (gw, gh) = _rotate_marker_argmax(9, 5, w, h, angle)
+        rx, ry = rotate_point_north_up(9, 5, w, h, angle)
+        assert abs(rx - gx) <= 1.0 and abs(ry - gy) <= 1.0
+
+
+def test_rotate_point_matches_bicubic_expand():
+    # A general angle is a bicubic expand-rotate; the helper must land on the same
+    # spot in the grown canvas (a pixel of drift is fine — the crop is centred).
+    w, h = 50, 30
+    for angle in (30.0, -20.0, 45.0, 12.5):
+        (gx, gy), (gw, gh) = _rotate_marker_argmax(35, 8, w, h, angle)
+        rx, ry = rotate_point_north_up(35, 8, w, h, angle)
+        assert abs(rx - gx) <= 1.5 and abs(ry - gy) <= 1.5
+
+
+def test_rotate_point_zero_angle_is_identity():
+    assert rotate_point_north_up(12.0, 7.0, 40, 20, 0.0) == (12.0, 7.0)
 
 
 def _png(w, h, colour=(40, 80, 160)):

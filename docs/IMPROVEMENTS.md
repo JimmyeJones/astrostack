@@ -5992,20 +5992,29 @@ problems. Dogfood it every big-picture run and fix root causes.
   default-phone, WCS-centring end-to-end via a gradient preview), frontend `WallpaperMenu.test.tsx` (+2). Beginner
   bar ✔ (one tap, three obvious presets, zero astro knobs, plain language; serves the enjoy + share pillars).
   *(Original spec kept for provenance.)*
-- **IDEA (Builder 2026-07-21, filed while shipping the wallpaper export) — surface the "Make it your wallpaper"
-  menu on the Target/Gallery result surfaces too, and let it honour "North up".** *(Friendliness / PRIORITY 3;
-  size S.)* **PARTIALLY SHIPPED v0.158.4** (Builder 2026-07-21, branch `claude/pensive-faraday-kodolb`) — slice
-  **(a)-Target done**: the `WallpaperMenu` now sits next to the Picture/Share controls on the **Target** page
-  toolbar (guarded by `latestRun?.has_preview`, styled to match the toolbar via a new optional `variant` prop on
-  the component, default `"light"` so the History card is byte-for-byte unchanged), so a beginner can make a
-  wallpaper from the target's main "enjoy my picture" surface without opening History. Tests:
-  `Target.test.tsx` +2 (offers the three aspect presets with a preview; hides them without one). **Still open:**
-  (a)-**Gallery lightbox** — mount the same menu on the Gallery lightbox (pure frontend; the lightbox needs the
-  run id + `has_preview` for the shown image); and (b) optionally thread the existing `north_up` orientation
-  through the wallpaper endpoint so the cropped wallpaper can point celestial North up like the JPEG download
-  does — this needs the endpoint to orient the preview *before* computing the target pixel (the rotation moves the
-  pixel), so it's a small but real bit of care, not a pure pass-through. Both additive/read-only. Beginner bar ✔
-  (reaches the delight from where the beginner actually looks at their picture).
+- ~~**IDEA (Builder 2026-07-21, filed while shipping the wallpaper export) — surface the "Make it your wallpaper"
+  menu on the Target/Gallery result surfaces too, and let it honour "North up".**~~ — **ALL SLICES SHIPPED**
+  *(Friendliness / PRIORITY 3; size S.)* Slice **(a)-Target** shipped v0.158.4; the remaining two slices shipped
+  **v0.170.0** (Builder 2026-07-22, branch `claude/pensive-faraday-9u274a`):
+  **(a)-Gallery lightbox** — `ImageLightbox` gained a generic optional `toolbarExtra` slot (decoupled — the
+  lightbox knows nothing about wallpapers), and the Gallery mounts a `WallpaperMenu` (subtle variant) into it
+  whenever the viewed run `has_preview`, so a beginner can make a wallpaper straight from the fullscreen browse
+  view. **(b) North up** — the wallpaper endpoint (`GET …/wallpaper`) now takes `north_up`: when the run's WCS
+  yields a more-than-trivial correction it orients the preview North-up (reusing `orient_preview_north_up`) *and*
+  re-centres the crop on the rotated target via a new pure `seestack.wallpaper.rotate_point_north_up(px, py, w, h,
+  angle)` — which mirrors `rotate_image_north_up`'s two branches exactly (lossless `np.rot90` snap; else bicubic
+  `expand` rotate) so the target stays inside its crop. The `WallpaperMenu` grows an optional `canNorthUp` "North
+  up" switch that rewrites all three aspect links; the **Target** page enables it from a cheap
+  `render-suggestion` read of the latest run (`north_up_deg` non-null), and the endpoint no-ops (byte-for-byte
+  identical) when there's no field rotation, so it never shows a toggle that does nothing. Additive/upgrade-safe:
+  read-only, opt-in, no schema/config/API-shape/default change (`north_up` defaults false → the existing request
+  is unchanged). Tests: `tests/test_wallpaper.py` (+3 — `rotate_point_north_up` validated against the *actual*
+  `rotate_image_north_up` for the 90° snap, the bicubic-expand case, and the zero-angle identity),
+  `tests/webapp/test_wallpaper.py` (+2 — north_up rotates a tilted run / no-ops without field rotation),
+  `WallpaperMenu.test.tsx` (+2 — toggle hidden unless `canNorthUp`, rewrites links when on),
+  `ImageLightbox.test.tsx` (+1 — renders `toolbarExtra`), `Target.test.tsx` (+2 — toggle shown/hidden by
+  `north_up_deg`). Beginner bar ✔ (reaches the delight from where the beginner looks at their picture, oriented
+  like every reference photo).
 - **NEW BEGINNER FEATURE (Scout 2026-07-21 #11) — "Make it your wallpaper": one-tap export of a finished stack
   cropped + sized to a phone or desktop background, auto-centred on the target.** *(Beginner feature; PRIORITY 3
   friendliness / "enjoy + share" pillar; size S–M.)* Making your own astrophoto your phone lock-screen is one of

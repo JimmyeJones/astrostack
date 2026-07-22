@@ -19,9 +19,13 @@ _run_seq = 0
 
 
 def _register_run(data_root, safe: str, *, preview: Image.Image,
-                  with_wcs: bool = False, target_ra_dec=None) -> int:
+                  with_wcs: bool = False, target_ra_dec=None,
+                  rotation_deg: float = 0.0) -> int:
     """Register a run with a real preview PNG (and optionally a WCS master +
-    target position) so the wallpaper endpoint has something to crop."""
+    target position) so the wallpaper endpoint has something to crop.
+
+    ``rotation_deg`` rotates the WCS's CD matrix so the master is *not* North-up,
+    which is what the ``north_up`` wallpaper option corrects."""
     global _run_seq
     _run_seq += 1
     tag = f"wp_{_run_seq}"
@@ -36,7 +40,11 @@ def _register_run(data_root, safe: str, *, preview: Image.Image,
             wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
             wcs.wcs.crpix = [w / 2 + 0.5, h / 2 + 0.5]
             wcs.wcs.crval = [150.0, 20.0]
-            wcs.wcs.cd = [[-0.001, 0.0], [0.0, 0.001]]
+            theta = np.radians(rotation_deg)
+            ct, st = float(np.cos(theta)), float(np.sin(theta))
+            s = 0.001
+            # RA-flipped (CDELT1<0) TAN with an in-plane field rotation.
+            wcs.wcs.cd = [[-s * ct, s * st], [s * st, s * ct]]
             hdr = wcs.to_header()
         fits_path = tdir / f"{tag}_master.fits"
         fits.PrimaryHDU(data=cube, header=hdr).writeto(fits_path, overwrite=True)
@@ -119,6 +127,46 @@ def _wallpaper_mean(client, safe, run_id) -> float:
     r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/wallpaper?aspect=phone")
     assert r.status_code == 200
     return float(np.asarray(_open(r.content)).mean())
+
+
+def test_wallpaper_north_up_rotates_a_tilted_run(client, solved_library):
+    """A run whose WCS carries a real field rotation: the North-up wallpaper is a
+    rotated crop (different pixels + a tell-tale black corner from the expand
+    rotate), while the plain wallpaper is not."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    # A left→right brightness ramp so a rotation visibly reshuffles the pixels.
+    w, h = 400, 300
+    ramp = np.tile(np.linspace(20, 235, w, dtype=np.uint8), (h, 1))
+    grad = Image.fromarray(np.stack([ramp, ramp, ramp], axis=-1), "RGB")
+    run_id = _register_run(solved_library, safe, preview=grad, with_wcs=True,
+                           rotation_deg=30.0)
+
+    plain = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/wallpaper?aspect=square")
+    north = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/wallpaper?aspect=square&north_up=true")
+    assert plain.status_code == 200 and north.status_code == 200
+    assert plain.content != north.content                     # rotation changed it
+    # The bicubic expand-rotate fills exposed corners with black, so the North-up
+    # crop has some near-black pixels the plain (gap-free) ramp crop never has.
+    north_arr = np.asarray(_open(north.content).convert("L"))
+    plain_arr = np.asarray(_open(plain.content).convert("L"))
+    assert (north_arr < 8).mean() > (plain_arr < 8).mean() + 0.01
+
+
+def test_wallpaper_north_up_no_op_without_field_rotation(client, solved_library):
+    """A run already North-up (no field rotation) → the ``north_up`` request is a
+    no-op: byte-for-byte the same wallpaper as the plain one."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _register_run(solved_library, safe,
+                           preview=Image.new("RGB", (400, 300), (30, 60, 120)),
+                           with_wcs=True, rotation_deg=0.0)
+    plain = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/wallpaper?aspect=phone")
+    north = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/wallpaper?aspect=phone&north_up=true")
+    assert plain.status_code == 200 and north.status_code == 200
+    assert plain.content == north.content
 
 
 def test_wallpaper_centres_on_the_target_via_wcs(client, solved_library):
