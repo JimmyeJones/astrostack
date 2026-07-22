@@ -98,6 +98,38 @@ export interface NextSession {
   windows: NextObservingWindow[];
 }
 
+// One not-yet-captured showpiece that's well-placed tonight — a "try something
+// new" discovery suggestion (from /api/plan/suggest). Carries the friendly
+// catalog blurb ("what am I looking at?") plus tonight's observability.
+export interface SuggestedTarget {
+  id: string;
+  name: string;
+  ra_deg: number;
+  dec_deg: number;
+  type: string;
+  con: string;
+  blurb: string;
+  max_altitude_deg: number;
+  transit_utc: string | null;
+  minutes_above_min_alt: number;
+  moon_separation_deg: number;
+  moon_up_fraction: number | null;
+  usable_start_utc: string | null;
+  usable_end_utc: string | null;
+  score: number;
+  size_arcmin?: number | null;
+  framing?: FramingHint | null;
+}
+
+export interface SuggestResponse {
+  location_source: "settings" | "fits" | "none";
+  observer: { lat_deg: number; lon_deg: number; elevation_m: number } | null;
+  min_altitude_deg: number;
+  // A few famous showpieces the user hasn't captured that are up tonight,
+  // best-first; empty when no location is set or nothing new is well-placed.
+  suggestions: SuggestedTarget[];
+}
+
 // Plain-language "why were some frames left out?" breakdown (from
 // /frames/reject-summary). Buckets are non-zero and pre-ordered by the server.
 export interface RejectionBucket {
@@ -999,6 +1031,13 @@ export const api = {
   // the file to the OS calendar.
   nextSessionIcsUrl: (safe: string) =>
     `/api/plan/next-session/${safe}/calendar.ics`,
+  // "Try something new tonight" — famous showpieces the user hasn't captured
+  // that are well-placed tonight (empty list ⇒ the card self-hides).
+  suggestTargets: () => req<SuggestResponse>(`/api/plan/suggest`),
+  // Download URL for a *suggested* (not-yet-captured) showpiece's next windows as
+  // a .ics calendar file. Catalog ids can contain spaces ("NGC 7000"), so encode.
+  suggestIcsUrl: (catalogId: string) =>
+    `/api/plan/suggest/${encodeURIComponent(catalogId)}/calendar.ics`,
   getIntegrationGoal: (safe: string) =>
     req<{ goal_s: number | null }>(`/api/targets/${safe}/integration-goal`),
   setIntegrationGoal: (safe: string, goalS: number | null) =>

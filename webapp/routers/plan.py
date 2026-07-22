@@ -27,8 +27,10 @@ from seestack.nightplan import (
     HorizonProfile,
     LibraryTarget,
     Observer,
+    load_catalog,
     next_observing_windows,
     plan_tonight,
+    suggest_targets,
 )
 from webapp import deps
 from webapp.ics import IcsEvent, to_ics
@@ -443,6 +445,138 @@ def get_next_session_ics(
     events = [_window_ics_event(safe, entry.name, w, location) for w in wins]
     body = to_ics(events)
     filename = f"{safe}-next-session.ics"
+    return Response(
+        content=body,
+        media_type="text/calendar",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# How many not-yet-captured showpieces to suggest tonight. One to three keeps the
+# "try something new" card a gentle nudge, not a wall of choices for a beginner.
+_SUGGEST_LIMIT = 3
+
+
+@router.get("/suggest")
+def get_suggested_targets(
+    request: Request,
+    when: str | None = Query(default=None,
+                             description="ISO-8601 UTC reference; defaults to now"),
+    min_alt: int | None = Query(default=None, ge=0, le=80),
+) -> dict[str, Any]:
+    """"Try something new tonight" — a few famous, beginner-friendly showpiece
+    targets the user has **not** already captured that are well-placed tonight.
+
+    The discovery companion to ``/tonight`` (which ranks everything, mostly the
+    library) and ``/next-session`` (which plans a target you already have): it
+    answers the beginner's "what's a good, easy thing to point at tonight?" from
+    the curated showpiece whitelist, excluding anything already in the library.
+    Read-only and offline. ``suggestions`` is empty (the card self-hides) when no
+    location is set, nothing new is well-placed, or the library already covers the
+    whitelist; ``location_source`` lets the UI explain a missing location."""
+    settings = deps.get_settings(request)
+
+    start = datetime.now(timezone.utc)
+    if when:
+        try:
+            start = datetime.fromisoformat(when)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Bad 'when' timestamp") from exc
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+
+    observer, location_source = _resolve_observer(request, settings)
+    min_altitude = min_alt if min_alt is not None else int(settings.min_target_altitude_deg)
+
+    base: dict[str, Any] = {
+        "location_source": location_source,
+        "observer": asdict(observer) if observer is not None else None,
+        "min_altitude_deg": min_altitude,
+        "suggestions": [],
+    }
+    if observer is None:
+        return base
+
+    lib_coords = [(t.ra_deg, t.dec_deg) for t in _library_targets(request)]
+    suggestions = suggest_targets(
+        observer, start,
+        library_coords=lib_coords,
+        min_altitude_deg=float(min_altitude),
+        limit=_SUGGEST_LIMIT,
+        horizon=HorizonProfile.from_pairs(settings.horizon_profile),
+    )
+    base["suggestions"] = [asdict(s) for s in suggestions]
+    return base
+
+
+def _catalog_object(catalog_id: str):  # noqa: ANN202
+    """The bundled catalog object for ``catalog_id``, or ``None`` if unknown.
+
+    Only *showpiece* ids are addressable here — the ``.ics`` link exists to back
+    the suggestion card, so a non-showpiece (or bogus) id is a 404, not a way to
+    calendar arbitrary catalog rows."""
+    from seestack.nightplan import _SHOWPIECE_IDS
+
+    if catalog_id not in _SHOWPIECE_IDS:
+        return None
+    for obj in load_catalog():
+        if obj.id == catalog_id:
+            return obj
+    return None
+
+
+@router.get("/suggest/{catalog_id}/calendar.ics")
+def get_suggest_ics(
+    catalog_id: str,
+    request: Request,
+    min_alt: int | None = Query(default=None, ge=0, le=80),
+    when: str | None = Query(default=None,
+                             description="ISO-8601 UTC reference; defaults to now"),
+) -> Response:
+    """Download the next few good observing windows for a *suggested* (not-yet-
+    captured) showpiece as an ``.ics`` file, so a beginner can one-tap "Add to
+    calendar" the new target the discovery card recommended. Read-only and offline,
+    mirroring the per-target ``.ics``. 404s on an unknown/non-showpiece id or when
+    there's no upcoming window, so the file is never blank."""
+    settings = deps.get_settings(request)
+
+    start = datetime.now(timezone.utc)
+    if when:
+        try:
+            start = datetime.fromisoformat(when)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Bad 'when' timestamp") from exc
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+
+    obj = _catalog_object(catalog_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail="Unknown target")
+
+    observer, _ = _resolve_observer(request, settings)
+    min_altitude = min_alt if min_alt is not None else int(settings.min_target_altitude_deg)
+    if observer is None:
+        raise HTTPException(status_code=404,
+                            detail="No observing window to add (set a location first)")
+
+    wins = next_observing_windows(
+        observer, float(obj.ra_deg), float(obj.dec_deg),
+        start_utc=start,
+        min_altitude_deg=float(min_altitude),
+        horizon=HorizonProfile.from_pairs(settings.horizon_profile),
+        nights=_NEXT_SESSION_NIGHTS, want=_NEXT_SESSION_WANT,
+    )
+    if not wins:
+        raise HTTPException(status_code=404, detail="No upcoming window to add")
+
+    # Prefer the friendly common name; fall back to the catalog id (a few famous
+    # objects have no proper name). A stable, filesystem-safe slug for the UID/file.
+    display_name = obj.name or obj.id
+    slug = obj.id.replace(" ", "_")
+    location = f"{observer.lat_deg:.4f}, {observer.lon_deg:.4f}"
+    events = [_window_ics_event(slug, display_name, w, location) for w in wins]
+    body = to_ics(events)
+    filename = f"{slug}-next-session.ics"
     return Response(
         content=body,
         media_type="text/calendar",
