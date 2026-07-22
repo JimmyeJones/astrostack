@@ -30,6 +30,7 @@ import { SharePictureButton } from "../components/SharePictureButton";
 import { sharePictureText } from "../share";
 import { detectSolveSetupProblem } from "../components/target/solveSetup";
 import { RejectionBreakdown } from "../components/target/RejectionBreakdown";
+import { thinStackWarning } from "../components/target/thinStack";
 import { detectMixedPointings } from "../components/target/mixedPointings";
 
 // Re-exported for existing tests that import it from this route module.
@@ -354,6 +355,13 @@ export function TargetView() {
   });
   const runs = useQuery({ queryKey: ["runs", safe], queryFn: () => api.listStackRuns(safe) });
   const latestRun = runs.data?.[0];  // listStackRuns returns newest first
+  // Honest heads-up when the newest stack combined very few frames — it will
+  // look noisy (a stack only smooths noise as it combines more subs), so say so
+  // rather than presenting a single-sub result as a finished picture.
+  const thinStack = useMemo(
+    () => thinStackWarning(latestRun?.n_frames_used),
+    [latestRun],
+  );
 
   const patch = useMutation({
     mutationFn: ({ id, body }: { id: number; body: Record<string, unknown> }) =>
@@ -765,6 +773,18 @@ export function TargetView() {
               {mixedPointings.minorityIds.length === 1 ? "" : "s"}
             </Button>
           ) : null}
+        </Alert>
+      ) : null}
+      {thinStack ? (
+        <Alert
+          color={thinStack.level === "single" ? "orange" : "yellow"}
+          variant="light"
+          icon={<IconAlertTriangle size={18} />}
+          title={thinStack.level === "single"
+            ? "This stack is really just one frame"
+            : "Very few frames were combined"}
+        >
+          <Text size="sm">{thinStack.message}</Text>
         </Alert>
       ) : null}
       <Group justify="space-between" gap="xs">
