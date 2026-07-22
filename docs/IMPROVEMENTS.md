@@ -128,6 +128,40 @@ when you take it.
   summary). The repro scaffold (`scratchpad/repro_thin.py`, bg-noise-vs-N) is the harness to extend. Keep this
   entry at the top until the frame-count root cause is fixed.
 
+- **⭐ Streak auto-reject silently drops a large fraction of good subs on a bright *elongated* target (edge-on
+  galaxy, Needle/NGC 4565/891, an elongated nebula or comet) — on by default.** *(Stacking-engine correctness;
+  wrong-result, Medium; traced + simulated by a 2026-07-22 adversarial audit; NOT blind-fixed — see why below.)*
+  The shape-only streak detector (`seestack/qc/streaks.py`: bright `>sky+6σ`, long `major ≥ 80 px` half-res,
+  elongated `elongation ≥ 4.0` connected component) flags an edge-on galaxy / elongated bright target as a
+  "streak", and `apply_qc_result_to_db` (`seestack/qc/runner.py:104-108`, default
+  `auto_reject_streaks=True` since `keep_streaked_frames=False`) sets `accept=False, reject_reason="auto:streak"`.
+  `reconcile_streak_rejections` (`runner.py:186-192`) only *un*-rejects when the flag rate exceeds **>50%**
+  (≥10 eligible frames) or **>80%** (3–9 frames). **The gap:** because per-frame streak detection is a marginal
+  Hough decision, a *stationary* extended target flags on a **variable subset** of subs (sharper/brighter subs
+  flag, worse ones don't). If that subset lands in the **~34–50%** band (normal session) or anywhere **≤80%**
+  (short 3–9-sub session), the reconcile guard does **not** fire and those good subs stay `auto:streak`-rejected —
+  up to ~half a session's good frames discarded before they reach the stacker (the existing
+  `test_qc_streak_reconcile.py::test_small_target_minority_streaks_stay_rejected` even encodes a 2-of-6=33% flag
+  rate staying rejected). The per-pixel κ-σ/drizzle rejection in the stack is the *intended* fallback for genuine
+  trails (it's exactly what `keep_streaked_frames=True` relies on), which is why whole-frame rejection here is
+  over-aggressive. **Interacts with the ⭐⭐ top bug:** the reconcile fraction is computed over *all* eligible
+  frames including **accepted-but-unsolved** (`solve_failed`/no-`wcs_json`) subs, which never stack. On a faint
+  field with many solve failures the streaked (solved) galaxy subs are a small fraction of the *diluted*
+  denominator, so reconcile never fires even when they're a large fraction of the *stackable* subs — dropping the
+  few solved subs that ARE the target and worsening the thin-stack. **Why NOT blind-fixed this run:** the real
+  discriminator (transient trail vs stationary object) is **cross-frame pointing stability**, which the per-frame
+  shape detector lacks, and every cheap aggregate alternative (lower the reconcile fraction; raise the streak bar;
+  make whole-frame reject opt-in) is a tradeoff that needs **real elongated-target data** to tune safely — and a
+  wrong threshold change to this on-by-default hot path risks *worsening* the top bug. **Fix directions (pick with
+  real data):** (a) **principled** — have the detector record each flagged component's centroid/orientation
+  (additive nullable columns via `SCHEMA_VERSION`+`_migrate_schema`) and have `reconcile_streak_rejections`
+  re-accept when the flagged components cluster tightly in position across subs (a stationary object), regardless
+  of fraction; (b) **denominator fix** — compute the reconcile fraction over the *stackable* (solved) population,
+  not diluted by accepted-but-unsolved subs (guard the QC-runs-before-solve ordering so it doesn't collapse to the
+  small tier); (c) **cheap interim** — lower the main-tier reconcile fraction (κ-σ safely cleans a re-accepted
+  minority once ≥10 frames), keeping the small tier. Add a fail-before/pass-after regression test with a synthetic
+  variable-subset flag pattern. **Scout: validate on a real edge-on-galaxy stack before flipping.**
+
 - ~~**⭐ Always-on hot/cold-pixel suppression clips real (undersampled) star cores — dims and colour-shifts every
   star in the final stack, a coherent per-frame bias that stacking does NOT average out.**~~ — **FIXED v0.158.9**
   (Builder 2026-07-21, branch `claude/pensive-faraday-dg2fc9`; reproduced + regression-tested). Added a
@@ -6132,8 +6166,28 @@ problems. Dogfood it every big-picture run and fix root causes.
   a pure `focusVerdict(points)` helper, unit-tested for the steady / drift / too-few-points cases); (c) mount
   it on Target. Keep it hidden when <~5 timestamped frames carry FWHM (nothing to trend). Additive/off-nothing,
   no schema/config/API-shape change.
-- **NEW (Scout 2026-07-21, follow-on to the v0.148.1 sub-preview fix) — put a number on the "one frame vs your
-  stack" reveal: "stacking cut your noise ~N×".** *(Beginner feature / trust; PRIORITY 3; size S–M.)* Now that
+- ~~**NEW (Scout 2026-07-21, follow-on to the v0.148.1 sub-preview fix) — put a number on the "one frame vs your
+  stack" reveal: "stacking cut your noise ~N×".**~~ — **SHIPPED v0.162.0** (Builder 2026-07-22, branch
+  `claude/pensive-faraday-2iu86x`). The reveal card now shows a concrete, shareable number — *"Stacking your 228
+  subs cut the background noise about 15×."* — measured honestly per the Builder note's two pitfalls. **Engine:**
+  a pure `seestack/qc/noise_ratio.py::noise_ratio(sub_rgb, stack_rgb)` (no webapp import) — a raw robust
+  background-σ estimator (MAD of adjacent-pixel differences ÷ √2, NaN-aware; a two-pass object mask drops stars
+  and a *bright extended target* at `median + 4·σ` so its texture can't inflate the estimate, without truncating
+  the background noise distribution) returns `σ_sub / σ_stack`, landing near √(n_frames) for a mean stack.
+  **Backend:** a lazy, best-effort `.../one-sub-vs-stack/noise` → `{ratio|null}` endpoint; `_measure_noise_ratio`
+  measures **both** sides in the **linear** domain (debayered raw sub vs `getdata` master — never the display
+  PNGs) on **native-resolution equal central crops** (never one box-averaged, the other strided → no decimation
+  bias), and returns `null` for a tone-mapped editor/display-space export (no meaningful linear σ). **Frontend:**
+  a pure `noiseReductionBadge(ratio, n_frames)` (whole-number for ≥10×, one-decimal below, omitted under 1.5×) and
+  a teal badge line under the reveal — fetched **lazily** only once the user reveals the comparison, so History's
+  run list never pays for it. Additive, read-only, no schema/config/API-shape/default change. Tests:
+  `tests/test_noise_ratio.py` (+6: recovers a known σ, lands near √N, pedestal-invariant, bright-target-robust,
+  NaN-aware, degenerate→None), `tests/webapp/test_one_sub_vs_stack.py` (+4: real-master ratio, display-space→null,
+  no-master→null, unknown-run 404), `oneFrameVsStack.test.ts` (+5), `OneFrameVsStackCard.test.tsx` (+1 badge, +1
+  omitted, +lazy-fetch assertion).
+- ~~**NEW (Scout 2026-07-21, follow-on to the v0.148.1 sub-preview fix) — put a number on the "one frame vs your
+  stack" reveal: "stacking cut your noise ~N×" — original spec kept for provenance.**~~ *(Beginner feature /
+  trust; PRIORITY 3; size S–M.)* Now that
   `render_sub_preview` faithfully shows a single sub's *real* noise (v0.148.1 fixed the downsample that flattened
   it), the reveal can be **quantitative**, not just visual: measure the background noise (robust σ over a
   star-free/low-signal region) of the single sub vs the finished stack and show a plain badge — *"Stacking your

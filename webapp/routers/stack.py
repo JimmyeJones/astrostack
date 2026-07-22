@@ -821,6 +821,92 @@ async def reference_sub_png(safe: str, run_id: int, request: Request) -> Respons
                     headers={"Cache-Control": "no-store"})
 
 
+def _measure_noise_ratio(fits_path: str, sub_path: str, pattern: str) -> float | None:
+    """Background-noise reduction factor between one sub and the linear master.
+
+    Loads both on the **linear**, **native-resolution** scale (never the display
+    PNGs, never one box-averaged and the other strided — either would distort the
+    ratio), bounds each to an equal central crop for memory, and returns their
+    σ ratio. ``None`` when the master is a tone-mapped editor/display-space export
+    (its linear σ is meaningless) or either side can't be measured. Threadpool-safe.
+    """
+    import numpy as np
+    from astropy.io import fits as _fits
+
+    from seestack.io.fits_loader import bilinear_debayer, load_seestar_raw
+    from seestack.qc.noise_ratio import noise_ratio
+    from seestack.stack.output import fits_is_display_space
+
+    try:
+        if fits_is_display_space(fits_path):
+            return None
+    except Exception:  # noqa: BLE001 — an unreadable master → no honest number
+        return None
+
+    def _central_crop(rgb: np.ndarray, size: int = 1024) -> np.ndarray:
+        h, w = rgb.shape[:2]
+        y0 = max(0, (h - size) // 2)
+        x0 = max(0, (w - size) // 2)
+        return rgb[y0:y0 + size, x0:x0 + size]
+
+    try:
+        # Linear master (native res; NaN preserved for uncovered pixels).
+        arr = np.asarray(_fits.getdata(fits_path), dtype=np.float32)
+        if arr.ndim == 3:                       # (channels, H, W) → (H, W, channels)
+            stack_rgb = np.transpose(arr, (1, 2, 0))
+            if stack_rgb.shape[2] == 1:
+                stack_rgb = np.repeat(stack_rgb, 3, axis=2)
+            elif stack_rgb.shape[2] > 3:
+                stack_rgb = stack_rgb[..., :3]
+        else:                                   # 2-D mono → grey RGB
+            stack_rgb = np.stack([arr, arr, arr], axis=-1)
+        stack_rgb = _central_crop(stack_rgb)
+
+        # Linear sub: debayer at native res (no decimation), same central crop.
+        sub_raw, info = load_seestar_raw(sub_path, debayer=False, out_dtype=np.float32)
+        sub_rgb = bilinear_debayer(
+            sub_raw, pattern=(pattern or info.bayer_pattern or "RGGB"))
+        sub_rgb = _central_crop(sub_rgb)
+    except Exception:  # noqa: BLE001 — best-effort; the badge just omits the number
+        return None
+
+    return noise_ratio(sub_rgb, stack_rgb)
+
+
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/one-sub-vs-stack/noise")
+async def one_sub_vs_stack_noise(safe: str, run_id: int, request: Request) -> dict[str, Any]:
+    """The concrete "stacking cut your noise ~N×" number for the reveal card.
+
+    Measures the background-noise σ of a representative single sub against the
+    finished linear master and returns their ratio (``{"ratio": float|null}``) —
+    which lands near √(n_frames) on a healthy weighted-mean stack. Its own lazy,
+    best-effort endpoint so the info card stays cheap: any missing datum, an
+    edited/display-space export, or an unmeasurable image returns ``null`` and the
+    badge simply omits the number.
+    """
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
+        if run is None:
+            raise HTTPException(status_code=404, detail="No such run")
+        fits_path = run.fits_path
+        ref = _pick_reference_sub(proj)
+        src = (ref.cached_path or ref.source_path) if ref is not None else None
+        pattern = (ref.bayer_pattern or "RGGB").upper() if ref is not None else "RGGB"
+        if pattern not in _BAYER_PATTERNS:
+            pattern = "RGGB"
+    finally:
+        proj.close()
+        lib.close()
+
+    if (not fits_path or not Path(fits_path).exists()
+            or not src or not Path(src).exists()):
+        return {"ratio": None}
+
+    ratio = await run_in_threadpool(_measure_noise_ratio, str(fits_path), str(src), pattern)
+    return {"ratio": ratio}
+
+
 # Human-relevant provenance cards, in display order. Keys not present in a
 # given FITS are simply skipped, so this works for old stacks (no provenance),
 # newer stacks, channel-combines (NCOMBINE/STACKMTD) and editor exports

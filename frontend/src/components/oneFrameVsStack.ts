@@ -31,3 +31,26 @@ export function oneFrameCaption(
   const stack = hasCount ? `your ${nFrames}-frame stack` : "your stack";
   return `${frame} vs ${stack} — stacking cut the noise and pulled out faint detail.`;
 }
+
+/** The quantitative "stacking cut your noise ~N×" badge line, or null to omit it.
+ *
+ * Turns the measured background-noise reduction ratio into a concrete, shareable
+ * sentence a beginner immediately understands (and a plain reminder that more
+ * subs help, √N). Returns null for a missing/non-finite ratio, or one too small
+ * to be a compelling, trustworthy story (< 1.5×) — the card then just shows the
+ * visual reveal without a number. Formats a big reduction as a whole number
+ * ("about 15×") and a small one to one decimal ("about 2.4×"). */
+export function noiseReductionBadge(
+  ratio: number | null | undefined,
+  nFrames: number | null | undefined,
+): string | null {
+  if (ratio == null || !Number.isFinite(ratio) || ratio < 1.5) return null;
+  // Big reductions read as a whole number ("15×"); smaller ones keep one decimal
+  // ("2.4×") — but drop a trailing ".0" so a value that rounds up to a whole
+  // number ("10.0") shows cleanly as "10×".
+  const rounded = ratio >= 10 ? Math.round(ratio) : Math.round(ratio * 10) / 10;
+  const factor = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+  const hasCount = nFrames != null && Number.isFinite(nFrames) && nFrames > 0;
+  const subs = hasCount ? `your ${nFrames} subs` : "your subs";
+  return `Stacking ${subs} cut the background noise about ${factor}×.`;
+}

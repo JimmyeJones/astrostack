@@ -1166,6 +1166,11 @@ export const api = {
       sub_exposure_s: number | null;
       integration_s: number | null;
     }>(`/api/targets/${safe}/stack-runs/${id}/one-sub-vs-stack`),
+  // The concrete "stacking cut your noise ~N×" number (lazy, best-effort — null
+  // for an edited/older run or an unmeasurable image).
+  oneSubVsStackNoise: (safe: string, id: number) =>
+    req<{ ratio: number | null }>(
+      `/api/targets/${safe}/stack-runs/${id}/one-sub-vs-stack/noise`),
   stackReferenceSubUrl: (safe: string, id: number) =>
     `/api/targets/${safe}/stack-runs/${id}/reference-sub`,
   // "Watch your picture come together" progress reel (opt-in save_progress).
