@@ -183,6 +183,7 @@ def reject_summary(safe: str, request: Request) -> dict:
     try:
         counts = proj.reject_reason_counts()
         n_accepted = proj.count(accepted_only=True)
+        n_unsolved = proj.count_accepted_unsolved()
     finally:
         proj.close()
         lib.close()
@@ -193,7 +194,10 @@ def reject_summary(safe: str, request: Request) -> dict:
         # Plain-language grouped breakdown + reassuring verdict for the
         # "why were some frames left out?" beginner card. Additive: the raw
         # ``counts``/``total`` above stay for existing consumers.
-        "summary": summarize_rejections(counts, n_accepted),
+        # ``n_unsolved`` folds accepted-but-not-plate-solved subs (silently
+        # excluded from the stack) into the breakdown so a thin stack is
+        # explained, not counted as "used".
+        "summary": summarize_rejections(counts, n_accepted, n_unsolved),
     }
 
 

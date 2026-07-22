@@ -95,12 +95,29 @@ when you take it.
   `thin` for 2–4, `null` ≥5 — thresholds taken from the √N curve) drives a plain-language Alert on the Target
   page ("This stack combined only N frame(s) — it will look noisy; check your subs plate-solved and weren't
   over-rejected, then add more subs"). Frontend-only, additive, no API/schema/default change (the run already
-  carries `n_frames_used`). Tests: `thinStack.test.ts` (+5). (3) **STILL OPEN — the root-cause half (needs the
-  owner's real faint-field data):** localise *which* stage over-drops (ASTAP solve-failure rate vs auto-grade vs
-  streak vs QC) on a real sparse-star field and fix the over-rejection (and/or a server-side minimum-frames guard
-  that surfaces "only N of M subs could be stacked because …" in the auto/Process job summary). The repro
-  scaffold (`scratchpad/repro_thin.py`, bg-noise-vs-N) is the harness to extend. Keep this entry at the top until
-  the frame-count root cause is fixed.
+  carries `n_frames_used`). Tests: `thinStack.test.ts` (+5). (3) **MORE OF THE HONEST-ACCOUNTING HALF SHIPPED
+  v0.159.4 (Builder 2026-07-22, branch `claude/pensive-faraday-dks31d`) — accepted-but-unsolved subs are no
+  longer counted as "used".** The "why were some frames left out?" breakdown (`webapp/rejection_summary.py`)
+  previously fed only *rejected* frames, treating every **accepted** sub — including those that never
+  plate-solved — as if it made the stack. On the owner's exact case (plate-solve fails on most faint subs, so
+  hundreds stay accepted-but-unsolved and are silently dropped by `run_stack`, which combines only
+  accepted **and** solved frames) the card reassuringly reported "used 500 of 500, healthy night" while the real
+  stack was a handful of frames of gibberish. Fix: `Project.count_accepted_unsolved()` (accept=1 ∧ wcs_json IS
+  NULL) feeds a new `n_unsolved` arg to `summarize_rejections`, which now (a) surfaces those subs as their own
+  **"Not located in the sky yet"** bucket, (b) counts them as *left-out* (so `used` = accepted **and** solved =
+  what actually stacks, and `dropped` includes them), and (c) leads with a **plate-solve nudge** verdict when
+  unsolved subs outnumber what stacked ("Most of your subs haven't been located in the sky yet … Run Plate
+  Solve"). Frontend: the reject-summary query now runs whenever the target loads (was gated on
+  `rejectedCount>0`, so the owner's zero-rejected case never fetched it), and a new orange **"N not located
+  yet"** badge + honest "X of Y went into your picture" line appears even when nothing was rejected. Additive
+  and upgrade-safe: default `n_unsolved=0` keeps every existing caller/test unchanged; no config/DB/API-shape
+  change (only an added response field value). Tests: `test_rejection_summary.py` (+4), `test_api.py`
+  (+1 endpoint test on unsolved fixtures), `Target.test.tsx` (+1 badge test). (4) **STILL OPEN — the root-cause
+  half (needs the owner's real faint-field data):** localise *which* stage over-drops (ASTAP solve-failure rate
+  vs auto-grade vs streak vs QC) on a real sparse-star field and fix the over-rejection (and/or a server-side
+  minimum-frames guard that surfaces "only N of M subs could be stacked because …" in the auto/Process job
+  summary). The repro scaffold (`scratchpad/repro_thin.py`, bg-noise-vs-N) is the harness to extend. Keep this
+  entry at the top until the frame-count root cause is fixed.
 
 - ~~**⭐ Always-on hot/cold-pixel suppression clips real (undersampled) star cores — dims and colour-shifts every
   star in the final stack, a coherent per-frame bias that stacking does NOT average out.**~~ — **FIXED v0.158.9**

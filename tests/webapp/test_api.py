@@ -429,11 +429,32 @@ def test_bulk_returns_changed_ids_for_undo(client, built_library):
         assert after[fid]["reject_reason"] is None
 
 
-def test_reject_summary_groups_by_reason(client, built_library, data_root):
+def test_reject_summary_surfaces_accepted_unsolved_frames(client, built_library):
+    """The owner's gibberish case: subs are accepted but not plate-solved yet, so
+    they never reach the stack. The breakdown must surface them as "not located
+    yet" (left-out) instead of silently counting them as used."""
+    frames = client.get("/api/targets/M_42/frames").json()
+    n_total = len(frames)
+    assert n_total > 0
+
+    body = client.get("/api/targets/M_42/frames/reject-summary").json()
+    # Nothing *rejected*, but every accepted-unsolved sub is honestly left out.
+    assert body["counts"] == {}
+    summary = body["summary"]
+    assert summary["used"] == 0                 # none plate-solved → none stacked
+    assert summary["dropped"] == n_total
+    keys = {b["key"]: b["count"] for b in summary["buckets"]}
+    assert keys == {"unsolved": n_total}
+    # Unsolved dominates, so the verdict nudges the user to plate-solve.
+    assert summary["verdict"]["tone"] == "warn"
+    assert "Plate Solve" in summary["verdict"]["text"]
+
+
+def test_reject_summary_groups_by_reason(client, solved_library, data_root):
     from seestack.io.library import Library
 
     frames = client.get("/api/targets/M_42/frames").json()
-    # Nothing rejected yet.
+    # Nothing rejected yet (frames are all accepted and plate-solved).
     r = client.get("/api/targets/M_42/frames/reject-summary")
     assert r.status_code == 200
     body0 = r.json()

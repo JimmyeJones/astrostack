@@ -343,12 +343,19 @@ export function TargetView() {
   const rejectedCount = target.data
     ? target.data.n_frames - target.data.n_frames_accepted
     : 0;
-  // Only fetch the why-breakdown when there's something rejected to explain.
+  // Fetch the why-breakdown once the target is loaded: it also surfaces accepted
+  // subs that haven't plate-solved yet (silently excluded from the stack), which
+  // aren't visible from the target's accepted/rejected counts alone.
   const rejectSummary = useQuery({
     queryKey: ["reject-summary", safe],
     queryFn: () => api.rejectSummary(safe),
-    enabled: rejectedCount > 0,
+    enabled: !!target.data,
   });
+  // Accepted-but-not-yet-solved subs the stacker can't use — the honest count
+  // behind a thin/gibberish stack. Comes from the breakdown's "unsolved" bucket.
+  const unsolvedCount =
+    rejectSummary.data?.summary?.buckets.find((b) => b.key === "unsolved")
+      ?.count ?? 0;
   const frames = useQuery({
     queryKey: ["frames", safe, sort, order],
     queryFn: () => api.listFrames(safe, sort, order),
@@ -806,11 +813,17 @@ export function TargetView() {
               </Badge>
             </Tooltip>
           ) : null}
-          {rejectedCount > 0 ? (
+          {rejectedCount > 0 || unsolvedCount > 0 ? (
             <HoverCard width={300} shadow="md" withArrow openDelay={100}>
               <HoverCard.Target>
-                <Badge variant="light" color="gray" style={{ cursor: "help" }}>
-                  {rejectedCount} rejected
+                <Badge
+                  variant="light"
+                  color={unsolvedCount > 0 && rejectedCount === 0 ? "orange" : "gray"}
+                  style={{ cursor: "help" }}
+                >
+                  {unsolvedCount > 0 && rejectedCount === 0
+                    ? `${unsolvedCount} not located yet`
+                    : `${rejectedCount} rejected`}
                 </Badge>
               </HoverCard.Target>
               <HoverCard.Dropdown>
