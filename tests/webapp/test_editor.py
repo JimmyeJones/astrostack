@@ -719,6 +719,55 @@ def test_auto_feedback_shifts_the_auto_recipe(client, solved_library):
     assert stretch_target_bg() == base
 
 
+def test_auto_feedback_with_run_context_is_scoped_to_the_object_type(
+        client, solved_library, monkeypatch):
+    """Feedback given while editing a run is recorded into that run's archetype
+    bucket (not the global taste), and the returned note names the archetype — so
+    a 'too dark' on a galaxy brightens galaxies without touching clusters."""
+    import seestack.edit.presets as presets
+
+    # Force the classifier so the test doesn't depend on the synthetic proxy's
+    # content — the classifier itself is covered by its own unit tests.
+    monkeypatch.setattr(presets, "classify_target", lambda rgb: {"cls": "galaxy"})
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="scoped")
+
+    r = client.post("/api/editor/auto-preferences/feedback",
+                    json={"cue": "too_dark", "safe": safe, "run_id": rid})
+    assert r.status_code == 200
+    body = r.json()
+    # The response is scoped to the run's archetype: brighter, named for galaxies.
+    assert body["neutral"] is False
+    assert body["biases"]["brightness"] == 1
+    assert body["note"] and "for your galaxies" in body["note"]
+
+    # The *global* view (library-wide GET, no run context) stays neutral — the
+    # taste lives only in the galaxy bucket.
+    glob = client.get("/api/editor/auto-preferences").json()
+    assert glob["neutral"] is True and glob["biases"] == {}
+
+    # The run-scoped GET reflects the galaxy taste on load (before any new tap).
+    run_view = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/auto-preferences").json()
+    assert run_view["neutral"] is False
+    assert run_view["biases"]["brightness"] == 1
+    assert "for your galaxies" in (run_view["note"] or "")
+
+    # And the run's own one-click Auto reflects the galaxy bias (apply path
+    # classifies via the same patched classifier → galaxy → brighter stretch).
+    def stretch_target_bg():
+        ops = client.post(
+            f"/api/targets/{safe}/stack-runs/{rid}/editor/auto").json()["ops"]
+        return next(o for o in ops if o["id"] == "tone.stretch")["params"]["target_bg"]
+
+    monkeypatch.setattr(presets, "classify_target", lambda rgb: {"cls": "cluster"})
+    cluster_bg = stretch_target_bg()  # a cluster is untouched by the galaxy taste
+    monkeypatch.setattr(presets, "classify_target", lambda rgb: {"cls": "galaxy"})
+    galaxy_bg = stretch_target_bg()
+    assert galaxy_bg > cluster_bg
+
+
 def test_edit_preview_and_histogram(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
     rid = _make_run(solved_library, safe, is_mosaic=True)

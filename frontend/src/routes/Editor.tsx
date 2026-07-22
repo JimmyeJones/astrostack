@@ -1653,7 +1653,7 @@ export function EditorView() {
                 {/* Adaptive Auto: one-tap feedback teaches Auto the owner's taste
                     over time (bounded, reversible). Re-runs Auto so the shift shows
                     immediately. */}
-                <AutoFeedback onRerun={() => auto.mutate()} />
+                <AutoFeedback onRerun={() => auto.mutate()} safe={safe} runId={rid} />
               </Alert>
             ) : null}
 
