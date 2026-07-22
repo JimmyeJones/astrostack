@@ -13,6 +13,7 @@ about astropy import paths or header formatting details.
 from __future__ import annotations
 
 import logging
+import math
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -142,6 +143,56 @@ def wcs_dict_rescaled_to_preview(
         }
     except Exception as exc:  # noqa: BLE001 — a malformed WCS just means "fall back"
         log.warning("WCS rescale to preview failed (%s): %s", fits_path, exc)
+        return None
+
+
+def _extent_from_scale_matrix(
+    m, full_w: int, full_h: int,
+) -> tuple[float, float, float]:
+    """(width_deg, height_deg, rotation_deg) from a 2×2 CD/scale matrix + dims.
+
+    ``m[i][j]`` is ``∂world_i/∂pixel_j`` (astropy's ``wcs.pixel_scale_matrix``
+    layout, deg/px): column 0 is the RA/Dec change per x-pixel, column 1 per
+    y-pixel. The angular size along each pixel axis is that column's magnitude,
+    so ``width_deg = full_w · |col_x|`` and ``height_deg = full_h · |col_y|``.
+
+    The position angle is recovered from the second row as
+    ``atan2(-CD2_1, CD2_2)`` — the inverse of the FITS-standard CROTA2→CD
+    relation for the RA-flipped convention (CDELT1 < 0). For a single-frame
+    canvas (whose stored WCS *is* the reference frame's solved WCS) this returns
+    exactly the ``CROTA2`` the frame's ``rotation_deg`` carried, so the built-in
+    3D viewer is unchanged there; for a mosaic it returns the *union canvas*
+    rotation instead of frame 0's extrapolation.
+    """
+    cd11, cd21 = float(m[0][0]), float(m[1][0])   # column 0 (per x-pixel)
+    cd12, cd22 = float(m[0][1]), float(m[1][1])   # column 1 (per y-pixel)
+    width_deg = full_w * math.hypot(cd11, cd21)
+    height_deg = full_h * math.hypot(cd12, cd22)
+    rotation_deg = math.degrees(math.atan2(-cd21, cd22))
+    return width_deg, height_deg, rotation_deg
+
+
+def canvas_extent_from_fits(
+    fits_path: str | Path,
+) -> tuple[float, float, float] | None:
+    """A stack canvas's on-sky (width_deg, height_deg, rotation_deg) from its
+    **stored** WCS, or ``None`` when the master FITS is missing/headerless.
+
+    The stack master FITS carries the true canvas geometry (for a mosaic the
+    astropy-built union-canvas WCS, for a single target the reference frame's own
+    solved WCS). Deriving size + rotation from it places the built-in 3D viewer's
+    tile on the *canvas* grid — mirroring what the Aladin overlay's ``wcs`` already
+    does — instead of extrapolating from a single representative frame. Returns
+    ``None`` (caller falls back to the frame-0 pixscale/rotation) when no
+    celestial WCS is present. See :func:`_extent_from_scale_matrix`.
+    """
+    wcs, full_w, full_h = celestial_wcs_from_fits(fits_path)
+    if wcs is None or full_w <= 0 or full_h <= 0:
+        return None
+    try:
+        return _extent_from_scale_matrix(wcs.pixel_scale_matrix, full_w, full_h)
+    except Exception as exc:  # noqa: BLE001 — a malformed WCS just means "fall back"
+        log.warning("WCS extent from FITS failed (%s): %s", fits_path, exc)
         return None
 
 

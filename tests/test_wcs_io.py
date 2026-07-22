@@ -8,6 +8,8 @@ pytest.importorskip("astropy")
 from astropy.wcs import WCS  # noqa: E402
 
 from seestack.io.wcs_io import (  # noqa: E402
+    _extent_from_scale_matrix,
+    canvas_extent_from_fits,
     footprint_radec_deg,
     wcs_dict_rescaled_to_preview,
     wcs_from_text,
@@ -158,3 +160,49 @@ def test_rescaled_preview_wcs_returns_none_without_a_master(tmp_path):
                        cd=[[-1e-3, 0.0], [0.0, 1e-3]])
     assert wcs_dict_rescaled_to_preview(fits_path, 0, 100) is None
     assert wcs_dict_rescaled_to_preview(fits_path, 100, -1) is None
+
+
+@pytest.mark.parametrize("crota2", [0.0, 12.0, 37.0, -25.0, 90.0])
+def test_extent_from_scale_matrix_recovers_crota2(crota2):
+    """Size + rotation are read back exactly from a standard CROTA2-built WCS.
+
+    A single-frame canvas's stored WCS *is* the reference frame's solved WCS, so
+    the recovered rotation must equal the frame's ``CROTA2`` (== its stored
+    ``rotation_deg``) for the built-in 3D viewer to be unchanged there. Pins the
+    ``atan2(-CD2_1, CD2_2)`` convention against astropy's own CROTA2→CD."""
+    scale = 2.5 / 3600.0
+    w = WCS(naxis=2)
+    w.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+    w.wcs.crval = [83.6, -5.4]
+    w.wcs.crpix = [960.5, 540.5]
+    w.wcs.cdelt = np.array([-scale, scale])  # RA-flipped (CDELT1 < 0)
+    w.wcs.crota = [0.0, crota2]
+    width_deg, height_deg, rotation_deg = _extent_from_scale_matrix(
+        w.pixel_scale_matrix, 1920, 1080)
+    assert width_deg == pytest.approx(1920 * scale, rel=1e-9)
+    assert height_deg == pytest.approx(1080 * scale, rel=1e-9)
+    assert rotation_deg == pytest.approx(crota2, abs=1e-6)
+
+
+def test_canvas_extent_from_fits_reads_the_stored_geometry(tmp_path):
+    """The FITS wrapper returns the canvas size + rotation from a stored WCS, and
+    falls back to None (caller uses the frame-0 extrapolation) when absent."""
+    import math
+
+    scale = 3.0 / 3600.0
+    theta = math.radians(30.0)
+    c, s = math.cos(theta), math.sin(theta)
+    # Standard FITS CROTA2→CD for CDELT1 = -scale, CDELT2 = +scale, θ = 30°.
+    cd = [[-scale * c, -scale * s], [-scale * s, scale * c]]
+    fits_path = tmp_path / "m.fits"
+    _write_master_fits(fits_path, full_w=1000, full_h=800, cd=cd)
+
+    extent = canvas_extent_from_fits(fits_path)
+    assert extent is not None
+    width_deg, height_deg, rotation_deg = extent
+    assert width_deg == pytest.approx(1000 * scale, rel=1e-6)
+    assert height_deg == pytest.approx(800 * scale, rel=1e-6)
+    assert rotation_deg == pytest.approx(30.0, abs=1e-4)
+
+    # Missing / headerless master → None (frame-0 fallback).
+    assert canvas_extent_from_fits(tmp_path / "nope.fits") is None

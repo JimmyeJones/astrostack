@@ -18,7 +18,7 @@ from pathlib import Path
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
-from seestack.io.wcs_io import wcs_dict_rescaled_to_preview
+from seestack.io.wcs_io import canvas_extent_from_fits, wcs_dict_rescaled_to_preview
 from seestack.post.skymap import bright_star_catalog
 from webapp import deps
 
@@ -131,11 +131,22 @@ def get_sky(request: Request) -> SkyResponse:
                 if run is None:
                     continue
                 pixscale, rotation = _representative_pixscale_rotation(proj)
-                if not pixscale:
-                    # No plate-solved frame → we can't size it on the sky. Skip.
+                # Prefer the stack's *stored* canvas WCS for the tile's size and
+                # rotation too — that is the true union-canvas geometry the pixels
+                # were reprojected onto, so a mosaic (or a rotated canvas) is sized
+                # and oriented correctly instead of extrapolated from frame 0's
+                # grid. Mirrors the `wcs`/Aladin path below (same fix, both viewers
+                # now agree). Fall back to the single-frame pixscale/rotation when
+                # the master FITS is missing/headerless (older/edited runs).
+                extent = canvas_extent_from_fits(run.fits_path) if run.fits_path else None
+                if extent is not None:
+                    width_deg, height_deg, rotation = extent
+                elif pixscale:
+                    width_deg = run.canvas_w * pixscale / 3600.0
+                    height_deg = run.canvas_h * pixscale / 3600.0
+                else:
+                    # No stored WCS and no plate-solved frame → can't size it. Skip.
                     continue
-                width_deg = run.canvas_w * pixscale / 3600.0
-                height_deg = run.canvas_h * pixscale / 3600.0
                 wcs = None
                 if run.preview_path and (size := _png_size(run.preview_path)):
                     # Prefer the stack's *stored* canvas WCS (master FITS header),
