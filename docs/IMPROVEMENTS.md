@@ -5854,18 +5854,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   sentence + the dated window(s), reusing the readiness card's goal-gap figures the page already loads. Keeps the
   beginner-feature pipeline stocked with a *forward-looking, autonomy* feature to balance the recent run of
   retrospective trend cards.
-- **IMPROVEMENT IDEA (Scout 2026-07-21) — surface "N subs the auto-stack quietly demoted" on the result, so the
-  beginner trusts (and understands) quality weighting.** *(Autonomy trust / PRIORITY 3 friendliness; size S.)*
-  Quality weighting (`weighting.py`) already down-weights soft/hazy/elongated subs, and `WeightingStats` already
-  computes `n_downweighted` (frames pulled below full weight) — but the finished result never *tells* the
-  beginner it happened. A one-line trust note on the run Info panel — *"12 of your 228 subs were softer than the
-  rest, so the stacker gave them less weight (not dropped — just trusted less). Your sharp subs did the heavy
-  lifting."* — turns an invisible auto-decision into a reassuring, educational one (the same "show what the
-  autonomy did" pattern the auto-edit note and rejection "% dropped" line already follow). The number is already
-  computed and plumbed through the stack log; this just persists it to the run record (additively) and renders one
-  sentence. Distinct from the rejection "% of samples clipped" line (that's per-pixel κ-σ *rejection*; this is
-  per-*frame* quality *weighting*). Beginner bar ✔: zero knobs, plain language, builds trust in the auto-stack.
-  Guardrails: additive/read-only, self-hide when weighting is off or `n_downweighted == 0`.
+- ~~**IMPROVEMENT IDEA (Scout 2026-07-21) — surface "N subs the auto-stack quietly demoted" on the result, so the
+  beginner trusts (and understands) quality weighting.**~~ — **SHIPPED v0.159.5** (Builder 2026-07-22, branch
+  `claude/pensive-faraday-dks31d`). The backend half was *already* done — `webapp/routers/stack.py` parses
+  `WGTMODE`/`WGTNDOWN`/`WGTMIN`/`WGTMAX`/`WGTMED` from the FITS header into the run-info `weighting` dict (no DB
+  migration needed) — and History's Info panel already showed the *number*, but only as jargon
+  (*"Quality-weighted · 7 frames down-weighted · weights 0.31–1.00 (median 0.72)"*), which fails the beginner
+  bar the idea called for. This run shipped the missing *plain-language, reassuring* half: a pure
+  `weightingSummaryText(weighting, nFrames)` helper (`frontend/src/routes/History.tsx`) renders
+  *"Quality-weighted — of your 840 subs, 7 were softer or hazier than the rest, so the stacker trusted them a
+  little less (not dropped — just weighted down). Your best subs did the heavy lifting."*, with singular grammar
+  for one sub, a bare-count fallback when the total is unknown, and a "your subs were consistent, so they all
+  counted about equally" reassurance when nothing was down-weighted. Replaces the terse weights min/max/median
+  jargon line entirely (removing expert surface per PRIORITY 3). Frontend-only, additive/read-only, no
+  engine/schema/API/default change. Tests: `History.test.tsx` (+6 helper cases; the existing render test now
+  asserts the plain-language sentence).
 - **PARTLY SHIPPED (v0.153.0, Builder 2026-07-21, branch `claude/pensive-faraday-c2l3n1`) — the honest √N
   diminishing-returns *verdict*, folded into the existing "Is it enough yet?" readiness card rather than a
   second parallel card.** Chose to **deepen the existing card** over adding a whole new `IntegrationMeterCard`
