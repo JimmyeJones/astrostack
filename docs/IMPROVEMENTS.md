@@ -82,6 +82,25 @@ when you take it.
   ship gibberish again. Severity: wrong-result on the app's **core function** (a
   clean stack), owner-visible on real data. Confidence: traced (data-dependent →
   frame-count, not render); reproduce to localise the dropping stage.
+  **▶ PARTIAL — honest "thin stack" warning SHIPPED v0.159.3 + engine ruled out (Builder 2026-07-22, branch
+  `claude/pensive-faraday-x8myvn`).** (1) **Reproduced the engine side and it is CLEAN** — synthetic stacks of a
+  faint 6-star field (`sky_noise≈50`, `noise_seed` varied per sub) reduce background noise ~√N: measured
+  bg-noise **11.86 (1 frame) → 6.02 (4) → 3.03 (16)**, i.e. **1.97× (1→4)** and **1.98× (4→16)**, both ≈ the
+  ideal 2.0×. So the accumulator/coverage/κ-σ path averages correctly even on a sparse-star field — **cause #2
+  (combine/coverage regression) is ruled out.** A 1-frame "stack" IS just one raw sub → per-pixel colour speckle,
+  exactly the owner's gibberish. This confirms **the root cause is frame-count** (cause #1: plate-solve failing
+  on faint fields and/or over-aggressive auto-reject/grade dropping most subs). (2) **Shipped the honest
+  safety-net half** so a thin result is never silently presented as a finished picture: a pure, threshold-driven
+  `frontend/src/components/target/thinStack.ts::thinStackWarning(n_frames_used)` (level `single` for ≤1 frame,
+  `thin` for 2–4, `null` ≥5 — thresholds taken from the √N curve) drives a plain-language Alert on the Target
+  page ("This stack combined only N frame(s) — it will look noisy; check your subs plate-solved and weren't
+  over-rejected, then add more subs"). Frontend-only, additive, no API/schema/default change (the run already
+  carries `n_frames_used`). Tests: `thinStack.test.ts` (+5). (3) **STILL OPEN — the root-cause half (needs the
+  owner's real faint-field data):** localise *which* stage over-drops (ASTAP solve-failure rate vs auto-grade vs
+  streak vs QC) on a real sparse-star field and fix the over-rejection (and/or a server-side minimum-frames guard
+  that surfaces "only N of M subs could be stacked because …" in the auto/Process job summary). The repro
+  scaffold (`scratchpad/repro_thin.py`, bg-noise-vs-N) is the harness to extend. Keep this entry at the top until
+  the frame-count root cause is fixed.
 
 - ~~**⭐ Always-on hot/cold-pixel suppression clips real (undersampled) star cores — dims and colour-shifts every
   star in the final stack, a coherent per-frame bias that stacking does NOT average out.**~~ — **FIXED v0.158.9**
