@@ -98,6 +98,22 @@ export interface NextSession {
   windows: NextObservingWindow[];
 }
 
+// Plain-language "why were some frames left out?" breakdown (from
+// /frames/reject-summary). Buckets are non-zero and pre-ordered by the server.
+export interface RejectionBucket {
+  key: string;
+  label: string;
+  count: number;
+  note: string;
+}
+export interface RejectionSummary {
+  used: number;
+  dropped: number;
+  dropped_fraction: number;
+  verdict: { tone: "good" | "ok" | "warn"; text: string };
+  buckets: RejectionBucket[];
+}
+
 export interface Target {
   safe_name: string;
   name: string;
@@ -1007,6 +1023,9 @@ export const api = {
       // the star-database case too; older backends omit it and the frontend
       // falls back to detecting it from `counts`.
       solve_setup_problem?: { kind: "astap" | "database"; frames: number } | null;
+      // Plain-language grouped "why were some frames left out?" breakdown
+      // (v0.159.2+). Older backends omit it, so it's optional.
+      summary?: RejectionSummary;
     }>(
       `/api/targets/${safe}/frames/reject-summary`,
     ),

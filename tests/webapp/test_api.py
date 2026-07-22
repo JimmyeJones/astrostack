@@ -436,7 +436,13 @@ def test_reject_summary_groups_by_reason(client, built_library, data_root):
     # Nothing rejected yet.
     r = client.get("/api/targets/M_42/frames/reject-summary")
     assert r.status_code == 200
-    assert r.json() == {"counts": {}, "total": 0, "solve_setup_problem": None}
+    body0 = r.json()
+    assert body0["counts"] == {}
+    assert body0["total"] == 0
+    assert body0["solve_setup_problem"] is None
+    # The friendly breakdown is present but empty (no buckets, nothing dropped).
+    assert body0["summary"]["dropped"] == 0
+    assert body0["summary"]["buckets"] == []
 
     # A manual reject (reason "user")...
     client.post("/api/targets/M_42/frames/bulk",
@@ -458,6 +464,14 @@ def test_reject_summary_groups_by_reason(client, built_library, data_root):
     assert body["counts"].get("qc:fwhm") == 1
     # Ordinary rejects are not a solve-setup problem.
     assert body["solve_setup_problem"] is None
+    # The friendly breakdown groups the two reasons into a "soft" (qc:fwhm) and a
+    # "removed" (user) bucket, each with a count, and carries a headline verdict.
+    summary = body["summary"]
+    assert summary["dropped"] == 2
+    bucket_keys = {b["key"]: b["count"] for b in summary["buckets"]}
+    assert bucket_keys.get("soft") == 1
+    assert bucket_keys.get("removed") == 1
+    assert summary["used"] >= 1 and summary["verdict"]["text"]
     # 'reject-summary' is a literal path, not captured as a frame id.
     assert client.get("/api/targets/M_42/frames/reject-summary").status_code == 200
 

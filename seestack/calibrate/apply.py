@@ -56,6 +56,14 @@ class CalibrationMasters:
     # (see :meth:`_effective_dark`); the unscaled path already subtracts the
     # sanitized 0 there.
     dark_nodata_mask: np.ndarray | None = None
+    # Boolean mask of master-*bias* pixels that were non-finite before sanitizing
+    # (= "genuinely no data"), or None when the bias is all-finite. Used only on
+    # the exposure-scaling path: with no trustworthy bias pedestal at such a
+    # pixel, the scaled formula ``bias + (dark − bias)·ratio`` would scale the
+    # sanitized 0 into a spurious ``dark·ratio``, so :meth:`_effective_dark`
+    # falls back to the unscaled dark there (the documented "no correction beyond
+    # the plain dark" behaviour).
+    bias_nodata_mask: np.ndarray | None = None
     dark_path: str | None = None
     flat_path: str | None = None
     bias_path: str | None = None
@@ -111,6 +119,7 @@ class CalibrationMasters:
         dark_exposure_s = None
         flat_norm = None
         bias = None
+        bias_nodata_mask = None
         bias_exposure_s = None
         if dark_path:
             dark, dark_meta = load_master(dark_path)
@@ -124,7 +133,13 @@ class CalibrationMasters:
             dark_exposure_s = dark_meta.exposure_s
         if bias_path:
             bias, bias_meta = load_master(bias_path)
-            bias = _sanitize_pedestal(np.asarray(bias, dtype=np.float32))
+            bias = np.asarray(bias, dtype=np.float32)
+            # Remember which bias pixels are genuinely no-data *before* they're
+            # sanitized to 0, so the exposure-scaling path can fall back to the
+            # unscaled dark there instead of scaling the 0 into a wrong pedestal.
+            bias_nodata = ~np.isfinite(bias)
+            bias_nodata_mask = bias_nodata if bool(bias_nodata.any()) else None
+            bias = _sanitize_pedestal(bias)
             bias_exposure_s = bias_meta.exposure_s
         if flat_path:
             flat, _ = load_master(flat_path)
@@ -170,6 +185,7 @@ class CalibrationMasters:
                                      ).astype(np.float32, copy=False)
         return cls(dark=dark, flat_norm=flat_norm, bias=bias,
                    dark_nodata_mask=dark_nodata_mask,
+                   bias_nodata_mask=bias_nodata_mask,
                    dark_path=dark_path, flat_path=flat_path, bias_path=bias_path,
                    dark_exposure_s=dark_exposure_s, bias_exposure_s=bias_exposure_s,
                    scale_dark_to_light=scale_dark_to_light)
@@ -232,12 +248,23 @@ class CalibrationMasters:
             if abs(ratio - 1.0) > 1e-3:
                 scaled = (self.bias + (dark - self.bias) * ratio).astype(
                     np.float32, copy=False)
+                # ``scaled`` is a fresh array, so the in-place writes below can't
+                # mutate the shared master dark/bias.
+                #
+                # A genuinely no-data *bias* pixel (sanitized to 0) has no
+                # trustworthy pedestal to hold fixed, so the formula collapses to
+                # ``dark·ratio`` — a scaled dark rather than the documented
+                # "subtract the dark unscaled" fallback. Restore the plain dark
+                # there, matching what the whole scaling path degrades to without
+                # a usable bias. (A dark-no-data pixel below still wins: it maps
+                # to 0 = no correction.)
+                if self.bias_nodata_mask is not None:
+                    scaled[self.bias_nodata_mask] = dark[self.bias_nodata_mask]
                 # A genuinely no-data dark pixel (sanitized to 0) must still mean
                 # "no correction" here, exactly as on the unscaled path. Scaling
                 # turns that 0 into ``bias·(1 − ratio)`` — a spurious pedestal
                 # added into every calibrated light there — so restore 0 at those
-                # pixels. ``scaled`` is a fresh array, so the in-place write can't
-                # mutate the shared master dark/bias.
+                # pixels.
                 if self.dark_nodata_mask is not None:
                     scaled[self.dark_nodata_mask] = 0.0
                 return scaled
