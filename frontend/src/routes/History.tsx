@@ -8,7 +8,7 @@ import { notifications } from "@mantine/notifications";
 import { IconAdjustments, IconCheck, IconCopy, IconDeviceFloppy, IconDownload, IconGitCompare, IconInfoCircle, IconPencil, IconPhotoDown, IconSparkles, IconStar, IconStarFilled, IconTags, IconTrash, IconX } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
-import { api, type StackRun, type StackPhotometricSummary, type StackDarkScalingSummary, type StackRejectionSummary, type StackFrameAccounting } from "../api/client";
+import { api, type StackRun, type StackPhotometricSummary, type StackDarkScalingSummary, type StackRejectionSummary, type StackWeightingSummary, type StackFrameAccounting } from "../api/client";
 import { formatIntegration } from "../format";
 import { HazyNightBadge } from "../components/HazyNightBadge";
 import { CalibrationBadge } from "../components/CalibrationBadge";
@@ -211,6 +211,37 @@ export function rejectionSummaryText(
   return `Rejection ${verb} ~${pctText} ${noun} (${note})`;
 }
 
+// Plain-language trust note for quality weighting. The stacker already computes
+// which subs it down-weighted (soft/hazy/elongated frames pulled below full
+// weight), but the raw "7 frames down-weighted · weights 0.31–1.00 (median
+// 0.72)" reads as jargon to a beginner. This turns the invisible auto-decision
+// into a reassuring sentence — the same "show (and explain) what the autonomy
+// did" pattern as the rejection and auto-edit notes — so a non-expert trusts
+// that weighting helped (best subs did more) rather than fearing frames were
+// thrown away. Pure so it's unit-tested. Returns null when weighting is off.
+export function weightingSummaryText(
+  weighting: StackWeightingSummary | null | undefined,
+  nFrames?: number | null,
+): string | null {
+  if (!weighting) return null;
+  const n = weighting.n_downweighted;
+  if (typeof n !== "number" || !Number.isFinite(n) || n <= 0) {
+    // Weighting ran but nothing stood out — reassure the subs were consistent.
+    return "Quality-weighted — your subs were consistent, so they all counted about equally.";
+  }
+  const was = n === 1 ? "was" : "were";
+  const them = n === 1 ? "it" : "them";
+  const count =
+    typeof nFrames === "number" && Number.isFinite(nFrames) && nFrames > 0
+      ? `of your ${nFrames.toLocaleString()} subs, ${n.toLocaleString()} ${was}`
+      : `${n.toLocaleString()} ${n === 1 ? "sub" : "subs"} ${was}`;
+  return (
+    `Quality-weighted — ${count} softer or hazier than the rest, so the ` +
+    `stacker trusted ${them} a little less (not dropped — just weighted down). ` +
+    `Your best subs did the heavy lifting.`
+  );
+}
+
 export interface FrameAccountingNote {
   // The honest one-liner: "1,850 of 2,000 subs combined · 150 couldn't be aligned".
   text: string;
@@ -319,18 +350,9 @@ function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
           </Text>
         );
       })()}
-      {data.weighting ? (
+      {weightingSummaryText(data.weighting, data.n_frames) ? (
         <Text size="xs" c="dimmed">
-          Quality-weighted
-          {typeof data.weighting.n_downweighted === "number"
-            ? ` · ${data.weighting.n_downweighted} frame${data.weighting.n_downweighted === 1 ? "" : "s"} down-weighted`
-            : ""}
-          {typeof data.weighting.min === "number" && typeof data.weighting.max === "number"
-            ? ` · weights ${data.weighting.min.toFixed(2)}–${data.weighting.max.toFixed(2)}`
-            : ""}
-          {typeof data.weighting.median === "number"
-            ? ` (median ${data.weighting.median.toFixed(2)})`
-            : ""}
+          {weightingSummaryText(data.weighting, data.n_frames)}
         </Text>
       ) : null}
       {photometricSummaryText(data.photometric) ? (

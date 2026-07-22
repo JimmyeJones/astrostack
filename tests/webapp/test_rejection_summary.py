@@ -82,3 +82,44 @@ def test_negative_accepted_is_floored():
     s = summarize_rejections({"user": 3}, n_accepted=-5)
     assert s["used"] == 0
     assert s["dropped_fraction"] == 1.0
+
+
+def test_accepted_unsolved_frames_are_left_out_not_counted_as_used():
+    # The owner's gibberish case: 500 subs accepted, only 3 plate-solved, none
+    # rejected. Before the fix the summary said "used 500, healthy night"; now it
+    # honestly reports 3 used, 497 left out because they aren't located yet.
+    s = summarize_rejections({}, n_accepted=500, n_unsolved=497)
+    k = _keys(s)
+    assert k == {"unsolved": 497}
+    assert s["used"] == 3
+    assert s["dropped"] == 497
+    assert s["dropped_fraction"] == round(497 / 500, 4)
+
+
+def test_unsolved_dominant_verdict_nudges_plate_solve():
+    # When unsolved subs outnumber what actually stacked, lead with a plate-solve
+    # nudge (the actionable cause), not the generic cloud/wind copy.
+    s = summarize_rejections({}, n_accepted=500, n_unsolved=497)
+    assert s["verdict"]["tone"] == "warn"
+    assert "Plate Solve" in s["verdict"]["text"]
+
+
+def test_unsolved_combines_with_rejected_frames():
+    # Rejected (accept=0) and unsolved-accepted subs are distinct causes and both
+    # count as left-out; used stays accepted-and-solved.
+    s = summarize_rejections({"user": 10}, n_accepted=100, n_unsolved=20)
+    k = _keys(s)
+    assert k["removed"] == 10
+    assert k["unsolved"] == 20
+    assert s["used"] == 80          # 100 accepted − 20 unsolved
+    assert s["dropped"] == 30       # 10 rejected + 20 unsolved
+
+
+def test_a_few_unsolved_among_many_solved_stays_calm():
+    # A handful of not-yet-solved subs among a healthy stack keeps a calm verdict
+    # (the plate-solve nudge only fires when unsolved dominates), but the frames
+    # are still surfaced honestly as left-out.
+    s = summarize_rejections({}, n_accepted=400, n_unsolved=8)
+    assert s["used"] == 392
+    assert _keys(s) == {"unsolved": 8}
+    assert s["verdict"]["tone"] == "good"

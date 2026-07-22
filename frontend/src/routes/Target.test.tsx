@@ -745,6 +745,34 @@ describe("TargetView reject breakdown + undo", () => {
     expect(summary).toHaveBeenCalledWith("M_42");
   });
 
+  it("shows a 'not located yet' badge when accepted subs haven't plate-solved", async () => {
+    // No frames rejected (n_frames === n_frames_accepted), but the breakdown
+    // reports accepted-unsolved subs — surface them so a thin stack is explained.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ n_frames: 5, n_frames_accepted: 5 }),
+    );
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    vi.spyOn(client.api, "rejectSummary").mockResolvedValue({
+      counts: {},
+      total: 0,
+      summary: {
+        used: 0,
+        dropped: 5,
+        dropped_fraction: 1,
+        verdict: { tone: "warn", text: "Run Plate Solve so the rest can be added." },
+        buckets: [
+          { key: "unsolved", label: "Not located in the sky yet", count: 5, note: "Run Plate Solve." },
+        ],
+      },
+    });
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(screen.getByText("5 not located yet")).toBeInTheDocument());
+  });
+
   it("shows a per-row plain-language reason chip on rejected frames", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(
       mkTarget({ n_frames: 3, n_frames_accepted: 1 }),

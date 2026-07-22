@@ -51,6 +51,9 @@ _BUCKETS: list[tuple[str, str, str]] = [
     ("solve_failed", "Couldn't be located in the sky",
      "These frames couldn't be matched to the star field, so they can't be "
      "lined up with the others."),
+    ("unsolved", "Not located in the sky yet",
+     "These frames were kept but haven't been matched to the star field yet, "
+     "so they can't be added to the stack. Run Plate Solve to include them."),
     ("removed", "You removed these",
      "Frames you rejected by hand."),
     ("error", "Couldn't be read or measured",
@@ -81,8 +84,18 @@ def _bucket_for(reason: str) -> str:
     return "other"
 
 
-def _verdict(dropped: int, used: int) -> dict[str, str]:
-    """A single reassuring headline from the dropped fraction."""
+def _verdict(dropped: int, used: int, unsolved: int = 0) -> dict[str, str]:
+    """A single reassuring headline from the dropped fraction.
+
+    ``unsolved`` (accepted-but-not-plate-solved frames) is the beginner's one
+    *actionable* case — the frames aren't bad, they just haven't been located in
+    the sky yet — so when they outnumber what actually stacked, lead with a
+    plate-solve nudge rather than the generic "cloud or wind" copy."""
+    if unsolved > 0 and unsolved >= max(1, used):
+        return {"tone": "warn",
+                "text": "Most of your subs haven't been located in the sky yet, "
+                        "so only a few made the stack — it will look noisy. Run "
+                        "Plate Solve so the rest can be added."}
     total = dropped + used
     frac = dropped / total if total > 0 else 0.0
     if frac < 0.10:
@@ -96,12 +109,18 @@ def _verdict(dropped: int, used: int) -> dict[str, str]:
                     "The stack still used all the good ones."}
 
 
-def summarize_rejections(counts: dict[str, int], n_accepted: int) -> dict:
+def summarize_rejections(
+    counts: dict[str, int], n_accepted: int, n_unsolved: int = 0
+) -> dict:
     """Group a ``reject_reason`` tally into friendly buckets + a verdict.
 
     ``counts`` is the raw namespaced tally (``{"auto:streak": 12, "user": 3,
-    …}``); ``n_accepted`` is how many frames *made* the stack. Returns a
-    JSON-safe dict::
+    …}``, all from *rejected* frames); ``n_accepted`` is how many frames are
+    accepted. ``n_unsolved`` is how many of those accepted frames have **not
+    plate-solved yet** — they are kept but never reach the stacker (which
+    combines only accepted+solved frames), so they must be counted as *left out*,
+    not *used*, or a beginner is told a thin/gibberish stack was a "healthy
+    night". Returns a JSON-safe dict::
 
         {
           "used": 412, "dropped": 88, "dropped_fraction": 0.176,
@@ -109,6 +128,8 @@ def summarize_rejections(counts: dict[str, int], n_accepted: int) -> dict:
           "buckets": [{"key","label","count","note"}, …],  # non-zero, ordered
         }
 
+    Here ``used`` is accepted **and** solved (what actually stacks), and
+    ``dropped`` includes both rejected frames and unsolved-accepted ones.
     Buckets with a zero count are omitted; the rest are returned in the canonical
     presentation order. Negative/garbled counts are floored at 0 so a bad row can
     never make the totals lie.
@@ -119,8 +140,14 @@ def summarize_rejections(counts: dict[str, int], n_accepted: int) -> dict:
             continue
         grouped[_bucket_for(reason)] = grouped.get(_bucket_for(reason), 0) + int(n)
 
+    # Accepted-but-unsolved subs never reach the stack — surface them as their
+    # own bucket and remove them from "used" so the accounting is honest.
+    n_unsolved = max(0, int(n_unsolved))
+    if n_unsolved > 0:
+        grouped["unsolved"] = grouped.get("unsolved", 0) + n_unsolved
+
     dropped = sum(grouped.values())
-    used = max(0, int(n_accepted))
+    used = max(0, int(n_accepted) - n_unsolved)
     buckets = [
         {"key": key,
          "label": _BUCKET_META[key][0],
@@ -133,6 +160,6 @@ def summarize_rejections(counts: dict[str, int], n_accepted: int) -> dict:
         "used": used,
         "dropped": dropped,
         "dropped_fraction": round(dropped / total, 4) if total > 0 else 0.0,
-        "verdict": _verdict(dropped, used),
+        "verdict": _verdict(dropped, used, n_unsolved),
         "buckets": buckets,
     }

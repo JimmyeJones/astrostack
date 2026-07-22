@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, darkScalingSummaryText, rejectionSummaryText, frameAccountingNote, calibrationSummaryText } from "./History";
+import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, darkScalingSummaryText, rejectionSummaryText, weightingSummaryText, frameAccountingNote, calibrationSummaryText } from "./History";
 import { formatIntegration } from "../format";
 import * as client from "../api/client";
 import type { StackRun } from "../api/client";
@@ -155,8 +155,11 @@ describe("HistoryView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Info" }));
 
     await waitFor(() =>
-      expect(screen.getByText(/7 frames down-weighted/)).toBeInTheDocument());
-    expect(screen.getByText(/weights 0.31–1.00/)).toBeInTheDocument();
+      expect(
+        screen.getByText(/of your 840 subs, 7 were softer or hazier/),
+      ).toBeInTheDocument());
+    // Reassures rather than alarms: down-weighted, not dropped.
+    expect(screen.getByText(/not dropped — just weighted down/)).toBeInTheDocument();
   });
 
   it("shows integration time inline on a card without opening Info", async () => {
@@ -659,6 +662,45 @@ describe("rejectionSummaryText", () => {
     ).toBe("Rejection clipped ~0.4% of samples (transient outliers)");
     const high = rejectionSummaryText({ mode: "drizzle-reject", fraction: 0.15 });
     expect(high).toContain("check that κ isn't clipping real signal");
+  });
+});
+
+describe("weightingSummaryText", () => {
+  it("returns null when weighting is off", () => {
+    expect(weightingSummaryText(null)).toBeNull();
+    expect(weightingSummaryText(undefined)).toBeNull();
+  });
+  it("names the down-weighted subs against the total, and reassures", () => {
+    const s = weightingSummaryText(
+      { mode: "quality", n_downweighted: 7 }, 840,
+    );
+    expect(s).toContain("of your 840 subs, 7 were softer or hazier");
+    expect(s).toContain("not dropped — just weighted down");
+    expect(s).toContain("Your best subs did the heavy lifting");
+  });
+  it("uses singular grammar for a single down-weighted sub", () => {
+    const s = weightingSummaryText({ mode: "quality", n_downweighted: 1 }, 200);
+    expect(s).toContain("of your 200 subs, 1 was softer");
+    expect(s).toContain("trusted it a little less");
+  });
+  it("falls back to a bare count when the total is unknown", () => {
+    expect(weightingSummaryText({ mode: "quality", n_downweighted: 3 })).toContain(
+      "3 subs were softer or hazier",
+    );
+  });
+  it("reassures consistency when nothing was down-weighted", () => {
+    expect(weightingSummaryText({ mode: "quality", n_downweighted: 0 }, 500)).toBe(
+      "Quality-weighted — your subs were consistent, so they all counted about equally.",
+    );
+    // Same reassurance when the count field is absent (older master).
+    expect(weightingSummaryText({ mode: "quality" }, 500)).toContain(
+      "your subs were consistent",
+    );
+  });
+  it("formats large sub counts with thousands separators", () => {
+    expect(weightingSummaryText({ mode: "quality", n_downweighted: 120 }, 2400)).toContain(
+      "of your 2,400 subs, 120 were",
+    );
   });
 });
 

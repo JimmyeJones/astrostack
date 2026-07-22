@@ -533,6 +533,20 @@ class Project:
         mid = n // 2
         return vals[mid] if n % 2 else (vals[mid - 1] + vals[mid]) / 2
 
+    def count_accepted_unsolved(self) -> int:
+        """Count accepted frames that have no plate-solve WCS yet.
+
+        These frames are *not* rejected — they simply never plate-solved (solve
+        off, not run yet, or failed/timed-out with ``accept`` left True), so
+        ``run_stack`` (which combines only accepted **and** solved frames)
+        silently excludes them. Surfacing this count is what lets the
+        "why were some frames left out?" breakdown explain a thin stack instead
+        of counting these subs as if they made the picture."""
+        assert self._conn is not None
+        return self._conn.execute(
+            "SELECT COUNT(*) FROM frames WHERE accept = 1 AND wcs_json IS NULL"
+        ).fetchone()[0]
+
     def reject_reason_counts(self) -> dict[str, int]:
         """Tally rejected frames by ``reject_reason`` (e.g. ``qc:fwhm``,
         ``bulk:streaked``, ``user``). A rejected frame with a NULL reason is
