@@ -115,6 +115,40 @@ def test_png_bytes_to_jpeg_transcodes_at_same_resolution(tmp_path):
         assert img.size == (50, 40)             # same resolution, not resized
 
 
+def test_png_bytes_to_jpeg_bakes_the_nameplate_when_requested(tmp_path):
+    """The direct JPEG download can bake the same acquisition footer as the editor
+    share export: passing a NameplateFields draws the caption bar, changing the
+    lower rows, while the default (no nameplate) leaves the pixels untouched."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    from seestack.nameplate import NameplateFields
+
+    src = Image.new("RGB", (400, 300), (30, 40, 60))
+    buf = BytesIO()
+    src.save(buf, format="PNG")
+    png = buf.getvalue()
+
+    plain = png_bytes_to_jpeg(png)
+    plate = NameplateFields(target="M 31", integration_s=15150, n_frames=505,
+                            sub_exposure_s=30, date_iso="2026-07-19",
+                            camera="ZWO Seestar S50")
+    captioned = png_bytes_to_jpeg(png, nameplate=plate)
+
+    assert captioned[:2] == b"\xff\xd8"
+    assert captioned != plain                      # the footer bar altered the pixels
+    with Image.open(BytesIO(captioned)) as img:
+        assert img.size == (400, 300)              # same resolution, footer overlaid
+        # A dark caption bar now sits along the bottom rows (was uniform blue).
+        bottom = np.asarray(img)[-8:, :, :]
+        assert bottom.min() < 20
+
+    # An empty nameplate (nothing to say) is a clean no-op transcode.
+    empty = png_bytes_to_jpeg(png, nameplate=NameplateFields())
+    assert empty == plain
+
+
 def test_png_bytes_to_jpeg_flattens_transparency_onto_black(tmp_path):
     """JPEG has no alpha — a transparent (uncovered) region flattens to black,
     matching the preview's own NaN→black convention, and never crashes."""

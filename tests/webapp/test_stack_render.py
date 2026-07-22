@@ -331,6 +331,24 @@ def test_jpeg_download_north_up_is_a_noop_without_a_wcs(client, solved_library):
     assert oriented.content == plain.content
 
 
+def test_jpeg_download_nameplate_bakes_the_acquisition_footer(client, solved_library):
+    """nameplate=true bakes the same tasteful acquisition footer (target ·
+    integration · gear) the editor share export offers onto the direct JPEG
+    download — a different image from the plain JPEG."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    assert client.post(f"/api/targets/{safe}/stack-runs/{run_id}/preview",
+                       json={"stretch": 0.5, "black": 0.35}).status_code == 200
+
+    plain = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/jpeg")
+    captioned = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/jpeg?nameplate=true")
+    assert plain.status_code == captioned.status_code == 200
+    assert captioned.headers["content-type"] == "image/jpeg"
+    assert captioned.content[:2] == b"\xff\xd8"
+    # The footer bar changes the pixels — the captioned share is distinct.
+    assert captioned.content != plain.content
+
+
 def test_stack_info_reads_provenance_cards(client, solved_library):
     """The info endpoint surfaces the provenance header cards (integration time,
     frame count, method) from the run's master FITS."""

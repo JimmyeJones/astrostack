@@ -4,7 +4,7 @@ import { IconArrowsHorizontal, IconPhoto } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { splitClipLeft, splitFraction, splitLeftPct } from "./editor/splitCompare";
-import { oneFrameCaption } from "./oneFrameVsStack";
+import { noiseReductionBadge, oneFrameCaption } from "./oneFrameVsStack";
 
 /**
  * "One frame vs your stack" — a read-only reveal that puts a single noisy raw
@@ -38,11 +38,19 @@ export function OneFrameVsStackCard({
     queryFn: () => api.oneSubVsStack(safe, runId),
     enabled: !!safe,
   });
+  // The concrete "cut your noise ~N×" number is measured lazily — only once the
+  // user reveals the comparison — so History's list of runs never pays for it.
+  const noise = useQuery({
+    queryKey: ["one-sub-vs-stack-noise", safe, runId],
+    queryFn: () => api.oneSubVsStackNoise(safe, runId),
+    enabled: !!safe && revealed && !!info.data?.available,
+  });
   if (!info.data?.available) return null;
 
   const subSrc = api.stackReferenceSubUrl(safe, runId);
   const stackSrc = api.stackArtifactUrl(safe, runId, "preview");
   const caption = oneFrameCaption(info.data.sub_exposure_s, info.data.n_frames);
+  const noiseBadge = noiseReductionBadge(noise.data?.ratio, info.data.n_frames);
 
   const moveTo = (clientX: number) => {
     const rect = boxRef.current?.getBoundingClientRect();
@@ -61,6 +69,7 @@ export function OneFrameVsStackCard({
           <Text size="sm" fw={500}>One frame vs your stack</Text>
           <Text size="xs" c="dimmed">{caption}</Text>
           {revealed ? (
+            <>
             <Box
               ref={boxRef}
               onPointerDown={(e) => {
@@ -103,6 +112,12 @@ export function OneFrameVsStackCard({
                 textShadow: "0 1px 3px rgba(0,0,0,0.9)", pointerEvents: "none",
               }}>Your stack</Text>
             </Box>
+            {noiseBadge && (
+              <Text size="xs" fw={600} c="teal.6" data-testid="noise-badge">
+                {noiseBadge}
+              </Text>
+            )}
+            </>
           ) : (
             <Group gap="xs">
               <Button size="xs" variant="light" color="teal"

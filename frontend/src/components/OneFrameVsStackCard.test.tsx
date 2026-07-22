@@ -31,6 +31,7 @@ describe("OneFrameVsStackCard", () => {
     vi.spyOn(client.api, "oneSubVsStack").mockResolvedValue({
       available: true, n_frames: 505, sub_exposure_s: 30, integration_s: 15150,
     });
+    vi.spyOn(client.api, "oneSubVsStackNoise").mockResolvedValue({ ratio: 15.3 });
     renderCard("M_42", 7);
     await waitFor(() =>
       expect(screen.getByText("One frame vs your stack")).toBeInTheDocument());
@@ -40,6 +41,8 @@ describe("OneFrameVsStackCard", () => {
     ).toBeInTheDocument();
     // Collapsed: no image yet (History lists many runs — don't fetch each up front).
     expect(document.querySelector("img")).toBeNull();
+    // The noise number isn't measured until the user reveals the comparison.
+    expect(client.api.oneSubVsStackNoise).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: /see the difference/i }));
     // Both halves load: the raw sub and the finished stack preview.
@@ -47,6 +50,22 @@ describe("OneFrameVsStackCard", () => {
     expect(sub).toHaveAttribute("src", "/api/targets/M_42/stack-runs/7/reference-sub");
     const stack = screen.getByAltText("Your finished stack");
     expect(stack).toHaveAttribute("src", "/api/targets/M_42/stack-runs/7/preview");
+    // …and the concrete "cut your noise ~N×" badge appears once measured.
+    expect(await screen.findByTestId("noise-badge")).toHaveTextContent(
+      "Stacking your 505 subs cut the background noise about 15×.");
+  });
+
+  it("omits the noise badge when the ratio can't be measured", async () => {
+    vi.spyOn(client.api, "oneSubVsStack").mockResolvedValue({
+      available: true, n_frames: 505, sub_exposure_s: 30, integration_s: 15150,
+    });
+    vi.spyOn(client.api, "oneSubVsStackNoise").mockResolvedValue({ ratio: null });
+    renderCard("M_42", 7);
+    fireEvent.click(await screen.findByRole("button", { name: /see the difference/i }));
+    await screen.findByAltText("A single raw sub");
+    await waitFor(() =>
+      expect(client.api.oneSubVsStackNoise).toHaveBeenCalled());
+    expect(screen.queryByTestId("noise-badge")).toBeNull();
   });
 
   it("degrades the caption when provenance is missing", async () => {

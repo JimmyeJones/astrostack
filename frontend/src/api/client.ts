@@ -1132,11 +1132,17 @@ export const api = {
   },
   stackArtifactUrl: (
     safe: string, id: number, kind: "preview" | "jpeg" | "fits" | "tiff",
-    northUp = false,
-  ) =>
-    `/api/targets/${safe}/stack-runs/${id}/${kind}` +
-    // Only the share-friendly JPEG honours north_up (rotate so North is up).
-    (northUp && kind === "jpeg" ? "?north_up=true" : ""),
+    northUp = false, nameplate = false,
+  ) => {
+    const base = `/api/targets/${safe}/stack-runs/${id}/${kind}`;
+    if (kind !== "jpeg") return base;
+    // Only the share-friendly JPEG honours north_up (rotate so North is up) and
+    // nameplate (bake the acquisition-data caption footer).
+    const params: string[] = [];
+    if (northUp) params.push("north_up=true");
+    if (nameplate) params.push("nameplate=true");
+    return params.length ? `${base}?${params.join("&")}` : base;
+  },
   // "Make it your wallpaper" — the finished preview cropped to a device aspect
   // (phone/desktop/square), auto-centred on the target, downloaded as a JPEG.
   stackWallpaperUrl: (
@@ -1166,6 +1172,11 @@ export const api = {
       sub_exposure_s: number | null;
       integration_s: number | null;
     }>(`/api/targets/${safe}/stack-runs/${id}/one-sub-vs-stack`),
+  // The concrete "stacking cut your noise ~N×" number (lazy, best-effort — null
+  // for an edited/older run or an unmeasurable image).
+  oneSubVsStackNoise: (safe: string, id: number) =>
+    req<{ ratio: number | null }>(
+      `/api/targets/${safe}/stack-runs/${id}/one-sub-vs-stack/noise`),
   stackReferenceSubUrl: (safe: string, id: number) =>
     `/api/targets/${safe}/stack-runs/${id}/reference-sub`,
   // "Watch your picture come together" progress reel (opt-in save_progress).
