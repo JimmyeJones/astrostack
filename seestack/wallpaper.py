@@ -17,6 +17,7 @@ that isn't in the stack) and never touches the stored pixels on disk.
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 # Aspect presets a beginner actually wants. ``aspect_w``/``aspect_h`` set the crop
@@ -112,6 +113,45 @@ def wallpaper_target_pixel(
     tx = (px + 0.5) / s_x - 0.5
     ty = (py + 0.5) / s_y - 0.5
     return (tx, ty)
+
+
+def rotate_point_north_up(
+    px: float, py: float, w: int, h: int, angle_deg: float,
+) -> tuple[float, float]:
+    """Where a pixel ``(px, py)`` in a ``w × h`` image lands after the *same*
+    North-up rotation :func:`seestack.render.orient.rotate_image_north_up` applies.
+
+    A North-up wallpaper rotates the preview so celestial North points up, which
+    also *moves* the target pixel — so the crop must re-centre on the rotated
+    position, not the original one. This mirrors ``rotate_image_north_up``'s two
+    branches exactly: a near-orthogonal angle is a lossless ``np.rot90`` (so the
+    point maps by the same 90° step), and any other angle is a bicubic
+    ``PIL.Image.rotate(angle, expand=True)`` about the image centre (CCW, y-down),
+    with the canvas grown to the rotated bounding box. Sub-pixel exactness isn't
+    needed — the crop is target-*centred*, so a pixel of drift is invisible — but
+    the branch/geometry match keeps a rotated target inside its crop.
+    """
+    from seestack.render.orient import _SNAP_TOL_DEG
+
+    snapped = round(angle_deg / 90.0) * 90.0
+    k = int(snapped / 90.0) % 4
+    if abs(angle_deg - snapped) <= _SNAP_TOL_DEG:
+        x, y, cw, ch = float(px), float(py), int(w), int(h)
+        for _ in range(k):                       # each step is one CCW 90° turn
+            x, y, cw, ch = float(y), float(cw - 1 - x), ch, cw
+        return (x, y)
+
+    # Bicubic expand: rotate about the image centre (CCW on screen, y grows down),
+    # then translate so the grown canvas starts at (0, 0).
+    theta = math.radians(angle_deg)
+    c, s = math.cos(theta), math.sin(theta)
+    cx, cy = w / 2.0, h / 2.0
+    dx, dy = px - cx, py - cy
+    rx = dx * c + dy * s
+    ry = -dx * s + dy * c
+    new_w = abs(w * c) + abs(h * s)              # bounding box of the rotated frame
+    new_h = abs(w * s) + abs(h * c)
+    return (new_w / 2.0 + rx, new_h / 2.0 + ry)
 
 
 def png_size(png_bytes: bytes) -> tuple[int, int] | None:

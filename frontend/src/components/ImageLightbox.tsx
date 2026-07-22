@@ -50,10 +50,14 @@ export function computePinch(
  *    effect keyed on `src` couldn't reliably find the node.
  */
 export function ImageLightbox({
-  src, title, downloadHref, jpegHref, rawHref, shareFilename, shareTitle, shareText, onClose,
+  src, title, downloadHref, jpegHref, rawHref, shareFilename, shareTitle, shareText,
+  toolbarExtra, onClose,
 }: {
   src: string | null;
   title?: string;
+  /** Optional extra control(s) rendered in the toolbar (e.g. a "Wallpaper" menu),
+   * so a surface can offer its own actions without this component knowing them. */
+  toolbarExtra?: React.ReactNode;
   /** The picture being shown (a shareable PNG) — the download the viewer
    * most likely wants: what they're looking at, not a 100 MB scientific file. */
   downloadHref?: string;
@@ -270,6 +274,7 @@ export function ImageLightbox({
             <Tooltip label="Download raw data (FITS)"><ActionIcon size="lg" variant="subtle" color="gray"
               component="a" href={rawHref} aria-label="Download raw data"><IconDatabase size={20} /></ActionIcon></Tooltip>
           ) : null}
+          {toolbarExtra}
           <ActionIcon size="lg" variant="subtle" color="gray" onClick={onClose} aria-label="Close">✕</ActionIcon>
         </Group>
 

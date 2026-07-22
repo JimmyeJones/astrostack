@@ -17,6 +17,7 @@ import {
 } from "../components/RejectionBadge";
 import { NoiseReadout, hasNoise } from "../components/NoiseBadge";
 import { ImageLightbox } from "../components/ImageLightbox";
+import { WallpaperMenu } from "../components/WallpaperMenu";
 import { QueryError } from "../components/QueryError";
 
 export type GallerySort = "newest" | "cleanest";
@@ -419,6 +420,8 @@ export function GalleryView() {
           ? api.stackArtifactUrl(viewing.safe, viewing.run_id, "jpeg") : undefined}
         rawHref={viewing?.has_fits
           ? api.stackArtifactUrl(viewing.safe, viewing.run_id, "fits") : undefined}
+        toolbarExtra={viewing?.has_preview
+          ? <WallpaperMenu safe={viewing.safe} runId={viewing.run_id} variant="subtle" /> : undefined}
         {...(viewing?.has_preview
           ? (() => {
               const { title, text, filename } = sharePictureText(

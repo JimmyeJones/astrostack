@@ -146,6 +146,36 @@ describe("TargetView latest-picture download", () => {
       "href", client.api.stackWallpaperUrl("M_42", 9, "square"));
   });
 
+  it("offers the wallpaper North-up toggle when the run has an orientation to correct", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ id: 9 })]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1), mkFrame(2)]);
+    vi.spyOn(client.api, "stackRenderSuggestion")
+      .mockResolvedValue({ stretch: null, black: null, north_up_deg: 31.2 });
+
+    renderTarget();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Wallpaper/ }));
+    const toggle = await screen.findByLabelText(/orient wallpaper north up/i);
+    fireEvent.click(toggle);
+    expect(screen.getByText("Phone").closest("a")).toHaveAttribute(
+      "href", client.api.stackWallpaperUrl("M_42", 9, "phone", true));
+  });
+
+  it("hides the wallpaper North-up toggle when the run has no orientation correction", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ id: 9 })]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1), mkFrame(2)]);
+    vi.spyOn(client.api, "stackRenderSuggestion")
+      .mockResolvedValue({ stretch: null, black: null, north_up_deg: null });
+
+    renderTarget();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Wallpaper/ }));
+    await screen.findByText("Phone");
+    expect(screen.queryByLabelText(/orient wallpaper north up/i)).toBeNull();
+  });
+
   it("hides the picture and wallpaper downloads when the latest stack has no preview", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
     vi.spyOn(client.api, "listStackRuns")

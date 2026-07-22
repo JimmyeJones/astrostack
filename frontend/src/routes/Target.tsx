@@ -363,6 +363,16 @@ export function TargetView() {
   });
   const runs = useQuery({ queryKey: ["runs", safe], queryFn: () => api.listStackRuns(safe) });
   const latestRun = runs.data?.[0];  // listStackRuns returns newest first
+  // Whether to offer the wallpaper "North up" toggle: only when the latest run's
+  // WCS yields a real orientation correction (else the endpoint no-ops). One
+  // cheap read of the run's own suggestion, gated on it having a FITS to read.
+  const renderSuggestion = useQuery({
+    queryKey: ["render-suggestion", safe, latestRun?.id],
+    queryFn: () => api.stackRenderSuggestion(safe, latestRun!.id),
+    enabled: !!latestRun?.has_fits,
+    staleTime: Infinity,
+  });
+  const wallpaperCanNorthUp = typeof renderSuggestion.data?.north_up_deg === "number";
   // Honest heads-up when the newest stack combined very few frames — it will
   // look noisy (a stack only smooths noise as it combines more subs), so say so
   // rather than presenting a single-sub result as a finished picture.
@@ -998,7 +1008,8 @@ export function TargetView() {
             />
           ) : null}
           {latestRun?.has_preview ? (
-            <WallpaperMenu safe={safe} runId={latestRun.id} size="sm" variant="default" />
+            <WallpaperMenu safe={safe} runId={latestRun.id} size="sm" variant="default"
+              canNorthUp={wallpaperCanNorthUp} />
           ) : null}
           <Button component={Link} to={`/targets/${safe}/stack`}
             leftSection={<IconStack2 size={16} />} aria-label="Stack">

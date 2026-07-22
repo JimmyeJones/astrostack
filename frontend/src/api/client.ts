@@ -1167,7 +1167,9 @@ export const api = {
   // (phone/desktop/square), auto-centred on the target, downloaded as a JPEG.
   stackWallpaperUrl: (
     safe: string, id: number, aspect: "phone" | "desktop" | "square",
-  ) => `/api/targets/${safe}/stack-runs/${id}/wallpaper?aspect=${aspect}`,
+    northUp = false,
+  ) => `/api/targets/${safe}/stack-runs/${id}/wallpaper?aspect=${aspect}` +
+    (northUp ? "&north_up=true" : ""),
   // "What's in this picture?" — catalog objects that fall inside a run's field.
   stackAnnotations: (safe: string, id: number) =>
     req<StackAnnotations>(`/api/targets/${safe}/stack-runs/${id}/annotations`),

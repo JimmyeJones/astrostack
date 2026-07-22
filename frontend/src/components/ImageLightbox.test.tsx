@@ -98,6 +98,11 @@ describe("ImageLightbox", () => {
     expect(screen.getByLabelText("Download raw data")).toHaveAttribute("href", "/api/run/1/fits");
   });
 
+  it("renders a toolbarExtra control in the toolbar when given", () => {
+    renderLightbox({ toolbarExtra: <button type="button">Wallpaper</button> });
+    expect(screen.getByRole("button", { name: "Wallpaper" })).toBeInTheDocument();
+  });
+
   it("does not crash on a pointermove that arrives after pointerup", () => {
     // Regression: the pan updater used to read drag.current inside setState,
     // which could run after pointerup had nulled it → crash.
