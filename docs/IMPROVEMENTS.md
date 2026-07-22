@@ -5867,19 +5867,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   the split-divider math is pure (mirror `splitCompare.test.ts`); the run-pair picker defaults are unit-testable;
   the verdict string is a pure function of two stat blobs. Natural companion to the shipped "Your target, night
   after night" deepening reel (that *animates* the growth; this lets you *scrub* any two points directly).
-- **IDEA (Builder 2026-07-22, filed while shipping the Split compare mode) — show each side's provenance inline in
-  the Compare **Split** (and **Blink**) modes.** *(Friendliness / trust, PRIORITY 3; size S; frontend-only.)*
-  **Why:** the two-stack Compare view's **Side by side** mode shows a `CardMeta` line for each stack (target ·
-  basename · size · integration · noise σ), but the new **Split** and **Blink** modes show only bare "A"/"B" badges
-  plus a one-line drag hint. A beginner scrubbing the divider can *see* one side is cleaner but can't tell **which
-  stack is which** — is A the newer 5-night deep stack or the old 2-night one? — so the "did it get better?"
-  answer is ambiguous exactly when it matters. **Feature:** render a compact two-column meta strip above the Split
-  frame (and above the Blink image) — "A: 3 nights · 412 subs · 18 Jul · σ 0.041" vs "B: 5 nights · 690 subs ·
-  21 Jul · σ 0.032" — reusing the existing `CardMeta`/`NoiseReadout` components already imported in `Compare.tsx`,
-  colour-keyed to the A(blue)/B(grape) badges. **Beginner bar ✔:** pure plain-language provenance, no knobs, makes
-  the existing compare trustworthy. **Guardrails:** frontend-only, additive, no backend/schema/API change (the
-  gallery items already carry every field). **Testable:** assert both sides' basenames/sub-counts render in Split
-  mode (mirror the existing side-by-side test). Small, clean follow-on to the shipped Split slider.
+- ~~**IDEA (Builder 2026-07-22, filed while shipping the Split compare mode) — show each side's provenance inline in
+  the Compare **Split** (and **Blink**) modes.**~~ — **SHIPPED v0.168.0** (Builder 2026-07-22, branch
+  `claude/pensive-faraday-58p3n9`). The two-stack Compare **Split** and **Blink** modes showed only bare "A"/"B"
+  badges, so a beginner scrubbing the divider couldn't tell *which* stack was which. Added a compact two-column
+  `AbMetaStrip` (internal to `Compare.tsx`) above the Split frame and the Blink image: each side is colour-keyed to
+  its A(blue)/B(grape) badge and carries plain-language provenance — target name (linked to History), basename,
+  frame count, integration, capture date, and measured noise σ (reusing the shipped `NoiseReadout`/`hasNoise` +
+  `formatIntegration`). A pure exported `compareDateLabel(iso)` formats a short capture date and drops the clause on
+  a missing/unparseable timestamp. The now-redundant Split drag hint was trimmed to "left is A, right is B" (the
+  basenames moved into the strip). Frontend-only, additive, no backend/schema/API change (the gallery items already
+  carry every field). Tests: `Compare.test.tsx` (+4 — Split strip names both stacks + frame counts, Blink strip
+  too, `compareDateLabel` valid/empty cases). Beginner bar ✔ (makes the "did it get better?" compare trustworthy
+  about which side is which). Small, clean follow-on to the shipped Split slider.
 - ~~**IDEA (Builder 2026-07-21, filed while shipping the deepening reel) — "Time to re-stack?" nudge.**~~ —
   **ALREADY COVERED (withdrawn same day by the Builder who filed it).** On a closer read this already exists as
   the Target page's **"Multi-night nudge"** (`newSubsSinceStack` / `countNewSubsSinceStack` in `Target.tsx`,
