@@ -6222,6 +6222,17 @@ problems. Dogfood it every big-picture run and fix root causes.
   NaN-aware, degenerate→None), `tests/webapp/test_one_sub_vs_stack.py` (+4: real-master ratio, display-space→null,
   no-master→null, unknown-run 404), `oneFrameVsStack.test.ts` (+5), `OneFrameVsStackCard.test.tsx` (+1 badge, +1
   omitted, +lazy-fetch assertion).
+- **NEW IDEA (Builder 2026-07-22, follow-on to the shipped "cut your noise ~N×" badge) — surface the same
+  noise-reduction number at the *moment of completion*, not only when a user digs into History's reveal.**
+  *(Beginner feature / trust; PRIORITY 3–4; size S.)* The v0.162.0 badge only appears if a beginner opens a run's
+  History card and clicks "See the difference". The most impactful place for the "stacking cut your noise ~N×"
+  payoff is where they *land*: (a) the **Jobs "Process target" completion summary** ("Stacked 300 subs → noise cut
+  ~17×") right next to the existing thin-stack heads-up, and (b) the **Target page headline** result. Both can
+  reuse the shipped, tested `.../one-sub-vs-stack/noise` endpoint + the pure `noiseReductionBadge` formatter, so
+  it's a pure frontend wiring slice (lazy fetch, null → omit) with no new engine/endpoint. Naturally composes with
+  the thin-stack warning: a thin stack shows a *small* ratio, honestly reinforcing "add more subs". Additive,
+  read-only, off nothing. _(Considered but not built this run to keep the two shipped tasks focused; genuinely
+  spotted while wiring the badge — the infra is all in place.)_
 - ~~**NEW (Scout 2026-07-21, follow-on to the v0.148.1 sub-preview fix) — put a number on the "one frame vs your
   stack" reveal: "stacking cut your noise ~N×" — original spec kept for provenance.**~~ *(Beginner feature /
   trust; PRIORITY 3; size S–M.)* Now that
