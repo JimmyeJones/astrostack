@@ -5789,7 +5789,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   would have wrongly shouted "88 couldn't plate-solve" at a beginner whose frames all actually solved.
 
 - **NEW BEGINNER FEATURE (Scout 2026-07-21) — "Did it get better?": A/B compare two finished stacks of the same
-  target, side by side with a split slider.** *(Friendliness / trust, PRIORITY 3; size M.)* **Why:** a beginner
+  target, side by side with a split slider.** **▶ SPLIT-SLIDER SLICE SHIPPED v0.164.0** (Builder 2026-07-22, branch
+  `claude/pensive-faraday-vsepvf`). The two-stack Compare view (`/compare?a=…&b=…`, reachable from the History run
+  card's **Compare** button, which auto-targets the chronologically-previous run) already shipped **Side by side**
+  and **Blink**; the one named gap in this idea — the *split slider* — is now a third **Split** mode on the same
+  view. It overlays stack A on top of stack B in one frame and clips A under a draggable vertical divider (left = A,
+  right = B), reusing the editor's already-tested `splitCompare` divider geometry (`splitFraction` / `splitClipLeft`
+  / `splitLeftPct`) and the exact pointer-drag pattern from `OneFrameVsStackCard`, so you scrub one line across the
+  picture to see precisely where a deeper/re-tuned stack pulls out faint detail or knocks down noise — the most
+  direct answer to "did my new stack get better?". A/B badges pin the two sides, a plain-language hint names both
+  stacks under the frame, and it falls back with guidance ("Split needs a preview image for both stacks. Try 'Side
+  by side'.") if either run has no preview. Frontend-only, additive, opt-in (a third segmented-control option;
+  nothing else changes); the existing which-is-cleaner noise verdict (`noiseComparison`) still shows above all three
+  modes. No backend/schema/config/API-shape/default change — reuses the same gallery-resolved preview URLs the other
+  two modes use. Tests: `Compare.test.tsx` (+2 — Split overlays A-over-B with the drag hint; no-preview fallback).
+  The remaining slice (b) — an optional plain-language √N noise-delta *number* — is already largely covered by the
+  shipped `noiseComparison` verdict; leave any richer per-run stat delta for a future run. Original spec kept for
+  provenance:
+  - _(orig)_ *(Friendliness / trust, PRIORITY 3; size M.)* **Why:** a beginner
   who adds a second night and re-stacks, or reprocesses the same subs with different settings, has no easy way to
   answer the one question that matters — *did the picture actually improve?* Today the History run cards list
   runs with dates/sub-counts and thumbnails, but you can only look at one at a time and eyeball it from memory.
@@ -5818,15 +5835,35 @@ problems. Dogfood it every big-picture run and fix root causes.
   comparison, arguably better than the count-delta sketch). No new work needed; recorded here only so a future
   Builder doesn't re-implement it. (The deepening reel v0.157.0 does make that existing nudge more rewarding —
   each re-stack now adds a frame to the "night after night" animation.)
-- **IDEA (Builder 2026-07-21) — date/sub labels burned into the deepening-reel frames.** *(Friendliness /
-  PRIORITY 3; size S.)* The v0.157.0 "night after night" reel animates a target's stacks getting deeper, with the
-  provenance (dates + sub counts) shown as a *static* caption under the animation. A nice, low-risk enhancement:
-  overlay each frame with its own small date + sub-count label (e.g. bottom-corner "28 Jun · 120 subs") so a
-  *shared/downloaded* clip — which travels without the surrounding card — still tells the story frame by frame.
-  Pure render addition in `seestack/render/deepening.py` (draw the label per frame before assembling, from the
-  same `iter_stack_runs` rows the info endpoint already reads), guarded so a missing date/count simply omits its
-  clause. Beginner bar ✔ (self-explanatory shareable). Guardrails: additive/opt-in-safe (label only; the
-  underlying pixels/stretch unchanged); keep the label subtle so it never obscures the picture.
+- ~~**IDEA (Builder 2026-07-21) — date/sub labels burned into the deepening-reel frames.**~~ — **SHIPPED
+  v0.165.0** (Builder 2026-07-22, branch `claude/pensive-faraday-vsepvf`). Each "night after night" reel frame now
+  carries its own small, subtle bottom-left provenance caption (e.g. `"28 Jun 2026 · 120 subs"`) burned into the
+  pixels, so a *downloaded/shared* clip — which travels without the surrounding card's static caption — still
+  tells the deepening story frame by frame. **Engine** (`seestack/render/deepening.py`): a pure
+  `deepening_frame_label(date_iso, n_frames)` (reuses the nameplate's forgiving `format_acq_date`; degrades to just
+  the date, just the count with correct "1 sub"/"N subs" plural, or `""` when neither is known → a clean no-op) and
+  a `_draw_corner_label(img, text)` helper (translucent dark backing + white text, font scaled to frame width and
+  shrunk to ≤60% so a long label never overflows; mirrors `nameplate.py`'s built-in-scalable-font approach — no
+  bundled asset). `render_deepening_frames` / `build_deepening_reel` gained an optional `labels` param **parallel to
+  `fits_paths`**, and the label follows its frame through the unreadable-frame skip filter so a dropped master never
+  shifts the remaining labels off by one. Drawn **after** the unify-to-deepest-size resize so text is crisp at the
+  output resolution (not up/down-scaled with the frame). Omitting `labels` leaves frames byte-for-byte as before.
+  **Webapp** (`webapp/routers/stack.py`): `_build_or_get_deepening_reel` builds the labels from each run row's
+  `timestamp_utc` + `n_frames_used` (the same rows the info endpoint reads) and the cache signature gained a
+  `v2-labels` version tag so an existing cached label-less reel is rebuilt in place rather than served stale.
+  Additive/upgrade-safe: read-only render addition, no schema/config/API-shape/default change; the label only draws
+  onto the cached animation, never the stored FITS/preview/linear science data, and self-omits when a run lacks a
+  date/count. Tests: `tests/test_deepening_reel.py` (+3 — label formatting incl. plural/degrade/empty; labels burned
+  into the bottom-left only (top-left sky untouched); a label follows its frame through a mid-series skip).
+  Beginner bar ✔ (self-explanatory, shareable). Original spec kept for provenance:
+  - _(orig)_ *(Friendliness / PRIORITY 3; size S.)* The v0.157.0 "night after night" reel animates a target's
+  stacks getting deeper, with the provenance (dates + sub counts) shown as a *static* caption under the animation.
+  A nice, low-risk enhancement: overlay each frame with its own small date + sub-count label (e.g. bottom-corner
+  "28 Jun · 120 subs") so a *shared/downloaded* clip — which travels without the surrounding card — still tells the
+  story frame by frame. Pure render addition in `seestack/render/deepening.py` (draw the label per frame before
+  assembling, from the same `iter_stack_runs` rows the info endpoint already reads), guarded so a missing date/count
+  simply omits its clause. Beginner bar ✔ (self-explanatory shareable). Guardrails: additive/opt-in-safe (label
+  only; the underlying pixels/stretch unchanged); keep the label subtle so it never obscures the picture.
 - ~~**NEW BEGINNER FEATURE (Scout 2026-07-21 #11) — "Make it your wallpaper": one-tap export of a finished stack
   cropped + sized to a phone or desktop background, auto-centred on the target.**~~ — **SHIPPED v0.158.0**
   (Builder 2026-07-21, branch `claude/pensive-faraday-m66efc`). Built exactly the Scout's slice across engine +

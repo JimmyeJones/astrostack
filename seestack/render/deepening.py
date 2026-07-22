@@ -110,7 +110,77 @@ def _apply_stf_params(rgb: np.ndarray, params: _StfParams) -> np.ndarray:
     return np.clip(out, 0.0, 1.0)
 
 
+def deepening_frame_label(date_iso: str | None, n_frames: int | None) -> str:
+    """A compact provenance caption for one reel frame — e.g.
+    ``"19 Jul 2026 · 120 subs"`` — so a *downloaded/shared* clip (which travels
+    without the surrounding card) still tells its "night after night" story frame
+    by frame. Best-effort: a missing/garbage date or a non-positive sub count is
+    simply dropped (degrading to just the date, just the count, or ``""`` when
+    neither is known, in which case the label is a clean no-op). Pure, so it's
+    unit-tested. Reuses the nameplate's forgiving date parser for one date format
+    across the app."""
+    from seestack.nameplate import format_acq_date
+
+    parts: list[str] = []
+    date = format_acq_date(date_iso)
+    if date:
+        parts.append(date)
+    if n_frames and n_frames > 0:
+        n = int(n_frames)
+        parts.append("1 sub" if n == 1 else f"{n} subs")
+    return " · ".join(parts)
+
+
+def _load_label_font(size: int):
+    """Pillow's built-in scalable font at ``size`` px — no bundled asset (mirrors
+    :func:`seestack.nameplate._load_font`)."""
+    from PIL import ImageFont
+
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:  # pragma: no cover — Pillow <10.1 (below our pin)
+        return ImageFont.load_default()
+
+
+def _draw_corner_label(img, text: str):
+    """Return ``img`` (a PIL RGB image) with a small translucent provenance label
+    in the **bottom-left** corner. Subtle by design — a dark backing strip plus
+    white text — so it never competes with the picture. An empty ``text`` is a
+    clean no-op (the image is returned unchanged), so a label-less frame is
+    byte-for-byte what the reel produced before. The font scales with the frame
+    width and shrinks so a long label never runs past ~60% of the frame."""
+    if not text:
+        return img
+    from PIL import Image, ImageDraw
+
+    base = img.convert("RGBA")
+    width, height = base.size
+    font_px = max(9, round(width * 0.028))
+    font = _load_label_font(font_px)
+    avail = max(1, round(width * 0.6))
+    while font_px > 7 and font.getlength(text) > avail:
+        font_px -= 1
+        font = _load_label_font(font_px)
+
+    ascent, descent = font.getmetrics()
+    line_h = ascent + descent
+    pad = max(3, round(font_px * 0.4))
+    margin = max(3, round(width * 0.015))
+    tw = font.getlength(text)
+    x0 = margin
+    y1 = height - margin
+    y0 = y1 - (line_h + 2 * pad)
+    x1 = x0 + tw + 2 * pad
+
+    overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
+    od = ImageDraw.Draw(overlay)
+    od.rectangle((x0, y0, x1, y1), fill=(0, 0, 0, 130))
+    od.text((x0 + pad, y0 + pad), text, font=font, fill=(255, 255, 255, 235))
+    return Image.alpha_composite(base, overlay).convert("RGB")
+
+
 def render_deepening_frames(fits_paths: list[str | Path], *,
+                            labels: list[str] | None = None,
                             max_width: int = 1024) -> list:
     """Render each stack FITS in ``fits_paths`` (oldest → newest) to a PIL RGB
     image, all under **one common stretch** taken from the deepest (last) frame.
@@ -121,31 +191,41 @@ def render_deepening_frames(fits_paths: list[str | Path], *,
     the normal re-stack output. Frames are resized to the last (deepest) frame's
     size so the encoder gets a uniform series even as the canvas grows across
     nights. Frames that can't be loaded are skipped (best-effort).
+
+    ``labels`` (optional, parallel to ``fits_paths``) burns a small provenance
+    caption into each frame's bottom-left corner — see
+    :func:`_draw_corner_label` — so a shared clip carries its own date/sub-count
+    story. A label follows its frame through the skip filter, so a dropped
+    (unreadable) frame never shifts the remaining labels off by one. Omitting
+    ``labels`` (or an empty string per frame) leaves the frame unlabelled and
+    byte-for-byte as before.
     """
     from PIL import Image
 
-    loaded: list[tuple[np.ndarray, bool]] = []
-    for fp in fits_paths:
+    loaded: list[tuple[np.ndarray, bool, str]] = []
+    for i, fp in enumerate(fits_paths):
+        label = labels[i] if (labels is not None and i < len(labels)) else ""
         try:
             rgb, display_space = load_stack_rgb(fp, max_width=max_width)
         except Exception as exc:  # noqa: BLE001 — a bad master just drops out
             log.warning("deepening reel: could not load %s: %s", fp, exc)
             continue
-        loaded.append((rgb, display_space))
+        loaded.append((rgb, display_space, label))
     if len(loaded) < 2:
         return []
 
     # Solve the shared stretch from the deepest *linear* frame (prefer the last),
     # so the whole reel is tone-mapped identically and only the noise changes.
     params: _StfParams | None = None
-    for rgb, display_space in reversed(loaded):
+    for rgb, display_space, _label in reversed(loaded):
         if not display_space:
             params = _solve_stf_params(rgb)
             if params is not None:
                 break
 
     images: list = []
-    for rgb, display_space in loaded:
+    frame_labels: list[str] = []
+    for rgb, display_space, label in loaded:
         if display_space:
             disp = np.clip(np.nan_to_num(rgb), 0.0, 1.0)
         elif params is not None:
@@ -156,10 +236,15 @@ def render_deepening_frames(fits_paths: list[str | Path], *,
             disp = np.clip(np.nan_to_num(rgb), 0.0, 1.0)
         u8 = (disp * 255).astype(np.uint8)
         images.append(Image.fromarray(u8, mode="RGB"))
+        frame_labels.append(label)
 
     target_size = images[-1].size
-    return [im if im.size == target_size else im.resize(target_size, Image.BOX)
-            for im in images]
+    # Unify size first (so the label is drawn crisp at the final output
+    # resolution, not up/down-scaled with the frame), then burn each label in.
+    resized = [im if im.size == target_size else im.resize(target_size, Image.BOX)
+               for im in images]
+    return [_draw_corner_label(im, lbl)
+            for im, lbl in zip(resized, frame_labels, strict=True)]
 
 
 def write_deepening_reel(frames: list, out_dir: Path, out_basename: str) -> Path | None:
@@ -189,10 +274,14 @@ def write_deepening_reel(frames: list, out_dir: Path, out_basename: str) -> Path
 
 
 def build_deepening_reel(fits_paths: list[str | Path], out_dir: Path,
-                         out_basename: str, *, max_width: int = 1024) -> Path | None:
+                         out_basename: str, *, labels: list[str] | None = None,
+                         max_width: int = 1024) -> Path | None:
     """Render ``fits_paths`` (oldest → newest) under a common stretch and write
     the looping "night after night" reel beside the outputs. Convenience wrapper
     over :func:`render_deepening_frames` + :func:`write_deepening_reel`. Returns
-    the written path, or ``None`` when fewer than two frames survive."""
-    frames = render_deepening_frames(fits_paths, max_width=max_width)
+    the written path, or ``None`` when fewer than two frames survive.
+
+    ``labels`` (optional, parallel to ``fits_paths``) burns a per-frame
+    provenance caption in — see :func:`render_deepening_frames`."""
+    frames = render_deepening_frames(fits_paths, labels=labels, max_width=max_width)
     return write_deepening_reel(frames, out_dir, out_basename)
