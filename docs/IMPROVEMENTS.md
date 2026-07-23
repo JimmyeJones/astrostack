@@ -5318,7 +5318,29 @@ problems. Dogfood it every big-picture run and fix root causes.
   reverts on a truly pathological skew. If it does over-revert on real nebula, raise the site-specific threshold
   (or gate it on `sc_std` magnitude). No change unless (a) fails on real data — same real-data-gating as the
   SCNR / `sky_sigma` items below.
-- **IMPROVEMENT IDEA (Scout 2026-07-23) — warn when a master dark's exposure (or temperature) doesn't match the
+- ~~**IMPROVEMENT IDEA (Scout 2026-07-23) — warn when a master dark's exposure (or temperature) doesn't match the
+  lights it's calibrating, instead of silently over/under-subtracting.**~~ — **SHIPPED v0.174.1** (Builder
+  2026-07-23, branch `claude/pensive-faraday-ul8pe1`). Added a pure, advisory-only
+  `CalibrationMasters.calibration_warnings(light_exposure_s, light_temp_c=None) -> list[str]` (`seestack/calibrate/
+  apply.py`) that returns a plain-language warning when (a) a master **dark**'s exposure differs from the lights by
+  more than `_EXPOSURE_MISMATCH_TOL` (15%) **on the default unscaled path** — where `apply_raw` subtracts the full
+  dark, so a 30 s dark on 10 s subs over-subtracts the pedestal ~3× on *every* frame — and (b) the dark's sensor
+  temperature differs by ≥`_TEMP_MISMATCH_TOL_C` (5 °C). The exposure warning is **suppressed when exposure-scaling
+  is on** (a bias present), since `_effective_dark` then corrects the gap itself. `load()` now also captures the
+  dark's `dark_temp_c` (additive, from the existing `MasterMeta.sensor_temp_c`). `run_stack` calls it right after
+  the shape `validate()` and logs each warning (`log.warning("Calibration: …")`, the same stack-log channel the
+  existing flat-mismatch/`describe()` messages use), using the reference frame's exposure/temperature as the
+  (uniform-session) stand-in. **Advisory only** — no hard failure, no behaviour change on any applied path, no new
+  default; additive and upgrade-safe (a nullable field + a new method; existing calibration is byte-for-byte
+  unchanged). Closes a real silent-corruption vector for anyone supplying their own darks (Seestar does in-camera
+  calibration, so this is the advanced manual-master path). Tests: `tests/test_calibrate.py` (+5: mismatched
+  exposure warns, matched/near-matched silent, scaling suppresses it, temperature mismatch warns + within-tolerance
+  silent, no-dark/unknown-header silent) and `tests/test_stack_pipeline.py` (+1: the warning is logged through the
+  real `run_stack` path on a shape-matching but exposure-mismatched dark). _(Original idea below.)_
+
+  <details><summary>Original idea</summary>
+
+  **IMPROVEMENT IDEA (Scout 2026-07-23) — warn when a master dark's exposure (or temperature) doesn't match the
   lights it's calibrating, instead of silently over/under-subtracting.** *(Calibration correctness / trust,
   PRIORITY 4; size S.)* **What the audit traced:** `CalibrationMasters.validate()` (`seestack/calibrate/apply.py`)
   checks only master **shape**; it never compares the master dark's `dark_exposure_s` (which *is* loaded, line
@@ -5336,6 +5358,8 @@ problems. Dogfood it every big-picture run and fix root causes.
   vector for anyone supplying their own darks. Testable on `CalibrationMasters.load()` + a synthetic
   exposure/temp-mismatched master pair. Found by the align/calibrate adversarial audit (which otherwise traced
   the calibration *math* clean).
+
+  </details>
 - **IMPROVEMENT IDEA (Scout 2026-07-23) — count & surface "N subs were only roughly aligned" when sub-pixel
   refine gives up above its shift cap.** *(Stacking-engine trust + image quality, PRIORITY 4 (touches autonomy /
   honest-accounting, PRIORITY 2); size S–M.)* **What I traced:** with `subpixel_refine` on,

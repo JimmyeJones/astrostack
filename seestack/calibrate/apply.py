@@ -21,6 +21,16 @@ log = logging.getLogger(__name__)
 # spike in the calibrated light frame.
 _FLAT_FLOOR = 0.1
 
+# How far a master dark's exposure may differ from the lights before the advisory
+# mismatch warning fires (fractional). Seestar exposures are discrete (10/20/30 s),
+# so a real mismatch is ≥2× — well past this; the slack only absorbs header
+# rounding on a nominally-matched pair.
+_EXPOSURE_MISMATCH_TOL = 0.15
+# How far a master dark's sensor temperature may differ from the lights (°C)
+# before the advisory warning fires. Dark current ~doubles per 6-7 °C, so a few
+# degrees is tolerable; this flags a clearly-mismatched dark library.
+_TEMP_MISMATCH_TOL_C = 5.0
+
 
 def _sanitize_pedestal(arr: np.ndarray) -> np.ndarray:
     """Replace non-finite master dark/bias pixels with 0.0 (= no correction).
@@ -72,6 +82,11 @@ class CalibrationMasters:
     # exposure-scaling (see ``scale_dark_to_light`` / :meth:`_effective_dark`).
     dark_exposure_s: float | None = None
     bias_exposure_s: float | None = None
+    # Sensor temperature (°C) the master dark was shot at, None when the header
+    # didn't carry it. Used only for the advisory mismatch check
+    # (:meth:`calibration_warnings`) — dark current varies with temperature, so a
+    # dark shot far from the lights' temperature leaves a residual.
+    dark_temp_c: float | None = None
     # When True *and* a master bias is available, a master dark shot at a
     # different exposure than the light is scaled to the light's integration
     # time before subtraction (see :meth:`_effective_dark`). Off by default.
@@ -117,6 +132,7 @@ class CalibrationMasters:
         dark = None
         dark_nodata_mask = None
         dark_exposure_s = None
+        dark_temp_c = None
         flat_norm = None
         bias = None
         bias_nodata_mask = None
@@ -131,6 +147,7 @@ class CalibrationMasters:
             dark_nodata_mask = nodata if bool(nodata.any()) else None
             dark = _sanitize_pedestal(dark)
             dark_exposure_s = dark_meta.exposure_s
+            dark_temp_c = dark_meta.sensor_temp_c
         if bias_path:
             bias, bias_meta = load_master(bias_path)
             bias = np.asarray(bias, dtype=np.float32)
@@ -188,6 +205,7 @@ class CalibrationMasters:
                    bias_nodata_mask=bias_nodata_mask,
                    dark_path=dark_path, flat_path=flat_path, bias_path=bias_path,
                    dark_exposure_s=dark_exposure_s, bias_exposure_s=bias_exposure_s,
+                   dark_temp_c=dark_temp_c,
                    scale_dark_to_light=scale_dark_to_light)
 
     @property
@@ -233,6 +251,54 @@ class CalibrationMasters:
                     f"but the frames are {shape[1]}×{shape[0]} — they must match "
                     f"(same camera, binning and no debayering)."
                 )
+
+    def calibration_warnings(
+        self,
+        light_exposure_s: float | None,
+        light_temp_c: float | None = None,
+    ) -> list[str]:
+        """Advisory (non-fatal) warnings that the master dark doesn't match the
+        lights it's calibrating.
+
+        ``validate()`` only checks master *shape*. But a master dark shot at a
+        different **exposure** than the lights silently over/under-subtracts its
+        pedestal on the default (non-scaling) path — ``apply_raw`` subtracts the
+        full unscaled dark — crushing the background or leaving residual dark
+        current on *every* calibrated frame, with nothing telling the user. And a
+        dark shot at a very different **temperature** leaves residual dark current
+        (which ~doubles per ~6-7 °C) even at a matched exposure. This returns a
+        plain-language warning per real mismatch so the stack log can flag it,
+        instead of shipping a silently mis-calibrated stack. Empty when the dark
+        matches (or there's nothing to compare, or exposure-scaling is on and will
+        correct the exposure difference itself).
+        """
+        warnings: list[str] = []
+        if self.dark is None:
+            return warnings
+        de = self.dark_exposure_s
+        # Exposure-scaling (when a bias is present) corrects the exposure gap
+        # itself, so only warn about it on the plain unscaled-subtraction path.
+        scaling_active = self.scale_dark_to_light and self.bias is not None
+        if (not scaling_active and de and de > 0
+                and light_exposure_s and light_exposure_s > 0):
+            ratio = float(light_exposure_s) / float(de)
+            if abs(ratio - 1.0) > _EXPOSURE_MISMATCH_TOL:
+                direction = "over" if de > light_exposure_s else "under"
+                warnings.append(
+                    f"Master dark is {de:g}s but your subs are {light_exposure_s:g}s — "
+                    f"its pedestal will be {direction}-subtracted on every frame. "
+                    f"Use a dark matched to your exposure, or turn on dark "
+                    f"exposure-scaling (needs a master bias)."
+                )
+        dt = self.dark_temp_c
+        if (dt is not None and light_temp_c is not None
+                and abs(float(dt) - float(light_temp_c)) >= _TEMP_MISMATCH_TOL_C):
+            warnings.append(
+                f"Master dark was shot at {dt:g}°C but your subs are at "
+                f"{light_temp_c:g}°C — dark current changes with temperature, so "
+                f"some may remain. A temperature-matched dark calibrates best."
+            )
+        return warnings
 
     def _effective_dark(self, light_exposure_s: float | None) -> np.ndarray | None:
         """The dark to subtract, exposure-scaled to the light when opted in.
