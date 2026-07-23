@@ -47,6 +47,30 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+> **Re-audit — stacking-engine reductions + calibrate + align + bg all CLEAN, no new bug (Scout 2026-07-23, branch `claude/kind-mccarthy-bt8ehb`).**
+> Baseline suite green (**1775 passed, 2 skipped**). Two independent adversarial audit sub-agents re-read the engine
+> end-to-end and both came back **CLEAN**, matching the repeatedly-clean documented state: (a) the reduction/rejection
+> core — `accumulator.py` (WeightedSum `sum/w>0` else-NaN + any-channel `frame_coverage`; MinMaxReject re-verified
+> across counts 0–7 at k=3 against the closed-form per-band expectation incl. `rejection_counts` drop schedule and
+> the `[full]`-before-add inf-safety; Welford mean/var ≡ `nanmean`/`nanvar(ddof=1)` and the `add_window` sub-view
+> writes proven equivalent to full `add`), `drizzle_path.py` (`_clip_tolerance` `+inf` for `wht==0`/`neff<3`/below the
+> `16·eps·m²` float32 var-floor, Bessel on the true `_count`, float64 `m2−m²` anti-cancellation, half-open
+> `[-0.5,N-0.5]`, per-channel OR footprint, `result()` NaN-mask), `weighting.py`/`photometric.py` (factors clipped to
+> `[min_weight,1]` so log/geo-mean never ≤0; scales bounded `[1/max_ratio,max_ratio]`; `MIN_MEASURED_FRAMES` neutral
+> fallback; the `1/s²` fold composes into a correct inverse-variance weighted mean), and `mosaic.py` (RA-wrap circular
+> mean/`unwrap_ra_deg` seam-safe, MAD drop capped at half the frames, canvas px/MP caps, `crpix−x_min+1` CRPIX shift);
+> (b) the per-frame path — `calibrate/apply.py` (dark-then-flat raw-Bayer order, `_FLAT_FLOOR=0.1`→1.0 divide guard,
+> `bias+(dark−bias)·(t_light/t_dark)` scaling with the no-data pedestal restores numerically re-verified, and the
+> exposure-mismatch warning gated on the *same* `_dark_scaling_applies` predicate as the scaling — the v0.176.1 fix
+> holds), `calibrate/masters.py` (`_sigma_clip_mean` MAD=0→tol=0 spike-reject, NaN-aware combine), `align.py` (the CPU
+> `cval=NaN` vs GPU `cval=0` divergence proven un-reachable on the production windowed path by the
+> `FRAME_EDGE_INSET_PX=3` interior-stencil argument; the only exact-boundary site is the caller-less non-windowed
+> `reproject_rgb`; subpixel-shift NaN propagation with the matched order-1 mask), and `bg/*` (shared CPU/GPU
+> `_suppress` core, coverage/gradient sky models finite-only). NaN=no-coverage, rejection math, memory bounds and
+> preview↔export parity all hold. My own reads of `accumulator.py` and `webapp/rejection_summary.py` agreed. **No new
+> verified engine bug this run.** One maintainability note (dead caller-less `reproject_rgb` carrying a latent CPU/GPU
+> `cval` parity hazard) filed under Infra; curation + a new beginner feature + an improvement idea filed below.
+>
 > **Re-audit — stacker.py orchestration CLEAN; shipped a new calibration broken-guardrail bug (Scout 2026-07-23, branch `claude/kind-mccarthy-449g7g`).**
 > Baseline suite green (**1771 passed, 2 skipped**). Two independent adversarial audit sub-agents re-read the hot path
 > again end-to-end: (a) `stacker.py` (1905 lines — κ-σ pass-1/2 keep-mask incl. both NaN widenings, the `consume_clipped`
@@ -5367,6 +5391,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+- **IMPROVEMENT IDEA (Scout 2026-07-23) — make the "why frames were left out" high-drop verdict name the *dominant
+  actual cause*, not the generic "cloud or wind".** *(Friendliness + trust; size S; PRIORITY 3, fully offline,
+  additive.)* `webapp/rejection_summary.py::_verdict` already computes the right *buckets* (trailed / clouds / soft /
+  solve-failed / unsolved / …) and picks a headline tone from the dropped fraction — but when a lot of frames were
+  left out it always says *"A lot of frames were left out — usually cloud or wind. The stack still used all the good
+  ones."* even when the real dominant bucket this night was, say, **soft focus** or **couldn't be located**. For a
+  beginner that's a missed teaching moment: the specific cause is exactly the thing they could act on next time
+  (refocus / run Plate Solve / add a dew heater). **Improvement:** when the high-drop branch fires, look at the
+  already-grouped bucket tallies and, if one non-trivial bucket clearly dominates (e.g. ≥ ~50 % of the dropped
+  frames and it isn't the reassuring "trailed" one), swap the generic tail for a specific, still-reassuring clause —
+  *"…mostly soft focus this time — worth checking focus/dew on your next session"* / *"…mostly frames that couldn't
+  be located yet — run Plate Solve to add them"*. Keep the generic copy as the fallback when no single bucket
+  dominates (genuinely mixed night). **Why it fits:** `summarize_rejections` already has the grouped counts in hand,
+  so this is a pure-function tweak with no new data, no new endpoint, no knob; it just makes the trust card *specific*
+  instead of vague. **Guardrails:** additive/read-only, no schema/config/API-shape/default change; the low/mid-drop
+  verdicts are unchanged. **Builder slice:** extend `_verdict` to take the grouped bucket dict, add the
+  dominant-bucket branch + copy, and add unit cases (soft-dominated → soft copy; unsolved-dominated → plate-solve
+  copy; mixed → generic fallback; trailed-dominated → stays generic-reassuring). Pillar: friendliness + trust.
 - **IMPROVEMENT IDEA (Scout 2026-07-23) — surface calibration-master mismatches (and a *never-applied* wrong-shaped
   bias) at *bind time* in the calibration UI, not only buried in the stack log.** *(Friendliness + trust; size S–M;
   PRIORITY 3, adjacent to image-quality.)* `CalibrationMasters.calibration_warnings()` already produces the right
@@ -6483,6 +6525,33 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Your first image": a dismissible, self-checking end-to-end
+  getting-started guide that walks a brand-new user from empty app → shared picture.** *(Friendliness + autonomy /
+  "understand the app" pillar, PRIORITY 2–3; size M; fully offline, additive, read-only — no new deps.)* **Why a
+  beginner wants it:** the very first time someone opens AstroStack they face a wall of screens (Dashboard, Library,
+  Calibration, Stack, Editor, History, Storage) with no map of the journey. Today the only first-run help is the
+  *setup-problem* banners (`astapReadiness`, `folderReadiness` on the Dashboard) — those fire only when something is
+  *misconfigured* (ASTAP missing, watched folder unset); there is **no positive, ordered "here's how you go from
+  frames to a finished picture" walkthrough**. A beginner who has ASTAP and a folder set correctly gets *no*
+  guidance at all. **Feature:** a small, dismissible **"Your first image" checklist card** on the Dashboard (and/or
+  the empty Library state) with ~5 ordered steps, each a plain sentence + a link to the page that does it, and each
+  **auto-ticking off from state the app already knows**: (1) *Point AstroStack at your subs* — watched folder set or
+  any frame ingested; (2) *Let it check & locate your frames* — target has ≥1 QC'd + plate-solved frame; (3) *Stack
+  them into one image* — target has ≥1 genuine stack run; (4) *Make it a picture* — a saved edit recipe / export
+  exists; (5) *Share it* — a share-card/export has been produced (or just "you're done — here's how to share").
+  The card **self-hides permanently once all steps are done or the user dismisses it** (localStorage flag, like the
+  existing readiness-banner dismissal), so it never nags an experienced user. **Beginner bar ✔:** it *is* the
+  hand-holding a non-expert wants on night one — one card, zero knobs, sane default (auto-detected progress), plain
+  language, directly actionable; serves friendliness + autonomy ("the app told me what to do next"). **Reuses
+  existing signals, no new engine math:** step completion reads counts already on `GET /api/system` / the target
+  list / `iter_stack_runs` — a pure `firstImageSteps(systemInfo, targets)` helper returning `{key, label, href,
+  done}[]` is trivially unit-testable. **Guardrails:** additive/read-only, off nothing, no schema/config/API-shape/
+  default change; renders only for a fresh/low-progress install and disappears afterwards. **Builder slices:**
+  (a) pure `firstImageSteps(...)` helper + unit tests (fresh install → all steps open; mid-journey → correct ticks;
+  fully-done → returns "complete"); (b) a `FirstImageCard` on the Dashboard gated on "not dismissed AND not all
+  done", reusing the readiness-dismissal pattern; (c, follow-on) surface the same card on the empty Library state so
+  a user who lands there first still sees it. Keeps the beginner-feature pipeline stocked with a pure
+  *friendliness/onboarding* capability (distinct from the many retrospective/planning cards already filed).
 - **NEW BEGINNER FEATURE (Scout 2026-07-23) — "How big is this in the sky?": a scale bar + full-moon-comparison on
   the finished picture, from the stack's own WCS.** *(Understand + enjoy + share / "get a good image" pillar,
   PRIORITY 3–4; size S–M; fully offline, additive, read-only — no new deps.)* **Why a beginner wants it:** a fresh
@@ -8950,6 +9019,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+- **NEW (Scout 2026-07-23) — remove or parity-pin the caller-less non-windowed `reproject_rgb` in `align.py` (latent
+  CPU/GPU `cval` divergence).** *(Maintainability / latent-correctness; size S; from this run's align audit.)* The
+  2026-07-23 adversarial align audit re-confirmed that the production stack uses only the **windowed** reproject path,
+  where the CPU (`cval=NaN`) vs GPU (`cval=0`) boundary-fill difference is proven un-reachable by the
+  `FRAME_EDGE_INSET_PX=3` interior-stencil argument. The **non-windowed** `reproject_rgb` is the one site that carries
+  the exact-integer-boundary `valid` edge (`src_x <= w_src-1`, no inset) — and it has **no production caller**: the hot
+  path uses `reproject_rgb_windowed` (`align.py:158`); the only user of the full-frame `reproject_rgb` (`align.py:286`)
+  is `tests/test_windowed_stack.py:95`, purely as an *oracle* to prove the windowed path matches a full-frame
+  reproject. Mild foot-gun: a future change that wired the full-frame version into production would bypass the windowed
+  path's interior-stencil safety and lean on the edge boundary instead. **Fix directions (pick one — do NOT just delete
+  it, the parity test depends on it):** (a) keep it but harden the two branches to identical fill semantics (both
+  `cval=NaN` + valid-mask, mirroring the windowed path) and extend a CPU-vs-GPU parity assertion to this wrapper (the
+  existing `tests/test_align_gpu_parity.py` covers the `_cpu`/`_gpu` kernels but not this wrapper's boundary handling);
+  or (b) mark it explicitly test-only (underscore/rename + a docstring note) so nobody wires it into production by
+  mistake. Either way documents intent and removes the latent divergence. Additive/safe (tightening an off-hot-path
+  function + a test); no config/DB/API/on-disk/default change. Confidence: traced (no production caller +
+  parity-hazard, not a live bug — the hot path never reaches it).
 - ~~**NEW (Builder 2026-07-22) — the documented Qt-skip test fallback (AGENTS.md §7) is broken when `libEGL` is
   missing.**~~ — **SHIPPED v0.170.2** (Builder 2026-07-22, branch `claude/pensive-faraday-808ymd`; hit firsthand
   this run). When `apt` is blocked so `libEGL.so.1` can't be installed, the `pytest-qt` plugin's
