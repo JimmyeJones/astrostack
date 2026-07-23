@@ -504,6 +504,23 @@ when you take it.
   owner's data. May share the owner's deploy with the thin-stack bug below but is a
   distinct axis (size, not frame count). Severity: wrong-result on the core output.
   Confidence: traced candidates; reproduce to localise.
+  - **Builder investigation 2026-07-23 (branch `claude/pensive-faraday-rlgaiv`) — candidate 2 RULED OUT for the
+    default path; localises to candidate 1 (drizzle-on only) or candidate 3 (display caps).** Reproduced
+    deterministically with 4 synthetic 480×320 WCS subs: a default `StackOptions` stack (drizzle OFF — it defaults
+    `drizzle=False`) produces `estimate_stack` canvas **320×480** and `run_stack` `canvas_shape` **(320, 480)**, and
+    the **saved FITS is (3, 320, 480)** — i.e. **exactly the native sub resolution, no shrink**. So on a default
+    install the FITS/TIFF/full-res artifact is *not* losing pixels; the base (non-drizzle) canvas equals the reference
+    sub (candidate 2 is not the bug). That leaves two real possibilities for the owner's report: **(1)** they judge
+    "resolution" by the **in-browser preview PNG (1024px cap) or the shared JPEG (2048px cap)** — by-design display
+    caps, so the fix is to *surface the true output pixel size + a genuine full-res download*, not to change the caps;
+    or **(2)** they run with **drizzle ON** expecting super-res (`drizzle_scale=1.5` default when enabled) and
+    `_largest_drizzle_scale_within_budget` silently dropped the scale to fit `max_stack_memory_gb` on the RAM-capped
+    NAS — the fix there is to record the *requested vs actual* drizzle scale on the run and warn plainly when reduced.
+    **Highest-value, LOWEST-risk next slice (do this first, no hot-path change):** persist+surface the output pixel
+    dimensions on the run/History info (the run record already stores `canvas_w`/`canvas_h`) and, when drizzle scale
+    was reduced by the budget, stamp a plain-language note — this directly answers "is my output actually low-res?"
+    without touching the memory-bounded stack math. Only *after* that, and only with a memory-measurement harness,
+    consider changing the budget/scale logic (§10: never break the OOM bounds).
 
 - **⭐⭐ OWNER-REPORTED (2026-07 — TOP PRIORITY, real data on v0.158) — auto-stacked
   FINAL results come out as single-frame colour-speckle "gibberish" for some
