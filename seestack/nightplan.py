@@ -983,6 +983,79 @@ def suggest_targets(
     return out[:max(0, limit)]
 
 
+@dataclass(frozen=True)
+class MonthObservability:
+    """How well-placed a target is on a representative night of one month.
+
+    One row of :func:`best_months` — the building block of the "best time of year
+    to shoot this" seasonal strip. ``max_transit_alt_deg`` is the target's peak
+    altitude *during that night's dark window* (not its physical transit, which
+    may fall in daylight — a target that only culminates while the Sun is up reads
+    as a poor month here, which is exactly right for "when can I actually get
+    it?"). ``usable_dark_minutes`` is the darkness it spends above the altitude
+    floor; ``dark_minutes`` is the length of the dark window itself (0 in polar
+    day, when there is no darkness to shoot in).
+    """
+
+    month: int  # 1..12
+    max_transit_alt_deg: float
+    usable_dark_minutes: float
+    dark_minutes: float
+
+
+def best_months(
+    observer: Observer,
+    ra_deg: float,
+    dec_deg: float,
+    *,
+    year: int,
+    min_altitude_deg: float = 30.0,
+    horizon: HorizonProfile | None = None,
+) -> list[MonthObservability]:
+    """Which months of ``year`` this target is well-placed from ``observer``.
+
+    Answers the most common *plan-ahead* question a beginner asks about a named
+    object — "when *this year* can I actually get it?" — that the short-horizon
+    :func:`plan_tonight` / :func:`next_observing_windows` don't: they only look a
+    night (or ~two weeks) out. Scans the year at monthly cadence: for a
+    representative night near the middle of each month it finds that night's
+    astronomical-dark window (:func:`_find_dark_window`) and how observable the
+    single target is over it (:func:`_observability_batch`), so a winter target
+    lights up Nov–Feb and a summer one Jun–Aug.
+
+    Deterministic and offline like the rest of the planner (the Moon is *not*
+    folded in — its phase on one representative night is seasonal noise, so this
+    is a pure Sun/geometry answer). Always returns 12 rows, ``month`` 1→12; a row
+    with ``dark_minutes == 0`` is a polar-day month (no darkness), and one with
+    ``usable_dark_minutes == 0`` means the target never clears the floor during
+    that month's darkness (too far south from this site, or only up in daylight).
+    """
+    _configure_iers_offline()
+    rows: list[MonthObservability] = []
+    for month in range(1, 13):
+        # Anchor at local solar noon on the 15th, so ``_find_dark_window`` (which
+        # takes the darkness *following* its reference) lands on that month's
+        # night regardless of longitude — the same anchoring the forward planner
+        # uses. The 15th is a stable mid-month representative for the season.
+        anchor = datetime(year, month, 15, 12, 0, 0, tzinfo=timezone.utc) - timedelta(
+            hours=observer.lon_deg / 15.0)
+        window = _find_dark_window(observer, anchor)
+        if window is None:
+            # Sun never sets that night (high-latitude summer) — no darkness.
+            rows.append(MonthObservability(month, 0.0, 0.0, 0.0))
+            continue
+        illum = moon_illumination(window.start + (window.end - window.start) / 2)
+        o = _observability_batch([ra_deg], [dec_deg], observer, window,
+                                 min_altitude_deg, illum, horizon=horizon)[0]
+        rows.append(MonthObservability(
+            month=month,
+            max_transit_alt_deg=o.max_altitude_deg,
+            usable_dark_minutes=o.minutes_above_min_alt,
+            dark_minutes=round(window.duration_minutes, 1),
+        ))
+    return rows
+
+
 def _angular_sep_deg(ra1: float, dec1: float, ra2: float, dec2: float) -> float:
     """Great-circle angular separation (deg) between two RA/Dec points."""
     r1, d1, r2, d2 = map(np.radians, (ra1, dec1, ra2, dec2))

@@ -6004,7 +6004,33 @@ problems. Dogfood it every big-picture run and fix root causes.
   unit-tested on synthetic distributions. **(b) webapp (S):** surface it in the target/reject-summary response
   (additive field). **(c) frontend (S):** the card + tip, shown only when the estimate is trustworthy. Absolute
   bucketing is a follow-on that needs real per-model calibration.
-- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Best time of year to shoot this target": a plain-language
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "Best time of year to shoot this target": a plain-language
+  seasonal-observability strip that answers "when *this year* can I actually get this object?"**~~ — **SHIPPED
+  v0.174.0** (Builder 2026-07-23, branch `claude/pensive-faraday-ul8pe1`). Built end-to-end across
+  engine/webapp/frontend, reusing the offline planner — no new astro math, no network, no model, no
+  schema/config/API-shape/default change (read-only). **Engine** (`seestack/nightplan.py`): a pure, unit-tested
+  `best_months(observer, ra_deg, dec_deg, *, year, min_altitude_deg, horizon)` → 12 `MonthObservability` rows
+  `{month, max_transit_alt_deg, usable_dark_minutes, dark_minutes}`. For a representative mid-month night it finds
+  that night's dark window (`_find_dark_window`) and the single target's observability over it
+  (`_observability_batch`) — so `max_transit_alt_deg` is the peak altitude *during darkness* (a target that only
+  culminates in daylight reads low, exactly right for "when can I actually get it?"). The Moon is deliberately
+  excluded (its phase on one representative night is seasonal noise). Deterministic; a `dark_minutes==0` row is a
+  polar-day month, `usable_dark_minutes==0` means it never clears the floor in that month's darkness. **Webapp**
+  (`webapp/routers/plan.py`): read-only `GET /api/plan/best-months/{safe}` mirroring `/next-session` (site +
+  library resolved server-side; year taken from the optional `when`; empty `months` ⇒ the strip self-hides when no
+  location or no solved position). **Frontend**: pure phrasing helpers (`components/bestMonths.ts`:
+  `bestMonthsVerdict`/`longestCircularRun`/`monthShades`) that name the best *wrap-around* month range and peak in
+  **hemisphere-neutral month names** (not "winter"/"summer"), handle circumpolar ("Up all year"), never-rising
+  ("never climbs above the horizon"), and low-from-here (altitude fallback + "stays low" caveat) cases; a compact
+  self-hiding `BestMonthsStrip` on the Target page (12-cell heat strip shaded by observability, peak-month
+  highlighted, per-cell tooltips) placed beside "Plan your next night". Additive/upgrade-safe throughout. Tests:
+  `tests/test_nightplan.py` (+7: 12 ordered rows, winter/summer peaks, circumpolar, never-rising, polar-day,
+  determinism), `tests/webapp/test_plan.py` (+4: seasonal strip, self-hide, 404, bad-`when`),
+  `frontend/.../bestMonths.test.ts` (+14) and `BestMonthsStrip.test.tsx` (+2). _(Original spec below.)_
+
+  <details><summary>Original spec</summary>
+
+  **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Best time of year to shoot this target": a plain-language
   seasonal-observability strip that answers "when *this year* can I actually get this object?"** *(Autonomy /
   Friendliness — the "plan" pillar, PRIORITY 2–3; size M.)* **Why:** the planner today is **short-horizon only** —
   `plan_tonight` covers *tonight* and `next_observing_windows` walks at most ~14 nights forward. Nothing answers
@@ -6029,6 +6055,8 @@ problems. Dogfood it every big-picture run and fix root causes.
   (winter/summer target, circumpolar, never-rises, empty-coords self-hide). Keeps the beginner-feature pipeline
   stocked with a *plan* capability distinct from the tonight-only "What should I shoot next?" and 14-night
   "next windows" cards.
+
+  </details>
 - ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "My best pictures": an auto-curated, cross-target portfolio wall of
   your finest finished stacks.**~~ — **SHIPPED v0.173.0** (Builder 2026-07-23, branch `claude/pensive-faraday-iv26r2`).
   Built end-to-end across engine/webapp/frontend, reusing the existing gallery/lightbox/share plumbing — no new astro

@@ -16,6 +16,7 @@ from seestack.nightplan import (
     HorizonProfile,
     LibraryTarget,
     Observer,
+    best_months,
     load_catalog,
     moon_illumination,
     moon_is_waxing,
@@ -779,3 +780,70 @@ def test_suggest_targets_carries_a_framing_hint():
     for t in sized:
         assert t.framing is not None
         assert t.framing.level in {"fits", "tight", "mosaic"}
+
+
+# --- best_months ("best time of year to shoot *this* target") ----------------
+
+
+def test_best_months_returns_twelve_ordered_rows():
+    rows = best_months(LONDON, 83.8, -5.4, year=2026)
+    assert [r.month for r in rows] == list(range(1, 13))
+    for r in rows:
+        assert r.max_transit_alt_deg <= 90.0
+        assert r.usable_dark_minutes >= 0.0
+        assert r.dark_minutes >= 0.0
+        # Can never be usable for longer than the night is dark.
+        assert r.usable_dark_minutes <= r.dark_minutes + 1e-6
+
+
+def test_best_months_winter_target_peaks_in_winter():
+    # Orion (M42, dec ~-5) from a northern site is a classic winter target: high
+    # and up all night Nov–Feb, absent (below the floor) in mid-summer.
+    rows = {r.month: r for r in best_months(LONDON, 83.8, -5.4, year=2026)}
+    winter = max(rows[m].usable_dark_minutes for m in (11, 12, 1, 2))
+    summer = max(rows[m].usable_dark_minutes for m in (5, 6, 7))
+    assert winter > summer
+    assert summer == 0.0  # never clears the floor during darkness in high summer
+    assert winter > 60.0  # a real, usable winter window
+
+
+def test_best_months_summer_target_peaks_in_summer():
+    # A northern-summer target: Cygnus (NGC 7000 / Deneb region, RA ~314, dec +44)
+    # is highest in the short summer nights and low in winter darkness.
+    rows = {r.month: r for r in best_months(LONDON, 314.0, 44.0, year=2026)}
+    # Summer months reach a markedly higher peak altitude than deep winter.
+    summer_alt = max(rows[m].max_transit_alt_deg for m in (6, 7, 8))
+    winter_alt = max(rows[m].max_transit_alt_deg for m in (12, 1, 2))
+    assert summer_alt > winter_alt
+
+
+def test_best_months_circumpolar_target_is_usable_year_round():
+    # A high-declination target from a mid-northern site never sets, so every
+    # month with real darkness offers a usable window.
+    rows = best_months(LONDON, 37.0, 80.0, year=2026)
+    assert all(r.usable_dark_minutes > 0.0 for r in rows)
+
+
+def test_best_months_never_rising_target_is_never_usable():
+    # Deep-southern declination from a northern site: never above the horizon, so
+    # no month is usable and the peak altitude stays negative all year.
+    rows = best_months(LONDON, 100.0, -80.0, year=2026)
+    assert all(r.usable_dark_minutes == 0.0 for r in rows)
+    assert max(r.max_transit_alt_deg for r in rows) < 0.0
+
+
+def test_best_months_polar_day_month_has_no_darkness():
+    # A far-north site loses all astronomical darkness around midsummer, so those
+    # months report zero dark minutes (and hence zero usable) rather than crashing.
+    svalbard = Observer(lat_deg=78.2, lon_deg=15.6, elevation_m=0.0)
+    rows = {r.month: r for r in best_months(svalbard, 83.8, -5.4, year=2026)}
+    assert rows[6].dark_minutes == 0.0
+    assert rows[6].usable_dark_minutes == 0.0
+    # A dark winter month there does have a night to shoot in.
+    assert rows[12].dark_minutes > 0.0
+
+
+def test_best_months_is_deterministic():
+    a = best_months(LONDON, 83.8, -5.4, year=2026)
+    b = best_months(LONDON, 83.8, -5.4, year=2026)
+    assert a == b

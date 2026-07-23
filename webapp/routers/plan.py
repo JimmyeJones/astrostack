@@ -27,6 +27,7 @@ from seestack.nightplan import (
     HorizonProfile,
     LibraryTarget,
     Observer,
+    best_months,
     load_catalog,
     next_observing_windows,
     plan_tonight,
@@ -450,6 +451,74 @@ def get_next_session_ics(
         media_type="text/calendar",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get("/best-months/{safe}")
+def get_best_months(
+    safe: str,
+    request: Request,
+    min_alt: int | None = Query(default=None, ge=0, le=80),
+    when: str | None = Query(default=None,
+                             description="ISO-8601 UTC reference; the year is scanned. Defaults to now"),
+) -> dict[str, Any]:
+    """"Best time of year to shoot this target" — a seasonal-observability strip.
+
+    The plan-ahead companion to ``/next-session`` (which looks ~two weeks out):
+    it answers "when *this year* can I actually get this object?" by scanning the
+    twelve months and reporting, for a representative night of each, how high the
+    target climbs during darkness and how long it stays up. So the Target page can
+    say "a winter target — best Nov–Feb" for M42 and "a summer target" for the
+    Cygnus region. Read-only and offline. ``months`` is empty (the strip
+    self-hides) when no location is set or the target has no solved position;
+    ``target_has_position``/``location_source`` let the UI explain which.
+    """
+    settings = deps.get_settings(request)
+
+    ref = datetime.now(timezone.utc)
+    if when:
+        try:
+            ref = datetime.fromisoformat(when)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Bad 'when' timestamp") from exc
+        if ref.tzinfo is None:
+            ref = ref.replace(tzinfo=timezone.utc)
+
+    lib = deps.open_library(request)
+    try:
+        entry = lib.find_target(safe)
+    finally:
+        lib.close()
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Unknown target")
+
+    observer, location_source = _resolve_observer(request, settings)
+    min_altitude = min_alt if min_alt is not None else int(settings.min_target_altitude_deg)
+    has_position = entry.ra_deg is not None and entry.dec_deg is not None
+
+    base: dict[str, Any] = {
+        "location_source": location_source,
+        "observer": asdict(observer) if observer is not None else None,
+        "target_has_position": has_position,
+        "min_altitude_deg": min_altitude,
+        "year": ref.year,
+        "months": [],
+    }
+    if observer is None or not has_position:
+        return base
+
+    rows = best_months(
+        observer, float(entry.ra_deg), float(entry.dec_deg),
+        year=ref.year,
+        min_altitude_deg=float(min_altitude),
+        horizon=HorizonProfile.from_pairs(settings.horizon_profile),
+    )
+    base["months"] = [{
+        "month": r.month,
+        "max_transit_alt_deg": r.max_transit_alt_deg,
+        "usable_dark_minutes": r.usable_dark_minutes,
+        "dark_minutes": r.dark_minutes,
+    } for r in rows]
+    return base
 
 
 # How many not-yet-captured showpieces to suggest tonight. One to three keeps the
