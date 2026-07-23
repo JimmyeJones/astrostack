@@ -47,6 +47,22 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+> **Re-audit — stacker.py orchestration CLEAN; shipped a new calibration broken-guardrail bug (Scout 2026-07-23, branch `claude/kind-mccarthy-449g7g`).**
+> Baseline suite green (**1771 passed, 2 skipped**). Two independent adversarial audit sub-agents re-read the hot path
+> again end-to-end: (a) `stacker.py` (1905 lines — κ-σ pass-1/2 keep-mask incl. both NaN widenings, the `consume_clipped`
+> rejection tally units, the memory guard's `dst_shape`/`reject_arrays`/post-lucky-`n` accounting, coverage sourcing per
+> path, `_imap_bounded` in-flight bounding, cancel handling on all four standard branches, quick-look/reel caps) — **CLEAN**,
+> matching the documented state (the STACKER-label-on-degraded-method and the pass-1→pass-2 transient are the known
+> label-only / already-filed-memory-guard notes, not new bugs); (b) `render/thumbnail.py` (asinh/STF stretch, `_downsample_rgb`
+> NaN floor, striding preview parity) and `output.py` (FITS/TIFF/preview parity, display-space card, `_to_uint16_linear`
+> covered-only percentiles) read clean too. The **one new verified bug** this run was in `calibrate/apply.py`: the
+> exposure-mismatch advisory (`calibration_warnings`) gated scaling on "a bias is present", but `_effective_dark` only
+> *actually* scales when the bias **shape matches the dark** — so a loaded-but-wrong-shaped bias fell back to the unscaled
+> dark (over/under-subtracting a mismatched-exposure pedestal on every frame) **while silencing the very warning meant to
+> catch it**. Reproduced (30 s dark on 10 s subs, 2×2 bias vs 4×4 dark → effective dark 300 not the scaled 166.67, warnings
+> `[]`), **fixed + regression-tested + shipped this run** (struck below): extracted a shared `_dark_scaling_applies` predicate
+> used by both sites so they can't drift again. Curation + 2 ideas filed below.
+>
 - **FLAKY TEST (test-infra, not a product bug) — `frontend/src/routes/Editor.test.tsx` fails ~2 of 68 whenever the
   whole file runs, with a *different* victim set each time.** *(CI reliability; Medium-infra — a flaky suite erodes
   the green-gate the whole autonomous project leans on; **reproduced** on clean `origin/main` 2026-07-23, branch
@@ -5329,6 +5345,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+- **IMPROVEMENT IDEA (Scout 2026-07-23) — surface calibration-master mismatches (and a *never-applied* wrong-shaped
+  bias) at *bind time* in the calibration UI, not only buried in the stack log.** *(Friendliness + trust; size S–M;
+  PRIORITY 3, adjacent to image-quality.)* `CalibrationMasters.calibration_warnings()` already produces the right
+  plain-language advisories ("Master dark is 30s but your subs are 10s — its pedestal will be over-subtracted on every
+  frame…"; the temperature-mismatch line), and this run's fix keeps them honest. But they only reach the *stack log* —
+  a beginner binding a dark/flat/bias to a target never sees them until (if ever) they read a log, so they ship a
+  silently mis-calibrated stack. Idea: when a user binds masters (the calibration bind dialog / `POST` bind endpoint),
+  compute and return these warnings against the target's representative sub exposure/temperature and show them inline
+  ("this dark was shot at a different exposure — turn on exposure-scaling or use a matched dark"). Also flag a
+  **loaded-but-inert** master: a bias whose shape doesn't match the dark (never applied — the case behind this run's
+  bug) or a master whose dimensions don't match the target's frames, with a plain "this master won't be used because it
+  doesn't match your camera/binning" note — so the user isn't misled into thinking calibration is happening when it
+  isn't. Read-only/additive: reuses the existing `calibration_warnings` + `validate` logic at a new (bind-time) call
+  site; sane default is simply *showing* what the engine already computes. Ship as a slice: (a) return warnings from the
+  bind/preview endpoint; (b) render them in the bind dialog; (c) add the inert-master notice. Serves the OSC beginner
+  who "added darks" and expects them to just work.
 - ~~**IMPROVEMENT IDEA (Scout 2026-07-21) — turn "the storage went read-only" into a plain-language error, not a
   bare 500, on the frame-write endpoints.**~~ — **SHIPPED v0.158.8** (Builder 2026-07-21, branch
   `claude/pensive-faraday-yr971k`). The three frame-mutating endpoints in `webapp/routers/frames.py`
@@ -6429,6 +6461,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "How big is this in the sky?": a scale bar + full-moon-comparison on
+  the finished picture, from the stack's own WCS.** *(Understand + enjoy + share / "get a good image" pillar,
+  PRIORITY 3–4; size S–M; fully offline, additive, read-only — no new deps.)* **Why a beginner wants it:** a fresh
+  imager has no intuition for angular scale — they don't know whether their M31 frame is 1° or 3° across, or how the
+  Ring Nebula's tiny apparent size compares to what they see. A scale bar ("30′") plus a plain-language comparison
+  ("about the width of the full Moon" / "the whole frame is ~2.5 Moons wide") turns the picture into something they
+  *understand* and can caption when sharing. This is different from the existing "Will it fit?" framing hint (a
+  *planning-time* FOV estimate) and the "What's in this picture?" object labels (identity, not scale): this annotates
+  the *finished result* with its true measured scale. **How (fits our idiom — automatic, explained, one toggle):**
+  the stack's master FITS already carries a celestial WCS; `celestial_wcs_from_fits` (added for the annotate feature)
+  yields the pixel scale (arcsec/px) and frame dimensions, so a pure helper `scale_bar_for(wcs, width_px, height_px)`
+  can pick a "nice" round bar length (e.g. 1′/5′/10′/30′/1°) that's ~15–25 % of the frame width, return its
+  pixel length + label + a Moon-fraction comparison (Moon ≈ 31′), and the frontend draws a small unobtrusive bar in a
+  corner (a reusable overlay next to `AnnotatedImage`, off by default with a "Scale" toggle, exactly like "Identify").
+  Sane default: only offered when the run has a usable WCS (older/edited runs simply don't show it). **Slices:**
+  (a) engine helper + unit tests (round-number selection, Moon comparison, pole/seam-safe since it uses the local
+  pixscale, `None` when no WCS); (b) read-only `GET …/stack-runs/{id}/scale-bar` (or fold into the existing
+  annotations endpoint); (c) frontend overlay + toggle on the History/result card; (d, follow-on) bake the bar into
+  the share JPEG/wallpaper export so a shared image carries its scale. Clears the beginner bar: sane default,
+  plain-language, no expert knobs.
 - **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Tonight's subs look soft — check focus": an early, actionable
   focus/dew nudge fired on a fresh session's *first few* subs, comparing them to this target's own best nights.**
   *(Autonomy + friendliness / "get a good image" pillar, PRIORITY 2–3; size M; offline, additive, read-only, no new
@@ -9507,6 +9559,22 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- ~~**Calibration exposure-mismatch warning was silenced exactly when a wrong-shaped bias disabled dark-scaling.**~~
+  — **FIXED v0.176.1** (Scout 2026-07-23, branch `claude/kind-mccarthy-449g7g`; traced + reproduced + regression-tested).
+  *(Stacking/calibration correctness + broken-guardrail; Medium — advanced manual-calibration path; found by this run's
+  calibrate/weighting adversarial audit.)* `calibrate/apply.py::calibration_warnings` computed `scaling_active =
+  self.scale_dark_to_light and self.bias is not None` (no shape check), but `_effective_dark` **only** exposure-scales the
+  dark when `self.bias.shape == self.dark.shape`. So a user with a dark + a **wrong-shaped** master bias + scaling on got the
+  unscaled dark subtracted (a 30 s dark's pedestal over/under-subtracted on 10 s subs, every frame — background crushed by
+  ~133 ADU in the repro) **while the exposure-mismatch advisory that exists to catch exactly this was suppressed**. Reproduced
+  (2×2 bias vs 4×4 dark, 30 s→10 s: `_effective_dark(10)` returns 300 not the scaled 166.67, `calibration_warnings(10)` returns
+  `[]`; control with a matching bias correctly scales and stays silent). **Fix:** extracted a shared `_dark_scaling_applies`
+  property (scale-on ∧ dark present ∧ bias present ∧ **bias.shape == dark.shape**) and used it in **both** `_effective_dark`
+  and `calibration_warnings` so the two can never drift apart again. Byte-for-byte unchanged on every already-correct path
+  (matched-shape bias still scales silently; no bias / no dark / matched-exposure all as before). Regression
+  `tests/test_calibrate.py::test_calibration_exposure_warning_fires_when_bias_shape_mismatch_disables_scaling` (asserts the
+  unscaled 300 ADU fallback AND that the advisory now fires; fail-before: warning was `[]`). Upgrade-safe: within-class
+  predicate refactor, no config/DB/API-shape/on-disk/default change.
 - **QA re-audit record (Scout 2026-07-23, branch `claude/kind-mccarthy-49jli6`).** Adversarial correctness sweep
   of the stacking engine per the current focus. **`drizzle_path.py` / `mosaic.py` / `pointings.py` /
   `photometric.py` traced CLEAN** (drizzle weighted-average output, E[v²]−E[v]² variance, photometric scale
