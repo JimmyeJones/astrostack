@@ -119,12 +119,28 @@ def solve_one(
         )
 
     wcs_text = wcs_text_from_sidecar(r.wcs_sidecar_path) if r.wcs_sidecar_path else None
+    ra_center = r.ra_center_deg
+    dec_center = r.dec_center_deg
+    # ASTAP can solve (returncode 0 + a valid ``.wcs`` sidecar) yet leave the centre
+    # None when its ``.ini`` sidecar is missing or unparseable — the centre is only
+    # read from the ``.ini``. The same coordinates live in the ``.wcs`` sidecar's
+    # reference point (CRPIX is the image centre, so CRVAL1/CRVAL2 are the centre),
+    # so recover them from the WCS instead of persisting a solved-but-centreless
+    # frame. Without a centre the frame stacks but is silently barred from being the
+    # reference frame and from seeding sibling plate-solve hints, and is never
+    # re-offered to fill it in.
+    if r.solved and wcs_text is not None and (ra_center is None or dec_center is None):
+        from seestack.io.wcs_io import wcs_center_deg_from_text
+
+        centre = wcs_center_deg_from_text(wcs_text)
+        if centre is not None:
+            ra_center, dec_center = centre
     return SolveResult(
         frame_id=frame_id, fits_path=fits_path,
         solved=r.solved,
         wcs_text=wcs_text,
-        ra_center_deg=r.ra_center_deg,
-        dec_center_deg=r.dec_center_deg,
+        ra_center_deg=ra_center,
+        dec_center_deg=dec_center,
         pixscale_arcsec=r.pixscale_arcsec,
         rotation_deg=r.rotation_deg,
         error=None if r.solved else (r.log_tail or "").strip()[-500:] or "no solution",

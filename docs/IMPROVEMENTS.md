@@ -832,11 +832,20 @@ when you take it.
   at the same path in no-cache mode, re-ingests, and asserts `wcs_json`/hints were cleared. Confidence: traced
   (gating + default verified end-to-end: `config.py:65` False → `pipeline.py:66` → `ingest.py:194` guard).
 
-- **A plate-solve that succeeds but whose ASTAP `.ini` sidecar doesn't parse is persisted as "solved" with a valid
+- ~~**A plate-solve that succeeds but whose ASTAP `.ini` sidecar doesn't parse is persisted as "solved" with a valid
   `wcs_json` but NULL centre coordinates — the frame stacks yet is silently barred from being the reference frame and
-  from seeding sibling plate-solve hints, and is never re-offered to recover its centre.** *(Stacking/solve
-  correctness — data-completeness; Low–Medium latent, ASTAP-config-dependent; found by the 2026-07-23 QC/solve
-  adversarial audit — traced + reproduced.)* `ASTAPSolver._solve_once` (`seestack/solve/astap.py:286-304`) sets
+  from seeding sibling plate-solve hints, and is never re-offered to recover its centre.**~~ — **FIXED v0.184.1**
+  (Builder 2026-07-23, branch `claude/pensive-faraday-2nhbq9`; traced + regression-tested). `solve_one`
+  (`seestack/solve/runner.py`) now backfills the centre from the `.wcs` sidecar when ASTAP solved but the `.ini`
+  yielded no centre: a new `wcs_io.wcs_center_deg_from_text` reads CRVAL1/CRVAL2 (ASTAP writes CRPIX at the image
+  centre, so CRVAL *is* the centre — the same coordinates `_parse_astap_ini` would have returned), so the frame keeps
+  a non-None `ra/dec_center_deg` and stays eligible as the stack reference and as a sibling plate-solve hint instead of
+  being a solved-but-centreless orphan. Regression: `tests/test_solve_runner.py::
+  test_solve_one_backfills_centre_from_wcs_when_ini_unparseable` (mocked ASTAP: solved + valid `.wcs` + null `.ini`
+  centre → recovered centre; fail-before: None) and `…_makes_frame_reference_eligible` (backfilled centre → `fallback_
+  solve_hint` non-None), plus two `tests/test_wcs_io.py` unit cases for the helper. Upgrade-safe: additive read-only
+  helper + a backfill in the solve driver; no config/DB-schema/API-shape/on-disk/default change. Confidence: traced +
+  regression-tested. *(Original trace kept below for provenance.)* `ASTAPSolver._solve_once` (`seestack/solve/astap.py:286-304`) sets
   `solved = returncode == 0 and wcs_sidecar.exists()`, then reads the centre **only** from the `.ini` via
   `_parse_astap_ini` (`astap.py:373`, `values["CRVAL1"]`). If the `.ini` is missing or lacks `CRVAL1`/`CRVAL2`, the
   `KeyError` is swallowed (`astap.py:292`) and `ra/dec` come back `None` **while `solved` stays `True`**. `solve_frame`
