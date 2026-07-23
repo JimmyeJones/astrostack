@@ -714,6 +714,16 @@ sweep are now both well-hardened.)_
     channel's `Background2D` fit fails it's skipped while the others subtract, then `_zero_sky_per_channel` runs —
     a per-channel-asymmetric result that could introduce a faint colour cast. Only on a degenerate fit; the editor
     path is correctly all-or-nothing. Documented "best-effort". (Confidence: traced.)
+  - `seestack/qc/streaks.py:107-112` `streak_count` **over-reports** a single continuous trail as 2–5 (one
+    satellite/plane trail fragments into several collinear `probabilistic_hough_line` segments; `line_gap=8` +
+    `disk(1)` dilation don't re-merge them). Reproduced (Scout 2026-07-23, adversarial QC audit): a clean diagonal
+    trail → count 2 (width 1) / 5 (width 2–3). **Not surfaced in the live web app** — `streak_count` is displayed
+    only in the historical desktop GUI (`seestack/gui/preview.py:209`, `frame_table.py:60`), which is
+    deprioritised; it *is* persisted to `project.sqlite`. **Does NOT affect stacking or auto-reject** — the
+    `streak_detected` boolean that drives `auto:streak` is correct in every tested case. The docstring's primary
+    definition ("number of distinct line segments") is technically accurate; only the "N satellites" framing is
+    optimistic. Fix only if this count is ever surfaced in the web UI (then post-merge collinear segments into
+    trails). (Broken-UX but web-invisible today; confidence: reproduced.)
 
 - ~~**"One frame vs your stack" reveal (and every raw-sub thumbnail) flattened the single sub's sky to
   ~2–3 tonal levels — a saturated star set the uint8 normalisation ceiling, quantising the faint sky
@@ -3885,6 +3895,33 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+- **NEW (Scout 2026-07-23) — "Try harder to locate these": a more-sensitive plate-solve re-pass for the
+  *accepted-but-unsolved* subs, so a faint/sparse-star field's subs actually reach the stacker.** *(Autonomy +
+  trust; PRIORITY 2; size M. Directly attacks the ROOT CAUSE half of the ⭐⭐ top owner bug — thin auto-stacks on
+  faint fields — that is still open.)* **Why:** on a faint / sparse-star target ASTAP's normal ladder
+  (`seestack/solve/astap.py::_SOLVE_LADDER` = downsample `None → 2 → 4`, `timeout_s=60`, `search_radius_deg=30`)
+  fails on most subs; those subs stay **accepted-but-unsolved** and `run_stack` silently combines only
+  accepted **AND** solved frames, so the "stack" is a handful of subs = the owner's single-frame speckle. The
+  honest thin-stack + "N not located yet" surfacing already shipped (see the ⭐⭐ entry), and the existing nudge
+  says *"Run Plate Solve"* — but re-running the **same** ladder that already failed won't help. **The missing
+  lever is a genuinely more-sensitive re-solve**, applied **only to the unsolved-accepted subs** (identified by
+  the already-present `Project.count_accepted_unsolved()` / `accept=1 ∧ wcs_json IS NULL`): e.g. add coarser
+  downsample rungs and/or raise ASTAP's star-detection sensitivity, lengthen the timeout, and widen the search
+  radius — a "faint-field" solve profile tried as a second chance. Distinct from `_solve_setup_problem`
+  (frames.py:150), which only catches **ASTAP-missing / no-star-database** setup failures; the owner's case is
+  ASTAP *present and working* but unable to lock a faint frame, so no setup hint fires. **Beginner bar / trust ✔:**
+  one-click "Try harder to locate these N subs", plain-language, no knobs; a sub that solves on the retry then
+  flows into the stack automatically, thickening it. **Guardrails / needs real data:** additive and opt-in (a new
+  action + optional second ladder tier; **do not** change the default first-pass ladder or timeouts on the hot
+  path). The exact ASTAP flags (sensitivity, extra `-z` rungs, radius) and where the sensitivity/speed knee sits
+  **must be validated against the owner's real faint-field subs** before shipping — a blind sensitivity bump can
+  cost solve time on every sub or mis-solve a sparse field, so tune with real data (extend the ⭐⭐ repro scaffold
+  `scratchpad/repro_thin.py`). **Builder slices — (a) engine (S–M):** a `faint_field=True` variant of the solve
+  ladder (extra rungs / higher sensitivity / longer timeout) in `astap.py`, unit-tested for arg assembly.
+  **(b) webapp (S):** an endpoint that re-solves only the accepted-unsolved subs with the faint profile, wired to
+  the existing solve job machinery. **(c) frontend (S):** a "Try harder to locate these N subs" button on the
+  Target page, shown only when accepted-unsolved subs materially outnumber what stacked (reuse the existing
+  `n_unsolved` the reject-summary already returns).
 - **⭐ OWNER-REQUESTED — Adaptive Auto: learn the owner's taste from feedback on the
   auto-processed image (no ML runtime, fully offline/private).** — **slice (b) per-object-type
   profiles SHIPPED v0.169.0** (Builder 2026-07-22, branch `claude/pensive-faraday-a8m4u2`). The
@@ -5729,6 +5766,32 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Scan to get it on your phone": a QR code beside the finished
+  picture's download button that a beginner scans to pull the JPEG straight onto their phone.** *(Friendliness /
+  "enjoy + share" pillar, PRIORITY 3; size S.)* **Why:** AstroStack runs headless on a NAS/Docker box, so the
+  beginner almost always views their result on a laptop on the LAN — but the picture they actually want to post,
+  set as a lock-screen, or text to family lives on their **phone**, and today the only paths off the laptop are a
+  file download + a manual transfer (AirDrop/USB/cloud). That's the single most common friction after "it
+  worked!": *"how do I get this onto my phone?"* A QR code the phone camera reads in one second closes that loop
+  with zero typing and zero account. **Feature:** next to the existing "Download JPEG" / share affordance on the
+  finished-picture views (Target result, History/Gallery lightbox, editor export), show a small "📱 Scan to get it
+  on your phone" button that pops a QR encoding the **absolute URL of the JPEG download endpoint** (the same
+  nameplate/North-up variant the user is looking at). The phone, on the same Wi-Fi, opens the URL and saves the
+  image — no app, no login. **Beginner bar ✔:** answers a real, universal beginner need, zero knobs, sane default
+  (encodes exactly the picture shown), serves enjoy+share; **not** pro tooling. **Fully offline / no sign-off:**
+  the QR is generated **client-side in the browser** from `window.location.origin` + the download path, so no
+  server dependency and nothing leaves the LAN. Bundle a tiny pure-JS QR encoder (e.g. a ~5 KB vendored
+  `qrcode`/`qrious`-style module, or emit the QR as inline SVG) — no network, no Python dep, no model. **Caveats
+  to design around (call out in the Builder slice):** (a) the URL must be an *absolute LAN* URL the phone can
+  reach — use `window.location` (the address the user already typed), **not** a server-guessed hostname, so it
+  works behind Docker/reverse-proxy without the server knowing its own external name; (b) if auth is ever enabled
+  the link needs the same session/token consideration as the existing download (default install is auth-off, so
+  the common case just works); (c) self-hide gracefully if there's no finished JPEG yet. **Builder slices —
+  (a) frontend (S):** a `ScanToPhoneButton`/`QrPopover` component fed the download URL, vendoring the tiny QR
+  encoder; wire it beside the existing download buttons on the result/lightbox/export views. **(b) tests:** unit
+  test the URL assembly (absolute, correct variant, path-safe) and that the popover renders an SVG/canvas QR;
+  no backend change needed. Keeps the beginner-feature pipeline stocked with a fresh *share/enjoy* capability no
+  existing card covers.
 - ~~**NEW BEGINNER FEATURE (Scout 2026-07-21) — "What should I shoot next?": suggest one or two *well-placed
   showpiece targets you haven't captured yet*, ranked for tonight, each with a one-tap "add to calendar".**~~
   — **SHIPPED v0.161.0** (Builder 2026-07-22, branch `claude/pensive-faraday-6ogopr`). Built the ask end-to-end
@@ -5757,7 +5820,8 @@ problems. Dogfood it every big-picture run and fix root causes.
   self-hide/returns-new-showpieces, .ics download + non-showpiece/no-location 404s),
   `frontend/.../suggestTargets.test.ts` (+5) and `SuggestTargetsCard.test.tsx` (+3). Original spec kept for
   provenance:
-- **NEW BEGINNER FEATURE (Scout 2026-07-21) — "What should I shoot next?": suggest one or two *well-placed
+  _(Original spec, now SHIPPED — see the struck entry above; kept for provenance.)_
+  **NEW BEGINNER FEATURE (Scout 2026-07-21) — "What should I shoot next?": suggest one or two *well-placed
   showpiece targets you haven't captured yet*, ranked for tonight, each with a one-tap "add to calendar".**
   *(Autonomy + friendliness / "plan + enjoy" pillar, PRIORITY 2–3; size M.)* **Why:** every planning card the app
   has today answers "when can I next shoot a target I'm *already* working?" (`NextSessionCard`, the multi-night
@@ -5805,7 +5869,8 @@ problems. Dogfood it every big-picture run and fix root causes.
   `tests/test_ics.py` (+12: escaping, Z-format, tz conversion, folding incl. multibyte, empty calendar, CRLF),
   `tests/webapp/test_plan.py` (+4: download headers + body, and the three 404 self-hide cases),
   `NextSessionCard.test.tsx` (+1: link href + download attr). Original spec kept for provenance:
-- **NEW BEGINNER FEATURE (Scout 2026-07-21) — "Add it to your calendar": one-tap `.ics` download for the next
+  _(Original spec, now SHIPPED — see the struck entry above; kept for provenance.)_
+  **NEW BEGINNER FEATURE (Scout 2026-07-21) — "Add it to your calendar": one-tap `.ics` download for the next
   good observing window on a target, so a beginner doesn't miss the night.** *(Autonomy + friendliness /
   "plan" pillar, PRIORITY 2–3; size S.)* **Why:** the shipped **"Plan your next night"** card (v0.156.0,
   `NextSessionCard` + `nightplan.next_observing_windows`) already tells a beginner *"Your next good window: Thu
@@ -5854,7 +5919,8 @@ problems. Dogfood it every big-picture run and fix root causes.
   render). Upgrade-safe: read-only, additive field + new UI; no schema/config/API-shape/default change; a pure
   new read over data the DB already holds. Slice (b) ("show me" bucket→frame-grid filter) left for a future run.
   Original spec kept for provenance:
-- **NEW BEGINNER FEATURE (Scout 2026-07-21) — "Why were some frames left out?": a plain-language breakdown of
+  _(Original spec, now SHIPPED — see the struck entry above; kept for provenance.)_
+  **NEW BEGINNER FEATURE (Scout 2026-07-21) — "Why were some frames left out?": a plain-language breakdown of
   the frames the stack dropped, grouped by reason, with a reassuring verdict.** *(Friendliness / trust,
   PRIORITY 3; size S–M.)* **Why:** a beginner's stack quietly uses, say, 412 of 500 subs and today they see
   only the two counts — never *why* 88 were dropped or whether that's normal. That silence reads as "something
@@ -6015,7 +6081,8 @@ problems. Dogfood it every big-picture run and fix root causes.
   `ImageLightbox.test.tsx` (+1 — renders `toolbarExtra`), `Target.test.tsx` (+2 — toggle shown/hidden by
   `north_up_deg`). Beginner bar ✔ (reaches the delight from where the beginner looks at their picture, oriented
   like every reference photo).
-- **NEW BEGINNER FEATURE (Scout 2026-07-21 #11) — "Make it your wallpaper": one-tap export of a finished stack
+  _(Original spec, now SHIPPED — see the struck entry above; kept for provenance.)_
+  **NEW BEGINNER FEATURE (Scout 2026-07-21 #11) — "Make it your wallpaper": one-tap export of a finished stack
   cropped + sized to a phone or desktop background, auto-centred on the target.** *(Beginner feature; PRIORITY 3
   friendliness / "enjoy + share" pillar; size S–M.)* Making your own astrophoto your phone lock-screen is one of
   the most common, most *delightful* things a Seestar beginner does with a good result — and today there's no
@@ -6797,7 +6864,8 @@ problems. Dogfood it every big-picture run and fix root causes.
   (+3 — merge-into-deepest / self-hide / persisted-dismiss). Beginner bar ✔ (one obvious action, plain-language
   *why*, sane default, no expert knobs; pays off hardest for the "thousands of subs across many nights" owner in
   §1). *(Original spec kept for provenance.)*
-- **NEW BEGINNER FEATURE (Scout 2026-07-21 #3) — "Same object? Combine these into one deep picture":
+  _(Original spec, now SHIPPED — see the struck entry above; kept for provenance.)_
+  **NEW BEGINNER FEATURE (Scout 2026-07-21 #3) — "Same object? Combine these into one deep picture":
   auto-suggest merging same-target folders shot on different nights.** The Seestar app writes a
   **new folder per night**, so a beginner who shoots M31 across three clear nights ends up with three
   *separate* AstroStack targets — each a shallow stack — instead of one deep one, and never realises
