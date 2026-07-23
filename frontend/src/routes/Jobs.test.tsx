@@ -5,8 +5,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  JobRow, JobsView, buildMasterSummary, friendlyJobError, jobKindLabel, processTargetSummary,
-  reprocessSummary,
+  JobRow, JobsView, buildMasterSummary, friendlyJobError, jobKindLabel, pipelineSummary,
+  processTargetSummary, reprocessSummary,
 } from "./Jobs";
 import * as client from "../api/client";
 import type { Job } from "../api/client";
@@ -277,6 +277,84 @@ describe("buildMasterSummary", () => {
 
   it("falls back to 'master' when the kind is missing", () => {
     expect(buildMasterSummary({ n_frames: 4 })).toBe("Built a master master from 4 frames.");
+  });
+});
+
+describe("pipelineSummary", () => {
+  it("summarises a scan that imported frames and auto-stacked some targets", () => {
+    const { line, held } = pipelineSummary({
+      scanned: 42, auto_stacked: ["M 42", "M 31"], auto_edited: 2,
+    });
+    expect(line).toBe("Imported 42 new frames · auto-stacked 2 targets · finished 2 into pictures.");
+    expect(held).toEqual([]);
+  });
+
+  it("surfaces targets held back for more located subs (the invisible state)", () => {
+    const { line, held } = pipelineSummary({
+      scanned: 10, auto_stacked: [],
+      auto_stack_held_thin: [
+        { target: "M 42", frames: 2, min: 3 },
+        { target: "NGC 7000", frames: 1, min: 3 },
+      ],
+    });
+    expect(line).toBe("Imported 10 new frames · held 2 for more subs.");
+    expect(held).toEqual([
+      { target: "M 42", frames: 2, min: 3 },
+      { target: "NGC 7000", frames: 1, min: 3 },
+    ]);
+  });
+
+  it("reads 'No new frames' and singularises one target / one picture", () => {
+    expect(pipelineSummary({ scanned: 0, auto_stacked: ["M 42"], auto_edited: 1 }).line)
+      .toBe("No new frames · auto-stacked 1 target · finished 1 into a picture.");
+  });
+
+  it("counts failures across both unattended passes", () => {
+    expect(pipelineSummary({
+      scanned: 5, auto_stacked: ["A"],
+      stack_errors: { B: "boom" }, qc_errors: { C: "bad" },
+    }).line).toBe("Imported 5 new frames · auto-stacked 1 target · 2 couldn't finish.");
+  });
+
+  it("tolerates a bare/empty summary and malformed held entries", () => {
+    expect(pipelineSummary({}).line).toBe("No new frames.");
+    const { held } = pipelineSummary({ auto_stack_held_thin: [null, "junk", { target: "X" }] });
+    expect(held).toEqual([{ target: "X", frames: 0, min: 0 }]);
+  });
+});
+
+describe("JobsView pipeline result actions", () => {
+  function renderJobsRouted() {
+    const qc = new QueryClient();
+    return render(
+      <MantineProvider>
+        <Notifications />
+        <QueryClientProvider client={qc}>
+          <MemoryRouter>
+            <JobsView />
+          </MemoryRouter>
+        </QueryClientProvider>
+      </MantineProvider>,
+    );
+  }
+
+  it("renders the held-for-more-subs alert with a link to the waiting target", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "pl-1", kind: "pipeline", target: null, state: "done",
+        result: {
+          scanned: 12, auto_stacked: [],
+          auto_stack_held_thin: [{ target: "M 42", frames: 2, min: 3 }],
+        },
+      }),
+    ]);
+    renderJobsRouted();
+    expect(await screen.findByText(
+      "Imported 12 new frames · held 1 for more subs.",
+    )).toBeInTheDocument();
+    expect(screen.getByText("Waiting for more of your subs to be located")).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: "M 42" });
+    expect(link).toHaveAttribute("href", "/targets/M 42");
   });
 });
 

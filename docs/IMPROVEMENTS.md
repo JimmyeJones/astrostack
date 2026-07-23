@@ -4902,9 +4902,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   change. Test: an `accept=0` frame with a `user`/`auto:grade:` reason is not in `build_solve_arglist`; an `accept=0`
   frame whose reason is `solve_failed:…` *is* still offered; accepted-unsolved frames unchanged.
 
-- **IMPROVEMENT IDEA (Builder 2026-07-23, follow-up to the v0.183.0 minimum-frames guard) — make the walk-away
-  auto-stack's "held for more located subs" state VISIBLE to a beginner. Target-page half SHIPPED v0.184.0; Jobs-page
-  half still open.** *(Friendliness pillar, PRIORITY 3; size S–M; frontend-only, additive.)* **Why:** v0.183.0 stops
+- ~~**IMPROVEMENT IDEA (Builder 2026-07-23, follow-up to the v0.183.0 minimum-frames guard) — make the walk-away
+  auto-stack's "held for more located subs" state VISIBLE to a beginner.**~~ — **BOTH HALVES SHIPPED** (Target page
+  v0.184.0; **Jobs page v0.184.4**, Builder 2026-07-23, branch `claude/pensive-faraday-rxd30t`). The `pipeline`
+  (scan) job had no result renderer at all — a walk-away scan showed a bare "done". Added a pure, tested
+  `pipelineSummary(r)` helper (`Jobs.tsx`) that turns the scan summary into a plain-language line — *"Imported N new
+  frames · auto-stacked M targets · finished K into pictures · held J for more subs · E couldn't finish"* — and a
+  `pipeline` branch in `JobResultActions` that renders it plus a blue info Alert listing each held-back target
+  (linked to its Target page) with *"F of your subs located so far — needs K"*, mirroring the Target-page copy, and a
+  "View in Gallery" button when the pass finished pictures. Display-only, no behaviour/config/DB/API change.
+  Regression: `Jobs.test.tsx` (+6 — five `pipelineSummary` unit cases incl. singularisation, failure-count across
+  both passes, and malformed-held-entry tolerance; one render test asserting the held-target alert + link).
+  _(Original idea kept below for provenance.)_ *(Friendliness pillar, PRIORITY 3; size S–M; frontend-only, additive.)*
+  **Why:** v0.183.0 stops
   the hands-off auto-stack from publishing 1–2 frame single-frame speckle by holding a thin target back
   (`auto_stack_held_thin` in the scan job summary) until enough subs plate-solve. That fixes the *wrong-result* half,
   but the held-back state was silent in the UI — a beginner who turned Auto-stack on and saw no picture had to infer
