@@ -828,6 +828,15 @@ def run_stack(
             # reference frame size) rather than silently skipping every frame.
             calibration.validate(ref_shape)
             log.info("Calibration: applying %s master(s)", calibration.describe())
+            # Advisory (non-fatal): a master dark whose exposure/temperature
+            # doesn't match the lights silently over/under-subtracts on every
+            # frame. Surface it in the stack log rather than shipping a quietly
+            # mis-calibrated result — the reference frame's exposure/temperature
+            # stands in for the (uniform) session.
+            for _warn in calibration.calibration_warnings(
+                ref.exposure_s, ref.sensor_temp_c
+            ):
+                log.warning("Calibration: %s", _warn)
 
     # ---- 1b. Build the output canvas --------------------------------------
     # For a single-target stack the reference frame's footprint is fine. For a

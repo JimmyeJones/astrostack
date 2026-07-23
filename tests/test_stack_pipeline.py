@@ -17,6 +17,8 @@ pytest.importorskip("photutils")
 pytest.importorskip("PIL")
 pytest.importorskip("tifffile")
 
+from seestack.calibrate import save_master  # noqa: E402
+from seestack.calibrate.masters import MasterMeta  # noqa: E402
 from seestack.io.project import FrameRow, Project  # noqa: E402
 from seestack.stack.stacker import StackOptions, run_stack  # noqa: E402
 from tests.synth import make_synth_wcs_text, write_seestar_fits  # noqa: E402
@@ -45,6 +47,33 @@ def _build_project(tmp_path, n: int = 5, *, with_outlier: bool = False) -> Proje
             ra_center_deg=83.6, dec_center_deg=-5.4,
         ))
     return proj
+
+
+def test_stack_logs_a_mismatched_dark_exposure_warning(tmp_path, caplog):
+    """A master dark shot at a different exposure than the lights silently
+    over/under-subtracts on the default (unscaled) path. validate() checks only
+    shape, so run_stack must emit the advisory calibration warning to the log."""
+    import logging
+
+    proj = _build_project(tmp_path, n=4)
+    try:
+        for f in proj.iter_frames():
+            proj.update_frame(f.id, exposure_s=10.0, sensor_temp_c=-10.0)
+        # A shape-matching master dark (raw dims 320×480) shot at 30 s → 3× the
+        # 10 s lights: passes validate() but should trip the exposure warning.
+        dark = np.zeros((320, 480), dtype=np.float32)
+        dark_path = tmp_path / "dark30.fits"
+        save_master(dark_path, dark,
+                    MasterMeta("dark", 5, 480, 320, "mean", exposure_s=30.0,
+                               sensor_temp_c=-10.0))
+        with caplog.at_level(logging.WARNING, logger="seestack.stack.stacker"):
+            run_stack(proj, StackOptions(sigma_clip=False, max_workers=2,
+                                         dark_path=str(dark_path),
+                                         output_name="mismatch"))
+        msgs = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+        assert any("Master dark is 30s but your subs are 10s" in m for m in msgs), msgs
+    finally:
+        proj.close()
 
 
 def test_stack_records_integration_time(tmp_path):

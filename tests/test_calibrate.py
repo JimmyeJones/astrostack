@@ -556,6 +556,74 @@ def test_validate_still_catches_a_wrong_shaped_bias_that_is_applied(tmp_path):
         cal.validate((4, 4))
 
 
+def test_calibration_warns_on_a_mismatched_dark_exposure(tmp_path):
+    # A 30 s master dark applied (unscaled) to 10 s subs over-subtracts its
+    # pedestal ~3× on every frame — validate() (shape only) can't catch it, so
+    # calibration_warnings() must flag it.
+    dark = np.zeros((4, 4), dtype=np.float32)
+    save_master(tmp_path / "d.fits", dark,
+                MasterMeta("dark", 5, 4, 4, "mean", exposure_s=30.0))
+    cal = CalibrationMasters.load(dark_path=str(tmp_path / "d.fits"))
+    warns = cal.calibration_warnings(light_exposure_s=10.0)
+    assert len(warns) == 1
+    assert "30" in warns[0] and "10" in warns[0]
+    assert "over-subtracted" in warns[0]
+
+
+def test_calibration_no_exposure_warning_when_matched(tmp_path):
+    dark = np.zeros((4, 4), dtype=np.float32)
+    save_master(tmp_path / "d.fits", dark,
+                MasterMeta("dark", 5, 4, 4, "mean", exposure_s=10.0))
+    cal = CalibrationMasters.load(dark_path=str(tmp_path / "d.fits"))
+    # Exactly matched, and a tiny rounding difference, both stay silent.
+    assert cal.calibration_warnings(light_exposure_s=10.0) == []
+    assert cal.calibration_warnings(light_exposure_s=10.5) == []
+
+
+def test_calibration_exposure_warning_suppressed_when_scaling_is_on(tmp_path):
+    # With exposure-scaling on and a bias present, the exposure gap is corrected
+    # by _effective_dark itself, so there's nothing to warn about.
+    dark = np.zeros((4, 4), dtype=np.float32)
+    bias = np.zeros((4, 4), dtype=np.float32)
+    save_master(tmp_path / "d.fits", dark,
+                MasterMeta("dark", 5, 4, 4, "mean", exposure_s=30.0))
+    save_master(tmp_path / "b.fits", bias,
+                MasterMeta("bias", 5, 4, 4, "mean", exposure_s=0.0))
+    cal = CalibrationMasters.load(
+        dark_path=str(tmp_path / "d.fits"),
+        bias_path=str(tmp_path / "b.fits"),
+        scale_dark_to_light=True)
+    assert cal.calibration_warnings(light_exposure_s=10.0) == []
+
+
+def test_calibration_warns_on_a_mismatched_dark_temperature(tmp_path):
+    dark = np.zeros((4, 4), dtype=np.float32)
+    save_master(tmp_path / "d.fits", dark,
+                MasterMeta("dark", 5, 4, 4, "mean", exposure_s=10.0,
+                           sensor_temp_c=-10.0))
+    cal = CalibrationMasters.load(dark_path=str(tmp_path / "d.fits"))
+    # Matched exposure, but the dark is 15 °C colder than the subs.
+    warns = cal.calibration_warnings(light_exposure_s=10.0, light_temp_c=5.0)
+    assert len(warns) == 1
+    assert "temperature" in warns[0]
+    # A small temperature difference (within tolerance) stays silent.
+    assert cal.calibration_warnings(light_exposure_s=10.0, light_temp_c=-8.0) == []
+
+
+def test_calibration_warnings_empty_without_a_dark_or_unknown_headers(tmp_path):
+    # No dark → nothing to warn about (a bias-only calibration is exposure-
+    # independent).
+    bias = np.zeros((4, 4), dtype=np.float32)
+    save_master(tmp_path / "b.fits", bias, MasterMeta("bias", 5, 4, 4, "mean"))
+    cal = CalibrationMasters.load(bias_path=str(tmp_path / "b.fits"))
+    assert cal.calibration_warnings(light_exposure_s=10.0) == []
+    # A dark whose header carried no exposure can't be compared → silent.
+    dark = np.zeros((4, 4), dtype=np.float32)
+    save_master(tmp_path / "d.fits", dark, MasterMeta("dark", 5, 4, 4, "mean"))
+    cal2 = CalibrationMasters.load(dark_path=str(tmp_path / "d.fits"))
+    assert cal2.calibration_warnings(light_exposure_s=10.0) == []
+
+
 def test_calibration_flows_through_align_one(tmp_path):
     """A constant dark subtracted at load time lowers the aligned output by
     that constant (debayer + identity reproject are linear, so a uniform

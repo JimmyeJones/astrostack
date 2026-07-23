@@ -130,6 +130,29 @@ export interface SuggestResponse {
   suggestions: SuggestedTarget[];
 }
 
+// One month's observability for a target (from /api/plan/best-months) — the
+// building block of the "best time of year" seasonal strip. max_transit_alt_deg
+// is the peak altitude *during that month's darkness* (a target that only
+// culminates in daylight reads low here — exactly the point).
+export interface MonthObservability {
+  month: number; // 1..12
+  max_transit_alt_deg: number;
+  usable_dark_minutes: number;
+  dark_minutes: number;
+}
+
+export interface BestMonths {
+  location_source: "settings" | "fits" | "none";
+  observer: { lat_deg: number; lon_deg: number; elevation_m: number } | null;
+  // False when the library has no RA/Dec for this target (never solved).
+  target_has_position: boolean;
+  min_altitude_deg: number;
+  year: number;
+  // Twelve rows, month 1→12; empty when no location is set or the target has no
+  // position (the strip self-hides).
+  months: MonthObservability[];
+}
+
 // Plain-language "why were some frames left out?" breakdown (from
 // /frames/reject-summary). Buckets are non-zero and pre-ordered by the server.
 export interface RejectionBucket {
@@ -1070,6 +1093,10 @@ export const api = {
   // the file to the OS calendar.
   nextSessionIcsUrl: (safe: string) =>
     `/api/plan/next-session/${safe}/calendar.ics`,
+  // "Best time of year to shoot this" — twelve months of observability for a
+  // known target (empty months ⇒ the strip self-hides).
+  bestMonths: (safe: string) =>
+    req<BestMonths>(`/api/plan/best-months/${safe}`),
   // "Try something new tonight" — famous showpieces the user hasn't captured
   // that are well-placed tonight (empty list ⇒ the card self-hides).
   suggestTargets: () => req<SuggestResponse>(`/api/plan/suggest`),

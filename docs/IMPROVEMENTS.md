@@ -5389,7 +5389,29 @@ problems. Dogfood it every big-picture run and fix root causes.
   reverts on a truly pathological skew. If it does over-revert on real nebula, raise the site-specific threshold
   (or gate it on `sc_std` magnitude). No change unless (a) fails on real data — same real-data-gating as the
   SCNR / `sky_sigma` items below.
-- **IMPROVEMENT IDEA (Scout 2026-07-23) — warn when a master dark's exposure (or temperature) doesn't match the
+- ~~**IMPROVEMENT IDEA (Scout 2026-07-23) — warn when a master dark's exposure (or temperature) doesn't match the
+  lights it's calibrating, instead of silently over/under-subtracting.**~~ — **SHIPPED v0.174.1** (Builder
+  2026-07-23, branch `claude/pensive-faraday-ul8pe1`). Added a pure, advisory-only
+  `CalibrationMasters.calibration_warnings(light_exposure_s, light_temp_c=None) -> list[str]` (`seestack/calibrate/
+  apply.py`) that returns a plain-language warning when (a) a master **dark**'s exposure differs from the lights by
+  more than `_EXPOSURE_MISMATCH_TOL` (15%) **on the default unscaled path** — where `apply_raw` subtracts the full
+  dark, so a 30 s dark on 10 s subs over-subtracts the pedestal ~3× on *every* frame — and (b) the dark's sensor
+  temperature differs by ≥`_TEMP_MISMATCH_TOL_C` (5 °C). The exposure warning is **suppressed when exposure-scaling
+  is on** (a bias present), since `_effective_dark` then corrects the gap itself. `load()` now also captures the
+  dark's `dark_temp_c` (additive, from the existing `MasterMeta.sensor_temp_c`). `run_stack` calls it right after
+  the shape `validate()` and logs each warning (`log.warning("Calibration: …")`, the same stack-log channel the
+  existing flat-mismatch/`describe()` messages use), using the reference frame's exposure/temperature as the
+  (uniform-session) stand-in. **Advisory only** — no hard failure, no behaviour change on any applied path, no new
+  default; additive and upgrade-safe (a nullable field + a new method; existing calibration is byte-for-byte
+  unchanged). Closes a real silent-corruption vector for anyone supplying their own darks (Seestar does in-camera
+  calibration, so this is the advanced manual-master path). Tests: `tests/test_calibrate.py` (+5: mismatched
+  exposure warns, matched/near-matched silent, scaling suppresses it, temperature mismatch warns + within-tolerance
+  silent, no-dark/unknown-header silent) and `tests/test_stack_pipeline.py` (+1: the warning is logged through the
+  real `run_stack` path on a shape-matching but exposure-mismatched dark). _(Original idea below.)_
+
+  <details><summary>Original idea</summary>
+
+  **IMPROVEMENT IDEA (Scout 2026-07-23) — warn when a master dark's exposure (or temperature) doesn't match the
   lights it's calibrating, instead of silently over/under-subtracting.** *(Calibration correctness / trust,
   PRIORITY 4; size S.)* **What the audit traced:** `CalibrationMasters.validate()` (`seestack/calibrate/apply.py`)
   checks only master **shape**; it never compares the master dark's `dark_exposure_s` (which *is* loaded, line
@@ -5407,6 +5429,8 @@ problems. Dogfood it every big-picture run and fix root causes.
   vector for anyone supplying their own darks. Testable on `CalibrationMasters.load()` + a synthetic
   exposure/temp-mismatched master pair. Found by the align/calibrate adversarial audit (which otherwise traced
   the calibration *math* clean).
+
+  </details>
 - **IMPROVEMENT IDEA (Scout 2026-07-23) — count & surface "N subs were only roughly aligned" when sub-pixel
   refine gives up above its shift cap.** *(Stacking-engine trust + image quality, PRIORITY 4 (touches autonomy /
   honest-accounting, PRIORITY 2); size S–M.)* **What I traced:** with `subpixel_refine` on,
@@ -6106,7 +6130,33 @@ problems. Dogfood it every big-picture run and fix root causes.
   unit-tested on synthetic distributions. **(b) webapp (S):** surface it in the target/reject-summary response
   (additive field). **(c) frontend (S):** the card + tip, shown only when the estimate is trustworthy. Absolute
   bucketing is a follow-on that needs real per-model calibration.
-- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Best time of year to shoot this target": a plain-language
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "Best time of year to shoot this target": a plain-language
+  seasonal-observability strip that answers "when *this year* can I actually get this object?"**~~ — **SHIPPED
+  v0.174.0** (Builder 2026-07-23, branch `claude/pensive-faraday-ul8pe1`). Built end-to-end across
+  engine/webapp/frontend, reusing the offline planner — no new astro math, no network, no model, no
+  schema/config/API-shape/default change (read-only). **Engine** (`seestack/nightplan.py`): a pure, unit-tested
+  `best_months(observer, ra_deg, dec_deg, *, year, min_altitude_deg, horizon)` → 12 `MonthObservability` rows
+  `{month, max_transit_alt_deg, usable_dark_minutes, dark_minutes}`. For a representative mid-month night it finds
+  that night's dark window (`_find_dark_window`) and the single target's observability over it
+  (`_observability_batch`) — so `max_transit_alt_deg` is the peak altitude *during darkness* (a target that only
+  culminates in daylight reads low, exactly right for "when can I actually get it?"). The Moon is deliberately
+  excluded (its phase on one representative night is seasonal noise). Deterministic; a `dark_minutes==0` row is a
+  polar-day month, `usable_dark_minutes==0` means it never clears the floor in that month's darkness. **Webapp**
+  (`webapp/routers/plan.py`): read-only `GET /api/plan/best-months/{safe}` mirroring `/next-session` (site +
+  library resolved server-side; year taken from the optional `when`; empty `months` ⇒ the strip self-hides when no
+  location or no solved position). **Frontend**: pure phrasing helpers (`components/bestMonths.ts`:
+  `bestMonthsVerdict`/`longestCircularRun`/`monthShades`) that name the best *wrap-around* month range and peak in
+  **hemisphere-neutral month names** (not "winter"/"summer"), handle circumpolar ("Up all year"), never-rising
+  ("never climbs above the horizon"), and low-from-here (altitude fallback + "stays low" caveat) cases; a compact
+  self-hiding `BestMonthsStrip` on the Target page (12-cell heat strip shaded by observability, peak-month
+  highlighted, per-cell tooltips) placed beside "Plan your next night". Additive/upgrade-safe throughout. Tests:
+  `tests/test_nightplan.py` (+7: 12 ordered rows, winter/summer peaks, circumpolar, never-rising, polar-day,
+  determinism), `tests/webapp/test_plan.py` (+4: seasonal strip, self-hide, 404, bad-`when`),
+  `frontend/.../bestMonths.test.ts` (+14) and `BestMonthsStrip.test.tsx` (+2). _(Original spec below.)_
+
+  <details><summary>Original spec</summary>
+
+  **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Best time of year to shoot this target": a plain-language
   seasonal-observability strip that answers "when *this year* can I actually get this object?"** *(Autonomy /
   Friendliness — the "plan" pillar, PRIORITY 2–3; size M.)* **Why:** the planner today is **short-horizon only** —
   `plan_tonight` covers *tonight* and `next_observing_windows` walks at most ~14 nights forward. Nothing answers
@@ -6131,6 +6181,8 @@ problems. Dogfood it every big-picture run and fix root causes.
   (winter/summer target, circumpolar, never-rises, empty-coords self-hide). Keeps the beginner-feature pipeline
   stocked with a *plan* capability distinct from the tonight-only "What should I shoot next?" and 14-night
   "next windows" cards.
+
+  </details>
 - ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "My best pictures": an auto-curated, cross-target portfolio wall of
   your finest finished stacks.**~~ — **SHIPPED v0.173.0** (Builder 2026-07-23, branch `claude/pensive-faraday-iv26r2`).
   Built end-to-end across engine/webapp/frontend, reusing the existing gallery/lightbox/share plumbing — no new astro

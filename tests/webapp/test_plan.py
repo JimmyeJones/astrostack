@@ -318,6 +318,47 @@ def test_next_session_ics_no_window_404s(client, solved_library):
     assert r.status_code == 404
 
 
+def test_best_months_returns_a_seasonal_strip_for_a_library_target(client, solved_library):
+    # The plan-ahead companion to /next-session: twelve months of observability
+    # for this target, so the Target page can say "a winter target — best Nov–Feb".
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    r = client.get("/api/plan/best-months/M_42", params={"when": JAN_EVENING})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["location_source"] == "settings"
+    assert body["target_has_position"] is True
+    assert body["year"] == 2026
+    months = body["months"]
+    assert [m["month"] for m in months] == list(range(1, 13))
+    by_month = {m["month"]: m for m in months}
+    # Orion (M42) from London: usable in deep winter, not in high summer.
+    assert max(by_month[m]["usable_dark_minutes"] for m in (12, 1, 2)) > 60.0
+    assert max(by_month[m]["usable_dark_minutes"] for m in (5, 6, 7)) == 0.0
+
+
+def test_best_months_without_location_self_hides(client, solved_library):
+    # No configured site and no SITELAT in the synth frames → empty strip (the UI
+    # self-hides) with a clean 200, not a 500.
+    r = client.get("/api/plan/best-months/M_42", params={"when": JAN_EVENING})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["location_source"] == "none"
+    assert body["observer"] is None
+    assert body["months"] == []
+
+
+def test_best_months_unknown_target_404s(client, solved_library):
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    r = client.get("/api/plan/best-months/NOPE_404", params={"when": JAN_EVENING})
+    assert r.status_code == 404
+
+
+def test_best_months_rejects_bad_when(client, solved_library):
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    r = client.get("/api/plan/best-months/M_42", params={"when": "not-a-date"})
+    assert r.status_code == 422
+
+
 def test_suggest_without_location_self_hides(client, solved_library):
     # No configured site and the synth frames carry no SITELAT → nothing to
     # suggest, but a clean 200 with an empty list so the card just self-hides.
