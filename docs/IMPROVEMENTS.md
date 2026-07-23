@@ -47,6 +47,26 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+> **Re-audit — stacking engine CLEAN again; shipped a verified plate-solve-banner broken-UX bug in the ⭐⭐ family;
+> filed one cosmetic STACKER-label bug (Scout 2026-07-23, branch `claude/kind-mccarthy-hn18nz`).** Baseline suite
+> green (**1795 passed, 2 skipped**). Two independent adversarial audit sub-agents plus my own reads re-covered the
+> engine and the webapp/ingest/QC/solve path. (a) The **stacking hot path is CLEAN** — the reduction/rejection core
+> (`accumulator.py` MinMaxReject k-insertion verified at every count boundary incl. the shared min/max view writes +
+> tie-safety, κ-σ keep-mask NaN widenings, Welford `add`≡`add_window` sub-view ordering, WeightedSum inverse-variance
+> combine), `drizzle_path.py` (`_clip_tolerance`/neff/var-floor/pixmap-bounds), `align.py` (CPU cval=NaN ↔ GPU cval=0
+> parity, subpixel NaN mask), and `calibrate/apply.py`+`masters.py` (dark-then-flat raw-Bayer order, bias never
+> double-subtracted, no-data pedestal masks) all match the repeatedly-clean documented state — **no new data-integrity
+> bug.** (b) The **webapp/solve audit found a verified, reproduced broken-UX bug** directly in the ⭐⭐ plate-solve
+> family: the "install ASTAP / star database" **setup banner was dead** — plate-solve failures are stored
+> `solve_failed:…` but leave the frame **accepted** (`accept=1`), while `reject_reason_counts()` (which feeds
+> `_solve_setup_problem`) tallies only `accept=0`, so the detector never saw them and a first-light user with no star
+> DB was told to "Run Plate Solve" (the very thing failing) with no guidance. **Reproduced + fixed + regression-tested
+> + shipped this run** (struck below): added `Project.solve_failure_reason_counts()` (accept-agnostic tally of
+> `solve_failed:` reasons over `wcs_json IS NULL` frames) and fed it to the setup detector. (c) One **cosmetic
+> provenance bug** filed below — the `STACKER` FITS header/History badge mislabels the method on a below-threshold
+> stack (n<3 min-max / n<4 κ-σ silently fall to plain mean, but the header still says the rejection method). Curation +
+> a new beginner feature (storage headroom) + an improvement idea filed below.
+>
 > **Re-audit — stacking-engine hot path CLEAN again; one NEW verified render/parity broken-UX bug in the "one frame
 > vs your stack" reveal (Scout 2026-07-23, branch `claude/kind-mccarthy-ltki02`).** Baseline suite green
 > (**1784 passed, 2 skipped**). Two independent adversarial audit sub-agents plus my own reads re-covered the engine
@@ -109,6 +129,51 @@ when you take it.
 > `[]`), **fixed + regression-tested + shipped this run** (struck below): extracted a shared `_dark_scaling_applies` predicate
 > used by both sites so they can't drift again. Curation + 2 ideas filed below.
 >
+- ~~**⭐ The plate-solve "install ASTAP / star database" setup banner is DEAD — a first-light user whose ASTAP star
+  database is missing has *every* frame fail to solve, yet gets no actionable guidance, only a "Run Plate Solve" nudge
+  to re-run the very thing that's failing.**~~ — **FIXED v0.178.3** (Scout 2026-07-23, branch
+  `claude/kind-mccarthy-hn18nz`; **reproduced + regression-tested**). *(Broken-UX; Medium — directly in the ⭐⭐
+  plate-solve-failure → thin/gibberish-stack family; found by the 2026-07-23 webapp/solve adversarial audit.)* A
+  plate-solve failure is stored by `apply_solve_result_to_db` (`seestack/solve/runner.py:145`) as
+  `reject_reason="solve_failed:<canonical>"` but **leaves the frame accepted** (`accept=1` — the pixels may be fine,
+  they just couldn't be located). The setup-problem detector `_solve_setup_problem` (`webapp/routers/frames.py`) was
+  fed `proj.reject_reason_counts()`, whose SQL is `... WHERE accept = 0` (`seestack/io/project.py:633`), so it
+  **structurally excluded every solve failure** → `solve_setup_problem` was always `None`, and the frontend fallback
+  `detectSolveSetupProblem(counts)` reads the same tally, so **both** the server field and the client backstop were
+  dead. The existing test `test_reject_summary_flags_solve_setup_problem` hid it by hand-setting `accept=False`, which
+  the real solve path never does. **Reproduced** (`scratchpad/repro_solve.py`: 5 accepted frames, real
+  `apply_solve_result_to_db` with a "no star database" error → `reject_reason_counts()` = `{}`, `_solve_setup_problem`
+  = `None`, expected `{'kind':'database','frames':5}`). **Fix:** added
+  `Project.solve_failure_reason_counts()` — an accept-agnostic tally of `solve_failed:` reasons over `wcs_json IS NULL`
+  frames (the `wcs_json IS NULL` guard excludes a frame that later solved) — and fed
+  `_solve_setup_problem({**counts, **solve_failures})` in `reject_summary`, so the banner fires off accepted-but-unsolved
+  failures too. The friendly `counts`/`summary` payload is byte-unchanged (still `accept=0`-only), so the
+  "why were some frames left out?" breakdown is untouched; only the previously-null `solve_setup_problem` field now
+  populates. Regression: `tests/webapp/test_api.py::test_reject_summary_setup_banner_sees_accepted_solve_failures`
+  (drives the **real** `apply_solve_result_to_db`, asserts frames stay accepted, banner = `{'kind':'database',
+  'frames':3}`, and no `solve_failed` key leaks into `counts`; fail-before: `None`) and
+  `tests/test_project.py::test_solve_failure_reason_counts_sees_accepted_unsolved` (helper unit: counts accepted
+  failures, excludes a since-solved one, invisible to `reject_reason_counts`). Upgrade-safe: additive read-only Project
+  method + a query-input change; no config/DB-schema/API-shape/on-disk/default change (the response field already
+  existed). Confidence: reproduced.
+
+- **The `STACKER` FITS-header card (and the History "method" badge) mislabels the stacking method on a
+  below-threshold stack — a 3-frame default stack records `STACKER="sigma-clip"` and a 2-frame min-max stack records
+  `STACKER="min-max-reject"`, but both actually ran plain mean.** *(Stacking-engine provenance; **cosmetic /
+  broken-UX label only — pixels are the correct plain-mean result, nothing is corrupted**; traced + reproduced by the
+  2026-07-23 stacking-engine audit.)* `_build_output_header_meta` (`seestack/stack/stacker.py:683-691`) replicates the
+  effective `sigma_clip`/`min_max_reject` flags when choosing the label, but **omits the frame-count gates the
+  dispatcher applies** — `min_max_reject and n >= 3` (`stacker.py:1144`) and `sigma_clip and n >= 4`
+  (`stacker.py:1177`). Below those counts the dispatcher falls through to the plain-mean branch (no rejection pass
+  runs — `REJMODE` is correctly absent), yet the header still claims the rejection method, so the card is internally
+  inconsistent with its own (empty) rejection tally. Reproduced: a default 3-frame (`sigma_clip=True`) stack →
+  `STACKER="sigma-clip"` while plain mean ran; a 2-frame `min_max_reject` stack → `STACKER="min-max-reject"`. Severity
+  cosmetic (falls in the known honest-accounting tolerance zone), but it's a clean one-file fix. **Fix (Builder):**
+  gate the label the same way the dispatcher does — `method = "sigma-clip" if eff.sigma_clip and n >= 4 else
+  ("min-max-reject" if eff.min_max_reject and n >= 3 else "mean")` — and add a regression test asserting a 3-frame
+  sigma-clip and a 2-frame min-max stack both record `STACKER="mean"` with no `REJMODE`. Confidence: traced +
+  reproduced.
+
 - **FLAKY TEST (test-infra, not a product bug) — `frontend/src/routes/Editor.test.tsx` fails ~2 of 68 whenever the
   whole file runs, with a *different* victim set each time.** *(CI reliability; Medium-infra — a flaky suite erodes
   the green-gate the whole autonomous project leans on; **reproduced** on clean `origin/main` 2026-07-23, branch
@@ -4429,6 +4494,27 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+- **IMPROVEMENT IDEA (Scout 2026-07-23, spotted while fixing the dead per-target setup banner v0.178.3) — raise a
+  *global, cross-target* "plate-solving isn't set up" readiness banner on the Dashboard when the star **database** is
+  missing, not only the per-target banner.** *(Autonomy + friendliness / "just works" pillar, PRIORITY 2–3; size S;
+  additive, read-only — no new deps.)* **What prompts it:** the Dashboard already fires an `astapReadiness` banner when
+  the ASTAP **binary** is missing/unconfigured, and (as of v0.178.3) each *Target* page can surface a
+  `solve_setup_problem` banner when its frames pile up as `solve_failed:no star database`. But a first-light user whose
+  ASTAP is installed yet whose **star database** (G17/H18) was never downloaded gets **no Dashboard-level signal** —
+  every target silently fails to solve (→ thin/gibberish stacks, the ⭐⭐ family), and they only discover the fix if
+  they happen to open a Target page and read its banner. A brand-new user with no targets open sees nothing at all.
+  **Feature:** on the Dashboard, alongside `astapReadiness`/`folderReadiness`, show one calm actionable banner when
+  *any* target has accepted-but-unsolved frames whose canonical reason is `no star database` — "Plate-solving can't
+  find its star database, so your frames aren't being located in the sky. [Here's how to add it]" — pointing at the
+  same setup guidance the per-target banner links to. **Reuses the fix just shipped:** the classification already
+  exists (`_solve_setup_problem` + the new `Project.solve_failure_reason_counts()`); a cross-target roll-up (a small
+  `GET /api/system`-style aggregate, or reusing the per-target reject-summary across the target list) is all that's
+  new. **Feasibility:** all inputs exist; a pure aggregator `solveSetupAcrossTargets(perTargetProblems) ->
+  {kind, targets, frames} | None` is trivially unit-testable. Additive/opt-safe: read-only, self-hides when solving is
+  healthy, no config/DB-schema/API-shape/default change. **Builder slices:** (a) the cross-target roll-up (server
+  aggregate or client fold over the target list) + tests; (b) the Dashboard banner reusing the existing readiness-banner
+  pattern + dismissal. Serves autonomy (the app tells you *once, up front* why nothing is solving) and directly hardens
+  the ⭐⭐ plate-solve-failure → thin-stack path at its most common root cause (a missing star DB on a fresh install).
 - ~~**IMPROVEMENT IDEA (Builder 2026-07-23, spotted while shipping walk-away `auto_reject` v0.177.0) — name the
   auto-picked rejection outcome in the Process-target / Jobs result, not only the History badge.**~~ — **SHIPPED
   v0.177.1** (Builder 2026-07-23, branch `claude/pensive-faraday-nynziu`). Closed the honest-accounting loop for the
@@ -6642,6 +6728,38 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "How much longer can I keep imaging?": a plain-language storage-headroom
+  read on the Storage page — GB free translated into *nights left at your recent rate* + a one-tap "free up space"
+  nudge.** *(Plan + autonomy / "keep going" pillar, PRIORITY 2–3; size S–M; fully offline, additive, read-only — no new
+  deps, no network.)* **Why a beginner (and a thousands-of-subs owner) wants it:** a Seestar drips 10-second subs onto
+  the box night after night, so a real library grows by ~1–2 GB per clear night and *will* eventually fill the disk —
+  at which point ingest silently fails and the owner loses a night's frames with no warning. Today the Storage page
+  (`GET /api/storage`) shows raw `total_gb`/`used_gb`/`free_gb` and per-target byte totals, but **nothing translates
+  that into the one thing a beginner actually asks — "am I about to run out, and if so what do I clear?"** A number in
+  gigabytes means nothing to a non-expert; "you have room for about **18 more nights** at your recent pace" does.
+  **Feature:** one friendly line + a coloured chip on the Storage page: estimate a per-night growth rate from the last
+  ~N nights of ingested frames (group accepted+rejected frames by capture night via their `timestamp_utc`, take the
+  median bytes-added-per-night — or, simplest, `used_growth ≈ recent_frames · median_frame_bytes`), divide `free_gb`
+  by it, and say *"About 18 more nights of imaging before the disk fills (12 GB free, ~0.7 GB/night lately)."* When
+  headroom is short (< ~5 nights) the chip turns amber and the line adds a **"Free up space"** affordance that points
+  at the already-existing per-target **cache-clear / prune** controls (Stage-1/Stage-2 caches are regenerable — the
+  safe thing to clear first), telling the user roughly how much those would reclaim (`cache_bytes` is already in the
+  payload). On a healthy disk it's a calm green "plenty of room". **Beginner bar ✔:** universal ("will I run out of
+  space?"), one plain sentence, a sane auto-estimate, zero knobs; serves *plan/keep-going* autonomy and directly
+  prevents the silent data-loss failure (a filled disk dropping a night's subs). **Not** pro tooling — no byte-level
+  quotas or retention policies, just "nights left" + "here's the safe thing to clear". **Reuses existing signals, no
+  new engine math:** `free_gb`/`cache_bytes` are already in the `/api/storage` payload; the per-night rate comes from
+  frame `timestamp_utc` + on-disk sizes the app already tracks. The core is a pure, unit-testable
+  `storageHeadroom({freeBytes, recentNightlyBytes, reclaimableCacheBytes}) -> {nightsLeft, level, sentence,
+  reclaimHint}` that degrades gracefully (too little history → "not enough history to estimate yet, N GB free"; a
+  zero/negative rate → no estimate, just the free figure). **Guardrails:** additive/read-only, off nothing, no
+  schema/config/API-shape/default change (a frontend helper fed by fields the storage endpoint already returns, plus
+  one optional additive `nightly_bytes` estimate folded into the storage response). **Builder slices:** (a) pure
+  `storageHeadroom(...)` helper + unit tests (healthy/short/no-history/zero-rate; singular "1 night"); (b) the
+  headroom line + amber-when-short chip on the Storage page; (c, follow-on) the "Free up space" affordance wiring to
+  the existing cache-clear/prune controls with a reclaim estimate. Keeps the beginner-feature pipeline stocked with a
+  pure *plan/keep-going* capability distinct from every sky/target-planning card already filed (those plan the
+  *sky*; this plans the *disk*).
 - **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Ready-to-post caption": one tap to copy a plain-language, accurate
   description of the finished picture for sharing.** *(Share + understand pillar, PRIORITY 3; size S; fully offline,
   additive, read-only — no new deps, no network.)* **Why a beginner wants it:** the app already helps them *make* a

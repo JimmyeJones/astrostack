@@ -183,6 +183,12 @@ def reject_summary(safe: str, request: Request) -> dict:
     lib, proj = deps.open_target_project(request, safe)
     try:
         counts = proj.reject_reason_counts()
+        # Plate-solve failures are stored as ``solve_failed:…`` but keep the frame
+        # *accepted*, so they never appear in ``counts`` (accept=0 only). Tally
+        # them separately for the setup-problem detector, else the "install ASTAP /
+        # star database" banner can never fire on a first-light install where
+        # every frame fails identically.
+        solve_failures = proj.solve_failure_reason_counts()
         n_accepted = proj.count(accepted_only=True)
         n_unsolved = proj.count_accepted_unsolved()
     finally:
@@ -191,7 +197,7 @@ def reject_summary(safe: str, request: Request) -> dict:
     return {
         "counts": counts,
         "total": sum(counts.values()),
-        "solve_setup_problem": _solve_setup_problem(counts),
+        "solve_setup_problem": _solve_setup_problem({**counts, **solve_failures}),
         # Plain-language grouped breakdown + reassuring verdict for the
         # "why were some frames left out?" beginner card. Additive: the raw
         # ``counts``/``total`` above stay for existing consumers.
