@@ -1,7 +1,10 @@
 """Target identification (graceful failure modes — no network in tests)."""
 
+from astropy.table import Table
+
 from seestack.post.target_id import (
     _TYPE_HINTS,
+    _pick_nearest_row,
     friendly_object_type,
     identify_target,
 )
@@ -45,3 +48,47 @@ def test_friendly_object_type_falls_back_to_the_raw_code():
     assert friendly_object_type("ZzZ") == "ZzZ"
     assert friendly_object_type(None) is None
     assert friendly_object_type("") is None
+
+
+# --- nearest-row selection (query_region rows aren't sorted by separation) ---
+
+# M 42 field centre.
+_M42_RA, _M42_DEC = 83.82, -5.39
+
+
+def test_pick_nearest_row_modern_numeric_columns():
+    """With decimal-degree ra/dec columns, pick the object at the centre, not
+    the first row (a nearby Trapezium star SIMBAD happens to list first)."""
+    table = Table({
+        "MAIN_ID": ["* tet01 Ori C", "M 42", "NGC 1976 far"],
+        "ra": [83.86, 83.82, 84.5],
+        "dec": [-5.39, -5.39, -5.9],
+        "otype": ["*", "HII", "HII"],
+    })
+    row = _pick_nearest_row(table, _M42_RA, _M42_DEC)
+    assert str(row["MAIN_ID"]) == "M 42"
+
+
+def test_pick_nearest_row_legacy_sexagesimal_columns():
+    """Older astroquery hands back sexagesimal RA (hours) / DEC (deg) strings —
+    still resolve the nearest object correctly."""
+    table = Table({
+        "MAIN_ID": ["far star", "M 42"],
+        "RA": ["05 40 00.0", "05 35 16.8"],   # 05h35m16.8s ≈ 83.82 deg
+        "DEC": ["-05 23 00", "-05 23 24"],
+        "OTYPE": ["*", "HII"],
+    })
+    row = _pick_nearest_row(table, _M42_RA, _M42_DEC)
+    assert str(row["MAIN_ID"]) == "M 42"
+
+
+def test_pick_nearest_row_falls_back_to_first_when_coords_unreadable():
+    """No readable coordinates on any row → preserve the prior table[0] pick
+    rather than raising."""
+    table = Table({
+        "MAIN_ID": ["first", "second"],
+        "ra": ["--", "--"],
+        "dec": ["--", "--"],
+    })
+    row = _pick_nearest_row(table, _M42_RA, _M42_DEC)
+    assert str(row["MAIN_ID"]) == "first"
