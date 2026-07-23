@@ -222,6 +222,51 @@ export function buildMasterSummary(r: Record<string, unknown>): string {
   return `${line}.`;
 }
 
+/** One target the walk-away auto-stack is holding back because too few of its
+ * subs have been located (plate-solved) to make anything but single-frame
+ * speckle — the `auto_stack_held_thin` entries the pipeline job records. */
+export interface HeldForSubs { target: string; frames: number; min: number; }
+
+/** Plain-language outcome of a finished "Importing & processing new frames"
+ * (`pipeline`) scan job (pure, tested). A hands-off scan otherwise shows a bare
+ * "done" with no hint of what it did — how many frames came in, how many targets
+ * it auto-stacked, and (the part that used to be invisible) which targets it
+ * *held back* for more located subs rather than publish as noise. Surfacing the
+ * held-back state is the Jobs-page half of the v0.183.0 minimum-frames guard:
+ * the Target page already explains the wait per target, but a beginner who kicks
+ * off a scan and watches Jobs had no signal there. */
+export function pipelineSummary(r: Record<string, unknown>): {
+  line: string; held: HeldForSubs[];
+} {
+  const scanned = Number(r.scanned ?? 0) || 0;
+  const stacked = Array.isArray(r.auto_stacked) ? r.auto_stacked.length : 0;
+  const autoEdited = Number(r.auto_edited ?? 0) || 0;
+  const held: HeldForSubs[] = Array.isArray(r.auto_stack_held_thin)
+    ? (r.auto_stack_held_thin as unknown[])
+        .filter((h): h is Record<string, unknown> => !!h && typeof h === "object")
+        .map((o) => ({
+          target: typeof o.target === "string" ? o.target : "",
+          frames: Number(o.frames ?? 0) || 0,
+          min: Number(o.min ?? 0) || 0,
+        }))
+    : [];
+  // Failed targets across both unattended passes (QC/solve + auto-stack).
+  const countErrs = (v: unknown) =>
+    v && typeof v === "object" ? Object.keys(v as object).length : 0;
+  const errors = countErrs(r.stack_errors) + countErrs(r.qc_errors);
+
+  const clauses: string[] = [
+    scanned > 0 ? `Imported ${scanned} new frame${scanned === 1 ? "" : "s"}` : "No new frames",
+  ];
+  if (stacked > 0) clauses.push(`auto-stacked ${stacked} target${stacked === 1 ? "" : "s"}`);
+  if (autoEdited > 0) {
+    clauses.push(`finished ${autoEdited} into ${autoEdited === 1 ? "a picture" : "pictures"}`);
+  }
+  if (held.length > 0) clauses.push(`held ${held.length} for more subs`);
+  if (errors > 0) clauses.push(`${errors} couldn't finish`);
+  return { line: `${clauses.join(" · ")}.`, held };
+}
+
 /** Result-specific actions for finished editor jobs (download / view). */
 function JobResultActions({ job }: { job: Job }) {
   if (job.state !== "done" || !job.result) return null;
@@ -278,6 +323,47 @@ function JobResultActions({ job }: { job: Job }) {
         <Text size="sm">{line}</Text>
         {failed.length ? (
           <Text size="xs" c="red">Failed: {failed.join(", ")}</Text>
+        ) : null}
+      </Stack>
+    );
+  }
+  if (job.kind === "pipeline") {
+    const { line, held } = pipelineSummary(r);
+    const autoEdited = Number(r.auto_edited ?? 0) || 0;
+    return (
+      <Stack gap={4} mt="xs">
+        <Text size="sm">{line}</Text>
+        {held.length ? (
+          <Alert color="blue" variant="light" p="xs"
+            title="Waiting for more of your subs to be located">
+            <Text size="xs">
+              {held.length === 1
+                ? "One target isn't ready to auto-stack yet"
+                : `${held.length} targets aren't ready to auto-stack yet`}
+              {" — the hands-off auto-stack is holding off rather than making a "}
+              {"picture out of one or two frames (that would just be noise). "}
+              {"Run Plate Solve to locate more subs, or open the target and use "}
+              {'"Stack" to make one now anyway:'}
+            </Text>
+            <Stack gap={0} mt={4}>
+              {held.map((h) => (
+                <Text size="xs" key={h.target}>
+                  {h.target ? (
+                    <Anchor component={Link} to={`/targets/${h.target}`}>{h.target}</Anchor>
+                  ) : "This target"}
+                  {`: ${h.frames} of your subs located so far — needs ${h.min}.`}
+                </Text>
+              ))}
+            </Stack>
+          </Alert>
+        ) : null}
+        {autoEdited > 0 ? (
+          <Group>
+            <Button size="xs" variant="light" leftSection={<IconPhoto size={14} />}
+              component={Link} to="/gallery">
+              View in Gallery
+            </Button>
+          </Group>
         ) : null}
       </Stack>
     );
