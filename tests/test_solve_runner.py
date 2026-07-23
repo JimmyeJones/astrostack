@@ -146,6 +146,35 @@ def test_solve_one_backfills_centre_from_wcs_when_ini_unparseable(tmp_path):
     assert result.dec_center_deg == pytest.approx(69.06, abs=1e-6)
 
 
+def test_solve_one_keeps_astap_center_when_present(tmp_path):
+    """When ASTAP's .ini yields a centre, it is used verbatim (no WCS override)."""
+    fits = tmp_path / "x.fit"
+    fits.write_bytes(b"")
+    sidecar = tmp_path / "x.wcs"
+    sidecar.write_bytes(b"")
+
+    fake_result = ASTAPResult(
+        fits_path=fits, wcs_sidecar_path=sidecar,
+        ra_center_deg=83.63, dec_center_deg=-5.39,
+        pixscale_arcsec=2.5, rotation_deg=12.0, solved=True, log_tail="",
+    )
+
+    class FakeSolver:
+        def __init__(self, *a, **kw):
+            pass
+
+        def solve(self, _path, **_kw):
+            return fake_result
+
+    # Even if the .wcs disagreed, an ASTAP-provided centre wins (no backfill).
+    with patch("seestack.solve.runner.ASTAPSolver", FakeSolver), \
+         patch("seestack.io.wcs_io.wcs_text_from_sidecar", return_value="CRVAL1 = 999.0"):
+        result = solve_one(7, str(fits))
+
+    assert result.ra_center_deg == 83.63
+    assert result.dec_center_deg == -5.39
+
+
 def test_solve_one_backfilled_centre_makes_frame_reference_eligible(tmp_path):
     """The backfilled centre flows through to the DB so the frame is reference-
     and sibling-hint-eligible (both require non-None centres)."""
@@ -204,6 +233,61 @@ def test_apply_solve_result_failure_doesnt_clobber_accept(tmp_path):
         # We don't auto-reject — solve failure is often transient.
         assert f.accept is True
         assert f.reject_reason and "solve_failed" in f.reject_reason
+    finally:
+        proj.close()
+
+
+def test_apply_solve_failure_preserves_a_real_reject_reason(tmp_path):
+    """A frame already rejected for a concrete cause keeps that reason when a later
+    plate-solve fails — it is not clobbered to ``solve_failed:``.
+
+    Regression: ``build_solve_arglist`` offers any frame without a ``wcs_json``
+    (no ``accept`` gate), so an already-rejected star-poor sub is re-offered to
+    solve and fails; the failure branch unconditionally overwrote its reason,
+    (a) mis-attributing it in the reject-summary buckets and (b) — for an
+    ``auto:grade:`` reason — dropping it from the cumulative 25% auto-grade cap
+    denominator, leaking rejections past the rail.
+    """
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        for i, real in enumerate(
+                ("user", "auto:grade:star_count", "bulk:fwhm_px", "auto:streak")):
+            fid = proj.add_frame(FrameRow(source_path=f"x{i}.fit"))
+            proj.update_frame(fid, accept=False, reject_reason=real)
+            apply_solve_result_to_db(proj, SolveResult(
+                frame_id=fid, fits_path="x.fit", solved=False,
+                wcs_text=None, ra_center_deg=None, dec_center_deg=None,
+                pixscale_arcsec=None, rotation_deg=None, error="no solution",
+            ))
+            f = proj.get_frame(fid)
+            assert f is not None
+            assert f.accept is False
+            assert f.reject_reason == real  # untouched, not "solve_failed:no solution"
+    finally:
+        proj.close()
+
+
+def test_apply_solve_failure_refreshes_a_prior_solve_failed_reason(tmp_path):
+    """A frame whose only reason is a prior ``solve_failed:`` still gets its
+    message refreshed on a later failure (the preserve-guard must not freeze it)."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        fid = proj.add_frame(FrameRow(source_path="x.fit"))
+        apply_solve_result_to_db(proj, SolveResult(
+            frame_id=fid, fits_path="x.fit", solved=False,
+            wcs_text=None, ra_center_deg=None, dec_center_deg=None,
+            pixscale_arcsec=None, rotation_deg=None, error="no solution",
+        ))
+        # A later scan hits the setup problem — the reason updates to the canonical
+        # "no star database" so the banner can classify it.
+        apply_solve_result_to_db(proj, SolveResult(
+            frame_id=fid, fits_path="x.fit", solved=False,
+            wcs_text=None, ra_center_deg=None, dec_center_deg=None,
+            pixscale_arcsec=None, rotation_deg=None, error="no star database found",
+        ))
+        f = proj.get_frame(fid)
+        assert f is not None
+        assert f.reject_reason == "solve_failed:no star database"
     finally:
         proj.close()
 

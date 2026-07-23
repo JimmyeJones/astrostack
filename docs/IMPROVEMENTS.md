@@ -47,6 +47,29 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+> **Re-audit — stacking engine (geometry/drizzle + calibrate/weighting) CLEAN again; shipped one verified solve bug
+> (a second was a concurrent duplicate) (Scout 2026-07-23, branch `claude/kind-mccarthy-kjj0fu`).** Baseline suite green (**1817 passed, 2 skipped**).
+> Three independent adversarial audit sub-agents re-covered the engine + the ingest/QC/solve path: (a) **stacking
+> geometry/drizzle** — `accumulator.py` (WeightedSum/MinMaxReject band denominators ≥1 + ±inf-seed masking, Welford
+> online mean/var), `drizzle_path.py` (CRPIX/CDELT super-res scaling re-derived exact, half-open `[-0.5,N−0.5]`
+> bounds, pixmap axis order, two-pass rejection fed by separate stackers, `_clip_tolerance` keep-all guards),
+> `mosaic.py` (RA-wrap `unwrap_ra_deg`, CRPIX pad, MAD outlier floor), `reference.py`, `pointings.py` — **CLEAN** (one
+> non-corrupting note: drizzle `_clip_tolerance` Bessel uses the integer frame count vs the weighted effective sample
+> size — affects only which contributions clip, never a covered pixel's value); (b) **calibrate + weighting** —
+> `apply.py` (dark-then-flat raw-Bayer order numerically re-verified, bias never double-subtracted, exposure-scaled
+> dark direction, `_FLAT_FLOOR` divide guard, NaN=no-correction), `masters.py` (`_sigma_clip_mean` all-NaN→NaN /
+> mad=0 spike-reject), `weighting.py`/`photometric.py` (factors clipped `[0.1,1]`, inverse-variance `1/s²` fold
+> direction + zero-guards — no NaN/zero/negative weight reaches the accumulator) — **CLEAN**. **Two NEW verified bugs
+> found this run** (both struck below): (1) `solve_one` left an otherwise-solved frame with a NULL centre when ASTAP's
+> `.ini` didn't parse — I fixed it, but the Builder shipped the **same** fix concurrently on `main` as **v0.184.2**
+> (`wcs_center_deg_from_text`), a genuine duplicate, so at merge time I dropped my equivalent change and kept `main`'s;
+> (2) the plate-solve **failure branch clobbered a real `reject_reason`** (`user`/`qc:`/`auto:streak`/`auto:grade:`/
+> `bulk:`) to `solve_failed:` on any re-offered already-rejected frame, mis-attributing it in the reject-summary
+> buckets and leaking the cumulative 25% auto-grade cap — **fixed + regression-tested + shipped this run** as a guarded
+> write mirroring the success branch's self-heal contract (**v0.184.3**). One lower-confidence observation left unfiled
+> (the `_cache_stale` size-only compare — inside the already-documented "reused source path" family), and one
+> autonomy/efficiency idea filed (stop re-plate-solving deliberately-rejected frames every scan).
+>
 > **Re-audit — stacking engine CLEAN again; one NEW verified render/ingest preview-staleness bug filed
 > (Scout 2026-07-23, branch `claude/kind-mccarthy-hhvyko`).** Baseline suite green (**1817 passed, 2 skipped**). Three
 > independent adversarial audit sub-agents plus my own reads re-covered the engine + the render/ingest path: (a)
@@ -857,6 +880,29 @@ when you take it.
   of `copy_to_cache`. Add a fail-before/pass-after test that ingests, overwrites the source with different content
   at the same path in no-cache mode, re-ingests, and asserts `wcs_json`/hints were cleared. Confidence: traced
   (gating + default verified end-to-end: `config.py:65` False → `pipeline.py:66` → `ingest.py:194` guard).
+
+- ~~**A plate-solve *failure* silently overwrites the `reject_reason` of an already-rejected frame — a sub dropped for
+  soft focus / streaks / by the user / by auto-grade gets stamped `solve_failed:…` when solve runs and fails,
+  corrupting the reject-summary buckets and leaking the cumulative 25% auto-grade cap.**~~ — **FIXED v0.184.3**
+  (Scout 2026-07-23, branch `claude/kind-mccarthy-kjj0fu`; found by the 2026-07-23 watcher/ingest/QC/solve adversarial
+  audit; **traced + regression-tested, fail-before/pass-after confirmed**). *(Wrong-result — dishonest frame
+  accounting + a broken over-rejection guard; Medium.)* `build_solve_arglist` (`seestack/solve/runner.py`) gates only
+  on `wcs_json` (not `accept`), so an already-rejected star-poor sub (accept=0, `wcs_json` NULL) is re-offered to
+  plate-solve every scan; when it fails, the failure branch of `apply_solve_result_to_db` **unconditionally**
+  overwrote `reject_reason` to `solve_failed:…`. The **success** branch is careful (it only clears a `solve_failed:`
+  reason, preserving a real `user`/`qc:`/`auto:streak`/`auto:grade:`/`bulk:` reject), but the failure branch had no
+  such guard, so it destroyed exactly the reasons the success branch protects. Consequences: (a) `rejection_summary`
+  mis-attributes the drop (a soft-focus reject shows as "plate-solve failed", and `_verdict` can flip the
+  dominant-cause copy); (b) `pipeline.py` computes the cumulative auto-grade cap denominator by counting
+  `auto:grade`-reason frames — a clobbered `auto:grade:` reason drops out of that tally, inflating the budget so
+  auto-grade rejects past the documented 25% rail (the reason ping-pongs `auto:grade ⇄ solve_failed` every scan on the
+  overlapping star-poor population). **Fix:** the failure branch now stamps `solve_failed:` only when the frame is
+  still accepted, carries no reason, or already carries a `solve_failed:` reason (a re-failed solve just refreshes its
+  message) — mirroring the success branch's self-heal contract in reverse. Regression: `tests/test_solve_runner.py`
+  (+2: a rejected frame with `user`/`auto:grade:star_count`/`bulk:fwhm_px`/`auto:streak` keeps its reason across a
+  failed solve [fail-before]; a prior-`solve_failed:` reason still refreshes to the canonical "no star database").
+  Upgrade-safe: a guarded write in the worker entry point only; no config/DB-schema/API-shape/on-disk/default change.
+  Confidence: traced + regression-tested.
 
 - ~~**A plate-solve that succeeds but whose ASTAP `.ini` sidecar doesn't parse is persisted as "solved" with a valid
   `wcs_json` but NULL centre coordinates — the frame stacks yet is silently barred from being the reference frame and
@@ -4838,6 +4884,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+- **IMPROVEMENT IDEA (Scout 2026-07-23, spotted while fixing the v0.184.2 reject_reason-clobber bug) — stop
+  re-plate-solving deliberately-rejected frames on every scan.** *(Autonomy/efficiency + friendliness; size S.)*
+  **Why:** `build_solve_arglist` (`seestack/solve/runner.py`) offers a frame to ASTAP whenever it has no `wcs_json`,
+  with **no `accept` filter** — so a sub the user rejected, or that QC/streak/auto-grade dropped, is re-solved from
+  scratch on *every* scan even though a rejected frame can never enter the stack (`run_stack` combines accepted **and**
+  solved frames). On a long night with many soft/cloudy subs that's a lot of repeated, futile ASTAP time each scan,
+  slowing the hands-off pass. (It was also the enabling condition for the v0.184.2 clobber bug — now guarded — but the
+  *waste* remains.) **Shape:** skip frames that are `accept=0` **with a non-`solve_failed:` reject reason** from the
+  solve arglist — they're deliberately out and re-solving them buys nothing. Keep offering `accept=0` frames whose
+  *only* reason is a prior `solve_failed:` (those are the genuine retry candidates once a star DB is installed), and
+  all accepted-unsolved frames as today. **Trade-off to weigh (why it's an idea, not a blind fix):** a rejected sub
+  that *would* solve still contributes its centre to `fallback_solve_hint` sibling-hint seeding — so skipping it
+  removes a marginal hint source. Net: on a target with any accepted-solved sub the hint is already seeded, so the
+  saving dominates; the Builder should confirm the sibling-hint path still seeds from accepted frames before landing
+  it. **Sane default / upgrade-safe:** pure arglist-filtering change, display-invisible, no config/DB/API/default
+  change. Test: an `accept=0` frame with a `user`/`auto:grade:` reason is not in `build_solve_arglist`; an `accept=0`
+  frame whose reason is `solve_failed:…` *is* still offered; accepted-unsolved frames unchanged.
+
 - **IMPROVEMENT IDEA (Builder 2026-07-23, follow-up to the v0.183.0 minimum-frames guard) — make the walk-away
   auto-stack's "held for more located subs" state VISIBLE to a beginner. Target-page half SHIPPED v0.184.0; Jobs-page
   half still open.** *(Friendliness pillar, PRIORITY 3; size S–M; frontend-only, additive.)* **Why:** v0.183.0 stops
@@ -7201,6 +7265,35 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "You beat your best!": when a fresh stack of a target you've shot before
+  comes out sharper (or deeper) than your previous best of that same target, say so with a small celebratory callout —
+  so a beginner feels the progress of adding subs / catching better seeing, and learns what "better" looks like.**
+  *(Pillar: 3 friendliness + enjoy/motivation; size S–M.)* **The gap (verified this run):** the app already keeps every
+  stack run per target (History), each with `n_frames_used`, total integration, and a median-FWHM sharpness read, and
+  it has a cross-target "My best pictures" portfolio wall and within-target *visual* timelapse/A-B views — but
+  **nothing tells a beginner, on a *new* result, that it just beat their own previous best of that target.** A hobbyist
+  re-shooting M31 across several nights has no at-a-glance "this one's your sharpest yet" signal; they'd have to eyeball
+  the History table and compare FWHM numbers themselves (which a beginner won't). That "you set a new personal best" beat
+  is one of the most motivating moments in the hobby, and the raw material is already stored. **The feature (beginner
+  idiom):** on a finished stack's result card, when its sharpness (median FWHM, lower = better) or integration depth is
+  the best among that target's prior finished runs, show one calm line — *"✨ Your sharpest M31 yet — 2.1″ stars, beating
+  your 2.4″ from 12 Jul."* / *"✨ Your deepest M42 yet — 3.1 h, more than any night before."* Says nothing (card hidden)
+  when it's the first run or not a best. **Distinct from what exists:** "My best pictures" ranks *across* targets and is
+  a browsable wall; the timelapse/A-B compare *within* one target *visually*; readiness answers "keep shooting?". This is
+  a *per-target personal-record* beat on the moment a new result lands — motivation, not a wall or a slider. **Why it
+  clears the beginner bar:** universally legible ("you beat your record"), zero jargon (it *explains* what improved in
+  plain words — sharper stars / more hours), uses data already trusted, and serves the enjoy/motivation pillar (it
+  rewards consistency, which leads to better images). **Shape for one Builder run:** a pure, unit-testable helper that,
+  given the current run's `(median_fwhm, integration_s)` and the list of the target's prior finished runs, returns
+  `None` or a `{kind: "sharpness"|"depth", phrase, prior_value, prior_date}` — reuse the History run records already
+  queried for the target page; a frontend line on the result card. **Sane default, self-hiding:** first run or no
+  improvement → nothing; a run missing an FWHM read → fall back to the depth check or stay silent, never an error.
+  Tests: first run → `None`; a sharper run → sharpness beat with the right prior; an equal/worse run → `None`; ties
+  broken conservatively (strictly-better only, so it never over-claims). Upgrade-safe: purely additive read-only
+  helper + a display line, no schema/config/default/API-shape change. *(Feasibility: reuses existing per-target run
+  queries + the FWHM/integration figures already computed, no new/heavy dependency, sane default, testable — passes
+  §4's filter.)*
 
 - **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Your imaging calendar": a simple month/year heat-calendar of which
   nights you actually imaged and how much, so a beginner can see the rhythm of their hobby at a glance, spot the

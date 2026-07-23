@@ -215,7 +215,23 @@ def apply_solve_result_to_db(project, result: SolveResult) -> None:
         raw = result.error or "unknown"
         setup = classify_solve_setup_error(raw)
         reason = setup if setup is not None else raw[:120]
-        project.update_frame(result.frame_id, reject_reason=f"solve_failed:{reason}")
+        # Don't clobber a *real* rejection reason. ``build_solve_arglist`` gates
+        # only on ``wcs_json`` (not ``accept``), so a frame already rejected for a
+        # concrete cause — ``user`` / ``qc:`` / ``auto:streak`` / ``auto:grade:`` /
+        # ``bulk:`` — is still offered to plate-solve, and a solve failure on it is
+        # irrelevant (it's already out of the stack). Overwriting its reason with
+        # ``solve_failed:`` both mis-attributes it in the "why were frames left
+        # out?" summary and, for an ``auto:grade:`` reason, breaks the cumulative
+        # 25% auto-grade cap (which tallies ``auto:grade`` reasons). Mirror the
+        # success branch's self-heal contract in reverse: only stamp
+        # ``solve_failed:`` when the frame is still accepted, carries no reason, or
+        # already carries a ``solve_failed:`` reason (a re-failed solve just
+        # refreshes its message).
+        existing = project.get_frame(result.frame_id)
+        prior = (existing.reject_reason or "") if existing is not None else ""
+        accepted = existing.accept if existing is not None else True
+        if accepted or not prior or prior.startswith("solve_failed:"):
+            project.update_frame(result.frame_id, reject_reason=f"solve_failed:{reason}")
         return
     if result.wcs_text is None:
         # ASTAP reported success (returncode 0 + a ``.wcs`` sidecar) but no usable
