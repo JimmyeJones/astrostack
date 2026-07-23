@@ -33,6 +33,34 @@ def _frame_with_gradient_and_object():
     return rgb
 
 
+def test_stack_path_bails_on_a_single_channel_fit_failure_no_colour_cast(monkeypatch):
+    """If one channel's background fit fails on the stack path (``errors=None``),
+    the frame must be left un-flattened rather than get a per-channel-asymmetric
+    subtraction (R kept, G/B subtracted) that colour-casts the stacked frame.
+    Before the fix the stack path skipped only the failed channel and subtracted
+    the others, biasing colour."""
+    import seestack.bg.per_frame as pf
+
+    rgb = _frame_with_gradient_and_object()
+    real_ladder = pf._fit_bg2d_ladder
+    calls = {"n": 0}
+
+    def flaky_ladder(plane, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:  # first channel fails, the rest would succeed
+            raise ValueError("synthetic degenerate fit")
+        return real_ladder(plane, **kw)
+
+    monkeypatch.setattr(pf, "_fit_bg2d_ladder", flaky_ladder)
+
+    out = subtract_background(
+        rgb, BackgroundOptions(mode=MODE_PER_CHANNEL, box_size=32), use_gpu=False,
+    )
+    # All-or-nothing: nothing subtracted, so the frame is returned unchanged and
+    # no channel is shifted relative to the others.
+    np.testing.assert_array_equal(out, rgb)
+
+
 def test_mode_off_returns_input_unchanged():
     rgb = _frame_with_gradient_and_object()
     out = subtract_background(rgb, BackgroundOptions(mode=MODE_OFF))

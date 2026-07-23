@@ -840,10 +840,18 @@ sweep are now both well-hardened.)_
     contains both a real subdir and a symlink to it, both pass `is_dir()` and become separate targets/projects,
     and the per-project `realpath` dedup (built only from that project's own frames) doesn't catch the same
     physical raws landing in a second project. Only harmful if the user later stacks both. (Edge case; traced.)
-  - `seestack/bg/per_frame.py:289-297` `_subtract_background_cpu` on the **stack path** (`errors=None`): if one
+  - ~~`seestack/bg/per_frame.py:289-297` `_subtract_background_cpu` on the **stack path** (`errors=None`): if one
     channel's `Background2D` fit fails it's skipped while the others subtract, then `_zero_sky_per_channel` runs —
-    a per-channel-asymmetric result that could introduce a faint colour cast. Only on a degenerate fit; the editor
-    path is correctly all-or-nothing. Documented "best-effort". (Confidence: traced.)
+    a per-channel-asymmetric result that could introduce a faint colour cast.~~ — **FIXED v0.173.2** (Builder
+    2026-07-23, branch `claude/pensive-faraday-tfvkyx`; regression-tested). The stack path now fits all three
+    channels *before* subtracting and, if any channel's ladder fit fails, degrades to **no** subtraction (leaves
+    the gradients) rather than a per-channel-asymmetric one — matching the editor path's already-documented
+    reasoning ("don't leave a partial per-channel subtraction that would colour-shift the image"). A per-frame
+    colour cast is coherent and does not average out in the stack, so all-or-nothing is the correct degradation.
+    Regression `tests/test_bg_modes.py::test_stack_path_bails_on_a_single_channel_fit_failure_no_colour_cast`
+    (monkeypatches the ladder to fail on channel 0 only; asserts the frame is returned unchanged — fail-before it
+    partial-subtracted G/B). Additive; no config/DB/API/on-disk change. Severity: image-quality/correctness, Low
+    (only on a degenerate fit, now rare given the robust ladder). (Confidence: traced + regression-tested.)
   - `seestack/qc/streaks.py:107-112` `streak_count` **over-reports** a single continuous trail as 2–5 (one
     satellite/plane trail fragments into several collinear `probabilistic_hough_line` segments; `line_gap=8` +
     `disk(1)` dilation don't re-merge them). Reproduced (Scout 2026-07-23, adversarial QC audit): a clean diagonal
