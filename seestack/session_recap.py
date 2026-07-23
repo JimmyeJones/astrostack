@@ -659,6 +659,38 @@ def nights_breakdown(
     return out
 
 
+def night_frame_ids(
+    project: Project,
+    start_utc: str,
+    end_utc: str,
+    *,
+    accepted_only: bool = False,
+) -> list[int]:
+    """The frame IDs of the capture night bounded by ``[start_utc, end_utc]``.
+
+    ``start_utc``/``end_utc`` are a night's own first/last capture stamps as
+    returned by :func:`nights_breakdown` (a ``NightSummary``'s ``start_utc`` /
+    ``end_utc``). Because sessions are gap-separated and never overlap in time,
+    every frame whose capture time falls in that inclusive window belongs to
+    exactly that one night — so a plain time-window match reproduces the same
+    night the "Nights" card shows without re-deriving the session split. Pass
+    ``accepted_only`` to restrict to the subs currently feeding the stack — the
+    set the opt-in "set this night aside" action rejects.
+
+    Returns ``[]`` when either bound is unparseable or nothing falls in-window.
+    """
+    start = _parse(start_utc)
+    end = _parse(end_utc)
+    if start is None or end is None:
+        return []
+    ids: list[int] = []
+    for f in project.iter_frames(accepted_only=accepted_only):
+        dt = _parse(f.timestamp_utc)
+        if dt is not None and start <= dt <= end:
+            ids.append(f.id)
+    return ids
+
+
 @dataclass
 class TargetNightContribution:
     """What one target contributed to the library's most recent night."""

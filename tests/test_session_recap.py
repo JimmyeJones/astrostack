@@ -388,6 +388,7 @@ from seestack.session_recap import (  # noqa: E402
     FWHM_DRIFT_RATIO,
     NIGHT_HAZY_CLOUD_FRACTION,
     _night_verdict,
+    night_frame_ids,
     nights_breakdown,
 )
 
@@ -477,6 +478,58 @@ def test_nights_breakdown_no_verdict_when_too_few_measured(tmp_path):
         assert len(nights) == 1
         assert nights[0].median_fwhm_px is None
         assert nights[0].verdict == ""
+    finally:
+        proj.close()
+
+
+def test_night_frame_ids_selects_exactly_one_nights_frames(tmp_path):
+    """The bounds a NightSummary carries select exactly that night's frames — the
+    other night's are never swept in, since sessions never overlap in time."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        night_a = datetime(2026, 7, 1, 22, 0, 0)
+        for i in range(3):
+            proj.add_frame(_frame(night_a + timedelta(seconds=30 * i)))
+        night_b = datetime(2026, 7, 8, 22, 0, 0)
+        for i in range(4):
+            proj.add_frame(_frame(night_b + timedelta(seconds=30 * i)))
+        nights = nights_breakdown(proj)  # newest first → [B, A]
+        b, a = nights
+        all_ids = [f.id for f in proj.iter_frames()]
+        b_ids = night_frame_ids(proj, b.start_utc, b.end_utc)
+        a_ids = night_frame_ids(proj, a.start_utc, a.end_utc)
+        assert len(b_ids) == 4 and len(a_ids) == 3
+        assert set(b_ids).isdisjoint(a_ids)
+        assert set(b_ids) | set(a_ids) == set(all_ids)  # partition, nothing lost
+    finally:
+        proj.close()
+
+
+def test_night_frame_ids_accepted_only_skips_already_rejected(tmp_path):
+    """accepted_only restricts to the subs the stack actually uses — an already
+    set-aside sub is left out (so the set-aside action never re-touches it)."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        base = datetime(2026, 7, 8, 22, 0, 0)
+        for i in range(3):
+            proj.add_frame(_frame(base + timedelta(seconds=30 * i)))
+        proj.add_frame(_frame(base + timedelta(seconds=120),
+                              accept=False, reject_reason="auto:streak"))
+        [night] = nights_breakdown(proj)
+        assert len(night_frame_ids(proj, night.start_utc, night.end_utc)) == 4
+        accepted = night_frame_ids(proj, night.start_utc, night.end_utc,
+                                   accepted_only=True)
+        assert len(accepted) == 3  # the rejected sub is excluded
+    finally:
+        proj.close()
+
+
+def test_night_frame_ids_empty_on_unparseable_bounds(tmp_path):
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        proj.add_frame(_frame(datetime(2026, 7, 8, 22, 0, 0)))
+        assert night_frame_ids(proj, "not-a-date", "also-bad") == []
+        assert night_frame_ids(proj, None, None) == []  # type: ignore[arg-type]
     finally:
         proj.close()
 

@@ -1079,6 +1079,13 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  // Opt-in "set this night aside": reject the accepted subs of one capture night
+  // (bounded by a NightSummary's start/end). Returns the touched ids for undo.
+  setAsideNight: (safe: string, start_utc: string, end_utc: string) =>
+    req<{ changed: number; changed_ids: number[] }>(
+      `/api/targets/${safe}/frames/set-aside-night`,
+      { method: "POST", body: JSON.stringify({ start_utc, end_utc }) },
+    ),
   rejectSummary: (safe: string) =>
     req<{
       counts: Record<string, number>;

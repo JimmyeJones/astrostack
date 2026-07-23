@@ -6808,8 +6808,28 @@ problems. Dogfood it every big-picture run and fix root causes.
   Tests: `tests/test_session_recap.py` (+6 — empty, newest-first rollups, soft-vs-best + best nod, hazy cloud
   precedence, no-verdict on thin data, pure `_night_verdict`), `tests/webapp/test_target_nights.py` (+3 —
   default single night, two-nights newest-first, verdict+buckets serialisation), `NightsCard.test.tsx` (+7).
-  Python 1438 + tsc + vitest 951 + vite build green. **Slice (d) — the opt-in bulk "set this night aside"
-  reject + re-stack — is deliberately left for a future run (the only non-read-only slice).** Original spec:
+  Python 1438 + tsc + vitest 951 + vite build green. **Slice (d) — the opt-in "set this night aside"
+  bulk reject + re-stack nudge — SHIPPED v0.171.0** (Builder 2026-07-23, branch `claude/pensive-faraday-m351es`).
+  Each night in the Nights card now carries an opt-in **"Set aside"** button (shown only when the night still has
+  kept subs to drop): it rejects that night's *accepted* subs so a beginner can drop a whole clouded-out / soft
+  night in one click and re-stack a cleaner picture. **Reversible by construction** — it sets the same `user`
+  reject a manual reject uses (`accept=False, user_override=True, reject_reason="user"` → the "set aside by you"
+  bucket), **never deletes**, and **never touches an already-rejected sub** (a cloudy/streak auto-reject keeps its
+  own reason), so a legitimately faint target's only nights can never be silently culled and any auto-reject
+  provenance survives. The touched `changed_ids` come back so the card shows a one-click **Undo** (a `bulk` accept
+  of exactly those ids, reusing the shipped/ tested mixed-pointing reject/undo pattern), and the success notice
+  nudges "Re-stack (Process target) to see the cleaner picture" (pointing at the existing one-click Process
+  button rather than auto-triggering a job). **Engine:** pure `session_recap.night_frame_ids(project, start_utc,
+  end_utc, *, accepted_only)` — a time-window match over the night's own bounds (sessions never overlap in time,
+  so it reproduces exactly the card's night without re-splitting). **Backend:** `POST
+  /api/targets/{safe}/frames/set-aside-night` (`NightSetAside{start_utc,end_utc}`), mirroring `bulk_frames`'
+  nested-close + read-only→503 + `refresh_target_stats` handling. **Frontend:** the NightsCard button/undo/re-stack
+  nudge + `api.setAsideNight`. Additive/upgrade-safe: opt-in, off-nothing, no schema/config/DB/API-shape/default
+  change (one new endpoint + one new request model). Tests: `test_session_recap.py` (+3 — one-night partition,
+  accepted-only skips rejected, unparseable-bounds→[]), `test_target_nights.py` (+3 — rejects only that night's
+  accepted subs, leaves already-rejected untouched, undoable via bulk-accept), `NightsCard.test.tsx` (+2 —
+  set-aside with the night's own bounds then undo via bulk-accept, no button for a fully-set-aside night).
+  Original spec:
   The
   §1 owner shoots one target across *many* nights (the Seestar writes a new folder per night). Today the
   Target page has a **"Last session"** card (`session_recap`, one night) and the Library has a

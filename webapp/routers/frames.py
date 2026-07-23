@@ -27,6 +27,7 @@ from webapp.schemas import (
     GradeReasonOut,
     GradeRecommendationOut,
     GradeReportOut,
+    NightSetAside,
 )
 
 router = APIRouter(prefix="/api/targets/{safe}/frames", tags=["frames"])
@@ -408,6 +409,48 @@ def bulk_frames(safe: str, body: BulkFrameAction, request: Request) -> dict:
     finally:
         lib.close()
     return {"changed": len(changed_ids), "changed_ids": changed_ids}
+
+
+@router.post("/set-aside-night")
+def set_aside_night(safe: str, body: NightSetAside, request: Request) -> dict:
+    """Opt-in "set this night aside": reject every *accepted* sub captured on the
+    night bounded by ``[start_utc, end_utc]`` (the bounds a ``NightSummary`` from
+    the Nights card carries), so a beginner can drop a whole clouded-out or soft
+    night in one click and re-stack a cleaner picture.
+
+    Reversible by construction: it sets the same ``user`` reject a manual
+    reject uses (``accept=False``, ``user_override=True``, ``reject_reason="user"``
+    → the "set aside by you" bucket) and **never deletes a frame**. It only ever
+    touches *accepted* subs (an already-rejected sub is left exactly as it was, so
+    a cloudy/streak auto-reject keeps its own reason) and re-accepts nothing on its
+    own. The touched ``changed_ids`` are returned so the UI can offer a one-click
+    undo — a ``bulk`` accept of exactly those ids — mirroring the mixed-pointing
+    reject/undo pair.
+    """
+    from seestack.session_recap import night_frame_ids
+
+    lib, proj = deps.open_target_project(request, safe)
+    # Nest proj-close inside lib-close (as bulk_frames / patch_frame do) so the
+    # library handle is released on every exit, including a mid-loop write failure
+    # on a read-only/locked project DB.
+    try:
+        try:
+            ids = night_frame_ids(
+                proj, body.start_utc, body.end_utc, accepted_only=True
+            )
+            for fid in ids:
+                proj.update_frame(
+                    fid, accept=False, user_override=True, reject_reason="user",
+                )
+        finally:
+            proj.close()
+        if ids:
+            lib.refresh_target_stats(safe)
+    except sqlite3.OperationalError as exc:
+        raise HTTPException(status_code=503, detail=STORAGE_READONLY_MSG) from exc
+    finally:
+        lib.close()
+    return {"changed": len(ids), "changed_ids": ids}
 
 
 @router.get("/{frame_id}/preview")

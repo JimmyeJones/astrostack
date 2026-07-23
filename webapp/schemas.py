@@ -256,6 +256,16 @@ class BulkFrameAction(BaseModel):
     fraction: float = 0.1
 
 
+class NightSetAside(BaseModel):
+    """Bounds of one capture night to set aside (reject its accepted subs), as
+    carried by a ``NightSummary`` from the Nights card. Sessions are
+    gap-separated, so the inclusive ``[start_utc, end_utc]`` window names exactly
+    that night's frames."""
+
+    start_utc: str
+    end_utc: str
+
+
 class GradeReasonOut(BaseModel):
     """One plain-language reason a frame was flagged by auto-grade."""
 
