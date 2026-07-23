@@ -325,6 +325,43 @@ def test_apply_solve_failure_preserves_a_real_reject_reason(tmp_path):
         proj.close()
 
 
+def test_apply_solve_failure_preserves_a_qc_error_reason_on_accepted_frame(tmp_path):
+    """A frame that failed QC keeps its ``qc_error``/``qc_error_final`` reason when a
+    later plate-solve fails — even though such frames stay ``accept=True``.
+
+    Regression: a QC failure (``apply_qc_result_to_db`` with ``metrics=None``) sets
+    only ``reject_reason`` and leaves ``accept`` True, and ``build_solve_arglist``
+    offers any frame without a ``wcs_json`` — so a QC-errored frame is re-offered to
+    solve and fails (e.g. "no star database"). The failure branch's bare
+    ``accepted`` allowance clobbered the ``qc_error_final:`` terminal marker to
+    ``solve_failed:``, which defeats the QC terminal-skip state machine
+    (``build_qc_arglist(only_new=True)`` skips only ``qc_error_final`` frames), so a
+    genuinely-corrupt file gets re-QC'd on every scan forever and is mis-attributed
+    as a solve failure in the reject summary.
+    """
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        for i, qc_reason in enumerate(
+                ("qc_error_final:Truncated", "qc_error:NAS blip")):
+            fid = proj.add_frame(FrameRow(source_path=f"x_qc{i}.fit"))
+            # QC-error frames stay accepted (only reject_reason is set).
+            proj.update_frame(fid, reject_reason=qc_reason)
+            assert proj.get_frame(fid).accept is True
+            apply_solve_result_to_db(proj, SolveResult(
+                frame_id=fid, fits_path="x.fit", solved=False,
+                wcs_text=None, ra_center_deg=None, dec_center_deg=None,
+                pixscale_arcsec=None, rotation_deg=None,
+                error="no star database found",
+            ))
+            f = proj.get_frame(fid)
+            assert f is not None
+            # The QC state is preserved, not clobbered to solve_failed:.
+            assert f.reject_reason == qc_reason
+            assert f.accept is True
+    finally:
+        proj.close()
+
+
 def test_apply_solve_failure_refreshes_a_prior_solve_failed_reason(tmp_path):
     """A frame whose only reason is a prior ``solve_failed:`` still gets its
     message refreshed on a later failure (the preserve-guard must not freeze it)."""

@@ -106,6 +106,30 @@ when you take it.
   (`scanner.py` names targets by raw folder name) + owner-confirmed on real folders.
   (M–L, autonomy/correctness — PRIORITY 1/2)
 
+> **Re-audit — stacking engine core CLEAN again; TWO NEW verified bugs found in the solve/QC/ingest + auto-stack
+> orchestration paths; shipped one, filed the other (Scout 2026-07-23, branch `claude/kind-mccarthy-nt4l9m`).**
+> Baseline suite green (**1825 passed, 2 skipped**). Three independent adversarial audit sub-agents plus my own reads
+> re-covered: (a) the **stacking hot path** — `accumulator.py` (MinMaxReject k-insertion brute-forced against a
+> reference impl at every n=0..3 × k boundary incl. NaN gaps, band denominators ≥1 + ±inf-seed masking, Welford
+> online mean/var), `stacker.py` (κ-σ two-pass keep-mask both NaN widenings → can only ever yield an honest NaN gap,
+> never a corrupted value; coverage sourcing; memory-guard plane charges; cancel paths), `drizzle_path.py`
+> (`_clip_tolerance` neff/var-floor, CRPIX/CDELT super-res scaling re-derived, half-open pixmap bounds) — **CLEAN**;
+> (b) the **solve/QC/ingest path** — Bayer green-extraction (all four patterns), float32-promote overflow guard, FWHM/
+> eccentricity/transparency math + NaN guards, grading modified-z/meanAD/cap, streak reconcile (matches its documented
+> known-buggy dilution, no new defect), ingest dedup/`_cache_stale`/`_refresh_frame_metadata`/`reset_frame_*`
+> consistency — one NEW verified bug (below, **fixed this run**); (c) the **webapp auto-stack orchestration** —
+> `pipeline.py` min-frames guard (no off-by-one), `_auto_stack_frame_count` marker/`prior_max` logic, auto-grade
+> cumulative-cap denominator (no new leak), `jobs.py` queued-cancel race / cancelled-vs-error / `_recover_interrupted`
+> (no double-run) / prune, `watcher.py` debounce + stranded-retry — one NEW verified bug (below, **filed for the
+> Builder**). **(1) SHIPPED this run (v0.184.6):** a plate-solve *failure* clobbered a frame's `qc_error`/
+> `qc_error_final:` reject_reason to `solve_failed:` (the guard's bare `accepted` term fired because QC-error frames
+> stay `accept=True`), defeating the QC terminal-skip state machine and re-QC'ing corrupt files every scan forever —
+> reproduced + fixed + regression-tested (struck below). **(2) FILED (open):** the auto-stack *pre-check* phase
+> (`_auto_stack_frame_count`/`_mixed_pointing_check`/`_mark_auto_stack_attempt`) sits *outside* the per-target
+> `try/except`, so a target deleted mid-scan (or a DB-lock) marks the whole pipeline job `error` and skips auto-stack
+> for every remaining target — violating the documented "non-fatal per target" contract the QC loop already honours
+> (reproduced by the audit; open bug below). Curation + 1 improvement idea + 1 new beginner feature filed below.
+>
 > **Re-audit — stacking engine (geometry/drizzle + calibrate/weighting) CLEAN again; shipped one verified solve bug
 > (a second was a concurrent duplicate) (Scout 2026-07-23, branch `claude/kind-mccarthy-kjj0fu`).** Baseline suite green (**1817 passed, 2 skipped**).
 > Three independent adversarial audit sub-agents re-covered the engine + the ingest/QC/solve path: (a) **stacking
@@ -695,6 +719,61 @@ when you take it.
   (surfacing the already-shipped `thinStackWarning` copy) rather than a hard refusal, and confirm the re-stack
   path still fires once enough subs solve. The already-shipped thin-stack warnings (v0.159.3/.6) cover the
   *notification*; this covers the *don't-silently-publish-it* half.
+
+- **A per-target failure in the auto-stack *pre-check* phase aborts the whole walk-away pipeline job (marks it
+  `error`) and skips auto-stack for every remaining target — violating the documented "non-fatal per target"
+  contract the sibling QC loop already honours.** *(Webapp orchestration / autonomy correctness + broken-UX; Medium;
+  found + reproduced by the 2026-07-23 auto-stack orchestration adversarial audit.)* In `_pipeline_body`
+  (`webapp/pipeline.py`), the per-target `try/except` that is meant to isolate an auto-stack failure starts only at
+  **line 184** (wrapping `_stack_target` alone). But the three pre-check helpers that run *before* it —
+  `_auto_stack_frame_count(lib, safe)` (line 156), `_mixed_pointing_check(lib, safe)` (line 172), and
+  `_mark_auto_stack_attempt(lib, safe, …)` (line 183) — each call `lib.open_target(safe)` and sit **outside** the
+  `try`. So any raise in them escapes the loop: `JobManager._run` (`jobs.py:426-430`) catches it → the whole
+  `pipeline` job goes `state='error'`, even though scan/QC/solve and earlier targets' stacks already succeeded and
+  were persisted, and every target *after* the failing one misses that auto-stack pass. The QC/solve loop above
+  (lines 87-132) deliberately wraps `open_target` + engine call in `try/except` (there's a dedicated regression test,
+  `tests/webapp/test_pipeline_qc_isolation.py`, and the auto-stack docstring at lines 138-143 claims the same
+  per-target non-fatality) — so this is a real asymmetry, not by design. **Reproduced (by the audit):** two targets
+  `M_42`, `NGC_7000` (3 solved+accepted frames each), `auto_stack=True`; after `M_42` is stacked, `NGC_7000` is
+  deleted via the live `DELETE /api/targets/{safe}` endpoint; the loop reaches `NGC_7000`, `_auto_stack_frame_count`
+  → `lib.open_target("NGC_7000")` raises `FileNotFoundError` (`library.py:381`) at `pipeline.py:1468`, propagates out
+  of `_pipeline_body`, job goes red. Same escape for a `sqlite3.OperationalError` ("database is locked") from
+  `_mark_auto_stack_attempt`'s `proj.set_meta` write if a request-thread writer holds the project's write lock past
+  the busy_timeout — the exact "DB hiccup" class the QC-loop comment (lines 117-131) enumerates as a reason to
+  isolate. **Why Medium not higher:** it self-heals on the next poll (the deleted target drops out of `list_targets`,
+  the stranded-batch retry re-offers), so it isn't permanent stranding — but a fully-successful scan+partial-stack is
+  reported to the user as a red `error` job with a confusing traceback, and later targets miss a pass. **Fix
+  direction (Builder):** move `_auto_stack_frame_count` / `_mixed_pointing_check` / `_mark_auto_stack_attempt` inside
+  the per-target `try` (recording into `stack_errors[safe]` and `continue`-ing, mirroring the QC loop), and re-check
+  `job.cancel_requested()` in that handler as the QC loop does. Add a regression test mirroring
+  `test_pipeline_qc_isolation.py` (a target whose pre-check raises is recorded in the summary and the pass continues +
+  the job stays non-error). Confidence: traced + reproduced.
+
+- ~~**A plate-solve *failure* clobbers a frame's `qc_error`/`qc_error_final:` reject_reason to `solve_failed:` — the
+  guard's bare `accepted` term fires because QC-error frames stay `accept=True` — defeating the QC terminal-skip
+  state machine so a genuinely-corrupt file is re-QC'd on every scan forever and is mis-attributed as a solve
+  failure.**~~ — **FIXED v0.184.6** (Scout 2026-07-23, branch `claude/kind-mccarthy-nt4l9m`; found by the 2026-07-23
+  solve/QC/ingest adversarial audit; **traced + reproduced + regression-tested, fail-before/pass-after confirmed**).
+  *(Wrong-state — a broken retry state machine + dishonest frame accounting; Medium.)* `apply_qc_result_to_db`
+  (`seestack/qc/runner.py:91-92`) stamps a QC failure `qc_error:`/`qc_error_final:` but sets **only** `reject_reason`
+  — it leaves `accept=True`. `build_solve_arglist` (`solve/runner.py`) offers any frame without a `wcs_json` (no
+  `accept` gate), so a QC-errored frame is re-offered to plate-solve and fails (very common: "no star database" on a
+  fresh install hits *every* unsolved frame, including these). The v0.184.3 clobber-guard
+  (`if accepted or not prior or prior.startswith("solve_failed:")`) was written to protect `accept=False` reject
+  reasons (`user`/`qc:`/`auto:*`/`bulk:`) — but the `accepted` disjunct fires on a `qc_error*` frame (accept=True)
+  and overwrote its reason to `solve_failed:`. **Consequences (reproduced, `scratchpad/repro_qc_solve_clobber.py`):**
+  (a) `build_qc_arglist(only_new=True)` skips only `qc_error_final`-prefixed frames, so a clobbered-to-`solve_failed`
+  frame is **re-offered to QC every scan forever** — and can never re-reach `qc_error_final` (the next QC failure sees
+  a non-`qc_error` prior, so it stamps the *retryable* `qc_error` again), a permanent `qc_error ⇄ solve_failed`
+  ping-pong that wastes QC+solve time on a corrupt file indefinitely; (b) `rejection_summary` mis-attributes the drop
+  (a corrupt-file `qc_error` shows as "plate-solve failed"). **Fix:** the failure branch now carves `qc_error`
+  reasons out of the `accepted` allowance — it stamps `solve_failed:` only when the frame carries no reason, already
+  carries `solve_failed:`, or is accepted **and not** carrying a `qc_error` state — so a `qc_error*` reason is
+  preserved exactly like a rejected frame's. Regression: `tests/test_solve_runner.py::
+  test_apply_solve_failure_preserves_a_qc_error_reason_on_accepted_frame` (a `qc_error_final:` and a `qc_error:`
+  frame keep their reason across a failed solve; fail-before: clobbered to `solve_failed:no star database`).
+  Upgrade-safe: a guarded write in the worker entry point only; no config/DB-schema/API-shape/on-disk/default change.
+  Confidence: traced + reproduced + regression-tested.
 
 - ~~**Auto-grade's documented "never reject more than 25% per pass" cap is exceeded cumulatively, because the
   ingest pipeline re-grades a target over its *shrinking accepted survivor set* on every scan.**~~ —
@@ -5018,6 +5097,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+- **IMPROVEMENT IDEA (Scout 2026-07-23, spotted while fixing the v0.184.6 qc_error clobber bug) — surface a plain
+  "some of your subs couldn't be read" health signal when frames pile up as `qc_error_final`, so a beginner with a
+  flaky NAS / truncated downloads / a few corrupt files isn't left silently short of subs with no explanation.**
+  *(Autonomy + friendliness; pillar 2–3; size S–M; additive, read-only.)* **The gap (verified this run):** the app
+  now honestly surfaces *rejected* subs ("N not located yet", "X of Y went into your picture", the reject-summary
+  buckets), but a sub that **failed QC entirely** — an unreadable/corrupt/truncated file — ends up `accept=True` with
+  a `qc_error_final:` reason and `star_count` NULL, and it is **never counted or explained anywhere in the UI**: it's
+  not "rejected" (accept stays True), it's not "used" (no metrics → it never solves → it never stacks), and no
+  surface tells the owner "3 of your files couldn't be read". A beginner whose NAS drops packets, or whose Seestar
+  wrote a few truncated subs, just sees a slightly thinner stack with no clue why. **The feature:** a small,
+  read-only roll-up — `Project.qc_error_frame_count()` (frames with a `qc_error`/`qc_error_final:` reason and NULL
+  metrics) surfaced as one calm line on the Target page (and/or the reject-summary card): *"3 subs couldn't be
+  read — they may be corrupt or were still downloading. They're skipped; the rest are fine."* Self-hides at zero.
+  **Why it clears the bar:** turns an invisible failure into a plain, non-alarming explanation (friendliness), and
+  gives the owner an actionable nudge (check the NAS / re-copy those files) — closing the last silent "where did my
+  subs go?" gap next to the already-shipped unsolved/rejected honesty. **Sane default / upgrade-safe:** read-only
+  count + a display line, self-hiding, no config/DB-schema/API-shape/default change. Test: a fixture with N
+  `qc_error_final` frames reports N; a healthy library reports 0 → line hidden. *(Feasibility: reuses existing
+  reject_reason data, no new/heavy dependency, sane default, testable — passes §4's filter. Pairs naturally with the
+  auto-stack pre-check-isolation bug filed this run, both in the walk-away-robustness theme.)*
 - ~~**IMPROVEMENT IDEA (Scout 2026-07-23, spotted while fixing the v0.184.2 reject_reason-clobber bug) — stop
   re-plate-solving deliberately-rejected frames on every scan.**~~ — **SHIPPED v0.184.5** (Builder 2026-07-23,
   branch `claude/pensive-faraday-rxd30t`; regression-tested). `build_solve_arglist` (`seestack/solve/runner.py`) now
@@ -7421,6 +7520,42 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Your next best move": on a finished picture, one calm, plain-language
+  sentence naming the *single* highest-leverage thing that would most improve this target next time — derived
+  entirely from data the app already has — so a beginner learns what to change without reading a QC table or knowing
+  the jargon.** *(Pillar: 3 friendliness + 2 autonomy + understand/learn; size M.)* **The gap (verified this run):**
+  the app is full of *honest signals* about a finished stack — median FWHM (star sharpness), total integration
+  (depth / `n_frames_used`), star eccentricity (tracking/tilt), the thin-stack and unsolved-subs warnings, the
+  sky-background level — but they live scattered across the Target/History/QC surfaces as *numbers*, and **nothing
+  tells a beginner the one thing to do differently.** A non-expert who nails focus but only shot 15 minutes, or who
+  got 4 hours but with soft 4″ stars, has no way to know which lever matters most on *their* picture. That
+  "what should I change next?" is exactly the coaching a beginner wants and a pro does in their head. **The feature
+  (beginner idiom, one tip, never a dashboard):** a small **"To make this even better"** line on the finished-result
+  card that picks the *biggest* actionable gap and says it plainly — e.g. *"Add more time — 18 min so far. Galaxies
+  and nebulae reward hours; another clear night or two would pull out much more detail."* / *"Your stars are a little
+  soft (3.6″). Next time, refocus carefully at the start and check focus mid-session."* / *"Only 12 of your 210 subs
+  were located — installing ASTAP's star database (Settings) would let far more of them stack."* Picks exactly **one**
+  (the highest-priority unmet threshold, in a fixed sane order: can't-locate-subs → too-thin → soft-stars →
+  short-integration → all-good), and when the picture is already good says one encouraging line (*"This is a solid
+  result — plenty of subs, sharp stars. More time is the only thing that'll add depth."*) or stays silent. **Why it
+  clears the beginner bar:** universally useful ("how do I make my next one better?"), zero jargon (it *translates*
+  FWHM/integration into "sharper stars / more hours"), a sane single default with no knobs, reuses data the owner
+  already trusts, and serves the *learn/understand* + autonomy pillars — it's the gentle mentor a beginner doesn't
+  have. **Distinct from what exists:** the thin-stack warning fires only on ≤4-frame gibberish; "You beat your best!"
+  celebrates a *past* record; readiness/"keep shooting?" answers a yes/no; this names the *one specific improvement
+  lever* on any finished result, good or bad. **Shape for one Builder run:** a pure, unit-testable helper
+  `nextBestMove({medianFwhmPx, nFramesUsed, integrationS, nUnsolved, eccentricityMedian, …}) ->
+  {kind, phrase} | null` with a fixed priority ladder and plain-language thresholds (reuse the √N / thin-stack
+  thresholds already in `thinStack.ts` and the FWHM bands the QC code already uses); a single frontend line on the
+  result card. **Sane default, self-hiding:** missing inputs → fall to the next lever or stay silent, never an error;
+  a genuinely great, deep, sharp stack → the encouraging line or nothing. Tests: a short good-focus stack → "add
+  time"; a long soft-star stack → "refocus"; a mostly-unsolved target → "install star DB"; an all-good stack → the
+  encouraging line or null; each lever fires only when it's the top unmet one (ordering respected). Upgrade-safe:
+  purely additive read-only helper + a display line, no schema/config/default/API-shape change. *(Feasibility:
+  reuses the FWHM/integration/unsolved/eccentricity figures already computed and surfaced, no new/heavy dependency,
+  sane default, testable — passes §4's filter. Keeps the beginner-feature pipeline stocked with a *learn/understand*
+  capability distinct from every celebration/planning/record card already filed.)*
 
 - **NEW BEGINNER FEATURE (Scout 2026-07-23) — "You beat your best!": when a fresh stack of a target you've shot before
   comes out sharper (or deeper) than your previous best of that same target, say so with a small celebratory callout —
