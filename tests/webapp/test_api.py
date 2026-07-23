@@ -524,6 +524,48 @@ def test_reject_summary_flags_solve_setup_problem(client, built_library, data_ro
     assert body["solve_setup_problem"] == {"kind": "database", "frames": 2}
 
 
+def test_reject_summary_setup_banner_sees_accepted_solve_failures(
+        client, built_library, data_root):
+    """Regression: the real ``apply_solve_result_to_db`` stores a plate-solve
+    failure as ``solve_failed:…`` but leaves the frame **accepted** (``accept=1``
+    — the pixels may be fine, they just couldn't be located). Such frames are
+    invisible to ``reject_reason_counts`` (which tallies only ``accept=0``), so
+    the setup-problem banner used to never fire on a first-light install with no
+    star database — the user was told to "Run Plate Solve", the very thing that's
+    failing. The summary must classify the setup problem off the accepted-but-
+    unsolved frames too."""
+    from seestack.io.library import Library
+    from seestack.solve.runner import SolveResult, apply_solve_result_to_db
+
+    frames = client.get("/api/targets/M_42/frames").json()
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target("M_42")
+        try:
+            for f in frames[:3]:
+                apply_solve_result_to_db(proj, SolveResult(
+                    frame_id=f["id"], fits_path="/x.fit", solved=False,
+                    wcs_text=None, ra_center_deg=None, dec_center_deg=None,
+                    pixscale_arcsec=None, rotation_deg=None,
+                    error="ASTAP: no star database (G17/H18) found",
+                ))
+            # The real solve path keeps these frames *accepted* — the behaviour
+            # that hid the bug (they never reached the accept=0 reject tally).
+            accepts = [fr.accept for fr in proj.iter_frames()][:3]
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    assert all(accepts)  # real path leaves accept=1
+    body = client.get("/api/targets/M_42/frames/reject-summary").json()
+    # Fail-before: solve failures were accept=1, so this was None.
+    assert body["solve_setup_problem"] == {"kind": "database", "frames": 3}
+    # The friendly reject ``counts`` (accept=0 only) stay clean — no solve_failed
+    # key leaks into the "why were some frames left out?" breakdown.
+    assert all(not k.startswith("solve_failed") for k in body["counts"])
+
+
 def test_frame_preview_renders_png(client, built_library):
     frames = client.get("/api/targets/M_42/frames").json()
     fid = frames[0]["id"]

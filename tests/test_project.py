@@ -133,6 +133,27 @@ def test_reject_reason_counts(proj):
     assert sum(counts.values()) == proj.count() - proj.count(accepted_only=True)
 
 
+def test_solve_failure_reason_counts_sees_accepted_unsolved(proj):
+    """A plate-solve failure is stored as ``solve_failed:…`` but leaves the frame
+    *accepted*, so it never shows in ``reject_reason_counts`` (accept=0 only). The
+    dedicated tally must surface it regardless of accept, so the setup banner can
+    fire — but must exclude a frame that later solved (wcs_json set)."""
+    proj.add_frames([FrameRow(source_path=f"s{i}.fit") for i in range(4)])
+    # Two accepted subs failed to solve for the same setup reason.
+    proj.update_frame(1, reject_reason="solve_failed:no star database")
+    proj.update_frame(2, reject_reason="solve_failed:no star database")
+    # An ordinary accept=0 reject is not a solve failure.
+    proj.update_frame(3, accept=False, reject_reason="qc:fwhm")
+    # A frame that failed once but has since solved must NOT be counted.
+    proj.update_frame(4, reject_reason="solve_failed:no star database",
+                      wcs_json="{}")
+
+    counts = proj.solve_failure_reason_counts()
+    assert counts == {"solve_failed:no star database": 2}
+    # The accepted-but-unsolved failures are invisible to the accept=0 tally.
+    assert "solve_failed:no star database" not in proj.reject_reason_counts()
+
+
 def test_unique_source_path(proj):
     import sqlite3
 
