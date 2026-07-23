@@ -47,6 +47,19 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+> **Re-audit — stacking engine CLEAN; one new bug in the QC/stack path (Scout 2026-07-23, branch
+> `claude/kind-mccarthy-3nr8e8`).** Baseline suite green (1719 passed, 2 skipped). Adversarially re-read the full
+> stacking engine — `accumulator.py` (WeightedSum/MinMaxReject k-insertion/Welford), `weighting.py`,
+> `photometric.py`, `reference.py`, `mosaic.py` (RA-wrap/outlier/canvas caps), `drizzle_path.py`
+> (clip-tolerance/neff/var-floor), `align.py` (windowed reproject, subpixel-shift NaN propagation, CPU↔GPU cval
+> parity), `output.py` (preview↔export parity), `pointings.py`, `stacker.py` (κ-σ keep-mask, `_pass`/`_drizzle_pass`,
+> memory guard) — plus `qc/grading.py` (auto-grade rails) and `bg/coverage_leveling.py`: **all CLEAN**, matching
+> the documented state (two independent audit sub-agents on `align.py`+`calibrate/*` and `qc/*`+`watcher`+`ingest`
+> confirmed — no defensible pixel-corruption/coverage-semantics/rejection-math bug). The **one new verified bug**
+> this run is a data-availability defect in the shared `cached_path or source_path` idiom: clearing the Stage-1
+> cache leaves dangling `cached_path` pointers that are followed instead of falling back to the readable source,
+> silently breaking a target's QC/solve/stack — filed as the ⭐ entry below, **traced + reproduced**.
+>
 > **Stacking-engine re-audit — CLEAN (Scout 2026-07-23, branch `claude/kind-mccarthy-peqew6`).** Adversarially
 > re-read the full stack path (`align.py`, `stacker.py` κ-σ pass-1/2 + memory guard + `_pass`/`_drizzle_pass`,
 > `accumulator.py` WeightedSum/MinMaxReject/Welford, `drizzle_path.py` clip-tolerance/neff gating, `mosaic.py`
@@ -174,6 +187,42 @@ when you take it.
   small tier); (c) **cheap interim** — lower the main-tier reconcile fraction (κ-σ safely cleans a re-accepted
   minority once ≥10 frames), keeping the small tier. Add a fail-before/pass-after regression test with a synthetic
   variable-subset flag pattern. **Scout: validate on a real edge-on-galaxy stack before flipping.**
+
+- **⭐ Clearing the Stage-1 cache silently makes a target un-stackable *and* un-QC-able even though the original
+  subs are still on disk — every frame is dropped because the DB's dangling `cached_path` is followed instead of
+  falling back to the readable `source_path`.** *(Data-availability / broken-UX; Medium; found by the 2026-07-23
+  QC/watcher/ingest adversarial audit — **traced end-to-end AND reproduced**.)* The `POST
+  /api/targets/{safe}/cache/clear?stage=stage1` (or `all`) endpoint (`webapp/routers/storage.py::clear_cache`) is
+  UI-exposed and documented as **safe** — "only re-creatable intermediates … the project DB and the stacked
+  outputs are never touched." It calls `CacheManager.clear("stage1")` → `shutil.rmtree(stage1_raw/)`, deleting
+  every `frame_NNNNNN.fit` the frames' `cached_path` columns point at, **without nulling those columns**. Nothing
+  then repairs them: on the next scan `ingest_sources` only re-copies when `not prior.cached_path` (it's still
+  truthy, just dangling), and `_cache_stale(cached_path, src)` does `Path(cached_path).stat()` which raises
+  `OSError` on the missing file → caught → returns `False` (**not** stale) → no refresh. So the dangling pointer
+  is permanent. **The bite:** the path-selection idiom `path = f.cached_path or f.source_path; if not path or not
+  Path(path).exists(): <skip>` picks the (truthy) dead cache path by short-circuit, the existence check fails, and
+  the frame is dropped **without ever trying the perfectly-readable `source_path`**. Reachable at every consumer
+  that uses this idiom: `seestack/qc/runner.py:71` (`build_qc_arglist` → frame silently excluded from QC),
+  `seestack/stack/stacker.py:1694` (`_align_for_stack` → returns `None`, frame silently dropped from the stack),
+  the drizzle prepare path (`stacker.py:1602`), the reference-patch read (`stacker.py:963`), and
+  `seestack/solve/runner.py:117` (`build_solve_arglist` → frame silently un-solvable). With **all** frames sharing
+  the wiped cache, a subsequent stack raises "no frames could be aligned" and QC of any not-yet-QC'd sub is a
+  no-op — a target that worked five minutes ago is now broken by a button labelled safe, and a full re-ingest does
+  **not** fix it (dedup-skips the already-registered frames). **Reproduced** (Scout 2026-07-23,
+  `scratchpad/repro_stale_cache.py`): a frame with a readable `source_path` and a `cached_path` whose file is then
+  deleted → `build_qc_arglist` offers `[]` and `_align_for_stack` returns `None`, while the source still exists.
+  **Fix (matches the fallback the codebase already knows it wants — one place, `plan.py`, iterates the candidates
+  instead of short-circuiting):** add a shared helper, e.g. `seestack/io/project.py::readable_frame_path(frame) ->
+  str | None` that returns the **first of `(cached_path, source_path)` that actually exists on disk** (None if
+  neither), and use it at all six sites above. Strictly widening: when the cache exists, behaviour is byte-for-byte
+  identical (cache is tried first); only when the cache is missing does it now fall back to source instead of
+  failing. Optionally also null a frame's `cached_path` when its file is found missing (self-healing the DB), and/or
+  have `clear_cache` clear the `cached_path` column in the same transaction — but the helper fallback is the
+  robust, minimal fix and covers the case where source lives on a slow/removable NAS too. **Regression test:** a
+  frame with a dead `cached_path` + live `source_path` is offered to QC/solve and stacks from source (fail-before:
+  dropped); a frame with both dead is still skipped. Severity: broken-UX / data-availability (no pixel corruption,
+  but a documented-safe action silently disables a target's core function while its data is intact). Confidence:
+  traced + reproduced.
 
 - ~~**κ-σ pass-2 silently turns real pass-2 data into a NaN coverage gap at a pixel that had no pass-1
   coverage (mean = NaN).**~~ — **FIXED v0.172.1** (Scout 2026-07-23, branch `claude/kind-mccarthy-49jli6`;
@@ -4055,6 +4104,28 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+- **IMPROVEMENT IDEA (Scout 2026-07-23) — before an unattended stack, count how many accepted+solved subs are
+  actually *readable on disk*, and say so honestly instead of silently shipping a thin/failed stack.** *(Autonomy /
+  trust — the honest-accounting arc; PRIORITY 2; size S–M.)* **What prompted it:** while tracing the ⭐ stale-cache
+  bug above I confirmed the unattended chains (watcher auto-stack / Process target) select frames purely on DB
+  truthiness (`f.cached_path or f.source_path`) and only discover a missing file per-frame *inside* the worker,
+  where it's swallowed as an align failure. So if a chunk of a target's subs become unreadable (Stage-1 cache
+  cleared while source lives on a now-offline NAS, a removable drive unmounted, files moved), the walk-away stack
+  quietly drops them and either produces a thin stack or raises the generic "no frames could be aligned" — with no
+  plain-language reason. **Feature:** a cheap preflight in the auto/Process path that, using the same
+  `readable_frame_path` helper the bug fix introduces, counts `accepted ∧ solved ∧ file-readable` vs total and, when
+  a non-trivial fraction is unreadable, surfaces a plain line on the Jobs/stack-health surface — *"142 of 500 subs
+  couldn't be read (cache cleared, or the drive they're on is offline?) — stacking the 358 that remain"* — and
+  feeds the existing thin-stack warning when what remains is too few. **Why it's worth doing:** it's the same
+  "tell the user *why* a result is thin" arc as the shipped plate-solve / thin-stack nudges, one rung earlier
+  (file availability, before alignment), and it turns a silent, confusing failure into an actionable message. It's
+  purely a *surfacing* change — do **not** auto-delete or re-ingest, just count and report. **Sane + safe:**
+  read-only stat() checks, additive result field, self-hiding when everything is readable (the normal case →
+  byte-for-byte unchanged). **Builder slices:** (a) a pure counter over frame rows using the readable-path helper;
+  (b) thread the `n_unreadable` count onto the auto/Process job summary + the thin-stack surface; (c) tests — all
+  readable → silent; a fraction unreadable → the honest line fires and feeds the thin-stack threshold. Best done
+  *after* (or with) the ⭐ stale-cache fix, since it depends on the same helper. *(Traced during the 2026-07-23
+  QC/watcher/ingest audit.)*
 - **NEW (Scout 2026-07-23) — "Try harder to locate these": a more-sensitive plate-solve re-pass for the
   *accepted-but-unsolved* subs, so a faint/sparse-star field's subs actually reach the stacker.** *(Autonomy +
   trust; PRIORITY 2; size M. Directly attacks the ROOT CAUSE half of the ⭐⭐ top owner bug — thin auto-stacks on
@@ -6008,6 +6079,37 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Is it worth staying on this target?": a plain-language
+  diminishing-returns read that tells a beginner when more subs will visibly help vs when they've hit the flat
+  part of the curve.** *(Autonomy / Friendliness — the "plan / understand" pillar, PRIORITY 2–3; size M; offline,
+  additive, no new deps.)* **Why a beginner wants it:** the single most common question after "it worked!" for a
+  Seestar owner with a growing pile of subs is *"do I keep going on this one, or move to a new target?"* — and
+  today nothing answers it. Stacking noise falls with the **square root of integration time** (√N), so early subs
+  help a lot and late subs help barely at all, but a beginner has no intuition for where they are on that curve;
+  they either quit a target too early (noisy result) or pour ten more nights into a target that plateaued hours
+  ago. We already record everything needed: each `stack_runs` row carries `n_frames_used`, `total_exposure_s`, and
+  a measured `noise_sigma` (verified present in `seestack/io/project.py`). **Feature:** on the Target page (next to
+  the finished picture / stack-health surface) show one honest sentence + a tiny curve, e.g. *"You've captured
+  **1.4 h** (250 subs). Noise falls with the square root of time, so **doubling to ~2.8 h would cut noise ~30%** —
+  you're past the steep part of the curve. Bright targets like this usually look great by a few hours; fainter ones
+  reward more."* When the target has **multiple** runs at growing frame counts, fit the *actual* measured
+  `noise_sigma` vs √time trend and say whether it's still tracking √N (real gains ahead) or has **flattened early**
+  (sky-limited — "more subs aren't helping much here; your sky may be the limit — try a brighter target or a darker
+  site"). **Beginner bar ✔:** universal question, one plain sentence, sane auto-verdict, no knobs, serves *plan +
+  understand*; **not** pro tooling (no SNR graphs or curve-fitting knobs — just "keep going" / "good enough" /
+  "diminishing returns"). **Sane default, self-hiding:** needs only the target's own runs; hides when there's no
+  finished stack yet or `noise_sigma` is missing (old runs). Ties into the shipped thin-stack / stack-health
+  honesty arc and the "What should I shoot next?" card (when a target has plateaued, nudge toward a fresh
+  showpiece). **Feasibility / upgrade-safe:** pure arithmetic on columns that already exist — no new astro math, no
+  network, no model, no schema/config/API/default change; read-only. **Builder slices — (a) engine (S–M):** a pure
+  `integration_advice(runs, *, catalog_size_or_type=None)` → `{level:
+  "keep_going"|"good_enough"|"diminishing"|"plateaued", predicted_noise_at_2x, hours_now, sentence}`, unit-tested on
+  synthetic run series (single run → √N projection; multi-run tracking √N → "keep going"; multi-run flattening →
+  "plateaued"; missing `noise_sigma` → self-hide). **(b) webapp (S):** surface it in the target/stack-health
+  response (additive field). **(c) frontend (S):** a compact `IntegrationAdvice` line + a 4-point mini
+  noise-vs-time sparkline, shown only when the estimate is trustworthy. Keeps the beginner-feature pipeline stocked
+  with a *plan/understand* capability that no existing card (First look, thin-stack warning, best months,
+  what-to-shoot-next) covers — those tell you *what to shoot* or *what you got*; this tells you *when to stop*.
 - **NEW BEGINNER FEATURE (Scout 2026-07-23) — "How dark is your sky?": a plain-language read on the beginner's
   sky brightness, computed from the sky level QC already measures.** *(Friendliness / understand-and-plan,
   PRIORITY 3; size M; offline, additive, no new deps.)* **Why a beginner wants it:** a Seestar owner has no SQM
