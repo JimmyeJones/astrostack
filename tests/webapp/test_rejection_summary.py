@@ -104,6 +104,26 @@ def test_unsolved_dominant_verdict_nudges_plate_solve():
     assert "Plate Solve" in s["verdict"]["text"]
 
 
+def test_unsolved_equal_to_used_is_not_called_only_a_few_made_the_stack():
+    # Regression: at an *exact* 50/50 solved split (used == unsolved) the top-level
+    # nudge must NOT claim "most … haven't been located, so only a few made the
+    # stack" — half the subs *did* stack. The gate is strict-majority (unsolved >
+    # used), mirroring the `top * 2 > dropped` strict-majority rule used for the
+    # dominant-bucket verdicts; a tie falls through to the honest high-drop copy.
+    s = summarize_rejections({}, n_accepted=20, n_unsolved=10)
+    assert s["used"] == 10 and s["dropped"] == 10
+    assert "only a few made the stack" not in s["verdict"]["text"]
+    # It still names the dominant (unsolved) cause and nudges a plate-solve, just
+    # without the false "only a few" framing.
+    assert "Plate Solve" in s["verdict"]["text"]
+    # A genuine majority-unsolved night (unsolved > used) still fires the nudge.
+    s2 = summarize_rejections({}, n_accepted=20, n_unsolved=11)
+    assert "only a few made the stack" in s2["verdict"]["text"]
+    # And a night where every accepted sub is unsolved (used == 0) still fires it.
+    s3 = summarize_rejections({}, n_accepted=8, n_unsolved=8)
+    assert "only a few made the stack" in s3["verdict"]["text"]
+
+
 def test_unsolved_combines_with_rejected_frames():
     # Rejected (accept=0) and unsolved-accepted subs are distinct causes and both
     # count as left-out; used stays accepted-and-solved.
