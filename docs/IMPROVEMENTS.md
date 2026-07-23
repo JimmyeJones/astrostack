@@ -63,6 +63,30 @@ when you take it.
 > `[]`), **fixed + regression-tested + shipped this run** (struck below): extracted a shared `_dark_scaling_applies` predicate
 > used by both sites so they can't drift again. Curation + 2 ideas filed below.
 >
+- **FLAKY TEST (test-infra, not a product bug) — `frontend/src/routes/Editor.test.tsx` fails ~2 of 68 whenever the
+  whole file runs, with a *different* victim set each time.** *(CI reliability; Medium-infra — a flaky suite erodes
+  the green-gate the whole autonomous project leans on; **reproduced** on clean `origin/main` 2026-07-23, branch
+  `claude/pensive-faraday-n7pg4t`.)* Running the file end-to-end (`npx vitest run src/routes/Editor.test.tsx`, ~50 s
+  of full-app canvas renders) reliably reddens **two** tests, but *which* two varies run-to-run — observed victims
+  include *"splits the preview with vs without the selected op via 'Split this op'"*, *"shows the proposed crop over
+  the coverage heatmap on a mosaic"*, *"passes the recipe so the coverage overlay follows the crop geometry"*, plus
+  Star-mask / Coverage / "Set Midtones (gamma) from your data" cases. Any single one run in isolation (`-t`) passes
+  in ~1 s. So it is **not** a bug in any one test or in the product — it's cross-test scheduling/CPU contention: on a
+  constrained runner an async effect (a debounced re-fetch, a mock-backed render) hasn't settled when a later
+  assertion checks it, so `findBy*`/mock-call expectations see an empty/earlier state (symptoms:
+  *"Unable to find element …"*, *"expected editCoverageMapUrl to be called … Received: <empty>"*). The config already
+  applies the obvious mitigations (`vite.config.ts`: `fileParallelism:false`, `testTimeout:30000`,
+  `setup.ts asyncUtilTimeout 20000`), so raising ceilings further won't help — the settle simply never happens under
+  load, which points at **state leaking between sequential tests in the file** (an unmounted Editor's debounce
+  timer/effect still firing, or missing per-test cleanup) rather than a slow-but-correct render. **Fix directions
+  (needs a green baseline to validate — hard in a CPU-starved container):** (a) ensure each test fully unmounts and
+  flushes/clear pending timers in an `afterEach` (RTL `cleanup` + `vi.clearAllTimers()`), so a prior test's debounced
+  re-render can't land during the next; (b) convert the remaining synchronous post-`findBy` assertions in the flaky
+  tests to `await waitFor(...)`/`findBy*` so they retry through the settle instead of racing it; (c) if the renders
+  are genuinely too heavy, split the file so fewer full-app mounts share one worker. **Repro:**
+  `cd frontend && npx vitest run src/routes/Editor.test.tsx` (fails ~2; a `-t`-filtered single run passes). Confidence:
+  reproduced (on clean main, victim set varies → scheduling flake, not a real regression).
+
 > **Re-audit — stacking engine core CLEAN again; shipped the open auto-grade cumulative-cap bug (Scout 2026-07-23, branch `claude/kind-mccarthy-3qzy08`).**
 > Baseline suite green. Two independent adversarial audit sub-agents re-read the engine core end-to-end and both came back
 > **CLEAN**: (a) `accumulator.py` (WeightedSum NaN/coverage `sum(w)=0→NaN`, MinMaxReject k-insertion + degrade bands
