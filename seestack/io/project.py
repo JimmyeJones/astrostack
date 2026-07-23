@@ -30,7 +30,7 @@ from typing import Any, Iterator
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 SCHEMA_SQL = f"""
 PRAGMA user_version = {SCHEMA_VERSION};
@@ -76,6 +76,9 @@ CREATE TABLE IF NOT EXISTS frames (
     source_path         TEXT NOT NULL UNIQUE,   -- original NAS path
     cached_path         TEXT,                   -- stage-1 local copy
     aligned_cache_path  TEXT,                   -- stage-2 warped float16 mmap
+    -- source fingerprint: detect an in-place content swap at a reused path
+    source_size_bytes   INTEGER,                -- source st_size at ingest/refresh
+    source_mtime        REAL,                   -- source st_mtime at ingest/refresh
     -- header
     timestamp_utc       TEXT,                   -- ISO 8601
     exposure_s          REAL,
@@ -155,6 +158,8 @@ class FrameRow:
     id: int | None = None
     cached_path: str | None = None
     aligned_cache_path: str | None = None
+    source_size_bytes: int | None = None
+    source_mtime: float | None = None
     timestamp_utc: str | None = None
     exposure_s: float | None = None
     gain: float | None = None
@@ -205,6 +210,7 @@ def readable_frame_path(frame: "FrameRow") -> str | None:
 
 _INSERT_COLS = [
     "source_path", "cached_path", "aligned_cache_path",
+    "source_size_bytes", "source_mtime",
     "timestamp_utc", "exposure_s", "gain", "sensor_temp_c",
     "width_px", "height_px", "bayer_pattern",
     "ra_hint_deg", "dec_hint_deg",
@@ -461,6 +467,20 @@ class Project:
                 try:
                     self._conn.execute(
                         f"ALTER TABLE stack_runs ADD COLUMN {col} REAL")
+                except sqlite3.OperationalError:
+                    pass  # already present
+        if from_version < 12:
+            # Recorded the source file's size+mtime fingerprint so a frame whose
+            # source path is later overwritten in place with a *different*
+            # capture (a re-export/rename collision, or a NAS sync that reuses
+            # filenames) is detected and re-solved/re-metadata'd even with
+            # copy_to_cache OFF (the webapp default) — where there is no cached
+            # copy to diff against. Additive; older rows stay NULL and are
+            # backfilled on the first re-scan *without* triggering a re-solve.
+            for col, typ in (("source_size_bytes", "INTEGER"), ("source_mtime", "REAL")):
+                try:
+                    self._conn.execute(
+                        f"ALTER TABLE frames ADD COLUMN {col} {typ}")
                 except sqlite3.OperationalError:
                     pass  # already present
         self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
@@ -889,6 +909,8 @@ def _row_to_frame(row: sqlite3.Row) -> FrameRow:
         source_path=row["source_path"],
         cached_path=row["cached_path"],
         aligned_cache_path=row["aligned_cache_path"],
+        source_size_bytes=row["source_size_bytes"],
+        source_mtime=row["source_mtime"],
         timestamp_utc=row["timestamp_utc"],
         exposure_s=row["exposure_s"],
         gain=row["gain"],

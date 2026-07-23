@@ -853,11 +853,26 @@ when you take it.
   the card self-hides (fail-before: STF sub vs asinh/verbatim preview). Additive/upgrade-safe (new nullable columns
   default NULL = "no custom stretch" = today's STF behaviour).
 
-- **The shipped stale-plate-solution fix is DEAD on the default install — a source path overwritten in place with
+- ~~**The shipped stale-plate-solution fix is DEAD on the default install — a source path overwritten in place with
   different content keeps its old WCS and stacks at the wrong sky position, because the whole staleness-recovery
-  block is gated behind `copy_to_cache`, which the webapp defaults to `False`.** *(Stacking-engine / ingest
-  correctness; wrong-result but latent/rare, Low; found + traced end-to-end by the 2026-07-23 watcher/ingest
-  adversarial audit — NOT fixed, needs care.)* `ingest_files` (`seestack/io/ingest.py:194`) wraps *all* per-frame
+  block is gated behind `copy_to_cache`, which the webapp defaults to `False`.**~~ — **FIXED v0.184.6**
+  (Builder 2026-07-23, branch `claude/pensive-faraday-rlgaiv`; traced + regression-tested). Added a
+  **cache-independent source fingerprint**: two additive nullable frame columns (`source_size_bytes` INTEGER +
+  `source_mtime` REAL, `SCHEMA_VERSION` 11→12 + a `from_version < 12` migration + reconcile backfill), recorded at
+  ingest and refreshed on every detected change. `ingest_files` now compares the current source's `(size, mtime)`
+  against the stored fingerprint on a dedup-skip and, on a mismatch, runs `reset_frame_qc` + `_refresh_frame_metadata`
+  (dropping the stale `wcs_json`/hints so the new pixels are re-solved and re-metadata'd) — **regardless of
+  `copy_to_cache`**, closing the exposure on the default install. When caching *is* on it also force-re-copies the
+  Stage-1 cache (new `_copy_to_stage1(..., force=True)`) so a *same-size* swap — which slips past the size-only
+  `_cache_stale` check — can't leave the cache holding the previous capture's pixels. **Upgrade-safe:** a NULL stored
+  fingerprint (a pre-upgrade row, or a fresh one) is treated as "unknown, not changed" and is backfilled *without* a
+  re-solve, so an in-place upgrade never re-solves the whole library; an unchanged re-scan writes nothing. Additive
+  columns only — no config/API-shape/on-disk/default change. Regressions in `tests/test_ingest.py` (+3):
+  `test_ingest_content_swap_clears_solution_without_cache` (copy_to_cache=False + reused-path swap → solution dropped +
+  header re-read + `refreshed=True`; fail-before: stayed False, WCS kept), `test_ingest_no_cache_unchanged_rescan_keeps_solution`
+  (no false-positive re-solve on an unchanged re-scan), and `test_ingest_pre_fingerprint_frame_backfills_without_resolve`
+  (NULL fingerprint backfilled, solution preserved). Full suite green (1827 passed, 2 skipped). *(Original trace kept
+  below for provenance.)* `ingest_files` (`seestack/io/ingest.py:194`) wraps *all* per-frame
   staleness recovery — the truncated-cache refresh, `reset_frame_qc`, and crucially `_refresh_frame_metadata`
   (which re-reads the header and calls `reset_frame_solution` to drop the stale `wcs_json`/hints) — inside
   `if copy_to_cache and prior.id is not None:`. But the live webapp passes `copy_to_cache=settings.copy_to_cache`
