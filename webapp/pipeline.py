@@ -171,7 +171,8 @@ def _pipeline_body(
                 try:
                     res = _stack_target(
                         settings, jm, job, lib, safe,
-                        auto_bind_calibration=settings.auto_bind_calibration)
+                        auto_bind_calibration=settings.auto_bind_calibration,
+                        auto=True)
                     if res.get("cancelled"):
                         # A user cancel mid-stack is a survivable, non-crash outcome
                         # that recorded no run and raised no exception, so it never
@@ -429,7 +430,8 @@ def submit_process_target(settings: Settings, jm: JobManager, safe: str) -> Job:
                 return summary
             summary["stack"] = _stack_target(
                 settings, jm, job, lib, safe,
-                auto_bind_calibration=settings.auto_bind_calibration)
+                auto_bind_calibration=settings.auto_bind_calibration,
+                auto=True)
             if summary["stack"].get("cancelled"):
                 # Cancelled *during* the stack: no run was written. Surface the
                 # cancellation at the top level (mirroring submit_stack /
@@ -1596,6 +1598,7 @@ def _stack_target(
     options: dict[str, Any] | None = None,
     output_name: str | None = None,
     auto_bind_calibration: bool = False,
+    auto: bool = False,
 ) -> dict[str, Any]:
     """Run a stack for one target and record it. Returns a small summary.
 
@@ -1609,6 +1612,19 @@ def _stack_target(
     merged options carry no explicit calibration, so a walk-away stack is still
     calibrated. The interactive Stack form never sets it — it honours exactly what
     the user picked (or deliberately left blank).
+
+    ``auto`` (set by the walk-away chains — watcher auto-stack and Process target —
+    where the user made *no* stacking choices) turns on the engine's
+    ``StackOptions.auto_reject`` when the merged options carry no explicit rejection
+    preference. That resolves (per ``_resolve_auto_reject``) to order-statistic
+    min/max on a small stack — the only method that removes a lone satellite/plane
+    trail below ~11 frames, which plain κ-σ is mathematically blind to — and to
+    weight-respecting κ-σ once the stack is large enough for κ-σ to bite, all with
+    zero user decisions. It is applied **only** when the user has expressed no
+    rejection choice (no ``auto_reject``/``sigma_clip``/``min_max_reject`` key in the
+    merged options), so a saved per-target default or the manual Stack form is always
+    honoured verbatim; reprocess-all likewise reuses the prior run's options
+    untouched. Off (the default) leaves the built options byte-for-byte unchanged.
     """
     from seestack.stack.stacker import run_stack
 
@@ -1632,6 +1648,14 @@ def _stack_target(
             opts_dict.update(options)
         if output_name is not None:
             opts_dict["output_name"] = output_name
+        if auto and not any(
+            k in opts_dict for k in ("auto_reject", "sigma_clip", "min_max_reject")
+        ):
+            # Walk-away stack, no user rejection choice → let the engine auto-pick
+            # min/max (small stacks) vs κ-σ (large) so a lone trail is removed even
+            # below the ~11-frame κ-σ threshold. Only when nothing explicit was set,
+            # so a saved per-target default / the manual form is never overridden.
+            opts_dict["auto_reject"] = True
         if auto_bind_calibration:
             _auto_bind_calibration(settings, proj, opts_dict)
         if opts_dict.get("max_workers") is None and settings.cpu_workers:

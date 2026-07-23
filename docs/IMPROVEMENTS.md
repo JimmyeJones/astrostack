@@ -4316,6 +4316,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+- **IMPROVEMENT IDEA (Builder 2026-07-23, spotted while shipping walk-away `auto_reject` v0.177.0) — name the
+  auto-picked rejection outcome in the Process-target / Jobs result, not only the History badge.** *(Friendliness /
+  trust; pillar 2/3; size S; frontend-mostly.)* Now that a walk-away auto-stack auto-resolves to order-statistic
+  min/max on a small stack (v0.177.0), it may quietly remove a lone satellite/plane trail — a genuinely good,
+  invisible save. The immediate "Process target" Jobs result reports `n_frames_used` but says nothing about the
+  rejection: the user only learns a trail was cleaned if they open the History rejection badge or the "How's my
+  stack?" card. A one-line plain-language note on the Jobs `JobResultActions` ("Cleaned 1 outlier — a
+  satellite/plane trail — with min/max, since only 8 subs stacked") would close the honest-accounting loop for the
+  auto path exactly as the shipped thin-stack / "N not located yet" nudges did one rung earlier. **Slices:** (a)
+  thread the run's already-persisted effective rejection method + tally onto the `_stack_target` summary (the run
+  record already carries `options_json` with the resolved method and the rejection counts); (b) render an optional
+  note on the Jobs result when a rejection pass actually removed samples; (c) tests — a small auto-stack that
+  rejected an outlier shows the note, a clean/large stack shows nothing. Additive, read-only surfacing; no
+  config/DB/API-shape/default change. Best done after v0.177.0 (which this builds on).
 - **IMPROVEMENT IDEA (Scout 2026-07-23) — auto-grade should be able to *re-accept* a frame it earlier rejected once
   a larger population no longer flags it (machine decisions shouldn't be permanent).** *(Autonomy; pillar 2; size
   S–M; opt-in, off by default — only bites installs that turned `auto_grade_frames` on.)* Found while shipping the
@@ -4336,9 +4350,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   the cap fix landed in `_auto_grade_target` rather than here), plus a fail-before/pass-after test: reject a frame
   against a 10-sub noisy population, add 90 clean subs, re-grade → the frame comes back accepted. Additive,
   upgrade-safe (no config/DB/API/default change; gated feature).
-- **IMPROVEMENT IDEA (Scout 2026-07-23) — the walk-away auto-stack should auto-pick its outlier rejection from the
-  sub count (turn on the existing `auto_reject` for the auto-stack pipeline).** *(Autonomy + image quality;
-  pillar 2/4; size S–M.)* `StackOptions.auto_reject` already exists and does exactly the right thing — it resolves
+- ~~**IMPROVEMENT IDEA (Scout 2026-07-23) — the walk-away auto-stack should auto-pick its outlier rejection from the
+  sub count (turn on the existing `auto_reject` for the auto-stack pipeline).**~~ — **SHIPPED v0.177.0**
+  (Builder 2026-07-23, branch `claude/pensive-faraday-wppu6g`). `_stack_target` (`webapp/pipeline.py`) grew an
+  `auto: bool = False` flag, passed `True` by the two **walk-away** chains only — the watcher auto-stack and
+  Process target — where the user made no stacking choices. When `auto` is on **and** the merged options carry no
+  explicit rejection preference (no `auto_reject`/`sigma_clip`/`min_max_reject` key from the global defaults or a
+  saved per-target default), it sets `opts_dict["auto_reject"] = True`, so the engine's already-built
+  `_resolve_auto_reject` picks **order-statistic min/max** on a small stack (removes a lone satellite/plane trail
+  that κ-σ is mathematically blind to below ~11 frames) and weight-respecting **κ-σ** once the stack is large
+  enough — with zero user decisions. **Scoped conservatively:** the manual Stack form (`submit_stack`, `auto=False`)
+  and reprocess-all (reuses the prior run's options verbatim) are untouched, and any user who saved an explicit
+  rejection default is honoured — only the pure zero-config walk-away beginner (the target user) gets the
+  improvement. For a large stack (the common hundreds-of-subs case) `auto_reject` resolves back to κ-σ, so the
+  output is byte-for-byte unchanged; only small walk-away stacks change, and only to *add* correct outlier
+  rejection. Upgrade-safe: no config/DB-schema/API-shape/on-disk change; no existing run record altered (only
+  newly-created auto runs); the engine already persists the resolved method in the run's `options_json` (so the
+  History rejection badge reflects what actually ran). Tests: `tests/webapp/test_auto_stack_pipeline.py` (+3 —
+  walk-away turns auto_reject on; the manual form leaves it off with κ-σ; an explicit saved rejection default is
+  respected, not overridden). _(Original idea below.)_
+  `StackOptions.auto_reject` already exists and does exactly the right thing — it resolves
   (per `_resolve_auto_reject`) to the **order-statistic min/max** reject on small stacks and to weight-respecting
   **κ-σ** once the stack is large enough for κ-σ to bite — but it's **off by default**, so a beginner's fully
   unattended auto-stack currently runs plain κ-σ (`sigma_clip=True`). The gap that matters: κ-σ is *mathematically
