@@ -506,6 +506,39 @@ shipped latent-overflow fix — the numeric combine core stays clean, but the **
 Builder ships it; otherwise re-tread `bg/per_frame.py` sky-mode estimators (the dead SExtractor guard, still
 open) and rotate to `webapp/routers/{editor}.py` + `edit/ops/*` occasionally.)_
 
+_(Scout stacking-engine re-audit 2026-07-23 (v0.171.0 baseline, full suite green **1698 passed / 2 skipped**,
+plus a focused 150-test stacking-engine subset green in 45 s): led the rotation with `seestack/stack/*` +
+`seestack/calibrate/*` and hand-traced the whole hot path adversarially. **Traced clean — no new bug filed.**
+Covered: `stacker.py` all four combine branches (single-pass mean / κ-σ two-pass / min-max order-stat /
+drizzle) incl. the pass-1→pass-2 `del wel` free before pass-2 alloc, the `n_used==0` raise-guards on every
+branch (no silent all-NaN "successful" master), `eff` vs `options` split (auto-reject resolution drives
+dispatch + memory guard + provenance while the user's choice is what's persisted), and `weights_applied`
+stamping (min/max ignores weights, everything else applies them); `accumulator.py` WeightedSum (`_count`
+any-channel `frame_coverage`, NaN-safe `result`), MinMaxReject (±inf identities never displace, the
+count≥2k+1 / 3≤count<2k+1 / 1–2 / 0 degrade bands, `rejection_counts` matching the drop schedule), and Welford
+(`add`/`add_window` update order, unbiased-variance NaN-for-n<2 → +inf κ-σ tolerance so single-coverage
+mosaic edges aren't spuriously clipped); `weighting.py` geometric-mean of five bounded sub-weights +
+`combine_weights_with_photometric` 1/s² inverse-variance term threaded **only** into the final combine
+(κ-σ clip reference stays in the same scaled domain as the frames it clips, so the down-weight can't skew
+rejection); `photometric.py` neutral-fallback + median-reference + bounded scales; `align.py` windowed
+reproject inset/pad, sub-pixel-refine NaN-ring propagation (order-1 mask shift, cval=1.0), CPU/GPU cval parity
+(valid-mask NaN'd either way); `mosaic.py` RA-wrap circular-mean outlier rejection + pixel/MP canvas caps;
+`reference.py` unwrapped-RA median pick; `calibrate/apply.py` dark/bias/flat non-finite sanitisation +
+exposure-scaled-dark no-data restore + `_bias_applies` (never double-subtract) + "returns a fresh array"
+contract; `masters.py` NaN-aware median/mean/sigma-clip (mad==0→tol=0 keeps the spike out) + atomic save;
+`output.py`/`render/thumbnail.py` preview↔export parity (both the stored preview PNG and the export TIFF/PNG
+go through `_autostretch_for_export`; `render_stack_png`'s adjustable asinh is the History slider path, not a
+parity mismatch) + display-space card so an editor export is never double-stretched + NaN-preserving
+decimation. Closest near-misses, all correctly **not** bugs: the κ-σ pass-2 "drop a pixel covered in p2 but
+not p1" case is unreachable under a fixed alignment mask across passes; a fully-NaN-but-in-bounds drizzle
+frame returns `intersects=True` and counts as used (harmless, mirrors the standard path's aligned-but-clipped
+frame). The 27×-clean stacking-engine streak holds. Also confirmed the two open top bugs remain correctly
+open (⭐⭐ thin-stack frame-count root cause; ⭐ stationary-elongated-target streak over-reject) — both need
+**real data** to fix safely, not a blind change. Filed this run: 1 improvement idea (poorly-aligned-sub trust
+signal) + 1 new beginner feature ("My best pictures" cross-target portfolio). Next Scout: rotate onto the
+webapp routers (`frames.py`/`targets.py`/`editor.py` occasionally), `io/scanner.py`, `watcher`, and
+`edit/ops/*`; the stack path is well-hardened — re-tread it only sparingly.)_
+
 _(Scout re-audit 2026-07-21 (v0.158.1 baseline, suite green 1559 passed / 2 skipped): ran three parallel
 adversarial subagent audits + my own hand-trace/verification. **(1) Stacking-engine hot path**
 (`stacker.py` all four combine branches / photometric pass-1↔pass-2 parity / memory guard,
@@ -5170,6 +5203,32 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+- **IMPROVEMENT IDEA (Scout 2026-07-23) — count & surface "N subs were only roughly aligned" when sub-pixel
+  refine gives up above its shift cap.** *(Stacking-engine trust + image quality, PRIORITY 4 (touches autonomy /
+  honest-accounting, PRIORITY 2); size S–M.)* **What I traced:** with `subpixel_refine` on,
+  `seestack/stack/align.py::_apply_subpixel_shift_windowed` (and the non-windowed sibling) measures each frame's
+  residual shift by phase-correlation and, when `|dy|>SUBPIXEL_SHIFT_CAP_PX` or `|dx|>cap` (5 px — "a measured
+  shift this large means the plate-solve was already off, not seeing jitter"), **returns the frame unshifted**
+  and the frame still stacks at full weight. That's the right *pixel* decision (don't apply a wild shift), but it
+  is **completely silent**: a session where many subs blow past the cap (a drifting/less-stable mount, a marginal
+  re-solve) quietly folds roughly-aligned frames into the stack — mild blur / doubled stars the beginner sees but
+  can't explain, with nothing in the run record or UI pointing at alignment. Today `_pass` returns only `used`;
+  the over-cap count is thrown away. **Why it's worth doing:** it's the same "honest accounting" arc the owner's
+  ⭐⭐ thin-stack bug is about (tell the user *why* a result looks soft), one rung further down the pipeline than
+  the plate-solve/thin-stack warnings already shipped. It's purely a *surfacing* change — **do not** start
+  auto-excluding or down-weighting over-cap frames (that's a separate, riskier call needing real data); just
+  **count** them and report. **Shape (concrete, additive, testable):** (a) have `_align_for_stack` /
+  `align_one` return (or thread out) a small flag/count when a refine shift exceeded the cap; sum it in `_pass`
+  alongside `used`; (b) carry `n_roughly_aligned` on `StackResult` (additive field, default 0 — upgrade-safe, no
+  schema change since it's a runtime result, not persisted unless you also add a nullable `stack_runs` column via
+  `SCHEMA_VERSION`+`_migrate_schema`); (c) when it's a non-trivial fraction, add a plain-language line to the
+  existing stack-health / thin-stack surface ("12 of 200 subs were only roughly aligned — your stars may look a
+  little soft; a steadier mount or a re-solve of those subs helps"). **Gated behind `subpixel_refine`** (only
+  meaningful when refine runs), so a run with it off is byte-for-byte unchanged. **Tests:** a synthetic set where
+  some frames carry a >5 px injected offset → assert the count is right and the health line fires; refine-off run
+  reports 0. **Effort caveat for the Builder:** the cleanest slice is engine-count + `StackResult` field + one
+  frontend line; the persisted-column half is optional and can be a follow-up. *(Traced during the 2026-07-23
+  stacking-engine re-audit; not a wrong-result bug — a missing trust signal — so filed as an idea, not a bug.)*
 - ~~**IMPROVEMENT IDEA (Scout 2026-07-21) — make the SExtractor sky-mode fallback guard actually functional
   (defense-in-depth; currently algebraically inert).**~~ — **SHIPPED v0.158.11** (Builder 2026-07-22, branch
   `claude/pensive-faraday-jwvd6c`). Replaced the self-referential threshold (`abs(sky − median) > 5·abs(median −
@@ -5792,6 +5851,36 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "My best pictures": an auto-curated, cross-target portfolio wall of
+  your finest finished stacks.** *(Friendliness / "enjoy + share" pillar, PRIORITY 3; size M.)* **Why:** today the
+  app's imagery is organised strictly *per target* — each target has its Gallery/History and a pinned cover, and
+  the Dashboard shows one tile per target. There is **no single place that celebrates a beginner's best results
+  across everything they've shot.** After a few months a Seestar owner has a dozen targets and wants to *see their
+  collection as a body of work* — "here are my nicest pictures" — to enjoy it and to show someone, without
+  clicking into every target one by one. That "look what I made" moment is exactly the emotional payoff that keeps
+  a beginner in the hobby, and no existing card covers it (the per-target Gallery is single-target; "Set as cover"
+  pins one image *within* a target; the Share card exports *one* picture; the timelapse/A-B ideas compare *within*
+  one target). **Feature:** a new **"My best pictures"** view (its own nav entry + a distilled strip on the
+  Dashboard) that gathers the newest finished stack of *every* target across the Library, **auto-ranks** them by a
+  transparent quality proxy already stored on each `stack_runs` row — a simple blend of total integration time,
+  the recorded `noise_sigma` / "noise cut ~N×" figure, frame count, and coverage — and lays the top ones out as a
+  clean lightbox-able gallery wall, each with target name + a one-line "why it's good" (e.g. *"M31 · 3.4 h · noise
+  cut ~15×"*). One tap opens the existing lightbox / share / download for that picture, so it plugs straight into
+  the share/enjoy plumbing that already exists. **Sane default, zero knobs:** it ranks automatically and shows the
+  best; an optional "pin to My best" toggle (reusing the existing cover/keeper mechanism) lets a user force-include
+  a sentimental favourite, but the default needs no curation. **Beginner bar ✔:** universal ("show me my best
+  pictures"), no jargon, serves enjoy + share, sane auto-ranking, **not** pro tooling. **Feasibility / upgrade-safe:**
+  read-only aggregation over the Library's existing per-target `stack_runs` (same cross-target read pattern
+  `stats.py`/`gallery.py` already use — and it **must** wrap each `Project.open` in the established
+  `except Exception: continue` guard so one broken/rolled-back project can't 500 the wall, per the two prior
+  gallery/sky/storage fixes); no new astro math, no network, no model, no schema change (the ranking reads columns
+  that already exist — `total_exposure_s`, `noise_sigma`, `n_frames_used`, `coverage_min/max`). **Builder slices —
+  (a) engine/webapp (M):** a pure `rank_portfolio(runs, *, limit)` scorer (unit-testable on synthetic run rows,
+  incl. the missing-`noise_sigma`/old-run fallbacks) + a read-only `GET /api/gallery/best` (or extend the gallery
+  router) resolving site/library server-side and self-hiding when there are <2 finished stacks. **(b) frontend
+  (S–M):** a `BestPicturesWall` route + a compact Dashboard strip reusing the existing lightbox/share components.
+  **(c) tests:** rank ordering + tie-breaks + graceful-skip of a broken project + empty-state self-hide. Keeps the
+  beginner-feature pipeline stocked with a fresh *enjoy/share* capability that no existing card covers.
 - **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Scan to get it on your phone": a QR code beside the finished
   picture's download button that a beginner scans to pull the JPEG straight onto their phone.** *(Friendliness /
   "enjoy + share" pillar, PRIORITY 3; size S.)* **Why:** AstroStack runs headless on a NAS/Docker box, so the
