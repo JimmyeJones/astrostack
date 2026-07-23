@@ -519,10 +519,28 @@ when you take it.
   `test_kappa_sigma_keep_mask_matches_plain_clip_when_fully_covered`). Upgrade-safe: within-function algorithm
   change, no config/DB/API/on-disk/default change.
 
-- **⭐ "One frame vs your stack" reveal renders the two halves under *different tone curves* once a custom preview
+- ~~**⭐ "One frame vs your stack" reveal renders the two halves under *different tone curves* once a custom preview
   stretch is saved (and always for a display-space editor-export run) — breaking the feature's documented honesty
-  promise.** *(Render / preview↔export parity; broken-UX, Medium; found by the 2026-07-23 render/output adversarial
-  audit — traced end-to-end AND independently re-verified against the code, not runtime-reproduced.)* The
+  promise.**~~ — **FIXED v0.178.1** (Builder 2026-07-23, branch `claude/pensive-faraday-xgym08`; traced + regression-
+  tested). Applied fix directions (a)+(b): (a) **custom-stretch parity** — added additive nullable
+  `stack_runs.preview_stretch`/`preview_black` columns (`SCHEMA_VERSION` 10→11 + `_migrate_schema`); `save_stack_preview`
+  now records the saved asinh `stretch`/`black` on the run (and `render_sub_preview` grew optional `stretch`/`black`
+  params that render the sub through `asinh_stretch(sub, stretch, black)` instead of STF when they're set), so
+  `reference_sub_png` renders the "before" sub through the **same** curve the stored preview used — both asinh stretches
+  are anchored to each image's own robust sky level, so the same params on a single linear sub yield a comparable tone,
+  and the two halves again differ only in noise/detail. Columns stay NULL for the common default-STF preview (keeps
+  today's STF render). (b) **display-space self-hide** — `one_sub_vs_stack_info` now reports the run's display-space
+  status and returns `available=False` for a tone-mapped editor export (a raw sub can't be honestly matched to a
+  bespoke display image), exactly mirroring the noise-ratio endpoint which already bails on those runs; the frontend
+  card already self-hides on `available:false`, so no frontend change was needed and the response shape is unchanged.
+  `save_stack_preview` leaves the stretch columns NULL for a display-space run (its sliders are a no-op / rendered
+  verbatim). Regression tests: `tests/test_project.py::test_v10_project_migrates_preview_stretch_columns_additively`
+  (old-schema upgrade → NULL, `set_stack_preview_stretch` round-trip + clear + unknown-id), and
+  `tests/webapp/test_one_sub_vs_stack.py` (+3: display-space run → `available:false`; a saved custom stretch re-renders
+  the reference sub so its bytes differ from the default STF render and the run persists `stretch`/`black`; a
+  display-space save leaves the columns NULL). Upgrade-safe: purely additive nullable columns (default NULL = today's
+  STF behaviour), no config/API-shape/on-disk/default change; the info endpoint keeps its field set. *(Original trace
+  kept below for provenance.)* The
   before/after card is explicitly documented so the two halves differ *only* in noise/detail — "the only visible
   difference is the noise/detail stacking bought, not a brightness offset from a different tone curve"
   (`seestack/render/thumbnail.py:126-128`). That holds on a **fresh linear stack**: `write_stack_outputs` →
@@ -9797,6 +9815,11 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.178.1** — ⭐ Fixed the "One frame vs your stack" reveal rendering its two halves under different tone curves.
+  Persist the saved custom asinh stretch/black on the run (additive nullable `stack_runs.preview_stretch`/`preview_black`,
+  `SCHEMA_VERSION` 10→11) and render the "before" sub through the *same* curve; self-hide the card for display-space
+  editor exports (a raw sub can't honestly match a bespoke tone-mapped image), mirroring the noise-ratio endpoint.
+  Backend-only (frontend already self-hides on `available:false`); upgrade-safe. Branch `claude/pensive-faraday-xgym08`.
 - ~~**Calibration exposure-mismatch warning was silenced exactly when a wrong-shaped bias disabled dark-scaling.**~~
   — **FIXED v0.176.1** (Scout 2026-07-23, branch `claude/kind-mccarthy-449g7g`; traced + reproduced + regression-tested).
   *(Stacking/calibration correctness + broken-guardrail; Medium — advanced manual-calibration path; found by this run's

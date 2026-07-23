@@ -30,7 +30,7 @@ from typing import Any, Iterator
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 SCHEMA_SQL = f"""
 PRAGMA user_version = {SCHEMA_VERSION};
@@ -63,7 +63,9 @@ CREATE TABLE IF NOT EXISTS stack_runs (
     is_mosaic INTEGER,
     engine_version TEXT,
     rejection_fraction REAL,
-    rejection_mode TEXT
+    rejection_mode TEXT,
+    preview_stretch REAL,
+    preview_black REAL
 );
 
 CREATE INDEX IF NOT EXISTS idx_stack_runs_ts ON stack_runs(timestamp_utc);
@@ -449,6 +451,18 @@ class Project:
                         f"ALTER TABLE stack_runs ADD COLUMN {col} {typ}")
                 except sqlite3.OperationalError:
                     pass  # already present
+        if from_version < 11:
+            # Recorded the custom asinh stretch/black a user saved for this run's
+            # preview (History "Adjust"), so the "one frame vs your stack" reveal
+            # can render its sub half through the *same* tone curve the stored
+            # preview used — keeping the two halves honestly comparable. Additive;
+            # older runs stay NULL (no custom stretch = the default STF preview).
+            for col in ("preview_stretch", "preview_black"):
+                try:
+                    self._conn.execute(
+                        f"ALTER TABLE stack_runs ADD COLUMN {col} REAL")
+                except sqlite3.OperationalError:
+                    pass  # already present
         self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @contextmanager
@@ -697,6 +711,14 @@ class Project:
                     row["rejection_mode"]
                     if "rejection_mode" in row.keys() else None
                 ),
+                preview_stretch=(
+                    row["preview_stretch"]
+                    if "preview_stretch" in row.keys() else None
+                ),
+                preview_black=(
+                    row["preview_black"]
+                    if "preview_black" in row.keys() else None
+                ),
             )
 
     def repoint_stack_runs(self, path_map: dict[str, str]) -> int:
@@ -732,6 +754,20 @@ class Project:
         assert self._conn is not None
         cur = self._conn.execute(
             "UPDATE stack_runs SET notes = ? WHERE id = ?", (notes, run_id))
+        return cur.rowcount > 0
+
+    def set_stack_preview_stretch(
+        self, run_id: int, stretch: float | None, black: float | None
+    ) -> bool:
+        """Record the custom asinh stretch/black saved as this run's preview (or
+        clear it with ``None``/``None``), so the "one frame vs your stack" reveal
+        can render its sub half through the same tone curve. Returns True if a row
+        was updated, False if no run with ``run_id`` exists."""
+        assert self._conn is not None
+        cur = self._conn.execute(
+            "UPDATE stack_runs SET preview_stretch = ?, preview_black = ? "
+            "WHERE id = ?",
+            (stretch, black, run_id))
         return cur.rowcount > 0
 
 
@@ -784,6 +820,13 @@ class StackRunRow:
     # κ-σ / drizzle (min-max is structural, so its fraction isn't a clean-up figure).
     rejection_fraction: float | None = None
     rejection_mode: str | None = None
+    # The custom asinh stretch/black a user saved as this run's preview via the
+    # History "Adjust" panel (both in [0, 1]). NULL for runs whose preview is the
+    # default export STF autostretch (the common case) or that predate these
+    # columns (schema < 11). The "one frame vs your stack" reveal renders its sub
+    # half through this same curve so the two halves stay honestly comparable.
+    preview_stretch: float | None = None
+    preview_black: float | None = None
 
 
 def _to_db(value: Any) -> Any:

@@ -760,11 +760,28 @@ async def save_stack_preview(
                             detail=f"stretch/black must be numbers: {exc}") from exc
 
     from seestack.render.thumbnail import render_stack_png
+    from seestack.stack.output import fits_is_display_space
     png = await run_in_threadpool(
         render_stack_png, run.fits_path,
         stretch=stretch, black=black, max_width=1024,
     )
     Path(run.preview_path).write_bytes(png)
+
+    # Record the saved stretch on the run so the "one frame vs your stack" reveal
+    # renders its sub half through the *same* asinh curve (keeping the two halves
+    # honestly comparable). A display-space export ignores the sliders (rendered
+    # verbatim), so leave its columns NULL — the reveal self-hides for those runs.
+    is_display = await run_in_threadpool(fits_is_display_space, run.fits_path)
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        proj.set_stack_preview_stretch(
+            run_id,
+            None if is_display else stretch,
+            None if is_display else black,
+        )
+    finally:
+        proj.close()
+        lib.close()
     return {"ok": True, "stretch": stretch, "black": black}
 
 
@@ -801,24 +818,34 @@ def one_sub_vs_stack_info(safe: str, run_id: int, request: Request) -> dict[str,
     the finished stack so they can see (and share) exactly what stacking bought them.
 
     ``available`` is ``false`` (not a 404, where the run exists) when the run has no
-    stored preview to compare against, or the target has no frame to render — so the
-    card self-hides on an older/edited run instead of erroring. Every caption field
-    is best-effort (``null`` when its datum is missing) so the card degrades to a
-    shorter line rather than printing blanks.
+    stored preview to compare against, the target has no frame to render, or the run
+    is a **display-space editor export** — its preview is a bespoke tone-mapped image
+    a raw sub can't be honestly matched to (the noise-ratio endpoint already bails on
+    the same runs), so the card self-hides rather than showing two mismatched tone
+    curves. Every caption field is best-effort (``null`` when its datum is missing) so
+    the card degrades to a shorter line rather than printing blanks.
     """
+    from seestack.stack.output import fits_is_display_space
+
     lib, proj = deps.open_target_project(request, safe)
     try:
         run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
         if run is None:
             raise HTTPException(status_code=404, detail="No such run")
         has_preview = bool(run.preview_path and Path(run.preview_path).exists())
-        ref = _pick_reference_sub(proj) if has_preview else None
+        # A display-space export is tone-mapped verbatim; a raw sub STF/asinh
+        # render can't match it, so don't offer the reveal for those runs.
+        display_space = bool(
+            run.fits_path and Path(run.fits_path).exists()
+            and fits_is_display_space(run.fits_path)
+        )
+        ref = _pick_reference_sub(proj) if (has_preview and not display_space) else None
         sub_exposure_s = ref.exposure_s if ref is not None else None
     finally:
         proj.close()
         lib.close()
     return {
-        "available": has_preview and ref is not None,
+        "available": has_preview and not display_space and ref is not None,
         "n_frames": run.n_frames_used,
         "sub_exposure_s": sub_exposure_s,
         "integration_s": run.total_exposure_s,
@@ -850,6 +877,12 @@ async def reference_sub_png(safe: str, run_id: int, request: Request) -> Respons
         if pattern not in _BAYER_PATTERNS:
             pattern = "RGGB"
         src_path = str(src)
+        # If the run's preview was re-saved with a custom asinh stretch (History
+        # "Adjust"), render the sub through that same curve so the reveal's two
+        # halves differ only in noise/detail — not a tone offset. Both columns are
+        # NULL for the common default-STF preview, where we keep the STF render.
+        stretch = run.preview_stretch
+        black = run.preview_black
     finally:
         proj.close()
         lib.close()
@@ -858,6 +891,7 @@ async def reference_sub_png(safe: str, run_id: int, request: Request) -> Respons
 
     png = await run_in_threadpool(
         render_sub_preview, src_path, bayer_pattern=pattern, max_width=1024,
+        stretch=stretch, black=black,
     )
     return Response(content=png, media_type="image/png",
                     headers={"Cache-Control": "no-store"})

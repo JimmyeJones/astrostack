@@ -115,17 +115,29 @@ def render_sub_preview(
     *,
     bayer_pattern: str | None = None,
     max_width: int = 1024,
+    stretch: float | None = None,
+    black: float | None = None,
 ) -> bytes:
     """Render a single raw Seestar sub to PNG bytes, stretched to *match* the
     stored stack preview.
 
     Reads one raw Bayer light, debayers it, decimates to ``max_width`` and applies
-    the **same** conservative export STF stretch (:func:`~seestack.stack.output.
-    _autostretch_for_export`, sky → ~6 % grey) that produced the run's stored
-    ``*_preview.png``. Rendering both sides of a "one frame vs your stack"
-    comparison through the identical stretch is what makes the reveal *honest* — the
-    only visible difference is the noise/detail stacking bought, not a brightness
-    offset from a different tone curve.
+    the same tone curve that produced the run's stored ``*_preview.png``:
+
+      * By default (``stretch``/``black`` both ``None``) the conservative export
+        STF stretch (:func:`~seestack.stack.output._autostretch_for_export`,
+        sky → ~6 % grey) — which is what a fresh linear stack's preview uses.
+      * When the run has a **custom saved stretch** (the History "Adjust" panel
+        overwrote its preview via :func:`asinh_stretch`), pass that run's saved
+        ``stretch``/``black`` so the sub is rendered through the *same* asinh
+        curve. Both stretches are anchored to each image's own robust sky level,
+        so applying the same params to a single linear sub yields a comparable
+        tone to the linear master's preview.
+
+    Rendering both sides of a "one frame vs your stack" comparison through the
+    identical stretch is what makes the reveal *honest* — the only visible
+    difference is the noise/detail stacking bought, not a brightness offset from a
+    different tone curve.
 
     Pure inputs/outputs (no shared state), so it can run in a worker thread.
     """
@@ -146,7 +158,10 @@ def render_sub_preview(
         target_h = max(1, int(round(h * (max_width / w))))
         rgb = _downsample_rgb(rgb, target_h, target_w)
 
-    stretched = _autostretch_for_export(rgb)
+    if stretch is not None and black is not None:
+        stretched = asinh_stretch(rgb, stretch=float(stretch), black=float(black))
+    else:
+        stretched = _autostretch_for_export(rgb)
     out = (np.clip(np.nan_to_num(stretched), 0.0, 1.0) * 255).astype(np.uint8)
     buf = io.BytesIO()
     Image.fromarray(out, mode="RGB").save(buf, format="PNG")
