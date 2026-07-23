@@ -6348,8 +6348,29 @@ problems. Dogfood it every big-picture run and fix root causes.
   {phase, illum_frac, moon_alt_deg, separation_deg, verdict, plain_text}` with unit tests against known
   Moon-phase/separation dates; (2) a `/api/targets/{safe}/moon` endpoint; (3) a small Target-page card + a
   reuse hook for the planners. Ship slice (1)+(2) first (fully testable), then the UI.
-- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "We cleaned N passing lights out of your picture": a one-line trust
-  cue on a finished stack that turns the κ-σ rejection tally into plain language.** *(Trust / "understand + enjoy"
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "We cleaned N passing lights out of your picture": a one-line trust
+  cue on a finished stack that turns the κ-σ rejection tally into plain language.**~~ — **SHIPPED v0.175.0**
+  (Builder 2026-07-23, branch `claude/pensive-faraday-o0142d`). Routed through the existing "How's my stack?"
+  card (`StackHealthCard`, already on the Target page) rather than a bespoke widget, so it needed **no frontend
+  logic change** — the card renders generic ranked notes. **Engine/DB:** the per-pixel outlier-rejection tally
+  (`RejectionStats.fraction` + `mode`) is now **persisted** on the `stack_runs` row via two additive nullable
+  columns (`rejection_fraction REAL`, `rejection_mode TEXT`; `SCHEMA_VERSION` 9→10 + `_migrate_schema` ALTERs,
+  and the auto-reconcile picks them up from `SCHEMA_SQL`), stamped in `run_stack` only when a rejection pass
+  actually ran and saw samples (a plain-mean stack leaves both NULL). **Health note** (`seestack/stackhealth.py`):
+  a new `"rejection"` `"good"` note (priority 65 — below actionable fixes, among the reassurance notes) turns the
+  stored tally into plain language — *"Cleaned ~1.2% of pixels — passing satellites, planes and cosmic-ray hits
+  were rejected, so they're not in your final image."* **Beginner-bar shaping (honest):** only the data-driven
+  κ-σ / drizzle-reject fraction is named as a clean-up, and only inside an honest band
+  (`0.05% ≤ frac < 8%`) — below the floor the stack rejected nothing (no claim), above the ceiling the clip is
+  suspiciously large (κ may be eating real signal, which the History Info panel already flags) so the cheerful
+  cue stays silent; **min-max** rejection is structural, so it names only the guarantee ("Dropped the brightest
+  and darkest value at each pixel …") with **no** misleading percentage. Upgrade-safe: additive migration (old
+  DBs migrate, old runs read NULL → note self-hides), no config/default/API-shape change (`HealthNoteOut` is
+  generic). Tests: `tests/test_stackhealth.py` (+7: κ-σ/drizzle name a %, near-zero/high-frac/plain-mean stay
+  silent, min-max no-%, ranks after actionable), `tests/test_project.py` (+2: tally round-trips; v9→v10 migrates
+  additively — old rows NULL, new inserts persist), `tests/test_stack_pipeline.py` (+3: κ-σ records the tally,
+  min-max records a positive fraction, plain-mean leaves it NULL), `tests/webapp/test_target_stack_health.py`
+  (+1: the cue surfaces through the endpoint). *(Original idea kept below for provenance.)* *(Trust / "understand + enjoy"
   pillar, PRIORITY 3 with an image-quality-trust flavour; size S; frontend-mostly, additive, no new deps.)* **Why a
   beginner wants it:** a first-timer doesn't know that stacking *quietly removes* the satellite streaks, aeroplane
   trails and cosmic-ray hits that cross individual subs — they just see a clean picture and can't tell whether the

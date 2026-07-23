@@ -106,6 +106,51 @@ def test_stack_records_is_mosaic_false_for_single_field(tmp_path):
         proj.close()
 
 
+def test_stack_records_rejection_tally_on_sigma_clip(tmp_path):
+    """A κ-σ stack persists its outlier-rejection tally (a real fraction — 0 or
+    more — and the mode), so "How's my stack?" can read what the pass did without
+    a FITS read. The pass ran and saw samples, so the fraction is recorded (not
+    NULL) even when it happened to clip nothing on this clean synthetic set."""
+    proj = _build_project(tmp_path, n=5, with_outlier=True)
+    try:
+        run_stack(proj, StackOptions(sigma_clip=True, max_workers=2,
+                                     output_name="clip"))
+        run = next(iter(proj.iter_stack_runs()))
+        assert run.rejection_mode == "sigma-clip"
+        assert run.rejection_fraction is not None and run.rejection_fraction >= 0
+    finally:
+        proj.close()
+
+
+def test_stack_records_a_positive_rejection_fraction_on_min_max(tmp_path):
+    """Min/max rejection structurally drops the extreme sample at each covered
+    pixel, so a ≥3-frame stack always records a positive clipped fraction and the
+    min-max mode — the tally the health card softens to a no-percentage cue."""
+    proj = _build_project(tmp_path, n=5)
+    try:
+        run_stack(proj, StackOptions(sigma_clip=False, min_max_reject=True,
+                                     max_workers=2, output_name="mmr"))
+        run = next(iter(proj.iter_stack_runs()))
+        assert run.rejection_mode == "min-max-reject"
+        assert run.rejection_fraction is not None and run.rejection_fraction > 0
+    finally:
+        proj.close()
+
+
+def test_stack_leaves_rejection_tally_null_for_a_plain_mean(tmp_path):
+    """A plain weighted-mean stack (no rejection pass) leaves the tally NULL — no
+    clean-up to claim, so the health card stays quiet about it."""
+    proj = _build_project(tmp_path, n=4)
+    try:
+        run_stack(proj, StackOptions(sigma_clip=False, min_max_reject=False,
+                                     max_workers=2, output_name="mean"))
+        run = next(iter(proj.iter_stack_runs()))
+        assert run.rejection_fraction is None
+        assert run.rejection_mode is None
+    finally:
+        proj.close()
+
+
 def test_stack_reports_honest_frame_accounting_all_aligned(tmp_path):
     """run_stack reports how many subs it attempted to combine and how many
     couldn't be aligned. When every sub aligns cleanly, n_offered == frames used

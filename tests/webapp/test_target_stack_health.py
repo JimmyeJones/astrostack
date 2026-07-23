@@ -80,6 +80,18 @@ def test_stack_health_null_for_unknown_run_id(client, solved_library, data_root)
     assert r.json() is None
 
 
+def test_stack_health_surfaces_the_rejection_cleanup_note(
+        client, solved_library, data_root):
+    # A κ-σ run that clipped a real fraction surfaces the plain-language "we
+    # cleaned the trails out" trust cue through the endpoint (generic note shape).
+    _add_run(data_root, "M_42", rejection_mode="sigma-clip", rejection_fraction=0.012)
+    body = client.get("/api/targets/M_42/stack-health").json()
+    rej = next((n for n in body["notes"] if n["kind"] == "rejection"), None)
+    assert rej is not None
+    assert rej["severity"] == "good"
+    assert "1.2%" in rej["message"] and "satellites" in rej["message"]
+
+
 def test_stack_health_unknown_target_404(client):
     r = client.get("/api/targets/does_not_exist/stack-health")
     assert r.status_code == 404

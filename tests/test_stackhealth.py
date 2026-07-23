@@ -103,3 +103,74 @@ def test_actionable_notes_rank_before_reassurance_and_positives():
     order = _kinds(notes)
     assert order.index("calibration") < order.index("rejects")
     assert order.index("coverage") < order.index("rejects")
+
+
+def test_sigma_clip_rejection_gets_a_plain_language_cleanup_note():
+    # A κ-σ stack that clipped a real fraction of samples names the invisible
+    # "we removed the trails/cosmic-rays" work in plain language.
+    notes = stack_health(
+        _run(rejection_mode="sigma-clip", rejection_fraction=0.012),
+        [_frame() for _ in range(10)],
+    )
+    rej = next(n for n in notes if n.kind == "rejection")
+    assert rej.severity == "good" and rej.action is None
+    assert "1.2%" in rej.message
+    assert "satellites" in rej.message and "cosmic-ray" in rej.message
+
+
+def test_drizzle_reject_also_gets_the_cleanup_note():
+    notes = stack_health(
+        _run(rejection_mode="drizzle-reject", rejection_fraction=0.004),
+        [_frame() for _ in range(10)],
+    )
+    rej = next(n for n in notes if n.kind == "rejection")
+    assert rej.severity == "good"
+    assert "0.4%" in rej.message
+
+
+def test_near_zero_rejection_makes_no_cleanup_claim():
+    # A stack that rejected essentially nothing shouldn't claim a clean-up.
+    notes = stack_health(
+        _run(rejection_mode="sigma-clip", rejection_fraction=0.0),
+        [_frame() for _ in range(10)],
+    )
+    assert "rejection" not in _kinds(notes)
+
+
+def test_suspiciously_high_rejection_stays_silent_here():
+    # Above the honest band a cheerful "we cleaned trails" note could over-claim
+    # (κ may be eating real signal) — the beginner card stays quiet.
+    notes = stack_health(
+        _run(rejection_mode="sigma-clip", rejection_fraction=0.20),
+        [_frame() for _ in range(10)],
+    )
+    assert "rejection" not in _kinds(notes)
+
+
+def test_min_max_rejection_names_the_guarantee_without_a_percentage():
+    # Min/max is structural, so its fraction isn't a clean-up figure — name only
+    # what the method guarantees, with no (misleading) percentage.
+    notes = stack_health(
+        _run(rejection_mode="min-max-reject", rejection_fraction=0.5),
+        [_frame() for _ in range(10)],
+    )
+    rej = next(n for n in notes if n.kind == "rejection")
+    assert rej.severity == "good"
+    assert "%" not in rej.message
+    assert "brightest and darkest" in rej.message
+
+
+def test_plain_mean_stack_has_no_rejection_note():
+    # No rejection ran (both fields NULL) → nothing to say.
+    notes = stack_health(_run(), [_frame() for _ in range(10)])
+    assert "rejection" not in _kinds(notes)
+
+
+def test_rejection_note_ranks_after_actionable_next_steps():
+    # A clean-up reassurance must never displace an actionable fix from the top.
+    notes = stack_health(
+        _run(calstat=None, rejection_mode="sigma-clip", rejection_fraction=0.01),
+        [_frame() for _ in range(10)],
+    )
+    order = _kinds(notes)
+    assert order.index("calibration") < order.index("rejection")

@@ -30,7 +30,7 @@ from typing import Any, Iterator
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 SCHEMA_SQL = f"""
 PRAGMA user_version = {SCHEMA_VERSION};
@@ -61,7 +61,9 @@ CREATE TABLE IF NOT EXISTS stack_runs (
     noise_sigma REAL,
     calstat TEXT,
     is_mosaic INTEGER,
-    engine_version TEXT
+    engine_version TEXT,
+    rejection_fraction REAL,
+    rejection_mode TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_stack_runs_ts ON stack_runs(timestamp_utc);
@@ -434,6 +436,19 @@ class Project:
                     "ALTER TABLE stack_runs ADD COLUMN engine_version TEXT")
             except sqlite3.OperationalError:
                 pass  # already present
+        if from_version < 10:
+            # Recorded the per-pixel outlier-rejection tally per stack run — the
+            # fraction of samples the κ-σ / drizzle / min-max pass clipped and
+            # which mode ran — so the "How's my stack?" card can name the invisible
+            # "we cleaned the satellite/plane trails out" work in plain language
+            # without re-reading the FITS header. Additive; older runs stay NULL
+            # (unknown) and simply show no clean-up note.
+            for col, typ in (("rejection_fraction", "REAL"), ("rejection_mode", "TEXT")):
+                try:
+                    self._conn.execute(
+                        f"ALTER TABLE stack_runs ADD COLUMN {col} {typ}")
+                except sqlite3.OperationalError:
+                    pass  # already present
         self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @contextmanager
@@ -616,8 +631,9 @@ class Project:
             "  timestamp_utc, output_basename, fits_path, tiff_path, preview_path,"
             "  n_frames_used, canvas_h, canvas_w, coverage_min, coverage_max,"
             "  options_json, notes, total_exposure_s, transparency_ratio,"
-            "  noise_sigma, calstat, is_mosaic, engine_version"
-            ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "  noise_sigma, calstat, is_mosaic, engine_version,"
+            "  rejection_fraction, rejection_mode"
+            ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 run.timestamp_utc, run.output_basename, run.fits_path,
                 run.tiff_path, run.preview_path, run.n_frames_used,
@@ -625,7 +641,7 @@ class Project:
                 run.options_json, run.notes, run.total_exposure_s,
                 run.transparency_ratio, run.noise_sigma, run.calstat,
                 None if run.is_mosaic is None else int(bool(run.is_mosaic)),
-                run.engine_version,
+                run.engine_version, run.rejection_fraction, run.rejection_mode,
             ),
         )
         return cur.lastrowid  # type: ignore[return-value]
@@ -672,6 +688,14 @@ class Project:
                 engine_version=(
                     row["engine_version"]
                     if "engine_version" in row.keys() else None
+                ),
+                rejection_fraction=(
+                    row["rejection_fraction"]
+                    if "rejection_fraction" in row.keys() else None
+                ),
+                rejection_mode=(
+                    row["rejection_mode"]
+                    if "rejection_mode" in row.keys() else None
                 ),
             )
 
@@ -752,6 +776,14 @@ class StackRunRow:
     # at stack time), for provenance and stale-target reprocessing. None for runs
     # recorded before this column existed (schema < 9) or when unset by the caller.
     engine_version: str | None = None
+    # Fraction of per-pixel samples the outlier-rejection pass clipped (0–1), and
+    # which mode ran ("sigma-clip" | "drizzle-reject" | "min-max-reject"). None
+    # when no rejection ran (plain mean), when not computable, or for runs recorded
+    # before these columns existed (schema < 10). Lets "How's my stack?" name the
+    # trails/cosmic-rays the stack quietly removed — a data-driven fraction only for
+    # κ-σ / drizzle (min-max is structural, so its fraction isn't a clean-up figure).
+    rejection_fraction: float | None = None
+    rejection_mode: str | None = None
 
 
 def _to_db(value: Any) -> Any:
