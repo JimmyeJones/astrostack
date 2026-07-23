@@ -62,7 +62,7 @@ when you take it.
 > `pipeline.py` min-frames guard (no off-by-one), `_auto_stack_frame_count` marker/`prior_max` logic, auto-grade
 > cumulative-cap denominator (no new leak), `jobs.py` queued-cancel race / cancelled-vs-error / `_recover_interrupted`
 > (no double-run) / prune, `watcher.py` debounce + stranded-retry — one NEW verified bug (below, **filed for the
-> Builder**). **(1) SHIPPED this run (v0.184.5):** a plate-solve *failure* clobbered a frame's `qc_error`/
+> Builder**). **(1) SHIPPED this run (v0.184.6):** a plate-solve *failure* clobbered a frame's `qc_error`/
 > `qc_error_final:` reject_reason to `solve_failed:` (the guard's bare `accepted` term fired because QC-error frames
 > stay `accept=True`), defeating the QC terminal-skip state machine and re-QC'ing corrupt files every scan forever —
 > reproduced + fixed + regression-tested (struck below). **(2) FILED (open):** the auto-stack *pre-check* phase
@@ -644,7 +644,7 @@ when you take it.
 - ~~**A plate-solve *failure* clobbers a frame's `qc_error`/`qc_error_final:` reject_reason to `solve_failed:` — the
   guard's bare `accepted` term fires because QC-error frames stay `accept=True` — defeating the QC terminal-skip
   state machine so a genuinely-corrupt file is re-QC'd on every scan forever and is mis-attributed as a solve
-  failure.**~~ — **FIXED v0.184.5** (Scout 2026-07-23, branch `claude/kind-mccarthy-nt4l9m`; found by the 2026-07-23
+  failure.**~~ — **FIXED v0.184.6** (Scout 2026-07-23, branch `claude/kind-mccarthy-nt4l9m`; found by the 2026-07-23
   solve/QC/ingest adversarial audit; **traced + reproduced + regression-tested, fail-before/pass-after confirmed**).
   *(Wrong-state — a broken retry state machine + dishonest frame accounting; Medium.)* `apply_qc_result_to_db`
   (`seestack/qc/runner.py:91-92`) stamps a QC failure `qc_error:`/`qc_error_final:` but sets **only** `reject_reason`
@@ -4963,7 +4963,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
-- **IMPROVEMENT IDEA (Scout 2026-07-23, spotted while fixing the v0.184.5 qc_error clobber bug) — surface a plain
+- **IMPROVEMENT IDEA (Scout 2026-07-23, spotted while fixing the v0.184.6 qc_error clobber bug) — surface a plain
   "some of your subs couldn't be read" health signal when frames pile up as `qc_error_final`, so a beginner with a
   flaky NAS / truncated downloads / a few corrupt files isn't left silently short of subs with no explanation.**
   *(Autonomy + friendliness; pillar 2–3; size S–M; additive, read-only.)* **The gap (verified this run):** the app
