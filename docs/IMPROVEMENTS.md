@@ -198,16 +198,21 @@ when you take it.
   the charged worker count. File for a Builder run with a memory-measurement harness. Severity Low for the target
   hardware; record so it's on the books.
 
-- **`CalibrationMasters.validate()` aborts the whole stack over a wrong-shaped master *bias* even when the
-  bias is never applied.** *(Calibration; broken-UX / fail-loud false-positive, Low severity, traced; found by
-  the align/calibrate audit — NOT fixed.)* `seestack/calibrate/apply.py:214-228` loops over `("dark", "flat",
-  "bias")` unconditionally and raises `ValueError` on any shape mismatch. But a master bias is **only** subtracted
-  when no dark is set (`_bias_applies`, `apply.py:198-202` — a dark already contains the bias). So a user with
-  dark + flat + a leftover wrong-binning bias (loaded for provenance but never used) gets their whole stack
-  refused over a master that would never touch a pixel. Fix: skip the bias row of `validate()` when
-  `not self._bias_applies` (a one-line guard + a fail-before/pass-after test with a dark present and a
-  mismatched-shape bias). Safe, additive, no behaviour change on the applied paths. Low priority (manual
-  calibration is an advanced path), but a clean one-sitting fix.
+- ~~**`CalibrationMasters.validate()` aborts the whole stack over a wrong-shaped master *bias* even when the
+  bias is never applied.**~~ — **FIXED v0.173.1** (Builder 2026-07-23, branch `claude/pensive-faraday-tfvkyx`;
+  regression-tested). `seestack/calibrate/apply.py::validate` looped over `("dark", "flat", "bias")`
+  unconditionally and raised `ValueError` on any shape mismatch. But a master bias is **only** subtracted when no
+  dark is set (`_bias_applies` — a dark already carries the bias pedestal), and the one place a bias-with-dark is
+  read (`_effective_dark`'s exposure-scaling path) already shape-guards it. So a user with dark + flat + a
+  leftover wrong-binning bias (loaded for provenance but never applied) got their whole stack refused over a
+  master that would never touch a pixel. **Fix:** `validate()` now checks the bias row only when
+  `self._bias_applies` (no dark present); dark/flat are validated as before, and the applied bias-only path still
+  fails fast on a genuine mismatch. Regressions in `tests/test_calibrate.py`:
+  `test_validate_ignores_a_wrong_shaped_bias_that_is_never_applied` (dark+flat present + mismatched inert bias →
+  no raise; fail-before it raised) and `test_validate_still_catches_a_wrong_shaped_bias_that_is_applied` (no dark
+  → mismatched bias still raises). Safe, additive, no behaviour change on the applied paths; no
+  config/DB/API/on-disk change. Severity: broken-UX / fail-loud false-positive (Low — manual calibration is an
+  advanced path). Confidence: traced + regression-tested. _(Found by an earlier align/calibrate audit.)_
 
 - ~~**⭐ Always-on hot/cold-pixel suppression clips real (undersampled) star cores — dims and colour-shifts every
   star in the final stack, a coherent per-frame bias that stacking does NOT average out.**~~ — **FIXED v0.158.9**
