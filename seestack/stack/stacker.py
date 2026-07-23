@@ -1152,7 +1152,7 @@ def run_stack(
             mono=options.mono,
             photometric_scales=pscales,
         )
-        if n_used == 0:
+        if n_used == 0 and not cancel():
             raise ValueError("no frames could be aligned")
         result_image = mmr.result()
         coverage = mmr.coverage
@@ -1185,7 +1185,7 @@ def run_stack(
             mono=options.mono,
             photometric_scales=pscales,
         )
-        if n_used_p1 == 0:
+        if n_used_p1 == 0 and not cancel():
             raise ValueError("pass 1 produced no usable frames")
 
         # ---- 4. Pass 2: clipped weighted sum ------------------------------
@@ -1239,8 +1239,13 @@ def run_stack(
         # the min/max, pass-1, and single-pass branches do: raise rather than
         # fall through to writing a silent all-NaN master recorded as a
         # *successful* run with ``n_frames_used=0`` (the same hazard the drizzle
-        # two-pass path already guards against).
-        if n_used == 0:
+        # two-pass path already guards against). The ``not cancel()`` clause (as
+        # on the drizzle path, line ~1107) is essential: a user cancel *during*
+        # pass 1 leaves ``n_used_p1>0`` but makes pass 2 break on its first
+        # frame (``n_used_p2==0`` → ``n_used==0``), so without it a routine
+        # cancel of the *default* κ-σ stack raises a spurious error instead of
+        # returning the graceful cancelled result below.
+        if n_used == 0 and not cancel():
             raise ValueError("pass 2 produced no usable frames")
         result_image = wsum.result()
         coverage = wsum.coverage
@@ -1270,7 +1275,7 @@ def run_stack(
             mono=options.mono,
             photometric_scales=pscales,
         )
-        if n_used == 0:
+        if n_used == 0 and not cancel():
             raise ValueError("no frames could be aligned")
         result_image = wsum.result()
         coverage = wsum.coverage
