@@ -164,12 +164,17 @@ def test_render_suggestion_anchors_sliders_to_the_data(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
     _, run_id = _make_run_with_fits(solved_library, safe)
 
+    from seestack.stack.output import EXPORT_AUTOSTRETCH_TARGET_BG
+
     r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/render-suggestion")
     assert r.status_code == 200
     body = r.json()
     assert isinstance(body["stretch"], float) and 0.0 <= body["stretch"] <= 1.0
     assert isinstance(body["black"], float) and 0.0 <= body["black"] <= 1.0
-    assert body["target_bg"] == 0.10
+    # The suggestion anchors to the *export* grey (what the History/Gallery
+    # thumbnail is rendered at), so opening Adjust matches that thumbnail rather
+    # than jumping ~2× brighter.
+    assert body["target_bg"] == EXPORT_AUTOSTRETCH_TARGET_BG
 
 
 def test_render_suggestion_null_for_display_space_run(client, solved_library):
