@@ -23,6 +23,7 @@ from seestack.core.cache import CacheManager
 from seestack.io.project import StackRunRow
 from seestack.render.thumbnail import thumbs_dir
 from webapp import deps
+from webapp.storage_estimate import estimate_nightly_bytes
 
 router = APIRouter(tags=["storage"])
 
@@ -91,6 +92,9 @@ def get_storage(request: Request) -> StorageResponse:
 
     lib = deps.open_library(request)
     rows: list[TargetStorage] = []
+    # Capture cadence across the whole library, for the "nights left" estimate.
+    night_counts: dict[str, int] = {}
+    total_frames = 0
     try:
         for t in lib.list_targets():
             tdir = lib.target_dir(t)
@@ -115,6 +119,9 @@ def get_storage(request: Request) -> StorageResponse:
             try:
                 proj = Project.open(tdir)
                 n_runs = sum(1 for _ in proj.iter_stack_runs())
+                for night, n in proj.frame_night_counts().items():
+                    night_counts[night] = night_counts.get(night, 0) + n
+                    total_frames += n
             except Exception:  # noqa: BLE001
                 pass
             finally:
@@ -132,6 +139,7 @@ def get_storage(request: Request) -> StorageResponse:
 
     rows.sort(key=lambda r: r.total_bytes, reverse=True)
 
+    library_bytes = sum(r.total_bytes for r in rows)
     disk: dict = {}
     try:
         usage = shutil.disk_usage(deps.get_settings(request).data_root)
@@ -139,13 +147,20 @@ def get_storage(request: Request) -> StorageResponse:
             "total_gb": round(usage.total / 1e9, 1),
             "used_gb": round(usage.used / 1e9, 1),
             "free_gb": round(usage.free / 1e9, 1),
+            "free_bytes": int(usage.free),
         }
     except OSError:
         pass
 
+    # Additive, best-effort growth estimate — null when there isn't enough
+    # capture history to project from (see estimate_nightly_bytes). The frontend
+    # turns this into a plain-language "about N more nights" headroom line.
+    nightly = estimate_nightly_bytes(night_counts, library_bytes, total_frames)
+    disk["nightly_bytes"] = int(nightly) if nightly is not None else None
+
     return StorageResponse(
         targets=rows,
-        total_bytes=sum(r.total_bytes for r in rows),
+        total_bytes=library_bytes,
         output_bytes=sum(r.output_bytes for r in rows),
         cache_bytes=sum(r.cache_bytes for r in rows),
         disk=disk,

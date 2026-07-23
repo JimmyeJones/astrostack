@@ -660,6 +660,26 @@ class Project:
             out[reason] = n
         return out
 
+    def frame_night_counts(self) -> dict[str, int]:
+        """Tally *all* frames (accepted or rejected) by capture night.
+
+        The key is the UTC date portion (``YYYY-MM-DD``) of ``timestamp_utc``;
+        the value is how many frames carry that date. Frames with a NULL/empty
+        timestamp are skipped (they contribute no dated growth signal). This
+        drives the storage "how many more nights can I keep imaging?" estimate —
+        the recent capture cadence in frames/night — so it counts every ingested
+        frame, not just the accepted ones, because all of them consume disk."""
+        assert self._conn is not None
+        out: dict[str, int] = {}
+        for night, n in self._conn.execute(
+            "SELECT substr(timestamp_utc, 1, 10) AS d, COUNT(*) FROM frames "
+            "WHERE timestamp_utc IS NOT NULL AND timestamp_utc <> '' "
+            "GROUP BY d"
+        ):
+            if night:
+                out[night] = n
+        return out
+
     # ---- stack runs ----------------------------------------------------
 
     def add_stack_run(self, run: StackRunRow) -> int:
