@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 from seestack.io.library import Library
 from seestack.io.scanner import run_qc_and_solve, scan_and_organize
+from seestack.render.thumbnail import invalidate_frame_thumbs
 from seestack.stack.pointings import MixedPointings, detect_mixed_pointings
 from webapp import __version__ as APP_VERSION
 from webapp.config import Settings
@@ -76,6 +77,13 @@ def _pipeline_body(
                 t.safe_name for t in scan.targets
                 if t.n_frames_added > 0 or t.n_frames_refreshed > 0
             ]
+            # A refreshed frame's content changed under a reused id, but its cached
+            # preview PNGs key on id alone and only regenerate when missing — so
+            # drop them here or the Frames table keeps showing the old capture.
+            for t in scan.targets:
+                for fid in t.refreshed_frame_ids:
+                    with contextlib.suppress(OSError):
+                        invalidate_frame_thumbs(lib.targets_dir / t.safe_name, fid)
             summary["scanned"] = scan.total_added
         else:
             touched_names = [t.safe_name for t in lib.list_targets()]

@@ -80,10 +80,34 @@ higher on this list wins — always:
 4. **Best-possible image quality** for the OSC Seestar workflow (clean, detailed
    final images).
 
-**⚡ IMMEDIATE PRIORITY (owner-reported 2026-07, real data on v0.158): auto-stacked
+**⚡ IMMEDIATE PRIORITY (owner-reported 2026-07, real data on v0.158) — LIKELY ROOT
+CAUSE first: the scanner ignores the Seestar folder convention.** See the ⭐⭐⭐ top
+entry in `docs/IMPROVEMENTS.md` → "Bugs". A Seestar writes `<Target>_sub/` (raw
+subs) *and* `<Target>/` (its own single stacked OUTPUT), plus `_mosaic`/`_video`
+variants; `scan_and_organize` names a target by the raw folder name and ingests the
+**output** and **video** folders as if they were raw frames — so a target built from
+an output folder is a **1-frame stack (gibberish) at that image's lower resolution**,
+which plausibly explains BOTH output bugs below. Also keep **mosaic vs single-field
+of the same object as separate targets** (don't position-auto-merge them). Fix the
+scanner first, then re-check whether (A)/(B) below persist.
+
+**Then the two output symptoms (see the ⭐⭐ entries in `docs/IMPROVEMENTS.md` → "Bugs"):**
+
+**(A) Final stacked-output RESOLUTION is much lower than it should be.** Reproduce
+and pin which artifact loses pixels: prime suspect is the **memory-budget
+drizzle-scale reduction** (`_largest_drizzle_scale_within_budget`, `stacker.py`)
+silently shrinking the canvas on a RAM-capped NAS container; also verify the base
+canvas equals the native sub, and rule the display-only caps (1024px preview /
+2048px share JPEG) in or out. If RAM forces a reduction, say so plainly instead of
+silently shipping low-res; and show the output pixel size on the run info.
+
+**(B) auto-stacked
 FINAL results come out as single-frame colour-speckle "gibberish" for faint/
 sparse-star targets** (a bright galaxy stacks cleanly — so it's data-dependent).
-See the ⭐⭐ top entry in `docs/IMPROVEMENTS.md` → "Bugs (fix these first)". The
+[Engine ruled out + honest thin-stack warnings/guard shipped v0.159–v0.183; the
+remaining root is plate-solve failing on faint fields so most subs stay
+accepted-but-unsolved — keep improving faint-field solve success / surfacing.]
+See the ⭐⭐ entry in `docs/IMPROVEMENTS.md` → "Bugs (fix these first)". The
 data-dependence points away from a render/debayer bug and toward **the auto-pipeline
 combining too few frames** (plate-solve failing on faint fields and/or over-aggressive
 auto-reject/grade — note v0.149 defaulted `auto_reject` ON for a never-configured

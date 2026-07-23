@@ -38,6 +38,35 @@ def thumb_path_for(project_dir: Path, frame_id: int) -> Path:
     return thumbs_dir(project_dir) / f"frame_{frame_id:06d}.png"
 
 
+def invalidate_frame_thumbs(project_dir: Path, frame_id: int) -> int:
+    """Delete every cached preview PNG for one frame — the Qt gallery
+    ``frame_NNNNNN.png`` and all web ``web_NNNNNN_*`` size/pattern variants — so
+    the next request regenerates them from the frame's *current* pixels.
+
+    Both preview caches key purely on ``frame_id`` (plus size/pattern/version),
+    never on source content, and only regenerate when the file is missing. So
+    when a frame's content changes after ingest — its source path is overwritten
+    in place with a different capture, or a truncated mid-copy sub finishes
+    copying — the caches keep serving the previous image indefinitely. The
+    ingest/re-scan path calls this for each refreshed frame to close that gap.
+
+    Returns the number of files removed; missing files (and any that can't be
+    unlinked) are ignored."""
+    d = thumbs_dir(project_dir)
+    if not d.exists():
+        return 0
+    removed = 0
+    # frame_NNNNNN.png is an exact name; web_NNNNNN_* fans out over size+pattern.
+    for pattern in (f"frame_{frame_id:06d}.png", f"web_{frame_id:06d}_*.png"):
+        for f in d.glob(pattern):
+            try:
+                f.unlink()
+                removed += 1
+            except OSError:
+                pass
+    return removed
+
+
 def _version_sentinel(project_dir: Path) -> Path:
     return thumbs_dir(project_dir) / ".version"
 

@@ -46,10 +46,15 @@ class IngestResult:
     # zero-byte sub. Distinct from ``error`` so a benign skip isn't miscounted as a
     # failure in the scan summary. Only set when ``skipped`` is True.
     skip_reason: str | None = None
-    # True when a dedup-skipped frame's Stage-1 cache was *refreshed* because the
-    # source grew past the cached size (a mid-copy-truncated sub whose source
-    # later finished). Its QC was reset, so the caller should re-QC its target.
+    # True when a dedup-skipped frame's content was *refreshed* because the source
+    # grew past the cached size (a mid-copy-truncated sub whose source later
+    # finished) or its bytes changed under a reused path. Its QC/solution were
+    # reset, so the caller should re-QC its target.
     refreshed: bool = False
+    # The DB id of the refreshed frame (only set when ``refreshed`` is True). Lets
+    # the caller invalidate that frame's cached previews, which key on id alone and
+    # would otherwise keep serving the previous capture's image.
+    refreshed_frame_id: int | None = None
 
 
 def find_fits_files(root: str | Path, *, recursive: bool = True) -> list[Path]:
@@ -90,6 +95,24 @@ def _dedup_key(path: str | Path) -> str:
     return os.path.realpath(str(path))
 
 
+def _source_fingerprint(src: Path) -> tuple[int, float] | None:
+    """A cheap identity fingerprint ``(size, mtime)`` for a source file, or
+    ``None`` if it can't be stat'd.
+
+    Stored on the frame row so a later re-scan can tell that a reused source
+    path now holds *different* content — an in-place overwrite (a re-export /
+    rename collision, or a NAS sync that reuses filenames). This works even when
+    ``copy_to_cache`` is off (the webapp default), where there is no cached copy
+    to diff against, so the stale-solution refresh below is no longer inert on a
+    default install.
+    """
+    try:
+        st = src.stat()
+    except OSError:
+        return None
+    return (st.st_size, st.st_mtime)
+
+
 def _cache_stale(cached_path: str | Path, src: Path) -> bool:
     """True if the Stage-1 cache no longer matches its source and should be
     refreshed. A size mismatch means the source grew after it was cached — the
@@ -104,16 +127,21 @@ def _cache_stale(cached_path: str | Path, src: Path) -> bool:
 
 
 def _copy_to_stage1(
-    project: Project, cache: CacheManager, src: Path, frame_id: int
+    project: Project, cache: CacheManager, src: Path, frame_id: int,
+    *, force: bool = False,
 ) -> Path | None:
     """
     Copy ``src`` into the Stage-1 cache under ``frame_id`` and record the path on
     the frame row. Returns the cached path, or ``None`` if the copy failed (a NAS
     blip): the frame stays usable via ``source_path``, and a later scan retries.
+
+    ``force`` re-copies even when the cached size already matches — needed for an
+    in-place *same-size* content swap, which the size-only staleness check can't
+    see, so the cache would otherwise keep the previous capture's pixels.
     """
     cached = cache.stage1_path_for(frame_id, src.name)
     try:
-        if not cached.exists() or cached.stat().st_size != src.stat().st_size:
+        if force or not cached.exists() or cached.stat().st_size != src.stat().st_size:
             shutil.copy2(src, cached)
     except OSError as exc:
         log.warning("could not cache %s: %s", src, exc)
@@ -191,6 +219,19 @@ def ingest_files(
             # row is skipped on every future scan and the cache is never populated.
             recovered: Path | None = None
             refreshed = False
+            # Has the source's bytes changed under a reused path since we last saw
+            # it? A stored fingerprint of None means a pre-fingerprint (upgraded)
+            # row or a genuinely fresh one — we backfill it below rather than treat
+            # it as a change, so an upgrade doesn't re-solve the whole library.
+            fp = _source_fingerprint(src)
+            stored_fp = (
+                (prior.source_size_bytes, prior.source_mtime)
+                if prior.source_size_bytes is not None
+                else None
+            )
+            content_changed = (
+                fp is not None and stored_fp is not None and fp != stored_fp
+            )
             if copy_to_cache and prior.id is not None:
                 if not prior.cached_path:
                     recovered = _copy_to_stage1(project, cache, src, prior.id)
@@ -222,11 +263,39 @@ def ingest_files(
                         # position (idempotent for the truncated→complete case).
                         _refresh_frame_metadata(project, prior.id, src)
                         refreshed = True
+            # Cache-independent content-swap recovery. The block above only fires
+            # when copy_to_cache is on (the webapp defaults it OFF) and can only
+            # see a *size* difference, so a source overwritten in place with a
+            # different capture would otherwise keep its stale WCS/header and
+            # stack at the wrong sky position. The source fingerprint catches the
+            # swap with no cached copy to diff against.
+            if content_changed and not refreshed and prior.id is not None:
+                # When caching, force-refresh the Stage-1 copy too so QC/solve/
+                # stack read the new pixels — a same-size swap slips past the
+                # size-only staleness check above and would leave the cache stale.
+                if copy_to_cache and prior.cached_path:
+                    recovered = _copy_to_stage1(project, cache, src, prior.id,
+                                                force=True)
+                project.reset_frame_qc(prior.id)
+                _refresh_frame_metadata(project, prior.id, src)
+                refreshed = True
+            # Keep the stored fingerprint current: backfill a NULL (a pre-upgrade
+            # row seen again — recorded *without* forcing a re-solve) and record
+            # the new baseline after a detected swap. An unchanged frame writes
+            # nothing.
+            if (
+                fp is not None and prior.id is not None
+                and (stored_fp is None or content_changed)
+            ):
+                project.update_frame(
+                    prior.id, source_size_bytes=fp[0], source_mtime=fp[1]
+                )
             # frame_id stays None on a skip (a registered frame is not "added"),
             # so existing consumers that gate on frame_id don't re-list it.
             yield IngestResult(
                 source_path=src, frame_id=None, cached_path=recovered, skipped=True,
                 refreshed=refreshed,
+                refreshed_frame_id=prior.id if refreshed else None,
             )
             continue
 
@@ -257,8 +326,11 @@ def ingest_files(
             continue
 
         # Insert first so we get an id, then (optionally) copy to a path keyed on it.
+        ins_fp = _source_fingerprint(src)
         row = FrameRow(
             source_path=s_str,
+            source_size_bytes=ins_fp[0] if ins_fp is not None else None,
+            source_mtime=ins_fp[1] if ins_fp is not None else None,
             timestamp_utc=info.timestamp_utc,
             exposure_s=info.exposure_s,
             gain=info.gain,
