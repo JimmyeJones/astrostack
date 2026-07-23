@@ -47,6 +47,19 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+> **Re-audit — stacking engine core CLEAN again; shipped the open auto-grade cumulative-cap bug (Scout 2026-07-23, branch `claude/kind-mccarthy-3qzy08`).**
+> Baseline suite green. Two independent adversarial audit sub-agents re-read the engine core end-to-end and both came back
+> **CLEAN**: (a) `accumulator.py` (WeightedSum NaN/coverage `sum(w)=0→NaN`, MinMaxReject k-insertion + degrade bands
+> full/single/mean/NaN, `rejection_counts` drop schedule, Welford `add`≡`add_window` sub-view aliasing, int64 counts) and
+> `drizzle_path.py` (`_clip_tolerance` float64/NaN, `neff≥3` on the true unweighted count, `16·eps·m²` var-resolution floor,
+> half-open `[-0.5,N-0.5]` bounds, per-channel footprint OR into `_count`, `result()` NaN-masking without re-dividing);
+> (b) `align.py` (CPU `cval=NaN` ↔ GPU `cval=0`+valid-mask parity, `FRAME_EDGE_INSET_PX=3` stencil-in-bounds proof, subpixel
+> NaN-mask co-shift), `calibrate/apply.py` (dark-then-flat raw-Bayer order, `_FLAT_FLOOR=0.1` divide guard, exposure-scaled
+> dark direction, no-data pedestal sanitise), `calibrate/masters.py` (`_sigma_clip_mean` MAD=0→tol=0, NaN-aware combine,
+> memory cap, atomic save) — all matching the repeatedly-clean documented state, no new engine bug. This run I took the one
+> remaining well-traced open bug — the **auto-grade cumulative-cap cascade** — reproduced it (29/100 > the 25% rail),
+> **fixed + regression-tested + shipped it** (struck below), and filed curation + ideas below.
+>
 > **Re-audit — stacking engine core CLEAN; one shipped cancel-handling fix + one new low-severity auto-grade bug (Scout 2026-07-23, branch `claude/kind-mccarthy-5xqphm`).**
 > Adversarially re-read the stacking engine again end-to-end and independently verified the previously-audited files
 > (`accumulator.py` WeightedSum/MinMaxReject/Welford, `align.py` windowed reproject + subpixel-shift NaN
@@ -206,10 +219,23 @@ when you take it.
   summary). The repro scaffold (`scratchpad/repro_thin.py`, bg-noise-vs-N) is the harness to extend. Keep this
   entry at the top until the frame-count root cause is fixed.
 
-- **Auto-grade's documented "never reject more than 25% per pass" cap is exceeded cumulatively, because the
-  ingest pipeline re-grades a target over its *shrinking accepted survivor set* on every scan.** *(Autonomy /
-  over-rejection correctness; Low severity — opt-in, off by default, modest magnitude; **traced + reproduced** by
-  the 2026-07-23 calibrate/pipeline audit.)* `grade_frames` (`seestack/qc/grading.py:317-325`) caps a single pass
+- ~~**Auto-grade's documented "never reject more than 25% per pass" cap is exceeded cumulatively, because the
+  ingest pipeline re-grades a target over its *shrinking accepted survivor set* on every scan.**~~ —
+  **FIXED v0.175.1** (Scout 2026-07-23, branch `claude/kind-mccarthy-3qzy08`; **traced + reproduced +
+  regression-tested**). Made the cap **cumulative** in `webapp/pipeline.py::_auto_grade_target`: the population
+  auto-grade decides over is now the frames it would accept (non-override) *plus* the ones it already rejected
+  (`accept=False`, `reject_reason LIKE 'auto:grade%'`, not `user_override`), and a per-scan **budget** =
+  `max(1, int(population * MAX_REJECT_FRACTION)) - already_rejected` truncates `report.recommendations` before
+  apply, so the running total can never pass the 25% rail no matter how many scans re-grade the target. On the
+  **first** pass (`already == 0`) the budget equals `grade_frames`' own per-call cap, so behaviour is unchanged;
+  only the repeated re-grades a dripping Seestar session triggers are held to the cumulative total. Reproduced
+  (`scratchpad/repro_cascade.py`) on the bimodal "cloud rolled through" 100-sub session: **before** — single pass
+  20% but the per-scan cascade `[20, 8, 1, …]` converged at **29/100**; **after** — `[20, 5, 0, …]` caps at
+  exactly **25/100**. Regression: `tests/webapp/test_auto_grade.py::test_auto_grade_cumulative_cap_holds_across_
+  repeated_scans` (seeds the ramped-tail population, runs 8 re-grade scans, asserts the cascade is exercised — ≥2
+  scans reject — yet cumulative ≤ `int(pop·0.25)`; fail-before 29 > 25, pass-after ≤ 25). Upgrade-safe: pure
+  control-flow in one gated (`auto_grade_frames` defaults `False`) function — no config/DB-schema/API-shape/on-disk/
+  default change. *(Original trace kept below for provenance.)* `grade_frames` (`seestack/qc/grading.py:317-325`) caps a single pass
   at `MAX_REJECT_FRACTION=0.25` of the *considered* set, and the module header explicitly promises this "must never
   nuke half a library, no matter how pathological the distribution." That guarantee holds **per call only.**
   `webapp/pipeline.py:110-111` re-invokes `_auto_grade_target` for every *touched* target on every scan, and a
@@ -4266,6 +4292,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+- **IMPROVEMENT IDEA (Scout 2026-07-23) — auto-grade should be able to *re-accept* a frame it earlier rejected once
+  a larger population no longer flags it (machine decisions shouldn't be permanent).** *(Autonomy; pillar 2; size
+  S–M; opt-in, off by default — only bites installs that turned `auto_grade_frames` on.)* Found while shipping the
+  auto-grade cumulative-cap fix (v0.175.1): `apply_grade_report` (`seestack/qc/grading.py`) only ever sets
+  `accept=False` — it **never re-accepts** a frame it previously auto-rejected — and `grade_frames` never
+  recommends re-acceptance. On a live Seestar target that drips subs, that means a frame rejected **early** (graded
+  against a *tiny, noisy* population where the median/MAD are unstable) stays rejected **forever**, even after
+  hundreds more good subs arrive and it's plainly no longer an outlier against the full night. The user silently
+  loses a good sub they'd have kept, and it compounds the "auto-grade dropped subs" theme. The decision is
+  explicitly a *machine* one (`user_override=False`, same convention as `auto:streak`), so re-considering it is
+  safe by design — only a `user_override` re-accept is sacred. **Idea:** on each re-grade, feed the target's
+  **auto-graded-but-not-overridden** rejects back into the grading statistics/population (they're the natural
+  complement of the cumulative-cap denominator the fix already reasons about), and have `apply_grade_report`
+  **re-accept** any such frame that the current, larger population no longer flags (clearing its `auto:grade:*`
+  reject_reason), while leaving user rejects and streak/QC rejects untouched. Pairs cleanly with the cumulative cap
+  (stable denominator + reversible decisions = auto-grade converges to "the right ~≤25%", not a ratchet). Needs a
+  `grade_frames` signature that separates the *stats/cap population* from the *currently-accepted* set (the reason
+  the cap fix landed in `_auto_grade_target` rather than here), plus a fail-before/pass-after test: reject a frame
+  against a 10-sub noisy population, add 90 clean subs, re-grade → the frame comes back accepted. Additive,
+  upgrade-safe (no config/DB/API/default change; gated feature).
 - **IMPROVEMENT IDEA (Scout 2026-07-23) — the walk-away auto-stack should auto-pick its outlier rejection from the
   sub count (turn on the existing `auto_reject` for the auto-stack pipeline).** *(Autonomy + image quality;
   pillar 2/4; size S–M.)* `StackOptions.auto_reject` already exists and does exactly the right thing — it resolves
@@ -6328,6 +6374,36 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Tonight's subs look soft — check focus": an early, actionable
+  focus/dew nudge fired on a fresh session's *first few* subs, comparing them to this target's own best nights.**
+  *(Autonomy + friendliness / "get a good image" pillar, PRIORITY 2–3; size M; offline, additive, read-only, no new
+  deps.)* **Why a beginner wants it:** the most heartbreaking Seestar outcome is coming back to a whole night of
+  subs that were all soft — the lens dewed over, or focus drifted at the start — and finding it only *after* the
+  session, when the frames are wasted. Everything we surface today about sharpness is **retrospective** (per-run
+  FWHM in "How's my stack", the clouds/haze-through-the-night session recap, the cumulative "have I shot enough"
+  depth bar) — none of it warns the user **while they can still fix it**. Focus and dew are exactly the failures a
+  beginner *can* act on in the moment (refocus, wipe the corrector, clip on a dew heater) — unlike clouds, which
+  they can't. **Feature:** once a fresh session's first ~3–5 subs on a target have been QC'd, compare their median
+  FWHM (and star count) to that **target's historical best** (the median of its previously-accepted subs, which we
+  already store per frame). If tonight is materially softer — e.g. FWHM ≥ ~1.3× the target's historical-best median
+  **or** star count down ≥ ~40% — show one plain sentence on the Target/session view: *"Tonight's first subs are
+  softer than your usual on this target — worth checking focus or wiping dew off the lens before you fill the
+  night."* On par or better: stay quiet (or a small green *"Sharp start — you're good to keep going"*). **Beginner
+  bar ✔:** universal ("is my rig OK tonight?"), one plain sentence, a sane auto-verdict, zero knobs, and it serves
+  *get a good image* by saving a whole session; **not** pro tooling (no FWHM numbers/curves — just a friendly
+  early nudge). **Sane default, self-hiding:** only fires when the target already has enough historical accepted
+  subs to define a "usual" *and* the new session has ≥3 QC'd subs; hides otherwise (never nags a brand-new target
+  where there's nothing to compare to, and never on transparency alone — that's clouds, not a fixable rig
+  problem). **Feasibility:** all inputs already exist — per-frame `fwhm_px`/`star_count` from QC, and frames carry a
+  timestamp so "this session" = the latest contiguous night can be grouped as the existing session-recap code
+  already does. The core is a pure function `focus_check(session_subs, historical_best) -> {level, sentence} |
+  None` (soft/sharp/None), unit-testable on hand-built metric lists, with no network, model, or schema/config/API/
+  default change (read-only advisory). **Builder slices — (a) engine (M):** the pure `focus_check` +
+  session-grouping helper with fail-before/pass-after tests (soft night flags; on-par/better stays quiet;
+  too-few-subs or no-history → None; transparency-only drop does NOT flag). **(b) webapp (S):** compute it in the
+  target/session response (additive field, self-hiding when None). **(c) frontend (S):** a compact, dismissable
+  advisory on the Target/session view. Complements — doesn't duplicate — the retrospective recap and the depth bar
+  by being the one card that fires *early enough to act on tonight*, directly advancing "just works" autonomy.
 - **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Is the Moon going to wash this out tonight?": a plain-language
   Moon-interference readout for a target.** *(Planning / "plan + get a good image" pillar, PRIORITY 2–3; size M;
   offline — uses the ephemeris library already bundled for the sky/plate-solve code, no new dep, no network.)*

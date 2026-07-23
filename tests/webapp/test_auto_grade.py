@@ -258,3 +258,89 @@ def test_pipeline_leaves_frames_alone_when_disabled(built_library, data_root):
             proj.close()
     finally:
         lib.close()
+
+
+def _seed_ramp(data_root, safe: str = "M_42") -> int:
+    """Seed a bimodal "cloud rolled through for part of the night" population:
+    a tight-good core plus a continuous ramp tail. Removing the worst tightens
+    the median/MAD so the *next* tier crosses the threshold on the following
+    scan — the cascade that lets the per-scan re-grade creep past the 25% cap.
+    Returns the total population size (all accepted, all carrying metrics)."""
+    rng = random.Random(3)
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            def clean() -> dict:
+                return {
+                    "fwhm_px": 3.0 + rng.gauss(0, 0.18),
+                    "star_count": int(420 + rng.gauss(0, 20)),
+                    "sky_adu_median": 1200.0 + rng.gauss(0, 50),
+                    "eccentricity_median": 0.40 + rng.gauss(0, 0.02),
+                    "transparency_score": 5200.0 + rng.gauss(0, 180),
+                }
+
+            # Existing fixture frames get clean metrics too (so real QC never
+            # re-runs and can't skew the population), then 67 more good subs.
+            for f in proj.iter_frames():
+                proj.update_frame(f.id, **clean())
+            existing = sum(1 for _ in proj.iter_frames())
+            for i in range(70 - existing):
+                proj.add_frame(FrameRow(source_path=f"/synthetic/good_{i:03d}.fit",
+                                        **clean()))
+            for i in range(30):
+                frac = i / 29.0
+                proj.add_frame(FrameRow(
+                    source_path=f"/synthetic/ramp_{i:03d}.fit",
+                    fwhm_px=3.6 + 2.6 * frac + rng.gauss(0, 0.08),
+                    star_count=int(400 - 160 * frac + rng.gauss(0, 15)),
+                    sky_adu_median=1300.0 + 900 * frac + rng.gauss(0, 50),
+                    eccentricity_median=0.41 + 0.12 * frac + rng.gauss(0, 0.02),
+                    transparency_score=5000.0 - 2200 * frac + rng.gauss(0, 150),
+                ))
+            total = sum(1 for _ in proj.iter_frames())
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+    finally:
+        lib.close()
+    return total
+
+
+def test_auto_grade_cumulative_cap_holds_across_repeated_scans(
+        built_library, data_root):
+    """Re-grading a target on every scan (a dripping Seestar session) must not
+    let the cumulative auto-rejected fraction exceed the documented 25% cap.
+    Before the cumulative-cap fix a single pass rejected 20% but the per-scan
+    cascade converged at ~29% — over the rail."""
+    from seestack.qc.grading import MAX_REJECT_FRACTION
+
+    total = _seed_ramp(data_root)
+    settings = Settings(data_root=str(data_root), auto_grade_frames=True)
+    cap = int(total * MAX_REJECT_FRACTION)
+
+    per_scan = []
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        for _ in range(8):  # simulate repeated ingest scans re-grading
+            proj = lib.open_target("M_42")
+            try:
+                per_scan.append(pipeline._auto_grade_target(proj, settings))
+            finally:
+                proj.close()
+        proj = lib.open_target("M_42")
+        try:
+            cumulative = sum(
+                1 for f in proj.iter_frames()
+                if not f.accept and (f.reject_reason or "").startswith("auto:grade")
+            )
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    # The cascade must actually be exercised — more than one scan rejected
+    # frames (the second pass re-centres and flags the next tier)…
+    assert sum(1 for n in per_scan if n > 0) >= 2, per_scan
+    # …but the running total is held at or below the documented cap.
+    assert 0 < cumulative <= cap, (cumulative, cap, per_scan)
