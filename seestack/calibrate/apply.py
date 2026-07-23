@@ -218,8 +218,15 @@ class CalibrationMasters:
         a camera/binning mismatch fails fast with a clear message instead of
         silently skipping the correction on every frame.
         """
-        for name, arr in (("dark", self.dark), ("flat", self.flat_norm),
-                          ("bias", self.bias)):
+        # Only validate a master that can actually touch a pixel. A master bias
+        # is subtracted only when no dark is set (see ``_bias_applies``); with a
+        # dark present it is never applied to lights (and the exposure-scaling
+        # path in ``_effective_dark`` already shape-guards it), so a leftover
+        # wrong-shaped bias must not abort an otherwise-valid dark+flat stack.
+        rows = [("dark", self.dark), ("flat", self.flat_norm)]
+        if self._bias_applies:
+            rows.append(("bias", self.bias))
+        for name, arr in rows:
             if arr is not None and tuple(arr.shape) != tuple(shape):
                 raise ValueError(
                     f"calibration {name} master is {arr.shape[1]}×{arr.shape[0]} "

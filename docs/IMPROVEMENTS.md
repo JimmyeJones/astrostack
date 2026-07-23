@@ -211,16 +211,21 @@ when you take it.
   the charged worker count. File for a Builder run with a memory-measurement harness. Severity Low for the target
   hardware; record so it's on the books.
 
-- **`CalibrationMasters.validate()` aborts the whole stack over a wrong-shaped master *bias* even when the
-  bias is never applied.** *(Calibration; broken-UX / fail-loud false-positive, Low severity, traced; found by
-  the align/calibrate audit — NOT fixed.)* `seestack/calibrate/apply.py:214-228` loops over `("dark", "flat",
-  "bias")` unconditionally and raises `ValueError` on any shape mismatch. But a master bias is **only** subtracted
-  when no dark is set (`_bias_applies`, `apply.py:198-202` — a dark already contains the bias). So a user with
-  dark + flat + a leftover wrong-binning bias (loaded for provenance but never used) gets their whole stack
-  refused over a master that would never touch a pixel. Fix: skip the bias row of `validate()` when
-  `not self._bias_applies` (a one-line guard + a fail-before/pass-after test with a dark present and a
-  mismatched-shape bias). Safe, additive, no behaviour change on the applied paths. Low priority (manual
-  calibration is an advanced path), but a clean one-sitting fix.
+- ~~**`CalibrationMasters.validate()` aborts the whole stack over a wrong-shaped master *bias* even when the
+  bias is never applied.**~~ — **FIXED v0.173.1** (Builder 2026-07-23, branch `claude/pensive-faraday-tfvkyx`;
+  regression-tested). `seestack/calibrate/apply.py::validate` looped over `("dark", "flat", "bias")`
+  unconditionally and raised `ValueError` on any shape mismatch. But a master bias is **only** subtracted when no
+  dark is set (`_bias_applies` — a dark already carries the bias pedestal), and the one place a bias-with-dark is
+  read (`_effective_dark`'s exposure-scaling path) already shape-guards it. So a user with dark + flat + a
+  leftover wrong-binning bias (loaded for provenance but never applied) got their whole stack refused over a
+  master that would never touch a pixel. **Fix:** `validate()` now checks the bias row only when
+  `self._bias_applies` (no dark present); dark/flat are validated as before, and the applied bias-only path still
+  fails fast on a genuine mismatch. Regressions in `tests/test_calibrate.py`:
+  `test_validate_ignores_a_wrong_shaped_bias_that_is_never_applied` (dark+flat present + mismatched inert bias →
+  no raise; fail-before it raised) and `test_validate_still_catches_a_wrong_shaped_bias_that_is_applied` (no dark
+  → mismatched bias still raises). Safe, additive, no behaviour change on the applied paths; no
+  config/DB/API/on-disk change. Severity: broken-UX / fail-loud false-positive (Low — manual calibration is an
+  advanced path). Confidence: traced + regression-tested. _(Found by an earlier align/calibrate audit.)_
 
 - ~~**⭐ Always-on hot/cold-pixel suppression clips real (undersampled) star cores — dims and colour-shifts every
   star in the final stack, a coherent per-frame bias that stacking does NOT average out.**~~ — **FIXED v0.158.9**
@@ -848,10 +853,18 @@ sweep are now both well-hardened.)_
     contains both a real subdir and a symlink to it, both pass `is_dir()` and become separate targets/projects,
     and the per-project `realpath` dedup (built only from that project's own frames) doesn't catch the same
     physical raws landing in a second project. Only harmful if the user later stacks both. (Edge case; traced.)
-  - `seestack/bg/per_frame.py:289-297` `_subtract_background_cpu` on the **stack path** (`errors=None`): if one
+  - ~~`seestack/bg/per_frame.py:289-297` `_subtract_background_cpu` on the **stack path** (`errors=None`): if one
     channel's `Background2D` fit fails it's skipped while the others subtract, then `_zero_sky_per_channel` runs —
-    a per-channel-asymmetric result that could introduce a faint colour cast. Only on a degenerate fit; the editor
-    path is correctly all-or-nothing. Documented "best-effort". (Confidence: traced.)
+    a per-channel-asymmetric result that could introduce a faint colour cast.~~ — **FIXED v0.173.2** (Builder
+    2026-07-23, branch `claude/pensive-faraday-tfvkyx`; regression-tested). The stack path now fits all three
+    channels *before* subtracting and, if any channel's ladder fit fails, degrades to **no** subtraction (leaves
+    the gradients) rather than a per-channel-asymmetric one — matching the editor path's already-documented
+    reasoning ("don't leave a partial per-channel subtraction that would colour-shift the image"). A per-frame
+    colour cast is coherent and does not average out in the stack, so all-or-nothing is the correct degradation.
+    Regression `tests/test_bg_modes.py::test_stack_path_bails_on_a_single_channel_fit_failure_no_colour_cast`
+    (monkeypatches the ladder to fail on channel 0 only; asserts the frame is returned unchanged — fail-before it
+    partial-subtracted G/B). Additive; no config/DB/API/on-disk change. Severity: image-quality/correctness, Low
+    (only on a degenerate fit, now rare given the robust ladder). (Confidence: traced + regression-tested.)
   - `seestack/qc/streaks.py:107-112` `streak_count` **over-reports** a single continuous trail as 2–5 (one
     satellite/plane trail fragments into several collinear `probabilistic_hough_line` segments; `line_gap=8` +
     `disk(1)` dilation don't re-merge them). Reproduced (Scout 2026-07-23, adversarial QC audit): a clean diagonal

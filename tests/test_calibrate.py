@@ -527,6 +527,35 @@ def test_validate_shape_mismatch(tmp_path):
         cal.validate((8, 8))
 
 
+def test_validate_ignores_a_wrong_shaped_bias_that_is_never_applied(tmp_path):
+    # A leftover wrong-binning master bias, loaded alongside a good dark+flat,
+    # is never applied to the lights (the dark carries the pedestal), so it must
+    # NOT abort an otherwise-valid stack. Before the fix, validate() checked the
+    # bias unconditionally and raised.
+    dark = np.zeros((4, 4), dtype=np.float32)
+    flat = np.full((4, 4), 100.0, dtype=np.float32)
+    bias = np.zeros((2, 2), dtype=np.float32)  # wrong shape; inert (dark present)
+    save_master(tmp_path / "d.fits", dark, MasterMeta("dark", 5, 4, 4, "mean"))
+    save_master(tmp_path / "f.fits", flat, MasterMeta("flat", 5, 4, 4, "mean"))
+    save_master(tmp_path / "b.fits", bias, MasterMeta("bias", 0, 2, 2, "mean"))
+    cal = CalibrationMasters.load(
+        dark_path=str(tmp_path / "d.fits"),
+        flat_path=str(tmp_path / "f.fits"),
+        bias_path=str(tmp_path / "b.fits"))
+    assert not cal._bias_applies  # dark present → bias inert
+    cal.validate((4, 4))  # must not raise over the inert mismatched bias
+
+
+def test_validate_still_catches_a_wrong_shaped_bias_that_is_applied(tmp_path):
+    # With no dark, the bias IS applied — a shape mismatch must still fail fast.
+    bias = np.zeros((2, 2), dtype=np.float32)
+    save_master(tmp_path / "b.fits", bias, MasterMeta("bias", 0, 2, 2, "mean"))
+    cal = CalibrationMasters.load(bias_path=str(tmp_path / "b.fits"))
+    assert cal._bias_applies
+    with pytest.raises(ValueError, match="must match"):
+        cal.validate((4, 4))
+
+
 def test_calibration_flows_through_align_one(tmp_path):
     """A constant dark subtracted at load time lowers the aligned output by
     that constant (debayer + identity reproject are linear, so a uniform

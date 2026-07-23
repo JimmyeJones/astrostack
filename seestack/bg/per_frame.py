@@ -276,25 +276,38 @@ def _subtract_background_cpu(rgb: np.ndarray, options: "BackgroundOptions",
     # seeing those pixels — the actual subtraction still applies everywhere.
     obj_mask = _build_object_mask_for_bg(out, dilate_px=options.dilate_object_mask_px)
 
+    # Fit all three channels first, then subtract — a per-channel *partial*
+    # subtraction (some channels flattened, some not) shifts the colour balance,
+    # a coherent per-frame bias stacking does NOT average out. So if any channel
+    # can't be fit, abandon the whole subtraction rather than leave a colour cast
+    # (the editor path already did this; the stack path used to skip only the
+    # failed channel and keep the others, casting the stacked frame).
+    bgs = []
     for c in range(3):
         try:
-            bg = _fit_bg2d_ladder(
+            bgs.append(_fit_bg2d_ladder(
                 out[..., c],
                 box_size=options.box_size,
                 filter_size=options.filter_size,
                 sigma_clip=sigma_clip,
                 estimator=estimator,
                 mask=obj_mask,
-            )
+            ))
         except Exception as exc:  # noqa: BLE001 — degenerate inputs (constant arrays)
             if errors is not None:
                 # Editor path: surface the failure and don't leave a partial
                 # (per-channel) subtraction that would colour-shift the image.
                 errors.append(f"background fit failed: {exc}")
-                return rgb.astype(np.float32, copy=True)
-            log.warning("background fit failed for channel %d: %s; skipping", c, exc)
-            continue
-        out[..., c] -= bg
+            else:
+                # Stack path: degrade to no subtraction (leave gradients) rather
+                # than a per-channel-asymmetric one that would colour-cast.
+                log.warning("background fit failed for channel %d: %s; leaving "
+                            "this frame un-flattened to avoid a colour cast",
+                            c, exc)
+            return rgb.astype(np.float32, copy=True)
+
+    for c in range(3):
+        out[..., c] -= bgs[c]
 
     _zero_sky_per_channel(out)
     return out
