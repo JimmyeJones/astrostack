@@ -224,13 +224,25 @@ def apply_solve_result_to_db(project, result: SolveResult) -> None:
         # out?" summary and, for an ``auto:grade:`` reason, breaks the cumulative
         # 25% auto-grade cap (which tallies ``auto:grade`` reasons). Mirror the
         # success branch's self-heal contract in reverse: only stamp
-        # ``solve_failed:`` when the frame is still accepted, carries no reason, or
-        # already carries a ``solve_failed:`` reason (a re-failed solve just
-        # refreshes its message).
+        # ``solve_failed:`` when the frame carries no reason, or already carries a
+        # ``solve_failed:`` reason (a re-failed solve just refreshes its message),
+        # or is still accepted *and* not carrying a ``qc_error`` state.
+        #
+        # The ``qc_error`` carve-out matters: a frame that failed QC
+        # (``qc_error:`` retryable / ``qc_error_final:`` terminal) keeps ``accept``
+        # True (``apply_qc_result_to_db`` sets only ``reject_reason``), so the bare
+        # ``accepted`` term would clobber that reason. That defeats the QC
+        # terminal-skip state machine — ``build_qc_arglist(only_new=True)`` skips
+        # only ``qc_error_final`` frames, so a clobbered-to-``solve_failed`` frame
+        # is re-QC'd every scan forever (and can never re-reach ``qc_error_final``,
+        # since the next QC failure sees a non-``qc_error`` prior). A ``qc_error``
+        # reason is a real state, so preserve it exactly like a rejected frame's.
         existing = project.get_frame(result.frame_id)
         prior = (existing.reject_reason or "") if existing is not None else ""
         accepted = existing.accept if existing is not None else True
-        if accepted or not prior or prior.startswith("solve_failed:"):
+        if (not prior
+                or prior.startswith("solve_failed:")
+                or (accepted and not prior.startswith("qc_error"))):
             project.update_frame(result.frame_id, reject_reason=f"solve_failed:{reason}")
         return
     if result.wcs_text is None:
