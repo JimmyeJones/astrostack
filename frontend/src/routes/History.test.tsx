@@ -3,7 +3,7 @@ import { Notifications } from "@mantine/notifications";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, darkScalingSummaryText, rejectionSummaryText, weightingSummaryText, frameAccountingNote, calibrationSummaryText } from "./History";
 import { formatIntegration } from "../format";
 import * as client from "../api/client";
@@ -34,7 +34,23 @@ function renderHistory() {
   );
 }
 
+// Default the page-level catalog-identity fetch (drives "Copy caption") to
+// "unidentified" so tests that don't care about it never hit the network; any
+// test that needs a named object overrides this spy.
+beforeEach(() => {
+  vi.spyOn(client.api, "identifyTarget").mockResolvedValue(null);
+});
+
 afterEach(() => vi.restoreAllMocks());
+
+function mkIdentity(overrides: Partial<client.ObjectInfo> = {}): client.ObjectInfo {
+  return {
+    id: "M42", name: "Orion Nebula", type: "nebula",
+    constellation: "Orion", constellation_abbr: "Ori",
+    ra_deg: 83.82, dec_deg: -5.39, matched_by: "name",
+    ...overrides,
+  };
+}
 
 describe("HistoryView", () => {
   it("does not delete a stack when the confirmation is declined", async () => {
@@ -229,6 +245,54 @@ describe("HistoryView", () => {
       expect(screen.getByText(/about 5.4 full Moons wide/)).toBeInTheDocument());
     // (The scale-bar overlay's on-image geometry needs a measured box — 0 in
     // jsdom — so it's covered by scaleBarLayout's pure unit test instead.)
+  });
+
+  it("copies a ready-to-post caption built from identity, run facts and scale", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ has_preview: true, n_frames_used: 240, total_exposure_s: 40 * 60,
+        timestamp_utc: "2026-07-20T22:14:03" }),
+    ]);
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue(mkIdentity());
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue({
+      width: 1000, height: 600, objects: [],
+      scale_bar: {
+        arcsec: 1800, label: "30′", fraction: 0.18, frame_arcmin: 166.6,
+        moon_comparison: "the whole frame is about 5.4 full Moons wide",
+      },
+    });
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Copy caption" }));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    expect(writeText).toHaveBeenCalledWith(
+      "Orion Nebula (M42), a nebula — a stack of 240 subs (40 min total), " +
+        "shot on 20 Jul 2026 with a Seestar. " +
+        "The whole frame is about 5.4 full Moons wide.",
+    );
+  });
+
+  it("still copies an honest caption when the target isn't identified", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ has_preview: true, has_fits: false, n_frames_used: 12,
+        total_exposure_s: 5 * 60, timestamp_utc: "2026-09-01T03:00:00" }),
+    ]);
+    // identifyTarget defaults to null (unidentified) via beforeEach; no FITS →
+    // no annotations fetch, so the caption drops the scale clause too.
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Copy caption" }));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    expect(writeText).toHaveBeenCalledWith(
+      "M_42 — a stack of 12 subs (5 min total), shot on 1 Sep 2026 with a Seestar.",
+    );
   });
 
   it("pins a run as the target's cover from a preview run", async () => {
