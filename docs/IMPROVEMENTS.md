@@ -5891,7 +5891,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   Dashboard strip** (`BestPicturesStrip`) showing the top 4 above Recent stacks. One click opens the existing
   `ImageLightbox` (download/JPEG/share/scan-to-phone/wallpaper all reused). Additive/upgrade-safe throughout. Tests:
   `tests/test_portfolio.py` (+10: ordering, tie-breaks, missing-metric fallbacks, single-entry, order-independence,
-  truncation), `tests/webapp/test_gallery_best.py` (+6: self-hide floor, deep-cleaner-first ranking, newest-per-target,
+  truncation), `tests/webapp/test_gallery_best.py` (+5: self-hide floor, deep-cleaner-first ranking, newest-per-target,
   limit, broken-project skip), `frontend/.../bestPictures.test.ts` (+5) and `BestPictures.test.tsx` (+2: ranked wall
   + empty-state). _(Original spec below.)_
 
@@ -5929,6 +5929,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   beginner-feature pipeline stocked with a fresh *enjoy/share* capability that no existing card covers.
 
   </details>
+- **FOLLOW-ON to "My best pictures" (Builder 2026-07-23) — a "Pin to My best" toggle so a beginner can force-include
+  a sentimental favourite the auto-ranker didn't surface.** *(Friendliness / "enjoy + share" pillar, PRIORITY 3;
+  size S–M.)* **Why:** the shipped v0.173.0 wall ranks purely on the quality proxy (integration/noise/frames/
+  coverage), which is the right *default* — but a beginner's *favourite* picture isn't always their deepest one (a
+  lucky comet grab, a first-ever galaxy, a shot with sentimental value). The Scout's original spec called for an
+  optional pin, deferred from the first slice to keep it additive and shippable. **Feature:** a small "Pin to My
+  best" star on each finished picture (Target result / History / Gallery / the wall itself) that force-includes that
+  run at the top of the wall regardless of score, and a matching "unpin". **Upgrade-safe design:** reuse the
+  existing per-run `notes`/keeper mechanism *or* add a nullable additive `pinned_best` column via
+  `SCHEMA_VERSION`+`_migrate_schema` (never a default flip); the `/api/gallery/best` response already carries
+  `score`, so surface a `pinned` boolean alongside it and have `rank_portfolio` (or the endpoint) float pinned
+  entries above the ranked tail. **Builder slices:** (a) storage — additive pin flag + a `POST` to set/clear it
+  (server-side, no client paths); (b) endpoint — include pinned runs even below the quality tail and mark them
+  `pinned: true`; (c) frontend — a star toggle + a "Pinned" chip on the wall; (d) tests — pin floats to top,
+  unpin restores rank order, migration from an un-pinned DB. Keeps the wall's zero-knob default while giving the
+  one escape hatch a beginner actually asks for ("but *this* one's my favourite").
 - ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "Scan to get it on your phone": a QR code beside the finished
   picture's download button that a beginner scans to pull the JPEG straight onto their phone.**~~ — **SHIPPED
   v0.172.0** (Builder 2026-07-23, branch `claude/pensive-faraday-w4ht9n`). Frontend-only, fully offline. A pure
