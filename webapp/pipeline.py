@@ -267,12 +267,49 @@ def submit_build_master(
 def _auto_grade_target(proj: Any, settings: Settings) -> int:
     """Run auto-grade over a target's accepted frames and apply the rejections
     (the opt-in ``auto_grade_frames`` pipeline hook). Returns frames rejected.
-    Best-effort: grading must never sink a QC/ingest pass."""
-    from seestack.qc.grading import apply_grade_report, grade_frames
+    Best-effort: grading must never sink a QC/ingest pass.
+
+    ``grade_frames`` caps a *single* pass at ``MAX_REJECT_FRACTION`` of the
+    considered set, but this hook re-grades a target on **every** scan and a
+    Seestar drips subs continuously, so an actively-imaged target is re-graded
+    many times. Each pass re-centres on the *shrinking* survivor set (removing
+    the low tail raises the median and tightens the MAD), so borderline frames
+    that cleared the practical-significance floor last pass cross it this pass —
+    and the cumulative auto-rejected fraction creeps past the documented 25%
+    rail (measured to converge at ~29% on a bimodal session). We keep the cap
+    **cumulative**: the population auto-grade decides over is the frames it would
+    accept *plus* the ones it already rejected (and the user hasn't
+    re-accepted/overridden), and we never let the running total exceed
+    ``MAX_REJECT_FRACTION`` of that original population."""
+    from seestack.qc.grading import MAX_REJECT_FRACTION, apply_grade_report, grade_frames
 
     try:
-        frames = list(proj.iter_frames(accepted_only=True))
-        report = grade_frames(frames, sensitivity=settings.auto_grade_sensitivity)
+        all_frames = list(proj.iter_frames())
+        accepted = [f for f in all_frames if f.accept]
+        # Frames auto-grade itself already rejected (machine decision, not a user
+        # override) still belong to its population — count them so the cap is
+        # cumulative across scans, not per-pass. Streak/QC/manual rejects are a
+        # different decision and stay out of auto-grade's denominator.
+        already = sum(
+            1 for f in all_frames
+            if not f.accept and not f.user_override
+            and (f.reject_reason or "").startswith("auto:grade")
+        )
+        # Denominator mirrors grade_frames' ``considered`` (non-override accepted)
+        # plus what we've already dropped — i.e. the original considered set.
+        considered_now = sum(1 for f in accepted if not f.user_override)
+        population = considered_now + already
+        if population <= 0:
+            return 0
+        # Same cap formula as grade_frames, applied cumulatively. On the first
+        # pass (already == 0) this equals grade_frames' own cap, so behaviour is
+        # unchanged; only re-grades are held to the running total.
+        budget = max(1, int(population * MAX_REJECT_FRACTION)) - already
+        if budget <= 0:
+            return 0
+        report = grade_frames(accepted, sensitivity=settings.auto_grade_sensitivity)
+        if len(report.recommendations) > budget:
+            report.recommendations = report.recommendations[:budget]
         changed = apply_grade_report(proj, report)
         if changed:
             log.info("Auto-grade rejected %d frame(s): %s", len(changed),
