@@ -43,6 +43,64 @@ def test_build_solve_arglist_skips_solved(tmp_path):
         proj.close()
 
 
+def test_build_solve_arglist_skips_deliberately_rejected_frames(tmp_path):
+    """A frame the user/QC/streak/auto-grade rejected can never enter the stack
+    (``run_stack`` combines only accepted+solved frames), so it must not be
+    re-plate-solved on every scan — that's pure wasted ASTAP time.
+
+    Regression: ``build_solve_arglist`` offered every frame without a ``wcs_json``
+    with no ``accept`` filter, so a rejected sub was re-solved from scratch each
+    scan even though it can never contribute to a stack.
+    """
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        paths = []
+        for name in ("a.fit", "b.fit", "c.fit"):
+            p = tmp_path / name
+            p.write_bytes(b"")
+            paths.append(p)
+        accepted = proj.add_frame(FrameRow(source_path=str(paths[0])))
+        user_reject = proj.add_frame(FrameRow(source_path=str(paths[1])))
+        grade_reject = proj.add_frame(FrameRow(source_path=str(paths[2])))
+        # Deliberate rejections (a manual reject and an auto-grade drop) — out for
+        # good, so never worth solving.
+        proj.update_frame(user_reject, accept=False, reject_reason="user")
+        proj.update_frame(grade_reject, accept=False, reject_reason="auto:grade:fwhm")
+
+        ids = [a[0] for a in build_solve_arglist(proj)]
+        assert accepted in ids               # accepted-unsolved → still offered
+        assert user_reject not in ids        # rejected → skipped (fail-before: offered)
+        assert grade_reject not in ids
+    finally:
+        proj.close()
+
+
+def test_build_solve_arglist_still_offers_solve_failed_frames(tmp_path):
+    """A frame whose *only* mark against it is a prior ``solve_failed:`` reason is
+    a genuine retry candidate (e.g. once the star database is installed), so it
+    must keep being offered even though ``accept`` may be 0 — skipping it would
+    strand a first-light user's whole library as un-solvable."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        pa = tmp_path / "a.fit"
+        pa.write_bytes(b"")
+        pb = tmp_path / "b.fit"
+        pb.write_bytes(b"")
+        retry = proj.add_frame(FrameRow(source_path=str(pa)))
+        rejected = proj.add_frame(FrameRow(source_path=str(pb)))
+        # A prior solve failure that left the frame accepted (the usual case) — and,
+        # defensively, even if some path set accept=0, a solve_failed:-only frame is
+        # still a retry candidate.
+        proj.update_frame(retry, accept=False, reject_reason="solve_failed:no star database")
+        proj.update_frame(rejected, accept=False, reject_reason="user")
+
+        ids = [a[0] for a in build_solve_arglist(proj)]
+        assert retry in ids                  # solve_failed: → still retried
+        assert rejected not in ids
+    finally:
+        proj.close()
+
+
 def test_solve_one_handles_missing_astap(tmp_path):
     """If ASTAP isn't installed, solve_one returns a clean error result."""
     fits = tmp_path / "x.fit"

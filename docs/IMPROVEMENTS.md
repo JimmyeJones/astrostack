@@ -4983,8 +4983,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   `qc_error_final` frames reports N; a healthy library reports 0 → line hidden. *(Feasibility: reuses existing
   reject_reason data, no new/heavy dependency, sane default, testable — passes §4's filter. Pairs naturally with the
   auto-stack pre-check-isolation bug filed this run, both in the walk-away-robustness theme.)*
-- **IMPROVEMENT IDEA (Scout 2026-07-23, spotted while fixing the v0.184.2 reject_reason-clobber bug) — stop
-  re-plate-solving deliberately-rejected frames on every scan.** *(Autonomy/efficiency + friendliness; size S.)*
+- ~~**IMPROVEMENT IDEA (Scout 2026-07-23, spotted while fixing the v0.184.2 reject_reason-clobber bug) — stop
+  re-plate-solving deliberately-rejected frames on every scan.**~~ — **SHIPPED v0.184.5** (Builder 2026-07-23,
+  branch `claude/pensive-faraday-rxd30t`; regression-tested). `build_solve_arglist` (`seestack/solve/runner.py`) now
+  skips `accept=False` frames whose reject reason does **not** start with `solve_failed:` — a deliberately-rejected
+  sub (user / QC / streak / auto-grade) can never enter the stack (`run_stack` combines only accepted+solved frames),
+  so re-solving it every scan was pure wasted ASTAP time. A `solve_failed:`-only frame is still offered (the genuine
+  retry candidate once a star DB is installed — `apply_solve_result_to_db` clears the reason on success), as is every
+  accepted-unsolved frame. Verified the sibling-hint path is unaffected: `fallback_solve_hint` seeds from all
+  *solved* frames (unchanged), and a skipped frame is unsolved so it was never a hint source. Regression:
+  `test_solve_runner.py::test_build_solve_arglist_skips_deliberately_rejected_frames` (user + auto-grade rejects no
+  longer offered; accepted-unsolved still is — fail-before: all offered) and
+  `::test_build_solve_arglist_still_offers_solve_failed_frames`. Pure arglist-filtering change, display-invisible,
+  no config/DB/API/default change; a restored (un-rejected) frame becomes eligible again as before.
+  _(Original idea kept for provenance.)_ *(Autonomy/efficiency + friendliness; size S.)*
   **Why:** `build_solve_arglist` (`seestack/solve/runner.py`) offers a frame to ASTAP whenever it has no `wcs_json`,
   with **no `accept` filter** — so a sub the user rejected, or that QC/streak/auto-grade dropped, is re-solved from
   scratch on *every* scan even though a rejected frame can never enter the stack (`run_stack` combines accepted **and**

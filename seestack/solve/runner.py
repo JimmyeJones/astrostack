@@ -181,6 +181,17 @@ def build_solve_arglist(
     for f in frames:
         if f.wcs_json:
             continue  # already solved
+        # A deliberately-rejected frame can never enter the stack (``run_stack``
+        # combines only accepted **and** solved frames), so re-plate-solving it on
+        # every scan is pure wasted ASTAP time — a real drag on a long night with
+        # many soft/cloudy subs the user (or QC/streak/auto-grade) dropped. Skip
+        # those. But keep offering a frame whose *only* mark against it is a prior
+        # ``solve_failed:`` reason: those are the genuine retry candidates once the
+        # star database is installed (``apply_solve_result_to_db`` clears the reason
+        # on success), and skipping them would strand a first-light user's whole
+        # library as un-solvable. Accepted-unsolved frames are offered as before.
+        if f.accept is False and not (f.reject_reason or "").startswith("solve_failed:"):
+            continue
         path = readable_frame_path(f)
         if not path:
             continue
