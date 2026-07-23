@@ -11,6 +11,7 @@ import { api, type Job } from "../api/client";
 import { QueryError } from "../components/QueryError";
 import { StackNoiseBadge } from "../components/StackNoiseBadge";
 import { thinStackWarning, type ThinStackWarning } from "../components/target/thinStack";
+import { rejectionNote } from "../components/target/rejectionNote";
 import { type EtaSample, etaLabel, updateEtaAnchor } from "../jobEta";
 import {
   isJobNotifyEnabled, notificationsSupported, requestNotificationPermission,
@@ -158,6 +159,7 @@ export function reprocessSummary(r: Record<string, unknown>): {
  * bare "done" and no idea where the result is (or why there isn't one). */
 export function processTargetSummary(r: Record<string, unknown>): {
   line: string; stacked: boolean; thin: ThinStackWarning | null;
+  cleaned: string | null;
 } {
   const stacked = Boolean(r.stacked);
   const solved = Number(r.solved_accepted ?? 0);
@@ -172,7 +174,17 @@ export function processTargetSummary(r: Record<string, unknown>): {
     // the Jobs page would otherwise cheerfully report a green "Stacked 1 frame"
     // with a View-result link and no hint the picture is just noise. Surface the
     // same honest heads-up the Target page shows, right where the result lands.
-    return { line: `${line}.`, stacked, thin: thinStackWarning(used) };
+    const thin = thinStackWarning(used);
+    // Name the invisible outlier-rejection clean-up (e.g. the lone satellite/
+    // plane trail a small walk-away auto-stack removed with min/max) — the honest
+    // counterpart to "some frames were left out". Omit it on a thin stack, where
+    // the "this is basically one noisy sub" warning is the message that matters.
+    const cleaned = thin ? null : rejectionNote(
+      typeof stack.rejection_mode === "string" ? stack.rejection_mode : null,
+      typeof stack.rejection_fraction === "number" ? stack.rejection_fraction : null,
+      Number(stack.n_frames_used ?? 0) || null,
+    );
+    return { line: `${line}.`, stacked, thin, cleaned };
   }
   const reason = typeof r.stack_skipped_reason === "string"
     ? r.stack_skipped_reason : null;
@@ -185,7 +197,7 @@ export function processTargetSummary(r: Record<string, unknown>): {
   } else {
     line = "Finished, but no stack was produced.";
   }
-  return { line, stacked, thin: null };
+  return { line, stacked, thin: null, cleaned: null };
 }
 
 /** Plain-language outcome of a finished "Build master" job (pure, tested). A
@@ -215,7 +227,7 @@ function JobResultActions({ job }: { job: Job }) {
   if (job.state !== "done" || !job.result) return null;
   const r = job.result as Record<string, unknown>;
   if (job.kind === "process_target") {
-    const { line, stacked, thin } = processTargetSummary(r);
+    const { line, stacked, thin, cleaned } = processTargetSummary(r);
     // Deep-link straight to the finished run's editor when we know its id
     // (v0.85.3+ backend); fall back to the target's History on an older backend.
     const stack = r.stack && typeof r.stack === "object"
@@ -236,6 +248,11 @@ function JobResultActions({ job }: { job: Job }) {
             title="Very few frames stacked">
             <Text size="xs">{thin.message}</Text>
           </Alert>
+        ) : null}
+        {/* The honest "we quietly removed the trails" trust cue — self-omits on a
+            thin stack (warning wins) and when no rejection pass cleaned anything. */}
+        {cleaned ? (
+          <Text size="xs" c="dimmed">{cleaned}</Text>
         ) : null}
         {/* The satisfying "stacking cut your noise ~N×" payoff, right where the
             finished picture lands (self-omits for a thin stack — small ratio). */}

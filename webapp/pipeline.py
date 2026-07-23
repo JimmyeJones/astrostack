@@ -1703,6 +1703,12 @@ def _stack_target(
         # than raising; the real StackResult always carries them.
         "n_offered": getattr(result, "n_offered", 0),
         "n_align_failed": getattr(result, "n_align_failed", 0),
+        # The outlier-rejection tally, so the Jobs "Process target" result can
+        # name the invisible clean-up (e.g. a lone satellite/plane trail that a
+        # walk-away small-stack auto-picked min/max removed) right where the
+        # finished picture lands. None/None when no rejection pass ran.
+        "rejection_mode": getattr(result, "rejection_mode", None),
+        "rejection_fraction": getattr(result, "rejection_fraction", None),
     }
 
 

@@ -142,11 +142,32 @@ def test_stack_leaves_rejection_tally_null_for_a_plain_mean(tmp_path):
     clean-up to claim, so the health card stays quiet about it."""
     proj = _build_project(tmp_path, n=4)
     try:
-        run_stack(proj, StackOptions(sigma_clip=False, min_max_reject=False,
-                                     max_workers=2, output_name="mean"))
+        res = run_stack(proj, StackOptions(sigma_clip=False, min_max_reject=False,
+                                           max_workers=2, output_name="mean"))
         run = next(iter(proj.iter_stack_runs()))
         assert run.rejection_fraction is None
         assert run.rejection_mode is None
+        # The StackResult mirrors the persisted NULLs, so the Jobs summary shows
+        # no clean-up note either.
+        assert res.rejection_mode is None
+        assert res.rejection_fraction is None
+    finally:
+        proj.close()
+
+
+def test_stack_result_mirrors_the_persisted_rejection_tally(tmp_path):
+    """The StackResult carries the same rejection mode/fraction that lands on the
+    ``stack_runs`` row, so a caller (the Jobs "Process target" result) can name
+    the clean-up without re-reading the run record — and can never disagree with
+    the persisted tally the History card reads."""
+    proj = _build_project(tmp_path, n=5, with_outlier=True)
+    try:
+        res = run_stack(proj, StackOptions(sigma_clip=True, max_workers=2,
+                                           output_name="clip"))
+        run = next(iter(proj.iter_stack_runs()))
+        assert res.rejection_mode == run.rejection_mode == "sigma-clip"
+        assert res.rejection_fraction == run.rejection_fraction
+        assert res.rejection_fraction is not None
     finally:
         proj.close()
 
