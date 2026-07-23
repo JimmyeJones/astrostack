@@ -120,7 +120,7 @@ def _verdict(dropped: int, used: int, unsolved: int = 0,
     frames), the headline names *that* cause and its fix instead of the vague
     generic — the specific cause is the thing the beginner can act on. A genuinely
     mixed night (no single dominant bucket) keeps the generic reassurance."""
-    if unsolved > 0 and unsolved >= max(1, used):
+    if unsolved > 0 and unsolved > used:
         return {"tone": "warn",
                 "text": "Most of your subs haven't been located in the sky yet, "
                         "so only a few made the stack — it will look noisy. Run "
