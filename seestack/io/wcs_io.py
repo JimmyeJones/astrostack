@@ -44,6 +44,35 @@ def wcs_from_text(text: str | None):
         return None
 
 
+def wcs_center_deg_from_text(text: str | None) -> tuple[float, float] | None:
+    """The reference-point (CRVAL) RA/Dec in degrees from a stored WCS text blob.
+
+    ASTAP writes its solution with the reference pixel (CRPIX) at the image
+    centre, so CRVAL1/CRVAL2 are the frame's centre coordinates — the very values
+    :func:`seestack.solve.astap._parse_astap_ini` reads from the ``.ini`` sidecar.
+    This lets a solved frame's centre be recovered from the ``.wcs`` sidecar when
+    the ``.ini`` is missing or unparseable, so the frame stays eligible as the
+    stack reference and as a sibling plate-solve hint (both require a centre)
+    rather than becoming a solved-but-centreless orphan. Returns ``None`` when the
+    text carries no usable celestial reference point.
+    """
+    wcs = wcs_from_text(text)
+    if wcs is None:
+        return None
+    try:
+        cel = wcs.celestial
+        if not cel.has_celestial:
+            return None
+        ra = float(cel.wcs.crval[0])
+        dec = float(cel.wcs.crval[1])
+        if not (math.isfinite(ra) and math.isfinite(dec)):
+            return None
+        return ra, dec
+    except Exception as exc:  # noqa: BLE001 — a malformed WCS just means "no centre"
+        log.warning("WCS centre extraction failed: %s", exc)
+        return None
+
+
 def wcs_text_from_sidecar(wcs_path: str | Path) -> str | None:
     """Read an ASTAP ``.wcs`` sidecar file and return its FITS header as text."""
     wcs_path = Path(wcs_path)

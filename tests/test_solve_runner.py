@@ -94,6 +94,81 @@ def test_solve_one_with_mock_solver(tmp_path):
     assert result.error is None
 
 
+def test_solve_one_backfills_centre_from_wcs_when_ini_unparseable(tmp_path):
+    """ASTAP solved (valid ``.wcs``) but its ``.ini`` didn't yield a centre → the
+    centre is recovered from the ``.wcs`` sidecar rather than left None.
+
+    Regression: ``_parse_astap_ini`` raising (missing/garbled ``.ini``) left
+    ``ra/dec_center_deg`` None while ``solved`` stayed True and the WCS was valid,
+    so the frame stacked but was silently barred from being the reference frame and
+    from seeding sibling plate-solve hints, and was never re-offered to fill it in.
+    The CRVAL centre lives in the ``.wcs`` sidecar, so it must be backfilled."""
+    pytest.importorskip("astropy")
+    import numpy as np
+    from astropy.wcs import WCS
+
+    fits = tmp_path / "x.fit"
+    fits.write_bytes(b"")
+    sidecar = tmp_path / "x.wcs"
+    sidecar.write_bytes(b"")  # presence is enough for the wrapper
+
+    # A real WCS text blob whose CRVAL is the frame centre (as ASTAP writes it).
+    w = WCS(naxis=2)
+    w.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+    w.wcs.crval = [149.75, 69.06]
+    w.wcs.crpix = [960.5, 540.5]
+    w.wcs.cdelt = np.array([-2.5 / 3600.0, 2.5 / 3600.0])
+    wcs_text = str(w.to_header(relax=True))
+
+    # ASTAP "solved" but the .ini parse failed → centre came back None.
+    fake_result = ASTAPResult(
+        fits_path=fits, wcs_sidecar_path=sidecar,
+        ra_center_deg=None, dec_center_deg=None,
+        pixscale_arcsec=None, rotation_deg=None,
+        solved=True, log_tail="",
+    )
+
+    class FakeSolver:
+        def __init__(self, *a, **kw):
+            pass
+
+        def solve(self, _path, **_kw):
+            return fake_result
+
+    with patch("seestack.solve.runner.ASTAPSolver", FakeSolver), \
+         patch("seestack.io.wcs_io.wcs_text_from_sidecar", return_value=wcs_text):
+        result = solve_one(9, str(fits))
+
+    assert result.solved is True
+    assert result.wcs_text == wcs_text
+    # The centre is recovered from the WCS, not left None.
+    assert result.ra_center_deg == pytest.approx(149.75, abs=1e-6)
+    assert result.dec_center_deg == pytest.approx(69.06, abs=1e-6)
+
+
+def test_solve_one_backfilled_centre_makes_frame_reference_eligible(tmp_path):
+    """The backfilled centre flows through to the DB so the frame is reference-
+    and sibling-hint-eligible (both require non-None centres)."""
+    from seestack.solve.runner import fallback_solve_hint
+
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        fid = proj.add_frame(FrameRow(source_path="x.fit"))
+        apply_solve_result_to_db(proj, SolveResult(
+            frame_id=fid, fits_path="x.fit", solved=True,
+            wcs_text="CRVAL1=1.0", ra_center_deg=149.75, dec_center_deg=69.06,
+            pixscale_arcsec=None, rotation_deg=None, error=None,
+        ))
+        f = proj.get_frame(fid)
+        assert f is not None
+        assert f.ra_center_deg == pytest.approx(149.75)
+        assert f.dec_center_deg == pytest.approx(69.06)
+        # A non-None centre is what fallback_solve_hint needs to seed siblings.
+        assert fallback_solve_hint([f]) is not None
+    finally:
+        proj.close()
+
+
 def test_apply_solve_result_writes_db(tmp_path):
     proj = Project.create(tmp_path / "p", name="t")
     try:

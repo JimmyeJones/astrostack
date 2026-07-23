@@ -858,11 +858,20 @@ when you take it.
   at the same path in no-cache mode, re-ingests, and asserts `wcs_json`/hints were cleared. Confidence: traced
   (gating + default verified end-to-end: `config.py:65` False → `pipeline.py:66` → `ingest.py:194` guard).
 
-- **A plate-solve that succeeds but whose ASTAP `.ini` sidecar doesn't parse is persisted as "solved" with a valid
+- ~~**A plate-solve that succeeds but whose ASTAP `.ini` sidecar doesn't parse is persisted as "solved" with a valid
   `wcs_json` but NULL centre coordinates — the frame stacks yet is silently barred from being the reference frame and
-  from seeding sibling plate-solve hints, and is never re-offered to recover its centre.** *(Stacking/solve
-  correctness — data-completeness; Low–Medium latent, ASTAP-config-dependent; found by the 2026-07-23 QC/solve
-  adversarial audit — traced + reproduced.)* `ASTAPSolver._solve_once` (`seestack/solve/astap.py:286-304`) sets
+  from seeding sibling plate-solve hints, and is never re-offered to recover its centre.**~~ — **FIXED v0.184.1**
+  (Builder 2026-07-23, branch `claude/pensive-faraday-2nhbq9`; traced + regression-tested). `solve_one`
+  (`seestack/solve/runner.py`) now backfills the centre from the `.wcs` sidecar when ASTAP solved but the `.ini`
+  yielded no centre: a new `wcs_io.wcs_center_deg_from_text` reads CRVAL1/CRVAL2 (ASTAP writes CRPIX at the image
+  centre, so CRVAL *is* the centre — the same coordinates `_parse_astap_ini` would have returned), so the frame keeps
+  a non-None `ra/dec_center_deg` and stays eligible as the stack reference and as a sibling plate-solve hint instead of
+  being a solved-but-centreless orphan. Regression: `tests/test_solve_runner.py::
+  test_solve_one_backfills_centre_from_wcs_when_ini_unparseable` (mocked ASTAP: solved + valid `.wcs` + null `.ini`
+  centre → recovered centre; fail-before: None) and `…_makes_frame_reference_eligible` (backfilled centre → `fallback_
+  solve_hint` non-None), plus two `tests/test_wcs_io.py` unit cases for the helper. Upgrade-safe: additive read-only
+  helper + a backfill in the solve driver; no config/DB-schema/API-shape/on-disk/default change. Confidence: traced +
+  regression-tested. *(Original trace kept below for provenance.)* `ASTAPSolver._solve_once` (`seestack/solve/astap.py:286-304`) sets
   `solved = returncode == 0 and wcs_sidecar.exists()`, then reads the centre **only** from the `.ini` via
   `_parse_astap_ini` (`astap.py:373`, `values["CRVAL1"]`). If the `.ini` is missing or lacks `CRVAL1`/`CRVAL2`, the
   `KeyError` is swallowed (`astap.py:292`) and `ra/dec` come back `None` **while `solved` stays `True`**. `solve_frame`
@@ -915,9 +924,21 @@ when you take it.
   Confidence: traced (cache-key gap + no invalidation on the refresh path both read directly; source-reuse consequence
   is a direct logical consequence; the truncated-preview sub-trigger is noted but unverified).
 
-- **The History "Adjust" stretch suggestion opens the sliders ~2× brighter than the STF gallery/History thumbnail it
-  claims to match — it targets sky→0.10 while the stored STF preview targets sky→0.06.** *(Render / preview-parity —
-  broken-UX; Low; found by the 2026-07-23 render audit — reproduced.)* The `…/stack-runs/{id}/render-suggestion`
+- ~~**The History "Adjust" stretch suggestion opens the sliders ~2× brighter than the STF gallery/History thumbnail it
+  claims to match — it targets sky→0.10 while the stored STF preview targets sky→0.06.**~~ — **FIXED v0.184.2**
+  (Builder 2026-07-23, branch `claude/pensive-faraday-2nhbq9`; reproduced + regression-tested). The render-suggestion
+  endpoint (`webapp/routers/stack.py`) now seeds `suggest_asinh_stretch` with the *export* sky target instead of the
+  editor's brighter default, so opening Adjust starts on the History/Gallery thumbnail's look rather than jumping ~2×
+  brighter. The export grey `0.06` is now a named shared constant `EXPORT_AUTOSTRETCH_TARGET_BG`
+  (`seestack/stack/output.py`, used by `_autostretch_for_export`) so the thumbnail and the Adjust anchor can't drift
+  apart again; the endpoint imports it and returns it as `target_bg`. The editor's own stretch suggestion
+  (`webapp/routers/editor.py`) still uses `STRETCH_TARGET_BG=0.10` — its preview surface is a different render.
+  Regression: `tests/test_edit_stretch.py::test_export_anchored_suggestion_matches_the_thumbnail_sky` (the export-anchored
+  suggestion lands the sky within 0.03 of `_autostretch_for_export`'s sky, while the old 0.10 anchor lands it clearly
+  brighter) and updated `tests/webapp/test_stack_render.py::test_render_suggestion_anchors_sliders_to_the_data`
+  (`target_bg == EXPORT_AUTOSTRETCH_TARGET_BG`; fails before). Upgrade-safe: additive named constant + which target the
+  endpoint passes; no config/DB/API-shape/on-disk change (the field already existed, its value moved 0.10→0.06).
+  Confidence: reproduced. *(Original trace kept below for provenance.)* The `…/stack-runs/{id}/render-suggestion`
   endpoint (`webapp/routers/stack.py:~700`) seeds the Adjust sliders via `suggest_asinh_stretch`
   (`seestack/edit/stretch.py`), whose default `target_bg = STRETCH_TARGET_BG = 0.10` (`stretch.py:49`). But the stored
   linear-run thumbnail a beginner clicks (History/Gallery) is rendered by `generate_thumbnail` →

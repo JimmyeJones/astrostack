@@ -401,14 +401,22 @@ def _to_uint16_linear(rgb: np.ndarray) -> np.ndarray:
     return (norm * 65535.0).astype(np.uint16)
 
 
+#: The display-space sky-background grey the saved preview/export lands the stack's
+#: sky median at (~6% grey). This is the look a beginner sees on the History and
+#: Gallery thumbnails, so the History "Adjust" asinh suggestion anchors to the same
+#: target (see ``webapp/routers/stack.py``) — keeping the two named as one constant
+#: stops the suggestion drifting brighter/darker than the thumbnail it claims to match.
+EXPORT_AUTOSTRETCH_TARGET_BG = 0.06
+
+
 def _autostretch_for_export(rgb: np.ndarray) -> np.ndarray:
     """
     Conservative export stretch — much milder than the GUI preview thumbnail.
 
     The thumbnail uses ``target_bg=0.20`` because it has to be visible at a
     glance in a small panel. For a full-resolution saved file we want sky at
-    ~6% grey, with deeper shadows clipped (sigma_factor=-2.8) so noise
-    doesn't dominate the histogram.
+    ~6% grey (:data:`EXPORT_AUTOSTRETCH_TARGET_BG`), with deeper shadows clipped
+    (sigma_factor=-2.8) so noise doesn't dominate the histogram.
 
     NaN (uncovered mosaic canvas) is passed straight through — ``autostretch``
     is nan-aware and computes its per-channel statistics over covered pixels
@@ -418,7 +426,8 @@ def _autostretch_for_export(rgb: np.ndarray) -> np.ndarray:
     from seestack.render.thumbnail import autostretch
 
     return autostretch(
-        rgb.astype(np.float32, copy=False), target_bg=0.06, sigma_factor=-2.8,
+        rgb.astype(np.float32, copy=False),
+        target_bg=EXPORT_AUTOSTRETCH_TARGET_BG, sigma_factor=-2.8,
     )
 
 

@@ -11,6 +11,7 @@ from seestack.io.wcs_io import (  # noqa: E402
     _extent_from_scale_matrix,
     canvas_extent_from_fits,
     footprint_radec_deg,
+    wcs_center_deg_from_text,
     wcs_dict_rescaled_to_preview,
     wcs_from_text,
     wcs_text_from_sidecar,
@@ -47,6 +48,24 @@ def test_wcs_from_text_handles_empty():
     # Note: astropy's WCS is very permissive about malformed headers (it just
     # fills in defaults) so we don't try to test rejection of garbage strings —
     # the contract is "no exception, returns *something or None*".
+
+
+def test_wcs_center_deg_from_text_reads_the_reference_point():
+    """The CRVAL centre is recovered from a WCS text blob — the same coordinates
+    ASTAP's ``.ini`` reports — so a solved frame whose ``.ini`` didn't parse can
+    still have its centre backfilled from the ``.wcs`` sidecar."""
+    w = _make_simple_wcs(ra_deg=200.7, dec_deg=-33.2)
+    centre = wcs_center_deg_from_text(wcs_to_text(w))
+    assert centre is not None
+    ra, dec = centre
+    assert ra == pytest.approx(200.7, abs=1e-6)
+    assert dec == pytest.approx(-33.2, abs=1e-6)
+
+
+def test_wcs_center_deg_from_text_handles_no_wcs():
+    """Empty/garbage input yields None rather than raising or inventing a centre."""
+    assert wcs_center_deg_from_text(None) is None
+    assert wcs_center_deg_from_text("") is None
 
 
 def test_footprint_radec_deg_orientation():
