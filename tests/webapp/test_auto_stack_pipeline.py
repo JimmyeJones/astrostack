@@ -53,6 +53,96 @@ def test_auto_stack_runs_for_solved_targets(solved_library, monkeypatch):
     assert not summary.get("stack_errors")
 
 
+def _first_stackable(lib) -> str | None:
+    for entry in lib.list_targets():
+        proj = lib.open_target(entry.safe_name)
+        try:
+            if pipeline._solved_accepted_count(proj) > 0:
+                return entry.safe_name
+        finally:
+            proj.close()
+    return None
+
+
+def _capture_opts(monkeypatch):
+    captured: dict = {}
+
+    def fake_run_stack(proj, opts, *, progress=None, cancel=None,
+                       memory_budget_gb=None, app_version=None):  # noqa: ANN001
+        captured["opts"] = opts
+        return SimpleNamespace(
+            output_dir="/tmp/x", run_id=1, n_frames_used=3, canvas_shape=(1, 1, 3),
+            cancelled=False, errors=[], excluded_frames=[],
+            n_offered=3, n_align_failed=0,
+        )
+
+    monkeypatch.setattr("seestack.stack.stacker.run_stack", fake_run_stack)
+    return captured
+
+
+def test_walk_away_stack_turns_on_auto_reject(solved_library, monkeypatch):
+    # A walk-away stack (watcher / Process target) where the user made no rejection
+    # choice should hand the engine ``auto_reject=True`` so a small stack gets
+    # order-statistic min/max — the only method that removes a lone satellite/plane
+    # trail below the ~11-frame κ-σ threshold — with zero user decisions.
+    captured = _capture_opts(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = _first_stackable(lib)
+        assert safe is not None
+        pipeline._stack_target(
+            _settings(solved_library), _FakeJM(), Job(kind="stack"), lib, safe,
+            auto=True)
+    finally:
+        lib.close()
+    assert captured["opts"].auto_reject is True
+
+
+def test_manual_stack_leaves_auto_reject_off(solved_library, monkeypatch):
+    # The manual Stack form (auto=False, explicit options) must be honoured verbatim:
+    # no auto_reject is injected, so the engine runs the default κ-σ path unchanged.
+    captured = _capture_opts(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = _first_stackable(lib)
+        assert safe is not None
+        pipeline._stack_target(
+            _settings(solved_library), _FakeJM(), Job(kind="stack"), lib, safe,
+            options={})
+    finally:
+        lib.close()
+    assert captured["opts"].auto_reject is False
+    assert captured["opts"].sigma_clip is True
+
+
+def test_walk_away_respects_an_explicit_saved_rejection_default(solved_library, monkeypatch):
+    # If the user saved a per-target default with an explicit rejection method, the
+    # walk-away path must respect it and NOT override with auto_reject.
+    import json
+
+    captured = _capture_opts(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = _first_stackable(lib)
+        assert safe is not None
+        proj = lib.open_target(safe)
+        try:
+            proj.set_meta(
+                pipeline.STACK_DEFAULTS_META_KEY,
+                json.dumps({"min_max_reject": True, "sigma_clip": False}),
+            )
+        finally:
+            proj.close()
+        pipeline._stack_target(
+            _settings(solved_library), _FakeJM(), Job(kind="stack"), lib, safe,
+            auto=True)
+    finally:
+        lib.close()
+    assert captured["opts"].auto_reject is False
+    assert captured["opts"].min_max_reject is True
+    assert captured["opts"].sigma_clip is False
+
+
 def test_auto_stack_skips_already_stacked(solved_library, monkeypatch):
     calls = _patch_run_stack(monkeypatch)
     lib = Library.open_or_create(solved_library / "library")

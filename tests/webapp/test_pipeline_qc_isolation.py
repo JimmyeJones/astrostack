@@ -47,7 +47,8 @@ def test_qc_target_failure_isolated_and_autostack_still_runs(solved_library, mon
 
     stacked: list[str] = []
 
-    def fake_stack_target(settings, jm, job, lib, safe, *, auto_bind_calibration=False):  # noqa: ANN001
+    def fake_stack_target(settings, jm, job, lib, safe, *,
+                          auto_bind_calibration=False, auto=False):  # noqa: ANN001
         stacked.append(safe)
         return {"run_id": None}
 
