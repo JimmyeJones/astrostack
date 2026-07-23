@@ -4,7 +4,7 @@ import {
   Table, TagsInput, Text, Textarea, Title, Tooltip,
 } from "@mantine/core";
 import {
-  IconAlertTriangle, IconArrowBackUp, IconCheck, IconDeviceFloppy, IconHistory,
+  IconAlertTriangle, IconArrowBackUp, IconCheck, IconClock, IconDeviceFloppy, IconHistory,
   IconNotes, IconPhoto, IconPhotoDown, IconSparkles, IconStack2, IconTelescope,
   IconTargetArrow, IconWand, IconX,
 } from "@tabler/icons-react";
@@ -383,6 +383,25 @@ export function TargetView() {
     () => thinStackWarning(latestRun?.n_frames_used),
     [latestRun],
   );
+  // When walk-away Auto-stack is on, it now holds a target back rather than
+  // publishing a 1-2 frame single-frame-speckle "master" (see auto_stack_min_frames
+  // — v0.183.0). A held target produces no stack, so without this it looks like
+  // nothing is happening. Read the two relevant settings and, when the target is
+  // sitting below the floor with subs still waiting to be located, say so plainly
+  // and point at the fix (plate-solve). Display-only.
+  const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
+  const heldForSolve = useMemo(() => {
+    if (!settings.data || settings.data.auto_stack !== true) return null;
+    const floor = Number(settings.data.auto_stack_min_frames ?? 3);
+    if (!Number.isFinite(floor) || floor <= 1) return null;
+    const accepted = target.data?.n_frames_accepted ?? 0;
+    const solvedAccepted = Math.max(0, accepted - unsolvedCount);
+    // Only "waiting" when we're below the floor, more subs are still unsolved
+    // (so locating them would lift us over it), and no healthy stack exists yet.
+    const haveHealthyStack = (latestRun?.n_frames_used ?? 0) >= floor;
+    if (solvedAccepted >= floor || unsolvedCount <= 0 || haveHealthyStack) return null;
+    return { located: solvedAccepted, floor };
+  }, [settings.data, target.data, unsolvedCount, latestRun]);
 
   const patch = useMutation({
     mutationFn: ({ id, body }: { id: number; body: Record<string, unknown> }) =>
@@ -794,6 +813,27 @@ export function TargetView() {
               {mixedPointings.minorityIds.length === 1 ? "" : "s"}
             </Button>
           ) : null}
+        </Alert>
+      ) : null}
+      {heldForSolve ? (
+        <Alert
+          color="blue"
+          variant="light"
+          icon={<IconClock size={18} />}
+          title="Auto-stack is waiting for more of your subs to be located"
+        >
+          <Text size="sm">
+            {heldForSolve.located === 0
+              ? "None of your accepted subs have been located (plate-solved) yet"
+              : `Only ${heldForSolve.located} of your accepted subs `
+                + `${heldForSolve.located === 1 ? "has" : "have"} been located `
+                + "(plate-solved) so far"}
+            {`, so the hands-off auto-stack is holding off rather than making a `
+              + `picture out of one or two frames (that would just be noise). It `
+              + `will stack automatically once at least ${heldForSolve.floor} subs `
+              + `are located — run Plate Solve to locate more, or use "Stack" / `
+              + `"Process this target" to make one now anyway.`}
+          </Text>
         </Alert>
       ) : null}
       {thinStack ? (

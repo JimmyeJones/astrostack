@@ -504,7 +504,27 @@ when you take it.
   minimum-frames guard that surfaces "only N of M subs could be stacked because …" in the auto/Process job
   summary). The repro scaffold (`scratchpad/repro_thin.py`, bg-noise-vs-N) is the harness to extend. Keep this
   entry at the top until the frame-count root cause is fixed.
-  **▶ CODE LOCATION for the minimum-frames-guard half (Scout 2026-07-23 watcher/ingest audit, traced):** there is
+  **▶ MINIMUM-FRAMES GUARD SHIPPED v0.183.0 (Builder 2026-07-23, branch `claude/pensive-faraday-sioj6f`;
+  regression-tested).** The unattended walk-away auto-stack now **holds a thin target back instead of publishing
+  single-frame speckle.** New setting `auto_stack_min_frames` (`webapp/config.py`, default **3**, `ge=1 le=1000`):
+  in the auto-stack scan loop (`webapp/pipeline.py::_pipeline_body`), a target whose solved+accepted count is below
+  the floor is recorded under a new `auto_stack_held_thin` job-summary bucket and skipped **without** marking the
+  `AUTO_STACK_ATTEMPT_META_KEY` — so the next scan re-checks it and it auto-stacks the moment enough subs solve (the
+  growing-session case is only delayed, never stranded). Default 3 blocks the owner's exact 1-frame (and 2-frame)
+  gibberish while still letting a real small stack through; set to 1 to restore the old stack-from-the-first-solved-
+  frame behaviour. **Only the hands-off scan is gated** — the interactive Stack form and the one-click "Process
+  target" button still stack whatever the user explicitly asks for (Process already shows the thin-stack warning on
+  its result, v0.159.6). Surfaced in the Settings UI (a "minimum located subs" NumberInput under Auto-stack, disabled
+  until Auto-stack is on). Regression: `tests/webapp/test_auto_stack_pipeline.py` (+2 — a 2-solved-frame target is
+  held then stacks once back at 3; `auto_stack_min_frames=1` restores single-frame stacking) and
+  `tests/webapp/test_config_upgrade.py` (+1 — the floor defaults to 3 from an old config). Upgrade-safe: additive
+  setting with a default, control-flow-only pipeline change, no DB/API-shape/on-disk change. **This closes the
+  minimum-frames-guard half of the ⭐⭐ bug.** What remains for a future run: (a) the *root-cause* half still needs
+  the owner's real faint-field data to localise which stage (ASTAP solve-rate vs auto-grade vs streak) over-drops;
+  (b) ~~surface an explicit "held for more located subs" status on the *Target page*~~ **DONE v0.184.0** — the Target
+  page now shows a blue "Auto-stack is waiting for more of your subs to be located" note when a target sits below the
+  floor with subs still unsolved (the Jobs-page legibility half remains, filed under Autonomy ideas).
+  *(Original Scout trace kept for provenance.)* there is
   **no floor anywhere in the auto-stack chain** — `_auto_stack_frame_count` (`webapp/pipeline.py`, the count that
   gates auto-stack) skips only `solved_accepted == 0`, returning *any* count `≥ 1`; the auto-stack loop then
   stacks whatever it returns, and `run_stack` (`seestack/stack/stacker.py`, ~line 822) itself accepts
@@ -4742,6 +4762,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+- **IMPROVEMENT IDEA (Builder 2026-07-23, follow-up to the v0.183.0 minimum-frames guard) — make the walk-away
+  auto-stack's "held for more located subs" state VISIBLE to a beginner. Target-page half SHIPPED v0.184.0; Jobs-page
+  half still open.** *(Friendliness pillar, PRIORITY 3; size S–M; frontend-only, additive.)* **Why:** v0.183.0 stops
+  the hands-off auto-stack from publishing 1–2 frame single-frame speckle by holding a thin target back
+  (`auto_stack_held_thin` in the scan job summary) until enough subs plate-solve. That fixes the *wrong-result* half,
+  but the held-back state was silent in the UI — a beginner who turned Auto-stack on and saw no picture had to infer
+  why. **(a) Target page — SHIPPED v0.184.0** (Builder, branch `claude/pensive-faraday-sioj6f`): the Target route now
+  fetches `/api/settings` and, when Auto-stack is on, the target has no healthy stack, its solved+accepted count is
+  below `auto_stack_min_frames`, and unsolved subs remain, shows a blue info Alert — *"Auto-stack is waiting for more
+  of your subs to be located … Only N of your accepted subs have been located … it will stack automatically once at
+  least K subs are located — run Plate Solve to locate more, or use Stack / Process this target to make one now
+  anyway."* Regression: `Target.test.tsx` (+2 — the waiting note fires on a 2-of-202-solved target with Auto-stack on;
+  hidden when Auto-stack is off). **(b) Jobs page — STILL OPEN:** the auto pipeline/scan job summary already carries
+  `auto_stacked` / `auto_stack_skipped` / `auto_stack_held_thin`, but the frontend renders *none* of them, so a
+  walk-away scan is still an opaque "done". A small `pipeline`-job result renderer ("Auto-stacked M targets · held N
+  for more subs · skipped K") would make the hands-off pass legible. **Sane default:** display-only, no behaviour
+  change. **Feasibility:** clears the beginner bar and is additive/reversible.
 - **IMPROVEMENT IDEA (Scout 2026-07-23, targets the ⭐⭐ top bug's root cause) — auto-retry a failed plate-solve with
   progressively relaxed ASTAP parameters on faint/sparse fields before giving up, so more subs get located and the
   auto-stack combines more frames instead of shipping a thin/gibberish result.** *(Autonomy + image-quality pillar,

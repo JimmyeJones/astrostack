@@ -76,6 +76,23 @@ class Settings(BaseModel):
     # finished picture instead of a flat linear master. Best-effort per target —
     # a failed auto-edit never sinks the stack. Requires ``auto_stack``.
     auto_edit_on_autostack: bool = False
+    # Minimum solved+accepted frames before the *unattended* walk-away auto-stack
+    # will produce (and, with ``auto_edit_on_autostack``, publish) a master. A
+    # faint / sparse-star field where ASTAP fails to plate-solve most subs can
+    # leave just one or two frames located; auto-stacking that lone sub yields a
+    # single-frame "master" that is nothing but per-pixel colour speckle (the
+    # owner-reported gibberish) — and, once auto-edited, gets stretched and served
+    # as a finished picture. With a floor >1 the target is instead held back with
+    # an honest "waiting for more located subs" status; it auto-stacks as soon as
+    # enough subs solve (the re-stack guard re-checks every scan), so a growing
+    # session is only delayed, never stranded. Default 3 blocks the worst
+    # single/near-single speckle while still letting a small-but-real stack
+    # through; raise it (e.g. 5) to wait for a cleaner first look, or set it to 1
+    # to restore the old stack-from-the-first-solved-frame behaviour. Only the
+    # hands-off auto-stack scan is gated — the interactive Stack form and the
+    # one-click "Process target" button still stack whatever the user explicitly
+    # asks for.
+    auto_stack_min_frames: int = Field(default=3, ge=1, le=1000)
     # When an *unattended* stack (watcher auto-stack, one-click "Process target",
     # or library-wide "Reprocess everything") has no calibration masters chosen,
     # auto-bind the library's best *confidently-matching* master dark/flat/bias to

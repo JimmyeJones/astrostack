@@ -982,6 +982,71 @@ describe("TargetView reject breakdown + undo", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("tells the user when hands-off auto-stack is waiting for more subs to be located", async () => {
+    // Owner's faint-field case: 202 accepted subs, only 2 plate-solved. With
+    // Auto-stack on and the v0.183.0 minimum-frames floor at 3, the walk-away
+    // pass holds the target back instead of publishing a 2-frame speckle master —
+    // so the page must say so plainly rather than looking idle.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ n_frames: 202, n_frames_accepted: 202 }),
+    );
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);  // no stack yet
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    vi.spyOn(client.api, "getSettings").mockResolvedValue({
+      auto_stack: true, auto_stack_min_frames: 3,
+      resolved_incoming_dir: "/in", resolved_library_root: "/lib",
+    });
+    vi.spyOn(client.api, "rejectSummary").mockResolvedValue({
+      counts: {}, total: 0,
+      summary: {
+        used: 2, dropped: 200, dropped_fraction: 200 / 202,
+        verdict: { tone: "warn", text: "Run Plate Solve so the rest can be added." },
+        buckets: [
+          { key: "unsolved", label: "Not located in the sky yet", count: 200, note: "Run Plate Solve." },
+        ],
+      },
+    });
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Auto-stack is waiting for more of your subs to be located"),
+      ).toBeInTheDocument());
+    expect(screen.getByText(/Only 2 of your accepted subs have been located/))
+      .toBeInTheDocument();
+    expect(screen.getByText(/at least 3 subs are located/)).toBeInTheDocument();
+  });
+
+  it("does not show the auto-stack waiting note when Auto-stack is off", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ n_frames: 202, n_frames_accepted: 202 }),
+    );
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    vi.spyOn(client.api, "getSettings").mockResolvedValue({
+      auto_stack: false, auto_stack_min_frames: 3,
+      resolved_incoming_dir: "/in", resolved_library_root: "/lib",
+    });
+    vi.spyOn(client.api, "rejectSummary").mockResolvedValue({
+      counts: {}, total: 0,
+      summary: {
+        used: 2, dropped: 200, dropped_fraction: 200 / 202,
+        verdict: { tone: "warn", text: "Run Plate Solve." },
+        buckets: [
+          { key: "unsolved", label: "Not located in the sky yet", count: 200, note: "Run Plate Solve." },
+        ],
+      },
+    });
+
+    renderTarget();
+
+    await waitFor(() => expect(screen.getByText("202/202 accepted")).toBeInTheDocument());
+    expect(
+      screen.queryByText(/Auto-stack is waiting for more of your subs/),
+    ).not.toBeInTheDocument();
+  });
+
   it("offers Undo after a bulk reject and re-accepts exactly those ids", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);

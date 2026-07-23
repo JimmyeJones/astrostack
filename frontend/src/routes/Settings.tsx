@@ -31,6 +31,7 @@ const HINTS: Record<string, string> = {
   auto_solve: "On new files: plate-solve with ASTAP so frames can be aligned and placed on the sky.",
   auto_stack: "On new files: also stack each touched target automatically (uses the defaults below, or a target's saved defaults).",
   auto_edit_on_autostack: "After an automatic stack, also auto-edit the master into a finished picture (the same one-click Auto processing), so an unattended run comes back to a great image, not a flat linear master. Reversible in the editor (Reset). Needs Auto-stack on.",
+  auto_stack_min_frames: "How many of a target's subs must be located (plate-solved) before a hands-off auto-stack will make a picture. A faint field where ASTAP can only locate one or two subs would otherwise auto-stack a single frame — pure colour noise. Below this floor the target waits (\"held for more located subs\") and stacks itself the moment enough subs solve. 3 is a good default; set to 1 to stack from the very first located sub. The Stack form and Process-target button are unaffected.",
   auto_bind_calibration: "When a hands-off stack (auto-stack, Process target, or Reprocess everything) has no calibration masters chosen, automatically use the library's best matching master dark/flat/bias for it — so a stack you didn't set up by hand is still calibrated. Only a confident match is used (a dark whose exposure matches your subs within 25%); if nothing matches, the stack is left uncalibrated as before. The Stack form is unaffected — it always uses exactly what you pick.",
   mixed_pointing_guard: "Before a hands-off stack (auto-stack or Process target), check whether the target's solved frames actually point at one object. If they look like two different targets accidentally dropped in one folder (a mosaic never trips it), skip the stack with a message instead of silently combining only one pointing and wasting the run. Open the Frames table and reject the odd-target frames, then stack. The Stack form is unaffected — it already warns you before you stack.",
   copy_to_cache: "Copy each frame into a fast local cache before processing. Helps with slow or network-mounted sources.",
@@ -609,6 +610,10 @@ export function SettingsView() {
           <Switch label={lbl("auto_edit_on_autostack", "Auto-edit the auto-stacked master into a finished picture")}
             checked={bool("auto_edit_on_autostack")} disabled={!bool("auto_stack")}
             onChange={(e) => set("auto_edit_on_autostack", e.currentTarget.checked)} />
+          <NumberInput label={lbl("auto_stack_min_frames", "Hands-off auto-stack: minimum located subs")}
+            value={num("auto_stack_min_frames")} min={1} max={1000} w={280}
+            disabled={!bool("auto_stack")}
+            onChange={(v) => set("auto_stack_min_frames", Number(v))} />
           <Switch label={lbl("auto_bind_calibration", "Auto-apply matching calibration masters to hands-off stacks")}
             checked={bool("auto_bind_calibration")}
             onChange={(e) => set("auto_bind_calibration", e.currentTarget.checked)} />

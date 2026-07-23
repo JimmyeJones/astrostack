@@ -53,6 +53,93 @@ def test_auto_stack_runs_for_solved_targets(solved_library, monkeypatch):
     assert not summary.get("stack_errors")
 
 
+def _reject_down_to(lib, keep: int) -> None:
+    """Reject frames in every target until only ``keep`` accepted+solved remain."""
+    for entry in lib.list_targets():
+        proj = lib.open_target(entry.safe_name)
+        try:
+            solved = [f for f in proj.iter_frames() if f.accept and f.wcs_json]
+            for f in solved[keep:]:
+                proj.update_frame(f.id, accept=False,
+                                  reject_reason="test:thin", user_override=True)
+        finally:
+            proj.close()
+        lib.refresh_target_stats(entry.safe_name)
+
+
+def _reaccept_all(lib) -> None:
+    for entry in lib.list_targets():
+        proj = lib.open_target(entry.safe_name)
+        try:
+            for f in proj.iter_frames():
+                if not f.accept:
+                    proj.update_frame(f.id, accept=True, reject_reason=None,
+                                      user_override=True)
+        finally:
+            proj.close()
+        lib.refresh_target_stats(entry.safe_name)
+
+
+def test_auto_stack_holds_back_a_thin_solved_target(solved_library, monkeypatch):
+    """A walk-away auto-stack must NOT publish a 1-2 frame speckle "master".
+
+    The owner-reported gibberish is a faint field where ASTAP solves ~1 sub, so
+    the hands-off pipeline auto-stacks (and auto-edits) a single-frame result
+    that is pure per-pixel colour noise. With the default ``auto_stack_min_frames``
+    floor the target is held back instead — and stacked the moment enough subs
+    solve. Fail-before: two solved frames were auto-stacked as a finished picture.
+    """
+    calls = _patch_run_stack(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        _reject_down_to(lib, keep=2)  # 2 accepted+solved per target < floor of 3
+        # Default settings: auto_stack_min_frames == 3.
+        job = Job(kind="pipeline")
+        summary = pipeline._pipeline_body(_settings(solved_library), _FakeJM(), job, root=None)
+        # Nothing was stacked — every eligible target was held back as thin.
+        assert calls == []
+        assert summary["auto_stacked"] == []
+        held = summary.get("auto_stack_held_thin")
+        assert held, "expected the thin targets to be reported as held back"
+        assert all(h["frames"] == 2 and h["min"] == 3 for h in held)
+        # A held target is NOT marked attempted, so the next scan re-checks it.
+        for entry in lib.list_targets():
+            proj = lib.open_target(entry.safe_name)
+            try:
+                assert proj.get_meta(pipeline.AUTO_STACK_ATTEMPT_META_KEY) is None
+            finally:
+                proj.close()
+
+        # More subs solve → now at the floor → it stacks on the next scan.
+        _reaccept_all(lib)  # back to 3 accepted+solved per target
+        summary2 = pipeline._pipeline_body(
+            _settings(solved_library), _FakeJM(), Job(kind="pipeline"), root=None)
+        assert calls, "target should auto-stack once enough subs are located"
+        assert summary2["auto_stacked"]
+        assert not summary2.get("auto_stack_held_thin")
+    finally:
+        lib.close()
+
+
+def test_auto_stack_min_frames_one_restores_stacking_from_first_frame(
+    solved_library, monkeypatch,
+):
+    """Setting the floor to 1 opts back into the old stack-a-thin-set behaviour."""
+    calls = _patch_run_stack(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        _reject_down_to(lib, keep=1)  # 1 accepted+solved per target
+        settings = _settings(solved_library).model_copy(
+            update={"auto_stack_min_frames": 1})
+        summary = pipeline._pipeline_body(
+            settings, _FakeJM(), Job(kind="pipeline"), root=None)
+        assert calls, "floor=1 should stack even a single-frame target"
+        assert summary["auto_stacked"]
+        assert not summary.get("auto_stack_held_thin")
+    finally:
+        lib.close()
+
+
 def _first_stackable(lib) -> str | None:
     for entry in lib.list_targets():
         proj = lib.open_target(entry.safe_name)
