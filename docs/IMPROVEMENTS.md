@@ -47,6 +47,27 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+> **Re-audit — stacking engine (geometry/drizzle + calibrate/weighting) CLEAN again; shipped TWO verified solve
+> bugs (Scout 2026-07-23, branch `claude/kind-mccarthy-kjj0fu`).** Baseline suite green (**1817 passed, 2 skipped**).
+> Three independent adversarial audit sub-agents re-covered the engine + the ingest/QC/solve path: (a) **stacking
+> geometry/drizzle** — `accumulator.py` (WeightedSum/MinMaxReject band denominators ≥1 + ±inf-seed masking, Welford
+> online mean/var), `drizzle_path.py` (CRPIX/CDELT super-res scaling re-derived exact, half-open `[-0.5,N−0.5]`
+> bounds, pixmap axis order, two-pass rejection fed by separate stackers, `_clip_tolerance` keep-all guards),
+> `mosaic.py` (RA-wrap `unwrap_ra_deg`, CRPIX pad, MAD outlier floor), `reference.py`, `pointings.py` — **CLEAN** (one
+> non-corrupting note: drizzle `_clip_tolerance` Bessel uses the integer frame count vs the weighted effective sample
+> size — affects only which contributions clip, never a covered pixel's value); (b) **calibrate + weighting** —
+> `apply.py` (dark-then-flat raw-Bayer order numerically re-verified, bias never double-subtracted, exposure-scaled
+> dark direction, `_FLAT_FLOOR` divide guard, NaN=no-correction), `masters.py` (`_sigma_clip_mean` all-NaN→NaN /
+> mad=0 spike-reject), `weighting.py`/`photometric.py` (factors clipped `[0.1,1]`, inverse-variance `1/s²` fold
+> direction + zero-guards — no NaN/zero/negative weight reaches the accumulator) — **CLEAN**. **Two NEW verified bugs
+> found + fixed + shipped this run** (struck below): (1) `solve_one` left an otherwise-solved frame with a NULL centre
+> when ASTAP's `.ini` didn't parse — now backfilled from the `.wcs` we already read (**v0.184.1**); (2) the
+> plate-solve **failure branch clobbered a real `reject_reason`** (`user`/`qc:`/`auto:streak`/`auto:grade:`/`bulk:`)
+> to `solve_failed:` on any re-offered already-rejected frame, mis-attributing it in the reject-summary buckets and
+> leaking the cumulative 25% auto-grade cap — now a guarded write mirroring the success branch's self-heal contract
+> (**v0.184.2**). One lower-confidence observation left unfiled (the `_cache_stale` size-only compare — inside the
+> already-documented "reused source path" family).
+>
 > **Re-audit — stacking engine CLEAN again; one NEW verified render/ingest preview-staleness bug filed
 > (Scout 2026-07-23, branch `claude/kind-mccarthy-hhvyko`).** Baseline suite green (**1817 passed, 2 skipped**). Three
 > independent adversarial audit sub-agents plus my own reads re-covered the engine + the render/ingest path: (a)
@@ -857,6 +878,29 @@ when you take it.
   of `copy_to_cache`. Add a fail-before/pass-after test that ingests, overwrites the source with different content
   at the same path in no-cache mode, re-ingests, and asserts `wcs_json`/hints were cleared. Confidence: traced
   (gating + default verified end-to-end: `config.py:65` False → `pipeline.py:66` → `ingest.py:194` guard).
+
+- ~~**A plate-solve *failure* silently overwrites the `reject_reason` of an already-rejected frame — a sub dropped for
+  soft focus / streaks / by the user / by auto-grade gets stamped `solve_failed:…` when solve runs and fails,
+  corrupting the reject-summary buckets and leaking the cumulative 25% auto-grade cap.**~~ — **FIXED v0.184.2**
+  (Scout 2026-07-23, branch `claude/kind-mccarthy-kjj0fu`; found by the 2026-07-23 watcher/ingest/QC/solve adversarial
+  audit; **traced + regression-tested, fail-before/pass-after confirmed**). *(Wrong-result — dishonest frame
+  accounting + a broken over-rejection guard; Medium.)* `build_solve_arglist` (`seestack/solve/runner.py`) gates only
+  on `wcs_json` (not `accept`), so an already-rejected star-poor sub (accept=0, `wcs_json` NULL) is re-offered to
+  plate-solve every scan; when it fails, the failure branch of `apply_solve_result_to_db` **unconditionally**
+  overwrote `reject_reason` to `solve_failed:…`. The **success** branch is careful (it only clears a `solve_failed:`
+  reason, preserving a real `user`/`qc:`/`auto:streak`/`auto:grade:`/`bulk:` reject), but the failure branch had no
+  such guard, so it destroyed exactly the reasons the success branch protects. Consequences: (a) `rejection_summary`
+  mis-attributes the drop (a soft-focus reject shows as "plate-solve failed", and `_verdict` can flip the
+  dominant-cause copy); (b) `pipeline.py` computes the cumulative auto-grade cap denominator by counting
+  `auto:grade`-reason frames — a clobbered `auto:grade:` reason drops out of that tally, inflating the budget so
+  auto-grade rejects past the documented 25% rail (the reason ping-pongs `auto:grade ⇄ solve_failed` every scan on the
+  overlapping star-poor population). **Fix:** the failure branch now stamps `solve_failed:` only when the frame is
+  still accepted, carries no reason, or already carries a `solve_failed:` reason (a re-failed solve just refreshes its
+  message) — mirroring the success branch's self-heal contract in reverse. Regression: `tests/test_solve_runner.py`
+  (+2: a rejected frame with `user`/`auto:grade:star_count`/`bulk:fwhm_px`/`auto:streak` keeps its reason across a
+  failed solve [fail-before]; a prior-`solve_failed:` reason still refreshes to the canonical "no star database").
+  Upgrade-safe: a guarded write in the worker entry point only; no config/DB-schema/API-shape/on-disk/default change.
+  Confidence: traced + regression-tested.
 
 - ~~**A plate-solve that succeeds but whose ASTAP `.ini` sidecar doesn't parse is persisted as "solved" with a valid
   `wcs_json` but NULL centre coordinates — the frame stacks yet is silently barred from being the reference frame and

@@ -216,6 +216,61 @@ def test_apply_solve_result_failure_doesnt_clobber_accept(tmp_path):
         proj.close()
 
 
+def test_apply_solve_failure_preserves_a_real_reject_reason(tmp_path):
+    """A frame already rejected for a concrete cause keeps that reason when a later
+    plate-solve fails — it is not clobbered to ``solve_failed:``.
+
+    Regression: ``build_solve_arglist`` offers any frame without a ``wcs_json``
+    (no ``accept`` gate), so an already-rejected star-poor sub is re-offered to
+    solve and fails; the failure branch unconditionally overwrote its reason,
+    (a) mis-attributing it in the reject-summary buckets and (b) — for an
+    ``auto:grade:`` reason — dropping it from the cumulative 25% auto-grade cap
+    denominator, leaking rejections past the rail.
+    """
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        for i, real in enumerate(
+                ("user", "auto:grade:star_count", "bulk:fwhm_px", "auto:streak")):
+            fid = proj.add_frame(FrameRow(source_path=f"x{i}.fit"))
+            proj.update_frame(fid, accept=False, reject_reason=real)
+            apply_solve_result_to_db(proj, SolveResult(
+                frame_id=fid, fits_path="x.fit", solved=False,
+                wcs_text=None, ra_center_deg=None, dec_center_deg=None,
+                pixscale_arcsec=None, rotation_deg=None, error="no solution",
+            ))
+            f = proj.get_frame(fid)
+            assert f is not None
+            assert f.accept is False
+            assert f.reject_reason == real  # untouched, not "solve_failed:no solution"
+    finally:
+        proj.close()
+
+
+def test_apply_solve_failure_refreshes_a_prior_solve_failed_reason(tmp_path):
+    """A frame whose only reason is a prior ``solve_failed:`` still gets its
+    message refreshed on a later failure (the preserve-guard must not freeze it)."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        fid = proj.add_frame(FrameRow(source_path="x.fit"))
+        apply_solve_result_to_db(proj, SolveResult(
+            frame_id=fid, fits_path="x.fit", solved=False,
+            wcs_text=None, ra_center_deg=None, dec_center_deg=None,
+            pixscale_arcsec=None, rotation_deg=None, error="no solution",
+        ))
+        # A later scan hits the setup problem — the reason updates to the canonical
+        # "no star database" so the banner can classify it.
+        apply_solve_result_to_db(proj, SolveResult(
+            frame_id=fid, fits_path="x.fit", solved=False,
+            wcs_text=None, ra_center_deg=None, dec_center_deg=None,
+            pixscale_arcsec=None, rotation_deg=None, error="no star database found",
+        ))
+        f = proj.get_frame(fid)
+        assert f is not None
+        assert f.reject_reason == "solve_failed:no star database"
+    finally:
+        proj.close()
+
+
 def test_apply_solve_result_clears_stale_solve_failed_reason(tmp_path):
     """A frame that failed a solve, then succeeds on retry, has its stale
     ``solve_failed:`` reject reason cleared — not left contradicting the WCS.
