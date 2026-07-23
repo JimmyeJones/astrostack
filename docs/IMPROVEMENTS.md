@@ -4871,6 +4871,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+- **IMPROVEMENT IDEA (Scout 2026-07-23, spotted while fixing the v0.184.2 reject_reason-clobber bug) — stop
+  re-plate-solving deliberately-rejected frames on every scan.** *(Autonomy/efficiency + friendliness; size S.)*
+  **Why:** `build_solve_arglist` (`seestack/solve/runner.py`) offers a frame to ASTAP whenever it has no `wcs_json`,
+  with **no `accept` filter** — so a sub the user rejected, or that QC/streak/auto-grade dropped, is re-solved from
+  scratch on *every* scan even though a rejected frame can never enter the stack (`run_stack` combines accepted **and**
+  solved frames). On a long night with many soft/cloudy subs that's a lot of repeated, futile ASTAP time each scan,
+  slowing the hands-off pass. (It was also the enabling condition for the v0.184.2 clobber bug — now guarded — but the
+  *waste* remains.) **Shape:** skip frames that are `accept=0` **with a non-`solve_failed:` reject reason** from the
+  solve arglist — they're deliberately out and re-solving them buys nothing. Keep offering `accept=0` frames whose
+  *only* reason is a prior `solve_failed:` (those are the genuine retry candidates once a star DB is installed), and
+  all accepted-unsolved frames as today. **Trade-off to weigh (why it's an idea, not a blind fix):** a rejected sub
+  that *would* solve still contributes its centre to `fallback_solve_hint` sibling-hint seeding — so skipping it
+  removes a marginal hint source. Net: on a target with any accepted-solved sub the hint is already seeded, so the
+  saving dominates; the Builder should confirm the sibling-hint path still seeds from accepted frames before landing
+  it. **Sane default / upgrade-safe:** pure arglist-filtering change, display-invisible, no config/DB/API/default
+  change. Test: an `accept=0` frame with a `user`/`auto:grade:` reason is not in `build_solve_arglist`; an `accept=0`
+  frame whose reason is `solve_failed:…` *is* still offered; accepted-unsolved frames unchanged.
+
 - **IMPROVEMENT IDEA (Builder 2026-07-23, follow-up to the v0.183.0 minimum-frames guard) — make the walk-away
   auto-stack's "held for more located subs" state VISIBLE to a beginner. Target-page half SHIPPED v0.184.0; Jobs-page
   half still open.** *(Friendliness pillar, PRIORITY 3; size S–M; frontend-only, additive.)* **Why:** v0.183.0 stops
@@ -7234,6 +7252,35 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "You beat your best!": when a fresh stack of a target you've shot before
+  comes out sharper (or deeper) than your previous best of that same target, say so with a small celebratory callout —
+  so a beginner feels the progress of adding subs / catching better seeing, and learns what "better" looks like.**
+  *(Pillar: 3 friendliness + enjoy/motivation; size S–M.)* **The gap (verified this run):** the app already keeps every
+  stack run per target (History), each with `n_frames_used`, total integration, and a median-FWHM sharpness read, and
+  it has a cross-target "My best pictures" portfolio wall and within-target *visual* timelapse/A-B views — but
+  **nothing tells a beginner, on a *new* result, that it just beat their own previous best of that target.** A hobbyist
+  re-shooting M31 across several nights has no at-a-glance "this one's your sharpest yet" signal; they'd have to eyeball
+  the History table and compare FWHM numbers themselves (which a beginner won't). That "you set a new personal best" beat
+  is one of the most motivating moments in the hobby, and the raw material is already stored. **The feature (beginner
+  idiom):** on a finished stack's result card, when its sharpness (median FWHM, lower = better) or integration depth is
+  the best among that target's prior finished runs, show one calm line — *"✨ Your sharpest M31 yet — 2.1″ stars, beating
+  your 2.4″ from 12 Jul."* / *"✨ Your deepest M42 yet — 3.1 h, more than any night before."* Says nothing (card hidden)
+  when it's the first run or not a best. **Distinct from what exists:** "My best pictures" ranks *across* targets and is
+  a browsable wall; the timelapse/A-B compare *within* one target *visually*; readiness answers "keep shooting?". This is
+  a *per-target personal-record* beat on the moment a new result lands — motivation, not a wall or a slider. **Why it
+  clears the beginner bar:** universally legible ("you beat your record"), zero jargon (it *explains* what improved in
+  plain words — sharper stars / more hours), uses data already trusted, and serves the enjoy/motivation pillar (it
+  rewards consistency, which leads to better images). **Shape for one Builder run:** a pure, unit-testable helper that,
+  given the current run's `(median_fwhm, integration_s)` and the list of the target's prior finished runs, returns
+  `None` or a `{kind: "sharpness"|"depth", phrase, prior_value, prior_date}` — reuse the History run records already
+  queried for the target page; a frontend line on the result card. **Sane default, self-hiding:** first run or no
+  improvement → nothing; a run missing an FWHM read → fall back to the depth check or stay silent, never an error.
+  Tests: first run → `None`; a sharper run → sharpness beat with the right prior; an equal/worse run → `None`; ties
+  broken conservatively (strictly-better only, so it never over-claims). Upgrade-safe: purely additive read-only
+  helper + a display line, no schema/config/default/API-shape change. *(Feasibility: reuses existing per-target run
+  queries + the FWHM/integration figures already computed, no new/heavy dependency, sane default, testable — passes
+  §4's filter.)*
 
 - **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Your imaging calendar": a simple month/year heat-calendar of which
   nights you actually imaged and how much, so a beginner can see the rhythm of their hobby at a glance, spot the
