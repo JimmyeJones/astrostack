@@ -259,10 +259,26 @@ when you take it.
   but a documented-safe action silently disables a target's core function while its data is intact). Confidence:
   traced + reproduced.
 
-- **Re-ingesting *different* content at an already-registered source path applies the old frame's stale plate
-  solution and header to the new pixels — the frame stacks at the wrong sky position, silently.** *(Ingest
-  correctness / data-integrity; wrong-result, **Low severity — latent, needs an atypical trigger**; found by the
-  2026-07-23 watcher/ingest adversarial audit — **traced end-to-end, not reproduced**.)* Frames are de-duplicated
+- ~~**Re-ingesting *different* content at an already-registered source path applies the old frame's stale plate
+  solution and header to the new pixels — the frame stacks at the wrong sky position, silently.**~~ —
+  **FIXED v0.174.3** (Builder 2026-07-23, branch `claude/pensive-faraday-hsmubw`; traced + regression-tested).
+  On a *content* refresh (`_cache_stale` true → the source's size no longer matches its Stage-1 cache), the
+  ingest refresh branch now calls a new `seestack/io/ingest.py::_refresh_frame_metadata(project, id, src)` which
+  (a) re-reads the FITS header and updates the frame's `timestamp_utc`/`exposure_s`/`gain`/`sensor_temp_c`/
+  `width_px`/`height_px`/`bayer_pattern`/`ra_hint`/`dec_hint`, and (b) calls the new
+  `Project.reset_frame_solution(id)` to null the plate solution (`wcs_json`, `ra_center_deg`, `dec_center_deg`,
+  `pixscale_arcsec`, `rotation_deg`) so `build_solve_arglist` re-offers the frame. So a source path overwritten
+  in place with a **different** capture (a re-export/rename collision, or a NAS sync reusing filenames) is now
+  re-solved and re-metadata'd from scratch instead of reprojecting the old WCS onto the new pixels. **Idempotent
+  for the intended truncated→complete case** (same capture → identical header; a truncated sub's `wcs_json` is
+  already NULL so clearing is a no-op) — the common Seestar path is unaffected. Header re-read failures are
+  logged and tolerated (old header kept, solution still cleared). Regression
+  `tests/test_ingest.py::test_ingest_refresh_clears_stale_solution_and_reads_new_header` (overwrites a solved
+  480-wide frame with a different 640-wide capture, asserts `wcs_json`/centre-coords come back NULL and
+  `width_px` is re-read to 640; fail-before: the stale WCS survived). Upgrade-safe: pure ingest control-flow +
+  an additive `reset_frame_solution` helper, no config/DB-schema/API-shape/on-disk/default change. Severity:
+  wrong-result but latent (Low). Confidence: traced + regression-tested. *(Original trace kept below for
+  provenance.)* Frames are de-duplicated
   on their `realpath` (`seestack/io/ingest.py::_dedup_key`), so re-scanning a source whose **path** is unchanged but
   whose **content** was overwritten in place with a *different capture* (size differs) takes the "already
   registered" branch (`ingest_files`, `ingest.py:152-181`): `_cache_stale` sees the size mismatch → `_copy_to_stage1`
