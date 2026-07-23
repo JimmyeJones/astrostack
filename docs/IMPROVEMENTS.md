@@ -4613,10 +4613,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   behaviour change to a run already on disk. Add a test asserting an auto-stack of a small synthetic set with an
   injected lone bright outlier removes it (min/max) while a large set uses κ-σ. Serves the North Star (a clean
   trustworthy image with no fuss) directly.
-- **IMPROVEMENT IDEA (Scout 2026-07-23) — feed a *sibling sub's* solved centre as the plate-solve hint for the
-  target's still-unsolved subs (a cheap, safe attack on the ⭐⭐ thin-stack root cause).** *(Autonomy + image quality /
-  PRIORITY 2 + 4; size S–M; fully offline, additive, opt-nothing — no new deps. Lighter than the deep "stack-then-
-  solve" bootstrap below and can ship alongside it.)* **What prompts it:** the ⭐⭐ top bug is a *thin stack* because
+- ~~**IMPROVEMENT IDEA (Scout 2026-07-23) — feed a *sibling sub's* solved centre as the plate-solve hint for the
+  target's still-unsolved subs (a cheap, safe attack on the ⭐⭐ thin-stack root cause).**~~ — **SHIPPED v0.180.0
+  (slices a+b)** (Builder 2026-07-23, branch `claude/pensive-faraday-5krkz5`). Added the pure helper
+  `seestack/solve/runner.py::fallback_solve_hint(solved_frames) -> (ra, dec) | None` — a robust RA-wrap-safe median
+  (reusing `circular_median_ra_deg`) of the already-solved frames' centres — and wired it into `build_solve_arglist`:
+  in one pass it collects the target's solved centres, and for any still-unsolved frame that lacks a usable FITS-header
+  hint it offers that sibling centre with a tight `SIBLING_HINT_RADIUS_DEG = 5.0` search radius (capped at the
+  configured blind radius so a user who tightened it is never widened). Strictly a *search-localisation* fill-in:
+  ASTAP still verifies the star pattern, so a slightly-off hint can only fail (as today), never fabricate a solution;
+  a frame that already carried a header hint — or `use_hint=False` (blind solve) — is byte-for-byte unchanged. Lifts
+  the solved-frame count on the exact faint/sparse-star fields the ⭐⭐ thin-stack bug is about. Tests:
+  `tests/test_solve_hints.py` (+4 — helper: empty/one/median/RA-wrap; arglist: a header-hint-less frame borrows the
+  sibling centre at the tight radius while a header-hinted frame keeps its own hint+30°, `use_hint=False` stays blind,
+  no-sibling stays blind). Upgrade-safe: no config/DB-schema/API-shape/default change (a new module constant + helper
+  + wider hint-fill in an existing function). **Slice (c) still open** (filed as its own idea below): a *second solve
+  pass* that retries first-round blind failures — including header-hinted frames — with the sibling hint at the tight
+  radius, which is what reaches the owner's exact header-hint-present-but-still-failing case. *(Original idea kept
+  below for provenance.)* **What prompts it:** the ⭐⭐ top bug is a *thin stack* because
   on a faint / sparse-star field ASTAP fails to solve most subs, and `run_stack` combines only accepted **and**
   solved frames. Today `build_solve_arglist` (`seestack/solve/runner.py:96`) threads only each frame's **own FITS
   header hint** (`ra_hint_deg`/`dec_hint_deg` from `info.ra_target_deg`) into ASTAP; when that hint is absent or the
@@ -4643,6 +4657,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   re-shoots / "why is my stack noise?") and image quality (deeper real stacks). *(No existing entry covers this — the
   "stack-then-solve" bootstrap below integrates first then solves the *deep image*; this instead reuses a
   neighbour's existing per-sub solution to localise the remaining per-sub solves, and the two compose.)*
+- **NEW (Builder 2026-07-23, slice (c) follow-on to the shipped sibling-hint fill-in v0.180.0) — a *second* solve
+  pass that retries first-round failures with the sibling hint at the tight radius, so even a *header-hinted* frame
+  gets a tighter re-try.** *(Autonomy + image quality / PRIORITY 2 + 4; size S–M; additive, opt-safe.)* v0.180.0
+  shipped slices (a)+(b): `fallback_solve_hint` + offering the sibling centre only to frames that *lack* a usable
+  header hint, at `SIBLING_HINT_RADIUS_DEG`. The owner's exact case is different — a Seestar *does* write RA/Dec
+  headers, so its subs already carry a (loose, 30°) header hint and are left untouched by (b), yet still time out on a
+  faint field. **Slice (c):** after the normal solve batch, for the frames that *failed* this round, run one more
+  `solve_one` pass using the sibling centre (`fallback_solve_hint` over the now-larger solved set) at the tight
+  `SIBLING_HINT_RADIUS_DEG` — a correct, much narrower search where the first blind/loose sweep timed out. Same
+  can-only-add-solves safety (ASTAP verifies the pattern). **Where:** the solve batch driver in `webapp/pipeline.py`
+  (whichever body invokes `build_solve_arglist` + `solve_one`); collect the round's failures, recompute the fallback,
+  and re-issue just those with the tight radius (guard: only when ≥1 sibling has solved and the frame is still
+  unsolved, cap to one extra pass so it can't loop). Test with a fake solver that fails at 30° but "solves" at ≤5°
+  around the sibling centre → the frame ends solved after the second pass. This is the rung that reaches the owner's
+  reported header-hint-present-but-still-failing thin-stack case.
 - **IMPROVEMENT IDEA (Scout 2026-07-23) — "stack-then-solve" bootstrap: rescue a faint field that won't plate-solve
   per-sub by solving a rough integration instead, then reusing that WCS.** *(Autonomy / image-quality — directly
   attacks the ⭐⭐ owner top bug's root cause; PRIORITY 2; size L; idea, not yet traced to code — needs the owner's
