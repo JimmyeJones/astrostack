@@ -231,9 +231,17 @@ when you take it.
   `cd frontend && npx vitest run src/routes/Editor.test.tsx` (fails ~2; a `-t`-filtered single run passes). Confidence:
   reproduced (on clean main, victim set varies → scheduling flake, not a real regression).
 
-- **⭐ The Target-page left-out badge HIDES accepted-but-unsolved subs whenever *any* frame is also hand/auto-rejected —
+- ~~**⭐ The Target-page left-out badge HIDES accepted-but-unsolved subs whenever *any* frame is also hand/auto-rejected —
   a first-light night with 2 rejected + 200 accepted-but-unsolved subs shows a gray "2 rejected" pill and says nothing
-  about the 200 that silently never entered the stack.** *(Broken-UX; Medium — directly in the ⭐⭐ thin/gibberish-stack
+  about the 200 that silently never entered the stack.**~~ — **FIXED v0.180.2** (Builder 2026-07-23, branch
+  `claude/pensive-faraday-eadwhp`). The left-out pill (`frontend/src/routes/Target.tsx`) now surfaces *both* disjoint
+  left-out sets: when a target has rejected **and** accepted-but-unsolved subs it reads `"N rejected · M not located yet"`
+  (amber whenever any unsolved subs are present — they're the silent honesty concern), instead of collapsing to
+  `"N rejected"` and hiding the often-far-larger unsolved count. The two single-cause cases are unchanged
+  (`"N not located yet"` amber / `"N rejected"` gray). Regression:
+  `Target.test.tsx::"surfaces the unsolved count in the badge even when some frames were also rejected"` (202 subs,
+  200 accepted-but-unsolved + 2 rejected → asserts the combined label; fail-before showed only "2 rejected").
+  Frontend-only, additive; `tsc`/`vitest`/`vite build` green. *(Original trace kept below for provenance.)* *(Broken-UX; Medium — directly in the ⭐⭐ thin/gibberish-stack
   honest-accounting family the v0.159.4 / v0.178.3 work was built to fix; the at-a-glance pill undoes that honesty;
   found by the 2026-07-23 render/router adversarial audit, traced + confirmed against the code.)* In
   `frontend/src/routes/Target.tsx:836-847` the left-out badge only ever surfaces the unsolved count when

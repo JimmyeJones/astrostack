@@ -838,12 +838,19 @@ export function TargetView() {
               <HoverCard.Target>
                 <Badge
                   variant="light"
-                  color={unsolvedCount > 0 && rejectedCount === 0 ? "orange" : "gray"}
+                  // Amber whenever silently-dropped unsolved subs are present —
+                  // they're the honesty concern behind a thin stack, even when a
+                  // few frames were also rejected. Both left-out sets are disjoint
+                  // and both miss the stack, so surface each rather than letting a
+                  // single reject hide a far larger unsolved count.
+                  color={unsolvedCount > 0 ? "orange" : "gray"}
                   style={{ cursor: "help" }}
                 >
-                  {unsolvedCount > 0 && rejectedCount === 0
-                    ? `${unsolvedCount} not located yet`
-                    : `${rejectedCount} rejected`}
+                  {rejectedCount > 0 && unsolvedCount > 0
+                    ? `${rejectedCount} rejected · ${unsolvedCount} not located yet`
+                    : unsolvedCount > 0
+                      ? `${unsolvedCount} not located yet`
+                      : `${rejectedCount} rejected`}
                 </Badge>
               </HoverCard.Target>
               <HoverCard.Dropdown>
