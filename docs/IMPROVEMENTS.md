@@ -47,6 +47,33 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+> **Re-audit — stacking engine + render/output CLEAN again; shipped a verified honest-accounting verdict fix and filed
+> one NEW ⭐ Target-badge broken-UX bug (Scout 2026-07-23, branch `claude/kind-mccarthy-zkszg0`).** Baseline suite green
+> (**1797 passed, 2 skipped** at run start; the STACKER-label bug I'd re-verified was concurrently fixed on `main` by
+> the Builder as v0.179.2 — a genuine duplicate, so I dropped my equivalent code change and kept only my unique work).
+> Two independent adversarial audit sub-agents plus my own reads re-covered (a) the **stacking hot path** —
+> `accumulator.py` (MinMaxReject k-insertion brute-forced against a reference impl for k=1..3 across n=0..8, band
+> denominators `count−2k`/`count−2` proven ≥1, ±inf seeds never leak; WeightedSum covered=weighted-mean / uncovered=NaN;
+> Welford n=1→NaN-var / n=2→`(a−b)²/2` + `add_window` read-before-write ordering), `drizzle_path.py` (`result()` keeps
+> the running weighted *average* — the STScI-correct non-divide; `_clip_tolerance` neff<3/flat-var/uncovered gating; the
+> any-channel-OR `neff` overcount proven *benign*), `align.py` (CPU cval=NaN ↔ GPU cval=0 parity via the valid-mask
+> bound + no `0*NaN` at the integer boundary; subpixel order-1 NaN re-mask), `mosaic.py` (RA-wrap circular mean, MAD
+> ½-frame backstop, canvas caps, CRPIX pad), `weighting.py`/`photometric.py` (factors clipped `[min_weight,1]`, every
+> zero-divisor guarded, inverse-variance fold correct) — **all CLEAN, no data-integrity bug**; and (b) the
+> **render/output + rejection-accounting** path — `output.py` (covered-only percentiles, FITS/TIFF/preview + display-space
+> parity), `thumbnail.py` (NaN-excluding stretch, monotone black slider, `_midtones_for`≡inverse-MTF), `frames.py`
+> (reject-summary/setup-banner tallies, nulls-last sort, offset/limit clamp, connection-leak-safe try/finally,
+> missing-target→404), `grading.py` (modified-z + `MAX_REJECT_FRACTION` cap) — all correct. The render/router audit
+> surfaced **two verified broken-UX bugs in the frame-accounting UX** (the ⭐⭐ thin-stack honesty family): I
+> **fixed + regression-tested + shipped** the 50/50-split verdict (`unsolved >= used` → strict `unsolved > used`; struck
+> below), and **filed** the Target-page pill bug (hides the unsolved count whenever any frame is also rejected — a small
+> frontend fix left for the Builder, ⭐ below). Curation + a new beginner feature ("What else is in this picture?") + an
+> image-quality improvement idea (small stacks get no outlier rejection) filed below. (Non-bugs the audits noted and I
+> did **not** file: the float32 `_sum` ~1e-7 relative rounding on huge stacks — documented tradeoff far below read noise;
+> `_downsample_rgb` NaN-floor edge-darkening — effectively dead code, no production caller feeds it NaN;
+> `render_sub_preview` box-vs-strided noise understatement in the one-sub reveal — conservative direction, headline ratio
+> measured at native res.)
+>
 > **Re-audit — stacking engine CLEAN again; shipped a verified plate-solve-banner broken-UX bug in the ⭐⭐ family;
 > filed one cosmetic STACKER-label bug (Scout 2026-07-23, branch `claude/kind-mccarthy-hn18nz`).** Baseline suite
 > green (**1795 passed, 2 skipped**). Two independent adversarial audit sub-agents plus my own reads re-covered the
@@ -203,6 +230,49 @@ when you take it.
   are genuinely too heavy, split the file so fewer full-app mounts share one worker. **Repro:**
   `cd frontend && npx vitest run src/routes/Editor.test.tsx` (fails ~2; a `-t`-filtered single run passes). Confidence:
   reproduced (on clean main, victim set varies → scheduling flake, not a real regression).
+
+- **⭐ The Target-page left-out badge HIDES accepted-but-unsolved subs whenever *any* frame is also hand/auto-rejected —
+  a first-light night with 2 rejected + 200 accepted-but-unsolved subs shows a gray "2 rejected" pill and says nothing
+  about the 200 that silently never entered the stack.** *(Broken-UX; Medium — directly in the ⭐⭐ thin/gibberish-stack
+  honest-accounting family the v0.159.4 / v0.178.3 work was built to fix; the at-a-glance pill undoes that honesty;
+  found by the 2026-07-23 render/router adversarial audit, traced + confirmed against the code.)* In
+  `frontend/src/routes/Target.tsx:836-847` the left-out badge only ever surfaces the unsolved count when
+  `rejectedCount === 0`:
+  ```
+  color={unsolvedCount > 0 && rejectedCount === 0 ? "orange" : "gray"}
+  {unsolvedCount > 0 && rejectedCount === 0 ? `${unsolvedCount} not located yet` : `${rejectedCount} rejected`}
+  ```
+  `rejectedCount` (`Target.tsx:347` = `n_frames − n_frames_accepted`, i.e. accept=0) and `unsolvedCount`
+  (`Target.tsx:360`, the breakdown's `unsolved` bucket = accept=1 ∧ unsolved) are **disjoint left-out sets, both
+  excluded from the stack**. The moment even one sub is rejected, the pill flips to `"${rejectedCount} rejected"` and
+  the (often far larger) unsolved count vanishes from the glance-level view — exactly the "used 500 of 500, healthy
+  night" mis-report the backend `count_accepted_unsolved` / honest-bucket work eliminated everywhere else. It's only
+  recoverable if the user opens the hovercard (`RejectionBreakdown`, which *is* correct) or the no-star-DB setup banner
+  happens to fire. **Repro:** a target with, say, 2 user-rejected frames and 200 accepted-but-unsolved frames → the
+  pill reads "2 rejected" (gray), never mentioning the 200 unsolved. **Fix (Builder):** make the pill reflect the
+  *total* left-out — e.g. show both counts ("2 rejected · 200 not located yet") or a combined
+  `rejectedCount + unsolvedCount` with the unsolved cause called out, and keep the amber tone when unsolved dominates.
+  Add a `Target.test.tsx` case asserting that with both counts > 0 the badge surfaces the unsolved count (not just the
+  rejected one). Small frontend change (badge text/colour + one vitest case); needs `tsc`/`vitest`/`vite build`.
+  Confidence: traced (verified against `Target.tsx` + the `summarize_rejections` buckets it reads).
+
+- ~~**The "frames left out" verdict said "most … haven't been located, so only a few made the stack" at an *exact* 50/50
+  solved split, though half the subs did stack.**~~ — **FIXED v0.180.1** (Scout 2026-07-23, branch
+  `claude/kind-mccarthy-zkszg0`; **reproduced + regression-tested**). *(Broken-UX; Low — a user-visible contradiction in
+  the honest-accounting copy; found + reproduced by the 2026-07-23 render/router audit.)* `_verdict`
+  (`webapp/rejection_summary.py:123`) gated the top-level plate-solve nudge on `unsolved >= max(1, used)`, so at
+  `used == unsolved` (e.g. 10 used + 10 unsolved of 20 accepted) the `>=` fired "Most of your subs haven't been located
+  … only a few made the stack" — but *half* made the stack. That contradicts the deliberately strict `top * 2 > dropped`
+  majority rule the same function uses for its dominant-bucket verdicts. **Fix:** changed the gate to strict
+  `unsolved > used` (the `max(1, …)` guard is now redundant — the `unsolved > 0` clause already covers `used == 0`). At
+  the exact tie the verdict now falls through to the honest high-drop copy, which — because the unsolved bucket is the
+  strict majority of the *dropped* frames — still names the cause and nudges a plate-solve ("A lot of frames were left
+  out — mostly subs that haven't been located in the sky yet. Run Plate Solve…"), just without the false "only a few
+  made the stack". Genuine majority-unsolved nights (`unsolved > used`) and all-unsolved nights (`used == 0`) still fire
+  the original nudge. Regression:
+  `tests/webapp/test_rejection_summary.py::test_unsolved_equal_to_used_is_not_called_only_a_few_made_the_stack`
+  (tie → no "only a few"; 11/20 and 8/8 → still fire; fails before). Upgrade-safe: verdict-string selection only, no
+  config/DB/API-shape/default change. Confidence: reproduced.
 
 > **Re-audit — stacking engine core CLEAN again; shipped the open auto-grade cumulative-cap bug (Scout 2026-07-23, branch `claude/kind-mccarthy-3qzy08`).**
 > Baseline suite green. Two independent adversarial audit sub-agents re-read the engine core end-to-end and both came back
@@ -6059,6 +6129,27 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+- **IMPROVEMENT IDEA (Scout 2026-07-23) — a small (3-frame) default stack gets *no* outlier rejection at all, so a lone
+  satellite/plane trail or cosmic-ray/hot pixel in any one of those 3 subs lands straight in the final picture.**
+  *(Image-quality + autonomy pillar, PRIORITY 2/4; size S; **default-behaviour change — flag for care/owner judgement,
+  see caveat**.)* **What's happening (traced this run):** the stack dispatcher gates κ-σ on `n >= 4`
+  (`stacker.py:1177`) and min-max on `n >= 3` (`stacker.py:1144`); below those it silently runs plain **mean** with no
+  rejection pass. With the *default* options (`sigma_clip=True`, `min_max_reject=False`, `auto_reject` off), a **3-frame
+  stack** therefore falls through to plain mean — κ-σ genuinely can't bite at n=3 — and any transient outlier in one
+  sub survives into the result. The owner's target user often stacks small first-light sessions; a single passing
+  satellite is exactly the kind of thing they'd expect the stacker to remove. **Idea:** when the resolved method would
+  fall to plain mean *purely because the frame count is below the κ-σ threshold* but `n >= 3`, auto-substitute a single
+  **min-max reject** pass (drop the lone per-pixel extreme, mean the survivors) — the one rejection method that *does*
+  work at n=3. This is what `auto_reject` already does deliberately for small stacks (`_resolve_auto_reject`); the
+  proposal is to extend that safety to the *default* small stack too, so a beginner who never touched the Stack form
+  still gets trail/hot-pixel protection on a 3–4 frame night. **Caveat (why it's an idea, not a fix):** this **changes
+  the pixels** of an existing 3-frame default stack (mean → min-max-mean), i.e. a default-behaviour change on a live
+  install (§9). It is arguably strictly *better* (min-max of 3 = the median-ish middle sample, robust to a single
+  outlier, only marginally noisier than the 3-sample mean), but a default change wants a deliberate call. Ship it
+  behind the existing `auto_reject`-style resolution rather than an unconditional flip if that keeps it opt-in-safe, or
+  file for owner sign-off if it must change the bare default. **Tests:** a synthetic 3-frame stack with a bright
+  trail/hot pixel in one sub → assert the trail is gone from the result and `STACKER`/`REJMODE` reflect min-max (pairs
+  cleanly with the STACKER-label fix shipped v0.179.2). Confidence: traced.
 - **VALIDATION FOLLOW-UP (Scout 2026-07-23) — confirm on real nebula data that the now-live SExtractor skew
   guard (`abs(mean − median) > 0.3·σ → revert to median`) doesn't over-revert on heavy diffuse nebulosity.**
   *(Image-quality / correctness; PRIORITY 4; size S — one real-data check, no blind code change.)* The
@@ -6764,6 +6855,42 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "What else is in this picture?": a friendly, plain-language list of the
+  *other* catalogued deep-sky objects that fall inside your finished frame, read straight off the stack's own WCS.**
+  *(Understand + enjoy pillar, PRIORITY 3; size M; fully offline, additive, read-only — no new deps, no network.)*
+  **Why a beginner wants it:** a Seestar's ~1.3°×0.7° field almost always catches *more than one* object — shoot the
+  Orion Nebula and the Running Man (NGC 1977) rides along just above it; shoot M31 and its satellites M32/M110 are in
+  frame. Today the app names only the **single centred target** (the "Identify" cone match in
+  `objectinfo.identify_object`, which matches the *field centre* to one catalog object and stops). A non-expert
+  staring at their finished picture asks *"what are those other smudges?"* and has no way to find out — the very
+  question that makes astrophotography exciting to a newcomer. **Feature:** on a finished, plate-solved stack, one
+  calm card — **"Also in this frame"** — listing the catalogued objects whose sky position lands inside the image,
+  each as a plain sentence with a friendly relative position: *"The Running Man Nebula (NGC 1977) — a nebula, just
+  above your target."* Excludes the primary target itself; caps the list (≤~5, nearest-to-centre first) so it never
+  becomes a wall of PGC designations; says nothing (card hidden) when the field holds only the one target. **Beginner
+  bar ✔:** universal ("what else did I capture?"), one plain sentence per object, sane auto-default (the app finds
+  them for you), zero knobs, no jargon (no magnitude/PA/PGC dumps — just name + friendly type + "above/below/left of
+  your target"); serves *understand* and *enjoy*, and doubles as a gentle "you framed more than you realised" delight.
+  **Not** pro tooling — it is deliberately *not* a full plate-annotation overlay of hundreds of faint catalogue
+  entries (that's the PixInsight/ASTAP idiom); it's a short, human list of the recognisable neighbours a beginner
+  would actually be pleased to have caught. **Reuses existing signals, no new engine math:** the bundled deep-sky
+  catalog (`seestack.nightplan.load_catalog` — already carries `ra_deg`/`dec_deg`/`type`/`name`/`con`/size, the same
+  catalog "Identify" and the Tonight planner use) + the run's WCS (`celestial_wcs_from_fits`, already read for the
+  scale bar and annotations). The core is a pure, unit-testable
+  `objects_in_field(wcs, width_px, height_px, primary_id) -> [{id, name, type, dx, dy, position_phrase}]` that
+  projects each catalog object's RA/Dec to pixel coords via the WCS, keeps the ones inside `[0,W)×[0,H)` (minus the
+  primary), sorts by distance from centre, and turns the pixel offset into a plain compass-free phrase ("just above /
+  to the left of / near your target"). Degrades gracefully (no WCS → `None`, card hidden; catalog miss → empty list →
+  hidden). **Guardrails:** additive/read-only, off nothing, no schema/config/API-shape/default change (a pure engine
+  helper surfaced through the existing `…/stack-runs/{id}/annotations` endpoint as one additional read-only
+  `also_in_frame` field, rendered by a new small card on the History/Target result). **Builder slices:** (a) pure
+  `objects_in_field(...)` helper + unit tests (a wide M42 field returns NGC 1977 above the target and excludes M42
+  itself; a tight lone-galaxy field returns `[]`; degenerate/absent WCS → `None`; the position phrasing for
+  above/below/left/right); (b) wire it into the annotations endpoint as `also_in_frame` and render the "Also in this
+  frame" card beside the existing Identify/scale/caption affordances; (c, follow-on) let a listed neighbour link to
+  its Tonight-planner entry so the user can go shoot it deliberately next. Keeps the beginner-feature pipeline stocked
+  with a pure *understand/enjoy* capability distinct from every planning card already filed (those plan the *next*
+  night; this reveals what's *already in the shot they just made*).
 - **NEW BEGINNER FEATURE (Scout 2026-07-23) — "How much longer can I keep imaging?": a plain-language storage-headroom
   read on the Storage page — GB free translated into *nights left at your recent rate* + a one-tap "free up space"
   nudge.** *(Plan + autonomy / "keep going" pillar, PRIORITY 2–3; size S–M; fully offline, additive, read-only — no new
