@@ -47,6 +47,19 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+> **Stacking-engine re-audit — CLEAN (Scout 2026-07-23, branch `claude/kind-mccarthy-peqew6`).** Adversarially
+> re-read the full stack path (`align.py`, `stacker.py` κ-σ pass-1/2 + memory guard + `_pass`/`_drizzle_pass`,
+> `accumulator.py` WeightedSum/MinMaxReject/Welford, `drizzle_path.py` clip-tolerance/neff gating, `mosaic.py`
+> outlier/RA-wrap/canvas caps, `reference.py`, `pointings.py`, `weighting.py`, `photometric.py`, `output.py`
+> preview↔export parity) plus `calibrate/apply.py` + `masters.py`, `qc/streaks.py`+`runner.py`, `render/
+> thumbnail.py`, `bg/coverage_leveling.py`, and the webapp auto-stack path (`webapp/pipeline.py`,
+> `qc/grading.py`). NaN/coverage semantics, rejection math, memory bounds and preview-parity all hold. No new
+> verified bug found — matching the documented state. One **curation win**: the "dead SExtractor skew-guard in 4
+> helpers" bug is now fully fixed (all four sites carry a live `0.3·σ` guard) → struck below, with a real-nebula
+> confirmation filed as a low-priority validation follow-up under Image quality. Open engine bugs below (⭐ streak
+> over-reject, OOM-guard worker-buffer undercount, bias-`validate()` false-positive) are all correctly flagged as
+> needing real-data / a measurement harness before a safe change — none is a blind fix.
+
 - **⭐⭐ OWNER-REPORTED (2026-07 — TOP PRIORITY, real data on v0.158) — auto-stacked
   FINAL results come out as single-frame colour-speckle "gibberish" for some
   targets.** The owner's *finished* auto-stacks (History/Gallery, not a single-frame
@@ -2816,8 +2829,17 @@ the real webapp stack→edit path.)_
   (low). Confidence: reproduced + fixed. **Residual (deprioritised):** `channel_combine` items still take raw
   option fields — that's the mono/LRGB channel-combine path, so left unvalidated per §1.
 
-- **Dead SExtractor skew-fallback guard in 4 background/leveling helpers (needs REAL-data
-  threshold validation before fixing — NOT a blind Builder change).** *(traced + reproduced,
+- ~~**Dead SExtractor skew-fallback guard in 4 background/leveling helpers.**~~ — **FIXED / VERIFIED
+  DONE** (Scout 2026-07-23 stacking-engine re-audit, branch `claude/kind-mccarthy-peqew6`; re-read all four
+  sites). Every site now carries a **live** SExtractor skew guard `abs(sc_mean − sc_med) > 0.3·σ → median`
+  (not the old algebraically-inert `1.5·X > 5·X`): `bg/per_frame.py::_zero_sky_per_channel` (L375-379),
+  the GPU tile branch `_subtract_background_gpu` (L461-470, `skew <= 0.3·sigma`),
+  `bg/final_gradient.py::_subtract_luminance_with_mask` (L223-232), and `bg/coverage_leveling.py` per-level
+  offset (L166-179). All four measure the guard on the **object-masked + 3σ-clipped sky sample**, on which
+  the skew stays well inside the 0.3·σ band (per the in-code note), so the backlog-warned nebula-regression
+  is mitigated and the full suite is green. A dedicated real-nebula-data confirmation of that threshold is
+  filed as a low-priority validation follow-up under Image quality below. *(Original trace, kept for
+  provenance:)* *(traced + reproduced,
   Builder audit 2026-07-08; med confidence it produces a visibly-wrong result in practice.)*
   All four sky-mode estimators — `bg/per_frame.py::_zero_sky_per_channel` (~L300), the GPU
   `bg/per_frame.py::_subtract_background_gpu` tile branch (~L377), `bg/final_gradient.py::
@@ -5282,6 +5304,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+- **VALIDATION FOLLOW-UP (Scout 2026-07-23) — confirm on real nebula data that the now-live SExtractor skew
+  guard (`abs(mean − median) > 0.3·σ → revert to median`) doesn't over-revert on heavy diffuse nebulosity.**
+  *(Image-quality / correctness; PRIORITY 4; size S — one real-data check, no blind code change.)* The
+  formerly-dead skew fallback in the four sky-mode estimators (`bg/per_frame.py` CPU L378 + GPU L469,
+  `bg/final_gradient.py` L231, `bg/coverage_leveling.py` L178) is now **live** with the `0.3·σ` criterion (see the
+  struck bug in "Bugs"). An earlier Builder audit flagged that a heavy diffuse nebula reads `|mean−median|/σ ≈
+  0.32` on a *raw* region and could trip the 0.3 rail — but every site measures the guard on the **object-masked +
+  3σ-clipped sky sample**, where the in-code note says the skew stays well inside the band, and the suite is
+  green. **What's left is a confidence check, not a fix:** on a real heavy-nebulosity OSC stack (e.g. North
+  America / Rosette), log per-site how often the guard fires and confirm (a) it does **not** fire on genuine
+  diffuse-sky tiles (so the intended mode is kept where `final_gradient` deliberately wants it), and (b) it still
+  reverts on a truly pathological skew. If it does over-revert on real nebula, raise the site-specific threshold
+  (or gate it on `sc_std` magnitude). No change unless (a) fails on real data — same real-data-gating as the
+  SCNR / `sky_sigma` items below.
 - **IMPROVEMENT IDEA (Scout 2026-07-23) — warn when a master dark's exposure (or temperature) doesn't match the
   lights it's calibrating, instead of silently over/under-subtracting.** *(Calibration correctness / trust,
   PRIORITY 4; size S.)* **What the audit traced:** `CalibrationMasters.validate()` (`seestack/calibrate/apply.py`)
@@ -5948,6 +5984,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "How dark is your sky?": a plain-language read on the beginner's
+  sky brightness, computed from the sky level QC already measures.** *(Friendliness / understand-and-plan,
+  PRIORITY 3; size M; offline, additive, no new deps.)* **Why a beginner wants it:** a Seestar owner has no SQM
+  and no idea whether their backyard is "dark enough" — which is *the* thing that decides whether faint nebulae
+  are even worth attempting, and why their faint-target subs come out washed out. We already measure
+  `sky_adu_median` per sub (used by weighting/grading), and the Seestar shoots at a fixed aperture/pixel scale
+  with a small set of known exposures/gains, so **sky ADU per second** is a usable *relative* proxy for sky
+  brightness. **Feature:** on the Target (and/or Dashboard) show a small, honest card — "Your typical sky here
+  looks **suburban / bright**" as a coarse 3–4 bucket, plus a plain tip ("Bright sky — favour bright galaxies,
+  clusters and the Moon over faint nebulae; on faint targets, stack more subs"). Ties naturally to the existing
+  Moon and night-planner surfaces (a bright *sky* and a bright *Moon* compound). **Beginner bar ✔:** no knobs,
+  one plain sentence, hidden when it can't tell (unknown exposure/gain, too few subs). **Sane default:** show
+  only a *relative* bucket ("brighter than most of your nights" / "one of your darker nights") — which needs **no**
+  absolute calibration — and gate any absolute Bortle-ish wording behind Seestar-model constants
+  **validated on real data first** (exposure-normalised ADU→brightness thresholds differ by S30/S50 and gain).
+  **Builder slices — (a) engine (S):** a pure `sky_quality.py` that takes the target's subs' `(sky_adu_median,
+  exposure_s, gain)` and returns an exposure-normalised sky level + a relative bucket vs the owner's own history;
+  unit-tested on synthetic distributions. **(b) webapp (S):** surface it in the target/reject-summary response
+  (additive field). **(c) frontend (S):** the card + tip, shown only when the estimate is trustworthy. Absolute
+  bucketing is a follow-on that needs real per-model calibration.
 - **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Best time of year to shoot this target": a plain-language
   seasonal-observability strip that answers "when *this year* can I actually get this object?"** *(Autonomy /
   Friendliness — the "plan" pillar, PRIORITY 2–3; size M.)* **Why:** the planner today is **short-horizon only** —
