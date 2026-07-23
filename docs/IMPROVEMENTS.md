@@ -47,6 +47,32 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+> **Re-audit — stacking engine CLEAN again; one NEW verified render/ingest preview-staleness bug filed
+> (Scout 2026-07-23, branch `claude/kind-mccarthy-hhvyko`).** Baseline suite green (**1817 passed, 2 skipped**). Three
+> independent adversarial audit sub-agents plus my own reads re-covered the engine + the render/ingest path: (a)
+> **stacker.py orchestration** (κ-σ pass-1/2 keep-mask incl. both NaN widenings + the analytic proof a fully-covered
+> pixel can't be nulled to a wrong value — only to an honest NaN gap; MinMaxReject `result()` band denominators ≥1 +
+> ±inf identity masked before the add; coverage sourcing always 2-D from uniformly-3-D `coverage`; n=0/1/2/3 dispatch
+> gates; memory-guard plane charges; cancel-mid-pass-1 → graceful cancelled result) — **CLEAN**; (b) **calibrate +
+> combine + weighting** (`apply.py` flat-floor/`_sanitize_pedestal`/exposure=0/None/shape-mismatch guards,
+> `masters.py` `_sigma_clip_mean` all-NaN→NaN / spike-reject convergence, `channel_combine.py` floored LRGB/RGB
+> divisor + NaN-union, `weighting.py` factors clipped `[0.1,1]` + inverse-variance fold bounded, `photometric.py`
+> `max_ratio`-bounded scale — the `star_count` unguarded-finiteness asymmetry examined and dismissed as benign, a
+> SQLite INTEGER can't be NaN) — **CLEAN**; (c) my own reads of `reference.py` (the `is not None` centre filter makes
+> NaN-poisoning unreachable; RA-unwrap median; pole `cos_dec=0` degeneracy correct) and `pointings.py` (isfinite
+> guard, union-find path-compression, centroid-norm `or 1.0`, dot clamp) — **CLEAN**; (d) the **render/ingest path** —
+> `output.py` (covered-only percentiles, NaN→0 only *after* stats, display-space FITS/TIFF/PNG/JPEG parity),
+> `thumbnail.py` (NaN-aware stretch/downsample), `watcher.py` (size+mtime debounce, stranded-batch re-offer),
+> `rejection_summary.py` + `frames.py` (used = accepted−unsolved / dropped = rejected+unsolved partition disjoint,
+> nulls-last sort) — all **CLEAN**. **One NEW verified bug filed** (below): the frame preview/thumbnail cache keys on
+> `frame_id` only and is **never invalidated on a Stage-1 cache refresh**, so under `copy_to_cache=True` a reused
+> source path (or a completed truncated sub) keeps serving the OLD preview for that frame (broken-UX, Low/latent,
+> traced; same `copy_to_cache`-gated family as the stale-plate-solution bug). Curation: re-verified two open bugs are
+> still accurately described (the `copy_to_cache=False` staleness-recovery-DEAD bug — confirmed `config.py:65` +
+> `ingest.py:194` gating; the History "Adjust" 0.10-vs-0.06 parity bug — confirmed `stretch.py:49` vs
+> `output.py:421`). Added a new beginner feature ("Your imaging calendar" — a temporal capture-activity heatmap) and a
+> friendliness improvement (a plain-language "?" explainer for the honest "N not located yet" badges) below.
+>
 > **Re-audit — full stacking/QC/solve/render sweep CLEAN again; two NEW verified bugs filed (Scout 2026-07-23,
 > branch `claude/kind-mccarthy-54eyci`).** Baseline suite green (**1815 passed, 2 skipped**). Three independent
 > adversarial audit sub-agents plus my own reads re-covered: (a) the **less-audited stacking helpers** — `mosaic.py`
@@ -859,6 +885,35 @@ when you take it.
   well-shaped for a Builder run with the fix direction spelled out. Severity: Low–Medium (latent, data-completeness —
   degrades reference selection, can collapse it if systematic). Confidence: reproduced (the persisted null-centre
   state + both downstream consequences) + traced (the ASTAP `.ini`-fail trigger).
+
+- **A frame's cached preview/thumbnail PNG is never invalidated when its Stage-1 cache is refreshed, so after a
+  reused source path is overwritten with a *different* capture (or a truncated mid-copy sub completes) the Frames
+  table keeps serving the OLD image for that frame.** *(Render / preview-staleness — broken-UX; Low, latent —
+  reachable only with `copy_to_cache=True` (non-default); found by the 2026-07-23 render/ingest adversarial audit —
+  traced.)* On a re-scan, `ingest_incoming` detects a stale Stage-1 cache (`seestack/io/ingest.py:197` `_cache_stale`,
+  size mismatch), re-copies the source (`ingest.py:209`), and — correctly — resets QC and drops the stale plate
+  solution + re-reads the header (`reset_frame_qc` + `_refresh_frame_metadata`, `ingest.py:216-224`), setting
+  `refreshed=True`. **But nothing clears that frame's cached preview PNGs.** Both preview caches key purely on
+  `frame_id` (+ size/pattern/`THUMB_VERSION`), never on source content or mtime: the web endpoint writes/serves
+  `web_{frame_id:06d}_{size}_{pattern}_v{THUMB_VERSION}.png` and only ever regenerates on `if not out.exists()`
+  (`webapp/routers/frames.py:492,502`), and its ETag `"{frame_id}-{size}-{pattern}-{THUMB_VERSION}"` (`frames.py:498`)
+  is likewise content-independent, so a matching `If-None-Match` returns 304 and keeps the client's stale copy; the Qt
+  gallery thumbnail `frame_{id:06d}.png` (`seestack/render/thumbnail.py:38`) is served from cache the same way.
+  `THUMB_VERSION` (`thumbnail.py:30`) only bumps on a global pipeline change, never per-frame. **Verified wrong
+  result (traced):** with `copy_to_cache=True`, a source path reused with a *different* capture (the same premise as
+  the already-filed stale-plate-solution bug) refreshes the frame's data + metadata but the Frames-table preview keeps
+  showing the previous capture's (perfectly valid, cached) thumbnail indefinitely — the picture no longer matches the
+  data. A secondary trigger — a truncated mid-copy sub that had a preview generated *while* truncated, then completed
+  — would serve the partial-image PNG forever; I did **not** verify that `generate_thumbnail` yields a preview from a
+  truncated FITS rather than raising, so I lead with the source-reuse case, which doesn't depend on that. **Fix
+  (small, one place):** the pipeline already re-QCs refreshed targets (`webapp/pipeline.py:72-77`,
+  `t.n_frames_refreshed > 0`); in that same path, delete the refreshed frames' cached `web_{id}_*` and `frame_{id}.png`
+  PNGs (a `thumb_path_for`-style helper + a glob of the `web_{id:06d}_*` variants under `thumbs_dir`) so the next
+  request regenerates from the fresh cache. Add a fail-before/pass-after test: refresh a frame with `copy_to_cache=True`
+  and assert its stale cached preview file is removed (and the endpoint re-renders). Severity broken-UX, Low (latent,
+  `copy_to_cache=True` only; sits in the same copy_to_cache-gated family as the stale-plate-solution bug above).
+  Confidence: traced (cache-key gap + no invalidation on the refresh path both read directly; source-reuse consequence
+  is a direct logical consequence; the truncated-preview sub-trigger is noted but unverified).
 
 - **The History "Adjust" stretch suggestion opens the sliders ~2× brighter than the STF gallery/History thumbnail it
   claims to match — it targets sky→0.10 while the stored STF preview targets sky→0.06.** *(Render / preview-parity —
@@ -5918,6 +5973,27 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+- **IMPROVEMENT IDEA (Scout 2026-07-23) — put a plain-language "what does *not located yet* mean?" explainer next to
+  the unsolved-subs badges, so a beginner who sees "200 not located yet" understands it's usually normal and knows
+  the one thing to try, instead of reading it as a scary error.** *(Pillar: 3 friendliness; size S; frontend-only,
+  additive.)* **The gap (verified this run):** the app now honestly surfaces the unsolved-subs count in several
+  places — the Target-page left-out badge ("N not located yet", `Target.tsx`), the reject-summary "X of Y went into
+  your picture" line, and the auto-stack "waiting for more of your subs to be located" note (v0.184.0). That honesty
+  is good, but **"located" / "plate-solve" is unexplained jargon** to a first-light Seestar owner. A beginner seeing
+  "200 not located yet" has no way to tell whether that's a catastrophe, their fault, or normal for a faint field —
+  and no idea what to do about it. The plate-solve *setup* banner only fires in the specific missing-star-database
+  case; the ordinary faint-field case (most subs just didn't solve) gets a bare number and no guidance. **The fix:**
+  a small, reusable "?" popover/tooltip anchored to the unsolved badge that says, in plain language, roughly:
+  *"Plate-solving figures out exactly where in the sky each sub is pointing so they can be lined up and stacked. Subs
+  that can't be located are left out. This is common on faint or few-star fields, and usually harmless — the located
+  subs still stack. To locate more: make sure ASTAP's star database is installed (Settings), and remember more/longer
+  subs solve more easily."* One shared component reused wherever the count appears, so the copy stays consistent.
+  **Sane default:** no behaviour change — purely an on-demand explainer; the badge/number is unchanged. **Why it
+  clears the bar:** it turns an honest-but-cryptic number into something a non-expert understands and can act on
+  (friendliness pillar), and it directly softens the ⭐⭐ thin-stack story ("why did so few frames make my picture?")
+  where the honest accounting currently leaves the beginner informed but confused. Tests: the popover renders the
+  explainer text when opened; it appears wherever the unsolved badge does (`Target.test.tsx`). No API/schema/default
+  change. *(Feasibility: frontend-only, additive, reuses existing counts, testable — passes §4's filter.)*
 - **IMPROVEMENT IDEA (Scout 2026-07-23, extends the ⭐⭐ honest-accounting theme) — carry the already-tested
   thin-stack caveat onto the Gallery and Dashboard picture tiles, not only the Target and Jobs pages, so a beginner
   browsing their finished pictures isn't shown a 1-frame gibberish thumbnail wearing only a bare "1 frames" badge
@@ -7104,6 +7180,34 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Your imaging calendar": a simple month/year heat-calendar of which
+  nights you actually imaged and how much, so a beginner can see the rhythm of their hobby at a glance, spot the
+  clear-sky runs and the gaps, and feel the streak building — the astro equivalent of a fitness-app activity ring.**
+  *(Pillar: 3 friendliness + enjoy/motivation — §1 lists "enjoy" as a beginner pillar; size S–M.)* **The gap
+  (verified this run):** the app has rich *per-target* and *per-night* views — "Night by night", "Last night" recap,
+  "Your sky, so far" (cumulative sky coverage), the downloadable imaging log (a table) — but **nothing that shows the
+  beginner their imaging activity as a calendar across time.** There is no at-a-glance answer to "how many nights have
+  I been out this month?", "when did I last have a good clear run?", or "am I keeping this up?". Those are exactly the
+  motivating questions a hobbyist asks, and the raw material (every frame's capture timestamp + its integration time)
+  is already in the library. **The feature (beginner idiom):** a GitHub-contributions-style **calendar heatmap** — one
+  cell per night, shaded by that night's total integration time across all targets (darker = more), with a hover
+  showing "12 Jul: 2.3 h across M31, M42". Sits on the Dashboard or "Your sky, so far" page. A one-line headline above
+  it — *"You've imaged 14 nights this month (best run: 5 clear nights in a row)."* **Distinct from what exists:** the
+  imaging *log* is a downloadable per-run table (a record); "Your sky, so far" is a *spatial* sky-coverage map; "Night
+  by night" is *per-target*. This is a *temporal, whole-hobby* activity view — motivation and rhythm, not a record or
+  a map. **Why it clears the beginner bar:** instantly legible to anyone who's seen an activity calendar, zero astro
+  jargon, uses data already trusted, and serves the "enjoy" pillar (it makes the hobby feel like progress and nudges
+  consistency — which *does* lead to more/better images over time). **Shape for one Builder run:** a read-only
+  endpoint (`GET /api/activity-calendar?months=12`) that buckets frames by local-calendar night (reuse the same
+  night-boundary logic the "tonight"/recap code already uses) and sums integration-time per night; a frontend heatmap
+  component (Mantine has the primitives, or a tiny grid of shaded cells — no heavy dep). **Sane default:** last 12
+  months, local time; empty library → a friendly "no imaging yet — your calendar fills in after your first clear
+  night" empty state, never an error. Tests: the endpoint buckets a seeded 2-night fixture into the right cells with
+  the right totals; a night spanning UTC midnight lands in one local night; empty library → empty-but-valid payload.
+  Upgrade-safe: purely additive read-only endpoint + a display component, no schema/config/default/API-shape change.
+  *(Feasibility: reuses existing frame-timestamp queries and the established night-boundary helper, no new/heavy
+  dependency, sane default, testable — passes §4's filter.)*
 
 - **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Your imaging log": one tap to download a plain, printable record of
   every target and night you've imaged — date, target, subs used, total integration time, best sharpness — so a
