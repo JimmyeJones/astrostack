@@ -408,6 +408,32 @@ when you take it.
   _(Filed, not fixed this run: low value — desktop-only path — and the SIMBAD coord-column format varies by
   astroquery version, so a correct fix wants a network check the Scout deferred rather than rush.)_
 
+- **Auto-stack redundant-restack fallback under-counts when the newest stack run is a channel-combine /
+  editor-export (violates the documented no-redundant-restack invariant).** *(Autonomy/watcher; wasted-compute +
+  duplicate master row — NOT frame loss, NOT wrong pixels; Low; reproduced by a 2026-07-23 adversarial
+  pipeline audit + Scout-verified.)* Location: `webapp/pipeline.py:1411-1412` in `_auto_stack_frame_count`.
+  `latest = next(iter(proj.iter_stack_runs()), None)` takes the newest `stack_runs` row of **any** kind, and the
+  `solved_accepted <= latest.n_frames_used` fallback then compares against it. A **channel-combine** run stores
+  `n_frames_used = len(items)` (e.g. 2–3, `pipeline.py:1310`) and an **editor-export** copies its source count
+  (`pipeline.py:1061`), and **neither sets** `AUTO_STACK_ATTEMPT_META_KEY` (only the genuine `run_stack` path at
+  `pipeline.py:1616` does). So when that marker is **absent** — reachable via (a) pre-marker upgrade data whose
+  newest run happens to be a channel-combine/editor-export, or (b) after `_clear_auto_stack_attempt` on a
+  survivable auto-stack error — a target with, say, 50 solved+accepted subs and a newest 3-frame channel-combine
+  passes the guard (`50 > 3`) and redundantly re-stacks unchanged data. **Why it's only Low:** in the steady
+  state the `AUTO_STACK_ATTEMPT_META_KEY` marker (keyed on the solved+accepted count, set after every genuine
+  stack) is the primary guard and correctly skips; the `n_frames_used` check is only a fallback for pre-marker
+  runs, and the failure is a one-time redundant restack (archive-on-restack keeps the old master), never data
+  loss or wrong pixels. The inverse (wrongly *blocking* a needed restack) is impossible — a non-genuine run's
+  count is ≤ the genuine count, so the guard can only over-permit. **Repro (agent, reproduced):** 50
+  solved+accepted frames + newest run = channel-combine `n_frames_used=3`, marker present → correctly returns
+  `None`; marker absent → returns `50` → spurious full restack. **Fix direction:** make the fallback compare
+  against the **largest** genuine-stack coverage, not the newest run's count — e.g. `max(r.n_frames_used for r in
+  proj.iter_stack_runs())`, or skip channel-combine/editor-export rows (identifiable by `notes == "channel
+  combine"` / the display-space export marker) when picking `latest`. `max`-over-runs is strictly safe (it can
+  only make the guard *more* conservative, never miss a legitimate restack). Add a regression test with a Project
+  fixture carrying a genuine run + a newer small-count channel-combine and no marker (fail-before: restacks;
+  pass-after: skips). Confidence: reproduced.
+
 - ~~**Upload leaves an orphaned `.part` sidecar when the final `close()` flush fails.**~~ — **FIXED v0.158.1**
   (Builder 2026-07-21, branch `claude/pensive-faraday-m66efc`). Location: `webapp/routers/upload.py:184` —
   `await run_in_threadpool(fh.close)` sat **outside** the `try/except BaseException` that unlinks the temp on a
