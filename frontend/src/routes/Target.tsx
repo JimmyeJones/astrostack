@@ -22,6 +22,7 @@ import { FocusTrendCard } from "../components/FocusTrendCard";
 import { TransparencyTrendCard } from "../components/TransparencyTrendCard";
 import { NextSessionCard } from "../components/NextSessionCard";
 import { BestMonthsStrip } from "../components/BestMonthsStrip";
+import { MoonInterferenceCard } from "../components/MoonInterferenceCard";
 import { DeepeningReelCard } from "../components/DeepeningReelCard";
 import { SessionRecapCard } from "../components/SessionRecapCard";
 import { StackHealthCard } from "../components/StackHealthCard";
@@ -1128,6 +1129,11 @@ export function TargetView() {
       {/* Plan-ahead companion to "your next window": which months of the year
           this object is actually up. Self-hides without a location/position. */}
       <BestMonthsStrip safe={safe} />
+
+      {/* "Is the Moon going to wash this out tonight?" — a plain-language Moon-
+          interference readout so a beginner points at a bright target instead of
+          wasting a bright-Moon night. Self-hides without a location/position. */}
+      <MoonInterferenceCard safe={safe} />
 
       <Grid>
         <Grid.Col span={{ base: 12, md: 7 }}>

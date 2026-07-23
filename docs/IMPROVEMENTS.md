@@ -6328,8 +6328,28 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
-- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Is the Moon going to wash this out tonight?": a plain-language
-  Moon-interference readout for a target.** *(Planning / "plan + get a good image" pillar, PRIORITY 2–3; size M;
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "Is the Moon going to wash this out tonight?": a plain-language
+  Moon-interference readout for a target.**~~ — **SHIPPED v0.176.0** (Builder 2026-07-23, branch
+  `claude/pensive-faraday-o0142d`). Built end-to-end (engine + endpoint + UI), fully offline — reuses the
+  planner's existing Moon ephemeris (`moon_illumination` / `moon_is_waxing` / `_moon_altitudes` / the ICRS
+  separation the observability batch already computes), so **no new dep, no network, no config/DB/API-shape/default
+  change**. **Engine** (`seestack/nightplan.py`): a pure, unit-tested `moon_interference(observer, ra_deg, dec_deg,
+  when_utc) -> MoonInterference` — evaluated at the **darkest moment of tonight's dark window** (`_find_dark_window`
+  midpoint, or `when_utc` if no window), so the reading reflects the sky the user will actually shoot in, not the
+  Moon's daytime position when the page loads. Returns illumination, waxing sense, a friendly `phase_name`, the
+  Moon's topocentric altitude, its separation from the target, a coarse `level` (`good`/`ok`/`poor`) and one plain
+  sentence. Verdict is honest and beginner-shaped: Moon **below the horizon** → good whatever its phase; a **thin
+  crescent** up → good; **bright but far** (≥90°) → so-so; **bright and near** → poor, with a "point at a bright
+  galaxy / cluster / double star instead" nudge. **Webapp** (`webapp/routers/plan.py`): read-only
+  `GET /api/plan/moon/{safe}`, mirroring `/next-session` (site + target position resolved server-side; `moon`
+  is null ⇒ the card self-hides when there's no location or no solved position). **Frontend**: a compact,
+  self-hiding `MoonInterferenceCard` on the Target page beside "Plan your next night"/"Best months" (phase-toned
+  chip + verdict sentence + "{phase} · {pct}% lit"), with pure `moonLevelColor`/`moonLevelLabel` helpers. Tests:
+  `tests/test_nightplan.py` (+5: verdict bands, phase names, a bright nearby full Moon → poor + deterministic, a
+  new-Moon night → good, and that it evaluates during darkness not page-load), `tests/webapp/test_plan.py` (+4:
+  readout shape, self-hide without location, 404, bad-`when`), `MoonInterferenceCard.test.tsx` (+3). Full Python
+  suite green (1770 passed); frontend tsc/vitest(new)/build green. *(Original idea kept below for provenance.)*
+  *(Planning / "plan + get a good image" pillar, PRIORITY 2–3; size M;
   offline — uses the ephemeris library already bundled for the sky/plate-solve code, no new dep, no network.)*
   **Why a beginner wants it:** the single biggest avoidable reason a Seestar OSC owner's faint-nebula night comes
   out disappointing is a **bright Moon nearby** — it floods the sky background and buries faint signal, and a

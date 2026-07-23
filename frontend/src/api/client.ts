@@ -153,6 +153,28 @@ export interface BestMonths {
   months: MonthObservability[];
 }
 
+// "Is the Moon going to wash this out tonight?" (from /api/plan/moon) — one
+// honest verdict + sentence for a target, evaluated at tonight's darkest moment.
+export interface MoonInterference {
+  illumination: number; // 0..1 illuminated fraction of the disk tonight
+  waxing: boolean;      // waxing (evening Moon) vs waning (after-midnight)
+  phase_name: string;   // "Full Moon" / "waxing crescent" / …
+  moon_altitude_deg: number; // < 0 ⇒ below the horizon (can't affect the shot)
+  separation_deg: number;    // angular sep between the Moon and this target
+  level: "good" | "ok" | "poor"; // coarse verdict
+  text: string;         // one plain-language sentence for the card
+  at_utc: string;       // the darkest moment used for the readout (UTC ISO)
+}
+
+export interface MoonInterferenceResponse {
+  location_source: "settings" | "fits" | "none";
+  observer: { lat_deg: number; lon_deg: number; elevation_m: number } | null;
+  // False when the library has no RA/Dec for this target (never solved).
+  target_has_position: boolean;
+  // null when no location is set or the target has no position (card self-hides).
+  moon: MoonInterference | null;
+}
+
 // Plain-language "why were some frames left out?" breakdown (from
 // /frames/reject-summary). Buckets are non-zero and pre-ordered by the server.
 export interface RejectionBucket {
@@ -1097,6 +1119,10 @@ export const api = {
   // known target (empty months ⇒ the strip self-hides).
   bestMonths: (safe: string) =>
     req<BestMonths>(`/api/plan/best-months/${safe}`),
+  // "Is the Moon going to wash this out tonight?" — a Moon-interference readout
+  // for a known target (null moon ⇒ the card self-hides).
+  moonInterference: (safe: string) =>
+    req<MoonInterferenceResponse>(`/api/plan/moon/${safe}`),
   // "Try something new tonight" — famous showpieces the user hasn't captured
   // that are well-placed tonight (empty list ⇒ the card self-hides).
   suggestTargets: () => req<SuggestResponse>(`/api/plan/suggest`),
