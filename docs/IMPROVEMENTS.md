@@ -73,6 +73,25 @@ when you take it.
 > over-reject, OOM-guard worker-buffer undercount, bias-`validate()` false-positive) are all correctly flagged as
 > needing real-data / a measurement harness before a safe change — none is a blind fix.
 
+> **Re-audit — stacking engine + QC/solve CLEAN; one new low-severity ingest bug (Scout 2026-07-23, branch
+> `claude/kind-mccarthy-cmxle7`).** Baseline suite green (**1736 passed, 2 skipped**). Adversarially re-read the
+> whole stacking engine again end-to-end — `accumulator.py` (WeightedSum/MinMaxReject k-insertion/Welford),
+> `weighting.py` (geometric-mean factors + inverse-variance photometric fold), `output.py` (FITS/TIFF/preview
+> parity, display-space card), `render/thumbnail.py` (asinh/STF stretch, NaN-aware downsample), `mosaic.py`
+> (RA-wrap circular-mean, MAD outlier drop, canvas caps), `drizzle_path.py` (clip-tolerance / neff frame-count
+> gating / var-resolution floor), `align.py` (windowed reproject, subpixel-shift NaN propagation, CPU cval=NaN ↔
+> GPU cval=0+valid-mask parity), and `calibrate/apply.py` (dark/bias/flat domain, no-data pedestal masks,
+> exposure-scaling) — plus the webapp auto-stack path (`webapp/pipeline.py::submit_process_target`). **All CLEAN**,
+> matching the documented repeatedly-clean state: NaN=no-coverage held everywhere, rejection math sound, memory
+> bounds respected, preview↔export parity intact. Two independent audit sub-agents on (a) watcher+ingest+project+
+> storage and (b) the full plate-solve + QC path (`solve/*`, `qc/grading.py`/`streaks.py`/`metrics.py`/
+> `noise_ratio.py`) confirmed **no new defensible wrong-result bug** in those subsystems either. The **one new
+> verified bug** this run is the ingest stale-plate-solution defect filed below (re-ingesting different content at a
+> reused source path keeps the old WCS) — traced, Low severity/latent. (The QC/solve audit's other notes — a
+> solved-but-`wcs_json=None` frame re-solving every run on a malformed ASTAP sidecar; the by-design
+> `accept=True`+`solve_failed` reason divergence — are low/by-design; the first is filed as a robustness idea under
+> Autonomy, not a bug.)
+
 - **⭐⭐ OWNER-REPORTED (2026-07 — TOP PRIORITY, real data on v0.158) — auto-stacked
   FINAL results come out as single-frame colour-speckle "gibberish" for some
   targets.** The owner's *finished* auto-stacks (History/Gallery, not a single-frame
@@ -239,6 +258,34 @@ when you take it.
   dropped); a frame with both dead is still skipped. Severity: broken-UX / data-availability (no pixel corruption,
   but a documented-safe action silently disables a target's core function while its data is intact). Confidence:
   traced + reproduced.
+
+- **Re-ingesting *different* content at an already-registered source path applies the old frame's stale plate
+  solution and header to the new pixels — the frame stacks at the wrong sky position, silently.** *(Ingest
+  correctness / data-integrity; wrong-result, **Low severity — latent, needs an atypical trigger**; found by the
+  2026-07-23 watcher/ingest adversarial audit — **traced end-to-end, not reproduced**.)* Frames are de-duplicated
+  on their `realpath` (`seestack/io/ingest.py::_dedup_key`), so re-scanning a source whose **path** is unchanged but
+  whose **content** was overwritten in place with a *different capture* (size differs) takes the "already
+  registered" branch (`ingest_files`, `ingest.py:152-181`): `_cache_stale` sees the size mismatch → `_copy_to_stage1`
+  refreshes the Stage-1 cache and `reset_frame_qc(prior.id)` runs. But `reset_frame_qc`
+  (`seestack/io/project.py:489`) only nulls the **QC metrics** (`fwhm_px`, `star_count`, `sky_adu_median`,
+  `eccentricity_median`, `transparency_score`, streak fields) — it does **not** clear the plate solution
+  (`wcs_json`, `ra_center_deg`, `dec_center_deg`, `pixscale_arcsec`, `rotation_deg`) nor re-read the FITS header
+  (`timestamp_utc`, `exposure_s`, `gain`, `ra_hint`/`dec_hint`). Because `build_solve_arglist` only offers frames
+  with `wcs_json IS NULL` (`seestack/solve/runner.py`), the refreshed frame is **never re-solved**, so the *old*
+  WCS is reprojected onto the *new* pixels in the stack — the frame lands at the wrong sky position (contaminating
+  the result or getting κ-σ-rejected as an "outlier"), while its stale timestamp/exposure/gain also skew
+  weighting/grading and the session-recap. **Why the trigger is atypical (hence Low):** Seestar subs are uniquely
+  timestamp-named, so a path is normally never reused for a different capture; the *intended* refresh case (a
+  truncated → complete copy of the **same** capture) is unaffected (identical header, and a truncated sub usually
+  fails to solve so `wcs_json` is already NULL and it re-solves cleanly). It bites only a workflow that overwrites an
+  incoming filename in place with different data (a re-export/rename collision, or a folder-sync tool that reuses
+  names on a NAS). **Fix (small, one place):** on a *content* refresh (`_cache_stale` true), also clear the plate
+  solution + re-read the header so the new content is re-solved and re-metadata'd from scratch — either extend
+  `reset_frame_qc` with an opt-in `clear_solution=True` that also nulls the `_SOLVE_COLUMNS` and calls the header
+  loader, or have the refresh branch call a new `project.reset_frame_for_reingest(id, src)`. **Regression test:** a
+  frame registered with a WCS + header, whose source is then overwritten with a different-size, different-position
+  frame, must come back with `wcs_json IS NULL` (re-offered to solve) and the new header values after a re-scan
+  (fail-before: keeps the old WCS/timestamp). Severity: wrong-result but latent (Low). Confidence: traced.
 
 - ~~**κ-σ pass-2 silently turns real pass-2 data into a NaN coverage gap at a pixel that had no pass-1
   coverage (mean = NaN).**~~ — **FIXED v0.172.1** (Scout 2026-07-23, branch `claude/kind-mccarthy-49jli6`;
@@ -4120,6 +4167,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+- **IMPROVEMENT IDEA (Scout 2026-07-23) — a plate-solve that succeeds but whose sidecar won't parse should be
+  recorded as *retriable-unsolved*, not silently as "solved with no WCS" (which wastes a re-solve every scan and
+  never stacks the frame).** *(Autonomy / robustness — the honest-accounting arc; PRIORITY 2; size S; traced by
+  this run's QC/solve audit.)* **What prompted it:** in `apply_solve_result_to_db` (`seestack/solve/runner.py`)
+  ASTAP is classified "solved" on `returncode==0 and .wcs exists` (`solve/astap.py`), but if
+  `_parse_astap_ini` raises (swallowed → center coords stay `None`) or `wcs_text_from_sidecar` returns `None` on a
+  malformed/partial header (`io/wcs_io.py`, swallowed), the frame is still persisted as **solved with
+  `wcs_json=None`**. Downstream, `wcs_from_text(None)` treats it as unsolved, so (a) it **never stacks** (run_stack
+  combines only frames with a usable WCS), and (b) because `build_solve_arglist` skips only *truthy* `wcs_json`, it
+  is **re-solved on every scan forever** — wasted ASTAP time and a frame that silently never contributes. The
+  trigger (a non-standard `.wcs`/`.ini`) is rare, so it's an idea, not a bug — but the honest behaviour is: when
+  ASTAP reports success yet no usable WCS could be extracted, either **retry the WCS extraction / re-solve once and
+  then record an explicit `solve_failed:unparsable-wcs` reason** (so it stops re-solving and the reject-summary can
+  surface it), rather than leaving a `solved`-but-`None` limbo row. **Slices:** (a) in `apply_solve_result_to_db`,
+  treat `wcs_text is None` on a nominal success as a solve *failure* (set the explicit reason, leave `wcs_json`
+  NULL) so the retry/skip logic is consistent; (b) a regression test that a success-with-unparsable-sidecar frame
+  is not re-offered indefinitely and reads as an honest failure. Upgrade-safe: no schema/API/default change (only
+  a reason string on an already-nullable column). Keeps the unattended pipeline from burning cycles on a frame it
+  can never use and makes the "why was this left out?" accounting honest.
 - **IMPROVEMENT IDEA (Scout 2026-07-23) — before an unattended stack, count how many accepted+solved subs are
   actually *readable on disk*, and say so honestly instead of silently shipping a thin/failed stack.** *(Autonomy /
   trust — the honest-accounting arc; PRIORITY 2; size S–M.)* **What prompted it:** while tracing the ⭐ stale-cache
@@ -6111,6 +6177,40 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "How hard is this target for a Seestar?": a plain-language
+  difficulty / what-to-expect badge on the Target page that sets expectations *before* a beginner is disappointed
+  by a faint result.** *(Friendliness / "plan + understand" pillar, PRIORITY 3; size M; offline, additive, no new
+  deps.)* **Why a beginner wants it:** the owner's own top bug is *"faint/sparse-star targets come out as
+  gibberish while a bright galaxy stacks cleanly"* — which is partly a real pipeline issue **and** partly an
+  expectations gap: a beginner points a Seestar at a faint, large, low-surface-brightness object (M33, the Veil,
+  the California Nebula), gets a noisy or empty-looking result after one short session, and concludes the app is
+  broken. Nothing today tells them *up front* that some targets are simply hard from a backyard and need hours (or
+  a dark sky), while others look great in 20 minutes. Every other planning card either *recommends* targets ("What
+  should I shoot next?") or rates the *site* ("How dark is your sky?") — **none rates the target the user actually
+  chose.** **Feature:** on the Target page, a small honest badge — **Easy / Moderate / Challenging for a Seestar** —
+  with one plain sentence, e.g. *"Bright and compact — a great beginner target; looks good in under an hour"* vs
+  *"Faint and spread out — needs a dark-ish sky and several hours; from a bright suburb it will stay dim and
+  noisy, so don't be discouraged."* Naturally ties the existing **framing** hint ("bigger than one frame → use
+  mosaic") and, when present, the measured sky-brightness read into one expectation-setter. **Beginner bar ✔:**
+  universal ("is this a good one for me to try?"), one plain sentence, sane auto-verdict, zero knobs, serves
+  *plan + understand*; **not** pro tooling (no magnitude/surface-brightness numbers or knobs — just a friendly
+  bucket). **Sane default, self-hiding:** shows only when the target is identified against the bundled catalog and
+  carries a vetted difficulty tag; hides otherwise (never guesses). **Feasibility / data note (important):** the
+  bundled `messier.json` has `type`, `size_arcmin`, and a curated `blurb` but **no magnitude / surface
+  brightness**, and `type` alone can't separate a bright galaxy (M31) from a faint one (M33). So the honest,
+  low-risk path mirrors how `blurb`/`size_arcmin` are already handled — **add an optional, hand-curated
+  `difficulty` field ("easy"/"moderate"/"hard") to the well-known catalog objects** (omitted when not vetted, so
+  it self-hides), rather than computing it from data we don't have. The engine then blends that tag with the
+  framing "fits in one frame?" verdict into the plain-language sentence. No network, no model, no
+  schema/config/API/default change (read-only, plus a static data-file addition). **Builder slices — (a) data +
+  engine (M):** curate a `difficulty` tag on the common catalog objects + a pure
+  `target_difficulty(catalog_object, framing_hint) -> {level, sentence} | None`, unit-tested (easy/compact,
+  hard/large-faint, unknown → None, fits-vs-mosaic wording). **(b) webapp (S):** surface it in the target/objectinfo
+  response (additive field), self-hiding when None. **(c) frontend (S):** a compact `TargetDifficultyBadge` beside
+  the object-info / framing card, shown only when a vetted level exists. Keeps the beginner-feature pipeline
+  stocked with a *plan/understand* capability that directly softens the #1 owner-reported disappointment (faint
+  target → "gibberish") by front-loading honest expectations, complementing (not duplicating) the *what-to-shoot*,
+  *how-dark-is-your-sky*, and *is-it-worth-staying* cards.
 - **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Is it worth staying on this target?": a plain-language
   diminishing-returns read that tells a beginner when more subs will visibly help vs when they've hit the flat
   part of the curve.** *(Autonomy / Friendliness — the "plan / understand" pillar, PRIORITY 2–3; size M; offline,
