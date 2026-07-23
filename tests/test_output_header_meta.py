@@ -254,6 +254,36 @@ def test_rejection_provenance_absent_when_no_pass():
         RejectionStats("sigma-clip", n_contributed=0, n_rejected=0))
 
 
+# --- STACKER method label honours the dispatcher's frame-count gates -------------
+# The dispatcher only runs min-max reject at n >= 3 and κ-σ at n >= 4; below those
+# counts it silently falls through to plain mean (no rejection pass — REJMODE is
+# absent). The STACKER header card must reflect what actually ran, so a small stack
+# records STACKER="mean", not the (never-used) rejection method it was configured
+# with. Otherwise the card is internally inconsistent with its own empty REJMODE.
+def _method_for(*, opts, n):
+    proj = SimpleNamespace(get_meta=lambda k: "M42" if k == "name" else None)
+    frames = [SimpleNamespace(exposure_s=10.0) for _ in range(n)]
+    return _build_output_header_meta(proj, frames, opts, n)["STACKER"][0]
+
+
+def test_stacker_label_sigma_clip_below_four_frames_is_mean():
+    # Default options enable sigma_clip; a 3-frame stack falls through to mean.
+    assert _method_for(opts=StackOptions(sigma_clip=True), n=3) == "mean"
+    assert _method_for(opts=StackOptions(sigma_clip=True), n=4) == "sigma-clip"
+
+
+def test_stacker_label_min_max_below_three_frames_is_mean():
+    assert _method_for(opts=StackOptions(min_max_reject=True), n=2) == "mean"
+    assert _method_for(opts=StackOptions(min_max_reject=True), n=3) == "min-max-reject"
+
+
+def test_stacker_label_min_max_takes_precedence_over_sigma_clip():
+    # Dispatcher checks min-max before κ-σ, and drizzle before both.
+    both = StackOptions(min_max_reject=True, sigma_clip=True)
+    assert _method_for(opts=both, n=3) == "min-max-reject"
+    assert _method_for(opts=StackOptions(drizzle=True, sigma_clip=True), n=1) == "drizzle"
+
+
 # --- Weighting provenance honesty when min/max reject ignores the weights -------
 # quality_weighted computes per-frame weights, but the min/max order-statistic
 # path (min_max_reject on a non-drizzle ≥3-frame stack) combines by rank and

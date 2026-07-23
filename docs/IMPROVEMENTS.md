@@ -157,11 +157,17 @@ when you take it.
   method + a query-input change; no config/DB-schema/API-shape/on-disk/default change (the response field already
   existed). Confidence: reproduced.
 
-- **The `STACKER` FITS-header card (and the History "method" badge) mislabels the stacking method on a
+- ~~**The `STACKER` FITS-header card (and the History "method" badge) mislabels the stacking method on a
   below-threshold stack — a 3-frame default stack records `STACKER="sigma-clip"` and a 2-frame min-max stack records
-  `STACKER="min-max-reject"`, but both actually ran plain mean.** *(Stacking-engine provenance; **cosmetic /
-  broken-UX label only — pixels are the correct plain-mean result, nothing is corrupted**; traced + reproduced by the
-  2026-07-23 stacking-engine audit.)* `_build_output_header_meta` (`seestack/stack/stacker.py:683-691`) replicates the
+  `STACKER="min-max-reject"`, but both actually ran plain mean.**~~ — **FIXED v0.179.2** (Builder 2026-07-23, branch
+  `claude/pensive-faraday-5krkz5`; **traced + reproduced + regression-tested**). `_build_output_header_meta`
+  (`seestack/stack/stacker.py`) now gates the method label on the same candidate frame count `n = len(frames)` the
+  dispatcher uses — `min_max_reject and n >= 3`, `sigma_clip and n >= 4` — so a small stack that silently fell through
+  to plain mean records `STACKER="mean"` (matching its absent `REJMODE`) instead of the never-run rejection method.
+  Regression: `tests/test_output_header_meta.py` (+3 label cases: 3-frame sigma-clip → mean, 2-frame min-max → mean,
+  and min-max/drizzle precedence; fail-before on 2, pass-after). Upgrade-safe: pure label computation in one function,
+  no config/DB/API-shape/on-disk/default change. *(Original trace kept below for provenance.)*
+  `_build_output_header_meta` (`seestack/stack/stacker.py:683-691`) replicates the
   effective `sigma_clip`/`min_max_reject` flags when choosing the label, but **omits the frame-count gates the
   dispatcher applies** — `min_max_reject and n >= 3` (`stacker.py:1144`) and `sigma_clip and n >= 4`
   (`stacker.py:1177`). Below those counts the dispatcher falls through to the plain-mean branch (no rejection pass
