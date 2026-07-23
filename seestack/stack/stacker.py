@@ -1434,6 +1434,18 @@ def run_stack(
             calstat=applied_cal,
             is_mosaic=bool(is_mosaic_canvas),
             engine_version=app_version,
+            # Persist the outlier-rejection tally so "How's my stack?" can name the
+            # trails/cosmic-rays the pass removed, without re-reading the FITS. Only
+            # recorded when a rejection pass actually ran and saw samples; a plain
+            # mean stack leaves both NULL (no clean-up to speak of).
+            rejection_fraction=(
+                rej_stats.fraction
+                if rej_stats is not None and rej_stats.n_contributed > 0 else None
+            ),
+            rejection_mode=(
+                rej_stats.mode
+                if rej_stats is not None and rej_stats.n_contributed > 0 else None
+            ),
         ))
     except Exception as exc:  # noqa: BLE001 — history is non-critical
         log.warning("Could not record stack run in history: %s", exc)

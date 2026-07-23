@@ -166,6 +166,74 @@ def test_open_empty_sqlite_builds_the_base_schema(tmp_path):
         proj.close()
 
 
+def test_stack_run_rejection_tally_round_trips(proj):
+    """A run's outlier-rejection tally (fraction + mode) persists and reads back —
+    the data the "How's my stack?" clean-up note reads."""
+    from seestack.io.project import StackRunRow
+
+    proj.add_stack_run(StackRunRow(
+        id=None, timestamp_utc="2026-07-23T00:00:00+00:00", output_basename="master",
+        fits_path="m.fits", tiff_path=None, preview_path=None, n_frames_used=30,
+        canvas_h=1080, canvas_w=1920, coverage_min=30, coverage_max=30,
+        options_json="{}", rejection_fraction=0.012, rejection_mode="sigma-clip"))
+    run = next(iter(proj.iter_stack_runs()))
+    assert run.rejection_fraction == 0.012
+    assert run.rejection_mode == "sigma-clip"
+
+
+def test_v9_project_migrates_rejection_columns_additively(tmp_path):
+    """An older (schema 9) project — whose ``stack_runs`` predates the rejection
+    columns — upgrades cleanly on open: existing runs read the new fields as
+    ``None`` (no clean-up claimed) and a fresh run persists them. Guards the
+    live-install in-place upgrade (AGENTS.md §9)."""
+    import sqlite3
+
+    from seestack.io.project import SCHEMA_VERSION, StackRunRow
+
+    project_dir = tmp_path / "v9"
+    project_dir.mkdir()
+    db_path = project_dir / "project.sqlite"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        PRAGMA user_version = 9;
+        CREATE TABLE project_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE stack_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp_utc TEXT NOT NULL,
+            output_basename TEXT NOT NULL, fits_path TEXT, tiff_path TEXT,
+            preview_path TEXT, n_frames_used INTEGER NOT NULL, canvas_h INTEGER NOT NULL,
+            canvas_w INTEGER NOT NULL, coverage_min INTEGER NOT NULL DEFAULT 0,
+            coverage_max INTEGER NOT NULL DEFAULT 0, options_json TEXT NOT NULL,
+            notes TEXT, total_exposure_s REAL, transparency_ratio REAL,
+            noise_sigma REAL, calstat TEXT, is_mosaic INTEGER, engine_version TEXT);
+        CREATE TABLE frames (id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_path TEXT NOT NULL UNIQUE, accept INTEGER NOT NULL DEFAULT 1);
+        INSERT INTO stack_runs(timestamp_utc, output_basename, n_frames_used,
+            canvas_h, canvas_w, options_json)
+          VALUES('2026-01-01T00:00:00+00:00', 'old', 10, 1080, 1920, '{}');
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    proj = Project.open(project_dir)
+    try:
+        assert proj._conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        old = next(iter(proj.iter_stack_runs()))
+        assert old.rejection_fraction is None and old.rejection_mode is None
+        # A fresh run on the migrated DB persists the new tally.
+        proj.add_stack_run(StackRunRow(
+            id=None, timestamp_utc="2026-07-23T01:00:00+00:00", output_basename="new",
+            fits_path=None, tiff_path=None, preview_path=None, n_frames_used=5,
+            canvas_h=1, canvas_w=1, coverage_min=1, coverage_max=1, options_json="{}",
+            rejection_fraction=0.03, rejection_mode="min-max-reject"))
+        newest = next(iter(proj.iter_stack_runs()))
+        assert newest.rejection_fraction == 0.03
+        assert newest.rejection_mode == "min-max-reject"
+    finally:
+        proj.close()
+
+
 def test_open_closes_the_connection_when_schema_check_fails(tmp_path, monkeypatch):
     """A newer on-disk ``user_version`` makes ``_check_schema`` raise; ``open``
     must close the connection it opened before propagating, rather than leak it.
