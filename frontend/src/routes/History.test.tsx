@@ -207,8 +207,13 @@ describe("HistoryView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Identify" }));
 
     await waitFor(() => expect(annot).toHaveBeenCalledWith("M_42", 1));
+    // The plain-language "what else is in this picture?" list names the object,
+    // its friendly type, and roughly where it sits in the frame.
     await waitFor(() =>
-      expect(screen.getByText(/Found 1 catalog object in this field/)).toBeInTheDocument());
+      expect(screen.getByText(/In this picture — 1 catalog object:/)).toBeInTheDocument());
+    expect(
+      screen.getByText(/Andromeda Galaxy \(M31\) — a galaxy, near the centre\./),
+    ).toBeInTheDocument();
   });
 
   it("says so plainly when no catalog objects fall in the field", async () => {

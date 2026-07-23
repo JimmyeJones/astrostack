@@ -20,6 +20,7 @@ import { RejectionBadge } from "../components/RejectionBadge";
 import { NoiseReadout, NoiseDelta, CleanestBadge, cleanestRunId, hasNoise } from "../components/NoiseBadge";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { AnnotatedImage } from "../components/AnnotatedImage";
+import { describeFieldObjects } from "../components/fieldObjectList";
 import { StackHealthCard } from "../components/StackHealthCard";
 import { ProgressReelCard } from "../components/ProgressReelCard";
 import { OneFrameVsStackCard } from "../components/OneFrameVsStackCard";
@@ -652,11 +653,29 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
       </Card.Section>
 
       {identify && !annotations.isLoading && annotations.isSuccess ? (
-        <Text size="xs" c={objects.length ? "cyan.4" : "dimmed"} mt={6}>
-          {objects.length
-            ? `Found ${objects.length} catalog object${objects.length === 1 ? "" : "s"} in this field`
-            : "No catalog objects fall inside this field"}
-        </Text>
+        objects.length ? (
+          // Plain-language "what else is in this picture?" list — the friendly
+          // read of the same objects the overlay labels on the image, so a
+          // beginner can tell what the other smudges are without squinting at
+          // overlapping labels on a small preview.
+          <Stack gap={2} mt={6}>
+            <Text size="xs" c="cyan.4">
+              In this picture — {objects.length} catalog object{objects.length === 1 ? "" : "s"}:
+            </Text>
+            {describeFieldObjects(
+              objects, annotations.data?.width ?? 0, annotations.data?.height ?? 0,
+            ).map((d) => (
+              <Text key={d.catalogId} size="xs" c="dimmed">
+                {d.label}{d.typePhrase ? ` — ${d.typePhrase}` : ""}, {d.positionPhrase}.
+              </Text>
+            ))}
+            {objects.length > 5 ? (
+              <Text size="xs" c="dimmed">…and {objects.length - 5} more.</Text>
+            ) : null}
+          </Stack>
+        ) : (
+          <Text size="xs" c="dimmed" mt={6}>No catalog objects fall inside this field</Text>
+        )
       ) : null}
 
       {scale && !annotations.isLoading && annotations.isSuccess ? (
