@@ -4142,6 +4142,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   readable → silent; a fraction unreadable → the honest line fires and feeds the thin-stack threshold. Best done
   *after* (or with) the ⭐ stale-cache fix, since it depends on the same helper. *(Traced during the 2026-07-23
   QC/watcher/ingest audit.)*
+- **NEW (Builder 2026-07-23, filed while fixing the ⭐ stale-cache bug) — decide whether a cleared/missing Stage-1
+  cache should self-heal on the next scan.** *(Autonomy / friendliness; PRIORITY 2–3; size S; NEEDS a product call
+  before building — that's why it's an idea, not a bug.)* The stale-cache fix (v0.174.2) makes every consumer fall
+  back to `source_path` via `readable_frame_path`, so correctness is fully restored — a target with a cleared cache
+  keeps working from source. But the cache is **never rebuilt**: `_cache_stale(cached_path, src)`
+  (`seestack/io/ingest.py`) catches the `OSError` from stat-ing a *missing* cache file and returns `False` (not
+  stale), and `ingest_files` only re-copies when `not prior.cached_path` (still truthy), so the frame runs off the
+  (possibly slow NAS) source on every future scan. Rebuilding it on the next scan would restore the fast local path
+  — but there's a **real tradeoff**: users often clear Stage-1 to *reclaim disk*, and auto-refilling it (Stage-1 is
+  just a source copy) would silently undo that. **Options:** (a) treat a *missing* (not just size-mismatched) cache
+  file as needing re-copy in `_cache_stale`/`ingest_files` — simplest, but re-fills after a deliberate clear; (b)
+  have `clear_cache` null the `cached_path` column in the same transaction so the intent ("I cleared it") is
+  explicit and only *then* does a scan re-copy — cleaner separation, but a small additive DB write on a path that
+  currently touches no DB; (c) leave it as-is (source fallback only) and add a UI hint that clearing Stage-1 trades
+  disk for slower reads. Pick one with the owner's disk-vs-speed preference in mind. Not blind-shipped because the
+  "right" default is a product call. *(Found while routing the six read-sites through `readable_frame_path`.)*
 - **NEW (Scout 2026-07-23) — "Try harder to locate these": a more-sensitive plate-solve re-pass for the
   *accepted-but-unsolved* subs, so a faint/sparse-star field's subs actually reach the stacker.** *(Autonomy +
   trust; PRIORITY 2; size M. Directly attacks the ROOT CAUSE half of the ⭐⭐ top owner bug — thin auto-stacks on
