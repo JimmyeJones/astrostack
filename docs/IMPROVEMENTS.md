@@ -5918,6 +5918,27 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+- **IMPROVEMENT IDEA (Scout 2026-07-23) — put a plain-language "what does *not located yet* mean?" explainer next to
+  the unsolved-subs badges, so a beginner who sees "200 not located yet" understands it's usually normal and knows
+  the one thing to try, instead of reading it as a scary error.** *(Pillar: 3 friendliness; size S; frontend-only,
+  additive.)* **The gap (verified this run):** the app now honestly surfaces the unsolved-subs count in several
+  places — the Target-page left-out badge ("N not located yet", `Target.tsx`), the reject-summary "X of Y went into
+  your picture" line, and the auto-stack "waiting for more of your subs to be located" note (v0.184.0). That honesty
+  is good, but **"located" / "plate-solve" is unexplained jargon** to a first-light Seestar owner. A beginner seeing
+  "200 not located yet" has no way to tell whether that's a catastrophe, their fault, or normal for a faint field —
+  and no idea what to do about it. The plate-solve *setup* banner only fires in the specific missing-star-database
+  case; the ordinary faint-field case (most subs just didn't solve) gets a bare number and no guidance. **The fix:**
+  a small, reusable "?" popover/tooltip anchored to the unsolved badge that says, in plain language, roughly:
+  *"Plate-solving figures out exactly where in the sky each sub is pointing so they can be lined up and stacked. Subs
+  that can't be located are left out. This is common on faint or few-star fields, and usually harmless — the located
+  subs still stack. To locate more: make sure ASTAP's star database is installed (Settings), and remember more/longer
+  subs solve more easily."* One shared component reused wherever the count appears, so the copy stays consistent.
+  **Sane default:** no behaviour change — purely an on-demand explainer; the badge/number is unchanged. **Why it
+  clears the bar:** it turns an honest-but-cryptic number into something a non-expert understands and can act on
+  (friendliness pillar), and it directly softens the ⭐⭐ thin-stack story ("why did so few frames make my picture?")
+  where the honest accounting currently leaves the beginner informed but confused. Tests: the popover renders the
+  explainer text when opened; it appears wherever the unsolved badge does (`Target.test.tsx`). No API/schema/default
+  change. *(Feasibility: frontend-only, additive, reuses existing counts, testable — passes §4's filter.)*
 - **IMPROVEMENT IDEA (Scout 2026-07-23, extends the ⭐⭐ honest-accounting theme) — carry the already-tested
   thin-stack caveat onto the Gallery and Dashboard picture tiles, not only the Target and Jobs pages, so a beginner
   browsing their finished pictures isn't shown a 1-frame gibberish thumbnail wearing only a bare "1 frames" badge
@@ -7104,6 +7125,34 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Your imaging calendar": a simple month/year heat-calendar of which
+  nights you actually imaged and how much, so a beginner can see the rhythm of their hobby at a glance, spot the
+  clear-sky runs and the gaps, and feel the streak building — the astro equivalent of a fitness-app activity ring.**
+  *(Pillar: 3 friendliness + enjoy/motivation — §1 lists "enjoy" as a beginner pillar; size S–M.)* **The gap
+  (verified this run):** the app has rich *per-target* and *per-night* views — "Night by night", "Last night" recap,
+  "Your sky, so far" (cumulative sky coverage), the downloadable imaging log (a table) — but **nothing that shows the
+  beginner their imaging activity as a calendar across time.** There is no at-a-glance answer to "how many nights have
+  I been out this month?", "when did I last have a good clear run?", or "am I keeping this up?". Those are exactly the
+  motivating questions a hobbyist asks, and the raw material (every frame's capture timestamp + its integration time)
+  is already in the library. **The feature (beginner idiom):** a GitHub-contributions-style **calendar heatmap** — one
+  cell per night, shaded by that night's total integration time across all targets (darker = more), with a hover
+  showing "12 Jul: 2.3 h across M31, M42". Sits on the Dashboard or "Your sky, so far" page. A one-line headline above
+  it — *"You've imaged 14 nights this month (best run: 5 clear nights in a row)."* **Distinct from what exists:** the
+  imaging *log* is a downloadable per-run table (a record); "Your sky, so far" is a *spatial* sky-coverage map; "Night
+  by night" is *per-target*. This is a *temporal, whole-hobby* activity view — motivation and rhythm, not a record or
+  a map. **Why it clears the beginner bar:** instantly legible to anyone who's seen an activity calendar, zero astro
+  jargon, uses data already trusted, and serves the "enjoy" pillar (it makes the hobby feel like progress and nudges
+  consistency — which *does* lead to more/better images over time). **Shape for one Builder run:** a read-only
+  endpoint (`GET /api/activity-calendar?months=12`) that buckets frames by local-calendar night (reuse the same
+  night-boundary logic the "tonight"/recap code already uses) and sums integration-time per night; a frontend heatmap
+  component (Mantine has the primitives, or a tiny grid of shaded cells — no heavy dep). **Sane default:** last 12
+  months, local time; empty library → a friendly "no imaging yet — your calendar fills in after your first clear
+  night" empty state, never an error. Tests: the endpoint buckets a seeded 2-night fixture into the right cells with
+  the right totals; a night spanning UTC midnight lands in one local night; empty library → empty-but-valid payload.
+  Upgrade-safe: purely additive read-only endpoint + a display component, no schema/config/default/API-shape change.
+  *(Feasibility: reuses existing frame-timestamp queries and the established night-boundary helper, no new/heavy
+  dependency, sane default, testable — passes §4's filter.)*
 
 - **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Your imaging log": one tap to download a plain, printable record of
   every target and night you've imaged — date, target, subs used, total integration time, best sharpness — so a
