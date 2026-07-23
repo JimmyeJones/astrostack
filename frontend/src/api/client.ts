@@ -655,6 +655,25 @@ export interface GalleryItem {
   calstat?: string | null;
 }
 
+export interface BestPicture {
+  safe: string;
+  target_name: string;
+  run_id: number;
+  output_basename: string;
+  timestamp_utc: string;
+  n_frames_used: number;
+  canvas_w: number;
+  canvas_h: number;
+  total_exposure_s: number | null;
+  noise_sigma: number | null;
+  has_preview: boolean;
+  has_fits: boolean;
+  has_tiff: boolean;
+  preview_url: string;
+  // Quality-blend score in [0, 1], relative to this Library's own collection.
+  score: number;
+}
+
 export interface LogEntry {
   seq: number;
   ts: string;
@@ -1330,6 +1349,12 @@ export const api = {
 
   // gallery
   getGallery: () => req<{ items: GalleryItem[] }>("/api/gallery"),
+  // "My best pictures": the newest finished stack of every target, auto-ranked
+  // best-first. Self-hides (empty items) until there are ≥2 finished pictures.
+  getGalleryBest: (limit?: number) =>
+    req<{ items: BestPicture[] }>(
+      `/api/gallery/best${limit != null ? `?limit=${limit}` : ""}`,
+    ),
 
   // logs
   getLogs: (level?: string, limit = 1000) =>

@@ -5870,7 +5870,34 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
-- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "My best pictures": an auto-curated, cross-target portfolio wall of
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "My best pictures": an auto-curated, cross-target portfolio wall of
+  your finest finished stacks.**~~ — **SHIPPED v0.173.0** (Builder 2026-07-23, branch `claude/pensive-faraday-iv26r2`).
+  Built end-to-end across engine/webapp/frontend, reusing the existing gallery/lightbox/share plumbing — no new astro
+  math, no network, no model, no schema/config/API-shape/default change (read-only aggregation over columns that
+  already exist). **Engine** (`seestack/portfolio.py`): a pure, unit-tested `rank_portfolio(entries, *, limit)` +
+  `PortfolioEntry`/`RankedEntry` dataclasses. It scores each target's representative stack on a transparent blend —
+  `PORTFOLIO_WEIGHTS` = integration 0.40 / frames 0.25 / noise 0.25 / coverage 0.10 — with every metric normalised
+  against the *best value present in the user's own collection* (so no absolute calibration is needed), noise scored
+  lower-is-better (`min_σ / σ`), and each entry's score **renormalised over just the metrics it carries** so an old
+  run missing `noise_sigma`/`total_exposure_s` is never penalised for the null. Ordering is fully deterministic
+  (score → integration → frames → key). **Webapp** (`webapp/routers/gallery.py`): read-only
+  `GET /api/gallery/best?limit=` that takes each target's *newest run with a preview on disk* (a finished picture),
+  ranks them, and returns the top N with the ranking `score` — wrapping every `Project.open` in the established
+  `except Exception: continue` guard (a broken/rolled-back project is skipped, never 500s the wall) and **self-hiding**
+  (empty `items`) until ≥2 finished pictures exist so a new install shows nothing rather than a wall of one.
+  **Frontend**: a `BestPicturesView` route (`/best`, new "My best pictures" nav entry) laying the ranked stacks out
+  as a lightbox-able wall with a quiet #1–#3 rank chip and a plain-language "why it's good" line
+  (`components/bestPictures.ts::bestPictureReason` → e.g. "3.4 h · 500 frames"), plus a compact **self-hiding
+  Dashboard strip** (`BestPicturesStrip`) showing the top 4 above Recent stacks. One click opens the existing
+  `ImageLightbox` (download/JPEG/share/scan-to-phone/wallpaper all reused). Additive/upgrade-safe throughout. Tests:
+  `tests/test_portfolio.py` (+10: ordering, tie-breaks, missing-metric fallbacks, single-entry, order-independence,
+  truncation), `tests/webapp/test_gallery_best.py` (+6: self-hide floor, deep-cleaner-first ranking, newest-per-target,
+  limit, broken-project skip), `frontend/.../bestPictures.test.ts` (+5) and `BestPictures.test.tsx` (+2: ranked wall
+  + empty-state). _(Original spec below.)_
+
+  <details><summary>Original spec</summary>
+
+  **NEW BEGINNER FEATURE (Scout 2026-07-23) — "My best pictures": an auto-curated, cross-target portfolio wall of
   your finest finished stacks.** *(Friendliness / "enjoy + share" pillar, PRIORITY 3; size M.)* **Why:** today the
   app's imagery is organised strictly *per target* — each target has its Gallery/History and a pinned cover, and
   the Dashboard shows one tile per target. There is **no single place that celebrates a beginner's best results
@@ -5900,6 +5927,8 @@ problems. Dogfood it every big-picture run and fix root causes.
   (S–M):** a `BestPicturesWall` route + a compact Dashboard strip reusing the existing lightbox/share components.
   **(c) tests:** rank ordering + tie-breaks + graceful-skip of a broken project + empty-state self-hide. Keeps the
   beginner-feature pipeline stocked with a fresh *enjoy/share* capability that no existing card covers.
+
+  </details>
 - ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "Scan to get it on your phone": a QR code beside the finished
   picture's download button that a beginner scans to pull the JPEG straight onto their phone.**~~ — **SHIPPED
   v0.172.0** (Builder 2026-07-23, branch `claude/pensive-faraday-w4ht9n`). Frontend-only, fully offline. A pure
