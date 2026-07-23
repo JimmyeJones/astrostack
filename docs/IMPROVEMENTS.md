@@ -47,6 +47,28 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+> **Re-audit — stacking-engine hot path CLEAN again; one NEW verified render/parity broken-UX bug in the "one frame
+> vs your stack" reveal (Scout 2026-07-23, branch `claude/kind-mccarthy-ltki02`).** Baseline suite green
+> (**1784 passed, 2 skipped**). Two independent adversarial audit sub-agents plus my own reads re-covered the engine
+> and the render/output path: (a) the **stacking hot path is CLEAN** — `accumulator.py` (MinMaxReject k-insertion +
+> degrade bands + `rejection_counts` schedule traced against the closed form at counts 5/3/1/0; Welford `add`≡
+> `add_window` sub-view writes proven non-aliasing; WeightedSum `sum/w>0`-else-NaN + any-channel coverage),
+> `stacker.py` (κ-σ keep-mask σ=0/NaN-mean widenings, the analytic proof κ-σ can't null *all* contributions at a
+> pixel, memory guard plane-count charge, inverse-variance photometric combine, cancel handling), `drizzle_path.py`
+> (`_clip_tolerance` float64/Bessel/`16·eps·m²` unresolved-floor, `neff` on the true `_count`, half-open bounds,
+> per-channel footprint OR, `result()` NaN-mask), `align.py` (CPU `cval=NaN` ↔ GPU `cval=0` parity via the
+> `inset≥1` interior-stencil argument, subpixel-shift order-1 NaN re-mask) — all matching the repeatedly-clean
+> documented state (the `n_used=min(p1,p2)` frame-count under-report on a pass-1-fail/pass-2-succeed frame is the
+> known honest-accounting note, image is correct). My own reads of `calibrate/apply.py` (the `_dark_scaling_applies`
+> shared predicate holds), `qc/grading.py` (per-call 25% cap + practical-significance floors), `qc/streaks.py`,
+> `solve/runner.py` (the unreadable-sidecar → `solve_failed` self-heal), and `webapp/watcher.py` +
+> `pipeline.py::submit_process_target` agreed — no new engine bug. (b) The **render/output audit found ONE new
+> verified broken-UX bug** (re-verified by me against the code): the **"one frame vs your stack" reveal renders its
+> two halves under different tone curves** once a custom preview stretch is saved (`save_stack_preview` writes an
+> `asinh` preview while `reference_sub_png` stays hard-coded STF), and always for a display-space editor-export run —
+> filed as the ⭐ render/parity entry below, **traced**. Curation + a new beginner feature + an autonomy improvement
+> idea filed below.
+>
 > **Re-audit — stacking-engine reductions + calibrate + align + bg all CLEAN, no new bug (Scout 2026-07-23, branch `claude/kind-mccarthy-bt8ehb`).**
 > Baseline suite green (**1775 passed, 2 skipped**). Two independent adversarial audit sub-agents re-read the engine
 > end-to-end and both came back **CLEAN**, matching the repeatedly-clean documented state: (a) the reduction/rejection
@@ -496,6 +518,39 @@ when you take it.
   after on the exact divergence pattern incl. a still-clipped real outlier, and
   `test_kappa_sigma_keep_mask_matches_plain_clip_when_fully_covered`). Upgrade-safe: within-function algorithm
   change, no config/DB/API/on-disk/default change.
+
+- **⭐ "One frame vs your stack" reveal renders the two halves under *different tone curves* once a custom preview
+  stretch is saved (and always for a display-space editor-export run) — breaking the feature's documented honesty
+  promise.** *(Render / preview↔export parity; broken-UX, Medium; found by the 2026-07-23 render/output adversarial
+  audit — traced end-to-end AND independently re-verified against the code, not runtime-reproduced.)* The
+  before/after card is explicitly documented so the two halves differ *only* in noise/detail — "the only visible
+  difference is the noise/detail stacking bought, not a brightness offset from a different tone curve"
+  (`seestack/render/thumbnail.py:126-128`). That holds on a **fresh linear stack**: `write_stack_outputs` →
+  `_write_preview_png` (`seestack/stack/output.py:277`) stretches the master with `_autostretch_for_export` (STF),
+  and `reference_sub_png` → `render_sub_preview` (`thumbnail.py:149`) stretches the sub with the **same**
+  `_autostretch_for_export` STF → the halves match. **The break:** `save_stack_preview`
+  (`webapp/routers/stack.py:732-768`, the History "Adjust" save) re-renders the master via
+  `render_stack_png(..., stretch, black)` → **`asinh_stretch`** (a different curve family with user-picked sliders)
+  and **overwrites `run.preview_path`** — but `reference_sub_png` is hard-coded to STF and knows nothing about the
+  saved stretch, so the card's stack half is now asinh(custom) while its sub half is still STF: a global
+  brightness/tone offset, exactly what the docstring promises can never happen. **Secondary (always-on) variant:**
+  for an **editor-export / display-space run**, `_write_preview_png` writes the editor's tone-mapped image *verbatim*
+  (`already_display=True`) while `reference_sub_png` still STF-autostretches the raw sub → mismatched too;
+  `one_sub_vs_stack_info` (`stack.py:794`) gates the card only on `has_preview`, **not** on display-space (the
+  noise-ratio endpoint *does* correctly bail on display-space — the visual card doesn't). Repro (traced):
+  fresh linear stack → card halves match; open History "Adjust", move sliders, `POST …/stack-runs/{id}/preview` →
+  the reveal now shows two tone curves. Severity: broken-UX — the stacked pixels are correct, but the trust card that
+  exists to *honestly* show what stacking bought is rendered dishonest (the "after" looks brighter/different for a
+  reason that isn't stacking). Confidence: traced (both code paths unambiguous). **Fix directions (Builder):**
+  (a) make `reference_sub_png` render the sub through the **same** stretch the stored preview used — persist the
+  saved `stretch`/`black` on the run (additive nullable columns via `SCHEMA_VERSION`+`_migrate_schema`;
+  `save_stack_preview` already computes them and returns them) and apply `asinh_stretch(sub, stretch, black)` to the
+  debayered sub when a custom stretch is saved, else keep STF; (b) for a **display-space** run, have
+  `one_sub_vs_stack_info` report `display_space` (as the noise-ratio endpoint already does) and either self-hide the
+  card or render the sub to the same display space; (c) regression: a run with a saved custom stretch → assert the
+  reference-sub render and the stored preview use the same stretch family/params, and a display-space run → assert
+  the card self-hides (fail-before: STF sub vs asinh/verbatim preview). Additive/upgrade-safe (new nullable columns
+  default NULL = "no custom stretch" = today's STF behaviour).
 
 - **Stack OOM memory guard omits the `max_workers·2` in-flight aligned-frame buffers it actually holds.**
   *(Stacking-engine correctness / stability; Low severity on Seestar-sized frames, traced not reproduced; found
@@ -4448,6 +4503,36 @@ problems. Dogfood it every big-picture run and fix root causes.
   behaviour change to a run already on disk. Add a test asserting an auto-stack of a small synthetic set with an
   injected lone bright outlier removes it (min/max) while a large set uses κ-σ. Serves the North Star (a clean
   trustworthy image with no fuss) directly.
+- **IMPROVEMENT IDEA (Scout 2026-07-23) — feed a *sibling sub's* solved centre as the plate-solve hint for the
+  target's still-unsolved subs (a cheap, safe attack on the ⭐⭐ thin-stack root cause).** *(Autonomy + image quality /
+  PRIORITY 2 + 4; size S–M; fully offline, additive, opt-nothing — no new deps. Lighter than the deep "stack-then-
+  solve" bootstrap below and can ship alongside it.)* **What prompts it:** the ⭐⭐ top bug is a *thin stack* because
+  on a faint / sparse-star field ASTAP fails to solve most subs, and `run_stack` combines only accepted **and**
+  solved frames. Today `build_solve_arglist` (`seestack/solve/runner.py:96`) threads only each frame's **own FITS
+  header hint** (`ra_hint_deg`/`dec_hint_deg` from `info.ra_target_deg`) into ASTAP; when that hint is absent or the
+  blind search still fails, nothing narrows the search — and a tighter, correct search radius is exactly what turns
+  an ASTAP timeout/failure into a solve on a star-poor field. **The insight:** a Seestar holds one pointing for a
+  whole target, so **once *any* sub on the target has solved, we know where the scope is aimed** — that solved
+  centre (`ra_center_deg`/`dec_center_deg`, already stored per frame) is a far better, tighter hint for the *other*
+  subs than a missing/loose header hint. **Feature:** when building the solve arglist, if ≥1 frame on the target is
+  already solved, compute a robust centre of the solved frames (median RA/Dec — RA-wrap-safe via the existing
+  `unwrap_ra_deg`) and use it as the fallback hint (with a **tighter** `search_radius_deg`) for any frame lacking a
+  usable header hint — or optionally as a *second-pass* retry for frames that failed a first blind solve. This is
+  strictly a **search-localisation** change: ASTAP still verifies the star pattern, so a wrong hint can't create a
+  false solution (it just fails, as today) — meaning it can only *add* solves, never corrupt one. Directly lifts the
+  solved-frame count on the exact faint fields the ⭐⭐ bug is about, so more real subs reach the accumulator and the
+  noise averages down. **Feasibility:** all inputs exist (solved centres are in the DB; `unwrap_ra_deg` +
+  circular-mean helpers already live in `reference.py`/`mosaic.py`); the core is a pure
+  `fallback_solve_hint(solved_frames) -> (ra, dec) | None` + a tighter-radius arg, unit-testable on synthetic frame
+  rows (RA-wrap case, no-solved-frames → None, one-solved → its centre). Additive/opt-safe: only *fills in* a hint
+  where there wasn't a better one and/or drives an extra retry pass; a frame that already solved is untouched; no
+  config/DB-schema/API-shape/default change. **Builder slices:** (a) pure hint helper + tests; (b) wire it into
+  `build_solve_arglist` (fallback hint + a config-defaulted tighter fallback radius) with a fail-before/pass-after
+  test that a header-hint-less frame is offered the sibling centre once a sibling has solved; (c, follow-on) a
+  second solve pass that retries first-round failures with the sibling hint. Serves autonomy (fewer manual
+  re-shoots / "why is my stack noise?") and image quality (deeper real stacks). *(No existing entry covers this — the
+  "stack-then-solve" bootstrap below integrates first then solves the *deep image*; this instead reuses a
+  neighbour's existing per-sub solution to localise the remaining per-sub solves, and the two compose.)*
 - **IMPROVEMENT IDEA (Scout 2026-07-23) — "stack-then-solve" bootstrap: rescue a faint field that won't plate-solve
   per-sub by solving a rough integration instead, then reusing that WCS.** *(Autonomy / image-quality — directly
   attacks the ⭐⭐ owner top bug's root cause; PRIORITY 2; size L; idea, not yet traced to code — needs the owner's
@@ -6528,6 +6613,32 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Ready-to-post caption": one tap to copy a plain-language, accurate
+  description of the finished picture for sharing.** *(Share + understand pillar, PRIORITY 3; size S; fully offline,
+  additive, read-only — no new deps, no network.)* **Why a beginner wants it:** the app already helps them *make* a
+  shareable image (wallpaper export, QR-to-phone, portfolio wall, north-up, scale bar) — but the moment they go to
+  post it to a friend, a group chat, or social media, they're staring at a blank caption box. A non-expert doesn't
+  know the "right" way to describe an astrophoto and often gets the facts wrong (wrong object name, guessed
+  integration time). This hands them one correct, friendly sentence they can copy verbatim: *"The Orion Nebula (M42)
+  — a stack of 240 subs, 40 minutes total, shot on 20 Jul 2026 with a Seestar. The frame is about 1.3° across (~2.5
+  full Moons)."* Every fact is pulled from data the app *already* computed — no guessing, no wrong numbers.
+  **Beginner bar ✔:** universal ("what do I write under this?"), one plain sentence, sane auto-generated default,
+  zero knobs, a single **"Copy caption"** button; serves *share* (and *understand* — it teaches them how to describe
+  their own shot). **Not** pro tooling — no exposure/gain/pixel-scale jargon dump; the friendly Moon-comparison and
+  round integration time keep it approachable. **Reuses existing signals, no new engine math:** target name +
+  friendly type come from the existing local `objectinfo.identify_object` / stack-annotations "Identify"; sub count +
+  total integration from the run (`n_frames_used`, `total_exposure_s`); date from the run/frames; the "° across /
+  N Moons" clause from the **already-shipped** `scale_bar_for` (v0.178.0). The core is a pure, unit-testable
+  `postCaption({name, type, nFrames, integrationS, date, scaleBar}) -> string` that degrades gracefully (drops any
+  clause whose datum is missing — e.g. no WCS → no scale clause, unidentified → "your target"). **Guardrails:**
+  additive/read-only, off nothing, no schema/config/API-shape/default change (a frontend helper fed by fields the
+  History/Target endpoints already return, or one tiny read-only `caption` field folded into the existing
+  annotations/one-sub endpoints). **Builder slices:** (a) pure `postCaption(...)` helper + unit tests (all fields →
+  full sentence; missing scale/identity → shorter honest sentence; singular "1 sub"/"1 minute" grammar); (b) a
+  **"Copy caption"** button on the History `RunCard`/share affordance beside the existing wallpaper/QR/scale
+  controls, using the clipboard API with a "Copied!" confirmation; (c, follow-on) offer the same caption in the
+  share-image flow so the picture and its words travel together. Keeps the beginner-feature pipeline stocked with a
+  pure *share/understand* capability distinct from the image-side share features already filed.
 - **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Your first image": a dismissible, self-checking end-to-end
   getting-started guide that walks a brand-new user from empty app → shared picture.** *(Friendliness + autonomy /
   "understand the app" pillar, PRIORITY 2–3; size M; fully offline, additive, read-only — no new deps.)* **Why a
