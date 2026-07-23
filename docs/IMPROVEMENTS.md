@@ -47,6 +47,30 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+> **Re-audit — full stacking/QC/solve/render sweep CLEAN again; two NEW verified bugs filed (Scout 2026-07-23,
+> branch `claude/kind-mccarthy-54eyci`).** Baseline suite green (**1815 passed, 2 skipped**). Three independent
+> adversarial audit sub-agents plus my own reads re-covered: (a) the **less-audited stacking helpers** — `mosaic.py`
+> (RA-wrap canvas/CRPIX/outlier math reproduced clean across the 0°/360° seam and pole cases), `reference.py`,
+> `output.py` (NaN=no-coverage → 0 across FITS/TIFF/PNG/render, all-NaN→zeros, no percentile over uncovered pixels),
+> `pointings.py` — **CLEAN**; (b) the **QC + plate-solve path** — `metrics.py` (Bayer green-extraction layouts,
+> float32-before-add overflow-safety, FWHM 2.35482·σ, flat-frame no-crash), `noise_ratio.py` (MAD estimator),
+> `grading.py` (modified-z, single-pass 25% floor-`int()` cap distinct from the already-fixed cumulative bug),
+> `astap.py`/`runner.py` — core math CLEAN; (c) the **render/webapp layer** — `thumbnail.py`/`output.py` autostretch
+> NaN-awareness + preview↔export parity (byte-identical covered pixels for a display-space export), `frames.py`/
+> `gallery.py` pagination/nulls-last/connection-safety, `watcher.py` debounce — CLEAN. My own reads of the auto-stack
+> pipeline (`_auto_stack_frame_count`, `_auto_edit_process_run` parity) and the honest-accounting module
+> (`rejection_summary.py` + its `frames.py` caller, `used = accepted − unsolved`) agreed — no new bug there.
+> **Two NEW verified bugs filed** (both below): (1) a plate-solve **solved-but-null-centre** data-completeness bug —
+> a frame ASTAP solves (valid `.wcs`) but whose `.ini` doesn't parse is persisted with `wcs_json` set yet
+> `ra/dec_center_deg = NULL`, so it stacks but is silently excluded as the reference frame and from sibling-hint
+> seeding, and is never re-offered to recover its centre (reproduced); (2) a render-suggestion **parity** bug — the
+> History "Adjust" suggestion targets sky→0.10 while the stored STF gallery thumbnail targets sky→0.06, so "Adjust"
+> opens ~2× brighter than the thumbnail it claims to match (reproduced, median 32 vs 15 /255). Curation + a new
+> beginner feature ("Your imaging log") + a friendliness improvement idea (thin-stack caveat on Gallery/Dashboard
+> tiles) filed below. Two comment/consistency nits (the `runner.py` unreadable-sidecar comment overstates "stops
+> being re-offered"; `reference.py` lacks the `isfinite` centre guard `pointings.py` has — both effectively
+> unreachable) noted in the Minor group.
+>
 > **Re-audit — stacking engine CLEAN again; shipped the SIMBAD nearest-row fix; filed one NEW verified ingest
 > wrong-result bug + enriched the ⭐⭐ top bug with its minimum-frames code location (Scout 2026-07-23, branch
 > `claude/kind-mccarthy-nqgrvr`).** Baseline suite green (**1805 passed, 2 skipped**). Three independent adversarial
@@ -808,6 +832,50 @@ when you take it.
   at the same path in no-cache mode, re-ingests, and asserts `wcs_json`/hints were cleared. Confidence: traced
   (gating + default verified end-to-end: `config.py:65` False → `pipeline.py:66` → `ingest.py:194` guard).
 
+- **A plate-solve that succeeds but whose ASTAP `.ini` sidecar doesn't parse is persisted as "solved" with a valid
+  `wcs_json` but NULL centre coordinates — the frame stacks yet is silently barred from being the reference frame and
+  from seeding sibling plate-solve hints, and is never re-offered to recover its centre.** *(Stacking/solve
+  correctness — data-completeness; Low–Medium latent, ASTAP-config-dependent; found by the 2026-07-23 QC/solve
+  adversarial audit — traced + reproduced.)* `ASTAPSolver._solve_once` (`seestack/solve/astap.py:286-304`) sets
+  `solved = returncode == 0 and wcs_sidecar.exists()`, then reads the centre **only** from the `.ini` via
+  `_parse_astap_ini` (`astap.py:373`, `values["CRVAL1"]`). If the `.ini` is missing or lacks `CRVAL1`/`CRVAL2`, the
+  `KeyError` is swallowed (`astap.py:292`) and `ra/dec` come back `None` **while `solved` stays `True`**. `solve_frame`
+  (`runner.py:121`) then fills `wcs_text` from the *independent* `.wcs` sidecar (which is fine), so
+  `apply_solve_result_to_db` (`runner.py:204,220`) takes the success branch and writes `wcs_json=<valid>` with
+  `ra_center_deg=None`/`dec_center_deg=None`. **Consequences (reproduced, `scratchpad/repro_nullcenter.py`):** the
+  frame keeps `accept=1`, no `reject_reason`, `wcs_json` truthy → (a) `build_solve_arglist` (`runner.py:166`) skips it
+  (truthy `wcs_json`) so it is **never re-offered** to recover the centre; (b) `pick_reference_frame` (`reference.py:44`,
+  requires non-None centres) **excludes it** and `fallback_solve_hint` ignores it — and if the `.ini` problem is
+  *systematic* (an ASTAP version/format quirk that mis-writes every `.ini` while still writing a good `.wcs`),
+  **every** solved frame has a null centre → `pick_reference_frame` returns `None` and the stack has no reference
+  candidate at all. The frame still reprojects+stacks (only `wcs_json` is needed), so no pixel corruption — but the
+  centre it needs is sitting in the `.wcs` sidecar's `CRVAL1`/`CRVAL2` and is never read from there. **Fix (small, one
+  place):** when `solved` but `_parse_astap_ini` yielded no centre, backfill `ra/dec_center_deg` from the parsed WCS —
+  `seestack/io/wcs_io` already exposes `wcs_from_text`/`celestial_wcs_from_fits`, so evaluate the WCS at the image
+  centre (or read `CRVAL1/2` off the `.wcs`) instead of leaving them `None`. Add a fail-before/pass-after test: an
+  ASTAP result with a valid `.wcs` but an `.ini` missing `CRVAL1` yields a `SolveResult` with a non-None centre and a
+  reference-eligible DB frame. **Why the Scout didn't blind-ship it:** it edits the solve engine and the exact trigger
+  (ASTAP writing a good `.wcs` but a bad/absent `.ini`) can't be validated here against a real ASTAP — left
+  well-shaped for a Builder run with the fix direction spelled out. Severity: Low–Medium (latent, data-completeness —
+  degrades reference selection, can collapse it if systematic). Confidence: reproduced (the persisted null-centre
+  state + both downstream consequences) + traced (the ASTAP `.ini`-fail trigger).
+
+- **The History "Adjust" stretch suggestion opens the sliders ~2× brighter than the STF gallery/History thumbnail it
+  claims to match — it targets sky→0.10 while the stored STF preview targets sky→0.06.** *(Render / preview-parity —
+  broken-UX; Low; found by the 2026-07-23 render audit — reproduced.)* The `…/stack-runs/{id}/render-suggestion`
+  endpoint (`webapp/routers/stack.py:~700`) seeds the Adjust sliders via `suggest_asinh_stretch`
+  (`seestack/edit/stretch.py`), whose default `target_bg = STRETCH_TARGET_BG = 0.10` (`stretch.py:49`). But the stored
+  linear-run thumbnail a beginner clicks (History/Gallery) is rendered by `generate_thumbnail` →
+  `_autostretch_for_export` (`seestack/stack/output.py:421`, `target_bg=0.06`). So the endpoint's own docstring —
+  *"a look that matches the STF preview thumbnail instead of a fixed 0.5/0.35 that can jump brighter or darker"*
+  (`stack.py:~700`) — is contradicted by its behaviour: opening Adjust makes the background jump ~2× brighter than the
+  thumbnail (reproduced by the render audit: median **32 vs 15** /255). No pixel corruption and it settles once the
+  user adjusts, but the entire point of the suggestion is to anchor Adjust to what the user just saw, so the mismatch
+  is a small trust/parity ding. **Fix:** reconcile the two targets — either seed `suggest_asinh_stretch` with the
+  export target (`0.06`) so Adjust starts on the thumbnail's look, or correct the docstring if `0.10` is deliberate.
+  **Confirm the intended `target_bg` before changing** — two deliberate constants live in different modules, so this is
+  a verified docstring-vs-behaviour inconsistency either way. Severity: broken-UX, Low. Confidence: reproduced.
+
 - **Stack OOM memory guard omits the `max_workers·2` in-flight aligned-frame buffers it actually holds.**
   *(Stacking-engine correctness / stability; Low severity on Seestar-sized frames, traced not reproduced; found
   by the same rejection-math audit — NOT fixed, needs care.)* `_estimate_peak_bytes`/`_guard_stack_memory`
@@ -1462,6 +1530,19 @@ sweep are now both well-hardened.)_
     nested like `gallery.py`/`storage.py::get_storage`), so if `proj.close()` itself raised, `lib.close()` would
     be skipped and the Library handle would leak. Trigger is essentially unreachable (`sqlite3.Connection.close()`
     does not raise in practice), so this is a consistency nit, not a live leak — nest the two closes if the file is
+    touched. (Cosmetic; confidence: traced.)
+  - `seestack/solve/runner.py:204-218` the "unreadable plate solution" self-heal branch's comment claims recording a
+    `reject_reason` makes the frame "stop being re-offered," but `build_solve_arglist` (`runner.py:166`) skips frames
+    only on truthy `wcs_json` — nothing gates on `reject_reason`, so a consistently-unparseable `.wcs` sidecar is
+    re-solved every scan (identical to the ordinary transient-failure branch it says it "mirrors"). The re-offer
+    behaviour is itself harmless/safe (a transient corruption recovers on retry); only the comment over-promises. Fix
+    the comment (or, if genuinely un-recoverable, gate the skip on the stored reason) if the file is touched.
+    (Cosmetic — comment vs behaviour; confidence: traced.)
+  - `seestack/stack/reference.py:42-44` `pick_reference_frame` filters candidates on `ra_center_deg is not None` but,
+    unlike `pointings.py:78-80`, does not also require `math.isfinite` — so a hypothetical NaN centre would propagate
+    into the unwrap/median/score and pick an arbitrary reference. Effectively unreachable (a successful solve writes a
+    finite `wcs_json` + centre; a failure leaves `wcs_json` NULL and is filtered by the `f.wcs_json` clause), so this
+    is a defensive consistency nit, not a live bug — add the `isfinite` guard to match `pointings.py` if the file is
     touched. (Cosmetic; confidence: traced.)
   - `seestack/post/skymap.py:266` the **offline** galactic-plane fallback (astropy absent) draws the Milky Way
     curve with a linear-in-sin approximation that is up to ~29° off in declination. In this deployment astropy is
@@ -5837,6 +5918,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+- **IMPROVEMENT IDEA (Scout 2026-07-23, extends the ⭐⭐ honest-accounting theme) — carry the already-tested
+  thin-stack caveat onto the Gallery and Dashboard picture tiles, not only the Target and Jobs pages, so a beginner
+  browsing their finished pictures isn't shown a 1-frame gibberish thumbnail wearing only a bare "1 frames" badge
+  with no plain-language "this is very thin — expect noise" cue.** *(Pillar: 3 friendliness; size S; frontend-only,
+  additive.)* **The gap (verified this run):** the tested `thinStackWarning(n_frames_used)` helper
+  (`frontend/src/components/target/thinStack.ts`, thresholds from the √N curve: `single` ≤1, `thin` 2–4, `null` ≥5)
+  is wired into **Target.tsx** and **Jobs.tsx** only. But the two surfaces where a beginner actually *browses* their
+  results — the **Gallery** tiles (`Gallery.tsx:146` shows `{item.n_frames_used} frames` as a plain Badge) and the
+  **Dashboard** per-target tiles (`Dashboard.tsx:255`, same bare badge) — show the frame count with **no** thin-stack
+  cue. So the owner's exact gibberish case (a 1-frame auto-stack) lands in the Gallery looking like a finished
+  picture, and the honest warning they'd see if they clicked into the Target page is absent from the grid they scan
+  first. **The fix:** on any tile where `thinStackWarning(n_frames_used)` is non-null, show a small warning-coloured
+  badge/tooltip ("Very few frames — noisy" / "Only 1 frame") next to (or replacing) the plain frame-count badge,
+  reusing the existing helper so copy and thresholds stay consistent with Target/Jobs. **Sane default:** no change for
+  healthy stacks (≥5 frames → helper returns null → plain badge as today); purely additive on the thin ones. **Why it
+  matters:** it closes the last place a thin/gibberish result can masquerade as a good picture, on the most-browsed
+  screens — directly the ⭐⭐ "never silently present a thin stack as finished" goal, at S size. Tests: a
+  Gallery/Dashboard tile with `n_frames_used=1` renders the caveat; `n_frames_used=30` does not
+  (`Gallery.test.tsx`/`Dashboard.test.tsx`). `n_frames_used` is already in both tile payloads, so no API change.
+  *(Feasibility: frontend-only, reuses a tested helper, additive, testable — passes §4's filter.)*
 - ~~**IMPROVEMENT IDEA (Scout 2026-07-23) — make the "why frames were left out" high-drop verdict name the *dominant
   actual cause*, not the generic "cloud or wind".**~~ — **SHIPPED v0.178.2** (Builder 2026-07-23, branch
   `claude/pensive-faraday-xgym08`). Extended `webapp/rejection_summary.py::_verdict` to take the grouped by-bucket
@@ -7003,6 +7104,30 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Your imaging log": one tap to download a plain, printable record of
+  every target and night you've imaged — date, target, subs used, total integration time, best sharpness — so a
+  beginner can keep a journal of the hobby, track progress across months, and share "here's what I shot this month"
+  without copying numbers out by hand.** *(Pillar: 3 friendliness + enjoy/share; size S–M.)* **The gap:** the app
+  already computes rich per-target and per-night data — session recaps, `n_frames_used`, total exposure, median FWHM,
+  the "Night by night" and "Your sky, so far" cards — but every bit of it lives *inside* the app, on separate pages.
+  A beginner who wants a single takeaway record of their imaging (to keep a log, print it, paste it into a forum
+  post, or just see their whole hobby on one page) has to transcribe it target by target. There is **no export of the
+  library's own history** (verified this run: no CSV/journal/log-download endpoint exists anywhere in
+  `webapp/routers/` or the frontend). **The feature (beginner idiom):** a **"Download my imaging log"** button
+  (Dashboard or a Library menu) that returns a single tidy file — one row per finished stack (or per target-night):
+  *date, target name, #subs used, total integration (h:m), best/median FWHM, and the sky-quality read the app already
+  has.* Default format a plain **CSV** (opens in any spreadsheet / on a phone) with a friendly header; a printable
+  summary can follow later. **Why it clears the beginner bar:** a non-expert Seestar owner immediately understands
+  "download a record of what I've shot", it needs zero astro jargon, and it turns data they already trust into a
+  keepsake / share artifact — the "enjoy and share" pillar of §1. **Shape for one Builder run:** a read-only endpoint
+  (`GET /api/imaging-log.csv`) that walks `Library.list_targets()` → each target's stack runs / session recaps (all
+  already queried elsewhere), emits rows newest-first, and streams a CSV; a frontend download button. No new engine
+  work, no new DB columns, no heavy dep. **Sane default:** all targets, newest first; empty library → a header-only
+  file (or a friendly "nothing imaged yet" state), never an error. Tests: the CSV has the expected columns and one row
+  per run for a seeded 2-target fixture; an empty library yields just the header; totals match the per-target cards.
+  Upgrade-safe: purely additive read-only endpoint + button, no schema/config/default/API-shape change. *(Feasibility:
+  reuses existing recap/run queries, no new/heavy dependency, sane default, testable — passes §4's filter.)*
 
 - **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Reuse your favourite look": one tap to save the edit you just made
   as a named personal look, and one tap to apply it to any other stack — so a beginner who finally nails a picture
