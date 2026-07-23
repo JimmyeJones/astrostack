@@ -6863,9 +6863,27 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "What else is in this picture?": a friendly, plain-language list of the
-  *other* catalogued deep-sky objects that fall inside your finished frame, read straight off the stack's own WCS.**
-  *(Understand + enjoy pillar, PRIORITY 3; size M; fully offline, additive, read-only — no new deps, no network.)*
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "What else is in this picture?": a friendly, plain-language list of the
+  catalogued deep-sky objects that fall inside your finished frame, read straight off the stack's own WCS.**~~ —
+  **SHIPPED v0.181.0 (list surface)** (Builder 2026-07-23, branch `claude/pensive-faraday-eadwhp`). The engine half the
+  idea proposed (`seestack.annotate.objects_in_field` + the `…/stack-runs/{id}/annotations` endpoint's `objects` array)
+  already existed and drives the on-image Identify overlay, but the *plain-language read* did not — Identify showed only
+  labels drawn on the small preview (which overlap and are hard to read) plus a bare "Found N catalog objects in this
+  field" count, which never told a beginner *what* the other smudges are. Added a pure, tested frontend helper
+  `frontend/src/components/fieldObjectList.ts::describeFieldObjects(objects, width, height, limit=5)` that turns the
+  already-fetched objects into a short list — nearest-the-centre first, capped at 5 — each a plain sentence with a
+  friendly type clause and a frame-relative position: *"Andromeda Galaxy (M31) — a galaxy, near the centre."* /
+  *"NGC 1977 — a nebula, toward the top."* Positions are named relative to the **frame** (near-centre / toward the
+  top-left / …), not the primary target, so it needs no fragile primary-object identification and can never mislabel an
+  object it can't disambiguate. The History `RunCard` renders it under Identify in place of the bare count (headed "In
+  this picture — N catalog objects:", with "…and K more" when the field holds >5). Degrades exactly as before (no
+  objects → "No catalog objects fall inside this field"; no WCS → Identify simply doesn't populate). Frontend-only,
+  additive, read-only — reuses the exact tested backend data, no engine/schema/config/API-shape/default change. Tests:
+  `fieldObjectList.test.ts` (+7 — label/designation, "a"/"an" type article, empty-type drop, corner/edge position
+  phrasing, nearest-first ordering + cap, degenerate-grid/empty → [], non-empty-phrase fallback) and `History.test.tsx`
+  (updated the Identify case to assert the named plain-language list). *(Understand + enjoy pillar, PRIORITY 3;
+  slices (b) done here; slice (c) — link a listed neighbour to its Tonight-planner entry — remains a nice follow-on.)*
+  *(Original idea kept below for provenance.)* *(Understand + enjoy pillar, PRIORITY 3; size M; fully offline, additive, read-only — no new deps, no network.)*
   **Why a beginner wants it:** a Seestar's ~1.3°×0.7° field almost always catches *more than one* object — shoot the
   Orion Nebula and the Running Man (NGC 1977) rides along just above it; shoot M31 and its satellites M32/M110 are in
   frame. Today the app names only the **single centred target** (the "Identify" cone match in
