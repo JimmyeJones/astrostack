@@ -6642,8 +6642,27 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
-- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Ready-to-post caption": one tap to copy a plain-language, accurate
-  description of the finished picture for sharing.** *(Share + understand pillar, PRIORITY 3; size S; fully offline,
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "Ready-to-post caption": one tap to copy a plain-language, accurate
+  description of the finished picture for sharing.**~~ — **SHIPPED v0.179.0** (Builder 2026-07-23, branch
+  `claude/pensive-faraday-l3ardz`). Built slices (a)+(b), frontend-only, fully offline, additive, read-only — no
+  new deps, no network, no config/DB/API-shape/default change. **Helper** (`frontend/src/components/postCaption.ts`):
+  a pure, unit-tested `postCaption({name, catalogId, type, nFrames, integrationS, dateLabel, scaleBar, fallbackName})
+  -> string` that turns facts the app already computed into one correct, friendly sentence —
+  *"Orion Nebula (M42), a nebula — a stack of 240 subs (40 min total), shot on 20 Jul 2026 with a Seestar. The whole
+  frame is about 5.4 full Moons wide."* Every clause degrades gracefully: no common name → bare designation; no
+  identity → the target's own name (then a generic "My astrophoto"), and never an invented type appositive; a
+  vowel-initial type gets "an"; a 1-frame stack reads "1 sub"; a zero/absent integration drops the "(… total)"
+  clause; no WCS → no scale sentence. A companion `formatCaptionDate(iso)` reads y/m/d straight off the ISO string
+  (never via `Date`) so the label can't shift across a timezone boundary. **UI** (History `RunCard`): a teal
+  **"Copy caption"** button beside the wallpaper/QR/scale/share controls (shown for any run with a preview). On click
+  it reuses the run's already-cached annotations for the scale bar (or fetches them once — reusing the same query
+  Identify/Scale use — and drops the scale clause if the read fails), builds the caption from the page-level target
+  identity + the run's frame count / integration / date, writes it to the clipboard with a "Copied!" toast, and falls
+  back to showing the caption in a notification when the clipboard API is blocked (insecure context / permissions).
+  Tests: `postCaption.test.ts` (+11: full sentence, article choice, missing-scale/identity/frames/integration
+  degradations, singular grammar, timezone-safe date parsing), `History.test.tsx` (+2: identified run copies the
+  full caption incl. scale; unidentified/no-FITS run copies an honest shorter caption). Full frontend suite green
+  (1155 passed); tsc/build clean. *(Original idea kept below for provenance.)* *(Share + understand pillar, PRIORITY 3; size S; fully offline,
   additive, read-only — no new deps, no network.)* **Why a beginner wants it:** the app already helps them *make* a
   shareable image (wallpaper export, QR-to-phone, portfolio wall, north-up, scale bar) — but the moment they go to
   post it to a friend, a group chat, or social media, they're staring at a blank caption box. A non-expert doesn't

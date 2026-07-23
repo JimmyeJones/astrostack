@@ -5,11 +5,12 @@ import {
 } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
-import { IconAdjustments, IconCheck, IconCopy, IconDeviceFloppy, IconDownload, IconGitCompare, IconInfoCircle, IconPencil, IconPhotoDown, IconRuler2, IconSparkles, IconStar, IconStarFilled, IconTags, IconTrash, IconX } from "@tabler/icons-react";
+import { IconAdjustments, IconCheck, IconClipboardText, IconCopy, IconDeviceFloppy, IconDownload, IconGitCompare, IconInfoCircle, IconPencil, IconPhotoDown, IconRuler2, IconSparkles, IconStar, IconStarFilled, IconTags, IconTrash, IconX } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
-import { api, type StackRun, type StackPhotometricSummary, type StackDarkScalingSummary, type StackRejectionSummary, type StackWeightingSummary, type StackFrameAccounting } from "../api/client";
+import { api, type StackRun, type ObjectInfo, type StackPhotometricSummary, type StackDarkScalingSummary, type StackRejectionSummary, type StackWeightingSummary, type StackFrameAccounting } from "../api/client";
 import { formatIntegration } from "../format";
+import { postCaption, formatCaptionDate } from "../components/postCaption";
 import { HazyNightBadge } from "../components/HazyNightBadge";
 import { CalibrationBadge } from "../components/CalibrationBadge";
 import { calibrationSummaryText } from "../components/calibrationSummary";
@@ -472,9 +473,10 @@ function NotesEditor({ safe, run }: { safe: string; run: StackRun }) {
 const DEFAULT_STRETCH = 0.5;
 const DEFAULT_BLACK = 0.35;
 
-function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compareToId }: {
+function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compareToId, identity }: {
   safe: string; run: StackRun; onDelete: () => void; deleting?: boolean;
   isCleanest?: boolean; noiseDelta?: number; compareToId?: number | null;
+  identity?: ObjectInfo | null;
 }) {
   const qc = useQueryClient();
   const [adjust, setAdjust] = useState(false);
@@ -485,6 +487,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
   const [black, setBlack] = useState(DEFAULT_BLACK);
   const [cacheBust, setCacheBust] = useState(0);
   const [light, setLight] = useState(false);
+  const [copyingCaption, setCopyingCaption] = useState(false);
   // "What's in this picture?" (Identify) and "How big is this in the sky?"
   // (Scale) both come from the run's WCS via the same annotations endpoint —
   // lazily fetched once the user asks either (needs the FITS-header WCS, so gated
@@ -557,6 +560,56 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
     },
     onError: () => notifications.show({ message: "Could not update cover", color: "red" }),
   });
+
+  // "Copy caption" — one correct, friendly sentence to paste wherever the user
+  // is sharing (chat, socials). Built purely from facts the app already knows:
+  // the target's catalog identity, this run's frame count / integration / date,
+  // and the scale bar. The scale clause needs the run's WCS (the same annotations
+  // fetch that Identify/Scale use), so ensure it's loaded first — reusing the
+  // cached result when the user already toggled Identify/Scale — then degrade
+  // gracefully (drop the scale clause) if it can't be read.
+  const copyCaption = async () => {
+    setCopyingCaption(true);
+    try {
+      let scaleBar = annotations.data?.scale_bar ?? null;
+      if (run.has_fits && !annotations.data) {
+        try {
+          const data = await qc.fetchQuery({
+            queryKey: ["annotations", safe, run.id],
+            queryFn: () => api.stackAnnotations(safe, run.id),
+            staleTime: Infinity,
+          });
+          scaleBar = data.scale_bar ?? null;
+        } catch {
+          scaleBar = null;  // no WCS / read failed → caption omits the scale clause
+        }
+      }
+      const text = postCaption({
+        name: identity?.name,
+        catalogId: identity?.id,
+        type: identity?.type,
+        nFrames: run.n_frames_used,
+        integrationS: run.total_exposure_s,
+        dateLabel: formatCaptionDate(run.timestamp_utc),
+        scaleBar,
+        fallbackName: safe,
+      });
+      try {
+        await navigator.clipboard.writeText(text);
+        notifications.show({
+          message: "Caption copied — paste it wherever you're sharing.", color: "teal",
+        });
+      } catch {
+        // Clipboard blocked (insecure context / permissions) — show the caption
+        // so the user can still select and copy it by hand.
+        notifications.show({
+          title: "Copy this caption", message: text, color: "blue", autoClose: false,
+        });
+      }
+    } finally {
+      setCopyingCaption(false);
+    }
+  };
 
   const previewSrc = `${api.stackArtifactUrl(safe, run.id, "preview")}${cacheBust ? `?v=${cacheBust}` : ""}`;
   // While the first suggestion fetch is still in flight, keep showing the STF
@@ -801,6 +854,16 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
             />
           )}
           {run.has_preview && <WallpaperMenu safe={safe} runId={run.id} />}
+          {run.has_preview && (
+            <Tooltip label="Copy a ready-to-post caption — a correct, plain-language sentence about this picture to paste wherever you're sharing">
+              <Button
+                size="xs" variant="light" color="teal" leftSection={<IconClipboardText size={14} />}
+                loading={copyingCaption} onClick={copyCaption}
+              >
+                Copy caption
+              </Button>
+            </Tooltip>
+          )}
           {run.has_fits && (
             <Tooltip label="Download the raw scientific data (FITS) — for re-processing, not sharing">
               <Button
@@ -880,6 +943,14 @@ export function HistoryView() {
   const qc = useQueryClient();
   const [sort, setSort] = useState<RunSort>("newest");
   const runs = useQuery({ queryKey: ["runs", safe], queryFn: () => api.listStackRuns(safe) });
+  // The target's catalog identity (name/type), fetched once for the page so the
+  // per-run "Copy caption" can name the object; null when nothing matches (the
+  // caption then degrades to the target's own name). Never blocks the page.
+  const identity = useQuery({
+    queryKey: ["identify", safe],
+    queryFn: () => api.identifyTarget(safe),
+    staleTime: Infinity,
+  });
 
   const del = useMutation({
     mutationFn: (id: number) => api.deleteStackRun(safe, id),
@@ -973,6 +1044,7 @@ export function HistoryView() {
               deleting={del.isPending && del.variables === r.id}
               isCleanest={r.id === cleanestId}
               noiseDelta={deltas.get(r.id)}
+              identity={identity.data ?? null}
               compareToId={previousRunId(list, r.id)} />
           ))}
         </SimpleGrid>
