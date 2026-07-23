@@ -144,6 +144,7 @@ def _pipeline_body(
         if settings.auto_stack:
             stacked: list[str] = []
             skipped: list[str] = []
+            held_thin: list[dict[str, Any]] = []
             mixed_skipped: list[str] = []
             stack_errors: dict[str, str] = {}
             auto_edited = 0
@@ -155,6 +156,18 @@ def _pipeline_body(
                 attempt_n = _auto_stack_frame_count(lib, safe)
                 if attempt_n is None:
                     skipped.append(safe)
+                    continue
+                if attempt_n < settings.auto_stack_min_frames:
+                    # Too few located subs to make anything but single-frame
+                    # colour speckle (the owner-reported gibberish). Hold the
+                    # target back — *without* marking the attempt, so the next
+                    # scan re-checks and stacks it the moment enough subs solve —
+                    # rather than auto-publishing (and auto-editing) noise. The
+                    # already-shipped thin-stack warning covers the notification;
+                    # this is the "don't silently publish it" half.
+                    held_thin.append(
+                        {"target": safe, "frames": attempt_n,
+                         "min": settings.auto_stack_min_frames})
                     continue
                 if settings.mixed_pointing_guard and _mixed_pointing_check(
                         lib, safe) is not None:
@@ -208,6 +221,8 @@ def _pipeline_body(
                         _clear_auto_stack_attempt(lib, safe)
             summary["auto_stacked"] = stacked
             summary["auto_stack_skipped"] = skipped
+            if held_thin:
+                summary["auto_stack_held_thin"] = held_thin
             if mixed_skipped:
                 summary["auto_stack_mixed_skipped"] = mixed_skipped
             if auto_edited:

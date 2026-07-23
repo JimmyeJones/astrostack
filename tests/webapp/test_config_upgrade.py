@@ -45,6 +45,11 @@ def test_old_config_loads_keeps_values_and_defaults_new_fields(tmp_path):
     # unattended stack on its own; a bimodal batch stacks exactly as before until
     # the user opts in.
     assert s.mixed_pointing_guard is False
+    # New walk-away minimum-frames floor defaults to 3 → an unattended auto-stack
+    # holds a 1-2 frame target back (the single-frame speckle the owner reported)
+    # instead of publishing it, while a real stack still goes through. Loads
+    # cleanly from an old config that never wrote the field.
+    assert s.auto_stack_min_frames == 3
     # New job-history cap defaults to the long-standing hard-coded value, so an
     # upgraded install keeps exactly as much job history as before.
     assert s.job_history_limit == 200

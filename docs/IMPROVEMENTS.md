@@ -480,7 +480,26 @@ when you take it.
   minimum-frames guard that surfaces "only N of M subs could be stacked because …" in the auto/Process job
   summary). The repro scaffold (`scratchpad/repro_thin.py`, bg-noise-vs-N) is the harness to extend. Keep this
   entry at the top until the frame-count root cause is fixed.
-  **▶ CODE LOCATION for the minimum-frames-guard half (Scout 2026-07-23 watcher/ingest audit, traced):** there is
+  **▶ MINIMUM-FRAMES GUARD SHIPPED v0.183.0 (Builder 2026-07-23, branch `claude/pensive-faraday-sioj6f`;
+  regression-tested).** The unattended walk-away auto-stack now **holds a thin target back instead of publishing
+  single-frame speckle.** New setting `auto_stack_min_frames` (`webapp/config.py`, default **3**, `ge=1 le=1000`):
+  in the auto-stack scan loop (`webapp/pipeline.py::_pipeline_body`), a target whose solved+accepted count is below
+  the floor is recorded under a new `auto_stack_held_thin` job-summary bucket and skipped **without** marking the
+  `AUTO_STACK_ATTEMPT_META_KEY` — so the next scan re-checks it and it auto-stacks the moment enough subs solve (the
+  growing-session case is only delayed, never stranded). Default 3 blocks the owner's exact 1-frame (and 2-frame)
+  gibberish while still letting a real small stack through; set to 1 to restore the old stack-from-the-first-solved-
+  frame behaviour. **Only the hands-off scan is gated** — the interactive Stack form and the one-click "Process
+  target" button still stack whatever the user explicitly asks for (Process already shows the thin-stack warning on
+  its result, v0.159.6). Surfaced in the Settings UI (a "minimum located subs" NumberInput under Auto-stack, disabled
+  until Auto-stack is on). Regression: `tests/webapp/test_auto_stack_pipeline.py` (+2 — a 2-solved-frame target is
+  held then stacks once back at 3; `auto_stack_min_frames=1` restores single-frame stacking) and
+  `tests/webapp/test_config_upgrade.py` (+1 — the floor defaults to 3 from an old config). Upgrade-safe: additive
+  setting with a default, control-flow-only pipeline change, no DB/API-shape/on-disk change. **This closes the
+  minimum-frames-guard half of the ⭐⭐ bug.** What remains for a future run: (a) the *root-cause* half still needs
+  the owner's real faint-field data to localise which stage (ASTAP solve-rate vs auto-grade vs streak) over-drops;
+  (b) a nice-to-have — surface an explicit "held for more located subs" status on the *Target page* itself (today a
+  held-back target relies on the already-honest unsolved-count badge + plate-solve nudge to explain the missing
+  picture). *(Original Scout trace kept for provenance.)* there is
   **no floor anywhere in the auto-stack chain** — `_auto_stack_frame_count` (`webapp/pipeline.py`, the count that
   gates auto-stack) skips only `solved_accepted == 0`, returning *any* count `≥ 1`; the auto-stack loop then
   stacks whatever it returns, and `run_stack` (`seestack/stack/stacker.py`, ~line 822) itself accepts
