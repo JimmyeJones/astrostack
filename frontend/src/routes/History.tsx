@@ -5,7 +5,7 @@ import {
 } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
-import { IconAdjustments, IconCheck, IconCopy, IconDeviceFloppy, IconDownload, IconGitCompare, IconInfoCircle, IconPencil, IconPhotoDown, IconSparkles, IconStar, IconStarFilled, IconTags, IconTrash, IconX } from "@tabler/icons-react";
+import { IconAdjustments, IconCheck, IconCopy, IconDeviceFloppy, IconDownload, IconGitCompare, IconInfoCircle, IconPencil, IconPhotoDown, IconRuler2, IconSparkles, IconStar, IconStarFilled, IconTags, IconTrash, IconX } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api, type StackRun, type StackPhotometricSummary, type StackDarkScalingSummary, type StackRejectionSummary, type StackWeightingSummary, type StackFrameAccounting } from "../api/client";
@@ -485,16 +485,20 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
   const [black, setBlack] = useState(DEFAULT_BLACK);
   const [cacheBust, setCacheBust] = useState(0);
   const [light, setLight] = useState(false);
-  // "What's in this picture?" — lazily fetch the catalog objects in this run's
-  // field only once the user asks (needs the FITS-header WCS, so gated on has_fits).
+  // "What's in this picture?" (Identify) and "How big is this in the sky?"
+  // (Scale) both come from the run's WCS via the same annotations endpoint —
+  // lazily fetched once the user asks either (needs the FITS-header WCS, so gated
+  // on has_fits).
   const [identify, setIdentify] = useState(false);
+  const [scale, setScale] = useState(false);
   const annotations = useQuery({
     queryKey: ["annotations", safe, run.id],
     queryFn: () => api.stackAnnotations(safe, run.id),
-    enabled: identify && run.has_fits,
+    enabled: (identify || scale) && run.has_fits,
     staleTime: Infinity,
   });
   const objects = annotations.data?.objects ?? [];
+  const scaleBar = annotations.data?.scale_bar ?? null;
   const [dStretch] = useDebouncedValue(stretch, 250);
   const [dBlack] = useDebouncedValue(black, 250);
   // Suggest the initial asinh sliders from the run's own data (fetched lazily
@@ -571,6 +575,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
             imgWidth={annotations.data?.width ?? run.canvas_w}
             imgHeight={annotations.data?.height ?? run.canvas_h}
             objects={objects} show={identify} height={180}
+            scaleBar={scaleBar} showScale={scale}
             onClick={() => setLight(true)}
           />
         ) : (
@@ -583,6 +588,15 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
           {objects.length
             ? `Found ${objects.length} catalog object${objects.length === 1 ? "" : "s"} in this field`
             : "No catalog objects fall inside this field"}
+        </Text>
+      ) : null}
+
+      {scale && !annotations.isLoading && annotations.isSuccess ? (
+        <Text size="xs" c={scaleBar ? "grape.3" : "dimmed"} mt={6}>
+          {scaleBar
+            // Capitalise the plain-language Moon sentence for the caption.
+            ? scaleBar.moon_comparison.charAt(0).toUpperCase() + scaleBar.moon_comparison.slice(1)
+            : "This picture has no sky coordinates, so its scale can't be measured"}
         </Text>
       ) : null}
 
@@ -721,6 +735,18 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
                 loading={identify && annotations.isLoading}
               >
                 Identify
+              </Button>
+            </Tooltip>
+          )}
+          {run.has_fits && (
+            <Tooltip label="Show how big this picture is in the sky — a scale bar and a full-Moon comparison">
+              <Button
+                size="xs" variant={scale ? "filled" : "light"} color="grape"
+                leftSection={<IconRuler2 size={14} />}
+                onClick={() => setScale((v) => !v)}
+                loading={scale && annotations.isLoading}
+              >
+                Scale
               </Button>
             </Tooltip>
           )}

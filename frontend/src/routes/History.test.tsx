@@ -180,6 +180,7 @@ describe("HistoryView", () => {
         { catalog_id: "M31", name: "Andromeda Galaxy", type: "galaxy",
           ra_deg: 10.68, dec_deg: 41.27, x_px: 500, y_px: 300 },
       ],
+      scale_bar: null,
     });
 
     renderHistory();
@@ -197,7 +198,7 @@ describe("HistoryView", () => {
   it("says so plainly when no catalog objects fall in the field", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ has_preview: true })]);
     vi.spyOn(client.api, "stackAnnotations").mockResolvedValue({
-      width: 1000, height: 600, objects: [],
+      width: 1000, height: 600, objects: [], scale_bar: null,
     });
 
     renderHistory();
@@ -205,6 +206,29 @@ describe("HistoryView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Identify" }));
     await waitFor(() =>
       expect(screen.getByText(/No catalog objects fall inside this field/)).toBeInTheDocument());
+  });
+
+  it("shows the picture's angular scale and a Moon comparison when Scale is toggled", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ has_preview: true })]);
+    const annot = vi.spyOn(client.api, "stackAnnotations").mockResolvedValue({
+      width: 1000, height: 600, objects: [],
+      scale_bar: {
+        arcsec: 1800, label: "30′", fraction: 0.18, frame_arcmin: 166.6,
+        moon_comparison: "the whole frame is about 5.4 full Moons wide",
+      },
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    // Not fetched until the user asks.
+    expect(annot).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Scale" }));
+
+    await waitFor(() => expect(annot).toHaveBeenCalledWith("M_42", 1));
+    await waitFor(() =>
+      expect(screen.getByText(/about 5.4 full Moons wide/)).toBeInTheDocument());
+    // (The scale-bar overlay's on-image geometry needs a measured box — 0 in
+    // jsdom — so it's covered by scaleBarLayout's pure unit test instead.)
   });
 
   it("pins a run as the target's cover from a preview run", async () => {

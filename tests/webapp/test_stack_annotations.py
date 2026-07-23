@@ -70,6 +70,14 @@ def test_annotations_lists_catalog_objects_in_the_field(client, solved_library):
         assert -0.5 <= o["x_px"] <= w - 0.5
         assert -0.5 <= o["y_px"] <= h - 0.5
         assert {"catalog_id", "name", "type", "ra_deg", "dec_deg", "x_px", "y_px"} <= o.keys()
+    # The scale bar is derived from the run's own WCS (3″/px × 4000 px = 3.33°
+    # wide) and reported for the frontend overlay.
+    sb = body["scale_bar"]
+    assert sb is not None
+    assert set(sb) == {"arcsec", "label", "fraction", "frame_arcmin", "moon_comparison"}
+    assert 0 < sb["fraction"] <= 0.25
+    assert sb["label"].endswith(("″", "′", "°"))
+    assert abs(sb["frame_arcmin"] - (3.0 * w / 60.0)) < 1e-3
 
 
 def test_annotations_empty_when_run_has_no_wcs(client, solved_library):
@@ -81,6 +89,8 @@ def test_annotations_empty_when_run_has_no_wcs(client, solved_library):
     assert r.status_code == 200  # never 404s where the run exists
     body = r.json()
     assert body["objects"] == []
+    # No WCS → no scale bar (the overlay simply doesn't offer it).
+    assert body["scale_bar"] is None
 
 
 def test_annotations_404_for_unknown_run(client, solved_library):

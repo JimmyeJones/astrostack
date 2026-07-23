@@ -4356,20 +4356,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
-- **IMPROVEMENT IDEA (Builder 2026-07-23, spotted while shipping walk-away `auto_reject` v0.177.0) — name the
-  auto-picked rejection outcome in the Process-target / Jobs result, not only the History badge.** *(Friendliness /
-  trust; pillar 2/3; size S; frontend-mostly.)* Now that a walk-away auto-stack auto-resolves to order-statistic
-  min/max on a small stack (v0.177.0), it may quietly remove a lone satellite/plane trail — a genuinely good,
-  invisible save. The immediate "Process target" Jobs result reports `n_frames_used` but says nothing about the
-  rejection: the user only learns a trail was cleaned if they open the History rejection badge or the "How's my
-  stack?" card. A one-line plain-language note on the Jobs `JobResultActions` ("Cleaned 1 outlier — a
-  satellite/plane trail — with min/max, since only 8 subs stacked") would close the honest-accounting loop for the
-  auto path exactly as the shipped thin-stack / "N not located yet" nudges did one rung earlier. **Slices:** (a)
-  thread the run's already-persisted effective rejection method + tally onto the `_stack_target` summary (the run
-  record already carries `options_json` with the resolved method and the rejection counts); (b) render an optional
-  note on the Jobs result when a rejection pass actually removed samples; (c) tests — a small auto-stack that
-  rejected an outlier shows the note, a clean/large stack shows nothing. Additive, read-only surfacing; no
-  config/DB/API-shape/default change. Best done after v0.177.0 (which this builds on).
+- ~~**IMPROVEMENT IDEA (Builder 2026-07-23, spotted while shipping walk-away `auto_reject` v0.177.0) — name the
+  auto-picked rejection outcome in the Process-target / Jobs result, not only the History badge.**~~ — **SHIPPED
+  v0.177.1** (Builder 2026-07-23, branch `claude/pensive-faraday-nynziu`). Closed the honest-accounting loop for the
+  walk-away auto path exactly as planned. **Engine:** `StackResult` grew two mirrored fields
+  (`rejection_mode`, `rejection_fraction`) populated from the same `rej_stats` gate that stamps the `stack_runs`
+  row, so the returned tally can never disagree with the persisted one (a plain-mean stack leaves both None).
+  **Webapp:** `_stack_target`'s summary dict now surfaces `rejection_mode`/`rejection_fraction` (getattr-guarded).
+  **Frontend:** a pure, tested `rejectionNote(mode, fraction, nFramesUsed)` helper
+  (`components/target/rejectionNote.ts`, mirroring `stackhealth.py`'s honest bands — κ-σ/drizzle name a % only in
+  `[0.05%, 8%)`; min-max names only its structural guarantee with no misleading %, plus the "because only N subs
+  stacked" context that explains *why* a small walk-away stack auto-picked it) drives a dimmed one-line note on the
+  Jobs "Process target" result, right where the finished picture lands. It self-omits on a thin stack (the "basically
+  one noisy sub" warning wins) and when no rejection pass cleaned anything. Additive, read-only surfacing; no
+  config/DB/API-shape/default change (`StackResult`/summary gain fields; the persisted run record and every existing
+  caller are byte-for-byte unchanged). Tests: `rejectionNote.test.ts` (+10), `Jobs.test.tsx` (+3 — min/max note,
+  κ-σ %, thin-stack suppression), `test_stack_pipeline.py` (+1 StackResult-mirrors-persisted, +2 assertions on the
+  plain-mean case).
 - **IMPROVEMENT IDEA (Scout 2026-07-23) — auto-grade should be able to *re-accept* a frame it earlier rejected once
   a larger population no longer flags it (machine decisions shouldn't be permanent).** *(Autonomy; pillar 2; size
   S–M; opt-in, off by default — only bites installs that turned `auto_grade_frames` on.)* Found while shipping the
@@ -6552,8 +6555,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   done", reusing the readiness-dismissal pattern; (c, follow-on) surface the same card on the empty Library state so
   a user who lands there first still sees it. Keeps the beginner-feature pipeline stocked with a pure
   *friendliness/onboarding* capability (distinct from the many retrospective/planning cards already filed).
-- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "How big is this in the sky?": a scale bar + full-moon-comparison on
-  the finished picture, from the stack's own WCS.** *(Understand + enjoy + share / "get a good image" pillar,
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "How big is this in the sky?": a scale bar + full-moon-comparison on
+  the finished picture, from the stack's own WCS.**~~ — **SHIPPED v0.178.0** (Builder 2026-07-23, branch
+  `claude/pensive-faraday-nynziu`). Built end-to-end, fully offline (reuses `celestial_wcs_from_fits`; no new dep).
+  **Engine** (`seestack/scalebar.py`): a pure, unit-tested `scale_bar_for(arcsec_per_px, width_px, height_px) ->
+  ScaleBar | None` that picks the largest "nice" round rung (1″…5°) spanning ≤25% of the frame width, and returns its
+  label ("30′"), its length as a **fraction of the image width** (so the frontend draws it over any scaled preview),
+  the frame's width in arcminutes, and a plain-language full-Moon comparison ("the whole frame is about 5.4 full
+  Moons wide" / "about 25% the width of the full Moon"). None for unusable input (no/degenerate WCS). **Webapp**
+  (`webapp/routers/stack.py`): the existing `…/stack-runs/{id}/annotations` endpoint now also returns `scale_bar`
+  (derived from the run's WCS pixel-scale matrix via a `_scale_bar_from_wcs` helper), null when the run has no usable
+  celestial WCS — so the same one fetch drives both "Identify" and "Scale". **Frontend**: `AnnotatedImage` grew an
+  optional `scaleBar`/`showScale` overlay (a pure, tested `scaleBarLayout` places a corner bar at
+  `fraction·renderedWidth`), and the History `RunCard` gained a self-hiding **"Scale"** toggle (grape, `IconRuler2`)
+  beside "Identify" that draws the bar + a capitalised Moon-comparison caption. Additive, read-only; no
+  config/DB/API-shape/default change (the annotations payload gains a field; older/edited runs report `scale_bar:
+  null` and simply don't offer it). Tests: `test_scalebar.py` (+8), `test_stack_annotations.py` (+2 assertions),
+  `AnnotatedImage.test.tsx` (+3 `scaleBarLayout`), `History.test.tsx` (+1 Scale toggle). *(Original idea kept below
+  for provenance.)* *(Understand + enjoy + share / "get a good image" pillar,
   PRIORITY 3–4; size S–M; fully offline, additive, read-only — no new deps.)* **Why a beginner wants it:** a fresh
   imager has no intuition for angular scale — they don't know whether their M31 frame is 1° or 3° across, or how the
   Ring Nebula's tiny apparent size compares to what they see. A scale bar ("30′") plus a plain-language comparison

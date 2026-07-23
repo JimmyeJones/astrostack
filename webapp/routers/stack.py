@@ -431,6 +431,28 @@ async def sky_overlay(safe: str, run_id: int, request: Request) -> Response:
                     headers={"Cache-Control": "no-store"})
 
 
+def _scale_bar_from_wcs(wcs, width: int, height: int):  # noqa: ANN001, ANN202
+    """A :class:`~seestack.scalebar.ScaleBar` for a run from its celestial WCS.
+
+    Derives the local plate scale (arcsec/px) from the WCS's pixel-scale matrix —
+    the mean of the two axis scales, which is exact for the square, unrotated
+    Seestar grid and a sane average for a mosaic canvas — and hands it to the
+    pure :func:`scale_bar_for`. Returns ``None`` when there is no usable WCS or
+    the scale can't be measured, so the caller omits the scale bar cleanly."""
+    from seestack.scalebar import scale_bar_for
+
+    if wcs is None or width <= 0:
+        return None
+    try:
+        from astropy.wcs.utils import proj_plane_pixel_scales
+
+        scales_deg = proj_plane_pixel_scales(wcs)  # deg/px per axis
+        arcsec_per_px = float(sum(scales_deg) / len(scales_deg)) * 3600.0
+    except Exception:  # noqa: BLE001 — a degenerate WCS just means "no scale bar"
+        return None
+    return scale_bar_for(arcsec_per_px, width, height)
+
+
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/annotations")
 async def stack_run_annotations(safe: str, run_id: int, request: Request) -> dict[str, Any]:
     """The catalog deep-sky objects that fall inside this run's field.
@@ -458,6 +480,17 @@ async def stack_run_annotations(safe: str, run_id: int, request: Request) -> dic
         return {
             "width": width,
             "height": height,
+            # "How big is this in the sky?" — a round scale bar + full-Moon
+            # comparison from the run's own local pixel scale, so a beginner can
+            # read (and share) the picture's true angular size. None when the run
+            # has no usable celestial WCS (older/edited runs) — the overlay then
+            # simply doesn't offer it. Sized against the FITS-grid width; the
+            # frontend scales its `fraction` to whatever preview it renders.
+            "scale_bar": (
+                sb.to_dict()
+                if (sb := _scale_bar_from_wcs(wcs, width, height)) is not None
+                else None
+            ),
             "objects": [
                 {
                     "catalog_id": o.catalog_id,

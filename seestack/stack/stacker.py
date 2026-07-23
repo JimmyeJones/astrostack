@@ -364,6 +364,14 @@ class StackResult:
     # skipped — e.g. a cancelled run — or failed). Lets callers deep-link the
     # finished run's editor instead of just its target's History list.
     run_id: int | None = None
+    # The outlier-rejection tally, mirrored from the persisted run record so a
+    # caller (e.g. the Jobs "Process target" result) can name the invisible
+    # clean-up without re-reading the run row. ``rejection_mode`` is one of
+    # ``"sigma-clip"`` / ``"min-max-reject"`` / ``"drizzle-reject"``; both are
+    # None when no rejection pass ran (a plain-mean stack) — exactly the same
+    # gate the ``stack_runs`` columns use.
+    rejection_mode: str | None = None
+    rejection_fraction: float | None = None
 
 
 @dataclass
@@ -1463,6 +1471,10 @@ def run_stack(
     # wrong ``[..., 0]`` slice.
     cov_2d = frame_cov if frame_cov is not None else (
         coverage[..., 0] if coverage.ndim == 3 else coverage)
+    # Mirror the exact gate the ``stack_runs`` row uses (only a rejection pass
+    # that saw samples counts) so the returned tally can never disagree with the
+    # persisted one.
+    _rej_recorded = rej_stats is not None and rej_stats.n_contributed > 0
     return StackResult(
         output_dir=project.project_dir / "output",
         fits_path=paths["fits"],
@@ -1478,6 +1490,8 @@ def run_stack(
         n_offered=len(frames),
         n_align_failed=max(0, len(frames) - n_used),
         run_id=run_id,
+        rejection_mode=rej_stats.mode if _rej_recorded else None,
+        rejection_fraction=rej_stats.fraction if _rej_recorded else None,
     )
 
 

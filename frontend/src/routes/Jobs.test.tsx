@@ -472,7 +472,33 @@ describe("processTargetSummary", () => {
   it("summarises a successful one-click process into a new master", () => {
     expect(processTargetSummary({
       stacked: true, solved_accepted: 8, stack: { n_frames_used: 8 },
-    })).toEqual({ line: "Stacked 8 frames into a new master.", stacked: true, thin: null });
+    })).toEqual({
+      line: "Stacked 8 frames into a new master.", stacked: true, thin: null,
+      cleaned: null,
+    });
+  });
+  it("names the outlier clean-up a small auto-stack made with min/max", () => {
+    const { cleaned } = processTargetSummary({
+      stacked: true, solved_accepted: 8,
+      stack: { n_frames_used: 8, rejection_mode: "min-max-reject", rejection_fraction: null },
+    });
+    expect(cleaned).toMatch(/only 8 subs stacked/);
+    expect(cleaned).toMatch(/brightest and darkest/);
+  });
+  it("names a κ-σ clean-up as a percentage on a healthy stack", () => {
+    const { cleaned } = processTargetSummary({
+      stacked: true, solved_accepted: 40,
+      stack: { n_frames_used: 40, rejection_mode: "sigma-clip", rejection_fraction: 0.012 },
+    });
+    expect(cleaned).toMatch(/Cleaned ~1\.2% of pixels/);
+  });
+  it("suppresses the clean-up note on a thin stack (the warning wins)", () => {
+    const { thin, cleaned } = processTargetSummary({
+      stacked: true, solved_accepted: 2,
+      stack: { n_frames_used: 2, rejection_mode: "min-max-reject", rejection_fraction: null },
+    });
+    expect(thin?.level).toBe("thin");
+    expect(cleaned).toBeNull();
   });
   it("notes auto-graded drops and singularises one frame", () => {
     const { line, stacked, thin } = processTargetSummary({
@@ -485,7 +511,10 @@ describe("processTargetSummary", () => {
   });
   it("falls back to solved_accepted when the stack count is missing", () => {
     expect(processTargetSummary({ stacked: true, solved_accepted: 5 }))
-      .toEqual({ line: "Stacked 5 frames into a new master.", stacked: true, thin: null });
+      .toEqual({
+        line: "Stacked 5 frames into a new master.", stacked: true, thin: null,
+        cleaned: null,
+      });
   });
   it("flags a thin stack (very few frames combined) so it isn't shown as a clean result", () => {
     const { line, thin } = processTargetSummary({
@@ -508,12 +537,16 @@ describe("processTargetSummary", () => {
         + "so there was nothing to stack.",
       stacked: false,
       thin: null,
+      cleaned: null,
     });
   });
   it("explains a cancellation and an unknown non-stacked outcome", () => {
     expect(processTargetSummary({ stacked: false, stack_skipped_reason: "cancelled" }))
-      .toEqual({ line: "Cancelled before stacking.", stacked: false, thin: null });
+      .toEqual({ line: "Cancelled before stacking.", stacked: false, thin: null, cleaned: null });
     expect(processTargetSummary({ stacked: false }))
-      .toEqual({ line: "Finished, but no stack was produced.", stacked: false, thin: null });
+      .toEqual({
+        line: "Finished, but no stack was produced.", stacked: false, thin: null,
+        cleaned: null,
+      });
   });
 });

@@ -1,8 +1,8 @@
 import { MantineProvider } from "@mantine/core";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { AnnotatedImage, objectLabel, objectMarkerLayout } from "./AnnotatedImage";
-import type { FieldObject } from "../api/client";
+import { AnnotatedImage, objectLabel, objectMarkerLayout, scaleBarLayout } from "./AnnotatedImage";
+import type { FieldObject, ScaleBar } from "../api/client";
 
 function obj(over: Partial<FieldObject> = {}): FieldObject {
   return {
@@ -39,6 +39,29 @@ describe("objectMarkerLayout", () => {
   it("returns nothing until every dimension is known", () => {
     expect(objectMarkerLayout([obj()], 1000, 600, 0, 300)).toEqual([]);
     expect(objectMarkerLayout([obj()], 0, 600, 500, 300)).toEqual([]);
+  });
+});
+
+describe("scaleBarLayout", () => {
+  const bar: ScaleBar = {
+    arcsec: 1800, label: "30′", fraction: 0.2, frame_arcmin: 150,
+    moon_comparison: "the whole frame is about 5.0 full Moons wide",
+  };
+
+  it("scales the bar to a fraction of the rendered (contain-fit) width", () => {
+    // 1000×600 image in a 500×300 box → scale 0.5 → renderW 500 → bar 0.2·500=100.
+    expect(scaleBarLayout(bar, 1000, 600, 500, 300)).toEqual({ widthPx: 100 });
+  });
+
+  it("uses the letterbox-limited width when the box is a different aspect", () => {
+    // 1000×600 in a 1000×300 box → limited by height (0.5) → renderW 500 → 100.
+    expect(scaleBarLayout(bar, 1000, 600, 1000, 300)).toEqual({ widthPx: 100 });
+  });
+
+  it("returns null when there is no bar or the box is unmeasured", () => {
+    expect(scaleBarLayout(null, 1000, 600, 500, 300)).toBeNull();
+    expect(scaleBarLayout(bar, 1000, 600, 0, 300)).toBeNull();
+    expect(scaleBarLayout({ ...bar, fraction: 0 }, 1000, 600, 500, 300)).toBeNull();
   });
 });
 
