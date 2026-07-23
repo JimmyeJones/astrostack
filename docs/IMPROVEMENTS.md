@@ -473,6 +473,38 @@ when you take it.
 > `accept=True`+`solve_failed` reason divergence — are low/by-design; the first is filed as a robustness idea under
 > Autonomy, not a bug.)
 
+- **⭐⭐ OWNER-REPORTED (2026-07 — TOP PRIORITY, real data on v0.158) — the final
+  stacked output resolution is significantly lower than it should be.** The owner
+  reports finished stacks come out at a much lower pixel resolution than the version
+  should produce. **First, reproduce and pin down WHICH artifact and WHERE the
+  pixels are lost** — the candidates, in likely order:
+  1. **Memory-budget drizzle-scale reduction on a RAM-limited NAS container.** When
+     drizzle is on, `_largest_drizzle_scale_within_budget` (`seestack/stack/stacker.py`)
+     picks the biggest drizzle scale that fits `max_stack_memory_gb` / detected RAM.
+     On a memory-capped Docker container the chosen scale can silently drop (e.g.
+     2× → 1×), **halving output resolution vs. a roomier machine or an earlier
+     build** — and it's currently silent. Verify: stack synthetic subs with drizzle
+     on under a tight vs generous budget; assert the saved canvas size, and if the
+     budget forces a reduction, **surface a plain-language "output reduced to Npx to
+     fit your RAM — raise max_stack_memory_gb / give the container more memory"**
+     instead of silently shipping low-res.
+  2. **The base (non-drizzle) canvas is smaller than the native sub.** A single-field
+     stack's canvas is the reference frame's shape; confirm it equals the Seestar
+     sub's native resolution (reprojection/reference sizing not silently shrinking).
+  3. **Display-only caps (likely NOT real data loss — rule in/out early).** The
+     gallery **preview PNG is capped at 1024 px** (`_write_preview_png`) and the
+     **share JPEG at 2048 px** (`write_share_jpeg`). If the owner is judging by the
+     in-browser preview or a shared JPEG, that's by-design — but the **FITS / TIFF /
+     "Download full-res PNG"** must be genuinely native-resolution. Verify each saved
+     artifact's real dimensions and, if the preview is what reads as "low-res,"
+     surface the true output size + a full-res download rather than changing the cap.
+  Also: **show the output pixel dimensions on the run/History info** so the owner (and
+  a future audit) can see the resolution at a glance. Reproduce first — this is
+  deterministic (fixed sub size in → known canvas out), so it's testable without the
+  owner's data. May share the owner's deploy with the thin-stack bug below but is a
+  distinct axis (size, not frame count). Severity: wrong-result on the core output.
+  Confidence: traced candidates; reproduce to localise.
+
 - **⭐⭐ OWNER-REPORTED (2026-07 — TOP PRIORITY, real data on v0.158) — auto-stacked
   FINAL results come out as single-frame colour-speckle "gibberish" for some
   targets.** The owner's *finished* auto-stacks (History/Gallery, not a single-frame
