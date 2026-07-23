@@ -123,3 +123,72 @@ def test_a_few_unsolved_among_many_solved_stays_calm():
     assert s["used"] == 392
     assert _keys(s) == {"unsolved": 8}
     assert s["verdict"]["tone"] == "good"
+
+
+# --- high-drop verdict names the dominant actionable cause ------------------
+
+def test_high_drop_soft_dominated_names_focus():
+    # A high-drop night that's mostly soft/elongated stars gets a specific,
+    # actionable headline (check focus/dew) instead of the generic "cloud or wind".
+    s = summarize_rejections({"auto:grade:fwhm_px": 30, "auto:streak": 5},
+                             n_accepted=65)
+    v = s["verdict"]
+    assert v["tone"] == "warn"
+    assert "focus" in v["text"]
+    assert "cloud or wind" not in v["text"]
+
+
+def test_high_drop_cloud_dominated_names_clouds():
+    s = summarize_rejections({"auto:grade:star_count": 30, "user": 5},
+                             n_accepted=65)
+    v = s["verdict"]
+    assert v["tone"] == "warn"
+    assert "cloud, haze or moonlight" in v["text"]
+
+
+def test_high_drop_solve_failed_dominated_names_location():
+    s = summarize_rejections({"solve_failed:no stars": 30, "user": 5},
+                             n_accepted=65)
+    v = s["verdict"]
+    assert v["tone"] == "warn"
+    assert "located in the sky" in v["text"]
+
+
+def test_high_drop_unsolved_dominated_nudges_plate_solve_even_when_used_is_larger():
+    # Unsolved dominates the *dropped* frames but doesn't outnumber what stacked,
+    # so the top-level plate-solve nudge (unsolved >= used) doesn't fire — the
+    # dominant-cause branch still names it and points at Plate Solve.
+    s = summarize_rejections({"user": 10}, n_accepted=100, n_unsolved=40)
+    v = s["verdict"]
+    assert s["used"] == 60 and s["dropped"] == 50   # unsolved 40 < used 60
+    assert v["tone"] == "warn"
+    assert "Plate Solve" in v["text"]
+
+
+def test_high_drop_mixed_night_keeps_the_generic_reassurance():
+    # No single bucket is strictly the majority (18 soft / 18 clouds of 36) → the
+    # generic copy stays (naming one of two co-dominant causes would mislead).
+    s = summarize_rejections({"auto:grade:fwhm_px": 18, "auto:grade:star_count": 18},
+                             n_accepted=64)
+    v = s["verdict"]
+    assert v["tone"] == "warn"
+    assert "usually cloud or wind" in v["text"]
+
+
+def test_high_drop_trailed_dominated_stays_generic_reassuring():
+    # Trailed frames are the stacker doing its job (nothing for the user to fix),
+    # so even when they dominate, the headline stays the generic reassurance
+    # rather than inventing an action.
+    s = summarize_rejections({"auto:streak": 30, "user": 5}, n_accepted=65)
+    v = s["verdict"]
+    assert v["tone"] == "warn"
+    assert "usually cloud or wind" in v["text"]
+
+
+def test_mid_drop_is_unaffected_by_a_dominant_bucket():
+    # The dominant-cause copy is only for the high-drop (>=30%) branch; a solid
+    # 10-30% night keeps its calm "still a solid stack" line even if soft-heavy.
+    s = summarize_rejections({"auto:grade:fwhm_px": 20}, n_accepted=80)
+    v = s["verdict"]
+    assert v["tone"] == "ok"
+    assert "solid stack" in v["text"]

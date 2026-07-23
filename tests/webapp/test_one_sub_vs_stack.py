@@ -97,6 +97,126 @@ def test_reference_sub_404_for_unknown_run(client, solved_library):
     assert r.status_code == 404
 
 
+def _register_run_with_master_and_preview(
+    data_root, safe: str, master_path: Path, *, display_space: bool = False,
+) -> int:
+    """Register a run with a real master FITS *and* a real preview PNG on disk —
+    what ``save_stack_preview`` (the History "Adjust" save) needs to overwrite."""
+    _write_linear_master(master_path, sigma=2.0, display_space=display_space)
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        preview = master_path.with_suffix(".png")
+        Image.new("RGB", (4, 4), (10, 20, 30)).save(preview)
+        proj = lib.open_target(safe)
+        try:
+            run_id = proj.add_stack_run(StackRunRow(
+                id=None, timestamp_utc="2026-05-01T00:00:00Z",
+                output_basename="master", fits_path=str(master_path), tiff_path=None,
+                preview_path=str(preview), n_frames_used=42,
+                canvas_h=320, canvas_w=480, coverage_min=1, coverage_max=42,
+                options_json="{}", total_exposure_s=1260.0,
+            ))
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+        return run_id
+    finally:
+        lib.close()
+
+
+def test_info_unavailable_for_a_display_space_export(client, solved_library):
+    # An edited / display-space export's preview is a bespoke tone-mapped image a
+    # raw sub can't be honestly matched to (the reveal would show two different
+    # tone curves), so the card self-hides — matching the noise-ratio endpoint,
+    # which already bails on the same runs. Fail-before: available was gated only
+    # on has_preview, so a display-space run wrongly offered the reveal.
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        master = Path(lib.target_dir(lib.find_target(safe))) / "edited.fits"
+    finally:
+        lib.close()
+    run_id = _register_run_with_master_and_preview(
+        solved_library, safe, master, display_space=True)
+
+    r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/one-sub-vs-stack")
+    assert r.status_code == 200
+    assert r.json()["available"] is False
+
+
+def test_saved_custom_stretch_re_renders_the_reference_sub_to_match(client, solved_library):
+    # After the History "Adjust" panel saves a custom asinh stretch, the reveal's
+    # sub half must render through the *same* curve so the two halves differ only
+    # in noise/detail — not a brightness/tone offset (the feature's honesty
+    # promise). Fail-before: reference-sub was hard-coded to STF and ignored the
+    # saved stretch, so its bytes were identical to the default render.
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        master = Path(lib.target_dir(lib.find_target(safe))) / "linear.fits"
+    finally:
+        lib.close()
+    run_id = _register_run_with_master_and_preview(solved_library, safe, master)
+
+    default_png = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/reference-sub").content
+
+    # Save a strong custom stretch (History "Adjust").
+    saved = client.post(
+        f"/api/targets/{safe}/stack-runs/{run_id}/preview",
+        json={"stretch": 0.9, "black": 0.8})
+    assert saved.status_code == 200
+
+    custom_png = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/reference-sub").content
+    # The sub is now rendered through the saved asinh curve, so its pixels differ
+    # from the default STF render of the same frame.
+    assert custom_png != default_png
+
+    # And the run persisted the saved stretch so the render is reproducible.
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == run_id)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    assert run.preview_stretch == 0.9
+    assert run.preview_black == 0.8
+
+
+def test_saved_stretch_on_a_display_space_run_stays_null(client, solved_library):
+    # A display-space export ignores the sliders (rendered verbatim), so saving a
+    # "stretch" must not record a curve the reveal would then wrongly apply to a
+    # raw sub — the columns stay NULL and the card self-hides anyway.
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        master = Path(lib.target_dir(lib.find_target(safe))) / "edited2.fits"
+    finally:
+        lib.close()
+    run_id = _register_run_with_master_and_preview(
+        solved_library, safe, master, display_space=True)
+
+    saved = client.post(
+        f"/api/targets/{safe}/stack-runs/{run_id}/preview",
+        json={"stretch": 0.9, "black": 0.8})
+    assert saved.status_code == 200
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == run_id)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    assert run.preview_stretch is None and run.preview_black is None
+
+
 # --- "stacking cut your noise ~N×" number -----------------------------------
 
 def _register_run_with_master(data_root, safe: str, master_path: Path) -> int:

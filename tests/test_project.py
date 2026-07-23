@@ -234,6 +234,67 @@ def test_v9_project_migrates_rejection_columns_additively(tmp_path):
         proj.close()
 
 
+def test_v10_project_migrates_preview_stretch_columns_additively(tmp_path):
+    """An older (schema 10) project — whose ``stack_runs`` predates the saved
+    preview-stretch columns — upgrades cleanly on open: existing runs read
+    ``preview_stretch``/``preview_black`` as ``None`` (no custom stretch saved =
+    the default STF preview) and ``set_stack_preview_stretch`` persists a fresh
+    one. Guards the live-install in-place upgrade (AGENTS.md §9)."""
+    import sqlite3
+
+    from seestack.io.project import SCHEMA_VERSION, StackRunRow
+
+    project_dir = tmp_path / "v10"
+    project_dir.mkdir()
+    db_path = project_dir / "project.sqlite"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        PRAGMA user_version = 10;
+        CREATE TABLE project_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE stack_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp_utc TEXT NOT NULL,
+            output_basename TEXT NOT NULL, fits_path TEXT, tiff_path TEXT,
+            preview_path TEXT, n_frames_used INTEGER NOT NULL, canvas_h INTEGER NOT NULL,
+            canvas_w INTEGER NOT NULL, coverage_min INTEGER NOT NULL DEFAULT 0,
+            coverage_max INTEGER NOT NULL DEFAULT 0, options_json TEXT NOT NULL,
+            notes TEXT, total_exposure_s REAL, transparency_ratio REAL,
+            noise_sigma REAL, calstat TEXT, is_mosaic INTEGER, engine_version TEXT,
+            rejection_fraction REAL, rejection_mode TEXT);
+        CREATE TABLE frames (id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_path TEXT NOT NULL UNIQUE, accept INTEGER NOT NULL DEFAULT 1);
+        INSERT INTO stack_runs(timestamp_utc, output_basename, n_frames_used,
+            canvas_h, canvas_w, options_json)
+          VALUES('2026-01-01T00:00:00+00:00', 'old', 10, 1080, 1920, '{}');
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    proj = Project.open(project_dir)
+    try:
+        assert proj._conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        old = next(iter(proj.iter_stack_runs()))
+        assert old.preview_stretch is None and old.preview_black is None
+        # A fresh run + a saved custom stretch persists and reads back.
+        new_id = proj.add_stack_run(StackRunRow(
+            id=None, timestamp_utc="2026-07-23T01:00:00+00:00", output_basename="new",
+            fits_path=None, tiff_path=None, preview_path=None, n_frames_used=5,
+            canvas_h=1, canvas_w=1, coverage_min=1, coverage_max=1, options_json="{}"))
+        assert proj.set_stack_preview_stretch(new_id, 0.72, 0.44) is True
+        newest = next(r for r in proj.iter_stack_runs() if r.id == new_id)
+        assert newest.preview_stretch == 0.72
+        assert newest.preview_black == 0.44
+        # Clearing it back to the default STF preview.
+        assert proj.set_stack_preview_stretch(new_id, None, None) is True
+        cleared = next(r for r in proj.iter_stack_runs() if r.id == new_id)
+        assert cleared.preview_stretch is None and cleared.preview_black is None
+        # No row for an unknown id.
+        assert proj.set_stack_preview_stretch(999999, 0.5, 0.5) is False
+    finally:
+        proj.close()
+
+
 def test_open_closes_the_connection_when_schema_check_fails(tmp_path, monkeypatch):
     """A newer on-disk ``user_version`` makes ``_check_schema`` raise; ``open``
     must close the connection it opened before propagating, rather than leak it.
