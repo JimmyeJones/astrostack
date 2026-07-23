@@ -44,6 +44,32 @@ def wcs_from_text(text: str | None):
         return None
 
 
+def center_from_wcs_text(text: str | None) -> tuple[float | None, float | None]:
+    """Return the ``(RA, Dec)`` field centre in degrees from a stored WCS blob.
+
+    ASTAP places its reference pixel (``CRPIX``) at the image centre, so the WCS
+    reference value (``CRVAL1``/``CRVAL2``) *is* the field centre — the very
+    numbers ASTAP also writes to its ``.ini`` sidecar. This recovers the centre
+    from the ``.wcs`` solution we already have when the ``.ini`` is missing or
+    unparseable (which otherwise leaves an otherwise-solved frame with a NULL
+    centre — barred from being the reference frame and from seeding sibling
+    solve hints). Returns ``(None, None)`` when the blob is empty or carries no
+    usable finite centre.
+    """
+    wcs = wcs_from_text(text)
+    if wcs is None:
+        return None, None
+    try:
+        crval = wcs.wcs.crval
+        ra = float(crval[0]) % 360.0
+        dec = float(crval[1])
+    except Exception:  # noqa: BLE001 — malformed WCS, treat as no centre
+        return None, None
+    if not (math.isfinite(ra) and math.isfinite(dec)):
+        return None, None
+    return ra, dec
+
+
 def wcs_text_from_sidecar(wcs_path: str | Path) -> str | None:
     """Read an ASTAP ``.wcs`` sidecar file and return its FITS header as text."""
     wcs_path = Path(wcs_path)

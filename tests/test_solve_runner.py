@@ -94,6 +94,89 @@ def test_solve_one_with_mock_solver(tmp_path):
     assert result.error is None
 
 
+def test_solve_one_backfills_center_from_wcs_when_ini_unparseable(tmp_path):
+    """ASTAP solved (valid .wcs) but its .ini gave no centre → recover the centre
+    from the WCS so the frame can still be the reference / seed sibling hints.
+
+    Regression: previously ``solve_one`` copied ``ra/dec_center_deg`` straight from
+    the ASTAP result, so a swallowed ``.ini`` parse error left an otherwise-solved
+    frame with a NULL centre (barred from ``pick_reference_frame`` and
+    ``fallback_solve_hint``, never re-offered because ``wcs_json`` is truthy).
+    """
+    from astropy.wcs import WCS
+
+    fits = tmp_path / "x.fit"
+    fits.write_bytes(b"")
+    sidecar = tmp_path / "x.wcs"
+    sidecar.write_bytes(b"")
+
+    # ASTAP "solved" but couldn't yield a centre (ini missing/unparseable).
+    fake_result = ASTAPResult(
+        fits_path=fits,
+        wcs_sidecar_path=sidecar,
+        ra_center_deg=None,
+        dec_center_deg=None,
+        pixscale_arcsec=None,
+        rotation_deg=None,
+        solved=True,
+        log_tail="",
+    )
+
+    # A real WCS text blob (what wcs_text_from_sidecar would return from the .wcs).
+    w = WCS(naxis=2)
+    w.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+    w.wcs.crval = [187.706, 12.391]
+    w.wcs.crpix = [240.5, 160.5]
+    import numpy as np
+    w.wcs.cdelt = np.array([-2.5 / 3600.0, 2.5 / 3600.0])
+    wcs_text = str(w.to_header(relax=True))
+
+    class FakeSolver:
+        def __init__(self, *a, **kw):
+            pass
+
+        def solve(self, _path, **_kw):
+            return fake_result
+
+    with patch("seestack.solve.runner.ASTAPSolver", FakeSolver), \
+         patch("seestack.io.wcs_io.wcs_text_from_sidecar", return_value=wcs_text):
+        result = solve_one(9, str(fits))
+
+    assert result.solved is True
+    assert result.wcs_text == wcs_text
+    assert result.ra_center_deg == pytest.approx(187.706, abs=1e-6)
+    assert result.dec_center_deg == pytest.approx(12.391, abs=1e-6)
+
+
+def test_solve_one_keeps_astap_center_when_present(tmp_path):
+    """When ASTAP's .ini yields a centre, it is used verbatim (no WCS override)."""
+    fits = tmp_path / "x.fit"
+    fits.write_bytes(b"")
+    sidecar = tmp_path / "x.wcs"
+    sidecar.write_bytes(b"")
+
+    fake_result = ASTAPResult(
+        fits_path=fits, wcs_sidecar_path=sidecar,
+        ra_center_deg=83.63, dec_center_deg=-5.39,
+        pixscale_arcsec=2.5, rotation_deg=12.0, solved=True, log_tail="",
+    )
+
+    class FakeSolver:
+        def __init__(self, *a, **kw):
+            pass
+
+        def solve(self, _path, **_kw):
+            return fake_result
+
+    # Even if the .wcs disagreed, an ASTAP-provided centre wins (no backfill).
+    with patch("seestack.solve.runner.ASTAPSolver", FakeSolver), \
+         patch("seestack.io.wcs_io.wcs_text_from_sidecar", return_value="CRVAL1 = 999.0"):
+        result = solve_one(7, str(fits))
+
+    assert result.ra_center_deg == 83.63
+    assert result.dec_center_deg == -5.39
+
+
 def test_apply_solve_result_writes_db(tmp_path):
     proj = Project.create(tmp_path / "p", name="t")
     try:

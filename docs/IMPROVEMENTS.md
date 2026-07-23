@@ -858,11 +858,21 @@ when you take it.
   at the same path in no-cache mode, re-ingests, and asserts `wcs_json`/hints were cleared. Confidence: traced
   (gating + default verified end-to-end: `config.py:65` False → `pipeline.py:66` → `ingest.py:194` guard).
 
-- **A plate-solve that succeeds but whose ASTAP `.ini` sidecar doesn't parse is persisted as "solved" with a valid
+- ~~**A plate-solve that succeeds but whose ASTAP `.ini` sidecar doesn't parse is persisted as "solved" with a valid
   `wcs_json` but NULL centre coordinates — the frame stacks yet is silently barred from being the reference frame and
-  from seeding sibling plate-solve hints, and is never re-offered to recover its centre.** *(Stacking/solve
-  correctness — data-completeness; Low–Medium latent, ASTAP-config-dependent; found by the 2026-07-23 QC/solve
-  adversarial audit — traced + reproduced.)* `ASTAPSolver._solve_once` (`seestack/solve/astap.py:286-304`) sets
+  from seeding sibling plate-solve hints, and is never re-offered to recover its centre.**~~ — **FIXED v0.184.1**
+  (Scout 2026-07-23, branch `claude/kind-mccarthy-kjj0fu`; **traced + regression-tested, fail-before/pass-after
+  confirmed**). `solve_one` (`seestack/solve/runner.py`) now backfills the centre from the WCS it already reads: when a
+  frame is `solved` with a usable `wcs_text` but `ra/dec_center_deg` came back `None` (the swallowed `.ini` parse), it
+  calls a new pure helper `seestack.io.wcs_io.center_from_wcs_text(text)` — which returns the WCS reference value
+  (`CRVAL1`/`CRVAL2`, RA wrapped into `[0, 360)`, finiteness-guarded), the field centre because ASTAP puts `CRPIX` at
+  image centre — so the frame lands with a real centre and is eligible for `pick_reference_frame` /
+  `fallback_solve_hint` again. An ASTAP-provided centre still wins verbatim (backfill only fires when it's `None`).
+  Regression: `tests/test_wcs_io.py` (+3: recover CRVAL, RA-wrap near 0h, empty→`(None,None)`) and
+  `tests/test_solve_runner.py` (+2: solved-with-null-centre + valid `.wcs` → centre recovered [fail-before]; an
+  ASTAP-provided centre is kept and not overridden by a disagreeing `.wcs`). Upgrade-safe: pure additive helper +
+  a value backfill in the worker entry point; no config/DB-schema/API-shape/on-disk/default change. Confidence:
+  traced + regression-tested. *(Original trace kept below for provenance.)* `ASTAPSolver._solve_once` (`seestack/solve/astap.py:286-304`) sets
   `solved = returncode == 0 and wcs_sidecar.exists()`, then reads the centre **only** from the `.ini` via
   `_parse_astap_ini` (`astap.py:373`, `values["CRVAL1"]`). If the `.ini` is missing or lacks `CRVAL1`/`CRVAL2`, the
   `KeyError` is swallowed (`astap.py:292`) and `ra/dec` come back `None` **while `solved` stays `True`**. `solve_frame`

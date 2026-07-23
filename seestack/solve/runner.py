@@ -95,7 +95,7 @@ def solve_one(
     so we read those after the solve completes and serialize the WCS as text
     for storage in the project DB.
     """
-    from seestack.io.wcs_io import wcs_text_from_sidecar
+    from seestack.io.wcs_io import center_from_wcs_text, wcs_text_from_sidecar
 
     try:
         solver = ASTAPSolver(astap_path=astap_path, fov_deg=fov_deg, timeout_s=timeout_s)
@@ -119,12 +119,22 @@ def solve_one(
         )
 
     wcs_text = wcs_text_from_sidecar(r.wcs_sidecar_path) if r.wcs_sidecar_path else None
+    ra_center = r.ra_center_deg
+    dec_center = r.dec_center_deg
+    # ASTAP can report success (returncode 0 + a valid ``.wcs``) while its ``.ini``
+    # sidecar — the source of the centre coords — is missing or unparseable, so the
+    # centre comes back None on an otherwise-solved frame. Persisted that way the
+    # frame stacks but is silently barred from being the reference frame and from
+    # seeding sibling solve hints, and is never re-offered. Recover the centre from
+    # the ``.wcs`` solution we already hold (its CRVAL is the field centre).
+    if r.solved and wcs_text is not None and (ra_center is None or dec_center is None):
+        ra_center, dec_center = center_from_wcs_text(wcs_text)
     return SolveResult(
         frame_id=frame_id, fits_path=fits_path,
         solved=r.solved,
         wcs_text=wcs_text,
-        ra_center_deg=r.ra_center_deg,
-        dec_center_deg=r.dec_center_deg,
+        ra_center_deg=ra_center,
+        dec_center_deg=dec_center,
         pixscale_arcsec=r.pixscale_arcsec,
         rotation_deg=r.rotation_deg,
         error=None if r.solved else (r.log_tail or "").strip()[-500:] or "no solution",

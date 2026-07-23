@@ -10,6 +10,7 @@ from astropy.wcs import WCS  # noqa: E402
 from seestack.io.wcs_io import (  # noqa: E402
     _extent_from_scale_matrix,
     canvas_extent_from_fits,
+    center_from_wcs_text,
     footprint_radec_deg,
     wcs_dict_rescaled_to_preview,
     wcs_from_text,
@@ -47,6 +48,27 @@ def test_wcs_from_text_handles_empty():
     # Note: astropy's WCS is very permissive about malformed headers (it just
     # fills in defaults) so we don't try to test rejection of garbage strings —
     # the contract is "no exception, returns *something or None*".
+
+
+def test_center_from_wcs_text_recovers_crval():
+    """The field centre is recoverable from the stored WCS blob alone."""
+    w = _make_simple_wcs(ra_deg=210.802, dec_deg=54.349)
+    ra, dec = center_from_wcs_text(wcs_to_text(w))
+    assert ra == pytest.approx(210.802, abs=1e-6)
+    assert dec == pytest.approx(54.349, abs=1e-6)
+
+
+def test_center_from_wcs_text_wraps_ra():
+    """A near-0h RA CRVAL comes back inside [0, 360)."""
+    w = _make_simple_wcs(ra_deg=0.5, dec_deg=-10.0)
+    ra, dec = center_from_wcs_text(wcs_to_text(w))
+    assert 0.0 <= ra < 360.0
+    assert ra == pytest.approx(0.5, abs=1e-6)
+
+
+def test_center_from_wcs_text_handles_empty():
+    assert center_from_wcs_text(None) == (None, None)
+    assert center_from_wcs_text("") == (None, None)
 
 
 def test_footprint_radec_deg_orientation():
