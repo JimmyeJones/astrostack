@@ -177,20 +177,32 @@ def reconcile_streak_rejections(project) -> list[int]:
         and not f.user_override
     ]
     n_eligible = len(eligible)
-    streaked = [f for f in eligible if (f.reject_reason or "") == "auto:streak"]
-    n_streaked = len(streaked)
+    # The "is this a stationary extended object?" majority test must be measured
+    # over the *persistent* streak_detected flag, NOT the current auto:streak
+    # reject_reason. A frame this guard already re-accepted on an earlier drip-feed
+    # scan keeps streak_detected=True (for the UI count) but has its reject_reason
+    # cleared — so counting reject_reason here would drop every already-reconciled
+    # frame out of the numerator while it stays in the denominator, systematically
+    # understating the flag fraction on every re-scan. On a bright edge-on galaxy
+    # imaged across several scans that stranded every batch after the first as
+    # permanently auto:streak-rejected (never re-QC'd under only_new_qc), capping
+    # the stack at the first batch. Measure over the stable flag instead.
+    n_flagged = sum(1 for f in eligible if f.streak_detected)
     # Two tiers: a normal-sized target reconciles above a simple majority; a small
     # target (below the main floor) only above a near-total flag rate — see the
     # constants above. Below the small floor there's no meaningful fraction, so
     # leave the frames rejected.
     if n_eligible >= STREAK_RECONCILE_MIN_FRAMES:
-        fires = n_streaked > STREAK_MASS_REJECT_FRACTION * n_eligible
+        fires = n_flagged > STREAK_MASS_REJECT_FRACTION * n_eligible
     elif n_eligible >= STREAK_RECONCILE_SMALL_MIN_FRAMES:
-        fires = n_streaked > STREAK_MASS_REJECT_FRACTION_SMALL * n_eligible
+        fires = n_flagged > STREAK_MASS_REJECT_FRACTION_SMALL * n_eligible
     else:
         fires = False
     if not fires:
         return []
+    # Re-accept only the frames still held out by the streak reason (an
+    # already-reconciled frame is accepted with reject_reason=None — nothing to do).
+    streaked = [f for f in eligible if (f.reject_reason or "") == "auto:streak"]
     restored: list[int] = []
     for f in streaked:
         if f.id is None:

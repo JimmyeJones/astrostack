@@ -613,6 +613,31 @@ def test_stack_defaults_roundtrip(client, built_library):
     assert client.get("/api/targets/M_42/stack-defaults").json()["sigma_kappa"] == 2.0
 
 
+def test_stack_defaults_never_leaks_calibration_master_paths(client, built_library):
+    # Server-side calibration master paths (NON_FORM_KEYS: dark_path/flat_path/…)
+    # are resolved from master *ids* and must never reach the client. A legacy or
+    # hand-edited config.json can carry a raw path in default_stack_options; every
+    # other read path (settings GET/export, the stack builder) strips them, and
+    # this read path must too. Inject one straight into the store (bypassing the
+    # settings-PUT sanitizer, exactly as a hand-edited config would) and confirm
+    # the endpoint doesn't echo it back.
+    client.app.state.settings_store.update({
+        "default_stack_options": {
+            "combine": "mean",
+            "dark_path": "/data/library/calibration/dark_1.fits",
+            "flat_path": "/data/library/calibration/flat_2.fits",
+            "flat_dark_path": "/x",
+            "bias_path": "/y",
+        },
+    })
+    body = client.get("/api/targets/M_42/stack-defaults").json()
+    # The legitimate form field flows through…
+    assert body["combine"] == "mean"
+    # …but no calibration master path leaks (fail-before: dark_path/flat_path present).
+    for leaked in ("dark_path", "flat_path", "flat_dark_path", "bias_path"):
+        assert leaked not in body, f"{leaked} leaked to the client"
+
+
 def test_stack_defaults_auto_reject_on_for_never_configured_target(client, built_library):
     # A never-configured target's Stack form should default the smart
     # "Auto outlier removal" (auto_reject) ON, so a beginner's first stack picks

@@ -47,6 +47,25 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+> **Re-audit — stacking engine CLEAN again; shipped THREE verified bugs (one wrong-result, one info-disclosure, one
+> broken-UX), plus a beginner feature + an improvement idea (Scout 2026-07-23, branch `claude/kind-mccarthy-afpnt0`,
+> v0.180.2).** Baseline suite green (**1805 passed, 2 skipped**). Three parallel adversarial audit sub-agents plus my
+> own reads covered (a) the **stacking engine** — `reference.py`/`pointings.py`/`channel_combine.py` and the
+> less-trodden helpers, large-stack uint32/float32 dtypes, drizzle+mosaic canvas at the celestial pole, partial-overlap
+> coverage bookkeeping, single-frame/empty/RA-wrap guards — **CLEAN, no new data-integrity bug** (matching the
+> repeatedly-clean documented state; one documented `auto_reject`+`drizzle` no-op UX nuance noted, not filed); (b) the
+> **webapp layer** (jobs/watcher/config/routers) and (c) the **QC/ingest/solve path**. The two non-engine audits each
+> surfaced a **verified, reproduced** bug, both **fixed + regression-tested + shipped this run** (struck below): a
+> **wrong-result streak-reconcile denominator leak** that stranded every drip-feed batch after the first on a bright
+> extended target (the ⭐⭐ thin/gibberish family for edge-on galaxies — numerator now measured over the persistent
+> `streak_detected` flag), and a **calibration-master-path info-disclosure** in `GET …/stack-defaults` (the one read
+> path that forgot `strip_non_form_keys`). I also fixed the previously-filed **⭐ Target-badge** broken-UX bug (both
+> rejected + unsolved counts now shown). Curation + one new beginner feature ("How did this picture turn out?" holistic
+> finished-stack verdict) + one improvement idea (validate/clamp legacy `default_stack_options` on read) filed below.
+> Areas audited and confirmed clean: `jobs.py` restart/cancel races, `watcher.py` debounce, `config.py` old-config
+> load, `calibration.py` server-side id→path resolution, `ingest.py`/`fits_loader.py` dedup + overflow guards,
+> `solve/runner.py` failure handling, `project.py` additive migrations + disjoint accept/unsolved partitions.
+>
 > **Re-audit — stacking engine + render/output CLEAN again; shipped a verified honest-accounting verdict fix and filed
 > one NEW ⭐ Target-badge broken-UX bug (Scout 2026-07-23, branch `claude/kind-mccarthy-zkszg0`).** Baseline suite green
 > (**1797 passed, 2 skipped** at run start; the STACKER-label bug I'd re-verified was concurrently fixed on `main` by
@@ -207,6 +226,25 @@ when you take it.
   sigma-clip and a 2-frame min-max stack both record `STACKER="mean"` with no `REJMODE`. Confidence: traced +
   reproduced.
 
+- ~~**`GET /api/targets/{safe}/stack-defaults` leaked server-side calibration master paths (`dark_path`/`flat_path`/
+  `flat_dark_path`/`bias_path`) to the client — the one read path that forgot to strip `NON_FORM_KEYS`.**~~ —
+  **FIXED** (Scout 2026-07-23, branch `claude/kind-mccarthy-afpnt0`; **reproduced + regression-tested,
+  fail-before/pass-after confirmed**). *(Security-posture / info-disclosure; Low-Medium — a host filesystem path
+  disclosed to an authenticated client, no wrong-result effect since `trigger_stack` already pops client `*_path`
+  keys; found by the 2026-07-23 webapp adversarial audit.)* `get_stack_defaults` (`webapp/routers/stack.py:128`)
+  built its returned form dict as `dict(settings.default_stack_options)` + a per-target blob **without**
+  `strip_non_form_keys`, while **every other** path that touches `default_stack_options` strips it defensively
+  (settings GET/export via `_strip_nested_calibration_paths`; settings PUT/import via `strip_non_form_keys`; the stack
+  builder in `pipeline.py:1639` with an explicit "a raw path here would only be a leaked client value" comment). The
+  invariant (AGENTS.md §6: "Calibration master paths are resolved server-side; never accept raw filesystem paths from
+  the client") is documented and enforced everywhere but here. A legacy or hand-edited `config.json` (documented
+  human-editable) carrying a raw `dark_path` in `default_stack_options` was echoed straight back. **Fix:** strip
+  `NON_FORM_KEYS` from **both** sources before merge/return, mirroring `pipeline.py`. Regression:
+  `tests/webapp/test_api.py::test_stack_defaults_never_leaks_calibration_master_paths` (injects the four paths + a
+  legit `combine` into the store, asserts `combine` flows through but no path key appears in the response;
+  fail-before: `dark_path`/`flat_path` present). Upgrade-safe: removes keys that were never valid form values — no
+  config/DB/API-shape/default change (a real client never relied on these leaking).
+
 - **FLAKY TEST (test-infra, not a product bug) — `frontend/src/routes/Editor.test.tsx` fails ~2 of 68 whenever the
   whole file runs, with a *different* victim set each time.** *(CI reliability; Medium-infra — a flaky suite erodes
   the green-gate the whole autonomous project leans on; **reproduced** on clean `origin/main` 2026-07-23, branch
@@ -231,12 +269,17 @@ when you take it.
   `cd frontend && npx vitest run src/routes/Editor.test.tsx` (fails ~2; a `-t`-filtered single run passes). Confidence:
   reproduced (on clean main, victim set varies → scheduling flake, not a real regression).
 
-- **⭐ The Target-page left-out badge HIDES accepted-but-unsolved subs whenever *any* frame is also hand/auto-rejected —
+- ~~**⭐ The Target-page left-out badge HIDES accepted-but-unsolved subs whenever *any* frame is also hand/auto-rejected —
   a first-light night with 2 rejected + 200 accepted-but-unsolved subs shows a gray "2 rejected" pill and says nothing
-  about the 200 that silently never entered the stack.** *(Broken-UX; Medium — directly in the ⭐⭐ thin/gibberish-stack
-  honest-accounting family the v0.159.4 / v0.178.3 work was built to fix; the at-a-glance pill undoes that honesty;
-  found by the 2026-07-23 render/router adversarial audit, traced + confirmed against the code.)* In
-  `frontend/src/routes/Target.tsx:836-847` the left-out badge only ever surfaces the unsolved count when
+  about the 200 that silently never entered the stack.**~~ — **FIXED** (Scout 2026-07-23, branch
+  `claude/kind-mccarthy-afpnt0`; **traced + regression-tested, fail-before/pass-after confirmed**). The badge now shows
+  **both** counts when each is present (`"2 rejected · 200 not located yet"`), keeps the single-count text for the
+  rejected-only / unsolved-only cases, and turns amber whenever unsolved subs are present and at least as many as the
+  rejected ones (`unsolvedCount > 0 && unsolvedCount >= rejectedCount`) so the dominant "silently left out" cause leads
+  the glance. Regression: `frontend/src/routes/Target.test.tsx` (+1 — 2 rejected + 200 unsolved → badge reads
+  `"2 rejected · 200 not located yet"`; fails before). Frontend-only, additive; no API/schema/default change. *(Original
+  trace kept below for provenance.)* In
+  `frontend/src/routes/Target.tsx:836-847` the left-out badge only ever surfaced the unsolved count when
   `rejectedCount === 0`:
   ```
   color={unsolvedCount > 0 && rejectedCount === 0 ? "orange" : "gray"}
@@ -508,6 +551,36 @@ when you take it.
   `tests/test_stack_cancel.py` (+4 — cancel-before-first-frame, cancel-during-pass-1 on the default κ-σ path,
   min-max cancel, single-pass cancel; all fail-before with `ValueError`, pass-after returning `cancelled=True`).
   Upgrade-safe: within-function control-flow change, no config/DB/API-shape/on-disk/default change.
+
+- ~~**⭐ Streak-reconcile STRANDS every drip-feed batch after the first on a bright stationary extended target — the
+  majority test counts the current `auto:streak` reject_reason, but already-reconciled frames keep `streak_detected`
+  and lose that reason, so the numerator shrinks while the denominator doesn't, understating the flag fraction on
+  every re-scan.**~~ — **FIXED** (Scout 2026-07-23, branch `claude/kind-mccarthy-afpnt0`; **reproduced +
+  regression-tested, fail-before/pass-after confirmed**). *(Stacking-pipeline correctness; wrong-result, Medium —
+  silently drops good subs AND caps how many actually stack, on-by-default; a concrete, code-fixable mechanism in the
+  ⭐⭐ thin/gibberish-stack family for extended targets; found + reproduced by the 2026-07-23 QC/ingest/solve
+  adversarial audit.)* `reconcile_streak_rejections` (`seestack/qc/runner.py:180`) fired the "this is a stationary
+  object, re-accept the flagged subs" majority test on `n_streaked = count(reject_reason == "auto:streak")` over the
+  whole-target denominator `n_eligible`. When it re-accepts a batch it clears `reject_reason` but **deliberately
+  keeps** `streak_detected=True` (for the UI count). On a Seestar that drips subs across scans (the normal case —
+  `webapp/pipeline.py` runs QC+reconcile every scan with `only_new_qc=True`), scan 1's batch reconciles, then scan 2's
+  equally-flagged subs of the same edge-on galaxy see a numerator of only the *new* batch against the *grown*
+  denominator (e.g. 6/26 = 23% < 50%) → the guard doesn't fire → they stay `auto:streak`-rejected, and because
+  `only_new_qc` skips already-QC'd frames they're never re-checked → **permanently stranded**, capping the stack at
+  batch 1. **Reproduced** (auditor's `scratchpad/repro_streak_reconcile_denominator.py`: accepted-that-stack stuck at
+  20 while 6/12 good subs strand on each later scan; a small-first-batch variant caps the stack at 3 subs — matching
+  the reported few-frame "gibberish" for faint/extended targets). **Fix:** measure the majority test over the
+  **persistent `streak_detected` flag** (`n_flagged`), which is consistent with the whole-target denominator and
+  stable across re-scans, and restore only the frames still carrying the `auto:streak` reason. First-scan behaviour is
+  byte-identical (production sets `streak_detected` and `reject_reason=auto:streak` together); `keep_streaked_frames`
+  mode is still a no-op (nothing rejected to restore); a genuine transient-trail *minority* still stays rejected
+  (`n_flagged` is a minority → no fire). Regression:
+  `tests/test_qc_streak_reconcile.py::test_later_scan_batches_of_a_reconciled_target_are_not_stranded` (reconcile
+  batch 1, add a later flagged batch, assert it's rescued too; fails before). All 7 existing reconcile tests stay
+  green. Upgrade-safe: within-function logic in one gated (`auto_reject_streaks`) path; no config/DB-schema/API-shape/
+  on-disk/default change. **Note:** this fixes the *re-scan numerator-leak* mechanism only. The broader ⭐ entry below
+  (threshold tuning for the 34–50% single-scan band, and the accepted-but-unsolved denominator dilution) still needs
+  real edge-on-galaxy data — left open.
 
 - **⭐ Streak auto-reject silently drops a large fraction of good subs on a bright *elongated* target (edge-on
   galaxy, Needle/NGC 4565/891, an elongated nebula or comet) — on by default.** *(Stacking-engine correctness;
@@ -5652,6 +5725,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   Read-only, additive, no new computation; completes the "the walk-away user always sees whether it was
   calibrated" trust story across both surfaces (History Info **and** editor). Smallest slice: just the
   positive "Calibrated with…" line where CALSTAT is present, leaving the uncalibrated nudge to History.
+- **IMPROVEMENT IDEA (Scout 2026-07-23, spotted during the webapp path-leak fix) — `GET
+  …/stack-defaults` should coerce/validate the merged form so a legacy out-of-range value in
+  `default_stack_options` can't silently poison every stack with a cryptic 400.** *(PRIORITY 3 friendliness /
+  robustness; size S.)* The write path `put_stack_defaults` validates via `validate_stack_options`, but the read path
+  merges `settings.default_stack_options` (human-editable `config.json`, could hold a legacy or hand-edited
+  out-of-bounds value) straight into the returned form. A subsequent stack then fails `validate_stack_options` with a
+  generic 400 and no path to recovery from the UI. **Fix direction:** after merging, run the form dict through the
+  same coercion/clamp the schema already knows (`coerce_stack_options` + the field bounds), so an out-of-range legacy
+  value is clamped to a valid default (with, ideally, a one-line "we reset an invalid saved default" note) rather than
+  served as-is to 400 later. Small, self-contained; reuses `schemas` helpers; add a test that a legacy over-range
+  `default_stack_options` value yields a *valid* form from the endpoint. (Not a security bug — the NON_FORM_KEYS leak
+  that shared this code was fixed this run; this is the remaining robustness half.)
+
 - ~~**One-click "Drop N outlier frames" on the Stack-form auto-grade hint.**~~ —
   **shipped v0.83.2** (see Shipped). The auto-grade hint now carries a "Drop N outlier
   frames" button (beside the retained "Review Auto-grade" link) that calls
@@ -6854,6 +6940,30 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "How did this picture turn out?": one plain-language quality verdict on
+  the *finished stack*, synthesising the signals the app already stores into a single friendly line + a "make it
+  better next time" tip.** *(Understand + trust pillar, PRIORITY 3 friendliness / 4 image-quality; size M; fully
+  offline, additive, read-only — no new deps, no network.)* **Why a beginner wants it:** after an unattended night the
+  owner opens their finished picture and — unless it's the extreme ≤4-frame case the `thinStackWarning` Alert already
+  catches, or they go digging in the per-sub FWHM column — has **no at-a-glance read on whether the result is actually
+  good.** A picture can be a "healthy" 300-frame stack yet still soft (focus drifted), noisy (short total integration),
+  or shallow (bright sky), and nothing tells them so or what to change. Every established tool leaves this to the
+  human's eye; a beginner doesn't yet have that eye. **What it is:** a small verdict card on the finished stack /
+  result view that grades the picture on the three things a beginner can act on, each from data we already compute —
+  **depth** (`n_frames_used` × per-sub exposure vs a per-object-type integration target — reuses the shipped
+  integration-goal logic), **sharpness** (median accepted-sub `fwhm_px`, "sharp / a bit soft / soft — focus may have
+  drifted"), and **noise** (the stack's measured background noise / SNR the √N and one-sub-vs-stack work already
+  surface) — rolled into one plain sentence: e.g. *"A solid picture — sharp stars and a good, deep stack. To go
+  deeper, add another hour on this target."* or *"Noisy and a bit soft — only ~20 min of usable subs and focus
+  softened after 01:30. More subs and a dew-heater / refocus next time will sharpen it up."* **Beginner-bar check:**
+  sane default (auto-computed, no knobs), plain language, actionable, not pro tooling — it never dumps
+  FWHM-arcsec/e-noise jargon, just "sharp / soft" and "add more subs / check focus." **Distinct from existing items:**
+  the "Focus & sharpness through the night" sparkline grades *per-sub* focus over time; the `thinStackWarning` only
+  fires at ≤4 frames; this is the missing *holistic* "how did the whole picture come out?" grade. Feasibility: pure
+  read over `stack_runs` + accepted-frame stats + the integration goal; a pure, unit-testable scorer +
+  one card. Split for the Builder: (a) the pure `finishedStackVerdict()` scorer + tests; (b) wire it onto the result
+  card. Size M.
 
 - **NEW BEGINNER FEATURE (Scout 2026-07-23) — "What else is in this picture?": a friendly, plain-language list of the
   *other* catalogued deep-sky objects that fall inside your finished frame, read straight off the stack's own WCS.**

@@ -19,6 +19,7 @@ from webapp.schemas import (
     StackOptionField,
     StackRunOut,
     stack_option_fields,
+    strip_non_form_keys,
     validate_stack_options,
 )
 
@@ -125,10 +126,16 @@ def get_stack_defaults(safe: str, request: Request) -> dict[str, Any]:
     finally:
         proj.close()
         lib.close()
-    merged = dict(settings.default_stack_options)
+    # Strip server-side calibration master paths (NON_FORM_KEYS) from BOTH sources
+    # before they reach the client. These are resolved server-side from master
+    # *ids* and must never leave the server (settings GET/export and the stack
+    # builder all strip them the same way); a legacy/hand-edited config.json or an
+    # older per-target blob could carry a raw dark_path/flat_path, and this read
+    # path was the one that forgot to strip — leaking a host filesystem path.
+    merged = strip_non_form_keys(dict(settings.default_stack_options))
     if raw:
         with contextlib.suppress(json.JSONDecodeError):
-            merged.update(json.loads(raw))
+            merged.update(strip_non_form_keys(json.loads(raw)))
     # For a *never-configured* target (no per-target saved defaults and no
     # global default_stack_options), turn smart auto outlier removal on in the
     # form the beginner sees. auto_reject (v0.143.0) picks min/max vs kappa-sigma

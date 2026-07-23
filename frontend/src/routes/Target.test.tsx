@@ -837,6 +837,38 @@ describe("TargetView reject breakdown + undo", () => {
       expect(screen.getByText("5 not located yet")).toBeInTheDocument());
   });
 
+  it("surfaces BOTH rejected and unsolved counts when a target has each", async () => {
+    // A first-light night: a couple of frames rejected, but a much larger pile
+    // accepted-but-unsolved. The badge must not let the small rejected count hide
+    // the (often far larger) unsolved pile — both are left out of the stack.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ n_frames: 202, n_frames_accepted: 200 }),  // rejectedCount = 2
+    );
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    vi.spyOn(client.api, "rejectSummary").mockResolvedValue({
+      counts: { user: 2 },
+      total: 2,
+      summary: {
+        used: 0,
+        dropped: 202,
+        dropped_fraction: 1,
+        verdict: { tone: "warn", text: "Run Plate Solve so the rest can be added." },
+        buckets: [
+          { key: "unsolved", label: "Not located in the sky yet", count: 200, note: "Run Plate Solve." },
+          { key: "user", label: "You rejected these", count: 2, note: "You marked these." },
+        ],
+      },
+    });
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("2 rejected · 200 not located yet"),
+      ).toBeInTheDocument());
+  });
+
   it("shows a per-row plain-language reason chip on rejected frames", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(
       mkTarget({ n_frames: 3, n_frames_accepted: 1 }),
