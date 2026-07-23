@@ -144,6 +144,22 @@ def apply_solve_result_to_db(project, result: SolveResult) -> None:
         reason = setup if setup is not None else raw[:120]
         project.update_frame(result.frame_id, reject_reason=f"solve_failed:{reason}")
         return
+    if result.wcs_text is None:
+        # ASTAP reported success (returncode 0 + a ``.wcs`` sidecar) but no usable
+        # WCS could be extracted from it — a malformed/partial sidecar, or the
+        # ``.ini`` parse raised so the centre coords came back None. Persisting
+        # this as "solved with wcs_json=None" is a silent trap: ``run_stack``
+        # treats a None WCS as unsolved (the frame never stacks), while
+        # ``build_solve_arglist`` skips only frames with a *truthy* ``wcs_json``,
+        # so the frame is re-offered and re-solved on every scan forever — wasted
+        # ASTAP time on a frame that can never contribute. Record an explicit,
+        # honest failure so it stops being re-offered and the reject-summary can
+        # surface it, mirroring the failure branch above (``accept`` untouched —
+        # the pixels may be fine, they just couldn't be located).
+        project.update_frame(
+            result.frame_id, reject_reason="solve_failed:unreadable plate solution"
+        )
+        return
     fields: dict = dict(
         wcs_json=result.wcs_text,
         ra_center_deg=result.ra_center_deg,

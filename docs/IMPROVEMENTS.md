@@ -4183,10 +4183,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
-- **IMPROVEMENT IDEA (Scout 2026-07-23) — a plate-solve that succeeds but whose sidecar won't parse should be
+- ~~**IMPROVEMENT IDEA (Scout 2026-07-23) — a plate-solve that succeeds but whose sidecar won't parse should be
   recorded as *retriable-unsolved*, not silently as "solved with no WCS" (which wastes a re-solve every scan and
-  never stacks the frame).** *(Autonomy / robustness — the honest-accounting arc; PRIORITY 2; size S; traced by
-  this run's QC/solve audit.)* **What prompted it:** in `apply_solve_result_to_db` (`seestack/solve/runner.py`)
+  never stacks the frame).**~~ — **SHIPPED v0.174.4** (Builder 2026-07-23, branch
+  `claude/pensive-faraday-hsmubw`; regression-tested). `apply_solve_result_to_db` (`seestack/solve/runner.py`)
+  now, on a *nominal success* whose `result.wcs_text is None` (malformed/partial `.wcs` sidecar, or `.ini` parse
+  raised → centre coords None), records an explicit `solve_failed:unreadable plate solution` reason and leaves
+  `wcs_json` NULL, instead of writing a "solved with `wcs_json=None`" limbo row. That stops the frame being
+  re-offered by `build_solve_arglist` (which skips only *truthy* `wcs_json`) and re-solved on every scan forever,
+  and lets the reject-summary surface it honestly; `accept` is left untouched (a location failure, not a bad
+  frame), mirroring the transient-failure branch. Regression
+  `tests/test_solve_runner.py::test_apply_solve_result_success_without_wcs_is_an_honest_failure` (a
+  `solved=True, wcs_text=None` result → `wcs_json` NULL + `solve_failed:` reason + accept kept; fail-before: the
+  row went through with a NULL WCS and no reason). Upgrade-safe: no schema/API/default change (only a reason
+  string on an already-nullable column). *(Original idea kept below for provenance.)* **What prompted it:** in
+  `apply_solve_result_to_db` (`seestack/solve/runner.py`)
   ASTAP is classified "solved" on `returncode==0 and .wcs exists` (`solve/astap.py`), but if
   `_parse_astap_ini` raises (swallowed → center coords stay `None`) or `wcs_text_from_sidecar` returns `None` on a
   malformed/partial header (`io/wcs_io.py`, swallowed), the frame is still persisted as **solved with
