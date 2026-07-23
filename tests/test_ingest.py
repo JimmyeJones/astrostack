@@ -278,6 +278,7 @@ def test_ingest_content_swap_clears_solution_without_cache(tmp_path):
         second = list(ingest_files(proj, cache, [frame_file], copy_to_cache=False))
         assert second[0].skipped is True
         assert second[0].refreshed is True  # fail-before: stayed False in no-cache mode
+        assert second[0].refreshed_frame_id == frame_id  # so caller can drop previews
         assert proj.count() == 1
 
         row = proj.get_frame(frame_id)

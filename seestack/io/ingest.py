@@ -46,10 +46,15 @@ class IngestResult:
     # zero-byte sub. Distinct from ``error`` so a benign skip isn't miscounted as a
     # failure in the scan summary. Only set when ``skipped`` is True.
     skip_reason: str | None = None
-    # True when a dedup-skipped frame's Stage-1 cache was *refreshed* because the
-    # source grew past the cached size (a mid-copy-truncated sub whose source
-    # later finished). Its QC was reset, so the caller should re-QC its target.
+    # True when a dedup-skipped frame's content was *refreshed* because the source
+    # grew past the cached size (a mid-copy-truncated sub whose source later
+    # finished) or its bytes changed under a reused path. Its QC/solution were
+    # reset, so the caller should re-QC its target.
     refreshed: bool = False
+    # The DB id of the refreshed frame (only set when ``refreshed`` is True). Lets
+    # the caller invalidate that frame's cached previews, which key on id alone and
+    # would otherwise keep serving the previous capture's image.
+    refreshed_frame_id: int | None = None
 
 
 def find_fits_files(root: str | Path, *, recursive: bool = True) -> list[Path]:
@@ -290,6 +295,7 @@ def ingest_files(
             yield IngestResult(
                 source_path=src, frame_id=None, cached_path=recovered, skipped=True,
                 refreshed=refreshed,
+                refreshed_frame_id=prior.id if refreshed else None,
             )
             continue
 

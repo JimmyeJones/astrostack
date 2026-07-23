@@ -14,6 +14,7 @@ from seestack.render.thumbnail import (  # noqa: F401
     autostretch,
     ensure_thumb_cache_current,
     generate_thumbnail,
+    invalidate_frame_thumbs,
     thumb_path_for,
     thumbs_dir,
 )

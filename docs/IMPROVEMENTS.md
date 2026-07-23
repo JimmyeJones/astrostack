@@ -956,11 +956,22 @@ when you take it.
   degrades reference selection, can collapse it if systematic). Confidence: reproduced (the persisted null-centre
   state + both downstream consequences) + traced (the ASTAP `.ini`-fail trigger).
 
-- **A frame's cached preview/thumbnail PNG is never invalidated when its Stage-1 cache is refreshed, so after a
+- ~~**A frame's cached preview/thumbnail PNG is never invalidated when its Stage-1 cache is refreshed, so after a
   reused source path is overwritten with a *different* capture (or a truncated mid-copy sub completes) the Frames
-  table keeps serving the OLD image for that frame.** *(Render / preview-staleness — broken-UX; Low, latent —
-  reachable only with `copy_to_cache=True` (non-default); found by the 2026-07-23 render/ingest adversarial audit —
-  traced.)* On a re-scan, `ingest_incoming` detects a stale Stage-1 cache (`seestack/io/ingest.py:197` `_cache_stale`,
+  table keeps serving the OLD image for that frame.**~~ — **FIXED v0.184.7** (Builder 2026-07-23, branch
+  `claude/pensive-faraday-rlgaiv`; traced + regression-tested). Added `render/thumbnail.py::invalidate_frame_thumbs(project_dir,
+  frame_id)`, which deletes a single frame's cached previews — the Qt gallery `frame_NNNNNN.png` and every web
+  `web_NNNNNN_*` size/pattern variant — so the next request regenerates from the frame's current pixels. Threaded the
+  refreshed frame's id up through the ingest/scan path (`IngestResult.refreshed_frame_id` → `TargetScanResult.refreshed_frame_ids`)
+  and, in `webapp/pipeline.py`'s post-scan step, call `invalidate_frame_thumbs` for each refreshed frame. **This now
+  covers the default install too:** since v0.184.6 a content swap at a reused path refreshes the frame even with
+  `copy_to_cache=False`, so the stale-preview exposure applies there as well — both are closed together. Regression
+  tests: `tests/test_thumb_cache_versioning.py` (+2 — the helper removes only the target frame's previews, leaves
+  siblings untouched, and no-ops when the cache dir is absent), `tests/test_scanner.py` (the refreshed frame's id is
+  surfaced in `refreshed_frame_ids`), and `tests/test_ingest.py` (`refreshed_frame_id` set on a content-swap refresh).
+  Upgrade-safe: additive result fields + a delete-on-refresh of re-creatable cache files only; no config/DB/API-shape/
+  on-disk/default change. Full suite green. *(Original trace kept below for provenance.)*
+  On a re-scan, `ingest_incoming` detects a stale Stage-1 cache (`seestack/io/ingest.py:197` `_cache_stale`,
   size mismatch), re-copies the source (`ingest.py:209`), and — correctly — resets QC and drops the stale plate
   solution + re-reads the header (`reset_frame_qc` + `_refresh_frame_metadata`, `ingest.py:216-224`), setting
   `refreshed=True`. **But nothing clears that frame's cached preview PNGs.** Both preview caches key purely on
