@@ -4366,6 +4366,28 @@ problems. Dogfood it every big-picture run and fix root causes.
   the cap fix landed in `_auto_grade_target` rather than here), plus a fail-before/pass-after test: reject a frame
   against a 10-sub noisy population, add 90 clean subs, re-grade → the frame comes back accepted. Additive,
   upgrade-safe (no config/DB/API/default change; gated feature).
+  _(Builder design note 2026-07-23, worked out while scoping this — read before starting so the next run is
+  faster and doesn't destabilise the shipped cumulative cap: the **only oscillation-safe** shape is to grade the
+  reject **and** re-accept decisions over the **same stable population** = current-accepted **plus** the
+  auto:grade-rejected-non-override frames (the original ever-considered set). Concretely, build
+  `combined = accepted + [dataclasses.replace(f, accept=True) for f in auto_graded_rejects]` (leave
+  `user_override=False` so they're reconsidered), run `grade_frames(combined, …)` **once**, and let its output
+  drive both directions: the frames it flags are the true outliers-against-the-full-night (reject / stay-rejected),
+  and every auto:grade-rejected frame **not** in that flagged set is re-accepted (clear `auto:grade:*`, set
+  `accept=True`). Because `combined` is stable across scans (it only grows as genuinely new subs arrive),
+  `grade_frames` over it is **deterministic**, so a frame can't reject→re-accept→reject churn — the ratchet becomes
+  a fixed point. **This supersedes, rather than layers on, the v0.175.1 external `budget` truncation in
+  `_auto_grade_target`:** grading over `combined` makes `grade_frames`' *own* internal `cap = int(len(considered)·
+  MAX_REJECT_FRACTION)` measure against the stable denominator directly (which is exactly what the external budget
+  was emulating), so the external truncation should be removed *in the same change*, not kept — keeping both would
+  double-cap. **Do NOT** implement re-accept as a *separate* pass over a different (shrinking `accepted`) population
+  than the reject pass — that reintroduces the oscillation. Keep the v0.175.1 regression test
+  (`test_auto_grade_cumulative_cap_holds_across_repeated_scans`) green: the deterministic reject set is ≤ the
+  internal cap, so the ≤25% invariant still holds — verify it, don't weaken it. Cleanest surface: add an optional
+  `reconsider: list[FrameRow]` param to `grade_frames` (or a `combined` builder in `_auto_grade_target`) and a
+  `GradeReport.re_accept: list[int]`; teach `apply_grade_report` to clear the reject on those ids. Size is really
+  **M**, not S, because of the cap-supersession — but it's fully gated (`auto_grade_frames` off by default), so
+  zero risk to default installs.)_
 - ~~**IMPROVEMENT IDEA (Scout 2026-07-23) — the walk-away auto-stack should auto-pick its outlier rejection from the
   sub count (turn on the existing `auto_reject` for the auto-stack pipeline).**~~ — **SHIPPED v0.177.0**
   (Builder 2026-07-23, branch `claude/pensive-faraday-wppu6g`). `_stack_target` (`webapp/pipeline.py`) grew an
