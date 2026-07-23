@@ -47,6 +47,33 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+> **Re-audit — stacking engine CLEAN again; shipped the SIMBAD nearest-row fix; filed one NEW verified ingest
+> wrong-result bug + enriched the ⭐⭐ top bug with its minimum-frames code location (Scout 2026-07-23, branch
+> `claude/kind-mccarthy-nqgrvr`).** Baseline suite green (**1805 passed, 2 skipped**). Three independent adversarial
+> audit sub-agents plus my own reads re-covered: (a) the **stacking reduction/rejection core** — `accumulator.py`
+> (MinMaxReject k-insertion brute-forced against a reference impl across every k=1..3 × n=0..8 boundary incl. NaN
+> gaps = 0 mismatches; band denominators ≥1, ±inf seeds never leak; Welford n=1→NaN-var / n=2→(a−b)²/2 + `add`≡
+> `add_window` no read-before-write aliasing; WeightedSum covered=weighted-mean / uncovered=NaN), `stacker.py` (κ-σ
+> keep-mask σ=0/NaN widenings — proven it can only ever yield an honest NaN gap, never a corrupted value; below-
+> threshold fallbacks correctly gated), `drizzle_path.py` (`_clip_tolerance` neff<3/var-floor/Bessel-on-true-count;
+> `result()` no-re-divide); (b) **align/mosaic/calibrate** — `align.py` (CPU cval=NaN ↔ GPU cval=0 parity via the
+> `inset≥1` interior-stencil argument + subpixel NaN re-mask), `mosaic.py` (RA-wrap circular mean, MAD ½-frame cap,
+> CRPIX arithmetic), `calibrate/apply.py`+`masters.py` (dark-then-flat raw-Bayer order, exposure-scaled dark
+> direction, `_dark_scaling_applies` shared predicate, MAD=0→robust-median) — **all CLEAN, no data-integrity bug**;
+> and (c) the **watcher/ingest/QC/solve path**, which is where this run's findings came from. **Verified this run:**
+> (1) **the shipped stale-plate-solution fix is DEAD on the default install** — all staleness recovery incl.
+> `_refresh_frame_metadata` is gated behind `copy_to_cache`, which the webapp defaults to `False`
+> (`config.py:65`→`pipeline.py:66`→`ingest.py:194`), so a source overwritten in place with different content keeps
+> its old WCS and stacks at the wrong position (NEW bug filed below, wrong-result/latent, Low); (2) **the ⭐⭐ top
+> bug has no minimum-frames floor anywhere in the auto-stack chain** — `_auto_stack_frame_count` returns any count
+> ≥1, so a lone solved sub is auto-stacked + auto-edited + published unattended (precise locations added to the top
+> entry). **Shipped:** the SIMBAD `_pick_nearest_row` fix (struck below; +3 offline regression tests). Non-bugs the
+> audits noted and I did **not** file: the `_sigma_clip_mean` MAD=0 → robust-median on legitimately two-level
+> quantized data (documented, deliberate — degrades to the median, never a hole); the truncated-mid-copy
+> "successful-but-wrong QC metrics stuck forever" case (moderate confidence — depends on astropy raising on a
+> truncated FITS read, which it usually does — not filed). Curation + a new beginner feature ("Reuse your favourite
+> look") + an autonomy improvement idea (relaxed-parameter plate-solve retry, targets the top bug) filed below.
+>
 > **Re-audit — stacking engine + render/output CLEAN again; shipped a verified honest-accounting verdict fix and filed
 > one NEW ⭐ Target-badge broken-UX bug (Scout 2026-07-23, branch `claude/kind-mccarthy-zkszg0`).** Baseline suite green
 > (**1797 passed, 2 skipped** at run start; the STACKER-label bug I'd re-verified was concurrently fixed on `main` by
@@ -453,6 +480,20 @@ when you take it.
   minimum-frames guard that surfaces "only N of M subs could be stacked because …" in the auto/Process job
   summary). The repro scaffold (`scratchpad/repro_thin.py`, bg-noise-vs-N) is the harness to extend. Keep this
   entry at the top until the frame-count root cause is fixed.
+  **▶ CODE LOCATION for the minimum-frames-guard half (Scout 2026-07-23 watcher/ingest audit, traced):** there is
+  **no floor anywhere in the auto-stack chain** — `_auto_stack_frame_count` (`webapp/pipeline.py`, the count that
+  gates auto-stack) skips only `solved_accepted == 0`, returning *any* count `≥ 1`; the auto-stack loop then
+  stacks whatever it returns, and `run_stack` (`seestack/stack/stacker.py`, ~line 822) itself accepts
+  `len(frames) >= 1` (only `not frames` raises). So a faint field where 11 of 12 subs fail plate-solve
+  (`apply_solve_result_to_db` leaves them `accept=1`, `wcs_json=NULL`) and 1 solves auto-stacks that lone frame
+  into a published 1-frame "master" — the owner's exact single-frame speckle. The `AUTO_STACK_ATTEMPT_META_KEY`
+  guard means it *does* re-stack as more subs solve (so the 1-frame result is a transient first-look), but it is
+  still produced and, with `auto_edit_on_autostack`, auto-edited and served unattended. **Builder:** the guard is
+  a *defaults-sensitive* change — refusing to stack a legitimately small-but-growing early session would regress
+  a live install, so gate it as an honest "held back: only N of M subs are located — waiting for more" state
+  (surfacing the already-shipped `thinStackWarning` copy) rather than a hard refusal, and confirm the re-stack
+  path still fires once enough subs solve. The already-shipped thin-stack warnings (v0.159.3/.6) cover the
+  *notification*; this covers the *don't-silently-publish-it* half.
 
 - ~~**Auto-grade's documented "never reject more than 25% per pass" cap is exceeded cumulatively, because the
   ingest pipeline re-grades a target over its *shrinking accepted survivor set* on every scan.**~~ —
@@ -719,6 +760,34 @@ when you take it.
   the card self-hides (fail-before: STF sub vs asinh/verbatim preview). Additive/upgrade-safe (new nullable columns
   default NULL = "no custom stretch" = today's STF behaviour).
 
+- **The shipped stale-plate-solution fix is DEAD on the default install — a source path overwritten in place with
+  different content keeps its old WCS and stacks at the wrong sky position, because the whole staleness-recovery
+  block is gated behind `copy_to_cache`, which the webapp defaults to `False`.** *(Stacking-engine / ingest
+  correctness; wrong-result but latent/rare, Low; found + traced end-to-end by the 2026-07-23 watcher/ingest
+  adversarial audit — NOT fixed, needs care.)* `ingest_files` (`seestack/io/ingest.py:194`) wraps *all* per-frame
+  staleness recovery — the truncated-cache refresh, `reset_frame_qc`, and crucially `_refresh_frame_metadata`
+  (which re-reads the header and calls `reset_frame_solution` to drop the stale `wcs_json`/hints) — inside
+  `if copy_to_cache and prior.id is not None:`. But the live webapp passes `copy_to_cache=settings.copy_to_cache`
+  (`webapp/pipeline.py:66-68` → `scanner.scan_and_organize` → `ingest_files`), and `Settings.copy_to_cache`
+  defaults to **`False`** (`webapp/config.py:65`). So on a default install the v0.-era stale-WCS fix
+  (`_refresh_frame_metadata`) **never runs**: a dedup-skipped frame (`_dedup_key` on realpath) whose source was
+  overwritten in place with a *different* capture (a re-export/rename collision, or a NAS sync that reuses
+  filenames) keeps its old `wcs_json`, `ra_hint_deg`, timestamp, exposure and gain, and at stack time the new
+  pixels are reprojected using the **old** WCS → the frame lands at the wrong sky position, silently corrupting
+  the stack. **Why latent:** Seestar files are uniquely timestamp-named, so an in-place same-path content swap is
+  uncommon — matching the original bug's Low/latent rating — but the finding here is that the *fix for it is inert
+  in the deployed configuration*, so the exposure the fix was meant to close is still open by default. **Why NOT
+  blind-fixed:** simply hoisting `_refresh_frame_metadata` out of the `copy_to_cache` guard doesn't work, because
+  in no-cache mode there is no cached-vs-source size compare (`_cache_stale`) to *detect* that the content
+  changed — a correct fix needs a cache-independent change-detector (compare the DB's stored size/mtime, or a
+  cheap header fingerprint, against the current source) before it can safely clear a solution, and clearing on a
+  false positive would needlessly re-solve every frame each scan. **Fix direction:** add a lightweight source
+  fingerprint (e.g. store `source_size_bytes` + mtime on the frame row via an additive `SCHEMA_VERSION`
+  migration) and, on a dedup-skip, run `_refresh_frame_metadata` whenever that fingerprint changed — regardless
+  of `copy_to_cache`. Add a fail-before/pass-after test that ingests, overwrites the source with different content
+  at the same path in no-cache mode, re-ingests, and asserts `wcs_json`/hints were cleared. Confidence: traced
+  (gating + default verified end-to-end: `config.py:65` False → `pipeline.py:66` → `ingest.py:194` guard).
+
 - **Stack OOM memory guard omits the `max_workers·2` in-flight aligned-frame buffers it actually holds.**
   *(Stacking-engine correctness / stability; Low severity on Seestar-sized frames, traced not reproduced; found
   by the same rejection-math audit — NOT fixed, needs care.)* `_estimate_peak_bytes`/`_guard_stack_memory`
@@ -976,8 +1045,22 @@ when you take it.
   loss — the write simply didn't happen). Confidence: traced + regression-reproduced. _(Found by this run's
   adversarial webapp-router audit of the un-swept `editor/frames/targets/stats/plan/seestar` routers.)_
 
-- **SIMBAD `identify_target` returns an arbitrary object in the search cone, not the framed target — wrong
-  target identity + wrong bg-flatten hint.** Location: `seestack/post/target_id.py:161-162` (`row = table[0]`
+- ~~**SIMBAD `identify_target` returns an arbitrary object in the search cone, not the framed target — wrong
+  target identity + wrong bg-flatten hint.**~~ — **FIXED v0.181.1** (Scout 2026-07-23, branch
+  `claude/kind-mccarthy-nqgrvr`; traced + regression-tested offline, no network). Extracted a pure
+  `_pick_nearest_row(table, ra_deg, dec_deg)` helper (plus `_row_coord`) into `seestack/post/target_id.py` and
+  replaced the `row = table[0]` pick with it, so `identify_target` now returns the object angularly **closest**
+  to the frame centre instead of whatever SIMBAD happened to list first. `_row_coord` reads the row's RA/Dec via
+  the existing `_get_string` casing-normaliser and parses **both** astroquery column conventions — modern numeric
+  `ra`/`dec` (decimal degrees) and legacy sexagesimal `RA` (hours) / `DEC` (degrees) strings — so the fix is
+  version-robust; it falls back to `table[0]` when no row has readable coordinates (prior behaviour preserved).
+  The `identify_target` docstring's "brightest" was corrected to "nearest" (resolving the old three-way
+  docstring/comment/code disagreement). Regression: `tests/test_target_id.py` (+3 — numeric-degree columns pick
+  M 42 over a first-listed Trapezium star, sexagesimal columns pick M 42, and unreadable coords fall back to
+  row 0; unit-tested with synthetic astropy `Table`s, no network). Desktop-Qt-only advisory path (the live webapp
+  uses `seestack/objectinfo.identify_object`), so zero risk to web users or the stacked pixels; additive helper,
+  no config/DB/API-shape/on-disk/default change. Confidence: traced + regression-tested. *(Original trace kept
+  below for provenance.)* Location: `seestack/post/target_id.py:161-162` (`row = table[0]`
   with the comment "SIMBAD's first row is usually the closest match"). Symptom: `astroquery.simbad.
   Simbad.query_region()` returns rows in SIMBAD's internal/catalog order, **not** sorted by angular separation,
   so `table[0]` can be any object within the default 30′ (0.5°) cone rather than the one at the frame centre.
@@ -4578,6 +4661,27 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+- **IMPROVEMENT IDEA (Scout 2026-07-23, targets the ⭐⭐ top bug's root cause) — auto-retry a failed plate-solve with
+  progressively relaxed ASTAP parameters on faint/sparse fields before giving up, so more subs get located and the
+  auto-stack combines more frames instead of shipping a thin/gibberish result.** *(Autonomy + image-quality pillar,
+  PRIORITY 2/4; size M; additive — no new deps, ASTAP is already bundled.)* **Why:** the top open bug is that faint,
+  few-star fields yield single-frame speckle because most subs *fail plate-solve* and are silently dropped from the
+  stack. v0.180.0 already borrows a solved sibling's centre as a hint; a complementary lever is that ASTAP itself
+  often solves a faint field on a **second pass with a wider search radius, a lower star-detection threshold, or a
+  larger max-star count / longer timeout** — the defaults are tuned for a typical field and are too strict for a
+  sparse one. **Shape:** in `seestack/solve/runner.py`, when a solve fails with a "no match / too few stars" class of
+  error (not a "no star database" setup error — that needs the banner, not a retry), retry once or twice with a
+  relaxed parameter set (widen radius, lower the star threshold, raise the timeout modestly) before recording
+  `solve_failed`. Keep it bounded (retry budget + a hard timeout cap) so it can't blow up ingest latency on a
+  genuinely un-solvable frame, and log the relaxed-solve success rate so the effect is measurable. **Sane default:**
+  the relaxed retry is automatic and invisible when the first pass already succeeds (the common case), so no behaviour
+  change on bright fields; it only adds attempts where a frame would otherwise be dropped. **Validate** on a real
+  sparse-star field (or synthetic few-star subs) that the relaxed pass recovers solves the strict pass misses without
+  a flood of false/wrong solutions (guard on the solve's own residual/match quality). Tests: a `solve_failed`
+  no-match path triggers the relaxed retry; a "no star database" path does **not** (still surfaces the setup banner);
+  the retry budget is honoured. *(Feasibility: uses the already-bundled ASTAP, additive, bounded, testable — passes
+  §4's filter. Ties directly to the highest-priority owner-reported issue.)*
+
 - **IMPROVEMENT IDEA (Scout 2026-07-23, spotted while fixing the dead per-target setup banner v0.178.3) — raise a
   *global, cross-target* "plate-solving isn't set up" readiness banner on the Dashboard when the star **database** is
   missing, not only the per-target banner.** *(Autonomy + friendliness / "just works" pillar, PRIORITY 2–3; size S;
@@ -6862,6 +6966,29 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Reuse your favourite look": one tap to save the edit you just made
+  as a named personal look, and one tap to apply it to any other stack — so a beginner who finally nails a picture
+  they love never has to rebuild the same sliders by hand again.** *(Pillar: 2 autonomy + 3 friendliness; size M.)*
+  **The friction:** the app's auto-edit gives a good default, and the editor lets a beginner tweak it, but the moment
+  they land on a look they love (a little more saturation, a gentler stretch, a touch more denoise) there is **no way
+  to reuse it** — every new target starts from Auto again and they redo the same adjustments from scratch. That's the
+  classic "remove repeated work" gap (AGENTS.md §4 Method D: automation + repeatability beat another slider).
+  **The feature (beginner idiom, not a pro knob):** the editor already produces a non-destructive **recipe**
+  (`seestack/edit/recipe.py`) — the exact thing worth saving. Add a **"Save as my look"** button on the editor that
+  names and stores the *current* recipe, and a small **"My looks"** row (with an on-image thumbnail of what it does)
+  on any target's result that applies a saved look in one tap as a single undoable step. Ships with a sane default:
+  the list starts empty and **Auto stays the default** — a saved look is purely opt-in, never auto-applied, so no
+  existing behaviour changes. Plain-language throughout ("Apply *Punchy galaxies* to this picture"); no channel/curve
+  jargon surfaced. **Why it clears the beginner bar:** a non-expert Seestar owner absolutely understands "save this
+  look and use it again", and it directly cuts clicks on every subsequent picture — pillars 2 and 3. **Shape for one
+  Builder run:** persist a small set of named recipes (a new library-DB table via additive `SCHEMA_VERSION` +
+  `_migrate_schema`, or a JSON blob under `state/` — keep it upgrade-safe and additive); reuse the existing
+  `apply_recipe`/proxy render for the thumbnail so there's no new engine work; endpoints `GET/POST/DELETE
+  /api/looks`; frontend "Save as my look" + "My looks" row. Cap the count (e.g. 20) so it can't grow unbounded.
+  Tests: recipe round-trips through save→list→apply unchanged; applying a look is undoable; empty-list default keeps
+  Auto. Upgrade-safe: additive table/blob + additive endpoints, no default flip. *(Feasibility: reuses recipe +
+  apply_recipe + proxy render, no new/heavy dependency, sane default, testable — passes §4's filter.)*
 
 - ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "What else is in this picture?": a friendly, plain-language list of the
   catalogued deep-sky objects that fall inside your finished frame, read straight off the stack's own WCS.**~~ —

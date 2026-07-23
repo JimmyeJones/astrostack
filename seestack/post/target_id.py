@@ -122,7 +122,7 @@ class TargetIdResult:
 def identify_target(ra_deg: float, dec_deg: float, *,
                     search_radius_arcmin: float = 30.0) -> TargetIdResult:
     """
-    Query SIMBAD for the brightest catalog object near (RA, Dec).
+    Query SIMBAD for the catalog object nearest (RA, Dec).
 
     Returns a ``TargetIdResult``. If astroquery isn't available or the query
     fails, the result has ``error`` set and other fields are None — callers
@@ -158,8 +158,10 @@ def identify_target(ra_deg: float, dec_deg: float, *,
         return TargetIdResult(None, None, None, None, None,
                               error="no SIMBAD match within search radius")
 
-    # SIMBAD's first row is usually the closest match.
-    row = table[0]
+    # query_region returns rows in SIMBAD's catalog order, NOT sorted by angular
+    # separation, so table[0] can be any object in the cone (e.g. a Trapezium
+    # star instead of M 42). Pick the row actually nearest the frame centre.
+    row = _pick_nearest_row(table, ra_deg, dec_deg)
     name = _get_string(row, "MAIN_ID", "main_id")
     otype = _get_string(row, "OTYPE", "otype")
     hint = _TYPE_HINTS.get(otype) if otype else None
@@ -169,6 +171,58 @@ def identify_target(ra_deg: float, dec_deg: float, *,
         object_type_name=friendly_object_type(otype),
         bg_mode_hint=hint, hint_reason=reason,
     )
+
+
+def _row_coord(row):
+    """Build a ``SkyCoord`` from a SIMBAD result row's RA/Dec columns.
+
+    Returns ``None`` if the row carries no readable coordinates. Handles both
+    astroquery column conventions: modern releases give numeric ``ra``/``dec``
+    in decimal degrees; older ones give sexagesimal ``RA`` (hours) / ``DEC``
+    (degrees) strings.
+    """
+    from astropy.coordinates import SkyCoord
+    import astropy.units as u
+
+    ra = _get_string(row, "ra", "RA_d", "RA")
+    dec = _get_string(row, "dec", "DEC_d", "DEC")
+    if ra is None or dec is None:
+        return None
+    # Numeric decimal degrees (the common, unambiguous modern case).
+    try:
+        return SkyCoord(float(ra) * u.deg, float(dec) * u.deg)
+    except (ValueError, TypeError):
+        pass
+    # Sexagesimal strings: RA in hours, Dec in degrees.
+    try:
+        return SkyCoord(ra, dec, unit=(u.hourangle, u.deg))
+    except Exception:  # noqa: BLE001 — malformed/unparseable coordinate string
+        return None
+
+
+def _pick_nearest_row(table, ra_deg: float, dec_deg: float):
+    """Return the result row angularly closest to the query centre.
+
+    ``Simbad.query_region`` returns rows in SIMBAD's internal catalog order, not
+    sorted by separation, so ``table[0]`` can be any object in the search cone
+    (e.g. a Trapezium star instead of M 42). Pick the true nearest so the
+    friendly name and bg-flatten hint describe the framed target. Falls back to
+    row 0 if no row has readable coordinates (preserving prior behaviour).
+    """
+    from astropy.coordinates import SkyCoord
+    import astropy.units as u
+
+    center = SkyCoord(ra_deg * u.deg, dec_deg * u.deg)
+    best_i: int | None = None
+    best_sep: float | None = None
+    for i in range(len(table)):
+        coord = _row_coord(table[i])
+        if coord is None:
+            continue
+        sep = float(center.separation(coord).deg)
+        if best_sep is None or sep < best_sep:
+            best_i, best_sep = i, sep
+    return table[best_i] if best_i is not None else table[0]
 
 
 def _get_string(row, *keys: str) -> str | None:
