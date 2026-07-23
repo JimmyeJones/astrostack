@@ -47,6 +47,32 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+> **Re-audit — stacking engine CLEAN again; one NEW verified render/ingest preview-staleness bug filed
+> (Scout 2026-07-23, branch `claude/kind-mccarthy-hhvyko`).** Baseline suite green (**1817 passed, 2 skipped**). Three
+> independent adversarial audit sub-agents plus my own reads re-covered the engine + the render/ingest path: (a)
+> **stacker.py orchestration** (κ-σ pass-1/2 keep-mask incl. both NaN widenings + the analytic proof a fully-covered
+> pixel can't be nulled to a wrong value — only to an honest NaN gap; MinMaxReject `result()` band denominators ≥1 +
+> ±inf identity masked before the add; coverage sourcing always 2-D from uniformly-3-D `coverage`; n=0/1/2/3 dispatch
+> gates; memory-guard plane charges; cancel-mid-pass-1 → graceful cancelled result) — **CLEAN**; (b) **calibrate +
+> combine + weighting** (`apply.py` flat-floor/`_sanitize_pedestal`/exposure=0/None/shape-mismatch guards,
+> `masters.py` `_sigma_clip_mean` all-NaN→NaN / spike-reject convergence, `channel_combine.py` floored LRGB/RGB
+> divisor + NaN-union, `weighting.py` factors clipped `[0.1,1]` + inverse-variance fold bounded, `photometric.py`
+> `max_ratio`-bounded scale — the `star_count` unguarded-finiteness asymmetry examined and dismissed as benign, a
+> SQLite INTEGER can't be NaN) — **CLEAN**; (c) my own reads of `reference.py` (the `is not None` centre filter makes
+> NaN-poisoning unreachable; RA-unwrap median; pole `cos_dec=0` degeneracy correct) and `pointings.py` (isfinite
+> guard, union-find path-compression, centroid-norm `or 1.0`, dot clamp) — **CLEAN**; (d) the **render/ingest path** —
+> `output.py` (covered-only percentiles, NaN→0 only *after* stats, display-space FITS/TIFF/PNG/JPEG parity),
+> `thumbnail.py` (NaN-aware stretch/downsample), `watcher.py` (size+mtime debounce, stranded-batch re-offer),
+> `rejection_summary.py` + `frames.py` (used = accepted−unsolved / dropped = rejected+unsolved partition disjoint,
+> nulls-last sort) — all **CLEAN**. **One NEW verified bug filed** (below): the frame preview/thumbnail cache keys on
+> `frame_id` only and is **never invalidated on a Stage-1 cache refresh**, so under `copy_to_cache=True` a reused
+> source path (or a completed truncated sub) keeps serving the OLD preview for that frame (broken-UX, Low/latent,
+> traced; same `copy_to_cache`-gated family as the stale-plate-solution bug). Curation: re-verified two open bugs are
+> still accurately described (the `copy_to_cache=False` staleness-recovery-DEAD bug — confirmed `config.py:65` +
+> `ingest.py:194` gating; the History "Adjust" 0.10-vs-0.06 parity bug — confirmed `stretch.py:49` vs
+> `output.py:421`). Added a new beginner feature ("Your imaging calendar" — a temporal capture-activity heatmap) and a
+> friendliness improvement (a plain-language "?" explainer for the honest "N not located yet" badges) below.
+>
 > **Re-audit — full stacking/QC/solve/render sweep CLEAN again; two NEW verified bugs filed (Scout 2026-07-23,
 > branch `claude/kind-mccarthy-54eyci`).** Baseline suite green (**1815 passed, 2 skipped**). Three independent
 > adversarial audit sub-agents plus my own reads re-covered: (a) the **less-audited stacking helpers** — `mosaic.py`
@@ -859,6 +885,35 @@ when you take it.
   well-shaped for a Builder run with the fix direction spelled out. Severity: Low–Medium (latent, data-completeness —
   degrades reference selection, can collapse it if systematic). Confidence: reproduced (the persisted null-centre
   state + both downstream consequences) + traced (the ASTAP `.ini`-fail trigger).
+
+- **A frame's cached preview/thumbnail PNG is never invalidated when its Stage-1 cache is refreshed, so after a
+  reused source path is overwritten with a *different* capture (or a truncated mid-copy sub completes) the Frames
+  table keeps serving the OLD image for that frame.** *(Render / preview-staleness — broken-UX; Low, latent —
+  reachable only with `copy_to_cache=True` (non-default); found by the 2026-07-23 render/ingest adversarial audit —
+  traced.)* On a re-scan, `ingest_incoming` detects a stale Stage-1 cache (`seestack/io/ingest.py:197` `_cache_stale`,
+  size mismatch), re-copies the source (`ingest.py:209`), and — correctly — resets QC and drops the stale plate
+  solution + re-reads the header (`reset_frame_qc` + `_refresh_frame_metadata`, `ingest.py:216-224`), setting
+  `refreshed=True`. **But nothing clears that frame's cached preview PNGs.** Both preview caches key purely on
+  `frame_id` (+ size/pattern/`THUMB_VERSION`), never on source content or mtime: the web endpoint writes/serves
+  `web_{frame_id:06d}_{size}_{pattern}_v{THUMB_VERSION}.png` and only ever regenerates on `if not out.exists()`
+  (`webapp/routers/frames.py:492,502`), and its ETag `"{frame_id}-{size}-{pattern}-{THUMB_VERSION}"` (`frames.py:498`)
+  is likewise content-independent, so a matching `If-None-Match` returns 304 and keeps the client's stale copy; the Qt
+  gallery thumbnail `frame_{id:06d}.png` (`seestack/render/thumbnail.py:38`) is served from cache the same way.
+  `THUMB_VERSION` (`thumbnail.py:30`) only bumps on a global pipeline change, never per-frame. **Verified wrong
+  result (traced):** with `copy_to_cache=True`, a source path reused with a *different* capture (the same premise as
+  the already-filed stale-plate-solution bug) refreshes the frame's data + metadata but the Frames-table preview keeps
+  showing the previous capture's (perfectly valid, cached) thumbnail indefinitely — the picture no longer matches the
+  data. A secondary trigger — a truncated mid-copy sub that had a preview generated *while* truncated, then completed
+  — would serve the partial-image PNG forever; I did **not** verify that `generate_thumbnail` yields a preview from a
+  truncated FITS rather than raising, so I lead with the source-reuse case, which doesn't depend on that. **Fix
+  (small, one place):** the pipeline already re-QCs refreshed targets (`webapp/pipeline.py:72-77`,
+  `t.n_frames_refreshed > 0`); in that same path, delete the refreshed frames' cached `web_{id}_*` and `frame_{id}.png`
+  PNGs (a `thumb_path_for`-style helper + a glob of the `web_{id:06d}_*` variants under `thumbs_dir`) so the next
+  request regenerates from the fresh cache. Add a fail-before/pass-after test: refresh a frame with `copy_to_cache=True`
+  and assert its stale cached preview file is removed (and the endpoint re-renders). Severity broken-UX, Low (latent,
+  `copy_to_cache=True` only; sits in the same copy_to_cache-gated family as the stale-plate-solution bug above).
+  Confidence: traced (cache-key gap + no invalidation on the refresh path both read directly; source-reuse consequence
+  is a direct logical consequence; the truncated-preview sub-trigger is noted but unverified).
 
 - **The History "Adjust" stretch suggestion opens the sliders ~2× brighter than the STF gallery/History thumbnail it
   claims to match — it targets sky→0.10 while the stored STF preview targets sky→0.06.** *(Render / preview-parity —
