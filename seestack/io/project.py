@@ -635,6 +635,31 @@ class Project:
             out[reason] = n
         return out
 
+    def solve_failure_reason_counts(self) -> dict[str, int]:
+        """Tally *unsolved* frames by their ``solve_failed:…`` reason.
+
+        A plate-solve failure is stored with ``reject_reason='solve_failed:…'``
+        but the frame is left **accepted** (``accept=1``) — the pixels may be
+        fine, they just couldn't be located (see
+        :func:`seestack.solve.runner.apply_solve_result_to_db`). So these frames
+        are invisible to :meth:`reject_reason_counts` (which tallies only
+        ``accept=0``), which is why the plate-solve *setup* banner — the one that
+        tells a first-light user to install ASTAP or its star database when
+        *every* frame fails identically — never fires from that tally. This
+        helper tallies the ``solve_failed:`` reasons regardless of ``accept`` so
+        the setup detector can see them. The ``wcs_json IS NULL`` guard excludes
+        a frame that later solved cleanly (its stale ``solve_failed`` reason is
+        no longer relevant)."""
+        assert self._conn is not None
+        out: dict[str, int] = {}
+        for reason, n in self._conn.execute(
+            "SELECT reject_reason AS r, COUNT(*) FROM frames "
+            "WHERE wcs_json IS NULL AND reject_reason LIKE 'solve_failed:%' "
+            "GROUP BY r"
+        ):
+            out[reason] = n
+        return out
+
     # ---- stack runs ----------------------------------------------------
 
     def add_stack_run(self, run: StackRunRow) -> int:
