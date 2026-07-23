@@ -19,16 +19,16 @@ router = APIRouter(tags=["system"])
 
 def _first_solvable_frame(lib) -> tuple[str, str] | None:
     """Return (target_safe, fits_path) of the first frame we could solve, or None."""
-    from seestack.io.project import Project
+    from seestack.io.project import Project, readable_frame_path
 
     for t in lib.list_targets():
         proj = None
         try:
             proj = Project.open(lib.target_dir(t))
             for f in proj.iter_frames():
-                path = f.cached_path or f.source_path
-                if path and Path(path).exists():
-                    return t.safe_name, str(path)
+                path = readable_frame_path(f)
+                if path:
+                    return t.safe_name, path
         except Exception:  # noqa: BLE001 — skip broken projects
             pass
         finally:

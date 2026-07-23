@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 
-from seestack.io.project import FrameRow
+from seestack.io.project import FrameRow, readable_frame_path
 from seestack.render.thumbnail import THUMB_VERSION, generate_thumbnail, thumbs_dir
 from seestack.solve.astap import (
     SOLVE_SETUP_ASTAP_MISSING,
@@ -473,8 +473,8 @@ async def frame_preview(
         f = proj.get_frame(frame_id)
         if f is None:
             raise HTTPException(status_code=404, detail="No such frame")
-        src = f.cached_path or f.source_path
-        if not src or not Path(src).exists():
+        src = readable_frame_path(f)
+        if not src:
             raise HTTPException(status_code=404, detail="Frame file not found on disk")
         pattern = (bayer or f.bayer_pattern or "RGGB").upper()
         if pattern not in _BAYER_PATTERNS:

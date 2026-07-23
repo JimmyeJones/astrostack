@@ -188,9 +188,25 @@ when you take it.
   minority once ≥10 frames), keeping the small tier. Add a fail-before/pass-after regression test with a synthetic
   variable-subset flag pattern. **Scout: validate on a real edge-on-galaxy stack before flipping.**
 
-- **⭐ Clearing the Stage-1 cache silently makes a target un-stackable *and* un-QC-able even though the original
+- ~~**⭐ Clearing the Stage-1 cache silently makes a target un-stackable *and* un-QC-able even though the original
   subs are still on disk — every frame is dropped because the DB's dangling `cached_path` is followed instead of
-  falling back to the readable `source_path`.** *(Data-availability / broken-UX; Medium; found by the 2026-07-23
+  falling back to the readable `source_path`.**~~ — **FIXED v0.174.2** (Builder 2026-07-23, branch
+  `claude/pensive-faraday-49k930`; traced + reproduced + regression-tested). Added the shared helper
+  `seestack/io/project.py::readable_frame_path(frame) -> str | None`, which returns the **first of
+  `(cached_path, source_path)` that actually exists on disk** (None if neither), and routed every consumer of the
+  old `cached_path or source_path` short-circuit through it: `qc/runner.py::build_qc_arglist`,
+  `solve/runner.py::build_solve_arglist`, `stack/stacker.py` (`_align_for_stack`, the drizzle `prepare`, and the
+  sub-pixel reference-patch read), plus the webapp preview/thumbnail sites (`routers/system.py::_first_solvable_frame`,
+  `routers/frames.py`, `routers/stack.py` ×2). Strictly widening: when the cache file exists behaviour is
+  byte-for-byte identical (cache is tried first); only when the cache is *missing* does it now fall back to the
+  readable source instead of silently dropping the frame — so clearing the Stage-1 cache (a documented-safe
+  action) no longer breaks a target whose original subs are still on disk. A frame with **both** paths dead is
+  still skipped, as before. Regression tests: `tests/test_readable_frame_path.py` (+6 — helper unit cases for
+  cache-preferred / dangling-cache→source fallback / both-dead→None / missing-cache-column, and integration cases
+  proving `build_qc_arglist` and `build_solve_arglist` now offer the live source for a frame whose cache pointer is
+  dangling; fail-before: the frame was dropped). Upgrade-safe: no config/DB/API-shape/on-disk/default change (pure
+  path-selection logic). *(Original trace kept below for provenance.)*
+  *(Data-availability / broken-UX; Medium; found by the 2026-07-23
   QC/watcher/ingest adversarial audit — **traced end-to-end AND reproduced**.)* The `POST
   /api/targets/{safe}/cache/clear?stage=stage1` (or `all`) endpoint (`webapp/routers/storage.py::clear_cache`) is
   UI-exposed and documented as **safe** — "only re-creatable intermediates … the project DB and the stacked
