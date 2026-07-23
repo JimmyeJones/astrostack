@@ -239,6 +239,115 @@ def test_ingest_refresh_clears_stale_solution_and_reads_new_header(tmp_path):
         proj.close()
 
 
+def test_ingest_content_swap_clears_solution_without_cache(tmp_path):
+    """A source overwritten in place with a *different* capture must drop its
+    stale plate solution and re-read its header even with ``copy_to_cache=False``
+    (the webapp default), where there is no cached copy to diff against.
+
+    Regression: the whole staleness-recovery block was gated behind
+    ``copy_to_cache``, so on a default install the frame kept its old WCS and
+    stacked at the wrong sky position, silently. The stored source fingerprint
+    (size+mtime) now detects the swap cache-independently."""
+    src = tmp_path / "raws"
+    src.mkdir()
+    frame_file = src / "a.fit"
+    write_seestar_fits(frame_file, seed=3, width=480, height=320)
+
+    proj = Project.create(tmp_path / "proj", name="t")
+    cache = CacheManager(proj.project_dir)
+    try:
+        first = list(ingest_files(proj, cache, [frame_file], copy_to_cache=False))
+        frame_id = first[0].frame_id
+        assert frame_id is not None
+        # No cache was made (copy_to_cache off), but the fingerprint was recorded.
+        row = proj.get_frame(frame_id)
+        assert row.cached_path is None
+        assert row.source_size_bytes is not None and row.source_mtime is not None
+
+        # Frame gets plate-solved at some sky position.
+        proj.update_frame(
+            frame_id,
+            wcs_json='{"CRVAL1": 10.0}', ra_center_deg=10.0, dec_center_deg=20.0,
+            pixscale_arcsec=5.0, rotation_deg=1.0,
+        )
+
+        # The source path is reused for a different capture (different width →
+        # different size), while still in no-cache mode.
+        write_seestar_fits(frame_file, seed=99, width=640, height=320)
+
+        second = list(ingest_files(proj, cache, [frame_file], copy_to_cache=False))
+        assert second[0].skipped is True
+        assert second[0].refreshed is True  # fail-before: stayed False in no-cache mode
+        assert second[0].refreshed_frame_id == frame_id  # so caller can drop previews
+        assert proj.count() == 1
+
+        row = proj.get_frame(frame_id)
+        # Stale solution dropped → re-offered to plate-solving (fail-before: kept).
+        assert row.wcs_json is None
+        assert row.ra_center_deg is None and row.dec_center_deg is None
+        assert row.pixscale_arcsec is None and row.rotation_deg is None
+        # Header re-read from the new content.
+        assert row.width_px == 640
+        # Fingerprint advanced to the new content.
+        assert row.source_size_bytes is not None
+    finally:
+        proj.close()
+
+
+def test_ingest_no_cache_unchanged_rescan_keeps_solution(tmp_path):
+    """An unchanged re-scan in no-cache mode must NOT drop the plate solution —
+    the fingerprint matches, so there is no false-positive re-solve."""
+    src = tmp_path / "raws"
+    src.mkdir()
+    frame_file = src / "a.fit"
+    write_seestar_fits(frame_file, seed=7)
+
+    proj = Project.create(tmp_path / "proj", name="t")
+    cache = CacheManager(proj.project_dir)
+    try:
+        first = list(ingest_files(proj, cache, [frame_file], copy_to_cache=False))
+        frame_id = first[0].frame_id
+        proj.update_frame(frame_id, wcs_json='{"CRVAL1": 1.0}', ra_center_deg=1.0,
+                          star_count=150)
+
+        second = list(ingest_files(proj, cache, [frame_file], copy_to_cache=False))
+        assert second[0].skipped is True
+        assert second[0].refreshed is False
+        row = proj.get_frame(frame_id)
+        assert row.wcs_json == '{"CRVAL1": 1.0}'  # solution untouched
+        assert row.star_count == 150
+    finally:
+        proj.close()
+
+
+def test_ingest_pre_fingerprint_frame_backfills_without_resolve(tmp_path):
+    """A frame ingested before the fingerprint column existed (stored NULL) is
+    backfilled on its next re-scan *without* dropping its solution — so an
+    in-place upgrade does not needlessly re-solve the whole library."""
+    src = tmp_path / "raws"
+    src.mkdir()
+    frame_file = src / "a.fit"
+    write_seestar_fits(frame_file, seed=5)
+
+    proj = Project.create(tmp_path / "proj", name="t")
+    cache = CacheManager(proj.project_dir)
+    try:
+        first = list(ingest_files(proj, cache, [frame_file], copy_to_cache=False))
+        frame_id = first[0].frame_id
+        # Simulate a pre-fingerprint (upgraded) row: NULL fingerprint + a solution.
+        proj.update_frame(frame_id, source_size_bytes=None, source_mtime=None,
+                          wcs_json='{"CRVAL1": 2.0}', ra_center_deg=2.0)
+
+        second = list(ingest_files(proj, cache, [frame_file], copy_to_cache=False))
+        assert second[0].refreshed is False  # NULL fingerprint != "content changed"
+        row = proj.get_frame(frame_id)
+        assert row.wcs_json == '{"CRVAL1": 2.0}'  # solution preserved
+        # Fingerprint was backfilled from the current source.
+        assert row.source_size_bytes is not None and row.source_mtime is not None
+    finally:
+        proj.close()
+
+
 def test_ingest_does_not_reset_qc_on_a_plain_dedup_skip(tmp_path):
     """A normal (unchanged) re-scan must NOT reset QC or flag a refresh — only a
     genuine cache refresh (source grew past the cached size) does."""

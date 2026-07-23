@@ -127,6 +127,14 @@ def test_scan_counts_a_cache_refresh_as_refreshed_not_added(tmp_path):
         m42 = next(t for t in second.targets if t.safe_name == "M_42")
         assert m42.n_frames_added == 0        # nothing new
         assert m42.n_frames_refreshed == 1    # but the cache was refreshed
+        # The refreshed frame's id is surfaced so the pipeline can drop its
+        # now-stale cached previews (which key on id alone).
+        assert len(m42.refreshed_frame_ids) == 1
+        proj = lib.open_target("M_42")
+        try:
+            assert m42.refreshed_frame_ids[0] == next(iter(proj.iter_frames())).id
+        finally:
+            proj.close()
     finally:
         lib.close()
 

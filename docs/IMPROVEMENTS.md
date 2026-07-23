@@ -504,6 +504,23 @@ when you take it.
   owner's data. May share the owner's deploy with the thin-stack bug below but is a
   distinct axis (size, not frame count). Severity: wrong-result on the core output.
   Confidence: traced candidates; reproduce to localise.
+  - **Builder investigation 2026-07-23 (branch `claude/pensive-faraday-rlgaiv`) — candidate 2 RULED OUT for the
+    default path; localises to candidate 1 (drizzle-on only) or candidate 3 (display caps).** Reproduced
+    deterministically with 4 synthetic 480×320 WCS subs: a default `StackOptions` stack (drizzle OFF — it defaults
+    `drizzle=False`) produces `estimate_stack` canvas **320×480** and `run_stack` `canvas_shape` **(320, 480)**, and
+    the **saved FITS is (3, 320, 480)** — i.e. **exactly the native sub resolution, no shrink**. So on a default
+    install the FITS/TIFF/full-res artifact is *not* losing pixels; the base (non-drizzle) canvas equals the reference
+    sub (candidate 2 is not the bug). That leaves two real possibilities for the owner's report: **(1)** they judge
+    "resolution" by the **in-browser preview PNG (1024px cap) or the shared JPEG (2048px cap)** — by-design display
+    caps, so the fix is to *surface the true output pixel size + a genuine full-res download*, not to change the caps;
+    or **(2)** they run with **drizzle ON** expecting super-res (`drizzle_scale=1.5` default when enabled) and
+    `_largest_drizzle_scale_within_budget` silently dropped the scale to fit `max_stack_memory_gb` on the RAM-capped
+    NAS — the fix there is to record the *requested vs actual* drizzle scale on the run and warn plainly when reduced.
+    **Highest-value, LOWEST-risk next slice (do this first, no hot-path change):** persist+surface the output pixel
+    dimensions on the run/History info (the run record already stores `canvas_w`/`canvas_h`) and, when drizzle scale
+    was reduced by the budget, stamp a plain-language note — this directly answers "is my output actually low-res?"
+    without touching the memory-bounded stack math. Only *after* that, and only with a memory-measurement harness,
+    consider changing the budget/scale logic (§10: never break the OOM bounds).
 
 - **⭐⭐ OWNER-REPORTED (2026-07 — TOP PRIORITY, real data on v0.158) — auto-stacked
   FINAL results come out as single-frame colour-speckle "gibberish" for some
@@ -885,11 +902,26 @@ when you take it.
   the card self-hides (fail-before: STF sub vs asinh/verbatim preview). Additive/upgrade-safe (new nullable columns
   default NULL = "no custom stretch" = today's STF behaviour).
 
-- **The shipped stale-plate-solution fix is DEAD on the default install — a source path overwritten in place with
+- ~~**The shipped stale-plate-solution fix is DEAD on the default install — a source path overwritten in place with
   different content keeps its old WCS and stacks at the wrong sky position, because the whole staleness-recovery
-  block is gated behind `copy_to_cache`, which the webapp defaults to `False`.** *(Stacking-engine / ingest
-  correctness; wrong-result but latent/rare, Low; found + traced end-to-end by the 2026-07-23 watcher/ingest
-  adversarial audit — NOT fixed, needs care.)* `ingest_files` (`seestack/io/ingest.py:194`) wraps *all* per-frame
+  block is gated behind `copy_to_cache`, which the webapp defaults to `False`.**~~ — **FIXED v0.184.6**
+  (Builder 2026-07-23, branch `claude/pensive-faraday-rlgaiv`; traced + regression-tested). Added a
+  **cache-independent source fingerprint**: two additive nullable frame columns (`source_size_bytes` INTEGER +
+  `source_mtime` REAL, `SCHEMA_VERSION` 11→12 + a `from_version < 12` migration + reconcile backfill), recorded at
+  ingest and refreshed on every detected change. `ingest_files` now compares the current source's `(size, mtime)`
+  against the stored fingerprint on a dedup-skip and, on a mismatch, runs `reset_frame_qc` + `_refresh_frame_metadata`
+  (dropping the stale `wcs_json`/hints so the new pixels are re-solved and re-metadata'd) — **regardless of
+  `copy_to_cache`**, closing the exposure on the default install. When caching *is* on it also force-re-copies the
+  Stage-1 cache (new `_copy_to_stage1(..., force=True)`) so a *same-size* swap — which slips past the size-only
+  `_cache_stale` check — can't leave the cache holding the previous capture's pixels. **Upgrade-safe:** a NULL stored
+  fingerprint (a pre-upgrade row, or a fresh one) is treated as "unknown, not changed" and is backfilled *without* a
+  re-solve, so an in-place upgrade never re-solves the whole library; an unchanged re-scan writes nothing. Additive
+  columns only — no config/API-shape/on-disk/default change. Regressions in `tests/test_ingest.py` (+3):
+  `test_ingest_content_swap_clears_solution_without_cache` (copy_to_cache=False + reused-path swap → solution dropped +
+  header re-read + `refreshed=True`; fail-before: stayed False, WCS kept), `test_ingest_no_cache_unchanged_rescan_keeps_solution`
+  (no false-positive re-solve on an unchanged re-scan), and `test_ingest_pre_fingerprint_frame_backfills_without_resolve`
+  (NULL fingerprint backfilled, solution preserved). Full suite green (1827 passed, 2 skipped). *(Original trace kept
+  below for provenance.)* `ingest_files` (`seestack/io/ingest.py:194`) wraps *all* per-frame
   staleness recovery — the truncated-cache refresh, `reset_frame_qc`, and crucially `_refresh_frame_metadata`
   (which re-reads the header and calls `reset_frame_solution` to drop the stale `wcs_json`/hints) — inside
   `if copy_to_cache and prior.id is not None:`. But the live webapp passes `copy_to_cache=settings.copy_to_cache`
@@ -973,11 +1005,22 @@ when you take it.
   degrades reference selection, can collapse it if systematic). Confidence: reproduced (the persisted null-centre
   state + both downstream consequences) + traced (the ASTAP `.ini`-fail trigger).
 
-- **A frame's cached preview/thumbnail PNG is never invalidated when its Stage-1 cache is refreshed, so after a
+- ~~**A frame's cached preview/thumbnail PNG is never invalidated when its Stage-1 cache is refreshed, so after a
   reused source path is overwritten with a *different* capture (or a truncated mid-copy sub completes) the Frames
-  table keeps serving the OLD image for that frame.** *(Render / preview-staleness — broken-UX; Low, latent —
-  reachable only with `copy_to_cache=True` (non-default); found by the 2026-07-23 render/ingest adversarial audit —
-  traced.)* On a re-scan, `ingest_incoming` detects a stale Stage-1 cache (`seestack/io/ingest.py:197` `_cache_stale`,
+  table keeps serving the OLD image for that frame.**~~ — **FIXED v0.184.7** (Builder 2026-07-23, branch
+  `claude/pensive-faraday-rlgaiv`; traced + regression-tested). Added `render/thumbnail.py::invalidate_frame_thumbs(project_dir,
+  frame_id)`, which deletes a single frame's cached previews — the Qt gallery `frame_NNNNNN.png` and every web
+  `web_NNNNNN_*` size/pattern variant — so the next request regenerates from the frame's current pixels. Threaded the
+  refreshed frame's id up through the ingest/scan path (`IngestResult.refreshed_frame_id` → `TargetScanResult.refreshed_frame_ids`)
+  and, in `webapp/pipeline.py`'s post-scan step, call `invalidate_frame_thumbs` for each refreshed frame. **This now
+  covers the default install too:** since v0.184.6 a content swap at a reused path refreshes the frame even with
+  `copy_to_cache=False`, so the stale-preview exposure applies there as well — both are closed together. Regression
+  tests: `tests/test_thumb_cache_versioning.py` (+2 — the helper removes only the target frame's previews, leaves
+  siblings untouched, and no-ops when the cache dir is absent), `tests/test_scanner.py` (the refreshed frame's id is
+  surfaced in `refreshed_frame_ids`), and `tests/test_ingest.py` (`refreshed_frame_id` set on a content-swap refresh).
+  Upgrade-safe: additive result fields + a delete-on-refresh of re-creatable cache files only; no config/DB/API-shape/
+  on-disk/default change. Full suite green. *(Original trace kept below for provenance.)*
+  On a re-scan, `ingest_incoming` detects a stale Stage-1 cache (`seestack/io/ingest.py:197` `_cache_stale`,
   size mismatch), re-copies the source (`ingest.py:209`), and — correctly — resets QC and drops the stale plate
   solution + re-reads the header (`reset_frame_qc` + `_refresh_frame_metadata`, `ingest.py:216-224`), setting
   `refreshed=True`. **But nothing clears that frame's cached preview PNGs.** Both preview caches key purely on

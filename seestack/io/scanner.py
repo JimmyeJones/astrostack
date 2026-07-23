@@ -57,10 +57,14 @@ class TargetScanResult:
     n_frames_added: int = 0
     n_skipped_existing: int = 0
     n_errors: int = 0
-    # Dedup-skipped frames whose Stage-1 cache was refreshed (a mid-copy sub whose
-    # source later completed) — their QC was reset, so the target needs re-QC even
-    # though no *new* frame was added.
+    # Dedup-skipped frames whose content was refreshed (a mid-copy sub whose
+    # source later completed, or a reused path overwritten with a different
+    # capture) — their QC was reset, so the target needs re-QC even though no
+    # *new* frame was added.
     n_frames_refreshed: int = 0
+    # DB ids of those refreshed frames, so the caller can invalidate their cached
+    # previews (which key on id alone and would keep showing the old image).
+    refreshed_frame_ids: list[int] = field(default_factory=list)
 
 
 @dataclass
@@ -171,6 +175,8 @@ def _ingest_into_target(
                 tsr.n_skipped_existing += 1
                 if res.refreshed:
                     tsr.n_frames_refreshed += 1
+                    if res.refreshed_frame_id is not None:
+                        tsr.refreshed_frame_ids.append(res.refreshed_frame_id)
             elif res.error is not None:
                 tsr.n_errors += 1
             else:
