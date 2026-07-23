@@ -162,6 +162,53 @@ when you take it.
   minority once ≥10 frames), keeping the small tier. Add a fail-before/pass-after regression test with a synthetic
   variable-subset flag pattern. **Scout: validate on a real edge-on-galaxy stack before flipping.**
 
+- ~~**κ-σ pass-2 silently turns real pass-2 data into a NaN coverage gap at a pixel that had no pass-1
+  coverage (mean = NaN).**~~ — **FIXED v0.172.1** (Scout 2026-07-23, branch `claude/kind-mccarthy-49jli6`;
+  reproduced + regression-tested). *(Stacking-engine correctness; wrong-result, Low-Medium; found by an
+  adversarial `stacker.py` rejection-math audit, traced + reproduced.)* On the standard κ-σ two-pass path
+  (`seestack/stack/stacker.py`, `consume_clipped`), pass 2 kept a contribution only where
+  `|aligned − mean| ≤ κ·σ`. Where pass-1 coverage was **zero** at a pixel (`mean = std = NaN`), that test is
+  `|aligned − NaN| ≤ +inf → NaN ≤ inf → False`, so a frame that genuinely **covered** the pixel in pass 2 was
+  dropped to NaN — a silent black hole in the final image, violating the "NaN = no coverage; never turn real
+  data into a gap" invariant. **Reachable when pass-1 and pass-2 coverage diverge:** a frame that failed to
+  align in pass 1 (a transient decompress/I-O error on a NAS over a long, thousands-of-frame run — `_pass`
+  swallows per-frame errors and continues) but succeeded in pass 2, at a pixel only that frame covers (dither
+  edge / mosaic panel edge). The σ-unknown case was already widened to `+inf` (single-coverage support); the
+  mean-unknown case was not. Fix: extracted a pure `_kappa_sigma_keep_mask(aligned, mean_win, std_win, kappa)`
+  that also keeps a valid pixel where `mean` is NaN (no reference to clip against → keep the real data). **Byte-
+  for-byte identical on any all-finite, fully-covered stack** (both widenings are no-ops there), so ordinary
+  stacks are unaffected; the honest rejection tally also stops counting these kept pixels as "rejected". Tests:
+  `tests/test_stack_pipeline.py` (+2 — `test_kappa_sigma_keeps_pixel_with_no_pass1_reference` fail-before/pass-
+  after on the exact divergence pattern incl. a still-clipped real outlier, and
+  `test_kappa_sigma_keep_mask_matches_plain_clip_when_fully_covered`). Upgrade-safe: within-function algorithm
+  change, no config/DB/API/on-disk/default change.
+
+- **Stack OOM memory guard omits the `max_workers·2` in-flight aligned-frame buffers it actually holds.**
+  *(Stacking-engine correctness / stability; Low severity on Seestar-sized frames, traced not reproduced; found
+  by the same rejection-math audit — NOT fixed, needs care.)* `_estimate_peak_bytes`/`_guard_stack_memory`
+  (`seestack/stack/stacker.py:112-205`) charge a *fixed* canvas-array factor (`_PEAK_CANVAS_ARRAYS=4`, or `7` /
+  `2+2k`) and never reference `max_workers`. But `_pass` keeps up to `max_workers·2` reprojected windows alive at
+  once (`_imap_bounded(..., max_workers*2)`, line ~1503), and `max_workers` defaults to `os.cpu_count()`. On a
+  **single-target** stack each window ≈ the full reference canvas, so on a 32-core box that's ~64 canvas-sized
+  RGB float32 buffers the guard never counted. For the **Seestar 1920×1080 target this stays benign** (64×~25 MB
+  ≈ 1.6 GB), which is why it's never bitten — but a large sensor (24 MP → ~288 MB/window → ~9 GB of buffers on 32
+  cores) could OOM *after* the guard certified the run "safe", exactly the failure the guard exists to prevent.
+  **Why not fixed here:** the honest fix (add a `+ max_workers·2` window term to the estimate) makes the guard
+  more conservative and could refuse large stacks that currently work; it needs a measurement pass and a cap on
+  the charged worker count. File for a Builder run with a memory-measurement harness. Severity Low for the target
+  hardware; record so it's on the books.
+
+- **`CalibrationMasters.validate()` aborts the whole stack over a wrong-shaped master *bias* even when the
+  bias is never applied.** *(Calibration; broken-UX / fail-loud false-positive, Low severity, traced; found by
+  the align/calibrate audit — NOT fixed.)* `seestack/calibrate/apply.py:214-228` loops over `("dark", "flat",
+  "bias")` unconditionally and raises `ValueError` on any shape mismatch. But a master bias is **only** subtracted
+  when no dark is set (`_bias_applies`, `apply.py:198-202` — a dark already contains the bias). So a user with
+  dark + flat + a leftover wrong-binning bias (loaded for provenance but never used) gets their whole stack
+  refused over a master that would never touch a pixel. Fix: skip the bias row of `validate()` when
+  `not self._bias_applies` (a one-line guard + a fail-before/pass-after test with a dark present and a
+  mismatched-shape bias). Safe, additive, no behaviour change on the applied paths. Low priority (manual
+  calibration is an advanced path), but a clean one-sitting fix.
+
 - ~~**⭐ Always-on hot/cold-pixel suppression clips real (undersampled) star cores — dims and colour-shifts every
   star in the final stack, a coherent per-frame bias that stacking does NOT average out.**~~ — **FIXED v0.158.9**
   (Builder 2026-07-21, branch `claude/pensive-faraday-dg2fc9`; reproduced + regression-tested). Added a
@@ -5222,6 +5269,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+- **IMPROVEMENT IDEA (Scout 2026-07-23) — warn when a master dark's exposure (or temperature) doesn't match the
+  lights it's calibrating, instead of silently over/under-subtracting.** *(Calibration correctness / trust,
+  PRIORITY 4; size S.)* **What the audit traced:** `CalibrationMasters.validate()` (`seestack/calibrate/apply.py`)
+  checks only master **shape**; it never compares the master dark's `dark_exposure_s` (which *is* loaded, line
+  ~133) against the light exposure. On the **default** path (`scale_dark_to_light` off — the common case),
+  `apply_raw` subtracts the full unscaled dark (`out = out - dark`), so a 30 s dark library applied to 10 s subs
+  over-subtracts the pedestal ~3× → crushed background / large negatives across *every* calibrated light, entirely
+  silently. Sensor temperature is captured in `MasterMeta` but likewise never compared (dark current ~doubles per
+  ~6–7 °C, so even matched-exposure darks at the wrong temp leave a residual). **Feature:** in `validate()` (or a
+  sibling `check_matching()` called once up front), emit a **warning** (surfaced in the stack log / run Info, not
+  a hard failure) when the dark's exposure differs from the light's by more than a small tolerance and
+  `scale_dark_to_light` is off — "master dark is 30 s but your subs are 10 s; enable exposure-scaling or use a
+  matched dark" — and optionally the same for a large temperature delta. **Sane + safe:** advisory only, no
+  behaviour change, no new default; additive. Note manual calibration is an advanced path (Seestar does its own
+  in-camera), so this is a modest trust win, not a hot-path priority — but it closes a real silent-corruption
+  vector for anyone supplying their own darks. Testable on `CalibrationMasters.load()` + a synthetic
+  exposure/temp-mismatched master pair. Found by the align/calibrate adversarial audit (which otherwise traced
+  the calibration *math* clean).
 - **IMPROVEMENT IDEA (Scout 2026-07-23) — count & surface "N subs were only roughly aligned" when sub-pixel
   refine gives up above its shift cap.** *(Stacking-engine trust + image quality, PRIORITY 4 (touches autonomy /
   honest-accounting, PRIORITY 2); size S–M.)* **What I traced:** with `subpixel_refine` on,
@@ -5870,6 +5935,31 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Best time of year to shoot this target": a plain-language
+  seasonal-observability strip that answers "when *this year* can I actually get this object?"** *(Autonomy /
+  Friendliness — the "plan" pillar, PRIORITY 2–3; size M.)* **Why:** the planner today is **short-horizon only** —
+  `plan_tonight` covers *tonight* and `next_observing_windows` walks at most ~14 nights forward. Nothing answers
+  the single most common *planning-ahead* question a beginner asks about a named object: *"I want the Orion Nebula
+  — when is it up?"* A Seestar owner picks targets by season, and today has to leave the app (or already know the
+  sky) to learn that M42 is a winter target and Sagittarius is summer. **Feature:** on the Target page (and,
+  optionally, when browsing the showpiece catalog from the "What should I shoot next?" card), a compact **"Best
+  months"** strip: for the target's stored RA/Dec + the observer's site, scan the year at ~monthly cadence and show
+  which months it transits high during a dark window, with a one-line verdict — e.g. *"A winter target — highest
+  and best Nov–Feb (near midnight in December). Low or absent May–Aug."* A tiny 12-cell heat-strip (one cell per
+  month, shaded by max transit altitude × usable dark minutes) makes it glanceable. **Sane default, zero knobs:**
+  uses the stored site + the target's own coords; whole-year scan; self-hides when the target has no coords yet.
+  **Beginner bar ✔:** universal question, plain-language answer, sane auto-ranking, serves *plan*; **not** pro
+  tooling (no ephemeris tables/knobs — just "good months"). **Feasibility / upgrade-safe:** pure offline astropy,
+  reusing the existing `Observer` + altitude / dark-window helpers in `seestack/nightplan.py` — no new astro math,
+  no network, no model, no schema/config/API/default change; read-only. **Builder slices — (a) engine (M):** a
+  pure `best_months(observer, ra_deg, dec_deg, *, min_altitude_deg)` → 12 rows of `{month, max_transit_alt_deg,
+  usable_dark_minutes}`, unit-testable on synthetic coords across latitudes (a far-north target never sets; a
+  far-south one never rises from a northern site; a zodiacal target peaks opposite the Sun). **(b) webapp (S):** a
+  read-only endpoint resolving the site server-side (or fold the per-month scan into the existing target/plan
+  payload). **(c) frontend (S–M):** a `BestMonthsStrip` on the Target page + the plain-language verdict + tests
+  (winter/summer target, circumpolar, never-rises, empty-coords self-hide). Keeps the beginner-feature pipeline
+  stocked with a *plan* capability distinct from the tonight-only "What should I shoot next?" and 14-night
+  "next windows" cards.
 - **NEW BEGINNER FEATURE (Scout 2026-07-23) — "My best pictures": an auto-curated, cross-target portfolio wall of
   your finest finished stacks.** *(Friendliness / "enjoy + share" pillar, PRIORITY 3; size M.)* **Why:** today the
   app's imagery is organised strictly *per target* — each target has its Gallery/History and a pinned cover, and
@@ -8651,6 +8741,18 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **QA re-audit record (Scout 2026-07-23, branch `claude/kind-mccarthy-49jli6`).** Adversarial correctness sweep
+  of the stacking engine per the current focus. **`drizzle_path.py` / `mosaic.py` / `pointings.py` /
+  `photometric.py` traced CLEAN** (drizzle weighted-average output, E[v²]−E[v]² variance, photometric scale
+  direction + `1/s²` re-weight, mosaic canvas geometry / CRPIX pad, pointing union-find all verified correct; only
+  by-design edge-ring coverage falloff + a per-frame `out_wht.copy()` overhead noted, neither corrupts pixels).
+  **`align.py` + `calibrate/apply.py` + `calibrate/masters.py` math traced CLEAN** (flat div-by-zero floors, NaN
+  pedestal sanitisation + no-data masks, CFA R/B registration, order-1 reproject NaN propagation, subpixel-shift
+  mask recompute, MAD==0 degrade all already defended); the only real gaps are **calibration-frame *matching*
+  being unvalidated** — filed as the exposure/temperature-mismatch warning idea + the `validate()` unused-bias
+  false-positive bug. **`stacker.py` rejection math** yielded one fixed data-integrity edge (κ-σ pass-2
+  coverage-gap, FIXED v0.172.1) and one filed low-severity memory-guard gap; weighting, Welford, min/max
+  k-insertion, float32 drift over 10⁴ subs, and the NaN=no-coverage hot-path semantics all verified sound.
 - **v0.141.0** — NEW BEGINNER FEATURE / friendliness (PRIORITY 3 — "annotated results"; Builder 2026-07-21,
   branch `claude/pensive-faraday-d04mpi`). **"What's in this picture?" — label the catalog objects inside a
   finished stack.** Engine `seestack/annotate.py::objects_in_field` projects the bundled offline deep-sky
