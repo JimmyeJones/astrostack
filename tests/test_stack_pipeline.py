@@ -1034,3 +1034,47 @@ def test_auto_reject_large_stack_uses_sigma_clip(tmp_path):
     assert hdr["STACKER"] == "sigma-clip"
     assert hdr["REJMODE"] == "sigma-clip"
     assert hdr["REJNREJ"] > 0                    # the planted streak was clipped
+
+
+def test_kappa_sigma_keeps_pixel_with_no_pass1_reference():
+    """Regression: the κ-σ pass-2 clip must not turn real pass-2 data into a NaN
+    coverage gap at a pixel that had *no* pass-1 coverage (mean = NaN).
+
+    Coverage can diverge between the two passes when a frame fails to align in
+    pass 1 (e.g. a transient I/O error on a NAS over a thousands-of-frame run)
+    but succeeds in pass 2. At a pixel only that frame covers, pass 1 leaves
+    mean = std = NaN. The old inline test ``|aligned − NaN| ≤ tol`` is False, so
+    the frame's genuine pass-2 value was dropped to NaN — a silent black hole in
+    the final image, violating "NaN = no coverage; never turn real data into a
+    gap". The mean-unknown widening keeps it; a normally-covered pixel is
+    unchanged.
+    """
+    from seestack.stack.stacker import _kappa_sigma_keep_mask
+
+    # pixel 0: no pass-1 coverage (mean/std NaN) but real finite pass-2 data.
+    # pixel 1: normal — finite mean/σ, in-tolerance.
+    # pixel 2: normal — finite mean/σ, a genuine outlier that must still clip.
+    # pixel 3: pass-2 gap (aligned NaN) — stays dropped.
+    aligned = np.array([7.0, 5.2, 99.0, np.nan], dtype=np.float32)
+    mean_win = np.array([np.nan, 5.0, 5.0, 5.0], dtype=np.float32)
+    std_win = np.array([np.nan, 1.0, 1.0, 1.0], dtype=np.float32)
+    keep = _kappa_sigma_keep_mask(aligned, mean_win, std_win, kappa=3.0)
+    assert bool(keep[0]) is True    # real data kept despite no pass-1 reference
+    assert bool(keep[1]) is True    # in-tolerance pixel kept
+    assert bool(keep[2]) is False   # real outlier still clipped
+    assert bool(keep[3]) is False   # uncovered pass-2 pixel stays out
+
+
+def test_kappa_sigma_keep_mask_matches_plain_clip_when_fully_covered():
+    """The mean-unknown / σ-unknown widenings are no-ops on an all-finite,
+    fully-covered stack: the mask is byte-for-byte the plain mean ± κ·σ test, so
+    ordinary stacks are unaffected by the coverage-gap fix."""
+    from seestack.stack.stacker import _kappa_sigma_keep_mask
+
+    rng = np.random.default_rng(0)
+    aligned = rng.normal(5.0, 1.0, size=(8, 8, 3)).astype(np.float32)
+    mean_win = np.full((8, 8, 3), 5.0, dtype=np.float32)
+    std_win = np.full((8, 8, 3), 1.0, dtype=np.float32)
+    keep = _kappa_sigma_keep_mask(aligned, mean_win, std_win, kappa=3.0)
+    plain = np.isfinite(aligned) & (np.abs(aligned - mean_win) <= 3.0 * std_win)
+    assert np.array_equal(keep, plain)

@@ -422,6 +422,40 @@ def _resolve_auto_reject(options: StackOptions, n: int) -> StackOptions:
     return replace(options, sigma_clip=use_kappa, min_max_reject=not use_kappa)
 
 
+def _kappa_sigma_keep_mask(
+    aligned: np.ndarray,
+    mean_win: np.ndarray,
+    std_win: np.ndarray,
+    kappa: float,
+) -> np.ndarray:
+    """Per-pixel keep mask for the κ-σ pass-2 clip: keep a finite contribution
+    unless it lies outside ``mean ± kappa·σ``.
+
+    Two "no reference to clip against" cases widen to keep-all, so the clip can
+    never turn real pass-2 data into a NaN coverage gap:
+
+    * **σ unknown** (pass-1 ``n < 2`` → NaN std) → ``+inf`` tolerance, which
+      keeps single-coverage mosaic-edge pixels (the ``WelfordAccumulator``
+      variance contract).
+    * **mean unknown** (pass-1 ``n == 0`` → NaN mean) → this pixel had *no*
+      pass-1 coverage at all, so there is nothing to clip toward. Without this
+      guard ``|aligned − NaN| ≤ tol`` is ``False`` and a frame that *does* cover
+      the pixel in pass 2 is silently dropped to NaN — a black hole in the final
+      image. Only reachable when pass-1 and pass-2 coverage diverge (a frame that
+      failed to align in pass 1, e.g. a transient I/O error on a NAS over a long
+      run, but succeeded in pass 2); when it happens the invariant "NaN = no
+      coverage; never turn real data into a gap" must still hold, so keep it.
+
+    An all-finite, fully-covered stack (the common case) has finite mean/σ
+    everywhere covered, so both widenings are no-ops and the mask is byte-for-byte
+    the plain ``mean ± kappa·σ`` test.
+    """
+    valid = np.isfinite(aligned)
+    tol = kappa * np.where(np.isfinite(std_win), std_win, np.inf)
+    within = ~np.isfinite(mean_win) | (np.abs(aligned - mean_win) <= tol)
+    return valid & within
+
+
 def estimate_stack(project: Project, options: StackOptions,
                    memory_budget_gb: float | None = None) -> StackEstimate:
     """Compute the output canvas dimensions and estimated peak working memory a
@@ -1161,17 +1195,18 @@ def run_stack(
         # Memory-free rejection tally: sum two scalars over the per-pixel keep
         # mask this pass already computes (no extra canvas). "contributed" = the
         # covered samples seen; "rejected" = those clipped by the κ-σ test. Where
-        # σ is unknown (NaN → +inf tol) nothing is clipped, so it's excluded from
-        # rejected but still counted as contributed — the honest denominator.
+        # there's no pass-1 reference to clip against (σ unknown → +inf tol, or
+        # mean unknown → keep — see ``_kappa_sigma_keep_mask``) nothing is
+        # clipped, so it's excluded from rejected but still counted as
+        # contributed — the honest denominator.
         clip_counts = {"contributed": 0, "rejected": 0}
 
         def consume_clipped(aligned: np.ndarray, y0: int, x0: int, weight: float) -> None:
             wh, ww = aligned.shape[:2]
             mean_win = mean[y0:y0 + wh, x0:x0 + ww]
             std_win = std[y0:y0 + wh, x0:x0 + ww]
+            keep = _kappa_sigma_keep_mask(aligned, mean_win, std_win, options.sigma_kappa)
             valid = np.isfinite(aligned)
-            tol = options.sigma_kappa * np.where(np.isfinite(std_win), std_win, np.inf)
-            keep = valid & (np.abs(aligned - mean_win) <= tol)
             clip_counts["contributed"] += int(valid.sum())
             clip_counts["rejected"] += int(np.count_nonzero(valid & ~keep))
             wsum.add_window(np.where(keep, aligned, np.nan), y0, x0, weight=weight)
