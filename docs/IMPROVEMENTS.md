@@ -408,8 +408,25 @@ when you take it.
   _(Filed, not fixed this run: low value — desktop-only path — and the SIMBAD coord-column format varies by
   astroquery version, so a correct fix wants a network check the Scout deferred rather than rush.)_
 
-- **Auto-stack redundant-restack fallback under-counts when the newest stack run is a channel-combine /
-  editor-export (violates the documented no-redundant-restack invariant).** *(Autonomy/watcher; wasted-compute +
+- ~~**Auto-stack redundant-restack fallback under-counts when the newest stack run is a channel-combine /
+  editor-export (violates the documented no-redundant-restack invariant).**~~ — **FIXED v0.171.1** (Builder
+  2026-07-23, branch `claude/pensive-faraday-w4ht9n`; reproduced + regression-tested). The fallback in
+  `_auto_stack_frame_count` (`webapp/pipeline.py`) now compares the current solved+accepted count against
+  `max(r.n_frames_used for r in proj.iter_stack_runs())` — the *largest* coverage any prior run reached — instead
+  of the *newest* run's count. A small-count channel-combine or editor-export sitting on top of a genuine full
+  stack no longer lowers the bar, so unchanged data is never redundantly re-stacked on the pre-marker/upgrade
+  path. `max`-over-runs is strictly safe: it can only make the guard *more* conservative (a non-genuine run's
+  count is ≤ the genuine one's), never miss a legitimate restack; the steady-state `AUTO_STACK_ATTEMPT_META_KEY`
+  guard is untouched. Regression `tests/webapp/test_auto_stack_pipeline.py::
+  test_auto_stack_fallback_ignores_a_small_channel_combine_run` seeds a genuine full run + a newer 2-frame
+  channel-combine (no marker) and asserts the selector returns `None` (fail-before: returned the full count → a
+  redundant full re-stack). Additive/upgrade-safe: pure control-flow on the walk-away autonomy path; no
+  config/DB/API-shape/default change. Severity: wasted-compute + duplicate master row (Low), never frame loss or
+  wrong pixels. Confidence: reproduced + fixed. _(Original trace below.)_
+
+  <details><summary>Original bug trace</summary>
+
+  *(Autonomy/watcher; wasted-compute +
   duplicate master row — NOT frame loss, NOT wrong pixels; Low; reproduced by a 2026-07-23 adversarial
   pipeline audit + Scout-verified.)* Location: `webapp/pipeline.py:1411-1412` in `_auto_stack_frame_count`.
   `latest = next(iter(proj.iter_stack_runs()), None)` takes the newest `stack_runs` row of **any** kind, and the
@@ -433,6 +450,8 @@ when you take it.
   only make the guard *more* conservative, never miss a legitimate restack). Add a regression test with a Project
   fixture carrying a genuine run + a newer small-count channel-combine and no marker (fail-before: restacks;
   pass-after: skips). Confidence: reproduced.
+
+  </details>
 
 - ~~**Upload leaves an orphaned `.part` sidecar when the final `close()` flush fails.**~~ — **FIXED v0.158.1**
   (Builder 2026-07-21, branch `claude/pensive-faraday-m66efc`). Location: `webapp/routers/upload.py:184` —
