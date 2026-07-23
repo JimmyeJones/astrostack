@@ -680,11 +680,18 @@ def _build_output_header_meta(
         total = _integration_time_s(frames, n_used)
         if total is not None:
             meta["EXPTOTAL"] = (total, "integration time (s)")
+    # Label the method the dispatcher actually ran, applying the *same* frame-count
+    # gates it uses (`min_max_reject and n >= 3`, `sigma_clip and n >= 4`): below
+    # those counts the dispatcher silently falls through to plain mean (no rejection
+    # pass runs — REJMODE is correctly absent), so a 3-frame default stack or a
+    # 2-frame min-max stack must record STACKER="mean", not the rejection method.
+    # `len(frames)` here is the candidate count `n` the dispatcher gated on.
+    n = len(frames)
     if options.drizzle:
         method = "drizzle"
-    elif options.min_max_reject:
+    elif options.min_max_reject and n >= 3:
         method = "min-max-reject"
-    elif options.sigma_clip:
+    elif options.sigma_clip and n >= 4:
         method = "sigma-clip"
     else:
         method = "mean"

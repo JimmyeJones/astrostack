@@ -24,6 +24,44 @@ from seestack.solve.astap import ASTAPError, ASTAPSolver, classify_solve_setup_e
 
 log = logging.getLogger(__name__)
 
+# A Seestar holds one pointing for a whole target, so once *any* sub has solved
+# we know where the scope is aimed to well within a degree. When we offer that
+# solved centre as the fallback hint for a still-unsolved sub, search a *tight*
+# radius around it (far narrower than the 30° blind default) — a smaller,
+# correct search region is exactly what turns an ASTAP timeout/failure on a
+# star-poor field into a solve, and 5° leaves generous slack for any real
+# field drift while still dramatically localising the search.
+SIBLING_HINT_RADIUS_DEG = 5.0
+
+
+def fallback_solve_hint(solved_frames) -> tuple[float, float] | None:
+    """Robust median sky centre (RA, Dec in degrees) of the already-solved frames.
+
+    A Seestar points at one target for the whole session, so the centre of the
+    subs that *did* plate-solve is a far tighter, more reliable search hint for
+    the target's still-unsolved subs than a missing/loose FITS-header hint. Only
+    a *search-localisation* aid — ASTAP still verifies the star pattern, so a
+    hint that's slightly off can never create a false solution, it just widens
+    (or fails) the search as today. RA-wrap-safe for a target near RA=0h (reuses
+    the shared :func:`circular_median_ra_deg`). Returns ``None`` when no frame
+    carries a usable solved centre.
+    """
+    import numpy as np
+
+    from seestack.coords import circular_median_ra_deg
+
+    pairs = [
+        (f.ra_center_deg, f.dec_center_deg)
+        for f in solved_frames
+        if getattr(f, "ra_center_deg", None) is not None
+        and getattr(f, "dec_center_deg", None) is not None
+    ]
+    if not pairs:
+        return None
+    ras = [ra for ra, _ in pairs]
+    decs = [dec for _, dec in pairs]
+    return (circular_median_ra_deg(ras), float(np.median(decs)))
+
 
 @dataclass
 class SolveResult:
@@ -102,16 +140,29 @@ def build_solve_arglist(
 
     Skips frames already solved (have a ``wcs_json``). When ``use_hint`` is on
     and a frame carries a telescope-target hint (``ra_hint_deg``/``dec_hint_deg``
-    from its FITS header), it's threaded into ASTAP to localise the search.
+    from its FITS header), it's threaded into ASTAP to localise the search. When
+    a frame has *no* usable header hint but a sibling sub on the same target has
+    already solved, its solved centre (:func:`fallback_solve_hint`) is offered
+    instead, with a tight :data:`SIBLING_HINT_RADIUS_DEG` search radius — this
+    only *fills in* a hint where there wasn't a better one, so a frame that
+    already carried a header hint (or ``use_hint=False``) is untouched.
     """
     astap_path = project.get_meta("astap_path")  # may be None → use auto-find
     fov_deg = float(project.get_meta("astap_fov_deg") or 1.3)
     timeout_s = float(project.get_meta("astap_timeout_s") or 60.0)
     radius_deg = float(project.get_meta("astap_hint_radius_deg") or 30.0)
+
+    # A Seestar holds one pointing per target, so once any sub has solved its
+    # centre is a far tighter hint for the rest. Collect the solved centres in a
+    # single pass and derive one robust fallback hint (suppressed when the caller
+    # asked for a fully blind solve). Cap the sibling radius at the configured
+    # blind radius so a user who deliberately tightened it is never widened.
+    frames = [f for f in project.iter_frames() if f.id is not None]
+    fallback = fallback_solve_hint([f for f in frames if f.wcs_json]) if use_hint else None
+    sibling_radius = min(radius_deg, SIBLING_HINT_RADIUS_DEG)
+
     out: list[tuple[int, str, str | None, float, float, float | None, float | None, float]] = []
-    for f in project.iter_frames():
-        if f.id is None:
-            continue
+    for f in frames:
         if f.wcs_json:
             continue  # already solved
         path = readable_frame_path(f)
@@ -119,7 +170,13 @@ def build_solve_arglist(
             continue
         ra_hint = f.ra_hint_deg if use_hint else None
         dec_hint = f.dec_hint_deg if use_hint else None
-        out.append((f.id, path, astap_path, fov_deg, timeout_s, ra_hint, dec_hint, radius_deg))
+        radius = radius_deg
+        # No usable header hint (both coords) but a sibling solved → borrow its
+        # centre and search tight around it instead of a loose blind sweep.
+        if fallback is not None and (ra_hint is None or dec_hint is None):
+            ra_hint, dec_hint = fallback
+            radius = sibling_radius
+        out.append((f.id, path, astap_path, fov_deg, timeout_s, ra_hint, dec_hint, radius))
     return out
 
 
