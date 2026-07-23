@@ -5811,8 +5811,31 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
-- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Scan to get it on your phone": a QR code beside the finished
-  picture's download button that a beginner scans to pull the JPEG straight onto their phone.** *(Friendliness /
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "Scan to get it on your phone": a QR code beside the finished
+  picture's download button that a beginner scans to pull the JPEG straight onto their phone.**~~ — **SHIPPED
+  v0.172.0** (Builder 2026-07-23, branch `claude/pensive-faraday-w4ht9n`). Frontend-only, fully offline. A pure
+  helper `frontend/src/qr.ts` — `absoluteLanUrl(path, origin?)` resolves a relative download path to an absolute
+  LAN URL from `window.location.origin` (the address the user already typed — never a server-guessed hostname, so
+  it works behind Docker/reverse-proxy), and `qrMatrix(text)` builds a byte-mode QR at ECC level M / smallest
+  auto version via the vendored zero-transitive-dep `qrcode-generator` package. A new `ScanToPhoneButton`
+  (`components/ScanToPhoneButton.tsx`) pops a Popover with the QR rendered as an inline SVG path, **always drawn
+  dark-on-white with a white quiet zone** so it scans in either UI theme, plus a plain-language caption ("Point
+  your phone camera at this code to open the picture and save it."). The QR is built lazily only when the popover
+  first opens (memoised per URL), so an off-screen button costs nothing. Wired beside the existing
+  `SharePictureButton` on the three finished-picture views — the Target result header, the History run rows
+  (honouring the North-up / nameplate variant the user picked), and the Gallery/History `ImageLightbox` toolbar
+  (icon-only). It's the desktop-LAN complement to `SharePictureButton`, which renders nothing off a
+  file-share-capable phone browser: on the common laptop-on-LAN case the QR is the one-second, zero-typing,
+  no-account path to get the picture onto the phone. Additive/upgrade-safe: no backend, schema, config, API, or
+  default change; self-hides wherever `has_preview`/`jpegHref` is absent (no finished JPEG yet). Tests:
+  `frontend/src/qr.test.ts` (+8: URL assembly — absolute/relative/query-preserving/no-origin, and matrix shape/
+  finder-corners/growth/determinism) and `ScanToPhoneButton.test.tsx` (+4: lazy render, QR SVG on open, icon-only,
+  caption). The button label is "To phone" (not "Phone") to stay distinct from the Wallpaper menu's "Phone"
+  aspect. _(Original spec below.)_
+
+  <details><summary>Original spec</summary>
+
+  *(Friendliness /
   "enjoy + share" pillar, PRIORITY 3; size S.)* **Why:** AstroStack runs headless on a NAS/Docker box, so the
   beginner almost always views their result on a laptop on the LAN — but the picture they actually want to post,
   set as a lock-screen, or text to family lives on their **phone**, and today the only paths off the laptop are a
@@ -5837,6 +5860,8 @@ problems. Dogfood it every big-picture run and fix root causes.
   test the URL assembly (absolute, correct variant, path-safe) and that the popover renders an SVG/canvas QR;
   no backend change needed. Keeps the beginner-feature pipeline stocked with a fresh *share/enjoy* capability no
   existing card covers.
+
+  </details>
 - ~~**NEW BEGINNER FEATURE (Scout 2026-07-21) — "What should I shoot next?": suggest one or two *well-placed
   showpiece targets you haven't captured yet*, ranked for tonight, each with a one-tap "add to calendar".**~~
   — **SHIPPED v0.161.0** (Builder 2026-07-22, branch `claude/pensive-faraday-6ogopr`). Built the ask end-to-end

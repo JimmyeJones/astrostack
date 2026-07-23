@@ -4,6 +4,7 @@ import {
   IconArrowsMaximize, IconDatabase, IconPhotoDown, IconZoomIn, IconZoomOut,
 } from "@tabler/icons-react";
 import { SharePictureButton } from "./SharePictureButton";
+import { ScanToPhoneButton } from "./ScanToPhoneButton";
 
 interface Transform {
   scale: number;
@@ -270,6 +271,7 @@ export function ImageLightbox({
               url={jpegHref} filename={shareFilename} title={shareTitle} text={shareText} iconOnly
             />
           ) : null}
+          {jpegHref ? <ScanToPhoneButton url={jpegHref} iconOnly /> : null}
           {rawHref ? (
             <Tooltip label="Download raw data (FITS)"><ActionIcon size="lg" variant="subtle" color="gray"
               component="a" href={rawHref} aria-label="Download raw data"><IconDatabase size={20} /></ActionIcon></Tooltip>
