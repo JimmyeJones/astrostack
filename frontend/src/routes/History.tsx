@@ -23,6 +23,7 @@ import { StackHealthCard } from "../components/StackHealthCard";
 import { ProgressReelCard } from "../components/ProgressReelCard";
 import { OneFrameVsStackCard } from "../components/OneFrameVsStackCard";
 import { SharePictureButton } from "../components/SharePictureButton";
+import { ScanToPhoneButton } from "../components/ScanToPhoneButton";
 import { WallpaperMenu } from "../components/WallpaperMenu";
 import { sharePictureText } from "../share";
 import { Sparkline } from "../components/Sparkline";
@@ -766,6 +767,11 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
                 run.output_basename,
                 new Date(run.timestamp_utc).toLocaleDateString(),
               )}
+            />
+          )}
+          {run.has_preview && (
+            <ScanToPhoneButton
+              url={api.stackArtifactUrl(safe, run.id, "jpeg", applyNorthUp, nameplate)}
             />
           )}
           {run.has_preview && <WallpaperMenu safe={safe} runId={run.id} />}

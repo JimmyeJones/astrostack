@@ -133,6 +133,54 @@ def test_stack_marks_solved_count_so_watcher_skips_align_dropped_target(
         lib.close()
 
 
+def test_auto_stack_fallback_ignores_a_small_channel_combine_run(solved_library):
+    # Regression: the "already stacked?" fallback used the *newest* stack run's
+    # n_frames_used. A channel-combine (or editor-export) run records a tiny count
+    # (a couple of source stacks), is not a genuine full stack, and does not write
+    # the AUTO_STACK_ATTEMPT_META_KEY marker. So on pre-marker/upgrade data whose
+    # newest run is such a small-count run, the guard compared the target's full
+    # solved+accepted count against that tiny count and wrongly re-stacked unchanged
+    # data. The fallback now compares against the largest coverage any prior run
+    # reached, so a small channel-combine on top of a genuine full stack no longer
+    # lowers the bar.
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        checked = 0
+        for entry in lib.list_targets():
+            safe = entry.safe_name
+            proj = lib.open_target(safe)
+            try:
+                n = pipeline._solved_accepted_count(proj)
+                if n == 0:
+                    continue
+                # A genuine full stack covering every solved+accepted sub…
+                proj.add_stack_run(StackRunRow(
+                    id=None, timestamp_utc="2026-05-01T00:00:00Z",
+                    output_basename="master", fits_path=None, tiff_path=None,
+                    preview_path=None, n_frames_used=n,
+                    canvas_h=10, canvas_w=10, coverage_min=1, coverage_max=n,
+                    options_json="{}",
+                ))
+                # …then a *newer* small-count channel-combine run (no marker), the
+                # exact pre-marker/upgrade shape that tripped the old fallback.
+                proj.add_stack_run(StackRunRow(
+                    id=None, timestamp_utc="2026-05-02T00:00:00Z",
+                    output_basename="rgb", fits_path=None, tiff_path=None,
+                    preview_path=None, n_frames_used=2,
+                    canvas_h=10, canvas_w=10, coverage_min=1, coverage_max=2,
+                    options_json="{}", notes="channel combine",
+                ))
+            finally:
+                proj.close()
+            checked += 1
+            # No new solved+accepted frames arrived, so nothing to re-stack.
+            # (Before the fix: 2 < n → returned n → a redundant full re-stack.)
+            assert pipeline._auto_stack_frame_count(lib, safe) is None
+        assert checked >= 1
+    finally:
+        lib.close()
+
+
 def test_auto_stack_failure_is_non_fatal(solved_library, monkeypatch):
     def boom(proj, opts, *, progress=None, cancel=None,
              memory_budget_gb=None, app_version=None):  # noqa: ANN001

@@ -1402,14 +1402,23 @@ def _auto_stack_frame_count(lib: Library, safe: str) -> int | None:
     crash-loop: it's written *before* an auto-stack, so a process-crashing stack
     can't re-trigger forever. The ``n_frames_used`` check below is the fallback for
     a pre-existing run that predates the marker (upgrade-safe).
+
+    The fallback compares against the *largest* coverage any prior run reached, not
+    the newest run's count: a channel-combine or editor-export run records a tiny
+    ``n_frames_used`` (a handful of source stacks / a copied count) and is *not* a
+    genuine full stack, so if it happens to be the newest run, comparing against its
+    small count would wrongly permit a redundant re-stack of unchanged data. Taking
+    the max over all runs can only make this guard more conservative — it never
+    blocks a legitimate re-stack (a non-genuine run's count is ≤ the genuine one's).
     """
     proj = lib.open_target(safe)
     try:
         solved_accepted = _solved_accepted_count(proj)
         if solved_accepted == 0:
             return None
-        latest = next(iter(proj.iter_stack_runs()), None)  # newest first
-        if latest is not None and solved_accepted <= latest.n_frames_used:
+        prior_max = max(
+            (r.n_frames_used for r in proj.iter_stack_runs()), default=None)
+        if prior_max is not None and solved_accepted <= prior_max:
             return None
         attempted = proj.get_meta(AUTO_STACK_ATTEMPT_META_KEY)
         if attempted is not None:

@@ -28,6 +28,7 @@ import { StackNoiseBadge } from "../components/StackNoiseBadge";
 import { FirstLookCard } from "../components/FirstLookCard";
 import { WallpaperMenu } from "../components/WallpaperMenu";
 import { SharePictureButton } from "../components/SharePictureButton";
+import { ScanToPhoneButton } from "../components/ScanToPhoneButton";
 import { sharePictureText } from "../share";
 import { detectSolveSetupProblem } from "../components/target/solveSetup";
 import { RejectionBreakdown } from "../components/target/RejectionBreakdown";
@@ -1005,6 +1006,12 @@ export function TargetView() {
                 target.data?.name,
                 new Date(latestRun.timestamp_utc).toLocaleDateString(),
               )}
+            />
+          ) : null}
+          {latestRun?.has_preview ? (
+            <ScanToPhoneButton
+              url={api.stackArtifactUrl(safe, latestRun.id, "jpeg")}
+              variant="default"
             />
           ) : null}
           {latestRun?.has_preview ? (
