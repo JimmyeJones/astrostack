@@ -596,6 +596,34 @@ def test_calibration_exposure_warning_suppressed_when_scaling_is_on(tmp_path):
     assert cal.calibration_warnings(light_exposure_s=10.0) == []
 
 
+def test_calibration_exposure_warning_fires_when_bias_shape_mismatch_disables_scaling(tmp_path):
+    # Regression: scaling only takes effect when the master bias matches the
+    # dark's shape (_effective_dark). A loaded but *wrong-shaped* bias makes
+    # _effective_dark fall back to the unscaled dark — so the exposure-mismatch
+    # advisory must still fire. Previously calibration_warnings() checked only
+    # "bias present" and silenced the warning exactly when the unscaled fallback
+    # over/under-subtracts a mismatched-exposure pedestal on every frame.
+    dark = np.full((4, 4), 300.0, dtype=np.float32)   # 100 pedestal + 200 dark current
+    bias = np.full((2, 2), 100.0, dtype=np.float32)   # wrong shape → scaling disabled
+    save_master(tmp_path / "d.fits", dark,
+                MasterMeta("dark", 5, 4, 4, "mean", exposure_s=30.0))
+    save_master(tmp_path / "b.fits", bias,
+                MasterMeta("bias", 5, 2, 2, "mean", exposure_s=0.0))
+    cal = CalibrationMasters.load(
+        dark_path=str(tmp_path / "d.fits"),
+        bias_path=str(tmp_path / "b.fits"),
+        scale_dark_to_light=True)
+    # Scaling did NOT take effect: the dark is subtracted unscaled at 300 ADU
+    # (a matched-shape bias would have scaled it to 100 + 200·(10/30) = 166.67).
+    eff = cal._effective_dark(10.0)
+    assert eff is not None and float(eff[0, 0]) == 300.0
+    # …so the exposure-mismatch advisory must fire (fail-before: it was silenced).
+    warns = cal.calibration_warnings(light_exposure_s=10.0)
+    assert len(warns) == 1
+    assert "30" in warns[0] and "10" in warns[0]
+    assert "over-subtracted" in warns[0]
+
+
 def test_calibration_warns_on_a_mismatched_dark_temperature(tmp_path):
     dark = np.zeros((4, 4), dtype=np.float32)
     save_master(tmp_path / "d.fits", dark,
