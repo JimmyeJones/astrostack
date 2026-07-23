@@ -95,7 +95,7 @@ def solve_one(
     so we read those after the solve completes and serialize the WCS as text
     for storage in the project DB.
     """
-    from seestack.io.wcs_io import center_from_wcs_text, wcs_text_from_sidecar
+    from seestack.io.wcs_io import wcs_text_from_sidecar
 
     try:
         solver = ASTAPSolver(astap_path=astap_path, fov_deg=fov_deg, timeout_s=timeout_s)
@@ -121,14 +121,20 @@ def solve_one(
     wcs_text = wcs_text_from_sidecar(r.wcs_sidecar_path) if r.wcs_sidecar_path else None
     ra_center = r.ra_center_deg
     dec_center = r.dec_center_deg
-    # ASTAP can report success (returncode 0 + a valid ``.wcs``) while its ``.ini``
-    # sidecar — the source of the centre coords — is missing or unparseable, so the
-    # centre comes back None on an otherwise-solved frame. Persisted that way the
-    # frame stacks but is silently barred from being the reference frame and from
-    # seeding sibling solve hints, and is never re-offered. Recover the centre from
-    # the ``.wcs`` solution we already hold (its CRVAL is the field centre).
+    # ASTAP can solve (returncode 0 + a valid ``.wcs`` sidecar) yet leave the centre
+    # None when its ``.ini`` sidecar is missing or unparseable — the centre is only
+    # read from the ``.ini``. The same coordinates live in the ``.wcs`` sidecar's
+    # reference point (CRPIX is the image centre, so CRVAL1/CRVAL2 are the centre),
+    # so recover them from the WCS instead of persisting a solved-but-centreless
+    # frame. Without a centre the frame stacks but is silently barred from being the
+    # reference frame and from seeding sibling plate-solve hints, and is never
+    # re-offered to fill it in.
     if r.solved and wcs_text is not None and (ra_center is None or dec_center is None):
-        ra_center, dec_center = center_from_wcs_text(wcs_text)
+        from seestack.io.wcs_io import wcs_center_deg_from_text
+
+        centre = wcs_center_deg_from_text(wcs_text)
+        if centre is not None:
+            ra_center, dec_center = centre
     return SolveResult(
         frame_id=frame_id, fits_path=fits_path,
         solved=r.solved,

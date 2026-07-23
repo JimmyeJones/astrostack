@@ -57,6 +57,35 @@ def test_suggestion_lands_the_sky_near_the_target_grey():
     assert abs(_sky_median(out) - STRETCH_TARGET_BG) < 0.03
 
 
+def test_export_anchored_suggestion_matches_the_thumbnail_sky():
+    """Seeding the suggestion with the *export* target grey (what the History /
+    Gallery thumbnail is rendered at) lands Adjust's sky at the same brightness as
+    that thumbnail — instead of ~2× brighter.
+
+    Regression for the History "Adjust" parity bug: the render-suggestion endpoint
+    anchored asinh at the editor's brighter ``STRETCH_TARGET_BG`` (0.10) while the
+    thumbnail the user clicked was rendered at ``EXPORT_AUTOSTRETCH_TARGET_BG``
+    (0.06), so opening Adjust jumped the background noticeably brighter than the
+    picture it claimed to match. Anchoring both to the same target reconciles them."""
+    from seestack.stack.output import EXPORT_AUTOSTRETCH_TARGET_BG, _autostretch_for_export
+
+    img = _linear_scene(star_max=20000.0, seed=3)
+    thumb_sky = _sky_median(_autostretch_for_export(img))
+
+    # The fixed suggestion anchors to the export target → its sky matches the thumb.
+    sug = suggest_asinh_stretch(img, target_bg=EXPORT_AUTOSTRETCH_TARGET_BG)
+    assert sug is not None
+    anchored_sky = _sky_median(asinh_stretch(img, stretch=sug[0], black=sug[1]))
+    assert abs(anchored_sky - thumb_sky) < 0.03
+
+    # The old (unfixed) 0.10 anchor lands the sky clearly brighter than the thumb —
+    # this is the visible mismatch the fix removes.
+    old = suggest_asinh_stretch(img, target_bg=STRETCH_TARGET_BG)
+    assert old is not None
+    old_sky = _sky_median(asinh_stretch(img, stretch=old[0], black=old[1]))
+    assert old_sky > anchored_sky + 0.02
+
+
 def test_higher_dynamic_range_needs_more_strength():
     dim = suggest_asinh_stretch(_linear_scene(star_max=20000.0, seed=1))
     bright = suggest_asinh_stretch(_linear_scene(star_max=60000.0, seed=1))

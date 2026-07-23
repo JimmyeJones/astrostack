@@ -10,8 +10,8 @@ from astropy.wcs import WCS  # noqa: E402
 from seestack.io.wcs_io import (  # noqa: E402
     _extent_from_scale_matrix,
     canvas_extent_from_fits,
-    center_from_wcs_text,
     footprint_radec_deg,
+    wcs_center_deg_from_text,
     wcs_dict_rescaled_to_preview,
     wcs_from_text,
     wcs_text_from_sidecar,
@@ -50,25 +50,22 @@ def test_wcs_from_text_handles_empty():
     # the contract is "no exception, returns *something or None*".
 
 
-def test_center_from_wcs_text_recovers_crval():
-    """The field centre is recoverable from the stored WCS blob alone."""
-    w = _make_simple_wcs(ra_deg=210.802, dec_deg=54.349)
-    ra, dec = center_from_wcs_text(wcs_to_text(w))
-    assert ra == pytest.approx(210.802, abs=1e-6)
-    assert dec == pytest.approx(54.349, abs=1e-6)
+def test_wcs_center_deg_from_text_reads_the_reference_point():
+    """The CRVAL centre is recovered from a WCS text blob — the same coordinates
+    ASTAP's ``.ini`` reports — so a solved frame whose ``.ini`` didn't parse can
+    still have its centre backfilled from the ``.wcs`` sidecar."""
+    w = _make_simple_wcs(ra_deg=200.7, dec_deg=-33.2)
+    centre = wcs_center_deg_from_text(wcs_to_text(w))
+    assert centre is not None
+    ra, dec = centre
+    assert ra == pytest.approx(200.7, abs=1e-6)
+    assert dec == pytest.approx(-33.2, abs=1e-6)
 
 
-def test_center_from_wcs_text_wraps_ra():
-    """A near-0h RA CRVAL comes back inside [0, 360)."""
-    w = _make_simple_wcs(ra_deg=0.5, dec_deg=-10.0)
-    ra, dec = center_from_wcs_text(wcs_to_text(w))
-    assert 0.0 <= ra < 360.0
-    assert ra == pytest.approx(0.5, abs=1e-6)
-
-
-def test_center_from_wcs_text_handles_empty():
-    assert center_from_wcs_text(None) == (None, None)
-    assert center_from_wcs_text("") == (None, None)
+def test_wcs_center_deg_from_text_handles_no_wcs():
+    """Empty/garbage input yields None rather than raising or inventing a centre."""
+    assert wcs_center_deg_from_text(None) is None
+    assert wcs_center_deg_from_text("") is None
 
 
 def test_footprint_radec_deg_orientation():

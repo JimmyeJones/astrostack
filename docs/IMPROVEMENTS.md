@@ -47,8 +47,8 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
-> **Re-audit — stacking engine (geometry/drizzle + calibrate/weighting) CLEAN again; shipped TWO verified solve
-> bugs (Scout 2026-07-23, branch `claude/kind-mccarthy-kjj0fu`).** Baseline suite green (**1817 passed, 2 skipped**).
+> **Re-audit — stacking engine (geometry/drizzle + calibrate/weighting) CLEAN again; shipped one verified solve bug
+> (a second was a concurrent duplicate) (Scout 2026-07-23, branch `claude/kind-mccarthy-kjj0fu`).** Baseline suite green (**1817 passed, 2 skipped**).
 > Three independent adversarial audit sub-agents re-covered the engine + the ingest/QC/solve path: (a) **stacking
 > geometry/drizzle** — `accumulator.py` (WeightedSum/MinMaxReject band denominators ≥1 + ±inf-seed masking, Welford
 > online mean/var), `drizzle_path.py` (CRPIX/CDELT super-res scaling re-derived exact, half-open `[-0.5,N−0.5]`
@@ -60,13 +60,15 @@ when you take it.
 > dark direction, `_FLAT_FLOOR` divide guard, NaN=no-correction), `masters.py` (`_sigma_clip_mean` all-NaN→NaN /
 > mad=0 spike-reject), `weighting.py`/`photometric.py` (factors clipped `[0.1,1]`, inverse-variance `1/s²` fold
 > direction + zero-guards — no NaN/zero/negative weight reaches the accumulator) — **CLEAN**. **Two NEW verified bugs
-> found + fixed + shipped this run** (struck below): (1) `solve_one` left an otherwise-solved frame with a NULL centre
-> when ASTAP's `.ini` didn't parse — now backfilled from the `.wcs` we already read (**v0.184.1**); (2) the
-> plate-solve **failure branch clobbered a real `reject_reason`** (`user`/`qc:`/`auto:streak`/`auto:grade:`/`bulk:`)
-> to `solve_failed:` on any re-offered already-rejected frame, mis-attributing it in the reject-summary buckets and
-> leaking the cumulative 25% auto-grade cap — now a guarded write mirroring the success branch's self-heal contract
-> (**v0.184.2**). One lower-confidence observation left unfiled (the `_cache_stale` size-only compare — inside the
-> already-documented "reused source path" family).
+> found this run** (both struck below): (1) `solve_one` left an otherwise-solved frame with a NULL centre when ASTAP's
+> `.ini` didn't parse — I fixed it, but the Builder shipped the **same** fix concurrently on `main` as **v0.184.2**
+> (`wcs_center_deg_from_text`), a genuine duplicate, so at merge time I dropped my equivalent change and kept `main`'s;
+> (2) the plate-solve **failure branch clobbered a real `reject_reason`** (`user`/`qc:`/`auto:streak`/`auto:grade:`/
+> `bulk:`) to `solve_failed:` on any re-offered already-rejected frame, mis-attributing it in the reject-summary
+> buckets and leaking the cumulative 25% auto-grade cap — **fixed + regression-tested + shipped this run** as a guarded
+> write mirroring the success branch's self-heal contract (**v0.184.3**). One lower-confidence observation left unfiled
+> (the `_cache_stale` size-only compare — inside the already-documented "reused source path" family), and one
+> autonomy/efficiency idea filed (stop re-plate-solving deliberately-rejected frames every scan).
 >
 > **Re-audit — stacking engine CLEAN again; one NEW verified render/ingest preview-staleness bug filed
 > (Scout 2026-07-23, branch `claude/kind-mccarthy-hhvyko`).** Baseline suite green (**1817 passed, 2 skipped**). Three
@@ -881,7 +883,7 @@ when you take it.
 
 - ~~**A plate-solve *failure* silently overwrites the `reject_reason` of an already-rejected frame — a sub dropped for
   soft focus / streaks / by the user / by auto-grade gets stamped `solve_failed:…` when solve runs and fails,
-  corrupting the reject-summary buckets and leaking the cumulative 25% auto-grade cap.**~~ — **FIXED v0.184.2**
+  corrupting the reject-summary buckets and leaking the cumulative 25% auto-grade cap.**~~ — **FIXED v0.184.3**
   (Scout 2026-07-23, branch `claude/kind-mccarthy-kjj0fu`; found by the 2026-07-23 watcher/ingest/QC/solve adversarial
   audit; **traced + regression-tested, fail-before/pass-after confirmed**). *(Wrong-result — dishonest frame
   accounting + a broken over-rejection guard; Medium.)* `build_solve_arglist` (`seestack/solve/runner.py`) gates only
@@ -905,18 +907,17 @@ when you take it.
 - ~~**A plate-solve that succeeds but whose ASTAP `.ini` sidecar doesn't parse is persisted as "solved" with a valid
   `wcs_json` but NULL centre coordinates — the frame stacks yet is silently barred from being the reference frame and
   from seeding sibling plate-solve hints, and is never re-offered to recover its centre.**~~ — **FIXED v0.184.1**
-  (Scout 2026-07-23, branch `claude/kind-mccarthy-kjj0fu`; **traced + regression-tested, fail-before/pass-after
-  confirmed**). `solve_one` (`seestack/solve/runner.py`) now backfills the centre from the WCS it already reads: when a
-  frame is `solved` with a usable `wcs_text` but `ra/dec_center_deg` came back `None` (the swallowed `.ini` parse), it
-  calls a new pure helper `seestack.io.wcs_io.center_from_wcs_text(text)` — which returns the WCS reference value
-  (`CRVAL1`/`CRVAL2`, RA wrapped into `[0, 360)`, finiteness-guarded), the field centre because ASTAP puts `CRPIX` at
-  image centre — so the frame lands with a real centre and is eligible for `pick_reference_frame` /
-  `fallback_solve_hint` again. An ASTAP-provided centre still wins verbatim (backfill only fires when it's `None`).
-  Regression: `tests/test_wcs_io.py` (+3: recover CRVAL, RA-wrap near 0h, empty→`(None,None)`) and
-  `tests/test_solve_runner.py` (+2: solved-with-null-centre + valid `.wcs` → centre recovered [fail-before]; an
-  ASTAP-provided centre is kept and not overridden by a disagreeing `.wcs`). Upgrade-safe: pure additive helper +
-  a value backfill in the worker entry point; no config/DB-schema/API-shape/on-disk/default change. Confidence:
-  traced + regression-tested. *(Original trace kept below for provenance.)* `ASTAPSolver._solve_once` (`seestack/solve/astap.py:286-304`) sets
+  (Builder 2026-07-23, branch `claude/pensive-faraday-2nhbq9`; traced + regression-tested). `solve_one`
+  (`seestack/solve/runner.py`) now backfills the centre from the `.wcs` sidecar when ASTAP solved but the `.ini`
+  yielded no centre: a new `wcs_io.wcs_center_deg_from_text` reads CRVAL1/CRVAL2 (ASTAP writes CRPIX at the image
+  centre, so CRVAL *is* the centre — the same coordinates `_parse_astap_ini` would have returned), so the frame keeps
+  a non-None `ra/dec_center_deg` and stays eligible as the stack reference and as a sibling plate-solve hint instead of
+  being a solved-but-centreless orphan. Regression: `tests/test_solve_runner.py::
+  test_solve_one_backfills_centre_from_wcs_when_ini_unparseable` (mocked ASTAP: solved + valid `.wcs` + null `.ini`
+  centre → recovered centre; fail-before: None) and `…_makes_frame_reference_eligible` (backfilled centre → `fallback_
+  solve_hint` non-None), plus two `tests/test_wcs_io.py` unit cases for the helper. Upgrade-safe: additive read-only
+  helper + a backfill in the solve driver; no config/DB-schema/API-shape/on-disk/default change. Confidence: traced +
+  regression-tested. *(Original trace kept below for provenance.)* `ASTAPSolver._solve_once` (`seestack/solve/astap.py:286-304`) sets
   `solved = returncode == 0 and wcs_sidecar.exists()`, then reads the centre **only** from the `.ini` via
   `_parse_astap_ini` (`astap.py:373`, `values["CRVAL1"]`). If the `.ini` is missing or lacks `CRVAL1`/`CRVAL2`, the
   `KeyError` is swallowed (`astap.py:292`) and `ra/dec` come back `None` **while `solved` stays `True`**. `solve_frame`
@@ -969,9 +970,21 @@ when you take it.
   Confidence: traced (cache-key gap + no invalidation on the refresh path both read directly; source-reuse consequence
   is a direct logical consequence; the truncated-preview sub-trigger is noted but unverified).
 
-- **The History "Adjust" stretch suggestion opens the sliders ~2× brighter than the STF gallery/History thumbnail it
-  claims to match — it targets sky→0.10 while the stored STF preview targets sky→0.06.** *(Render / preview-parity —
-  broken-UX; Low; found by the 2026-07-23 render audit — reproduced.)* The `…/stack-runs/{id}/render-suggestion`
+- ~~**The History "Adjust" stretch suggestion opens the sliders ~2× brighter than the STF gallery/History thumbnail it
+  claims to match — it targets sky→0.10 while the stored STF preview targets sky→0.06.**~~ — **FIXED v0.184.2**
+  (Builder 2026-07-23, branch `claude/pensive-faraday-2nhbq9`; reproduced + regression-tested). The render-suggestion
+  endpoint (`webapp/routers/stack.py`) now seeds `suggest_asinh_stretch` with the *export* sky target instead of the
+  editor's brighter default, so opening Adjust starts on the History/Gallery thumbnail's look rather than jumping ~2×
+  brighter. The export grey `0.06` is now a named shared constant `EXPORT_AUTOSTRETCH_TARGET_BG`
+  (`seestack/stack/output.py`, used by `_autostretch_for_export`) so the thumbnail and the Adjust anchor can't drift
+  apart again; the endpoint imports it and returns it as `target_bg`. The editor's own stretch suggestion
+  (`webapp/routers/editor.py`) still uses `STRETCH_TARGET_BG=0.10` — its preview surface is a different render.
+  Regression: `tests/test_edit_stretch.py::test_export_anchored_suggestion_matches_the_thumbnail_sky` (the export-anchored
+  suggestion lands the sky within 0.03 of `_autostretch_for_export`'s sky, while the old 0.10 anchor lands it clearly
+  brighter) and updated `tests/webapp/test_stack_render.py::test_render_suggestion_anchors_sliders_to_the_data`
+  (`target_bg == EXPORT_AUTOSTRETCH_TARGET_BG`; fails before). Upgrade-safe: additive named constant + which target the
+  endpoint passes; no config/DB/API-shape/on-disk change (the field already existed, its value moved 0.10→0.06).
+  Confidence: reproduced. *(Original trace kept below for provenance.)* The `…/stack-runs/{id}/render-suggestion`
   endpoint (`webapp/routers/stack.py:~700`) seeds the Adjust sliders via `suggest_asinh_stretch`
   (`seestack/edit/stretch.py`), whose default `target_bg = STRETCH_TARGET_BG = 0.10` (`stretch.py:49`). But the stored
   linear-run thumbnail a beginner clicks (History/Gallery) is rendered by `generate_thumbnail` →

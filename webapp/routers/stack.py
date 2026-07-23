@@ -707,9 +707,10 @@ async def render_stretch_suggestion(
     if not fits_path or not Path(fits_path).exists():
         raise HTTPException(status_code=404, detail="No FITS for this run to render")
 
-    from seestack.edit.stretch import STRETCH_TARGET_BG, suggest_asinh_stretch
+    from seestack.edit.stretch import suggest_asinh_stretch
     from seestack.render.orient import NORTH_UP_MIN_DEG
     from seestack.render.thumbnail import load_stack_rgb, stack_north_up_deg
+    from seestack.stack.output import EXPORT_AUTOSTRETCH_TARGET_BG
 
     def work() -> dict[str, Any]:
         # "North up" is a pure orientation fix from the run's own WCS, so it's
@@ -720,10 +721,15 @@ async def render_stretch_suggestion(
         rgb, display_space = load_stack_rgb(fits_path, max_width=1024)
         if display_space:
             return {"stretch": None, "black": None, "north_up_deg": north_up_deg}
-        sug = suggest_asinh_stretch(rgb)
+        # Anchor the asinh sky target to the *export* grey (the value the History/
+        # Gallery thumbnail the user just clicked is rendered at), not the editor's
+        # brighter default, so opening Adjust starts on that thumbnail's look
+        # instead of jumping ~2× brighter.
+        sug = suggest_asinh_stretch(rgb, target_bg=EXPORT_AUTOSTRETCH_TARGET_BG)
         if sug is None:
             return {"stretch": None, "black": None, "north_up_deg": north_up_deg}
-        return {"stretch": sug[0], "black": sug[1], "target_bg": STRETCH_TARGET_BG,
+        return {"stretch": sug[0], "black": sug[1],
+                "target_bg": EXPORT_AUTOSTRETCH_TARGET_BG,
                 "north_up_deg": north_up_deg}
 
     return await run_in_threadpool(work)

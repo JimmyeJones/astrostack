@@ -44,30 +44,33 @@ def wcs_from_text(text: str | None):
         return None
 
 
-def center_from_wcs_text(text: str | None) -> tuple[float | None, float | None]:
-    """Return the ``(RA, Dec)`` field centre in degrees from a stored WCS blob.
+def wcs_center_deg_from_text(text: str | None) -> tuple[float, float] | None:
+    """The reference-point (CRVAL) RA/Dec in degrees from a stored WCS text blob.
 
-    ASTAP places its reference pixel (``CRPIX``) at the image centre, so the WCS
-    reference value (``CRVAL1``/``CRVAL2``) *is* the field centre — the very
-    numbers ASTAP also writes to its ``.ini`` sidecar. This recovers the centre
-    from the ``.wcs`` solution we already have when the ``.ini`` is missing or
-    unparseable (which otherwise leaves an otherwise-solved frame with a NULL
-    centre — barred from being the reference frame and from seeding sibling
-    solve hints). Returns ``(None, None)`` when the blob is empty or carries no
-    usable finite centre.
+    ASTAP writes its solution with the reference pixel (CRPIX) at the image
+    centre, so CRVAL1/CRVAL2 are the frame's centre coordinates — the very values
+    :func:`seestack.solve.astap._parse_astap_ini` reads from the ``.ini`` sidecar.
+    This lets a solved frame's centre be recovered from the ``.wcs`` sidecar when
+    the ``.ini`` is missing or unparseable, so the frame stays eligible as the
+    stack reference and as a sibling plate-solve hint (both require a centre)
+    rather than becoming a solved-but-centreless orphan. Returns ``None`` when the
+    text carries no usable celestial reference point.
     """
     wcs = wcs_from_text(text)
     if wcs is None:
-        return None, None
+        return None
     try:
-        crval = wcs.wcs.crval
-        ra = float(crval[0]) % 360.0
-        dec = float(crval[1])
-    except Exception:  # noqa: BLE001 — malformed WCS, treat as no centre
-        return None, None
-    if not (math.isfinite(ra) and math.isfinite(dec)):
-        return None, None
-    return ra, dec
+        cel = wcs.celestial
+        if not cel.has_celestial:
+            return None
+        ra = float(cel.wcs.crval[0])
+        dec = float(cel.wcs.crval[1])
+        if not (math.isfinite(ra) and math.isfinite(dec)):
+            return None
+        return ra, dec
+    except Exception as exc:  # noqa: BLE001 — a malformed WCS just means "no centre"
+        log.warning("WCS centre extraction failed: %s", exc)
+        return None
 
 
 def wcs_text_from_sidecar(wcs_path: str | Path) -> str | None:
