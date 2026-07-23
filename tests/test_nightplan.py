@@ -847,3 +847,72 @@ def test_best_months_is_deterministic():
     a = best_months(LONDON, 83.8, -5.4, year=2026)
     b = best_months(LONDON, 83.8, -5.4, year=2026)
     assert a == b
+
+
+# --- Moon interference readout ("is the Moon going to wash this out?") ---------
+
+from seestack.nightplan import (  # noqa: E402
+    moon_interference,
+    _moon_phase_name,
+    _moon_verdict,
+)
+
+_NJ = Observer(lat_deg=40.0, lon_deg=-74.0, elevation_m=0.0)  # a northern backyard
+
+
+def test_moon_verdict_covers_the_bands():
+    # Moon below the horizon → good, whatever its phase.
+    assert _moon_verdict(0.95, -5.0, 30.0)[0] == "good"
+    # A thin crescent that IS up → still good.
+    assert _moon_verdict(0.10, 40.0, 20.0)[0] == "good"
+    # Bright but far across the sky → so-so.
+    assert _moon_verdict(0.90, 40.0, 120.0)[0] == "ok"
+    # Half Moon a moderate distance off → so-so.
+    assert _moon_verdict(0.50, 40.0, 35.0)[0] == "ok"
+    # Bright Moon close to the target → poor, with the "shoot something bright" nudge.
+    level, text = _moon_verdict(0.90, 40.0, 20.0)
+    assert level == "poor"
+    assert "bright galaxy" in text
+
+
+def test_moon_phase_name_reads_the_fraction_and_sense():
+    assert _moon_phase_name(0.0, True) == "New Moon"
+    assert _moon_phase_name(1.0, False) == "Full Moon"
+    assert _moon_phase_name(0.2, True) == "waxing crescent"
+    assert _moon_phase_name(0.2, False) == "waning crescent"
+    assert _moon_phase_name(0.5, True) == "first quarter"
+    assert _moon_phase_name(0.8, False) == "waning gibbous"
+
+
+def test_moon_interference_flags_a_bright_nearby_full_moon():
+    # Around the 2026-07-29 full Moon, a target near the Moon's path reads "poor".
+    when = datetime(2026, 7, 29, 20, 0, tzinfo=timezone.utc)
+    # Pick a target close to where the (summer) full Moon rides — low southern ecliptic.
+    mi = moon_interference(_NJ, ra_deg=300.0, dec_deg=-20.0, when_utc=when)
+    assert mi.illumination > 0.9
+    assert mi.phase_name == "Full Moon"
+    assert mi.moon_altitude_deg > 0  # up during darkness
+    assert mi.separation_deg < 60.0
+    assert mi.level == "poor"
+    assert "wash out" in mi.text
+    # Deterministic: same inputs → same reading.
+    again = moon_interference(_NJ, ra_deg=300.0, dec_deg=-20.0, when_utc=when)
+    assert (again.illumination, again.separation_deg, again.level) == (
+        mi.illumination, mi.separation_deg, mi.level)
+
+
+def test_moon_interference_is_clear_on_a_new_moon_night():
+    # New Moon (~2026-08-12) is down during the night → good, whatever the target.
+    when = datetime(2026, 8, 12, 20, 0, tzinfo=timezone.utc)
+    mi = moon_interference(_NJ, ra_deg=10.7, dec_deg=41.3, when_utc=when)  # M31
+    assert mi.illumination < 0.1
+    assert mi.level == "good"
+
+
+def test_moon_interference_evaluates_during_darkness_not_page_load():
+    # Called at local noon (Moon may be up in daylight), the readout still reflects
+    # tonight's dark window — its `at_utc` lands in the small hours, not midday.
+    noon = datetime(2026, 7, 29, 16, 0, tzinfo=timezone.utc)  # ~local noon at -74°
+    mi = moon_interference(_NJ, ra_deg=300.0, dec_deg=-20.0, when_utc=noon)
+    hour = datetime.fromisoformat(mi.at_utc).hour  # UTC ~ 04-06h = night at -74°
+    assert hour < 12

@@ -527,6 +527,115 @@ def moon_window(observer: Observer, window: DarkWindow) -> MoonWindow:
                       up_all_night=up_all, down_all_night=down_all)
 
 
+@dataclass
+class MoonInterference:
+    """A plain-language "is the Moon going to wash this out tonight?" readout for
+    one target, evaluated at the darkest moment of tonight's dark window.
+
+    The single biggest avoidable reason a beginner's faint-nebula night comes out
+    disappointing is a bright Moon nearby flooding the sky background — and a
+    non-expert has no intuition for it. This turns the ephemeris into one honest
+    verdict + sentence. Offline and deterministic (see :func:`moon_interference`)."""
+
+    # Illuminated fraction of the Moon's disk (0..1) tonight.
+    illumination: float
+    # Waxing (evening Moon, sets before midnight) vs waning (rises after midnight).
+    waxing: bool
+    # A friendly phase name ("Full Moon", "waxing crescent", …).
+    phase_name: str
+    # Topocentric Moon altitude at the darkest moment (deg); < 0 = below the
+    # horizon, so it can't affect the shot however bright it is.
+    moon_altitude_deg: float
+    # Angular separation between the Moon and this target at that moment (deg).
+    separation_deg: float
+    # Coarse verdict: "good" (Moon down / thin / far) | "ok" | "poor" (bright & near).
+    level: str
+    # One plain-language sentence for the card.
+    text: str
+    # The darkest moment used for the readout (UTC ISO), so the UI can caption it.
+    at_utc: str
+
+
+def _moon_phase_name(illum: float, waxing: bool) -> str:
+    """A friendly Moon-phase name from the illuminated fraction + waxing sense."""
+    if illum < 0.02:
+        return "New Moon"
+    if illum > 0.98:
+        return "Full Moon"
+    if illum < 0.45:
+        return "waxing crescent" if waxing else "waning crescent"
+    if illum <= 0.55:
+        return "first quarter" if waxing else "last quarter"
+    return "waxing gibbous" if waxing else "waning gibbous"
+
+
+def _moon_verdict(illum: float, moon_alt_deg: float, sep_deg: float) -> tuple[str, str]:
+    """Blend illumination, Moon altitude and target separation into a coarse level
+    + a plain-language sentence. Pure so it's unit-testable on its own."""
+    pct = round(illum * 100)
+    sep = round(sep_deg)
+    if moon_alt_deg < 0:
+        return "good", ("The Moon is below the horizon during tonight's dark hours, "
+                        "so it won't wash out your shot.")
+    if illum < 0.25:
+        return "good", (f"Only a thin crescent Moon ({pct}% lit) is up tonight — it "
+                        "adds very little skyglow.")
+    if sep_deg >= 90:
+        return "ok", (f"A {pct}%-lit Moon is up, but it's well away from this target "
+                      f"(~{sep}° off), so it should be manageable.")
+    if illum < 0.65:
+        return "ok", (f"A {pct}%-lit Moon sits ~{sep}° from this target — you'll lose "
+                      "some of the faintest detail, but bright targets are fine.")
+    return "poor", (f"A bright {pct}%-lit Moon is only ~{sep}° from this target — faint "
+                    "nebulae will wash out tonight. A bright galaxy, star cluster or "
+                    "double star would show much better.")
+
+
+def moon_interference(observer: Observer, ra_deg: float, dec_deg: float,
+                      when_utc: datetime) -> MoonInterference:
+    """How much the Moon will interfere with imaging ``(ra_deg, dec_deg)`` tonight.
+
+    Evaluated at the **darkest moment of tonight's dark window** (the solar
+    midnight after ``when_utc``, or the ongoing window if the caller is already in
+    the small hours) — so the reading reflects the sky the user will actually shoot
+    in, not the Moon's daytime position when the page happens to load. Falls back to
+    ``when_utc`` itself when no dark window can be found (e.g. polar day). Offline
+    and deterministic, like the rest of the planner."""
+    _configure_iers_offline()
+    from astropy import units as u
+    from astropy.coordinates import AltAz, SkyCoord, get_body
+    from astropy.time import Time
+
+    window = _find_dark_window(observer, when_utc)
+    at = (window.start + (window.end - window.start) / 2) if window is not None else when_utc
+    at = at.astimezone(timezone.utc)
+
+    illum = moon_illumination(at)
+    waxing = moon_is_waxing(at)
+
+    location = observer.earth_location()
+    t = Time(at.replace(tzinfo=None), scale="utc")
+    moon = get_body("moon", t, location)
+    moon_alt = float(moon.transform_to(AltAz(obstime=t, location=location)).alt.deg)
+    # Transform the Moon into the target's ICRS frame before measuring separation,
+    # so astropy doesn't warn about a direction-dependent transform (as the batch
+    # observability path does).
+    target = SkyCoord(ra=ra_deg * u.deg, dec=dec_deg * u.deg, frame="icrs")
+    sep = float(target.separation(moon.icrs).deg)
+
+    level, text = _moon_verdict(illum, moon_alt, sep)
+    return MoonInterference(
+        illumination=round(illum, 3),
+        waxing=waxing,
+        phase_name=_moon_phase_name(illum, waxing),
+        moon_altitude_deg=round(moon_alt, 1),
+        separation_deg=round(sep, 1),
+        level=level,
+        text=text,
+        at_utc=at.isoformat(),
+    )
+
+
 def _score(max_alt: float, minutes_above: float, dark_minutes: float,
            moon_sep: float, moon_illum: float, min_alt: float,
            moon_up_fraction: float = 1.0) -> float:

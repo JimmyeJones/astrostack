@@ -29,6 +29,7 @@ from seestack.nightplan import (
     Observer,
     best_months,
     load_catalog,
+    moon_interference,
     next_observing_windows,
     plan_tonight,
     suggest_targets,
@@ -518,6 +519,64 @@ def get_best_months(
         "usable_dark_minutes": r.usable_dark_minutes,
         "dark_minutes": r.dark_minutes,
     } for r in rows]
+    return base
+
+
+@router.get("/moon/{safe}")
+def get_moon_interference(
+    safe: str,
+    request: Request,
+    when: str | None = Query(default=None,
+                             description="ISO-8601 UTC reference to plan from; defaults to now"),
+) -> dict[str, Any]:
+    """"Is the Moon going to wash this out tonight?" — a plain-language Moon-
+    interference readout for *this* target.
+
+    A bright Moon near a faint target floods the sky background and buries the
+    signal — the single biggest avoidable reason a beginner's faint-nebula night
+    disappoints — and a non-expert has no intuition for it. This turns the offline
+    ephemeris into one honest verdict + sentence (Moon phase / illumination, its
+    altitude, and its separation from this target at tonight's darkest moment), so
+    the Target page can nudge "point at a bright galaxy or cluster instead" before
+    a clear night is wasted. Read-only and offline. ``moon`` is null (the card
+    self-hides) when no location is set or the target has no position;
+    ``target_has_position``/``location_source`` let the UI explain which.
+    """
+    settings = deps.get_settings(request)
+
+    start = datetime.now(timezone.utc)
+    if when:
+        try:
+            start = datetime.fromisoformat(when)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Bad 'when' timestamp") from exc
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+
+    lib = deps.open_library(request)
+    try:
+        entry = lib.find_target(safe)
+    finally:
+        lib.close()
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Unknown target")
+
+    observer, location_source = _resolve_observer(request, settings)
+    has_position = entry.ra_deg is not None and entry.dec_deg is not None
+
+    base: dict[str, Any] = {
+        "location_source": location_source,
+        "observer": asdict(observer) if observer is not None else None,
+        "target_has_position": has_position,
+        "moon": None,
+    }
+    if observer is None or not has_position:
+        return base
+
+    mi = moon_interference(
+        observer, float(entry.ra_deg), float(entry.dec_deg), when_utc=start,
+    )
+    base["moon"] = asdict(mi)
     return base
 
 

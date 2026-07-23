@@ -359,6 +359,48 @@ def test_best_months_rejects_bad_when(client, solved_library):
     assert r.status_code == 422
 
 
+def test_moon_returns_an_interference_readout_for_a_library_target(client, solved_library):
+    # "Is the Moon going to wash this out tonight?" — one honest verdict + sentence
+    # for this target, so the Target page can warn before a clear night is wasted.
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    r = client.get("/api/plan/moon/M_42", params={"when": JAN_EVENING})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["location_source"] == "settings"
+    assert body["target_has_position"] is True
+    moon = body["moon"]
+    assert moon is not None
+    assert 0.0 <= moon["illumination"] <= 1.0
+    assert isinstance(moon["waxing"], bool)
+    assert moon["phase_name"]
+    assert moon["level"] in ("good", "ok", "poor")
+    assert moon["text"]
+    assert -90.0 <= moon["moon_altitude_deg"] <= 90.0
+    assert 0.0 <= moon["separation_deg"] <= 180.0
+
+
+def test_moon_without_location_self_hides(client, solved_library):
+    # No configured site and no SITELAT in the synth frames → null readout (the
+    # card self-hides) with a clean 200, not a 500.
+    r = client.get("/api/plan/moon/M_42", params={"when": JAN_EVENING})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["location_source"] == "none"
+    assert body["moon"] is None
+
+
+def test_moon_unknown_target_404s(client, solved_library):
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    r = client.get("/api/plan/moon/NOPE_404", params={"when": JAN_EVENING})
+    assert r.status_code == 404
+
+
+def test_moon_rejects_bad_when(client, solved_library):
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    r = client.get("/api/plan/moon/M_42", params={"when": "not-a-date"})
+    assert r.status_code == 422
+
+
 def test_suggest_without_location_self_hides(client, solved_library):
     # No configured site and the synth frames carry no SITELAT → nothing to
     # suggest, but a clean 200 with an empty list so the card just self-hides.
