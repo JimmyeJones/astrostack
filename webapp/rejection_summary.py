@@ -84,13 +84,42 @@ def _bucket_for(reason: str) -> str:
     return "other"
 
 
-def _verdict(dropped: int, used: int, unsolved: int = 0) -> dict[str, str]:
+# When a lot of frames drop and ONE actionable cause clearly dominates them, name
+# it (and what to do next) instead of the generic "cloud or wind" — the specific
+# cause is exactly the thing a beginner can act on before their next session.
+# Keyed by bucket; only buckets with a clear, still-reassuring next step get a
+# line. "trailed" is already reassuring (the stacker doing its job) and "removed"
+# is the user's own choice, while "error"/"other" have no useful advice — those
+# fall through to the generic copy.
+_DOMINANT_VERDICTS: dict[str, str] = {
+    "soft": "A lot of frames were left out — mostly soft or elongated stars this "
+            "time. It's worth checking focus (and dew on the lens) before your "
+            "next session. The stack still used all the sharp ones.",
+    "clouds": "A lot of frames were left out — mostly cloud, haze or moonlight "
+              "this time. A clearer, darker night will keep more of them. The "
+              "stack still used all the clear ones.",
+    "solve_failed": "A lot of frames were left out — mostly ones that couldn't be "
+                    "located in the sky. The good ones still stacked; if it keeps "
+                    "happening, check your subs aren't trailed or fogged.",
+    "unsolved": "A lot of frames were left out — mostly subs that haven't been "
+                "located in the sky yet. Run Plate Solve so the rest can be added.",
+}
+
+
+def _verdict(dropped: int, used: int, unsolved: int = 0,
+             grouped: dict[str, int] | None = None) -> dict[str, str]:
     """A single reassuring headline from the dropped fraction.
 
     ``unsolved`` (accepted-but-not-plate-solved frames) is the beginner's one
     *actionable* case — the frames aren't bad, they just haven't been located in
     the sky yet — so when they outnumber what actually stacked, lead with a
-    plate-solve nudge rather than the generic "cloud or wind" copy."""
+    plate-solve nudge rather than the generic "cloud or wind" copy.
+
+    ``grouped`` is the by-bucket dropped tally. On a high-drop night, when one
+    actionable bucket clearly dominates (strictly more than half the dropped
+    frames), the headline names *that* cause and its fix instead of the vague
+    generic — the specific cause is the thing the beginner can act on. A genuinely
+    mixed night (no single dominant bucket) keeps the generic reassurance."""
     if unsolved > 0 and unsolved >= max(1, used):
         return {"tone": "warn",
                 "text": "Most of your subs haven't been located in the sky yet, "
@@ -104,6 +133,13 @@ def _verdict(dropped: int, used: int, unsolved: int = 0) -> dict[str, str]:
     if frac < 0.30:
         return {"tone": "ok",
                 "text": "A few frames didn't make the cut — still a solid stack."}
+    # High-drop: if one actionable cause is strictly the majority of the dropped
+    # frames, name it. `top * 2 > dropped` guarantees a single dominant bucket (a
+    # 50/50 split isn't "dominant" and keeps the generic copy).
+    if grouped and dropped > 0:
+        top_key, top_n = max(grouped.items(), key=lambda kv: kv[1])
+        if top_key in _DOMINANT_VERDICTS and top_n * 2 > dropped:
+            return {"tone": "warn", "text": _DOMINANT_VERDICTS[top_key]}
     return {"tone": "warn",
             "text": "A lot of frames were left out — usually cloud or wind. "
                     "The stack still used all the good ones."}
@@ -160,6 +196,6 @@ def summarize_rejections(
         "used": used,
         "dropped": dropped,
         "dropped_fraction": round(dropped / total, 4) if total > 0 else 0.0,
-        "verdict": _verdict(dropped, used, n_unsolved),
+        "verdict": _verdict(dropped, used, n_unsolved, grouped),
         "buckets": buckets,
     }

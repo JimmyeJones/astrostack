@@ -5497,8 +5497,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
-- **IMPROVEMENT IDEA (Scout 2026-07-23) — make the "why frames were left out" high-drop verdict name the *dominant
-  actual cause*, not the generic "cloud or wind".** *(Friendliness + trust; size S; PRIORITY 3, fully offline,
+- ~~**IMPROVEMENT IDEA (Scout 2026-07-23) — make the "why frames were left out" high-drop verdict name the *dominant
+  actual cause*, not the generic "cloud or wind".**~~ — **SHIPPED v0.178.2** (Builder 2026-07-23, branch
+  `claude/pensive-faraday-xgym08`). Extended `webapp/rejection_summary.py::_verdict` to take the grouped by-bucket
+  tally: on the high-drop (≥30%) branch, when one *actionable* bucket is strictly the majority of the dropped frames
+  (`top*2 > dropped`, so a 50/50 split stays generic), the headline names that cause and its fix — soft → "check
+  focus/dew", clouds → "wait for a clearer, darker night", solve_failed → "couldn't be located … check your subs",
+  unsolved → "Run Plate Solve". `trailed` (the stacker doing its job) and `removed` (the user's own choice) plus the
+  non-actionable `error`/`other` fall through to the generic reassurance, as does a genuinely mixed night. Pure-
+  function change (the grouped dict was already in hand), no new data/endpoint/knob; low/mid-drop verdicts unchanged;
+  frontend renders `verdict.text` generically so no FE change. Tests: `test_rejection_summary.py` (+8 — soft/clouds/
+  solve_failed/unsolved-dominated → specific copy; mixed & trailed-dominated → generic; mid-drop unaffected).
+  Additive/read-only, no schema/config/API-shape/default change. *(Original spec kept below for provenance.)*
+  *(Friendliness + trust; size S; PRIORITY 3, fully offline,
   additive.)* `webapp/rejection_summary.py::_verdict` already computes the right *buckets* (trailed / clouds / soft /
   solve-failed / unsolved / …) and picks a headline tone from the dropped fraction — but when a lot of frames were
   left out it always says *"A lot of frames were left out — usually cloud or wind. The stack still used all the good
@@ -9815,6 +9826,11 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.178.2** — The "why frames were left out" high-drop verdict now names the *dominant actual cause* (soft focus →
+  check focus/dew, clouds, couldn't-be-located → check subs, unsolved → Run Plate Solve) instead of the generic
+  "cloud or wind", when one actionable bucket is strictly the majority of the dropped frames; a mixed night or a
+  trailed/removed-dominated night keeps the generic reassurance. Pure-function; friendliness + trust. Branch
+  `claude/pensive-faraday-xgym08`.
 - **v0.178.1** — ⭐ Fixed the "One frame vs your stack" reveal rendering its two halves under different tone curves.
   Persist the saved custom asinh stretch/black on the run (additive nullable `stack_runs.preview_stretch`/`preview_black`,
   `SCHEMA_VERSION` 10→11) and render the "before" sub through the *same* curve; self-hide the card for display-space
