@@ -47,6 +47,25 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+> **Re-audit — full stacking engine CLEAN, no new bug (Scout 2026-07-23, branch `claude/kind-mccarthy-jgkizl`).**
+> Baseline suite green (**1742 passed, 2 skipped**). Adversarially re-read the stacking engine again end-to-end:
+> `accumulator.py` (WeightedSum, MinMaxReject k-insertion/degrade bands + `rejection_counts` drop schedule,
+> Welford online mean/var incl. the `add_window` sub-view in-place writes), `weighting.py` (geometric-mean sub-
+> weights + the `1/s²` photometric inverse-variance fold), `photometric.py` (median-reference scale, `_MIN_MEASURED_
+> FRAMES` neutral fallback, bound clip), plus `calibrate/masters.py` (`_sigma_clip_mean` MAD=0 → tol=0 spike-reject
+> convergence, NaN-aware `nanmedian`/`nanmean` combine, even-sampling memory cap, atomic `save_master`). Then a
+> second independent audit sub-agent re-traced the geometry/rejection files — `mosaic.py` (`_circ_mean_ra_deg`
+> atan2 wrap, MAD outlier drop with the 3° floor + over-reject guards, canvas pixel-cap termination + CRPIX
+> off-by-one), `drizzle_path.py` (`_clip_tolerance` float64 NaN→+inf, neff≥3 gate, `16·eps·m²` variance-resolution
+> floor, half-open `[-0.5, N-0.5]` bounds), `reference.py` (`unwrap_ra_deg` before median/span, pole `cos_dec=0`),
+> `pointings.py` (union-find path-compression + zero-vector centroid guard), `channel_combine.py` (NaN-propagating
+> LRGB/RGB, floored divisor). **All CLEAN** — NaN=no-coverage held everywhere, every denominator guarded, no
+> integer-overflow path, rejection math sound, memory bounds respected; matching the repeatedly-clean documented
+> state. No new verified engine bug this run. (Two design *notes*, not bugs: an LRGB pixel covered in RGB but not in
+> L is deliberately NaN — LRGB is deprioritised niche anyway; and the drizzle `neff` gate OR's channel footprints
+> but can't actually reject at sane κ. Neither warrants a change.) Curation + 2 ideas filed below (a stack-then-solve
+> bootstrap for un-solvable faint fields under Autonomy; a "trails we cleaned out" trust line under Features).
+>
 > **Re-audit — stacking engine CLEAN; one new bug in the QC/stack path (Scout 2026-07-23, branch
 > `claude/kind-mccarthy-3nr8e8`).** Baseline suite green (1719 passed, 2 skipped). Adversarially re-read the full
 > stacking engine — `accumulator.py` (WeightedSum/MinMaxReject k-insertion/Welford), `weighting.py`,
@@ -4167,6 +4186,31 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+- **IMPROVEMENT IDEA (Scout 2026-07-23) — "stack-then-solve" bootstrap: rescue a faint field that won't plate-solve
+  per-sub by solving a rough integration instead, then reusing that WCS.** *(Autonomy / image-quality — directly
+  attacks the ⭐⭐ owner top bug's root cause; PRIORITY 2; size L; idea, not yet traced to code — needs the owner's
+  real faint-field data to validate the gain.)* **What prompts it:** the ⭐⭐ top bug is a *thin stack* because on a
+  faint / sparse-star field ASTAP fails on most subs (no WCS → dropped by `run_stack`, which stacks only
+  accepted **and** solved frames). The existing solve ladder already helps within a sub (`solve/astap.py`:
+  default → bin-2 → bin-4/200-stars downsample rungs), but when a *single* 10 s Seestar sub simply lacks the SNR
+  to detect enough stars, no per-sub rung can rescue it — the stars aren't there to match. Mature tools (Siril's
+  global registration, N.I.N.A.'s blind-solve after a rough stack) get around this by **integrating first to raise
+  SNR, then solving the deep image**: (1) pick a reference sub, (2) align the accepted-but-unsolved subs to it by
+  **phase-correlation / star-pattern registration in pixel space** (no WCS needed — `align.py` already does
+  sub-pixel phase-correlation for the stack), (3) stack a quick, rough integration of, say, the sharpest N subs,
+  (4) plate-solve *that* SNR-boosted image once (it has the stars a single sub lacks), (5) propagate the solved
+  WCS back to the registered subs (each sub's WCS = the deep-stack WCS composed with its measured pixel shift/
+  rotation to the reference). Suddenly the whole session stacks instead of ~3 subs. **Why it's L / careful:** it
+  adds a real new pipeline stage and a pixel-space registration path that must be robust to rotation/field drift,
+  and a wrong WCS propagation would *silently mis-place* frames (worse than dropping them) — so it must ship
+  behind a guard ("only when < X% of subs solved individually") and be validated on real faint-field data before
+  it's ever on by default. **Feasibility:** no heavy/networked dep (reuses ASTAP + the existing phase-correlation
+  aligner); additive and opt-in; testable with synthetic faint few-star subs (assert the deep-stack solves and
+  the propagated WCS lands each sub within a pixel of ground truth). **Confirmed absent** from the backlog (no
+  stack-then-solve / rough-stack-then-solve idea exists). Serves autonomy (fewer manual re-shoots) *and* image
+  quality (a real deep stack instead of gibberish) for exactly the case the owner reported. **Scout: this is the
+  principled long-term answer to the thin-stack root cause — pair it with the already-shipped honest "thin stack"
+  warning (the warning tells the user; this actually fixes it).**
 - **IMPROVEMENT IDEA (Scout 2026-07-23) — a plate-solve that succeeds but whose sidecar won't parse should be
   recorded as *retriable-unsolved*, not silently as "solved with no WCS" (which wastes a re-solve every scan and
   never stacks the frame).** *(Autonomy / robustness — the honest-accounting arc; PRIORITY 2; size S; traced by
@@ -6177,6 +6221,29 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "We cleaned N passing lights out of your picture": a one-line trust
+  cue on a finished stack that turns the κ-σ rejection tally into plain language.** *(Trust / "understand + enjoy"
+  pillar, PRIORITY 3 with an image-quality-trust flavour; size S; frontend-mostly, additive, no new deps.)* **Why a
+  beginner wants it:** a first-timer doesn't know that stacking *quietly removes* the satellite streaks, aeroplane
+  trails and cosmic-ray hits that cross individual subs — they just see a clean picture and can't tell whether the
+  app did anything clever or got lucky. A single honest line — *"Cleaned ~1.2% of pixels: passing satellites,
+  planes and cosmic-ray hits were rejected so they're not in your final image"* — makes the invisible work visible
+  and builds trust, the same way the shipped "stacking cut your noise ~N×" badge (v0.167.0) does for averaging.
+  **The data already exists — this is pure surfacing, no new computation:** the stacker already computes an honest
+  per-pixel rejection tally on the κ-σ path (the "clipped X% of samples" trust figure in the run log / STACKER
+  provenance card) and `MinMaxRejectAccumulator.rejection_counts()` returns `(n_contributed, n_rejected)`. Read
+  whichever the run used and render it as a friendly Alert/badge on the Target/History result. **Beginner-bar
+  shaping (important):** (1) key the message off the **κ-σ** data-driven fraction (real outliers), **not** the
+  min/max path — as `rejection_counts`' own docstring warns, min/max rejection is *structural* (≈2k/count, always
+  ~large at low frame counts), so a "we cleaned X%" line off it would be misleading; when the run used min/max,
+  soften to a generic "removed the brightest/darkest outlier per pixel" phrasing or omit the percentage. (2) Only
+  show it when the fraction is meaningfully above zero (a stack that rejected ~nothing shouldn't claim a clean-up).
+  (3) Plain words only — no "κ-σ", "sigma", or percentages-without-context. **Feasibility:** offline, additive,
+  reversible, no config/DB/API-shape change (the rejection figure is already on the run record / provenance card);
+  testable with a pure formatter helper (fraction → message, incl. the zero/near-zero and min-max cases) plus a
+  component test. **Confirmed absent:** the backlog surfaces *frame-level* rejections ("why N subs were left out",
+  the rejection-summary buckets) and the √N noise cut, but **not** the *per-pixel* "trails/CRs cleaned out" trust
+  line — a distinct, delightful beginner cue. Serves understand + enjoy + trust for every clean night.
 - **NEW BEGINNER FEATURE (Scout 2026-07-23) — "How hard is this target for a Seestar?": a plain-language
   difficulty / what-to-expect badge on the Target page that sets expectations *before* a beginner is disappointed
   by a faint result.** *(Friendliness / "plan + understand" pillar, PRIORITY 3; size M; offline, additive, no new
