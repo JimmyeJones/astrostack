@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 
+from seestack.io.project import readable_frame_path
 from webapp import deps, pipeline
 from webapp.schemas import (
     STACK_DEFAULTS_META_KEY,
@@ -809,8 +810,8 @@ async def reference_sub_png(safe: str, run_id: int, request: Request) -> Respons
         ref = _pick_reference_sub(proj)
         if ref is None:
             raise HTTPException(status_code=404, detail="No frame to render for this run")
-        src = ref.cached_path or ref.source_path
-        if not src or not Path(src).exists():
+        src = readable_frame_path(ref)
+        if not src:
             raise HTTPException(status_code=404, detail="Frame file not found on disk")
         pattern = (ref.bayer_pattern or "RGGB").upper()
         if pattern not in _BAYER_PATTERNS:
@@ -899,7 +900,7 @@ async def one_sub_vs_stack_noise(safe: str, run_id: int, request: Request) -> di
             raise HTTPException(status_code=404, detail="No such run")
         fits_path = run.fits_path
         ref = _pick_reference_sub(proj)
-        src = (ref.cached_path or ref.source_path) if ref is not None else None
+        src = readable_frame_path(ref) if ref is not None else None
         pattern = (ref.bayer_pattern or "RGGB").upper() if ref is not None else "RGGB"
         if pattern not in _BAYER_PATTERNS:
             pattern = "RGGB"

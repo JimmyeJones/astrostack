@@ -38,7 +38,7 @@ import numpy as np
 
 from seestack.bg.per_frame import BackgroundOptions
 from seestack.core.xp import GPU_AVAILABLE
-from seestack.io.project import FrameRow, Project
+from seestack.io.project import FrameRow, Project, readable_frame_path
 from seestack.stack.accumulator import (
     MinMaxRejectAccumulator,
     WeightedSumAccumulator,
@@ -969,7 +969,7 @@ def run_stack(
     if options.subpixel_refine:
         try:
             ref_result = align_one(
-                fits_path=str(ref.cached_path or ref.source_path),
+                fits_path=str(readable_frame_path(ref) or ""),
                 bayer_pattern=ref.bayer_pattern,
                 # The reference frame's *own* WCS is the source; the canvas WCS
                 # is the destination (these differ once a mosaic canvas is used).
@@ -1608,8 +1608,8 @@ def _drizzle_pass(
     done = 0
 
     def prepare(frame: FrameRow):
-        path = frame.cached_path or frame.source_path
-        if not path or not Path(path).exists() or not frame.wcs_json:
+        path = readable_frame_path(frame)
+        if not path or not frame.wcs_json:
             return None
         from seestack.bg.hot_pixels import suppress_hot_cold_pixels
         from seestack.bg.per_frame import subtract_background
@@ -1700,13 +1700,13 @@ def _align_for_stack(
     frame cropped to its footprint plus its canvas offset — or ``None`` on
     benign failure (missing file, no WCS, footprint off-canvas).
     """
-    path = frame.cached_path or frame.source_path
-    if not path or not Path(path).exists():
+    path = readable_frame_path(frame)
+    if not path:
         return None
     if not frame.wcs_json:
         return None
     result = align_one(
-        fits_path=str(path),
+        fits_path=path,
         bayer_pattern=frame.bayer_pattern,
         src_wcs_text=frame.wcs_json,
         dst_wcs_text=dst_wcs_text,

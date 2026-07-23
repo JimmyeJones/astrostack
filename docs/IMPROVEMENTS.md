@@ -207,9 +207,25 @@ when you take it.
   minority once ≥10 frames), keeping the small tier. Add a fail-before/pass-after regression test with a synthetic
   variable-subset flag pattern. **Scout: validate on a real edge-on-galaxy stack before flipping.**
 
-- **⭐ Clearing the Stage-1 cache silently makes a target un-stackable *and* un-QC-able even though the original
+- ~~**⭐ Clearing the Stage-1 cache silently makes a target un-stackable *and* un-QC-able even though the original
   subs are still on disk — every frame is dropped because the DB's dangling `cached_path` is followed instead of
-  falling back to the readable `source_path`.** *(Data-availability / broken-UX; Medium; found by the 2026-07-23
+  falling back to the readable `source_path`.**~~ — **FIXED v0.174.2** (Builder 2026-07-23, branch
+  `claude/pensive-faraday-49k930`; traced + reproduced + regression-tested). Added the shared helper
+  `seestack/io/project.py::readable_frame_path(frame) -> str | None`, which returns the **first of
+  `(cached_path, source_path)` that actually exists on disk** (None if neither), and routed every consumer of the
+  old `cached_path or source_path` short-circuit through it: `qc/runner.py::build_qc_arglist`,
+  `solve/runner.py::build_solve_arglist`, `stack/stacker.py` (`_align_for_stack`, the drizzle `prepare`, and the
+  sub-pixel reference-patch read), plus the webapp preview/thumbnail sites (`routers/system.py::_first_solvable_frame`,
+  `routers/frames.py`, `routers/stack.py` ×2). Strictly widening: when the cache file exists behaviour is
+  byte-for-byte identical (cache is tried first); only when the cache is *missing* does it now fall back to the
+  readable source instead of silently dropping the frame — so clearing the Stage-1 cache (a documented-safe
+  action) no longer breaks a target whose original subs are still on disk. A frame with **both** paths dead is
+  still skipped, as before. Regression tests: `tests/test_readable_frame_path.py` (+6 — helper unit cases for
+  cache-preferred / dangling-cache→source fallback / both-dead→None / missing-cache-column, and integration cases
+  proving `build_qc_arglist` and `build_solve_arglist` now offer the live source for a frame whose cache pointer is
+  dangling; fail-before: the frame was dropped). Upgrade-safe: no config/DB/API-shape/on-disk/default change (pure
+  path-selection logic). *(Original trace kept below for provenance.)*
+  *(Data-availability / broken-UX; Medium; found by the 2026-07-23
   QC/watcher/ingest adversarial audit — **traced end-to-end AND reproduced**.)* The `POST
   /api/targets/{safe}/cache/clear?stage=stage1` (or `all`) endpoint (`webapp/routers/storage.py::clear_cache`) is
   UI-exposed and documented as **safe** — "only re-creatable intermediates … the project DB and the stacked
@@ -4192,6 +4208,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   readable → silent; a fraction unreadable → the honest line fires and feeds the thin-stack threshold. Best done
   *after* (or with) the ⭐ stale-cache fix, since it depends on the same helper. *(Traced during the 2026-07-23
   QC/watcher/ingest audit.)*
+- **NEW (Builder 2026-07-23, filed while fixing the ⭐ stale-cache bug) — decide whether a cleared/missing Stage-1
+  cache should self-heal on the next scan.** *(Autonomy / friendliness; PRIORITY 2–3; size S; NEEDS a product call
+  before building — that's why it's an idea, not a bug.)* The stale-cache fix (v0.174.2) makes every consumer fall
+  back to `source_path` via `readable_frame_path`, so correctness is fully restored — a target with a cleared cache
+  keeps working from source. But the cache is **never rebuilt**: `_cache_stale(cached_path, src)`
+  (`seestack/io/ingest.py`) catches the `OSError` from stat-ing a *missing* cache file and returns `False` (not
+  stale), and `ingest_files` only re-copies when `not prior.cached_path` (still truthy), so the frame runs off the
+  (possibly slow NAS) source on every future scan. Rebuilding it on the next scan would restore the fast local path
+  — but there's a **real tradeoff**: users often clear Stage-1 to *reclaim disk*, and auto-refilling it (Stage-1 is
+  just a source copy) would silently undo that. **Options:** (a) treat a *missing* (not just size-mismatched) cache
+  file as needing re-copy in `_cache_stale`/`ingest_files` — simplest, but re-fills after a deliberate clear; (b)
+  have `clear_cache` null the `cached_path` column in the same transaction so the intent ("I cleared it") is
+  explicit and only *then* does a scan re-copy — cleaner separation, but a small additive DB write on a path that
+  currently touches no DB; (c) leave it as-is (source fallback only) and add a UI hint that clearing Stage-1 trades
+  disk for slower reads. Pick one with the owner's disk-vs-speed preference in mind. Not blind-shipped because the
+  "right" default is a product call. *(Found while routing the six read-sites through `readable_frame_path`.)*
 - **NEW (Scout 2026-07-23) — "Try harder to locate these": a more-sensitive plate-solve re-pass for the
   *accepted-but-unsolved* subs, so a faint/sparse-star field's subs actually reach the stacker.** *(Autonomy +
   trust; PRIORITY 2; size M. Directly attacks the ROOT CAUSE half of the ⭐⭐ top owner bug — thin auto-stacks on

@@ -18,8 +18,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from pathlib import Path
 
+from seestack.io.project import readable_frame_path
 from seestack.solve.astap import ASTAPError, ASTAPSolver, classify_solve_setup_error
 
 log = logging.getLogger(__name__)
@@ -114,12 +114,12 @@ def build_solve_arglist(
             continue
         if f.wcs_json:
             continue  # already solved
-        path = f.cached_path or f.source_path
-        if not path or not Path(path).exists():
+        path = readable_frame_path(f)
+        if not path:
             continue
         ra_hint = f.ra_hint_deg if use_hint else None
         dec_hint = f.dec_hint_deg if use_hint else None
-        out.append((f.id, str(path), astap_path, fov_deg, timeout_s, ra_hint, dec_hint, radius_deg))
+        out.append((f.id, path, astap_path, fov_deg, timeout_s, ra_hint, dec_hint, radius_deg))
     return out
 
 

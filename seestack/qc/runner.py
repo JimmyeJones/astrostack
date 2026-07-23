@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from pathlib import Path
 
+from seestack.io.project import readable_frame_path
 from seestack.qc.metrics import FrameMetrics, compute_frame_metrics
 
 log = logging.getLogger(__name__)
@@ -68,10 +68,10 @@ def build_qc_arglist(project, *, only_new: bool = False) -> list[tuple[int, str,
         if only_new and (f.star_count is not None
                          or (f.reject_reason or "").startswith("qc_error_final")):
             continue
-        path = f.cached_path or f.source_path
-        if not path or not Path(path).exists():
+        path = readable_frame_path(f)
+        if not path:
             continue
-        out.append((f.id, str(path), f.bayer_pattern, True))
+        out.append((f.id, path, f.bayer_pattern, True))
     return out
 
 

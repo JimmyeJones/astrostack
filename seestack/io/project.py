@@ -178,6 +178,27 @@ class FrameRow:
     user_override: bool = False
 
 
+def readable_frame_path(frame: "FrameRow") -> str | None:
+    """Return the first of a frame's on-disk paths that actually exists.
+
+    A frame carries a Stage-1 ``cached_path`` (a local copy) and the original
+    ``source_path``. The cache is disposable: clearing it (the UI's "clear
+    cache" button, or a NAS blip) can leave ``cached_path`` pointing at a file
+    that no longer exists while the original source is still perfectly
+    readable. Prefer the cache when its file is present (it is local/fast), but
+    fall back to the source rather than silently dropping the frame from
+    QC/solve/stack. Returns ``None`` only when neither path exists on disk.
+
+    This is strictly wider than the old ``cached_path or source_path`` idiom:
+    when the cache exists the result is identical (cache tried first); only a
+    *missing* cache now falls through to the source instead of failing.
+    """
+    for path in (frame.cached_path, frame.source_path):
+        if path and Path(path).exists():
+            return str(path)
+    return None
+
+
 _INSERT_COLS = [
     "source_path", "cached_path", "aligned_cache_path",
     "timestamp_utc", "exposure_s", "gain", "sensor_temp_c",
