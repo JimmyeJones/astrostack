@@ -80,8 +80,18 @@ higher on this list wins — always:
 4. **Best-possible image quality** for the OSC Seestar workflow (clean, detailed
    final images).
 
-**⚡ IMMEDIATE PRIORITY (owner-reported 2026-07, real data on v0.158) — TWO output
-bugs (see the ⭐⭐ top entries in `docs/IMPROVEMENTS.md` → "Bugs"):**
+**⚡ IMMEDIATE PRIORITY (owner-reported 2026-07, real data on v0.158) — LIKELY ROOT
+CAUSE first: the scanner ignores the Seestar folder convention.** See the ⭐⭐⭐ top
+entry in `docs/IMPROVEMENTS.md` → "Bugs". A Seestar writes `<Target>_sub/` (raw
+subs) *and* `<Target>/` (its own single stacked OUTPUT), plus `_mosaic`/`_video`
+variants; `scan_and_organize` names a target by the raw folder name and ingests the
+**output** and **video** folders as if they were raw frames — so a target built from
+an output folder is a **1-frame stack (gibberish) at that image's lower resolution**,
+which plausibly explains BOTH output bugs below. Also keep **mosaic vs single-field
+of the same object as separate targets** (don't position-auto-merge them). Fix the
+scanner first, then re-check whether (A)/(B) below persist.
+
+**Then the two output symptoms (see the ⭐⭐ entries in `docs/IMPROVEMENTS.md` → "Bugs"):**
 
 **(A) Final stacked-output RESOLUTION is much lower than it should be.** Reproduce
 and pin which artifact loses pixels: prime suspect is the **memory-budget
