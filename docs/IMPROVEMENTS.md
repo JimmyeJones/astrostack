@@ -47,6 +47,20 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+> **Re-audit — stacking engine core CLEAN; one shipped cancel-handling fix + one new low-severity auto-grade bug (Scout 2026-07-23, branch `claude/kind-mccarthy-5xqphm`).**
+> Adversarially re-read the stacking engine again end-to-end and independently verified the previously-audited files
+> (`accumulator.py` WeightedSum/MinMaxReject/Welford, `align.py` windowed reproject + subpixel-shift NaN
+> propagation + CPU cval=NaN/GPU cval=0-valid-mask parity, `weighting.py` geometric-mean + `1/s²` inverse-variance
+> fold, `render/thumbnail.py` STF/asinh stretch + NaN-aware downsample, `bg/final_gradient.py` skew-guard + degrade
+> ladder, `post/color_cal.py` clamps + starless fallback, `stacker.py` κ-σ pass-1/2 + memory guard) plus the
+> `qc/grading.py` + `webapp/pipeline.py` auto-grade path and `calibrate/apply.py`+`masters.py` — all matching the
+> documented repeatedly-clean state (NaN=no-coverage held, rejection math sound, memory bounds respected,
+> preview↔export parity intact). Two independent audit sub-agents (stacker.py orchestration; calibrate + auto-stack
+> pipeline) surfaced candidates; after tracing/reproducing them myself: (1) a **broken-UX cancel-handling bug** on
+> the *default* κ-σ stack path — **fixed + regression-tested + shipped this run** (struck below); (2) a **new,
+> reproduced Low-severity auto-grade over-rejection bug** (per-scan cascade breaks the documented 25% cap) — filed
+> below. The engine *core* reductions are clean. Curation + 2 ideas filed below.
+>
 > **Re-audit — full stacking engine CLEAN, no new bug (Scout 2026-07-23, branch `claude/kind-mccarthy-jgkizl`).**
 > Baseline suite green (**1742 passed, 2 skipped**). Adversarially re-read the stacking engine again end-to-end:
 > `accumulator.py` (WeightedSum, MinMaxReject k-insertion/degrade bands + `rejection_counts` drop schedule,
@@ -191,6 +205,56 @@ when you take it.
   minimum-frames guard that surfaces "only N of M subs could be stacked because …" in the auto/Process job
   summary). The repro scaffold (`scratchpad/repro_thin.py`, bg-noise-vs-N) is the harness to extend. Keep this
   entry at the top until the frame-count root cause is fixed.
+
+- **Auto-grade's documented "never reject more than 25% per pass" cap is exceeded cumulatively, because the
+  ingest pipeline re-grades a target over its *shrinking accepted survivor set* on every scan.** *(Autonomy /
+  over-rejection correctness; Low severity — opt-in, off by default, modest magnitude; **traced + reproduced** by
+  the 2026-07-23 calibrate/pipeline audit.)* `grade_frames` (`seestack/qc/grading.py:317-325`) caps a single pass
+  at `MAX_REJECT_FRACTION=0.25` of the *considered* set, and the module header explicitly promises this "must never
+  nuke half a library, no matter how pathological the distribution." That guarantee holds **per call only.**
+  `webapp/pipeline.py:110-111` re-invokes `_auto_grade_target` for every *touched* target on every scan, and a
+  Seestar drips subs in continuously, so an actively-imaged target is re-graded on essentially every scan.
+  `_auto_grade_target` (`pipeline.py:267-284`) grades `proj.iter_frames(accepted_only=True)` — and an auto-graded
+  frame is set `accept=False` with `user_override` **False** (`grading.py`/`apply_grade_report`), so it drops out of
+  the `accepted_only` population next scan. Each subsequent pass therefore re-centres on a tighter surviving set
+  (removing the low tail *raises* the median and *shrinks* the MAD), so borderline-good frames that cleared the
+  practical-significance floor last pass now cross it — the total auto-rejected fraction creeps past the 25% cap the
+  code promises. **Reproduced** (`scratchpad/repro_cascade3.py`): on a realistic bimodal "cloud rolled through for
+  part of the night" 100-sub session, a single pass rejects **22/100 (22%)** but the per-scan cascade converges at
+  **27/100 (27%)** — over the documented 25% rail. The practical floors and the `MIN_FRAMES_FOR_GRADING=10` floor
+  keep the magnitude modest (it does **not** collapse to ~1 frame and is **not** the ⭐⭐ gibberish root cause — that
+  needs the solve/streak path), so severity is Low, but it is a real, silent violation of a documented invariant and
+  it compounds the over-drop theme. **Gated:** only bites installs that turned `auto_grade_frames` **on** (defaults
+  `False` — `config.py:114`). **Fix directions (Builder):** (a) grade **once over the whole ever-accepted
+  population** each pass — feed the auto-rejected-but-not-user-overridden frames back into `grade_frames`'
+  statistics and the cap denominator, so the 25% cap is measured against the original count, not the shrinking
+  survivors (they can be re-accepted freely, so re-considering them is safe); or (b) make the cap **cumulative** —
+  track how many frames auto-grade has already rejected for the target and stop once the running total hits 25% of
+  the original population. Add a fail-before/pass-after regression test that runs several grade→apply→re-grade
+  cycles on a synthetic bimodal population and asserts the cumulative auto-rejected fraction never exceeds the cap.
+  Confidence: traced + reproduced.
+
+- ~~**Cancelling an ordinary (default κ-σ) stack raises `ValueError` instead of returning a graceful
+  `StackResult(cancelled=True)`, so a routine user cancel surfaces as a red job *error*.**~~ — **FIXED v0.174.5**
+  (Scout 2026-07-23, branch `claude/kind-mccarthy-5xqphm`; **traced + reproduced + regression-tested**).
+  *(Stacking-engine / broken-UX; Medium-UX — hit the **default** path; found by the 2026-07-23 stacker.py
+  orchestration audit.)* The drizzle two-pass path guards its "no usable frames" error with `and not cancel()`
+  (`seestack/stack/stacker.py` ~line 1107), but the standard **κ-σ / min-max / single-pass** branches did not. Since
+  `sigma_clip` is the **default** (`StackOptions.sigma_clip=True`), a normal cancel hit the bug: `_pass` increments
+  `done` then breaks on `cancel()`, so a cancel *during* pass 1 leaves `n_used_p1 > 0`, then pass 2 breaks on its
+  very first frame (`n_used_p2 == 0` → `n_used == 0`), and the pass-2 zero-guard raised
+  `ValueError("pass 2 produced no usable frames")` **before** reaching the cancelled-result return at ~line 1279 —
+  so `run_stack` raised out to the job body, which marked the job a red *error* rather than a clean *cancelled*. A
+  cancel before the first frame completes hit the same flaw in the pass-1 / min-max / single-pass guards. Reproduced
+  end-to-end on a 4-sub synthetic project (`scratchpad/repro_cancel*.py`): a default-options `run_stack` with
+  `cancel=lambda: True` raised `ValueError`; with a cancel-after-first-frame it also raised. **Fix:** added
+  `and not cancel()` to all four standard-path zero-guards (min-max ~1155, pass-1 ~1188, pass-2 ~1243, single-pass
+  ~1273), exactly mirroring the drizzle path, so a cancelled run falls through to the graceful
+  `StackResult(cancelled=True)`. Byte-for-byte unchanged for a **completed** run (the guards still raise when
+  `n_used==0` and the run was *not* cancelled — a genuine all-unreadable / no-overlap failure). Regression:
+  `tests/test_stack_cancel.py` (+4 — cancel-before-first-frame, cancel-during-pass-1 on the default κ-σ path,
+  min-max cancel, single-pass cancel; all fail-before with `ValueError`, pass-after returning `cancelled=True`).
+  Upgrade-safe: within-function control-flow change, no config/DB/API-shape/on-disk/default change.
 
 - **⭐ Streak auto-reject silently drops a large fraction of good subs on a bright *elongated* target (edge-on
   galaxy, Needle/NGC 4565/891, an elongated nebula or comet) — on by default.** *(Stacking-engine correctness;
@@ -4202,6 +4266,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+- **IMPROVEMENT IDEA (Scout 2026-07-23) — the walk-away auto-stack should auto-pick its outlier rejection from the
+  sub count (turn on the existing `auto_reject` for the auto-stack pipeline).** *(Autonomy + image quality;
+  pillar 2/4; size S–M.)* `StackOptions.auto_reject` already exists and does exactly the right thing — it resolves
+  (per `_resolve_auto_reject`) to the **order-statistic min/max** reject on small stacks and to weight-respecting
+  **κ-σ** once the stack is large enough for κ-σ to bite — but it's **off by default**, so a beginner's fully
+  unattended auto-stack currently runs plain κ-σ (`sigma_clip=True`). The gap that matters: κ-σ is *mathematically
+  blind to a lone satellite/plane trail* until ~11 frames (a single outlier's z-score against stats that include it
+  stays below κ), so a walk-away stack of, say, 8 subs with one plane trail **keeps the trail** — a visible defect
+  in the beginner's finished picture, with no knob they'd know to touch. min/max removes exactly that lone extreme
+  even at n≥3. **Shape:** have the auto-stack path (`webapp/pipeline.py::_stack_target` / the StackOptions it builds
+  for an *auto* run) set `auto_reject=True`, so a small walk-away stack gets order-statistic rejection and a large
+  one gets κ-σ, with zero user decisions. **Upgrade-safe:** flip it **only** for newly-created auto-stack runs (the
+  options are persisted per-run), never for existing run records or the manual Stack form default — additive, no
+  behaviour change to a run already on disk. Add a test asserting an auto-stack of a small synthetic set with an
+  injected lone bright outlier removes it (min/max) while a large set uses κ-σ. Serves the North Star (a clean
+  trustworthy image with no fuss) directly.
 - **IMPROVEMENT IDEA (Scout 2026-07-23) — "stack-then-solve" bootstrap: rescue a faint field that won't plate-solve
   per-sub by solving a rough integration instead, then reusing that WCS.** *(Autonomy / image-quality — directly
   attacks the ⭐⭐ owner top bug's root cause; PRIORITY 2; size L; idea, not yet traced to code — needs the owner's
@@ -6248,6 +6328,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Is the Moon going to wash this out tonight?": a plain-language
+  Moon-interference readout for a target.** *(Planning / "plan + get a good image" pillar, PRIORITY 2–3; size M;
+  offline — uses the ephemeris library already bundled for the sky/plate-solve code, no new dep, no network.)*
+  **Why a beginner wants it:** the single biggest avoidable reason a Seestar OSC owner's faint-nebula night comes
+  out disappointing is a **bright Moon nearby** — it floods the sky background and buries faint signal, and a
+  non-expert has no intuition for "the Moon is 85% full and 25° from M33 tonight, so this is a bad night for it;
+  point at a bright galaxy, globular, or double star instead." Today's planners rank targets by *altitude/season*
+  but say nothing about the Moon, so a beginner burns a clear night on a target that can't work. **Shape:** on the
+  Target page (and optionally folded into the existing "Tonight" / "Up now, worth more time" planners), show a small
+  card: **Moon phase + % illumination tonight, its altitude, and its angular separation from this target**, turned
+  into one verdict — *"Good: Moon is down / far / a thin crescent"* / *"So-so: bright Moon but well separated"* /
+  *"Poor for faint targets: {illum}% Moon only {sep}° away — try a bright galaxy or star cluster tonight."* All of
+  this is a pure ephemeris computation from the observer's location + the target's stored RA/Dec + the date (moon
+  phase/position and angular separation), so it's a deterministic, testable, **offline** helper. **Beginner bar:**
+  sane default (auto-shown when a target has a plate solution / coordinates), plain-language ("wash out", not
+  "sky-background ADU"), and it makes the *next clear night* produce a better picture with zero expert knobs — no
+  mono/narrowband/pro surface. **Slices:** (1) a pure engine helper `moon_interference(lat, lon, when, ra, dec) ->
+  {phase, illum_frac, moon_alt_deg, separation_deg, verdict, plain_text}` with unit tests against known
+  Moon-phase/separation dates; (2) a `/api/targets/{safe}/moon` endpoint; (3) a small Target-page card + a
+  reuse hook for the planners. Ship slice (1)+(2) first (fully testable), then the UI.
 - **NEW BEGINNER FEATURE (Scout 2026-07-23) — "We cleaned N passing lights out of your picture": a one-line trust
   cue on a finished stack that turns the κ-σ rejection tally into plain language.** *(Trust / "understand + enjoy"
   pillar, PRIORITY 3 with an image-quality-trust flavour; size S; frontend-mostly, additive, no new deps.)* **Why a
