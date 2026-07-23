@@ -17,6 +17,7 @@ import { StackView } from "./routes/Stack";
 import { HistoryView } from "./routes/History";
 import { EditorView } from "./routes/Editor";
 import { GalleryView } from "./routes/Gallery";
+import { BestPicturesView } from "./routes/BestPictures";
 import { JobsView } from "./routes/Jobs";
 import { LogsView } from "./routes/Logs";
 import { SettingsView } from "./routes/Settings";
@@ -56,6 +57,7 @@ const router = createBrowserRouter([
       { path: "calibration", element: <CalibrationView /> },
       { path: "combine", element: <CombineView /> },
       { path: "gallery", element: <GalleryView /> },
+      { path: "best", element: <BestPicturesView /> },
       { path: "compare", element: <CompareView /> },
       { path: "tonight", element: <TonightView /> },
       { path: "sky-so-far", element: <SkySoFarView /> },

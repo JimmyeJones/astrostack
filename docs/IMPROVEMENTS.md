@@ -5960,7 +5960,34 @@ problems. Dogfood it every big-picture run and fix root causes.
   (winter/summer target, circumpolar, never-rises, empty-coords self-hide). Keeps the beginner-feature pipeline
   stocked with a *plan* capability distinct from the tonight-only "What should I shoot next?" and 14-night
   "next windows" cards.
-- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "My best pictures": an auto-curated, cross-target portfolio wall of
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "My best pictures": an auto-curated, cross-target portfolio wall of
+  your finest finished stacks.**~~ — **SHIPPED v0.173.0** (Builder 2026-07-23, branch `claude/pensive-faraday-iv26r2`).
+  Built end-to-end across engine/webapp/frontend, reusing the existing gallery/lightbox/share plumbing — no new astro
+  math, no network, no model, no schema/config/API-shape/default change (read-only aggregation over columns that
+  already exist). **Engine** (`seestack/portfolio.py`): a pure, unit-tested `rank_portfolio(entries, *, limit)` +
+  `PortfolioEntry`/`RankedEntry` dataclasses. It scores each target's representative stack on a transparent blend —
+  `PORTFOLIO_WEIGHTS` = integration 0.40 / frames 0.25 / noise 0.25 / coverage 0.10 — with every metric normalised
+  against the *best value present in the user's own collection* (so no absolute calibration is needed), noise scored
+  lower-is-better (`min_σ / σ`), and each entry's score **renormalised over just the metrics it carries** so an old
+  run missing `noise_sigma`/`total_exposure_s` is never penalised for the null. Ordering is fully deterministic
+  (score → integration → frames → key). **Webapp** (`webapp/routers/gallery.py`): read-only
+  `GET /api/gallery/best?limit=` that takes each target's *newest run with a preview on disk* (a finished picture),
+  ranks them, and returns the top N with the ranking `score` — wrapping every `Project.open` in the established
+  `except Exception: continue` guard (a broken/rolled-back project is skipped, never 500s the wall) and **self-hiding**
+  (empty `items`) until ≥2 finished pictures exist so a new install shows nothing rather than a wall of one.
+  **Frontend**: a `BestPicturesView` route (`/best`, new "My best pictures" nav entry) laying the ranked stacks out
+  as a lightbox-able wall with a quiet #1–#3 rank chip and a plain-language "why it's good" line
+  (`components/bestPictures.ts::bestPictureReason` → e.g. "3.4 h · 500 frames"), plus a compact **self-hiding
+  Dashboard strip** (`BestPicturesStrip`) showing the top 4 above Recent stacks. One click opens the existing
+  `ImageLightbox` (download/JPEG/share/scan-to-phone/wallpaper all reused). Additive/upgrade-safe throughout. Tests:
+  `tests/test_portfolio.py` (+10: ordering, tie-breaks, missing-metric fallbacks, single-entry, order-independence,
+  truncation), `tests/webapp/test_gallery_best.py` (+5: self-hide floor, deep-cleaner-first ranking, newest-per-target,
+  limit, broken-project skip), `frontend/.../bestPictures.test.ts` (+5) and `BestPictures.test.tsx` (+2: ranked wall
+  + empty-state). _(Original spec below.)_
+
+  <details><summary>Original spec</summary>
+
+  **NEW BEGINNER FEATURE (Scout 2026-07-23) — "My best pictures": an auto-curated, cross-target portfolio wall of
   your finest finished stacks.** *(Friendliness / "enjoy + share" pillar, PRIORITY 3; size M.)* **Why:** today the
   app's imagery is organised strictly *per target* — each target has its Gallery/History and a pinned cover, and
   the Dashboard shows one tile per target. There is **no single place that celebrates a beginner's best results
@@ -5990,6 +6017,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   (S–M):** a `BestPicturesWall` route + a compact Dashboard strip reusing the existing lightbox/share components.
   **(c) tests:** rank ordering + tie-breaks + graceful-skip of a broken project + empty-state self-hide. Keeps the
   beginner-feature pipeline stocked with a fresh *enjoy/share* capability that no existing card covers.
+
+  </details>
+- **FOLLOW-ON to "My best pictures" (Builder 2026-07-23) — a "Pin to My best" toggle so a beginner can force-include
+  a sentimental favourite the auto-ranker didn't surface.** *(Friendliness / "enjoy + share" pillar, PRIORITY 3;
+  size S–M.)* **Why:** the shipped v0.173.0 wall ranks purely on the quality proxy (integration/noise/frames/
+  coverage), which is the right *default* — but a beginner's *favourite* picture isn't always their deepest one (a
+  lucky comet grab, a first-ever galaxy, a shot with sentimental value). The Scout's original spec called for an
+  optional pin, deferred from the first slice to keep it additive and shippable. **Feature:** a small "Pin to My
+  best" star on each finished picture (Target result / History / Gallery / the wall itself) that force-includes that
+  run at the top of the wall regardless of score, and a matching "unpin". **Upgrade-safe design:** reuse the
+  existing per-run `notes`/keeper mechanism *or* add a nullable additive `pinned_best` column via
+  `SCHEMA_VERSION`+`_migrate_schema` (never a default flip); the `/api/gallery/best` response already carries
+  `score`, so surface a `pinned` boolean alongside it and have `rank_portfolio` (or the endpoint) float pinned
+  entries above the ranked tail. **Builder slices:** (a) storage — additive pin flag + a `POST` to set/clear it
+  (server-side, no client paths); (b) endpoint — include pinned runs even below the quality tail and mark them
+  `pinned: true`; (c) frontend — a star toggle + a "Pinned" chip on the wall; (d) tests — pin floats to top,
+  unpin restores rank order, migration from an un-pinned DB. Keeps the wall's zero-knob default while giving the
+  one escape hatch a beginner actually asks for ("but *this* one's my favourite").
 - ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "Scan to get it on your phone": a QR code beside the finished
   picture's download button that a beginner scans to pull the JPEG straight onto their phone.**~~ — **SHIPPED
   v0.172.0** (Builder 2026-07-23, branch `claude/pensive-faraday-w4ht9n`). Frontend-only, fully offline. A pure
