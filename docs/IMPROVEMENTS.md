@@ -6486,8 +6486,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
-- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "How big is this in the sky?": a scale bar + full-moon-comparison on
-  the finished picture, from the stack's own WCS.** *(Understand + enjoy + share / "get a good image" pillar,
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "How big is this in the sky?": a scale bar + full-moon-comparison on
+  the finished picture, from the stack's own WCS.**~~ — **SHIPPED v0.178.0** (Builder 2026-07-23, branch
+  `claude/pensive-faraday-nynziu`). Built end-to-end, fully offline (reuses `celestial_wcs_from_fits`; no new dep).
+  **Engine** (`seestack/scalebar.py`): a pure, unit-tested `scale_bar_for(arcsec_per_px, width_px, height_px) ->
+  ScaleBar | None` that picks the largest "nice" round rung (1″…5°) spanning ≤25% of the frame width, and returns its
+  label ("30′"), its length as a **fraction of the image width** (so the frontend draws it over any scaled preview),
+  the frame's width in arcminutes, and a plain-language full-Moon comparison ("the whole frame is about 5.4 full
+  Moons wide" / "about 25% the width of the full Moon"). None for unusable input (no/degenerate WCS). **Webapp**
+  (`webapp/routers/stack.py`): the existing `…/stack-runs/{id}/annotations` endpoint now also returns `scale_bar`
+  (derived from the run's WCS pixel-scale matrix via a `_scale_bar_from_wcs` helper), null when the run has no usable
+  celestial WCS — so the same one fetch drives both "Identify" and "Scale". **Frontend**: `AnnotatedImage` grew an
+  optional `scaleBar`/`showScale` overlay (a pure, tested `scaleBarLayout` places a corner bar at
+  `fraction·renderedWidth`), and the History `RunCard` gained a self-hiding **"Scale"** toggle (grape, `IconRuler2`)
+  beside "Identify" that draws the bar + a capitalised Moon-comparison caption. Additive, read-only; no
+  config/DB/API-shape/default change (the annotations payload gains a field; older/edited runs report `scale_bar:
+  null` and simply don't offer it). Tests: `test_scalebar.py` (+8), `test_stack_annotations.py` (+2 assertions),
+  `AnnotatedImage.test.tsx` (+3 `scaleBarLayout`), `History.test.tsx` (+1 Scale toggle). *(Original idea kept below
+  for provenance.)* *(Understand + enjoy + share / "get a good image" pillar,
   PRIORITY 3–4; size S–M; fully offline, additive, read-only — no new deps.)* **Why a beginner wants it:** a fresh
   imager has no intuition for angular scale — they don't know whether their M31 frame is 1° or 3° across, or how the
   Ring Nebula's tiny apparent size compares to what they see. A scale bar ("30′") plus a plain-language comparison

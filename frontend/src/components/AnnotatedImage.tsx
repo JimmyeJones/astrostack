@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { FieldObject } from "../api/client";
+import type { FieldObject, ScaleBar } from "../api/client";
 
 /**
  * "What's in this picture?" — overlay named catalog objects on a finished stack.
@@ -55,8 +55,31 @@ export function objectLabel(o: FieldObject): string {
   return o.name && o.name.trim() ? o.name : o.catalog_id;
 }
 
+/**
+ * On-screen geometry for the scale bar over a contain-fit image. The bar's
+ * `fraction` is a share of the *image* width, so its on-screen length is
+ * `fraction · renderW` (the letterbox-trimmed rendered width). Returns `null`
+ * when nothing can be placed yet (no bar, or a zero-size box). Pure so it's
+ * unit-testable without a DOM.
+ */
+export function scaleBarLayout(
+  bar: ScaleBar | null | undefined,
+  imgWidth: number,
+  imgHeight: number,
+  boxW: number,
+  boxH: number,
+): { widthPx: number } | null {
+  if (!bar || imgWidth <= 0 || imgHeight <= 0 || boxW <= 0 || boxH <= 0) return null;
+  const scale = Math.min(boxW / imgWidth, boxH / imgHeight);
+  const renderW = imgWidth * scale;
+  const widthPx = bar.fraction * renderW;
+  if (!(widthPx > 0)) return null;
+  return { widthPx };
+}
+
 export function AnnotatedImage({
   src, alt, imgWidth, imgHeight, objects, show, height, onClick,
+  scaleBar, showScale,
 }: {
   src: string;
   alt: string;
@@ -68,6 +91,10 @@ export function AnnotatedImage({
   /** Box height in px (the image is contain-fit into full width × this height). */
   height: number;
   onClick?: () => void;
+  /** The run's angular scale bar (null when it has no usable WCS). */
+  scaleBar?: ScaleBar | null;
+  /** Draw the scale bar in the corner. When false it isn't shown. */
+  showScale?: boolean;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [box, setBox] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
@@ -86,6 +113,9 @@ export function AnnotatedImage({
   }, []);
 
   const markers = show ? objectMarkerLayout(objects, imgWidth, imgHeight, box.w, box.h) : [];
+  const bar = showScale
+    ? scaleBarLayout(scaleBar, imgWidth, imgHeight, box.w, box.h)
+    : null;
 
   return (
     <div
@@ -126,6 +156,29 @@ export function AnnotatedImage({
           </span>
         </div>
       ))}
+      {bar && scaleBar ? (
+        <div
+          data-testid="scale-bar"
+          style={{
+            position: "absolute", left: 10, bottom: 8, pointerEvents: "none",
+            display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
+          }}
+        >
+          <span style={{
+            fontSize: 11, lineHeight: 1.1, color: "#dff1ff", whiteSpace: "nowrap",
+            padding: "1px 4px", borderRadius: 4, background: "rgba(8,12,22,0.72)",
+            textShadow: "0 1px 2px rgba(0,0,0,0.9)",
+          }}>
+            {scaleBar.label}
+          </span>
+          <div style={{
+            width: bar.widthPx, height: 3, background: "rgba(223,241,255,0.95)",
+            borderRadius: 2, boxShadow: "0 0 3px rgba(0,0,0,0.9)",
+            borderLeft: "2px solid rgba(223,241,255,0.95)",
+            borderRight: "2px solid rgba(223,241,255,0.95)",
+          }} />
+        </div>
+      ) : null}
     </div>
   );
 }

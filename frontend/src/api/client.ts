@@ -619,11 +619,23 @@ export interface FieldObject {
   y_px: number;         // 0-based pixel y on the FITS grid (height_px below)
 }
 
+/** "How big is this in the sky?" — a round angular scale bar for a run. */
+export interface ScaleBar {
+  arcsec: number;          // the bar's length in arcseconds (a round number)
+  label: string;           // a friendly label ("30′" / "2°" / "45″")
+  fraction: number;        // bar length as a fraction of the image width (0–1)
+  frame_arcmin: number;    // the whole frame's width in arcminutes
+  moon_comparison: string; // one plain sentence comparing the frame to the Moon
+}
+
 /** "What's in this picture?" — objects + the grid their pixel coords live on. */
 export interface StackAnnotations {
   width: number;        // the run's FITS pixel width (x_px domain)
   height: number;       // the run's FITS pixel height (y_px domain)
   objects: FieldObject[];
+  // The scale bar for this run, or null when it has no usable celestial WCS
+  // (older/edited runs) — the overlay then simply doesn't offer it.
+  scale_bar: ScaleBar | null;
 }
 
 export interface StackRunInfo {
