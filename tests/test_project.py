@@ -154,6 +154,24 @@ def test_solve_failure_reason_counts_sees_accepted_unsolved(proj):
     assert "solve_failed:no star database" not in proj.reject_reason_counts()
 
 
+def test_frame_night_counts_buckets_by_capture_date(proj):
+    """The storage headroom estimate needs frames-per-capture-night. The tally
+    keys on the UTC date, counts rejected frames too (they consume disk), and
+    skips frames with no timestamp."""
+    proj.add_frame(FrameRow(source_path="a.fit", timestamp_utc="2026-07-20T22:01:00Z"))
+    proj.add_frame(FrameRow(source_path="b.fit", timestamp_utc="2026-07-20T23:30:00Z"))
+    # A rejected frame from the same night still counts (it was still ingested).
+    fid = proj.add_frame(FrameRow(source_path="c.fit",
+                                  timestamp_utc="2026-07-20T23:45:00Z"))
+    proj.update_frame(fid, accept=False, reject_reason="qc:fwhm")
+    proj.add_frame(FrameRow(source_path="d.fit", timestamp_utc="2026-07-21T21:10:00Z"))
+    # A frame with no timestamp contributes no dated growth signal.
+    proj.add_frame(FrameRow(source_path="e.fit", timestamp_utc=None))
+
+    counts = proj.frame_night_counts()
+    assert counts == {"2026-07-20": 3, "2026-07-21": 1}
+
+
 def test_unique_source_path(proj):
     import sqlite3
 

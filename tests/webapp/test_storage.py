@@ -67,6 +67,33 @@ def test_storage_survives_one_unreadable_target_dir(client, solved_library, monk
     assert "disk" in body
 
 
+def test_storage_reports_nightly_growth_estimate(client, solved_library):
+    """The disk payload carries the additive fields the 'nights left' headroom
+    line needs: free_bytes plus a nightly_bytes growth estimate once there are
+    ≥2 capture nights of frames on disk."""
+    # Spread the fixture's frames across two capture nights so the estimate has
+    # enough history (a single night reports null by design).
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        for entry in lib.list_targets():
+            proj = lib.open_target(entry.safe_name)
+            try:
+                for i, f in enumerate(proj.iter_frames()):
+                    night = "2026-07-20" if i % 2 == 0 else "2026-07-21"
+                    proj.update_frame(f.id, timestamp_utc=f"{night}T22:0{i % 6}:00Z")
+            finally:
+                proj.close()
+    finally:
+        lib.close()
+
+    disk = client.get("/api/storage").json()["disk"]
+    assert "free_bytes" in disk
+    assert "nightly_bytes" in disk
+    # Two nights of frames on a non-empty library → a positive estimate.
+    assert disk["nightly_bytes"] is not None
+    assert disk["nightly_bytes"] > 0
+
+
 def test_cache_clear_bad_stage_400(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
     r = client.post(f"/api/targets/{safe}/cache/clear", params={"stage": "bogus"})

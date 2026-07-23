@@ -7044,9 +7044,28 @@ problems. Dogfood it every big-picture run and fix root causes.
   its Tonight-planner entry so the user can go shoot it deliberately next. Keeps the beginner-feature pipeline stocked
   with a pure *understand/enjoy* capability distinct from every planning card already filed (those plan the *next*
   night; this reveals what's *already in the shot they just made*).
-- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "How much longer can I keep imaging?": a plain-language storage-headroom
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "How much longer can I keep imaging?": a plain-language storage-headroom
   read on the Storage page — GB free translated into *nights left at your recent rate* + a one-tap "free up space"
-  nudge.** *(Plan + autonomy / "keep going" pillar, PRIORITY 2–3; size S–M; fully offline, additive, read-only — no new
+  nudge.**~~ — **SHIPPED v0.182.0** (Builder 2026-07-23, branch `claude/pensive-faraday-47z7zx`). Built slices (a)+(b),
+  fully offline, additive, read-only — no new deps, no network, no config/DB-schema/API-shape/default change. **Engine/DB:**
+  added a read-only `Project.frame_night_counts()` (SQL `GROUP BY substr(timestamp_utc,1,10)`, counts rejected frames too —
+  they still consumed disk — and skips null-timestamp frames). **Backend estimator** (`webapp/storage_estimate.py`): a pure,
+  unit-tested `estimate_nightly_bytes(night_counts, total_library_bytes, total_frames, recent_nights=7)` that takes the
+  **median** frames/night over the most recent capture nights × the amortised bytes-per-frame
+  (`total_library_bytes / total_frames`, which honestly folds in stage-1 + stage-2 caches, thumbnails, and outputs — the
+  true cost per sub). Returns `None` (→ null) when history is too thin (<2 capture nights) or the library is empty, so it
+  never invents a rate. The `/api/storage` endpoint folds it into `disk.nightly_bytes` and also exposes `disk.free_bytes`.
+  **Frontend** (`storageHeadroom.ts` + Storage page): a pure, tested `storageHeadroom({freeBytes, nightlyBytes,
+  reclaimableCacheBytes})` turns those into one plain sentence + a coloured card — *"Room for about 18 more nights of
+  imaging before the disk fills (12 GB free, about 0.7 GB/night lately)."* Amber when < 5 nights remain, with a **"Clearing
+  regenerable caches would free about N GB — the safe thing to clear first"** nudge pointing at the existing cache-clear
+  controls; "Almost out of space" at 0 nights; and a graceful *"N GB free — not enough imaging history yet to estimate"*
+  fallback (also for an unreadable-free-space / zero-rate case). Degrades to nothing when the disk read fails. Tests:
+  `test_storage_estimate.py` (+6 — median/window/single-night/empty cases), `test_project.py`
+  (+1 `frame_night_counts` bucketing), `test_storage.py` (+1 endpoint test on the `nightly_bytes`/`free_bytes` fields),
+  `storageHeadroom.test.ts` (+7 — healthy/short/singular/almost-full/unknown/zero-rate/unreadable). *(Slice (c) — a
+  dedicated one-tap "free up space" button that pre-selects the biggest cache — remains a nice follow-on; the card already
+  links the user to the existing per-target clear controls.)* *(Original idea kept below for provenance.)* *(Plan + autonomy / "keep going" pillar, PRIORITY 2–3; size S–M; fully offline, additive, read-only — no new
   deps, no network.)* **Why a beginner (and a thousands-of-subs owner) wants it:** a Seestar drips 10-second subs onto
   the box night after night, so a real library grows by ~1–2 GB per clear night and *will* eventually fill the disk —
   at which point ingest silently fails and the owner loses a night's frames with no warning. Today the Storage page

@@ -2,12 +2,13 @@ import {
   Badge, Button, Card, Center, Group, Loader, Menu, NumberInput, Progress,
   Stack, Text, Title,
 } from "@mantine/core";
-import { IconChevronDown, IconDatabase, IconTrash } from "@tabler/icons-react";
+import { IconChevronDown, IconClock, IconDatabase, IconTrash } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, type TargetStorage } from "../api/client";
 import { QueryError } from "../components/QueryError";
+import { storageHeadroom } from "../components/storageHeadroom";
 
 function gb(bytes: number): string {
   if (!bytes) return "0 MB";
@@ -131,6 +132,12 @@ export function StorageView() {
     return <Center h={300}><Loader /></Center>;
   }
 
+  const headroom = storageHeadroom({
+    freeBytes: data.disk.free_bytes ?? null,
+    nightlyBytes: data.disk.nightly_bytes ?? null,
+    reclaimableCacheBytes: data.cache_bytes,
+  });
+
   return (
     <Stack maw={900}>
       <Title order={2}>Storage</Title>
@@ -142,6 +149,33 @@ export function StorageView() {
           <Text size="sm" c="dimmed">{data.disk.free_gb} GB free on disk</Text>
         ) : null}
       </Group>
+
+      {data.disk.free_bytes != null ? (
+        <Card
+          withBorder padding="sm" radius="md"
+          bg={headroom.level === "short"
+            ? "var(--mantine-color-yellow-light)"
+            : undefined}
+        >
+          <Group gap="xs" wrap="nowrap" align="flex-start">
+            <IconClock
+              size={18}
+              color={headroom.level === "short"
+                ? "var(--mantine-color-yellow-7)"
+                : "var(--mantine-color-dimmed)"}
+              style={{ flexShrink: 0, marginTop: 2 }}
+            />
+            <div>
+              <Text size="sm" fw={headroom.level === "short" ? 600 : 500}>
+                {headroom.sentence}
+              </Text>
+              {headroom.reclaimHint ? (
+                <Text size="xs" c="dimmed" mt={4}>{headroom.reclaimHint}</Text>
+              ) : null}
+            </div>
+          </Group>
+        </Card>
+      ) : null}
       <Text size="sm" c="dimmed">
         Caches are intermediate files (downloaded raws, aligned frames, thumbnails) that are
         regenerated automatically — safe to clear to reclaim space. Pruning stacks permanently

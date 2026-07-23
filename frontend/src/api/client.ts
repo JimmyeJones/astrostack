@@ -429,7 +429,14 @@ export interface StorageInfo {
   total_bytes: number;
   output_bytes: number;
   cache_bytes: number;
-  disk: { total_gb?: number; used_gb?: number; free_gb?: number };
+  disk: {
+    total_gb?: number;
+    used_gb?: number;
+    free_gb?: number;
+    free_bytes?: number;
+    // Estimated recent library growth, bytes/night; null when history is too thin.
+    nightly_bytes?: number | null;
+  };
 }
 
 export interface SeestarTelemetry {
