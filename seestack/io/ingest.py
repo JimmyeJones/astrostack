@@ -122,6 +122,42 @@ def _copy_to_stage1(
     return cached
 
 
+def _refresh_frame_metadata(project: Project, frame_id: int, src: Path) -> None:
+    """Re-read a refreshed source's FITS header and drop its stale plate
+    solution, so a frame whose *content* changed at a reused path is re-solved
+    and re-metadata'd from scratch instead of inheriting the previous capture's
+    WCS, timestamp, exposure and gain.
+
+    The Stage-1 cache is refreshed on a size mismatch (see ``_cache_stale``),
+    which fires for two cases: a truncated sub whose source finished copying
+    (same capture — re-reading the header is idempotent and its ``wcs_json`` is
+    already NULL, so clearing is a no-op), *and* a source path overwritten in
+    place with a different capture (a re-export/rename collision or a NAS sync
+    that reuses filenames). The second case is the one that bites: without this,
+    the old WCS is reprojected onto the new pixels and the frame lands at the
+    wrong sky position, silently. Header re-read failures are logged and
+    tolerated (the old header is kept) — the solution is still cleared so a
+    wrong WCS can never be applied."""
+    try:
+        info = load_header(src)
+    except Exception as exc:  # noqa: BLE001 — astropy raises a zoo of exceptions
+        log.warning("could not re-read header for refreshed %s: %s", src, exc)
+    else:
+        project.update_frame(
+            frame_id,
+            timestamp_utc=info.timestamp_utc,
+            exposure_s=info.exposure_s,
+            gain=info.gain,
+            sensor_temp_c=info.sensor_temp_c,
+            width_px=info.width_px,
+            height_px=info.height_px,
+            bayer_pattern=info.bayer_pattern,
+            ra_hint_deg=info.ra_target_deg,
+            dec_hint_deg=info.dec_target_deg,
+        )
+    project.reset_frame_solution(frame_id)
+
+
 def ingest_files(
     project: Project,
     cache: CacheManager,
@@ -178,6 +214,13 @@ def ingest_files(
                         # flag the refresh so the caller re-QCs this frame's target
                         # in the same run rather than waiting for new frames to land.
                         project.reset_frame_qc(prior.id)
+                        # The refreshed cache may be a *different* capture at a
+                        # reused source path, not just a completed copy of the
+                        # same sub. Re-read the header and drop the stale plate
+                        # solution so the new content is re-solved and
+                        # re-metadata'd instead of stacking at the old sky
+                        # position (idempotent for the truncated→complete case).
+                        _refresh_frame_metadata(project, prior.id, src)
                         refreshed = True
             # frame_id stays None on a skip (a registered frame is not "added"),
             # so existing consumers that gate on frame_id don't re-list it.

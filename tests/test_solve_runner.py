@@ -168,6 +168,37 @@ def test_apply_solve_result_clears_stale_solve_failed_reason(tmp_path):
         proj.close()
 
 
+def test_apply_solve_result_success_without_wcs_is_an_honest_failure(tmp_path):
+    """ASTAP reports success but no usable WCS could be extracted (malformed
+    sidecar / unparsable ``.ini``) → the frame is recorded as an explicit
+    ``solve_failed:`` failure, not left as "solved with wcs_json=None".
+
+    Regression: a nominal-success SolveResult with ``wcs_text=None`` was written
+    straight through, leaving ``wcs_json`` NULL. ``build_solve_arglist`` skips
+    only frames with a *truthy* ``wcs_json``, so the frame was re-solved on every
+    scan forever, and ``run_stack`` treated the None WCS as unsolved so it never
+    stacked — a silent, wasteful limbo. It must instead read as an honest failure
+    (``accept`` untouched, since the pixels may be fine)."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        fid = proj.add_frame(FrameRow(source_path="x.fit"))
+        apply_solve_result_to_db(proj, SolveResult(
+            frame_id=fid, fits_path="x.fit", solved=True,
+            wcs_text=None, ra_center_deg=None, dec_center_deg=None,
+            pixscale_arcsec=None, rotation_deg=None, error=None,
+        ))
+        f = proj.get_frame(fid)
+        assert f is not None
+        # No usable WCS was stored, so it is NOT counted as solved...
+        assert f.wcs_json is None
+        # ...and it is flagged as a solve failure so it stops being re-offered.
+        assert (f.reject_reason or "").startswith("solve_failed:")
+        # accept is left alone — this is a location failure, not a bad frame.
+        assert f.accept is True
+    finally:
+        proj.close()
+
+
 def test_apply_solve_result_preserves_a_user_reject_on_success(tmp_path):
     """A successful solve never un-rejects a user/QC/streak decision — only a
     ``solve_failed:`` reason is self-healed."""

@@ -278,10 +278,26 @@ when you take it.
   but a documented-safe action silently disables a target's core function while its data is intact). Confidence:
   traced + reproduced.
 
-- **Re-ingesting *different* content at an already-registered source path applies the old frame's stale plate
-  solution and header to the new pixels — the frame stacks at the wrong sky position, silently.** *(Ingest
-  correctness / data-integrity; wrong-result, **Low severity — latent, needs an atypical trigger**; found by the
-  2026-07-23 watcher/ingest adversarial audit — **traced end-to-end, not reproduced**.)* Frames are de-duplicated
+- ~~**Re-ingesting *different* content at an already-registered source path applies the old frame's stale plate
+  solution and header to the new pixels — the frame stacks at the wrong sky position, silently.**~~ —
+  **FIXED v0.174.3** (Builder 2026-07-23, branch `claude/pensive-faraday-hsmubw`; traced + regression-tested).
+  On a *content* refresh (`_cache_stale` true → the source's size no longer matches its Stage-1 cache), the
+  ingest refresh branch now calls a new `seestack/io/ingest.py::_refresh_frame_metadata(project, id, src)` which
+  (a) re-reads the FITS header and updates the frame's `timestamp_utc`/`exposure_s`/`gain`/`sensor_temp_c`/
+  `width_px`/`height_px`/`bayer_pattern`/`ra_hint`/`dec_hint`, and (b) calls the new
+  `Project.reset_frame_solution(id)` to null the plate solution (`wcs_json`, `ra_center_deg`, `dec_center_deg`,
+  `pixscale_arcsec`, `rotation_deg`) so `build_solve_arglist` re-offers the frame. So a source path overwritten
+  in place with a **different** capture (a re-export/rename collision, or a NAS sync reusing filenames) is now
+  re-solved and re-metadata'd from scratch instead of reprojecting the old WCS onto the new pixels. **Idempotent
+  for the intended truncated→complete case** (same capture → identical header; a truncated sub's `wcs_json` is
+  already NULL so clearing is a no-op) — the common Seestar path is unaffected. Header re-read failures are
+  logged and tolerated (old header kept, solution still cleared). Regression
+  `tests/test_ingest.py::test_ingest_refresh_clears_stale_solution_and_reads_new_header` (overwrites a solved
+  480-wide frame with a different 640-wide capture, asserts `wcs_json`/centre-coords come back NULL and
+  `width_px` is re-read to 640; fail-before: the stale WCS survived). Upgrade-safe: pure ingest control-flow +
+  an additive `reset_frame_solution` helper, no config/DB-schema/API-shape/on-disk/default change. Severity:
+  wrong-result but latent (Low). Confidence: traced + regression-tested. *(Original trace kept below for
+  provenance.)* Frames are de-duplicated
   on their `realpath` (`seestack/io/ingest.py::_dedup_key`), so re-scanning a source whose **path** is unchanged but
   whose **content** was overwritten in place with a *different capture* (size differs) takes the "already
   registered" branch (`ingest_files`, `ingest.py:152-181`): `_cache_stale` sees the size mismatch → `_copy_to_stage1`
@@ -4211,10 +4227,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   quality (a real deep stack instead of gibberish) for exactly the case the owner reported. **Scout: this is the
   principled long-term answer to the thin-stack root cause — pair it with the already-shipped honest "thin stack"
   warning (the warning tells the user; this actually fixes it).**
-- **IMPROVEMENT IDEA (Scout 2026-07-23) — a plate-solve that succeeds but whose sidecar won't parse should be
+- ~~**IMPROVEMENT IDEA (Scout 2026-07-23) — a plate-solve that succeeds but whose sidecar won't parse should be
   recorded as *retriable-unsolved*, not silently as "solved with no WCS" (which wastes a re-solve every scan and
-  never stacks the frame).** *(Autonomy / robustness — the honest-accounting arc; PRIORITY 2; size S; traced by
-  this run's QC/solve audit.)* **What prompted it:** in `apply_solve_result_to_db` (`seestack/solve/runner.py`)
+  never stacks the frame).**~~ — **SHIPPED v0.174.4** (Builder 2026-07-23, branch
+  `claude/pensive-faraday-hsmubw`; regression-tested). `apply_solve_result_to_db` (`seestack/solve/runner.py`)
+  now, on a *nominal success* whose `result.wcs_text is None` (malformed/partial `.wcs` sidecar, or `.ini` parse
+  raised → centre coords None), records an explicit `solve_failed:unreadable plate solution` reason and leaves
+  `wcs_json` NULL, instead of writing a "solved with `wcs_json=None`" limbo row. That stops the frame being
+  re-offered by `build_solve_arglist` (which skips only *truthy* `wcs_json`) and re-solved on every scan forever,
+  and lets the reject-summary surface it honestly; `accept` is left untouched (a location failure, not a bad
+  frame), mirroring the transient-failure branch. Regression
+  `tests/test_solve_runner.py::test_apply_solve_result_success_without_wcs_is_an_honest_failure` (a
+  `solved=True, wcs_text=None` result → `wcs_json` NULL + `solve_failed:` reason + accept kept; fail-before: the
+  row went through with a NULL WCS and no reason). Upgrade-safe: no schema/API/default change (only a reason
+  string on an already-nullable column). *(Original idea kept below for provenance.)* **What prompted it:** in
+  `apply_solve_result_to_db` (`seestack/solve/runner.py`)
   ASTAP is classified "solved" on `returncode==0 and .wcs exists` (`solve/astap.py`), but if
   `_parse_astap_ini` raises (swallowed → center coords stay `None`) or `wcs_text_from_sidecar` returns `None` on a
   malformed/partial header (`io/wcs_io.py`, swallowed), the frame is still persisted as **solved with

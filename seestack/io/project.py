@@ -530,6 +530,21 @@ class Project:
             fields["reject_reason"] = None
         self.update_frame(frame_id, **fields)
 
+    def reset_frame_solution(self, frame_id: int) -> None:
+        """Clear a frame's plate solution so it is re-offered to plate-solving.
+
+        Used when a frame's *content* changed after ingest (its source path was
+        reused for a **different** capture, so the cached copy was refreshed):
+        the stored WCS was solved on the *old* pixels and must never be
+        reprojected onto the new ones, or the frame stacks at the wrong sky
+        position. Nulling ``wcs_json`` makes ``build_solve_arglist`` re-offer the
+        frame automatically. A no-op if the frame was never solved."""
+        self.update_frame(
+            frame_id,
+            wcs_json=None, ra_center_deg=None, dec_center_deg=None,
+            pixscale_arcsec=None, rotation_deg=None,
+        )
+
     def iter_frames(self, accepted_only: bool = False) -> Iterator[FrameRow]:
         assert self._conn is not None
         sql = "SELECT * FROM frames"

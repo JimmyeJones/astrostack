@@ -187,6 +187,58 @@ def test_ingest_refreshes_cache_when_source_grew_after_a_mid_copy_ingest(tmp_pat
         proj.close()
 
 
+def test_ingest_refresh_clears_stale_solution_and_reads_new_header(tmp_path):
+    """A source path overwritten in place with a *different* capture (size
+    differs) must re-solve and re-metadata from scratch, not inherit the old
+    frame's WCS/header.
+
+    Regression: the refresh branch only reset QC metrics, so the stale plate
+    solution (``wcs_json`` + centre coords) survived and was reprojected onto
+    the new pixels — the frame stacked at the wrong sky position, silently — and
+    the old header (timestamp/exposure/gain/dimensions) was kept too."""
+    src = tmp_path / "raws"
+    src.mkdir()
+    # First capture: a 480-wide frame that gets a plate solution.
+    write_seestar_fits(src / "a.fit", seed=3, width=480, height=320)
+    frame_file = src / "a.fit"
+
+    proj = Project.create(tmp_path / "proj", name="t")
+    cache = CacheManager(proj.project_dir)
+    try:
+        first = list(ingest_files(proj, cache, [frame_file]))
+        frame_id = first[0].frame_id
+        assert frame_id is not None
+        row = proj.get_frame(frame_id)
+        assert row.width_px == 480
+
+        # Simulate the frame having been plate-solved at some sky position.
+        proj.update_frame(
+            frame_id,
+            wcs_json='{"CRVAL1": 10.0}', ra_center_deg=10.0, dec_center_deg=20.0,
+            pixscale_arcsec=5.0, rotation_deg=1.0,
+        )
+
+        # The source path is reused for a *different* capture (a re-export /
+        # rename collision, or a NAS sync reusing filenames). Different width →
+        # different file size → the refresh branch fires.
+        write_seestar_fits(frame_file, seed=99, width=640, height=320)
+
+        second = list(ingest_files(proj, cache, [frame_file]))
+        assert second[0].skipped is True
+        assert second[0].refreshed is True
+        assert proj.count() == 1  # still one row, no duplicate
+
+        row = proj.get_frame(frame_id)
+        # Stale plate solution dropped → re-offered to plate-solving.
+        assert row.wcs_json is None
+        assert row.ra_center_deg is None and row.dec_center_deg is None
+        assert row.pixscale_arcsec is None and row.rotation_deg is None
+        # Header re-read from the new content (proves it wasn't left stale).
+        assert row.width_px == 640
+    finally:
+        proj.close()
+
+
 def test_ingest_does_not_reset_qc_on_a_plain_dedup_skip(tmp_path):
     """A normal (unchanged) re-scan must NOT reset QC or flag a refresh — only a
     genuine cache refresh (source grew past the cached size) does."""
