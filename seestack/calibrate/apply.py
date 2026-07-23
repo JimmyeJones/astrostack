@@ -219,6 +219,23 @@ class CalibrationMasters:
         double-subtract it."""
         return self.dark is None and self.bias is not None
 
+    @property
+    def _dark_scaling_applies(self) -> bool:
+        """Whether exposure-scaling of the dark actually takes effect.
+
+        ``_effective_dark`` can only scale the dark to the lights' exposure when
+        a master bias **matching the dark's shape** is present (it holds the
+        exposure-independent bias pedestal fixed while scaling the dark current).
+        A loaded but *wrong-shaped* bias does **not** enable scaling — the dark
+        is subtracted unscaled — so both the scaling path and the exposure-
+        mismatch advisory (``calibration_warnings``) must gate on this same
+        predicate. Otherwise the warning is silenced exactly when the unscaled
+        fallback (which over/under-subtracts a mismatched-exposure pedestal on
+        every frame) makes it most needed."""
+        return (self.scale_dark_to_light and self.dark is not None
+                and self.bias is not None
+                and self.bias.shape == self.dark.shape)
+
     def describe(self) -> str:
         parts = []
         if self.dark is not None:
@@ -276,9 +293,13 @@ class CalibrationMasters:
         if self.dark is None:
             return warnings
         de = self.dark_exposure_s
-        # Exposure-scaling (when a bias is present) corrects the exposure gap
-        # itself, so only warn about it on the plain unscaled-subtraction path.
-        scaling_active = self.scale_dark_to_light and self.bias is not None
+        # Exposure-scaling (when a shape-matching bias is present) corrects the
+        # exposure gap itself, so only warn about it on the plain unscaled-
+        # subtraction path. A wrong-shaped bias does NOT enable scaling
+        # (``_effective_dark`` falls back to the unscaled dark), so gate on the
+        # same predicate the scaling path uses — else the warning is silenced
+        # exactly when the unscaled fallback makes it necessary.
+        scaling_active = self._dark_scaling_applies
         if (not scaling_active and de and de > 0
                 and light_exposure_s and light_exposure_s > 0):
             ratio = float(light_exposure_s) / float(de)
@@ -313,8 +334,7 @@ class CalibrationMasters:
         needless float work and rounding.
         """
         dark = self.dark
-        if (self.scale_dark_to_light and dark is not None and self.bias is not None
-                and self.bias.shape == dark.shape
+        if (self._dark_scaling_applies
                 and self.dark_exposure_s and light_exposure_s
                 and self.dark_exposure_s > 0 and light_exposure_s > 0):
             ratio = float(light_exposure_s) / float(self.dark_exposure_s)
