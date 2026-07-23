@@ -6643,8 +6643,9 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 - ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "Ready-to-post caption": one tap to copy a plain-language, accurate
-  description of the finished picture for sharing.**~~ — **SHIPPED v0.179.0** (Builder 2026-07-23, branch
-  `claude/pensive-faraday-l3ardz`). Built slices (a)+(b), frontend-only, fully offline, additive, read-only — no
+  description of the finished picture for sharing.**~~ — **SHIPPED v0.179.0 + slice (c) v0.179.1** (Builder
+  2026-07-23, branch `claude/pensive-faraday-l3ardz`). Built slices (a)+(b)+(c), frontend-only, fully offline,
+  additive, read-only — no
   new deps, no network, no config/DB/API-shape/default change. **Helper** (`frontend/src/components/postCaption.ts`):
   a pure, unit-tested `postCaption({name, catalogId, type, nFrames, integrationS, dateLabel, scaleBar, fallbackName})
   -> string` that turns facts the app already computed into one correct, friendly sentence —
@@ -6661,8 +6662,11 @@ problems. Dogfood it every big-picture run and fix root causes.
   back to showing the caption in a notification when the clipboard API is blocked (insecure context / permissions).
   Tests: `postCaption.test.ts` (+11: full sentence, article choice, missing-scale/identity/frames/integration
   degradations, singular grammar, timezone-safe date parsing), `History.test.tsx` (+2: identified run copies the
-  full caption incl. scale; unidentified/no-FITS run copies an honest shorter caption). Full frontend suite green
-  (1155 passed); tsc/build clean. *(Original idea kept below for provenance.)* *(Share + understand pillar, PRIORITY 3; size S; fully offline,
+  full caption incl. scale; unidentified/no-FITS run copies an honest shorter caption). **Slice (c) v0.179.1** then
+  pre-fills the OS share sheet and the lightbox "Share" with the *same* accurate caption (a best-effort synchronous
+  build — includes the scale clause when the run's annotations are already loaded, else omits it — replacing the
+  thin "name — captured date" text), so a shared picture arrives with its words. Pure prop rewire over the
+  already-tested `postCaption`; tsc/build/full-frontend-suite green. *(Original idea kept below for provenance.)* *(Share + understand pillar, PRIORITY 3; size S; fully offline,
   additive, read-only — no new deps, no network.)* **Why a beginner wants it:** the app already helps them *make* a
   shareable image (wallpaper export, QR-to-phone, portfolio wall, north-up, scale bar) — but the moment they go to
   post it to a friend, a group chat, or social media, they're staring at a blank caption box. A non-expert doesn't

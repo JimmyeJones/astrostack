@@ -611,6 +611,21 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
     }
   };
 
+  // A best-effort caption to pre-fill the OS share sheet / lightbox share, so a
+  // shared picture arrives with its words — the same accurate sentence as "Copy
+  // caption", minus the scale clause unless the run's annotations happen to be
+  // loaded already (the share flow is synchronous; we don't block it on a fetch).
+  const shareCaption = postCaption({
+    name: identity?.name,
+    catalogId: identity?.id,
+    type: identity?.type,
+    nFrames: run.n_frames_used,
+    integrationS: run.total_exposure_s,
+    dateLabel: formatCaptionDate(run.timestamp_utc),
+    scaleBar: annotations.data?.scale_bar ?? null,
+    fallbackName: safe,
+  });
+
   const previewSrc = `${api.stackArtifactUrl(safe, run.id, "preview")}${cacheBust ? `?v=${cacheBust}` : ""}`;
   // While the first suggestion fetch is still in flight, keep showing the STF
   // preview thumbnail rather than briefly rendering at the fixed defaults and
@@ -846,6 +861,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
                 run.output_basename,
                 new Date(run.timestamp_utc).toLocaleDateString(),
               )}
+              text={shareCaption}
             />
           )}
           {run.has_preview && (
@@ -925,11 +941,11 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
         rawHref={run.has_fits ? api.stackArtifactUrl(safe, run.id, "fits") : undefined}
         {...(run.has_preview
           ? (() => {
-              const { title, text, filename } = sharePictureText(
+              const { title, filename } = sharePictureText(
                 run.output_basename,
                 new Date(run.timestamp_utc).toLocaleDateString(),
               );
-              return { shareFilename: filename, shareTitle: title, shareText: text };
+              return { shareFilename: filename, shareTitle: title, shareText: shareCaption };
             })()
           : {})}
         onClose={() => setLight(false)}
