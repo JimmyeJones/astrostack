@@ -1602,9 +1602,27 @@ when you take it.
   **Confirm the intended `target_bg` before changing** — two deliberate constants live in different modules, so this is
   a verified docstring-vs-behaviour inconsistency either way. Severity: broken-UX, Low. Confidence: reproduced.
 
-- **Stack OOM memory guard omits the `max_workers·2` in-flight aligned-frame buffers it actually holds.**
-  *(Stacking-engine correctness / stability; Low severity on Seestar-sized frames, traced not reproduced; found
-  by the same rejection-math audit — NOT fixed, needs care.)* `_estimate_peak_bytes`/`_guard_stack_memory`
+- ~~**Stack OOM memory guard omits the `max_workers·2` in-flight aligned-frame buffers it actually holds.**~~ —
+  **FIXED v0.189.1** (Builder 2026-07-24, branch `claude/pensive-faraday-cznr3m`; traced + regression-tested). Took the
+  Builder note's *recommended* route — a **memory-aware in-flight cap at pass time**, leaving the estimate/guard math
+  (and every calibrated tight-budget test) untouched. New pure helper `_memory_bounded_in_flight(per_frame_shape,
+  dst_shape, *, max_in_flight, drizzle, drizzle_scale, drizzle_reject, reject_arrays, memory_budget_gb)`
+  (`seestack/stack/stacker.py`) computes `headroom = budget − canvas_peak` (from the *same* `_estimate_peak_bytes` the
+  guard refuses on) and returns `max(2, min(max_in_flight, headroom // per_frame_bytes))`, where `per_frame_bytes` is one
+  **native reference frame** RGB float32 (`ref_shape` — independent of the drizzle scale, which enlarges only the
+  canvas). `run_stack` computes this cap once right after `_guard_stack_memory` (mirroring its exact args, on the
+  pre-drizzle `dst_shape`) and threads it through both `_pass` and `_drizzle_pass` (each grew an optional
+  `max_in_flight` kwarg replacing the bare `max_workers*2` in its `_imap_bounded` call; **None → the historical
+  `max_workers*2`**, so direct callers/tests are unaffected). Now the in-flight worker buffers — which the guard's peak
+  estimate never counted — can't exceed the RAM left after the canvas arrays, so a many-core box with a large sensor can
+  no longer OOM a run the guard just certified "safe"; it only ever trims throughput (never correctness), floors at 2 so
+  the pass keeps pipelining, and is **inert for the Seestar target** (small frames / few cores keep the cap above
+  `max_workers*2`). Regression (`tests/test_memory_bounded_in_flight.py`, +7): inert-for-Seestar, never-exceeds-ceiling,
+  caps-below-ceiling-on-a-big-sensor, floors-at-2-when-headroom-exhausted, drizzle-per-frame-buffer-is-native-not-scaled,
+  and two wiring tests (`_pass` forwards the cap to `_imap_bounded`; defaults to `max_workers·2` when uncapped).
+  Upgrade-safe: no config/DB/API-shape/on-disk/default change (a within-engine throughput cap). Confidence: traced +
+  regression-tested. (S, stacking-engine stability — PRIORITY 1.)
+  *(Original trace kept for provenance.)* `_estimate_peak_bytes`/`_guard_stack_memory`
   (`seestack/stack/stacker.py:112-205`) charge a *fixed* canvas-array factor (`_PEAK_CANVAS_ARRAYS=4`, or `7` /
   `2+2k`) and never reference `max_workers`. But `_pass` keeps up to `max_workers·2` reprojected windows alive at
   once (`_imap_bounded(..., max_workers*2)`, line ~1503), and `max_workers` defaults to `os.cpu_count()`. On a

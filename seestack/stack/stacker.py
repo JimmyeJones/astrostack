@@ -147,6 +147,44 @@ def _estimate_peak_bytes(dst_shape: tuple[int, int], *, drizzle: bool,
     return need, (out_h, out_w)
 
 
+def _memory_bounded_in_flight(
+    per_frame_shape: tuple[int, int],
+    dst_shape: tuple[int, int],
+    *,
+    max_in_flight: int,
+    drizzle: bool = False,
+    drizzle_scale: float = 1.0,
+    drizzle_reject: bool = False,
+    reject_arrays: int = 0,
+    memory_budget_gb: float | None = None,
+) -> int:
+    """Cap the number of in-flight per-frame worker buffers so they can't exceed the
+    RAM left over after the persistent canvas arrays the OOM guard already charged.
+
+    ``_pass``/``_drizzle_pass`` keep up to ``max_in_flight`` reprojected/debayered
+    frame buffers alive at once (``_imap_bounded``), each ~one **native reference
+    frame** RGB float32 array (``per_frame_shape`` — independent of the drizzle
+    scale, which enlarges only the canvas). :func:`_estimate_peak_bytes` — the
+    number the OOM guard refuses on — charges only the canvas arrays and never this
+    per-worker term, so on a many-core box with a large sensor those buffers can OOM
+    a run the guard just certified "safe". Bounding ``max_in_flight`` to
+    ``headroom // per_frame_bytes`` prevents that OOM at the cost of throughput only
+    (never correctness). Never drops below 2 — a little pipelining is needed to
+    overlap the parallel load with the serialised consumer — and is inert for the
+    Seestar target (small frames / few cores keep the cap above ``max_workers·2``)."""
+    h, w = per_frame_shape
+    per_frame_bytes = int(h) * int(w) * 3 * 4  # native RGB float32 worker buffer
+    if per_frame_bytes <= 0:
+        return max_in_flight
+    budget = _stack_memory_budget_bytes(memory_budget_gb)
+    canvas_peak, _ = _estimate_peak_bytes(
+        dst_shape, drizzle=drizzle, drizzle_scale=drizzle_scale,
+        drizzle_reject=drizzle_reject, reject_arrays=reject_arrays)
+    headroom = budget - canvas_peak
+    cap = int(headroom // per_frame_bytes)
+    return max(2, min(max_in_flight, cap))
+
+
 def _largest_drizzle_scale_within_budget(
     dst_shape: tuple[int, int], *, drizzle_reject: bool, budget: int,
     max_scale: float, step: float = 0.1,
@@ -1122,6 +1160,22 @@ def run_stack(
                                               if eff.min_max_reject and not options.drizzle and n >= 3
                                               else 1),
                         memory_budget_gb=memory_budget_gb)
+    # Bound the in-flight aligned/prepared frame buffers (each ~one native
+    # reference frame, ``max_workers·2`` of them by default) to the RAM left after
+    # the canvas arrays the guard above charged — the guard's estimate never counts
+    # these per-worker buffers, so on a many-core box with a large sensor they could
+    # OOM a run it just certified "safe". Inert for the Seestar target (small frames
+    # / few cores keep the cap above ``max_workers·2``); only ever trims throughput.
+    _max_workers = options.max_workers or max(1, (os.cpu_count() or 4))
+    max_in_flight = _memory_bounded_in_flight(
+        ref_shape, dst_shape,
+        max_in_flight=_max_workers * 2,
+        drizzle=options.drizzle, drizzle_scale=options.drizzle_scale,
+        drizzle_reject=options.drizzle_reject and n >= 4,
+        reject_arrays=(_min_max_reject_arrays(eff.min_max_reject_count)
+                       if eff.min_max_reject and not options.drizzle and n >= 3
+                       else 0),
+        memory_budget_gb=memory_budget_gb)
     errors: list[str] = []
     # Set by the κ-σ pass-2 branch to record how much rejection actually clipped
     # (a memory-free trust signal stamped into the output header). None on paths
@@ -1173,6 +1227,7 @@ def run_stack(
                 calibration=calibration,
                 mono=options.mono,
                 photometric_scales=pscales,
+                max_in_flight=max_in_flight,
             )
             if n_stats == 0 and not cancel():
                 raise ValueError("drizzle: no usable frames")
@@ -1194,6 +1249,7 @@ def run_stack(
             calibration=calibration,
             mono=options.mono,
             photometric_scales=pscales,
+            max_in_flight=max_in_flight,
         )
         if n_used == 0 and not cancel():
             raise ValueError("drizzle: no usable frames")
@@ -1242,6 +1298,7 @@ def run_stack(
             calibration=calibration,
             mono=options.mono,
             photometric_scales=pscales,
+            max_in_flight=max_in_flight,
         )
         if n_used == 0 and not cancel():
             raise ValueError("no frames could be aligned")
@@ -1275,6 +1332,7 @@ def run_stack(
             calibration=calibration,
             mono=options.mono,
             photometric_scales=pscales,
+            max_in_flight=max_in_flight,
         )
         if n_used_p1 == 0 and not cancel():
             raise ValueError("pass 1 produced no usable frames")
@@ -1322,6 +1380,7 @@ def run_stack(
             calibration=calibration,
             mono=options.mono,
             photometric_scales=pscales,
+            max_in_flight=max_in_flight,
         )
         n_used = min(n_used_p1, n_used_p2)
         # Pass 1 succeeded but pass 2 aligned nothing (e.g. the cached/source
@@ -1365,6 +1424,7 @@ def run_stack(
             calibration=calibration,
             mono=options.mono,
             photometric_scales=pscales,
+            max_in_flight=max_in_flight,
         )
         if n_used == 0 and not cancel():
             raise ValueError("no frames could be aligned")
@@ -1623,12 +1683,17 @@ def _pass(
     calibration: "CalibrationMasters | None" = None,
     mono: bool = False,
     photometric_scales: dict[int, float] | None = None,
+    max_in_flight: int | None = None,
 ) -> int:
     """
     Run one pass over ``frames``, feeding each windowed aligned image plus its
     canvas offset and per-frame quality weight into
     ``consumer(window_rgb, y0, x0, weight)``. Returns the number of frames
     that contributed (post-error).
+
+    ``max_in_flight`` caps how many aligned frame buffers may be in flight at once
+    (memory-bounded by the caller via :func:`_memory_bounded_in_flight`); when None
+    it falls back to ``max_workers·2`` — the historical bound.
 
     ``photometric_scales`` (optional) gain-matches each frame's *pixels* by an
     in-place multiply before the consumer sees them, so the scaling is applied
@@ -1637,6 +1702,7 @@ def _pass(
     total = len(frames)
     progress(phase_label, 0, total)
     max_workers = options.max_workers or max(1, (os.cpu_count() or 4))
+    in_flight = max_in_flight if max_in_flight is not None else max_workers * 2
     used = 0
     done = 0
     consumer_lock = threading.Lock()
@@ -1658,7 +1724,7 @@ def _pass(
         # Bounded in-flight work: aligned full-res frames must not pile up
         # faster than the (serialised) consumer drains them, or thousands of
         # frames will OOM the process.
-        for f, fut in _imap_bounded(ex, _submit, frames, max_workers * 2):
+        for f, fut in _imap_bounded(ex, _submit, frames, in_flight):
             done += 1
             if cancel():
                 progress(phase_label + " (cancelled)", done, total)
@@ -1705,18 +1771,24 @@ def _drizzle_pass(
     calibration: "CalibrationMasters | None" = None,
     mono: bool = False,
     photometric_scales: dict[int, float] | None = None,
+    max_in_flight: int | None = None,
 ) -> int:
     """
     One-shot drizzle accumulation. Drizzle's ``add_image`` mutates internal
     state, so we serialise additions on one thread but parallelise the per-
     frame load+debayer+bg-flatten+pixmap on workers. Workers return prepared
     payloads; the consumer thread feeds them into the drizzler.
+
+    ``max_in_flight`` caps how many prepared frame buffers may be in flight at once
+    (memory-bounded by the caller via :func:`_memory_bounded_in_flight`); when None
+    it falls back to ``max_workers·2`` — the historical bound.
     """
     from seestack.io.wcs_io import wcs_from_text
 
     total = len(frames)
     progress(phase_label, 0, total)
     max_workers = options.max_workers or max(1, (os.cpu_count() or 4))
+    in_flight = max_in_flight if max_in_flight is not None else max_workers * 2
     bg_opts = options.background_options()
     used = 0
     done = 0
@@ -1760,7 +1832,7 @@ def _drizzle_pass(
         # Bounded in-flight work: prepared full-res RGB frames must not pile up
         # faster than the (serialised) drizzler consumes them — submitting all
         # frames at once is what drove the OOM on large (5k+ frame) targets.
-        for f, fut in _imap_bounded(ex, prepare, frames, max_workers * 2):
+        for f, fut in _imap_bounded(ex, prepare, frames, in_flight):
             done += 1
             if cancel():
                 progress(phase_label + " (cancelled)", done, total)
