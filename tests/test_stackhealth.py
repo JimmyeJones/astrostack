@@ -18,9 +18,9 @@ def _run(**kw) -> StackRunRow:
     return StackRunRow(**base)
 
 
-def _frame(*, accept=True, ecc=0.35, reason=None) -> FrameRow:
+def _frame(*, accept=True, ecc=0.35, reason=None, wcs=None) -> FrameRow:
     return FrameRow(source_path=f"s{id(object())}.fit", accept=accept,
-                    eccentricity_median=ecc, reject_reason=reason)
+                    eccentricity_median=ecc, reject_reason=reason, wcs_json=wcs)
 
 
 def _kinds(notes) -> list[str]:
@@ -164,6 +164,56 @@ def test_plain_mean_stack_has_no_rejection_note():
     # No rejection ran (both fields NULL) → nothing to say.
     notes = stack_health(_run(), [_frame() for _ in range(10)])
     assert "rejection" not in _kinds(notes)
+
+
+def test_mostly_unsolved_subs_leads_with_an_actionable_note():
+    # A faint field where ASTAP solved only a handful of subs: the whole night
+    # collapses to the located few, so the card leads with the highest-value fix.
+    frames = [_frame(wcs="{}") for _ in range(20)]      # located
+    frames += [_frame(wcs=None) for _ in range(190)]    # accepted but unsolved
+    notes = stack_health(_run(), frames)
+    assert notes[0].kind == "unsolved"
+    assert notes[0].action == "solve_help"
+    assert notes[0].severity == "info"
+    assert "20 of 210" in notes[0].message
+    assert "star database" in notes[0].message.lower()
+
+
+def test_all_located_subs_get_no_unsolved_note():
+    # Every accepted sub plate-solved → nothing to warn about.
+    notes = stack_health(_run(), [_frame(wcs="{}") for _ in range(30)])
+    assert "unsolved" not in _kinds(notes)
+
+
+def test_a_few_unsolved_subs_below_the_fraction_stays_silent():
+    # 2 of 20 unlocated (10%) is normal attrition, not a solve problem.
+    frames = [_frame(wcs="{}") for _ in range(18)] + [_frame(wcs=None) for _ in range(2)]
+    notes = stack_health(_run(), frames)
+    assert "unsolved" not in _kinds(notes)
+
+
+def test_no_located_subs_stays_silent_solve_pending():
+    # Zero located subs means plate-solve simply hasn't run yet (all accepted
+    # frames have no WCS) — that's not a solve *failure* to report, so stay quiet.
+    notes = stack_health(_run(), [_frame(wcs=None) for _ in range(30)])
+    assert "unsolved" not in _kinds(notes)
+
+
+def test_too_few_accepted_subs_no_unsolved_note():
+    # Below the minimum accepted count the fraction is meaningless (a tiny target),
+    # so even a high unlocated share doesn't nag.
+    frames = [_frame(wcs="{}") for _ in range(3)] + [_frame(wcs=None) for _ in range(3)]
+    notes = stack_health(_run(), frames)
+    assert "unsolved" not in _kinds(notes)
+
+
+def test_unsolved_note_ranks_before_calibration():
+    # When both fire, the "most subs couldn't locate" fix outranks calibration —
+    # it's the bigger lever on a thin faint-field result.
+    frames = [_frame(wcs="{}") for _ in range(10)] + [_frame(wcs=None) for _ in range(30)]
+    notes = stack_health(_run(calstat=None), frames)
+    order = _kinds(notes)
+    assert order.index("unsolved") < order.index("calibration")
 
 
 def test_rejection_note_ranks_after_actionable_next_steps():

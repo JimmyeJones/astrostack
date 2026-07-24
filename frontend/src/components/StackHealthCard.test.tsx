@@ -52,6 +52,11 @@ describe("noteAction", () => {
   it("wires calibration to the Calibration page", () => {
     expect(noteAction("calibration", "M_42", 7)?.href).toBe("/calibration");
   });
+  it("wires solve_help to the Settings page (star-database status)", () => {
+    expect(noteAction("solve_help", "M_42", 7)?.href).toBe("/settings");
+    // Still linked inside the editor — it's an off-page action.
+    expect(noteAction("solve_help", "M_42", 7, true)?.href).toBe("/settings");
+  });
   it("returns null for a note with no wired action", () => {
     expect(noteAction(null, "M_42", 7)).toBeNull();
     expect(noteAction("something_else", "M_42", 7)).toBeNull();

@@ -11086,6 +11086,15 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.184.11** — ⭐ "How's my stack?" now surfaces the #1 cause of the owner-reported faint-field "gibberish": when
+  a large fraction of a target's *accepted* subs never plate-solved (so they silently never reached the stacker),
+  `stack_health` leads with a plain-language note — "Only N of M subs could be located (plate-solved) … installing
+  ASTAP's star database (Settings) helps far more subs solve" — wired to a one-click Settings link (new `solve_help`
+  action). Fires only above 30% unlocated with ≥8 accepted subs and ≥1 located (so solve-pending targets stay silent);
+  ranks above every other note. Complements the `thinStackWarning` (which only fires at ≤4 frames *used*) by catching
+  the plentiful-but-mostly-unsolved night the owner actually hit. Additive pure-function note + a frontend action link;
+  no schema/config/default/API-shape change. Tests: `tests/test_stackhealth.py` (+6), `StackHealthCard.test.tsx` (+1).
+  Friendliness + autonomy (surfaces the gibberish root cause). Branch `claude/pensive-faraday-h5qn26`.
 - **v0.178.2** — The "why frames were left out" high-drop verdict now names the *dominant actual cause* (soft focus →
   check focus/dew, clouds, couldn't-be-located → check subs, unsolved → Run Plate Solve) instead of the generic
   "cloud or wind", when one actionable bucket is strictly the majority of the dropped frames; a mixed night or a

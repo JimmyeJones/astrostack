@@ -32,6 +32,16 @@ from seestack.session_recap import bucket_reject_reason
 # stars, and the note is soft ("won't ruin the picture") and never a gate.
 _ECC_ELONGATED = 0.6
 
+# Only *located* (plate-solved) subs reach the stacker, so a field where ASTAP
+# fails to solve most subs stacks just the solved handful — a thin, speckly result
+# from a night that looks fully "accepted" (the documented root of the faint-field
+# "gibberish" report). Surface that loss with the concrete fix once it's large.
+# We can only speak to solve success when at least one sub *did* locate; if we see
+# zero located subs, plate-solve simply hasn't run yet, so stay silent rather than
+# nag. Needs a handful of accepted subs for the fraction to be meaningful.
+_UNSOLVED_MIN_ACCEPTED = 8
+_UNSOLVED_NOTE_FRACTION = 0.30  # ≥30% of accepted subs unlocated → worth surfacing
+
 # A pixel is "thin coverage" when far fewer frames overlap it than the best-covered
 # region. Only fires when there's real unevenness (a dithered/mosaic border), so a
 # flat single-field stack (min≈max) never trips it. Needs a few frames at the peak
@@ -67,8 +77,8 @@ class HealthNote:
 
     ``kind`` is a stable id (for tests / the frontend); ``severity`` is
     ``"good"`` | ``"info"`` (colour only, never alarming); ``action`` is an
-    optional key the UI can wire to the button that already does it
-    (``"trim_border"`` | ``"calibration"`` | ``None``)."""
+    optional key the UI can wire to the page that already does it
+    (``"trim_border"`` | ``"calibration"`` | ``"solve_help"`` | ``None``)."""
 
     kind: str
     severity: str
@@ -96,6 +106,30 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow]) -> list[HealthNot
     # (priority, note) — lower priority shown first. Actionable next-steps lead;
     # reassurance and the positive summary trail.
     scored: list[tuple[int, HealthNote]] = []
+
+    # --- Most subs couldn't be located (plate-solve failures) ------------------
+    # Only plate-solved subs stack, so a field where ASTAP fails on most of them
+    # collapses a whole night to the solved handful — a thin, noisy result even
+    # though the frames all read as "accepted". This is the single highest-value
+    # lever when it fires (it explains the faint-field "gibberish"), so it ranks
+    # first. Guarded on ≥1 located sub so we only speak once solve has actually run
+    # (all-unsolved = solve pending, not a failure to report), and on a handful of
+    # accepted subs so the fraction is meaningful.
+    located = [f for f in accepted if f.wcs_json]
+    n_acc = len(accepted)
+    n_loc = len(located)
+    if (n_loc > 0 and n_acc >= _UNSOLVED_MIN_ACCEPTED
+            and (n_acc - n_loc) >= _UNSOLVED_NOTE_FRACTION * n_acc):
+        scored.append((5, HealthNote(
+            kind="unsolved",
+            severity="info",
+            message=(f"Only {n_loc} of {n_acc} subs could be located (plate-solved), "
+                     f"so the other {n_acc - n_loc} couldn't be stacked and this "
+                     "result is thinner than your night. Installing ASTAP's star "
+                     "database (Settings) helps far more subs solve — especially on "
+                     "faint or sparse-star fields."),
+            action="solve_help",
+        )))
 
     # --- Calibration: were darks/flats applied? (robust presence check) --------
     calibrated = bool(run.calstat and run.calstat.strip())
