@@ -8922,10 +8922,32 @@ problems. Dogfood it every big-picture run and fix root causes.
   component test. **Confirmed absent:** the backlog surfaces *frame-level* rejections ("why N subs were left out",
   the rejection-summary buckets) and the √N noise cut, but **not** the *per-pixel* "trails/CRs cleaned out" trust
   line — a distinct, delightful beginner cue. Serves understand + enjoy + trust for every clean night.
-- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "How hard is this target for a Seestar?": a plain-language
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "How hard is this target for a Seestar?": a plain-language
   difficulty / what-to-expect badge on the Target page that sets expectations *before* a beginner is disappointed
-  by a faint result.** *(Friendliness / "plan + understand" pillar, PRIORITY 3; size M; offline, additive, no new
-  deps.)* **Why a beginner wants it:** the owner's own top bug is *"faint/sparse-star targets come out as
+  by a faint result.**~~ — **SHIPPED v0.192.0** (Builder 2026-07-24, branch `claude/pensive-faraday-ehk6ye`;
+  tested). Built end-to-end across engine/webapp/frontend, mirroring the existing framing/blurb pattern — offline,
+  additive, no new deps, no schema/config/on-disk/default change (read-only, an ObjectInfo field). **Engine**
+  (`seestack/target_difficulty.py`, pure + unit-tested): `target_difficulty(object_id, object_type) -> DifficultyHint |
+  None` resolves in the endorsed order — (1) a hand-curated `{id: level}` table for the ~90 popular galaxies / nebulae /
+  planetary nebulae / SNRs, where difficulty genuinely varies (the catalog has no magnitude/surface-brightness to compute
+  it, so we curate rather than guess); (2) one reliable *type* rule — star clusters and star fields (open/globular
+  cluster, star cloud, asterism, double star) are uniformly easy, so they resolve without per-object curation;
+  (3) `None` (self-hides) for anything un-vetted. Verdicts are for an OSC (no-filter) Seestar and **bias conservative**
+  (borderline diffuse nebulae → "challenging") so a beginner is pleasantly surprised, never over-promised. Each level maps
+  to one honest, encouraging sentence (challenging: *"…don't be discouraged if an early result looks weak"*). Wired into
+  `ObjectInfo` (new nullable `difficulty` field, computed in `_to_info`). **Webapp**: `DifficultyHintOut` + additive
+  nullable `ObjectInfoOut.difficulty`, mapped in `GET /api/targets/{safe}/identify`. **Frontend**: `ObjectInfoCard`
+  renders a calm colour-graded badge ("Easy/Moderate/Challenging for a Seestar" — green→blue→amber, never alarming red)
+  plus the sentence, self-hiding when absent. Tests: `tests/test_target_difficulty.py` (+12 — curated levels, the
+  cluster type-rule incl. case-insensitivity, id-normalisation, un-vetted self-hide, missing-type, a full sweep over the
+  *real* bundled catalog asserting every object gets a valid bucket or cleanly self-hides and no cluster is ever dropped,
+  and the ObjectInfo end-to-end), `tests/webapp/test_target_identify.py` (+1 — M42 surfaces "easy"),
+  `frontend/.../ObjectInfoCard.test.tsx` (+3 — `difficultyColor`, the badge+sentence render, self-hide when un-vetted).
+  Upgrade-safe: old backends omit the field and the UI treats absent as "no verdict". *(Pillar: 3 friendliness /
+  plan-understand; directly softens the #1 owner disappointment — a faint target reading as "gibberish" — by
+  front-loading honest expectations. Follow-on ideas: add `mag`/surface-brightness to the catalog to make the
+  galaxy/nebula split data-driven; a matching Tonight-planner difficulty column.)*
+  *(Original idea kept for provenance.)* **Why a beginner wants it:** the owner's own top bug is *"faint/sparse-star targets come out as
   gibberish while a bright galaxy stacks cleanly"* — which is partly a real pipeline issue **and** partly an
   expectations gap: a beginner points a Seestar at a faint, large, low-surface-brightness object (M33, the Veil,
   the California Nebula), gets a noisy or empty-looking result after one short session, and concludes the app is
@@ -8956,6 +8978,29 @@ problems. Dogfood it every big-picture run and fix root causes.
   stocked with a *plan/understand* capability that directly softens the #1 owner-reported disappointment (faint
   target → "gibberish") by front-loading honest expectations, complementing (not duplicating) the *what-to-shoot*,
   *how-dark-is-your-sky*, and *is-it-worth-staying* cards.
+- **NEW IDEA (Builder 2026-07-24, follow-on to the v0.192.0 target-difficulty badge) — make the galaxy/nebula
+  difficulty split *data-driven* by adding an optional `mag` (and/or `surface_brightness`) field to the bundled
+  catalog, so difficulty can be computed instead of hand-curated.** *(Friendliness / image-quality-trust, PRIORITY
+  3–4; size M; offline, additive.)* **Why:** the shipped `target_difficulty` hand-curates ~90 galaxies/nebulae/PNe/SNRs
+  because `messier.json`/`deepsky_popular.json` carry no magnitude or surface brightness — the very quantities that
+  decide "hard for a Seestar". A curated table is honest but doesn't scale to a growing catalog and encodes one person's
+  judgement calls. **Shape:** add an optional `mag` (integrated) and, better, an estimated **surface brightness**
+  (mag/arcsec², derivable from `mag` + `size_arcmin`) to the catalog entries where a reliable value exists; then a pure
+  `difficulty_from_surface_brightness(sb, type)` blends SB + type into the same easy/moderate/challenging bucket, with
+  the curated table kept as an override/fallback for entries lacking a value. Keeps the cluster type-rule. Self-hides when
+  neither SB nor a curated tag exists. **Feasibility:** static data-file addition + a pure function; no network, no
+  schema/config/API/default change (the `DifficultyHint` shape is unchanged). Validate the SB→bucket thresholds against
+  the existing curated table (they should broadly agree) before trusting them over curation. (S–M.)
+- **NEW IDEA (Builder 2026-07-24, follow-on to the v0.192.0 target-difficulty badge) — surface the difficulty verdict
+  in the "Tonight"/"What should I shoot next?" planner rows, so a beginner sees "easy/moderate/challenging" *while
+  choosing* a target, not only after they've shot it.** *(Autonomy + friendliness / plan pillar, PRIORITY 2–3; size S;
+  offline, additive.)* **Why:** the badge today only appears on the Target page (after a folder exists). The most
+  useful moment for "is this one easy or hard?" is *before* pointing the scope — in the planner, next to the framing
+  hint the rows already carry. **Shape:** the planner already resolves each row's catalog object (it renders
+  `framing`), so call `target_difficulty(obj.id, obj.type)` there too and add an additive `difficulty` field to the
+  planned-target payload; the frontend shows a compact difficulty chip on each planner row. Pure reuse of the shipped
+  engine function — no new astro math, no network, additive field only. Pairs naturally with a "start with an easy one
+  tonight" nudge for a brand-new owner. (S.)
 - **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Is it worth staying on this target?": a plain-language
   diminishing-returns read that tells a beginner when more subs will visibly help vs when they've hit the flat
   part of the curve.** *(Autonomy / Friendliness — the "plan / understand" pillar, PRIORITY 2–3; size M; offline,

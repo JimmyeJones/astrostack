@@ -12,6 +12,7 @@ from webapp.schemas import (
     BestFrameOut,
     CleanupSuggestionOut,
     DarkSpecOut,
+    DifficultyHintOut,
     FocusTrendOut,
     FocusTrendPointOut,
     FramingHintOut,
@@ -290,6 +291,10 @@ def identify_target(safe: str, request: Request) -> ObjectInfoOut | None:
         framing=(FramingHintOut(level=info.framing.level, text=info.framing.text)
                  if info.framing is not None else None),
         blurb=info.blurb,
+        difficulty=(DifficultyHintOut(level=info.difficulty.level,
+                                      label=info.difficulty.label,
+                                      text=info.difficulty.text)
+                    if info.difficulty is not None else None),
     )
 
 
