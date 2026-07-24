@@ -40,6 +40,17 @@ log = logging.getLogger(__name__)
 # count once; the user can still trigger a manual stack to retry.
 AUTO_STACK_ATTEMPT_META_KEY = "web_auto_stack_attempt"
 
+# Per-target meta marker recording the confident-master fingerprint of the last
+# calibration-availability *re-stack*. The frame-count auto-stack trigger only
+# fires when new subs solve, so a beginner who follows the app's own "add darks"
+# advice and drops in a master *without* capturing new subs would otherwise never
+# get their noisy uncalibrated result re-stacked with the darks. The
+# calibration recheck (:func:`_auto_stack_calibration_recheck`) closes that loop —
+# and this marker holds it to *once per newly-available master set*, mirroring the
+# crash-loop discipline of ``AUTO_STACK_ATTEMPT_META_KEY`` so a restack that (for
+# any reason) stays uncalibrated can't re-trigger on every subsequent scan.
+AUTO_STACK_CALIB_META_KEY = "web_auto_stack_calib_retrigger"
+
 
 def _progress(jm: JobManager, job: Job):
     """Engine ``(phase, done, total)`` callback bound to a job."""
@@ -171,10 +182,18 @@ def _pipeline_body(
                 # scan job 'error', and skips auto-stack for every remaining
                 # target — the exact non-fatality the QC/solve loop above honours.
                 try:
+                    calib_fp: str | None = None
                     attempt_n = _auto_stack_frame_count(lib, safe)
                     if attempt_n is None:
-                        skipped.append(safe)
-                        continue
+                        # No *new* frames to stack — but if the target's stack is
+                        # still uncalibrated and a confident master has newly
+                        # become available (the beginner added darks after their
+                        # first stack), re-stack it once to actually apply them.
+                        recheck = _auto_stack_calibration_recheck(settings, lib, safe)
+                        if recheck is None:
+                            skipped.append(safe)
+                            continue
+                        attempt_n, calib_fp = recheck
                     if attempt_n < settings.auto_stack_min_frames:
                         # Too few located subs to make anything but single-frame
                         # colour speckle (the owner-reported gibberish). Hold the
@@ -198,7 +217,12 @@ def _pipeline_body(
                         continue
                     # Record the attempt *before* stacking so that if this stack
                     # crashes the whole process, the watcher won't re-trigger the
-                    # identical stack on restart (crash-loop guard).
+                    # identical stack on restart (crash-loop guard). A
+                    # calibration-availability re-stack (no new frames) also stamps
+                    # its master-set fingerprint first, so a restack that stays
+                    # uncalibrated can't loop the recheck on every scan.
+                    if calib_fp is not None:
+                        _mark_auto_stack_calib_retrigger(lib, safe, calib_fp)
                     _mark_auto_stack_attempt(lib, safe, attempt_n)
                     res = _stack_target(
                         settings, jm, job, lib, safe,
@@ -215,6 +239,9 @@ def _pipeline_body(
                         # breaks on the next iteration's cancel check anyway.
                         with contextlib.suppress(Exception):
                             _clear_auto_stack_attempt(lib, safe)
+                        if calib_fp is not None:
+                            with contextlib.suppress(Exception):
+                                _clear_auto_stack_calib_retrigger(lib, safe)
                         summary["cancelled"] = True
                         break
                     stacked.append(safe)
@@ -235,6 +262,9 @@ def _pipeline_body(
                     # never reaches here, so this doesn't weaken the crash-loop guard.
                     with contextlib.suppress(Exception):
                         _clear_auto_stack_attempt(lib, safe)
+                    if calib_fp is not None:
+                        with contextlib.suppress(Exception):
+                            _clear_auto_stack_calib_retrigger(lib, safe)
                     # A cancel that surfaced as a raise (rather than a graceful
                     # cancelled result) is a cancel, not a target error — classify
                     # it as one and stop, mirroring the QC/solve loop above.
@@ -1536,6 +1566,96 @@ def _clear_auto_stack_attempt(lib: Library, safe: str) -> None:
         proj.close()
 
 
+def _calib_fingerprint(bound: dict[str, Any]) -> str:
+    """A stable fingerprint of a confident-master binding, used as the
+    once-per-master-set marker for the calibration recheck. Only the master
+    *path* keys matter (``scale_dark_to_light`` is a derived flag), so a re-run
+    that binds the same masters produces the same string."""
+    return "|".join(
+        f"{k}={bound[k]}" for k in sorted(bound)
+        if k.endswith("_path") and bound.get(k)
+    )
+
+
+def _auto_stack_calibration_recheck(
+    settings: Settings, lib: Library, safe: str) -> tuple[int, str] | None:
+    """``(frame_count, fingerprint)`` to *re-stack* an already-stacked target
+    because a confident calibration master has newly become bindable for it — or
+    ``None`` to skip.
+
+    Closes the beginner loop the frame-count trigger can't: the app's own "How's
+    my stack?" card advises "add darks", the user builds/drops a master and
+    re-scans, but **no new subs arrived**, so :func:`_auto_stack_frame_count`
+    never re-fires and the noisy *uncalibrated* result stands. This re-triggers a
+    single restack (which the walk-away chain then auto-binds + calibrates) when
+    **all** hold:
+
+    * ``auto_bind_calibration`` is on — otherwise the restack couldn't apply the
+      master and the retrigger would be pointless churn (``auto_stack`` is already
+      checked by the caller). Both default off, so a default install is unchanged.
+    * the target has at least one genuine stack run and **none** of its runs was
+      calibrated (empty ``calstat``) — i.e. it has never had darks/flats applied;
+    * a confident master now auto-binds for the target's acquisition params (the
+      *same* confidence gates the walk-away path trusts, via
+      :func:`_confident_master_binding`);
+    * that master set's fingerprint differs from the last recheck's marker, so a
+      given newly-available master set fires **once**, never every scan.
+
+    Returns the current solved+accepted count (so the caller stacks exactly the
+    frames it would have) and the fingerprint the caller persists before stacking.
+    """
+    if not settings.auto_bind_calibration:
+        return None
+    proj = lib.open_target(safe)
+    try:
+        solved_accepted = _solved_accepted_count(proj)
+        if solved_accepted == 0:
+            return None
+        runs = list(proj.iter_stack_runs())
+        if not runs:
+            return None  # never stacked — the frame-count path owns first stacks
+        if any(bool(r.calstat and r.calstat.strip()) for r in runs):
+            return None  # already calibrated at some point — not our loop to close
+        try:
+            bound = _confident_master_binding(settings, proj)
+        except Exception as exc:  # noqa: BLE001 — detection must never sink the scan
+            log.warning("calibration recheck bind failed for %s: %s", safe, exc)
+            return None
+        if not any(bound.get(k) for k in
+                   ("dark_path", "flat_path", "flat_dark_path", "bias_path")):
+            return None  # no confident master available — nothing to apply
+        fingerprint = _calib_fingerprint(bound)
+        if proj.get_meta(AUTO_STACK_CALIB_META_KEY) == fingerprint:
+            return None  # already re-stacked for this exact master set
+        return solved_accepted, fingerprint
+    finally:
+        proj.close()
+
+
+def _mark_auto_stack_calib_retrigger(lib: Library, safe: str, fingerprint: str) -> None:
+    proj = lib.open_target(safe)
+    try:
+        proj.set_meta(AUTO_STACK_CALIB_META_KEY, fingerprint)
+    finally:
+        proj.close()
+
+
+def _clear_auto_stack_calib_retrigger(lib: Library, safe: str) -> None:
+    """Drop the calibration-recheck marker so the next scan may retry the restack.
+
+    The marker is written *before* the calibration re-stack purely to break a
+    process-*crash* loop on the recheck path (which deliberately bypasses the
+    frame-count crash guard). A *survivable* failure or a user cancel reaches the
+    loop's handlers, so — exactly as :func:`_clear_auto_stack_attempt` does for the
+    frame-count marker — clearing it here avoids stranding a transient failure; a
+    genuinely reproducible one simply re-fails fast and is re-logged each scan."""
+    proj = lib.open_target(safe)
+    try:
+        proj.delete_meta(AUTO_STACK_CALIB_META_KEY)
+    finally:
+        proj.close()
+
+
 def _reprocess_output_basename(existing: set[str], version: str) -> str:
     """A fresh, non-colliding output basename for a reprocessed run.
 
@@ -1558,6 +1678,56 @@ def _reprocess_output_basename(existing: set[str], version: str) -> str:
     return f"{base}_{n}"
 
 
+def _confident_master_binding(settings: Settings, proj: Any) -> dict[str, Any]:
+    """The confidently-matching library master dark/flat/bias paths for a target's
+    accepted frames — the ``StackOptions`` calibration keys an *unattended* stack
+    would auto-bind — or ``{}`` when none is confident (leave it uncalibrated).
+
+    Pure/read-only: it consults the library's masters against the target's own
+    acquisition params (median exposure/gain/temp, modal frame dims) via
+    :func:`calibration.auto_bind_master_paths` and never mutates the project. Shared
+    by :func:`_auto_bind_calibration` (which binds it into a run's options) and
+    :func:`_auto_stack_calibration_recheck` (which uses it to decide whether a
+    now-available master should re-trigger a previously-uncalibrated target)."""
+    from webapp import calibration
+
+    frames = list(proj.iter_frames(accepted_only=True))
+    if not frames:
+        return {}
+
+    def _med(vals: list[Any]) -> float | None:
+        xs = sorted(v for v in vals if v is not None)
+        if not xs:
+            return None
+        n = len(xs)
+        return xs[n // 2] if n % 2 else (xs[n // 2 - 1] + xs[n // 2]) / 2.0
+
+    def _mode_dim(vals: list[Any]) -> int | None:
+        """Most common frame dimension — the size ``run_stack`` will validate
+        calibration masters against. Used to reject a wrong-camera master
+        before it can hard-fail the unattended stack."""
+        counts: dict[int, int] = {}
+        for v in vals:
+            if v is None:
+                continue
+            try:
+                k = int(v)
+            except (TypeError, ValueError):
+                continue
+            counts[k] = counts.get(k, 0) + 1
+        return max(counts, key=lambda k: counts[k]) if counts else None
+
+    masters = calibration.list_masters(settings.resolved_library_root)
+    return calibration.auto_bind_master_paths(
+        settings.resolved_library_root, masters,
+        exposure_s=_med([f.exposure_s for f in frames]),
+        gain=_med([f.gain for f in frames]),
+        sensor_temp_c=_med([f.sensor_temp_c for f in frames]),
+        width_px=_mode_dim([f.width_px for f in frames]),
+        height_px=_mode_dim([f.height_px for f in frames]),
+    )
+
+
 def _auto_bind_calibration(settings: Settings, proj: Any, opts_dict: dict[str, Any]) -> None:
     """Best-effort: bind confidently-matching library master darks/flats/bias to
     an unattended stack when it has no calibration chosen (mutates ``opts_dict``).
@@ -1567,47 +1737,11 @@ def _auto_bind_calibration(settings: Settings, proj: Any, opts_dict: dict[str, A
     stack — an unresolvable master or a bad frame set just leaves it uncalibrated,
     exactly as today. The applied masters flow through the normal stack path, so
     the run's ``CALSTAT`` provenance records what was calibrated."""
-    from webapp import calibration
-
     if any(opts_dict.get(k) for k in
            ("dark_path", "flat_path", "flat_dark_path", "bias_path")):
         return
     try:
-        frames = list(proj.iter_frames(accepted_only=True))
-        if not frames:
-            return
-
-        def _med(vals: list[Any]) -> float | None:
-            xs = sorted(v for v in vals if v is not None)
-            if not xs:
-                return None
-            n = len(xs)
-            return xs[n // 2] if n % 2 else (xs[n // 2 - 1] + xs[n // 2]) / 2.0
-
-        def _mode_dim(vals: list[Any]) -> int | None:
-            """Most common frame dimension — the size ``run_stack`` will validate
-            calibration masters against. Used to reject a wrong-camera master
-            before it can hard-fail the unattended stack."""
-            counts: dict[int, int] = {}
-            for v in vals:
-                if v is None:
-                    continue
-                try:
-                    k = int(v)
-                except (TypeError, ValueError):
-                    continue
-                counts[k] = counts.get(k, 0) + 1
-            return max(counts, key=lambda k: counts[k]) if counts else None
-
-        masters = calibration.list_masters(settings.resolved_library_root)
-        bound = calibration.auto_bind_master_paths(
-            settings.resolved_library_root, masters,
-            exposure_s=_med([f.exposure_s for f in frames]),
-            gain=_med([f.gain for f in frames]),
-            sensor_temp_c=_med([f.sensor_temp_c for f in frames]),
-            width_px=_mode_dim([f.width_px for f in frames]),
-            height_px=_mode_dim([f.height_px for f in frames]),
-        )
+        bound = _confident_master_binding(settings, proj)
     except Exception as exc:  # noqa: BLE001 — calibration binding is a best-effort nicety
         log.warning("auto-bind calibration failed for %s: %s",
                     opts_dict.get("output_name", "?"), exc)
