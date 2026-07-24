@@ -11,9 +11,10 @@ import pytest
 pytest.importorskip("astropy")
 
 from seestack.io.library import Library
-from seestack.io.project import Project
+from seestack.io.project import REJECT_REASON_SEESTAR_OUTPUT, FrameRow, Project
 from seestack.io.scanner import (
     _apply_seestar_convention,
+    _seestar_output_bases,
     classify_seestar_junk_target,
     run_qc_and_solve,
     scan_and_organize,
@@ -221,6 +222,138 @@ def test_scan_is_seestar_aware_end_to_end(tmp_path):
         assert by_name["M 3 (mosaic)"].n_frames_added == 2
         # No bogus output/video targets in the registry.
         assert {t.name for t in lib.list_targets()} == {"M 3", "M 3 (mosaic)"}
+    finally:
+        lib.close()
+
+
+def test_seestar_output_bases_maps_single_field_sub_only():
+    """``_sub`` single-field folders yield a bare-output base to reject; mosaic
+    ``_mosaic_sub`` and plain non-Seestar folders yield nothing."""
+    bases = _seestar_output_bases(_fake("M 31_sub", "M 31", "M 3_mosaic_sub", "Andromeda"))
+    assert bases == {"M 31": "M 31"}
+
+
+def test_reject_seestar_output_frames_rejects_output_and_video_not_subs(tmp_path):
+    """The Project helper additively rejects frames whose source lives in the
+    bare ``<T>/`` output folder or any ``*_video`` folder, leaves the raw ``_sub``
+    frames accepted, and never touches a user-overridden accept."""
+    proj = Project.create(tmp_path / "proj", name="M 31")
+    try:
+        root = tmp_path / "incoming"
+        sub_a = proj.add_frame(FrameRow(source_path=str(root / "M 31_sub" / "Light_001.fit")))
+        sub_b = proj.add_frame(FrameRow(source_path=str(root / "M 31_sub" / "Light_002.fit")))
+        out = proj.add_frame(FrameRow(source_path=str(root / "M 31" / "Stacked_60s.fit")))
+        vid = proj.add_frame(FrameRow(source_path=str(root / "M 31_video" / "clip.fit")))
+        # A frame the user manually accepted must survive even if it looks like output.
+        kept = proj.add_frame(FrameRow(
+            source_path=str(root / "M 31" / "Stacked_keep.fit"), user_override=True))
+
+        rejected = proj.reject_seestar_output_frames("M 31")
+        assert set(rejected) == {out, vid}
+        assert proj.get_frame(out).accept is False
+        assert proj.get_frame(out).reject_reason == REJECT_REASON_SEESTAR_OUTPUT
+        assert proj.get_frame(vid).accept is False
+        assert proj.get_frame(sub_a).accept is True and proj.get_frame(sub_b).accept is True
+        assert proj.get_frame(kept).accept is True  # user override preserved
+
+        # Idempotent: a second call rejects nothing more.
+        assert proj.reject_seestar_output_frames("M 31") == []
+    finally:
+        proj.close()
+
+
+def test_rescan_rejects_pre_v0_184_9_output_pollution_end_to_end(tmp_path):
+    """Upgrade path: a library first scanned before the Seestar convention
+    shipped merged the on-device output into the ``<T>`` target. Re-scanning with
+    the fixed scanner ingests the raw ``<T>_sub`` subs and additively rejects that
+    output frame so it leaves the stack/reference pool (regression for the ⭐⭐
+    upgrade-path pollution bug)."""
+    scan_root = tmp_path / "incoming"
+    (scan_root / "M 31_sub").mkdir(parents=True)
+    write_seestar_fits(scan_root / "M 31_sub" / "Light_001.fit", n_stars=5, seed=1)
+    write_seestar_fits(scan_root / "M 31_sub" / "Light_002.fit", n_stars=5, seed=2)
+    write_seestar_fits(scan_root / "M 31_sub" / "Light_003.fit", n_stars=5, seed=3)
+    # The Seestar's own on-device output, sitting in the bare "M 31/" folder.
+    (scan_root / "M 31").mkdir()
+    output_file = write_seestar_fits(scan_root / "M 31" / "Stacked_60s.fit", n_stars=5, seed=10)
+
+    lib = Library.create(tmp_path / "lib")
+    try:
+        # Seed the pre-fix polluted state: the OLD scanner made "M 31" a target
+        # and ingested the on-device output frame into it as if it were a sub.
+        entry, proj = lib.open_or_create_target("M 31")
+        try:
+            proj.add_frame(FrameRow(source_path=str(output_file)))
+        finally:
+            proj.close()
+
+        result = scan_and_organize(lib, scan_root)
+        m31 = next(t for t in result.targets if t.safe_name == "M_31")
+        assert m31.n_frames_added == 3               # the three raw subs
+        assert m31.n_output_frames_rejected == 1     # the on-device output
+
+        proj = lib.open_target("M_31")
+        try:
+            frames = list(proj.iter_frames())
+            assert len(frames) == 4                  # 3 subs + 1 seeded output
+            accepted = [f for f in proj.iter_frames(accepted_only=True)]
+            assert len(accepted) == 3                # output no longer in the pool
+            out = next(f for f in frames if f.source_path == str(output_file))
+            assert out.accept is False
+            assert out.reject_reason == REJECT_REASON_SEESTAR_OUTPUT
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def test_scan_expands_a_whole_device_container_drop(tmp_path):
+    """A whole Seestar share/card copied in with its container level intact
+    (incoming/MyWorks/{...}) must expand into the real per-target folders, not
+    lump every object + output + video into one giant 'MyWorks' target
+    (regression for the whole-device-drop bug)."""
+    scan_root = tmp_path / "incoming"
+    works = scan_root / "MyWorks"
+    (works / "M 31_sub").mkdir(parents=True)
+    write_seestar_fits(works / "M 31_sub" / "Light_001.fit", n_stars=5, seed=1)
+    write_seestar_fits(works / "M 31_sub" / "Light_002.fit", n_stars=5, seed=2)
+    (works / "M 31").mkdir()  # on-device output for M 31 — must be skipped
+    write_seestar_fits(works / "M 31" / "Stacked.fit", n_stars=5, seed=10)
+    (works / "NGC 7000_mosaic_sub").mkdir()
+    write_seestar_fits(works / "NGC 7000_mosaic_sub" / "Light_001.fit", n_stars=5, seed=3)
+    write_seestar_fits(works / "NGC 7000_mosaic_sub" / "Light_002.fit", n_stars=5, seed=4)
+    (works / "Lunar_video").mkdir()  # video — must be skipped
+    write_seestar_fits(works / "Lunar_video" / "clip.fit", n_stars=5, seed=6)
+
+    lib = Library.create(tmp_path / "lib")
+    try:
+        result = scan_and_organize(lib, scan_root)
+        by_name = {t.target_name: t for t in result.targets}
+        assert set(by_name) == {"M 31", "NGC 7000 (mosaic)"}   # no "MyWorks"
+        assert by_name["M 31"].n_frames_added == 2             # subs, not the output
+        assert by_name["NGC 7000 (mosaic)"].n_frames_added == 2
+        assert {t.name for t in lib.list_targets()} == {"M 31", "NGC 7000 (mosaic)"}
+    finally:
+        lib.close()
+
+
+def test_scan_keeps_a_plain_nested_non_seestar_folder_as_one_target(tmp_path):
+    """A plainly-nested non-Seestar folder (children share no '_sub' convention
+    name) must still ingest as ONE target — the container expansion must not
+    fire for it (no regression for the Andromeda/sub layout)."""
+    scan_root = tmp_path / "incoming"
+    proj = scan_root / "MyProject"
+    (proj / "night1").mkdir(parents=True)
+    (proj / "night2").mkdir()
+    write_seestar_fits(proj / "night1" / "Light_001.fit", n_stars=5, seed=1)
+    write_seestar_fits(proj / "night2" / "Light_002.fit", n_stars=5, seed=2)
+
+    lib = Library.create(tmp_path / "lib")
+    try:
+        result = scan_and_organize(lib, scan_root)
+        by_name = {t.target_name: t for t in result.targets}
+        assert set(by_name) == {"MyProject"}       # one target, both nights folded in
+        assert by_name["MyProject"].n_frames_added == 2
     finally:
         lib.close()
 

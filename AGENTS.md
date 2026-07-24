@@ -81,21 +81,20 @@ higher on this list wins — always:
    final images).
 
 **⚡ IMMEDIATE PRIORITY (owner-reported 2026-07 + 2026-07-24 integration audit) — the
-owner's LIVE install is still broken: fix the Seestar upgrade-path pollution FIRST.**
+Seestar upgrade-path pollution is now FIXED (v0.184.15); two sibling ingest bugs remain.**
 The fresh-library Seestar-convention scanner fix shipped (v0.184.9 — verified correct
-by the audit), but the owner's install is *already polluted* by the old scan, and the
-audit proved (traced + reproduced) that a re-scan **merges the raw subs INTO the old
-bare-output target**: `<T>_sub/` → target `<T>` → same `safe_name` as the pre-fix
-`<T>/` output target, so the Seestar's own on-device `Stacked_*.fit` keeps stacking in,
-gets **preferentially picked as the stack reference** (its centre is the dither median),
-which flips `is_mosaic` (pixel-area compare across pixel scales, `mosaic.py:330`) and
-stacks a single-field target as a padded low-res "mosaic" — and the old `<T>_sub`
-target duplicates every sub. This is the ⭐⭐ entry in `docs/IMPROVEMENTS.md` → "Bugs":
-at scan time, additively reject frames whose source parent is the bare `<T>/` (or
-`*_video/`) folder (`auto:seestar_output`, never delete) so they leave the stack +
-reference pool, and point the junk-target detector at the `<T>_sub`-named duplicates.
-Also fix the two sibling ingest bugs the audit filed (whole-device `MyWorks/` drop
-merging everything; unicode names collapsing to one project). **This is why the owner's
+by the audit). The owner's *already-polluted* install — where a re-scan merged the raw
+subs INTO the old bare-output target (`<T>_sub/` → target `<T>` → same `safe_name` as
+the pre-fix `<T>/` output target), so the Seestar's own on-device `Stacked_*.fit` kept
+stacking in, got preferentially picked as the stack reference, and flipped `is_mosaic`
+into a padded low-res "mosaic" — is now healed by **v0.184.15**: `scan_and_organize`
+additively rejects any already-registered frame whose source parent is the bare `<T>/`
+(or a `*_video/`) folder as `auto:seestar_output` (never deleted; user can re-accept),
+so it leaves the stack + reference pool. The stale `<T>_sub`-named *duplicate target* it
+leaves behind is correctness-neutral (it stacks the correct subs) and is filed as a
+one-click-cleanup Idea. **Still open — fix these next:** the two sibling ingest bugs the
+audit filed (whole-device `MyWorks/` drop merging everything; unicode names collapsing to
+one project). **This is why the owner's
 redeploy would still produce bad stacks — fix it before anything else.**
 
 **Background (fresh-library convention, already shipped v0.184.9):** a Seestar writes

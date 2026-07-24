@@ -221,6 +221,11 @@ _INSERT_COLS = [
     "accept", "reject_reason", "user_override",
 ]
 
+# Reject reason stamped on the Seestar's own on-device *stacked output* when it
+# was ingested into a target as if it were a raw sub (pre-v0.184.9 scans, before
+# the folder convention shipped). Additive + reversible — never a delete.
+REJECT_REASON_SEESTAR_OUTPUT = "auto:seestar_output"
+
 
 class Project:
     """Handle to a Seestack project directory and its SQLite database."""
@@ -593,6 +598,51 @@ class Project:
             wcs_json=None, ra_center_deg=None, dec_center_deg=None,
             pixscale_arcsec=None, rotation_deg=None,
         )
+
+    def reject_seestar_output_frames(self, output_folder: str) -> list[int]:
+        """Additively reject already-registered frames that live in the Seestar's
+        own on-device *output* folder for this target (the bare ``<T>/`` beside
+        the authoritative ``<T>_sub/``), or in a ``*_video/`` capture folder.
+
+        This heals a library first scanned **before** the Seestar folder
+        convention shipped (v0.184.9): back then the scanner ingested the
+        on-device stacked output as if it were a raw sub, into the very target
+        the raw subs now map to. Left in the stack that output is averaged into
+        the final image and — being the dither-median frame — is *preferentially*
+        picked as the stack reference (which can even flip a plain single field
+        into a padded low-res "mosaic"). This moves those frames out of the
+        stack/reference pool **without deleting anything**: they are marked
+        ``accept=0`` with ``reject_reason=REJECT_REASON_SEESTAR_OUTPUT`` and the
+        user can re-accept them.
+
+        ``output_folder`` is the bare target-folder basename (``"<T>"``); a frame
+        is treated as output when its source's immediate parent folder matches it
+        (case-insensitively) or is a ``*_video`` folder. A frame the user manually
+        accepted (``user_override``) is left untouched, and a frame already
+        rejected is not re-touched — so a re-scan is idempotent.
+
+        Returns the ids of the frames newly rejected by this call.
+        """
+        assert self._conn is not None
+        base_low = output_folder.strip().lower()
+        if not base_low:
+            return []
+        to_reject: list[int] = []
+        for frame in list(self.iter_frames()):
+            if frame.id is None or frame.user_override or not frame.accept:
+                continue
+            parent = Path(frame.source_path).parent.name.lower()
+            if parent == base_low or parent.endswith("_video"):
+                to_reject.append(frame.id)
+        if not to_reject:
+            return []
+        with self.transaction():
+            for fid in to_reject:
+                self.update_frame(
+                    fid, accept=False,
+                    reject_reason=REJECT_REASON_SEESTAR_OUTPUT,
+                )
+        return to_reject
 
     def iter_frames(self, accepted_only: bool = False) -> Iterator[FrameRow]:
         assert self._conn is not None
