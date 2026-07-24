@@ -30,7 +30,7 @@ def test_pass_applies_weight_and_scale_for_frame_id_zero(monkeypatch):
     # Bypass the real load→calibrate→debayer→reproject; hand the pass a fixed
     # window so we can observe exactly the weight/scale it applies.
     monkeypatch.setattr(stacker, "_align_for_stack",
-                        lambda *a, **k: (win.copy(), 0, 0))
+                        lambda *a, **k: (win.copy(), 0, 0, False))
 
     captured: list[tuple[float, float]] = []
 

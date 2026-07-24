@@ -642,6 +642,10 @@ export interface StackFrameAccounting {
   // Of those, how many couldn't be aligned (load failure or a footprint that
   // missed the canvas — usually a stray sub or a bad plate-solve).
   n_align_failed?: number;
+  // How many contributing subs sub-pixel refine had to leave *only roughly*
+  // aligned (its measured shift exceeded the cap, so the frame stacked
+  // unshifted → possibly soft/doubled stars). Present only when refine ran.
+  n_roughly_aligned?: number;
 }
 
 export interface StackProcessingStep {

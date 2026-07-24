@@ -294,6 +294,42 @@ export function frameAccountingNote(
   return { text, concern, guidance };
 }
 
+// One-line honest signal when sub-pixel refine had to leave some subs *only
+// roughly aligned* — its measured shift exceeded the cap, so those frames
+// stacked unshifted. The beginner sees slightly soft / doubled stars but has
+// nothing pointing at alignment; this names it and, when it's a big share,
+// nudges the likely cause (a less-steady mount, or subs that plate-solved a
+// touch off). Pure so it can be unit-tested.
+//
+// Returns null when nothing's worth saying: no refine accounting recorded
+// (older master / refine off), or every sub landed within the cap (the happy
+// case needs no note). Only fires on a non-trivial share, so one stray sub out
+// of thousands stays quiet.
+export function roughlyAlignedNote(
+  fa: StackFrameAccounting | null | undefined,
+): FrameAccountingNote | null {
+  if (!fa || typeof fa.n_offered !== "number" || fa.n_offered <= 0) return null;
+  if (typeof fa.n_roughly_aligned !== "number" || fa.n_roughly_aligned <= 0) {
+    return null;
+  }
+  const offered = fa.n_offered;
+  const rough = Math.min(fa.n_roughly_aligned, offered);
+  const nf = (n: number) => n.toLocaleString();
+  const text =
+    `${nf(rough)} of ${nf(offered)} subs were only roughly aligned · ` +
+    `your stars may look a little soft`;
+  // Guide a fix only when it's a materially large share and not a tiny stack
+  // (one soft sub out of five isn't worth a scary nudge).
+  const fraction = rough / offered;
+  const concern = offered >= 10 && fraction >= 0.2;
+  const guidance = concern
+    ? "Many subs didn't quite line up to the reference, so the stacker used " +
+      "them as-is — stars can end up a little soft or doubled. A steadier " +
+      "mount, or re-solving these subs, usually tightens them up."
+    : null;
+  return { text, concern, guidance };
+}
+
 // Compact seconds label for exposures — "30s", "2.5s" — trimming a trailing ".0".
 function formatExposure(s: number): string {
   const r = Math.round(s * 10) / 10;
@@ -383,6 +419,20 @@ function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
             </Text>
             {fa.guidance ? (
               <Text size="xs" c="dimmed">{fa.guidance}</Text>
+            ) : null}
+          </Stack>
+        );
+      })()}
+      {(() => {
+        const ra = roughlyAlignedNote(data.frame_accounting);
+        if (!ra) return null;
+        return (
+          <Stack gap={2}>
+            <Text size="xs" c={ra.concern ? "yellow.7" : "dimmed"} fw={ra.concern ? 600 : undefined}>
+              {ra.text}
+            </Text>
+            {ra.guidance ? (
+              <Text size="xs" c="dimmed">{ra.guidance}</Text>
             ) : null}
           </Stack>
         );

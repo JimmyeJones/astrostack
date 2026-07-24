@@ -159,6 +159,90 @@ def test_subpixel_shift_windowed_marks_vacated_edge_as_nan():
     assert np.isfinite(out[20:-20, 20:-20]).all()
 
 
+def test_subpixel_shift_flags_over_cap_in_stats():
+    """A refine shift past ``SUBPIXEL_SHIFT_CAP_PX`` leaves the frame unshifted
+    *and*, when an optional ``stats`` dict is passed, records ``over_cap`` — the
+    honest "only roughly aligned" signal the stacker counts. No stats arg keeps
+    the old byte-for-byte behaviour (backward-compatible)."""
+    from scipy.ndimage import shift as nd_shift
+
+    frame = _frame_with_stars(256, 256, seed=13)
+    patch, origin = extract_reference_patch(frame, size=128)
+    # Reference patch shifted by 9 px (> 5 px cap) → measured residual over cap.
+    ref_shifted = nd_shift(patch, shift=(9.0, 0.0), order=1,
+                           mode="nearest").astype(np.float32)
+
+    stats: dict = {}
+    out = _apply_subpixel_shift(frame, ref_shifted, origin, stats=stats)
+
+    assert stats.get("over_cap") is True
+    # Over-cap → the frame is returned unshifted (the existing pixel decision).
+    assert out is frame
+    # And without a stats dict the call still no-ops cleanly (no crash, same
+    # unshifted frame) — proves the param is optional.
+    assert _apply_subpixel_shift(frame, ref_shifted, origin) is frame
+
+
+def test_subpixel_shift_within_cap_does_not_flag():
+    """A shift inside the cap is applied and must NOT set ``over_cap`` — only a
+    genuinely-over-cap frame counts as roughly aligned."""
+    from scipy.ndimage import shift as nd_shift
+
+    frame = _frame_with_stars(256, 256, seed=14)
+    patch, origin = extract_reference_patch(frame, size=128)
+    ref_shifted = nd_shift(patch, shift=(1.2, -0.8), order=1,
+                           mode="nearest").astype(np.float32)
+
+    stats: dict = {}
+    out = _apply_subpixel_shift(frame, ref_shifted, origin, stats=stats)
+
+    assert "over_cap" not in stats
+    # A shift was actually applied → a fresh array, not the input identity.
+    assert out is not frame
+
+
+def test_subpixel_shift_windowed_flags_over_cap_in_stats():
+    """Same over-cap accounting for the windowed (mosaic) refine path."""
+    from scipy.ndimage import shift as nd_shift
+
+    canvas = _frame_with_stars(256, 256, seed=15)
+    ph = pw = 128
+    ry0 = (256 - ph) // 2
+    rx0 = (256 - pw) // 2
+    luma = (0.299 * canvas[..., 0] + 0.587 * canvas[..., 1]
+            + 0.114 * canvas[..., 2])
+    # Reference patch shifted 8 px (> 5 px cap).
+    ref_full = nd_shift(luma, shift=(8.0, 0.0), order=1, mode="nearest")
+    ref_patch = ref_full[ry0:ry0 + ph, rx0:rx0 + pw].astype(np.float32)
+
+    stats: dict = {}
+    out = _apply_subpixel_shift_windowed(canvas, 0, 0, ref_patch, (ry0, rx0),
+                                         stats=stats)
+
+    assert stats.get("over_cap") is True
+    assert out is canvas  # unshifted, and no NaN invented
+
+
+def test_subpixel_shift_windowed_within_cap_does_not_flag():
+    from scipy.ndimage import shift as nd_shift
+
+    canvas = _frame_with_stars(256, 256, seed=16)
+    ph = pw = 128
+    ry0 = (256 - ph) // 2
+    rx0 = (256 - pw) // 2
+    luma = (0.299 * canvas[..., 0] + 0.587 * canvas[..., 1]
+            + 0.114 * canvas[..., 2])
+    ref_full = nd_shift(luma, shift=(1.3, 0.6), order=1, mode="nearest")
+    ref_patch = ref_full[ry0:ry0 + ph, rx0:rx0 + pw].astype(np.float32)
+
+    stats: dict = {}
+    out = _apply_subpixel_shift_windowed(canvas, 0, 0, ref_patch, (ry0, rx0),
+                                         stats=stats)
+
+    assert "over_cap" not in stats
+    assert out is not canvas
+
+
 def test_reproject_windowed_honours_pad():
     """The window is padded ``pad`` px beyond the footprint on every side, and
     the extra border is uncovered (NaN) — so a wider pad only *adds* an

@@ -464,6 +464,11 @@ class StackResult:
     # nothing-aligned run that returns before the passes complete.
     n_offered: int = 0
     n_align_failed: int = 0
+    # How many contributing subs sub-pixel refine had to leave *only roughly
+    # aligned* (its measured shift exceeded ``SUBPIXEL_SHIFT_CAP_PX``, so the
+    # frame stacked unshifted → possibly soft/doubled stars). 0 when refine was
+    # off. Observational only — it never changes which frames contribute.
+    n_roughly_aligned: int = 0
     # The new ``stack_runs`` row id for this run (None if history recording was
     # skipped — e.g. a cancelled run — or failed). Lets callers deep-link the
     # finished run's editor instead of just its target's History list.
@@ -758,6 +763,7 @@ def _build_output_header_meta(
     pstats: PhotometricStats | None = None,
     rstats: "RejectionStats | None" = None,
     weights_applied: bool = True,
+    n_roughly_aligned: int = 0,
 ) -> dict[str, Any]:
     """Collect provenance for the output FITS header.
 
@@ -882,6 +888,17 @@ def _build_output_header_meta(
         n_failed = max(0, n_offered - int(n_used))
         meta["NOFFERED"] = (int(n_offered), "subs offered to the stacker")
         meta["NALIGNFL"] = (int(n_failed), "subs that could not be aligned")
+    # Sub-pixel refine accounting: how many contributing subs the refine step
+    # had to leave *only roughly aligned* (its measured shift exceeded the cap,
+    # so the frame stacked unshifted). Softer/doubled stars the user sees but
+    # can't otherwise explain. Stamped only when refine actually ran (so the
+    # card's absence means "refine off / older master", not "0 flagged"), even
+    # at 0 — "nothing was rough" is itself an honest, reassuring signal (mirrors
+    # REJFRAC stamping at 0%). Drizzle uses a pixmap, not the refine step, so it
+    # never leaves a frame "roughly aligned" — don't stamp a meaningless 0 there.
+    if options.subpixel_refine and not options.drizzle:
+        meta["NROUGHAL"] = (int(max(0, n_roughly_aligned)),
+                            "subs only roughly aligned (over cap)")
     return meta
 
 
@@ -1195,6 +1212,13 @@ def run_stack(
     # outputs are written (post-archive).
     ql = _QuickLook(project.project_dir, options.output_name, options, n)
 
+    # Honest-accounting: contributing frames that sub-pixel refine had to leave
+    # unshifted because the measured shift exceeded its cap (only roughly
+    # aligned → possibly soft/doubled stars). A set so the two κ-σ passes, which
+    # refine the same frames twice, count each frame once. Stays empty when
+    # refine is off (drizzle never refines), so a run with it off is unaffected.
+    roughly_ids: set[int] = set()
+
     # ---- 3a. Drizzle path (alternate accumulator) --------------------------
     if options.drizzle:
         from seestack.io.wcs_io import wcs_from_text, wcs_to_text
@@ -1299,6 +1323,7 @@ def run_stack(
             mono=options.mono,
             photometric_scales=pscales,
             max_in_flight=max_in_flight,
+            roughly_aligned_ids=roughly_ids,
         )
         if n_used == 0 and not cancel():
             raise ValueError("no frames could be aligned")
@@ -1333,6 +1358,7 @@ def run_stack(
             mono=options.mono,
             photometric_scales=pscales,
             max_in_flight=max_in_flight,
+            roughly_aligned_ids=roughly_ids,
         )
         if n_used_p1 == 0 and not cancel():
             raise ValueError("pass 1 produced no usable frames")
@@ -1381,6 +1407,7 @@ def run_stack(
             mono=options.mono,
             photometric_scales=pscales,
             max_in_flight=max_in_flight,
+            roughly_aligned_ids=roughly_ids,
         )
         n_used = min(n_used_p1, n_used_p2)
         # Pass 1 succeeded but pass 2 aligned nothing (e.g. the cached/source
@@ -1425,6 +1452,7 @@ def run_stack(
             mono=options.mono,
             photometric_scales=pscales,
             max_in_flight=max_in_flight,
+            roughly_aligned_ids=roughly_ids,
         )
         if n_used == 0 and not cancel():
             raise ValueError("no frames could be aligned")
@@ -1514,10 +1542,12 @@ def run_stack(
     # other path (drizzle, κ-σ pass 2, plain weighted sum, and the min/max
     # fall-back-to-mean when n < 3) does apply the weights.
     weights_applied = not (eff.min_max_reject and not options.drizzle and n >= 3)
+    n_roughly = len(roughly_ids)
     header_meta = _build_output_header_meta(project, frames, eff, n_used, wstats,
                                             calibration=calibration, pstats=pstats,
                                             rstats=rej_stats,
-                                            weights_applied=weights_applied)
+                                            weights_applied=weights_applied,
+                                            n_roughly_aligned=n_roughly)
     if noise_sigma is not None:
         header_meta["BKGSIGMA"] = (noise_sigma, "normalized background noise sigma")
     paths = write_stack_outputs(
@@ -1632,6 +1662,7 @@ def run_stack(
         excluded_frames=excluded_frames,
         n_offered=len(frames),
         n_align_failed=max(0, len(frames) - n_used),
+        n_roughly_aligned=n_roughly,
         run_id=run_id,
         rejection_mode=rej_stats.mode if _rej_recorded else None,
         rejection_fraction=rej_stats.fraction if _rej_recorded else None,
@@ -1684,12 +1715,20 @@ def _pass(
     mono: bool = False,
     photometric_scales: dict[int, float] | None = None,
     max_in_flight: int | None = None,
+    roughly_aligned_ids: set[int] | None = None,
 ) -> int:
     """
     Run one pass over ``frames``, feeding each windowed aligned image plus its
     canvas offset and per-frame quality weight into
     ``consumer(window_rgb, y0, x0, weight)``. Returns the number of frames
     that contributed (post-error).
+
+    ``roughly_aligned_ids`` (optional): a mutable set the pass adds a
+    contributing frame's ``id`` to when sub-pixel refine measured a shift past
+    its cap (the frame stacked unshifted — only *roughly* aligned). Threaded in
+    (rather than returned) so the same set dedupes across the two κ-σ passes,
+    which refine the same frames twice. Left empty when refine is off. Purely an
+    honest-accounting signal; it never changes which frames contribute.
 
     ``max_in_flight`` caps how many aligned frame buffers may be in flight at once
     (memory-bounded by the caller via :func:`_memory_bounded_in_flight`); when None
@@ -1740,7 +1779,12 @@ def _pass(
                 # canvas (e.g. a stray frame from a different target).
                 progress(phase_label, done, total)
                 continue
-            win_rgb, y0, x0 = aligned
+            win_rgb, y0, x0, roughly = aligned
+            if roughly and roughly_aligned_ids is not None and f.id is not None:
+                # Refine measured a shift past the cap, so this contributing
+                # frame stacked only roughly aligned. Record its id (a set, so
+                # a κ-σ two-pass counts it once).
+                roughly_aligned_ids.add(f.id)
             if photometric_scales is not None:
                 scale = photometric_scales.get(f.id if f.id is not None else -1, 1.0)
                 if scale != 1.0:
@@ -1880,17 +1924,21 @@ def _align_for_stack(
     subpixel_refine: bool,
     calibration: "CalibrationMasters | None" = None,
     mono: bool = False,
-) -> tuple[np.ndarray, int, int] | None:
+) -> tuple[np.ndarray, int, int, bool] | None:
     """
-    Worker entry point. Returns ``(window_rgb, y0, x0)`` — the reprojected
-    frame cropped to its footprint plus its canvas offset — or ``None`` on
-    benign failure (missing file, no WCS, footprint off-canvas).
+    Worker entry point. Returns ``(window_rgb, y0, x0, roughly_aligned)`` — the
+    reprojected frame cropped to its footprint, its canvas offset, and a flag
+    that is ``True`` when sub-pixel refine measured a shift past its cap so the
+    frame stacks only *roughly* aligned (unshifted) — or ``None`` on benign
+    failure (missing file, no WCS, footprint off-canvas). The flag is always
+    ``False`` when refine didn't run; it never affects the pixels.
     """
     path = readable_frame_path(frame)
     if not path:
         return None
     if not frame.wcs_json:
         return None
+    refine_stats: dict = {}
     result = align_one(
         fits_path=path,
         bayer_pattern=frame.bayer_pattern,
@@ -1906,11 +1954,12 @@ def _align_for_stack(
         subpixel_refine=subpixel_refine,
         calibration=calibration,
         mono=mono,
+        refine_stats=refine_stats,
     )
     if result is None:
         return None
     win_rgb, _win_valid, y0, x0 = result
-    return win_rgb, y0, x0
+    return win_rgb, y0, x0, bool(refine_stats.get("over_cap"))
 
 
 # Keep at most this many evenly-spaced snapshots in the progress reel, so a

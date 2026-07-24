@@ -1146,7 +1146,8 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
     frame_accounting: dict[str, Any] | None = None
     if "NOFFERED" in header:
         frame_accounting = {}
-        for hk, k in (("NOFFERED", "n_offered"), ("NALIGNFL", "n_align_failed")):
+        for hk, k in (("NOFFERED", "n_offered"), ("NALIGNFL", "n_align_failed"),
+                      ("NROUGHAL", "n_roughly_aligned")):
             with contextlib.suppress(KeyError, TypeError, ValueError):
                 frame_accounting[k] = int(header[hk])
         if "n_offered" not in frame_accounting:
