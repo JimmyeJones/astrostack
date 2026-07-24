@@ -70,6 +70,66 @@ describe("CleanupSuggestionsCard", () => {
     expect(del).not.toHaveBeenCalled();
   });
 
+  it("shows the duplicate group in its own alert with distinct copy", async () => {
+    vi.spyOn(client.api, "cleanupSuggestions").mockResolvedValue([
+      suggestion({ safe: "m_31", name: "M 31", reason: "on_device_output" }),
+      suggestion({
+        safe: "m_31_sub",
+        name: "M 31_sub",
+        n_frames: 6,
+        reason: "duplicate_sub",
+        detail: "already in your “M 31” target",
+      }),
+    ]);
+    renderCard();
+
+    // Both groups render as separate alerts.
+    await waitFor(() =>
+      expect(screen.getByText(/are duplicates left by an older scan/i)).toBeInTheDocument(),
+    );
+    expect(screen.getByText(/look like Seestar outputs or videos/i)).toBeInTheDocument();
+    expect(screen.getByText(/M 31_sub · duplicate/)).toBeInTheDocument();
+  });
+
+  it("removes only the duplicate group when its own Remove is clicked", async () => {
+    vi.spyOn(client.api, "cleanupSuggestions").mockResolvedValue([
+      suggestion({
+        safe: "m_31_sub",
+        name: "M 31_sub",
+        n_frames: 6,
+        reason: "duplicate_sub",
+      }),
+    ]);
+    const del = vi.spyOn(client.api, "deleteTarget").mockResolvedValue({} as never);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    renderCard();
+
+    await waitFor(() =>
+      expect(screen.getByText(/are duplicates left by an older scan/i)).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByText("Remove this target"));
+    await waitFor(() => expect(del).toHaveBeenCalledWith("m_31_sub", false));
+  });
+
+  it("dismisses the two groups independently", async () => {
+    vi.spyOn(client.api, "cleanupSuggestions").mockResolvedValue([
+      suggestion({ safe: "m_31", name: "M 31", reason: "on_device_output" }),
+      suggestion({ safe: "m_31_sub", name: "M 31_sub", reason: "duplicate_sub" }),
+    ]);
+    renderCard();
+
+    await waitFor(() =>
+      expect(screen.getByText(/are duplicates left by an older scan/i)).toBeInTheDocument(),
+    );
+    // Dismiss only the junk group via its "Keep them" button (first one).
+    fireEvent.click(screen.getAllByText("Keep them")[0]);
+    await waitFor(() =>
+      expect(screen.queryByText(/look like Seestar outputs or videos/i)).not.toBeInTheDocument(),
+    );
+    // The duplicate group is still shown.
+    expect(screen.getByText(/are duplicates left by an older scan/i)).toBeInTheDocument();
+  });
+
   it("self-hides when there is nothing to clean up", async () => {
     vi.spyOn(client.api, "cleanupSuggestions").mockResolvedValue([]);
     const { container } = renderCard();

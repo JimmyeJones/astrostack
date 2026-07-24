@@ -232,6 +232,45 @@ def classify_seestar_junk_target(
     return None
 
 
+def duplicate_sub_target_base_name(
+    target_name: str,
+    source_paths: Sequence[str | Path],
+) -> str | None:
+    """Return the base target name (``<T>``) if this target looks like a leftover
+    ``<T>_sub``-named **duplicate** that a pre-v0.184.9 scan built, else ``None``.
+
+    Before the scanner learned the Seestar convention it mapped a raw-subs folder
+    ``<T>_sub/`` to a target literally named ``<T>_sub``. The convention (v0.184.9)
+    now maps that same folder to target ``<T>``, so on an upgraded install a
+    re-scan registers those subs under ``<T>`` while the old ``<T>_sub``-named
+    target lingers holding the *same* frames — a harmless-but-cluttering duplicate
+    (two library tiles for one object, double auto-stack compute). The frames are
+    correct raw subs, so this is **not** the ``on_device_output`` junk case; it is
+    a de-duplication hint.
+
+    Pure and side-effect-free: it only recognises the *shape* (name ends ``_sub``
+    and every frame sits under a single ``*_sub/`` folder). The caller must confirm
+    the base target ``<T>`` actually exists and already owns these subs before
+    offering removal, so a legitimately-named standalone ``…_sub`` target (or one
+    whose subs the base doesn't yet own) is never flagged. Single-field only —
+    ``_mosaic_sub`` naming is device-specific and deliberately left to its own bug.
+    """
+    name = target_name.strip()
+    low = name.lower()
+    if not low.endswith(_SUB_SUFFIX) or low.endswith(_MOSAIC_SUB_SUFFIX):
+        return None
+    base = name[: -len(_SUB_SUFFIX)].rstrip()
+    if not base:
+        return None
+    folders = {Path(p).parent for p in source_paths}
+    if len(folders) != 1:
+        return None
+    folder = next(iter(folders))
+    if not folder.name.lower().endswith(_SUB_SUFFIX):
+        return None
+    return base
+
+
 @dataclass
 class TargetScanResult:
     """What the organise phase did for one target."""

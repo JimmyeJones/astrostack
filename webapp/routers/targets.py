@@ -166,36 +166,85 @@ _MAX_CLEANUP_FRAMES = 2
 
 @router.get("/cleanup-suggestions", response_model=list[CleanupSuggestionOut])
 def cleanup_suggestions(request: Request) -> list[CleanupSuggestionOut]:
-    """Detect leftover *junk* targets a pre-v0.184.9 scan built from the Seestar's
-    own output / ``_video`` folders (not raw subs), so the Library can offer a
-    one-click "remove these" cleanup. Read-only: it never deletes anything (the
-    user confirms via ``DELETE /api/targets/{safe}``), and never touches the real
-    ``_sub`` data. Returns ``[]`` when the library is clean."""
-    from seestack.io.scanner import classify_seestar_junk_target
+    """Detect leftover targets a pre-v0.184.9 scan built before the scanner learned
+    the Seestar folder convention, so the Library can offer a one-click "remove
+    these" cleanup. Two kinds: (1) *junk* targets built from the Seestar's own
+    output / ``_video`` folders (not raw subs, cannot be stacked); (2)
+    ``<T>_sub``-named *duplicates* holding the same raw subs the base target ``<T>``
+    now owns (clutter + double compute, not corrupt data). Read-only: it never
+    deletes anything (the user confirms via ``DELETE /api/targets/{safe}``), and
+    never touches the real ``_sub`` data or the base target. Returns ``[]`` when
+    the library is clean."""
+    from seestack.io.library import make_safe_name
+    from seestack.io.scanner import (
+        classify_seestar_junk_target,
+        duplicate_sub_target_base_name,
+    )
 
     lib = deps.open_library(request)
     out: list[CleanupSuggestionOut] = []
     try:
-        for entry in lib.list_targets():
+        targets = lib.list_targets()
+        by_safe = {t.safe_name: t for t in targets}
+        for entry in targets:
+            # --- (1) output/video junk (cheap: only small targets opened) -----
             is_video_name = entry.name.strip().lower().endswith("_video")
-            if not is_video_name and entry.n_frames > _MAX_CLEANUP_FRAMES:
-                continue  # a real stack — skip cheaply, don't open its project
-            source_paths: list[str] = []
-            if not is_video_name:
-                proj = lib.open_target(entry.safe_name)
-                try:
-                    source_paths = [f.source_path for f in proj.iter_frames()]
-                finally:
-                    proj.close()
-            verdict = classify_seestar_junk_target(
-                entry.name, source_paths, entry.n_frames)
-            if verdict is not None:
+            if is_video_name or entry.n_frames <= _MAX_CLEANUP_FRAMES:
+                source_paths: list[str] = []
+                if not is_video_name:
+                    proj = lib.open_target(entry.safe_name)
+                    try:
+                        source_paths = [f.source_path for f in proj.iter_frames()]
+                    finally:
+                        proj.close()
+                verdict = classify_seestar_junk_target(
+                    entry.name, source_paths, entry.n_frames)
+                if verdict is not None:
+                    out.append(CleanupSuggestionOut(
+                        safe=entry.safe_name,
+                        name=entry.name,
+                        n_frames=entry.n_frames,
+                        reason=verdict.reason,
+                        detail=verdict.detail,
+                    ))
+                    continue  # a junk target is never also a duplicate
+
+            # --- (2) <T>_sub duplicate of a base target that now owns the subs -
+            # Cheap name-shape prefilter: only ``_sub``-named targets (rare) reach
+            # the project-opening confirmation below.
+            low = entry.name.strip().lower()
+            if not low.endswith("_sub") or low.endswith("_mosaic_sub"):
+                continue
+            proj = lib.open_target(entry.safe_name)
+            try:
+                dup_sources = [f.source_path for f in proj.iter_frames()]
+            finally:
+                proj.close()
+            base_name = duplicate_sub_target_base_name(entry.name, dup_sources)
+            if base_name is None:
+                continue
+            base = by_safe.get(make_safe_name(base_name))
+            if base is None or base.safe_name == entry.safe_name:
+                continue
+            base_proj = lib.open_target(base.safe_name)
+            try:
+                base_sources = {f.source_path for f in base_proj.iter_frames()}
+            finally:
+                base_proj.close()
+            # Offer removal only when the base already owns *every* one of these
+            # subs — so nothing real is lost, and the message is truthful.
+            if dup_sources and all(s in base_sources for s in dup_sources):
                 out.append(CleanupSuggestionOut(
                     safe=entry.safe_name,
                     name=entry.name,
                     n_frames=entry.n_frames,
-                    reason=verdict.reason,
-                    detail=verdict.detail,
+                    reason="duplicate_sub",
+                    detail=(
+                        "A leftover from an older scan — these are the same raw "
+                        f"subs, now already in your “{base.name}” target. Removing "
+                        "this duplicate tidies your library and saves re-stacking "
+                        "the same frames twice; your files on disk are untouched."
+                    ),
                 ))
     finally:
         lib.close()
