@@ -5244,6 +5244,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   it needs a careful Builder slice (and the astroalign-vs-in-house/dependency call belongs to the owner). But it is the
   single most direct cure for the owner's real "gibberish on faint targets" report — worth prioritising once the
   cheaper solve-side mitigations are exhausted.
+- **▶ PARTIAL — refusal message half SHIPPED v0.184.13** (Builder 2026-07-24, branch `claude/pensive-faraday-xok0ew`;
+  regression-tested). The `_guard_stack_memory` `MemoryError` (surfaced verbatim on the failed stack job) now names the
+  **single least-destructive concrete lever** that brings the run within budget, with the memory it lands at — instead
+  of the generic four-lever dump. New pure `_best_memory_fix(dst_shape, ref_shape, …)` (`seestack/stack/stacker.py`)
+  reuses `_estimate_peak_bytes` (so the named "~X GB" can never disagree with the refusal threshold) and mirrors the
+  levers `estimate_stack` already surfaces pre-submit: drizzle on → "lower the drizzle scale to ×N"
+  (`_largest_drizzle_scale_within_budget`); non-drizzle, least-destructive first → "lower Extra outlier passes to 1"
+  (k>1 min/max) then "switch Canvas mode to 'reference'" (mosaic union whose ref frame fits). When no single lever
+  obviously fits, it keeps the generic guidance. `run_stack` now threads `ref_shape`/`is_mosaic_canvas`/effective
+  `min_max_reject_count` into the guard. Engine-only, additive (new optional guard kwargs default to the old behaviour),
+  **no change to *what* is refused** (same threshold) — upgrade-safe, no config/DB/API-shape/default change. Tests:
+  `tests/test_stack_memory_guard.py` (+4 — drizzle-scale/reference-canvas/drop-extra-passes each named with its GB;
+  generic fallback when nothing single fits). **Remaining (smaller follow-up): the pre-submit UI half** — add the
+  ranked fitting options + their resulting peak to `StackEstimate` (it already computes `suggested_drizzle_scale`/
+  `suggested_reference_canvas`) and render them as one-click actions on the Stack form, so the fix is offered *before*
+  the run is even submitted, not only on the refusal. *(Original idea kept below for provenance.)*
 - **IMPROVEMENT IDEA (Scout 2026-07-24, spotted while fixing the v0.184.10 memory-estimate/guard bug) — when a stack
   is refused for memory, tell the beginner the *one* concrete change that makes it fit (and by how much), instead of a
   generic four-lever message.** *(Autonomy + friendliness — priorities 2/3; squarely relevant to the owner's RAM-capped

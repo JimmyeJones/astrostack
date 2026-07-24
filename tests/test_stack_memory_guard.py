@@ -120,6 +120,52 @@ def test_estimated_drizzle_output_shape_matches_the_real_canvas():
     assert est_shape == drz.output_canvas_shape == (480, 720)
 
 
+def test_refusal_names_the_drizzle_scale_that_fits(monkeypatch):
+    """A drizzled run over budget should name the concrete smaller scale that
+    fits (and its memory), not the generic four-lever list."""
+    shape = (320, 480)
+    budget_gb = (_peak(shape, 1.0) + _peak(shape, 2.0)) / 2 / 1e9
+    monkeypatch.delenv("ASTROSTACK_MAX_STACK_GB", raising=False)
+    with pytest.raises(MemoryError, match=r"lower the drizzle scale to ×") as exc:
+        stacker._guard_stack_memory(shape, drizzle=True, drizzle_scale=2.0,
+                                    memory_budget_gb=budget_gb)
+    assert "GB), or raise" in str(exc.value)  # names the resulting memory
+
+
+def test_refusal_names_the_reference_canvas_for_a_mosaic(monkeypatch):
+    """An over-budget mosaic union canvas whose reference frame would fit should
+    say 'switch Canvas mode to reference', not the generic list."""
+    monkeypatch.delenv("ASTROSTACK_MAX_STACK_GB", raising=False)
+    union = (4000, 4000)   # ~0.77 GB — over a 0.5 GB budget
+    ref = (1000, 1000)     # ~0.05 GB — comfortably fits
+    with pytest.raises(MemoryError, match=r"switch Canvas mode to 'reference'"):
+        stacker._guard_stack_memory(union, drizzle=False, drizzle_scale=1.0,
+                                    ref_shape=ref, is_mosaic=True,
+                                    memory_budget_gb=0.5)
+
+
+def test_refusal_names_dropping_extra_outlier_passes(monkeypatch):
+    """A k>1 min/max reject that busts the budget but would fit at k=1 should name
+    that as the least-destructive fix (preferred over cropping to the reference)."""
+    monkeypatch.delenv("ASTROSTACK_MAX_STACK_GB", raising=False)
+    shape = (4000, 4000)   # k=3 → 8 planes ≈ 1.5 GB; k=1 → 4 planes ≈ 0.77 GB
+    with pytest.raises(MemoryError, match=r"lower Extra outlier passes to 1"):
+        stacker._guard_stack_memory(
+            shape, drizzle=False, drizzle_scale=1.0,
+            reject_arrays=stacker._min_max_reject_arrays(3),
+            min_max_reject_count=3, memory_budget_gb=0.9)
+
+
+def test_refusal_falls_back_to_generic_guidance_when_no_single_lever_fits(monkeypatch):
+    """A plain (non-drizzle, non-mosaic, k=1) canvas that's simply too big has no
+    one obvious lever, so the message keeps the generic four-lever guidance."""
+    monkeypatch.setenv("ASTROSTACK_MAX_STACK_GB", "1")
+    with pytest.raises(MemoryError, match="Reduce drizzle scale") as exc:
+        stacker._guard_stack_memory((10000, 10000), drizzle=False, drizzle_scale=1.0)
+    # The over-specific "To fit, …" line must NOT appear when nothing single fits.
+    assert "To fit," not in str(exc.value)
+
+
 def _peak(shape, scale, reject=False):
     peak, _ = stacker._estimate_peak_bytes(
         shape, drizzle=True, drizzle_scale=scale, drizzle_reject=reject)
