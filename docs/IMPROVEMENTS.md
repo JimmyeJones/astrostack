@@ -86,6 +86,37 @@ when you take it.
   and video folders and treated those single output images as raw frames.)* Confidence:
   reproduced. (M–L, autonomy/correctness — PRIORITY 1/2)
 
+> **Integration audit — Seestar data-shapes + output-resolution + thin-stack verification; THREE NEW verified
+> (reproduced) ingest-family bugs filed; the three queued owner fixes verified, with one significant completeness gap
+> (Audit 2026-07-24, branch `claude/astrostack-integration-audit-43giya`).** Baseline suite green (**1858 passed,
+> 2 skipped**). This run deliberately audited the *integration / real-data-shape* seams the hourly unit-test-driven
+> agents don't exercise — the Seestar folder convention end-to-end (fresh vs upgraded-in-place library, nested
+> layouts, non-Latin names), the output-resolution path, and the auto-stack frame accounting — rather than re-treading
+> the repeatedly-clean stack math. **Verdicts on the three queued owner fixes:** (1) **Seestar folder convention
+> v0.184.9 — CORRECT for a fresh library** (map `_sub`/`_mosaic_sub`, skip bare-output-with-sibling and `*_video`,
+> case-insensitivity all re-verified by running the classifier and full scans) **but INCOMPLETE in three ways**:
+> (a) the ⭐⭐ upgrade-path pollution bug filed below — on the owner's own already-polluted install, a re-scan merges
+> the raw subs INTO the old bare-output target, so the Seestar's on-device stacked output keeps stacking into the
+> final image and is *preferentially picked as the stack reference* (reproduced end-to-end); (b) the already-filed
+> mosaic bare-output gap re-verified still present (`[('M31', 1 output file), ('M31_mosaic_sub', 2)]` →
+> spurious 1-frame `M31` target); (c) the container-nesting bug filed below (a wholesale `MyWorks/` drop merges every
+> target+output+video into ONE target — the convention only fires at depth 1 while `find_fits_files` is recursive).
+> (2) **Low-resolution output — VERIFIED at HEAD for every engine artifact**: the default (non-drizzle) canvas equals
+> the native sub (`run_stack` `dst_shape=ref_shape` unless a genuine mosaic; Builder's 480×320 repro re-confirmed);
+> the memory guard **refuses** with an actionable `MemoryError` and never silently shrinks a drizzle canvas
+> (`_guard_stack_memory` — `_largest_drizzle_scale_within_budget` is used only to word the suggestion); and
+> FITS/TIFF/full-res-PNG are written unscaled (`output.py` — only the 1024 px preview PNG and 2048 px share JPEG
+> downscale, by design). The one *surviving* low-res-adjacent mechanism on real data is the upgrade-path pollution
+> below: a lower-res on-device output captured as reference flips `compute_mosaic_canvas`'s `is_mosaic` heuristic
+> (it compares union-vs-reference **pixel** areas across **different pixel scales**, `mosaic.py:330`) so a plain
+> dithered single-field target stacks as a padded "mosaic". (3) **Thin-stack gibberish — the shipped halves are
+> CORRECT**: `auto_stack_min_frames` (default 3) holds a thin target in `_pipeline_body` *without* marking the
+> attempt marker (so it re-checks next scan), only the hands-off scan is gated (interactive paths deliberately
+> unaffected), and the `used = accepted − unsolved` accounting is consistent; the remaining root stays faint-field
+> plate-solve success — the ASTAP ladder (`astap.py::_SOLVE_LADDER`) only escalates *noise suppression* (bin 2×/4×,
+> star cap), so the queued sensitivity-side ideas (relaxed-parameter retry, stack-then-solve bootstrap) are the right
+> attack; hint threading and the fatal-setup-error short-circuit re-verified sound.
+>
 > **Re-audit — stacking-engine core CLEAN again; shipped one verified reproduced solve-path state-corruption bug;
 > filed two more verified bugs (Scout 2026-07-24, branch `claude/kind-mccarthy-hntcnk`).** Baseline suite green
 > (**1857 passed, 2 skipped**). Three independent adversarial audit sub-agents (each told to skip the
@@ -564,6 +595,75 @@ when you take it.
   when any `<T>*_sub` sibling exists (or specifically `<T>_mosaic_sub`), being careful not to over-skip a legitimately
   bare non-Seestar folder that has no `_sub` sibling at all. Confidence: traced (code path proven; device-naming
   assumption unverified). (S, ingest/autonomy — PRIORITY 2.)
+
+- **⭐⭐ The v0.184.9 Seestar-convention fix is INCOMPLETE on the owner's own upgrade path: re-scanning an
+  already-polluted library merges the raw subs INTO the bare-name target that still holds the Seestar's on-device
+  stacked OUTPUT frame — the output keeps stacking into the final image, is *preferentially picked as the stack
+  reference*, and the old `<T>_sub` target lives on as a full duplicate.** *(Ingest/upgrade-safety; wrong-result on
+  the live install the fix was shipped for; found by the 2026-07-24 integration audit; **traced + reproduced**
+  end-to-end — `scratchpad/repro_upgrade_pollution.py`.)* Mechanism: pre-fix, folder `M 31/` (the on-device output)
+  became target `M 31` (safe `M_31`) and `M 31_sub/` became target `M 31_sub`. Post-fix, `_apply_seestar_convention`
+  maps `M 31_sub/` → target name `M 31` → `make_safe_name` → **the same safe `M_31`** → `open_or_create_target`
+  (`library.py:356-375`) re-opens the polluted project and ingests the subs into it. Reproduced: after the
+  post-upgrade re-scan, target `M 31` = 6 raw subs **plus `Stacked_60s_M31.fit`**, and the stale `M 31_sub` target
+  still holds the same 6 subs — every sub registered in TWO projects (double auto-stack compute, two near-identical
+  library tiles). Consequences, all reproduced: (a) the output frame was already accepted+solved pre-upgrade, so
+  `_auto_stack_frame_count` sees new work (n ≫ prior_max=1) and re-stacks **with the output frame included** —
+  `run_stack` returned `n_used=7, align_failed=0`: a 2-D output is debayered as RGGB (already-stacked, non-linear
+  data averaged into the final image at weight 1/N; a 3-plane RGB output instead fails `load_seestar_raw` and is
+  align-dropped — but see (b)); (b) `pick_reference_frame` scores by distance-to-median-centre, and the output's
+  centre IS the dither median, so it is *preferentially* chosen as reference (reproduced: the 240×160
+  `Stacked_60s_M31.fit` picked over six 480×320 subs) — the Seestar's own output then defines the canvas WCS; (c)
+  with a lower-res output as reference, `compute_mosaic_canvas.is_mosaic` (`union_area > 1.3 × ref_area`,
+  `mosaic.py:330`) misfires because it compares **pixel** areas across **different pixel scales** — a plain dithered
+  single-field target stacks and labels as a **mosaic** on a padded union canvas (reproduced: canvas (329, 489) vs
+  native (320, 480); resolution is rescued only because the union uses the *median* input pixel scale). Note the
+  queued "Surface the junk targets an OLD scan built" idea (Ideas below) mis-models this state — it assumes the junk
+  output target stays a *separate 1-frame target beside* the correct one, but the output frames end up **inside**
+  the real target, and the separate leftovers are the `<T>_sub`-named duplicates; its proposed detector would miss
+  both. **Fix direction (Builder):** at scan time, when the convention maps `<T>_sub` → `<T>`, additionally detect
+  frames already registered in target `<T>` whose `source_path` parent is the bare `<T>/` (or a `*_video/`) folder
+  and mark them rejected additively (`auto:seestar_output` — never delete; user can re-accept), removing them from
+  the stack/reference pool; and point the junk-target detector at the `<T>_sub`-named duplicates for the one-click
+  cleanup. Regression: seed a library the pre-fix way (bare-output target + `_sub` target, same sources), re-scan
+  with the fixed scanner, assert the output frame is excluded from stacking/reference and the duplicate flagged.
+  Confidence: traced + reproduced. (M, ingest/upgrade-safety/correctness — PRIORITY 2.)
+
+- **A whole-device drop — the Seestar share or SD card copied wholesale, with its `MyWorks/` level intact — silently
+  merges EVERY target, on-device output, and `*_video` capture into ONE giant target named `MyWorks`.**
+  *(Ingest/autonomy; wrong-result via a realistic beginner action; found by the 2026-07-24 integration audit;
+  **traced + reproduced**.)* `scan_and_organize` applies the Seestar convention only to the *immediate* subdirs of
+  the scan root (`scanner.py:189-203`) while `find_fits_files(d, recursive=True)` collects every FITS at any depth
+  below each one. A root containing one *container* level — exactly what "copy the whole share/card into incoming"
+  produces — therefore yields a single unit `("MyWorks", <all files>)`. Reproduced: `MyWorks/{M 31_sub, M 31,
+  NGC 7000_mosaic_sub, Lunar_video}` → ONE target `MyWorks` holding all 6 frames (two different sky targets' subs +
+  the on-device output + the video frames). Mixed pointings then hit the mosaic-canvas outlier/size errors at best,
+  or — with `mixed_pointing_guard` off, the default — stack one pointing with the outputs/videos as "subs": the same
+  gibberish family the ⭐⭐⭐ fix cured, resurrected by a one-level-deeper drop, and nothing detects or warns. **Fix
+  direction:** in `scan_and_organize`, when an immediate subdir has **no FITS directly in it** but its child folder
+  names match the Seestar convention (any `*_sub` / `*_video` / bare-output-sibling pattern), treat it as a
+  *container* and apply the convention per child (or, minimally, surface a plain-language "this looks like a whole
+  Seestar card — point the scan at the folders inside `MyWorks/`" warning in the scan summary instead of ingesting).
+  Don't descend into a flat non-Seestar folder whose children share no convention names. Regression: the exact tree
+  above → targets `M 31` (2 subs) + `NGC 7000 (mosaic)` (2 subs), no `MyWorks` target, video skipped. Confidence:
+  traced + reproduced. (M, ingest/autonomy — PRIORITY 2.)
+
+- **Non-Latin target names collapse in `make_safe_name` to the same folder name — every all-unicode-named target
+  merges into ONE project (`safe_name='target'`).** *(Ingest/correctness; wrong-result for any non-Latin-locale
+  user; found by the 2026-07-24 integration audit; **traced + reproduced**.)* `make_safe_name` (`library.py:141-152`)
+  strips every rune outside `[A-Za-z0-9._-]`, so a name with no ASCII at all (e.g. Chinese `仙女座`,
+  `猎户座大星云` — plausible folder names from the Seestar app under a zh locale) cleans to `""` and falls back to
+  the literal `"target"`. `open_or_create_target` keys the project directory on `safe_name` and `_upsert_target`'s
+  `ON CONFLICT(safe_name)` folds the registry rows, so two *different* sky targets silently land in one project.
+  Reproduced: scanning `仙女座_sub` (2 subs) + `猎户座大星云_sub` (3 subs) → a single target (display name
+  `仙女座`, safe `target`) holding all 5 frames — which then stacks as a mixed-pointing mess. Milder same-mechanism
+  case: names differing only in punctuation/whitespace (`M 31` vs `M_31` vs `M  31`) silently merge. **Fix direction
+  (upgrade-safe — never rename an existing registered target's folder):** make safe-name allocation collision-aware
+  at the Library layer: keep the current cleaning, but when the cleaned name is empty *or* already registered to a
+  different display name, disambiguate deterministically (e.g. `target-2`, or `t-<short stable hash of the display
+  name>`) by checking the registry before creating. Regression: two all-unicode names → two distinct targets;
+  re-scan stays idempotent; an existing library keeps its folder names. Confidence: traced + reproduced.
+  (S–M, ingest/correctness — PRIORITY 2.)
 
 - **FLAKY TEST (test-infra, not a product bug) — `frontend/src/routes/Editor.test.tsx` fails ~2 of 68 whenever the
   whole file runs, with a *different* victim set each time.** *(CI reliability; Medium-infra — a flaky suite erodes
