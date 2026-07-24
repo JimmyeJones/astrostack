@@ -615,6 +615,17 @@ when you take it.
   when any `<T>*_sub` sibling exists (or specifically `<T>_mosaic_sub`), being careful not to over-skip a legitimately
   bare non-Seestar folder that has no `_sub` sibling at all. Confidence: traced (code path proven; device-naming
   assumption unverified). (S, ingest/autonomy — PRIORITY 2.)
+  **⚠ Builder note (2026-07-24, `claude/pensive-faraday-xyqa9z`): do NOT blind-fix — an existing test encodes the
+  OPPOSITE assumption.** `tests/test_scanner.py::test_apply_seestar_convention_maps_sub_and_skips_output_and_video`
+  deliberately includes a bare `M 3` folder sitting *beside* `M 3_mosaic_sub` (with no `M 3_sub`) and asserts `M 3`
+  is **kept** (`names == ["M 31", "M 3 (mosaic)", "M 3"]`, with the comment "bare 'M 3' (no 'M 3_sub' sibling) still
+  ingests"). The obvious one-line fix (add `or (low + _MOSAIC_SUB_SUFFIX) in names_lower` to the bare-output skip at
+  `scanner.py:106`) would flip that `M 3` to *skipped* and **break** that test. So this is a genuine two-sided
+  ambiguity — is a bare `<T>/` beside `<T>_mosaic_sub/` the Seestar's single-field OUTPUT (skip) or a legitimate
+  single-field capture the user wants (keep)? — that the current test resolves as *keep*. Resolving it the bug's way
+  requires **real Seestar mosaic-folder-naming data** plus updating that test with a documented rationale; a blind
+  flip risks silently dropping a real single-field target. Best handled by the Scout with a confirmed device dump, or
+  escalated to owner sign-off.
 
 - ~~**⭐⭐ The v0.184.9 Seestar-convention fix is INCOMPLETE on the owner's own upgrade path: re-scanning an
   already-polluted library merges the raw subs INTO the bare-name target that still holds the Seestar's on-device
