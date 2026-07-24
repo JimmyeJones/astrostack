@@ -47,64 +47,44 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
-- **⭐⭐⭐ OWNER-REPORTED (2026-07 — TOP PRIORITY; LIKELY ROOT CAUSE of the gibberish
+- ~~**⭐⭐⭐ OWNER-REPORTED (2026-07 — TOP PRIORITY; LIKELY ROOT CAUSE of the gibberish
   AND low-resolution reports) — the scanner ignores the Seestar folder convention:
   it ingests the Seestar's own OUTPUT folders (and `_video` folders) as if they were
-  raw sub-frames.** Verified against the owner's real `incoming/` (Windows share
-  screenshot). **A ZWO Seestar writes two folders per capture:**
-  - `<Target>_sub/` — the individual **raw sub-frames** (the lights to stack).
-    **Authoritative frame source.** Mosaics: `<Target>_mosaic_sub/`.
-  - `<Target>/` (no suffix) — the Seestar's **own on-device stacked/enhanced
-    output**, typically **a single image, often lower-resolution**. **NOT raw subs.**
-    Mosaics: `<Target>_mosaic/`.
-  - `Lunar_video/`, `Solar_video/`, `Scenery_video/`, `*_video/` — video captures,
-    **not stackable deep-sky subs**.
-  `scan_and_organize` (`seestack/io/scanner.py`) currently makes **every** immediate
-  subfolder a target named by its raw folder name (`units.append((d.name, fits))`) —
-  no suffix handling. So it builds bogus targets from the Seestar's **output** folders
-  (`M 31`, `NGC 6960_mosaic`, …) and from **video** folders, and treats those single
-  output images as raw frames. **This almost certainly explains both open owner bugs:**
-  a target built from a Seestar *output* folder is a **1-frame "stack" → colour-speckle
-  gibberish**, at **that output image's (lower) resolution → the low-res complaint.**
-  It also splits each real target into two (`M 31` vs `M 31_sub`). **Fix — make the
-  scanner Seestar-aware:**
-  1. Derive the target from the folder name by stripping the Seestar suffix: `_sub`
-     → single-field target (`M 31_sub` → **"M 31"**); `_mosaic_sub` → a **SEPARATE
-     mosaic target** (`M 3_mosaic_sub` → **"M 3 (mosaic)"**, distinct from "M 3").
-  2. The `_sub` / `_mosaic_sub` folder is the **authoritative frame source**. When a
-     target has one, **skip its output sibling** — the bare `M 31` (for `M 31_sub`)
-     and the `M 3_mosaic` (for `M 3_mosaic_sub`) are the Seestar's own outputs, not
-     raw subs.
-  3. **Keep mosaic and single-field of the same object as DISTINCT targets — never
-     merge them.** They have different fields of view / footprints / canvases, so
-     co-stacking or auto-merging them produces a broken, partial-coverage result (the
-     owner observed the app "merging mosaic and non-mosaic targets of the same area").
-     Two places to guard: (a) folder→target naming above (mosaic gets its own name);
-     and (b) **any position-based auto-merge** — e.g. `library.find_target_within(ra,
-     dec)` / the pipeline's same-sky-area grouping must **not** fold a mosaic target
-     into a single-field target (or vice-versa) just because they solve to the same
-     region. Gate the merge on same-framing (both single-field, or both the *same*
-     mosaic), not just proximity.
-  4. **Skip `*_video` folders entirely.**
-  5. **Stay backward-compatible:** a subfolder that has FITS, **no `_sub` sibling**, and
-     isn't `_video` still ingests as today (don't regress non-Seestar / older layouts
-     whose subs live in a bare folder). The skip applies **only** to a bare folder that
-     has a `_sub` sibling. (Optionally: if any `_sub` folders exist in the scanned root,
-     apply Seestar rules; else fall back to current behaviour.)
-  **Cleanup for the already-polluted library (do NOT auto-delete):** the owner already
-  has junk targets (`M 31`, `Lunar_video`, `NGC 6960_mosaic`, …) built from outputs/
-  videos. Surface them (e.g. a "these look like Seestar outputs / videos, not subs —
-  remove?" prompt or a re-scan that merges `_sub` into the base and flags the
-  output/video targets) so the owner can clean up with one confirmation; never delete
-  the real `_sub` data. **Verify:** synthetic Seestar tree — `M 3_sub/` (N FITS) +
-  `M 3/` (1 FITS) + `M 3_mosaic_sub/` (K FITS) + `M 3_mosaic/` (1 FITS) +
-  `Lunar_video/` → exactly **two** targets: "M 3" (N frames, single-field) and
-  "M 3 (mosaic)" (K frames) — **not merged**; **no** bare "M 3"/"M 3_mosaic" output
-  target, **no** "Lunar_video" target. Add a same-area-different-framing case
-  asserting the position auto-merge keeps them separate. Severity: wrong-result on the **core
-  ingest** for the exact target user (a Seestar OSC owner). Confidence: traced
-  (`scanner.py` names targets by raw folder name) + owner-confirmed on real folders.
-  (M–L, autonomy/correctness — PRIORITY 1/2)
+  raw sub-frames.**~~ — **FIXED v0.184.9** (Builder 2026-07-24, branch
+  `claude/pensive-faraday-m76tgt`; **traced + reproduced + regression-tested**). Made
+  `scan_and_organize` (`seestack/io/scanner.py`) Seestar-aware via a new pure
+  classifier `_apply_seestar_convention(subdirs_with_fits)` applied between "walk the
+  tree" and "make targets". It: (1) maps `<T>_sub/` → target `"<T>"` and
+  `<T>_mosaic_sub/` → the **separate** target `"<T> (mosaic)"` (distinct name →
+  distinct `safe_name` `<T>_mosaic`, so a mosaic and its single field are never one
+  target); (2) **skips a bare `<T>/` output folder when its `<T>_sub/` sibling is
+  present** (covers both `M 31` for `M 31_sub` and `M 3_mosaic` for `M 3_mosaic_sub`,
+  since the sub-sibling of `M 3_mosaic` is exactly `M 3_mosaic_sub`) — so we never
+  build a 1-frame "stack" (→ colour-speckle gibberish, at the output's lower
+  resolution) from an on-device output; (3) **skips `*_video/` folders entirely**;
+  (4) stays **backward-compatible** — a bare folder with FITS, **no `_sub` sibling**,
+  and not `*_video` still ingests exactly as before (non-Seestar / older layouts).
+  Suffix tests are case-insensitive (firmware casing varies) but the target keeps the
+  folder's original casing. Regression tests (`tests/test_scanner.py`, all fail-before
+  where applicable): `test_apply_seestar_convention_maps_sub_and_skips_output_and_video`
+  (the exact backlog example → `["M 31", "M 3 (mosaic)", "M 3"]`),
+  `…_bare_folder_without_sub_sibling_kept` (no regression for non-Seestar layouts),
+  `…_is_case_insensitive`, and `test_scan_is_seestar_aware_end_to_end` (a realistic
+  dump: `M 3_sub`+`M 3`+`M 3_mosaic_sub`+`M 3_mosaic`+`Lunar_video` → exactly the two
+  real targets "M 3" (3 raw subs) and "M 3 (mosaic)" (2 raw subs), no output/video
+  junk targets). Upgrade-safe: pure folder→target mapping change, no config/DB-schema/
+  API-shape/on-disk/default change; re-scanning an already-polluted library simply
+  ingests the raw subs under the correct target name and leaves the old junk targets
+  for the owner to remove (see the follow-up below). **On the position-based
+  auto-merge guard (part 3b of the original entry):** `library.find_target_within()`
+  currently has **no callers** anywhere in `seestack/`/`webapp/`, so there is no live
+  auto-merge that could fold a mosaic into a single field — the distinct-name fix is
+  the active protection today; if a same-sky-area auto-merge is ever wired up it must
+  gate on same-framing (filed as the follow-up idea below). *(Original trace kept for
+  provenance: the old code did `units.append((d.name, fits))` for every immediate
+  subfolder — no suffix handling — so it built bogus targets from the Seestar's output
+  and video folders and treated those single output images as raw frames.)* Confidence:
+  reproduced. (M–L, autonomy/correctness — PRIORITY 1/2)
 
 > **Re-audit — stacking engine core CLEAN again; TWO NEW verified bugs found in the solve/QC/ingest + auto-stack
 > orchestration paths; shipped one, filed the other (Scout 2026-07-23, branch `claude/kind-mccarthy-nt4l9m`).**
@@ -4749,6 +4729,31 @@ to **Shipped**.)_
 > the codebase for each open Idea before leaving it open, and strike through
 > anything already built. A stale backlog makes every Builder run start by
 > re-discovering finished work.
+
+### Autonomy & friendliness (PRIORITY 2–3)
+- **Surface (never auto-delete) the junk targets an OLD scan built from Seestar
+  outputs/videos, so the owner can clean up in one click.** *(Follow-up to the
+  ⭐⭐⭐ scanner fix shipped v0.184.9 — the scanner is now Seestar-aware, but a
+  library scanned by the pre-fix scanner still carries bogus targets: a bare `M 31`
+  output target beside the now-correct `M 31`, `Lunar_video`, `NGC 6960_mosaic`, …
+  M, autonomy/friendliness — PRIORITY 2/3.)* After a re-scan folds each `<T>_sub/`
+  into the correct `<T>` target, some old targets are now duplicates/leftovers built
+  from a single output image or a video. Detect the likely-junk ones (a target that
+  is a 1-frame "stack" whose sole frame's source path is a bare `<T>/` or `*_video/`
+  folder that now has a `<T>_sub/` sibling, or whose name matches a `*_video`
+  pattern) and show a dismissible "these look like Seestar outputs / videos, not raw
+  subs — remove?" prompt with a one-confirmation bulk-remove. **Never auto-delete**;
+  never touch the real `_sub` data. Test: seed a library the old way, re-scan, assert
+  the detector flags exactly the output/video targets and no `_sub`-derived one.
+- **If a same-sky-area auto-merge is ever wired up, gate it on same-framing.**
+  *(S, correctness — PRIORITY 2; latent, no live caller today.)* `library.
+  find_target_within()` exists but is currently unused, so nothing folds a mosaic
+  target into a single-field one by proximity. If a "merge by sky position" feature
+  is built, it must **not** merge a mosaic target (`"<T> (mosaic)"`) into a
+  single-field `"<T>"` (or vice-versa) just because they solve to the same region —
+  their footprints/canvases differ. Gate on both-single-field or both-the-same-mosaic,
+  not proximity alone. (Recorded here so the guard isn't forgotten when the merge
+  lands.)
 
 ### ⭐ Editor — make it excellent (PRIORITY 1)
 The editor is where a good stack becomes a good *picture*, and it has real

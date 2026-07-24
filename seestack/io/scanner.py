@@ -3,13 +3,21 @@ Folder scanner: turn a folder of Seestar sub-folders into organised targets.
 
 The Seestar app already does the hard part of organising — every time you
 image something it drops the frames into their own sub-folder. The scanner
-leans on that:
+leans on that, and on the Seestar's **folder-naming convention** (see
+``_apply_seestar_convention``):
 
-  * Each immediate sub-folder of the scanned root becomes **one target**.
-    All FITS files anywhere inside that sub-folder belong to it. A mosaic,
-    whose panels all live in a single Seestar folder, therefore comes in as
-    one target — exactly what you want, since the stacker stitches the
-    panels onto one canvas.
+  * ``<Target>_sub/`` holds the raw sub-frames (the lights to stack) and is
+    the authoritative frame source; it becomes the target ``<Target>``.
+    A mosaic's raw subs live in ``<Target>_mosaic_sub/`` and become the
+    **separate** target ``<Target> (mosaic)`` — kept distinct from the
+    single-field target because their fields of view / canvases differ.
+  * ``<Target>/`` (no suffix) is the Seestar's *own on-device stacked
+    output* — a single, often lower-resolution image, **not** raw subs. When
+    a ``<Target>_sub/`` sibling exists we skip this output folder so we never
+    build a bogus 1-frame "stack" from it. A bare folder with no ``_sub``
+    sibling still ingests as a target (older / non-Seestar layouts).
+  * ``*_video/`` folders are video captures, not stackable deep-sky subs, and
+    are skipped entirely.
   * Loose FITS files sitting directly in the root (exports, one-offs, files
     that escaped a folder) are collected into a single ``Unsorted`` target
     you can sort out by hand later.
@@ -45,6 +53,60 @@ log = logging.getLogger(__name__)
 # phase, done, total  — emitted by the progress callback throughout a scan.
 ProgressFn = Callable[[str, int, int], None]
 ShouldStopFn = Callable[[], bool]
+
+# Seestar folder-naming convention (see the module docstring). The Seestar
+# writes raw subs into "<Target>_sub/" ("<Target>_mosaic_sub/" for a mosaic)
+# and its own on-device stacked OUTPUT into the bare "<Target>/". "*_video/"
+# folders are video captures. Suffixes are matched case-insensitively because
+# the folder casing is not guaranteed across firmware/app versions.
+_SUB_SUFFIX = "_sub"
+_MOSAIC_SUB_SUFFIX = "_mosaic_sub"
+_VIDEO_SUFFIX = "_video"
+
+
+def _apply_seestar_convention(
+    subdirs_with_fits: list[tuple[str, list[Path]]],
+) -> list[tuple[str, list[Path]]]:
+    """
+    Map raw scan folders to ``(target_name, files)`` units, honouring the
+    Seestar folder convention so we never ingest the Seestar's own output or
+    video folders as if they were raw sub-frames.
+
+    Rules, applied per folder:
+
+    * ``*_video`` → skipped (video capture, not stackable subs).
+    * ``<T>_mosaic_sub`` → target ``"<T> (mosaic)"`` (a mosaic's raw subs, kept
+      distinct from the single-field target so their differing footprints are
+      never co-stacked or auto-merged).
+    * ``<T>_sub`` → target ``"<T>"`` (a single field's raw subs).
+    * a bare ``<T>`` whose ``<T>_sub`` sibling is also present → skipped (it's
+      the Seestar's on-device stacked output, not raw subs).
+    * any other bare folder → ingested unchanged (older / non-Seestar layouts
+      whose subs live directly in a plainly-named folder).
+
+    Order is preserved. Folder names are compared case-insensitively for the
+    suffix tests, but the target name keeps the folder's original casing.
+    """
+    names_lower = {name.lower() for name, _ in subdirs_with_fits}
+    units: list[tuple[str, list[Path]]] = []
+    for name, files in subdirs_with_fits:
+        low = name.lower()
+        if low.endswith(_VIDEO_SUFFIX):
+            continue
+        if low.endswith(_MOSAIC_SUB_SUFFIX):
+            base = name[: -len(_MOSAIC_SUB_SUFFIX)].rstrip()
+            units.append((f"{base} (mosaic)" if base else name, files))
+            continue
+        if low.endswith(_SUB_SUFFIX):
+            base = name[: -len(_SUB_SUFFIX)].rstrip()
+            units.append((base if base else name, files))
+            continue
+        # A bare folder: skip it only when its raw-sub sibling is present (then
+        # it's the Seestar's own output). Otherwise ingest it as today.
+        if (low + _SUB_SUFFIX) in names_lower:
+            continue
+        units.append((name, files))
+    return units
 
 
 @dataclass
@@ -131,11 +193,14 @@ def scan_and_organize(
         if p.is_file() and p.suffix.lower() in FITS_SUFFIXES
     )
 
-    units: list[tuple[str, list[Path]]] = []
+    subdirs_with_fits: list[tuple[str, list[Path]]] = []
     for d in subdirs:
         fits = find_fits_files(d, recursive=True)
         if fits:
-            units.append((d.name, fits))
+            subdirs_with_fits.append((d.name, fits))
+    # Fold the Seestar folder convention in (raw "_sub" folders → targets;
+    # skip on-device outputs and videos) before turning folders into targets.
+    units = _apply_seestar_convention(subdirs_with_fits)
     if loose:
         units.append((UNSORTED_TARGET_NAME, loose))
 
