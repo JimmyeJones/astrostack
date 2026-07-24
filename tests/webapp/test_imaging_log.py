@@ -16,7 +16,7 @@ def _register_run(
     data_root, safe: str, *, basename: str, n_frames: int,
     exposure_s: float | None, timestamp: str,
     calstat: str | None = None, is_mosaic: bool | None = None,
-    engine_version: str | None = None,
+    engine_version: str | None = None, stack_fwhm_px: float | None = None,
 ) -> None:
     lib = Library.open_or_create(data_root / "library")
     try:
@@ -30,6 +30,7 @@ def _register_run(
                 options_json=json.dumps({"sigma_clip": True}),
                 total_exposure_s=exposure_s, calstat=calstat,
                 is_mosaic=is_mosaic, engine_version=engine_version,
+                stack_fwhm_px=stack_fwhm_px,
             ))
         finally:
             proj.close()
@@ -96,3 +97,17 @@ def test_row_count_matches_runs_across_targets(client, solved_library):
                   exposure_s=600, timestamp="2026-06-02T00:00:00Z")
     rows = _parse(client.get("/api/imaging-log.csv").text)
     assert len(rows) == 3  # header + the 2 runs on this target
+
+
+def test_per_run_stack_fwhm_is_reported_over_the_target_median(client, solved_library):
+    """When a run stored its own measured sharpness (schema ≥ 14), the log's
+    "Typical star size" reflects *that stack*, not the static target-wide frame
+    median — so two nights of one target can show different sharpness."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _register_run(solved_library, safe, basename="sharp", n_frames=40,
+                  exposure_s=1200, timestamp="2026-06-10T00:00:00Z",
+                  stack_fwhm_px=1.8)
+    rows = _parse(client.get("/api/imaging-log.csv").text)
+    star_size_col = IMAGING_LOG_COLUMNS.index("Typical star size (px)")
+    run_row = next(r for r in rows[1:] if r[0] == "2026-06-10")
+    assert run_row[star_size_col] == "1.8"

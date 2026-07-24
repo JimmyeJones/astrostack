@@ -30,7 +30,7 @@ from typing import Any, Iterator
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 SCHEMA_SQL = f"""
 PRAGMA user_version = {SCHEMA_VERSION};
@@ -66,7 +66,8 @@ CREATE TABLE IF NOT EXISTS stack_runs (
     rejection_mode TEXT,
     preview_stretch REAL,
     preview_black REAL,
-    n_roughly_aligned INTEGER
+    n_roughly_aligned INTEGER,
+    stack_fwhm_px REAL
 );
 
 CREATE INDEX IF NOT EXISTS idx_stack_runs_ts ON stack_runs(timestamp_utc);
@@ -501,6 +502,19 @@ class Project:
                     "ALTER TABLE stack_runs ADD COLUMN n_roughly_aligned INTEGER")
             except sqlite3.OperationalError:
                 pass  # already present
+        if from_version < 14:
+            # Recorded the finished stack's own median star size (FWHM), measured
+            # once on the combined image and normalised to native-frame pixels so
+            # it's comparable to the per-frame QC ``fwhm_px`` and to a target's
+            # other stacks — making sharpness a first-class *per-run* signal the
+            # way ``noise_sigma`` already is (so the imaging log can show *this
+            # stack's* sharpness, and a future "sharpest yet" can compare runs).
+            # Additive; older runs stay NULL (unknown → callers self-hide/fall back).
+            try:
+                self._conn.execute(
+                    "ALTER TABLE stack_runs ADD COLUMN stack_fwhm_px REAL")
+            except sqlite3.OperationalError:
+                pass  # already present
         self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @contextmanager
@@ -793,8 +807,8 @@ class Project:
             "  n_frames_used, canvas_h, canvas_w, coverage_min, coverage_max,"
             "  options_json, notes, total_exposure_s, transparency_ratio,"
             "  noise_sigma, calstat, is_mosaic, engine_version,"
-            "  rejection_fraction, rejection_mode, n_roughly_aligned"
-            ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "  rejection_fraction, rejection_mode, n_roughly_aligned, stack_fwhm_px"
+            ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 run.timestamp_utc, run.output_basename, run.fits_path,
                 run.tiff_path, run.preview_path, run.n_frames_used,
@@ -804,6 +818,7 @@ class Project:
                 None if run.is_mosaic is None else int(bool(run.is_mosaic)),
                 run.engine_version, run.rejection_fraction, run.rejection_mode,
                 None if run.n_roughly_aligned is None else int(run.n_roughly_aligned),
+                run.stack_fwhm_px,
             ),
         )
         return cur.lastrowid  # type: ignore[return-value]
@@ -870,6 +885,10 @@ class Project:
                 n_roughly_aligned=(
                     row["n_roughly_aligned"]
                     if "n_roughly_aligned" in row.keys() else None
+                ),
+                stack_fwhm_px=(
+                    row["stack_fwhm_px"]
+                    if "stack_fwhm_px" in row.keys() else None
                 ),
             )
 
@@ -1022,6 +1041,14 @@ class StackRunRow:
     # Lets "How's my stack?" name the soft-star cause the History Info panel
     # already reads from the NROUGHAL FITS card.
     n_roughly_aligned: int | None = None
+    # The finished stack's own median star size (FWHM), measured once on the
+    # combined image and normalised to native-frame pixels so it's comparable to
+    # the per-frame QC ``fwhm_px`` and to this target's other stacks (lower =
+    # sharper). None when too few stars to fit, when not computable, or for runs
+    # recorded before this column existed (schema < 14). The per-run counterpart
+    # of ``noise_sigma``: it lets the imaging log report *this stack's* sharpness
+    # rather than the static target-wide frame median.
+    stack_fwhm_px: float | None = None
 
 
 def _to_db(value: Any) -> Any:

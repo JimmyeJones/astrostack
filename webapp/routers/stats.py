@@ -623,12 +623,20 @@ def _collect_imaging_log(lib, targets) -> list:
             ]
             median_fwhm = float(median(fwhms)) if fwhms else None
             for run in proj.iter_stack_runs():
+                # Prefer *this stack's own* measured sharpness (per-run, schema
+                # ≥ 14) so the log reflects each night's result; fall back to the
+                # target-wide frame median for older runs that predate the column.
+                run_fwhm = (
+                    run.stack_fwhm_px
+                    if run.stack_fwhm_px is not None and run.stack_fwhm_px > 0
+                    else median_fwhm
+                )
                 rows.append(ImagingLogRow(
                     date=run.timestamp_utc,
                     target_name=t.name,
                     n_subs=run.n_frames_used,
                     integration_s=run.total_exposure_s,
-                    median_fwhm_px=median_fwhm,
+                    median_fwhm_px=run_fwhm,
                     calibration=run.calstat,
                     is_mosaic=run.is_mosaic,
                     noise_sigma=run.noise_sigma,

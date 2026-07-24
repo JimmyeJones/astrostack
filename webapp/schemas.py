@@ -352,6 +352,11 @@ class StackRunOut(BaseModel):
     # pre-schema-6 runs or when not computable; lets the UI show a noise readout
     # and flag the cleanest of several stacks of one target.
     noise_sigma: float | None = None
+    # This stack's own median star size (FWHM) in native-frame pixels — the per-run
+    # sharpness counterpart of noise_sigma (lower = tighter stars). None for
+    # pre-schema-14 runs or when too few stars to fit; lets the UI show a per-run
+    # sharpness readout and compare a target's stacks.
+    stack_fwhm_px: float | None = None
     # Which calibration masters were applied to the lights ("dark+flat",
     # "bias+flat", "flat", …), or None when the stack was uncalibrated / for
     # pre-schema-7 runs; lets a card show a "dark+flat" chip at a glance.

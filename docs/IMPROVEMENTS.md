@@ -8506,10 +8506,29 @@ problems. Dogfood it every big-picture run and fix root causes.
   record has no FWHM column; `StackRun` exposes only `noise_sigma`/`total_exposure_s`/`n_frames_used`), so a true
   "sharpest yet" would first need the new idea filed below (persist per-run median FWHM). Leave this unless that lands.
 
-- **NEW IDEA (Builder 2026-07-24, `claude/pensive-faraday-jauk0d`, surfaced while scoping "You beat your best!") —
+- ~~**NEW IDEA (Builder 2026-07-24, `claude/pensive-faraday-jauk0d`, surfaced while scoping "You beat your best!") —
   persist a per-run *median FWHM* (typical star size) on the `stack_runs` row, so sharpness becomes a first-class,
-  per-stack quality signal the way noise σ already is.** *(Image-quality + trust, PRIORITY 4; size S; additive
-  migration.)* **The gap:** a stack's background-noise σ is measured and stored per run (`stack_runs.noise_sigma`,
+  per-stack quality signal the way noise σ already is.**~~ — **SHIPPED v0.194.0** (Builder 2026-07-24, branch
+  `claude/pensive-faraday-u83f7q`; tested). Added an additive nullable `stack_runs.stack_fwhm_px` column
+  (`SCHEMA_VERSION` 13 → 14 + `_migrate_schema` `ALTER TABLE`, backfill left NULL — old runs read None and callers
+  self-hide/fall back, exactly like `noise_sigma` did). `run_stack` now measures the finished stack's median star size
+  **once** on the combined image via the new `seestack/stack/stacker.py::_compute_stack_fwhm(rgb, *, drizzle,
+  drizzle_scale)` — it 2×2 block-averages the stacked green plane to the same half-res sampling QC's `green_channel`
+  uses, reuses the existing `detect_stars`/`median_fwhm` (no new detection pass), fills NaN=no-coverage gaps with the
+  robust sky median, and **divides out the drizzle super-resolution** so the value is always in *native-frame pixels*
+  — directly comparable to the per-frame `fwhm_px` and to a target's other stacks (lower = sharper). Best-effort
+  (too-few-stars / mono / tiny canvas → NULL, never raises). Stamped on the run record + mirrored into the FITS header
+  (`STKFWHM`) and exposed on the History run API (`StackRunOut.stack_fwhm_px`). **First surface:** the *Your imaging
+  log* CSV now reports **this stack's own** measured sharpness in "Typical star size (px)" when present, falling back
+  to the static target-wide frame median for pre-v0.194.0 runs — so two nights of one target can honestly show
+  different sharpness. Unblocks the "sharpest yet"/sharpness-trend/A-B-sharpness features (which needed a per-run
+  sharpness axis). Upgrade-safe: additive migration (old DBs migrate, old rows NULL), no default/API-shape change; the
+  runtime reconcile auto-restores the column from `SCHEMA_SQL`. Tests: `tests/test_stack_fwhm.py` (+7 — plausible
+  band, monotonic in star width, drizzle-scale normalisation, no-stars/all-NaN/tiny→None, NaN-gap fill),
+  `tests/test_project.py::test_v13_project_migrates_stack_fwhm_column_additively` (old DB migrates, new inserts persist,
+  unset→NULL), `tests/test_stack_pipeline.py::test_stack_records_its_own_median_fwhm` (end-to-end stamp + FITS header),
+  `tests/webapp/test_imaging_log.py::test_per_run_stack_fwhm_is_reported_over_the_target_median`.
+  *(Original idea kept below for provenance.)* **The gap:** a stack's background-noise σ is measured and stored per run (`stack_runs.noise_sigma`,
   schema 6) and drives the "Cleanest" badge, the noise-delta, the cleanest sort, and the A/B noise verdict — but the
   *other* half of "is this a good stack?", **star sharpness**, is only ever a **per-frame** QC number (`frames.fwhm_px`)
   and the *target-wide* median (used by the editor's sharpen radius + the new imaging-log column). There is no
