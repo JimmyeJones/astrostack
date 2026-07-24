@@ -12,6 +12,7 @@ import { api } from "../api/client";
 import { formatIntegration } from "../format";
 import { astapReadiness, astapReadinessSignature } from "../components/dashboard/astapReadiness";
 import { folderReadiness, folderReadinessSignature } from "../components/dashboard/folderReadiness";
+import { ContinueTonightCard } from "../components/ContinueTonightCard";
 import { LastNightCard } from "../components/LastNightCard";
 import { LibraryProgressCard } from "../components/LibraryProgressCard";
 import { QueryError } from "../components/QueryError";
@@ -183,6 +184,8 @@ export function Dashboard() {
       <LastNightCard />
 
       <LibraryProgressCard />
+
+      <ContinueTonightCard />
 
       <SuggestTargetsCard />
 

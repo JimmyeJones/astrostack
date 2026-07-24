@@ -8204,10 +8204,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   *(Verified genuinely absent 2026-07-24 against the routes/backlog: live capture is de-scoped, but a *bundled sample
   dataset* to try the app offline is a different, unfiled capability.)* (M, friendliness/onboarding — PRIORITY 3.)
 
-- **NEW BEGINNER FEATURE (Scout 2026-07-24) — "Point here tonight": one calm recommendation of which target you're
-  *already working on* to continue tonight, ranked across your whole library by (how close it is to a good result) ×
-  (how well-placed it is right now) — so a beginner with several half-finished targets doesn't have to decide, or open
-  each Target page, to know where the next clear night pays off most.** *(Pillar: 2 autonomy + 3 friendliness + plan;
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-24) — "Point here tonight": one calm recommendation of which target you're
+  *already working on* to continue tonight.**~~ — **SHIPPED v0.187.0** (Builder 2026-07-24, branch
+  `claude/pensive-faraday-o52pa4`). A self-hiding **"Point here tonight"** card on the Dashboard (between "Target
+  progress" and "Try something new tonight") recommends the single **owned** target that is both well-placed tonight
+  and closest to a finished picture, with up to two dimmed runners-up ("Or continue: …"). **Implemented frontend-only**
+  (cleaner than the proposed new endpoint — no schema/API change, and it keeps the readiness verdict as its existing
+  single source of truth in `readiness.ts`): a pure helper `pickContinueTonight(plan, goalSecondsBySafe)`
+  (`frontend/src/continueTonight.ts`) combines the two endpoints the Dashboard already calls — `/api/plan/tonight`
+  (which owned targets are shootable tonight, with score + usable window) and `/api/library-progress` (each target's
+  user-set integration goal) — filtering to already-started targets with `score > 0`, excluding ones already at
+  *plenty* integration (nothing to gain), and ranking the rest by readiness fraction (closest to its goal first),
+  tie-broken by tonight's observability score. The card (`components/ContinueTonightCard.tsx`) shows the pick's name,
+  subs + integration, tonight's usable window ("Up tonight 21:10–02:30"), a goal-progress bar, and the shared readiness
+  verdict; it renders nothing when there's no location, no started target up tonight, or everything's already done —
+  so it never duplicates the Tonight page's "set a location" prompt. Tests: `frontend/src/continueTonight.test.ts`
+  (8 — closest-to-goal pick, catalog/un-shootable exclusion, score tiebreak, plenty-exclusion, all-done→null,
+  user-goal override, runners-up cap) and `components/ContinueTonightCard.test.tsx` (3 — the pick + runner-up render,
+  self-hide, user-goal override). Upgrade-safe: frontend-only, additive, reuses data already returned; no
+  config/DB/on-disk/default/API-shape change. *(Original idea kept below for provenance.)* *(Pillar: 2 autonomy + 3 friendliness + plan;
   size M.)* **The gap (verified this run against `webapp/routers/plan.py`):** the planning surface is broad but has a
   precise hole. `/suggest` recommends **new** showpieces you have **not** captured (it *excludes* the library);
   `/next-session/{safe}` plans a **single target you pick** (forward windows for *this* one); `/tonight` ranks
