@@ -8494,6 +8494,36 @@ problems. Dogfood it every big-picture run and fix root causes.
   helper + a display line, no schema/config/default/API-shape change. *(Feasibility: reuses existing per-target run
   queries + the FWHM/integration figures already computed, no new/heavy dependency, sane default, testable — passes
   §4's filter.)*
+  **⚠ Builder note (2026-07-24, `claude/pensive-faraday-jauk0d`) — LARGELY COVERED already; only a marginal slice
+  remains, so DEPRIORITISED (don't rebuild the covered part).** The "cleanest yet" half is **already shipped**: the
+  History run cards render a `CleanestBadge` on the single lowest-noise run (`frontend/src/components/NoiseBadge.tsx`
+  `CleanestBadge` + `cleanestRunId`, requiring ≥2 measured runs so a lone stack is never singled out), and each card
+  also shows a per-run "cleaner/noisier than last time" `NoiseDelta`. So a beginner *already* sees which stack is their
+  best-so-far on the meaningful quality axis. What's genuinely missing is only (a) a "deepest yet" axis and (b) a
+  *celebratory phrasing* naming the prior best/date. But (a) fires on **nearly every** deeper re-stack (integration
+  almost always grows when you add a night → noisy, low signal), and (b) is a wording tweak on top of the existing
+  badge — both marginal. Note the idea's headline axis, **sharpness (median FWHM), is not per-run-persisted** (the run
+  record has no FWHM column; `StackRun` exposes only `noise_sigma`/`total_exposure_s`/`n_frames_used`), so a true
+  "sharpest yet" would first need the new idea filed below (persist per-run median FWHM). Leave this unless that lands.
+
+- **NEW IDEA (Builder 2026-07-24, `claude/pensive-faraday-jauk0d`, surfaced while scoping "You beat your best!") —
+  persist a per-run *median FWHM* (typical star size) on the `stack_runs` row, so sharpness becomes a first-class,
+  per-stack quality signal the way noise σ already is.** *(Image-quality + trust, PRIORITY 4; size S; additive
+  migration.)* **The gap:** a stack's background-noise σ is measured and stored per run (`stack_runs.noise_sigma`,
+  schema 6) and drives the "Cleanest" badge, the noise-delta, the cleanest sort, and the A/B noise verdict — but the
+  *other* half of "is this a good stack?", **star sharpness**, is only ever a **per-frame** QC number (`frames.fwhm_px`)
+  and the *target-wide* median (used by the editor's sharpen radius + the new imaging-log column). There is no
+  **per-run** sharpness, so nothing can say "this stack resolved tighter stars than your last one" — which blocks the
+  headline axis of the "You beat your best!" idea (a *sharpest-yet* beat), a per-run sharpness trend, and a sharpness
+  A/B verdict beside the noise one. **The idea:** measure the stacked image's median FWHM once at `run_stack` time
+  (reuse `seestack/qc/metrics.py::median_fwhm` on the final combined frame — the stars are already there, no extra
+  detection pass elsewhere) and store it in a new additive nullable column (`stack_runs.stack_fwhm_px`,
+  `SCHEMA_VERSION` bump + `_migrate_schema` `ALTER TABLE`, backfill left NULL — old runs read None and self-hide, exactly
+  like `noise_sigma` did). Then a `SharpestBadge`/`fwhm_delta`/sharpness-trend can mirror the noise machinery, and
+  "sharpest yet" becomes buildable. **Upgrade-safe:** additive migration (old DBs migrate, old rows NULL), no
+  default/API-shape change; the new field is opt-in read (self-hiding when absent). **Tests:** a stacked run records a
+  plausible `stack_fwhm_px`; a v(N-1)→vN DB migrates additively (old rows NULL, new inserts persist); a run with too
+  few stars leaves it NULL, never errors. Well-grounded (mirrors the proven `noise_sigma` pattern exactly) and low-risk.
 
 - ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "Your imaging calendar": a simple month/year heat-calendar of which
   nights you actually imaged and how much, so a beginner can see the rhythm of their hobby at a glance, spot the
