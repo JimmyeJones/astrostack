@@ -453,6 +453,46 @@ def test_apply_solve_result_success_without_wcs_is_an_honest_failure(tmp_path):
         proj.close()
 
 
+def test_apply_solve_result_unreadable_wcs_preserves_a_qc_error_reason(tmp_path):
+    """ASTAP reports success but the WCS is unreadable (``solved=True,
+    wcs_text=None``) on a frame that had *already* failed QC → its
+    ``qc_error``/``qc_error_final`` reason is preserved, not clobbered to
+    ``solve_failed:unreadable plate solution``.
+
+    Regression: the ``wcs_text is None`` "honest failure" branch wrote its reason
+    *unconditionally*, unlike the sibling ``not result.solved`` branch which carries
+    a ``qc_error`` carve-out. But a qc_error frame stays ``accept=True``
+    (``apply_qc_result_to_db`` sets only ``reject_reason``) and
+    ``build_solve_arglist`` offers any un-solved accepted frame, so a qc_error frame
+    is re-offered to solve; a malformed ``.wcs`` sidecar then overwrote its QC state.
+    That defeats the QC terminal-skip machine (``build_qc_arglist(only_new=True)``
+    skips only ``qc_error_final`` frames), so a genuinely-corrupt file is re-QC'd on
+    every scan forever and is mis-attributed as a solve failure in the reject summary.
+    """
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        for i, qc_reason in enumerate(
+                ("qc_error_final:Truncated", "qc_error:NAS blip")):
+            fid = proj.add_frame(FrameRow(source_path=f"x_qc{i}.fit"))
+            # QC-error frames stay accepted (only reject_reason is set).
+            proj.update_frame(fid, reject_reason=qc_reason)
+            assert proj.get_frame(fid).accept is True
+            # ASTAP "solves" it but the sidecar is unreadable.
+            apply_solve_result_to_db(proj, SolveResult(
+                frame_id=fid, fits_path="x.fit", solved=True,
+                wcs_text=None, ra_center_deg=None, dec_center_deg=None,
+                pixscale_arcsec=None, rotation_deg=None, error=None,
+            ))
+            f = proj.get_frame(fid)
+            assert f is not None
+            # The QC state is preserved, not clobbered to solve_failed:.
+            assert f.reject_reason == qc_reason
+            assert f.wcs_json is None
+            assert f.accept is True
+    finally:
+        proj.close()
+
+
 def test_apply_solve_result_preserves_a_user_reject_on_success(tmp_path):
     """A successful solve never un-rejects a user/QC/streak decision — only a
     ``solve_failed:`` reason is self-healed."""

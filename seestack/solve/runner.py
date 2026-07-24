@@ -207,6 +207,38 @@ def build_solve_arglist(
     return out
 
 
+def _store_solve_failed_reason(project, frame_id, reason: str) -> None:
+    """Stamp a ``solve_failed:<reason>`` reject reason **without clobbering a real
+    prior reason.**
+
+    ``build_solve_arglist`` gates only on ``wcs_json`` (not ``accept``), so a frame
+    already carrying a concrete reason — ``user`` / ``qc:`` / ``qc_error``(``_final``)
+    / ``auto:streak`` / ``auto:grade:`` / ``bulk:`` — is still offered to plate-solve,
+    and a solve *outcome* on it is irrelevant (it's already out of the stack, or its
+    QC state is terminal). Mirror the success branch's self-heal contract in reverse:
+    only stamp ``solve_failed:`` when the frame carries no reason, or already carries a
+    ``solve_failed:`` reason (a re-failed solve just refreshes its message), or is
+    still accepted *and* not carrying a ``qc_error`` state.
+
+    The ``qc_error`` carve-out matters: a frame that failed QC (``qc_error:``
+    retryable / ``qc_error_final:`` terminal) keeps ``accept`` True
+    (``apply_qc_result_to_db`` sets only ``reject_reason``), so the bare ``accepted``
+    term would clobber that reason. That defeats the QC terminal-skip state machine —
+    ``build_qc_arglist(only_new=True)`` skips only ``qc_error_final`` frames, so a
+    clobbered-to-``solve_failed`` frame is re-QC'd every scan forever (and can never
+    re-reach ``qc_error_final``, since the next QC failure sees a non-``qc_error``
+    prior). Overwriting an ``auto:grade:`` reason additionally breaks the cumulative
+    25% auto-grade cap. A prior reason is a real state, so preserve it.
+    """
+    existing = project.get_frame(frame_id)
+    prior = (existing.reject_reason or "") if existing is not None else ""
+    accepted = existing.accept if existing is not None else True
+    if (not prior
+            or prior.startswith("solve_failed:")
+            or (accepted and not prior.startswith("qc_error"))):
+        project.update_frame(frame_id, reject_reason=f"solve_failed:{reason}")
+
+
 def apply_solve_result_to_db(project, result: SolveResult) -> None:
     """Write a SolveResult back to the project DB."""
     if not result.solved:
@@ -226,35 +258,8 @@ def apply_solve_result_to_db(project, result: SolveResult) -> None:
         raw = result.error or "unknown"
         setup = classify_solve_setup_error(raw)
         reason = setup if setup is not None else raw[:120]
-        # Don't clobber a *real* rejection reason. ``build_solve_arglist`` gates
-        # only on ``wcs_json`` (not ``accept``), so a frame already rejected for a
-        # concrete cause — ``user`` / ``qc:`` / ``auto:streak`` / ``auto:grade:`` /
-        # ``bulk:`` — is still offered to plate-solve, and a solve failure on it is
-        # irrelevant (it's already out of the stack). Overwriting its reason with
-        # ``solve_failed:`` both mis-attributes it in the "why were frames left
-        # out?" summary and, for an ``auto:grade:`` reason, breaks the cumulative
-        # 25% auto-grade cap (which tallies ``auto:grade`` reasons). Mirror the
-        # success branch's self-heal contract in reverse: only stamp
-        # ``solve_failed:`` when the frame carries no reason, or already carries a
-        # ``solve_failed:`` reason (a re-failed solve just refreshes its message),
-        # or is still accepted *and* not carrying a ``qc_error`` state.
-        #
-        # The ``qc_error`` carve-out matters: a frame that failed QC
-        # (``qc_error:`` retryable / ``qc_error_final:`` terminal) keeps ``accept``
-        # True (``apply_qc_result_to_db`` sets only ``reject_reason``), so the bare
-        # ``accepted`` term would clobber that reason. That defeats the QC
-        # terminal-skip state machine — ``build_qc_arglist(only_new=True)`` skips
-        # only ``qc_error_final`` frames, so a clobbered-to-``solve_failed`` frame
-        # is re-QC'd every scan forever (and can never re-reach ``qc_error_final``,
-        # since the next QC failure sees a non-``qc_error`` prior). A ``qc_error``
-        # reason is a real state, so preserve it exactly like a rejected frame's.
-        existing = project.get_frame(result.frame_id)
-        prior = (existing.reject_reason or "") if existing is not None else ""
-        accepted = existing.accept if existing is not None else True
-        if (not prior
-                or prior.startswith("solve_failed:")
-                or (accepted and not prior.startswith("qc_error"))):
-            project.update_frame(result.frame_id, reject_reason=f"solve_failed:{reason}")
+        # Preserve a real prior reason (see ``_store_solve_failed_reason``).
+        _store_solve_failed_reason(project, result.frame_id, reason)
         return
     if result.wcs_text is None:
         # ASTAP reported success (returncode 0 + a ``.wcs`` sidecar) but no usable
@@ -267,9 +272,14 @@ def apply_solve_result_to_db(project, result: SolveResult) -> None:
         # ASTAP time on a frame that can never contribute. Record an explicit,
         # honest failure so it stops being re-offered and the reject-summary can
         # surface it, mirroring the failure branch above (``accept`` untouched —
-        # the pixels may be fine, they just couldn't be located).
-        project.update_frame(
-            result.frame_id, reject_reason="solve_failed:unreadable plate solution"
+        # the pixels may be fine, they just couldn't be located). Use the shared
+        # preserve-guard so this branch, like the ``not result.solved`` one, never
+        # clobbers a ``qc_error`` / concrete prior reason (a qc_error frame stays
+        # ``accept=True`` and is re-offered to solve; a "solved-but-unreadable"
+        # result on it must not overwrite its QC state — see
+        # ``_store_solve_failed_reason``).
+        _store_solve_failed_reason(
+            project, result.frame_id, "unreadable plate solution"
         )
         return
     fields: dict = dict(
