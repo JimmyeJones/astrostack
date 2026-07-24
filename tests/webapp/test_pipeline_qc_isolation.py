@@ -115,6 +115,91 @@ def test_refreshed_only_target_is_requeued_for_qc(solved_library, monkeypatch):
     assert qc_calls == ["M_42"]
 
 
+def test_autostack_precheck_failure_isolated_and_batch_continues(solved_library, monkeypatch):
+    """A per-target failure in the auto-stack *pre-check* phase (e.g. a target
+    deleted mid-scan → open_target raises, or a DB lock) must not abort the whole
+    pipeline job — it must be recorded in summary["stack_errors"] and the loop
+    must carry on so every remaining target still gets its auto-stack pass.
+
+    Regression: the pre-check helpers (_auto_stack_frame_count /
+    _mixed_pointing_check / _mark_auto_stack_attempt) used to sit *outside* the
+    per-target try/except, so a raise there escaped _pipeline_body and marked the
+    (already-successful) scan job 'error', skipping auto-stack for every later
+    target.
+    """
+    settings = Settings(
+        data_root=str(solved_library), auto_ingest=False, auto_qc=False,
+        auto_solve=False, auto_stack=True,
+    )
+
+    seen: list[str] = []
+
+    def fake_count(lib, safe):  # noqa: ANN001
+        seen.append(safe)
+        # The first target blows up the way a mid-scan DELETE (FileNotFoundError
+        # from open_target) or a "database is locked" would; the second must still
+        # be processed.
+        if len(seen) == 1:
+            raise FileNotFoundError(f"no target '{safe}' in library")
+        return 3
+
+    monkeypatch.setattr("webapp.pipeline._auto_stack_frame_count", fake_count)
+    monkeypatch.setattr("webapp.pipeline._mark_auto_stack_attempt",
+                        lambda *a, **k: None)
+
+    stacked: list[str] = []
+
+    def fake_stack_target(settings, jm, job, lib, safe, *,
+                          auto_bind_calibration=False, auto=False):  # noqa: ANN001
+        stacked.append(safe)
+        return {"run_id": None}
+
+    monkeypatch.setattr("webapp.pipeline._stack_target", fake_stack_target)
+
+    # Before the fix this raised (propagating the target's FileNotFoundError);
+    # after the fix it returns a normal summary.
+    summary = pipeline._pipeline_body(settings, _FakeJM(), Job(kind="pipeline"), root=None)
+
+    # Both targets were reached — the first failure did not abort the loop.
+    assert len(seen) == 2
+    # The failure is recorded, not raised, and the job is not misclassified as
+    # cancelled.
+    assert len(summary.get("stack_errors", {})) == 1
+    assert "cancelled" not in summary
+    # The crux: the healthy target still auto-stacked instead of being skipped
+    # because the job errored out.
+    assert len(stacked) == 1
+    assert summary.get("auto_stacked") == stacked
+
+
+def test_autostack_precheck_cancel_during_target_is_classified_cancelled(
+        solved_library, monkeypatch):
+    """A cancel that surfaces as a raise from a pre-check (rather than a graceful
+    cancelled result) must still be classified as a cancel, not a per-target
+    error, by the auto-stack except's cancel re-check."""
+    settings = Settings(
+        data_root=str(solved_library), auto_ingest=False, auto_qc=False,
+        auto_solve=False, auto_stack=True,
+    )
+
+    job = Job(kind="pipeline")
+
+    def fake_count(lib, safe):  # noqa: ANN001
+        # The user cancels *during* the pre-check (after the top-of-loop cancel
+        # check has passed), and the pre-check then raises — the except handler
+        # must see the cancel and classify the outcome as cancelled.
+        job._cancel.set()
+        raise RuntimeError("interrupted")
+
+    monkeypatch.setattr("webapp.pipeline._auto_stack_frame_count", fake_count)
+
+    summary = pipeline._pipeline_body(settings, _FakeJM(), job, root=None)
+
+    assert summary.get("cancelled") is True
+    # A cancel is not recorded as a per-target stack error.
+    assert "stack_errors" not in summary
+
+
 def test_qc_cancel_during_target_is_classified_cancelled(solved_library, monkeypatch):
     # A cancel that surfaces as a raise (rather than run_qc_and_solve's graceful
     # early return) must still be classified as a cancel, not an error, by the new
