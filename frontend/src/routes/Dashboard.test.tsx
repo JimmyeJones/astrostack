@@ -105,7 +105,7 @@ describe("Dashboard recent-stack picture download", () => {
       recent_stacks: [{
         safe: "m31", target_name: "M31", run_id: 7, output_basename: "m31_stack",
         timestamp_utc: "2026-07-14T00:00:00Z", n_frames_used: 100,
-        has_preview: true, preview_url: "/api/targets/m31/stack-runs/7/preview",
+        has_preview: true, has_fits: true, preview_url: "/api/targets/m31/stack-runs/7/preview",
       }],
     };
   }
@@ -127,11 +127,18 @@ describe("Dashboard recent-stack picture download", () => {
     expect(clicked).toHaveLength(1);
     expect(clicked[0]).toContain(client.api.stackArtifactUrl("m31", 7, "jpeg"));
 
-    // Re-open and pick PNG → the preview URL.
+    // Re-open and pick the quick preview PNG → the preview URL.
     fireEvent.click(screen.getByLabelText("Download picture of M31"));
-    fireEvent.click(await screen.findByText("PNG (best quality)"));
+    fireEvent.click(await screen.findByText("Quick preview PNG (up to 1024px)"));
     expect(clicked).toHaveLength(2);
     expect(clicked[1]).toContain(client.api.stackArtifactUrl("m31", 7, "preview"));
+
+    // Re-open and pick the full-res PNG → the native-resolution render URL (the
+    // FITS exists, so it's offered).
+    fireEvent.click(screen.getByLabelText("Download picture of M31"));
+    fireEvent.click(await screen.findByText("Full-res PNG (native size)"));
+    expect(clicked).toHaveLength(3);
+    expect(clicked[2]).toContain(client.api.stackFullResPngUrl("m31", 7));
   });
 
   it("shows no download control when the recent stack has no preview", async () => {

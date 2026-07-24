@@ -52,7 +52,7 @@ def _add_stack_run(root, safe, ts="2026-05-02T00:00:00Z", preview="master_previe
     try:
         proj = lib.open_target(safe)
         try:
-            proj.add_stack_run(StackRunRow(
+            run_id = proj.add_stack_run(StackRunRow(
                 id=None, timestamp_utc=ts, output_basename="master",
                 fits_path=None, tiff_path=None, preview_path=preview,
                 n_frames_used=3, canvas_h=320, canvas_w=480,
@@ -62,8 +62,45 @@ def _add_stack_run(root, safe, ts="2026-05-02T00:00:00Z", preview="master_previe
             proj.close()
         # Bumps last_activity_utc + last_stack_preview → cache signature changes.
         lib.refresh_target_stats(safe)
+        return run_id
     finally:
         lib.close()
+
+
+def test_recent_stack_reports_has_fits(client, solved_library, tmp_path):
+    """``recent_stacks[].has_fits`` reflects whether the run's FITS exists — it
+    gates the Dashboard's "Full-res PNG" download (rendered from the FITS)."""
+    import numpy as np
+    from astropy.io import fits as _fits
+
+    from seestack.io.library import Library
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    # One run with a real FITS on disk and one without, so both has_fits states
+    # appear in the same response.
+    no_fits_id = _add_stack_run(solved_library, safe, ts="2026-05-01T00:00:00Z")
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        tdir = lib.target_dir(lib.find_target(safe))
+        fp = tdir / "with_fits.fits"
+        _fits.PrimaryHDU(data=np.zeros((3, 8, 8), dtype=np.float32)).writeto(fp, overwrite=True)
+        proj = lib.open_target(safe)
+        try:
+            with_fits_id = proj.add_stack_run(StackRunRow(
+                id=None, timestamp_utc="2026-05-09T00:00:00Z", output_basename="master",
+                fits_path=str(fp), tiff_path=None, preview_path=None,
+                n_frames_used=3, canvas_h=8, canvas_w=8,
+                coverage_min=1, coverage_max=3, options_json=json.dumps({}),
+            ))
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+    finally:
+        lib.close()
+
+    by_id = {r["run_id"]: r for r in client.get("/api/stats").json()["recent_stacks"]}
+    assert by_id[with_fits_id]["has_fits"] is True
+    assert by_id[no_fits_id]["has_fits"] is False
 
 
 def test_stats_recent_limit_is_clamped(client, solved_library):

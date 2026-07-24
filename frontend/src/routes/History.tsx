@@ -902,12 +902,22 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
             </Tooltip>
           )}
           {run.has_preview && (
-            <Tooltip label="Download the finished picture as a PNG (best quality)">
+            <Tooltip label="Download a quick preview PNG (up to 1024px wide) — small and fast, good for a glance">
               <Button
                 size="xs" variant="light" leftSection={<IconPhotoDown size={14} />}
                 component="a" href={api.stackArtifactUrl(safe, run.id, "preview")}
               >
                 PNG
+              </Button>
+            </Tooltip>
+          )}
+          {run.has_fits && (
+            <Tooltip label={`Download the picture at full output resolution (${run.canvas_w}×${run.canvas_h} px) — the same look as shown here, just full-size`}>
+              <Button
+                size="xs" variant="light" color="grape" leftSection={<IconPhotoDown size={14} />}
+                component="a" href={api.stackFullResPngUrl(safe, run.id, applyNorthUp)}
+              >
+                Full-res PNG
               </Button>
             </Tooltip>
           )}
@@ -1007,6 +1017,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
         title={run.output_basename}
         downloadHref={run.has_preview ? api.stackArtifactUrl(safe, run.id, "preview") : undefined}
         jpegHref={run.has_preview ? api.stackArtifactUrl(safe, run.id, "jpeg", applyNorthUp, nameplate) : undefined}
+        fullResHref={run.has_fits ? api.stackFullResPngUrl(safe, run.id, applyNorthUp) : undefined}
         rawHref={run.has_fits ? api.stackArtifactUrl(safe, run.id, "fits") : undefined}
         {...(run.has_preview
           ? (() => {

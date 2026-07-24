@@ -981,6 +981,25 @@ when you take it.
     was reduced by the budget, stamp a plain-language note — this directly answers "is my output actually low-res?"
     without touching the memory-bounded stack math. Only *after* that, and only with a memory-measurement harness,
     consider changing the budget/scale logic (§10: never break the OOM bounds).
+  - **Builder 2026-07-24 (branch `claude/pensive-faraday-xflilv`) — candidate 3 (display-cap perception) directly
+    addressed: shipped a full-resolution PNG download (v0.195.0).** The only beginner-friendly *picture* download on
+    the History card was the quick preview PNG — capped at 1024 px and, worse, labelled "(best quality)" — so a user
+    who downloaded it and saw a 1024 px image reasonably concluded the app produces low-res output, even though the
+    FITS/TIFF were already full native resolution. Added a **"Full-res PNG"** download (grape button, gated on a FITS)
+    that renders the run's FITS at native output resolution (`GET …/stack-runs/{id}/full-res-png` →
+    `seestack.render.thumbnail.render_preview_png_full_res`, capped at an 8000 px long edge to bound memory on the
+    RAM-capped NAS — the FITS/TIFF keep the true native pixels of a giant mosaic). It uses the **same stretch as the
+    baked gallery/History preview** (STF for a linear stack, verbatim for a display-space editor export), so it is the
+    exact picture the user clicked, just full-size — not the adjustable-asinh `/render`. The tooltip on the existing
+    quick PNG button was corrected from the misleading "(best quality)" to "quick preview PNG (up to 1024px wide)".
+    Additive + upgrade-safe: new endpoint + frontend button only, no config/DB-schema/API-shape/on-disk/default change.
+    Tests: `tests/test_full_res_png.py` (+4 engine — native size, long-edge cap, display-space-verbatim, preview-look
+    parity), `tests/webapp/test_full_res_png.py` (+3 endpoint — native resolution, 404 no-FITS, 404 unknown-run),
+    `History.test.tsx` (+1 — the Full-res PNG link at native output size). **Note:** the History card already showed
+    `canvas_w×canvas_h` and the engine artifacts were confirmed native by the earlier investigation, so the remaining
+    low-res axis is now candidate 1 only (drizzle-on budget reduction) — but the current engine *refuses* (never
+    silently shrinks) per the 2026-07-24 audit, so there is no silent-low-res path left; the drizzle requested-vs-actual
+    surfacing stays a nice-to-have, not a correctness gap.
 
 - **⭐⭐ OWNER-REPORTED (2026-07 — TOP PRIORITY, real data on v0.158) — auto-stacked
   FINAL results come out as single-frame colour-speckle "gibberish" for some
@@ -12015,6 +12034,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.196.0** — ⭐⭐ Full-res PNG offered on every beginner picture-download surface (consistency follow-up to
+  v0.195.0): the fullscreen viewer menu (Gallery / My best pictures / History lightbox), the Target page's "Picture"
+  menu, and the Dashboard recent-stack card all now lead with "Full-res PNG (native size)" and honestly relabel the
+  1024px option "Quick preview PNG"; the misleading "(best quality)" label is gone app-wide. Added `has_fits` to the
+  stats `recent_stacks` summary (additive) so the Dashboard menu only offers full-res when a FITS exists. +2 lightbox /
+  updated Gallery/Target/Dashboard / +1 stats tests. (branch `claude/pensive-faraday-xflilv`)
+- **v0.195.0** — ⭐⭐ Full-resolution PNG download on the History card (directly answers the owner "my output is
+  low-res" report — candidate 3): a new "Full-res PNG" button renders the run's FITS at native output resolution
+  (`…/stack-runs/{id}/full-res-png` → `render_preview_png_full_res`, same STF/verbatim look as the preview, 8000 px
+  long-edge cap), and the misleading "(best quality)" tooltip on the 1024 px quick PNG is corrected. Additive endpoint
+  + frontend button; +4 engine / +3 endpoint / +1 frontend tests. (branch `claude/pensive-faraday-xflilv`)
 - **v0.184.11** — ⭐ "How's my stack?" now surfaces the #1 cause of the owner-reported faint-field "gibberish": when
   a large fraction of a target's *accepted* subs never plate-solved (so they silently never reached the stacker),
   `stack_health` leads with a plain-language note — "Only N of M subs could be located (plate-solved) … installing

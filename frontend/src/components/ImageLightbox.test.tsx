@@ -72,6 +72,35 @@ describe("ImageLightbox", () => {
     expect(jpeg.closest("a")).toHaveAttribute("href", "/api/run/1/jpeg");
   });
 
+  it("leads the download menu with the full-resolution PNG when one is given", async () => {
+    renderLightbox({
+      downloadHref: "/api/run/1/preview",
+      fullResHref: "/api/run/1/full-res-png",
+      jpegHref: "/api/run/1/jpeg",
+    });
+    const trigger = screen.getByLabelText("Download picture");
+    fireEvent.click(trigger);
+    const full = await screen.findByText("Full-res PNG (native size)");
+    expect(full.closest("a")).toHaveAttribute("href", "/api/run/1/full-res-png");
+    // The small preview is now honestly labelled, not "best quality".
+    const preview = screen.getByText("Quick preview PNG (up to 1024px)");
+    expect(preview.closest("a")).toHaveAttribute("href", "/api/run/1/preview");
+    expect(screen.getByText("JPEG (smaller — best for sharing)").closest("a"))
+      .toHaveAttribute("href", "/api/run/1/jpeg");
+  });
+
+  it("shows a full-res menu even without a jpeg href", async () => {
+    renderLightbox({
+      downloadHref: "/api/run/1/preview",
+      fullResHref: "/api/run/1/full-res-png",
+    });
+    const trigger = screen.getByLabelText("Download picture");
+    expect(trigger).not.toHaveAttribute("href");  // it's a menu, not a bare anchor
+    fireEvent.click(trigger);
+    expect((await screen.findByText("Full-res PNG (native size)")).closest("a"))
+      .toHaveAttribute("href", "/api/run/1/full-res-png");
+  });
+
   it("shows a Share icon when the browser can share files and share captions are given", () => {
     const nav = navigator as unknown as Record<string, unknown>;
     nav.canShare = () => true;

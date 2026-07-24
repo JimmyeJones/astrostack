@@ -418,6 +418,8 @@ export function GalleryView() {
           ? api.stackArtifactUrl(viewing.safe, viewing.run_id, "preview") : undefined}
         jpegHref={viewing?.has_preview
           ? api.stackArtifactUrl(viewing.safe, viewing.run_id, "jpeg") : undefined}
+        fullResHref={viewing?.has_fits
+          ? api.stackFullResPngUrl(viewing.safe, viewing.run_id) : undefined}
         rawHref={viewing?.has_fits
           ? api.stackArtifactUrl(viewing.safe, viewing.run_id, "fits") : undefined}
         toolbarExtra={viewing?.has_preview

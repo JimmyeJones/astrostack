@@ -407,6 +407,47 @@ async def render_stack_run(
                     headers={"Cache-Control": "no-store"})
 
 
+# A practical ceiling on the downloaded PNG's long edge: a Seestar single field
+# (~1080–1920 px) or a 2× drizzle (~3840 px) comes out at true native resolution,
+# while a 100+ MP union mosaic is capped so the render/response stays within the
+# RAM-capped NAS's budget. The full-res FITS/TIFF remain for the true native
+# pixels of such a giant mosaic.
+_FULL_RES_PNG_MAX_LONG_EDGE = 8000
+
+
+# NOTE: declared before the "/{kind}" catch-all download route below so the
+# literal "full-res-png" segment isn't swallowed as an artifact kind.
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/full-res-png")
+async def download_full_res_png(
+    safe: str, run_id: int, request: Request, north_up: bool = False,
+) -> Response:
+    """The finished picture as a **native-resolution PNG** — the same look as the
+    gallery/History thumbnail, just at full output resolution instead of the
+    1024 px preview cap.
+
+    This is the direct answer to the "my downloaded picture is low-res" report: the
+    FITS/TIFF already carry full-resolution pixels but aren't easily viewable, and
+    the quick PNG button serves the small preview. This serves the picture the user
+    sees at full size. ``north_up`` rotates it so celestial North points up (like
+    the shared JPEG), a no-op when the run has no usable WCS. Runs in a threadpool
+    so it never blocks the job worker."""
+    basename, fits_path = _run_fits_path(request, safe, run_id)
+    if not fits_path or not Path(fits_path).exists():
+        raise HTTPException(status_code=404,
+                            detail="No FITS for this run to render at full resolution")
+
+    from seestack.render.thumbnail import render_preview_png_full_res
+    png = await run_in_threadpool(
+        render_preview_png_full_res, fits_path,
+        max_long_edge=_FULL_RES_PNG_MAX_LONG_EDGE, north_up=bool(north_up),
+    )
+    filename = f"{basename}_fullres.png"
+    return Response(
+        content=png, media_type="image/png",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/sky-overlay")
 async def sky_overlay(safe: str, run_id: int, request: Request) -> Response:
     """The run's preview as an RGBA PNG with uncovered (NaN / no-coverage) pixels
