@@ -6,7 +6,8 @@ from datetime import date as _date
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from webapp.routers.plan import _parse_angle, _site_from_header
+from webapp.site_location import parse_angle as _parse_angle
+from webapp.site_location import site_from_header as _site_from_header
 
 # A fixed winter evening in the northern hemisphere → a real dark window.
 JAN_EVENING = "2026-01-15T20:00:00+00:00"
