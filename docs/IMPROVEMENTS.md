@@ -649,10 +649,21 @@ when you take it.
   with the fixed scanner, assert the output frame is excluded from stacking/reference and the duplicate flagged.
   Confidence: traced + reproduced. (M, ingest/upgrade-safety/correctness — PRIORITY 2.)
 
-- **A whole-device drop — the Seestar share or SD card copied wholesale, with its `MyWorks/` level intact — silently
-  merges EVERY target, on-device output, and `*_video` capture into ONE giant target named `MyWorks`.**
-  *(Ingest/autonomy; wrong-result via a realistic beginner action; found by the 2026-07-24 integration audit;
-  **traced + reproduced**.)* `scan_and_organize` applies the Seestar convention only to the *immediate* subdirs of
+- ~~**A whole-device drop — the Seestar share or SD card copied wholesale, with its `MyWorks/` level intact — silently
+  merges EVERY target, on-device output, and `*_video` capture into ONE giant target named `MyWorks`.**~~ —
+  **FIXED v0.184.17** (Builder 2026-07-24, branch `claude/pensive-faraday-vrd4ka`; **traced + reproduced +
+  regression-tested**). `scan_and_organize` now detects a *container* subdir — one holding no FITS directly
+  (`find_fits_files(d, recursive=False)` empty) but whose child folders follow the Seestar convention (new
+  `_looks_like_seestar_container`: at least one child named `*_sub`, which also covers `*_mosaic_sub`) — and expands it
+  into its children before applying the convention, so `incoming/MyWorks/{M 31_sub, M 31, NGC 7000_mosaic_sub,
+  Lunar_video}` yields the two real targets `M 31` (2 subs) + `NGC 7000 (mosaic)` (2 subs) with the on-device output and
+  video skipped, instead of one giant `MyWorks`. A plainly-nested non-Seestar folder whose children share no `_sub`
+  name (`Andromeda/sub/`, `MyProject/night1/`) is **not** a container and still folds into one target as before.
+  Upgrade-safe: pure folder→target mapping change, no config/DB/API/on-disk/default change. Regression
+  (`tests/test_scanner.py`, both new, fail-before/pass-after): `test_scan_expands_a_whole_device_container_drop` and
+  `test_scan_keeps_a_plain_nested_non_seestar_folder_as_one_target`. Confidence: traced + reproduced +
+  regression-tested. (M, ingest/autonomy — PRIORITY 2.) *(Original trace kept for provenance.)*
+  `scan_and_organize` applies the Seestar convention only to the *immediate* subdirs of
   the scan root (`scanner.py:189-203`) while `find_fits_files(d, recursive=True)` collects every FITS at any depth
   below each one. A root containing one *container* level — exactly what "copy the whole share/card into incoming"
   produces — therefore yields a single unit `("MyWorks", <all files>)`. Reproduced: `MyWorks/{M 31_sub, M 31,

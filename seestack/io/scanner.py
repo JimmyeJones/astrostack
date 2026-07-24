@@ -109,6 +109,25 @@ def _apply_seestar_convention(
     return units
 
 
+def _looks_like_seestar_container(d: Path) -> bool:
+    """True when ``d`` is a *container* level of a Seestar layout — a folder that
+    holds no FITS of its own but wraps the real per-target folders one level
+    deeper — recognised by at least one child folder named ``*_sub`` (the
+    authoritative raw-subs marker, which also covers ``*_mosaic_sub``).
+
+    This is the "I copied the whole Seestar share/SD card into incoming" shape
+    (``incoming/MyWorks/{M 31_sub, M 31, …}``). A plainly-nested non-Seestar
+    folder — whose children share no convention names (e.g. ``Andromeda/sub/``,
+    ``MyProject/night1/``) — returns False so it still ingests as a single
+    target, exactly as before.
+    """
+    try:
+        children = [c for c in d.iterdir() if c.is_dir()]
+    except OSError:
+        return False
+    return any(c.name.lower().endswith(_SUB_SUFFIX) for c in children)
+
+
 def _seestar_output_bases(
     subdirs_with_fits: list[tuple[str, list[Path]]],
 ) -> dict[str, str]:
@@ -224,6 +243,18 @@ def scan_and_organize(
 
     subdirs_with_fits: list[tuple[str, list[Path]]] = []
     for d in subdirs:
+        # Whole-device drop: the Seestar share/SD card copied wholesale keeps a
+        # container level (e.g. "MyWorks/") intact, so a subdir may hold no FITS
+        # directly but wrap the real "<T>_sub"/"<T>" folders one level deeper.
+        # Expand such a container into its children so each real target is kept
+        # separate, instead of lumping every object + output + video into ONE
+        # giant target named after the container.
+        if not find_fits_files(d, recursive=False) and _looks_like_seestar_container(d):
+            for child in sorted(c for c in d.iterdir() if c.is_dir()):
+                child_fits = find_fits_files(child, recursive=True)
+                if child_fits:
+                    subdirs_with_fits.append((child.name, child_fits))
+            continue
         fits = find_fits_files(d, recursive=True)
         if fits:
             subdirs_with_fits.append((d.name, fits))

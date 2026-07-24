@@ -228,6 +228,57 @@ def test_rescan_rejects_pre_v0_184_9_output_pollution_end_to_end(tmp_path):
         lib.close()
 
 
+def test_scan_expands_a_whole_device_container_drop(tmp_path):
+    """A whole Seestar share/card copied in with its container level intact
+    (incoming/MyWorks/{...}) must expand into the real per-target folders, not
+    lump every object + output + video into one giant 'MyWorks' target
+    (regression for the whole-device-drop bug)."""
+    scan_root = tmp_path / "incoming"
+    works = scan_root / "MyWorks"
+    (works / "M 31_sub").mkdir(parents=True)
+    write_seestar_fits(works / "M 31_sub" / "Light_001.fit", n_stars=5, seed=1)
+    write_seestar_fits(works / "M 31_sub" / "Light_002.fit", n_stars=5, seed=2)
+    (works / "M 31").mkdir()  # on-device output for M 31 — must be skipped
+    write_seestar_fits(works / "M 31" / "Stacked.fit", n_stars=5, seed=10)
+    (works / "NGC 7000_mosaic_sub").mkdir()
+    write_seestar_fits(works / "NGC 7000_mosaic_sub" / "Light_001.fit", n_stars=5, seed=3)
+    write_seestar_fits(works / "NGC 7000_mosaic_sub" / "Light_002.fit", n_stars=5, seed=4)
+    (works / "Lunar_video").mkdir()  # video — must be skipped
+    write_seestar_fits(works / "Lunar_video" / "clip.fit", n_stars=5, seed=6)
+
+    lib = Library.create(tmp_path / "lib")
+    try:
+        result = scan_and_organize(lib, scan_root)
+        by_name = {t.target_name: t for t in result.targets}
+        assert set(by_name) == {"M 31", "NGC 7000 (mosaic)"}   # no "MyWorks"
+        assert by_name["M 31"].n_frames_added == 2             # subs, not the output
+        assert by_name["NGC 7000 (mosaic)"].n_frames_added == 2
+        assert {t.name for t in lib.list_targets()} == {"M 31", "NGC 7000 (mosaic)"}
+    finally:
+        lib.close()
+
+
+def test_scan_keeps_a_plain_nested_non_seestar_folder_as_one_target(tmp_path):
+    """A plainly-nested non-Seestar folder (children share no '_sub' convention
+    name) must still ingest as ONE target — the container expansion must not
+    fire for it (no regression for the Andromeda/sub layout)."""
+    scan_root = tmp_path / "incoming"
+    proj = scan_root / "MyProject"
+    (proj / "night1").mkdir(parents=True)
+    (proj / "night2").mkdir()
+    write_seestar_fits(proj / "night1" / "Light_001.fit", n_stars=5, seed=1)
+    write_seestar_fits(proj / "night2" / "Light_002.fit", n_stars=5, seed=2)
+
+    lib = Library.create(tmp_path / "lib")
+    try:
+        result = scan_and_organize(lib, scan_root)
+        by_name = {t.target_name: t for t in result.targets}
+        assert set(by_name) == {"MyProject"}       # one target, both nights folded in
+        assert by_name["MyProject"].n_frames_added == 2
+    finally:
+        lib.close()
+
+
 def test_scan_is_idempotent(tmp_path):
     """Re-scanning the same tree adds nothing the second time."""
     scan_root = _seestar_tree(tmp_path / "seestar")
