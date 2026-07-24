@@ -8411,9 +8411,29 @@ problems. Dogfood it every big-picture run and fix root causes.
   *how* to capture them on a Seestar — a distinct understand/learn capability from every planning/recap/coaching card
   already filed or built.)*
 
-- **NEW BEGINNER FEATURE (Scout 2026-07-24) — "Try it with a sample image": a one-tap way for a brand-new owner with
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-24) — "Try it with a sample image": a one-tap way for a brand-new owner with
   no data yet to load a small bundled sample set and walk the whole journey (ingest → QC → stack → edit → export)
-  before their first clear night.** *(Pillar: 3 friendliness / onboarding + understand/learn; size M.)* **The gap
+  before their first clear night.**~~ — **SHIPPED v0.199.0** (Builder 2026-07-24, branch
+  `claude/pensive-faraday-i18g71`; tested). A dismissing-by-design **"New here? Try it with a sample image"** card on
+  the Dashboard (`components/SampleImageCard.tsx`, shown above the stat grid) loads a *generated* demo target in one
+  tap, then navigates the owner straight to it so they can run QC → stack → edit → export on real-looking data. The
+  demo is built entirely on the server from a slim production star-field writer (`webapp/sample_data.py` — **nothing
+  binary ships in the repo/image**): 6 dithered synthetic Seestar OSC subs of a fake "Sample: Orion Nebula (M42)"
+  target, written into the target's own `sample_subs/` dir, ingested via the normal `ingest_files` path, QC'd via
+  `run_qc_and_solve(run_qc=True, run_solve=False, serial=True)`, then each frame's **true WCS injected directly**
+  (`update_frame(wcs_json=…)`) so it stacks cleanly on any install **without ASTAP** (synthetic star fields don't
+  plate-solve). Three tiny endpoints (`webapp/routers/sample.py`: `GET/POST/DELETE /api/sample`) back the card;
+  **idempotent** (a double-tap returns the existing target, never a duplicate) and **fully reversible** — "Remove
+  sample" deletes the target with `remove_files=True`, sweeping up the generated subs + Stage-1 cache + project DB and
+  touching nothing else. Card visibility is self-managing: the "try it" offer shows only while the library is empty
+  (never nags an established user), switching to a small "sample is ready / remove it" card once loaded so the demo
+  stays easy to clean up. Regression: `tests/webapp/test_sample_data.py` (+7 — status on a fresh library, load builds
+  a valid solved target, **the sample actually stacks and the sky noise falls** (proof it's a real demo, not a stub),
+  load idempotency, remove deletes only the sample + its files, remove-on-empty no-op, and the full status→load→remove
+  API round-trip) and `frontend/src/components/SampleImageCard.test.tsx` (+3 — offers + loads on an empty library,
+  shows the ready+remove state once loaded, hides entirely when real data exists and no sample). Upgrade-safe:
+  purely additive — a new module + router + Dashboard card, all opt-in (the demo exists only after the user taps),
+  no config/DB-schema/on-disk/default/API-shape change. *(Original idea kept for provenance.)* *(Pillar: 3 friendliness / onboarding + understand/learn; size M.)* **The gap
   (verified this run):** a first-run owner who installs AstroStack before they've captured anything lands on an empty
   Dashboard with first-run readiness banners but **nothing to actually *do*** — every screen (QC, Target, Stack,
   Editor, share) is empty until they've dropped real Seestar frames in, which won't happen until their next clear

@@ -458,6 +458,12 @@ export interface DashboardStats {
   disk: { total_gb?: number; used_gb?: number; free_gb?: number };
 }
 
+export interface SampleStatus {
+  loaded: boolean;
+  safe: string | null;
+  n_frames: number;
+}
+
 export interface TargetStorage {
   safe: string;
   name: string;
@@ -1529,6 +1535,11 @@ export const api = {
     req<ActivityCalendar>(`/api/activity-calendar?months=${months}`),
   getLibraryProgress: () => req<TargetProgress[]>("/api/library-progress"),
   getLibrarySummary: () => req<LibrarySummary>("/api/library/summary"),
+
+  // "Try it with a sample image" onboarding demo
+  getSampleStatus: () => req<SampleStatus>("/api/sample"),
+  loadSample: () => req<SampleStatus>("/api/sample", { method: "POST" }),
+  removeSample: () => req<SampleStatus>("/api/sample", { method: "DELETE" }),
 
   // storage / housekeeping
   getStorage: () => req<StorageInfo>("/api/storage"),

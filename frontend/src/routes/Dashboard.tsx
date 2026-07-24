@@ -18,6 +18,7 @@ import { ImagingCalendarCard } from "../components/ImagingCalendarCard";
 import { LastNightCard } from "../components/LastNightCard";
 import { LibraryProgressCard } from "../components/LibraryProgressCard";
 import { QueryError } from "../components/QueryError";
+import { SampleImageCard } from "../components/SampleImageCard";
 import { SuggestTargetsCard } from "../components/SuggestTargetsCard";
 import { BestPicturesStrip } from "../components/BestPicturesStrip";
 import { ImagingLogButton } from "../components/ImagingLogButton";
@@ -166,6 +167,8 @@ export function Dashboard() {
           </Button>
         </Alert>
       ) : null}
+
+      <SampleImageCard />
 
       <SimpleGrid cols={{ base: 2, sm: 3, lg: 6 }}>
         <StatCard icon={<IconStars size={22} color="var(--mantine-color-violet-4)" />}
