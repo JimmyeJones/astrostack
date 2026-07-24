@@ -7538,6 +7538,31 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+- **IMPROVEMENT IDEA (Builder 2026-07-24, spotted while shipping "Your sharpest yet") — a *threshold-free* soft-star
+  note for "How's my stack?": flag when the finished stack's stars are materially **bloated relative to the target's
+  own subs**, pointing at alignment/tracking loss rather than nagging on an absolute FWHM bar.** *(Pillar: 4 image
+  quality + 3 friendliness/understand; size S; engine helper + one health note.)* **The gap (verified this run):**
+  `stack_health` (`seestack/stackhealth.py`) has a *shape* note (eccentricity ≥ 0.6) but **no sharpness note** — even
+  though v0.194.0 now persists the finished stack's own median star size (`stack_runs.stack_fwhm_px`, native-frame px).
+  A plain absolute "your stars are soft (>N px)" note is genuinely hard to ship safely: QC grades FWHM only
+  *relatively* (percentile), so there's no in-repo absolute band, and a fixed px/arcsec threshold needs per-camera
+  tuning (the Seestar is undersampled → "soft" in px is camera-specific) — exactly the real-data-gated trap. **But a
+  *relative* signal sidesteps it entirely:** compare the run's `stack_fwhm_px` to the **median of the accepted subs'
+  own `fwhm_px`** (both native-frame px, already computed). If the stack is significantly *fatter* than its own
+  contributing subs (e.g. `stack_fwhm_px > k · median(sub fwhm_px)` for a gentle k like 1.3–1.5), the stars *bloated
+  in the combine* — the classic fingerprint of imperfect registration/field rotation over the night — which is
+  actionable ("a steadier mount, or re-solving the roughly-aligned subs, tightens them") and has a natural per-target
+  anchor (the subs themselves), so it needs **no absolute threshold**. Complements the existing `roughly_aligned` note
+  (which fires on the *count* of shift-capped subs) by catching bloat from accumulated sub-pixel/rotation error that
+  each individual frame's own refine didn't flag. **Sane default / self-hiding:** NULL `stack_fwhm_px` (old runs,
+  too-few-stars) or no sub FWHM medians → silent; only fires when both are measured and the ratio clears the gentle
+  floor. **Shape for a Builder run:** a pure helper in `stackhealth.py` taking `(run.stack_fwhm_px, [f.fwhm_px for
+  accepted f])`, a new ranked `HealthNote(kind="soft_stars", …)` slotted near the shape note, and unit tests (bloated
+  ratio → note; comparable/sharp stack → silent; missing either input → silent). Upgrade-safe: additive read-only note,
+  no schema/config/default/API-shape change (both fields already served). **Scout: sanity-check the k floor on a real
+  multi-night Seestar target before it lands on-by-default — pick k so a normal well-aligned stack never trips it.**
+  *(Feasibility: reuses `stack_fwhm_px` + per-frame `fwhm_px` already computed, no new dependency, sane self-hiding
+  default, testable — passes §4's filter.)*
 - **IMPROVEMENT IDEA (Scout 2026-07-23) — a small (3-frame) default stack gets *no* outlier rejection at all, so a lone
   satellite/plane trail or cosmic-ray/hot pixel in any one of those 3 subs lands straight in the final picture.**
   *(Image-quality + autonomy pillar, PRIORITY 2/4; size S; **default-behaviour change — flag for care/owner judgement,
