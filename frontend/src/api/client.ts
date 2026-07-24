@@ -385,6 +385,24 @@ export interface TargetProgress {
   goal_s: number | null;
 }
 
+export interface NightActivity {
+  date: string; // observing-night date, ISO YYYY-MM-DD
+  exposure_s: number;
+  n_frames: number;
+  targets: string[];
+}
+
+export interface ActivityCalendar {
+  start_date: string;
+  end_date: string;
+  months: number;
+  nights: NightActivity[];
+  n_nights: number;
+  total_exposure_s: number;
+  nights_this_month: number;
+  best_streak_nights: number;
+}
+
 export interface SummaryTarget {
   safe: string;
   name: string;
@@ -1455,6 +1473,8 @@ export const api = {
   // dashboard
   getStats: () => req<DashboardStats>("/api/stats"),
   getLastNight: () => req<LibrarySessionRecap | null>("/api/last-night"),
+  getActivityCalendar: (months = 12) =>
+    req<ActivityCalendar>(`/api/activity-calendar?months=${months}`),
   getLibraryProgress: () => req<TargetProgress[]>("/api/library-progress"),
   getLibrarySummary: () => req<LibrarySummary>("/api/library/summary"),
 

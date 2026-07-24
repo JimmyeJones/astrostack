@@ -5168,9 +5168,13 @@ to **Shipped**.)_
   (soft-delete / archive the duplicate target, never the frames on disk). Must be **reversible** and default to *asking*,
   never auto-deleting a user's target. Note the older "Surface the junk targets an OLD scan built" idea below
   mis-modelled this state (it assumed a separate 1-frame output target) — this entry supersedes it.
-- **NEW IDEA (Scout 2026-07-24) — "About N min left": a live time-remaining estimate on a running stack (and the
+- ~~**NEW IDEA (Scout 2026-07-24) — "About N min left": a live time-remaining estimate on a running stack (and the
   scan/QC/solve jobs), so a beginner with thousands of subs knows whether to wait or go make tea — and can tell a
-  slow-but-working job from a stuck one.** *(Pillar: 3 friendliness + trust; size S — frontend-only, verified
+  slow-but-working job from a stuck one.**~~ — **ALREADY SHIPPED** (curated by Builder 2026-07-24 — the Ideas list was
+  stale). The Jobs page already renders a per-**step** "time left" via `frontend/src/jobEta.ts`
+  (`updateEtaAnchor`/`phaseEtaSeconds`/`etaLabel`, unit-tested in `jobEta.test.ts`) wired into `routes/Jobs.tsx`
+  (`useJobEtas`), anchoring the rate on each step's start so a multi-step stack doesn't average across step
+  boundaries — exactly this idea. *(Pillar: 3 friendliness + trust; size S — frontend-only, verified
   additive.)* **The gap:** `JobRecord` already streams `phase` / `done` / `total` / `started_utc` over SSE
   (`webapp/jobs.py`; `to_dict()` exposes all four), and the Jobs page + the completion toast render a progress bar —
   but nothing tells the user *how long is left*. On a 5,000-sub stack the bar can sit at "1,240 / 5,000" for many
@@ -5218,6 +5222,18 @@ to **Shipped**.)_
   persisted dismissal). Upgrade-safe: additive read-only endpoint + new component, no
   config/DB-schema/on-disk/default change; **never auto-deletes** and never touches
   `_sub` data. *(Follow-up to the ⭐⭐⭐ scanner fix shipped v0.184.9.)*
+- **NEW IDEA (Builder 2026-07-24, spotted while shipping the imaging calendar v0.188.0) — derive the calendar's
+  night-boundary longitude from a solved frame's FITS `SITELONG` when `site_lon` is unset, so noon-to-noon bucketing
+  is correct out of the box.** *(Pillar: 2 autonomy + 3 friendliness; size S.)* **The gap:** the activity calendar
+  (`/api/activity-calendar`) buckets each sub onto its observing night using the observer's longitude to approximate
+  local time, but it reads **only** `settings.site_lon` — which a beginner usually never sets. With it unset the
+  calendar falls back to UTC noon-to-noon, so a far-east/west observer's late-evening subs can bucket onto the wrong
+  calendar night. **The fix:** the Tonight planner already solves exactly this — `nightplan` reads `SITELAT`/`SITELONG`
+  off a solved frame's header when config has no location. Reuse that: when `site_lon` is None, fall back to a
+  library-derived longitude (cache it like the other Dashboard roll-ups) before computing `today`/the night buckets.
+  Sane default (unchanged when a location *is* configured), additive, testable (a fixture with a `SITELONG` header
+  and no config buckets a midnight-crossing session the same as an explicit `site_lon`). Small follow-up to the
+  calendar; not urgent (the UTC fallback is already sane for most owners).
 - **If a same-sky-area auto-merge is ever wired up, gate it on same-framing.**
   *(S, correctness — PRIORITY 2; latent, no live caller today.)* `library.
   find_target_within()` exists but is currently unused, so nothing folds a mosaic
@@ -8335,10 +8351,27 @@ problems. Dogfood it every big-picture run and fix root causes.
   queries + the FWHM/integration figures already computed, no new/heavy dependency, sane default, testable — passes
   §4's filter.)*
 
-- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Your imaging calendar": a simple month/year heat-calendar of which
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "Your imaging calendar": a simple month/year heat-calendar of which
   nights you actually imaged and how much, so a beginner can see the rhythm of their hobby at a glance, spot the
-  clear-sky runs and the gaps, and feel the streak building — the astro equivalent of a fitness-app activity ring.**
-  *(Pillar: 3 friendliness + enjoy/motivation — §1 lists "enjoy" as a beginner pillar; size S–M.)* **The gap
+  clear-sky runs and the gaps, and feel the streak building — the astro equivalent of a fitness-app activity ring.**~~
+  — **SHIPPED v0.188.0** (Builder 2026-07-24, branch `claude/pensive-faraday-aev89h`). A GitHub-contributions-style
+  activity heatmap on the Dashboard. **Engine** (`seestack/activity_calendar.py`, pure/offline/deterministic):
+  `night_date_of(ts, lon_deg)` buckets a capture timestamp onto its **observing night** (local noon-to-noon; local
+  time approximated from `site_lon` as `UTC+lon/15` h, else UTC), so a single midnight-spanning session lands in one
+  cell; `accumulate_nights`/`finalize_calendar` fold `(timestamp, exposure, target)` tuples into per-night buckets
+  (Σ exposure, sub count, distinct targets) over a trailing N-month window and compute `nights_this_month` +
+  longest consecutive-night streak. **Webapp**: `GET /api/activity-calendar?months=12` (`webapp/routers/stats.py`)
+  streams each target's frames into the accumulator (memory-bounded, a broken project skipped), cached on the app
+  like the other Dashboard roll-ups; `months` clamped 1–24. **Frontend**: pure `activityCalendar.ts`
+  (`buildCalendarGrid` → dense week-column grid, `exposureLevel` shade buckets, `calendarHeadline`, `nightLabel`)
+  + `ImagingCalendarCard` (violet heatmap with per-night hover, legend, plain-language headline
+  *"You've imaged N nights this month — best run: M clear nights in a row."*), rendered on the Dashboard below
+  "Last night"; self-hides until there's an imaged night. Tests: `tests/test_activity_calendar.py` (+14 — night
+  bucketing incl. midnight-span & longitude, streak, month window, empty/garbage/missing-exposure),
+  `tests/webapp/test_activity_calendar.py` (+4 — two-night buckets, empty library valid, months clamp, no-timestamp
+  skip), `frontend/src/activityCalendar.test.ts` (+9) and `ImagingCalendarCard.test.tsx` (+2). Upgrade-safe: additive
+  read-only endpoint + display component, no schema/config/default/API-shape change; the feature is inert (self-hides)
+  until frames carry timestamps. *(Pillar: 3 friendliness + enjoy/motivation — §1 lists "enjoy" as a beginner pillar; size S–M.)* **The gap
   (verified this run):** the app has rich *per-target* and *per-night* views — "Night by night", "Last night" recap,
   "Your sky, so far" (cumulative sky coverage), the downloadable imaging log (a table) — but **nothing that shows the
   beginner their imaging activity as a calendar across time.** There is no at-a-glance answer to "how many nights have

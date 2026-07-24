@@ -10,6 +10,7 @@ strip does open each project, exactly like the Gallery endpoint does.
 from __future__ import annotations
 
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Request
@@ -464,4 +465,107 @@ def get_stats(request: Request, recent_limit: int = 8) -> StatsResponse:
         active_jobs=active,
         recent_stacks=recent[:recent_limit],
         disk=disk,
+    )
+
+
+# "Your imaging calendar" — a temporal, whole-hobby activity heatmap. Opening
+# every project to read its capture timestamps is the expensive part, so the
+# result is cached on the app exactly like the roll-ups above; the signature
+# keys on each target's activity stamp so a fresh scan invalidates it promptly.
+_ACTIVITY_CACHE_TTL_S = 120.0
+
+
+class NightActivityOut(BaseModel):
+    date: str            # observing-night date, ISO ``YYYY-MM-DD``
+    exposure_s: float
+    n_frames: int
+    targets: list[str]
+
+
+class ActivityCalendarOut(BaseModel):
+    """The library's imaging activity over a trailing window of nights, one cell
+    per observing night — the Dashboard "your imaging calendar" heatmap."""
+
+    start_date: str
+    end_date: str
+    months: int
+    nights: list[NightActivityOut] = []
+    n_nights: int
+    total_exposure_s: float
+    nights_this_month: int
+    best_streak_nights: int
+
+
+def _collect_activity_calendar(lib, targets, *, today, months, lon_deg):
+    """Stream every target's capture timestamps into a per-night accumulator and
+    finalize the trailing-window calendar. Memory-bounded — each project's frames
+    are folded and released before the next opens — and a broken project is
+    skipped, never 500s the dashboard."""
+    from seestack.activity_calendar import accumulate_nights, finalize_calendar
+    from seestack.io.project import Project
+
+    acc: dict = {}
+    for t in targets:
+        proj = None
+        try:
+            proj = Project.open(lib.target_dir(t))
+            accumulate_nights(
+                ((f.timestamp_utc, f.exposure_s, t.name) for f in proj.iter_frames()),
+                acc, lon_deg=lon_deg,
+            )
+        except Exception:  # noqa: BLE001 — a broken project must not 500 the dashboard
+            pass
+        finally:
+            if proj is not None:
+                proj.close()
+    return finalize_calendar(acc, today=today, months=months)
+
+
+@router.get("/api/activity-calendar", response_model=ActivityCalendarOut)
+def get_activity_calendar(request: Request, months: int = 12) -> ActivityCalendarOut:
+    """The library's imaging activity as a calendar heatmap — one cell per
+    observing night, shaded by that night's total capture time. Read-only
+    aggregation over the frames tables, cached on the app between scans. Nights
+    are bucketed noon-to-noon in the observer's local time (from ``site_lon`` when
+    set, else UTC), so a single midnight-spanning session lands in one cell."""
+    months = max(1, min(24, months))
+    settings = deps.get_settings(request)
+    lon = settings.site_lon
+    offset_h = (lon / 15.0) if lon is not None else 0.0
+    today = (datetime.now(timezone.utc) + timedelta(hours=offset_h)).date()
+
+    lib = deps.open_library(request)
+    try:
+        targets = lib.list_targets()
+        sig = (
+            months, lon,
+            tuple(sorted((t.safe_name, t.last_activity_utc or "") for t in targets)),
+        )
+        cache = getattr(request.app.state, "activity_calendar_cache", None)
+        now = time.monotonic()
+        if cache and cache["sig"] == sig and (now - cache["at"]) < _ACTIVITY_CACHE_TTL_S:
+            cal = cache["data"]
+        else:
+            cal = _collect_activity_calendar(
+                lib, targets, today=today, months=months, lon_deg=lon)
+            request.app.state.activity_calendar_cache = {
+                "sig": sig, "at": now, "data": cal}
+    finally:
+        lib.close()
+
+    return ActivityCalendarOut(
+        start_date=cal.start_date,
+        end_date=cal.end_date,
+        months=cal.months,
+        nights=[
+            NightActivityOut(
+                date=n.date, exposure_s=n.exposure_s,
+                n_frames=n.n_frames, targets=n.targets,
+            )
+            for n in cal.nights
+        ],
+        n_nights=cal.n_nights,
+        total_exposure_s=cal.total_exposure_s,
+        nights_this_month=cal.nights_this_month,
+        best_streak_nights=cal.best_streak_nights,
     )
