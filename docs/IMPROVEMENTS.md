@@ -8521,6 +8521,27 @@ problems. Dogfood it every big-picture run and fix root causes.
   sane default, testable — passes §4's filter. Keeps the beginner-feature pipeline stocked with a *learn/understand*
   capability distinct from every celebration/planning/record card already filed.)*
 
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "You beat your best!" (sharpest-yet slice): when a fresh stack of a
+  target comes out sharper than your previous best of that same target, say so with a small celebratory callout.**~~
+  — **SHIPPED v0.198.0** (Builder 2026-07-24, branch `claude/pensive-faraday-jtfnbq`; tested). Now unblocked by the
+  per-run `stack_fwhm_px` column (v0.194.0). Added a pure, threshold-free helper
+  `frontend/src/components/target/sharpestYet.ts::sharpestYet(runs)` — given the target's stack runs **newest-first**
+  (exactly what `listStackRuns` returns), it returns a `SharpestYet {currentFwhmPx, priorBestFwhmPx, priorBestDate}`
+  only when the newest run's measured median star size (FWHM, native-frame px, lower = sharper) strictly beats the
+  sharpest prior run by at least `SHARPEST_MARGIN` (2%, so measurement jitter never triggers a false "record"), else
+  `null` (first run, no measurement, tie, or no improvement → nothing). It **only ever compares a target against its own
+  prior best**, never an absolute "good" bar, so it can't over-claim or need per-camera tuning. A small self-hiding
+  `SharpestYetBadge` (grape Alert, ✨) renders it on the Target page beside the finished picture (next to the noise
+  badge), naming the target and both px values + the prior-best date. Frontend-only + additive: exposed the
+  already-served `StackRunOut.stack_fwhm_px` on the frontend `StackRun` type; no config/DB/on-disk/default/API-shape
+  change (backend already returned the field). Tests: `sharpestYet.test.ts` (+7 — first run/empty/null → null, clear
+  beat with the right prior+date, worse → null, tie/within-margin → null vs over-margin → beat, ignores unmeasured
+  priors, null current → null, non-finite/non-positive ignored) and `SharpestYetBadge.test.tsx` (+4 — celebratory copy
+  with both values + prior date, self-hide on first run / non-record / missing runs). The complementary "deepest yet"
+  axis is deliberately *not* built (it fires on nearly every deeper re-stack → low signal, per the earlier Builder
+  note), and the noise-axis "cleanest yet" is already shipped (`CleanestBadge`). (S, friendliness/enjoy — PRIORITY 3.)
+  *(Original idea kept below for provenance.)*
+
 - **NEW BEGINNER FEATURE (Scout 2026-07-23) — "You beat your best!": when a fresh stack of a target you've shot before
   comes out sharper (or deeper) than your previous best of that same target, say so with a small celebratory callout —
   so a beginner feels the progress of adding subs / catching better seeing, and learns what "better" looks like.**

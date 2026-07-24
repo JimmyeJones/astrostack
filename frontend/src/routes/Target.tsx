@@ -35,6 +35,7 @@ import { sharePictureText } from "../share";
 import { detectSolveSetupProblem } from "../components/target/solveSetup";
 import { RejectionBreakdown } from "../components/target/RejectionBreakdown";
 import { thinStackWarning } from "../components/target/thinStack";
+import { SharpestYetBadge } from "../components/target/SharpestYetBadge";
 import { detectMixedPointings } from "../components/target/mixedPointings";
 
 // Re-exported for existing tests that import it from this route module.
@@ -853,6 +854,12 @@ export function TargetView() {
       {latestRun?.has_preview ? (
         <StackNoiseBadge safe={safe} runId={latestRun.id}
           nFrames={latestRun.n_frames_used ?? null} />
+      ) : null}
+      {/* Per-target personal-record beat: celebrate when the newest stack came
+          out sharper than any previous stack of this target (self-hides on the
+          first run or when it's not a record). */}
+      {latestRun?.has_preview ? (
+        <SharpestYetBadge name={target.data?.name ?? "target"} runs={runs.data} />
       ) : null}
       <Group justify="space-between" gap="xs">
         <Group gap="xs" style={{ minWidth: 0 }}>
