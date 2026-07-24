@@ -10,6 +10,8 @@ from fastapi.responses import FileResponse
 from webapp import deps
 from webapp.schemas import (
     BestFrameOut,
+    CleanupSuggestionOut,
+    DarkSpecOut,
     FocusTrendOut,
     FocusTrendPointOut,
     FramingHintOut,
@@ -152,6 +154,51 @@ def merge_suggestions(request: Request) -> list[MergeSuggestionOut]:
                 for m in g.members
             ],
         ))
+    return out
+
+
+# A real light-frame stack has many subs; only a 1-frame on-device output (or a
+# ``_video`` target, handled by name regardless of count) is a cleanup candidate.
+# Skipping the big ones by frame count avoids opening their projects and scanning
+# thousands of source paths on every poll.
+_MAX_CLEANUP_FRAMES = 2
+
+
+@router.get("/cleanup-suggestions", response_model=list[CleanupSuggestionOut])
+def cleanup_suggestions(request: Request) -> list[CleanupSuggestionOut]:
+    """Detect leftover *junk* targets a pre-v0.184.9 scan built from the Seestar's
+    own output / ``_video`` folders (not raw subs), so the Library can offer a
+    one-click "remove these" cleanup. Read-only: it never deletes anything (the
+    user confirms via ``DELETE /api/targets/{safe}``), and never touches the real
+    ``_sub`` data. Returns ``[]`` when the library is clean."""
+    from seestack.io.scanner import classify_seestar_junk_target
+
+    lib = deps.open_library(request)
+    out: list[CleanupSuggestionOut] = []
+    try:
+        for entry in lib.list_targets():
+            is_video_name = entry.name.strip().lower().endswith("_video")
+            if not is_video_name and entry.n_frames > _MAX_CLEANUP_FRAMES:
+                continue  # a real stack — skip cheaply, don't open its project
+            source_paths: list[str] = []
+            if not is_video_name:
+                proj = lib.open_target(entry.safe_name)
+                try:
+                    source_paths = [f.source_path for f in proj.iter_frames()]
+                finally:
+                    proj.close()
+            verdict = classify_seestar_junk_target(
+                entry.name, source_paths, entry.n_frames)
+            if verdict is not None:
+                out.append(CleanupSuggestionOut(
+                    safe=entry.safe_name,
+                    name=entry.name,
+                    n_frames=entry.n_frames,
+                    reason=verdict.reason,
+                    detail=verdict.detail,
+                ))
+    finally:
+        lib.close()
     return out
 
 
@@ -359,7 +406,7 @@ def target_stack_health(
     ``null`` when there's no matching genuine stack. Read-only; never a gate.
     """
     from webapp.pipeline import _newest_genuine_stack_run, _stack_options_from_run_json
-    from seestack.stackhealth import stack_health
+    from seestack.stackhealth import recommended_dark_spec, stack_health
 
     lib, proj = deps.open_target_project(request, safe)
     try:
@@ -377,7 +424,9 @@ def target_stack_health(
             )
         if run is None:
             return None
-        notes = stack_health(run, proj.iter_frames())
+        frames = list(proj.iter_frames())
+        notes = stack_health(run, frames)
+        spec = recommended_dark_spec(frames)
     finally:
         proj.close()
         lib.close()
@@ -386,6 +435,7 @@ def target_stack_health(
         notes=[HealthNoteOut(kind=n.kind, severity=n.severity,
                              message=n.message, action=n.action)
                for n in notes],
+        dark_spec=DarkSpecOut(exposure_s=spec.exposure_s, gain=spec.gain),
     )
 
 

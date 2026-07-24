@@ -7,6 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type Target } from "../api/client";
+import { CleanupSuggestionsCard } from "../components/CleanupSuggestionsCard";
 import { MergeSuggestionsCard } from "../components/MergeSuggestionsCard";
 import { QueryError } from "../components/QueryError";
 import { UploadFits } from "../components/UploadFits";
@@ -190,6 +191,7 @@ export function Library() {
         </Card>
       ) : null}
 
+      {targets.length > 0 ? <CleanupSuggestionsCard /> : null}
       {targets.length > 0 ? <MergeSuggestionsCard /> : null}
 
       {targets.length === 0 ? (

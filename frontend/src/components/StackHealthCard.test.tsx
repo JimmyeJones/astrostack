@@ -91,6 +91,35 @@ describe("StackHealthCard", () => {
     expect(link).toHaveAttribute("href", "/calibration");
   });
 
+  it("offers the 'How to add darks' guide beside an uncalibrated note", async () => {
+    const health: StackHealth = {
+      run_id: 7,
+      notes: [
+        note({ kind: "calibration", severity: "info",
+          message: "No darks or flats were applied.", action: "calibration" }),
+      ],
+      dark_spec: { exposure_s: 10, gain: 80 },
+    };
+    vi.spyOn(client.api, "stackHealth").mockResolvedValue(health);
+    renderCard();
+    // The disclosure appears; expanding it shows the target's own numbers.
+    const toggle = await screen.findByText("How to add darks →");
+    toggle.click();
+    await waitFor(() =>
+      expect(screen.getByText(/10 s at gain 80/)).toBeInTheDocument());
+  });
+
+  it("does not show the darks guide for a non-calibration note", async () => {
+    vi.spyOn(client.api, "stackHealth").mockResolvedValue({
+      run_id: 7,
+      notes: [note({ kind: "solid", severity: "good", message: "Round stars." })],
+      dark_spec: { exposure_s: 10, gain: 80 },
+    });
+    renderCard();
+    await waitFor(() => expect(screen.getByText("Round stars.")).toBeInTheDocument());
+    expect(screen.queryByText("How to add darks →")).toBeNull();
+  });
+
   it("renders nothing when there is no stack to grade", async () => {
     vi.spyOn(client.api, "stackHealth").mockResolvedValue(null);
     const { container } = renderCard();
