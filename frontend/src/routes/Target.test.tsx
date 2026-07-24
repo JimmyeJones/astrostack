@@ -115,11 +115,15 @@ describe("TargetView latest-picture download", () => {
 
     renderTarget();
 
-    // The "Picture" control is a menu trigger; opening it offers both formats.
+    // The "Picture" control is a menu trigger; opening it offers full-res,
+    // preview, and JPEG (mkRun has a FITS, so a full-res PNG is offered).
     const trigger = await screen.findByRole("button", { name: "Download latest picture" });
     fireEvent.click(trigger);
-    const png = await screen.findByText("PNG (best quality)");
+    const full = await screen.findByText("Full-res PNG (native size)");
+    const png = screen.getByText("Quick preview PNG (up to 1024px)");
     const jpeg = screen.getByText("JPEG (smaller — best for sharing)");
+    expect(full.closest("a")).toHaveAttribute(
+      "href", client.api.stackFullResPngUrl("M_42", 9));
     expect(png.closest("a")).toHaveAttribute(
       "href", client.api.stackArtifactUrl("M_42", 9, "preview"));
     expect(jpeg.closest("a")).toHaveAttribute(

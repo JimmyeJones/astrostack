@@ -1038,8 +1038,13 @@ export function TargetView() {
                 </Tooltip>
               </Menu.Target>
               <Menu.Dropdown>
+                {latestRun.has_fits ? (
+                  <Menu.Item component="a" href={api.stackFullResPngUrl(safe, latestRun.id)}>
+                    Full-res PNG (native size)
+                  </Menu.Item>
+                ) : null}
                 <Menu.Item component="a" href={api.stackArtifactUrl(safe, latestRun.id, "preview")}>
-                  PNG (best quality)
+                  {latestRun.has_fits ? "Quick preview PNG (up to 1024px)" : "PNG (best quality)"}
                 </Menu.Item>
                 <Menu.Item component="a" href={api.stackArtifactUrl(safe, latestRun.id, "jpeg")}>
                   JPEG (smaller — best for sharing)

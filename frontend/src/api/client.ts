@@ -452,6 +452,7 @@ export interface DashboardStats {
     timestamp_utc: string;
     n_frames_used: number;
     has_preview: boolean;
+    has_fits?: boolean;
     preview_url: string;
   }[];
   disk: { total_gb?: number; used_gb?: number; free_gb?: number };

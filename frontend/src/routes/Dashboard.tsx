@@ -242,9 +242,15 @@ export function Dashboard() {
                           </Tooltip>
                         </Menu.Target>
                         <Menu.Dropdown>
+                          {s.has_fits ? (
+                            <Menu.Item onClick={() => triggerPictureDownload(
+                              api.stackFullResPngUrl(s.safe, s.run_id))}>
+                              Full-res PNG (native size)
+                            </Menu.Item>
+                          ) : null}
                           <Menu.Item onClick={() => triggerPictureDownload(
                             api.stackArtifactUrl(s.safe, s.run_id, "preview"))}>
-                            PNG (best quality)
+                            {s.has_fits ? "Quick preview PNG (up to 1024px)" : "PNG (best quality)"}
                           </Menu.Item>
                           <Menu.Item onClick={() => triggerPictureDownload(
                             api.stackArtifactUrl(s.safe, s.run_id, "jpeg"))}>

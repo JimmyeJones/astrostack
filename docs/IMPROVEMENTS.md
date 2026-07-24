@@ -12034,6 +12034,12 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.196.0** — ⭐⭐ Full-res PNG offered on every beginner picture-download surface (consistency follow-up to
+  v0.195.0): the fullscreen viewer menu (Gallery / My best pictures / History lightbox), the Target page's "Picture"
+  menu, and the Dashboard recent-stack card all now lead with "Full-res PNG (native size)" and honestly relabel the
+  1024px option "Quick preview PNG"; the misleading "(best quality)" label is gone app-wide. Added `has_fits` to the
+  stats `recent_stacks` summary (additive) so the Dashboard menu only offers full-res when a FITS exists. +2 lightbox /
+  updated Gallery/Target/Dashboard / +1 stats tests. (branch `claude/pensive-faraday-xflilv`)
 - **v0.195.0** — ⭐⭐ Full-resolution PNG download on the History card (directly answers the owner "my output is
   low-res" report — candidate 3): a new "Full-res PNG" button renders the run's FITS at native output resolution
   (`…/stack-runs/{id}/full-res-png` → `render_preview_png_full_res`, same STF/verbatim look as the preview, 8000 px

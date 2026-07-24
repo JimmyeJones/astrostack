@@ -38,6 +38,9 @@ class RecentStack(BaseModel):
     timestamp_utc: str
     n_frames_used: int
     has_preview: bool
+    # Whether the run's full-resolution FITS exists — gates the "Full-res PNG"
+    # download so it's only offered when there's a FITS to render at native size.
+    has_fits: bool = False
     preview_url: str
 
 
@@ -303,6 +306,7 @@ def _rollup_stacks(lib, targets) -> tuple[list[RecentStack], int, int]:
             for run in proj.iter_stack_runs():
                 target_runs += 1
                 has_preview = bool(run.preview_path and Path(run.preview_path).exists())
+                has_fits = bool(run.fits_path and Path(run.fits_path).exists())
                 recent.append(RecentStack(
                     safe=t.safe_name,
                     target_name=t.name,
@@ -311,6 +315,7 @@ def _rollup_stacks(lib, targets) -> tuple[list[RecentStack], int, int]:
                     timestamp_utc=run.timestamp_utc,
                     n_frames_used=run.n_frames_used,
                     has_preview=has_preview,
+                    has_fits=has_fits,
                     preview_url=f"/api/targets/{t.safe_name}/stack-runs/{run.id}/preview",
                 ))
             n_stack_runs += target_runs

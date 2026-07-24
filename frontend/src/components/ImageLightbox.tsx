@@ -51,7 +51,7 @@ export function computePinch(
  *    effect keyed on `src` couldn't reliably find the node.
  */
 export function ImageLightbox({
-  src, title, downloadHref, jpegHref, rawHref, shareFilename, shareTitle, shareText,
+  src, title, downloadHref, jpegHref, fullResHref, rawHref, shareFilename, shareTitle, shareText,
   toolbarExtra, onClose,
 }: {
   src: string | null;
@@ -67,6 +67,12 @@ export function ImageLightbox({
    * offering PNG or JPEG; when absent it stays a single PNG download. Also the
    * source for the OS "Share" control (small, share-friendly). */
   jpegHref?: string;
+  /** Optional full-resolution PNG of the same picture (native output size — the
+   * same look as `downloadHref`, just not capped at 1024px). When given, the
+   * picture-download menu leads with it, so a beginner's main "download this
+   * picture" action gives a genuinely full-resolution image, not the small
+   * preview. */
+  fullResHref?: string;
   /** Optional secondary download for the raw scientific data (FITS), offered
    * next to the picture download so power users keep access to it. */
   rawHref?: string;
@@ -251,15 +257,22 @@ export function ImageLightbox({
           <Tooltip label="Reset"><ActionIcon size="lg" variant="subtle" color="gray"
             onClick={() => setT(RESET)} aria-label="Reset zoom">
             <IconArrowsMaximize size={20} /></ActionIcon></Tooltip>
-          {downloadHref && jpegHref ? (
+          {downloadHref && (jpegHref || fullResHref) ? (
             <Menu shadow="md" position="bottom-end" withinPortal>
               <Menu.Target>
                 <Tooltip label="Download picture"><ActionIcon size="lg" variant="subtle" color="gray"
                   aria-label="Download picture"><IconPhotoDown size={20} /></ActionIcon></Tooltip>
               </Menu.Target>
               <Menu.Dropdown>
-                <Menu.Item component="a" href={downloadHref}>PNG (best quality)</Menu.Item>
-                <Menu.Item component="a" href={jpegHref}>JPEG (smaller — best for sharing)</Menu.Item>
+                {fullResHref ? (
+                  <Menu.Item component="a" href={fullResHref}>Full-res PNG (native size)</Menu.Item>
+                ) : null}
+                <Menu.Item component="a" href={downloadHref}>
+                  {fullResHref ? "Quick preview PNG (up to 1024px)" : "PNG (best quality)"}
+                </Menu.Item>
+                {jpegHref ? (
+                  <Menu.Item component="a" href={jpegHref}>JPEG (smaller — best for sharing)</Menu.Item>
+                ) : null}
               </Menu.Dropdown>
             </Menu>
           ) : downloadHref ? (
