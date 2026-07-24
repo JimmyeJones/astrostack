@@ -80,7 +80,20 @@ higher on this list wins — always:
 4. **Best-possible image quality** for the OSC Seestar workflow (clean, detailed
    final images).
 
-**⚡ IMMEDIATE PRIORITY (owner-reported + 2026-07-24 plate-solve audit, MEASURED) —
+**⚡ IMMEDIATE PRIORITY #1 (owner-CONFIRMED Seestar S30) — every plate-solve uses the
+WRONG field of view.** The owner runs a Seestar **S30** (true FOV ≈ 2.1°), but every
+real solve is hardcoded to **1.3°** and the Settings that would fix it are dead
+(`runner.py:167-169` reads project-meta keys nothing writes; webapp threads only
+`astap_path`). ASTAP's quad-matching does not forgive a wrong FOV, so this plausibly
+fails MOST of the owner's subs across ALL targets (not just faint) → thin "gibberish"
+stacks. **Fix (do the robust version): auto-derive the solve FOV per frame from the
+Seestar FITS header** (`FOCALLEN` + `XPIXSZ`/`YPIXSZ` → pixel scale → `fov = scale ·
+width_px / 3600`; S30 ≈ 2.1°, S50 ≈ 1.27° — works for any model, no user config),
+falling back to a now-wired-through Settings value, then 1.3°. See the ⭐⭐⭐ entry in
+`docs/IMPROVEMENTS.md` → "Bugs". This is the single highest-yield fix for the owner's
+reported problem — do it first.
+
+**⚡ IMMEDIATE PRIORITY #2 (2026-07-24 plate-solve audit, MEASURED) —
 fix faint-field plate-solve: the ASTAP ladder is backwards, and the stack-then-solve
 bootstrap is validated.** This is the measured root cause of the owner's #1 remaining
 pain (faint targets → few solved subs → thin "gibberish" stacks). The audit measured

@@ -632,8 +632,20 @@ when you take it.
   reveal/suggestion/Adjust either match the thumbnail or self-hide. Confidence: traced. (M, editor/render parity —
   PRIORITY 1.)
 
-- **⭐ The Settings' ASTAP field-of-view and timeout NEVER reach a real plate-solve — only the Settings-page "test solve"
-  honours them (and the sibling-hint search radius has no setter anywhere).** *(Solve/autonomy; broken-UX — a silently
+- **⭐⭐⭐ OWNER-CONFIRMED S30 (TOP PRIORITY) — every real plate-solve uses the WRONG field of view (hardcoded 1.3°),
+  and the Settings that would fix it are dead. The owner runs a Seestar S30 (true FOV ≈ 2.1°), so ASTAP gets the wrong
+  FOV on EVERY sub — a mismatch its quad-matching does not forgive — which very plausibly makes most of the owner's
+  subs fail to solve across ALL targets (not just faint ones), directly driving the thin-stack "gibberish".** *(Solve/
+  autonomy; wrong-result on the app's core function for a confirmed S30 owner; found by the 2026-07-24 plate-solve audit;
+  traced.)* **The robust "just works" fix (do this, not just the setting): auto-derive the solve FOV per frame from the
+  Seestar FITS header** — Seestar lights carry the focal length + pixel size (`FOCALLEN`, `XPIXSZ`/`YPIXSZ`) and sensor
+  dimensions, so `pixel_scale_arcsec = 206.265 · pixel_um / focal_mm` and `fov_deg = pixel_scale · width_px / 3600`
+  computes the true FOV (S30 ≈ 2.1°, S50 ≈ 1.27°) automatically for any model, no user config. Fall back to the Settings
+  value (below), then the 1.3° default. Also **wire the Settings FOV/timeout through** as a manual override for headers
+  that lack the fields. Regression: an S30-shaped synthetic header yields ~2.1° in the built ASTAP arglist; a changed
+  Settings value reaches it. This is the single highest-yield fix for the owner's reported problem — pair it with the
+  ladder reorder + stack-then-solve bootstrap (below). *(Original audit finding follows.)* Only the Settings-page "test
+  solve" honours them (and the sibling-hint search radius has no setter anywhere). *(broken-UX — a silently
   dead setting: an S30 owner cannot fix their FOV; found by the 2026-07-24 plate-solve audit. Traced.)*
   `build_solve_arglist` (`seestack/solve/runner.py:167-169`) reads `astap_fov_deg` / `astap_timeout_s` /
   `astap_hint_radius_deg` from **project meta** — and nothing in `webapp/` or `seestack/` ever writes those keys (only
@@ -648,7 +660,7 @@ when you take it.
   fov/timeout(/radius) as explicit args `run_qc_and_solve → build_solve_arglist` sourced from Settings (mirroring the
   existing `astap_path` override), keeping project meta as a per-target override; regression-test that a changed
   Settings value reaches the built arglist. Upgrade-safe (defaults identical). Confidence: traced (call graph complete).
-  (S, autonomy/friendliness — PRIORITY 2/3.)
+  (S–M, autonomy/correctness — **PRIORITY 1: owner-confirmed S30, likely the dominant cause of their solve failures**.)
 
 - **The interactive stack render (History "Adjust" viewer, its stretch-suggestion measurement, and any >8000 px
   "full-res" PNG) decimates by pixel striding — a native 1080-wide Seestar stack renders at 540 px with aliased,
