@@ -388,6 +388,68 @@ def test_v10_project_migrates_preview_stretch_columns_additively(tmp_path):
         proj.close()
 
 
+def test_v12_project_migrates_roughly_aligned_column_additively(tmp_path):
+    """An older (schema 12) project — whose ``stack_runs`` predates the
+    ``n_roughly_aligned`` column — upgrades cleanly on open: existing runs read
+    it as ``None`` (unknown → no health note), and a fresh run round-trips a
+    stamped value so the "How's my stack?" panel can name the soft-star cause.
+    Guards the live-install in-place upgrade (AGENTS.md §9)."""
+    import sqlite3
+
+    from seestack.io.project import SCHEMA_VERSION, StackRunRow
+
+    project_dir = tmp_path / "v12"
+    project_dir.mkdir()
+    db_path = project_dir / "project.sqlite"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        PRAGMA user_version = 12;
+        CREATE TABLE project_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE stack_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp_utc TEXT NOT NULL,
+            output_basename TEXT NOT NULL, fits_path TEXT, tiff_path TEXT,
+            preview_path TEXT, n_frames_used INTEGER NOT NULL, canvas_h INTEGER NOT NULL,
+            canvas_w INTEGER NOT NULL, coverage_min INTEGER NOT NULL DEFAULT 0,
+            coverage_max INTEGER NOT NULL DEFAULT 0, options_json TEXT NOT NULL,
+            notes TEXT, total_exposure_s REAL, transparency_ratio REAL,
+            noise_sigma REAL, calstat TEXT, is_mosaic INTEGER, engine_version TEXT,
+            rejection_fraction REAL, rejection_mode TEXT, preview_stretch REAL,
+            preview_black REAL);
+        CREATE TABLE frames (id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_path TEXT NOT NULL UNIQUE, accept INTEGER NOT NULL DEFAULT 1);
+        INSERT INTO stack_runs(timestamp_utc, output_basename, n_frames_used,
+            canvas_h, canvas_w, options_json)
+          VALUES('2026-01-01T00:00:00+00:00', 'old', 10, 1080, 1920, '{}');
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    proj = Project.open(project_dir)
+    try:
+        assert proj._conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        old = next(iter(proj.iter_stack_runs()))
+        assert old.n_roughly_aligned is None
+        # A fresh run round-trips a stamped roughly-aligned count.
+        new_id = proj.add_stack_run(StackRunRow(
+            id=None, timestamp_utc="2026-07-24T01:00:00+00:00", output_basename="new",
+            fits_path=None, tiff_path=None, preview_path=None, n_frames_used=50,
+            canvas_h=1, canvas_w=1, coverage_min=1, coverage_max=1, options_json="{}",
+            n_roughly_aligned=12))
+        newest = next(r for r in proj.iter_stack_runs() if r.id == new_id)
+        assert newest.n_roughly_aligned == 12
+        # A run that leaves it unset (refine off) persists NULL, not 0.
+        none_id = proj.add_stack_run(StackRunRow(
+            id=None, timestamp_utc="2026-07-24T02:00:00+00:00", output_basename="noref",
+            fits_path=None, tiff_path=None, preview_path=None, n_frames_used=5,
+            canvas_h=1, canvas_w=1, coverage_min=1, coverage_max=1, options_json="{}"))
+        none_run = next(r for r in proj.iter_stack_runs() if r.id == none_id)
+        assert none_run.n_roughly_aligned is None
+    finally:
+        proj.close()
+
+
 def test_open_closes_the_connection_when_schema_check_fails(tmp_path, monkeypatch):
     """A newer on-disk ``user_version`` makes ``_check_schema`` raise; ``open``
     must close the connection it opened before propagating, rather than leak it.

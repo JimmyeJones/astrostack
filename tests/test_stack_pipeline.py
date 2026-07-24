@@ -456,6 +456,47 @@ def test_roughly_aligned_count_surfaces_in_result_and_header(tmp_path, monkeypat
         assert int(hdul[0].header["NROUGHAL"]) == 4
 
 
+def test_roughly_aligned_count_persists_on_the_stack_run_row(tmp_path, monkeypatch):
+    """The roughly-aligned count is persisted on the stack_runs row (schema 13),
+    so the 'How's my stack?' health panel — which reads the run record, not the
+    FITS header — can name the soft-star cause. Round-trips through the DB."""
+    import seestack.stack.stacker as st
+
+    real_align_one = st.align_one
+
+    def spy(**kwargs):
+        result = real_align_one(**kwargs)
+        rs = kwargs.get("refine_stats")
+        if rs is not None:
+            rs["over_cap"] = True
+        return result
+
+    monkeypatch.setattr(st, "align_one", spy)
+
+    proj = _build_project(tmp_path, n=4)
+    try:
+        result = run_stack(proj, StackOptions(sigma_clip=True, subpixel_refine=True,
+                                              max_workers=1, output_name="persist"))
+        assert result.run_id is not None
+        row = next(r for r in proj.iter_stack_runs() if r.id == result.run_id)
+        assert row.n_roughly_aligned == result.n_roughly_aligned == 4
+    finally:
+        proj.close()
+
+
+def test_roughly_aligned_not_persisted_when_refine_off(tmp_path):
+    """Refine off → the run row records NULL (not 0), so the health panel simply
+    shows no soft-star note rather than a misleading 'nothing rough'."""
+    proj = _build_project(tmp_path, n=4)
+    try:
+        result = run_stack(proj, StackOptions(sigma_clip=True, subpixel_refine=False,
+                                              max_workers=1, output_name="norefpersist"))
+        row = next(r for r in proj.iter_stack_runs() if r.id == result.run_id)
+        assert row.n_roughly_aligned is None
+    finally:
+        proj.close()
+
+
 def test_roughly_aligned_zero_when_all_within_cap(tmp_path, monkeypatch):
     """With refine on but every sub aligning within the cap, the count is 0 and
     the card is still stamped at 0 — a reassuring 'nothing was rough' signal,

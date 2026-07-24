@@ -261,3 +261,46 @@ def test_rejection_note_ranks_after_actionable_next_steps():
     )
     order = _kinds(notes)
     assert order.index("calibration") < order.index("rejection")
+
+
+def test_roughly_aligned_note_fires_on_a_large_share():
+    """A large share of contributing subs left only roughly aligned → a soft, no-
+    gate note naming the soft-star cause."""
+    notes = stack_health(
+        _run(n_frames_used=100, n_roughly_aligned=40),
+        [_frame() for _ in range(100)],
+    )
+    ra = next((n for n in notes if n.kind == "roughly_aligned"), None)
+    assert ra is not None
+    assert ra.severity == "info"
+    assert "40 of 100" in ra.message
+    assert "roughly aligned" in ra.message
+
+
+def test_roughly_aligned_note_silent_below_the_fraction():
+    # 1 of 100 (1%) is real but not worth a note (< 20% gate).
+    notes = stack_health(
+        _run(n_frames_used=100, n_roughly_aligned=1),
+        [_frame() for _ in range(100)],
+    )
+    assert "roughly_aligned" not in _kinds(notes)
+
+
+def test_roughly_aligned_note_silent_on_a_tiny_stack():
+    # 3 of 5 is 60%, but a 5-sub stack is too small for the fraction to mean much.
+    notes = stack_health(
+        _run(n_frames_used=5, n_roughly_aligned=3),
+        [_frame() for _ in range(5)],
+    )
+    assert "roughly_aligned" not in _kinds(notes)
+
+
+def test_roughly_aligned_note_silent_when_null_or_zero():
+    """Older runs / refine-off runs record NULL, and a refine run with nothing
+    rough records 0 — both must stay silent (no note)."""
+    for val in (None, 0):
+        notes = stack_health(
+            _run(n_frames_used=100, n_roughly_aligned=val),
+            [_frame() for _ in range(100)],
+        )
+        assert "roughly_aligned" not in _kinds(notes)

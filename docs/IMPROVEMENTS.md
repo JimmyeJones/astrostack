@@ -7540,6 +7540,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   the calibration *math* clean).
 
   </details>
+- ~~**FOLLOW-UP to the shipped roughly-aligned signal — persist `n_roughly_aligned` on the `stack_runs` row and
+  surface it in the "How's my stack?" health panel too.**~~ — **SHIPPED v0.190.1** (Builder 2026-07-24, branch
+  `claude/pensive-faraday-vhze3d`). v0.190.0 shipped the "cleanest slice" (count on `StackResult` + a `NROUGHAL`
+  FITS card + the History **Info panel** `roughlyAlignedNote`), but `seestack/stackhealth.py::stack_health` reads
+  only the persisted `StackRunRow` — not the FITS header — so the beginner's more-prominent trust surface couldn't
+  see it. Now it can: (a) `SCHEMA_VERSION` 12→13 with an additive `from_version < 13` migration adding a nullable
+  `n_roughly_aligned INTEGER` to `stack_runs` (idempotent `ALTER TABLE … ADD COLUMN`, mirroring the
+  `rejection_fraction`/`rejection_mode` pattern — old DBs migrate cleanly, older runs stay NULL); the column is
+  also in the base `SCHEMA_SQL` for fresh DBs. (b) `StackRunRow` carries `n_roughly_aligned: int | None`, threaded
+  from the already-computed `n_roughly` in `run_stack`'s `add_stack_run` insert and read back (NULL-safe) in
+  `iter_stack_runs`. (c) `stack_health` emits a soft `HealthNote` (kind `"roughly_aligned"`, severity `"info"`, no
+  gate) only on a non-trivial share — the **same ≥20%-of-≥10-subs threshold** the frontend `roughlyAlignedNote`
+  uses, so the two surfaces never disagree; it reads the run's own offered count (`n_offered = n_align_failed +
+  n_frames_used` isn't stored, so it uses `n_frames_used` as the honest denominator of *contributing* subs, which
+  is exactly the population the roughly-aligned count is drawn from). Upgrade-safe: additive nullable column +
+  migration, no default/behaviour/API-shape change; older runs (NULL) simply show no note. Tests:
+  `tests/test_project_schema.py` (migration from a v12 DB adds the column and reads NULL; a fresh DB round-trips a
+  stamped value), `tests/test_stack_health.py` (note fires above the fraction, silent at 0/NULL/below-threshold),
+  and a `run_stack` round-trip that the persisted value matches `StackResult.n_roughly_aligned`. *(Original
+  follow-up spec preserved in the v0.190.0 shipped entry below.)*
 - ~~**IMPROVEMENT IDEA (Scout 2026-07-23) — count & surface "N subs were only roughly aligned" when sub-pixel
   refine gives up above its shift cap.**~~ — **SHIPPED v0.190.0** (Builder 2026-07-24, branch
   `claude/pensive-faraday-vhze3d`). Implemented the exact "cleanest slice" the idea specified: engine-count +

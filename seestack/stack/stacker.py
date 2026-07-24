@@ -1632,6 +1632,15 @@ def run_stack(
                 rej_stats.mode
                 if rej_stats is not None and rej_stats.n_contributed > 0 else None
             ),
+            # Persist the roughly-aligned count (contributing subs refine left
+            # unshifted past its cap) so the "How's my stack?" health panel can
+            # name the soft-star cause without re-reading the FITS header. Only
+            # meaningful when refine ran on a non-drizzle stack — otherwise NULL
+            # (mirrors the NROUGHAL card gate), so an off-by-default run records
+            # no signal rather than a misleading 0.
+            n_roughly_aligned=(
+                n_roughly if (eff.subpixel_refine and not eff.drizzle) else None
+            ),
         ))
     except Exception as exc:  # noqa: BLE001 — history is non-critical
         log.warning("Could not record stack run in history: %s", exc)
