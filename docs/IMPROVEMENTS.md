@@ -8291,9 +8291,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   "told me to add darks → I added them → it got cleaner" loop.
   *(Original idea kept below for provenance.)*
 
-- **NEW BEGINNER FEATURE (Scout 2026-07-24) — "Add darks in 3 steps": turn the app's existing "adding darks would cut
-  the speckle" advice into a plain-language, Seestar-specific how-to, so a beginner who's told darks would help can
-  actually capture and apply them without knowing any astro jargon.** *(Pillar: 3 friendliness + understand/learn +
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-24) — "Add darks in 3 steps".**~~ — **ALREADY SHIPPED** (curated by Builder
+  2026-07-24 — the Ideas list was stale). Built in commit b532629 (#460): `frontend/src/components/target/DarksGuide.tsx`
+  (`formatDarkSpec` + the `DarksGuide` collapsible with three plain steps and the target's own exposure/gain pre-filled)
+  is wired into `StackHealthCard` (`<DarksGuide spec={data.dark_spec} />`), shown beside the uncalibrated "How's my
+  stack?" note. Tested (`DarksGuide.test.tsx`). Don't rebuild. *(Original idea kept for provenance.)*
+  *(Pillar: 3 friendliness + understand/learn +
   4 image quality; size S–M.)* **The gap (verified this run):** the app *already* tells a beginner darks would help —
   `StackHealthCard` ("How's my stack?") and the editor surface *"No darks or flats were applied … adding darks would
   cut the background speckle"* (`seestack/stackhealth.py`), and the Calibration page can build a master from dark
@@ -8491,6 +8494,36 @@ problems. Dogfood it every big-picture run and fix root causes.
   helper + a display line, no schema/config/default/API-shape change. *(Feasibility: reuses existing per-target run
   queries + the FWHM/integration figures already computed, no new/heavy dependency, sane default, testable — passes
   §4's filter.)*
+  **⚠ Builder note (2026-07-24, `claude/pensive-faraday-jauk0d`) — LARGELY COVERED already; only a marginal slice
+  remains, so DEPRIORITISED (don't rebuild the covered part).** The "cleanest yet" half is **already shipped**: the
+  History run cards render a `CleanestBadge` on the single lowest-noise run (`frontend/src/components/NoiseBadge.tsx`
+  `CleanestBadge` + `cleanestRunId`, requiring ≥2 measured runs so a lone stack is never singled out), and each card
+  also shows a per-run "cleaner/noisier than last time" `NoiseDelta`. So a beginner *already* sees which stack is their
+  best-so-far on the meaningful quality axis. What's genuinely missing is only (a) a "deepest yet" axis and (b) a
+  *celebratory phrasing* naming the prior best/date. But (a) fires on **nearly every** deeper re-stack (integration
+  almost always grows when you add a night → noisy, low signal), and (b) is a wording tweak on top of the existing
+  badge — both marginal. Note the idea's headline axis, **sharpness (median FWHM), is not per-run-persisted** (the run
+  record has no FWHM column; `StackRun` exposes only `noise_sigma`/`total_exposure_s`/`n_frames_used`), so a true
+  "sharpest yet" would first need the new idea filed below (persist per-run median FWHM). Leave this unless that lands.
+
+- **NEW IDEA (Builder 2026-07-24, `claude/pensive-faraday-jauk0d`, surfaced while scoping "You beat your best!") —
+  persist a per-run *median FWHM* (typical star size) on the `stack_runs` row, so sharpness becomes a first-class,
+  per-stack quality signal the way noise σ already is.** *(Image-quality + trust, PRIORITY 4; size S; additive
+  migration.)* **The gap:** a stack's background-noise σ is measured and stored per run (`stack_runs.noise_sigma`,
+  schema 6) and drives the "Cleanest" badge, the noise-delta, the cleanest sort, and the A/B noise verdict — but the
+  *other* half of "is this a good stack?", **star sharpness**, is only ever a **per-frame** QC number (`frames.fwhm_px`)
+  and the *target-wide* median (used by the editor's sharpen radius + the new imaging-log column). There is no
+  **per-run** sharpness, so nothing can say "this stack resolved tighter stars than your last one" — which blocks the
+  headline axis of the "You beat your best!" idea (a *sharpest-yet* beat), a per-run sharpness trend, and a sharpness
+  A/B verdict beside the noise one. **The idea:** measure the stacked image's median FWHM once at `run_stack` time
+  (reuse `seestack/qc/metrics.py::median_fwhm` on the final combined frame — the stars are already there, no extra
+  detection pass elsewhere) and store it in a new additive nullable column (`stack_runs.stack_fwhm_px`,
+  `SCHEMA_VERSION` bump + `_migrate_schema` `ALTER TABLE`, backfill left NULL — old runs read None and self-hide, exactly
+  like `noise_sigma` did). Then a `SharpestBadge`/`fwhm_delta`/sharpness-trend can mirror the noise machinery, and
+  "sharpest yet" becomes buildable. **Upgrade-safe:** additive migration (old DBs migrate, old rows NULL), no
+  default/API-shape change; the new field is opt-in read (self-hiding when absent). **Tests:** a stacked run records a
+  plausible `stack_fwhm_px`; a v(N-1)→vN DB migrates additively (old rows NULL, new inserts persist); a run with too
+  few stars leaves it NULL, never errors. Well-grounded (mirrors the proven `noise_sigma` pattern exactly) and low-risk.
 
 - ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "Your imaging calendar": a simple month/year heat-calendar of which
   nights you actually imaged and how much, so a beginner can see the rhythm of their hobby at a glance, spot the
@@ -8537,10 +8570,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   *(Feasibility: reuses existing frame-timestamp queries and the established night-boundary helper, no new/heavy
   dependency, sane default, testable — passes §4's filter.)*
 
-- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Your imaging log": one tap to download a plain, printable record of
-  every target and night you've imaged — date, target, subs used, total integration time, best sharpness — so a
-  beginner can keep a journal of the hobby, track progress across months, and share "here's what I shot this month"
-  without copying numbers out by hand.** *(Pillar: 3 friendliness + enjoy/share; size S–M.)* **The gap:** the app
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "Your imaging log": one tap to download a plain, printable record of
+  every target and night you've imaged.**~~ — **SHIPPED v0.193.0** (Builder 2026-07-24, branch
+  `claude/pensive-faraday-jauk0d`). A **"Imaging log (CSV)"** download link on the Dashboard (beside "Recent stacks",
+  self-hiding until at least one stack exists). **Engine** (`seestack/imaging_log.py`, pure/offline/testable):
+  `ImagingLogRow` + `build_imaging_log_csv(rows)` render one CSV row per finished stack with beginner-legible,
+  jargon-free columns — Date (UTC calendar day), Target, Subs used, Integration (`"1h 24m"`), Typical star size (px),
+  Calibration (`dark+flat`/`none`), Mosaic (`yes`/`no`), Noise (lower is cleaner), App version — every value formatted
+  plainly (never raw seconds), missing optionals blanked (never an error), an empty list → header-only file.
+  **Webapp** (`GET /api/imaging-log.csv`, `webapp/routers/stats.py`): walks `Library.list_targets()`, opens each
+  project (a broken one skipped, never 500s), reads each run's stored `n_frames_used`/`total_exposure_s`/`calstat`/
+  `is_mosaic`/`noise_sigma`/`engine_version` plus the target's median accepted-frame `fwhm_px` (already measured by QC —
+  no image recompute), sorts newest-first, and streams a `text/csv` attachment. **Frontend**:
+  `ImagingLogButton` (`api.imagingLogUrl()` → a plain `download` anchor). Tests: `tests/test_imaging_log.py` (+6 —
+  header-only empty, one row per run, formatting, blanks, mosaic wording), `tests/webapp/test_imaging_log.py` (+3 —
+  header-only empty library, newest-first two-target CSV with correct values + headers, per-target run count),
+  `frontend/.../ImagingLogButton.test.tsx` (+2 — download link with the right href/download attr; self-hides at zero
+  stacks). Upgrade-safe: purely additive read-only endpoint + a display button, reuses columns/frames already stored;
+  no schema/config/default/API-shape change. *(Pillar: 3 friendliness + enjoy/share; size S–M.)* *(Original idea kept
+  for provenance.)* **The gap:** the app
   already computes rich per-target and per-night data — session recaps, `n_frames_used`, total exposure, median FWHM,
   the "Night by night" and "Your sky, so far" cards — but every bit of it lives *inside* the app, on separate pages.
   A beginner who wants a single takeaway record of their imaging (to keep a log, print it, paste it into a forum

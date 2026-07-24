@@ -19,6 +19,7 @@ import { LibraryProgressCard } from "../components/LibraryProgressCard";
 import { QueryError } from "../components/QueryError";
 import { SuggestTargetsCard } from "../components/SuggestTargetsCard";
 import { BestPicturesStrip } from "../components/BestPicturesStrip";
+import { ImagingLogButton } from "../components/ImagingLogButton";
 
 // Dismissal of the first-run readiness banners, keyed to the *specific* problem
 // so dismissing one never suppresses a genuinely different (or returning) one:
@@ -196,7 +197,10 @@ export function Dashboard() {
 
       <Group justify="space-between" mt="sm">
         <Title order={4}>Recent stacks</Title>
-        <Text component={Link} to="/gallery" size="sm" c="violet">View gallery →</Text>
+        <Group gap="lg">
+          <ImagingLogButton nStacks={data.n_stack_runs} />
+          <Text component={Link} to="/gallery" size="sm" c="violet">View gallery →</Text>
+        </Group>
       </Group>
 
       {data.recent_stacks.length === 0 ? (
