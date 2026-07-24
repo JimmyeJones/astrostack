@@ -8464,6 +8464,36 @@ problems. Dogfood it every big-picture run and fix root causes.
   *(Verified genuinely absent 2026-07-24 against the routes/backlog: live capture is de-scoped, but a *bundled sample
   dataset* to try the app offline is a different, unfiled capability.)* (M, friendliness/onboarding — PRIORITY 3.)
 
+- **NEW IDEA (Builder 2026-07-24, follow-on to the v0.199.0 "Try it with a sample image" demo) — a "Stack it now"
+  shortcut right on the sample card, so a newcomer sees a finished picture in *one more tap* instead of hunting for
+  the stack control.** *(Pillar: 3 friendliness / onboarding; size S.)* **The gap:** v0.199.0 loads the demo target
+  and navigates the user to its Target page, but from there they still have to find and click through the Stack flow
+  to see the payoff (a clean stacked image) — the moment that actually sells the app. A brand-new owner who's never
+  seen the workflow may not know Stack is the next step. **The feature:** on the "Your sample target is ready" state
+  of `SampleImageCard` (and/or on the sample's Target page), add a one-tap **"Stack the sample"** button that submits
+  the normal stack job with sane defaults and, on completion, drops them on the finished picture (or the editor). Keep
+  it purely additive — it's just a pre-wired call to the existing stack endpoint on the demo target; no new engine
+  path. **Why it clears the bar:** removes the one bit of "now what?" friction between loading the demo and seeing
+  why stacking matters; sane default (no options to pick), plain language, reversible (Remove sample still cleans it
+  all up). Testable via the existing job/stack test harness. (S, friendliness/onboarding — PRIORITY 3.)
+
+- **NEW IDEA (Builder 2026-07-24, follow-on to the v0.199.0 sample demo) — a lightweight guided "first-run tour"
+  overlay that only shows while the *sample* target is active, coaching the newcomer through QC → Stack → Edit →
+  Export with one plain sentence per screen.** *(Pillar: 3 friendliness / understand-and-learn; size M.)* **The gap:**
+  the sample demo gives a beginner real data to poke at, but the *screens themselves* are still unlabelled — a first-
+  timer on the Target/QC/Stack/Editor pages doesn't necessarily know what they're looking at or what to click next.
+  The Scout's original sample idea called for "each screen with a one-line 'this is what you'll see with your own
+  frames' note", which v0.199.0 deliberately scoped out to ship the core loader first. **The feature:** a dismissible,
+  non-modal coach-mark / callout (e.g. a small anchored `Popover` or a top-of-page `Alert`) that appears **only when
+  the currently-open target is the sample** (detect via the reserved `SAMPLE_TARGET_NAME` / a `is_sample` flag on the
+  target payload) and says, in one calm sentence, what this screen is for and what to do next ("This is quality
+  control — green frames are kept. Happy? Head to Stack."). Self-hiding once the sample is removed or once the user
+  dismisses the tour; never shown for real targets. **Why it clears the bar:** it's the guided first-run learning the
+  app lacks, shown on live screens rather than a static walkthrough, with a sane default (auto-shown on the demo only)
+  and zero jargon. Additive/reversible, no schema change beyond an additive `is_sample` boolean on the target-out
+  model (or a frontend name check). Testable per-screen (renders the callout for the sample, not for a real target).
+  (M, friendliness/onboarding — PRIORITY 3.)
+
 - ~~**NEW BEGINNER FEATURE (Scout 2026-07-24) — "Point here tonight": one calm recommendation of which target you're
   *already working on* to continue tonight.**~~ — **SHIPPED v0.187.0** (Builder 2026-07-24, branch
   `claude/pensive-faraday-o52pa4`). A self-hiding **"Point here tonight"** card on the Dashboard (between "Target
