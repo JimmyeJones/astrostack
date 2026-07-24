@@ -161,35 +161,45 @@ def _pipeline_body(
                     summary["cancelled"] = True
                     break
                 safe = entry.safe_name
-                attempt_n = _auto_stack_frame_count(lib, safe)
-                if attempt_n is None:
-                    skipped.append(safe)
-                    continue
-                if attempt_n < settings.auto_stack_min_frames:
-                    # Too few located subs to make anything but single-frame
-                    # colour speckle (the owner-reported gibberish). Hold the
-                    # target back — *without* marking the attempt, so the next
-                    # scan re-checks and stacks it the moment enough subs solve —
-                    # rather than auto-publishing (and auto-editing) noise. The
-                    # already-shipped thin-stack warning covers the notification;
-                    # this is the "don't silently publish it" half.
-                    held_thin.append(
-                        {"target": safe, "frames": attempt_n,
-                         "min": settings.auto_stack_min_frames})
-                    continue
-                if settings.mixed_pointing_guard and _mixed_pointing_check(
-                        lib, safe) is not None:
-                    # Looks like two+ targets in one folder — don't burn a
-                    # walk-away stack on one pointing. Skip without marking the
-                    # attempt, so the next scan re-checks (and stacks once the
-                    # user rejects the odd-target frames), rather than stranding it.
-                    mixed_skipped.append(safe)
-                    continue
-                # Record the attempt *before* stacking so that if this stack
-                # crashes the whole process, the watcher won't re-trigger the
-                # identical stack on restart (crash-loop guard).
-                _mark_auto_stack_attempt(lib, safe, attempt_n)
+                # The whole per-target body — pre-checks included — is wrapped so
+                # one target can't sink the batch. The pre-check helpers each
+                # open_target(safe), which raises FileNotFoundError if the target
+                # was deleted mid-scan (live DELETE /api/targets/{safe}) or a
+                # sqlite "database is locked" if a request thread holds the write
+                # lock past the busy_timeout; without this guard such a raise
+                # escapes _pipeline_body, marks the whole (already-successful)
+                # scan job 'error', and skips auto-stack for every remaining
+                # target — the exact non-fatality the QC/solve loop above honours.
                 try:
+                    attempt_n = _auto_stack_frame_count(lib, safe)
+                    if attempt_n is None:
+                        skipped.append(safe)
+                        continue
+                    if attempt_n < settings.auto_stack_min_frames:
+                        # Too few located subs to make anything but single-frame
+                        # colour speckle (the owner-reported gibberish). Hold the
+                        # target back — *without* marking the attempt, so the next
+                        # scan re-checks and stacks it the moment enough subs solve
+                        # — rather than auto-publishing (and auto-editing) noise.
+                        # The already-shipped thin-stack warning covers the
+                        # notification; this is the "don't silently publish it" half.
+                        held_thin.append(
+                            {"target": safe, "frames": attempt_n,
+                             "min": settings.auto_stack_min_frames})
+                        continue
+                    if settings.mixed_pointing_guard and _mixed_pointing_check(
+                            lib, safe) is not None:
+                        # Looks like two+ targets in one folder — don't burn a
+                        # walk-away stack on one pointing. Skip without marking the
+                        # attempt, so the next scan re-checks (and stacks once the
+                        # user rejects the odd-target frames), rather than stranding
+                        # it.
+                        mixed_skipped.append(safe)
+                        continue
+                    # Record the attempt *before* stacking so that if this stack
+                    # crashes the whole process, the watcher won't re-trigger the
+                    # identical stack on restart (crash-loop guard).
+                    _mark_auto_stack_attempt(lib, safe, attempt_n)
                     res = _stack_target(
                         settings, jm, job, lib, safe,
                         auto_bind_calibration=settings.auto_bind_calibration,
@@ -218,8 +228,6 @@ def _pipeline_body(
                         if _auto_edit_process_run(lib, safe, run_id) is not None:
                             auto_edited += 1
                 except Exception as exc:  # noqa: BLE001 — one target shouldn't sink the batch
-                    log.warning("auto-stack failed for %s: %s", safe, exc)
-                    stack_errors[safe] = str(exc)
                     # The process survived this failure, so the crash-loop marker
                     # written at line 123 must be cleared — otherwise a *transient*
                     # error (flapping mount, momentary lock) would strand the
@@ -227,6 +235,14 @@ def _pipeline_body(
                     # never reaches here, so this doesn't weaken the crash-loop guard.
                     with contextlib.suppress(Exception):
                         _clear_auto_stack_attempt(lib, safe)
+                    # A cancel that surfaced as a raise (rather than a graceful
+                    # cancelled result) is a cancel, not a target error — classify
+                    # it as one and stop, mirroring the QC/solve loop above.
+                    if job.cancel_requested():
+                        summary["cancelled"] = True
+                        break
+                    log.warning("auto-stack failed for %s: %s", safe, exc)
+                    stack_errors[safe] = str(exc)
             summary["auto_stacked"] = stacked
             summary["auto_stack_skipped"] = skipped
             if held_thin:

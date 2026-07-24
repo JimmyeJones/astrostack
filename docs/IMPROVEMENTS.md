@@ -700,10 +700,24 @@ when you take it.
   path still fires once enough subs solve. The already-shipped thin-stack warnings (v0.159.3/.6) cover the
   *notification*; this covers the *don't-silently-publish-it* half.
 
-- **A per-target failure in the auto-stack *pre-check* phase aborts the whole walk-away pipeline job (marks it
+- ~~**A per-target failure in the auto-stack *pre-check* phase aborts the whole walk-away pipeline job (marks it
   `error`) and skips auto-stack for every remaining target — violating the documented "non-fatal per target"
-  contract the sibling QC loop already honours.** *(Webapp orchestration / autonomy correctness + broken-UX; Medium;
-  found + reproduced by the 2026-07-23 auto-stack orchestration adversarial audit.)* In `_pipeline_body`
+  contract the sibling QC loop already honours.**~~ — **FIXED v0.184.10** (Builder 2026-07-24, branch
+  `claude/pensive-faraday-m76tgt`; **traced + regression-tested**). Widened the per-target `try/except` in
+  `_pipeline_body`'s auto-stack loop (`webapp/pipeline.py`) to start **before** the pre-check helpers so a raise in
+  `_auto_stack_frame_count` / `_mixed_pointing_check` / `_mark_auto_stack_attempt` (a mid-scan `DELETE
+  /api/targets/{safe}` → `FileNotFoundError`, or a "database is locked") is recorded in `stack_errors[safe]` and the
+  loop `continue`s, exactly like the QC/solve loop — instead of escaping `_pipeline_body`, marking the whole
+  (already-successful) scan job `error`, and skipping auto-stack for every remaining target. Also added a
+  `job.cancel_requested()` re-check to that `except` (mirroring the QC loop) so a cancel that surfaces as a raise is
+  classified `cancelled`, not a target error, and still clears the crash-loop marker. Regression:
+  `tests/webapp/test_pipeline_qc_isolation.py::test_autostack_precheck_failure_isolated_and_batch_continues` (target 1's
+  pre-check raises `FileNotFoundError` → recorded in `stack_errors`, job not raised/cancelled, healthy target 2 still
+  auto-stacks; fail-before: the raise propagated out of `_pipeline_body`) and
+  `…::test_autostack_precheck_cancel_during_target_is_classified_cancelled` (a cancel firing during the pre-check →
+  `summary["cancelled"]`, no `stack_errors`). Upgrade-safe: control-flow-only change in one function, no config/DB/
+  API-shape/on-disk/default change. Confidence: traced + regression-tested. *(Original trace kept for provenance.)*
+  In `_pipeline_body`
   (`webapp/pipeline.py`), the per-target `try/except` that is meant to isolate an auto-stack failure starts only at
   **line 184** (wrapping `_stack_target` alone). But the three pre-check helpers that run *before* it —
   `_auto_stack_frame_count(lib, safe)` (line 156), `_mixed_pointing_check(lib, safe)` (line 172), and
