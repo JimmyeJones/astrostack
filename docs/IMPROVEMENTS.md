@@ -5191,9 +5191,29 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
-- **NEW IDEA (Builder 2026-07-24, follow-up to the v0.184.15 upgrade-pollution fix) — surface & offer one-click
-  cleanup of the stale `<T>_sub`-named *duplicate targets* a pre-v0.184.9 scan left behind.** *(Pillar: 3 friendliness
-  + autonomy; size S–M.)* **The gap:** the v0.184.15 fix now additively rejects the on-device *output frame* that a
+- ~~**NEW IDEA (Builder 2026-07-24, follow-up to the v0.184.15 upgrade-pollution fix) — surface & offer one-click
+  cleanup of the stale `<T>_sub`-named *duplicate targets* a pre-v0.184.9 scan left behind.**~~ — **SHIPPED v0.191.0**
+  (Builder 2026-07-24, branch `claude/pensive-faraday-klqhi9`; tested). Extended the existing v0.185.0 cleanup-suggestions
+  path (Library nudge) to also detect the `<T>_sub` duplicates, as a **second, independently-dismissible** group. **Engine**
+  (`seestack/io/scanner.py::duplicate_sub_target_base_name(target_name, source_paths) -> str | None`, pure): returns the
+  base name `<T>` when a target's name ends `_sub` (not `_mosaic_sub` — device-specific, left to its own bug) **and** all
+  its frames sit under a single `*_sub/` folder (the Seestar raw-subs shape the convention now folds into `<T>`), else
+  `None`. **Webapp** (`GET /api/targets/cleanup-suggestions`, new `reason="duplicate_sub"`): a second pass over
+  `list_targets()` name-prefilters to `_sub`-named targets (rare → cheap), then opens the candidate **and** the base
+  target and offers removal **only when the base already owns *every* one of the candidate's subs** — so removing the
+  duplicate can never lose the only copy of a frame, and the message ("…already in your *M 31* target") is truthful.
+  Read-only; deletion still goes through the existing `DELETE /api/targets/{safe}` (`remove_files=false` — raw folders on
+  disk untouched). **Frontend**: `CleanupSuggestionsCard` now renders two independent `CleanupAlert`s (junk outputs/videos;
+  `_sub` duplicates) with distinct plain-language copy and **separate persisted dismissal** keys, so keeping one group
+  doesn't hide the other. Regression tests: `tests/test_scanner.py` (+6 — recognises a `_sub` duplicate, `None` for
+  plain-named / frames-not-under-`_sub` / mixed-folders / `_mosaic_sub` / no-frames),
+  `tests/webapp/test_cleanup_suggestions.py` (+3 — flags a duplicate the base fully owns & it then deletes cleanly leaving
+  the base intact; does **not** flag when the base owns only some subs; does **not** flag a standalone `_sub` target),
+  `frontend/.../CleanupSuggestionsCard.test.tsx` (+3 — duplicate group in its own alert, its Remove deletes only its
+  targets, the two groups dismiss independently). Upgrade-safe: additive detection on an existing read-only endpoint + a
+  frontend-only card change, no config/DB-schema/on-disk/API-shape/default change; **never auto-deletes**, never touches
+  `_sub` data, and never offers removal unless the base fully owns the subs. *(Pillar: 3 friendliness + autonomy; size M.)*
+  *(Original idea kept for provenance.)* **The gap:** the v0.184.15 fix now additively rejects the on-device *output frame* that a
   pre-convention scan merged into the `<T>` target, so the **final image is no longer corrupted**. But the *other* half
   of that old scan — the separate target literally named `<T>_sub` (safe `<T>_sub`), holding the same raw subs — still
   lingers: a beginner sees two library tiles for one object (`M 31` and `M 31_sub`) and pays double auto-stack compute.
@@ -8541,9 +8561,16 @@ problems. Dogfood it every big-picture run and fix root causes.
   Upgrade-safe: purely additive read-only endpoint + button, no schema/config/default/API-shape change. *(Feasibility:
   reuses existing recap/run queries, no new/heavy dependency, sane default, testable — passes §4's filter.)*
 
-- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Reuse your favourite look": one tap to save the edit you just made
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "Reuse your favourite look": one tap to save the edit you just made
   as a named personal look, and one tap to apply it to any other stack — so a beginner who finally nails a picture
-  they love never has to rebuild the same sliders by hand again.** *(Pillar: 2 autonomy + 3 friendliness; size M.)*
+  they love never has to rebuild the same sliders by hand again.**~~ — **ALREADY COVERED** (curated by Builder
+  2026-07-24 while scoping it — the Ideas list was stale). This is the existing **Presets** feature: `PresetMenu.tsx`
+  already offers *"Save current as preset…"* (names + stores the current recipe via `api.createPreset` →
+  `POST /api/editor/presets`), lists **My presets** with one-tap apply and per-preset delete, *plus* a separate
+  library-wide **"Set current as my default"** house-style seed (`/api/editor/default-recipe`). Both round-trip the
+  recipe through `recipe_from_dict` validation and are unit-tested (`PresetMenu.test.tsx`, `Editor.test.tsx`
+  "offers the user's saved default recipe…"). The only unbuilt sub-idea is an *on-image thumbnail* per saved look —
+  a nice-to-have, not worth a run on its own. Don't rebuild this. *(Pillar: 2 autonomy + 3 friendliness; size M.)*
   **The friction:** the app's auto-edit gives a good default, and the editor lets a beginner tweak it, but the moment
   they land on a look they love (a little more saturation, a gentler stretch, a touch more denoise) there is **no way
   to reuse it** — every new target starts from Auto again and they redo the same adjustments from scratch. That's the

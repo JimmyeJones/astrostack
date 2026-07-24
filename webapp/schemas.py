@@ -406,12 +406,15 @@ class MergeSuggestionOut(BaseModel):
 
 
 class CleanupSuggestionOut(BaseModel):
-    """A leftover *junk* target an old (pre-v0.184.9) scan built from a Seestar
-    output or ``_video`` folder rather than raw sub-frames. Read-only detection:
-    the Library offers a one-click "remove these" and the user confirms; nothing
-    is deleted until then (``DELETE /api/targets/{safe}``). ``reason`` is
-    ``"video"`` or ``"on_device_output"``; ``detail`` is a plain-language
-    explanation for the beginner."""
+    """A leftover target an old (pre-v0.184.9) scan built before the scanner
+    learned the Seestar folder convention. Read-only detection: the Library offers
+    a one-click "remove these" and the user confirms; nothing is deleted until then
+    (``DELETE /api/targets/{safe}``). ``reason`` is one of ``"video"`` /
+    ``"on_device_output"`` (built from a Seestar output or ``_video`` folder rather
+    than raw sub-frames — cannot be stacked) or ``"duplicate_sub"`` (a
+    ``<T>_sub``-named duplicate holding the *same* raw subs the base target ``<T>``
+    now owns — a harmless clutter/wasted-compute leftover, not corrupt data);
+    ``detail`` is a plain-language explanation for the beginner."""
 
     safe: str
     name: str

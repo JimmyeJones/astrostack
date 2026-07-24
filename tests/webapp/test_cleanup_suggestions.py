@@ -77,6 +77,70 @@ def test_clean_library_gives_empty_list(client, data_root: Path):
     assert r.json() == []
 
 
+def test_flags_a_sub_named_duplicate_the_base_target_now_owns(client, data_root: Path):
+    """The upgrade-path leftover: a pre-v0.184.9 scan built a ``M 31_sub`` target;
+    a later scan folded the same subs into ``M 31``. The ``_sub`` duplicate is
+    flagged (reason ``duplicate_sub``) because the base already owns every frame —
+    while the real ``M 31`` target and an unrelated target are left alone."""
+    incoming = data_root / "dump"
+    (incoming / "M 31_sub").mkdir(parents=True)
+    subs = [incoming / "M 31_sub" / f"Light_{i:03d}.fit" for i in range(6)]
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        # Both targets registered against the SAME raw subs (the duplicate state).
+        _add_target(lib, "M 31", subs)        # base — the convention's target
+        _add_target(lib, "M 31_sub", subs)    # leftover duplicate
+        _add_target(lib, "Orion", [incoming / "Orion" / "Light_001.fit"])
+    finally:
+        lib.close()
+
+    body = client.get("/api/targets/cleanup-suggestions").json()
+    by_safe = {s["safe"]: s for s in body}
+    assert set(by_safe) == {"M_31_sub"}
+    assert by_safe["M_31_sub"]["reason"] == "duplicate_sub"
+    assert "M 31" in by_safe["M_31_sub"]["detail"]
+
+    # Actionable: removing it leaves the base target intact and clears the nudge.
+    assert client.delete("/api/targets/M_31_sub").status_code == 200
+    assert client.get("/api/targets/cleanup-suggestions").json() == []
+    assert client.get("/api/targets/M_31").status_code == 200
+
+
+def test_does_not_flag_a_sub_duplicate_the_base_does_not_fully_own(client, data_root: Path):
+    """Safety: if the base target does NOT already own every one of the ``_sub``
+    target's subs (e.g. a re-scan hasn't run since the upgrade), removing the
+    duplicate could lose the only copy — so it is NOT offered for removal."""
+    incoming = data_root / "dump"
+    (incoming / "M 31_sub").mkdir(parents=True)
+    subs = [incoming / "M 31_sub" / f"Light_{i:03d}.fit" for i in range(6)]
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        _add_target(lib, "M 31", subs[:3])    # base owns only half the subs
+        _add_target(lib, "M 31_sub", subs)
+    finally:
+        lib.close()
+
+    assert client.get("/api/targets/cleanup-suggestions").json() == []
+
+
+def test_does_not_flag_a_standalone_sub_named_target(client, data_root: Path):
+    """A ``_sub``-named target with no matching base target is left alone — it is
+    the only copy of those subs, not a duplicate."""
+    incoming = data_root / "dump"
+    (incoming / "Nebula_sub").mkdir(parents=True)
+    subs = [incoming / "Nebula_sub" / f"Light_{i:03d}.fit" for i in range(6)]
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        _add_target(lib, "Nebula_sub", subs)
+    finally:
+        lib.close()
+
+    assert client.get("/api/targets/cleanup-suggestions").json() == []
+
+
 def test_flagged_target_can_then_be_deleted(client, data_root: Path):
     """The suggestion is actionable: the flagged safe_name deletes cleanly via the
     existing endpoint (the one-click "remove these" the Library wires up)."""

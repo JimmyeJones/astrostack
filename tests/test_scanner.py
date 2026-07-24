@@ -16,6 +16,7 @@ from seestack.io.scanner import (
     _apply_seestar_convention,
     _seestar_output_bases,
     classify_seestar_junk_target,
+    duplicate_sub_target_base_name,
     run_qc_and_solve,
     scan_and_organize,
 )
@@ -188,6 +189,44 @@ def test_classify_not_junk_for_a_real_stack_with_many_frames(tmp_path):
 def test_classify_not_junk_for_an_empty_frameless_target():
     """No source paths and a non-video name → nothing to judge → None."""
     assert classify_seestar_junk_target("M 42", [], n_frames=0) is None
+
+
+def test_duplicate_sub_base_name_recognises_a_sub_named_duplicate():
+    """A ``<T>_sub``-named target whose frames all sit under a ``*_sub/`` folder →
+    the base name ``<T>`` (the target the convention now folds those subs into)."""
+    subs = [Path(f"/dump/M 31_sub/Light_{i:03d}.fit") for i in range(6)]
+    assert duplicate_sub_target_base_name("M 31_sub", subs) == "M 31"
+
+
+def test_duplicate_sub_base_name_is_none_without_a_sub_name():
+    """A plainly-named target is never a ``_sub`` duplicate."""
+    subs = [Path(f"/dump/M 31_sub/Light_{i:03d}.fit") for i in range(6)]
+    assert duplicate_sub_target_base_name("M 31", subs) is None
+
+
+def test_duplicate_sub_base_name_is_none_when_frames_not_under_a_sub_folder():
+    """The name ends ``_sub`` but the frames live in a plainly-named folder — not
+    the Seestar raw-subs shape, so don't call it a duplicate."""
+    subs = [Path(f"/dump/Weird/Light_{i:03d}.fit") for i in range(6)]
+    assert duplicate_sub_target_base_name("Weird_sub", subs) is None
+
+
+def test_duplicate_sub_base_name_is_none_for_mixed_source_folders():
+    """Frames spread across more than one folder don't fit the single-folder
+    ``<T>_sub/`` shape."""
+    subs = [Path("/dump/M 31_sub/a.fit"), Path("/dump/other_sub/b.fit")]
+    assert duplicate_sub_target_base_name("M 31_sub", subs) is None
+
+
+def test_duplicate_sub_base_name_skips_mosaic_sub():
+    """Mosaic ``_mosaic_sub`` naming is device-specific and handled elsewhere."""
+    subs = [Path("/dump/M 3_mosaic_sub/a.fit"), Path("/dump/M 3_mosaic_sub/b.fit")]
+    assert duplicate_sub_target_base_name("M 3_mosaic_sub", subs) is None
+
+
+def test_duplicate_sub_base_name_is_none_with_no_frames():
+    """No source paths → no single ``*_sub/`` folder to key on → None."""
+    assert duplicate_sub_target_base_name("M 31_sub", []) is None
 
 
 def test_scan_is_seestar_aware_end_to_end(tmp_path):

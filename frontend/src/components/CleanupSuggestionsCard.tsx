@@ -1,45 +1,118 @@
 import { Alert, Badge, Button, Group, Stack, Text } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { IconTrash } from "@tabler/icons-react";
+import { IconCopyOff, IconTrash } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { api, type CleanupSuggestion } from "../api/client";
 
-// Remember which cleanup nudges the user dismissed, keyed by the flagged
-// targets' safe-names, so a declined nudge stays gone across reloads (and only
-// reappears if a different junk target turns up). localStorage-only and
-// defensively guarded so a disabled/broken store never breaks the page.
-const LS_KEY = "astrostack.cleanupSuggestions.dismissed";
+// Remember which cleanup nudges the user dismissed, keyed per group so declining
+// one (e.g. "these aren't real subs") doesn't also hide the other (e.g. "these
+// are duplicates"). localStorage-only and defensively guarded so a
+// disabled/broken store never breaks the page.
+const JUNK_LS_KEY = "astrostack.cleanupSuggestions.dismissed";
+const DUP_LS_KEY = "astrostack.cleanupSuggestions.duplicates.dismissed";
 
-function loadDismissed(): boolean {
+function loadDismissed(key: string): boolean {
   try {
-    return localStorage.getItem(LS_KEY) === "1";
+    return localStorage.getItem(key) === "1";
   } catch {
     return false;
   }
 }
 
-function saveDismissed(): void {
+function saveDismissed(key: string): void {
   try {
-    localStorage.setItem(LS_KEY, "1");
+    localStorage.setItem(key, "1");
   } catch {
     /* storage unavailable — dismissal just won't persist */
   }
 }
 
 function reasonLabel(reason: CleanupSuggestion["reason"]): string {
-  return reason === "video" ? "video" : "on-device output";
+  if (reason === "video") return "video";
+  if (reason === "duplicate_sub") return "duplicate";
+  return "on-device output";
+}
+
+/** One dismissible cleanup group (junk outputs/videos, or `_sub` duplicates).
+ * Owns its own persisted dismissal so the two groups hide independently. */
+function CleanupAlert({
+  items,
+  lsKey,
+  icon,
+  title,
+  intro,
+  onRemove,
+  pending,
+}: {
+  items: CleanupSuggestion[];
+  lsKey: string;
+  icon: ReactNode;
+  title: string;
+  intro: ReactNode;
+  onRemove: (items: CleanupSuggestion[]) => void;
+  pending: boolean;
+}) {
+  const [dismissed, setDismissed] = useState<boolean>(() => loadDismissed(lsKey));
+  if (dismissed || items.length === 0) return null;
+
+  const dismiss = () => {
+    setDismissed(true);
+    saveDismissed(lsKey);
+  };
+  const removeNoun =
+    items.length === 1 ? "this target" : `these ${items.length} targets`;
+  const confirmMsg =
+    items.length === 1
+      ? `Remove the leftover target “${items[0].name}”? This only deletes the target record — your raw sub folders on disk are not touched.`
+      : `Remove these ${items.length} leftover targets? This only deletes the target records — your raw sub folders on disk are not touched.`;
+  const askRemove = () => {
+    if (window.confirm(confirmMsg)) onRemove(items);
+  };
+
+  return (
+    <Alert
+      color="teal"
+      variant="light"
+      icon={icon}
+      title={title}
+      withCloseButton
+      onClose={dismiss}
+      closeButtonLabel="Dismiss"
+      mb="md"
+    >
+      <Stack gap={8}>
+        <Text size="sm">{intro}</Text>
+        <Group gap={6}>
+          {items.map((t) => (
+            <Badge key={t.safe} variant="outline" color="gray" size="sm">
+              {t.name} · {reasonLabel(t.reason)}
+            </Badge>
+          ))}
+        </Group>
+        <Group gap="xs">
+          <Button size="xs" color="teal" loading={pending} onClick={askRemove}>
+            Remove {removeNoun}
+          </Button>
+          <Button size="xs" variant="subtle" color="gray" onClick={dismiss}>
+            Keep them
+          </Button>
+        </Group>
+      </Stack>
+    </Alert>
+  );
 }
 
 /**
- * "These look like Seestar outputs/videos, not raw subs — remove?" — a friendly,
- * dismissible Library cleanup nudge. An older scan (before the scanner learned
- * the Seestar folder convention) ingested the Seestar's own single stacked
- * *output* folders and ``_video`` folders as if they were raw sub-frames,
- * leaving junk targets that "stack" to one lower-resolution frame. The backend
- * detects those (read-only); this offers a one-confirmation bulk-remove. It
- * never touches the real ``_sub`` data. Self-hides when there's nothing to
- * clean up.
+ * Friendly, dismissible Library cleanup nudges for the leftovers a pre-convention
+ * scan produced. Two independent groups:
+ *   • outputs/videos — the Seestar's own finished images / video clips ingested as
+ *     if they were raw subs (can't be stacked into a good picture);
+ *   • `<T>_sub` duplicates — the same raw subs the base target `<T>` now owns
+ *     (harmless clutter + double compute, not corrupt data).
+ * The backend detects both (read-only); this offers a one-confirmation
+ * bulk-remove per group. It never touches the real `_sub` data on disk. Each
+ * group self-hides when empty or dismissed.
  */
 export function CleanupSuggestionsCard() {
   const qc = useQueryClient();
@@ -47,7 +120,6 @@ export function CleanupSuggestionsCard() {
     queryKey: ["cleanup-suggestions"],
     queryFn: api.cleanupSuggestions,
   });
-  const [dismissed, setDismissed] = useState<boolean>(loadDismissed);
 
   const remove = useMutation({
     mutationFn: async (targets: CleanupSuggestion[]) => {
@@ -75,61 +147,46 @@ export function CleanupSuggestionsCard() {
     },
   });
 
-  const dismiss = () => {
-    setDismissed(true);
-    saveDismissed();
-  };
-
   const items = suggestions.data ?? [];
-  if (dismissed || items.length === 0) return null;
-
-  const onRemove = () => {
-    const msg =
-      items.length === 1
-        ? `Remove the leftover target “${items[0].name}”? This only deletes the target record — your raw sub folders on disk are not touched.`
-        : `Remove these ${items.length} leftover targets? This only deletes the target records — your raw sub folders on disk are not touched.`;
-    if (window.confirm(msg)) remove.mutate(items);
-  };
+  const junk = items.filter((t) => t.reason !== "duplicate_sub");
+  const dupes = items.filter((t) => t.reason === "duplicate_sub");
+  const onRemove = (targets: CleanupSuggestion[]) => remove.mutate(targets);
 
   return (
-    <Alert
-      color="teal"
-      variant="light"
-      icon={<IconTrash size={18} />}
-      title="Some targets look like Seestar outputs or videos, not raw subs"
-      withCloseButton
-      onClose={dismiss}
-      closeButtonLabel="Dismiss"
-      mb="md"
-    >
-      <Stack gap={8}>
-        <Text size="sm">
-          An earlier scan picked up the Seestar's own finished images and video
-          clips as if they were raw sub-frames. These can't be stacked into a
-          good picture — remove them to tidy your library. Your raw sub folders
-          on disk are never touched.
-        </Text>
-        <Group gap={6}>
-          {items.map((t) => (
-            <Badge key={t.safe} variant="outline" color="gray" size="sm">
-              {t.name} · {reasonLabel(t.reason)}
-            </Badge>
-          ))}
-        </Group>
-        <Group gap="xs">
-          <Button
-            size="xs"
-            color="teal"
-            loading={remove.isPending}
-            onClick={onRemove}
-          >
-            Remove {items.length === 1 ? "this target" : `these ${items.length} targets`}
-          </Button>
-          <Button size="xs" variant="subtle" color="gray" onClick={dismiss}>
-            Keep them
-          </Button>
-        </Group>
-      </Stack>
-    </Alert>
+    <>
+      <CleanupAlert
+        items={junk}
+        lsKey={JUNK_LS_KEY}
+        icon={<IconTrash size={18} />}
+        title="Some targets look like Seestar outputs or videos, not raw subs"
+        intro={
+          <>
+            An earlier scan picked up the Seestar's own finished images and video
+            clips as if they were raw sub-frames. These can't be stacked into a
+            good picture — remove them to tidy your library. Your raw sub folders
+            on disk are never touched.
+          </>
+        }
+        onRemove={onRemove}
+        pending={remove.isPending}
+      />
+      <CleanupAlert
+        items={dupes}
+        lsKey={DUP_LS_KEY}
+        icon={<IconCopyOff size={18} />}
+        title="Some targets are duplicates left by an older scan"
+        intro={
+          <>
+            An earlier scan added these “_sub” targets before the app learned to
+            fold each Seestar raw-subs folder into its main target. They hold the
+            same frames your main target already has, so they just clutter your
+            library and re-stack the same subs twice. Removing them changes
+            nothing about your pictures, and your files on disk are never touched.
+          </>
+        }
+        onRemove={onRemove}
+        pending={remove.isPending}
+      />
+    </>
   );
 }

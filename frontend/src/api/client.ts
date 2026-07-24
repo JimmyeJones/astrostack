@@ -228,7 +228,7 @@ export interface CleanupSuggestion {
   safe: string;
   name: string;
   n_frames: number;
-  reason: "video" | "on_device_output";
+  reason: "video" | "on_device_output" | "duplicate_sub";
   detail: string;
 }
 
