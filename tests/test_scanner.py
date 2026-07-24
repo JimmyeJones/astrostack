@@ -12,7 +12,11 @@ pytest.importorskip("astropy")
 
 from seestack.io.library import Library
 from seestack.io.project import Project
-from seestack.io.scanner import run_qc_and_solve, scan_and_organize
+from seestack.io.scanner import (
+    _apply_seestar_convention,
+    run_qc_and_solve,
+    scan_and_organize,
+)
 from tests.synth import write_seestar_fits
 
 
@@ -66,6 +70,78 @@ def test_scan_organizes_folders_into_targets(tmp_path):
         }
         m42 = lib.find_target("M_42")
         assert m42 is not None and m42.n_frames == 2
+    finally:
+        lib.close()
+
+
+def _fake(*names: str) -> list:
+    """Build ``[(name, [Path]), ...]`` units for the pure-classifier test."""
+    return [(n, [Path(f"{n}/x.fit")]) for n in names]
+
+
+def test_apply_seestar_convention_maps_sub_and_skips_output_and_video():
+    """The pure folder-classifier: raw '_sub' folders become targets, the
+    Seestar's own output sibling and any '*_video' folder are skipped, and a
+    mosaic gets its own '(mosaic)' target distinct from the single field."""
+    units = _apply_seestar_convention(_fake(
+        "M 31_sub", "M 31",                 # raw subs + on-device output
+        "M 3_mosaic_sub", "M 3_mosaic",     # mosaic raw subs + mosaic output
+        "M 3",                              # single-field output, but no _sub
+        "Lunar_video", "Solar_video",       # videos
+    ))
+    names = [n for n, _ in units]
+    # "M 31_sub" -> "M 31"; its bare "M 31" output is skipped.
+    # "M 3_mosaic_sub" -> "M 3 (mosaic)"; its "M 3_mosaic" output is skipped.
+    # bare "M 3" (no "M 3_sub" sibling) still ingests. Videos are gone.
+    assert names == ["M 31", "M 3 (mosaic)", "M 3"]
+
+
+def test_apply_seestar_convention_bare_folder_without_sub_sibling_kept():
+    """A plainly-named folder with no '_sub' sibling is a non-Seestar layout
+    and must still ingest exactly as before (no regression)."""
+    units = _apply_seestar_convention(_fake("Andromeda", "M 42"))
+    assert [n for n, _ in units] == ["Andromeda", "M 42"]
+
+
+def test_apply_seestar_convention_is_case_insensitive():
+    """Folder casing varies across firmware; suffix tests ignore case but the
+    target name keeps the folder's original casing."""
+    units = _apply_seestar_convention(_fake("Ngc 7000_SUB", "Ngc 7000", "Clip_VIDEO"))
+    assert [n for n, _ in units] == ["Ngc 7000"]
+
+
+def test_scan_is_seestar_aware_end_to_end(tmp_path):
+    """A realistic Seestar dump produces exactly the two real targets — one
+    single-field, one mosaic — with the raw subs, and NO junk target from the
+    on-device output or video folders."""
+    scan_root = tmp_path / "incoming"
+    (scan_root / "M 3_sub").mkdir(parents=True)
+    write_seestar_fits(scan_root / "M 3_sub" / "Light_001.fit", n_stars=5, seed=1)
+    write_seestar_fits(scan_root / "M 3_sub" / "Light_002.fit", n_stars=5, seed=2)
+    write_seestar_fits(scan_root / "M 3_sub" / "Light_003.fit", n_stars=5, seed=3)
+    # The Seestar's own single stacked output for M 3 (must be ignored).
+    (scan_root / "M 3").mkdir()
+    write_seestar_fits(scan_root / "M 3" / "Stacked.fit", n_stars=5, seed=10)
+    # A mosaic of the same object — its raw subs + its own output.
+    (scan_root / "M 3_mosaic_sub").mkdir()
+    write_seestar_fits(scan_root / "M 3_mosaic_sub" / "Light_001.fit", n_stars=5, seed=4)
+    write_seestar_fits(scan_root / "M 3_mosaic_sub" / "Light_002.fit", n_stars=5, seed=5)
+    (scan_root / "M 3_mosaic").mkdir()
+    write_seestar_fits(scan_root / "M 3_mosaic" / "Stacked.fit", n_stars=5, seed=11)
+    # A video capture (must be ignored).
+    (scan_root / "Lunar_video").mkdir()
+    write_seestar_fits(scan_root / "Lunar_video" / "clip_001.fit", n_stars=5, seed=6)
+
+    lib = Library.create(tmp_path / "lib")
+    try:
+        result = scan_and_organize(lib, scan_root)
+        by_name = {t.target_name: t for t in result.targets}
+        # Exactly two real targets, kept distinct (mosaic never merged in).
+        assert set(by_name) == {"M 3", "M 3 (mosaic)"}
+        assert by_name["M 3"].n_frames_added == 3           # the raw subs, not the 1 output
+        assert by_name["M 3 (mosaic)"].n_frames_added == 2
+        # No bogus output/video targets in the registry.
+        assert {t.name for t in lib.list_targets()} == {"M 3", "M 3 (mosaic)"}
     finally:
         lib.close()
 
