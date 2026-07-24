@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, darkScalingSummaryText, rejectionSummaryText, weightingSummaryText, frameAccountingNote, calibrationSummaryText } from "./History";
+import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, darkScalingSummaryText, rejectionSummaryText, weightingSummaryText, frameAccountingNote, roughlyAlignedNote, calibrationSummaryText } from "./History";
 import { formatIntegration } from "../format";
 import * as client from "../api/client";
 import type { StackRun } from "../api/client";
@@ -835,6 +835,43 @@ describe("frameAccountingNote", () => {
   });
 });
 
+describe("roughlyAlignedNote", () => {
+  it("returns null when no refine accounting was recorded", () => {
+    expect(roughlyAlignedNote(null)).toBeNull();
+    expect(roughlyAlignedNote(undefined)).toBeNull();
+    // Refine ran but nothing was rough → stamped 0 → still nothing to say.
+    expect(roughlyAlignedNote({ n_offered: 2000, n_roughly_aligned: 0 })).toBeNull();
+    // Refine off → the field is simply absent.
+    expect(roughlyAlignedNote({ n_offered: 2000 })).toBeNull();
+  });
+  it("reports a small roughly-aligned share without a scary nudge", () => {
+    const ra = roughlyAlignedNote({ n_offered: 2000, n_roughly_aligned: 8 });
+    expect(ra).not.toBeNull();
+    expect(ra!.text).toBe(
+      "8 of 2,000 subs were only roughly aligned · your stars may look a little soft");
+    expect(ra!.concern).toBe(false);
+    expect(ra!.guidance).toBeNull();
+  });
+  it("guides a fix when a large share only roughly aligned", () => {
+    const ra = roughlyAlignedNote({ n_offered: 200, n_roughly_aligned: 90 });
+    expect(ra!.text).toBe(
+      "90 of 200 subs were only roughly aligned · your stars may look a little soft");
+    expect(ra!.concern).toBe(true);
+    expect(ra!.guidance).toContain("steadier");
+    expect(ra!.guidance).toContain("re-solving");
+  });
+  it("doesn't nag on a tiny stack where one soft sub is a big fraction", () => {
+    const ra = roughlyAlignedNote({ n_offered: 5, n_roughly_aligned: 2 });
+    expect(ra!.concern).toBe(false);
+    expect(ra!.guidance).toBeNull();
+  });
+  it("clamps a rough count that exceeds the offered total", () => {
+    const ra = roughlyAlignedNote({ n_offered: 10, n_roughly_aligned: 99 });
+    expect(ra!.text).toBe(
+      "10 of 10 subs were only roughly aligned · your stars may look a little soft");
+  });
+});
+
 describe("HistoryView frame accounting", () => {
   it("surfaces a large align-failure fraction with guidance in the Info panel", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
@@ -851,6 +888,23 @@ describe("HistoryView frame accounting", () => {
     await waitFor(() =>
       expect(screen.getByText(/1,160 of 2,000 subs combined/)).toBeInTheDocument());
     expect(screen.getByText(/Open the Frames table/)).toBeInTheDocument();
+  });
+
+  it("surfaces a roughly-aligned share in the Info panel", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({
+      run_id: 1, integration_s: 2520, n_frames: 2000, weighting: null,
+      frame_accounting: { n_offered: 2000, n_align_failed: 0, n_roughly_aligned: 90 },
+      cards: [{ key: "STACKER", value: "sigma-clip", comment: "stacking method" }],
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Info" }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/90 of 2,000 subs were only roughly aligned/))
+        .toBeInTheDocument());
   });
 });
 

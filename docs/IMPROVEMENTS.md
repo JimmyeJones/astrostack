@@ -7540,7 +7540,35 @@ problems. Dogfood it every big-picture run and fix root causes.
   the calibration *math* clean).
 
   </details>
-- **IMPROVEMENT IDEA (Scout 2026-07-23) — count & surface "N subs were only roughly aligned" when sub-pixel
+- ~~**IMPROVEMENT IDEA (Scout 2026-07-23) — count & surface "N subs were only roughly aligned" when sub-pixel
+  refine gives up above its shift cap.**~~ — **SHIPPED v0.190.0** (Builder 2026-07-24, branch
+  `claude/pensive-faraday-vhze3d`). Implemented the exact "cleanest slice" the idea specified: engine-count +
+  `StackResult` field + one History line, no DB migration. (a) The two refine helpers
+  (`align.py::_apply_subpixel_shift[_windowed]`) now take an optional keyword `stats: dict | None`; on the
+  over-cap early return they set `stats["over_cap"]=True` (every other outcome — shift applied, benign
+  too-small-overlap/correlation-fail skip — leaves it untouched), so the pixel decision is byte-for-byte
+  unchanged and the flag is purely observational. Backward-compatible: existing callers pass no `stats`. (b)
+  `align_one` gained an optional `refine_stats` dict it threads into the windowed helper; its **return tuple is
+  unchanged** (so all its many test/callers are untouched). (c) `_align_for_stack` now returns
+  `(win_rgb, y0, x0, roughly_bool)`, and `_pass` accumulates each contributing over-cap frame's id into a shared
+  `roughly_aligned_ids: set` threaded in by `run_stack` — a **set**, so the two κ-σ passes (which refine the same
+  frames twice) count each frame **once**. (d) `run_stack` stamps `n_roughly_aligned` on `StackResult` and, via
+  `_build_output_header_meta`, writes a **`NROUGHAL`** FITS card whenever refine ran on a non-drizzle stack (even
+  at 0 — "nothing was rough" is a reassuring signal, mirroring REJFRAC@0%; absent = refine off/older master, no
+  migration). (e) `webapp/routers/stack.py` parses `NROUGHAL` into `frame_accounting.n_roughly_aligned`; the
+  History Info panel renders a pure, unit-tested `roughlyAlignedNote` ("90 of 200 subs were only roughly
+  aligned · your stars may look a little soft", amber + a steadier-mount/re-solve nudge when ≥20% of ≥10 subs).
+  **Purely a surfacing change** — no auto-exclude/down-weight (the idea explicitly warned against that). Tests:
+  `tests/test_subpixel_align.py` (+4: windowed/non-windowed over-cap sets the flag & returns unshifted, within-cap
+  doesn't flag, no-`stats`-arg backward-compat), `tests/test_stack_pipeline.py` (+3: count surfaces on
+  `StackResult`+`NROUGHAL` and **dedups across the two κ-σ passes** to 4 not 8, 0-when-all-within-cap with the card
+  still stamped, card absent when refine off), and `History.test.tsx` (+6 unit + 1 render). Upgrade-safe: additive
+  `StackResult` field + FITS card + response field, no config/DB-schema/on-disk/default/API-shape change; refine
+  stays off by default so a run with it off is byte-for-byte unchanged. *(Original idea below.)*
+
+  <details><summary>Original idea</summary>
+
+  **IMPROVEMENT IDEA (Scout 2026-07-23) — count & surface "N subs were only roughly aligned" when sub-pixel
   refine gives up above its shift cap.** *(Stacking-engine trust + image quality, PRIORITY 4 (touches autonomy /
   honest-accounting, PRIORITY 2); size S–M.)* **What I traced:** with `subpixel_refine` on,
   `seestack/stack/align.py::_apply_subpixel_shift_windowed` (and the non-windowed sibling) measures each frame's
@@ -7566,6 +7594,8 @@ problems. Dogfood it every big-picture run and fix root causes.
   reports 0. **Effort caveat for the Builder:** the cleanest slice is engine-count + `StackResult` field + one
   frontend line; the persisted-column half is optional and can be a follow-up. *(Traced during the 2026-07-23
   stacking-engine re-audit; not a wrong-result bug — a missing trust signal — so filed as an idea, not a bug.)*
+
+  </details>
 - ~~**IMPROVEMENT IDEA (Scout 2026-07-21) — make the SExtractor sky-mode fallback guard actually functional
   (defense-in-depth; currently algebraically inert).**~~ — **SHIPPED v0.158.11** (Builder 2026-07-22, branch
   `claude/pensive-faraday-jwvd6c`). Replaced the self-referential threshold (`abs(sky − median) > 5·abs(median −

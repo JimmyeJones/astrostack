@@ -414,6 +414,101 @@ def test_subpixel_reference_patch_matches_frame_alignment_domain(tmp_path, monke
     assert ref_call["calibration"] == frame_call["calibration"]
 
 
+def test_roughly_aligned_count_surfaces_in_result_and_header(tmp_path, monkeypatch):
+    """When sub-pixel refine leaves contributing subs only *roughly* aligned
+    (measured shift over the cap), run_stack counts them once — even across the
+    two κ-σ passes that refine the same frames twice — onto StackResult and the
+    output FITS header (NROUGHAL), the honest 'your stars may look soft' signal.
+
+    Forces the over-cap outcome by stamping ``refine_stats['over_cap']`` on every
+    per-frame align call, so the test doesn't depend on synthesising a genuine
+    >5 px jitter session."""
+    from astropy.io import fits
+
+    import seestack.stack.stacker as st
+
+    real_align_one = st.align_one
+
+    def spy(**kwargs):
+        result = real_align_one(**kwargs)
+        # Only the per-frame path (via _align_for_stack) passes refine_stats; the
+        # one reference-patch build call does not. Mark every contributing frame
+        # as over-cap.
+        rs = kwargs.get("refine_stats")
+        if rs is not None:
+            rs["over_cap"] = True
+        return result
+
+    monkeypatch.setattr(st, "align_one", spy)
+
+    proj = _build_project(tmp_path, n=4)
+    try:
+        # Default κ-σ path (n>=4) → two passes refine the same 4 frames; the set
+        # dedup must keep the count at 4, not 8.
+        result = run_stack(proj, StackOptions(sigma_clip=True, subpixel_refine=True,
+                                              max_workers=1, output_name="rough"))
+    finally:
+        proj.close()
+
+    assert result.n_frames_used == 4
+    assert result.n_roughly_aligned == 4
+    with fits.open(result.fits_path) as hdul:
+        assert int(hdul[0].header["NROUGHAL"]) == 4
+
+
+def test_roughly_aligned_zero_when_all_within_cap(tmp_path, monkeypatch):
+    """With refine on but every sub aligning within the cap, the count is 0 and
+    the card is still stamped at 0 — a reassuring 'nothing was rough' signal,
+    mirroring REJFRAC at 0%.
+
+    The synthetic frames carry *different* random star fields per seed, so real
+    refine legitimately measures large (over-cap) shifts on them — that's the
+    feature firing correctly. To exercise the deterministic all-within-cap path
+    we clear the over-cap flag on every per-frame align call."""
+    from astropy.io import fits
+
+    import seestack.stack.stacker as st
+
+    real_align_one = st.align_one
+
+    def spy(**kwargs):
+        result = real_align_one(**kwargs)
+        rs = kwargs.get("refine_stats")
+        if rs is not None:
+            rs.pop("over_cap", None)  # force "aligned within the cap"
+        return result
+
+    monkeypatch.setattr(st, "align_one", spy)
+
+    proj = _build_project(tmp_path, n=4)
+    try:
+        result = run_stack(proj, StackOptions(sigma_clip=True, subpixel_refine=True,
+                                              max_workers=1, output_name="clean"))
+    finally:
+        proj.close()
+
+    assert result.n_roughly_aligned == 0
+    with fits.open(result.fits_path) as hdul:
+        assert int(hdul[0].header["NROUGHAL"]) == 0
+
+
+def test_roughly_aligned_card_absent_when_refine_off(tmp_path):
+    """Refine off (the default) → no NROUGHAL card at all (its absence means
+    'refine didn't run', distinct from a stamped 0), and the count is 0."""
+    from astropy.io import fits
+
+    proj = _build_project(tmp_path, n=4)
+    try:
+        result = run_stack(proj, StackOptions(sigma_clip=True, subpixel_refine=False,
+                                              max_workers=1, output_name="norefine"))
+    finally:
+        proj.close()
+
+    assert result.n_roughly_aligned == 0
+    with fits.open(result.fits_path) as hdul:
+        assert "NROUGHAL" not in hdul[0].header
+
+
 def test_output_name_is_sanitized_against_path_traversal(tmp_path):
     from seestack.stack.output import safe_basename
 

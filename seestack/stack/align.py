@@ -91,6 +91,7 @@ def align_one(
     subpixel_refine: bool = False,
     calibration: "CalibrationMasters | None" = None,
     mono: bool = False,
+    refine_stats: dict | None = None,
 ) -> tuple[np.ndarray, np.ndarray, int, int] | None:
     """
     Load → (calibrate) → debayer → bg-flatten → reproject one frame, **windowed**.
@@ -110,6 +111,12 @@ def align_one(
         background per channel before reprojection.
     use_gpu
         Force-enable or force-disable GPU. ``None`` (default) auto-decides.
+    refine_stats
+        Optional dict populated by the sub-pixel refine step: when refinement
+        runs but the measured shift exceeds ``SUBPIXEL_SHIFT_CAP_PX`` (so the
+        frame stacks only *roughly* aligned, unshifted), ``refine_stats
+        ["over_cap"]`` is set ``True``. Left untouched otherwise. Purely an
+        honest-accounting signal; it never changes the returned pixels.
 
     Returns
     -------
@@ -164,7 +171,7 @@ def align_one(
 
     if will_refine:
         win_rgb = _apply_subpixel_shift_windowed(
-            win_rgb, y0, x0, ref_patch, ref_patch_origin,
+            win_rgb, y0, x0, ref_patch, ref_patch_origin, stats=refine_stats,
         )
         # win_valid is left as reprojected: the refine shift (up to ~5 px) does
         # NaN a thin coverage ring, but every downstream consumer recomputes the
@@ -359,6 +366,8 @@ def _apply_subpixel_shift(
     aligned: np.ndarray,
     ref_patch: np.ndarray,
     ref_origin: tuple[int, int],
+    *,
+    stats: dict | None = None,
 ) -> np.ndarray:
     """
     Cross-correlate the aligned frame's central patch with the reference
@@ -367,6 +376,14 @@ def _apply_subpixel_shift(
     No-op if the measured shift is implausibly large (suggesting bad
     plate-solve rather than seeing jitter) or if scikit-image isn't
     available.
+
+    ``stats`` (optional): when a dict is passed, ``stats["over_cap"]`` is set
+    ``True`` iff the measured residual shift exceeded ``SUBPIXEL_SHIFT_CAP_PX``
+    so the frame stacks only *roughly* aligned (unshifted). Left untouched on
+    every other outcome (shift applied, or a benign skip like too-small overlap
+    or a correlation failure), so callers can count how many subs merely landed
+    close — an honest "your stars may look a little soft" trust signal. Purely
+    observational: it never changes the pixel decision.
     """
     try:
         from skimage.registration import phase_cross_correlation
@@ -402,6 +419,8 @@ def _apply_subpixel_shift(
     # alignment was already off — apply nothing and let sigma-clipping pick up
     # the slack.
     if abs(dy) > SUBPIXEL_SHIFT_CAP_PX or abs(dx) > SUBPIXEL_SHIFT_CAP_PX:
+        if stats is not None:
+            stats["over_cap"] = True
         return aligned
 
     out = np.empty_like(aligned)
@@ -436,6 +455,8 @@ def _apply_subpixel_shift_windowed(
     win_x0: int,
     ref_patch: np.ndarray,
     ref_origin: tuple[int, int],
+    *,
+    stats: dict | None = None,
 ) -> np.ndarray:
     """
     Sub-pixel refine a *windowed* aligned frame.
@@ -445,6 +466,11 @@ def _apply_subpixel_shift_windowed(
     region, and apply the resulting shift to the whole window. If the overlap
     is too small to give a reliable correlation (e.g. a mosaic panel that
     doesn't touch the reference panel), refinement is skipped for that frame.
+
+    ``stats`` (optional): like :func:`_apply_subpixel_shift`, when a dict is
+    passed ``stats["over_cap"]`` is set ``True`` iff the measured shift exceeded
+    ``SUBPIXEL_SHIFT_CAP_PX`` (the frame stacks only roughly aligned). Untouched
+    on every other outcome; observational only.
     """
     try:
         from skimage.registration import phase_cross_correlation
@@ -490,6 +516,8 @@ def _apply_subpixel_shift_windowed(
 
     dy, dx = float(shift[0]), float(shift[1])
     if abs(dy) > SUBPIXEL_SHIFT_CAP_PX or abs(dx) > SUBPIXEL_SHIFT_CAP_PX:
+        if stats is not None:
+            stats["over_cap"] = True
         return win_rgb
 
     out = np.empty_like(win_rgb)

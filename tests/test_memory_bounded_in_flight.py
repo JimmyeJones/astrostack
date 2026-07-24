@@ -89,7 +89,7 @@ def test_pass_forwards_the_cap_to_imap_bounded(monkeypatch):
     frame = FrameRow(id=1, source_path="a.fit")
     win = np.ones((2, 2, 3), dtype=np.float32)
     monkeypatch.setattr(stacker, "_align_for_stack",
-                        lambda *a, **k: (win.copy(), 0, 0))
+                        lambda *a, **k: (win.copy(), 0, 0, False))
 
     captured: dict[str, int] = {}
     real_imap = stacker._imap_bounded
@@ -119,7 +119,7 @@ def test_pass_defaults_to_max_workers_times_two_when_uncapped(monkeypatch):
     frame = FrameRow(id=1, source_path="a.fit")
     win = np.ones((2, 2, 3), dtype=np.float32)
     monkeypatch.setattr(stacker, "_align_for_stack",
-                        lambda *a, **k: (win.copy(), 0, 0))
+                        lambda *a, **k: (win.copy(), 0, 0, False))
 
     captured: dict[str, int] = {}
     real_imap = stacker._imap_bounded
