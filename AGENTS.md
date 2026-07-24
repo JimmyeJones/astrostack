@@ -80,15 +80,29 @@ higher on this list wins — always:
 4. **Best-possible image quality** for the OSC Seestar workflow (clean, detailed
    final images).
 
-**⚡ IMMEDIATE PRIORITY (owner-reported 2026-07, real data on v0.158) — LIKELY ROOT
-CAUSE first: the scanner ignores the Seestar folder convention.** See the ⭐⭐⭐ top
-entry in `docs/IMPROVEMENTS.md` → "Bugs". A Seestar writes `<Target>_sub/` (raw
-subs) *and* `<Target>/` (its own single stacked OUTPUT), plus `_mosaic`/`_video`
-variants; `scan_and_organize` names a target by the raw folder name and ingests the
-**output** and **video** folders as if they were raw frames — so a target built from
-an output folder is a **1-frame stack (gibberish) at that image's lower resolution**,
-which plausibly explains BOTH output bugs below. Also keep **mosaic vs single-field
-of the same object as separate targets** (don't position-auto-merge them). Fix the
+**⚡ IMMEDIATE PRIORITY (owner-reported 2026-07 + 2026-07-24 integration audit) — the
+owner's LIVE install is still broken: fix the Seestar upgrade-path pollution FIRST.**
+The fresh-library Seestar-convention scanner fix shipped (v0.184.9 — verified correct
+by the audit), but the owner's install is *already polluted* by the old scan, and the
+audit proved (traced + reproduced) that a re-scan **merges the raw subs INTO the old
+bare-output target**: `<T>_sub/` → target `<T>` → same `safe_name` as the pre-fix
+`<T>/` output target, so the Seestar's own on-device `Stacked_*.fit` keeps stacking in,
+gets **preferentially picked as the stack reference** (its centre is the dither median),
+which flips `is_mosaic` (pixel-area compare across pixel scales, `mosaic.py:330`) and
+stacks a single-field target as a padded low-res "mosaic" — and the old `<T>_sub`
+target duplicates every sub. This is the ⭐⭐ entry in `docs/IMPROVEMENTS.md` → "Bugs":
+at scan time, additively reject frames whose source parent is the bare `<T>/` (or
+`*_video/`) folder (`auto:seestar_output`, never delete) so they leave the stack +
+reference pool, and point the junk-target detector at the `<T>_sub`-named duplicates.
+Also fix the two sibling ingest bugs the audit filed (whole-device `MyWorks/` drop
+merging everything; unicode names collapsing to one project). **This is why the owner's
+redeploy would still produce bad stacks — fix it before anything else.**
+
+**Background (fresh-library convention, already shipped v0.184.9):** a Seestar writes
+`<Target>_sub/` (raw subs) *and* `<Target>/` (its own single stacked OUTPUT), plus
+`_mosaic`/`_video` variants; the scanner now maps `_sub`/`_mosaic_sub`, skips the
+output + `*_video` folders, and keeps **mosaic vs single-field as separate targets**.
+Original root-cause context:
 scanner first, then re-check whether (A)/(B) below persist.
 
 **Then the two output symptoms (see the ⭐⭐ entries in `docs/IMPROVEMENTS.md` → "Bugs"):**
