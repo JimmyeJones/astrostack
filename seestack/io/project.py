@@ -30,7 +30,7 @@ from typing import Any, Iterator
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 SCHEMA_SQL = f"""
 PRAGMA user_version = {SCHEMA_VERSION};
@@ -65,7 +65,8 @@ CREATE TABLE IF NOT EXISTS stack_runs (
     rejection_fraction REAL,
     rejection_mode TEXT,
     preview_stretch REAL,
-    preview_black REAL
+    preview_black REAL,
+    n_roughly_aligned INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_stack_runs_ts ON stack_runs(timestamp_utc);
@@ -488,6 +489,18 @@ class Project:
                         f"ALTER TABLE frames ADD COLUMN {col} {typ}")
                 except sqlite3.OperationalError:
                     pass  # already present
+        if from_version < 13:
+            # Recorded how many contributing subs sub-pixel refine had to leave
+            # *only roughly aligned* (its measured shift exceeded the cap, so the
+            # frame stacked unshifted → possibly soft/doubled stars), so the
+            # "How's my stack?" health panel can name it in plain language without
+            # re-reading the FITS header (the History Info panel already reads the
+            # NROUGHAL card). Additive; older runs stay NULL (unknown → no note).
+            try:
+                self._conn.execute(
+                    "ALTER TABLE stack_runs ADD COLUMN n_roughly_aligned INTEGER")
+            except sqlite3.OperationalError:
+                pass  # already present
         self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @contextmanager
@@ -780,8 +793,8 @@ class Project:
             "  n_frames_used, canvas_h, canvas_w, coverage_min, coverage_max,"
             "  options_json, notes, total_exposure_s, transparency_ratio,"
             "  noise_sigma, calstat, is_mosaic, engine_version,"
-            "  rejection_fraction, rejection_mode"
-            ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "  rejection_fraction, rejection_mode, n_roughly_aligned"
+            ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 run.timestamp_utc, run.output_basename, run.fits_path,
                 run.tiff_path, run.preview_path, run.n_frames_used,
@@ -790,6 +803,7 @@ class Project:
                 run.transparency_ratio, run.noise_sigma, run.calstat,
                 None if run.is_mosaic is None else int(bool(run.is_mosaic)),
                 run.engine_version, run.rejection_fraction, run.rejection_mode,
+                None if run.n_roughly_aligned is None else int(run.n_roughly_aligned),
             ),
         )
         return cur.lastrowid  # type: ignore[return-value]
@@ -852,6 +866,10 @@ class Project:
                 preview_black=(
                     row["preview_black"]
                     if "preview_black" in row.keys() else None
+                ),
+                n_roughly_aligned=(
+                    row["n_roughly_aligned"]
+                    if "n_roughly_aligned" in row.keys() else None
                 ),
             )
 
@@ -997,6 +1015,13 @@ class StackRunRow:
     # half through this same curve so the two halves stay honestly comparable.
     preview_stretch: float | None = None
     preview_black: float | None = None
+    # How many contributing subs sub-pixel refine had to leave *only roughly
+    # aligned* (its measured shift exceeded the cap, so the frame stacked
+    # unshifted → possibly soft/doubled stars). None when refine was off, not
+    # computable, or for runs recorded before this column existed (schema < 13).
+    # Lets "How's my stack?" name the soft-star cause the History Info panel
+    # already reads from the NROUGHAL FITS card.
+    n_roughly_aligned: int | None = None
 
 
 def _to_db(value: Any) -> Any:

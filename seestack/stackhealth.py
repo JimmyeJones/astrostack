@@ -58,6 +58,16 @@ _COVERAGE_MIN_PEAK = 4
 _REJECTION_NOTE_MIN_FRACTION = 0.0005  # 0.05% of samples
 _REJECTION_NOTE_MAX_FRACTION = 0.08    # 8% — matches the History "high, check κ" line
 
+# When sub-pixel refine can't lock a sub within its shift cap it stacks the frame
+# unshifted (only *roughly* aligned) — soft/doubled stars with nothing pointing at
+# alignment. Surface it only once it's a materially large share of the contributing
+# subs, on a stack big enough for the fraction to mean something — the SAME
+# ≥20%-of-≥10 gate the frontend ``roughlyAlignedNote`` uses, so the two surfaces
+# never disagree. ``n_frames_used`` (contributing subs) is the honest denominator:
+# only a sub that made it into the stack can be roughly aligned.
+_ROUGHLY_ALIGNED_MIN_USED = 10
+_ROUGHLY_ALIGNED_NOTE_FRACTION = 0.20
+
 
 def _format_reject_pct(frac: float) -> str:
     """A plain, honest percentage for a rejection fraction (mirrors the History
@@ -192,6 +202,27 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow]) -> list[HealthNot
             severity="info",
             message=("Stars are a little elongated (a sign of tracking or tilt). "
                      "It won't ruin the picture, but rounder subs stack sharper."),
+            action=None,
+        )))
+
+    # --- Sub-pixel refine left many subs only roughly aligned ------------------
+    # A large share of contributing subs that refine couldn't lock within its
+    # shift cap → those frames stacked unshifted, so stars can look soft/doubled
+    # with nothing else pointing at the cause. Read the persisted count (schema
+    # ≥ 13; older runs / refine-off runs are NULL → silent). Denominator is the
+    # contributing count, the only population a roughly-aligned frame comes from.
+    n_rough = run.n_roughly_aligned
+    n_used = run.n_frames_used
+    if (n_rough is not None and n_rough > 0
+            and n_used >= _ROUGHLY_ALIGNED_MIN_USED
+            and n_rough >= _ROUGHLY_ALIGNED_NOTE_FRACTION * n_used):
+        n_rough = min(n_rough, n_used)
+        scored.append((35, HealthNote(
+            kind="roughly_aligned",
+            severity="info",
+            message=(f"{n_rough} of {n_used} stacked subs were only roughly "
+                     "aligned, so your stars may look a little soft or doubled. "
+                     "A steadier mount, or re-solving those subs, tightens them up."),
             action=None,
         )))
 
