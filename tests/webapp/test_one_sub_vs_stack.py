@@ -144,6 +144,44 @@ def test_info_unavailable_for_a_display_space_export(client, solved_library):
     assert r.json()["available"] is False
 
 
+def test_info_unavailable_for_an_in_place_auto_edited_run(client, solved_library):
+    # An in-place "Process target" Auto edit rewrites only the preview PNG to the
+    # recipe's tone-mapped result; its FITS stays linear, so fits_is_display_space
+    # is False. The run instead carries a `preview_display_space` marker, and the
+    # reveal must self-hide on it just like a display-space export — otherwise it
+    # shows a raw STF sub beside the recipe-toned stack. Fail-before: with a linear
+    # FITS and no FITS-header stamp, the reveal wrongly reported available.
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        master = Path(lib.target_dir(lib.find_target(safe))) / "autoedited.fits"
+    finally:
+        lib.close()
+    run_id = _register_run_with_master_and_preview(
+        solved_library, safe, master, display_space=False)
+    # Mark the run's preview as a tone-mapped Auto edit (what _auto_edit_process_run
+    # does after rewriting the preview PNG).
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            assert proj.set_run_preview_display_space(run_id) is True
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/one-sub-vs-stack")
+    assert r.status_code == 200
+    assert r.json()["available"] is False
+
+    # And the Adjust stretch suggestion anchors nothing (its curve can't match a
+    # recipe result) — self-hiding to Adjust's neutral defaults.
+    sug = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/render-suggestion")
+    assert sug.status_code == 200
+    assert sug.json()["stretch"] is None and sug.json()["black"] is None
+
+
 def test_saved_custom_stretch_re_renders_the_reference_sub_to_match(client, solved_library):
     # After the History "Adjust" panel saves a custom asinh stretch, the reveal's
     # sub half must render through the *same* curve so the two halves differ only

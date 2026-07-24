@@ -1810,6 +1810,13 @@ def _auto_edit_process_run(lib: Library, safe: str, run_id: int) -> int | None:
                 out, render_ctx = render_run_display_array(
                     proj.project_dir, run, recipe, return_ctx=True)
                 _write_preview_png(Path(run.preview_path), out, already_display=True)
+                # The preview is now the Auto recipe's tone-mapped result, but the
+                # run's FITS stays linear (the recipe is stored separately and is
+                # reversible). Mark the run so the parity surfaces — the one-sub-vs-
+                # stack reveal and the Adjust stretch suggestion — self-hide instead
+                # of comparing a raw STF sub / anchoring an asinh curve to this
+                # recipe-toned thumbnail (they already do for a display-space export).
+                proj.set_run_preview_display_space(run_id)
                 # Stamp which colour-calibration (white-balance) path Auto actually
                 # ran and on how many stars — star-based, the v0.107.9
                 # background-neutral fallback, or a no-op — so the History Info panel

@@ -904,6 +904,42 @@ class Project:
             (stretch, black, run_id))
         return cur.rowcount > 0
 
+    def set_run_preview_display_space(self, run_id: int, value: bool = True) -> bool:
+        """Record (in the run's ``options_json``) that its stored preview PNG is a
+        tone-mapped *display-space* image — e.g. an in-place "Process target" Auto
+        edit — rather than a plain STF/asinh render of its linear FITS.
+
+        The auto-edit path rewrites only the preview (the FITS stays genuinely
+        linear, since the recipe is stored separately and stays reversible), so
+        ``fits_is_display_space`` still reports False for it. Parity surfaces (the
+        one-sub-vs-stack reveal, the Adjust stretch suggestion) read this marker to
+        self-hide, exactly as they do for a display-space *export* whose FITS is
+        stamped — otherwise they compare a raw STF sub / anchor an asinh curve to a
+        recipe-toned thumbnail and diverge from it.
+
+        Additive: merges the flag into the existing ``options_json`` so the run's
+        stack knobs (reuse/badge) survive, and never touches the FITS or the
+        editor's own ``display_space`` flag. Returns True if a row was updated."""
+        import json as _json
+
+        assert self._conn is not None
+        row = self._conn.execute(
+            "SELECT options_json FROM stack_runs WHERE id = ?", (run_id,)
+        ).fetchone()
+        if row is None:
+            return False
+        try:
+            opts = _json.loads(row["options_json"]) if row["options_json"] else {}
+        except (ValueError, TypeError):
+            opts = {}
+        if not isinstance(opts, dict):
+            opts = {}
+        opts["preview_display_space"] = bool(value)
+        cur = self._conn.execute(
+            "UPDATE stack_runs SET options_json = ? WHERE id = ?",
+            (_json.dumps(opts), run_id))
+        return cur.rowcount > 0
+
 
 @dataclass
 class StackRunRow:
