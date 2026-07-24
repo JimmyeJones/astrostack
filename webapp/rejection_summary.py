@@ -57,7 +57,8 @@ _BUCKETS: list[tuple[str, str, str]] = [
     ("removed", "You removed these",
      "Frames you rejected by hand."),
     ("error", "Couldn't be read or measured",
-     "A problem reading or measuring these frames left them out."),
+     "These files couldn't be read (they may be corrupt or were still "
+     "downloading), so they're skipped. The rest are fine."),
     ("other", "Left out for other reasons",
      "A few frames were set aside for other reasons."),
 ]
@@ -146,7 +147,8 @@ def _verdict(dropped: int, used: int, unsolved: int = 0,
 
 
 def summarize_rejections(
-    counts: dict[str, int], n_accepted: int, n_unsolved: int = 0
+    counts: dict[str, int], n_accepted: int, n_unsolved: int = 0,
+    n_unreadable: int = 0,
 ) -> dict:
     """Group a ``reject_reason`` tally into friendly buckets + a verdict.
 
@@ -156,7 +158,12 @@ def summarize_rejections(
     plate-solved yet** — they are kept but never reach the stacker (which
     combines only accepted+solved frames), so they must be counted as *left out*,
     not *used*, or a beginner is told a thin/gibberish stack was a "healthy
-    night". Returns a JSON-safe dict::
+    night". ``n_unreadable`` is the *subset* of those unsolved subs that failed
+    QC entirely (unreadable/corrupt/truncated FITS, a ``qc_error`` reason left
+    ``accept=1``): they never stack for a different reason — they couldn't be
+    *read*, not merely located — so they're attributed to the "couldn't be read"
+    bucket and excluded from the plate-solve nudge (telling a beginner to
+    plate-solve a corrupt file is wrong advice). Returns a JSON-safe dict::
 
         {
           "used": 412, "dropped": 88, "dropped_fraction": 0.176,
@@ -177,10 +184,19 @@ def summarize_rejections(
         grouped[_bucket_for(reason)] = grouped.get(_bucket_for(reason), 0) + int(n)
 
     # Accepted-but-unsolved subs never reach the stack — surface them as their
-    # own bucket and remove them from "used" so the accounting is honest.
+    # own bucket and remove them from "used" so the accounting is honest. Of
+    # those, the ones that couldn't even be read (``n_unreadable``, a subset) are
+    # a *different* cause: attribute them to the "couldn't be read" error bucket
+    # rather than "not located yet", so the plate-solve nudge never fires on a
+    # corrupt file. Clamp the subset defensively so a bad count can't make the
+    # located-pending tally go negative.
     n_unsolved = max(0, int(n_unsolved))
-    if n_unsolved > 0:
-        grouped["unsolved"] = grouped.get("unsolved", 0) + n_unsolved
+    n_unreadable = min(max(0, int(n_unreadable)), n_unsolved)
+    n_located_pending = n_unsolved - n_unreadable
+    if n_located_pending > 0:
+        grouped["unsolved"] = grouped.get("unsolved", 0) + n_located_pending
+    if n_unreadable > 0:
+        grouped["error"] = grouped.get("error", 0) + n_unreadable
 
     dropped = sum(grouped.values())
     used = max(0, int(n_accepted) - n_unsolved)
@@ -196,6 +212,6 @@ def summarize_rejections(
         "used": used,
         "dropped": dropped,
         "dropped_fraction": round(dropped / total, 4) if total > 0 else 0.0,
-        "verdict": _verdict(dropped, used, n_unsolved, grouped),
+        "verdict": _verdict(dropped, used, n_located_pending, grouped),
         "buckets": buckets,
     }

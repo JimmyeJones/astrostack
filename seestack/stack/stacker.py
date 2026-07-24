@@ -179,14 +179,69 @@ def _largest_drizzle_scale_within_budget(
     return None
 
 
+def _best_memory_fix(
+    dst_shape: tuple[int, int], ref_shape: tuple[int, int] | None, *,
+    is_mosaic: bool, drizzle: bool, drizzle_scale: float,
+    drizzle_reject: bool, reject_arrays: int, min_max_reject_count: int,
+    budget: int,
+) -> tuple[str, int] | None:
+    """The single least-destructive concrete change that brings an over-budget
+    stack within ``budget`` — ``(sentence, peak_bytes)`` — or ``None`` when no one
+    lever obviously fits (the caller then keeps the generic four-lever guidance).
+
+    A beginner on a RAM-capped NAS gets no help from "reduce drizzle scale, switch
+    canvas, reject frames, or raise the budget" — they can't tell *which* one, or
+    *how far*. This names the specific lever and the memory it lands at, computed
+    from the same :func:`_estimate_peak_bytes` the guard refuses on, so the named
+    "fits at ~X GB" can never disagree with the threshold. Mirrors the levers
+    :func:`estimate_stack` already surfaces pre-submit (drizzle-scale down /
+    reference canvas), plus dropping extra min/max outlier passes."""
+    # Drizzle on → the only in-family lever is a smaller super-res scale (matches
+    # estimate_stack's ``suggested_drizzle_scale``). If even ×1.0 can't fit, there
+    # is no clean single fix — fall back to the generic guidance.
+    if drizzle:
+        s = _largest_drizzle_scale_within_budget(
+            dst_shape, drizzle_reject=drizzle_reject, budget=budget,
+            max_scale=float(drizzle_scale))
+        if s is not None:
+            peak, _ = _estimate_peak_bytes(
+                dst_shape, drizzle=True, drizzle_scale=s,
+                drizzle_reject=drizzle_reject)
+            return (f"lower the drizzle scale to ×{s:g}", int(peak))
+        return None
+    # Non-drizzle levers, least-destructive first. Dropping extra outlier passes
+    # (k>1 → the proven single min/max) costs only a little trail rejection; the
+    # reference canvas crops a mosaic's field, a bigger change, so it's tried last.
+    if reject_arrays > _min_max_reject_arrays(1) and min_max_reject_count > 1:
+        peak, _ = _estimate_peak_bytes(
+            dst_shape, drizzle=False, drizzle_scale=1.0,
+            reject_arrays=_min_max_reject_arrays(1))
+        if peak <= budget:
+            return ("lower Extra outlier passes to 1", int(peak))
+    if is_mosaic and ref_shape is not None:
+        peak, _ = _estimate_peak_bytes(
+            ref_shape, drizzle=False, drizzle_scale=1.0,
+            reject_arrays=reject_arrays)
+        if peak <= budget:
+            return ("switch Canvas mode to 'reference'", int(peak))
+    return None
+
+
 def _guard_stack_memory(dst_shape: tuple[int, int], *, drizzle: bool,
                         drizzle_scale: float,
                         drizzle_reject: bool = False,
                         reject_arrays: int = 0,
+                        ref_shape: tuple[int, int] | None = None,
+                        is_mosaic: bool = False,
+                        min_max_reject_count: int = 1,
                         memory_budget_gb: float | None = None) -> None:
     """Refuse a stack whose output canvas would blow the memory budget instead
     of letting it OOM-kill the whole process. ``dst_shape`` is (h, w) of the
-    pre-drizzle canvas; drizzle multiplies each axis by ``drizzle_scale``."""
+    pre-drizzle canvas; drizzle multiplies each axis by ``drizzle_scale``.
+
+    When one concrete lever would make the run fit (:func:`_best_memory_fix`), the
+    refusal names *that* change and the memory it lands at, so a beginner on a
+    RAM-capped box gets an actionable next step instead of a generic list."""
     h, w = dst_shape
     need, _ = _estimate_peak_bytes(dst_shape, drizzle=drizzle,
                                    drizzle_scale=drizzle_scale,
@@ -194,14 +249,25 @@ def _guard_stack_memory(dst_shape: tuple[int, int], *, drizzle: bool,
                                    reject_arrays=reject_arrays)
     budget = _stack_memory_budget_bytes(memory_budget_gb)
     if need > budget:
+        fix = _best_memory_fix(
+            dst_shape, ref_shape, is_mosaic=is_mosaic, drizzle=drizzle,
+            drizzle_scale=drizzle_scale, drizzle_reject=drizzle_reject,
+            reject_arrays=reject_arrays,
+            min_max_reject_count=min_max_reject_count, budget=int(budget))
+        if fix is not None:
+            sentence, fit_peak = fix
+            advice = (f"To fit, {sentence} (~{fit_peak / 1e9:.1f} GB), or raise "
+                      f"ASTROSTACK_MAX_STACK_GB to override.")
+        else:
+            advice = ("Reduce drizzle scale, switch Canvas mode to 'reference', "
+                      "reject outlier/off-target frames, or raise "
+                      "ASTROSTACK_MAX_STACK_GB to override.")
         raise MemoryError(
             f"stack output canvas {w}×{h}"
             + (f" ×{drizzle_scale:g} drizzle" if drizzle else "")
             + (" with outlier rejection" if (drizzle and drizzle_reject) else "")
             + f" needs ~{need / 1e9:.1f} GB of working memory, over the "
-            f"~{budget / 1e9:.1f} GB budget. Reduce drizzle scale, switch Canvas "
-            f"mode to 'reference', reject outlier/off-target frames, or raise "
-            f"ASTROSTACK_MAX_STACK_GB to override."
+            f"~{budget / 1e9:.1f} GB budget. " + advice
         )
 
 log = logging.getLogger(__name__)
@@ -1051,6 +1117,10 @@ def run_stack(
                         reject_arrays=(_min_max_reject_arrays(eff.min_max_reject_count)
                                        if eff.min_max_reject and not options.drizzle and n >= 3
                                        else 0),
+                        ref_shape=ref_shape, is_mosaic=is_mosaic_canvas,
+                        min_max_reject_count=(eff.min_max_reject_count
+                                              if eff.min_max_reject and not options.drizzle and n >= 3
+                                              else 1),
                         memory_budget_gb=memory_budget_gb)
     errors: list[str] = []
     # Set by the κ-σ pass-2 branch to record how much rejection actually clipped

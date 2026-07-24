@@ -154,6 +154,28 @@ def test_solve_failure_reason_counts_sees_accepted_unsolved(proj):
     assert "solve_failed:no star database" not in proj.reject_reason_counts()
 
 
+def test_count_accepted_unreadable_is_the_unsolved_qc_error_subset(proj):
+    """A frame that couldn't be read during QC is stamped ``qc_error`` but left
+    accepted (no metrics, never solves), so it is a subset of the accepted-unsolved
+    set — but its cause is "couldn't be read", not "not located yet". The dedicated
+    count must see it, and must NOT count an ordinary unsolved sub, a rejected
+    frame, or a qc_error frame that later solved."""
+    proj.add_frames([FrameRow(source_path=f"u{i}.fit") for i in range(5)])
+    # Two accepted, unsolved subs failed QC (retryable + terminal).
+    proj.update_frame(1, reject_reason="qc_error:truncated file")
+    proj.update_frame(2, reject_reason="qc_error_final:bad HDU")
+    # An ordinary accepted-but-unsolved sub is NOT unreadable.
+    #   (frame 3 left untouched: accept=1, wcs_json NULL, no reason)
+    # A qc_error frame that has since solved is not double-counted as unreadable.
+    proj.update_frame(4, reject_reason="qc_error:blip", wcs_json="{}")
+    # A user-rejected frame is not an unreadable one.
+    proj.update_frame(5, accept=False, reject_reason="user")
+
+    assert proj.count_accepted_unreadable() == 2
+    # It is genuinely a subset of the accepted-unsolved tally (frames 1, 2, 3).
+    assert proj.count_accepted_unsolved() == 3
+
+
 def test_frame_night_counts_buckets_by_capture_date(proj):
     """The storage headroom estimate needs frames-per-capture-night. The tally
     keys on the UTC date, counts rejected frames too (they consume disk), and
