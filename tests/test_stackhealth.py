@@ -304,3 +304,53 @@ def test_roughly_aligned_note_silent_when_null_or_zero():
             [_frame() for _ in range(100)],
         )
         assert "roughly_aligned" not in _kinds(notes)
+
+
+def _fwhm_frame(fwhm: float | None, *, accept=True) -> FrameRow:
+    return FrameRow(source_path=f"s{id(object())}.fit", accept=accept, fwhm_px=fwhm)
+
+
+def test_soft_stars_note_fires_when_the_stack_is_bloated_vs_its_subs():
+    """The finished stack's stars are materially fatter than the subs that made
+    them → a soft, no-gate note pointing at registration smear."""
+    # Subs median FWHM 3.0 px; stack FWHM 5.0 px → 1.67× ≥ 1.5× floor.
+    frames = [_fwhm_frame(3.0) for _ in range(8)]
+    notes = stack_health(_run(stack_fwhm_px=5.0), frames)
+    sf = next((n for n in notes if n.kind == "soft_stars"), None)
+    assert sf is not None
+    assert sf.severity == "info"
+    assert sf.action is None
+    assert "fatter" in sf.message
+
+
+def test_soft_stars_note_silent_when_the_stack_matches_its_subs():
+    """A well-registered stack holds the subs' sharpness → no note."""
+    frames = [_fwhm_frame(3.0) for _ in range(8)]
+    notes = stack_health(_run(stack_fwhm_px=3.1), frames)  # 1.03× < 1.5×
+    assert "soft_stars" not in _kinds(notes)
+
+
+def test_soft_stars_note_silent_when_the_stack_fwhm_is_missing():
+    """Old runs / too-few-stars record NULL stack_fwhm_px → stay silent."""
+    frames = [_fwhm_frame(3.0) for _ in range(8)]
+    notes = stack_health(_run(stack_fwhm_px=None), frames)
+    assert "soft_stars" not in _kinds(notes)
+
+
+def test_soft_stars_note_silent_with_too_few_sub_fwhm_measurements():
+    """Fewer than the minimum subs recorded a FWHM → no meaningful median, so no
+    note even if the one measured sub is much sharper than the stack."""
+    frames = [_fwhm_frame(3.0) for _ in range(4)] + [_fwhm_frame(None) for _ in range(4)]
+    notes = stack_health(_run(stack_fwhm_px=6.0), frames)
+    assert "soft_stars" not in _kinds(notes)
+
+
+def test_soft_stars_note_ignores_rejected_subs_for_the_sub_median():
+    """Only accepted subs anchor the comparison — a rejected soft sub must not
+    inflate the sub median and mask real bloat."""
+    # Accepted subs are sharp (2.0 px); a rejected 8.0 px sub must be ignored, so
+    # the stack at 3.5 px is 1.75× the accepted median → note fires.
+    frames = [_fwhm_frame(2.0) for _ in range(6)]
+    frames += [_fwhm_frame(8.0, accept=False) for _ in range(3)]
+    notes = stack_health(_run(stack_fwhm_px=3.5), frames)
+    assert "soft_stars" in _kinds(notes)

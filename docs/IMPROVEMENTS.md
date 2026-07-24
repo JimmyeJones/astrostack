@@ -7551,9 +7551,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
-- **IMPROVEMENT IDEA (Builder 2026-07-24, spotted while shipping "Your sharpest yet") — a *threshold-free* soft-star
+- ~~**IMPROVEMENT IDEA (Builder 2026-07-24, spotted while shipping "Your sharpest yet") — a *threshold-free* soft-star
   note for "How's my stack?": flag when the finished stack's stars are materially **bloated relative to the target's
-  own subs**, pointing at alignment/tracking loss rather than nagging on an absolute FWHM bar.** *(Pillar: 4 image
+  own subs**, pointing at alignment/tracking loss rather than nagging on an absolute FWHM bar.**~~ — **SHIPPED v0.200.0**
+  (Builder 2026-07-24, branch `claude/pensive-faraday-0b6bzx`; tested). Added a new `soft_stars` `HealthNote` to
+  `seestack/stackhealth.py`: a pure `_median_sub_fwhm(accepted)` helper takes the median of the accepted subs' own
+  `fwhm_px` (native-frame px, ≥5 measured or it stays silent), and the note fires only when the run's persisted
+  `stack_fwhm_px` is a finite `> 0` value that is `≥ 1.5×` that sub median — i.e. the *combine*, not the sky, bloated
+  the stars (accumulated sub-pixel/field-rotation registration drift). Purely **relative** (stack vs its own subs), so
+  no absolute/per-camera FWHM bar; the 1.5× floor is deliberately gentle so a normal well-aligned stack (≤~1.0×) never
+  trips it. Ranked at priority 37 (right after `roughly_aligned`, which it complements — that fires on the *count* of
+  shift-capped subs, this on the *measured* bloat). `action=None`, `severity="info"`, so it renders generically via the
+  existing `StackHealthCard` with **zero frontend change**; `kind` is an unconstrained `str` on `HealthNoteOut`, so no
+  schema/API change either. Silent for old runs (NULL `stack_fwhm_px`), too-few sub FWHMs, or a sharp stack. Tests:
+  `tests/test_stackhealth.py` (+5 — fires on bloat, silent when the stack matches its subs / NULL stack FWHM / too-few
+  sub measurements, and ignores rejected subs for the sub median). Upgrade-safe: additive read-only note, no
+  config/DB-schema/on-disk/API-shape/default change (both fields already persisted + served). *(Pillar: 4 image
   quality + 3 friendliness/understand; size S; engine helper + one health note.)* **The gap (verified this run):**
   `stack_health` (`seestack/stackhealth.py`) has a *shape* note (eccentricity ≥ 0.6) but **no sharpness note** — even
   though v0.194.0 now persists the finished stack's own median star size (`stack_runs.stack_fwhm_px`, native-frame px).
@@ -9222,16 +9235,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   neither SB nor a curated tag exists. **Feasibility:** static data-file addition + a pure function; no network, no
   schema/config/API/default change (the `DifficultyHint` shape is unchanged). Validate the SB→bucket thresholds against
   the existing curated table (they should broadly agree) before trusting them over curation. (S–M.)
-- **NEW IDEA (Builder 2026-07-24, follow-on to the v0.192.0 target-difficulty badge) — surface the difficulty verdict
+- ~~**NEW IDEA (Builder 2026-07-24, follow-on to the v0.192.0 target-difficulty badge) — surface the difficulty verdict
   in the "Tonight"/"What should I shoot next?" planner rows, so a beginner sees "easy/moderate/challenging" *while
-  choosing* a target, not only after they've shot it.** *(Autonomy + friendliness / plan pillar, PRIORITY 2–3; size S;
-  offline, additive.)* **Why:** the badge today only appears on the Target page (after a folder exists). The most
-  useful moment for "is this one easy or hard?" is *before* pointing the scope — in the planner, next to the framing
-  hint the rows already carry. **Shape:** the planner already resolves each row's catalog object (it renders
-  `framing`), so call `target_difficulty(obj.id, obj.type)` there too and add an additive `difficulty` field to the
-  planned-target payload; the frontend shows a compact difficulty chip on each planner row. Pure reuse of the shipped
-  engine function — no new astro math, no network, additive field only. Pairs naturally with a "start with an easy one
-  tonight" nudge for a brand-new owner. (S.)
+  choosing* a target, not only after they've shot it.**~~ — **SHIPPED v0.201.0** (Builder 2026-07-24, branch
+  `claude/pensive-faraday-0b6bzx`; tested). Added an additive `difficulty: DifficultyHint | None` field to both
+  `PlannedTarget` and `SuggestedTarget` (`seestack/nightplan.py`), set to `target_difficulty(obj.id, obj.type)` at the
+  two **catalog** construction sites (library rows carry `None`, mirroring `framing`). It serializes through the
+  existing `asdict(plan)` / `asdict(s)` path unchanged (nested frozen dataclass → `{level,label,text}`), so **no webapp
+  change** was needed. Frontend: a pure `difficultyRowBadge(difficulty)` helper (`frontend/src/tonight.ts`) mirroring
+  `framingRowBadge` — all three verdicts get a calm chip (teal Easy / blue Moderate / orange Challenging) with the full
+  sentence as tooltip, `null` for un-vetted rows — rendered next to the framing badge on both the Tonight table row
+  (`routes/Tonight.tsx`) and the Dashboard "Try something new tonight" suggestion (`components/SuggestTargetsCard.tsx`);
+  the `difficulty?` field was added to the two client types. So a beginner now sees "start with an easy one" *before*
+  pointing the scope, not only on the Target page after a folder exists. Tests: `tests/test_nightplan.py` (+3 — catalog
+  rows carry the verdict, library rows carry none, suggestions all carry one), `tests/webapp/test_plan.py` (+1 — the
+  verdict serializes through `/api/plan/tonight`), `frontend/src/tonight.test.ts` (+2 — the helper's null + colour
+  cases), `SuggestTargetsCard.test.tsx` (+1 — the badge renders). Upgrade-safe: additive engine field + frontend chip,
+  pure reuse of the shipped `target_difficulty` function; no config/DB-schema/on-disk/API-shape/default change (older
+  frontends simply ignore the new field). *(Autonomy + friendliness / plan pillar, PRIORITY 2–3; size S.)*
 - **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Is it worth staying on this target?": a plain-language
   diminishing-returns read that tells a beginner when more subs will visibly help vs when they've hit the flat
   part of the curve.** *(Autonomy / Friendliness — the "plan / understand" pillar, PRIORITY 2–3; size M; offline,

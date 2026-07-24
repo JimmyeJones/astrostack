@@ -66,6 +66,16 @@ describe("SuggestTargetsCard", () => {
     expect(screen.getByText(/Climbs to 64°, up about 7 h tonight/)).toBeInTheDocument();
   });
 
+  it("shows the difficulty verdict badge when the suggestion carries one", async () => {
+    vi.spyOn(client.api, "suggestTargets").mockResolvedValue(
+      response({ suggestions: [suggestion({
+        difficulty: { level: "easy", label: "Easy", text: "Bright and rewarding." },
+      })] }),
+    );
+    renderCard();
+    expect(await screen.findByText("Easy")).toBeInTheDocument();
+  });
+
   it("offers a per-target 'Add to calendar' .ics download (id encoded)", async () => {
     vi.spyOn(client.api, "suggestTargets").mockResolvedValue(
       response({ suggestions: [suggestion({ id: "NGC 7000", name: "North America Nebula" })] }),

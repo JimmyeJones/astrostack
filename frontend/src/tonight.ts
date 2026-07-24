@@ -1,7 +1,7 @@
 // Pure helpers for the 'Tonight' night-planner page — kept out of the component
 // so they're easy to unit-test without rendering.
 
-import type { FramingHint, NightPlan, PlannedTarget } from "./api/client";
+import type { DifficultyHint, FramingHint, NightPlan, PlannedTarget } from "./api/client";
 
 // A compact "will it fit in one frame?" table badge for a catalog planner row —
 // a pre-capture nudge so a beginner picks mosaic mode *before* pointing at an
@@ -16,6 +16,23 @@ export function framingRowBadge(
   const label = framing.level === "mosaic" ? "Needs mosaic" : "Mosaic for margin";
   const color = framing.level === "mosaic" ? "orange" : "yellow";
   return { label, color, tooltip: `This target ${framing.text}` };
+}
+
+// A compact "how hard for a Seestar?" table badge for a catalog planner row, so a
+// beginner sees the difficulty *while choosing* a target — not only after they've
+// shot it. All three verdicts get a chip (a reassuring "Easy" is exactly what a
+// brand-new owner wants to see when picking their first target), coloured calmly:
+// green for easy, blue for moderate, orange for challenging. `tooltip` carries the
+// full plain-language sentence for hover. Null when the object has no vetted
+// verdict (library rows / un-vetted catalog entries), so it never guesses.
+export function difficultyRowBadge(
+  difficulty: DifficultyHint | null | undefined,
+): { label: string; color: string; tooltip: string } | null {
+  if (!difficulty) return null;
+  const color = difficulty.level === "challenging"
+    ? "orange"
+    : difficulty.level === "moderate" ? "blue" : "teal";
+  return { label: difficulty.label, color, tooltip: difficulty.text };
 }
 
 // A short, friendly Moon-phase label from the illuminated fraction (0..1).

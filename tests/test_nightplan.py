@@ -141,6 +141,34 @@ def test_catalog_plan_rows_carry_a_framing_hint():
     assert m57.framing.level == "fits"
 
 
+def test_catalog_plan_rows_carry_a_difficulty_verdict():
+    """A vetted catalog candidate surfaces its "how hard for a Seestar?" verdict
+    pre-capture, so a beginner sees difficulty while choosing a target."""
+    plan = plan_tonight(LONDON, JAN_EVENING)
+    by_id = {t.id: t for t in plan.targets}
+    # M31 is bright and beginner-friendly → an "easy" verdict on the row.
+    m31 = by_id["M31"]
+    assert m31.difficulty is not None
+    assert m31.difficulty.level == "easy"
+    assert m31.difficulty.label == "Easy"
+    assert m31.difficulty.text  # a ready-to-render sentence
+    # M33 is a low-surface-brightness face-on galaxy → "challenging".
+    m33 = by_id.get("M33")
+    if m33 is not None:  # only if it's up tonight in this plan
+        assert m33.difficulty is not None
+        assert m33.difficulty.level == "challenging"
+
+
+def test_library_plan_rows_carry_no_difficulty_verdict():
+    """A user's own library row isn't a catalog object, so it gets no guessed
+    difficulty verdict (mirrors framing — catalog candidates only)."""
+    m42 = LibraryTarget(safe="M42", name="Orion Nebula", ra_deg=83.82,
+                        dec_deg=-5.39, frames_accepted=100, total_exposure_s=1000.0)
+    plan = plan_tonight(LONDON, JAN_EVENING, library_targets=[m42], include_catalog=False)
+    entry = next(p for p in plan.targets if p.id == "M42")
+    assert entry.difficulty is None
+
+
 def test_dark_window_is_astronomical_in_winter():
     plan = plan_tonight(LONDON, JAN_EVENING)
     dw = plan.dark_window
@@ -734,6 +762,18 @@ def test_suggest_targets_returns_well_placed_showpieces_best_first():
     # Sorted best-first by score.
     scores = [t.score for t in got]
     assert scores == sorted(scores, reverse=True)
+
+
+def test_suggest_targets_carry_a_difficulty_verdict():
+    """A discovery suggestion (all whitelisted showpieces) shows its "how hard for
+    a Seestar?" verdict next to the framing hint."""
+    got = suggest_targets(LONDON, JAN_EVENING, limit=40)
+    assert got
+    # Every showpiece on the whitelist is vetted, so each suggestion has a verdict.
+    for t in got:
+        assert t.difficulty is not None
+        assert t.difficulty.level in {"easy", "moderate", "challenging"}
+        assert t.difficulty.label
 
 
 def test_suggest_targets_excludes_already_captured_by_position():

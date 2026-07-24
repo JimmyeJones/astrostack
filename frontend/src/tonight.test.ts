@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  compassPoint, filterByTypeBucket, formatClock, formatMinutes, framingRowBadge,
+  compassPoint, difficultyRowBadge, filterByTypeBucket, formatClock, formatMinutes, framingRowBadge,
   isoDate, minAltOptions, MAX_PLAN_LOOKAHEAD_DAYS, moonCueForTarget, moonPhaseLabel,
   moonWindowNote, notUpTonightNote, objectTypeBucket, partitionByUpTonight,
   planDateBounds, planNightLabel, scoreColor, splitTargets, typeFilterOptions,
@@ -232,6 +232,30 @@ describe("framingRowBadge", () => {
     const tight = framingRowBadge({ level: "tight", text: "is about as wide as one frame." });
     expect(tight!.label).toBe("Mosaic for margin");
     expect(tight!.color).toBe("yellow");
+  });
+});
+
+describe("difficultyRowBadge", () => {
+  it("is null when there's no vetted verdict (library/un-vetted rows)", () => {
+    expect(difficultyRowBadge(null)).toBeNull();
+    expect(difficultyRowBadge(undefined)).toBeNull();
+  });
+
+  it("badges every verdict with a calm colour and the full sentence as tooltip", () => {
+    const easy = difficultyRowBadge(
+      { level: "easy", label: "Easy", text: "Bright and rewarding." });
+    expect(easy!.label).toBe("Easy");
+    expect(easy!.color).toBe("teal");
+    expect(easy!.tooltip).toBe("Bright and rewarding.");
+
+    const moderate = difficultyRowBadge(
+      { level: "moderate", label: "Moderate", text: "Needs a bit of patience." });
+    expect(moderate!.color).toBe("blue");
+
+    const hard = difficultyRowBadge(
+      { level: "challenging", label: "Challenging", text: "Faint — give it time." });
+    expect(hard!.label).toBe("Challenging");
+    expect(hard!.color).toBe("orange");
   });
 });
 
