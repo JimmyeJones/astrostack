@@ -1,7 +1,7 @@
 import { Badge, Group, Paper, Stack, Text } from "@mantine/core";
 import { IconStars } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
-import { api, type FramingHint } from "../api/client";
+import { api, type DifficultyHint, type FramingHint } from "../api/client";
 
 /** A plain-language one-liner for the object card, e.g.
  *  "A galaxy in the constellation Andromeda." Constellation is dropped when the
@@ -30,6 +30,15 @@ export function framingColor(level: FramingHint["level"]): string {
   if (level === "mosaic") return "orange.6";
   if (level === "tight") return "yellow.7";
   return "dimmed";
+}
+
+/** Mantine colour for a difficulty badge: reassuring green for easy, a calm blue
+ *  for moderate, and a gentle amber (never alarming red) for challenging — the
+ *  point is honest expectation-setting, not warning the user off. */
+export function difficultyColor(level: DifficultyHint["level"]): string {
+  if (level === "challenging") return "orange";
+  if (level === "moderate") return "blue";
+  return "green";
 }
 
 /**
@@ -65,6 +74,15 @@ export function ObjectInfoCard({ safe }: { safe: string }) {
           </Text>
           {d.blurb ? (
             <Text size="sm">{d.blurb}</Text>
+          ) : null}
+          {d.difficulty ? (
+            <Group gap="xs" wrap="nowrap" align="flex-start">
+              <Badge variant="light" color={difficultyColor(d.difficulty.level)}
+                size="sm" style={{ flexShrink: 0, marginTop: 2 }}>
+                {d.difficulty.label} for a Seestar
+              </Badge>
+              <Text size="sm" c="dimmed">{d.difficulty.text}</Text>
+            </Group>
           ) : null}
           {d.framing ? (
             <Text size="sm" c={framingColor(d.framing.level)}>

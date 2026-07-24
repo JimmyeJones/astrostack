@@ -19,6 +19,7 @@ from dataclasses import dataclass
 
 from seestack.framing import FramingHint, framing_hint
 from seestack.nightplan import CatalogObject, _angular_sep_deg, load_catalog
+from seestack.target_difficulty import DifficultyHint, target_difficulty
 
 # IAU 3-letter constellation abbreviation → full name. Static and offline; the
 # bundled catalog uses these abbreviations in its ``con`` field. The full 88 are
@@ -75,6 +76,7 @@ class ObjectInfo:
     size_arcmin: float | None = None   # major-axis size, when the catalog has one
     framing: FramingHint | None = None  # "will it fit in one frame?" verdict
     blurb: str = ""         # plain-language "what am I looking at?" one-liner, "" if none
+    difficulty: DifficultyHint | None = None  # "how hard for a Seestar?" verdict, if vetted
 
 
 def _norm_name(s: str) -> str:
@@ -149,4 +151,5 @@ def _to_info(obj: CatalogObject, matched_by: str) -> ObjectInfo:
         size_arcmin=obj.size_arcmin,
         framing=framing_hint(obj.size_arcmin),
         blurb=obj.blurb,
+        difficulty=target_difficulty(obj.id, obj.type),
     )

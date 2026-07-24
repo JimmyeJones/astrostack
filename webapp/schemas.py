@@ -55,6 +55,14 @@ class FramingHintOut(BaseModel):
     text: str
 
 
+class DifficultyHintOut(BaseModel):
+    """A "how hard is this for a Seestar?" verdict for a matched target."""
+
+    level: str  # "easy" | "moderate" | "challenging"
+    label: str  # one-word badge text, e.g. "Easy"
+    text: str
+
+
 class BestFrameOut(BaseModel):
     """The target's sharpest accepted sub, for the pre-stack "First look" card.
 
@@ -89,6 +97,10 @@ class ObjectInfoOut(BaseModel):
     # looking at?"), for the popular targets; ``""`` when the catalog has none.
     # Old backends omit it, so the UI treats absent/empty as "no blurb".
     blurb: str = ""
+    # "How hard is this target for a Seestar?" — easy/moderate/challenging plus one
+    # honest sentence, for the vetted popular objects; ``null`` when the object
+    # isn't vetted (old backends omit it — the UI treats absent as "no verdict").
+    difficulty: DifficultyHintOut | None = None
 
 
 class IntegrationGoalOut(BaseModel):

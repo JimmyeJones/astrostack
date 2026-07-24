@@ -237,6 +237,13 @@ export interface FramingHint {
   text: string;
 }
 
+export interface DifficultyHint {
+  level: "easy" | "moderate" | "challenging";
+  // One-word badge text, e.g. "Easy".
+  label: string;
+  text: string;
+}
+
 export interface ObjectInfo {
   id: string;
   name: string;
@@ -255,6 +262,10 @@ export interface ObjectInfo {
   // looking at?"), for the popular targets; absent/"" when the catalog has none
   // (older backends omit it — the card reads fine from type + constellation).
   blurb?: string;
+  // "How hard is this target for a Seestar?" — easy/moderate/challenging plus one
+  // honest sentence, for the vetted popular objects; absent/null otherwise (older
+  // backends omit it — treat as "no difficulty verdict").
+  difficulty?: DifficultyHint | null;
 }
 
 export interface SessionQualityDrift {

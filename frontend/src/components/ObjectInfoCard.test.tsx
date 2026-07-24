@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ObjectInfoCard,
   describeObject,
+  difficultyColor,
   framingColor,
   framingSentence,
 } from "./ObjectInfoCard";
@@ -53,6 +54,14 @@ describe("framingSentence / framingColor", () => {
   });
 });
 
+describe("difficultyColor", () => {
+  it("uses reassuring→amber colours, never an alarming red", () => {
+    expect(difficultyColor("easy")).toBe("green");
+    expect(difficultyColor("moderate")).toBe("blue");
+    expect(difficultyColor("challenging")).toBe("orange");
+  });
+});
+
 describe("ObjectInfoCard", () => {
   it("renders the catalog card on a confident match", async () => {
     vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
@@ -78,6 +87,39 @@ describe("ObjectInfoCard", () => {
     expect(
       screen.getByText(/Andromeda Galaxy is bigger than the Seestar's single frame/),
     ).toBeInTheDocument();
+  });
+
+  it("renders the difficulty badge and honest sentence when vetted", async () => {
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M33", name: "Triangulum Galaxy", type: "galaxy",
+      constellation: "Triangulum", constellation_abbr: "Tri",
+      ra_deg: 23, dec_deg: 30, matched_by: "name",
+      size_arcmin: 71,
+      difficulty: {
+        level: "challenging", label: "Challenging",
+        text: "Faint and low-contrast — it rewards a darker sky and several hours.",
+      },
+    });
+    renderCard("M_33");
+    await waitFor(() =>
+      expect(screen.getByText("Triangulum Galaxy")).toBeInTheDocument());
+    expect(screen.getByText("Challenging for a Seestar")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Faint and low-contrast/),
+    ).toBeInTheDocument();
+  });
+
+  it("omits the difficulty badge when the object isn't vetted", async () => {
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "NGC 4449", name: "", type: "galaxy",
+      constellation: "Canes Venatici", constellation_abbr: "CVn",
+      ra_deg: 187, dec_deg: 44, matched_by: "name",
+      // no `difficulty` field — old backend / uncurated object
+    });
+    const { container } = renderCard("NGC_4449");
+    await waitFor(() =>
+      expect(screen.getAllByText("NGC 4449").length).toBeGreaterThan(0));
+    expect(container.textContent).not.toContain("for a Seestar");
   });
 
   it("omits the blurb line when the catalog has none", async () => {

@@ -25,6 +25,11 @@ def test_identify_known_target_by_name(client, solved_library):
     # M42 is a curated popular target, so it carries a beginner blurb too.
     assert info["blurb"]
     assert "nebula" in info["blurb"].lower()
+    # ...and a "how hard for a Seestar?" verdict — Orion is the easy one.
+    assert info["difficulty"] is not None
+    assert info["difficulty"]["level"] == "easy"
+    assert info["difficulty"]["label"] == "Easy"
+    assert info["difficulty"]["text"]
 
 
 def test_identify_returns_null_for_an_unmatched_target(client, solved_library):
