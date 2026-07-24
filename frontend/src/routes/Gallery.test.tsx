@@ -96,6 +96,33 @@ describe("Gallery batch apply", () => {
     await waitFor(() => expect(screen.getByText(/5 min/)).toBeInTheDocument());
   });
 
+  it("flags a thin (1-frame) stack on its gallery tile so it can't pass as finished", async () => {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [{ ...item(1), n_frames_used: 1 }],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+
+    renderGallery();
+
+    await waitFor(() => expect(screen.getByText("1 frames")).toBeInTheDocument());
+    // The honest thin-stack cue (warning triangle) rides the frame-count badge.
+    expect(document.querySelector(".tabler-icon-alert-triangle")).not.toBeNull();
+  });
+
+  it("shows no thin-stack cue on a healthy gallery tile", async () => {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [{ ...item(1), n_frames_used: 40 }],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+
+    renderGallery();
+
+    await waitFor(() => expect(screen.getByText("40 frames")).toBeInTheDocument());
+    expect(document.querySelector(".tabler-icon-alert-triangle")).toBeNull();
+  });
+
   it("shows a run's label and filters by it (and by target name)", async () => {
     vi.spyOn(client.api, "getGallery").mockResolvedValue({
       items: [

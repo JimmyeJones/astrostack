@@ -220,15 +220,21 @@ def stack_estimate(
     safe: str, request: Request,
     drizzle: bool = False, drizzle_scale: float = 1.5,
     drizzle_reject: bool = False, mosaic_canvas: str = "auto",
+    min_max_reject: bool = False, min_max_reject_count: int = 1,
+    auto_reject: bool = False, sigma_kappa: float = 3.0,
 ) -> dict[str, Any]:
     """Dry-run sizing for a stack: output canvas + estimated peak memory,
     computed without stacking, so the Stack form can warn *before* a run is
     submitted and refused for OOM (e.g. "Drizzle ×2 → 7680×4320, ≈2.1 GB peak,
     over the ~1.4 GB budget").
 
-    Only the canvas-affecting knobs matter to sizing, so those are the only query
-    params. Returns 422 (not 500) when there's nothing solved to size yet, with
-    the same guidance ``run_stack`` gives."""
+    Only the sizing-affecting knobs are query params: the canvas ones (drizzle /
+    scale / reject / canvas mode) plus the min/max-reject knobs, because extra
+    outlier passes hold ``2k`` extra canvas planes the run-time guard charges — so
+    passing them keeps the pre-submit peak honest for a k>1 reject and lets the
+    over-budget fix offer "drop the extra passes". Returns 422 (not 500) when
+    there's nothing solved to size yet, with the same guidance ``run_stack``
+    gives."""
     from seestack.stack.stacker import StackOptions, estimate_stack
 
     settings = deps.get_settings(request)
@@ -239,6 +245,10 @@ def stack_estimate(
             drizzle_scale=float(drizzle_scale),
             drizzle_reject=bool(drizzle_reject),
             mosaic_canvas=str(mosaic_canvas),
+            min_max_reject=bool(min_max_reject),
+            min_max_reject_count=int(min_max_reject_count),
+            auto_reject=bool(auto_reject),
+            sigma_kappa=float(sigma_kappa),
         )
         try:
             est = estimate_stack(proj, options,
@@ -262,6 +272,19 @@ def stack_estimate(
         "would_exceed": est.would_exceed,
         "suggested_drizzle_scale": est.suggested_drizzle_scale,
         "suggested_reference_canvas": est.suggested_reference_canvas,
+        # The single least-destructive one-click fix + the memory it lands at,
+        # matching the run-time refusal message (None when the run fits or no one
+        # lever obviously does).
+        "memory_fix": (
+            {
+                "kind": est.memory_fix.kind,
+                "value": est.memory_fix.value,
+                "peak_bytes": est.memory_fix.peak_bytes,
+                "peak_gb": round(est.memory_fix.peak_bytes / 1e9, 2),
+            }
+            if est.memory_fix is not None
+            else None
+        ),
     }
 
 

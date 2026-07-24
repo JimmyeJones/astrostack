@@ -745,6 +745,18 @@ export interface StackEstimate {
   would_exceed: boolean;
   suggested_drizzle_scale: number | null;
   suggested_reference_canvas: boolean;
+  // The single least-destructive one-click fix + the memory it lands at, matching
+  // the run-time refusal message. null when the run fits or no one lever obviously
+  // does. `kind` names the lever: "drizzle_scale" (set drizzle_scale to `value`),
+  // "reduce_outlier_passes" (set min_max_reject_count to 1), or "reference_canvas"
+  // (set mosaic_canvas to "reference"). `value` is the target drizzle scale for
+  // "drizzle_scale", null otherwise.
+  memory_fix: {
+    kind: "drizzle_scale" | "reduce_outlier_passes" | "reference_canvas";
+    value: number | null;
+    peak_bytes: number;
+    peak_gb: number;
+  } | null;
 }
 
 export interface GalleryItem {
@@ -1295,13 +1307,23 @@ export const api = {
       `/api/targets/${safe}/stack-runs/${id}/options`),
   stackEstimate: (
     safe: string,
-    opts: { drizzle?: boolean; drizzle_scale?: number; drizzle_reject?: boolean; mosaic_canvas?: string },
+    opts: {
+      drizzle?: boolean; drizzle_scale?: number; drizzle_reject?: boolean;
+      mosaic_canvas?: string; min_max_reject?: boolean; min_max_reject_count?: number;
+      auto_reject?: boolean; sigma_kappa?: number;
+    },
   ) => {
     const p = new URLSearchParams();
     if (opts.drizzle) p.set("drizzle", "true");
     if (opts.drizzle_scale != null) p.set("drizzle_scale", String(opts.drizzle_scale));
     if (opts.drizzle_reject) p.set("drizzle_reject", "true");
     if (opts.mosaic_canvas) p.set("mosaic_canvas", opts.mosaic_canvas);
+    // Rejection knobs affect memory (extra min/max passes hold 2k canvas planes),
+    // so pass them through to keep the pre-submit peak honest for a k>1 reject.
+    if (opts.min_max_reject) p.set("min_max_reject", "true");
+    if (opts.min_max_reject_count != null) p.set("min_max_reject_count", String(opts.min_max_reject_count));
+    if (opts.auto_reject) p.set("auto_reject", "true");
+    if (opts.sigma_kappa != null) p.set("sigma_kappa", String(opts.sigma_kappa));
     return req<StackEstimate>(`/api/targets/${safe}/stack-estimate?${p.toString()}`);
   },
   stackArtifactUrl: (

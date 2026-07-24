@@ -217,23 +217,60 @@ def _largest_drizzle_scale_within_budget(
     return None
 
 
+@dataclass
+class MemoryFix:
+    """The single least-destructive change that brings an over-budget stack within
+    the memory budget, as a machine-actionable suggestion.
+
+    ``kind`` names the lever so the same fix can be rendered as a one-click button
+    on the Stack form *and* worded into the run-time refusal message (one source of
+    truth, so pre-submit advice and the post-refusal error can never disagree):
+
+    * ``"drizzle_scale"`` — set ``drizzle_scale`` to ``value`` (a smaller super-res
+      scale on the 0.1 grid).
+    * ``"reduce_outlier_passes"`` — set ``min_max_reject_count`` to 1 (drop the
+      extra min/max outlier passes; ``value`` is ``None``).
+    * ``"reference_canvas"`` — set ``mosaic_canvas`` to ``"reference"`` (crop a
+      mosaic union canvas to the reference frame; ``value`` is ``None``).
+
+    ``peak_bytes`` is the peak the run lands at *after* the change, computed from
+    the same :func:`_estimate_peak_bytes` the guard refuses on."""
+
+    kind: str
+    value: float | None
+    peak_bytes: int
+
+
+def _memory_fix_sentence(fix: MemoryFix) -> str:
+    """The imperative clause naming ``fix`` for the run-time refusal message
+    (e.g. ``"lower the drizzle scale to ×1.5"``). Kept beside :class:`MemoryFix`
+    so the pre-submit button and the error string stay worded consistently."""
+    if fix.kind == "drizzle_scale":
+        return f"lower the drizzle scale to ×{fix.value:g}"
+    if fix.kind == "reduce_outlier_passes":
+        return "lower Extra outlier passes to 1"
+    if fix.kind == "reference_canvas":
+        return "switch Canvas mode to 'reference'"
+    return ""  # unreachable — every kind above is enumerated
+
+
 def _best_memory_fix(
     dst_shape: tuple[int, int], ref_shape: tuple[int, int] | None, *,
     is_mosaic: bool, drizzle: bool, drizzle_scale: float,
     drizzle_reject: bool, reject_arrays: int, min_max_reject_count: int,
     budget: int,
-) -> tuple[str, int] | None:
+) -> MemoryFix | None:
     """The single least-destructive concrete change that brings an over-budget
-    stack within ``budget`` — ``(sentence, peak_bytes)`` — or ``None`` when no one
-    lever obviously fits (the caller then keeps the generic four-lever guidance).
+    stack within ``budget`` — a :class:`MemoryFix` — or ``None`` when no one lever
+    obviously fits (the caller then keeps the generic four-lever guidance).
 
     A beginner on a RAM-capped NAS gets no help from "reduce drizzle scale, switch
     canvas, reject frames, or raise the budget" — they can't tell *which* one, or
     *how far*. This names the specific lever and the memory it lands at, computed
     from the same :func:`_estimate_peak_bytes` the guard refuses on, so the named
-    "fits at ~X GB" can never disagree with the threshold. Mirrors the levers
-    :func:`estimate_stack` already surfaces pre-submit (drizzle-scale down /
-    reference canvas), plus dropping extra min/max outlier passes."""
+    "fits at ~X GB" can never disagree with the threshold. Both the pre-submit
+    :func:`estimate_stack` and the run-time :func:`_guard_stack_memory` call this,
+    so the one-click fix the UI offers and the refusal message always agree."""
     # Drizzle on → the only in-family lever is a smaller super-res scale (matches
     # estimate_stack's ``suggested_drizzle_scale``). If even ×1.0 can't fit, there
     # is no clean single fix — fall back to the generic guidance.
@@ -245,7 +282,7 @@ def _best_memory_fix(
             peak, _ = _estimate_peak_bytes(
                 dst_shape, drizzle=True, drizzle_scale=s,
                 drizzle_reject=drizzle_reject)
-            return (f"lower the drizzle scale to ×{s:g}", int(peak))
+            return MemoryFix("drizzle_scale", s, int(peak))
         return None
     # Non-drizzle levers, least-destructive first. Dropping extra outlier passes
     # (k>1 → the proven single min/max) costs only a little trail rejection; the
@@ -255,13 +292,13 @@ def _best_memory_fix(
             dst_shape, drizzle=False, drizzle_scale=1.0,
             reject_arrays=_min_max_reject_arrays(1))
         if peak <= budget:
-            return ("lower Extra outlier passes to 1", int(peak))
+            return MemoryFix("reduce_outlier_passes", None, int(peak))
     if is_mosaic and ref_shape is not None:
         peak, _ = _estimate_peak_bytes(
             ref_shape, drizzle=False, drizzle_scale=1.0,
             reject_arrays=reject_arrays)
         if peak <= budget:
-            return ("switch Canvas mode to 'reference'", int(peak))
+            return MemoryFix("reference_canvas", None, int(peak))
     return None
 
 
@@ -293,8 +330,8 @@ def _guard_stack_memory(dst_shape: tuple[int, int], *, drizzle: bool,
             reject_arrays=reject_arrays,
             min_max_reject_count=min_max_reject_count, budget=int(budget))
         if fix is not None:
-            sentence, fit_peak = fix
-            advice = (f"To fit, {sentence} (~{fit_peak / 1e9:.1f} GB), or raise "
+            advice = (f"To fit, {_memory_fix_sentence(fix)} "
+                      f"(~{fix.peak_bytes / 1e9:.1f} GB), or raise "
                       f"ASTROSTACK_MAX_STACK_GB to override.")
         else:
             advice = ("Reduce drizzle scale, switch Canvas mode to 'reference', "
@@ -510,6 +547,13 @@ class StackEstimate:
     # ``suggested_drizzle_scale``). False when drizzle is on, the run already
     # fits, it isn't a mosaic, or even the reference canvas exceeds the budget.
     suggested_reference_canvas: bool = False
+    # The single least-destructive one-click fix (with the memory it lands at)
+    # that brings an over-budget run within the budget — the *same*
+    # :class:`MemoryFix` the run-time refusal message names, so the pre-submit
+    # button and the error can never disagree. It also covers a lever the two
+    # coarse fields above miss (dropping extra min/max outlier passes on a
+    # non-drizzle stack). None when the run fits or no single lever obviously does.
+    memory_fix: MemoryFix | None = None
 
 
 def _auto_kappa_min_frames(kappa: float) -> int:
@@ -634,6 +678,21 @@ def estimate_stack(project: Project, options: StackOptions,
     )
     budget = int(_stack_memory_budget_bytes(memory_budget_gb))
     would_exceed = int(peak) > budget
+    # The single least-destructive concrete fix (with its resulting peak) — the
+    # same one the run-time guard would name, computed from the resolved options
+    # so a k>1 min/max reject that busts the budget can offer "drop to k=1"
+    # pre-submit, not only after a refusal.
+    memory_fix = (
+        _best_memory_fix(
+            dst_shape, ref_shape, is_mosaic=is_mosaic, drizzle=options.drizzle,
+            drizzle_scale=options.drizzle_scale,
+            drizzle_reject=options.drizzle_reject and n >= 4,
+            reject_arrays=(_min_max_reject_arrays(options.min_max_reject_count)
+                           if options.min_max_reject and not options.drizzle
+                           and n >= 3 else 0),
+            min_max_reject_count=options.min_max_reject_count, budget=budget)
+        if would_exceed else None
+    )
     suggested_scale: float | None = None
     suggest_ref_canvas = False
     if would_exceed and options.drizzle:
@@ -663,6 +722,7 @@ def estimate_stack(project: Project, options: StackOptions,
         would_exceed=would_exceed,
         suggested_drizzle_scale=suggested_scale,
         suggested_reference_canvas=suggest_ref_canvas,
+        memory_fix=memory_fix,
     )
 
 

@@ -117,3 +117,91 @@ def test_reference_canvas_mode_never_suggests(tmp_path):
         assert est.suggested_reference_canvas is False
     finally:
         proj.close()
+
+
+def test_memory_fix_offers_reference_canvas_with_its_peak(tmp_path):
+    """The structured ``memory_fix`` mirrors the coarse ``suggested_reference_canvas``
+    flag but also carries the concrete lever + the memory the run lands at, so the
+    Stack form can show "fits at ~X GB" pre-submit."""
+    proj = _mosaic_project(tmp_path)
+    try:
+        opts = StackOptions(drizzle=False, mosaic_canvas="auto")
+        est = estimate_stack(proj, opts, memory_budget_gb=15e-3)
+        assert est.would_exceed is True
+        assert est.suggested_reference_canvas is True
+        assert est.memory_fix is not None
+        assert est.memory_fix.kind == "reference_canvas"
+        assert est.memory_fix.value is None
+        # The named peak genuinely fits the budget (never offer a fix the run-time
+        # guard would then refuse) and is smaller than the over-budget union peak.
+        assert est.memory_fix.peak_bytes <= est.budget_bytes
+        assert est.memory_fix.peak_bytes < est.peak_bytes
+    finally:
+        proj.close()
+
+
+def test_memory_fix_prefers_dropping_extra_outlier_passes(tmp_path):
+    """When a k>1 min/max reject is the *only* reason a run busts the budget, the
+    pre-submit fix offers "drop to k=1" — the least-destructive lever — which the
+    two coarse suggestion fields never surfaced. This closes the gap where the
+    pre-submit advice was blunter than the run-time refusal message."""
+    proj = _mosaic_project(tmp_path)
+    try:
+        opts = StackOptions(
+            drizzle=False, mosaic_canvas="auto",
+            min_max_reject=True, min_max_reject_count=3,
+        )
+        # Budget the union canvas fits at the baseline 4 planes (k=1) but not at
+        # k=3's 8 planes: dropping the extra passes rescues it without cropping.
+        from seestack.stack.stacker import _estimate_peak_bytes, _min_max_reject_arrays
+
+        dst = (est_union := estimate_stack(proj, opts, memory_budget_gb=1.0)).canvas_h, \
+            est_union.canvas_w
+        peak_k1, _ = _estimate_peak_bytes(
+            dst, drizzle=False, drizzle_scale=1.0,
+            reject_arrays=_min_max_reject_arrays(1))
+        peak_k3, _ = _estimate_peak_bytes(
+            dst, drizzle=False, drizzle_scale=1.0,
+            reject_arrays=_min_max_reject_arrays(3))
+        budget_gb = (peak_k1 + peak_k3) / 2 / 1e9  # fits k=1, busts k=3
+        est = estimate_stack(proj, opts, memory_budget_gb=budget_gb)
+        assert est.would_exceed is True
+        assert est.memory_fix is not None
+        assert est.memory_fix.kind == "reduce_outlier_passes"
+        assert est.memory_fix.value is None
+        assert est.memory_fix.peak_bytes <= est.budget_bytes
+    finally:
+        proj.close()
+
+
+def test_memory_fix_offers_drizzle_scale_with_its_peak(tmp_path):
+    """A drizzle run over budget → the fix names the smaller scale + its peak."""
+    proj = _mosaic_project(tmp_path)
+    try:
+        opts = StackOptions(drizzle=True, drizzle_scale=2.0, mosaic_canvas="reference")
+        # A budget between the ×1.0 and ×2.0 reference-canvas peaks.
+        from seestack.stack.stacker import _estimate_peak_bytes
+
+        p1, _ = _estimate_peak_bytes((320, 480), drizzle=True, drizzle_scale=1.0)
+        p2, _ = _estimate_peak_bytes((320, 480), drizzle=True, drizzle_scale=2.0)
+        est = estimate_stack(proj, opts, memory_budget_gb=(p1 + p2) / 2 / 1e9)
+        assert est.would_exceed is True
+        assert est.memory_fix is not None
+        assert est.memory_fix.kind == "drizzle_scale"
+        assert 1.0 <= est.memory_fix.value < 2.0
+        assert est.memory_fix.peak_bytes <= est.budget_bytes
+        # The structured value agrees with the coarse suggested_drizzle_scale.
+        assert est.memory_fix.value == est.suggested_drizzle_scale
+    finally:
+        proj.close()
+
+
+def test_memory_fix_none_when_run_fits(tmp_path):
+    proj = _mosaic_project(tmp_path)
+    try:
+        opts = StackOptions(drizzle=False, mosaic_canvas="auto")
+        est = estimate_stack(proj, opts, memory_budget_gb=1.0)  # generous
+        assert est.would_exceed is False
+        assert est.memory_fix is None
+    finally:
+        proj.close()
