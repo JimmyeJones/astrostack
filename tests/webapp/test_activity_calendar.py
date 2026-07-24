@@ -78,3 +78,58 @@ def test_activity_calendar_ignores_a_frame_with_no_timestamp(client, built_libra
     assert r.status_code == 200
     # No timestamps were set here, so no nights are reported.
     assert r.json()["n_nights"] == 0
+
+
+def _night_of_the_session(client, built_library):
+    """Stamp M_42's frames onto a 03:00-UTC session ~30 days ago and return the
+    single observing-night date the calendar reports for it."""
+    from seestack.io.library import Library
+
+    day = (datetime.now(timezone.utc) - timedelta(days=30)).date()
+    lib = Library.open_or_create(built_library / "library")
+    try:
+        _set_night(lib, "M_42", day, 3, 60.0)  # 03:00 UTC — near the UTC midnight edge
+    finally:
+        lib.close()
+    r = client.get("/api/activity-calendar")
+    assert r.status_code == 200
+    nights = [n for n in r.json()["nights"] if n["n_frames"] == 3]
+    assert len(nights) == 1
+    return day, nights[0]["date"]
+
+
+def test_calendar_falls_back_to_sitelong_when_no_configured_lon(
+        client, built_library, monkeypatch):
+    # No site_lon in Settings, but a frame's header says we're far east (+150°,
+    # ~+10 h). A 03:00-UTC session then belongs to *that* calendar day's night,
+    # not the previous UTC night the bare UTC fallback would assign.
+    import webapp.routers.stats as stats
+    monkeypatch.setattr(stats, "detect_site_from_library",
+                        lambda lib, **k: (20.0, 150.0))
+    day, night = _night_of_the_session(client, built_library)
+    assert night == day.isoformat()
+
+
+def test_calendar_uses_utc_when_no_location_anywhere(
+        client, built_library, monkeypatch):
+    # No configured lon and no header site → UTC noon-to-noon: the same 03:00-UTC
+    # session buckets onto the *previous* calendar day.
+    import webapp.routers.stats as stats
+    monkeypatch.setattr(stats, "detect_site_from_library", lambda lib, **k: None)
+    day, night = _night_of_the_session(client, built_library)
+    assert night == (day - timedelta(days=1)).isoformat()
+
+
+def test_configured_site_lon_wins_and_skips_header_probe(
+        client, built_library, monkeypatch):
+    # An explicit Settings longitude must win over any header, and the FITS probe
+    # must not run at all when a location is already configured.
+    import webapp.routers.stats as stats
+
+    def _boom(lib, **k):
+        raise AssertionError("header probe must not run when site_lon is configured")
+
+    monkeypatch.setattr(stats, "detect_site_from_library", _boom)
+    client.put("/api/settings", json={"site_lon": 150.0})
+    day, night = _night_of_the_session(client, built_library)
+    assert night == day.isoformat()  # +150° → same-day night, same as the fallback

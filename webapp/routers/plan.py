@@ -36,14 +36,11 @@ from seestack.nightplan import (
 )
 from webapp import deps
 from webapp.ics import IcsEvent, to_ics
+from webapp.site_location import detect_site_from_library as _detect_site_from_library
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/plan", tags=["plan"])
-
-# Cap how many frames we probe for a site location so a big library with no
-# SITELAT header anywhere can't turn one request into thousands of header reads.
-_MAX_SITE_PROBE_FRAMES = 24
 
 # How far ahead the `date` picker may plan. Deep-sky observability a couple of
 # months out is still useful ("when's the next dark-sky window for M31?"); beyond
@@ -69,87 +66,17 @@ def _reference_for_date(plan_date: _date, lon_deg: float) -> datetime:
     return noon_utc - timedelta(hours=lon_deg / 15.0)
 
 
-def _parse_angle(value: Any) -> float | None:
-    """Parse a FITS angle that may be a float (deg) or a 'DD:MM:SS' string."""
-    if value is None:
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    s = str(value).strip()
-    if not s:
-        return None
-    try:
-        return float(s)
-    except ValueError:
-        pass
-    # Sexagesimal 'DD:MM:SS' / 'DD MM SS'.
-    parts = s.replace(":", " ").split()
-    try:
-        nums = [float(p) for p in parts]
-    except ValueError:
-        return None
-    if not nums:
-        return None
-    sign = -1.0 if nums[0] < 0 or s.lstrip().startswith("-") else 1.0
-    deg = abs(nums[0])
-    if len(nums) > 1:
-        deg += nums[1] / 60.0
-    if len(nums) > 2:
-        deg += nums[2] / 3600.0
-    return sign * deg
-
-
-def _site_from_header(header: dict) -> tuple[float, float] | None:
-    """(lat, lon) in degrees from a raw FITS header, or None if absent/bad."""
-    lat = _parse_angle(header.get("SITELAT"))
-    lon = _parse_angle(header.get("SITELONG") or header.get("SITELONG "))
-    if lat is None or lon is None:
-        return None
-    if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
-        return None
-    return lat, lon
-
-
 def _detect_site_from_fits(request: Request) -> tuple[float, float] | None:
     """Best-effort observer lat/lon from a recent frame's FITS header.
 
-    Reads headers only (fast, no pixel data), tries the cached copy before the
-    original NAS path, and bails after a bounded number of probes. Any read
-    error is swallowed — a missing site just means the caller must configure one.
+    Opens the library and delegates to the shared, bounded header probe
+    (:func:`webapp.site_location.detect_site_from_library`).
     """
-    from seestack.io.fits_loader import load_header
-    from seestack.io.project import Project
-
     lib = deps.open_library(request)
-    probed = 0
     try:
-        for entry in lib.list_targets():
-            proj = None
-            try:
-                proj = Project.open(lib.target_dir(entry))
-                for frame in proj.iter_frames(accepted_only=True):
-                    if probed >= _MAX_SITE_PROBE_FRAMES:
-                        return None
-                    for path in (frame.cached_path, frame.source_path):
-                        if not path:
-                            continue
-                        probed += 1
-                        try:
-                            info = load_header(path)
-                        except Exception:  # noqa: BLE001 — unreadable frame, move on
-                            continue
-                        site = _site_from_header(info.raw_header)
-                        if site is not None:
-                            return site
-                        break  # one readable path per frame is enough
-            except Exception:  # noqa: BLE001 — a broken project must not 500 the plan
-                continue
-            finally:
-                if proj is not None:
-                    proj.close()
+        return _detect_site_from_library(lib)
     finally:
         lib.close()
-    return None
 
 
 def _resolve_observer(request: Request, settings) -> tuple[Observer | None, str]:  # noqa: ANN001

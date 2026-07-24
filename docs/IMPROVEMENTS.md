@@ -5258,9 +5258,25 @@ to **Shipped**.)_
   persisted dismissal). Upgrade-safe: additive read-only endpoint + new component, no
   config/DB-schema/on-disk/default change; **never auto-deletes** and never touches
   `_sub` data. *(Follow-up to the ⭐⭐⭐ scanner fix shipped v0.184.9.)*
-- **NEW IDEA (Builder 2026-07-24, spotted while shipping the imaging calendar v0.188.0) — derive the calendar's
+- ~~**NEW IDEA (Builder 2026-07-24, spotted while shipping the imaging calendar v0.188.0) — derive the calendar's
   night-boundary longitude from a solved frame's FITS `SITELONG` when `site_lon` is unset, so noon-to-noon bucketing
-  is correct out of the box.** *(Pillar: 2 autonomy + 3 friendliness; size S.)* **The gap:** the activity calendar
+  is correct out of the box.**~~ — **SHIPPED v0.189.2** (Builder 2026-07-24, branch `claude/pensive-faraday-cznr3m`;
+  tested). Extracted the plan router's best-effort site-detection into a shared `webapp/site_location.py`
+  (`parse_angle`, `site_from_header`, `detect_site_from_library(lib, *, max_probes=24)` — a bounded, headers-only probe
+  that reuses the exact SITELAT/SITELONG parsing the Tonight planner already uses), and had `plan.py` import it
+  (its `_detect_site_from_fits` is now a thin lib-opening wrapper). `GET /api/activity-calendar` now resolves the
+  bucketing longitude as **Settings `site_lon` → a frame's `SITELONG` header → UTC**: when `site_lon` is unset it calls
+  `_fallback_site_lon`, which sniffs a header longitude and caches it on `app.state.activity_lon_cache` (keyed on the
+  target set, same 120 s TTL as the calendar) so a locationless library isn't re-probed every dashboard load. A beginner
+  who never configured a location now gets correct noon-to-noon nights for a far-east/west site out of the box; the UTC
+  fallback still applies only when there's no header site either. Upgrade-safe: additive (new module + a fallback path),
+  no config/DB/API-shape/on-disk change, and **behaviour is byte-identical when a location IS configured** (Settings
+  still wins; the probe doesn't even run). Regression: `tests/webapp/test_site_location.py` (+3 — reads SITELONG,
+  None when absent, respects the probe cap) and `tests/webapp/test_activity_calendar.py` (+3 — a 03:00-UTC session
+  buckets onto *that* day's night under a +150° header fallback, onto the *previous* day under UTC, and a configured
+  `site_lon` wins while skipping the probe entirely). `test_plan.py` re-pointed at the moved helpers. (S, autonomy +
+  friendliness — PRIORITY 2–3.)
+  *(Original idea kept for provenance.)* **The gap:** the activity calendar
   (`/api/activity-calendar`) buckets each sub onto its observing night using the observer's longitude to approximate
   local time, but it reads **only** `settings.site_lon` — which a beginner usually never sets. With it unset the
   calendar falls back to UTC noon-to-noon, so a far-east/west observer's late-evening subs can bucket onto the wrong
