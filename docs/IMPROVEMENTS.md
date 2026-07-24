@@ -5260,10 +5260,28 @@ problems. Dogfood it every big-picture run and fix root causes.
   minimal-fuss fix. Additive to `StackEstimate` (new optional fields); no default/behaviour change. Serves the "just
   works / fewer decisions" pillar. Confidence in value: high (the owner is on a RAM-capped NAS by report).
 
-- **IMPROVEMENT IDEA (Scout 2026-07-23, spotted while fixing the v0.184.6 qc_error clobber bug) — surface a plain
+- ~~**IMPROVEMENT IDEA (Scout 2026-07-23, spotted while fixing the v0.184.6 qc_error clobber bug) — surface a plain
   "some of your subs couldn't be read" health signal when frames pile up as `qc_error_final`, so a beginner with a
-  flaky NAS / truncated downloads / a few corrupt files isn't left silently short of subs with no explanation.**
-  *(Autonomy + friendliness; pillar 2–3; size S–M; additive, read-only.)* **The gap (verified this run):** the app
+  flaky NAS / truncated downloads / a few corrupt files isn't left silently short of subs with no explanation.**~~ —
+  **SHIPPED (both halves).** The **Target-page callout** already existed (`countQcUncheckable` → the grey "N frames
+  couldn't be quality-checked" Alert with a "Re-check these frames" action, `frontend/src/routes/Target.tsx`). **This
+  run (v0.184.12, Builder, branch `claude/pensive-faraday-xok0ew`)** closed the *breakdown* gap: those same
+  accepted-but-unreadable subs were ALSO being counted in the "why frames were left out?" breakdown's **"Not located
+  in the sky yet"** bucket (they're `accept=1, wcs_json NULL`, so `count_accepted_unsolved()` swept them in) — so a
+  corrupt file was both double-reported *and* drove the "Run Plate Solve" nudge (wrong advice: you can't plate-solve a
+  file that won't read). Added `Project.count_accepted_unreadable()` (the `accept=1 ∧ wcs_json NULL ∧
+  reject_reason LIKE 'qc_error%'` subset) and threaded an `n_unreadable` arg through `summarize_rejections`
+  (`webapp/rejection_summary.py`): those subs are now moved from the "unsolved" bucket into the **"Couldn't be read or
+  measured"** bucket (copy sharpened to "may be corrupt or were still downloading … the rest are fine"), and the
+  plate-solve-nudge verdict is computed over the *located-pending* count only, so it never fires on unreadable files.
+  Totals (`used`/`dropped`) are byte-identical — the subs are just re-attributed to the honest cause. A positive knock-on:
+  the Target page's `unsolvedCount` (which drives the "Auto-stack is waiting for more subs to be located" banner) no
+  longer waits on corrupt files. Additive + upgrade-safe: new optional `n_unreadable=0` param (defaults reproduce the
+  old output exactly), no config/DB-schema/API-shape/default change. Tests: `test_project.py`
+  (`test_count_accepted_unreadable_is_the_unsolved_qc_error_subset`), `test_rejection_summary.py` (+5 — error-bucket
+  re-attribution, merge with an existing error bucket, all-unreadable suppresses the nudge, clamp, default backward-compat),
+  `test_api.py` (`test_reject_summary_buckets_unreadable_subs_as_error_not_unsolved`).
+  *(Original idea kept for provenance.)* **The gap (verified this run):** the app
   now honestly surfaces *rejected* subs ("N not located yet", "X of Y went into your picture", the reject-summary
   buckets), but a sub that **failed QC entirely** — an unreadable/corrupt/truncated file — ends up `accept=True` with
   a `qc_error_final:` reason and `star_count` NULL, and it is **never counted or explained anywhere in the UI**: it's

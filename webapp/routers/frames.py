@@ -191,6 +191,11 @@ def reject_summary(safe: str, request: Request) -> dict:
         solve_failures = proj.solve_failure_reason_counts()
         n_accepted = proj.count(accepted_only=True)
         n_unsolved = proj.count_accepted_unsolved()
+        # Of the accepted-but-unsolved subs, the ones that couldn't be *read* at
+        # all (qc_error) are a distinct cause — surface them as "couldn't be read"
+        # rather than "not located yet", so the breakdown doesn't nudge a
+        # plate-solve on a corrupt file (or double-count it against the callout).
+        n_unreadable = proj.count_accepted_unreadable()
     finally:
         proj.close()
         lib.close()
@@ -204,7 +209,8 @@ def reject_summary(safe: str, request: Request) -> dict:
         # ``n_unsolved`` folds accepted-but-not-plate-solved subs (silently
         # excluded from the stack) into the breakdown so a thin stack is
         # explained, not counted as "used".
-        "summary": summarize_rejections(counts, n_accepted, n_unsolved),
+        "summary": summarize_rejections(counts, n_accepted, n_unsolved,
+                                        n_unreadable),
     }
 
 

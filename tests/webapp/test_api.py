@@ -450,6 +450,40 @@ def test_reject_summary_surfaces_accepted_unsolved_frames(client, built_library)
     assert "Plate Solve" in summary["verdict"]["text"]
 
 
+def test_reject_summary_buckets_unreadable_subs_as_error_not_unsolved(
+    client, built_library, data_root,
+):
+    """A sub that couldn't be read during QC (qc_error, left accepted) is unsolved,
+    but its cause is "couldn't be read", not "not located yet". The breakdown must
+    put it in the error bucket — and must not nudge a plate-solve on it."""
+    from seestack.io.library import Library
+
+    frames = client.get("/api/targets/M_42/frames").json()
+    n_total = len(frames)
+    assert n_total >= 2
+
+    # Mark one accepted, unsolved sub as an unreadable QC failure.
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target("M_42")
+        try:
+            proj.update_frame(frames[0]["id"],
+                              reject_reason="qc_error_final:truncated file")
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    summary = client.get(
+        "/api/targets/M_42/frames/reject-summary").json()["summary"]
+    keys = {b["key"]: b["count"] for b in summary["buckets"]}
+    assert keys.get("error") == 1
+    assert keys.get("unsolved") == n_total - 1
+    # Still all left out; used unchanged (none plate-solved).
+    assert summary["dropped"] == n_total
+    assert summary["used"] == 0
+
+
 def test_reject_summary_groups_by_reason(client, solved_library, data_root):
     from seestack.io.library import Library
 

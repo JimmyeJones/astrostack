@@ -641,6 +641,25 @@ class Project:
             "SELECT COUNT(*) FROM frames WHERE accept = 1 AND wcs_json IS NULL"
         ).fetchone()[0]
 
+    def count_accepted_unreadable(self) -> int:
+        """Count accepted, still-unsolved frames that couldn't be quality-checked.
+
+        A frame whose FITS couldn't be read during QC (corrupt / truncated / a
+        copy still in progress) is stamped a ``qc_error``/``qc_error_final:``
+        ``reject_reason`` but left **accepted** (``accept=1``, no metrics), so it
+        never solves and ``run_stack`` silently drops it. It is therefore a
+        *subset* of :meth:`count_accepted_unsolved`, but its cause is "couldn't be
+        read", not "not located in the sky yet" — so the breakdown must attribute
+        it to the unreadable bucket (and never nudge a plate-solve on it). The
+        ``wcs_json IS NULL`` guard keeps it definitionally within the unsolved set
+        (a rare frame that errored in QC yet later solved is not double-counted)."""
+        assert self._conn is not None
+        return self._conn.execute(
+            "SELECT COUNT(*) FROM frames "
+            "WHERE accept = 1 AND wcs_json IS NULL "
+            "AND reject_reason LIKE 'qc_error%'"
+        ).fetchone()[0]
+
     def reject_reason_counts(self) -> dict[str, int]:
         """Tally rejected frames by ``reject_reason`` (e.g. ``qc:fwhm``,
         ``bulk:streaked``, ``user``). A rejected frame with a NULL reason is

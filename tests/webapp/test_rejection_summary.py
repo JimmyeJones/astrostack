@@ -124,6 +124,54 @@ def test_unsolved_equal_to_used_is_not_called_only_a_few_made_the_stack():
     assert "only a few made the stack" in s3["verdict"]["text"]
 
 
+def test_unreadable_subs_are_bucketed_as_error_not_unsolved():
+    # Of 20 accepted-but-unsolved subs, 3 couldn't be *read* (qc_error). Those are
+    # a distinct cause: attribute them to "couldn't be read", not "not located
+    # yet", so the breakdown never nudges a plate-solve on a corrupt file. Totals
+    # are unchanged — the 3 are still left-out, just re-bucketed.
+    s = summarize_rejections({}, n_accepted=100, n_unsolved=20, n_unreadable=3)
+    k = _keys(s)
+    assert k["unsolved"] == 17
+    assert k["error"] == 3
+    assert s["used"] == 80          # 100 accepted − 20 unsolved (unchanged)
+    assert s["dropped"] == 20       # still all 20 left out
+
+
+def test_unreadable_merges_with_an_existing_error_bucket():
+    # A rejected (accept=0) qc_error frame already lands in "error"; the accepted
+    # unreadable subs add to the same bucket rather than a duplicate one.
+    s = summarize_rejections({"qc_error_final:boom": 1}, n_accepted=50,
+                             n_unsolved=5, n_unreadable=2)
+    k = _keys(s)
+    assert k["error"] == 3          # 1 rejected + 2 accepted-unreadable
+    assert k["unsolved"] == 3       # 5 unsolved − 2 unreadable
+
+
+def test_all_unsolved_are_unreadable_suppresses_the_plate_solve_nudge():
+    # When every "missing" sub is actually a corrupt file, there's nothing to
+    # plate-solve — the verdict must NOT tell the beginner to run Plate Solve.
+    s = summarize_rejections({}, n_accepted=8, n_unsolved=8, n_unreadable=8)
+    k = _keys(s)
+    assert k == {"error": 8}
+    assert "unsolved" not in k
+    assert "Plate Solve" not in s["verdict"]["text"]
+
+
+def test_unreadable_is_clamped_to_the_unsolved_count():
+    # A garbled count where unreadable > unsolved can never make the located-pending
+    # tally go negative; it's clamped to the unsolved total.
+    s = summarize_rejections({}, n_accepted=10, n_unsolved=3, n_unreadable=99)
+    k = _keys(s)
+    assert k == {"error": 3}
+    assert s["dropped"] == 3
+
+
+def test_unreadable_defaults_to_zero_backward_compatible():
+    # Omitting n_unreadable reproduces the pre-change behaviour exactly.
+    s = summarize_rejections({}, n_accepted=100, n_unsolved=20)
+    assert _keys(s) == {"unsolved": 20}
+
+
 def test_unsolved_combines_with_rejected_frames():
     # Rejected (accept=0) and unsolved-accepted subs are distinct causes and both
     # count as left-out; used stays accepted-and-solved.
