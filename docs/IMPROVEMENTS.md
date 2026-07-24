@@ -5591,9 +5591,28 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
-- **IMPROVEMENT IDEA (Scout 2026-07-24) — auto-restack an uncalibrated target once confident calibration masters
+- ~~**IMPROVEMENT IDEA (Scout 2026-07-24) — auto-restack an uncalibrated target once confident calibration masters
   become available, so the darks/flats a beginner adds *after* their first stack actually get used without a manual
-  reprocess.** *(Autonomy + image quality — priorities 2/4; size M — one scoped Builder slice.)* **The gap (verified
+  reprocess.**~~ — **SHIPPED v0.189.0** (Builder 2026-07-24, branch `claude/pensive-faraday-rzctfj`; regression-tested).
+  The unattended auto-stack pass (`webapp/pipeline.py`) now runs a **calibration-availability recheck** whenever the
+  frame-count trigger finds no new subs: new pure helper `_confident_master_binding(settings, proj)` (factored out of
+  `_auto_bind_calibration`, so the recheck uses the *same* confidence gates the walk-away path already trusts) +
+  `_auto_stack_calibration_recheck(settings, lib, safe)`, which re-triggers a single restack when **all** hold —
+  `auto_bind_calibration` is on (both it and `auto_stack` default **off**, so a default install is byte-for-byte
+  unchanged), the target has ≥1 prior stack run and **none** was calibrated (empty `calstat`), and a confident master
+  now auto-binds for the target's acquisition params. **Loop-safety** mirrors the crash-loop discipline exactly: a new
+  additive per-target meta marker (`AUTO_STACK_CALIB_META_KEY`) records the bound master-set fingerprint
+  (`_calib_fingerprint`) *before* the restack, so a given newly-available master set fires **once**, never on every
+  scan (and a successful calibrated restack self-limits via the "no calibrated run" gate); the marker is cleared
+  alongside the frame-count marker on a recoverable failure / cancel so a *transient* failure isn't stranded.
+  **Upgrade-safe:** additive meta key only, no config/DB-schema/API-shape/on-disk/default change; the restack reuses the
+  existing `_stack_target(auto_bind_calibration=…)` path so its `CALSTAT` provenance records the applied masters.
+  Regression tests (`tests/webapp/test_auto_stack_calibration_recheck.py`, 5): uncalibrated target re-stacks once a
+  matching master appears then the marker holds a second scan; no restack without a confident master, with
+  `auto_bind_calibration` off, or when the prior run was already calibrated; and the recheck helper returns
+  `(count, fingerprint)` then goes quiet once its marker is set. Closes the loop on the "add darks" advice the app's own
+  "How's my stack?" card gives. Confidence: traced + regression-tested. (M, autonomy/image-quality — PRIORITY 2/4.)
+  *(Original idea trace kept below for provenance.)* **The gap (verified
   this run against `webapp/pipeline.py`):** the auto-stack trigger is **purely frame-count-based** —
   `_auto_stack_frame_count(lib, safe)` re-stacks only when *solved+accepted* frames exceed `prior_max` (plus the
   attempt-marker guard). **Adding a calibration master changes no frame count**, so it never re-triggers. Real beginner
