@@ -5754,6 +5754,28 @@ problems. Dogfood it every big-picture run and fix root causes.
   it needs a careful Builder slice (and the astroalign-vs-in-house/dependency call belongs to the owner). But it is the
   single most direct cure for the owner's real "gibberish on faint targets" report — worth prioritising once the
   cheaper solve-side mitigations are exhausted.
+- ~~**▶ PARTIAL — refusal message half SHIPPED v0.184.13; pre-submit UI half now SHIPPED v0.197.0.**~~ — **COMPLETE
+  v0.197.0** (Builder 2026-07-24, branch `claude/pensive-faraday-7sd8na`; regression-tested). The pre-submit half is now
+  done, unified on the *same* `_best_memory_fix` the refusal message uses, so the Stack-form one-click fix and the
+  run-time error can never disagree. **Engine:** `_best_memory_fix` now returns a machine-actionable `MemoryFix(kind,
+  value, peak_bytes)` (kinds `drizzle_scale` / `reduce_outlier_passes` / `reference_canvas`) instead of a bare
+  `(sentence, peak)`; a new `_memory_fix_sentence()` words it for the refusal (byte-identical to before — the guard
+  tests' exact strings still pass). `estimate_stack` calls it and exposes `StackEstimate.memory_fix`, so the pre-submit
+  estimate offers the *least-destructive* single lever with the memory it lands at — including "drop the extra outlier
+  passes", which the two coarse `suggested_*` fields never surfaced. **Correctness bonus:** the estimate endpoint now
+  forwards the min/max-reject knobs (`min_max_reject`/`min_max_reject_count`/`auto_reject`/`sigma_kappa`), so the
+  pre-submit peak now *charges the 2k reject planes the run-time guard charges* — previously the estimate under-counted
+  memory for a k>1 reject and could say "fits" for a run the guard would then refuse. **Frontend:** a pure
+  `memoryFixAction()` (`frontend/src/stackMemoryFix.ts`) maps `memory_fix` → one button (label names the lever + "fits at
+  ~X GB", wired to the right form option); the Stack form prefers it and falls back to the old two fields for an old
+  backend. Tests: `tests/test_estimate_reference_suggestion.py` (+4 — reference/reduce-passes/drizzle-scale each carry
+  the structured fix + peak; None when it fits), `tests/test_stack_memory_guard.py` (+1 — the structured/worded
+  contract), `tests/webapp/test_stack_estimate.py` (+4 — `memory_fix` in the payload, k>1 raises the peak, and the
+  reduce-passes fix is offered end-to-end), `frontend/src/stackMemoryFix.test.ts` (+5) and `Stack.test.tsx` (+1 — the
+  drop-extra-passes button re-queries with `min_max_reject_count: 1`). Upgrade-safe: additive dataclass + additive
+  `StackEstimate`/payload field + additive optional endpoint params (all default to the old behaviour); no
+  config/DB-schema/on-disk/default change, old clients ignore the new field. *(Original PARTIAL entry kept below for
+  provenance.)*
 - **▶ PARTIAL — refusal message half SHIPPED v0.184.13** (Builder 2026-07-24, branch `claude/pensive-faraday-xok0ew`;
   regression-tested). The `_guard_stack_memory` `MemoryError` (surfaced verbatim on the failed stack job) now names the
   **single least-destructive concrete lever** that brings the run within budget, with the memory it lands at — instead
@@ -5770,9 +5792,11 @@ problems. Dogfood it every big-picture run and fix root causes.
   ranked fitting options + their resulting peak to `StackEstimate` (it already computes `suggested_drizzle_scale`/
   `suggested_reference_canvas`) and render them as one-click actions on the Stack form, so the fix is offered *before*
   the run is even submitted, not only on the refusal. *(Original idea kept below for provenance.)*
-- **IMPROVEMENT IDEA (Scout 2026-07-24, spotted while fixing the v0.184.10 memory-estimate/guard bug) — when a stack
+- ~~**IMPROVEMENT IDEA (Scout 2026-07-24, spotted while fixing the v0.184.10 memory-estimate/guard bug) — when a stack
   is refused for memory, tell the beginner the *one* concrete change that makes it fit (and by how much), instead of a
-  generic four-lever message.** *(Autonomy + friendliness — priorities 2/3; squarely relevant to the owner's RAM-capped
+  generic four-lever message.**~~ — **SHIPPED v0.197.0** (both halves — see the COMPLETE entry above; the guard-message
+  half landed v0.184.13 and the pre-submit `StackEstimate.memory_fix` one-click half v0.197.0, unified on one
+  `_best_memory_fix`). *(Original idea kept for provenance.)* *(Autonomy + friendliness — priorities 2/3; squarely relevant to the owner's RAM-capped
   NAS, the same environment behind the ⭐⭐ low-res bug. Size M.)* Today `_guard_stack_memory`
   (`seestack/stack/stacker.py`) raises a bare `MemoryError` whose text lists four possibilities ("Reduce drizzle scale,
   switch Canvas mode to 'reference', reject outlier/off-target frames, or raise ASTROSTACK_MAX_STACK_GB"), and

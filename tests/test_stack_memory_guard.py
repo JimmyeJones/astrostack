@@ -166,6 +166,30 @@ def test_refusal_falls_back_to_generic_guidance_when_no_single_lever_fits(monkey
     assert "To fit," not in str(exc.value)
 
 
+def test_best_memory_fix_is_structured_and_worded_consistently(monkeypatch):
+    """``_best_memory_fix`` returns a machine-actionable ``MemoryFix`` (the Stack
+    form renders it as a one-click button), and ``_memory_fix_sentence`` words it
+    for the refusal message — one source of truth so the two never diverge."""
+    shape = (320, 480)
+    budget = int((_peak(shape, 1.0) + _peak(shape, 2.0)) / 2)
+    fix = stacker._best_memory_fix(
+        shape, None, is_mosaic=False, drizzle=True, drizzle_scale=2.0,
+        drizzle_reject=False, reject_arrays=0, min_max_reject_count=1,
+        budget=budget)
+    assert isinstance(fix, stacker.MemoryFix)
+    assert fix.kind == "drizzle_scale"
+    assert 1.0 <= fix.value < 2.0
+    assert fix.peak_bytes <= budget
+    # The refusal wording is derived from the same structured fix.
+    assert stacker._memory_fix_sentence(fix) == f"lower the drizzle scale to ×{fix.value:g}"
+
+    # The two non-drizzle levers word as the guard tests expect.
+    ref_fix = stacker.MemoryFix("reference_canvas", None, 123)
+    assert stacker._memory_fix_sentence(ref_fix) == "switch Canvas mode to 'reference'"
+    drop_fix = stacker.MemoryFix("reduce_outlier_passes", None, 123)
+    assert stacker._memory_fix_sentence(drop_fix) == "lower Extra outlier passes to 1"
+
+
 def _peak(shape, scale, reject=False):
     peak, _ = stacker._estimate_peak_bytes(
         shape, drizzle=True, drizzle_scale=scale, drizzle_reject=reject)

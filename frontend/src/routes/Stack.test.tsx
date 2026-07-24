@@ -1105,7 +1105,7 @@ describe("StackView", () => {
       n_frames: 2, canvas_w: 480, canvas_h: 320, output_w: 480, output_h: 320,
       is_mosaic: false, peak_bytes: 7e6, peak_gb: 0.01,
       budget_bytes: 8e9, budget_gb: 8, would_exceed: false,
-      suggested_drizzle_scale: null, suggested_reference_canvas: false,
+      suggested_drizzle_scale: null, suggested_reference_canvas: false, memory_fix: null,
     });
 
     renderStack();
@@ -1124,7 +1124,7 @@ describe("StackView", () => {
       n_frames: 2, canvas_w: 8000, canvas_h: 6000, output_w: 16000, output_h: 12000,
       is_mosaic: true, peak_bytes: 5.4e9, peak_gb: 5.4,
       budget_bytes: 1.4e9, budget_gb: 1.4, would_exceed: true,
-      suggested_drizzle_scale: null, suggested_reference_canvas: false,
+      suggested_drizzle_scale: null, suggested_reference_canvas: false, memory_fix: null,
     });
 
     renderStack();
@@ -1145,6 +1145,7 @@ describe("StackView", () => {
       is_mosaic: false, peak_bytes: 2.3e9, peak_gb: 2.3,
       budget_bytes: 1.4e9, budget_gb: 1.4, would_exceed: true,
       suggested_drizzle_scale: 1.4, suggested_reference_canvas: false,
+      memory_fix: { kind: "drizzle_scale", value: 1.4, peak_bytes: 1.3e9, peak_gb: 1.3 },
     });
 
     renderStack();
@@ -1167,6 +1168,7 @@ describe("StackView", () => {
       is_mosaic: true, peak_bytes: 2.3e9, peak_gb: 2.3,
       budget_bytes: 1.4e9, budget_gb: 1.4, would_exceed: true,
       suggested_drizzle_scale: null, suggested_reference_canvas: true,
+      memory_fix: { kind: "reference_canvas", value: null, peak_bytes: 1.2e9, peak_gb: 1.2 },
     });
 
     renderStack();
@@ -1179,6 +1181,34 @@ describe("StackView", () => {
         "M_42", expect.objectContaining({ mosaic_canvas: "reference" })));
   });
 
+  it("offers dropping extra outlier passes — the least-destructive lever — with its peak", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({
+      min_max_reject: true, min_max_reject_count: 3,
+    });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1), mkFrame(2)]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+    vi.spyOn(client.api, "stackEstimate").mockResolvedValue({
+      n_frames: 2, canvas_w: 4000, canvas_h: 4000, output_w: 4000, output_h: 4000,
+      is_mosaic: true, peak_bytes: 1.5e9, peak_gb: 1.5,
+      budget_bytes: 1e9, budget_gb: 1, would_exceed: true,
+      // A k>1 reject is the only reason it busts the budget → dropping the extra
+      // passes (a smaller change than cropping the canvas) is offered first.
+      suggested_drizzle_scale: null, suggested_reference_canvas: false,
+      memory_fix: { kind: "reduce_outlier_passes", value: null, peak_bytes: 0.77e9, peak_gb: 0.77 },
+    });
+
+    renderStack();
+
+    const btn = await screen.findByRole("button", {
+      name: /Lower Extra outlier passes to 1 — fits at ~0.77 GB/,
+    });
+    fireEvent.click(btn);
+    await waitFor(() =>
+      expect(client.api.stackEstimate).toHaveBeenCalledWith(
+        "M_42", expect.objectContaining({ min_max_reject_count: 1 })));
+  });
+
   // A dry-run estimate the drizzle-on feasibility check resolves to. `is_mosaic`
   // / `would_exceed` are what the nudge gates on.
   function estimateResult(over: boolean, mosaic: boolean): client.StackEstimate {
@@ -1186,7 +1216,7 @@ describe("StackView", () => {
       n_frames: 250, canvas_w: 480, canvas_h: 320, output_w: 720, output_h: 480,
       is_mosaic: mosaic, peak_bytes: over ? 5.4e9 : 3e8, peak_gb: over ? 5.4 : 0.3,
       budget_bytes: 1.4e9, budget_gb: 1.4, would_exceed: over,
-      suggested_drizzle_scale: null, suggested_reference_canvas: false,
+      suggested_drizzle_scale: null, suggested_reference_canvas: false, memory_fix: null,
     };
   }
 

@@ -62,6 +62,55 @@ def test_estimate_suggests_smaller_drizzle_scale_when_over_budget(
     s = data["suggested_drizzle_scale"]
     assert s is not None
     assert 1.0 <= s < 2.0
+    # The structured memory_fix carries the same lever plus its resulting peak.
+    fix = data["memory_fix"]
+    assert fix is not None
+    assert fix["kind"] == "drizzle_scale"
+    assert fix["value"] == s
+    assert fix["peak_bytes"] <= data["budget_bytes"]
+    assert fix["peak_gb"] == round(fix["peak_bytes"] / 1e9, 2)
+
+
+def test_estimate_memory_fix_null_when_within_budget(client, solved_library):
+    """A run that fits carries no memory_fix (the field is present but null)."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    data = client.get(f"/api/targets/{safe}/stack-estimate").json()
+    assert data["would_exceed"] is False
+    assert data["memory_fix"] is None
+
+
+def test_estimate_charges_extra_outlier_passes(client, solved_library):
+    """A k>1 min/max reject holds extra canvas planes, so the pre-submit peak must
+    rise with it — otherwise the estimate under-counts memory versus the run-time
+    guard and could say "fits" for a run the guard then refuses."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    base = client.get(f"/api/targets/{safe}/stack-estimate").json()
+    k3 = client.get(
+        f"/api/targets/{safe}/stack-estimate",
+        params={"min_max_reject": "true", "min_max_reject_count": 3},
+    ).json()
+    assert k3["peak_bytes"] > base["peak_bytes"]
+
+
+def test_estimate_offers_dropping_extra_outlier_passes_when_over_budget(
+    client, solved_library, monkeypatch):
+    """A k=3 min/max reject that busts the budget but fits at k=1 → the estimate
+    offers "drop the extra passes" (the least-destructive lever), reachable only
+    now that the endpoint forwards the reject knobs."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    # 480×320 reference canvas ≈ 7.4 MB at 4 planes (k=1), ≈ 14.7 MB at 8 (k=3).
+    # A ~10 MB budget refuses k=3 but fits k=1.
+    monkeypatch.setenv("ASTROSTACK_MAX_STACK_GB", str(10e-3))
+    data = client.get(
+        f"/api/targets/{safe}/stack-estimate",
+        params={"min_max_reject": "true", "min_max_reject_count": 3},
+    ).json()
+    assert data["would_exceed"] is True
+    fix = data["memory_fix"]
+    assert fix is not None
+    assert fix["kind"] == "reduce_outlier_passes"
+    assert fix["value"] is None
+    assert fix["peak_bytes"] <= data["budget_bytes"]
 
 
 def test_estimate_no_drizzle_suggestion_when_within_budget(client, solved_library):

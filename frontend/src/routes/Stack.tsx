@@ -15,6 +15,7 @@ import { dependencyMet } from "../api/depends";
 import { StackOptionControl as FieldControl } from "../components/StackOptionControl";
 import { detectMixedPointings } from "../components/target/mixedPointings";
 import { useJobEvents } from "../hooks/useJobEvents";
+import { memoryFixAction } from "../stackMemoryFix";
 
 // Linear-interpolated percentile of an unsorted numeric sample (p in [0, 100]).
 function pctile(values: number[], p: number): number {
@@ -84,11 +85,21 @@ export function StackView() {
   const drizzleScale = Number(values.drizzle_scale ?? 1.5);
   const drizzleReject = !!values.drizzle_reject;
   const mosaicCanvas = String(values.mosaic_canvas ?? "auto");
+  // Extra min/max outlier passes hold 2k canvas planes, so they change the peak
+  // memory too — pass them so the pre-submit estimate matches the run-time guard
+  // for a k>1 reject (and so the over-budget fix can offer "drop to k=1").
+  const minMaxReject = !!values.min_max_reject;
+  const minMaxRejectCount = Number(values.min_max_reject_count ?? 1);
+  const autoReject = !!values.auto_reject;
+  const sigmaKappa = Number(values.sigma_kappa ?? 3.0);
   const estimate = useQuery({
-    queryKey: ["stack-estimate", safe, drizzleOn, drizzleScale, drizzleReject, mosaicCanvas],
+    queryKey: ["stack-estimate", safe, drizzleOn, drizzleScale, drizzleReject,
+      mosaicCanvas, minMaxReject, minMaxRejectCount, autoReject, sigmaKappa],
     queryFn: () => api.stackEstimate(safe, {
       drizzle: drizzleOn, drizzle_scale: drizzleScale,
       drizzle_reject: drizzleReject, mosaic_canvas: mosaicCanvas,
+      min_max_reject: minMaxReject, min_max_reject_count: minMaxRejectCount,
+      auto_reject: autoReject, sigma_kappa: sigmaKappa,
     }),
     enabled: Object.keys(values).length > 0,
     retry: false,
@@ -629,6 +640,10 @@ export function StackView() {
   const estimateOverBudget = est?.would_exceed
     ? `This stack would need ~${est.peak_gb.toFixed(1)} GB of working memory, over the ~${est.budget_gb.toFixed(1)} GB budget on this server, so the run will be refused. Lower the drizzle scale, switch Canvas mode to “reference”, or reject off-target frames.`
     : null;
+  // The single least-destructive one-click fix (with the memory it lands at) —
+  // prefer the structured memory_fix, which also covers dropping extra outlier
+  // passes and always shows the resulting peak; fall back to the coarse fields.
+  const memoryFix = memoryFixAction(est?.memory_fix);
 
   return (
     <Stack maw={720}>
@@ -1035,7 +1050,17 @@ export function StackView() {
           {estimateOverBudget ? (
             <Alert color="red" variant="light" py={6} px="sm">
               <Text size="xs">{estimateOverBudget}</Text>
-              {est?.suggested_drizzle_scale ? (
+              {memoryFix ? (
+                <Button
+                  mt={6}
+                  size="xs"
+                  variant="light"
+                  color="red"
+                  onClick={() => set(memoryFix.optionKey, memoryFix.optionValue)}
+                >
+                  {memoryFix.label}
+                </Button>
+              ) : est?.suggested_drizzle_scale ? (
                 <Button
                   mt={6}
                   size="xs"
