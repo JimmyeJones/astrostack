@@ -318,6 +318,7 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
             reusable=_run_is_reusable(r.options_json),
             transparency_ratio=r.transparency_ratio,
             noise_sigma=r.noise_sigma,
+            stack_fwhm_px=r.stack_fwhm_px,
             calstat=r.calstat,
             options=_parse_options(r.options_json),
             engine_version=r.engine_version,

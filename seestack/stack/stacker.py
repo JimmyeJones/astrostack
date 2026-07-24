@@ -718,6 +718,66 @@ def _compute_transparency_ratio(project: Project, frames: list) -> float | None:
         return None
 
 
+def _compute_stack_fwhm(
+    rgb: np.ndarray, *, drizzle: bool, drizzle_scale: float,
+) -> float | None:
+    """Median star size (FWHM) of the finished stack, in *native-frame* pixels.
+
+    The per-run counterpart of :func:`_compute_noise_sigma`: it turns "are the
+    stars sharp?" into one number a user can compare across their stacks of a
+    target (lower = tighter stars), the way noise σ answers "is it clean?".
+
+    Measured to match the per-frame QC ``fwhm_px`` so the value is comparable to
+    it (and to the target-wide frame median): QC detects on a *half-resolution*
+    green plane (``green_channel``), so we 2×2 block-average the stacked green
+    plane before detecting — putting a non-drizzle stack on exactly that sampling
+    — then divide out the drizzle super-resolution so the result is always in
+    native-frame pixels regardless of canvas scale. Reuses the existing
+    ``detect_stars``/``median_fwhm`` (no new detection pass elsewhere).
+
+    Best-effort: any failure (too few stars, a fit that won't converge, a mono
+    canvas) returns ``None`` and never raises into the stack.
+    """
+    try:
+        from seestack.qc.metrics import detect_stars, estimate_sky, median_fwhm
+
+        green = rgb[..., 1] if rgb.ndim == 3 else rgb
+        green = np.asarray(green, dtype=np.float32)
+        # 2×2 block-average to the half-res sampling QC's green_channel uses, so a
+        # non-drizzle stack's FWHM lands on the same footing as a frame's. Crop to
+        # even dims first; skip (too small to mean anything) if either axis < 4.
+        h, w = green.shape[:2]
+        if h < 4 or w < 4:
+            return None
+        h2, w2 = h - (h % 2), w - (w % 2)
+        half = 0.25 * (
+            green[0:h2:2, 0:w2:2] + green[1:h2:2, 0:w2:2]
+            + green[0:h2:2, 1:w2:2] + green[1:h2:2, 1:w2:2]
+        )
+        if not np.isfinite(half).any():
+            return None
+        # detect_stars/median_fwhm are NaN-intolerant in the sky estimate; the
+        # stacked canvas carries NaN = no-coverage, so fill gaps with the robust
+        # sky median before detection (a no-op on a fully-covered single field).
+        finite = half[np.isfinite(half)]
+        if finite.size == 0:
+            return None
+        half = np.where(np.isfinite(half), half, float(np.median(finite)))
+        sky_med, sky_std = estimate_sky(half)
+        sources = detect_stars(half, sky_median=sky_med, sky_std=sky_std)
+        fwhm = median_fwhm(half, sources)
+        if fwhm is None or not np.isfinite(fwhm):
+            return None
+        # Undo drizzle super-resolution: the block-averaged green is drizzle_scale×
+        # finer than native, so its FWHM in pixels is that much larger.
+        scale = float(drizzle_scale) if drizzle else 1.0
+        if scale <= 0:
+            scale = 1.0
+        return round(float(fwhm) / scale, 3)
+    except Exception:  # noqa: BLE001 — a diagnostic must never break the stack
+        return None
+
+
 def _compute_noise_sigma(rgb: np.ndarray) -> float | None:
     """Background-noise σ of the finished stack, normalized to its own signal
     range so the value is comparable across gain/exposure (lower = cleaner).
@@ -1536,6 +1596,11 @@ def run_stack(
     # Measure the finished stack's background noise once and reuse it for both the
     # self-documenting FITS header and the run record, so the two never disagree.
     noise_sigma = _compute_noise_sigma(result_image)
+    # Measure the finished stack's own median star size (sharpness) once, for both
+    # the FITS header and the run record. Normalised to native-frame pixels (see
+    # _compute_stack_fwhm) so it's comparable to the per-frame QC fwhm_px.
+    stack_fwhm = _compute_stack_fwhm(
+        result_image, drizzle=eff.drizzle, drizzle_scale=eff.drizzle_scale)
     # The min/max order-statistic path combines by rank and ignores per-frame
     # weights, so weighting provenance must not be stamped when it ran (it's the
     # active path only for a non-drizzle ≥3-frame min-max-reject stack). Every
@@ -1550,6 +1615,8 @@ def run_stack(
                                             n_roughly_aligned=n_roughly)
     if noise_sigma is not None:
         header_meta["BKGSIGMA"] = (noise_sigma, "normalized background noise sigma")
+    if stack_fwhm is not None:
+        header_meta["STKFWHM"] = (stack_fwhm, "median star FWHM, native-frame px")
     paths = write_stack_outputs(
         project_dir=project.project_dir,
         rgb=result_image,
@@ -1641,6 +1708,9 @@ def run_stack(
             n_roughly_aligned=(
                 n_roughly if (eff.subpixel_refine and not eff.drizzle) else None
             ),
+            # This stack's own median star size (native-frame px). NULL when too
+            # few stars to fit — old runs read NULL and callers self-hide.
+            stack_fwhm_px=stack_fwhm,
         ))
     except Exception as exc:  # noqa: BLE001 — history is non-critical
         log.warning("Could not record stack run in history: %s", exc)

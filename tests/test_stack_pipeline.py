@@ -92,6 +92,29 @@ def test_stack_records_integration_time(tmp_path):
         proj.close()
 
 
+def test_stack_records_its_own_median_fwhm(tmp_path):
+    """run_stack measures the finished stack's median star size once and stamps it
+    on the run record (the per-run sharpness counterpart of noise_sigma), and
+    mirrors it into the FITS header, so the imaging log / history can show *this
+    stack's* sharpness without a re-detection pass."""
+    from astropy.io import fits
+
+    proj = _build_project(tmp_path, n=4)
+    try:
+        run = run_stack(proj, StackOptions(sigma_clip=False, max_workers=2,
+                                           output_name="sharp"))
+        rec = next(iter(proj.iter_stack_runs()))
+        # The synthetic subs carry round stars, so a value is measured and it's a
+        # sane finite few-pixel size (never a crash / negative / absurd number).
+        assert rec.stack_fwhm_px is not None
+        assert 0.5 < rec.stack_fwhm_px < 20.0
+        # Mirrored into the self-documenting FITS header for provenance.
+        hdr = fits.getheader(str(run.fits_path))
+        assert abs(hdr["STKFWHM"] - rec.stack_fwhm_px) < 1e-3
+    finally:
+        proj.close()
+
+
 def test_stack_records_is_mosaic_false_for_single_field(tmp_path):
     """run_stack persists its authoritative mosaic verdict. A single-field stack
     (all frames the same pointing) is recorded is_mosaic=False, so the editor no
