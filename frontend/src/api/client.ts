@@ -1326,6 +1326,12 @@ export const api = {
   // "What's in this picture?" — catalog objects that fall inside a run's field.
   stackAnnotations: (safe: string, id: number) =>
     req<StackAnnotations>(`/api/targets/${safe}/stack-runs/${id}/annotations`),
+  // The finished picture as a native-resolution PNG (same look as the preview
+  // thumbnail, just full-size instead of the 1024px preview cap) — the direct
+  // answer to "why is my downloaded picture low-res?".
+  stackFullResPngUrl: (safe: string, id: number, northUp = false) =>
+    `/api/targets/${safe}/stack-runs/${id}/full-res-png` +
+    (northUp ? "?north_up=true" : ""),
   stackRenderUrl: (
     safe: string, id: number, stretch: number, black: number, northUp = false,
   ) =>

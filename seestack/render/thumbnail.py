@@ -278,6 +278,56 @@ def render_stack_png(
     return buf.getvalue()
 
 
+def render_preview_png_full_res(
+    fits_path: str | Path, *, max_long_edge: int = 8000,
+    north_up: bool = False,
+) -> bytes:
+    """Render a stacked-image FITS to a PNG at (near) native output resolution
+    using the **same stretch as the baked gallery/History preview** — the STF
+    autostretch for a linear stack, verbatim for a display-space editor export —
+    i.e. the very picture the user already sees, at full output resolution instead
+    of the 1024 px preview cap.
+
+    This is the beginner-friendly answer to "why is my downloaded picture
+    low-res?": the FITS/TIFF already hold full-resolution pixels but aren't easily
+    viewable, and the quick PNG button serves the 1024 px preview. This serves the
+    same look at full size. It matches :func:`~seestack.stack.output._write_preview_png`
+    exactly (STF for linear, ``nan_to_num`` for display-space) rather than the
+    adjustable asinh of :func:`render_stack_png`, so the download is the thumbnail
+    the user clicked, just bigger.
+
+    Decimated only if the long edge exceeds ``max_long_edge`` — a practical PNG
+    ceiling that bounds memory / response size on a RAM-capped host; the FITS/TIFF
+    stay available for the true native pixels of an enormous mosaic. Returns PNG
+    bytes.
+    """
+    import io
+
+    from PIL import Image
+
+    from seestack.stack.output import _autostretch_for_export
+
+    # ``load_stack_rgb`` strides the width down to ``max_long_edge`` during load
+    # (cheap for a wide image); a tall image's height is capped after stretching.
+    rgb, display_space = load_stack_rgb(fits_path, max_width=max_long_edge)
+    stretched = (np.nan_to_num(rgb, nan=0.0) if display_space
+                 else _autostretch_for_export(rgb))
+    disp = np.clip(np.nan_to_num(stretched), 0.0, 1.0)
+    if north_up:
+        disp = _apply_north_up(disp, fits_path)
+    u8 = (disp * 255).astype(np.uint8)
+    img = Image.fromarray(u8, mode="RGB")
+    h, w = u8.shape[:2]
+    long_edge = max(h, w)
+    if long_edge > max_long_edge:
+        scale = max_long_edge / long_edge
+        img = img.resize((max(1, round(w * scale)), max(1, round(h * scale))),
+                         Image.BOX)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
 def stack_north_up_deg(fits_path: str | Path) -> float | None:
     """The rotation (deg) that orients a stack's stored master so celestial North
     is up, read from its own WCS — or ``None`` when the run carries no usable WCS

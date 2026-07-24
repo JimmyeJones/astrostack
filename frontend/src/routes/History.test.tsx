@@ -344,6 +344,17 @@ describe("HistoryView", () => {
     expect(jpeg).toHaveAttribute("href", "/api/targets/M_42/stack-runs/1/jpeg");
   });
 
+  it("offers a full-resolution PNG download (native output size) when a FITS exists", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ has_preview: true, has_fits: true })]);
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    const full = screen.getByRole("link", { name: "Full-res PNG" });
+    expect(full).toHaveAttribute("href", "/api/targets/M_42/stack-runs/1/full-res-png");
+    // Distinct from the small quick-preview PNG.
+    const png = screen.getByRole("link", { name: "PNG" });
+    expect(png).toHaveAttribute("href", "/api/targets/M_42/stack-runs/1/preview");
+  });
+
   it("does not offer a picture download when the run has no preview", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ has_preview: false })]);
     renderHistory();
