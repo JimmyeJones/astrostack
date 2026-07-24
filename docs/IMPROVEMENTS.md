@@ -668,9 +668,23 @@ when you take it.
   above → targets `M 31` (2 subs) + `NGC 7000 (mosaic)` (2 subs), no `MyWorks` target, video skipped. Confidence:
   traced + reproduced. (M, ingest/autonomy — PRIORITY 2.)
 
-- **Non-Latin target names collapse in `make_safe_name` to the same folder name — every all-unicode-named target
-  merges into ONE project (`safe_name='target'`).** *(Ingest/correctness; wrong-result for any non-Latin-locale
-  user; found by the 2026-07-24 integration audit; **traced + reproduced**.)* `make_safe_name` (`library.py:141-152`)
+- ~~**Non-Latin target names collapse in `make_safe_name` to the same folder name — every all-unicode-named target
+  merges into ONE project (`safe_name='target'`).**~~ — **FIXED v0.184.16** (Builder 2026-07-24, branch
+  `claude/pensive-faraday-vrd4ka`; **traced + reproduced + regression-tested**). Added a collision-aware
+  `Library._allocate_safe_name(name)` (used by both `create_target` and `open_or_create_target` in place of the bare
+  `make_safe_name`): it keeps the readable cleaned name when the folder is free or already owned by *this same display
+  name* (so re-scans stay idempotent), but when the cleaned name is already registered to a *different* display name it
+  disambiguates deterministically with a short stable SHA-1 hash of the display name (`<base>-<hash8>`, widened on the
+  astronomically-unlikely secondary collision). So two all-unicode names (`仙女座`, `猎户座大星云` — both → `"target"`)
+  land in two distinct projects, and the milder punctuation case (`M 31` vs `M_31`) no longer merges. `make_safe_name`
+  itself is unchanged, and an existing registered target keeps its folder (the allocator returns the current name for a
+  known display name; the sync/adopt path still uses the on-disk folder name verbatim) — upgrade-safe, no config/DB-
+  schema/API-shape/on-disk-rename/default change. Regression (`tests/test_library.py`, both new, fail-before/pass-after):
+  `test_all_unicode_names_get_distinct_targets` (two Chinese names → 2 targets, idempotent re-scan) and
+  `test_names_differing_only_in_punctuation_do_not_merge`. *(Note: a library the pre-fix code already merged into one
+  `target` folder can't be retro-split — that's inherited damage — but no NEW colliding name will merge into it.)*
+  Confidence: traced + reproduced + regression-tested. (S–M, ingest/correctness — PRIORITY 2.)
+  *(Original trace kept for provenance.)* `make_safe_name` (`library.py:141-152`)
   strips every rune outside `[A-Za-z0-9._-]`, so a name with no ASCII at all (e.g. Chinese `仙女座`,
   `猎户座大星云` — plausible folder names from the Seestar app under a zh locale) cleans to `""` and falls back to
   the literal `"target"`. `open_or_create_target` keys the project directory on `safe_name` and `_upsert_target`'s

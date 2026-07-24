@@ -33,6 +33,7 @@ totals are refreshed after each scan / stack.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -336,6 +337,50 @@ class Library:
 
     # ---- targets -------------------------------------------------------
 
+    def _name_owning_safe(self, safe: str) -> str | None:
+        """The display name currently registered to folder ``safe``, or None."""
+        assert self._conn is not None
+        row = self._conn.execute(
+            "SELECT name FROM targets WHERE safe_name = ?", (safe,)
+        ).fetchone()
+        return row["name"] if row else None
+
+    def _allocate_safe_name(self, name: str) -> str:
+        """A filesystem-safe folder name for ``name`` that never folds two
+        *different* display names into one project directory.
+
+        ``make_safe_name`` strips every non-``[A-Za-z0-9._-]`` rune, so an
+        all-unicode name (e.g. a Chinese Seestar folder like ``仙女座``) cleans to
+        the same ``"target"`` fallback, and names differing only in
+        punctuation/whitespace (``M 31`` vs ``M_31``) collapse together — either
+        way silently merging unrelated sky targets into one project. We keep the
+        readable cleaned name when it's free (or already owned by *this* name, so
+        re-scans stay idempotent), but when it's already registered to a
+        *different* display name we disambiguate deterministically with a short
+        stable hash of the display name (stable → the same folder every re-scan).
+
+        Upgrade-safe: an already-registered target keeps its folder untouched —
+        this only changes where a *new* colliding name is placed. (A library the
+        pre-fix code already merged into one ``target`` folder can't be
+        retro-split, but no *new* name will merge into it.)
+        """
+        base = make_safe_name(name)
+        owner = self._name_owning_safe(base)
+        if owner is None or owner == name:
+            return base
+        # Collides with a different display name — disambiguate by a stable hash
+        # of *this* name so the mapping is deterministic across re-scans. Widen
+        # the hash in the (astronomically unlikely) event even the hashed name is
+        # already owned by a third, different name.
+        digest = hashlib.sha1(name.encode("utf-8")).hexdigest()
+        for width in range(8, len(digest) + 1, 4):
+            suffix = f"-{digest[:width]}"
+            candidate = (base[: 64 - len(suffix)].rstrip("._-") or "target") + suffix
+            owner = self._name_owning_safe(candidate)
+            if owner is None or owner == name:
+                return candidate
+        return candidate
+
     def create_target(
         self, name: str, *, ra_deg: float | None = None,
         dec_deg: float | None = None, notes: str | None = None,
@@ -344,7 +389,7 @@ class Library:
         Create a new target sub-project. Returns (registry entry, open Project).
         The caller is responsible for closing the Project.
         """
-        safe = make_safe_name(name)
+        safe = self._allocate_safe_name(name)
         proj_dir = self.targets_dir / safe
         if proj_dir.exists() and (proj_dir / "project.sqlite").exists():
             raise FileExistsError(f"target '{safe}' already exists")
@@ -363,7 +408,7 @@ class Library:
         idempotent because an already-existing target is simply re-opened
         and added to, never duplicated.
         """
-        safe = make_safe_name(name)
+        safe = self._allocate_safe_name(name)
         proj_dir = self.targets_dir / safe
         if proj_dir.exists() and (proj_dir / "project.sqlite").exists():
             proj = Project.open(proj_dir)

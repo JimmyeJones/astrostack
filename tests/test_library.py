@@ -196,6 +196,52 @@ def test_adopt_existing_projects(tmp_path):
         lib.close()
 
 
+def test_all_unicode_names_get_distinct_targets(tmp_path):
+    """Two all-unicode names both clean to the ``"target"`` fallback in
+    make_safe_name; the Library must still place them in *separate* projects
+    (regression for the non-Latin-name collapse bug)."""
+    lib = Library.create(tmp_path / "lib")
+    try:
+        e1, p1 = lib.open_or_create_target("仙女座")          # Andromeda
+        p1.close()
+        e2, p2 = lib.open_or_create_target("猎户座大星云")     # Orion Nebula
+        p2.close()
+        # Distinct folders, both non-empty, one keeps the readable fallback.
+        assert e1.safe_name != e2.safe_name
+        assert e1.safe_name and e2.safe_name
+        assert len(lib.list_targets()) == 2
+        # Re-scanning either name is idempotent — no third target, stable folder.
+        e1b, p1b = lib.open_or_create_target("仙女座")
+        p1b.close()
+        e2b, p2b = lib.open_or_create_target("猎户座大星云")
+        p2b.close()
+        assert e1b.safe_name == e1.safe_name
+        assert e2b.safe_name == e2.safe_name
+        assert len(lib.list_targets()) == 2
+    finally:
+        lib.close()
+
+
+def test_names_differing_only_in_punctuation_do_not_merge(tmp_path):
+    """``M 31`` and ``M_31`` both clean to ``M_31`` — they must not silently
+    fold into one project."""
+    lib = Library.create(tmp_path / "lib")
+    try:
+        e1, p1 = lib.open_or_create_target("M 31")
+        p1.close()
+        e2, p2 = lib.open_or_create_target("M_31")
+        p2.close()
+        assert e1.safe_name != e2.safe_name
+        assert len(lib.list_targets()) == 2
+        # And each stays idempotent on re-open.
+        e2b, p2b = lib.open_or_create_target("M_31")
+        p2b.close()
+        assert e2b.safe_name == e2.safe_name
+        assert len(lib.list_targets()) == 2
+    finally:
+        lib.close()
+
+
 def test_open_or_create_target_is_idempotent(tmp_path):
     """The scanner relies on open_or_create_target: first call creates,
     later calls re-open the same project without raising."""
