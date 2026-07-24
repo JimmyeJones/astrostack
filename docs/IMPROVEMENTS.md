@@ -8291,9 +8291,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   "told me to add darks → I added them → it got cleaner" loop.
   *(Original idea kept below for provenance.)*
 
-- **NEW BEGINNER FEATURE (Scout 2026-07-24) — "Add darks in 3 steps": turn the app's existing "adding darks would cut
-  the speckle" advice into a plain-language, Seestar-specific how-to, so a beginner who's told darks would help can
-  actually capture and apply them without knowing any astro jargon.** *(Pillar: 3 friendliness + understand/learn +
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-24) — "Add darks in 3 steps".**~~ — **ALREADY SHIPPED** (curated by Builder
+  2026-07-24 — the Ideas list was stale). Built in commit b532629 (#460): `frontend/src/components/target/DarksGuide.tsx`
+  (`formatDarkSpec` + the `DarksGuide` collapsible with three plain steps and the target's own exposure/gain pre-filled)
+  is wired into `StackHealthCard` (`<DarksGuide spec={data.dark_spec} />`), shown beside the uncalibrated "How's my
+  stack?" note. Tested (`DarksGuide.test.tsx`). Don't rebuild. *(Original idea kept for provenance.)*
+  *(Pillar: 3 friendliness + understand/learn +
   4 image quality; size S–M.)* **The gap (verified this run):** the app *already* tells a beginner darks would help —
   `StackHealthCard` ("How's my stack?") and the editor surface *"No darks or flats were applied … adding darks would
   cut the background speckle"* (`seestack/stackhealth.py`), and the Calibration page can build a master from dark
@@ -8537,10 +8540,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   *(Feasibility: reuses existing frame-timestamp queries and the established night-boundary helper, no new/heavy
   dependency, sane default, testable — passes §4's filter.)*
 
-- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Your imaging log": one tap to download a plain, printable record of
-  every target and night you've imaged — date, target, subs used, total integration time, best sharpness — so a
-  beginner can keep a journal of the hobby, track progress across months, and share "here's what I shot this month"
-  without copying numbers out by hand.** *(Pillar: 3 friendliness + enjoy/share; size S–M.)* **The gap:** the app
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "Your imaging log": one tap to download a plain, printable record of
+  every target and night you've imaged.**~~ — **SHIPPED v0.193.0** (Builder 2026-07-24, branch
+  `claude/pensive-faraday-jauk0d`). A **"Imaging log (CSV)"** download link on the Dashboard (beside "Recent stacks",
+  self-hiding until at least one stack exists). **Engine** (`seestack/imaging_log.py`, pure/offline/testable):
+  `ImagingLogRow` + `build_imaging_log_csv(rows)` render one CSV row per finished stack with beginner-legible,
+  jargon-free columns — Date (UTC calendar day), Target, Subs used, Integration (`"1h 24m"`), Typical star size (px),
+  Calibration (`dark+flat`/`none`), Mosaic (`yes`/`no`), Noise (lower is cleaner), App version — every value formatted
+  plainly (never raw seconds), missing optionals blanked (never an error), an empty list → header-only file.
+  **Webapp** (`GET /api/imaging-log.csv`, `webapp/routers/stats.py`): walks `Library.list_targets()`, opens each
+  project (a broken one skipped, never 500s), reads each run's stored `n_frames_used`/`total_exposure_s`/`calstat`/
+  `is_mosaic`/`noise_sigma`/`engine_version` plus the target's median accepted-frame `fwhm_px` (already measured by QC —
+  no image recompute), sorts newest-first, and streams a `text/csv` attachment. **Frontend**:
+  `ImagingLogButton` (`api.imagingLogUrl()` → a plain `download` anchor). Tests: `tests/test_imaging_log.py` (+6 —
+  header-only empty, one row per run, formatting, blanks, mosaic wording), `tests/webapp/test_imaging_log.py` (+3 —
+  header-only empty library, newest-first two-target CSV with correct values + headers, per-target run count),
+  `frontend/.../ImagingLogButton.test.tsx` (+2 — download link with the right href/download attr; self-hides at zero
+  stacks). Upgrade-safe: purely additive read-only endpoint + a display button, reuses columns/frames already stored;
+  no schema/config/default/API-shape change. *(Pillar: 3 friendliness + enjoy/share; size S–M.)* *(Original idea kept
+  for provenance.)* **The gap:** the app
   already computes rich per-target and per-night data — session recaps, `n_frames_used`, total exposure, median FWHM,
   the "Night by night" and "Your sky, so far" cards — but every bit of it lives *inside* the app, on separate pages.
   A beginner who wants a single takeaway record of their imaging (to keep a log, print it, paste it into a forum

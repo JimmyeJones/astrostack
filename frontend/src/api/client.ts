@@ -1200,6 +1200,10 @@ export const api = {
   // a .ics calendar file. Catalog ids can contain spaces ("NGC 7000"), so encode.
   suggestIcsUrl: (catalogId: string) =>
     `/api/plan/suggest/${encodeURIComponent(catalogId)}/calendar.ics`,
+  // Download URL for "Your imaging log" — a plain CSV record of every finished
+  // stack (date, target, subs, integration, sharpness, calibration, noise). A
+  // href/download, not a fetch: the browser saves the file.
+  imagingLogUrl: () => `/api/imaging-log.csv`,
   getIntegrationGoal: (safe: string) =>
     req<{ goal_s: number | null }>(`/api/targets/${safe}/integration-goal`),
   setIntegrationGoal: (safe: string, goalS: number | null) =>

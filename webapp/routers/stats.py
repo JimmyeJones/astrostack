@@ -13,7 +13,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel
 
 from webapp import deps
@@ -594,4 +594,72 @@ def get_activity_calendar(request: Request, months: int = 12) -> ActivityCalenda
         total_exposure_s=cal.total_exposure_s,
         nights_this_month=cal.nights_this_month,
         best_streak_nights=cal.best_streak_nights,
+    )
+
+
+def _collect_imaging_log(lib, targets) -> list:
+    """Walk the library and build one imaging-log row per finished stack run.
+
+    Expensive (opens every project + reads each frame's stored FWHM), but this is
+    a deliberate one-tap download, not a page render, so it isn't cached. A broken
+    project is skipped, never 500s the download.
+    """
+    from statistics import median
+
+    from seestack.imaging_log import ImagingLogRow
+    from seestack.io.project import Project
+
+    rows: list[ImagingLogRow] = []
+    for t in targets:
+        proj = None
+        try:
+            proj = Project.open(lib.target_dir(t))
+            # Typical star size for this target: the median of its accepted frames'
+            # already-stored FWHM (measured by QC — no image recompute here).
+            fwhms = [
+                f.fwhm_px
+                for f in proj.iter_frames(accepted_only=True)
+                if f.fwhm_px is not None and f.fwhm_px > 0
+            ]
+            median_fwhm = float(median(fwhms)) if fwhms else None
+            for run in proj.iter_stack_runs():
+                rows.append(ImagingLogRow(
+                    date=run.timestamp_utc,
+                    target_name=t.name,
+                    n_subs=run.n_frames_used,
+                    integration_s=run.total_exposure_s,
+                    median_fwhm_px=median_fwhm,
+                    calibration=run.calstat,
+                    is_mosaic=run.is_mosaic,
+                    noise_sigma=run.noise_sigma,
+                    app_version=run.engine_version,
+                ))
+        except Exception:  # noqa: BLE001 — a broken project must not 500 the download
+            pass
+        finally:
+            if proj is not None:
+                proj.close()
+    # Newest first, so a beginner's most recent night sits at the top of the log.
+    rows.sort(key=lambda r: (r.date or ""), reverse=True)
+    return rows
+
+
+@router.get("/api/imaging-log.csv")
+def get_imaging_log(request: Request) -> Response:
+    """Download a plain-CSV record of every finished stack — the beginner's
+    imaging journal. One row per stack run (date, target, subs, integration,
+    typical star size, calibration, mosaic, noise, app version), newest first.
+    An empty library yields a header-only file, never an error."""
+    from seestack.imaging_log import build_imaging_log_csv
+
+    lib = deps.open_library(request)
+    try:
+        rows = _collect_imaging_log(lib, lib.list_targets())
+    finally:
+        lib.close()
+    csv_text = build_imaging_log_csv(rows)
+    return Response(
+        content=csv_text,
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="imaging-log.csv"'},
     )
