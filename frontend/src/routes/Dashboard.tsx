@@ -1,5 +1,5 @@
 import {
-  ActionIcon, Alert, Badge, Box, Button, Card, Center, Group, Image, Loader, Menu, Paper,
+  ActionIcon, Alert, Box, Button, Card, Center, Group, Image, Loader, Menu, Paper,
   SimpleGrid, Stack, Text, Title, Tooltip,
 } from "@mantine/core";
 import {
@@ -13,6 +13,7 @@ import { formatIntegration } from "../format";
 import { astapReadiness, astapReadinessSignature } from "../components/dashboard/astapReadiness";
 import { folderReadiness, folderReadinessSignature } from "../components/dashboard/folderReadiness";
 import { ContinueTonightCard } from "../components/ContinueTonightCard";
+import { FrameCountBadge } from "../components/target/FrameCountBadge";
 import { ImagingCalendarCard } from "../components/ImagingCalendarCard";
 import { LastNightCard } from "../components/LastNightCard";
 import { LibraryProgressCard } from "../components/LibraryProgressCard";
@@ -268,7 +269,7 @@ export function Dashboard() {
               </Card.Section>
               <Text fw={600} mt="xs" lineClamp={1}>{s.target_name}</Text>
               <Group justify="space-between" mt={4}>
-                <Badge variant="light" color="violet">{s.n_frames_used} frames</Badge>
+                <FrameCountBadge nFramesUsed={s.n_frames_used} color="violet" />
                 <Text size="xs" c="dimmed">{s.timestamp_utc.slice(0, 10)}</Text>
               </Group>
             </Card>

@@ -7065,10 +7065,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   where the honest accounting currently leaves the beginner informed but confused. Tests: the popover renders the
   explainer text when opened; it appears wherever the unsolved badge does (`Target.test.tsx`). No API/schema/default
   change. *(Feasibility: frontend-only, additive, reuses existing counts, testable — passes §4's filter.)*
-- **IMPROVEMENT IDEA (Scout 2026-07-23, extends the ⭐⭐ honest-accounting theme) — carry the already-tested
+- ~~**IMPROVEMENT IDEA (Scout 2026-07-23, extends the ⭐⭐ honest-accounting theme) — carry the already-tested
   thin-stack caveat onto the Gallery and Dashboard picture tiles, not only the Target and Jobs pages, so a beginner
   browsing their finished pictures isn't shown a 1-frame gibberish thumbnail wearing only a bare "1 frames" badge
-  with no plain-language "this is very thin — expect noise" cue.** *(Pillar: 3 friendliness; size S; frontend-only,
+  with no plain-language "this is very thin — expect noise" cue.**~~ — **SHIPPED v0.197.1** (Builder 2026-07-24,
+  branch `claude/pensive-faraday-7sd8na`). New reusable `FrameCountBadge`
+  (`frontend/src/components/target/FrameCountBadge.tsx`) wraps the existing tested `thinStackWarning` helper: a healthy
+  stack (≥5 combined frames) renders **byte-identically** to the old plain "N frames" badge, but a thin one (≤4 — the
+  owner's 1-frame gibberish case) turns warning-coloured (orange for a single sub, yellow for 2–4) with a warning
+  triangle and a plain-language tooltip ("This stack combined only 1 frame — that's a single sub… will look noisy…").
+  Wired into the Gallery tiles (`Gallery.tsx`) and the Dashboard recent-stack tiles (`Dashboard.tsx`), reusing the same
+  helper so copy/thresholds stay identical to the Target and Jobs pages. Frontend-only, additive; no API/schema/default
+  change (`n_frames_used` was already in both tile payloads). Tests: `FrameCountBadge.test.tsx` (+4 — plain badge for a
+  healthy count, the warning cue at 1 and 2–4, none at the ≥5 threshold), `Gallery.test.tsx` (+2 — a 1-frame tile shows
+  the cue, a 40-frame tile doesn't). `tsc`/`vitest` (1242)/`vite build` green. Closes the last place a thin/gibberish
+  result could masquerade as a finished picture, on the most-browsed screens. *(Original spec kept for provenance.)*
+  *(Pillar: 3 friendliness; size S; frontend-only,
   additive.)* **The gap (verified this run):** the tested `thinStackWarning(n_frames_used)` helper
   (`frontend/src/components/target/thinStack.ts`, thresholds from the √N curve: `single` ≤1, `thin` 2–4, `null` ≥5)
   is wired into **Target.tsx** and **Jobs.tsx** only. But the two surfaces where a beginner actually *browses* their

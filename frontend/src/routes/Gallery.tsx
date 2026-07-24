@@ -12,6 +12,7 @@ import { sharePictureText } from "../share";
 import { formatIntegration } from "../format";
 import { HazyNightBadge } from "../components/HazyNightBadge";
 import { CalibrationBadge } from "../components/CalibrationBadge";
+import { FrameCountBadge } from "../components/target/FrameCountBadge";
 import {
   RejectionBadge, combineMethodKey, COMBINE_METHOD_LABELS, type CombineMethod,
 } from "../components/RejectionBadge";
@@ -143,7 +144,7 @@ function GalleryCard({ item, labels, onView, selected, onToggleSelect }: {
           <RejectionBadge options={item.options} />
           <HazyNightBadge ratio={item.transparency_ratio} />
           <CalibrationBadge calstat={item.calstat} />
-          <Badge variant="light">{item.n_frames_used} frames</Badge>
+          <FrameCountBadge nFramesUsed={item.n_frames_used} />
         </Group>
       </Group>
       {item.notes ? (
