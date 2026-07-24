@@ -593,6 +593,10 @@ export interface StackRun {
   reusable?: boolean;
   transparency_ratio?: number | null;
   noise_sigma?: number | null;
+  // This stack's own measured median star size (FWHM) in native-frame pixels,
+  // lower = sharper. Null for runs recorded before the column existed (schema
+  // < 14) or when too few stars to fit. Comparable across a target's runs.
+  stack_fwhm_px?: number | null;
   calstat?: string | null;
   options?: Record<string, unknown>;
   engine_version?: string | null;
