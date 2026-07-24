@@ -224,6 +224,14 @@ export interface MergeSuggestion {
   targets: MergeSuggestionTarget[];
 }
 
+export interface CleanupSuggestion {
+  safe: string;
+  name: string;
+  n_frames: number;
+  reason: "video" | "on_device_output";
+  detail: string;
+}
+
 export interface FramingHint {
   level: "fits" | "tight" | "mosaic";
   text: string;
@@ -277,9 +285,17 @@ export interface HealthNote {
   action: string | null;
 }
 
+export interface DarkSpec {
+  exposure_s: number | null;
+  gain: number | null;
+}
+
 export interface StackHealth {
   run_id: number | null;
   notes: HealthNote[];
+  // The exposure/gain to shoot darks at, for the "How to add darks" guide.
+  // Optional — older backends omit it (treat as no pre-filled numbers).
+  dark_spec?: DarkSpec | null;
 }
 
 export interface BestFrame {
@@ -1109,6 +1125,8 @@ export const api = {
     req("/api/targets/merge", { method: "POST", body: JSON.stringify({ into, sources }) }),
   mergeSuggestions: () =>
     req<MergeSuggestion[]>("/api/targets/merge-suggestions"),
+  cleanupSuggestions: () =>
+    req<CleanupSuggestion[]>("/api/targets/cleanup-suggestions"),
   targetThumbnailUrl: (safe: string) => `/api/targets/${safe}/thumbnail`,
   identifyTarget: (safe: string) =>
     req<ObjectInfo | null>(`/api/targets/${safe}/identify`),

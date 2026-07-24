@@ -3,6 +3,7 @@ import { IconStethoscope, IconCircleCheck, IconBulb } from "@tabler/icons-react"
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type HealthNote } from "../api/client";
+import { DarksGuide } from "./target/DarksGuide";
 
 // The card never dumps a wall of warnings — it shows only the top one or two
 // notes the backend already ranked best-first (actionable next-steps before
@@ -104,6 +105,11 @@ export function StackHealthCard(
                     <Anchor component={Link} to={act.href} size="xs" fw={500}>
                       {act.label}
                     </Anchor>
+                  ) : null}
+                  {/* Turn the "add darks" advice into an actionable how-to, with
+                      the target's own exposure/gain pre-filled. */}
+                  {n.kind === "calibration" ? (
+                    <DarksGuide spec={data.dark_spec} />
                   ) : null}
                 </Stack>
               </Group>

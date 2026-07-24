@@ -15,6 +15,7 @@ from seestack.io.project import REJECT_REASON_SEESTAR_OUTPUT, FrameRow, Project
 from seestack.io.scanner import (
     _apply_seestar_convention,
     _seestar_output_bases,
+    classify_seestar_junk_target,
     run_qc_and_solve,
     scan_and_organize,
 )
@@ -109,6 +110,84 @@ def test_apply_seestar_convention_is_case_insensitive():
     target name keeps the folder's original casing."""
     units = _apply_seestar_convention(_fake("Ngc 7000_SUB", "Ngc 7000", "Clip_VIDEO"))
     assert [n for n, _ in units] == ["Ngc 7000"]
+
+
+def test_classify_junk_video_by_target_name():
+    """A target named '<T>_video' is a Seestar video capture — flagged as junk
+    regardless of what its frames' source folders look like (no disk needed)."""
+    v = classify_seestar_junk_target("Lunar_video", [], n_frames=30)
+    assert v is not None and v.reason == "video"
+    # Case-insensitive on the suffix.
+    assert classify_seestar_junk_target("Clip_VIDEO", [], 5) is not None
+
+
+def test_classify_junk_video_by_source_folder(tmp_path):
+    """Even without a '_video' target name, frames sourced entirely from a
+    '*_video' folder are a video capture."""
+    vid = tmp_path / "Solar_video"
+    vid.mkdir()
+    paths = [str(vid / "f001.fit"), str(vid / "f002.fit")]
+    v = classify_seestar_junk_target("Solar", paths, n_frames=2)
+    assert v is not None and v.reason == "video"
+
+
+def test_classify_junk_on_device_output_when_sub_sibling_present(tmp_path):
+    """A 1-frame target whose sole frame sits in a bare '<T>/' folder that has a
+    raw-subs '<T>_sub/' sibling on disk is the Seestar's own stacked output."""
+    (tmp_path / "M 31_sub").mkdir()          # the raw-subs sibling
+    output = tmp_path / "M 31"               # the on-device output folder
+    output.mkdir()
+    v = classify_seestar_junk_target(
+        "M 31", [str(output / "Stacked.fit")], n_frames=1)
+    assert v is not None and v.reason == "on_device_output"
+    assert "M 31_sub" in v.detail
+
+
+def test_classify_junk_mosaic_output_when_mosaic_sub_sibling_present(tmp_path):
+    """The '<name>_sub' sibling test also covers a mosaic output '<T>_mosaic/'
+    beside its '<T>_mosaic_sub/' raw subs."""
+    (tmp_path / "M 3_mosaic_sub").mkdir()
+    output = tmp_path / "M 3_mosaic"
+    output.mkdir()
+    v = classify_seestar_junk_target(
+        "M 3_mosaic", [str(output / "Stacked.fit")], n_frames=1)
+    assert v is not None and v.reason == "on_device_output"
+
+
+def test_classify_not_junk_without_a_sub_sibling(tmp_path):
+    """A bare output folder with NO '_sub' sibling is a non-Seestar layout the
+    scanner keeps — it must not be flagged (no false positive)."""
+    output = tmp_path / "Andromeda"
+    output.mkdir()
+    v = classify_seestar_junk_target(
+        "Andromeda", [str(output / "img.fit")], n_frames=1)
+    assert v is None
+
+
+def test_classify_not_junk_when_the_target_is_the_raw_subs(tmp_path):
+    """The raw-subs folder itself ('<T>_sub/') is the real data — never junk,
+    even though its own name would form a spurious '<T>_sub_sub' sibling."""
+    subs = tmp_path / "M 31_sub"
+    subs.mkdir()
+    v = classify_seestar_junk_target(
+        "M 31", [str(subs / "Light_001.fit")], n_frames=1)
+    assert v is None
+
+
+def test_classify_not_junk_for_a_real_stack_with_many_frames(tmp_path):
+    """A genuine light-frame stack has many subs; even sitting beside a '_sub'
+    sibling it is above the 1-frame-output threshold and never flagged."""
+    (tmp_path / "M 31_sub").mkdir()
+    output = tmp_path / "M 31"
+    output.mkdir()
+    paths = [str(output / f"Light_{i:03d}.fit") for i in range(50)]
+    v = classify_seestar_junk_target("M 31", paths, n_frames=50)
+    assert v is None
+
+
+def test_classify_not_junk_for_an_empty_frameless_target():
+    """No source paths and a non-video name → nothing to judge → None."""
+    assert classify_seestar_junk_target("M 42", [], n_frames=0) is None
 
 
 def test_scan_is_seestar_aware_end_to_end(tmp_path):

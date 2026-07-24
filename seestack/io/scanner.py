@@ -38,7 +38,7 @@ before committing CPU time to a stack.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -152,6 +152,84 @@ def _seestar_output_bases(
             if base:
                 bases[base] = base
     return bases
+
+
+# A Seestar's own on-device stacked OUTPUT folder holds a single image, so a
+# target the pre-``_apply_seestar_convention`` scanner built from one is a
+# 1-frame "stack". Allow a tiny margin above 1 (an occasional two-file output)
+# while never flagging a real light-frame stack (dozens–thousands of subs).
+_MAX_JUNK_OUTPUT_FRAMES = 2
+
+
+@dataclass(frozen=True)
+class JunkTargetVerdict:
+    """Why a target looks like Seestar output/video junk, not raw subs."""
+
+    reason: str   # "video" | "on_device_output"
+    detail: str   # plain-language, beginner-facing explanation
+
+
+def classify_seestar_junk_target(
+    target_name: str,
+    source_paths: Sequence[str | Path],
+    n_frames: int,
+) -> JunkTargetVerdict | None:
+    """
+    Decide whether a library target was built from a Seestar *output* or *video*
+    folder rather than raw sub-frames — the leftover "junk" targets an old,
+    pre-``_apply_seestar_convention`` scan produced before the scanner learned the
+    Seestar folder convention (v0.184.9).
+
+    Pure and side-effect-free apart from a **read-only** ``<T>_sub`` sibling check
+    on disk — the same signal ``_apply_seestar_convention`` uses to skip an
+    on-device output. Returns ``None`` for a normal target. It never deletes
+    anything: the caller surfaces the verdict for the user to confirm.
+
+    * ``video`` — the target name (or every frame's source folder) ends with
+      ``_video``: a video capture, not stackable deep-sky subs.
+    * ``on_device_output`` — a small (≤ ``_MAX_JUNK_OUTPUT_FRAMES``) target whose
+      frames all sit in a single **bare** ``<T>/`` folder that has a raw-subs
+      ``<T>_sub/`` sibling on disk: the Seestar's own single stacked output, which
+      "stacks" to one lower-resolution frame (colour speckle).
+
+    Conservative by design — it only flags a target with positive evidence
+    (a ``_video`` name/folder, or a bare output folder whose ``_sub`` sibling is
+    actually present), so a real target is never mistaken for junk.
+    """
+    _VIDEO_DETAIL = (
+        "Built from a Seestar “_video” capture folder, not raw sub-frames — "
+        "it can't be stacked into a deep image."
+    )
+    if target_name.strip().lower().endswith(_VIDEO_SUFFIX):
+        return JunkTargetVerdict("video", _VIDEO_DETAIL)
+
+    folders = {Path(p).parent for p in source_paths}
+    if not folders:
+        return None
+    folder_names = {f.name.lower() for f in folders}
+    if all(n.endswith(_VIDEO_SUFFIX) for n in folder_names):
+        return JunkTargetVerdict("video", _VIDEO_DETAIL)
+
+    if n_frames <= _MAX_JUNK_OUTPUT_FRAMES and len(folders) == 1:
+        folder = next(iter(folders))
+        low = folder.name.lower()
+        # A raw-subs folder ("_sub"/"_mosaic_sub") is never junk — only a *bare*
+        # output folder is. "_mosaic_sub" ends with "_sub", so one test covers both.
+        if not (low.endswith(_SUB_SUFFIX) or low.endswith(_VIDEO_SUFFIX)):
+            sibling = folder.parent / f"{folder.name}{_SUB_SUFFIX}"
+            try:
+                is_output = sibling.is_dir()
+            except OSError:
+                is_output = False
+            if is_output:
+                return JunkTargetVerdict(
+                    "on_device_output",
+                    "Looks like the Seestar's own single stacked image (its "
+                    f"“{folder.name}_sub” raw-subs folder is right beside it), not "
+                    "raw subs — stacking it just reproduces that one "
+                    "lower-resolution frame.",
+                )
+    return None
 
 
 @dataclass

@@ -200,12 +200,24 @@ class HealthNoteOut(BaseModel):
     action: str | None = None  # UI action key ("trim_border" | "calibration" | "solve_help") or null
 
 
+class DarkSpecOut(BaseModel):
+    """The exposure/gain a beginner should shoot dark frames at (read from the
+    target's own subs), powering the "How to add darks" guide's pre-filled
+    numbers. Either field is ``null`` when the subs didn't record it."""
+
+    exposure_s: float | None = None
+    gain: float | None = None
+
+
 class StackHealthOut(BaseModel):
     """Ranked health notes for a target's current stack, or ``null`` when the
     target has no genuine stack yet. The card shows the top one or two."""
 
     run_id: int | None = None
     notes: list[HealthNoteOut] = []
+    # The exposure/gain to shoot darks at, for the "How to add darks" guide shown
+    # beside an uncalibrated note. Additive/nullable — older clients ignore it.
+    dark_spec: DarkSpecOut | None = None
 
 
 class FrameOut(BaseModel):
@@ -391,6 +403,21 @@ class MergeSuggestionOut(BaseModel):
     center_dec_deg: float
     max_sep_arcmin: float    # widest pairwise separation in the group (arcmin)
     targets: list[MergeSuggestionTarget]
+
+
+class CleanupSuggestionOut(BaseModel):
+    """A leftover *junk* target an old (pre-v0.184.9) scan built from a Seestar
+    output or ``_video`` folder rather than raw sub-frames. Read-only detection:
+    the Library offers a one-click "remove these" and the user confirms; nothing
+    is deleted until then (``DELETE /api/targets/{safe}``). ``reason`` is
+    ``"video"`` or ``"on_device_output"``; ``detail`` is a plain-language
+    explanation for the beginner."""
+
+    safe: str
+    name: str
+    n_frames: int
+    reason: str
+    detail: str
 
 
 class ScanRequest(BaseModel):

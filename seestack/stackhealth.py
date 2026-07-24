@@ -86,6 +86,36 @@ class HealthNote:
     action: str | None = None
 
 
+@dataclass(frozen=True)
+class DarkSpec:
+    """The exposure/gain a beginner should shoot their *dark* frames at so they
+    match the lights — the numbers behind the "How to add darks" guide. Either
+    field may be ``None`` when the frames didn't record it (older/odd FITS); the
+    guide then falls back to generic wording rather than a wrong number."""
+
+    exposure_s: float | None
+    gain: float | None
+
+
+def recommended_dark_spec(frames: Iterable[FrameRow]) -> DarkSpec:
+    """The exposure and gain to shoot darks at, read from the target's own subs.
+
+    Darks must match the lights' exposure and gain to subtract correctly, so we
+    report the *typical* value across the accepted subs (median exposure, median
+    gain) — the numbers a beginner should dial in. Pure/offline; returns a
+    ``DarkSpec`` whose fields are ``None`` when no accepted frame recorded them,
+    so the caller can degrade to generic wording instead of inventing a value.
+    """
+    accepted = [f for f in frames if f.accept]
+    exps = [f.exposure_s for f in accepted
+            if f.exposure_s is not None and f.exposure_s > 0]
+    gains = [f.gain for f in accepted if f.gain is not None]
+    return DarkSpec(
+        exposure_s=statistics.median(exps) if exps else None,
+        gain=statistics.median(gains) if gains else None,
+    )
+
+
 def _median_eccentricity(accepted: list[FrameRow]) -> float | None:
     vals = [f.eccentricity_median for f in accepted
             if f.eccentricity_median is not None]
