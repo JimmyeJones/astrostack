@@ -86,6 +86,40 @@ when you take it.
   and video folders and treated those single output images as raw frames.)* Confidence:
   reproduced. (M–L, autonomy/correctness — PRIORITY 1/2)
 
+> **Deep plate-solve + ingest-heal integration audit — the faint-field solve root cause MEASURED with the real ASTAP CLI +
+> the bundled d05 database; the owner's re-scan heal verified SAFE end-to-end; four new verified bugs filed and measured
+> ground truth added to the queued solve ideas (Audit 2026-07-24, branch `claude/astrostack-plate-solve-audit-u4wjk1`).**
+> Baseline suite green (**1996 passed, 2 skipped**). This run attacked the #1 unresolved owner pain — ASTAP failing on
+> faint/sparse fields so auto-stacks stay thin — *empirically*: downloaded the exact ASTAP CLI (2026.07.16) + d05 star
+> database the Docker image bundles and measured the app's real ladder (`astap.py::_SOLVE_LADDER`) on realistic synthetic
+> Seestar OSC subs (1080×1920 RGGB, sky 1200 ADU, σ≈45, FWHM 2.1 px, 25 stars, CFA-weighted fluxes; ASTAP's own solve logs
+> parsed for per-rung star-detection counts — detection precedes catalog matching, so synthetic frames measure it exactly).
+> **Headline results (reproduced; numbers in the ⭐⭐ thin-stack entry's new ▶ block below):** (1) the ladder's escalation
+> direction is *backwards* for faint Seestar frames — ASTAP already auto-picks bin 1×1 on the default first rung for a
+> 1080×1920 frame, and the bin-2/bin-4 rungs strictly *lose* detected stars at every faintness (22.3 → 16.8 → 5.0 of 25 on
+> bright frames; 5.0 → 1.0 → 0.0 on faint; bin 4 finds ~nothing even on bright frames); (2) the ladder's hot-pixel
+> rationale is empirically void on this ASTAP version — 200 planted hot pixels changed bin-1 detection not at all
+> (13.8 → 13.8, 7.8 → 7.8 stars); (3) the queued **stack-then-solve bootstrap idea WORKS**: at a faintness where a single
+> sub detects 0–2 stars (below ASTAP's ≥3-star abort), a plain mean of 8–16 subs detects 6–12 — solvable — and is robust
+> to ±2 px uncompensated inter-sub drift; (4) measured **non-levers** (so no future run burns time on them): a deeper star
+> database (decoded d05's area files: GAIA DR3, density-capped ~500 stars/deg²; census over all 1476 sky areas = min 124 /
+> median ~490 catalog stars per Seestar FOV — the catalog always outguns a 10 s sub's detection), the unused `-check` /
+> `-m 1` / `-speed slow` ASTAP flags (zero detection change on faint frames), and radius/timeout tuning (a *failed* search
+> costs only ~4 s at the 30° default radius, 0.2 s at 5°). Also verified: the webapp Settings' ASTAP FOV/timeout never
+> reach real solves at all (new ⭐ bug below). **Ingest-heal verdict (the owner's imminent redeploy): SAFE** — on a full
+> synthetic reproduction of the polluted install (bare-output target + merged subs + `_mosaic` pair + `_video` +
+> duplicates), the pre-heal wrong result was reproduced with the real stacker (7 frames, the low-res on-device output as
+> reference, `is_mosaic` flipped, padded 323×483 canvas), ONE re-scan heals it (output frame → `auto:seestar_output`,
+> excluded from both the stack and reference pools; post-heal n_used=6, native 320×480 canvas, `is_mosaic=False`), a
+> second re-scan is byte-identical (idempotent), a user re-accept survives later scans, nothing is ever deleted
+> (sha256-verified), and the `<T>_sub` duplicate-target cleanup flags exactly the junk targets and only them. Three real
+> edge defects filed below (mixed-library mass-reject; legacy whole-device-drop target never healed; cleanup discards user
+> history) — none on the owner's specific path. **Scope note:** the end-to-end image-quality sweep planned for this run
+> was interrupted (its subagent hit the session usage limit mid-run); its preview-aliasing thread was completed by hand
+> and filed below (stride-decimated adjustable render), and partial evidence for a hot-pixel-on-thin-min-max-stacks
+> thread sits in that session's scratchpad — the colour/stretch/gradient/denoise auto-path quality sweep remains the top
+> re-audit candidate for the next Scout run.
+
 > **Integration audit — Seestar data-shapes + output-resolution + thin-stack verification; THREE NEW verified
 > (reproduced) ingest-family bugs filed; the three queued owner fixes verified, with one significant completeness gap
 > (Audit 2026-07-24, branch `claude/astrostack-integration-audit-43giya`).** Baseline suite green (**1858 passed,
@@ -598,6 +632,80 @@ when you take it.
   reveal/suggestion/Adjust either match the thumbnail or self-hide. Confidence: traced. (M, editor/render parity —
   PRIORITY 1.)
 
+- **⭐ The Settings' ASTAP field-of-view and timeout NEVER reach a real plate-solve — only the Settings-page "test solve"
+  honours them (and the sibling-hint search radius has no setter anywhere).** *(Solve/autonomy; broken-UX — a silently
+  dead setting: an S30 owner cannot fix their FOV; found by the 2026-07-24 plate-solve audit. Traced.)*
+  `build_solve_arglist` (`seestack/solve/runner.py:167-169`) reads `astap_fov_deg` / `astap_timeout_s` /
+  `astap_hint_radius_deg` from **project meta** — and nothing in `webapp/` or `seestack/` ever writes those keys (only
+  the desktop-era GUI/plan write `astap_path`; verified by grep). The webapp's solve entry points (the
+  `run_qc_and_solve` callers at `webapp/pipeline.py:117/400/452/748`) thread only `astap_path`, so every real solve runs
+  fov=1.3° / timeout=60 s / radius=30° regardless of Settings; `settings.astap_fov_deg`/`astap_timeout_s` are consumed
+  **only** by the Settings-page test endpoint (`webapp/routers/system.py:59`). An owner who corrects the FOV for a
+  Seestar S30 (true FOV ≈ 2.1°, vs the S50's 1.27° ≈ the 1.3 default — a mismatch ASTAP quad-matching does not forgive)
+  or raises the timeout sees zero effect where it matters, with no hint why — the same silently-dead-surface family as
+  the fixed per-target setup banner. `astap_hint_radius_deg` additionally has no Settings field or UI at all, so the
+  "user who deliberately tightened it" guard in `runner.py:175-178` is dead code. **Fix direction (S):** pass
+  fov/timeout(/radius) as explicit args `run_qc_and_solve → build_solve_arglist` sourced from Settings (mirroring the
+  existing `astap_path` override), keeping project meta as a per-target override; regression-test that a changed
+  Settings value reaches the built arglist. Upgrade-safe (defaults identical). Confidence: traced (call graph complete).
+  (S, autonomy/friendliness — PRIORITY 2/3.)
+
+- **The interactive stack render (History "Adjust" viewer, its stretch-suggestion measurement, and any >8000 px
+  "full-res" PNG) decimates by pixel striding — a native 1080-wide Seestar stack renders at 540 px with aliased,
+  twinkling stars, visibly worse than the 1024 px box-averaged baked preview sitting next to it.** *(Render
+  parity/quality; broken-UX, display only — the FITS/TIFF/share-JPEG artifacts are unaffected; found by the 2026-07-24
+  audit completing the interrupted quality sweep's aliasing thread. Traced.)* `load_stack_rgb`
+  (`seestack/render/thumbnail.py:229-237`) decimates with `rgb[::step, ::step]` where `step = ceil(w/max_width)` — for
+  the Seestar's 1080-wide canvas step=2 → **540 px**, not 1024; and nearest-striding drops up to ~half a FWHM≈2 px
+  star's flux samples depending on subpixel phase, so stars twinkle/alias, while the baked `_write_preview_png`
+  (`seestack/stack/output.py:282`, `Image.BOX`) and share JPEG (LANCZOS) of the *same run* are clean — the "Adjust"
+  view the owner compares against is the odd one out. The same loader serves `render_preview_png_full_res`
+  (`thumbnail.py:312`, `max_long_edge=8000`), so a >8000 px mosaic's "Full-res PNG" download is also stride-aliased.
+  The in-code rationale (striding preserves NaN coverage gaps that box-averaging would smear) is real but fixable:
+  decimate with a NaN-aware block mean (average finite samples per block; NaN only when a block is fully NaN). **Fix
+  direction (S–M):** NaN-aware box decimation in `load_stack_rgb` (float path, keeps the stretch suggestion measuring
+  the same pixels it shows); regression: 1080-wide renders at 1024 (not 540) and a planted star's flux survives the
+  downscale within a few percent. Confidence: traced (mechanism + sizes verified by reading). (S–M,
+  editor/image-quality — PRIORITY 1/4.)
+
+- **⭐ The upgrade-heal can mass-reject a legitimate non-Seestar library: any registered frame whose parent folder merely
+  *shares the base name* of a `<T>_sub` sibling seen during a scan is stamped `auto:seestar_output` — with no per-folder
+  frame-count or path guard.** *(Ingest; wrong-result, recoverable — nothing deleted and the user can re-accept;
+  reproduced by the 2026-07-24 heal audit.)* `reject_seestar_output_frames` (`seestack/io/project.py:661-663`) matches
+  any frame whose parent *basename* equals `<T>` anywhere on disk, fed by `_seestar_output_bases`
+  (`seestack/io/scanner.py:131-154`) — and unlike the junk *classifier* (`scanner.py:161`, `≤ _MAX_JUNK_OUTPUT_FRAMES`)
+  it applies no size sanity check. Repro: a genuine `Andromeda/` folder of 8 real subs (non-Seestar source), later
+  joined in the same scan root by a Seestar-convention `Andromeda_sub/` (3 subs) → the re-scan rejects **8/8 legitimate
+  subs** as `auto:seestar_output`; the target's stack pool silently drops 11 → 3. Visible + reversible in the UI, so
+  not a blocker for the owner's own pure-Seestar redeploy — but a mixed-source library silently loses whole sessions
+  from its stacks. **Fix direction (S):** anchor the reject to the actual bare-output folder *path* observed in this
+  scan (pass the folder `Path` through; compare the full parent), and/or apply the classifier's
+  `≤ _MAX_JUNK_OUTPUT_FRAMES` guard here too. Regression: the mixed-library repro above. Confidence: reproduced.
+  (S, ingest — PRIORITY 2.)
+
+- **A legacy "whole-device drop" target (an old build ingested `MyWorks/` wholesale as ONE target mixing raw subs,
+  on-device outputs and `_video` frames) is never healed and is invisible to both cleanup detectors — it keeps
+  auto-stacking gibberish after the upgrade.** *(Ingest; wrong-result inside that legacy target only; reproduced by the
+  2026-07-24 heal audit.)* The container fix (`seestack/io/scanner.py::_looks_like_seestar_container:112-128`) covers
+  the *forward* path only: on re-scan the correct new per-target ingest happens, but the old giant target keeps **all**
+  its frames accepted (output + `_video` included), and `classify_seestar_junk_target` /
+  `duplicate_sub_target_base_name` both return None for it. Only hits owners whose OLD library was built from a
+  wholesale card/share drop — not the reporting owner's shape. **Fix direction (M):** when a container expands, run the
+  output/`_video` reject against any existing target whose registered source paths live under that container; or teach
+  the junk detector to flag a multi-folder target mixing `_sub` + bare + `_video` sources. Confidence: reproduced.
+  (M, ingest — PRIORITY 2.)
+
+- **One-click `<T>_sub` duplicate cleanup silently discards the duplicate target's user data (stack-run history, notes)
+  — and a genuinely-named standalone `<T>_sub` target gets cloned on re-scan, then its ORIGINAL offered for deletion.**
+  *(Ingest/friendliness; broken-UX — files are never deleted, but registry history/notes vanish from the UI; reproduced
+  by the 2026-07-24 heal audit.)* `webapp/routers/targets.py::cleanup_suggestions:213-249` has no user-data check.
+  Repro: a standalone target genuinely named `Nebula_sub` → re-scan clones its 4 subs into a new `Nebula` target, then
+  cleanup flags the *original* — holding the user's stack history and notes — for removal; with the frontend's
+  hardwired `remove_files=false` (`CleanupSuggestionsCard.tsx:128`) the FITS and old outputs survive orphaned on disk,
+  but the target's runs/notes are gone from the UI. **Fix direction (S–M):** suppress (or clearly caveat) suggestions
+  for duplicates carrying `stack_runs`/notes, or migrate that history onto the base target before delete. Confidence:
+  reproduced. (S–M, friendliness — PRIORITY 3.)
+
 - **The Seestar-aware scanner skips a bare `<T>/` on-device *output* folder only when a `<T>_sub` sibling is present,
   never a `<T>_mosaic_sub` sibling — so a **mosaic's** bare on-device output can still be ingested as a spurious
   1-frame target.** *(Ingest/autonomy; broken-UX — a junk target, not corruption of a real one; found by the
@@ -626,6 +734,14 @@ when you take it.
   requires **real Seestar mosaic-folder-naming data** plus updating that test with a documented rationale; a blind
   flip risks silently dropping a real single-field target. Best handled by the Scout with a confirmed device dump, or
   escalated to owner sign-off.
+  **Heal-side twin (2026-07-24 heal audit — reproduced):** the upgrade-heal has the same blind spot —
+  `_seestar_output_bases` (`seestack/io/scanner.py:148-149`) deliberately skips `_mosaic_sub`, so on the
+  *intermediate-build* pollution shape (raw subs already merged INTO `M 3_mosaic` beside its bare on-device output) a
+  re-scan heals nothing: the output stays accepted inside the live target, the junk classifier is blind (>2 frames),
+  and `_allocate_safe_name` mints a duplicate hashed target (`M_3_mosaic-<hash>`). The common pure-old-build shape IS
+  covered (the 1-frame `M_3_mosaic` junk target is flagged by cleanup — verified). Whatever resolution the device-dump
+  question above gets, apply it to `_seestar_output_bases` in the same commit so the scanner and the heal never
+  disagree.
 
 - ~~**⭐⭐ The v0.184.9 Seestar-convention fix is INCOMPLETE on the owner's own upgrade path: re-scanning an
   already-polluted library merges the raw subs INTO the bare-name target that still holds the Seestar's on-device
@@ -1115,6 +1231,32 @@ when you take it.
   (surfacing the already-shipped `thinStackWarning` copy) rather than a hard refusal, and confirm the re-stack
   path still fires once enough subs solve. The already-shipped thin-stack warnings (v0.159.3/.6) cover the
   *notification*; this covers the *don't-silently-publish-it* half.
+  **▶ ROOT CAUSE MEASURED (Audit 2026-07-24, branch `claude/astrostack-plate-solve-audit-u4wjk1`) — the ASTAP
+  ladder's escalation can only LOSE faint-field solves; fix = reorder the ladder + ship the (now-validated)
+  stack-then-solve bootstrap.** Measured with the real ASTAP CLI 2026.07.16 + the bundled d05 database on realistic
+  synthetic Seestar subs (1080×1920 RGGB, sky 1200 ADU, σ≈45, FWHM 2.1 px — see the 2026-07-24 audit note above;
+  harness in that session's scratchpad `detect_exp.py`/`hot_exp.py`/`bootstrap_exp.py`): ASTAP **auto-bins 1×1 on the
+  ladder's first (default) rung** for a 1080×1920 frame, so `_SOLVE_LADDER`'s bin-2/bin-4 rungs are pure *detection
+  destroyers* for the Seestar's ~2 px-FWHM stars (a binned star collapses into a single pixel and is dropped by
+  ASTAP's shape filter). Stars detected of 25 planted, by brightest-star peak over the 1200-ADU sky:
+  **7200 ADU → 22.3 (bin1) / 16.8 (bin2) / 5.0 (bin4+s200); 1800 ADU → 12.0 / 6.2 / 0.2; 864 ADU → 5.0 / 1.0 /
+  0.0.** ASTAP hard-aborts below 3 stars ("Only N stars found in image. Abort") and needs ~6+ for reliable quads —
+  so on faint subs rung 1 is marginal and rungs 2–3 are wasted work (bin 4 detects ~nothing even on *bright* frames;
+  it cannot rescue anything a Seestar produces). The ladder's hot-pixel rationale is empirically void: 200 planted
+  hot pixels change bin-1 detection not at all (13.8 → 13.8, 7.8 → 7.8 — ASTAP's own single-pixel filter already
+  rejects them; caveat: clustered defects/warm columns untested). Meanwhile the bootstrap measures out: at 864 ADU
+  (single sub 0–2 stars at bin 2 — un-solvable), a plain mean of **8** subs detects **6–12** stars and of **16** subs
+  **7–12**, robust to ±2 px uncompensated inter-sub drift — a quick mean of the first ~8–16 accepted-but-unsolved
+  subs IS solvable and can seed WCS propagation. **Builder, concrete slices:** (a) *S* — replace the bin-4+`-s 200`
+  rung with a rung that can actually win (keep bin-2 for fat-PSF/hazy nights; a bin-1 retry with a raised `-s` is
+  strictly better on sharp frames); (b) *M–L, the real cure* — implement the queued "stack-then-solve bootstrap" +
+  "WCS-free star-registration fallback" ideas (both annotated with these numbers): when most of a target's subs stay
+  unsolved after a scan, mean the first N≈8–16 accepted-unsolved subs (integer-shift alignment suffices per the
+  jitter test), solve THAT with the same ladder, then register members to it and synthesise per-sub WCS. (c) The
+  measured **non-levers** — deeper star DB, `-check`/`-m 1`/`-speed slow`, radius/timeout tuning — are recorded in
+  the audit note so no run burns time on them. Severity: this is the root of the ⭐⭐ gibberish family. Confidence:
+  reproduced on the detection side (the end-to-end catalog-match rate isn't measurable on synthetic star patterns;
+  ASTAP's own ≥3-star abort + quad-count mechanics close that gap).
 
 - ~~**A per-target failure in the auto-stack *pre-check* phase aborts the whole walk-away pipeline job (marks it
   `error`) and skips auto-stack for every remaining target — violating the documented "non-fatal per target"
@@ -5754,6 +5896,11 @@ problems. Dogfood it every big-picture run and fix root causes.
   it needs a careful Builder slice (and the astroalign-vs-in-house/dependency call belongs to the owner). But it is the
   single most direct cure for the owner's real "gibberish on faint targets" report — worth prioritising once the
   cheaper solve-side mitigations are exhausted.
+  **▶ VALIDATED IN PART (Audit 2026-07-24, real ASTAP CLI + d05):** the companion stack-then-solve bootstrap
+  measured out — a plain mean of 8–16 subs at a faintness where a single sub detects 0–2 stars detects 6–12 (solvable),
+  robust to ±2 px uncompensated drift, so the "solve the deep image, propagate WCS by registration" plan is sound and
+  integer-shift-level registration is enough for a short tracked burst. See the ⭐⭐ thin-stack entry's ▶ block for
+  numbers.
 - ~~**▶ PARTIAL — refusal message half SHIPPED v0.184.13; pre-submit UI half now SHIPPED v0.197.0.**~~ — **COMPLETE
   v0.197.0** (Builder 2026-07-24, branch `claude/pensive-faraday-7sd8na`; regression-tested). The pre-submit half is now
   done, unified on the *same* `_best_memory_fix` the refusal message uses, so the Stack-form one-click fix and the
@@ -5925,6 +6072,13 @@ problems. Dogfood it every big-picture run and fix root causes.
   no-match path triggers the relaxed retry; a "no star database" path does **not** (still surfaces the setup banner);
   the retry budget is honoured. *(Feasibility: uses the already-bundled ASTAP, additive, bounded, testable — passes
   §4's filter. Ties directly to the highest-priority owner-reported issue.)*
+  **▶ MEASURED (Audit 2026-07-24) — scope this DOWN before building:** most sensitivity levers this entry guesses at
+  measured as **non-levers** on realistic faint Seestar frames (real ASTAP CLI + d05): `-check`, `-m 1`, `-speed slow`
+  → zero detection change; a wider radius / longer timeout is irrelevant (a failed search costs ~4 s at the 30°
+  default, 0.2 s at 5°); a deeper star database is unnecessary (d05 census: ≥124 catalog stars per Seestar FOV in the
+  sparsest sky area, median ~490). What DOES move the needle: never escalate binning past 2 (the bin-4+`-s 200` rung
+  detects ~0 of 25 stars even on bright frames), keep/boost the bin-1 rung (raise `-s`), and the stack-then-solve
+  bootstrap (validated). Full numbers: the ⭐⭐ thin-stack entry's ▶ ROOT CAUSE MEASURED block.
 
 - **IMPROVEMENT IDEA (Scout 2026-07-23, spotted while fixing the dead per-target setup banner v0.178.3) — raise a
   *global, cross-target* "plate-solving isn't set up" readiness banner on the Dashboard when the star **database** is
@@ -6123,6 +6277,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   quality (a real deep stack instead of gibberish) for exactly the case the owner reported. **Scout: this is the
   principled long-term answer to the thin-stack root cause — pair it with the already-shipped honest "thin stack"
   warning (the warning tells the user; this actually fixes it).**
+  **▶ VALIDATED (Audit 2026-07-24, real ASTAP CLI + the bundled d05):** at a faintness where a single sub detects 0–2
+  stars (below ASTAP's ≥3-star abort — un-solvable), a plain mean of **8** subs detects **6–12** stars and of **16**
+  subs **7–12** — comfortably solvable — and the gain survives ±2 px of uncompensated inter-sub drift (integer-shift
+  alignment is enough for a short tracked burst; no star registration needed just to *bootstrap*). This is now the
+  measured, highest-yield attack on the ⭐⭐ faint-field family — see that entry's ▶ ROOT CAUSE MEASURED block for the
+  full numbers and the suggested guard ("engage when most subs stay unsolved after a scan").
 - ~~**IMPROVEMENT IDEA (Scout 2026-07-23) — a plate-solve that succeeds but whose sidecar won't parse should be
   recorded as *retriable-unsolved*, not silently as "solved with no WCS" (which wastes a re-solve every scan and
   never stacks the frame).**~~ — **SHIPPED v0.174.4** (Builder 2026-07-23, branch
