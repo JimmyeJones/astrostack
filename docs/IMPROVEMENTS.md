@@ -596,12 +596,32 @@ when you take it.
   bare non-Seestar folder that has no `_sub` sibling at all. Confidence: traced (code path proven; device-naming
   assumption unverified). (S, ingest/autonomy — PRIORITY 2.)
 
-- **⭐⭐ The v0.184.9 Seestar-convention fix is INCOMPLETE on the owner's own upgrade path: re-scanning an
+- ~~**⭐⭐ The v0.184.9 Seestar-convention fix is INCOMPLETE on the owner's own upgrade path: re-scanning an
   already-polluted library merges the raw subs INTO the bare-name target that still holds the Seestar's on-device
   stacked OUTPUT frame — the output keeps stacking into the final image, is *preferentially picked as the stack
-  reference*, and the old `<T>_sub` target lives on as a full duplicate.** *(Ingest/upgrade-safety; wrong-result on
-  the live install the fix was shipped for; found by the 2026-07-24 integration audit; **traced + reproduced**
-  end-to-end — `scratchpad/repro_upgrade_pollution.py`.)* Mechanism: pre-fix, folder `M 31/` (the on-device output)
+  reference*, and the old `<T>_sub` target lives on as a full duplicate.**~~ — **FIXED v0.184.15** (Builder
+  2026-07-24, branch `claude/pensive-faraday-vrd4ka`; **traced + reproduced + regression-tested**). At scan time,
+  `scan_and_organize` now computes `_seestar_output_bases(subdirs_with_fits)` — mapping each single-field `<T>_sub`
+  folder to the bare `<T>` output-folder basename — and, after ingesting the raw subs into target `<T>`, calls the new
+  `Project.reject_seestar_output_frames(<T>)`. That helper additively rejects every already-registered frame whose
+  `source_path` parent folder is the bare `<T>/` (the Seestar's on-device stacked output) or a `*_video/` folder,
+  stamping `accept=0, reject_reason="auto:seestar_output"` (new exported constant `REJECT_REASON_SEESTAR_OUTPUT`), so
+  those frames leave the **stack + reference pool** (`iter_frames(accepted_only=True)`) — which cures (a) the output
+  averaging into the final image, (b) it being preferentially picked as reference, and (c) the resulting `is_mosaic`
+  misfire. **Additive + reversible + idempotent:** nothing is deleted, a user's manual accept (`user_override`) is
+  never clobbered, an already-rejected frame is not re-touched, and the reject only fires for a target whose `<T>_sub`
+  sibling is present in the scan (so a legitimate non-Seestar bare `<T>/` folder is untouched). The `TargetScanResult`
+  now carries `n_output_frames_rejected` and the scanner logs the count. Regression (`tests/test_scanner.py`, all new,
+  fail-before/pass-after): `test_seestar_output_bases_maps_single_field_sub_only`,
+  `test_reject_seestar_output_frames_rejects_output_and_video_not_subs` (output+video rejected, subs kept, user
+  override preserved, idempotent), and `test_rescan_rejects_pre_v0_184_9_output_pollution_end_to_end` (seeds the pre-fix
+  polluted state, re-scans, asserts 3 subs added + 1 output rejected + only 3 accepted). Upgrade-safe: pure additive
+  reject on a re-scan, no config/DB-schema/API-shape/on-disk/default change. **Deliberately out of scope (filed as a
+  follow-up Idea below):** the stale `<T>_sub`-named *duplicate target* still lingers — it holds the correct raw subs so
+  it produces a correct (if duplicated) stack, i.e. wasted compute, not a corrupt image; surfacing it for one-click
+  cleanup is a UX task, not a correctness one. Mosaic bare-output naming stays with its own filed bug. Confidence:
+  traced + reproduced + regression-tested. (M, ingest/upgrade-safety/correctness — PRIORITY 2.)
+  *(Original trace kept below for provenance.)* Mechanism: pre-fix, folder `M 31/` (the on-device output)
   became target `M 31` (safe `M_31`) and `M 31_sub/` became target `M 31_sub`. Post-fix, `_apply_seestar_convention`
   maps `M 31_sub/` → target name `M 31` → `make_safe_name` → **the same safe `M_31`** → `open_or_create_target`
   (`library.py:356-375`) re-opens the polluted project and ingests the subs into it. Reproduced: after the
@@ -5079,6 +5099,19 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
+- **NEW IDEA (Builder 2026-07-24, follow-up to the v0.184.15 upgrade-pollution fix) — surface & offer one-click
+  cleanup of the stale `<T>_sub`-named *duplicate targets* a pre-v0.184.9 scan left behind.** *(Pillar: 3 friendliness
+  + autonomy; size S–M.)* **The gap:** the v0.184.15 fix now additively rejects the on-device *output frame* that a
+  pre-convention scan merged into the `<T>` target, so the **final image is no longer corrupted**. But the *other* half
+  of that old scan — the separate target literally named `<T>_sub` (safe `<T>_sub`), holding the same raw subs — still
+  lingers: a beginner sees two library tiles for one object (`M 31` and `M 31_sub`) and pays double auto-stack compute.
+  It's not a correctness bug (the `<T>_sub` target stacks the *correct* subs), just clutter + wasted work. **The
+  feature:** a detector that flags a target whose safe name is exactly `<other>_sub` **and** whose frames' source paths
+  all live under a `*_sub/` folder that another target (`<other>`) now owns, then offers a plain-language "This looks
+  like a leftover from an older scan — the frames are already in *M 31*. Remove the duplicate?" one-click action
+  (soft-delete / archive the duplicate target, never the frames on disk). Must be **reversible** and default to *asking*,
+  never auto-deleting a user's target. Note the older "Surface the junk targets an OLD scan built" idea below
+  mis-modelled this state (it assumed a separate 1-frame output target) — this entry supersedes it.
 - **NEW IDEA (Scout 2026-07-24) — "About N min left": a live time-remaining estimate on a running stack (and the
   scan/QC/solve jobs), so a beginner with thousands of subs knows whether to wait or go make tea — and can tell a
   slow-but-working job from a stuck one.** *(Pillar: 3 friendliness + trust; size S — frontend-only, verified

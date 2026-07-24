@@ -109,6 +109,32 @@ def _apply_seestar_convention(
     return units
 
 
+def _seestar_output_bases(
+    subdirs_with_fits: list[tuple[str, list[Path]]],
+) -> dict[str, str]:
+    """Map each single-field ``<T>_sub`` target name to the bare ``<T>`` folder
+    basename whose already-registered frames (the Seestar's on-device stacked
+    output) must be additively rejected from that target on a re-scan.
+
+    This is the *upgrade-path* companion to ``_apply_seestar_convention``: the
+    convention stops us ingesting a bare ``<T>/`` output folder going forward,
+    but a library first scanned before v0.184.9 already merged that output frame
+    into the ``<T>`` target (both fold to the same safe name). See
+    ``Project.reject_seestar_output_frames``. Mosaics are skipped here — their
+    on-device output naming is device-specific and tracked as a separate bug.
+    """
+    bases: dict[str, str] = {}
+    for name, _ in subdirs_with_fits:
+        low = name.lower()
+        if low.endswith(_MOSAIC_SUB_SUFFIX):
+            continue
+        if low.endswith(_SUB_SUFFIX):
+            base = name[: -len(_SUB_SUFFIX)].rstrip()
+            if base:
+                bases[base] = base
+    return bases
+
+
 @dataclass
 class TargetScanResult:
     """What the organise phase did for one target."""
@@ -127,6 +153,9 @@ class TargetScanResult:
     # DB ids of those refreshed frames, so the caller can invalidate their cached
     # previews (which key on id alone and would keep showing the old image).
     refreshed_frame_ids: list[int] = field(default_factory=list)
+    # Frames additively rejected because they are the Seestar's on-device output
+    # (a pre-v0.184.9 library merged that output into this target as a fake sub).
+    n_output_frames_rejected: int = 0
 
 
 @dataclass
@@ -201,6 +230,10 @@ def scan_and_organize(
     # Fold the Seestar folder convention in (raw "_sub" folders → targets;
     # skip on-device outputs and videos) before turning folders into targets.
     units = _apply_seestar_convention(subdirs_with_fits)
+    # Upgrade path: a library first scanned before v0.184.9 may already hold the
+    # Seestar's on-device output inside a "<T>" target the raw "<T>_sub" subs now
+    # map to — additively reject those output frames so they leave the stack pool.
+    output_bases = _seestar_output_bases(subdirs_with_fits)
     if loose:
         units.append((UNSORTED_TARGET_NAME, loose))
 
@@ -209,7 +242,8 @@ def scan_and_organize(
         if progress is not None:
             progress("Organizing", i, total)
         tsr = _ingest_into_target(library, target_name, files,
-                                  copy_to_cache=copy_to_cache)
+                                  copy_to_cache=copy_to_cache,
+                                  reject_output_base=output_bases.get(target_name))
         result.targets.append(tsr)
     if progress is not None:
         progress("Organizing", total, total)
@@ -223,8 +257,16 @@ def _ingest_into_target(
     files: list[Path],
     *,
     copy_to_cache: bool,
+    reject_output_base: str | None = None,
 ) -> TargetScanResult:
-    """Open (or create) the target and ingest ``files`` into its project."""
+    """Open (or create) the target and ingest ``files`` into its project.
+
+    ``reject_output_base``, when given, is the bare ``<T>/`` output-folder
+    basename for a Seestar single-field target: after ingest, any already-
+    registered frame that lives in that folder (the Seestar's own on-device
+    output, mis-ingested by a pre-v0.184.9 scan) is additively rejected so it
+    leaves the stack/reference pool.
+    """
     entry, proj = library.open_or_create_target(target_name)
     tsr = TargetScanResult(
         target_name=entry.name,
@@ -246,6 +288,16 @@ def _ingest_into_target(
                 tsr.n_errors += 1
             else:
                 tsr.n_frames_added += 1
+        if reject_output_base:
+            rejected = proj.reject_seestar_output_frames(reject_output_base)
+            tsr.n_output_frames_rejected = len(rejected)
+            if rejected:
+                log.info(
+                    "Rejected %d Seestar on-device output frame(s) from target "
+                    "%r (source folder %r) — they are excluded from stacking; "
+                    "re-accept them if you really want them stacked.",
+                    len(rejected), entry.name, reject_output_base,
+                )
     finally:
         proj.close()
     # Keep the registry's cached counts in step with the project DB.
