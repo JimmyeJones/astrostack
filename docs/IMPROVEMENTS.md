@@ -86,6 +86,40 @@ when you take it.
   and video folders and treated those single output images as raw frames.)* Confidence:
   reproduced. (M–L, autonomy/correctness — PRIORITY 1/2)
 
+> **Re-audit — full stacking-engine + calibration + webapp-orchestration sweep CLEAN again; NO new verified bugs this
+> run (Scout 2026-07-24, branch `claude/kind-mccarthy-cj5313`).** Baseline suite green (**1840 passed, 2 skipped**).
+> Three independent adversarial audit sub-agents (each told to skip the previously-confirmed-clean items and hunt only
+> for *new* defects) plus my own end-to-end reads re-covered: (a) **`align.py` + the whole per-frame path** it drives —
+> `bg/per_frame.py` (all-NaN/negative-sky/degenerate-field background degrade-safely; the `_EXCLUDE_PERCENTILE_LADDER`
+> falls all the way to no-subtraction with a warning, never a partial colour-cast), `bg/hot_pixels.py`,
+> `io/fits_loader.py` (`bilinear_debayer` zero-sample sentinel `plane != 0` **verified benign by repro** — a genuine
+> zero sample is preserved in every channel; integer-mosaic upcast before neighbour sums, odd-dim edge-pad cropped back
+> inside the 3px align inset), `calibrate/apply.py`, `wcs_io.py`, `core/xp.py` — and confirmed the subpixel-refine cap
+> (`|dy|>CAP or |dx|>CAP`) does **not** catch a NaN shift but is **unreachable** (patches are NaN-filled to finite before
+> `phase_cross_correlation`, and finite inputs never return NaN; the spurious `(-0.7,-0.7)` on a featureless overlap
+> shifts ≤5px, exactly consumed by the `pad=SUBPIXEL_SHIFT_CAP_PX=5` window) — **CLEAN**; (b) **`weighting.py` /
+> `photometric.py` / `reference.py`** — every weight reaching the accumulator is provably in (0,1] (each factor
+> `clip([0.1,1])`, geo-mean stays in-range; single-frame / identical-frame / zero-star / all-None-metrics / tiny-
+> transparency all give finite weights, verified by running `compute_frame_weights`), NaN can't reach it (sqlite coerces
+> NaN→NULL, dropped by the `is not None`+`>0` guards; QC never emits inf), photometric normalizes to the *median* (no
+> degenerate-reference case) with scales clipped `[1/max_ratio, max_ratio]`, reference tie-breaks deterministic
+> (`min(range, key=score)` over `ORDER BY id`) — **CLEAN**; (c) **the webapp autonomy path** — `pipeline.py`/`jobs.py`/
+> `calibration.py` (auto-calibrate master selection: `_dims_ok`/exposure/gain/temp gates use the *same* raw dims the
+> engine's `CalibrationMasters.validate` hard-fails on, so a bound master always validates — no wrong/mismatched master
+> silently applied; no-match → uncalibrated, never corrupt; the standalone-bias block correctly skipped when a dark is
+> bound — no double-subtract; `run_stack` **raises** on every degenerate path so a failed auto-stack can never publish a
+> black "success"; all four per-target loops isolate a mid-run DELETE / DB-lock; no changed default on live upgrade —
+> `auto_stack`/`auto_edit_on_autostack`/`auto_bind_calibration`/`mixed_pointing_guard`/`auto_grade_frames` all default
+> `False`) — full webapp suite **661 passed** — **CLEAN**. My own reads of **`output.py`** (preview/full-res-PNG/share-
+> JPEG only ever downscale, NaN→0 only *after* covered-percentile stats), **`calibrate/masters.py`** (`_sigma_clip_mean`
+> MAD=0→median-degrade, NaN-aware combine, atomic master write) and the **`estimate_stack`/drizzle-scale-budget** path
+> (`suggested_drizzle_scale`/`suggested_reference_canvas` charge the same planes the run-time guard does; `run_stack`
+> honours the requested scale or *refuses* via the guard — it never silently shrinks output) agreed — **CLEAN**. **No
+> bug rose above the noise floor, so per AGENTS.md nothing was manufactured.** Two *latent-but-unreachable* defensive-
+> hardening notes (not bugs — they cannot fire on real data) recorded in the Minor group below; one autonomy idea
+> (WCS-free star-registration fallback for faint fields — a direct attack on the ⭐⭐ thin-stack root) and one new
+> beginner feature ("Point here tonight") filed below.
+>
 > **Re-audit — full stacking-engine sweep CLEAN again; shipped one verified memory-estimate/guard broken-UX bug
 > (Scout 2026-07-24, branch `claude/kind-mccarthy-8fwg93`).** Baseline suite green (**1826 passed, 2 skipped**).
 > Three independent adversarial audit sub-agents plus my own reads re-covered the engine end-to-end and all came back
@@ -1908,6 +1942,19 @@ sweep are now both well-hardened.)_
   Confidence: reproduced + fixed.
 
 - **Minor / low-priority (traced, filed for completeness — fix only if touching these files):**
+  - `seestack/stack/weighting.py:97` the FWHM factor computes `(best_fwhm / f.fwhm_px) ** 2` with a Python float, so a
+    pathologically tiny `fwhm_px` would raise `OverflowError` (before `np.clip` can clamp it) rather than saturate.
+    **Unreachable on real data** — every writer of `fwhm_px` traces to `median_fwhm`, which persists only values in
+    (0.5, 20) or None, and overflow needs `fwhm_px < ~1.5e-154` (a crash reproduces only at ~1e-300). Defensive-only:
+    cast to `np.float64`/guard the ratio if the file is touched. (Cosmetic — unreachable; confidence: traced + repro'd
+    at the unreachable boundary.) _(Found by the 2026-07-24 weighting audit.)_
+  - `seestack/stack/align.py` (subpixel-refine cap, ~line 400/490) the guard `|dy| > CAP or |dx| > CAP` does **not**
+    reject a NaN shift (NaN fails both comparisons → the shift is applied). **Unreachable** — the correlation patches
+    are NaN-filled to finite before `phase_cross_correlation`, and finite inputs never return a NaN shift (a featureless
+    overlap returns a finite spurious `(-0.7,-0.7)` whose ≤5px NaN edge-ring is exactly consumed by the
+    `pad=SUBPIXEL_SHIFT_CAP_PX=5` window). Defensive-only: rewrite as `not (abs(dy) <= CAP and abs(dx) <= CAP)` so a NaN
+    is treated as "too large" and skipped, belt-and-suspenders, if the file is touched. (Cosmetic — unreachable;
+    confidence: traced.) _(Found by the 2026-07-24 align audit.)_
   - `webapp/routers/storage.py:193` `prune_stack_runs` closes `proj` then `lib` in a **single** `finally` (not
     nested like `gallery.py`/`storage.py::get_storage`), so if `proj.close()` itself raised, `lib.close()` would
     be skipped and the Library handle would leak. Trigger is essentially unreachable (`sqlite3.Connection.close()`
@@ -5169,6 +5216,34 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+- **IMPROVEMENT IDEA (Scout 2026-07-24) — a WCS-free star-registration *fallback* so a faint field whose subs mostly
+  fail to plate-solve can still stack from all its frames, instead of collapsing to a ~1–3-frame gibberish stack.**
+  *(Autonomy + image quality — priorities 2/4; a direct attack on the remaining root of the ⭐⭐ thin-stack/gibberish
+  top bug. Size L — file as a scoped Builder slice, and flag the dependency question below for owner sign-off before
+  any new package lands.)* **Why this is the highest-value autonomy gap:** the whole engine registers frames via ASTAP
+  WCS + reprojection, and `run_stack` combines **only accepted *and* solved** frames. On a faint / sparse-star target
+  ASTAP fails on most subs (the documented root cause the sibling-hint seeding v0.180.0, unsolved-surfacing, and the
+  relaxed-retry idea all *mitigate* but can't fully cure — a genuinely star-poor field may be unsolvable no matter the
+  hint). So hundreds of accepted subs sit unsolved and never stack, and the "stack" is the handful that did solve →
+  per-pixel colour speckle. **The idea:** when a run would stack far fewer frames than were accepted (e.g.
+  `solved << accepted` and `solved < auto_stack_min_frames·k`), fall back to registering the *unsolved* accepted subs
+  to the solved reference (or to the best sub) by **star-pattern matching** — the classic astro fallback DSS/Siril use
+  when there's no plate solution. **Non-trivial, be honest about it:** the Seestar is alt-az, so field *rotation*
+  accumulates over a night — a translation-only phase-correlation (what `align.py` already uses for subpixel refine)
+  is **not** enough; this needs a **similarity transform** (translation + rotation + modest scale) from matched star
+  triangles. Options: an in-house triangle-hash matcher over the QC star centroids we *already* detect (no new dep,
+  more work), **or** the small pure-Python `astroalign` package (fast to build, but a **new dependency → per §9/§10
+  record the sign-off** before adding). **Shape / guardrails:** additive and **opt-in / automatic-only-as-a-fallback**
+  (never replaces a good WCS solve; engages only when solved-frame count is pathologically low), memory-bounded like
+  the existing path (register→reproject one frame at a time, no unbounded accumulation), and must degrade safely
+  (a frame that fails star-matching is simply left out, exactly as an unsolved frame is today — never corrupt).
+  Surface it honestly on the result ("N of M frames stacked by star-matching — plate-solving couldn't locate them").
+  **Tests:** synthetic faint few-star subs with a known rotation+shift, most WCS-unsolvable → the fallback recovers
+  ≥K frames and output noise falls ~√N (vs single-frame today); a normal solved night is untouched (fallback never
+  engages). **Why it's an *idea* not a fix:** it's a new registration path on the hot path + a possible dependency, so
+  it needs a careful Builder slice (and the astroalign-vs-in-house/dependency call belongs to the owner). But it is the
+  single most direct cure for the owner's real "gibberish on faint targets" report — worth prioritising once the
+  cheaper solve-side mitigations are exhausted.
 - **IMPROVEMENT IDEA (Scout 2026-07-24, spotted while fixing the v0.184.10 memory-estimate/guard bug) — when a stack
   is refused for memory, tell the beginner the *one* concrete change that makes it fit (and by how much), instead of a
   generic four-lever message.** *(Autonomy + friendliness — priorities 2/3; squarely relevant to the owner's RAM-capped
@@ -7616,6 +7691,40 @@ problems. Dogfood it every big-picture run and fix root causes.
 > goals, Sky-so-far coverage, and a progress reel all already exist. Per AGENTS.md §2, I did **not** manufacture a
 > duplicate this run — I filed only the one genuinely-absent feature below (verified against the routes/routers), and
 > flag that future feature-ideation should first check this saturation rather than re-propose an existing capability.
+
+- **NEW BEGINNER FEATURE (Scout 2026-07-24) — "Point here tonight": one calm recommendation of which target you're
+  *already working on* to continue tonight, ranked across your whole library by (how close it is to a good result) ×
+  (how well-placed it is right now) — so a beginner with several half-finished targets doesn't have to decide, or open
+  each Target page, to know where the next clear night pays off most.** *(Pillar: 2 autonomy + 3 friendliness + plan;
+  size M.)* **The gap (verified this run against `webapp/routers/plan.py`):** the planning surface is broad but has a
+  precise hole. `/suggest` recommends **new** showpieces you have **not** captured (it *excludes* the library);
+  `/next-session/{safe}` plans a **single target you pick** (forward windows for *this* one); `/tonight` ranks
+  visibility; per-target readiness/goal cards live on each Target page. **Nothing ranks your *own in-progress* targets
+  against each other to answer the beginner's actual question — "of the things I've already started, which should I
+  point at *tonight*?"** A hobbyist mid-way through M31, M42 and the Pleiades has to open three Target pages and
+  eyeball goal-progress vs. tonight's altitude themselves; a beginner won't. **The feature (beginner idiom, one calm
+  pick):** a small Dashboard/Tonight card — *"Tonight, point at M31. It's high in the east from 21:10, and about 90
+  min more would reach your 3 h goal."* Picks the single owned target that is both **well-placed tonight** (reuse the
+  `/tonight` altitude/darkness machinery) **and** has the **most to gain** (closest to its integration goal, or —
+  when no goal is set — thinnest but still improvable, reusing the readiness figures already computed), with at most
+  one or two runners-up dimmed below. **Distinct from what exists:** `/suggest` = *new* targets; `/next-session` = a
+  target *you* chose; this = *the app choosing among the ones you already have*. It's the "just did it for you"
+  decision-removal the autonomy pillar is about. **Why it clears the beginner bar:** universally useful ("where do I
+  point tonight to finish something?"), zero jargon (translates goal-progress + altitude into one plain sentence),
+  a sane single default (auto-ranked, no knobs), reuses data + math already trusted (goals, readiness, altitude
+  windows), and serves autonomy + planning. **Shape for one Builder run:** a read-only endpoint (e.g.
+  `GET /api/plan/continue-tonight`) that walks library targets with a position, scores each by
+  `readiness_gap × tonight_placement` (both already derivable — `_read_goal_s`/readiness in `targets.py`, the
+  altitude-window helper behind `/tonight`), and returns the top pick + a couple of runners-up; a small frontend card.
+  **Sane default / self-hiding:** no location set, or no owned target with a position, or nothing well-placed →
+  the card hides (mirror the existing `/next-session` self-hide contract), never an error; a library with one target
+  → just that one if it's placed. Tests: a seeded library with two positioned targets at different goal-progress and
+  different tonight-altitude → asserts the expected top pick and ordering; empty/location-less library → empty payload,
+  card hidden. Upgrade-safe: purely additive read-only endpoint + a display card; reuses existing goal/readiness/
+  altitude code; no schema/config/default/API-shape change. *(Feasibility: fits headless/web/TrueNAS, no new/heavy
+  dependency, sane default + plain-language line, additive/reversible, testable — passes §4's filter. Verified
+  genuinely absent 2026-07-24: no endpoint ranks *owned* targets by tonight-suitability — `/suggest` excludes the
+  library, `/next-session` is single-target.)*
 
 - **NEW BEGINNER FEATURE (Scout 2026-07-24) — "Your year in space": a one-tap, shareable recap poster of everything
   you've captured (this year / all-time), turning the raw stats the app already tracks into something a beginner is
