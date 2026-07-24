@@ -337,6 +337,22 @@ def _parse_options(options_json: str | None) -> dict:
     return parsed if isinstance(parsed, dict) else {}
 
 
+def _preview_is_display_space(options_json: str | None) -> bool:
+    """True when a run's stored preview PNG is a tone-mapped display-space image —
+    an in-place "Process target" Auto edit (``preview_display_space`` marker) whose
+    FITS stays linear, so ``fits_is_display_space`` alone wouldn't catch it. Such a
+    preview can't be honestly matched by a raw STF sub render or anchored by an
+    asinh stretch suggestion, so the parity surfaces self-hide for it just as they
+    do for a display-space *export* whose FITS is stamped."""
+    if not options_json:
+        return False
+    try:
+        parsed = json.loads(options_json)
+    except json.JSONDecodeError:
+        return False
+    return isinstance(parsed, dict) and bool(parsed.get("preview_display_space", False))
+
+
 def _run_is_reusable(options_json: str | None) -> bool:
     """A run's settings can pre-fill the Stack form unless it's an editor-recipe
     or channel-combine run (those carry no stack knobs)."""
@@ -701,11 +717,24 @@ async def render_stretch_suggestion(
     can jump brighter or darker. Mirrors the editor's stretch suggestion but for
     the History ``…/render`` surface (measures the identical pixels that endpoint
     stretches). Returns ``{stretch, black}`` null when there's no useful
-    suggestion (too little dynamic range) or the run is a display-space export
-    (its sliders are a no-op — nothing to anchor)."""
-    _, fits_path = _run_fits_path(request, safe, run_id)
+    suggestion (too little dynamic range) or the run is a display-space export /
+    in-place Auto edit (its sliders are a no-op — nothing to anchor)."""
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
+    finally:
+        proj.close()
+        lib.close()
+    if run is None:
+        raise HTTPException(status_code=404, detail="No such run")
+    fits_path = run.fits_path
     if not fits_path or not Path(fits_path).exists():
         raise HTTPException(status_code=404, detail="No FITS for this run to render")
+    # An in-place Auto-edited run's preview is the recipe's tone-mapped result, not
+    # an STF/asinh render of its (still-linear) FITS — an asinh suggestion can't
+    # match it, so anchor nothing (Adjust falls back to its neutral defaults), the
+    # same as a display-space export whose FITS is stamped.
+    preview_ds = _preview_is_display_space(run.options_json)
 
     from seestack.edit.stretch import suggest_asinh_stretch
     from seestack.render.orient import NORTH_UP_MIN_DEG
@@ -718,6 +747,8 @@ async def render_stretch_suggestion(
         # only surface it when there's a real, more-than-trivial correction.
         angle = stack_north_up_deg(fits_path)
         north_up_deg = angle if (angle is not None and abs(angle) >= NORTH_UP_MIN_DEG) else None
+        if preview_ds:
+            return {"stretch": None, "black": None, "north_up_deg": north_up_deg}
         rgb, display_space = load_stack_rgb(fits_path, max_width=1024)
         if display_space:
             return {"stretch": None, "black": None, "north_up_deg": north_up_deg}
@@ -840,8 +871,10 @@ def one_sub_vs_stack_info(safe: str, run_id: int, request: Request) -> dict[str,
             raise HTTPException(status_code=404, detail="No such run")
         has_preview = bool(run.preview_path and Path(run.preview_path).exists())
         # A display-space export is tone-mapped verbatim; a raw sub STF/asinh
-        # render can't match it, so don't offer the reveal for those runs.
-        display_space = bool(
+        # render can't match it, so don't offer the reveal for those runs. An
+        # in-place Auto-edited run's preview is likewise a recipe result (its FITS
+        # stays linear, so only the run marker catches it).
+        display_space = _preview_is_display_space(run.options_json) or bool(
             run.fits_path and Path(run.fits_path).exists()
             and fits_is_display_space(run.fits_path)
         )

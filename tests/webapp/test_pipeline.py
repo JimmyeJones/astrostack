@@ -270,6 +270,31 @@ def test_auto_edit_on_autostack_finishes_the_picture(client, solved_library):
     assert any(o["id"] == "tone.stretch" for o in saved_ops)
 
 
+def test_auto_edited_run_self_hides_parity_surfaces(client, solved_library):
+    # An in-place "Process/auto-edit" run's preview PNG is the tone-mapped Auto
+    # recipe result, but its FITS stays linear (the recipe is stored separately and
+    # is reversible). The one-sub-vs-stack reveal (which would show a raw STF sub
+    # beside the recipe-toned stack) and the Adjust stretch suggestion (which
+    # promises to "match the STF preview thumbnail") must therefore self-hide,
+    # exactly as they do for a display-space export. Fail-before: the linear FITS
+    # let both surfaces engage and diverge from the clicked thumbnail.
+    client.put("/api/settings",
+               json={"auto_stack": True, "auto_edit_on_autostack": True})
+    body = _run_scan(client)
+    assert body["result"].get("auto_edited", 0) >= 1
+    runs = client.get("/api/targets/M_42/stack-runs").json()
+    assert runs
+    rid = runs[0]["id"]
+
+    info = client.get(
+        f"/api/targets/M_42/stack-runs/{rid}/one-sub-vs-stack").json()
+    assert info["available"] is False
+
+    sug = client.get(
+        f"/api/targets/M_42/stack-runs/{rid}/render-suggestion").json()
+    assert sug["stretch"] is None and sug["black"] is None
+
+
 def test_mixed_pointing_guard_skips_a_bimodal_process(client, data_root):
     # A batch that looks like two different targets in one folder: with the
     # (opt-in) mixed-pointing guard ON, the one-click Process skips the stack with

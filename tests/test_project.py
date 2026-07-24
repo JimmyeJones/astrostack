@@ -242,6 +242,38 @@ def test_stack_run_rejection_tally_round_trips(proj):
     assert run.rejection_mode == "sigma-clip"
 
 
+def test_set_run_preview_display_space_merges_marker_additively(proj):
+    """``set_run_preview_display_space`` records the preview-is-tone-mapped marker
+    in the run's ``options_json`` *without* dropping its existing stack knobs, is
+    idempotent, and returns False for an unknown run id. This is what lets the
+    in-place Auto edit tell the parity surfaces its preview is a recipe result."""
+    import json
+
+    from seestack.io.project import StackRunRow
+
+    run_id = proj.add_stack_run(StackRunRow(
+        id=None, timestamp_utc="2026-07-24T00:00:00+00:00", output_basename="master",
+        fits_path="m.fits", tiff_path=None, preview_path="m.png", n_frames_used=30,
+        canvas_h=320, canvas_w=480, coverage_min=30, coverage_max=30,
+        options_json=json.dumps({"combine": "sigma", "output_name": "m42"})))
+
+    assert proj.set_run_preview_display_space(run_id) is True
+    run = next(r for r in proj.iter_stack_runs() if r.id == run_id)
+    opts = json.loads(run.options_json)
+    assert opts["preview_display_space"] is True
+    # The pre-existing stack knobs survive (the run stays reusable/badge-able).
+    assert opts["combine"] == "sigma" and opts["output_name"] == "m42"
+
+    # Idempotent, and can be cleared.
+    assert proj.set_run_preview_display_space(run_id) is True
+    assert proj.set_run_preview_display_space(run_id, False) is True
+    run = next(r for r in proj.iter_stack_runs() if r.id == run_id)
+    assert json.loads(run.options_json)["preview_display_space"] is False
+
+    # Unknown run id → no-op, False (never raises).
+    assert proj.set_run_preview_display_space(999999) is False
+
+
 def test_v9_project_migrates_rejection_columns_additively(tmp_path):
     """An older (schema 9) project — whose ``stack_runs`` predates the rejection
     columns — upgrades cleanly on open: existing runs read the new fields as

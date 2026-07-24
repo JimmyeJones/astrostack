@@ -554,11 +554,31 @@ when you take it.
   stay green. Upgrade-safe: pure guard-tightening, no config/DB-schema/API-shape/on-disk/default change. Confidence:
   traced + reproduced + regression-tested.
 
-- **⭐ An in-place auto-edit (`Process target` / watcher `auto_edit_on_autostack`) rewrites the run's preview PNG to
+- ~~**⭐ An in-place auto-edit (`Process target` / watcher `auto_edit_on_autostack`) rewrites the run's preview PNG to
   the fully Auto-edited picture but never marks the run display-space — so History surfaces that gate on the *linear*
-  FITS render the run under a different tone curve than the thumbnail the user clicked.** *(Editor/render parity;
-  broken-UX — NOT data corruption; found by the 2026-07-24 render/router adversarial audit; traced, not run
-  end-to-end. Builder — needs a small design decision, so NOT blind-fixed.)* `_auto_edit_process_run`
+  FITS render the run under a different tone curve than the thumbnail the user clicked.**~~ — **FIXED v0.186.2**
+  (Builder 2026-07-24, branch `claude/pensive-faraday-xyqa9z`; **traced + regression-tested end-to-end**). Design
+  decision taken: the run's FITS is *genuinely linear* (the Auto recipe is stored separately and stays reversible), so
+  stamping the FITS display-space would be false and would break the editor's re-edit path (`_run_display_space` feeds
+  `already_display` for the linear base) and the noise-ratio measurement. Instead, `_auto_edit_process_run`
+  (`webapp/pipeline.py`) now marks the *run* via a new additive `options_json["preview_display_space"]` flag
+  (`Project.set_run_preview_display_space`, merged without dropping the run's stack knobs), meaning "the stored preview
+  PNG is a tone-mapped recipe result, not an STF/asinh render of the linear FITS". The two parity surfaces that made a
+  false promise now read this marker (new pure helper `_preview_is_display_space(options_json)` in
+  `webapp/routers/stack.py`) and self-hide exactly as they do for a display-space *export*: (1) `one_sub_vs_stack_info`
+  reports `available: False` (the reveal card hides, so `reference_sub_png` is never requested), and (2)
+  `render_stretch_suggestion` returns `{stretch: null, black: null}` (Adjust falls back to its neutral defaults) while
+  still offering the pure-WCS north-up correction. `render_stack_run` (Adjust) is left rendering asinh from the linear
+  FITS — it is an honest manual live-stretch tool that makes no claim to reproduce the thumbnail, and with the
+  suggestion self-hidden it no longer *pretends* to. Upgrade-safe: purely additive `options_json` key, no FITS/DB-
+  schema/API-shape/default change; old runs (no flag) behave exactly as before. Regression tests (all fail-before/
+  pass-after): `tests/test_project.py::test_set_run_preview_display_space_merges_marker_additively` (marker merges
+  additively, idempotent, clearable, False for unknown id),
+  `tests/webapp/test_one_sub_vs_stack.py::test_info_unavailable_for_an_in_place_auto_edited_run` (reveal + suggestion
+  self-hide on a linear-FITS marked run), and
+  `tests/webapp/test_pipeline.py::test_auto_edited_run_self_hides_parity_surfaces` (the real unattended
+  auto-edit-on-autostack path end-to-end → both surfaces self-hide). Confidence: traced + regression-tested. (M,
+  editor/render parity — PRIORITY 1.) *(Original trace kept below for provenance.)* `_auto_edit_process_run`
   (`webapp/pipeline.py:~1809-1812`) does `render_run_display_array(...)` → `_write_preview_png(..., already_display=True)`
   — i.e. it rewrites **only** the preview PNG. It does **not** rewrite the FITS with `DISPLAY_SPACE_CARD`, set
   `options_json["display_space"]`, or set `preview_stretch/black`. Contrast the editor **export** path
