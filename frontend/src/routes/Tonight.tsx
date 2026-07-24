@@ -11,7 +11,7 @@ import { QueryError } from "../components/QueryError";
 import { formatIntegration } from "../format";
 import { readinessRowHint } from "../readiness";
 import {
-  filterByTypeBucket, formatClock, formatMinutes, framingRowBadge, minAltOptions,
+  difficultyRowBadge, filterByTypeBucket, formatClock, formatMinutes, framingRowBadge, minAltOptions,
   moonCueForTarget, moonPhaseLabel, moonWindowNote, notUpTonightNote,
   partitionByUpTonight, planDateBounds, planNightLabel, scoreColor, splitTargets,
   typeFilterOptions, usableWindowNote,
@@ -39,6 +39,9 @@ function TargetRow({ t }: { t: PlannedTarget }) {
   // (or as wide as) a single Seestar frame — so a beginner reaches for mosaic
   // mode before pointing. Only the too-big cases badge; "fits" stays silent.
   const framingBadge = framingRowBadge(t.framing);
+  // "How hard for a Seestar?" so a beginner sees difficulty while choosing, not
+  // only after shooting. Catalog rows only; library/un-vetted rows carry none.
+  const difficultyBadge = difficultyRowBadge(t.difficulty);
   return (
     <Table.Tr>
       <Table.Td>
@@ -60,9 +63,17 @@ function TargetRow({ t }: { t: PlannedTarget }) {
             {readyHint.label}
           </Badge>
         ) : null}
+        {difficultyBadge ? (
+          <Tooltip label={difficultyBadge.tooltip} multiline w={240} withArrow>
+            <Badge mt={4} ml={readyHint ? 4 : 0} size="xs" variant="light"
+              color={difficultyBadge.color}>
+              {difficultyBadge.label}
+            </Badge>
+          </Tooltip>
+        ) : null}
         {framingBadge ? (
           <Tooltip label={framingBadge.tooltip} multiline w={240} withArrow>
-            <Badge mt={4} ml={readyHint ? 4 : 0} size="xs" variant="light"
+            <Badge mt={4} ml={(readyHint || difficultyBadge) ? 4 : 0} size="xs" variant="light"
               color={framingBadge.color}>
               {framingBadge.label}
             </Badge>

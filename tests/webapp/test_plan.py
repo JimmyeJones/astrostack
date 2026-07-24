@@ -88,6 +88,11 @@ def test_tonight_with_settings_location(client, solved_library):
         assert m31["size_arcmin"] == 178.0
         assert m31["framing"]["level"] == "mosaic"
         assert "mosaic" in m31["framing"]["text"]
+        # ...and its "how hard for a Seestar?" verdict, so the planner shows
+        # difficulty while choosing (serialized through asdict → nested dict).
+        assert m31["difficulty"]["level"] == "easy"
+        assert m31["difficulty"]["label"] == "Easy"
+        assert m31["difficulty"]["text"]
 
 
 def test_tonight_min_alt_override_changes_usable_window(client, solved_library):

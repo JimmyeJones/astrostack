@@ -38,6 +38,10 @@ export interface PlannedTarget {
   // on library rows and older backends. See FramingHint.
   size_arcmin?: number | null;
   framing?: FramingHint | null;
+  // "How hard is this target for a Seestar?" — easy/moderate/challenging, for
+  // catalog candidates the vetted table/type-rule has a verdict for; absent on
+  // library rows, un-vetted objects, and older backends (treat as "no verdict").
+  difficulty?: DifficultyHint | null;
 }
 
 export interface NightPlan {
@@ -119,6 +123,9 @@ export interface SuggestedTarget {
   score: number;
   size_arcmin?: number | null;
   framing?: FramingHint | null;
+  // "How hard is this target for a Seestar?" — shown next to the framing hint on a
+  // discovery suggestion; absent for un-vetted objects / older backends.
+  difficulty?: DifficultyHint | null;
 }
 
 export interface SuggestResponse {

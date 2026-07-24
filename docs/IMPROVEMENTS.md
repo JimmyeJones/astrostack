@@ -9235,16 +9235,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   neither SB nor a curated tag exists. **Feasibility:** static data-file addition + a pure function; no network, no
   schema/config/API/default change (the `DifficultyHint` shape is unchanged). Validate the SB→bucket thresholds against
   the existing curated table (they should broadly agree) before trusting them over curation. (S–M.)
-- **NEW IDEA (Builder 2026-07-24, follow-on to the v0.192.0 target-difficulty badge) — surface the difficulty verdict
+- ~~**NEW IDEA (Builder 2026-07-24, follow-on to the v0.192.0 target-difficulty badge) — surface the difficulty verdict
   in the "Tonight"/"What should I shoot next?" planner rows, so a beginner sees "easy/moderate/challenging" *while
-  choosing* a target, not only after they've shot it.** *(Autonomy + friendliness / plan pillar, PRIORITY 2–3; size S;
-  offline, additive.)* **Why:** the badge today only appears on the Target page (after a folder exists). The most
-  useful moment for "is this one easy or hard?" is *before* pointing the scope — in the planner, next to the framing
-  hint the rows already carry. **Shape:** the planner already resolves each row's catalog object (it renders
-  `framing`), so call `target_difficulty(obj.id, obj.type)` there too and add an additive `difficulty` field to the
-  planned-target payload; the frontend shows a compact difficulty chip on each planner row. Pure reuse of the shipped
-  engine function — no new astro math, no network, additive field only. Pairs naturally with a "start with an easy one
-  tonight" nudge for a brand-new owner. (S.)
+  choosing* a target, not only after they've shot it.**~~ — **SHIPPED v0.201.0** (Builder 2026-07-24, branch
+  `claude/pensive-faraday-0b6bzx`; tested). Added an additive `difficulty: DifficultyHint | None` field to both
+  `PlannedTarget` and `SuggestedTarget` (`seestack/nightplan.py`), set to `target_difficulty(obj.id, obj.type)` at the
+  two **catalog** construction sites (library rows carry `None`, mirroring `framing`). It serializes through the
+  existing `asdict(plan)` / `asdict(s)` path unchanged (nested frozen dataclass → `{level,label,text}`), so **no webapp
+  change** was needed. Frontend: a pure `difficultyRowBadge(difficulty)` helper (`frontend/src/tonight.ts`) mirroring
+  `framingRowBadge` — all three verdicts get a calm chip (teal Easy / blue Moderate / orange Challenging) with the full
+  sentence as tooltip, `null` for un-vetted rows — rendered next to the framing badge on both the Tonight table row
+  (`routes/Tonight.tsx`) and the Dashboard "Try something new tonight" suggestion (`components/SuggestTargetsCard.tsx`);
+  the `difficulty?` field was added to the two client types. So a beginner now sees "start with an easy one" *before*
+  pointing the scope, not only on the Target page after a folder exists. Tests: `tests/test_nightplan.py` (+3 — catalog
+  rows carry the verdict, library rows carry none, suggestions all carry one), `tests/webapp/test_plan.py` (+1 — the
+  verdict serializes through `/api/plan/tonight`), `frontend/src/tonight.test.ts` (+2 — the helper's null + colour
+  cases), `SuggestTargetsCard.test.tsx` (+1 — the badge renders). Upgrade-safe: additive engine field + frontend chip,
+  pure reuse of the shipped `target_difficulty` function; no config/DB-schema/on-disk/API-shape/default change (older
+  frontends simply ignore the new field). *(Autonomy + friendliness / plan pillar, PRIORITY 2–3; size S.)*
 - **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Is it worth staying on this target?": a plain-language
   diminishing-returns read that tells a beginner when more subs will visibly help vs when they've hit the flat
   part of the curve.** *(Autonomy / Friendliness — the "plan / understand" pillar, PRIORITY 2–3; size M; offline,

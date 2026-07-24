@@ -37,6 +37,7 @@ from pathlib import Path
 import numpy as np
 
 from seestack.framing import FramingHint, framing_hint
+from seestack.target_difficulty import DifficultyHint, target_difficulty
 
 log = logging.getLogger(__name__)
 
@@ -286,6 +287,12 @@ class PlannedTarget:
     # single-frame catalog verdict). See :mod:`seestack.framing`.
     size_arcmin: float | None = None
     framing: FramingHint | None = None
+    # "How hard is this target for a Seestar?" — easy/moderate/challenging, so a
+    # beginner sees the difficulty *while choosing* what to point at, not only
+    # after they've shot it. For catalog candidates the vetted table/type-rule has
+    # a verdict for; ``None`` otherwise (library rows and un-vetted objects carry
+    # none). See :func:`seestack.target_difficulty.target_difficulty`.
+    difficulty: DifficultyHint | None = None
 
 
 @dataclass
@@ -876,6 +883,7 @@ def plan_tonight(observer: Observer, when_utc: datetime, *,
                 usable_end_utc=o.usable_end_utc.isoformat() if o.usable_end_utc else None,
                 size_arcmin=obj.size_arcmin,
                 framing=framing_hint(obj.size_arcmin),
+                difficulty=target_difficulty(obj.id, obj.type),
             ))
 
     plan.targets.sort(key=lambda p: (-p.score, -p.max_altitude_deg))
@@ -1018,6 +1026,10 @@ class SuggestedTarget:
     score: float
     size_arcmin: float | None = None
     framing: FramingHint | None = None
+    # "How hard is this target for a Seestar?" — so the discovery suggestion shows
+    # difficulty next to the framing hint. ``None`` for un-vetted objects. See
+    # :func:`seestack.target_difficulty.target_difficulty`.
+    difficulty: DifficultyHint | None = None
 
 
 def suggest_targets(
@@ -1087,6 +1099,7 @@ def suggest_targets(
             score=o.score,
             size_arcmin=obj.size_arcmin,
             framing=framing_hint(obj.size_arcmin),
+            difficulty=target_difficulty(obj.id, obj.type),
         ))
     out.sort(key=lambda s: (-s.score, -s.max_altitude_deg))
     return out[:max(0, limit)]
