@@ -80,8 +80,28 @@ higher on this list wins — always:
 4. **Best-possible image quality** for the OSC Seestar workflow (clean, detailed
    final images).
 
-**⚡ IMMEDIATE PRIORITY (owner-reported 2026-07 + 2026-07-24 integration audit) — the
-Seestar upgrade-path pollution is now FIXED (v0.184.15); two sibling ingest bugs remain.**
+**⚡ IMMEDIATE PRIORITY (owner-reported + 2026-07-24 plate-solve audit, MEASURED) —
+fix faint-field plate-solve: the ASTAP ladder is backwards, and the stack-then-solve
+bootstrap is validated.** This is the measured root cause of the owner's #1 remaining
+pain (faint targets → few solved subs → thin "gibberish" stacks). The audit measured
+the real ASTAP CLI + bundled d05 DB on realistic Seestar subs: ASTAP already auto-bins
+1×1 on the first rung, so `_SOLVE_LADDER`'s bin-2/bin-4 rungs **strictly destroy**
+faint-field star detection (5.0 → 1.0 → 0.0 stars of 25, vs ASTAP's ≥3-star abort),
+and the hot-pixel rationale for binning is empirically void. Two slices: **(a, S)**
+reorder the ladder — never bin past 2, keep/boost a bin-1 rung (raise `-s`); **(b,
+M–L, the real cure)** ship the now-validated **stack-then-solve bootstrap** (mean the
+first ~8–16 accepted-but-unsolved subs → solvable at faintness where a single sub
+isn't → propagate WCS). See the ⭐⭐ thin-stack entry's "▶ ROOT CAUSE MEASURED" block.
+The audit also recorded the measured **non-levers** (deeper star DB, radius/timeout,
+`-check`/`-m 1`/`-speed slow` — don't build these) and filed a related ⭐ bug: the
+**Settings' ASTAP FOV/timeout never reach a real solve** (`runner.py:167-169`), so a
+Seestar **S30** owner (true FOV ≈ 2.1° vs the hardcoded 1.3°) cannot fix their solves
+at all — a likely large contributor if the owner runs an S30.
+
+**(Resolved/verified — background):** the Seestar upgrade-path pollution is FIXED
+(v0.184.15) and the owner's re-scan heal is verified SAFE end-to-end (idempotent,
+non-destructive); three heal edge-defects remain filed (mixed-library mass-reject,
+legacy whole-device-drop, cleanup-discards-history). Original ingest context:
 The fresh-library Seestar-convention scanner fix shipped (v0.184.9 — verified correct
 by the audit). The owner's *already-polluted* install — where a re-scan merged the raw
 subs INTO the old bare-output target (`<T>_sub/` → target `<T>` → same `safe_name` as
