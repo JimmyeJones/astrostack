@@ -4884,20 +4884,37 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
-- **Surface (never auto-delete) the junk targets an OLD scan built from Seestar
-  outputs/videos, so the owner can clean up in one click.** *(Follow-up to the
-  ⭐⭐⭐ scanner fix shipped v0.184.9 — the scanner is now Seestar-aware, but a
-  library scanned by the pre-fix scanner still carries bogus targets: a bare `M 31`
-  output target beside the now-correct `M 31`, `Lunar_video`, `NGC 6960_mosaic`, …
-  M, autonomy/friendliness — PRIORITY 2/3.)* After a re-scan folds each `<T>_sub/`
-  into the correct `<T>` target, some old targets are now duplicates/leftovers built
-  from a single output image or a video. Detect the likely-junk ones (a target that
-  is a 1-frame "stack" whose sole frame's source path is a bare `<T>/` or `*_video/`
-  folder that now has a `<T>_sub/` sibling, or whose name matches a `*_video`
-  pattern) and show a dismissible "these look like Seestar outputs / videos, not raw
-  subs — remove?" prompt with a one-confirmation bulk-remove. **Never auto-delete**;
-  never touch the real `_sub` data. Test: seed a library the old way, re-scan, assert
-  the detector flags exactly the output/video targets and no `_sub`-derived one.
+- ~~**Surface (never auto-delete) the junk targets an OLD scan built from Seestar
+  outputs/videos, so the owner can clean up in one click.**~~ — **SHIPPED v0.185.0**
+  (Builder 2026-07-24, branch `claude/pensive-faraday-fxnxqg`). Added a read-only
+  detector + a Library cleanup nudge that mirrors the same-object merge nudge.
+  **Engine** (`seestack/io/scanner.py::classify_seestar_junk_target(target_name,
+  source_paths, n_frames)`, pure apart from a read-only `<T>_sub` sibling `is_dir`
+  check): flags a target as `"video"` when its name (or every frame's source folder)
+  ends `_video`, or `"on_device_output"` when a ≤2-frame target's frames all sit in a
+  single **bare** `<T>/` folder that has a raw-subs `<T>_sub/` sibling on disk (the
+  single `<name>_sub` test also covers a mosaic output `<T>_mosaic/` beside
+  `<T>_mosaic_sub/`, exactly matching `_apply_seestar_convention`'s skip rule).
+  Conservative — only flags targets with positive output/video evidence, so a real
+  many-sub stack, a bare folder with **no** `_sub` sibling (non-Seestar layout), and
+  the raw-subs folder itself are all left alone. **Webapp**: `GET
+  /api/targets/cleanup-suggestions` (`CleanupSuggestionOut`) loops targets, cheaply
+  skipping any real stack (`n_frames > 2` and not a `_video` name) without opening its
+  project, and returns the flagged ones; read-only (deletion still goes through the
+  existing `DELETE /api/targets/{safe}`). **Frontend**: `CleanupSuggestionsCard`
+  (rendered above the merge nudge on the Library page) lists the flagged targets and
+  offers a **one-`window.confirm` bulk-remove** that deletes only the target records
+  (`remove_files=false` — the raw `_sub` folders on disk are never touched);
+  dismissible + persisted. Regression tests: `tests/test_scanner.py` (+9 classifier
+  cases incl. video-by-name/-folder, on-device-output with sub & mosaic-sub siblings,
+  and the false-positive guards: no-`_sub`-sibling, the `_sub` folder itself, a
+  50-frame real stack, an empty target), `tests/webapp/test_cleanup_suggestions.py`
+  (+3 — flags exactly the junk & not the real target, empty on a clean library, and a
+  flagged target then deletes cleanly), `frontend/.../CleanupSuggestionsCard.test.tsx`
+  (+4 — lists & bulk-removes after one confirm, no delete on decline, self-hides,
+  persisted dismissal). Upgrade-safe: additive read-only endpoint + new component, no
+  config/DB-schema/on-disk/default change; **never auto-deletes** and never touches
+  `_sub` data. *(Follow-up to the ⭐⭐⭐ scanner fix shipped v0.184.9.)*
 - **If a same-sky-area auto-merge is ever wired up, gate it on same-framing.**
   *(S, correctness — PRIORITY 2; latent, no live caller today.)* `library.
   find_target_within()` exists but is currently unused, so nothing folds a mosaic

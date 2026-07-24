@@ -224,6 +224,14 @@ export interface MergeSuggestion {
   targets: MergeSuggestionTarget[];
 }
 
+export interface CleanupSuggestion {
+  safe: string;
+  name: string;
+  n_frames: number;
+  reason: "video" | "on_device_output";
+  detail: string;
+}
+
 export interface FramingHint {
   level: "fits" | "tight" | "mosaic";
   text: string;
@@ -1109,6 +1117,8 @@ export const api = {
     req("/api/targets/merge", { method: "POST", body: JSON.stringify({ into, sources }) }),
   mergeSuggestions: () =>
     req<MergeSuggestion[]>("/api/targets/merge-suggestions"),
+  cleanupSuggestions: () =>
+    req<CleanupSuggestion[]>("/api/targets/cleanup-suggestions"),
   targetThumbnailUrl: (safe: string) => `/api/targets/${safe}/thumbnail`,
   identifyTarget: (safe: string) =>
     req<ObjectInfo | null>(`/api/targets/${safe}/identify`),

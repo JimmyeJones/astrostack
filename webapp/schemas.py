@@ -393,6 +393,21 @@ class MergeSuggestionOut(BaseModel):
     targets: list[MergeSuggestionTarget]
 
 
+class CleanupSuggestionOut(BaseModel):
+    """A leftover *junk* target an old (pre-v0.184.9) scan built from a Seestar
+    output or ``_video`` folder rather than raw sub-frames. Read-only detection:
+    the Library offers a one-click "remove these" and the user confirms; nothing
+    is deleted until then (``DELETE /api/targets/{safe}``). ``reason`` is
+    ``"video"`` or ``"on_device_output"``; ``detail`` is a plain-language
+    explanation for the beginner."""
+
+    safe: str
+    name: str
+    n_frames: int
+    reason: str
+    detail: str
+
+
 class ScanRequest(BaseModel):
     root: str | None = None  # default: settings.incoming_dir
 
