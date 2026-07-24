@@ -86,6 +86,45 @@ when you take it.
   and video folders and treated those single output images as raw frames.)* Confidence:
   reproduced. (M–L, autonomy/correctness — PRIORITY 1/2)
 
+> **Re-audit — stacking engine + render/output-parity + calibration/weighting + ingest/watcher/auto-stack orchestration
+> ALL CLEAN again; NO new verified bugs this run (Scout 2026-07-24, branch `claude/kind-mccarthy-n1kcnj`).** Baseline
+> suite green (**1839 passed, 2 skipped**). Three independent adversarial audit sub-agents (each told to skip the
+> repeatedly-confirmed-clean items and hunt only for *new* defects) plus my own end-to-end reads re-covered: (a)
+> **stacking geometry / mosaic / drizzle** — `mosaic.py` (RA-wrap 0/360 straddle at high dec via `unwrap_ra_deg`/
+> `_circ_mean_ra_deg` → 0.57° span not a bogus ~360°; single/zero-frame groups; CRPIX 1px-pad; canvas caps never a
+> zero-size axis), `drizzle_path.py` (super-res canvas re-derived exact on a **30°-rotated CD-matrix** reference at
+> scale 1.0/1.5/2.0 — input (10,20)→`scale·(p+0.5)−0.5` in every case; `has_cd()` CD-scaling; half-open pixmap bounds),
+> `reference.py`/`pointings.py`, and an **end-to-end two-panel mosaic reproject** with **zero interior holes and zero
+> empty rows/cols** inside the covered bbox — **CLEAN**; (b) **render / output / preview↔export parity** —
+> `render/thumbnail.py` (STF/asinh NaN-aware, robust 99.5th-pct high-end, NaN→0 only at final encode), `stack/output.py`
+> (FITS/TIFF/full-res PNG never downscaled; percentiles over covered pixels only), and a **per-op proxy-vs-downscaled-
+> export parity reproduction** (proxy_scale=4: RMSE ≈0 for tone/background/stars/sharpen; the only larger deviations —
+> `denoise:bilateral` 0.018, `deconvolve` 0.019 — are the already-captioned sub-pixel-on-decimated-grid limits, not
+> defects) plus a **negative-outlier stretch-robustness reproduction** (a −40000 hot pixel gives **0.0% faint-detail
+> contrast loss** because STF/asinh re-anchor to robust per-channel median/MAD after the affine normalize) — **CLEAN**;
+> (c) **calibration + weighting** — `apply.py` (dark-then-flat raw-Bayer order; exposure-scaled dark gated on `>0` for
+> both 0/negative EXPTIME cases — reproduced; `_FLAT_FLOOR` floors negative/NaN/inf flat pixels to 1.0 — reproduced;
+> float32 exact for Seestar 16-bit), `masters.py` (all-NaN→NaN, MAD=0→median, atomic write), `weighting.py`/
+> `photometric.py` (every weight provably in [0.1,1], can't reach 0; inverse-variance fold direction verified
+> hazy→scale-up→down-weight; photometric normalizes to the **median** so an anomalous reference can't skew it), and
+> `webapp/calibration.py` auto-bind (standalone-bias skipped when a dark is bound → no double-subtract; dims-gate blocks
+> a wrong-size master) — full calibrate suite **82 passed** — **CLEAN**. My own reads of **`io/ingest.py`** (realpath
+> dedup, size+mtime fingerprint content-swap recovery, truncated-cache refresh + stale-WCS reset), **`webapp/watcher.py`**
+> (`StabilityTracker` quiet-period debounce, stranded-batch re-arm, `pending = accepted is False` hand-off contract) and
+> **`webapp/pipeline.py`** auto-stack orchestration (`_auto_stack_frame_count` frame-count+`prior_max`+attempt-marker
+> guard; per-target try/except isolating a mid-scan DELETE/DB-lock; min-frames hold + mixed-pointing skip **without**
+> marking the attempt so the next scan re-checks) agreed — **CLEAN**. **No bug rose above the noise floor, so per
+> AGENTS.md §2 nothing was manufactured.** Three verified *non-impacting* observations were examined and NOT filed as
+> bugs (recorded here for provenance): (1) `wcs_io.py::footprint_radec_deg` sizes each frame footprint from pixel
+> *centres* `(0…w−1)` not the true `(−0.5…w−0.5)` extent (undersizes ~½px/edge) — harmless because the reproject valid
+> region is further inset by `FRAME_EDGE_INSET_PX=3` and the canvas carries a 1px pad, so coverage always lands strictly
+> inside; (2) `_compute_output_canvas` copies SIP coefficients unscaled onto a finer drizzle grid — self-consistent (all
+> frames map through the same `out_wcs`) and moot since Seestar/ASTAP WCS is plain TAN+CDELT/CD; (3) the unattended
+> auto-bind confidence gate (`_match_distance ≤ 1.0`) accepts a dark at up to a 2× gain or 10 °C temp mismatch —
+> degrades to residual over/under-subtraction (never NaN/inf), and moot for the fixed-gain Seestar target user. One
+> autonomy improvement idea (auto-restack an uncalibrated target once confident masters become available) and one new
+> beginner feature ("Add darks in 3 steps") filed below.
+>
 > **Re-audit — full stacking-engine + calibration + webapp-orchestration sweep CLEAN again; NO new verified bugs this
 > run (Scout 2026-07-24, branch `claude/kind-mccarthy-cj5313`).** Baseline suite green (**1840 passed, 2 skipped**).
 > Three independent adversarial audit sub-agents (each told to skip the previously-confirmed-clean items and hunt only
@@ -5216,6 +5255,31 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+- **IMPROVEMENT IDEA (Scout 2026-07-24) — auto-restack an uncalibrated target once confident calibration masters
+  become available, so the darks/flats a beginner adds *after* their first stack actually get used without a manual
+  reprocess.** *(Autonomy + image quality — priorities 2/4; size M — one scoped Builder slice.)* **The gap (verified
+  this run against `webapp/pipeline.py`):** the auto-stack trigger is **purely frame-count-based** —
+  `_auto_stack_frame_count(lib, safe)` re-stacks only when *solved+accepted* frames exceed `prior_max` (plus the
+  attempt-marker guard). **Adding a calibration master changes no frame count**, so it never re-triggers. Real beginner
+  flow that this strands: (1) a walk-away auto-stack runs with no darks (uncalibrated); (2) the app's own **"How's my
+  stack?"** card tells them *"No darks or flats were applied … adding darks would cut the background speckle"*
+  (`stackhealth.py`); (3) they capture darks and build/drop in a master; (4) they re-scan — but **no new subs arrived**,
+  so auto-stack skips the target and their noisy uncalibrated result stands. The app *asked* them to add darks, they
+  did, and nothing happened — the autonomy promise silently breaks exactly where the app coached them. **The idea:**
+  when `settings.auto_stack` is on, also re-trigger a target's auto-stack when **its newest genuine run was
+  uncalibrated** (run `calstat` shows no dark/flat applied) **and** a **confident** master now auto-binds for its
+  acquisition params (reuse `auto_bind_master_paths` / the same confidence gates the walk-away path already trusts —
+  `_AUTO_BIND_DARK_MAX_DIST` etc., so a merely-*available* but mismatched master does **not** trigger a churny restack).
+  **Loop-safety (mandatory):** gate the retrigger on a persisted marker (e.g. extend the attempt-meta with the bound
+  master-id set or a `calstat` fingerprint) so a target is re-stacked **once** per newly-available master set, never on
+  every subsequent scan — mirror the existing `_mark_auto_stack_attempt` crash-loop discipline exactly. **Upgrade-safe:**
+  additive marker only; `auto_stack` already defaults **off**, so no behaviour change on a default install; no
+  config/DB-schema (additive meta key)/API-shape/on-disk change. **Tests:** a target with a prior uncalibrated run + a
+  now-bindable confident dark → auto-stack re-fires once (calstat flips to calibrated), a second identical scan does
+  **not** re-fire (marker holds); an already-calibrated run, or only a low-confidence master available → no retrigger.
+  *(Feasibility: reuses the existing auto-bind confidence gates + run `calstat` + the attempt-marker pattern, no new
+  dependency, sane default (off), additive/reversible, testable — passes §4's filter. Closes the loop on the darks
+  advice the app already gives; pairs with the "Add darks in 3 steps" beginner feature filed below.)*
 - **IMPROVEMENT IDEA (Scout 2026-07-24) — a WCS-free star-registration *fallback* so a faint field whose subs mostly
   fail to plate-solve can still stack from all its frames, instead of collapsing to a ~1–3-frame gibberish stack.**
   *(Autonomy + image quality — priorities 2/4; a direct attack on the remaining root of the ⭐⭐ thin-stack/gibberish
@@ -7691,6 +7755,48 @@ problems. Dogfood it every big-picture run and fix root causes.
 > goals, Sky-so-far coverage, and a progress reel all already exist. Per AGENTS.md §2, I did **not** manufacture a
 > duplicate this run — I filed only the one genuinely-absent feature below (verified against the routes/routers), and
 > flag that future feature-ideation should first check this saturation rather than re-propose an existing capability.
+> **Confirmed still saturated (Scout 2026-07-24, `n1kcnj`):** re-checked every angle against the routes/components —
+> before/after reveal exists (`OneFrameVsStackCard`), the darks nudge exists (`StackHealthCard` "How's my stack?"),
+> annotation exists (`AnnotatedImage`), planning/recap/coaching/celebration all filed or built, and live capture is
+> explicitly de-scoped. The one genuinely-absent gap I found is the *actionable how-to* behind the existing darks
+> advice (filed immediately below) — the app tells beginners *that* darks help but never *how* to shoot them.
+
+- **NEW BEGINNER FEATURE (Scout 2026-07-24) — "Add darks in 3 steps": turn the app's existing "adding darks would cut
+  the speckle" advice into a plain-language, Seestar-specific how-to, so a beginner who's told darks would help can
+  actually capture and apply them without knowing any astro jargon.** *(Pillar: 3 friendliness + understand/learn +
+  4 image quality; size S–M.)* **The gap (verified this run):** the app *already* tells a beginner darks would help —
+  `StackHealthCard` ("How's my stack?") and the editor surface *"No darks or flats were applied … adding darks would
+  cut the background speckle"* (`seestack/stackhealth.py`), and the Calibration page can build a master from dark
+  frames. **But nothing bridges the two: a non-expert who reads "add darks" has no idea *how* to shoot them on a
+  Seestar, how many, at what exposure/gain, or where to put them** — so the advice dead-ends and their result stays
+  noisy. That "OK… how?" is exactly the hand-holding a beginner needs and an expert already knows. **The feature
+  (beginner idiom, one short guide):** a small **"How to add darks"** disclosure/panel shown right where the
+  uncalibrated nudge already appears (and linked from the Calibration page), with three plain steps written for a
+  Seestar OSC owner: **(1)** cap the scope / cover the lens so no light gets in; **(2)** shoot ~20–30 frames at the
+  **same exposure and gain** as your subs (it reads the target's actual `exposure_s`/`gain` off the run and fills them
+  in — *"your M31 subs were 10 s at gain 80, so shoot darks at 10 s / gain 80"*); **(3)** drop the dark folder in (or
+  point the Calibration page at it) and AstroStack builds the master and applies it next time. One warm sentence of
+  *why* ("darks record your camera's own warmth/noise so we can subtract it — this is the single biggest cleanup for a
+  noisy image"). **Distinct from what exists:** the `StackHealthCard` nudge says *that* you should; the Calibration page
+  is a build-a-master form that assumes you already have dark frames; **this teaches a beginner to actually get them,
+  with the numbers pre-filled from their own data.** Pairs with the "auto-restack when masters become available"
+  autonomy idea above — together they make "the app told me to add darks → I added them → my picture got cleaner, all on
+  its own" a complete, unbroken beginner loop. **Why it clears the beginner bar:** universally useful (every beginner
+  hits "add darks" with no idea how), zero jargon (translates dark-frame theory into cap-the-scope / match-these-numbers
+  / drop-them-here), a sane default (static guided content + the target's own exposure/gain pre-filled), no knobs, and
+  serves the *understand/learn* + image-quality pillars — the gentle mentor a beginner lacks. **Shape for one Builder
+  run:** mostly static, well-written frontend content (a collapsible guide component) beside the existing
+  uncalibrated-`StackHealthCard` note, reading the run's `exposure_s`/`gain` (already available) to fill the "match
+  these numbers" line; optionally a tiny read-only helper that formats the recommended dark spec from a run. **Sane
+  default / self-hiding:** only shown when the newest genuine run is uncalibrated (mirror the nudge's own visibility);
+  missing exposure/gain → show the guide with generic wording, never an error. Tests: a helper that formats
+  `{exposure_s, gain} -> "N s at gain G"` (and a graceful fallback when either is missing); a component test that the
+  guide renders beside the uncalibrated note and hides when the run is already calibrated. Upgrade-safe: frontend-only,
+  additive, reuses data already returned; no schema/config/default/API-shape change. *(Feasibility: fits
+  headless/web/TrueNAS, no new/heavy dependency, sane default + plain-language explanation, additive/reversible,
+  testable — passes §4's filter. Verified genuinely absent 2026-07-24: the app nudges "add darks" but nowhere explains
+  *how* to capture them on a Seestar — a distinct understand/learn capability from every planning/recap/coaching card
+  already filed or built.)*
 
 - **NEW BEGINNER FEATURE (Scout 2026-07-24) — "Point here tonight": one calm recommendation of which target you're
   *already working on* to continue tonight, ranked across your whole library by (how close it is to a good result) ×
