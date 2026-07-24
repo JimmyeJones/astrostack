@@ -68,6 +68,21 @@ _REJECTION_NOTE_MAX_FRACTION = 0.08    # 8% — matches the History "high, check
 _ROUGHLY_ALIGNED_MIN_USED = 10
 _ROUGHLY_ALIGNED_NOTE_FRACTION = 0.20
 
+# The finished stack's own median star size (``stack_fwhm_px``) should be no
+# *fatter* than its contributing subs' median FWHM — a well-registered stack
+# holds the subs' sharpness (averaging can even tighten it). When the stacked
+# stars come out materially bloated *relative to the subs that built them*, the
+# combine smeared them: the classic fingerprint of accumulated sub-pixel /
+# field-rotation registration error over the night (which each frame's own
+# refine didn't individually flag). This is a *relative* signal — it compares
+# the stack to the target's own subs, both in native-frame px — so it needs no
+# absolute/per-camera FWHM threshold. The ratio floor is deliberately gentle so
+# a normal well-aligned stack never trips it (a good stack sits ~≤1.0×); it only
+# fires on real bloat. Needs a handful of subs with a measured FWHM for the sub
+# median to mean anything.
+_SOFT_STARS_BLOAT_RATIO = 1.5
+_SOFT_STARS_MIN_SUB_FWHM = 5
+
 
 def _format_reject_pct(frac: float) -> str:
     """A plain, honest percentage for a rejection fraction (mirrors the History
@@ -130,6 +145,17 @@ def _median_eccentricity(accepted: list[FrameRow]) -> float | None:
     vals = [f.eccentricity_median for f in accepted
             if f.eccentricity_median is not None]
     return statistics.median(vals) if vals else None
+
+
+def _median_sub_fwhm(accepted: list[FrameRow]) -> float | None:
+    """Median measured star size (FWHM, native-frame px) across the accepted
+    subs, or ``None`` when too few recorded one. The per-target anchor the
+    stack's own ``stack_fwhm_px`` is compared against for the soft-stars note."""
+    vals = [f.fwhm_px for f in accepted
+            if f.fwhm_px is not None and math.isfinite(f.fwhm_px) and f.fwhm_px > 0]
+    if len(vals) < _SOFT_STARS_MIN_SUB_FWHM:
+        return None
+    return statistics.median(vals)
 
 
 def stack_health(run: StackRunRow, frames: Iterable[FrameRow]) -> list[HealthNote]:
@@ -223,6 +249,29 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow]) -> list[HealthNot
             message=(f"{n_rough} of {n_used} stacked subs were only roughly "
                      "aligned, so your stars may look a little soft or doubled. "
                      "A steadier mount, or re-solving those subs, tightens them up."),
+            action=None,
+        )))
+
+    # --- Stacked stars are bloated relative to the subs (registration smear) ---
+    # If the finished stack's own star size is materially larger than the median
+    # of its contributing subs, the combine — not the sky — is what softened the
+    # stars: accumulated sub-pixel/field-rotation registration error over the
+    # night. Purely relative (stack vs its own subs, both native px), so no
+    # absolute FWHM bar. Silent when either measurement is missing (old runs, or
+    # too few subs recorded a FWHM) or the stack is as sharp as its subs.
+    stack_fwhm = run.stack_fwhm_px
+    sub_fwhm = _median_sub_fwhm(accepted)
+    if (stack_fwhm is not None and math.isfinite(stack_fwhm) and stack_fwhm > 0
+            and sub_fwhm is not None
+            and stack_fwhm >= _SOFT_STARS_BLOAT_RATIO * sub_fwhm):
+        scored.append((37, HealthNote(
+            kind="soft_stars",
+            severity="info",
+            message=("Your stacked stars came out fatter than the subs that made "
+                     "them, so the combine — not the sky — softened them. This is "
+                     "usually small alignment drift building up over the night; a "
+                     "steadier mount, or re-solving the roughly-aligned subs, keeps "
+                     "them tight."),
             action=None,
         )))
 

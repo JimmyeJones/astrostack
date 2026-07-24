@@ -7551,9 +7551,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
-- **IMPROVEMENT IDEA (Builder 2026-07-24, spotted while shipping "Your sharpest yet") — a *threshold-free* soft-star
+- ~~**IMPROVEMENT IDEA (Builder 2026-07-24, spotted while shipping "Your sharpest yet") — a *threshold-free* soft-star
   note for "How's my stack?": flag when the finished stack's stars are materially **bloated relative to the target's
-  own subs**, pointing at alignment/tracking loss rather than nagging on an absolute FWHM bar.** *(Pillar: 4 image
+  own subs**, pointing at alignment/tracking loss rather than nagging on an absolute FWHM bar.**~~ — **SHIPPED v0.200.0**
+  (Builder 2026-07-24, branch `claude/pensive-faraday-0b6bzx`; tested). Added a new `soft_stars` `HealthNote` to
+  `seestack/stackhealth.py`: a pure `_median_sub_fwhm(accepted)` helper takes the median of the accepted subs' own
+  `fwhm_px` (native-frame px, ≥5 measured or it stays silent), and the note fires only when the run's persisted
+  `stack_fwhm_px` is a finite `> 0` value that is `≥ 1.5×` that sub median — i.e. the *combine*, not the sky, bloated
+  the stars (accumulated sub-pixel/field-rotation registration drift). Purely **relative** (stack vs its own subs), so
+  no absolute/per-camera FWHM bar; the 1.5× floor is deliberately gentle so a normal well-aligned stack (≤~1.0×) never
+  trips it. Ranked at priority 37 (right after `roughly_aligned`, which it complements — that fires on the *count* of
+  shift-capped subs, this on the *measured* bloat). `action=None`, `severity="info"`, so it renders generically via the
+  existing `StackHealthCard` with **zero frontend change**; `kind` is an unconstrained `str` on `HealthNoteOut`, so no
+  schema/API change either. Silent for old runs (NULL `stack_fwhm_px`), too-few sub FWHMs, or a sharp stack. Tests:
+  `tests/test_stackhealth.py` (+5 — fires on bloat, silent when the stack matches its subs / NULL stack FWHM / too-few
+  sub measurements, and ignores rejected subs for the sub median). Upgrade-safe: additive read-only note, no
+  config/DB-schema/on-disk/API-shape/default change (both fields already persisted + served). *(Pillar: 4 image
   quality + 3 friendliness/understand; size S; engine helper + one health note.)* **The gap (verified this run):**
   `stack_health` (`seestack/stackhealth.py`) has a *shape* note (eccentricity ≥ 0.6) but **no sharpness note** — even
   though v0.194.0 now persists the finished stack's own median star size (`stack_runs.stack_fwhm_px`, native-frame px).
