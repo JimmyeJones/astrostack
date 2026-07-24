@@ -839,6 +839,40 @@ describe("TargetView reject breakdown + undo", () => {
 
     await waitFor(() =>
       expect(screen.getByText("5 not located yet")).toBeInTheDocument());
+    // A visible "?" explainer sits beside the count so a first-timer can learn what
+    // "located"/"plate-solve" means without having to hover the badge to discover it.
+    expect(
+      screen.getByRole("button", { name: /what does .*not located yet.* mean/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("omits the plate-solve explainer when frames were only rejected, not unsolved", async () => {
+    // Everything that was left out was a hand/QC reject — there's no "not located"
+    // jargon to explain, so the "?" affordance must not appear.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ n_frames: 5, n_frames_accepted: 3 }),
+    );
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    vi.spyOn(client.api, "rejectSummary").mockResolvedValue({
+      counts: { user: 2 },
+      total: 2,
+      summary: {
+        used: 3,
+        dropped: 2,
+        dropped_fraction: 0.4,
+        verdict: { tone: "ok", text: "A couple set aside — still a solid stack." },
+        buckets: [{ key: "user", label: "You rejected these", count: 2, note: "" }],
+      },
+    });
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(screen.getByText("2 rejected")).toBeInTheDocument());
+    expect(
+      screen.queryByRole("button", { name: /what does .*not located yet.* mean/i }),
+    ).toBeNull();
   });
 
   it("surfaces the unsolved count in the badge even when some frames were also rejected", async () => {

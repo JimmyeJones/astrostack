@@ -7044,10 +7044,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
-- **IMPROVEMENT IDEA (Scout 2026-07-23) — put a plain-language "what does *not located yet* mean?" explainer next to
+- ~~**IMPROVEMENT IDEA (Scout 2026-07-23) — put a plain-language "what does *not located yet* mean?" explainer next to
   the unsolved-subs badges, so a beginner who sees "200 not located yet" understands it's usually normal and knows
-  the one thing to try, instead of reading it as a scary error.** *(Pillar: 3 friendliness; size S; frontend-only,
-  additive.)* **The gap (verified this run):** the app now honestly surfaces the unsolved-subs count in several
+  the one thing to try, instead of reading it as a scary error.**~~ — **SHIPPED v0.199.1** (Builder 2026-07-24, branch
+  `claude/pensive-faraday-pgwr11`). New reusable `UnsolvedHelp` component
+  (`frontend/src/components/target/UnsolvedHelp.tsx`): a small, **always-visible** "?" `ActionIcon` (with the
+  `aria-label` "What does 'not located yet' mean?") that opens a `Popover` explaining, in plain language, what
+  plate-solving is, that unsolved subs are *common on faint/few-star fields and usually harmless* (the located subs
+  still stack), and the one actionable next step (install ASTAP's star database in Settings; longer/more subs solve
+  more easily). Wired into `Target.tsx` right beside the "N not located yet" badge, rendered **only when
+  `unsolvedCount > 0`** — the prior explanation lived only inside the badge's hover-discovered `RejectionBreakdown`
+  card, which a first-timer reading the orange badge as an error would never find; this gives it a glanceable
+  affordance. Frontend-only, additive; no API/schema/default change, no behaviour change (purely an on-demand
+  explainer). Tests: `UnsolvedHelp.test.tsx` (+2 — the labelled "?" button renders with the explainer collapsed;
+  clicking it reveals the plate-solve explanation + "usually harmless" reassurance + the star-database next step),
+  `Target.test.tsx` (+1 for the affordance appearing beside a "5 not located yet" badge, +1 that it's absent when
+  frames were only rejected). `tsc`/`vitest`(1261)/`vite build` green. *(Original idea kept below for provenance.)*
+  **The gap (verified this run):** the app now honestly surfaces the unsolved-subs count in several
   places — the Target-page left-out badge ("N not located yet", `Target.tsx`), the reject-summary "X of Y went into
   your picture" line, and the auto-stack "waiting for more of your subs to be located" note (v0.184.0). That honesty
   is good, but **"located" / "plate-solve" is unexplained jargon** to a first-light Seestar owner. A beginner seeing

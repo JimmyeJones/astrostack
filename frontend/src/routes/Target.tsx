@@ -34,6 +34,7 @@ import { ScanToPhoneButton } from "../components/ScanToPhoneButton";
 import { sharePictureText } from "../share";
 import { detectSolveSetupProblem } from "../components/target/solveSetup";
 import { RejectionBreakdown } from "../components/target/RejectionBreakdown";
+import { UnsolvedHelp } from "../components/target/UnsolvedHelp";
 import { thinStackWarning } from "../components/target/thinStack";
 import { SharpestYetBadge } from "../components/target/SharpestYetBadge";
 import { detectMixedPointings } from "../components/target/mixedPointings";
@@ -927,6 +928,11 @@ export function TargetView() {
               </HoverCard.Dropdown>
             </HoverCard>
           ) : null}
+          {/* Visible plain-language explainer beside the "not located yet" count —
+              "located"/"plate-solve" is jargon a first-light owner can misread as
+              an error, and the breakdown that explains it is otherwise only found
+              by hovering the badge. Shown only when there are unsolved subs. */}
+          {unsolvedCount > 0 ? <UnsolvedHelp /> : null}
           {lastReject ? (
             <Button
               size="compact-xs"
