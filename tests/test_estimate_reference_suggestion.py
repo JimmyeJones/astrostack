@@ -81,6 +81,32 @@ def test_no_reference_suggestion_when_even_reference_exceeds(tmp_path):
         proj.close()
 
 
+def test_no_reference_suggestion_when_reference_only_fits_without_reject_planes(tmp_path):
+    """A k>1 min/max reject makes the reference canvas need more planes than the
+    baseline estimate, and the suggestion must charge them too — otherwise the UI
+    offers a reference canvas the run-time OOM guard would then refuse.
+
+    Reference 480×320 ≈ 7.4 MB at the baseline 4 canvas planes, but ≈ 14.7 MB at
+    the ``2+2k`` = 8 planes a k=3 min/max reject holds. A ~10 MB budget fits the
+    former but not the latter — so the reference canvas does *not* actually fit,
+    and no suggestion should be offered (a run on it would raise ``MemoryError``).
+    """
+    proj = _mosaic_project(tmp_path)
+    try:
+        opts = StackOptions(
+            drizzle=False, mosaic_canvas="auto",
+            min_max_reject=True, min_max_reject_count=3,
+        )
+        est = estimate_stack(proj, opts, memory_budget_gb=10e-3)
+        assert est.is_mosaic is True
+        assert est.would_exceed is True
+        # Before the fix the ref-canvas estimate omitted the reject planes, so it
+        # wrongly reported the reference canvas as fitting (True).
+        assert est.suggested_reference_canvas is False
+    finally:
+        proj.close()
+
+
 def test_reference_canvas_mode_never_suggests(tmp_path):
     proj = _mosaic_project(tmp_path)
     try:
