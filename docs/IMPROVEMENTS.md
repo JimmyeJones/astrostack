@@ -103,7 +103,7 @@ when you take it.
 > dark-scaling direction/ratio (`t_light/t_dark`) and its zero/None-exposure guards, bias never double-subtracted,
 > `_FLAT_FLOOR` divide guard, `masters.py` all-NaN→NaN / MAD=0→median, `mosaic.py` RA-wrap 0/360 + pole seams and the
 > canvas caps never yielding a zero-size axis — **CLEAN**. **One NEW verified bug found + fixed + shipped this run**
-> (struck below, **v0.184.9**): `estimate_stack`'s reference-canvas suggestion computed its `ref_peak` **without** the
+> (struck below, **v0.184.10**): `estimate_stack`'s reference-canvas suggestion computed its `ref_peak` **without** the
 > `min/max-reject` canvas-plane charge that both the main peak estimate and the run-time OOM guard apply, so a
 > mosaic-union run with `min_max_reject` on and `min_max_reject_count ≥ 2` could offer a one-click "use the reference
 > canvas instead" that the guard would then refuse with `MemoryError` — reproduced + regression-tested. Two speculative
@@ -423,7 +423,7 @@ when you take it.
 
 - ~~**The pre-run memory estimate offers a one-click "use the reference canvas instead" that the run-time OOM guard
   then refuses with `MemoryError` — the suggestion's `ref_peak` omitted the min/max-reject canvas planes the guard
-  charges.**~~ — **FIXED v0.184.9** (Scout 2026-07-24, branch `claude/kind-mccarthy-8fwg93`; found by the 2026-07-24
+  charges.**~~ — **FIXED v0.184.10** (Scout 2026-07-24, branch `claude/kind-mccarthy-8fwg93`; found by the 2026-07-24
   align/stacker adversarial audit; **traced + reproduced + regression-tested**). *(Stacking-engine / broken-UX; Low —
   narrow trigger, and it fails safe (refuses, never OOMs); not wrong-result.)* `estimate_stack`
   (`seestack/stack/stacker.py:519-525`) charges the extra `min/max-reject` canvas planes
@@ -5155,7 +5155,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
-- **IMPROVEMENT IDEA (Scout 2026-07-24, spotted while fixing the v0.184.9 memory-estimate/guard bug) — when a stack
+- **IMPROVEMENT IDEA (Scout 2026-07-24, spotted while fixing the v0.184.10 memory-estimate/guard bug) — when a stack
   is refused for memory, tell the beginner the *one* concrete change that makes it fit (and by how much), instead of a
   generic four-lever message.** *(Autonomy + friendliness — priorities 2/3; squarely relevant to the owner's RAM-capped
   NAS, the same environment behind the ⭐⭐ low-res bug. Size M.)* Today `_guard_stack_memory`
