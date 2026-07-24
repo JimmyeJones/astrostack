@@ -6,11 +6,7 @@ from datetime import date
 
 import pytest
 
-from seestack.activity_calendar import (
-    build_activity_calendar,
-    finalize_calendar,
-    night_date_of,
-)
+from seestack.activity_calendar import build_activity_calendar, night_date_of
 
 
 def test_night_date_groups_a_midnight_spanning_session_into_one_night():
