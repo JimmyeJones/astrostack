@@ -106,6 +106,33 @@ when you take it.
   (`scanner.py` names targets by raw folder name) + owner-confirmed on real folders.
   (M–L, autonomy/correctness — PRIORITY 1/2)
 
+> **Re-audit — full stacking-engine sweep CLEAN again; shipped one verified memory-estimate/guard broken-UX bug
+> (Scout 2026-07-24, branch `claude/kind-mccarthy-8fwg93`).** Baseline suite green (**1826 passed, 2 skipped**).
+> Three independent adversarial audit sub-agents plus my own reads re-covered the engine end-to-end and all came back
+> matching the repeatedly-clean documented state: (a) **accumulator + drizzle reductions** — `accumulator.py`
+> (MinMaxReject band partition `lt3=[1,2]`/`single=[3,2k]`/`full=[2k+1,∞)` gapless with every denominator provably ≥1,
+> ±inf seeds never leaking into a sum, Welford `add`≡`add_window` no read-before-write aliasing, WeightedSum
+> gap→NaN/single-covered kept), `drizzle_path.py` (`_clip_tolerance` neff gate at the true frame count, `result()`
+> returns the running weighted average with no re-divide, half-open pixmap bounds, CRPIX/CDELT super-res scaling) —
+> **CLEAN**; (b) **align + stacker orchestration** — per-frame calibration exposure threading verified correct (each
+> frame's own `info.exposure_s` from its own header → a fresh `bias+(dark−bias)·ratio` array per call, no stale/shared
+> value; concurrent workers safe on read-only masters), κ-σ two-pass keep-mask NaN widenings, subpixel-shift NaN
+> re-mask, CPU cval=NaN ↔ GPU cval=0 parity via `inset≥1`, the min/max-reject memory-guard plane charge
+> (`2+2k` exactly matches the accumulator's persistent planes), cancel paths (→`StackResult(cancelled=True)`, never
+> raise), and frame accounting — **CLEAN**; (c) **calibrate + mosaic** — `apply.py` dark-then-flat raw-Bayer order,
+> dark-scaling direction/ratio (`t_light/t_dark`) and its zero/None-exposure guards, bias never double-subtracted,
+> `_FLAT_FLOOR` divide guard, `masters.py` all-NaN→NaN / MAD=0→median, `mosaic.py` RA-wrap 0/360 + pole seams and the
+> canvas caps never yielding a zero-size axis — **CLEAN**. **One NEW verified bug found + fixed + shipped this run**
+> (struck below, **v0.184.9**): `estimate_stack`'s reference-canvas suggestion computed its `ref_peak` **without** the
+> `min/max-reject` canvas-plane charge that both the main peak estimate and the run-time OOM guard apply, so a
+> mosaic-union run with `min_max_reject` on and `min_max_reject_count ≥ 2` could offer a one-click "use the reference
+> canvas instead" that the guard would then refuse with `MemoryError` — reproduced + regression-tested. Two speculative
+> observations examined and NOT filed (both non-corrupting, already in the documented-benign family): the drizzle
+> `clip_reference` per-channel `neff` any-channel-OR (marginal ~13% tolerance tightening, needs astrophysically-rare
+> per-channel-differing NaN masks); and a frame with a missing/zero `EXPTIME` silently taking the unscaled dark while
+> the exposure-mismatch advisory is suppressed (documented conservative fallback = scaling-off behaviour; Seestar
+> always writes EXPTIME). One improvement idea + one new beginner feature filed below.
+>
 > **Re-audit — stacking engine core CLEAN again; TWO NEW verified bugs found in the solve/QC/ingest + auto-stack
 > orchestration paths; shipped one, filed the other (Scout 2026-07-23, branch `claude/kind-mccarthy-nt4l9m`).**
 > Baseline suite green (**1825 passed, 2 skipped**). Three independent adversarial audit sub-agents plus my own reads
@@ -413,6 +440,32 @@ when you take it.
   are genuinely too heavy, split the file so fewer full-app mounts share one worker. **Repro:**
   `cd frontend && npx vitest run src/routes/Editor.test.tsx` (fails ~2; a `-t`-filtered single run passes). Confidence:
   reproduced (on clean main, victim set varies → scheduling flake, not a real regression).
+
+- ~~**The pre-run memory estimate offers a one-click "use the reference canvas instead" that the run-time OOM guard
+  then refuses with `MemoryError` — the suggestion's `ref_peak` omitted the min/max-reject canvas planes the guard
+  charges.**~~ — **FIXED v0.184.9** (Scout 2026-07-24, branch `claude/kind-mccarthy-8fwg93`; found by the 2026-07-24
+  align/stacker adversarial audit; **traced + reproduced + regression-tested**). *(Stacking-engine / broken-UX; Low —
+  narrow trigger, and it fails safe (refuses, never OOMs); not wrong-result.)* `estimate_stack`
+  (`seestack/stack/stacker.py:519-525`) charges the extra `min/max-reject` canvas planes
+  (`_min_max_reject_arrays(count) = 2+2k`) in its main peak estimate, exactly as `_guard_stack_memory`
+  (`stacker.py:1042-1048`) does at run time. But when the union mosaic canvas is over budget, the drizzle-off
+  reference-canvas suggestion (`stacker.py:539-541`) computed `ref_peak = _estimate_peak_bytes(ref_shape,
+  drizzle=False, drizzle_scale=1.0)` — **omitting** the `reject_arrays` argument (defaults to 0). Because
+  `_PEAK_CANVAS_ARRAYS=4` and `reject_arrays=2+2k`, the two agree at `k=1` but diverge for **`min_max_reject_count ≥ 2`**
+  (k=2→6 planes, k=3→8, k=5→12). So on a mosaic-union run with `min_max_reject` on and `count ≥ 2`, for a budget in the
+  band `ref_px·3·4·4 ≤ budget < ref_px·3·4·(2+2k)`, `suggested_reference_canvas` was set **True** even though a real
+  re-run on the reference canvas *does* charge the reject planes and the guard raises `MemoryError` — the one-click
+  suggestion the UI made gets refused. **Reproduced:** a 2×2 synthetic mosaic (union 821×564, ref 480×320), `drizzle=
+  False, min_max_reject=True, min_max_reject_count=3`, `memory_budget_gb=10e-3` — ref canvas is ~7.4 MB at the baseline
+  4 planes but ~14.7 MB at k=3's 8 planes, so 10 MB fits the former (buggy True) but not the latter (correct False).
+  **Fix:** the `ref_peak` estimate now passes the same `reject_arrays=(_min_max_reject_arrays(options.
+  min_max_reject_count) if options.min_max_reject and n >= 3 else 0)` term as the main peak, so the suggestion can never
+  offer a canvas the guard would refuse (the estimate can only ever go from a wrong True to a correct False — it never
+  causes an OOM). Regression:
+  `tests/test_estimate_reference_suggestion.py::test_no_reference_suggestion_when_reference_only_fits_without_reject_planes`
+  (the reproduced case; asserts `suggested_reference_canvas is False`; fail-before: `True`). Upgrade-safe: a
+  within-function estimate refinement only — no config/DB-schema/API-shape/on-disk/default change (a purely more-honest
+  pre-run number). Confidence: traced + reproduced + regression-tested.
 
 - ~~**⭐ The Target-page left-out badge HIDES accepted-but-unsolved subs whenever *any* frame is also hand/auto-rejected —
   a first-light night with 2 rejected + 200 accepted-but-unsolved subs shows a gray "2 rejected" pill and says nothing
@@ -5097,6 +5150,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+- **IMPROVEMENT IDEA (Scout 2026-07-24, spotted while fixing the v0.184.9 memory-estimate/guard bug) — when a stack
+  is refused for memory, tell the beginner the *one* concrete change that makes it fit (and by how much), instead of a
+  generic four-lever message.** *(Autonomy + friendliness — priorities 2/3; squarely relevant to the owner's RAM-capped
+  NAS, the same environment behind the ⭐⭐ low-res bug. Size M.)* Today `_guard_stack_memory`
+  (`seestack/stack/stacker.py`) raises a bare `MemoryError` whose text lists four possibilities ("Reduce drizzle scale,
+  switch Canvas mode to 'reference', reject outlier/off-target frames, or raise ASTROSTACK_MAX_STACK_GB"), and
+  `estimate_stack` surfaces at most *one* pre-computed escape (`suggested_drizzle_scale` **or**
+  `suggested_reference_canvas`). A beginner on a memory-capped container who blows the budget with, say, a
+  mosaic-union + `min_max_reject_count=3` gets no idea which lever to pull or how far. Improvement: have
+  `estimate_stack` compute and rank the *actual* fitting options as one-click actions — e.g. "Switch to the reference
+  canvas → fits at ~1.2 GB", "Lower Extra outlier passes 3→1 → fits at ~1.5 GB", "Drizzle ×2→×1.5 → fits" — each
+  labelled with the resulting peak, and reuse the same numbers in the guard's refusal string so the two never disagree
+  (they already share `_estimate_peak_bytes`). This turns a dead-end error on the owner's exact hardware into a guided,
+  minimal-fuss fix. Additive to `StackEstimate` (new optional fields); no default/behaviour change. Serves the "just
+  works / fewer decisions" pillar. Confidence in value: high (the owner is on a RAM-capped NAS by report).
+
 - **IMPROVEMENT IDEA (Scout 2026-07-23, spotted while fixing the v0.184.6 qc_error clobber bug) — surface a plain
   "some of your subs couldn't be read" health signal when frames pile up as `qc_error_final`, so a beginner with a
   flaky NAS / truncated downloads / a few corrupt files isn't left silently short of subs with no explanation.**
@@ -7520,6 +7589,31 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+> **Note (Scout 2026-07-24):** this section is now amply stocked (many ready, unbuilt beginner features below) and the
+> app's beginner surface is genuinely broad — planning (Tonight: moon/altitude/clouds/`suggest` new targets/
+> `next-session`/`best-months`), calendar export (`ics.py`), a "Last night" recap card, per-object info blurbs
+> (`objectinfo.py`), a scalebar, a captioned share JPEG ("nameplate"), Best-pictures/Compare, integration-readiness +
+> goals, Sky-so-far coverage, and a progress reel all already exist. Per AGENTS.md §2, I did **not** manufacture a
+> duplicate this run — I filed only the one genuinely-absent feature below (verified against the routes/routers), and
+> flag that future feature-ideation should first check this saturation rather than re-propose an existing capability.
+
+- **NEW BEGINNER FEATURE (Scout 2026-07-24) — "Your year in space": a one-tap, shareable recap poster of everything
+  you've captured (this year / all-time), turning the raw stats the app already tracks into something a beginner is
+  proud to post.** *(Pillar: enjoy + share — priority 3; explicitly on the beginner-bar list "enjoy, and share a good
+  image". Size M.)* Distinct from the existing single-night "Last night" card and from the raw imaging log/calendar
+  (both already proposed/built): this is a *celebratory* summary — total nights out, total integration hours, number of
+  targets, favourite constellation, your best picture (thumbnail), and a fun highlight or two ("your longest single
+  target: M31, 6.2 h across 5 nights"). One warm sentence of copy, no jargon. It composes data the app **already
+  aggregates** — `webapp/routers/stats.py` (`library_session_recap`, last-night collection), the library's per-target
+  frame/exposure stats, `objectinfo.py` for constellation, and Best-pictures for the hero thumbnail — into a single
+  rendered card, and reuses the existing share-JPEG/"nameplate" pipeline (`submit_editor_share`) to bake it into a
+  social-ready image with one tap. Sane default: auto-generated from whatever exists, self-hides when the library is
+  empty, dismissible. No network, no new dependency (pure offline aggregation + the render path we already have), fully
+  additive, testable (feed synthetic library rows → assert the recap fields + the rendered card). Clears the beginner
+  bar: a non-expert Seestar owner immediately understands it and would use it to *enjoy and share* their hobby.
+  Feasibility: fits headless/web/TrueNAS; ships with a plain-language explanation; additive/reversible. **Verified
+  genuinely absent** (2026-07-24: no all-time/annual recap route or endpoint — `stats.py`'s recap is single-night only).
 
 - **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Your next best move": on a finished picture, one calm, plain-language
   sentence naming the *single* highest-leverage thing that would most improve this target next time — derived

@@ -535,9 +535,15 @@ def estimate_stack(project: Project, options: StackOptions,
     elif would_exceed and is_mosaic:
         # Drizzle off and the union mosaic canvas alone blows the budget — would
         # the smaller reference-frame canvas fit? If so the UI can offer a
-        # one-click "use the reference canvas instead".
+        # one-click "use the reference canvas instead". Charge the *same*
+        # min/max-reject planes the main peak (and the run-time guard) charge, so
+        # a k>1 reject can't make us suggest a reference canvas the guard would
+        # then refuse with MemoryError (the suggestion must match the guard).
         ref_peak, _ = _estimate_peak_bytes(
-            ref_shape, drizzle=False, drizzle_scale=1.0)
+            ref_shape, drizzle=False, drizzle_scale=1.0,
+            reject_arrays=(_min_max_reject_arrays(options.min_max_reject_count)
+                           if options.min_max_reject and n >= 3
+                           else 0))
         suggest_ref_canvas = int(ref_peak) <= budget
     return StackEstimate(
         n_frames=n,
