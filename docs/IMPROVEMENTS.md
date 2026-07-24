@@ -1616,6 +1616,24 @@ when you take it.
   more conservative and could refuse large stacks that currently work; it needs a measurement pass and a cap on
   the charged worker count. File for a Builder run with a memory-measurement harness. Severity Low for the target
   hardware; record so it's on the books.
+  **⚠ Builder note (2026-07-24, `claude/pensive-faraday-rzctfj`) — the "add a term to the estimate" approach is a
+  dead-end; prefer a memory-aware in-flight cap instead.** Traced it end-to-end this run. The worker buffers are held
+  by both `_pass` and `_drizzle_pass` (each holds up to `max_workers*2` reprojected/debayered frame buffers via
+  `_imap_bounded`), and each buffer is ~the *native reference frame* RGB float32 — **independent of the drizzle scale**
+  (drizzle enlarges only the canvas, not the per-frame window), so it's a constant additive offset across every lever
+  `_best_memory_fix` considers. **Two problems with folding it into `_estimate_peak_bytes` as the entry proposes:**
+  (1) the charged buffer count depends on `os.cpu_count()` (the real `max_workers` default), which **varies by machine**
+  → the pre-run `estimate_stack` number the UI shows and the guard threshold become non-deterministic, so the
+  calibrated tight-budget tests (`tests/test_estimate_reference_suggestion.py` at 15/10/1 MB budgets on 480×320 frames,
+  `tests/webapp/test_stack_estimate.py`'s `driz > base*3` ratio) flip depending on the CI box's core count; (2) it's a
+  pure over-refusal lever — it only ever makes the guard say no. **Better fix (recommended):** leave the estimate/guard
+  math untouched and instead **cap `max_in_flight` by memory at pass time** — replace the bare `max_workers*2` in
+  `_pass`/`_drizzle_pass` with `min(max_workers*2, headroom // per_frame_bytes)` (never below ~2) so the worker buffers
+  can't exceed the RAM left after the canvas arrays. This *prevents* the OOM (the actual failure) instead of just
+  refusing more runs, needs **zero** test recalibration (the low-level guard tests all pass `worker_buffer_bytes=0` and
+  the estimate tests are unchanged), never binds for the Seestar target (small frames / few cores → the cap is inert),
+  and only degrades throughput (never correctness) in the pathological many-core-huge-sensor case. Still Low-severity
+  for the target user, so not done this run — but do it *this* way when picked.
 
 - ~~**`CalibrationMasters.validate()` aborts the whole stack over a wrong-shaped master *bias* even when the
   bias is never applied.**~~ — **FIXED v0.173.1** (Builder 2026-07-23, branch `claude/pensive-faraday-tfvkyx`;
