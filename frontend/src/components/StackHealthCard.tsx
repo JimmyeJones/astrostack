@@ -25,7 +25,8 @@ export function noteColor(severity: string): string {
  * returns `null` for a note with no wired action (e.g. a reassurance/positive
  * note). `trim_border` opens the non-destructive editor on this run (where Trim
  * border lives); `calibration` opens the Calibration page (build master darks/
- * flats). Both are read-only navigations — nothing is changed until the user acts.
+ * flats); `solve_help` opens Settings (the ASTAP star-database status). All are
+ * read-only navigations — nothing is changed until the user acts.
  *
  * When the card is rendered *inside* the editor (`inEditor`), the `trim_border`
  * link would just point at the page the user is already on — and the "Trim
@@ -51,6 +52,10 @@ export function noteAction(
         : null;
     case "calibration":
       return { label: "Set up master darks & flats →", href: "/calibration" };
+    case "solve_help":
+      // Most subs failed to plate-solve; Settings shows the ASTAP star-database
+      // status and how to install it, which is what lets far more subs locate.
+      return { label: "Check your star database in Settings →", href: "/settings" };
     default:
       return null;
   }

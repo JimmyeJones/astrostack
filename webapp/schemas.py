@@ -197,7 +197,7 @@ class HealthNoteOut(BaseModel):
     kind: str
     severity: str          # "good" | "info" — colour only, never alarming
     message: str
-    action: str | None = None  # UI action key ("trim_border" | "calibration") or null
+    action: str | None = None  # UI action key ("trim_border" | "calibration" | "solve_help") or null
 
 
 class StackHealthOut(BaseModel):
