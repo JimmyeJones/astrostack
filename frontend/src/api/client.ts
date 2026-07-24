@@ -285,9 +285,17 @@ export interface HealthNote {
   action: string | null;
 }
 
+export interface DarkSpec {
+  exposure_s: number | null;
+  gain: number | null;
+}
+
 export interface StackHealth {
   run_id: number | null;
   notes: HealthNote[];
+  // The exposure/gain to shoot darks at, for the "How to add darks" guide.
+  // Optional — older backends omit it (treat as no pre-filled numbers).
+  dark_spec?: DarkSpec | null;
 }
 
 export interface BestFrame {

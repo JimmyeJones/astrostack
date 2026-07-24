@@ -11,6 +11,7 @@ from webapp import deps
 from webapp.schemas import (
     BestFrameOut,
     CleanupSuggestionOut,
+    DarkSpecOut,
     FocusTrendOut,
     FocusTrendPointOut,
     FramingHintOut,
@@ -405,7 +406,7 @@ def target_stack_health(
     ``null`` when there's no matching genuine stack. Read-only; never a gate.
     """
     from webapp.pipeline import _newest_genuine_stack_run, _stack_options_from_run_json
-    from seestack.stackhealth import stack_health
+    from seestack.stackhealth import recommended_dark_spec, stack_health
 
     lib, proj = deps.open_target_project(request, safe)
     try:
@@ -423,7 +424,9 @@ def target_stack_health(
             )
         if run is None:
             return None
-        notes = stack_health(run, proj.iter_frames())
+        frames = list(proj.iter_frames())
+        notes = stack_health(run, frames)
+        spec = recommended_dark_spec(frames)
     finally:
         proj.close()
         lib.close()
@@ -432,6 +435,7 @@ def target_stack_health(
         notes=[HealthNoteOut(kind=n.kind, severity=n.severity,
                              message=n.message, action=n.action)
                for n in notes],
+        dark_spec=DarkSpecOut(exposure_s=spec.exposure_s, gain=spec.gain),
     )
 
 

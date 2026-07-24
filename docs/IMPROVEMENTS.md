@@ -7812,6 +7812,25 @@ problems. Dogfood it every big-picture run and fix root causes.
 > explicitly de-scoped. The one genuinely-absent gap I found is the *actionable how-to* behind the existing darks
 > advice (filed immediately below) — the app tells beginners *that* darks help but never *how* to shoot them.
 
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-24) — "Add darks in 3 steps": turn the app's existing "adding darks would cut
+  the speckle" advice into a plain-language, Seestar-specific how-to.**~~ — **SHIPPED v0.186.0** (Builder 2026-07-24,
+  branch `claude/pensive-faraday-fxnxqg`). A collapsible **"How to add darks →"** guide now appears right beneath the
+  uncalibrated "How's my stack?" note (`StackHealthCard`), with three jargon-free steps for a Seestar OSC owner
+  ((1) cap the scope, (2) shoot ~20–30 darks at the **same exposure/gain as your subs**, (3) drop the folder in →
+  AstroStack builds+applies the master) and one warm sentence of *why*. **The "match these numbers" line is pre-filled
+  from the target's own data:** new engine helper `seestack/stackhealth.py::recommended_dark_spec(frames)` returns the
+  median exposure/gain of the accepted subs (a `DarkSpec`, fields `None` when unrecorded → the guide degrades to generic
+  wording, never a wrong number); the `/api/targets/{safe}/stack-health` payload carries it as an additive nullable
+  `dark_spec` (`DarkSpecOut`). Frontend: `formatDarkSpec` (pure) → `"10 s at gain 80"`, and the `DarksGuide` disclosure;
+  shown only beside a `calibration` note (mirrors the nudge's own visibility), never for other notes. Tests:
+  `tests/test_stackhealth.py` (+4 — median spec, ignores rejects, degrades on missing/zero exposure, empty target),
+  `frontend/.../DarksGuide.test.tsx` (+6 — `formatDarkSpec` cases + the guide's pre-filled/generic wording),
+  `StackHealthCard.test.tsx` (+2 — guide appears beside an uncalibrated note, absent for a non-calibration note).
+  Upgrade-safe: additive nullable payload field + a self-contained frontend guide; no config/DB/on-disk/default change,
+  old clients ignore `dark_spec`. Pairs with the "auto-restack when masters become available" autonomy idea to close the
+  "told me to add darks → I added them → it got cleaner" loop.
+  *(Original idea kept below for provenance.)*
+
 - **NEW BEGINNER FEATURE (Scout 2026-07-24) — "Add darks in 3 steps": turn the app's existing "adding darks would cut
   the speckle" advice into a plain-language, Seestar-specific how-to, so a beginner who's told darks would help can
   actually capture and apply them without knowing any astro jargon.** *(Pillar: 3 friendliness + understand/learn +

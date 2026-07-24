@@ -200,12 +200,24 @@ class HealthNoteOut(BaseModel):
     action: str | None = None  # UI action key ("trim_border" | "calibration" | "solve_help") or null
 
 
+class DarkSpecOut(BaseModel):
+    """The exposure/gain a beginner should shoot dark frames at (read from the
+    target's own subs), powering the "How to add darks" guide's pre-filled
+    numbers. Either field is ``null`` when the subs didn't record it."""
+
+    exposure_s: float | None = None
+    gain: float | None = None
+
+
 class StackHealthOut(BaseModel):
     """Ranked health notes for a target's current stack, or ``null`` when the
     target has no genuine stack yet. The card shows the top one or two."""
 
     run_id: int | None = None
     notes: list[HealthNoteOut] = []
+    # The exposure/gain to shoot darks at, for the "How to add darks" guide shown
+    # beside an uncalibrated note. Additive/nullable — older clients ignore it.
+    dark_spec: DarkSpecOut | None = None
 
 
 class FrameOut(BaseModel):

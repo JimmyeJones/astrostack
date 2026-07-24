@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from seestack.io.project import FrameRow, StackRunRow
-from seestack.stackhealth import stack_health
+from seestack.stackhealth import recommended_dark_spec, stack_health
 
 
 def _run(**kw) -> StackRunRow:
@@ -25,6 +25,43 @@ def _frame(*, accept=True, ecc=0.35, reason=None, wcs=None) -> FrameRow:
 
 def _kinds(notes) -> list[str]:
     return [n.kind for n in notes]
+
+
+def _exp_frame(*, accept=True, exposure_s=10.0, gain=80.0) -> FrameRow:
+    return FrameRow(source_path=f"s{id(object())}.fit", accept=accept,
+                    exposure_s=exposure_s, gain=gain)
+
+
+def test_recommended_dark_spec_reads_the_typical_exposure_and_gain():
+    """Darks must match the lights, so the spec is the median exposure/gain of
+    the accepted subs — the numbers the beginner should dial in."""
+    frames = [_exp_frame(exposure_s=10.0, gain=80.0) for _ in range(5)]
+    spec = recommended_dark_spec(frames)
+    assert spec.exposure_s == 10.0
+    assert spec.gain == 80.0
+
+
+def test_recommended_dark_spec_ignores_rejected_frames():
+    frames = [_exp_frame(exposure_s=10.0, gain=80.0) for _ in range(4)]
+    # A rejected 30 s frame must not drag the median toward itself.
+    frames.append(_exp_frame(accept=False, exposure_s=30.0, gain=200.0))
+    spec = recommended_dark_spec(frames)
+    assert spec.exposure_s == 10.0 and spec.gain == 80.0
+
+
+def test_recommended_dark_spec_degrades_when_metadata_missing():
+    """No recorded exposure/gain → None fields (the guide shows generic wording,
+    never a wrong number)."""
+    frames = [_exp_frame(exposure_s=None, gain=None) for _ in range(3)]
+    spec = recommended_dark_spec(frames)
+    assert spec.exposure_s is None and spec.gain is None
+    # A non-positive exposure is treated as unrecorded, too.
+    assert recommended_dark_spec([_exp_frame(exposure_s=0.0)]).exposure_s is None
+
+
+def test_recommended_dark_spec_empty_target():
+    spec = recommended_dark_spec([])
+    assert spec.exposure_s is None and spec.gain is None
 
 
 def test_healthy_calibrated_stack_reports_a_positive_note():
