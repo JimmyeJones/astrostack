@@ -86,6 +86,36 @@ when you take it.
   and video folders and treated those single output images as raw frames.)* Confidence:
   reproduced. (M–L, autonomy/correctness — PRIORITY 1/2)
 
+> **Re-audit — stacking-engine core CLEAN again; shipped one verified reproduced solve-path state-corruption bug;
+> filed two more verified bugs (Scout 2026-07-24, branch `claude/kind-mccarthy-hntcnk`).** Baseline suite green
+> (**1857 passed, 2 skipped**). Three independent adversarial audit sub-agents (each told to skip the
+> repeatedly-confirmed-clean items and hunt only for *new* defects) plus my own traces re-covered: (a) **stacking hot
+> path** — `accumulator.py` (MinMaxReject band partitions + denominators brute-forced against a NumPy reference over
+> 200 random N≤7/k≤3/NaN configs; ±inf-seed `_mins.sum()+_maxs.sum()` indexed per-side so no inf−inf; Welford
+> mean/var vs `np.nanmean`/`np.nanvar(ddof=1)` incl. n<2→NaN, stable at 1e6-mean unit-delta; WeightedSum
+> sum/weight + coverage), `stacker.py` (κ-σ keep-mask both NaN-widen guards, `_auto_kappa_min_frames` n=11@κ=3,
+> dispatch gates min_max n≥3 / sigma n≥4, memory-guard `2+2k` charge consistent with `estimate_stack`),
+> `drizzle_path.py` (CRPIX `(c−0.5)·s+0.5` / CDELT `/s` round-tripped vs astropy at scale 1–3, `_clip_tolerance`
+> neff/var-floor float64, half-open pixmap bounds), `weighting.py`/`photometric.py` (all five factors bounded
+> [0.1,1] with correct penalty direction, geo-mean in-range, inverse-variance `/s²` fold + hazy→scale-up direction)
+> — **CLEAN**; (b) **render / output / router surface** — `render/thumbnail.py` (STF/asinh NaN masks, 99.5-pct
+> ceiling, NaN-preserving stride), `stack/output.py` (covered-pixel percentiles, NaN→0 only at final encode,
+> `_sanitize_basename` traversal guard), and the seven read routers (server-side `safe`/master-id resolution, no
+> client filesystem paths, clamped pagination, per-target failure isolation, stable response models) — **CLEAN**;
+> (c) **ingest / watcher / QC** — `StabilityTracker` debounce + re-arm, stranded-batch single-retry bound, ingest
+> realpath dedup + fingerprint content-swap recovery (mtime stored REAL, exact round-trip), QC modified-z/meanAD
+> fallback + practical-significance floors + reject cap, `median_eccentricity`/`median_star_flux` empty-list guards,
+> `green_channel` no 16-bit overflow, streak determinism/div-by-zero guard, ASTAP solve ladder raise-on-total-failure
+> — **CLEAN**. **Three NEW verified bugs this run:** (1) **SHIPPED (v0.184.14, struck below)** — the plate-solve
+> `solved-but-unreadable-WCS` branch clobbered a frame's `qc_error`/`qc_error_final` reject reason (reproduced,
+> fail-before/pass-after regression-tested); (2) **FILED (open, ⭐ below)** — an in-place auto-edit (`Process target`
+> / `auto_edit_on_autostack`) rewrites the preview PNG but never marks the run display-space, so the History
+> one-sub-vs-stack reveal / stretch-suggestion / Adjust diverge from the clicked thumbnail (traced; broken-UX parity,
+> Builder — needs a design decision on stamp-vs-record); (3) **FILED (open, below)** — the Seestar-aware scanner
+> skips a bare `<T>/` output folder only when a `<T>_sub` sibling exists, not a `<T>_mosaic_sub` sibling, so a
+> mosaic's bare on-device output can still become a spurious 1-frame target (traced; device-naming-dependent). Two
+> ideas filed below (stacking-progress ETA; "Try it with a sample image" onboarding).
+>
 > **Re-audit — stacking engine + render/output-parity + calibration/weighting + ingest/watcher/auto-stack orchestration
 > ALL CLEAN again; NO new verified bugs this run (Scout 2026-07-24, branch `claude/kind-mccarthy-n1kcnj`).** Baseline
 > suite green (**1839 passed, 2 skipped**). Three independent adversarial audit sub-agents (each told to skip the
@@ -469,6 +499,71 @@ when you take it.
   ("min-max-reject" if eff.min_max_reject and n >= 3 else "mean")` — and add a regression test asserting a 3-frame
   sigma-clip and a 2-frame min-max stack both record `STACKER="mean"` with no `REJMODE`. Confidence: traced +
   reproduced.
+
+- ~~**A plate-solve `solved-but-unreadable-WCS` result clobbers a frame's `qc_error`/`qc_error_final` reject reason
+  to `solve_failed:unreadable plate solution` — corrupting the QC state so the frame is re-QC'd on every scan forever
+  and is mis-attributed as a solve failure.**~~ — **FIXED v0.184.14** (Scout 2026-07-24, branch
+  `claude/kind-mccarthy-hntcnk`; **traced + reproduced + fail-before/pass-after regression-tested**).
+  *(Stacking-adjacent / solve-path; wrong-result — persistent DB state corruption; Low frequency but permanent;
+  found by the 2026-07-24 ingest/solve adversarial audit.)* `apply_solve_result_to_db` (`seestack/solve/runner.py`)
+  has **two** failure branches: `not result.solved` (ASTAP failed) carried a careful preserve-guard — only stamp
+  `solve_failed:` when the frame has no prior reason, already a `solve_failed:` one, or is accepted-and-not-`qc_error`
+  — but the sibling `result.wcs_text is None` "honest failure" branch (ASTAP returns rc 0 + a `.wcs` sidecar that
+  can't be parsed) wrote `reject_reason="solve_failed:unreadable plate solution"` **unconditionally**. **Reachable:**
+  a `qc_error` frame stays `accept=True` (`apply_qc_result_to_db` sets only `reject_reason`) and
+  `build_solve_arglist` offers any un-solved *accepted* frame (line 193 skips only `accept is False`), so a qc_error
+  frame is re-offered to solve; a malformed sidecar then overwrote its QC state. That defeats the QC terminal-skip
+  machine (`build_qc_arglist(only_new=True)` skips only `qc_error_final` frames), so a genuinely-corrupt file is
+  re-QC'd forever and can never re-reach terminal. **Fix:** extracted the preserve-guard into a shared
+  `_store_solve_failed_reason(project, frame_id, reason)` helper and routed **both** branches through it, so the
+  unreadable-WCS branch now preserves `qc_error`/concrete prior reasons exactly like the failure branch. Regression:
+  `tests/test_solve_runner.py::test_apply_solve_result_unreadable_wcs_preserves_a_qc_error_reason` (a
+  `qc_error_final:`/`qc_error:` frame → solved+unreadable → reason preserved, `wcs_json` None, `accept` True;
+  fail-before it became `solve_failed:unreadable plate solution`). Existing honest-failure and failure-preserve tests
+  stay green. Upgrade-safe: pure guard-tightening, no config/DB-schema/API-shape/on-disk/default change. Confidence:
+  traced + reproduced + regression-tested.
+
+- **⭐ An in-place auto-edit (`Process target` / watcher `auto_edit_on_autostack`) rewrites the run's preview PNG to
+  the fully Auto-edited picture but never marks the run display-space — so History surfaces that gate on the *linear*
+  FITS render the run under a different tone curve than the thumbnail the user clicked.** *(Editor/render parity;
+  broken-UX — NOT data corruption; found by the 2026-07-24 render/router adversarial audit; traced, not run
+  end-to-end. Builder — needs a small design decision, so NOT blind-fixed.)* `_auto_edit_process_run`
+  (`webapp/pipeline.py:~1809-1812`) does `render_run_display_array(...)` → `_write_preview_png(..., already_display=True)`
+  — i.e. it rewrites **only** the preview PNG. It does **not** rewrite the FITS with `DISPLAY_SPACE_CARD`, set
+  `options_json["display_space"]`, or set `preview_stretch/black`. Contrast the editor **export** path
+  (`_apply_editor_to_run`), which creates a run whose FITS **is** stamped display-space and stays consistent. So for
+  an in-place-auto-edited run, `fits_is_display_space(fits_path)` / `_run_display_space` (reads `options_json`, no
+  `display_space` key) both report **False**, and these consumers diverge from the clicked thumbnail:
+  (1) **`one_sub_vs_stack_info` / `reference_sub_png`** (`webapp/routers/stack.py:~844,~890`) — `display_space` reads
+  False so the reveal is offered; `preview_stretch/black` are None so the single sub is STF-stretched (sky→~6% grey)
+  while the "stack" half shown is the tone-mapped Auto preview — exactly the brightness-offset mismatch the reveal's
+  docstring promises to avoid; (2) **`render_stretch_suggestion`** (`stack.py:~722`) — anchored to
+  `EXPORT_AUTOSTRETCH_TARGET_BG=0.06` with the documented contract "matches the STF preview thumbnail", but the
+  thumbnail is the recipe result, not an STF stretch; (3) **`render_stack_run`** (Adjust, `stack.py:~363`) — renders
+  asinh over the linear FITS, so opening Adjust jumps to a look unlike the clicked thumbnail. `submit_process_target`
+  auto-edits **unconditionally**, so this hits a primary one-click path, not an edge case. **Fix direction (Builder):**
+  in `_auto_edit_process_run`, either record the applied recipe/`preview_stretch` where these surfaces can detect it,
+  or stamp the run so `fits_is_display_space`/`_run_display_space` report True (as the export path does) — so the
+  reveal/suggestion/Adjust either match the thumbnail or self-hide. Confidence: traced. (M, editor/render parity —
+  PRIORITY 1.)
+
+- **The Seestar-aware scanner skips a bare `<T>/` on-device *output* folder only when a `<T>_sub` sibling is present,
+  never a `<T>_mosaic_sub` sibling — so a **mosaic's** bare on-device output can still be ingested as a spurious
+  1-frame target.** *(Ingest/autonomy; broken-UX — a junk target, not corruption of a real one; found by the
+  2026-07-24 ingest/scanner audit. Traced; **device-naming-dependent** — filed, not blind-fixed.)* The v0.184.9
+  Seestar-aware fix (`_apply_seestar_convention`, `seestack/io/scanner.py:~106`) maps `<T>_sub/` → `<T>`,
+  `<T>_mosaic_sub/` → the separate target `<T> (mosaic)`, and **skips a bare `<T>/` output folder when its `<T>_sub`
+  sibling exists** — but the skip test is `(low + "_sub") in names_lower`, which does **not** fire for a mosaic whose
+  raw subs live in `<T>_mosaic_sub`. Verified in-repo: running `_apply_seestar_convention` on
+  `[('M31', [1 file]), ('M31_mosaic_sub', [2 files])]` yields **both** `M31 (mosaic)` (2 real subs) **and** a spurious
+  `M31` built from the single output image. **Caveat (why not shipped):** whether an S30/S50 actually names a mosaic's
+  on-device stacked output as bare `<T>/` (vs `<T>_mosaic/`, which the existing suffix-strip already collapses and
+  skips) is device-specific and could not be confirmed in-repo. If the device uses bare `<T>/`, this is a real gap in
+  the same family as the already-fixed "scanner ingests output folders" bug; if it uses `<T>_mosaic/`, it's already
+  covered. **Fix direction (Builder, once device naming is confirmed):** generalise the bare-output skip to also fire
+  when any `<T>*_sub` sibling exists (or specifically `<T>_mosaic_sub`), being careful not to over-skip a legitimately
+  bare non-Seestar folder that has no `_sub` sibling at all. Confidence: traced (code path proven; device-naming
+  assumption unverified). (S, ingest/autonomy — PRIORITY 2.)
 
 - **FLAKY TEST (test-infra, not a product bug) — `frontend/src/routes/Editor.test.tsx` fails ~2 of 68 whenever the
   whole file runs, with a *different* victim set each time.** *(CI reliability; Medium-infra — a flaky suite erodes
@@ -4884,6 +4979,25 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
+- **NEW IDEA (Scout 2026-07-24) — "About N min left": a live time-remaining estimate on a running stack (and the
+  scan/QC/solve jobs), so a beginner with thousands of subs knows whether to wait or go make tea — and can tell a
+  slow-but-working job from a stuck one.** *(Pillar: 3 friendliness + trust; size S — frontend-only, verified
+  additive.)* **The gap:** `JobRecord` already streams `phase` / `done` / `total` / `started_utc` over SSE
+  (`webapp/jobs.py`; `to_dict()` exposes all four), and the Jobs page + the completion toast render a progress bar —
+  but nothing tells the user *how long is left*. On a 5,000-sub stack the bar can sit at "1,240 / 5,000" for many
+  minutes; a beginner has no way to know it's progressing normally rather than hung, which is real anxiety and a
+  reason people force-reload or cancel a healthy run. **The feature (beginner idiom):** compute a simple ETA
+  frontend-side from the data already present — `elapsed = now − started_utc`; when `done > 0`,
+  `remaining ≈ elapsed / done × (total − done)` — and show it as a calm, rounded phrase next to the bar
+  (*"about 6 min left"*, *"under a minute left"*, *"finishing up…"* once `done ≈ total`). Only show it once there's
+  enough signal (e.g. `done ≥ 3` and a few seconds elapsed) so it doesn't flash a wild number at the start; hide it
+  when `total` is 0/unknown or the phase has no meaningful count. **Why it clears the bar:** sane default (auto-shown,
+  no setting), plain language, purely additive, and it directly serves the "thousands of subs" persona AGENTS.md §1
+  calls out. **Scope note:** this can ship as a *frontend-only* change — no backend, DB, or API-shape change — because
+  `started_utc`/`done`/`total` are already in the job payload. Optionally, a later slice could add a smoothed
+  server-side estimate for the multi-phase pipeline (QC→solve→stack), but the simple per-job version is the S-size
+  win. Testable via a pure `formatEta(elapsedMs, done, total)` helper (vitest). (S, autonomy/friendliness —
+  PRIORITY 2–3.)
 - **Surface (never auto-delete) the junk targets an OLD scan built from Seestar
   outputs/videos, so the owner can clean up in one click.** *(Follow-up to the
   ⭐⭐⭐ scanner fix shipped v0.184.9 — the scanner is now Seestar-aware, but a
@@ -7831,6 +7945,39 @@ problems. Dogfood it every big-picture run and fix root causes.
   testable — passes §4's filter. Verified genuinely absent 2026-07-24: the app nudges "add darks" but nowhere explains
   *how* to capture them on a Seestar — a distinct understand/learn capability from every planning/recap/coaching card
   already filed or built.)*
+
+- **NEW BEGINNER FEATURE (Scout 2026-07-24) — "Try it with a sample image": a one-tap way for a brand-new owner with
+  no data yet to load a small bundled sample set and walk the whole journey (ingest → QC → stack → edit → export)
+  before their first clear night.** *(Pillar: 3 friendliness / onboarding + understand/learn; size M.)* **The gap
+  (verified this run):** a first-run owner who installs AstroStack before they've captured anything lands on an empty
+  Dashboard with first-run readiness banners but **nothing to actually *do*** — every screen (QC, Target, Stack,
+  Editor, share) is empty until they've dropped real Seestar frames in, which won't happen until their next clear
+  (and cloud-free) night. So the app can't show a newcomer what it's *for* at the moment they're most curious, and
+  they can't learn the workflow or judge whether it's worth setting up their NAS share. There is currently **no**
+  demo/sample/"try it" path (checked the routes + backlog: `tests/synth.py` writes synthetic Seestar FITS for the
+  suite, but that's test-only — no user-facing loader). **The feature (beginner idiom):** a dismissible **"New here?
+  Try it with a sample image"** card on the empty Dashboard that, on one tap, ingests a small **bundled** sample set
+  (a handful of real-or-synthetic Seestar OSC subs of one showpiece target) into a clearly-labelled **"Sample
+  (M42)"** target, then walks the owner straight through the real screens on real-looking data: QC verdict → one-tap
+  stack → the Auto-edited result → the share/export affordances — each with a one-line "this is what you'll see with
+  your own frames tonight" note. A single **"Remove sample"** button deletes just that target so it never clutters a
+  real library. **Why it clears the beginner bar:** universally useful (every new owner faces the empty-app moment),
+  zero jargon, a sane default (auto-offered only while the library is empty, self-hiding once real data arrives),
+  no knobs, and it serves the *understand/learn* pillar — it's the guided first-run tour the app lacks, on live
+  screens rather than a static walkthrough. It complements the already-filed "Your first image" end-to-end
+  walkthrough (which coaches a user through *their own* first capture) by giving a *pre-capture* try-before-you-shoot
+  path. **Feasibility / guardrails:** the one real cost is bundling sample FITS — keep it to a *few small* subs
+  (Seestar subs are ~2–4 MB each; 5–8 is a few tens of MB, acceptable in the image) or generate them at first-tap
+  from the existing `tests/synth.py`-style writer so **nothing** ships in the repo/image beyond a tiny generator.
+  No network, no heavy/ML dependency, additive/reversible (one target, one delete), fits headless/web/TrueNAS.
+  **Upgrade-safe:** additive — a new opt-in target created only on the user's tap, using the normal ingest path; no
+  config/DB-schema/on-disk/default/API-shape change (a `state/` flag to remember dismissal is additive). **Shape for
+  a Builder run:** a sample-generator/loader on the backend (reuse the synth writer; write into a real project under
+  a reserved safe_name so QC/stack/edit run unmodified), a Dashboard empty-state card + "Remove sample" action on the
+  frontend, and tests that (a) the loader builds a valid stackable target and (b) "Remove sample" deletes only it.
+  **Needs-owner-sign-off check:** none — no heavy dep, no outward-facing/irreversible action, no default flip.
+  *(Verified genuinely absent 2026-07-24 against the routes/backlog: live capture is de-scoped, but a *bundled sample
+  dataset* to try the app offline is a different, unfiled capability.)* (M, friendliness/onboarding — PRIORITY 3.)
 
 - **NEW BEGINNER FEATURE (Scout 2026-07-24) — "Point here tonight": one calm recommendation of which target you're
   *already working on* to continue tonight, ranked across your whole library by (how close it is to a good result) ×
