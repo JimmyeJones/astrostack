@@ -139,6 +139,16 @@ class Settings(BaseModel):
     # Use the telescope target RA/Dec from each frame's FITS header as a
     # plate-solve search hint (localises ASTAP's search; speeds up solving).
     astap_use_solve_hints: bool = True
+    # Stack-then-solve bootstrap: on a faint / sparse-star field a single 10 s
+    # Seestar sub often lacks the SNR to plate-solve, so most subs stay unsolved
+    # and never stack (→ the thin "gibberish" stack). When this is on, after the
+    # per-sub solve pass leaves most subs unsolved, the app integrates the
+    # accepted-but-unsolved subs into a higher-SNR deep image, solves *that* once,
+    # and propagates the solved position back to each sub so the whole burst can
+    # finally stack. Off by default — it's an extra pass that only helps faint
+    # fields, and it's newer than the per-sub path; turn it on if your faint
+    # targets keep coming out noisy because "most subs aren't located yet".
+    astap_bootstrap_solve: bool = False
 
     # --- compute -----------------------------------------------------------
     # ge=1: a zero/negative worker count would crash the thread/process pool.
