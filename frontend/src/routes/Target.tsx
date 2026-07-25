@@ -38,6 +38,9 @@ import { UnsolvedHelp } from "../components/target/UnsolvedHelp";
 import { thinStackWarning } from "../components/target/thinStack";
 import { SharpestYetBadge } from "../components/target/SharpestYetBadge";
 import { NextBestMoveBadge } from "../components/target/NextBestMoveBadge";
+import { IntegrationTrendBadge } from "../components/target/IntegrationTrendBadge";
+import { nextBestMove } from "../components/target/nextBestMove";
+import { softerThanUsual } from "../components/target/softStars";
 import { detectMixedPointings } from "../components/target/mixedPointings";
 
 // Re-exported for existing tests that import it from this route module.
@@ -385,6 +388,19 @@ export function TargetView() {
   const thinStack = useMemo(
     () => thinStackWarning(latestRun?.n_frames_used),
     [latestRun],
+  );
+  // Which "next best move" tip is currently in play (or null when none) — the
+  // plateau verdict defers to it so the two never contradict ("add more time"
+  // vs "more time won't help"). Mirrors NextBestMoveBadge's own inputs.
+  const coachKind = useMemo(
+    () =>
+      nextBestMove({
+        nFramesUsed: latestRun?.n_frames_used,
+        integrationS: latestRun?.total_exposure_s,
+        nUnsolved: unsolvedCount,
+        softStars: softerThanUsual(runs.data),
+      })?.kind ?? null,
+    [latestRun, unsolvedCount, runs.data],
   );
   // When walk-away Auto-stack is on, it now holds a target back rather than
   // publishing a 1-2 frame single-frame-speckle "master" (see auto_stack_min_frames
@@ -875,6 +891,14 @@ export function TargetView() {
           nUnsolved={unsolvedCount}
           runs={runs.data}
         />
+      ) : null}
+      {/* "About as clean as your sky allows": when this target's measured noise
+          has plateaued (sky-limited), tell the beginner more subs won't help it
+          much — right where they decide whether to revisit it. Self-hiding, and
+          suppressed whenever the coaching above is nudging "add more time" so the
+          two never contradict. */}
+      {latestRun?.has_preview ? (
+        <IntegrationTrendBadge runs={runs.data} coachKind={coachKind} />
       ) : null}
       <Group justify="space-between" gap="xs">
         <Group gap="xs" style={{ minWidth: 0 }}>
