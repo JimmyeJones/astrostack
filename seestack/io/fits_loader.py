@@ -93,6 +93,39 @@ def load_header(path: str | Path) -> FitsHeaderInfo:
     )
 
 
+def fov_deg_from_header(info: FitsHeaderInfo) -> float | None:
+    """Derive the approximate plate-solve field of view (long edge, degrees).
+
+    A Seestar light carries the focal length (``FOCALLEN``, mm) and pixel size
+    (``XPIXSZ``, µm), so the on-sky sampling is
+    ``pixel_scale_arcsec = 206.265 · pixel_um / focal_mm`` and the field's long
+    edge spans ``pixel_scale · long_edge_px / 3600`` degrees. This lets a solve
+    use the *right* FOV for any Seestar model (S30 ≈ 2.1°, S50 ≈ 1.27°) straight
+    from the frame, with no user configuration — and ASTAP's quad-matching does
+    not forgive a badly-wrong FOV, so the historical hardcoded 1.3° default
+    silently fails an S30 owner's subs.
+
+    Returns ``None`` when the header lacks the fields or they're non-physical
+    (the caller then falls back to the configured/default FOV). The long edge
+    is used to match the historical convention (the old 1.3° default ≈ an S50's
+    1920 px long edge), and the result is sanity-clamped so a garbage header
+    can't hand ASTAP an absurd value that's worse than the fallback.
+    """
+    h = info.raw_header
+    focal_mm = _get_float(h, ("FOCALLEN", "FOCALLENGTH"))
+    pixsz_um = _get_float(h, ("XPIXSZ", "PIXSIZE1", "XPIXELSZ"))
+    long_edge_px = max(int(info.width_px or 0), int(info.height_px or 0))
+    if not focal_mm or not pixsz_um or focal_mm <= 0 or pixsz_um <= 0 or long_edge_px <= 0:
+        return None
+    pixel_scale_arcsec = 206.265 * pixsz_um / focal_mm
+    fov = pixel_scale_arcsec * long_edge_px / 3600.0
+    # A physically-sensible amateur field is well inside this range; anything
+    # outside means a mis-parsed header, so decline and let the caller fall back.
+    if not (0.05 <= fov <= 20.0):
+        return None
+    return fov
+
+
 def load_seestar_raw(
     path: str | Path,
     *,

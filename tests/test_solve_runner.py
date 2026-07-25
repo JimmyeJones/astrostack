@@ -588,3 +588,105 @@ def test_apply_solve_result_keeps_raw_reason_for_per_frame_failure(tmp_path):
         assert classify_solve_setup_error(f.reject_reason) is None
     finally:
         proj.close()
+
+
+def test_solve_one_derives_fov_from_s30_header(tmp_path):
+    """``solve_one`` hands ASTAP the FOV derived from the frame's own header — an
+    S30 sub (2.1°), not the hardcoded 1.3° default. Regression for the
+    owner-confirmed wrong-FOV bug that silently failed most of an S30's solves."""
+    pytest.importorskip("astropy")
+    from tests.synth import write_seestar_fits
+
+    fits = write_seestar_fits(
+        tmp_path / "s30.fit", width=1920, height=1080,
+        focal_len_mm=150.0, pixel_size_um=2.9, add_wcs=False,
+    )
+    sidecar = tmp_path / "s30.wcs"
+    sidecar.write_bytes(b"")
+
+    seen_fov: list[float] = []
+
+    class RecordingSolver:
+        def __init__(self, *a, fov_deg=1.3, **kw):
+            seen_fov.append(fov_deg)
+
+        def solve(self, _path, **_kw):
+            return ASTAPResult(
+                fits_path=fits, wcs_sidecar_path=sidecar,
+                ra_center_deg=83.6, dec_center_deg=-5.4,
+                pixscale_arcsec=4.0, rotation_deg=0.0, solved=True, log_tail="",
+            )
+
+    with patch("seestack.solve.runner.ASTAPSolver", RecordingSolver), \
+         patch("seestack.io.wcs_io.wcs_text_from_sidecar", return_value="CRVAL1=1.0"):
+        # Pass the *wrong* fallback FOV; the header derivation must override it.
+        solve_one(1, str(fits), fov_deg=1.3)
+
+    assert seen_fov and seen_fov[0] == pytest.approx(2.13, abs=0.05)
+
+
+def test_solve_one_falls_back_to_passed_fov_without_optics(tmp_path):
+    """A header lacking FOCALLEN/XPIXSZ leaves the passed-through Settings/default
+    FOV in force (here a custom 1.9°)."""
+    pytest.importorskip("astropy")
+    from tests.synth import write_seestar_fits
+
+    fits = write_seestar_fits(tmp_path / "plain.fit", width=1920, height=1080)
+    sidecar = tmp_path / "plain.wcs"
+    sidecar.write_bytes(b"")
+
+    seen_fov: list[float] = []
+
+    class RecordingSolver:
+        def __init__(self, *a, fov_deg=1.3, **kw):
+            seen_fov.append(fov_deg)
+
+        def solve(self, _path, **_kw):
+            return ASTAPResult(
+                fits_path=fits, wcs_sidecar_path=sidecar,
+                ra_center_deg=1.0, dec_center_deg=1.0,
+                pixscale_arcsec=4.0, rotation_deg=0.0, solved=True, log_tail="",
+            )
+
+    with patch("seestack.solve.runner.ASTAPSolver", RecordingSolver), \
+         patch("seestack.io.wcs_io.wcs_text_from_sidecar", return_value="CRVAL1=1.0"):
+        solve_one(1, str(fits), fov_deg=1.9)
+
+    assert seen_fov and seen_fov[0] == pytest.approx(1.9)
+
+
+def test_run_qc_and_solve_threads_settings_fov_and_timeout(tmp_path):
+    """Settings' ASTAP FOV/timeout reach the built solve arglist — previously they
+    were read from project meta (which nothing writes), so a Seestar S30 owner's
+    corrected FOV never touched a real solve. Regression for the dead-setting bug."""
+    from seestack.io.scanner import run_qc_and_solve
+
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        f = tmp_path / "a.fit"
+        f.write_bytes(b"")
+        proj.add_frame(FrameRow(source_path=str(f)))
+
+        captured: list[tuple] = []
+
+        def fake_solve_one(*args):
+            captured.append(args)
+            return SolveResult(
+                frame_id=args[0], fits_path=args[1], solved=False,
+                wcs_text=None, ra_center_deg=None, dec_center_deg=None,
+                pixscale_arcsec=None, rotation_deg=None, error="no solution",
+            )
+
+        with patch("seestack.solve.runner.solve_one", fake_solve_one):
+            run_qc_and_solve(
+                proj, run_qc=False, run_solve=True, serial=True,
+                astap_fov_deg=2.1, astap_timeout_s=120.0,
+                use_solve_hints=False,
+            )
+
+        assert captured, "solve_one was never called"
+        # tuple: (frame_id, path, astap_path, fov_deg, timeout_s, ra, dec, radius)
+        assert captured[0][3] == pytest.approx(2.1)   # fov threaded from Settings
+        assert captured[0][4] == pytest.approx(120.0)  # timeout threaded from Settings
+    finally:
+        proj.close()

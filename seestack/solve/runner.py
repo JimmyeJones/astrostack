@@ -34,6 +34,28 @@ log = logging.getLogger(__name__)
 SIBLING_HINT_RADIUS_DEG = 5.0
 
 
+def _fov_deg_for_frame(fits_path: str, fallback_fov_deg: float) -> float:
+    """The FOV (degrees) to hand ASTAP for this frame.
+
+    Prefer the value derived from the frame's own FITS header (focal length +
+    pixel size + dimensions), which is correct for *any* Seestar model with no
+    user config; fall back to the caller-supplied FOV (the configured Settings
+    value, else the 1.3° default) when the header lacks the fields. ASTAP's
+    quad-matching does not forgive a badly-wrong FOV, so getting this right
+    per-frame is the single highest-yield fix for an S30 owner (true FOV ≈ 2.1°)
+    whose subs would otherwise all be solved at the wrong 1.3° scale.
+
+    Best-effort: any read/parse problem degrades silently to the fallback.
+    """
+    try:
+        from seestack.io.fits_loader import fov_deg_from_header, load_header
+
+        derived = fov_deg_from_header(load_header(fits_path))
+    except Exception:  # noqa: BLE001 — a header read must never sink a solve
+        derived = None
+    return derived if derived is not None else fallback_fov_deg
+
+
 def fallback_solve_hint(solved_frames) -> tuple[float, float] | None:
     """Robust median sky centre (RA, Dec in degrees) of the already-solved frames.
 
@@ -97,8 +119,12 @@ def solve_one(
     """
     from seestack.io.wcs_io import wcs_text_from_sidecar
 
+    # Derive the true FOV from this frame's header when possible (S30 ≈ 2.1°,
+    # S50 ≈ 1.27°), falling back to the passed-through Settings/default FOV.
+    effective_fov_deg = _fov_deg_for_frame(fits_path, fov_deg)
+
     try:
-        solver = ASTAPSolver(astap_path=astap_path, fov_deg=fov_deg, timeout_s=timeout_s)
+        solver = ASTAPSolver(astap_path=astap_path, fov_deg=effective_fov_deg, timeout_s=timeout_s)
     except ASTAPError as exc:
         return SolveResult(
             frame_id=frame_id, fits_path=fits_path, solved=False,
