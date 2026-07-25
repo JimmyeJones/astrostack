@@ -6003,6 +6003,44 @@ problems. Dogfood it every big-picture run and fix root causes.
   robust to ±2 px uncompensated drift, so the "solve the deep image, propagate WCS by registration" plan is sound and
   integer-shift-level registration is enough for a short tracked burst. See the ⭐⭐ thin-stack entry's ▶ block for
   numbers.
+  **▶ PARTIALLY DELIVERED by the stack-then-solve bootstrap (v0.210.0).** The shipped bootstrap
+  (`seestack/solve/bootstrap.py`) already recovers the common tracked-burst case with **translation-only** integer
+  registration (phase correlation) — enough for the short sharpest-N window it integrates, per the ±2 px jitter
+  measurement. This idea (a full **similarity** transform tolerant of accumulated alt-az **field rotation** across a
+  whole night, and/or registering *every* unsolved sub rather than just bootstrapping the deep image) remains the
+  more general L attack for long sessions where rotation between the first and last sub exceeds what a translation can
+  absorb. Still gated on the astroalign-vs-in-house dependency call (owner sign-off). Reassess after the bootstrap has
+  been validated on real faint-field data — the bootstrap may cover enough of the owner's cases that the full-rotation
+  path isn't needed.
+
+- **IMPROVEMENT IDEA (Builder 2026-07-25) — surface the stack-then-solve bootstrap's rescue on the job/Target
+  summary so the user sees it worked ("N subs located via a deep-image solve").** *(Friendliness / trust —
+  PRIORITY 3; size S.)* **What prompts it:** the v0.210.0 bootstrap writes `wcs_json` back to rescued subs and
+  `run_qc_and_solve` already returns `bootstrap_engaged` / `bootstrap_solved` / `bootstrap_propagated` in its
+  summary, but nothing surfaces that to the user — a beginner who turned the setting on (because their faint
+  targets were noisy) gets a suddenly-thicker stack with no explanation of *why* it improved, and the existing
+  "N not located yet" Target-page badge doesn't credit the rescue. **Feature:** thread the `bootstrap_*` summary
+  fields through the scan/QC-solve job result and show a plain-language line ("Located 12 more subs by combining
+  them into a deeper image — they're now in your stack") on the Jobs result and/or the Target page's solve
+  breakdown. Purely additive (the counts already exist), no engine change, testable with a summary fixture. Closes
+  the honest-accounting loop the thin-stack work built for the *rejection* side.
+- **IMPROVEMENT IDEA (Builder 2026-07-25) — let the bootstrap anchor on an already-solved sub when a few (but
+  < min_frames) subs did solve, instead of always re-solving the deep image.** *(Autonomy / image quality —
+  PRIORITY 2; size S–M.)* **What prompts it:** the shipped bootstrap engages when `n_solved < min_frames` and, in
+  that band, always integrates + solves a fresh deep image. But if e.g. 2–3 subs *did* plate-solve, their real WCS
+  is a stronger, already-verified anchor than a re-solve of the deep image: register the unsolved subs to a solved
+  reference and propagate that sub's *real* WCS (skipping the extra ASTAP call and its failure risk entirely). Keep
+  the deep-image solve as the fallback for the zero-solved case. Additive, reuses the same registration +
+  CRPIX-offset propagation already shipped, testable against ground truth. A modest accuracy + robustness win for
+  the "almost nothing solved" targets.
+- **IMPROVEMENT IDEA / SCOUT TASK (Builder 2026-07-25) — validate the stack-then-solve bootstrap on real
+  faint-field data, then consider promoting `astap_bootstrap_solve` to on-by-default.** *(Autonomy — PRIORITY 2;
+  size S for the Scout.)* The v0.210.0 bootstrap ships **off by default** because its gain was measured on
+  *synthetic* subs; the propagation math is ground-truth-tested but the end-to-end "does it actually rescue the
+  owner's real faint targets" gain needs confirming on real Seestar data (the audit harness in the plate-solve
+  audit's scratchpad — `detect_exp.py`/`bootstrap_exp.py` — plus a real faint-field sub set). If it reliably lifts
+  real un-located fields into a clean stack with no mis-placement, promoting it to on-by-default would make the
+  owner's #1 pain "just work" without a settings trip. Until then it stays opt-in per §9.
 - ~~**▶ PARTIAL — refusal message half SHIPPED v0.184.13; pre-submit UI half now SHIPPED v0.197.0.**~~ — **COMPLETE
   v0.197.0** (Builder 2026-07-24, branch `claude/pensive-faraday-7sd8na`; regression-tested). The pre-submit half is now
   done, unified on the *same* `_best_memory_fix` the refusal message uses, so the Stack-form one-click fix and the
