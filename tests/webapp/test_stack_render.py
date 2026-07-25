@@ -116,6 +116,33 @@ def test_load_stack_rgb_shapes_and_preserves_nan(tmp_path):
     assert np.isfinite(rgb[:, -1]).all()        # covered pixels are finite
 
 
+def test_load_stack_rgb_uses_full_max_width_and_preserves_star_flux(tmp_path):
+    """A 1080-wide stack must render at the full ``max_width`` (1024), not be
+    integer-strided down to 540 — and a compact star's flux must survive the
+    downscale rather than being dropped by nearest striding (which aliased/
+    twinkled stars). Regression for the stride-decimation render bug.
+    """
+    from seestack.render.thumbnail import load_stack_rgb
+
+    h, w = 320, 1080
+    chan = np.full((h, w), 0.02, dtype=np.float32)
+    # A single bright star at ODD coordinates — the old rgb[::2, ::2] stride kept
+    # only even indices, so it would have dropped this star entirely.
+    chan[161, 541] = 5.0
+    cube = np.stack([chan, chan, chan]).astype(np.float32)
+    fp = tmp_path / "wide.fits"
+    fits.PrimaryHDU(data=cube).writeto(fp)
+
+    rgb, _ = load_stack_rgb(fp, max_width=1024)
+    # Full preview width, not the coarse 540 px stride (fail-before: 540).
+    assert rgb.shape[1] == 1024
+    # Aspect ratio preserved (height scaled by the same width ratio).
+    assert rgb.shape[0] == round(h * 1024 / w)
+    # The star's flux is area-averaged into an output pixel, not dropped
+    # (fail-before: the odd-coord star vanished, peak ≈ the 0.02 background).
+    assert float(np.nanmax(rgb)) > 1.0
+
+
 def test_render_display_space_fits_is_verbatim(tmp_path):
     """An editor-export FITS is already tone-mapped display space, so render is
     verbatim: the stretch/black sliders don't apply (identical bytes at any
