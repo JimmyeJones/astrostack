@@ -734,6 +734,22 @@ when you take it.
   output/`_video` reject against any existing target whose registered source paths live under that container; or teach
   the junk detector to flag a multi-folder target mixing `_sub` + bare + `_video` sources. Confidence: reproduced.
   (M, ingest — PRIORITY 2.)
+  **⚠ Builder note (2026-07-25, `claude/pensive-faraday-v8z2rz`) — two design constraints found while scoping; do the
+  SCAN-TIME variant, not the poll-time one.** (1) **Don't put this in `cleanup-suggestions` as a poll-time detector.**
+  Unlike the existing junk/`_sub`-dup checks (cheap: gated on `n_frames ≤ _MAX_CLEANUP_FRAMES` or a `_sub` name
+  prefilter, so big real stacks are never opened), a wholesale-drop target is *large* (all the subs from several
+  targets), so detecting "frames from multiple mixed folders" would force opening **every** big project and reading
+  every source path on **every** Library-page poll — a real cost on the owner's thousands-of-subs library, for a rare
+  legacy artifact they don't even have. (2) **Rejecting only the output/`_video` frames does not fully heal it** — the
+  giant target still holds raw subs from *two different sky regions* (e.g. M 31 + NGC 7000), so it would still try to
+  stack mixed pointings (mosaic-canvas blow-up / gibberish), and the correct per-target versions already exist after the
+  container-expansion re-scan, making the whole giant target a duplicate that should not auto-stack at all. **Better
+  direction:** detect it **at scan time** (once, cheap — the container expansion already runs there), and stamp an
+  additive nullable marker (e.g. a project-meta flag or a `TargetScanResult` field) on the pre-existing giant target so
+  the *poll-time* `cleanup-suggestions` endpoint can surface it for one-click removal **without** re-scanning source
+  paths — mirroring how `reject_seestar_output_frames` already runs additively inside `scan_and_organize`. Removal stays
+  `remove_files=false` (raw subs on disk untouched → a later scan re-ingests them correctly under the right targets), so
+  it's fully reversible. Still narrow (legacy wholesale-drop libraries only) — a good careful task, not a rushed one.
 
 - ~~**One-click `<T>_sub` duplicate cleanup silently discards the duplicate target's user data (stack-run history, notes)
   — and a genuinely-named standalone `<T>_sub` target gets cloned on re-scan, then its ORIGINAL offered for deletion.**~~
@@ -8948,19 +8964,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   reuses the shipped helper (extend it to take an explicit "priors" slice so a mid-history row can be judged against
   only the runs *before* it). Testable via the pure helper. (S, friendliness — PRIORITY 3.)
 
-- **NEW IDEA (Builder 2026-07-25, follow-on to the v0.207.0 `integrationTrend` noise-vs-time verdict) — also surface
+- ~~**NEW IDEA (Builder 2026-07-25, follow-on to the v0.207.0 `integrationTrend` noise-vs-time verdict) — also surface
   the "still improving / sky-limited" verdict on the *Target* page next to the "next best move" coaching, so a
-  beginner sees it where they actually decide whether to revisit a target.** *(Pillar: 2 autonomy + 3 friendliness,
-  PRIORITY 2–3; size S — frontend-only.)* **The gap:** v0.207.0 shipped the pure `integrationTrend(runs)` helper
-  (`frontend/src/components/target/integrationTrend.ts`) but wires it into **only** the History "Noise trend" card.
-  A beginner deciding "do I go back to this target next clear night?" is usually on the *Target* page (where
-  `SharpestYetBadge` / `NextBestMoveBadge` already live and `runs.data` is already fetched), not scrolling History.
-  **The feature:** render a compact `IntegrationTrendBadge` (reusing the shipped helper, no new logic) beside
-  `NextBestMoveBadge` on the Target page — but **only** for the "plateaued" (sky-limited) verdict, and **suppress**
-  it while `NextBestMoveBadge` is showing an "add time" nudge (`kind === "integration" | "good"`), so the two never
-  contradict each other ("keep adding time" vs "more time won't help"). The "improving"/"slowing" verdicts stay
-  History-only (they broadly agree with the existing add-time coaching, so surfacing them on Target would just
-  duplicate it). Frontend-only, additive, self-hiding; testable via the already-tested helper + a small render test.
+  beginner sees it where they actually decide whether to revisit a target.**~~ — **SHIPPED v0.209.0** (Builder
+  2026-07-25, branch `claude/pensive-faraday-v8z2rz`; tested). New self-hiding `IntegrationTrendBadge`
+  (`frontend/src/components/target/IntegrationTrendBadge.tsx`) renders on the Target page beside `NextBestMoveBadge`
+  (below the finished picture, gated on `latestRun?.has_preview`). It reuses the already-tested `integrationTrend(runs)`
+  helper (no new trend logic) and surfaces **only** the `"plateaued"` (sky-limited) verdict here — the
+  `"improving"`/`"slowing"` verdicts stay on the History "Noise trend" card, where they broadly agree with the existing
+  add-time coaching. It is **suppressed** whenever `NextBestMoveBadge` is nudging *add more time*
+  (`coachKind ∈ {"integration","good"}`, computed once in `Target.tsx` via the same `nextBestMove(...)` inputs and
+  passed in), so the two surfaces never contradict ("keep adding time" vs "more time won't help"). Orange calm Alert,
+  plain-language: it tells a beginner a target has gone about as clean as their sky allows and a fresh target would pay
+  off more. Tests: `IntegrationTrendBadge.test.tsx` (+6 — shows the plateau verdict; suppressed under `integration` and
+  `good` coaching; still shows beside a `locate` tip; renders nothing for an `improving` target or without enough
+  measured history). Upgrade-safe: frontend-only, additive, self-hiding; no config/DB/on-disk/default/API-shape change.
   (S, autonomy/friendliness — PRIORITY 2–3.)
 - **NEW IDEA (Builder 2026-07-25, follow-on to the v0.207.0 `integrationTrend` verdict) — when a target reads
   "sky-limited / plateaued", nudge the "What should I shoot next?" surface toward a fresh target.** *(Pillar: 2
@@ -8971,6 +8989,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   suggestion ("You've got this one about as clean as your sky allows — a fresh target would pay off more tonight").
   Purely additive copy tying two shipped surfaces together; self-hides otherwise. Validate the plateau threshold
   reads sensibly on a real multi-night target before making the nudge loud. (S, autonomy — PRIORITY 2–3.)
+  **Note (Builder 2026-07-25, `v8z2rz`): partly delivered by v0.209.0's `IntegrationTrendBadge`** — the plateau
+  sentence it renders on the Target page already says "*A darker sky or a brighter target will do more than extra time
+  on this one*", so the core "move on" nudge is now shown where a beginner decides. What remains here is only the
+  *cross-page* tie-in: highlighting the Dashboard `SuggestTargetsCard` when a viewed target is plateaued — which needs
+  per-target plateau computation on the Dashboard (extra run fetches), not "purely additive copy". Lower value now that
+  the on-page nudge exists; keep the real-data threshold-validation caveat before making anything loud.
 
 - ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "You beat your best!" (sharpest-yet slice): when a fresh stack of a
   target comes out sharper than your previous best of that same target, say so with a small celebratory callout.**~~
