@@ -735,16 +735,22 @@ when you take it.
   the junk detector to flag a multi-folder target mixing `_sub` + bare + `_video` sources. Confidence: reproduced.
   (M, ingest — PRIORITY 2.)
 
-- **One-click `<T>_sub` duplicate cleanup silently discards the duplicate target's user data (stack-run history, notes)
-  — and a genuinely-named standalone `<T>_sub` target gets cloned on re-scan, then its ORIGINAL offered for deletion.**
-  *(Ingest/friendliness; broken-UX — files are never deleted, but registry history/notes vanish from the UI; reproduced
-  by the 2026-07-24 heal audit.)* `webapp/routers/targets.py::cleanup_suggestions:213-249` has no user-data check.
-  Repro: a standalone target genuinely named `Nebula_sub` → re-scan clones its 4 subs into a new `Nebula` target, then
-  cleanup flags the *original* — holding the user's stack history and notes — for removal; with the frontend's
-  hardwired `remove_files=false` (`CleanupSuggestionsCard.tsx:128`) the FITS and old outputs survive orphaned on disk,
-  but the target's runs/notes are gone from the UI. **Fix direction (S–M):** suppress (or clearly caveat) suggestions
-  for duplicates carrying `stack_runs`/notes, or migrate that history onto the base target before delete. Confidence:
-  reproduced. (S–M, friendliness — PRIORITY 3.)
+- ~~**One-click `<T>_sub` duplicate cleanup silently discards the duplicate target's user data (stack-run history, notes)
+  — and a genuinely-named standalone `<T>_sub` target gets cloned on re-scan, then its ORIGINAL offered for deletion.**~~
+  — **FIXED v0.203.3** (Builder 2026-07-25, branch `claude/pensive-faraday-yl7q7h`; regression-tested).
+  `cleanup_suggestions` (`webapp/routers/targets.py`) now guards the `duplicate_sub` branch with a **user-data check**:
+  a `_sub` duplicate the base fully owns is offered for one-click removal **only** when it carries no stack-run history
+  (`next(proj.iter_stack_runs(), None) is None`) **and** no free-text notes (`entry.notes` empty). A duplicate that
+  *does* hold real user data is left alone — since the frontend's one-click cleanup deletes the registry target
+  (keeping files on disk, `remove_files=false`), flagging one with history/notes would silently drop that history from
+  the UI. This covers the reported repro (a genuinely-named `Nebula_sub` target whose subs got re-scanned into a
+  `Nebula` base, then the original — holding the user's runs/notes — offered for deletion): it is now suppressed.
+  Regression tests (`tests/webapp/test_cleanup_suggestions.py`, fail-before/pass-after):
+  `test_does_not_flag_a_sub_duplicate_that_carries_stack_run_history` and
+  `test_does_not_flag_a_sub_duplicate_that_carries_user_notes` (both empty-list; without the guard the duplicate was
+  flagged). The plain-leftover duplicate (no history/notes) is still flagged and removable as before. Upgrade-safe:
+  read-only endpoint logic, no config/DB-schema/API-shape/on-disk/default change. Confidence: reproduced.
+  (S–M, friendliness — PRIORITY 3.)
 
 - **The Seestar-aware scanner skips a bare `<T>/` on-device *output* folder only when a `<T>_sub` sibling is present,
   never a `<T>_mosaic_sub` sibling — so a **mosaic's** bare on-device output can still be ingested as a spurious

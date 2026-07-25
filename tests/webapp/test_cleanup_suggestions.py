@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from seestack.io.library import Library
-from seestack.io.project import FrameRow
+from seestack.io.project import FrameRow, StackRunRow
 
 
 def _add_target(lib: Library, name: str, source_paths: list[Path]) -> str:
@@ -135,6 +135,63 @@ def test_does_not_flag_a_standalone_sub_named_target(client, data_root: Path):
     lib = Library.open_or_create(data_root / "library")
     try:
         _add_target(lib, "Nebula_sub", subs)
+    finally:
+        lib.close()
+
+    assert client.get("/api/targets/cleanup-suggestions").json() == []
+
+
+def test_does_not_flag_a_sub_duplicate_that_carries_stack_run_history(
+    client, data_root: Path
+):
+    """Data-safety: a ``_sub`` duplicate whose base owns every sub is normally
+    offered for removal — but NOT when the duplicate carries the user's own
+    stack-run history. One-click cleanup deletes the registry target (keeping
+    files on disk), which would silently drop that history from the UI, so the
+    target with real user data is left alone."""
+    incoming = data_root / "dump"
+    (incoming / "M 31_sub").mkdir(parents=True)
+    subs = [incoming / "M 31_sub" / f"Light_{i:03d}.fit" for i in range(6)]
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        _add_target(lib, "M 31", subs)        # base — owns all the subs
+        dup_safe = _add_target(lib, "M 31_sub", subs)  # leftover duplicate
+        # The duplicate carries a real stack-run the user produced from it.
+        _, proj = lib.open_or_create_target("M 31_sub")
+        try:
+            proj.add_stack_run(StackRunRow(
+                id=None, timestamp_utc="2026-07-01T00:00:00Z",
+                output_basename="m31_stack", fits_path=None, tiff_path=None,
+                preview_path=None, n_frames_used=6, canvas_h=480, canvas_w=320,
+                coverage_min=6, coverage_max=6, options_json="{}",
+            ))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    # Without the guard this would be flagged ``duplicate_sub`` and deleting it
+    # would lose the run history; with it, the target is not offered at all.
+    assert client.get("/api/targets/cleanup-suggestions").json() == []
+    assert dup_safe == "M_31_sub"
+
+
+def test_does_not_flag_a_sub_duplicate_that_carries_user_notes(
+    client, data_root: Path
+):
+    """Data-safety (notes variant): a ``_sub`` duplicate the base fully owns is
+    still NOT offered for removal when the user has written free-text notes on
+    it — those notes live only on this target and would vanish from the UI."""
+    incoming = data_root / "dump"
+    (incoming / "M 31_sub").mkdir(parents=True)
+    subs = [incoming / "M 31_sub" / f"Light_{i:03d}.fit" for i in range(6)]
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        _add_target(lib, "M 31", subs)
+        _add_target(lib, "M 31_sub", subs)
+        lib.update_target("M_31_sub", notes="Best session so far — keep!")
     finally:
         lib.close()
 
