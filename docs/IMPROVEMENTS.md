@@ -1294,6 +1294,22 @@ when you take it.
   the audit note so no run burns time on them. Severity: this is the root of the ⭐⭐ gibberish family. Confidence:
   reproduced on the detection side (the end-to-end catalog-match rate isn't measurable on synthetic star patterns;
   ASTAP's own ≥3-star abort + quad-count mechanics close that gap).
+  **▶ SLICE (a) SHIPPED — ladder reordered, bin-4 destroyer removed (Builder 2026-07-25, v0.202.1, branch
+  `claude/pensive-faraday-9pefxo`).** `_SOLVE_LADDER` (`seestack/solve/astap.py`) is now
+  `[{downsample: None}, {downsample: 1, max_stars: 1000}, {downsample: 2}]`: rung 1 stays ASTAP's default (auto → 1×1
+  detection, the measured best), rung 2 is a new **full-resolution retry that widens the detected-star pool** (`-z 1
+  -s 1000` — same pixels as rung 1 so detection is never degraded, but a sharp, star-rich but marginal frame that just
+  missed a quad match with ASTAP's ~500 default cap gets more of its faint stars into the matcher), and rung 3 keeps
+  the one legitimate noise-suppression escalation (bin 2×) for fat-PSF / hazy nights. The **bin-4 + `-s 200` rung is
+  gone** — the audit measured it detects ~nothing even on bright frames, so it could never rescue a Seestar sub and was
+  pure wasted work; the ladder now never bins past 2×. Strictly additive to solve chances (never removes a solve that
+  currently succeeds: no Seestar frame solves *only* on bin-4, and the new bin-1 rung is same-pixels-more-stars).
+  Upgrade-safe: internal control-flow constant, no config/DB/API-shape/on-disk/default change. Regression tests
+  (`tests/test_astap.py`, structural ones fail-before/pass-after): `test_solve_ladder_never_bins_past_2x`,
+  `test_solve_ladder_has_full_res_widened_star_pool_rung`, `test_solve_ladder_first_rung_is_astap_default`,
+  `test_ladder_solves_on_full_res_widened_star_pool_rung` (a frame that only locks with the widened `-s` is rescued by
+  the new rung, proving it is reached and useful). **Slice (b) — the stack-then-solve bootstrap (the real cure) —
+  remains open** (M–L; see the queued idea below).
 
 - ~~**A per-target failure in the auto-stack *pre-check* phase aborts the whole walk-away pipeline job (marks it
   `error`) and skips auto-stack for every remaining target — violating the documented "non-fatal per target"
