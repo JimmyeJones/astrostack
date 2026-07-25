@@ -89,8 +89,15 @@ def write_seestar_fits(
     noise_seed: int | None = None,
     site_lat: float | None = None,
     site_lon: float | None = None,
+    focal_len_mm: float | None = None,
+    pixel_size_um: float | None = None,
 ) -> Path:
-    """Write a synth FITS file with Seestar-like headers. Requires astropy."""
+    """Write a synth FITS file with Seestar-like headers. Requires astropy.
+
+    Pass ``focal_len_mm``/``pixel_size_um`` to add the optics keywords a real
+    Seestar light carries (``FOCALLEN``/``XPIXSZ``), from which the plate-solve
+    FOV is auto-derived (S30: 150 mm; S50: 250 mm; both 2.9 µm pixels).
+    """
     from astropy.io import fits
 
     data = make_star_field(
@@ -104,6 +111,11 @@ def write_seestar_fits(
     hdu.header["CCD-TEMP"] = -10.0
     hdu.header["DATE-OBS"] = "2024-09-12T03:14:55.123"
     hdu.header["INSTRUME"] = "Seestar S50"
+    if focal_len_mm is not None:
+        hdu.header["FOCALLEN"] = focal_len_mm
+    if pixel_size_um is not None:
+        hdu.header["XPIXSZ"] = pixel_size_um
+        hdu.header["YPIXSZ"] = pixel_size_um
     if site_lat is not None:
         hdu.header["SITELAT"] = site_lat
     if site_lon is not None:

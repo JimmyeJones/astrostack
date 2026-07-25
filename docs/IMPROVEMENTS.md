@@ -632,10 +632,25 @@ when you take it.
   reveal/suggestion/Adjust either match the thumbnail or self-hide. Confidence: traced. (M, editor/render parity —
   PRIORITY 1.)
 
-- **⭐⭐⭐ OWNER-CONFIRMED S30 (TOP PRIORITY) — every real plate-solve uses the WRONG field of view (hardcoded 1.3°),
-  and the Settings that would fix it are dead. The owner runs a Seestar S30 (true FOV ≈ 2.1°), so ASTAP gets the wrong
-  FOV on EVERY sub — a mismatch its quad-matching does not forgive — which very plausibly makes most of the owner's
-  subs fail to solve across ALL targets (not just faint ones), directly driving the thin-stack "gibberish".** *(Solve/
+- ~~**⭐⭐⭐ OWNER-CONFIRMED S30 (TOP PRIORITY) — every real plate-solve uses the WRONG field of view (hardcoded 1.3°),
+  and the Settings that would fix it are dead.**~~ — **FIXED v0.202.0** (Builder 2026-07-25, branch
+  `claude/pensive-faraday-0ggbe3`). Did the robust "just works" version: `solve_one`
+  (`seestack/solve/runner.py`) now derives the true FOV **per frame** from the frame's own FITS header via the new pure
+  `fov_deg_from_header` (`seestack/io/fits_loader.py`): `pixel_scale_arcsec = 206.265 · XPIXSZ / FOCALLEN`,
+  `fov_deg = pixel_scale · long_edge_px / 3600` (long edge to match the historical 1.3°≈S50-1920px convention), so an
+  S30 solves at ~2.13° and an S50 at ~1.28° with **no user config, any model**. Sanity-clamped to (0.05°, 20°] so a
+  mis-parsed header declines to the fallback rather than handing ASTAP garbage; any header read/parse error degrades
+  silently to the passed-through FOV. **Also wired the dead Settings through**: `run_qc_and_solve`
+  (`seestack/io/scanner.py`) now takes `astap_fov_deg`/`astap_timeout_s` and overrides the solve arglist (mirroring the
+  existing `astap_path` override), and all four `webapp/pipeline.py` solve entry points pass `settings.astap_fov_deg`/
+  `settings.astap_timeout_s` — so a header lacking the optics keys falls back to the *configured* FOV, then 1.3°.
+  Priority order is header → Settings → 1.3° default. Upgrade-safe: defaults identical (Settings default 1.3° ⇒ no
+  behaviour change for an existing config that never had working solves anyway; project-meta stays a per-target
+  override for any key the caller doesn't supply); no schema/API/on-disk change. Regression tests (all in
+  `tests/test_fits_loader.py` + `tests/test_solve_runner.py`): S30 header → ~2.13°, S50 → ~1.28°, missing-optics/
+  non-physical → None (fallback), `solve_one` hands ASTAP the header-derived FOV (not 1.3°) and falls back without
+  optics, and `run_qc_and_solve` threads a changed Settings FOV/timeout into the built arglist. Confidence: traced +
+  regression-tested. *(Original entry follows for provenance.)* *(Solve/
   autonomy; wrong-result on the app's core function for a confirmed S30 owner; found by the 2026-07-24 plate-solve audit;
   traced.)* **The robust "just works" fix (do this, not just the setting): auto-derive the solve FOV per frame from the
   Seestar FITS header** — Seestar lights carry the focal length + pixel size (`FOCALLEN`, `XPIXSZ`/`YPIXSZ`) and sensor
@@ -12372,6 +12387,13 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.202.0** — ⭐⭐⭐ Auto-derive the plate-solve FOV per frame from the FITS header (S30 ≈ 2.1°, S50 ≈ 1.27°) +
+  wire the dead ASTAP FOV/timeout Settings through to every real solve. The owner-confirmed root cause of an S30
+  owner's solves failing across ALL targets: every real solve was hardcoded to 1.3° (an S50 value) — a mismatch
+  ASTAP's quad-matching does not forgive. `solve_one` now derives the true FOV from each frame's own
+  FOCALLEN/XPIXSZ/dimensions (new pure `fov_deg_from_header`), falling back to the now-threaded Settings FOV, then
+  1.3°. Upgrade-safe (defaults identical). +8 tests (fits_loader FOV math + solve_one derivation/fallback +
+  run_qc_and_solve settings threading). (branch `claude/pensive-faraday-0ggbe3`)
 - **v0.196.0** — ⭐⭐ Full-res PNG offered on every beginner picture-download surface (consistency follow-up to
   v0.195.0): the fullscreen viewer menu (Gallery / My best pictures / History lightbox), the Target page's "Picture"
   menu, and the Dashboard recent-stack card all now lead with "Full-res PNG (native size)" and honestly relabel the

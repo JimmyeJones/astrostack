@@ -457,6 +457,8 @@ def run_qc_and_solve(
     project: Project,
     *,
     astap_path: str | Path | None = None,
+    astap_fov_deg: float | None = None,
+    astap_timeout_s: float | None = None,
     max_workers: int | None = None,
     run_qc: bool = True,
     run_solve: bool = True,
@@ -523,13 +525,24 @@ def run_qc_and_solve(
 
     if run_solve and not _stopped(should_stop):
         solve_args = build_solve_arglist(project, use_hint=use_solve_hints)
-        # build_solve_arglist reads astap_path from project meta (usually
-        # unset for freshly-scanned targets) — override it if the caller
-        # supplied one so the whole scan uses a known-good ASTAP.
-        if astap_path is not None:
+        # build_solve_arglist reads astap_path/fov/timeout from project meta
+        # (usually unset for freshly-scanned targets) — override each with the
+        # caller-supplied value so the whole scan uses the app's configured
+        # ASTAP, field of view, and timeout. The FOV here is the *fallback*: a
+        # frame whose header carries FOCALLEN/XPIXSZ derives its own true FOV in
+        # ``solve_one`` (S30 ≈ 2.1°, S50 ≈ 1.27°); this Settings value only
+        # applies to headers that lack those fields. Project meta stays a
+        # per-target override for any key the caller didn't supply.
+        if astap_path is not None or astap_fov_deg is not None or astap_timeout_s is not None:
             solve_args = [
-                (fid, path, str(astap_path), *rest)
-                for (fid, path, _ap, *rest) in solve_args
+                (
+                    fid, path,
+                    str(astap_path) if astap_path is not None else ap,
+                    astap_fov_deg if astap_fov_deg is not None else fov,
+                    astap_timeout_s if astap_timeout_s is not None else to,
+                    *rest,
+                )
+                for (fid, path, ap, fov, to, *rest) in solve_args
             ]
         summary["solve_total"] = len(solve_args)
         for done, result in _map_jobs(

@@ -117,6 +117,8 @@ def _pipeline_body(
                         run_qc_and_solve(
                             proj,
                             astap_path=settings.astap_path,
+                            astap_fov_deg=settings.astap_fov_deg,
+                            astap_timeout_s=settings.astap_timeout_s,
                             max_workers=settings.cpu_workers,
                             run_qc=settings.auto_qc,
                             run_solve=settings.auto_solve,
@@ -400,6 +402,8 @@ def submit_qc_solve(settings: Settings, jm: JobManager, safe: str) -> Job:
                 summary = run_qc_and_solve(
                     proj,
                     astap_path=settings.astap_path,
+                    astap_fov_deg=settings.astap_fov_deg,
+                    astap_timeout_s=settings.astap_timeout_s,
                     max_workers=settings.cpu_workers,
                     run_qc=settings.auto_qc or True,
                     run_solve=settings.auto_solve or True,
@@ -452,6 +456,8 @@ def submit_process_target(settings: Settings, jm: JobManager, safe: str) -> Job:
                 summary = dict(run_qc_and_solve(
                     proj,
                     astap_path=settings.astap_path,
+                    astap_fov_deg=settings.astap_fov_deg,
+                    astap_timeout_s=settings.astap_timeout_s,
                     max_workers=settings.cpu_workers,
                     run_qc=True,
                     run_solve=True,
@@ -748,6 +754,8 @@ def _refresh_target(settings: Settings, jm: JobManager, job: Job,
             run_qc_and_solve(
                 proj,
                 astap_path=settings.astap_path,
+                astap_fov_deg=settings.astap_fov_deg,
+                astap_timeout_s=settings.astap_timeout_s,
                 max_workers=settings.cpu_workers,
                 run_qc=True,
                 run_solve=True,

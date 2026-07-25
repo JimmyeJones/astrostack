@@ -8,6 +8,7 @@ pytest.importorskip("astropy")
 from seestack.io.fits_loader import (  # noqa: E402
     _parse_timestamp,
     bilinear_debayer,
+    fov_deg_from_header,
     load_header,
     load_seestar_raw,
 )
@@ -187,3 +188,45 @@ def test_bilinear_debayer_uint16_does_not_overflow():
     rgb_f32 = bilinear_debayer(mosaic_u16.astype(np.float32), pattern="RGGB")
     assert rgb_f32.dtype == np.float32
     assert np.allclose(rgb_f32, 60000.0)
+
+
+def test_fov_deg_from_header_s30(tmp_path):
+    """An S30-shaped header (150 mm f.l., 2.9 µm pixels, 1920 px long edge) yields
+    the true ~2.1° field — not the hardcoded 1.3° that silently fails an S30's
+    plate-solves. Regression for the owner-confirmed wrong-FOV bug."""
+    p = write_seestar_fits(
+        tmp_path / "s30.fit", width=1920, height=1080,
+        focal_len_mm=150.0, pixel_size_um=2.9,
+    )
+    fov = fov_deg_from_header(load_header(p))
+    assert fov is not None
+    # 206.265 * 2.9 / 150 * 1920 / 3600 ≈ 2.126°
+    assert fov == pytest.approx(2.13, abs=0.05)
+
+
+def test_fov_deg_from_header_s50(tmp_path):
+    """An S50-shaped header (250 mm f.l., 2.9 µm pixels) yields ~1.27° — close to
+    the old 1.3° default (which is why only the S30 was badly broken)."""
+    p = write_seestar_fits(
+        tmp_path / "s50.fit", width=1920, height=1080,
+        focal_len_mm=250.0, pixel_size_um=2.9,
+    )
+    fov = fov_deg_from_header(load_header(p))
+    assert fov is not None
+    assert fov == pytest.approx(1.28, abs=0.05)
+
+
+def test_fov_deg_from_header_missing_optics_returns_none(tmp_path):
+    """Without FOCALLEN/XPIXSZ (older/non-Seestar headers) the derivation declines
+    so the caller falls back to the configured/default FOV."""
+    p = write_seestar_fits(tmp_path / "plain.fit", width=1920, height=1080)
+    assert fov_deg_from_header(load_header(p)) is None
+
+
+def test_fov_deg_from_header_rejects_nonphysical(tmp_path):
+    """A garbage/zero focal length can't produce an absurd FOV — decline instead."""
+    p = write_seestar_fits(
+        tmp_path / "bad.fit", width=1920, height=1080,
+        focal_len_mm=0.0, pixel_size_um=2.9,
+    )
+    assert fov_deg_from_header(load_header(p)) is None
