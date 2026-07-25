@@ -10,12 +10,15 @@ import pytest
 
 pytest.importorskip("astropy")
 
+from seestack.io.ingest import find_fits_files
 from seestack.io.library import Library
 from seestack.io.project import REJECT_REASON_SEESTAR_OUTPUT, FrameRow, Project
 from seestack.io.scanner import (
     _apply_seestar_convention,
+    _ingest_into_target,
     _seestar_output_bases,
     classify_seestar_junk_target,
+    container_target_children,
     duplicate_sub_target_base_name,
     run_qc_and_solve,
     scan_and_organize,
@@ -417,6 +420,102 @@ def test_scan_expands_a_whole_device_container_drop(tmp_path):
         assert by_name["M 31"].n_frames_added == 2             # subs, not the output
         assert by_name["NGC 7000 (mosaic)"].n_frames_added == 2
         assert {t.name for t in lib.list_targets()} == {"M 31", "NGC 7000 (mosaic)"}
+    finally:
+        lib.close()
+
+
+def test_container_target_children_spans_multiple_folders():
+    """The pure classifier returns the set of immediate container children the
+    given frame paths live under — the mixed-drop signature is ≥2."""
+    works = Path("/incoming/MyWorks")
+    sources = [
+        "/incoming/MyWorks/M 31_sub/Light_001.fit",
+        "/incoming/MyWorks/M 31_sub/Light_002.fit",
+        "/incoming/MyWorks/M 31/Stacked.fit",
+        "/incoming/MyWorks/Lunar_video/clip.fit",
+    ]
+    assert container_target_children(works, sources) == {"M 31_sub", "M 31", "Lunar_video"}
+
+
+def test_container_target_children_single_folder_is_not_mixed():
+    """A real single-field target — every frame in one child folder — spans just
+    one folder, so it is never mistaken for a mixed drop."""
+    works = Path("/incoming/M 31_sub")
+    sources = [
+        "/incoming/M 31_sub/Light_001.fit",
+        "/incoming/M 31_sub/Light_002.fit",
+    ]
+    # relative to the folder itself the files have <1 sub-part, so no children;
+    # relative to a container that IS the folder, span is 0 (< 2) → not mixed.
+    assert container_target_children(Path("/incoming"), sources) == {"M 31_sub"}
+    assert container_target_children(works, sources) == set()
+
+
+def test_container_target_children_returns_none_for_outside_path():
+    """Any path not under the container means the frames are not a clean
+    whole-container drop → None (never flagged)."""
+    works = Path("/incoming/MyWorks")
+    sources = [
+        "/incoming/MyWorks/M 31_sub/Light_001.fit",
+        "/elsewhere/Random/Light_002.fit",
+    ]
+    assert container_target_children(works, sources) is None
+
+
+def test_rescan_flags_a_legacy_whole_device_drop_target(tmp_path):
+    """The upgrade heal: a library an OLD scan built by lumping a whole container
+    (incoming/MyWorks/{several objects + output + video}) into ONE giant target
+    must, on a re-scan with the container-expanding scanner, (a) grow the correct
+    per-target versions and (b) flag the leftover giant target for one-click
+    cleanup — without deleting anything. Fail-before: the giant target is never
+    flagged, so it keeps auto-stacking mixed-pointing gibberish forever."""
+    scan_root = tmp_path / "incoming"
+    works = scan_root / "MyWorks"
+    (works / "M 31_sub").mkdir(parents=True)
+    write_seestar_fits(works / "M 31_sub" / "Light_001.fit", n_stars=5, seed=1)
+    write_seestar_fits(works / "M 31_sub" / "Light_002.fit", n_stars=5, seed=2)
+    (works / "M 31").mkdir()  # the Seestar's on-device output for M 31
+    write_seestar_fits(works / "M 31" / "Stacked.fit", n_stars=5, seed=10)
+    (works / "NGC 7000_mosaic_sub").mkdir()
+    write_seestar_fits(works / "NGC 7000_mosaic_sub" / "Light_001.fit", n_stars=5, seed=3)
+    (works / "Lunar_video").mkdir()  # a video capture
+    write_seestar_fits(works / "Lunar_video" / "clip.fit", n_stars=5, seed=6)
+
+    lib = Library.create(tmp_path / "lib")
+    try:
+        # Seed the pre-fix state exactly like the old (pre-container-expansion)
+        # scanner did: the whole "MyWorks" container becomes ONE target holding
+        # every FITS found recursively beneath it.
+        all_files = find_fits_files(works, recursive=True)
+        _ingest_into_target(lib, "MyWorks", all_files, copy_to_cache=False)
+        giant = lib.find_target("MyWorks")
+        assert giant is not None and giant.n_frames == 5
+        assert giant.legacy_mixed_drop is None  # not yet flagged
+
+        # Re-scan with the current scanner: it expands the container into the real
+        # per-target folders AND heals the leftover giant target.
+        result = scan_and_organize(lib, scan_root)
+        by_name = {t.target_name: t for t in result.targets}
+        assert set(by_name) == {"M 31", "NGC 7000 (mosaic)"}  # correct targets exist
+
+        giant = lib.find_target("MyWorks")
+        assert giant is not None, "the giant target must NOT be deleted (reversible)"
+        assert giant.legacy_mixed_drop == 1  # flagged for one-click cleanup
+        assert giant.n_frames == 5           # frames untouched — nothing removed
+    finally:
+        lib.close()
+
+
+def test_rescan_does_not_flag_a_real_single_field_target(tmp_path):
+    """A normal library with no mixed-drop container must never gain the flag —
+    the heal only fires inside the container-expansion branch, and only for a
+    pre-existing giant target whose frames span ≥2 of the container's folders."""
+    scan_root = _seestar_tree(tmp_path / "seestar")
+    lib = Library.create(tmp_path / "lib")
+    try:
+        scan_and_organize(lib, scan_root)
+        for entry in lib.list_targets():
+            assert entry.legacy_mixed_drop is None, entry.name
     finally:
         lib.close()
 

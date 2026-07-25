@@ -188,6 +188,29 @@ def cleanup_suggestions(request: Request) -> list[CleanupSuggestionOut]:
         targets = lib.list_targets()
         by_safe = {t.safe_name: t for t in targets}
         for entry in targets:
+            # --- (0) legacy whole-device / mixed-folder container drop ---------
+            # Flagged at scan time (a registry column) when a container-expansion
+            # re-scan found the pre-existing giant target an old scan built from
+            # the same container. It's a *large* target (all several objects'
+            # subs), so the cheap frame-count-gated detectors below never open it —
+            # the flag lets us surface it here without re-reading source paths.
+            if entry.legacy_mixed_drop:
+                out.append(CleanupSuggestionOut(
+                    safe=entry.safe_name,
+                    name=entry.name,
+                    n_frames=entry.n_frames,
+                    reason="legacy_mixed_drop",
+                    detail=(
+                        "A leftover from an older scan that lumped a whole Seestar "
+                        "card or share into one target — it mixes several different "
+                        "objects' subs (plus the Seestar's own finished images and "
+                        "videos), so stacking it just makes a mess. The app has "
+                        "since re-sorted those frames into their own proper targets, "
+                        "so this jumbled one is now a stale duplicate. Removing it "
+                        "leaves your raw sub folders on disk untouched."
+                    ),
+                ))
+                continue
             # --- (1) output/video junk (cheap: only small targets opened) -----
             is_video_name = entry.name.strip().lower().endswith("_video")
             if is_video_name or entry.n_frames <= _MAX_CLEANUP_FRAMES:

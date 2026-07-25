@@ -430,7 +430,11 @@ class CleanupSuggestionOut(BaseModel):
     ``"on_device_output"`` (built from a Seestar output or ``_video`` folder rather
     than raw sub-frames — cannot be stacked) or ``"duplicate_sub"`` (a
     ``<T>_sub``-named duplicate holding the *same* raw subs the base target ``<T>``
-    now owns — a harmless clutter/wasted-compute leftover, not corrupt data);
+    now owns — a harmless clutter/wasted-compute leftover, not corrupt data) or
+    ``"legacy_mixed_drop"`` (a legacy giant target an old scan built from a
+    whole-device / mixed-folder container drop, mixing several objects' subs with
+    on-device outputs/videos — the correct per-target versions now exist, so it's a
+    stale duplicate that keeps auto-stacking gibberish; flagged at scan time);
     ``detail`` is a plain-language explanation for the beginner."""
 
     safe: str

@@ -48,7 +48,7 @@ from seestack.io.project import Project
 
 log = logging.getLogger(__name__)
 
-LIBRARY_SCHEMA_VERSION = 4
+LIBRARY_SCHEMA_VERSION = 5
 _REGISTRY_FILENAME = "library.sqlite"
 _TARGETS_SUBDIR = "targets"
 
@@ -80,7 +80,8 @@ CREATE TABLE IF NOT EXISTS targets (
     last_stack_preview    TEXT,                     -- absolute path to latest preview
     notes                 TEXT,
     tags                  TEXT,                      -- JSON array of tag strings
-    cover_stack_run_id    INTEGER                    -- pinned "cover" run id (in this target's project.sqlite); NULL = use newest
+    cover_stack_run_id    INTEGER,                   -- pinned "cover" run id (in this target's project.sqlite); NULL = use newest
+    legacy_mixed_drop     INTEGER                    -- 1 = legacy whole-device/mixed-folder drop the container-expansion scan superseded; NULL = normal
 );
 
 CREATE INDEX IF NOT EXISTS idx_targets_radec ON targets(ra_deg, dec_deg);
@@ -137,6 +138,13 @@ class TargetEntry:
     # Run id (in this target's ``project.sqlite``) the user pinned as the target's
     # showcase "cover" image. ``None`` means "show the newest stack" (the default).
     cover_stack_run_id: int | None = None
+    # Set to 1 by a scan that expanded a whole-device / mixed-folder *container*
+    # drop and found the pre-existing giant target an OLD scan built from it (a
+    # single target mixing several objects' subs with on-device outputs/videos).
+    # It keeps auto-stacking gibberish and is invisible to the cheap junk/dup
+    # detectors, so it's flagged here for the Library's one-click cleanup. ``None``
+    # (the default) means a normal, real target.
+    legacy_mixed_drop: int | None = None
 
 
 def make_safe_name(name: str) -> str:
@@ -482,6 +490,22 @@ class Library:
         )
         return self.find_target(name_or_safe)
 
+    def flag_legacy_mixed_drop(self, name_or_safe: str) -> TargetEntry | None:
+        """Mark a target as a legacy whole-device / mixed-folder *container* drop
+        (an old scan lumped several objects' subs + on-device outputs/videos into
+        one giant target). Idempotent and additive — it only sets the flag, never
+        touches frames or files. The Library's cleanup-suggestions reads it to
+        offer one-click removal without opening every big project on every poll.
+        Returns the refreshed entry, or ``None`` if the target is unknown."""
+        assert self._conn is not None
+        entry = self.find_target(name_or_safe)
+        if entry is None:
+            return None
+        self._conn.execute(
+            "UPDATE targets SET legacy_mixed_drop = 1 WHERE id = ?", (entry.id,)
+        )
+        return self.find_target(name_or_safe)
+
     def list_targets(self) -> list[TargetEntry]:
         assert self._conn is not None
         rows = self._conn.execute(
@@ -705,6 +729,10 @@ def _row_to_target(row: sqlite3.Row) -> TargetEntry:
         cover_stack_run_id=(
             row["cover_stack_run_id"]
             if "cover_stack_run_id" in row.keys() else None
+        ),
+        legacy_mixed_drop=(
+            row["legacy_mixed_drop"]
+            if "legacy_mixed_drop" in row.keys() else None
         ),
     )
 

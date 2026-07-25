@@ -128,6 +128,66 @@ def _looks_like_seestar_container(d: Path) -> bool:
     return any(c.name.lower().endswith(_SUB_SUFFIX) for c in children)
 
 
+def container_target_children(
+    container_dir: Path, source_paths: Sequence[str | Path]
+) -> set[str] | None:
+    """The distinct *immediate child folder* names of ``container_dir`` that
+    ``source_paths`` live under — or ``None`` if any path is **not** inside the
+    container (so the frames are not a clean whole-container drop).
+
+    Used to recognise a legacy giant target: before the scanner expanded a
+    whole-device / mixed-folder container (``incoming/MyWorks/{M 31_sub, M 31,
+    NGC 7000_mosaic_sub, Lunar_video}``), an old scan ingested that entire
+    container as ONE target, so its frames span **several** child folders. A real
+    single-field target's frames all sit under one folder. Pure and
+    filesystem-free (it only reasons about the given paths).
+    """
+    cdir = Path(container_dir)
+    children: set[str] = set()
+    for p in source_paths:
+        path = Path(p)
+        if cdir not in path.parents:
+            return None
+        rel = path.relative_to(cdir)
+        if len(rel.parts) >= 2:  # <child folder>/.../<file>
+            children.add(rel.parts[0])
+    return children
+
+
+def _flag_legacy_container_drop(library: Library, container_dir: Path) -> None:
+    """When a container is expanded, flag the pre-existing giant target an OLD
+    scan built from the same container (so cleanup-suggestions can surface it).
+
+    Cheap and conservative: the old scan named that target after the container
+    folder, so we look it up by ``make_safe_name(container_dir.name)`` — one
+    registry read — and only when such a target exists do we open it (once, at
+    scan time) to confirm its frames really span ≥2 of the container's child
+    folders (the mixed-drop signature) before flagging. A freshly-scanned library
+    has no such target, and a coincidentally same-named real single-field target
+    (all frames in one folder) is never flagged.
+    """
+    from seestack.io.library import make_safe_name
+
+    safe = make_safe_name(container_dir.name)
+    entry = library.find_target(safe)
+    if entry is None or entry.legacy_mixed_drop:
+        return
+    proj = library.open_target(safe)
+    try:
+        sources = [f.source_path for f in proj.iter_frames()]
+    finally:
+        proj.close()
+    children = container_target_children(container_dir, sources)
+    if children is not None and len(children) >= 2:
+        library.flag_legacy_mixed_drop(safe)
+        log.info(
+            "Flagged legacy whole-device drop target %r (frames span %d folders "
+            "under %r) for one-click cleanup — the correct per-target versions "
+            "were re-ingested this scan.",
+            entry.name, len(children), container_dir.name,
+        )
+
+
 def _seestar_output_bases(
     subdirs_with_fits: list[tuple[str, list[Path]]],
 ) -> dict[str, str]:
@@ -371,6 +431,14 @@ def scan_and_organize(
                 child_fits = find_fits_files(child, recursive=True)
                 if child_fits:
                     subdirs_with_fits.append((child.name, child_fits))
+            # Heal the OLD shape: before this expansion existed, a scan lumped the
+            # whole container into ONE giant target named after it, mixing several
+            # objects' subs with on-device outputs/videos — it keeps auto-stacking
+            # gibberish and both cheap junk detectors are blind to it. Flag that
+            # pre-existing giant target (once, cheaply, here at scan time) so the
+            # Library's cleanup-suggestions can offer one-click removal without
+            # opening every big project on every poll.
+            _flag_legacy_container_drop(library, d)
             continue
         fits = find_fits_files(d, recursive=True)
         if fits:

@@ -723,10 +723,34 @@ when you take it.
   additive-guard tightening of an internal reject, no config/DB-schema/API-shape/on-disk/default change. Confidence:
   reproduced. (S, ingest — PRIORITY 2.)
 
-- **A legacy "whole-device drop" target (an old build ingested `MyWorks/` wholesale as ONE target mixing raw subs,
+- ~~**A legacy "whole-device drop" target (an old build ingested `MyWorks/` wholesale as ONE target mixing raw subs,
   on-device outputs and `_video` frames) is never healed and is invisible to both cleanup detectors — it keeps
-  auto-stacking gibberish after the upgrade.** *(Ingest; wrong-result inside that legacy target only; reproduced by the
-  2026-07-24 heal audit.)* The container fix (`seestack/io/scanner.py::_looks_like_seestar_container:112-128`) covers
+  auto-stacking gibberish after the upgrade.**~~ — **FIXED v0.210.1** (Builder 2026-07-25, branch
+  `claude/pensive-faraday-awfu1w`; traced + reproduced + regression-tested). Did the **scan-time** variant the Builder
+  note below prescribed. When `scan_and_organize` expands a Seestar *container* (`incoming/MyWorks/{M 31_sub, M 31,
+  NGC 7000_mosaic_sub, Lunar_video}`), it now also heals the leftover giant target an OLD (pre-container-expansion)
+  scan built by lumping that whole container into one target: `_flag_legacy_container_drop(library, container_dir)`
+  looks the giant up by `make_safe_name(container_dir.name)` (one cheap registry read), opens it **once** (scan time
+  is already heavy) to confirm its frames really span ≥2 of the container's child folders via the pure classifier
+  `container_target_children(container_dir, source_paths)` (the mixed-drop signature), and stamps an additive nullable
+  registry column `targets.legacy_mixed_drop` (LIBRARY_SCHEMA_VERSION 4→5, backfilled by the existing generic
+  `_ensure_columns` self-heal). The poll-time `cleanup-suggestions` endpoint reads that flag straight off
+  `list_targets()` — no per-project open, no source-path re-read — and surfaces the giant target as a new
+  `legacy_mixed_drop` cleanup reason with its own plain-language explanation; removal stays `remove_files=false` (raw
+  subs on disk untouched → the container-expansion re-scan already re-ingested them correctly, so it's fully
+  reversible). Frontend: a third, independently-dismissible cleanup group ("A target looks like a whole Seestar card
+  dropped in at once"). Nothing is ever deleted, a fresh library / real single-field target is never flagged, and the
+  flag is idempotent. Regression tests (all fail-before/pass-after where applicable): `tests/test_scanner.py`
+  (`container_target_children` multi/single/outside cases; `test_rescan_flags_a_legacy_whole_device_drop_target`
+  end-to-end — seed the old giant target, re-scan, assert the correct per-target versions exist AND the giant is
+  flagged AND its frames are untouched; `test_rescan_does_not_flag_a_real_single_field_target`),
+  `tests/test_library.py` (`flag_legacy_mixed_drop` set/idempotent/persist + the v4→v5 additive-migration test),
+  `tests/webapp/test_cleanup_suggestions.py` (a flagged *large* target surfaces regardless of the frame-count gate;
+  an unflagged large target does not), and `CleanupSuggestionsCard.test.tsx` (the mixed-drop group renders in its own
+  alert and bulk-removes). Upgrade-safe: additive nullable column via the version-bumped schema + generic backfill,
+  additive API reason string, no on-disk/default/existing-API-shape change. Confidence: reproduced. (M, ingest —
+  PRIORITY 2.) *(Original entry + design notes kept below for provenance.)*
+  The container fix (`seestack/io/scanner.py::_looks_like_seestar_container:112-128`) covers
   the *forward* path only: on re-scan the correct new per-target ingest happens, but the old giant target keeps **all**
   its frames accepted (output + `_video` included), and `classify_seestar_junk_target` /
   `duplicate_sub_target_base_name` both return None for it. Only hits owners whose OLD library was built from a
