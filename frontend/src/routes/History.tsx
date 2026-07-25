@@ -19,6 +19,7 @@ import { autoColorCalCaption } from "../components/editor/colorCal";
 import { RejectionBadge } from "../components/RejectionBadge";
 import { FocusChip } from "../components/target/FocusChip";
 import { focusChips, type FocusVerdict } from "../components/target/focusChips";
+import { integrationTrend } from "../components/target/integrationTrend";
 import { NoiseReadout, NoiseDelta, CleanestBadge, cleanestRunId, hasNoise } from "../components/NoiseBadge";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { AnnotatedImage } from "../components/AnnotatedImage";
@@ -1080,6 +1081,10 @@ export function HistoryView() {
   const focus = focusChips(list);
   const sorted = sortRuns(list, sort);
   const trend = noiseTrendSeries(list);
+  // "Is this target still improving, or has it plateaued?" — a data-driven read
+  // of the measured noise-vs-√time trend across this target's stacks. Null (and
+  // hidden) unless two stacks both measured a σ and span a real time increase.
+  const integration = integrationTrend(list);
 
   return (
     <Stack>
@@ -1121,6 +1126,19 @@ export function HistoryView() {
                     ? `Noisier than your first measured stack (σ ${trend[trend.length - 1].toFixed(3)} vs ${trend[0].toFixed(3)}).`
                     : `Steady around σ ${trend[0].toFixed(3)}.`}
               </Text>
+              {integration ? (
+                <Text
+                  size="xs"
+                  mt={4}
+                  c={integration.level === "improving"
+                    ? "teal"
+                    : integration.level === "plateaued"
+                      ? "orange"
+                      : "dimmed"}
+                >
+                  {integration.sentence}
+                </Text>
+              ) : null}
             </div>
             <Sparkline
               values={trend}

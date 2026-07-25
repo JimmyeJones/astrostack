@@ -9554,9 +9554,28 @@ problems. Dogfood it every big-picture run and fix root causes.
   cases), `SuggestTargetsCard.test.tsx` (+1 — the badge renders). Upgrade-safe: additive engine field + frontend chip,
   pure reuse of the shipped `target_difficulty` function; no config/DB-schema/on-disk/API-shape/default change (older
   frontends simply ignore the new field). *(Autonomy + friendliness / plan pillar, PRIORITY 2–3; size S.)*
-- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Is it worth staying on this target?": a plain-language
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "Is it worth staying on this target?": a plain-language
   diminishing-returns read that tells a beginner when more subs will visibly help vs when they've hit the flat
-  part of the curve.** *(Autonomy / Friendliness — the "plan / understand" pillar, PRIORITY 2–3; size M; offline,
+  part of the curve.**~~ — **SHIPPED v0.207.0** (Builder 2026-07-25, branch `claude/pensive-faraday-8u4hoe`;
+  tested). Shipped the high-value **measured** half: a pure frontend helper `frontend/src/components/target/
+  integrationTrend.ts` (`integrationTrend(runs)`) that reads the target's *own* stack runs — every run already
+  streams `total_exposure_s` + a measured `noise_sigma` to the frontend — compares the **shallowest vs deepest
+  measured stack by integration time** (not chronology; a later stack can use fewer subs), and reads off the
+  effective noise-vs-time falloff exponent (σ ∝ t^-p; ideal shot-noise-limited √t is p=0.5, a sky-limited plateau
+  tends to ~0). It returns a `{level: "improving" | "slowing" | "plateaued", hoursNow, exponent,
+  percentCutIfDoubled, sentence}` verdict, or `null` (hidden) unless ≥2 stacks both measured a σ **and** span a real
+  integration increase (`MIN_TIME_RATIO` 1.5×) — below that there isn't enough signal to judge honestly. Purely
+  relative to the target's own history (no absolute px/σ bar, no per-camera calibration), and the doubling
+  projection is clamped to a non-negative, ≤29% (ideal √t) gain so it never over-claims. Surfaced by **deepening the
+  existing History "Noise trend" card** with one calm plain-language line (teal "still improving" / dimmed "past the
+  steep part" / orange "sky-limited — more subs won't help much"). **Deliberately scoped:** the single-run √N
+  *projection* the original idea also listed is already covered by the shipped `nextBestMove` "add more time"
+  coaching + `readiness.ts` text, so `integrationTrend` fires **only** on the genuinely-new multi-run *measured*
+  trend (never duplicating that coaching). Frontend-only + additive (reuses already-served fields; no
+  backend/DB/API-shape/default change). Tests: `integrationTrend.test.ts` (+6 — too-few-points/no-time-spread →
+  null, ideal √t → "improving" (p≈0.5, 29%), flat/rising σ → "plateaued" (0%), below-ideal falloff → "slowing"
+  (p≈0.25, 16%), reads by time not order + ignores unmeasured runs). (M, autonomy/friendliness — PRIORITY 2–3.)
+  *(Original idea kept for provenance.)* *(Autonomy / Friendliness — the "plan / understand" pillar, PRIORITY 2–3; size M; offline,
   additive, no new deps.)* **Why a beginner wants it:** the single most common question after "it worked!" for a
   Seestar owner with a growing pile of subs is *"do I keep going on this one, or move to a new target?"* — and
   today nothing answers it. Stacking noise falls with the **square root of integration time** (√N), so early subs
