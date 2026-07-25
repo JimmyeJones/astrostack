@@ -245,6 +245,68 @@ def test_solve_once_emits_z_and_s_flags(tmp_path, monkeypatch):
     assert "-s" in cmd and "200" in cmd
 
 
+def test_solve_ladder_never_bins_past_2x():
+    # 2026-07 plate-solve audit (real ASTAP CLI + d05 DB): binning past 2x
+    # destroys faint-star detection even on bright Seestar frames, so the old
+    # bin-4 rung could never rescue anything a Seestar produces. The ladder must
+    # never bin past 2x. (Fails before the reorder — the old rung binned 4x.)
+    for rung in ASTAPSolver._SOLVE_LADDER:
+        ds = rung.get("downsample")
+        assert ds is None or ds <= 2, f"ladder rung bins past 2x: {rung}"
+
+
+def test_solve_ladder_has_full_res_widened_star_pool_rung():
+    # The audit's fix keeps/boosts a full-resolution rung: since ASTAP already
+    # auto-bins 1x1 (best detection), the only lever left at full res is widening
+    # the detected-star pool (raise -s). Assert such a rung exists — a bin-1 (or
+    # auto) rung that raises max_stars above ASTAP's ~500 default.
+    boosted = [
+        r
+        for r in ASTAPSolver._SOLVE_LADDER
+        if r.get("downsample") in (None, 1) and (r.get("max_stars") or 0) > 500
+    ]
+    assert boosted, "ladder has no full-resolution widened-star-pool rung"
+
+
+def test_solve_ladder_first_rung_is_astap_default():
+    # Most frames solve on the cheap default rung; it must stay first and impose
+    # no star cap so ASTAP picks its own best detection.
+    first = ASTAPSolver._SOLVE_LADDER[0]
+    assert first.get("downsample") is None
+    assert first.get("max_stars") is None
+
+
+def test_ladder_solves_on_full_res_widened_star_pool_rung(tmp_path, monkeypatch):
+    # A frame that ASTAP only locks once more of its faint stars are offered to
+    # the matcher (simulated: solve only when a high -s is present) is rescued by
+    # the widened-star-pool rung — proving that rung is reached and useful, not
+    # dead weight like the removed bin-4 rung.
+    frame = tmp_path / "frame.fits"
+    frame.write_bytes(b"")
+    solver = _make_solver(tmp_path)
+    wcs = frame.with_suffix(".wcs")
+    ini = frame.with_suffix(".ini")
+
+    def fake_run(cmd, **kwargs):
+        class _P:
+            stdout = ""
+            stderr = "no solution"
+            returncode = 1
+
+        # Solve only when the star pool is widened past the default (-s >= 1000).
+        if "-s" in cmd and int(cmd[cmd.index("-s") + 1]) >= 1000:
+            wcs.write_text("CRVAL1=10\n")
+            ini.write_text("CRVAL1=10\nCRVAL2=20\nCDELT2=0.0007\nCROTA2=0\n")
+            _P.returncode = 0
+        else:
+            wcs.unlink(missing_ok=True)
+        return _P()
+
+    monkeypatch.setattr("seestack.solve.astap.subprocess.run", fake_run)
+    result = solver.solve(frame)
+    assert result.solved
+
+
 def _capture_cmd(monkeypatch):
     captured: dict = {}
 

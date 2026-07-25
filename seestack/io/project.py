@@ -228,6 +228,13 @@ _INSERT_COLS = [
 # the folder convention shipped). Additive + reversible — never a delete.
 REJECT_REASON_SEESTAR_OUTPUT = "auto:seestar_output"
 
+# The Seestar's on-device output folder holds a *single* stacked image (allow a
+# tiny margin for an occasional two-file output). A bare ``<T>/`` folder that
+# holds more than this is a user's real subs, not the on-device output, so its
+# frames must never be auto-rejected as output. Mirrors the scanner's
+# ``_MAX_JUNK_OUTPUT_FRAMES`` (kept local to avoid a scanner→project import cycle).
+_MAX_SEESTAR_OUTPUT_FRAMES = 2
+
 
 class Project:
     """Handle to a Seestack project directory and its SQLite database."""
@@ -648,19 +655,40 @@ class Project:
         accepted (``user_override``) is left untouched, and a frame already
         rejected is not re-touched — so a re-scan is idempotent.
 
+        **Frame-count guard (per folder).** The Seestar's on-device output folder
+        holds a *single* stacked image, so a bare ``<T>/`` folder that holds more
+        than :data:`_MAX_SEESTAR_OUTPUT_FRAMES` frames is a user's real subs, not
+        the on-device output, and its frames are **never** rejected — otherwise a
+        mixed-source library with a genuine ``<T>/`` folder of raw subs sitting
+        beside a Seestar ``<T>_sub/`` (same basename) would silently lose whole
+        sessions from its stack. ``*_video`` captures legitimately hold many frames
+        and are all junk, so they are not size-guarded.
+
         Returns the ids of the frames newly rejected by this call.
         """
         assert self._conn is not None
         base_low = output_folder.strip().lower()
         if not base_low:
             return []
-        to_reject: list[int] = []
+        # Group bare-``<T>/`` candidates by their actual folder path so the
+        # single-image size check is applied per folder; ``*_video`` frames reject
+        # unconditionally. Matching the full parent *path* (not just the basename)
+        # also keeps a same-named folder elsewhere on disk from cross-triggering.
+        output_by_folder: dict[str, list[int]] = {}
+        video_ids: list[int] = []
         for frame in list(self.iter_frames()):
             if frame.id is None or frame.user_override or not frame.accept:
                 continue
-            parent = Path(frame.source_path).parent.name.lower()
-            if parent == base_low or parent.endswith("_video"):
-                to_reject.append(frame.id)
+            parent = Path(frame.source_path).parent
+            parent_low = parent.name.lower()
+            if parent_low == base_low:
+                output_by_folder.setdefault(str(parent), []).append(frame.id)
+            elif parent_low.endswith("_video"):
+                video_ids.append(frame.id)
+        to_reject: list[int] = list(video_ids)
+        for ids in output_by_folder.values():
+            if len(ids) <= _MAX_SEESTAR_OUTPUT_FRAMES:
+                to_reject.extend(ids)
         if not to_reject:
             return []
         with self.transaction():

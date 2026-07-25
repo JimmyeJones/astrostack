@@ -705,20 +705,23 @@ when you take it.
   downscale within a few percent. Confidence: traced (mechanism + sizes verified by reading). (S–M,
   editor/image-quality — PRIORITY 1/4.)
 
-- **⭐ The upgrade-heal can mass-reject a legitimate non-Seestar library: any registered frame whose parent folder merely
+- ~~**⭐ The upgrade-heal can mass-reject a legitimate non-Seestar library: any registered frame whose parent folder merely
   *shares the base name* of a `<T>_sub` sibling seen during a scan is stamped `auto:seestar_output` — with no per-folder
-  frame-count or path guard.** *(Ingest; wrong-result, recoverable — nothing deleted and the user can re-accept;
-  reproduced by the 2026-07-24 heal audit.)* `reject_seestar_output_frames` (`seestack/io/project.py:661-663`) matches
-  any frame whose parent *basename* equals `<T>` anywhere on disk, fed by `_seestar_output_bases`
-  (`seestack/io/scanner.py:131-154`) — and unlike the junk *classifier* (`scanner.py:161`, `≤ _MAX_JUNK_OUTPUT_FRAMES`)
-  it applies no size sanity check. Repro: a genuine `Andromeda/` folder of 8 real subs (non-Seestar source), later
-  joined in the same scan root by a Seestar-convention `Andromeda_sub/` (3 subs) → the re-scan rejects **8/8 legitimate
-  subs** as `auto:seestar_output`; the target's stack pool silently drops 11 → 3. Visible + reversible in the UI, so
-  not a blocker for the owner's own pure-Seestar redeploy — but a mixed-source library silently loses whole sessions
-  from its stacks. **Fix direction (S):** anchor the reject to the actual bare-output folder *path* observed in this
-  scan (pass the folder `Path` through; compare the full parent), and/or apply the classifier's
-  `≤ _MAX_JUNK_OUTPUT_FRAMES` guard here too. Regression: the mixed-library repro above. Confidence: reproduced.
-  (S, ingest — PRIORITY 2.)
+  frame-count or path guard.**~~ — **FIXED v0.202.2** (Builder 2026-07-25, branch `claude/pensive-faraday-9pefxo`;
+  **traced + reproduced + regression-tested**). `Project.reject_seestar_output_frames` (`seestack/io/project.py`) now
+  applies a **per-folder frame-count guard**: it groups the bare-`<T>/` reject-candidates by their actual folder *path*
+  and only rejects a folder whose frame count is `≤ _MAX_SEESTAR_OUTPUT_FRAMES` (2, mirroring the scanner's
+  `_MAX_JUNK_OUTPUT_FRAMES`; defined locally to avoid a scanner→project import cycle). The Seestar's on-device output
+  is a *single* stacked image, so a bare `<T>/` folder holding many frames is a user's real subs and is left untouched.
+  `*_video` captures legitimately hold many junk frames, so they stay **un**-guarded and reject unconditionally as
+  before. Matching the full parent *path* (not just the basename) also stops a same-named folder elsewhere on disk from
+  cross-triggering. Repro fixed: a genuine `Andromeda/` folder of 8 real subs beside a Seestar `Andromeda_sub/` now
+  keeps all 8 (was: 8/8 rejected, stack pool silently 11→3). Regression tests (`tests/test_scanner.py`, fail-before/
+  pass-after): `test_reject_seestar_output_frames_keeps_a_real_subs_folder_sharing_the_base_name` (8 real subs kept) and
+  `test_reject_seestar_output_frames_rejects_a_multi_frame_video_folder` (a 6-frame `_video` folder still fully
+  rejected). The two prior reject tests (single-frame output + video) still pass unchanged. Upgrade-safe: pure
+  additive-guard tightening of an internal reject, no config/DB-schema/API-shape/on-disk/default change. Confidence:
+  reproduced. (S, ingest — PRIORITY 2.)
 
 - **A legacy "whole-device drop" target (an old build ingested `MyWorks/` wholesale as ONE target mixing raw subs,
   on-device outputs and `_video` frames) is never healed and is invisible to both cleanup detectors — it keeps
@@ -1294,6 +1297,22 @@ when you take it.
   the audit note so no run burns time on them. Severity: this is the root of the ⭐⭐ gibberish family. Confidence:
   reproduced on the detection side (the end-to-end catalog-match rate isn't measurable on synthetic star patterns;
   ASTAP's own ≥3-star abort + quad-count mechanics close that gap).
+  **▶ SLICE (a) SHIPPED — ladder reordered, bin-4 destroyer removed (Builder 2026-07-25, v0.202.1, branch
+  `claude/pensive-faraday-9pefxo`).** `_SOLVE_LADDER` (`seestack/solve/astap.py`) is now
+  `[{downsample: None}, {downsample: 1, max_stars: 1000}, {downsample: 2}]`: rung 1 stays ASTAP's default (auto → 1×1
+  detection, the measured best), rung 2 is a new **full-resolution retry that widens the detected-star pool** (`-z 1
+  -s 1000` — same pixels as rung 1 so detection is never degraded, but a sharp, star-rich but marginal frame that just
+  missed a quad match with ASTAP's ~500 default cap gets more of its faint stars into the matcher), and rung 3 keeps
+  the one legitimate noise-suppression escalation (bin 2×) for fat-PSF / hazy nights. The **bin-4 + `-s 200` rung is
+  gone** — the audit measured it detects ~nothing even on bright frames, so it could never rescue a Seestar sub and was
+  pure wasted work; the ladder now never bins past 2×. Strictly additive to solve chances (never removes a solve that
+  currently succeeds: no Seestar frame solves *only* on bin-4, and the new bin-1 rung is same-pixels-more-stars).
+  Upgrade-safe: internal control-flow constant, no config/DB/API-shape/on-disk/default change. Regression tests
+  (`tests/test_astap.py`, structural ones fail-before/pass-after): `test_solve_ladder_never_bins_past_2x`,
+  `test_solve_ladder_has_full_res_widened_star_pool_rung`, `test_solve_ladder_first_rung_is_astap_default`,
+  `test_ladder_solves_on_full_res_widened_star_pool_rung` (a frame that only locks with the widened `-s` is rescued by
+  the new rung, proving it is reached and useful). **Slice (b) — the stack-then-solve bootstrap (the real cure) —
+  remains open** (M–L; see the queued idea below).
 
 - ~~**A per-target failure in the auto-stack *pre-check* phase aborts the whole walk-away pipeline job (marks it
   `error`) and skips auto-stack for every remaining target — violating the documented "non-fatal per target"

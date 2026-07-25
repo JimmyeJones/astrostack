@@ -127,19 +127,36 @@ def find_star_db_dir(astap_path: str | os.PathLike[str] | None = None) -> Path |
 class ASTAPSolver:
     """Run ASTAP on FITS files. Configure once, solve many."""
 
-    # Adaptive solve ladder. Each frame is tried with progressively stronger
-    # noise suppression until one attempt solves. Clean frames solve on the
-    # first (cheap) attempt; only noisy frames pay for the extra tries.
+    # Adaptive solve ladder. Each frame is tried with progressively different
+    # detection settings until one attempt solves. Clean frames solve on the
+    # first (cheap) attempt; only harder frames pay for the extra tries.
     #
-    # ``downsample`` maps to ASTAP's ``-z`` (bin NxN before detecting stars):
-    # binning collapses single-pixel hot/read noise that would otherwise be
-    # mistaken for stars, while real stars survive with higher SNR. ``max_stars``
-    # maps to ``-s`` (cap on detected stars used for matching) — fewer, brighter
-    # stars means less chance of matching against noise.
+    # ``downsample`` maps to ASTAP's ``-z`` (bin NxN before detecting stars) and
+    # ``max_stars`` to ``-s`` (cap on detected stars used for matching).
+    #
+    # Ladder shape is set by the 2026-07 plate-solve audit (real ASTAP CLI +
+    # bundled d05 DB, measured on realistic Seestar OSC subs). Two findings drive
+    # it: (1) for a Seestar frame (~1080x1920) ASTAP already auto-selects 1x1
+    # binning on the default rung, which gives the *best* faint-star detection —
+    # so most frames should solve on rung 1; (2) binning past 2x destroys
+    # detection even on bright frames (the old bin-4 rung found ~nothing of 25
+    # planted stars), so it could never rescue anything a Seestar produces and was
+    # pure wasted work. The ladder therefore never bins past 2x: it keeps a
+    # full-resolution retry that widens the detected-star pool, then one genuine
+    # noise-suppression escalation (bin 2x) for fat-PSF / hazy nights.
     _SOLVE_LADDER: tuple[dict[str, int | None], ...] = (
-        {"downsample": None},                  # ASTAP default (auto)
-        {"downsample": 2},                     # bin 2x — suppress noise
-        {"downsample": 4, "max_stars": 200},   # bin 4x, brightest stars only
+        # Rung 1 — ASTAP default (auto): 1x1 detection on a Seestar frame, the
+        # measured best. Most frames solve here.
+        {"downsample": None},
+        # Rung 2 — force full resolution and widen the star pool (-s 1000). Same
+        # pixels as rung 1 (detection never degraded), but a sharp, star-rich but
+        # marginal frame that just missed a quad match with the default star cap
+        # gets more of its faint stars offered to the matcher.
+        {"downsample": 1, "max_stars": 1000},
+        # Rung 3 — bin 2x: the one legitimate noise-suppression escalation, for a
+        # genuinely fat-PSF / hazy night where merging adjacent pixels lifts a
+        # bloated star above the detection floor.
+        {"downsample": 2},
     )
 
     def __init__(
