@@ -8923,6 +8923,30 @@ problems. Dogfood it every big-picture run and fix root causes.
   reuses the shipped helper (extend it to take an explicit "priors" slice so a mid-history row can be judged against
   only the runs *before* it). Testable via the pure helper. (S, friendliness — PRIORITY 3.)
 
+- **NEW IDEA (Builder 2026-07-25, follow-on to the v0.207.0 `integrationTrend` noise-vs-time verdict) — also surface
+  the "still improving / sky-limited" verdict on the *Target* page next to the "next best move" coaching, so a
+  beginner sees it where they actually decide whether to revisit a target.** *(Pillar: 2 autonomy + 3 friendliness,
+  PRIORITY 2–3; size S — frontend-only.)* **The gap:** v0.207.0 shipped the pure `integrationTrend(runs)` helper
+  (`frontend/src/components/target/integrationTrend.ts`) but wires it into **only** the History "Noise trend" card.
+  A beginner deciding "do I go back to this target next clear night?" is usually on the *Target* page (where
+  `SharpestYetBadge` / `NextBestMoveBadge` already live and `runs.data` is already fetched), not scrolling History.
+  **The feature:** render a compact `IntegrationTrendBadge` (reusing the shipped helper, no new logic) beside
+  `NextBestMoveBadge` on the Target page — but **only** for the "plateaued" (sky-limited) verdict, and **suppress**
+  it while `NextBestMoveBadge` is showing an "add time" nudge (`kind === "integration" | "good"`), so the two never
+  contradict each other ("keep adding time" vs "more time won't help"). The "improving"/"slowing" verdicts stay
+  History-only (they broadly agree with the existing add-time coaching, so surfacing them on Target would just
+  duplicate it). Frontend-only, additive, self-hiding; testable via the already-tested helper + a small render test.
+  (S, autonomy/friendliness — PRIORITY 2–3.)
+- **NEW IDEA (Builder 2026-07-25, follow-on to the v0.207.0 `integrationTrend` verdict) — when a target reads
+  "sky-limited / plateaued", nudge the "What should I shoot next?" surface toward a fresh target.** *(Pillar: 2
+  autonomy, PRIORITY 2–3; size S — frontend-only.)* **Why:** the most useful thing to *do* with a "more subs won't
+  help this one much" verdict is move on — but nothing connects that verdict to the existing
+  `SuggestTargetsCard` / "Try something new tonight" surface. **The feature:** when `integrationTrend(runs).level`
+  is `"plateaued"` for a target the beginner is viewing, add one soft line to (or highlight) the what-to-shoot-next
+  suggestion ("You've got this one about as clean as your sky allows — a fresh target would pay off more tonight").
+  Purely additive copy tying two shipped surfaces together; self-hides otherwise. Validate the plateau threshold
+  reads sensibly on a real multi-night target before making the nudge loud. (S, autonomy — PRIORITY 2–3.)
+
 - ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "You beat your best!" (sharpest-yet slice): when a fresh stack of a
   target comes out sharper than your previous best of that same target, say so with a small celebratory callout.**~~
   — **SHIPPED v0.198.0** (Builder 2026-07-24, branch `claude/pensive-faraday-jtfnbq`; tested). Now unblocked by the
