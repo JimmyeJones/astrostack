@@ -8808,10 +8808,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   Feasibility: fits headless/web/TrueNAS; ships with a plain-language explanation; additive/reversible. **Verified
   genuinely absent** (2026-07-24: no all-time/annual recap route or endpoint — `stats.py`'s recap is single-night only).
 
-- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Your next best move": on a finished picture, one calm, plain-language
-  sentence naming the *single* highest-leverage thing that would most improve this target next time — derived
-  entirely from data the app already has — so a beginner learns what to change without reading a QC table or knowing
-  the jargon.** *(Pillar: 3 friendliness + 2 autonomy + understand/learn; size M.)* **The gap (verified this run):**
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "Your next best move": on a finished picture, one calm, plain-language
+  sentence naming the *single* highest-leverage thing that would most improve this target next time.**~~ —
+  **SHIPPED v0.204.0** (Builder 2026-07-25, branch `claude/pensive-faraday-yl7q7h`; frontend-only, tested).
+  Added the pure helper `frontend/src/components/target/nextBestMove.ts::nextBestMove({nFramesUsed, integrationS,
+  nUnsolved}) -> {kind, phrase} | null` with a fixed priority ladder — **can't-locate-subs → too-thin →
+  short-integration → all-good** — that picks exactly ONE lever and says it plainly ("Only N of your M subs were
+  located … installing ASTAP's star database would let far more stack", "add more subs", "add more time — 18 min so
+  far", or an encouraging "solid result" note). A self-hiding `NextBestMoveBadge` (💡 Alert) renders it on the Target
+  page beside the finished picture, **suppressed while the louder thin-stack warning is showing** so the two never
+  duplicate the "add more subs" nudge. Self-hides on no-stack, missing integration time, or a deep-and-healthy result.
+  **Deliberately omits the spec's soft-star lever**: an absolute FWHM-in-pixels "soft" bar needs per-camera pixel-scale
+  calibration (the exact reason `sharpestYet` avoids absolute bars), so shipping it unattended would risk false
+  "your stars are soft" nags — filed as a follow-up idea below (needs pixel-scale-aware thresholds / real Seestar
+  data). Tests: `nextBestMove.test.ts` (+12 — each lever fires only as the top unmet one, ladder ordering across the
+  thin/short/deep boundaries, locate count+fraction floors, silent on unknown integration / deep stack / no stack,
+  NaN-safe) and `NextBestMoveBadge.test.tsx` (+4 — plate-solve tip names the target, "nice work" encouragement, silent
+  on a deep stack and no-stack). `npx tsc` clean, full vitest green (1278), `vite build` OK. Upgrade-safe: purely
+  additive read-only helper + a display line, no schema/config/default/API-shape change. *(Pillar: 3 friendliness +
+  2 autonomy + understand/learn; size M.)* **The gap (verified this run):**
   the app is full of *honest signals* about a finished stack — median FWHM (star sharpness), total integration
   (depth / `n_frames_used`), star eccentricity (tracking/tilt), the thin-stack and unsolved-subs warnings, the
   sky-background level — but they live scattered across the Target/History/QC surfaces as *numbers*, and **nothing
@@ -8843,6 +8858,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   reuses the FWHM/integration/unsolved/eccentricity figures already computed and surfaced, no new/heavy dependency,
   sane default, testable — passes §4's filter. Keeps the beginner-feature pipeline stocked with a *learn/understand*
   capability distinct from every celebration/planning/record card already filed.)*
+
+- **FOLLOW-UP to "Your next best move" (Builder 2026-07-25) — add the deferred *soft-star* lever ("refocus")
+  once star sharpness can be judged without per-camera guesswork.** *(Pillar: 2 autonomy + 4 image-quality /
+  understand; size S–M; needs a safe threshold, not blind-shippable.)* The shipped `nextBestMove` ladder
+  (v0.204.0) omits the soft-star rung on purpose: the only sharpness figure on a finished run is
+  `stack_fwhm_px` (native-frame **pixels**), and there is **no absolute "soft" px bar** anywhere in the code —
+  reading a px value as "soft" needs the frame's pixel scale (arcsec/px), which varies by Seestar model
+  (S30 ≈ 2.1°, S50 ≈ 1.27° FOV → different arcsec/px), so a fixed px threshold would false-nag on one model
+  and miss on another. `sharpestYet` deliberately dodges this by comparing a target only against *its own*
+  prior best. **Two safe ways to add the lever:** (a) **relative** — flag "your stars came out softer than
+  usual for this target; try refocusing next time" only when the newest run's `stack_fwhm_px` is materially
+  worse than this target's own historical best (reuse the `sharpestYet` machinery in reverse, so no absolute
+  bar); or (b) **arcsec-aware** — persist the run's median pixel scale (already known per-frame from the plate
+  solve, `pixscale_arcsec`) so FWHM can be shown/thresholded in **arcseconds** (camera-independent), then a
+  genuine ">~4″ = soft" bar is safe. (a) is the smaller, zero-calibration win; (b) unlocks arcsec sharpness
+  everywhere. Insert the rung between `thin` and `integration` in the ladder. Confidence: traced (the
+  calibration gap is why it was deferred). (S–M, autonomy/image-quality — PRIORITY 2/4.)
 
 - ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "You beat your best!" (sharpest-yet slice): when a fresh stack of a
   target comes out sharper than your previous best of that same target, say so with a small celebratory callout.**~~
