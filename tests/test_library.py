@@ -319,3 +319,71 @@ def test_angular_separation_haversine_is_symmetric():
     assert abs(a - b) < 1e-9
     # Same point = 0.
     assert _angular_separation_deg(123.4, -5.6, 123.4, -5.6) == 0.0
+
+
+def test_flag_legacy_mixed_drop_sets_and_persists_the_flag(tmp_path):
+    """``flag_legacy_mixed_drop`` marks a target (idempotently) and the flag is
+    readable via both ``find_target`` and ``list_targets`` — the signal
+    cleanup-suggestions reads to surface a legacy whole-device drop for removal."""
+    lib = Library.create(tmp_path / "lib")
+    try:
+        lib.create_target("MyWorks")
+        lib.create_target("M 31")
+        assert lib.find_target("MyWorks").legacy_mixed_drop is None
+
+        out = lib.flag_legacy_mixed_drop("MyWorks")
+        assert out is not None and out.legacy_mixed_drop == 1
+        # Idempotent: flagging again stays 1.
+        assert lib.flag_legacy_mixed_drop("MyWorks").legacy_mixed_drop == 1
+        # Only the flagged target is affected.
+        by_name = {t.name: t for t in lib.list_targets()}
+        assert by_name["MyWorks"].legacy_mixed_drop == 1
+        assert by_name["M 31"].legacy_mixed_drop is None
+        # Unknown target → None, no error.
+        assert lib.flag_legacy_mixed_drop("nope") is None
+    finally:
+        lib.close()
+
+
+def test_old_library_without_legacy_mixed_drop_column_is_migrated(tmp_path):
+    """A registry created before the ``legacy_mixed_drop`` column existed must
+    gain it on open (additive migration; §9 live-in-place upgrade), defaulting to
+    NULL, and stay fully usable."""
+    import sqlite3
+
+    root = tmp_path / "lib"
+    root.mkdir()
+    (root / "targets").mkdir()
+    db = root / "library.sqlite"
+    # A v4-style targets table (has cover_stack_run_id, lacks legacy_mixed_drop).
+    con = sqlite3.connect(db)
+    con.executescript(
+        """
+        PRAGMA user_version = 4;
+        CREATE TABLE library_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE targets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE, safe_name TEXT NOT NULL UNIQUE,
+            ra_deg REAL, dec_deg REAL, created_utc TEXT NOT NULL,
+            last_activity_utc TEXT, n_frames INTEGER NOT NULL DEFAULT 0,
+            n_frames_accepted INTEGER NOT NULL DEFAULT 0,
+            total_exposure_s REAL NOT NULL DEFAULT 0,
+            last_stack_preview TEXT, notes TEXT, tags TEXT, cover_stack_run_id INTEGER
+        );
+        INSERT INTO targets(name, safe_name, created_utc)
+            VALUES('MyWorks','MyWorks','2026-01-01T00:00:00Z');
+        """
+    )
+    con.commit()
+    con.close()
+
+    lib = Library.open(root)
+    try:
+        cols = {r["name"] for r in lib._conn.execute("PRAGMA table_info(targets)")}
+        assert "legacy_mixed_drop" in cols
+        entry = lib.find_target("MyWorks")
+        assert entry is not None and entry.legacy_mixed_drop is None
+        # And it's usable after migration.
+        assert lib.flag_legacy_mixed_drop("MyWorks").legacy_mixed_drop == 1
+    finally:
+        lib.close()

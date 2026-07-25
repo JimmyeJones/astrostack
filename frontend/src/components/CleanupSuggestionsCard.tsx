@@ -11,6 +11,7 @@ import { api, type CleanupSuggestion } from "../api/client";
 // disabled/broken store never breaks the page.
 const JUNK_LS_KEY = "astrostack.cleanupSuggestions.dismissed";
 const DUP_LS_KEY = "astrostack.cleanupSuggestions.duplicates.dismissed";
+const MIXED_LS_KEY = "astrostack.cleanupSuggestions.mixedDrop.dismissed";
 
 function loadDismissed(key: string): boolean {
   try {
@@ -31,6 +32,7 @@ function saveDismissed(key: string): void {
 function reasonLabel(reason: CleanupSuggestion["reason"]): string {
   if (reason === "video") return "video";
   if (reason === "duplicate_sub") return "duplicate";
+  if (reason === "legacy_mixed_drop") return "mixed drop";
   return "on-device output";
 }
 
@@ -148,8 +150,11 @@ export function CleanupSuggestionsCard() {
   });
 
   const items = suggestions.data ?? [];
-  const junk = items.filter((t) => t.reason !== "duplicate_sub");
+  const junk = items.filter(
+    (t) => t.reason === "video" || t.reason === "on_device_output",
+  );
   const dupes = items.filter((t) => t.reason === "duplicate_sub");
+  const mixed = items.filter((t) => t.reason === "legacy_mixed_drop");
   const onRemove = (targets: CleanupSuggestion[]) => remove.mutate(targets);
 
   return (
@@ -182,6 +187,25 @@ export function CleanupSuggestionsCard() {
             same frames your main target already has, so they just clutter your
             library and re-stack the same subs twice. Removing them changes
             nothing about your pictures, and your files on disk are never touched.
+          </>
+        }
+        onRemove={onRemove}
+        pending={remove.isPending}
+      />
+      <CleanupAlert
+        items={mixed}
+        lsKey={MIXED_LS_KEY}
+        icon={<IconCopyOff size={18} />}
+        title="A target looks like a whole Seestar card dropped in at once"
+        intro={
+          <>
+            An earlier scan lumped a whole Seestar card or share into a single
+            target, mixing several different objects' subs together (plus the
+            Seestar's own finished images and videos), so it can't stack into a
+            clean picture. The app has since re-sorted those frames into their own
+            proper targets, so this jumbled one is now a stale duplicate. Removing
+            it changes nothing about your pictures, and your files on disk are
+            never touched.
           </>
         }
         onRemove={onRemove}

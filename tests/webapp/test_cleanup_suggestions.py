@@ -62,6 +62,40 @@ def test_flags_output_and_video_junk_but_not_real_targets(client, data_root: Pat
     assert by_safe["M_31"]["detail"] and by_safe["Lunar_video"]["detail"]
 
 
+def test_flags_a_legacy_mixed_drop_target_regardless_of_size(client, data_root: Path):
+    """A target flagged at scan time as a legacy whole-device / mixed-folder drop
+    must be surfaced for one-click cleanup even though it is *large* — the cheap
+    frame-count-gated junk detectors skip big targets, so the registry flag is the
+    only thing that reaches it. An unflagged large target is never surfaced."""
+    incoming = data_root / "dump"
+    giant = incoming / "MyWorks"
+    giant.mkdir(parents=True)
+    # A big jumble of frames (well above the frame-count cleanup gate).
+    giant_frames = [giant / f"Light_{i:03d}.fit" for i in range(30)]
+    real = incoming / "M 42"
+    real.mkdir()
+    real_frames = [real / f"Light_{i:03d}.fit" for i in range(30)]
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        giant_safe = _add_target(lib, "MyWorks", giant_frames)
+        _add_target(lib, "M 42", real_frames)
+        # Simulate the scan-time heal flagging the giant leftover.
+        lib.flag_legacy_mixed_drop(giant_safe)
+    finally:
+        lib.close()
+
+    r = client.get("/api/targets/cleanup-suggestions")
+    assert r.status_code == 200
+    body = r.json()
+    by_safe = {s["safe"]: s for s in body}
+    # Only the flagged giant target is surfaced; the real large M 42 is untouched.
+    assert set(by_safe) == {giant_safe}
+    assert by_safe[giant_safe]["reason"] == "legacy_mixed_drop"
+    assert by_safe[giant_safe]["n_frames"] == 30
+    assert by_safe[giant_safe]["detail"]
+
+
 def test_clean_library_gives_empty_list(client, data_root: Path):
     incoming = data_root / "dump"
     real = incoming / "Andromeda"

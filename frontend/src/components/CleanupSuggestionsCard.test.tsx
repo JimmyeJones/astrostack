@@ -130,6 +130,35 @@ describe("CleanupSuggestionsCard", () => {
     expect(screen.getByText(/are duplicates left by an older scan/i)).toBeInTheDocument();
   });
 
+  it("shows a legacy mixed-drop target in its own third group", async () => {
+    vi.spyOn(client.api, "cleanupSuggestions").mockResolvedValue([
+      suggestion({
+        safe: "myworks",
+        name: "MyWorks",
+        n_frames: 42,
+        reason: "legacy_mixed_drop",
+        detail: "lumped a whole Seestar card into one target",
+      }),
+    ]);
+    const del = vi.spyOn(client.api, "deleteTarget").mockResolvedValue({} as never);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    renderCard();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/whole Seestar card dropped in at once/i),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.getByText(/MyWorks · mixed drop/)).toBeInTheDocument();
+    // It is not lumped in with the outputs/videos group.
+    expect(
+      screen.queryByText(/look like Seestar outputs or videos/i),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Remove this target"));
+    await waitFor(() => expect(del).toHaveBeenCalledWith("myworks", false));
+  });
+
   it("self-hides when there is nothing to clean up", async () => {
     vi.spyOn(client.api, "cleanupSuggestions").mockResolvedValue([]);
     const { container } = renderCard();
