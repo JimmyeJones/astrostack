@@ -8,6 +8,7 @@ function renderBadge(props: {
   nFramesUsed?: number | null;
   integrationS?: number | null;
   nUnsolved?: number | null;
+  runs?: { stack_fwhm_px?: number | null }[] | null;
 }) {
   return render(
     <MantineProvider>
@@ -16,6 +17,7 @@ function renderBadge(props: {
         nFramesUsed={props.nFramesUsed ?? null}
         integrationS={props.integrationS ?? null}
         nUnsolved={props.nUnsolved ?? null}
+        runs={props.runs ?? null}
       />
     </MantineProvider>,
   );
@@ -32,6 +34,29 @@ describe("NextBestMoveBadge", () => {
     renderBadge({ nFramesUsed: 120, integrationS: 2 * 3600 });
     expect(screen.getByText(/Nice work on M31/)).toBeInTheDocument();
     expect(screen.getByText(/solid result/i)).toBeInTheDocument();
+  });
+
+  it("shows the refocus tip when this target's stars came out softer than usual", () => {
+    // Healthy count + soft stars vs the target's own history (median ~3.0 px,
+    // newest 4.5 px) → the soft rung fires with a refocus nudge.
+    renderBadge({
+      nFramesUsed: 40,
+      integrationS: 2 * 3600,
+      runs: [{ stack_fwhm_px: 4.5 }, { stack_fwhm_px: 3.0 }, { stack_fwhm_px: 3.0 }],
+    });
+    expect(screen.getByText(/To make your M31 even better/)).toBeInTheDocument();
+    expect(screen.getByText(/refocus/i)).toBeInTheDocument();
+  });
+
+  it("does not show a refocus tip when the stars are in the normal band", () => {
+    renderBadge({
+      nFramesUsed: 40,
+      integrationS: 2 * 3600,
+      runs: [{ stack_fwhm_px: 3.1 }, { stack_fwhm_px: 3.0 }, { stack_fwhm_px: 3.0 }],
+    });
+    expect(screen.queryByText(/refocus/i)).toBeNull();
+    // Falls through to the good/encouraging note instead.
+    expect(screen.getByText(/Nice work on M31/)).toBeInTheDocument();
   });
 
   it("renders nothing for a deep, healthy stack", () => {

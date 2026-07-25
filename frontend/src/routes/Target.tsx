@@ -873,6 +873,7 @@ export function TargetView() {
           nFramesUsed={latestRun.n_frames_used}
           integrationS={latestRun.total_exposure_s}
           nUnsolved={unsolvedCount}
+          runs={runs.data}
         />
       ) : null}
       <Group justify="space-between" gap="xs">

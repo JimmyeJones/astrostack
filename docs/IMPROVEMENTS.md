@@ -8859,9 +8859,28 @@ problems. Dogfood it every big-picture run and fix root causes.
   sane default, testable — passes §4's filter. Keeps the beginner-feature pipeline stocked with a *learn/understand*
   capability distinct from every celebration/planning/record card already filed.)*
 
-- **FOLLOW-UP to "Your next best move" (Builder 2026-07-25) — add the deferred *soft-star* lever ("refocus")
-  once star sharpness can be judged without per-camera guesswork.** *(Pillar: 2 autonomy + 4 image-quality /
-  understand; size S–M; needs a safe threshold, not blind-shippable.)* The shipped `nextBestMove` ladder
+- ~~**FOLLOW-UP to "Your next best move" (Builder 2026-07-25) — add the deferred *soft-star* lever ("refocus")
+  once star sharpness can be judged without per-camera guesswork.**~~ — **SHIPPED v0.205.0** (Builder 2026-07-25,
+  branch `agent/soft-star-refocus-lever`; frontend-only, tested). Took **path (a) — relative**, the zero-calibration
+  win. New pure helper `frontend/src/components/target/softStars.ts::softerThanUsual(runs)`: given the target's stack
+  runs **newest-first** (what `listStackRuns` returns), it returns a `SoftStars {currentFwhmPx, typicalFwhmPx}` only
+  when the newest run has a measured `stack_fwhm_px`, at least `SOFT_STAR_MIN_PRIORS` (2) prior runs also measured one,
+  and the newest FWHM is larger than the **median** of those priors by at least `SOFT_STAR_MARGIN` (25%) — else `null`.
+  Using the **median** (not the best, which would nag on every non-record run, nor the mean, which one flukey night
+  skews) makes "usual" robust, and the relative-only comparison needs **no arcsec/px** so it can't false-nag across
+  S30/S50 models. Wired a new `"soft"` rung into `nextBestMove` **between `thin` and `integration`** (so a refocus —
+  which tightens every future sub — outranks the add-time nudges, but locate/thin still outrank it); the rung fires on
+  the `softStars` signal the badge computes from `runs`, so `nextBestMove` stays pure/threshold-driven. `NextBestMoveBadge`
+  now takes the target's `runs` and renders the plain-language line ("Your stars came out a little softer than usual on
+  this one — about X px across, vs your typical Y px … a quick refocus at the start of your next session usually tightens
+  them back up"). Fail-safe: silent on the first run, missing measurements, ordinary seeing variation (<25%), or when a
+  higher lever applies. Tests: `softStars.test.ts` (+6 — no-history/one-prior→null, min-priors floor, fires on a real
+  regression, median robustness, normal-band/at-margin/sharper→null, ignores unmeasured/non-finite/non-positive),
+  `nextBestMove.test.ts` (+4 — soft rung fires, fires without integration time, locate/thin outrank it, soft outranks
+  add-time), `NextBestMoveBadge.test.tsx` (+2 — refocus tip shows vs normal band → good note). Upgrade-safe: frontend-only,
+  additive, no config/DB/on-disk/API-shape/default change (backend already served `stack_fwhm_px`). Confidence: shipped.
+  (S–M, autonomy/image-quality — PRIORITY 2/4.)
+  *(Original idea kept for provenance.)* The shipped `nextBestMove` ladder
   (v0.204.0) omits the soft-star rung on purpose: the only sharpness figure on a finished run is
   `stack_fwhm_px` (native-frame **pixels**), and there is **no absolute "soft" px bar** anywhere in the code —
   reading a px value as "soft" needs the frame's pixel scale (arcsec/px), which varies by Seestar model
