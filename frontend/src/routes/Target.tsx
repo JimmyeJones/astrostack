@@ -37,6 +37,7 @@ import { RejectionBreakdown } from "../components/target/RejectionBreakdown";
 import { UnsolvedHelp } from "../components/target/UnsolvedHelp";
 import { thinStackWarning } from "../components/target/thinStack";
 import { SharpestYetBadge } from "../components/target/SharpestYetBadge";
+import { NextBestMoveBadge } from "../components/target/NextBestMoveBadge";
 import { detectMixedPointings } from "../components/target/mixedPointings";
 
 // Re-exported for existing tests that import it from this route module.
@@ -861,6 +862,18 @@ export function TargetView() {
           first run or when it's not a record). */}
       {latestRun?.has_preview ? (
         <SharpestYetBadge name={target.data?.name ?? "target"} runs={runs.data} />
+      ) : null}
+      {/* "To make this even better": one plain-language coaching line naming the
+          single highest-leverage next step (locate more subs / add subs / add
+          time), or a short well-done note. Suppressed while the louder thin-stack
+          warning is up so the two never duplicate the "add more subs" nudge. */}
+      {latestRun?.has_preview && !thinStack ? (
+        <NextBestMoveBadge
+          name={target.data?.name ?? "target"}
+          nFramesUsed={latestRun.n_frames_used}
+          integrationS={latestRun.total_exposure_s}
+          nUnsolved={unsolvedCount}
+        />
       ) : null}
       <Group justify="space-between" gap="xs">
         <Group gap="xs" style={{ minWidth: 0 }}>

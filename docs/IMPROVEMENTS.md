@@ -735,16 +735,22 @@ when you take it.
   the junk detector to flag a multi-folder target mixing `_sub` + bare + `_video` sources. Confidence: reproduced.
   (M, ingest — PRIORITY 2.)
 
-- **One-click `<T>_sub` duplicate cleanup silently discards the duplicate target's user data (stack-run history, notes)
-  — and a genuinely-named standalone `<T>_sub` target gets cloned on re-scan, then its ORIGINAL offered for deletion.**
-  *(Ingest/friendliness; broken-UX — files are never deleted, but registry history/notes vanish from the UI; reproduced
-  by the 2026-07-24 heal audit.)* `webapp/routers/targets.py::cleanup_suggestions:213-249` has no user-data check.
-  Repro: a standalone target genuinely named `Nebula_sub` → re-scan clones its 4 subs into a new `Nebula` target, then
-  cleanup flags the *original* — holding the user's stack history and notes — for removal; with the frontend's
-  hardwired `remove_files=false` (`CleanupSuggestionsCard.tsx:128`) the FITS and old outputs survive orphaned on disk,
-  but the target's runs/notes are gone from the UI. **Fix direction (S–M):** suppress (or clearly caveat) suggestions
-  for duplicates carrying `stack_runs`/notes, or migrate that history onto the base target before delete. Confidence:
-  reproduced. (S–M, friendliness — PRIORITY 3.)
+- ~~**One-click `<T>_sub` duplicate cleanup silently discards the duplicate target's user data (stack-run history, notes)
+  — and a genuinely-named standalone `<T>_sub` target gets cloned on re-scan, then its ORIGINAL offered for deletion.**~~
+  — **FIXED v0.203.3** (Builder 2026-07-25, branch `claude/pensive-faraday-yl7q7h`; regression-tested).
+  `cleanup_suggestions` (`webapp/routers/targets.py`) now guards the `duplicate_sub` branch with a **user-data check**:
+  a `_sub` duplicate the base fully owns is offered for one-click removal **only** when it carries no stack-run history
+  (`next(proj.iter_stack_runs(), None) is None`) **and** no free-text notes (`entry.notes` empty). A duplicate that
+  *does* hold real user data is left alone — since the frontend's one-click cleanup deletes the registry target
+  (keeping files on disk, `remove_files=false`), flagging one with history/notes would silently drop that history from
+  the UI. This covers the reported repro (a genuinely-named `Nebula_sub` target whose subs got re-scanned into a
+  `Nebula` base, then the original — holding the user's runs/notes — offered for deletion): it is now suppressed.
+  Regression tests (`tests/webapp/test_cleanup_suggestions.py`, fail-before/pass-after):
+  `test_does_not_flag_a_sub_duplicate_that_carries_stack_run_history` and
+  `test_does_not_flag_a_sub_duplicate_that_carries_user_notes` (both empty-list; without the guard the duplicate was
+  flagged). The plain-leftover duplicate (no history/notes) is still flagged and removable as before. Upgrade-safe:
+  read-only endpoint logic, no config/DB-schema/API-shape/on-disk/default change. Confidence: reproduced.
+  (S–M, friendliness — PRIORITY 3.)
 
 - **The Seestar-aware scanner skips a bare `<T>/` on-device *output* folder only when a `<T>_sub` sibling is present,
   never a `<T>_mosaic_sub` sibling — so a **mosaic's** bare on-device output can still be ingested as a spurious
@@ -8802,10 +8808,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   Feasibility: fits headless/web/TrueNAS; ships with a plain-language explanation; additive/reversible. **Verified
   genuinely absent** (2026-07-24: no all-time/annual recap route or endpoint — `stats.py`'s recap is single-night only).
 
-- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Your next best move": on a finished picture, one calm, plain-language
-  sentence naming the *single* highest-leverage thing that would most improve this target next time — derived
-  entirely from data the app already has — so a beginner learns what to change without reading a QC table or knowing
-  the jargon.** *(Pillar: 3 friendliness + 2 autonomy + understand/learn; size M.)* **The gap (verified this run):**
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "Your next best move": on a finished picture, one calm, plain-language
+  sentence naming the *single* highest-leverage thing that would most improve this target next time.**~~ —
+  **SHIPPED v0.204.0** (Builder 2026-07-25, branch `claude/pensive-faraday-yl7q7h`; frontend-only, tested).
+  Added the pure helper `frontend/src/components/target/nextBestMove.ts::nextBestMove({nFramesUsed, integrationS,
+  nUnsolved}) -> {kind, phrase} | null` with a fixed priority ladder — **can't-locate-subs → too-thin →
+  short-integration → all-good** — that picks exactly ONE lever and says it plainly ("Only N of your M subs were
+  located … installing ASTAP's star database would let far more stack", "add more subs", "add more time — 18 min so
+  far", or an encouraging "solid result" note). A self-hiding `NextBestMoveBadge` (💡 Alert) renders it on the Target
+  page beside the finished picture, **suppressed while the louder thin-stack warning is showing** so the two never
+  duplicate the "add more subs" nudge. Self-hides on no-stack, missing integration time, or a deep-and-healthy result.
+  **Deliberately omits the spec's soft-star lever**: an absolute FWHM-in-pixels "soft" bar needs per-camera pixel-scale
+  calibration (the exact reason `sharpestYet` avoids absolute bars), so shipping it unattended would risk false
+  "your stars are soft" nags — filed as a follow-up idea below (needs pixel-scale-aware thresholds / real Seestar
+  data). Tests: `nextBestMove.test.ts` (+12 — each lever fires only as the top unmet one, ladder ordering across the
+  thin/short/deep boundaries, locate count+fraction floors, silent on unknown integration / deep stack / no stack,
+  NaN-safe) and `NextBestMoveBadge.test.tsx` (+4 — plate-solve tip names the target, "nice work" encouragement, silent
+  on a deep stack and no-stack). `npx tsc` clean, full vitest green (1278), `vite build` OK. Upgrade-safe: purely
+  additive read-only helper + a display line, no schema/config/default/API-shape change. *(Pillar: 3 friendliness +
+  2 autonomy + understand/learn; size M.)* **The gap (verified this run):**
   the app is full of *honest signals* about a finished stack — median FWHM (star sharpness), total integration
   (depth / `n_frames_used`), star eccentricity (tracking/tilt), the thin-stack and unsolved-subs warnings, the
   sky-background level — but they live scattered across the Target/History/QC surfaces as *numbers*, and **nothing
@@ -8837,6 +8858,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   reuses the FWHM/integration/unsolved/eccentricity figures already computed and surfaced, no new/heavy dependency,
   sane default, testable — passes §4's filter. Keeps the beginner-feature pipeline stocked with a *learn/understand*
   capability distinct from every celebration/planning/record card already filed.)*
+
+- **FOLLOW-UP to "Your next best move" (Builder 2026-07-25) — add the deferred *soft-star* lever ("refocus")
+  once star sharpness can be judged without per-camera guesswork.** *(Pillar: 2 autonomy + 4 image-quality /
+  understand; size S–M; needs a safe threshold, not blind-shippable.)* The shipped `nextBestMove` ladder
+  (v0.204.0) omits the soft-star rung on purpose: the only sharpness figure on a finished run is
+  `stack_fwhm_px` (native-frame **pixels**), and there is **no absolute "soft" px bar** anywhere in the code —
+  reading a px value as "soft" needs the frame's pixel scale (arcsec/px), which varies by Seestar model
+  (S30 ≈ 2.1°, S50 ≈ 1.27° FOV → different arcsec/px), so a fixed px threshold would false-nag on one model
+  and miss on another. `sharpestYet` deliberately dodges this by comparing a target only against *its own*
+  prior best. **Two safe ways to add the lever:** (a) **relative** — flag "your stars came out softer than
+  usual for this target; try refocusing next time" only when the newest run's `stack_fwhm_px` is materially
+  worse than this target's own historical best (reuse the `sharpestYet` machinery in reverse, so no absolute
+  bar); or (b) **arcsec-aware** — persist the run's median pixel scale (already known per-frame from the plate
+  solve, `pixscale_arcsec`) so FWHM can be shown/thresholded in **arcseconds** (camera-independent), then a
+  genuine ">~4″ = soft" bar is safe. (a) is the smaller, zero-calibration win; (b) unlocks arcsec sharpness
+  everywhere. Insert the rung between `thin` and `integration` in the ladder. Confidence: traced (the
+  calibration gap is why it was deferred). (S–M, autonomy/image-quality — PRIORITY 2/4.)
 
 - ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "You beat your best!" (sharpest-yet slice): when a fresh stack of a
   target comes out sharper than your previous best of that same target, say so with a small celebratory callout.**~~

@@ -219,6 +219,15 @@ def cleanup_suggestions(request: Request) -> list[CleanupSuggestionOut]:
             proj = lib.open_target(entry.safe_name)
             try:
                 dup_sources = [f.source_path for f in proj.iter_frames()]
+                # A genuine leftover duplicate holds nothing but re-registered raw
+                # subs. If this target *also* carries the user's own data — a
+                # stack-run history — then it is not disposable: the frontend's
+                # one-click cleanup deletes the registry target (keeping the files
+                # on disk), which would silently drop that history from the UI.
+                # Never offer such a target for removal (the base owns the subs,
+                # but the runs live only here). See the notes check below for the
+                # matching free-text-notes guard.
+                dup_has_runs = next(proj.iter_stack_runs(), None) is not None
             finally:
                 proj.close()
             base_name = duplicate_sub_target_base_name(entry.name, dup_sources)
@@ -233,8 +242,17 @@ def cleanup_suggestions(request: Request) -> list[CleanupSuggestionOut]:
             finally:
                 base_proj.close()
             # Offer removal only when the base already owns *every* one of these
-            # subs — so nothing real is lost, and the message is truthful.
-            if dup_sources and all(s in base_sources for s in dup_sources):
+            # subs — so nothing real is lost, and the message is truthful — and
+            # only when this duplicate carries no user-owned data of its own
+            # (stack-run history or free-text notes), which a one-click removal
+            # would drop from the UI even though the files stay on disk.
+            dup_has_notes = bool((entry.notes or "").strip())
+            if (
+                dup_sources
+                and all(s in base_sources for s in dup_sources)
+                and not dup_has_runs
+                and not dup_has_notes
+            ):
                 out.append(CleanupSuggestionOut(
                     safe=entry.safe_name,
                     name=entry.name,
