@@ -17,6 +17,9 @@ import { calibrationSummaryText } from "../components/calibrationSummary";
 import { autoSkyCastCaption } from "../components/editor/skyCast";
 import { autoColorCalCaption } from "../components/editor/colorCal";
 import { RejectionBadge } from "../components/RejectionBadge";
+import { FocusChip } from "../components/target/FocusChip";
+import { focusChips, type FocusVerdict } from "../components/target/focusChips";
+import { integrationTrend } from "../components/target/integrationTrend";
 import { NoiseReadout, NoiseDelta, CleanestBadge, cleanestRunId, hasNoise } from "../components/NoiseBadge";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { AnnotatedImage } from "../components/AnnotatedImage";
@@ -524,10 +527,10 @@ function NotesEditor({ safe, run }: { safe: string; run: StackRun }) {
 const DEFAULT_STRETCH = 0.5;
 const DEFAULT_BLACK = 0.35;
 
-function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compareToId, identity }: {
+function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compareToId, identity, focus }: {
   safe: string; run: StackRun; onDelete: () => void; deleting?: boolean;
   isCleanest?: boolean; noiseDelta?: number; compareToId?: number | null;
-  identity?: ObjectInfo | null;
+  identity?: ObjectInfo | null; focus?: FocusVerdict;
 }) {
   const qc = useQueryClient();
   const [adjust, setAdjust] = useState(false);
@@ -741,6 +744,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
         <Text fw={600}>{run.output_basename}</Text>
         <Group gap={4} wrap="nowrap">
           <CleanestBadge isCleanest={!!isCleanest} />
+          <FocusChip verdict={focus} />
           <RejectionBadge options={run.options} />
           <HazyNightBadge ratio={run.transparency_ratio} />
           <CalibrationBadge calstat={run.calstat} />
@@ -1072,8 +1076,15 @@ export function HistoryView() {
   const cleanestId = cleanestRunId(list);
   const anyNoise = list.some((r) => hasNoise(r.noise_sigma));
   const deltas = noiseDeltas(list);
+  // Per-run focus chips are judged against each run's own priors, so compute
+  // them from the API's chronological (newest-first) order, not the display sort.
+  const focus = focusChips(list);
   const sorted = sortRuns(list, sort);
   const trend = noiseTrendSeries(list);
+  // "Is this target still improving, or has it plateaued?" — a data-driven read
+  // of the measured noise-vs-√time trend across this target's stacks. Null (and
+  // hidden) unless two stacks both measured a σ and span a real time increase.
+  const integration = integrationTrend(list);
 
   return (
     <Stack>
@@ -1115,6 +1126,19 @@ export function HistoryView() {
                     ? `Noisier than your first measured stack (σ ${trend[trend.length - 1].toFixed(3)} vs ${trend[0].toFixed(3)}).`
                     : `Steady around σ ${trend[0].toFixed(3)}.`}
               </Text>
+              {integration ? (
+                <Text
+                  size="xs"
+                  mt={4}
+                  c={integration.level === "improving"
+                    ? "teal"
+                    : integration.level === "plateaued"
+                      ? "orange"
+                      : "dimmed"}
+                >
+                  {integration.sentence}
+                </Text>
+              ) : null}
             </div>
             <Sparkline
               values={trend}
@@ -1141,6 +1165,7 @@ export function HistoryView() {
               isCleanest={r.id === cleanestId}
               noiseDelta={deltas.get(r.id)}
               identity={identity.data ?? null}
+              focus={focus.get(r.id)}
               compareToId={previousRunId(list, r.id)} />
           ))}
         </SimpleGrid>

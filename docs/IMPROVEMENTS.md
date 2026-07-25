@@ -8895,9 +8895,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   everywhere. Insert the rung between `thin` and `integration` in the ladder. Confidence: traced (the
   calibration gap is why it was deferred). (S–M, autonomy/image-quality — PRIORITY 2/4.)
 
-- **NEW IDEA (Builder 2026-07-25, spotted while shipping the soft-star "refocus" rung v0.205.0) — surface the
+- ~~**NEW IDEA (Builder 2026-07-25, spotted while shipping the soft-star "refocus" rung v0.205.0) — surface the
   "softer than usual" signal as a small per-run chip in the target's History table, so a beginner scanning past
-  nights can *see at a glance* which sessions had focus trouble.** *(Pillar: 3 friendliness + 4 understand-your-data;
+  nights can *see at a glance* which sessions had focus trouble.**~~ — **SHIPPED v0.206.0** (Builder 2026-07-25,
+  branch `claude/pensive-faraday-8u4hoe`; tested). Added a pure helper `frontend/src/components/target/focusChips.ts`
+  (`focusChips(runs) -> Map<runId, "sharpest" | "soft">`) that judges **each** history row against only its own priors
+  (the runs shot before it): for the newest-first list, the run at index `i` is scored on the slice `runs.slice(i)`
+  (`[thisRun, ...olderRuns]`) by reusing the *exact* shipped `sharpestYet` / `softerThanUsual` helpers — so it stays
+  purely relative to the target's own history (no absolute px bar, no per-camera tuning). A tiny presentational
+  `FocusChip` (`FocusChip.tsx`) renders "✨ sharpest yet" (grape) or "softer than usual" (orange) with a plain-language
+  tooltip, in the History card's badge row beside the frame count; it renders nothing for a run with no verdict, so it's
+  fail-safe on the first run, unmeasured runs, and the normal band. The chips are computed from the API's chronological
+  (newest-first) list, not the display sort, so they're stable under the Cleanest/Newest toggle. Frontend-only +
+  additive (no backend/DB/API-shape/default change; reuses the already-served `stack_fwhm_px`). Tests:
+  `focusChips.test.ts` (+6 — empty input, oldest run gets no chip, a new-best → "sharpest", a materially-soft row →
+  "soft", each row judged against only its priors, silent in the normal band / on unmeasured runs) and
+  `FocusChip.test.tsx` (+3 — renders each chip, nothing when absent). (S, friendliness — PRIORITY 3.)
+  *(Original idea kept for provenance.)* *(Pillar: 3 friendliness + 4 understand-your-data;
   size S — frontend-only.)* **The gap:** v0.205.0's `softerThanUsual(runs)` (`frontend/src/components/target/
   softStars.ts`) computes a purely relative, zero-calibration verdict — is *this* run materially softer than the
   target's own median — but it's consumed **only** by the newest-result "next best move" coaching line. The History
@@ -9540,9 +9554,28 @@ problems. Dogfood it every big-picture run and fix root causes.
   cases), `SuggestTargetsCard.test.tsx` (+1 — the badge renders). Upgrade-safe: additive engine field + frontend chip,
   pure reuse of the shipped `target_difficulty` function; no config/DB-schema/on-disk/API-shape/default change (older
   frontends simply ignore the new field). *(Autonomy + friendliness / plan pillar, PRIORITY 2–3; size S.)*
-- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Is it worth staying on this target?": a plain-language
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "Is it worth staying on this target?": a plain-language
   diminishing-returns read that tells a beginner when more subs will visibly help vs when they've hit the flat
-  part of the curve.** *(Autonomy / Friendliness — the "plan / understand" pillar, PRIORITY 2–3; size M; offline,
+  part of the curve.**~~ — **SHIPPED v0.207.0** (Builder 2026-07-25, branch `claude/pensive-faraday-8u4hoe`;
+  tested). Shipped the high-value **measured** half: a pure frontend helper `frontend/src/components/target/
+  integrationTrend.ts` (`integrationTrend(runs)`) that reads the target's *own* stack runs — every run already
+  streams `total_exposure_s` + a measured `noise_sigma` to the frontend — compares the **shallowest vs deepest
+  measured stack by integration time** (not chronology; a later stack can use fewer subs), and reads off the
+  effective noise-vs-time falloff exponent (σ ∝ t^-p; ideal shot-noise-limited √t is p=0.5, a sky-limited plateau
+  tends to ~0). It returns a `{level: "improving" | "slowing" | "plateaued", hoursNow, exponent,
+  percentCutIfDoubled, sentence}` verdict, or `null` (hidden) unless ≥2 stacks both measured a σ **and** span a real
+  integration increase (`MIN_TIME_RATIO` 1.5×) — below that there isn't enough signal to judge honestly. Purely
+  relative to the target's own history (no absolute px/σ bar, no per-camera calibration), and the doubling
+  projection is clamped to a non-negative, ≤29% (ideal √t) gain so it never over-claims. Surfaced by **deepening the
+  existing History "Noise trend" card** with one calm plain-language line (teal "still improving" / dimmed "past the
+  steep part" / orange "sky-limited — more subs won't help much"). **Deliberately scoped:** the single-run √N
+  *projection* the original idea also listed is already covered by the shipped `nextBestMove` "add more time"
+  coaching + `readiness.ts` text, so `integrationTrend` fires **only** on the genuinely-new multi-run *measured*
+  trend (never duplicating that coaching). Frontend-only + additive (reuses already-served fields; no
+  backend/DB/API-shape/default change). Tests: `integrationTrend.test.ts` (+6 — too-few-points/no-time-spread →
+  null, ideal √t → "improving" (p≈0.5, 29%), flat/rising σ → "plateaued" (0%), below-ideal falloff → "slowing"
+  (p≈0.25, 16%), reads by time not order + ignores unmeasured runs). (M, autonomy/friendliness — PRIORITY 2–3.)
+  *(Original idea kept for provenance.)* *(Autonomy / Friendliness — the "plan / understand" pillar, PRIORITY 2–3; size M; offline,
   additive, no new deps.)* **Why a beginner wants it:** the single most common question after "it worked!" for a
   Seestar owner with a growing pile of subs is *"do I keep going on this one, or move to a new target?"* — and
   today nothing answers it. Stacking noise falls with the **square root of integration time** (√N), so early subs
