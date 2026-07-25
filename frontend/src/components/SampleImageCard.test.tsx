@@ -74,6 +74,22 @@ describe("SampleImageCard", () => {
     await waitFor(() => expect(remove).toHaveBeenCalledTimes(1));
   });
 
+  it("stacks the sample in one tap and navigates to its target", async () => {
+    vi.spyOn(client.api, "getSampleStatus").mockResolvedValue(
+      sample({ loaded: true, safe: "sample_orion", n_frames: 6 }),
+    );
+    vi.spyOn(client.api, "getStats").mockResolvedValue(stats(1));
+    const trigger = vi.spyOn(client.api, "triggerStack").mockResolvedValue({ job_id: "j1" });
+    renderCard();
+
+    await waitFor(() =>
+      expect(screen.getByText(/Your sample target is ready/i)).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Stack it/i }));
+    await waitFor(() => expect(trigger).toHaveBeenCalledTimes(1));
+    expect(trigger).toHaveBeenCalledWith("sample_orion", {});
+  });
+
   it("hides entirely when there's real data and no sample", async () => {
     vi.spyOn(client.api, "getSampleStatus").mockResolvedValue(sample());
     vi.spyOn(client.api, "getStats").mockResolvedValue(stats(3));

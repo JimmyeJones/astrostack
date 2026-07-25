@@ -8712,9 +8712,17 @@ problems. Dogfood it every big-picture run and fix root causes.
   *(Verified genuinely absent 2026-07-24 against the routes/backlog: live capture is de-scoped, but a *bundled sample
   dataset* to try the app offline is a different, unfiled capability.)* (M, friendliness/onboarding — PRIORITY 3.)
 
-- **NEW IDEA (Builder 2026-07-24, follow-on to the v0.199.0 "Try it with a sample image" demo) — a "Stack it now"
+- ~~**NEW IDEA (Builder 2026-07-24, follow-on to the v0.199.0 "Try it with a sample image" demo) — a "Stack it now"
   shortcut right on the sample card, so a newcomer sees a finished picture in *one more tap* instead of hunting for
-  the stack control.** *(Pillar: 3 friendliness / onboarding; size S.)* **The gap:** v0.199.0 loads the demo target
+  the stack control.**~~ — **SHIPPED v0.208.0** (Builder 2026-07-25, branch `claude/pensive-faraday-jqlh52`;
+  frontend-only, tested). The "Your sample target is ready" state of `SampleImageCard` now leads with a primary
+  **"Stack it"** button that submits the normal stack job on the demo target with sane defaults
+  (`api.triggerStack(safe, {})` — the backend fills every default) and drops the newcomer on the target's page to
+  watch the finished picture appear, so the payoff is one tap away instead of hunting for the Stack control. Purely
+  additive: it's a pre-wired call to the existing `POST /api/targets/{safe}/stack` endpoint — no new engine path,
+  no backend/DB/API-shape change. "Open sample" and "Remove" are unchanged. Regression:
+  `frontend/src/components/SampleImageCard.test.tsx` (+1 — one tap calls `triggerStack("sample_orion", {})` once and
+  navigates). Upgrade-safe: frontend-only. *(Original idea kept for provenance.)* **The gap:** v0.199.0 loads the demo target
   and navigates the user to its Target page, but from there they still have to find and click through the Stack flow
   to see the payoff (a clean stacked image) — the moment that actually sells the app. A brand-new owner who's never
   seen the workflow may not know Stack is the next step. **The feature:** on the "Your sample target is ready" state

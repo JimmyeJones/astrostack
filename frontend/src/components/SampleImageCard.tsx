@@ -1,6 +1,6 @@
 import { Button, Group, Paper, Stack, Text, ThemeIcon } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { IconSparkles, IconTrash } from "@tabler/icons-react";
+import { IconPlayerPlay, IconSparkles, IconTrash } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
@@ -47,6 +47,27 @@ export function SampleImageCard() {
     },
   });
 
+  // One-tap "see the payoff": stack the demo with sane defaults and drop the
+  // newcomer on its Target page to watch the finished picture appear — so they
+  // don't have to hunt for the Stack control to see why stacking matters.
+  const stack = useMutation({
+    mutationFn: (safe: string) => api.triggerStack(safe, {}),
+    onSuccess: (_res, safe) => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      notifications.show({
+        message: "Stacking the sample — watch it come together on the target page.",
+        color: "teal",
+      });
+      navigate(`/targets/${safe}`);
+    },
+    onError: (err) => {
+      notifications.show({
+        message: `Couldn't stack the sample: ${err instanceof Error ? err.message : String(err)}`,
+        color: "red",
+      });
+    },
+  });
+
   const remove = useMutation({
     mutationFn: api.removeSample,
     onSuccess: () => {
@@ -87,6 +108,12 @@ export function SampleImageCard() {
             </Stack>
           </Group>
           <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
+            <Button size="xs" color="violet"
+              leftSection={<IconPlayerPlay size={14} />}
+              loading={stack.isPending}
+              onClick={() => sample.data?.safe && stack.mutate(sample.data.safe)}>
+              Stack it
+            </Button>
             <Button size="xs" variant="light" color="violet"
               onClick={() => sample.data?.safe && navigate(`/targets/${sample.data.safe}`)}>
               Open sample
