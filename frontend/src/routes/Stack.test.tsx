@@ -178,6 +178,32 @@ describe("StackView", () => {
       expect(screen.getByText(/shot at 120s but your subs are 30s/)).toBeInTheDocument());
   });
 
+  it("warns when a chosen dark's temperature is far from the subs (even at a matched exposure)", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    // An exposure-matched (30 s) dark shot 15°C warmer than the subs — bias
+    // scaling can't fix a temperature gap, so it warns regardless of exposure.
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ dark_master_id: 1 });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
+      { id: 1, name: "Dark 30s @20C", kind: "dark", filename: "d1.fits", n_frames: 20,
+        method: "median", exposure_s: 30, gain: 80, sensor_temp_c: 20,
+        bayer_pattern: "RGGB", width_px: 480, height_px: 320,
+        created_utc: "2026-01-01T00:00:00", exists: true },
+    ]);
+    vi.spyOn(client.api, "calibrationSuggestions").mockResolvedValue({
+      params: { exposure_s: 30, gain: 80, sensor_temp_c: 5 },
+      dark_master_id: 1, flat_master_id: null, flat_dark_master_id: null, bias_master_id: null,
+      scores: { "1": 0.5 }, n_frames: 12,
+    });
+
+    renderStack();
+
+    // No exposure warning (30 s matches 30 s), but the temperature gap warns.
+    await waitFor(() =>
+      expect(screen.getByText(/shot at 20°C but your subs are at 5°C/)).toBeInTheDocument());
+    expect(screen.queryByText(/but your subs are 30s/)).not.toBeInTheDocument();
+  });
+
   it("offers a one-click dark exposure-scaling when a bias is also selected, then confirms", async () => {
     vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
     // A mismatched 120 s dark and a master bias both already selected.

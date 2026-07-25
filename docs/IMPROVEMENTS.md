@@ -7363,7 +7363,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   copy; mixed → generic fallback; trailed-dominated → stays generic-reassuring). Pillar: friendliness + trust.
 - **IMPROVEMENT IDEA (Scout 2026-07-23) — surface calibration-master mismatches (and a *never-applied* wrong-shaped
   bias) at *bind time* in the calibration UI, not only buried in the stack log.** *(Friendliness + trust; size S–M;
-  PRIORITY 3, adjacent to image-quality.)* `CalibrationMasters.calibration_warnings()` already produces the right
+  PRIORITY 3, adjacent to image-quality.)*
+  **▶ PARTIAL — the two exposure/temperature mismatch advisories are now surfaced at pick-time on the Stack form.**
+  The exposure-mismatch half shipped earlier as the inline `darkWarning`/`flatDarkWarning`/`darkScaledNote`/
+  `biasIgnoredForLights` cautions the Stack form renders beside each master `Select` (with a one-click "scale this dark"
+  fix). The **temperature-mismatch** half shipped **v0.208.1** (Builder 2026-07-25, branch `claude/pensive-faraday-jqlh52`;
+  frontend-only, tested): a new inline `darkTempWarning` warns whenever the chosen light-dark's `sensor_temp_c` and the
+  target's median sub temperature (`calibrationSuggestions().params.sensor_temp_c`) are both known and differ by ≥5°C —
+  mirroring the engine's `CalibrationMasters.calibration_warnings` temperature advisory (`_TEMP_MISMATCH_TOL_C=5.0`),
+  which until now reached only the stack log. It's independent of the exposure warning (a dark can match on exposure yet
+  be temperature-mismatched — and, unlike an exposure gap, bias-scaling can't correct it), so it fires even on an
+  exposure-matched dark. Regression: `frontend/src/routes/Stack.test.tsx` (+1 — an exposure-matched 30 s dark shot 15°C
+  warmer warns on temperature with *no* exposure warning). Upgrade-safe: frontend-only, additive, reuses data already in
+  the suggestions payload; no API/schema/default change.
+  **Still open (the (c) slice):** the **loaded-but-inert** master notice — a bias whose shape doesn't match the dark, or
+  a master whose dimensions don't match the target's frames, with a "this master won't be used because it doesn't match
+  your camera/binning" note. That one needs the backend to expose per-master dims-vs-target validity (the frontend can't
+  tell a shape mismatch from the current payload), so it's a separate S–M slice.
+  `CalibrationMasters.calibration_warnings()` already produces the right
   plain-language advisories ("Master dark is 30s but your subs are 10s — its pedestal will be over-subtracted on every
   frame…"; the temperature-mismatch line), and this run's fix keeps them honest. But they only reach the *stack log* —
   a beginner binding a dark/flat/bias to a target never sees them until (if ever) they read a log, so they ship a
@@ -8712,9 +8729,17 @@ problems. Dogfood it every big-picture run and fix root causes.
   *(Verified genuinely absent 2026-07-24 against the routes/backlog: live capture is de-scoped, but a *bundled sample
   dataset* to try the app offline is a different, unfiled capability.)* (M, friendliness/onboarding — PRIORITY 3.)
 
-- **NEW IDEA (Builder 2026-07-24, follow-on to the v0.199.0 "Try it with a sample image" demo) — a "Stack it now"
+- ~~**NEW IDEA (Builder 2026-07-24, follow-on to the v0.199.0 "Try it with a sample image" demo) — a "Stack it now"
   shortcut right on the sample card, so a newcomer sees a finished picture in *one more tap* instead of hunting for
-  the stack control.** *(Pillar: 3 friendliness / onboarding; size S.)* **The gap:** v0.199.0 loads the demo target
+  the stack control.**~~ — **SHIPPED v0.208.0** (Builder 2026-07-25, branch `claude/pensive-faraday-jqlh52`;
+  frontend-only, tested). The "Your sample target is ready" state of `SampleImageCard` now leads with a primary
+  **"Stack it"** button that submits the normal stack job on the demo target with sane defaults
+  (`api.triggerStack(safe, {})` — the backend fills every default) and drops the newcomer on the target's page to
+  watch the finished picture appear, so the payoff is one tap away instead of hunting for the Stack control. Purely
+  additive: it's a pre-wired call to the existing `POST /api/targets/{safe}/stack` endpoint — no new engine path,
+  no backend/DB/API-shape change. "Open sample" and "Remove" are unchanged. Regression:
+  `frontend/src/components/SampleImageCard.test.tsx` (+1 — one tap calls `triggerStack("sample_orion", {})` once and
+  navigates). Upgrade-safe: frontend-only. *(Original idea kept for provenance.)* **The gap:** v0.199.0 loads the demo target
   and navigates the user to its Target page, but from there they still have to find and click through the Stack flow
   to see the payoff (a clean stacked image) — the moment that actually sells the app. A brand-new owner who's never
   seen the workflow may not know Stack is the next step. **The feature:** on the "Your sample target is ready" state
