@@ -204,8 +204,8 @@ def load_stack_rgb(
     is a tone-mapped display-space export.
 
     Reads an already-processed stack FITS — a 3-channel ``(C, H, W)`` float cube
-    (or 2-D mono, expanded to grey RGB) — and decimates it to ``max_width`` by
-    NaN-preserving striding. Shared by :func:`render_stack_png` (which stretches
+    (or 2-D mono, expanded to grey RGB) — and decimates it to ``max_width`` by a
+    NaN-aware area average. Shared by :func:`render_stack_png` (which stretches
     the result) and the History render's stretch suggestion (which measures it),
     so both operate on the *identical* pixels and the suggested asinh sliders
     reproduce what the render actually shows.
@@ -227,14 +227,55 @@ def load_stack_rgb(
 
     w = rgb.shape[1]
     if w > max_width:
-        # Decimate by striding (nearest) rather than box-averaging. Stack FITS
-        # carry NaN in uncovered/mosaic-gap regions; box averaging (and a plain
-        # min/max normalize) would smear NaN across the whole frame and blank
-        # it out. Striding preserves NaN so the NaN-aware stretch below can
-        # exclude those pixels — and it's faster, which suits live previews.
-        step = int(np.ceil(w / max_width))
-        rgb = rgb[::step, ::step]
+        # Downscale to the full ``max_width`` with a NaN-aware area (box) average,
+        # not nearest-neighbour striding. Striding (a) only reached ``ceil(w/
+        # max_width)`` integer steps — a 1080-wide Seestar stack strode to 540 px,
+        # not 1024, visibly coarser than the box-averaged baked preview beside it —
+        # and (b) *dropped* samples: a FWHM≈2 px star could lose up to half its flux
+        # depending on subpixel phase, so stars aliased/twinkled. The area average
+        # spreads each star's flux instead. NaN (uncovered / mosaic-gap) is treated
+        # as no-coverage, so an output pixel is the mean of the finite samples under
+        # it and stays NaN only where every contributing input pixel was NaN — the
+        # property striding was originally chosen to preserve.
+        new_w = max_width
+        new_h = max(1, int(round(rgb.shape[0] * max_width / w)))
+        rgb = _nan_aware_area_downscale(rgb, new_w, new_h)
     return rgb, display_space
+
+
+def _nan_aware_area_downscale(rgb: np.ndarray, new_w: int, new_h: int) -> np.ndarray:
+    """Area-average an ``(H, W, C)`` float image down to ``(new_h, new_w, C)``,
+    treating NaN as *no coverage*.
+
+    Each output pixel is the mean of the **finite** input samples under it (via
+    PIL's BOX/area filter on the NaN→0 image divided by the same filter on a
+    finite-sample mask), and is NaN only where every contributing input pixel was
+    NaN. This spreads a star's flux across the downscale rather than dropping it
+    (what nearest striding did, causing aliasing/twinkle) while keeping genuine
+    coverage gaps as NaN for the NaN-aware stretch downstream. Channels are
+    processed one at a time to keep peak memory near the input size on a
+    RAM-capped host.
+    """
+    from PIL import Image
+
+    h, w, c = rgb.shape
+    out = np.empty((new_h, new_w, c), dtype=np.float32)
+    for ch in range(c):
+        plane = rgb[..., ch]
+        finite = np.isfinite(plane)
+        filled = np.where(finite, plane, 0.0).astype(np.float32, copy=False)
+        mask = finite.astype(np.float32)
+        num = np.asarray(
+            Image.fromarray(filled, mode="F").resize((new_w, new_h), Image.BOX),
+            dtype=np.float32)
+        den = np.asarray(
+            Image.fromarray(mask, mode="F").resize((new_w, new_h), Image.BOX),
+            dtype=np.float32)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            res = num / den
+        res[den <= 0.0] = np.nan          # a fully-uncovered block stays a gap
+        out[..., ch] = res
+    return out
 
 
 def render_stack_png(
@@ -307,8 +348,8 @@ def render_preview_png_full_res(
 
     from seestack.stack.output import _autostretch_for_export
 
-    # ``load_stack_rgb`` strides the width down to ``max_long_edge`` during load
-    # (cheap for a wide image); a tall image's height is capped after stretching.
+    # ``load_stack_rgb`` area-averages the width down to ``max_long_edge`` during
+    # load (cheap for a wide image); a tall image's height is capped after stretch.
     rgb, display_space = load_stack_rgb(fits_path, max_width=max_long_edge)
     stretched = (np.nan_to_num(rgb, nan=0.0) if display_space
                  else _autostretch_for_export(rgb))

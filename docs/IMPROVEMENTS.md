@@ -677,9 +677,19 @@ when you take it.
   Settings value reaches the built arglist. Upgrade-safe (defaults identical). Confidence: traced (call graph complete).
   (S–M, autonomy/correctness — **PRIORITY 1: owner-confirmed S30, likely the dominant cause of their solve failures**.)
 
-- **The interactive stack render (History "Adjust" viewer, its stretch-suggestion measurement, and any >8000 px
+- ~~**The interactive stack render (History "Adjust" viewer, its stretch-suggestion measurement, and any >8000 px
   "full-res" PNG) decimates by pixel striding — a native 1080-wide Seestar stack renders at 540 px with aliased,
-  twinkling stars, visibly worse than the 1024 px box-averaged baked preview sitting next to it.** *(Render
+  twinkling stars.**~~ — **FIXED v0.203.0** (Builder 2026-07-25, branch `claude/pensive-faraday-0ggbe3`). Replaced
+  the `rgb[::step, ::step]` nearest-stride in `load_stack_rgb` (`seestack/render/thumbnail.py`) with a NaN-aware area
+  (box) average to the *full* `max_width`: new `_nan_aware_area_downscale` box-resizes the NaN→0 image and a
+  finite-sample mask (PIL BOX, per-channel to bound peak memory) and divides, so each output pixel is the mean of the
+  finite samples under it and stays NaN only where a block is fully uncovered — the coverage-preservation striding was
+  chosen for, without dropping star flux. A 1080-wide stack now renders at 1024 px (not 540) matching the box-averaged
+  baked preview beside it, and the same loader fixes the stretch-suggestion measurement and the >8000 px full-res PNG.
+  Regression tests (`tests/webapp/test_stack_render.py`): 1080-wide → 1024 with an odd-coord star's flux surviving
+  (fail-before: 540 px, star dropped by the even-index stride), plus the existing NaN-strip-preservation test still
+  green. Upgrade-safe (display render only; no artifact/schema/API change). Confidence: traced + regression-tested.
+  *(Original entry follows for provenance.)* *(Render
   parity/quality; broken-UX, display only — the FITS/TIFF/share-JPEG artifacts are unaffected; found by the 2026-07-24
   audit completing the interrupted quality sweep's aliasing thread. Traced.)* `load_stack_rgb`
   (`seestack/render/thumbnail.py:229-237`) decimates with `rgb[::step, ::step]` where `step = ceil(w/max_width)` — for
@@ -12387,6 +12397,12 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.203.0** — Fix the aliased/low-res interactive stack render: `load_stack_rgb` now downscales with a NaN-aware
+  area (box) average to the full `max_width` instead of nearest striding, so the History "Adjust" view (and the
+  stretch-suggestion measurement + >8000 px full-res PNG) renders a native 1080-wide stack at 1024 px, not a coarse,
+  twinkling 540 px — matching the box-averaged baked preview beside it. Stars' flux is spread, not dropped; NaN
+  coverage gaps still preserved. +1 regression test (1080→1024, odd-coord star survives). (branch
+  `claude/pensive-faraday-0ggbe3`)
 - **v0.202.0** — ⭐⭐⭐ Auto-derive the plate-solve FOV per frame from the FITS header (S30 ≈ 2.1°, S50 ≈ 1.27°) +
   wire the dead ASTAP FOV/timeout Settings through to every real solve. The owner-confirmed root cause of an S30
   owner's solves failing across ALL targets: every real solve was hardcoded to 1.3° (an S50 value) — a mismatch
