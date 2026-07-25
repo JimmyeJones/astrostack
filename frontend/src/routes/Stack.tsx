@@ -357,6 +357,20 @@ export function StackView() {
   const darkScaledNote = darkScalingActive
     ? `Dark exposure-scaling is on — this ${darkM?.exposure_s}s dark will be scaled to match your ${subExp}s subs.`
     : null;
+  // A dark shot at a very different sensor temperature leaves residual dark
+  // current even at a matched exposure (dark current ~doubles per 6–7°C) — and,
+  // unlike an exposure gap, bias-scaling can't correct it, so it warns whenever
+  // both temperatures are known and differ by ≥5°C (mirrors the engine's
+  // CalibrationMasters.calibration_warnings temperature advisory, which until now
+  // only reached the stack log). Independent of the exposure warning above: a
+  // dark can match on exposure but still be temperature-mismatched.
+  const TEMP_MISMATCH_TOL_C = 5;
+  const subTemp = sug?.params.sensor_temp_c ?? null;
+  const darkTempWarning =
+    darkM?.sensor_temp_c != null && subTemp != null
+    && Math.abs(darkM.sensor_temp_c - subTemp) >= TEMP_MISMATCH_TOL_C
+      ? `This dark was shot at ${darkM.sensor_temp_c}°C but your subs are at ${subTemp}°C — dark current changes with temperature, so some may remain even at a matched exposure. A temperature-matched dark calibrates best.`
+      : null;
   // Proactive nudge: the dark's exposure is mismatched and no bias is selected,
   // but the library *holds* a master bias — so scaling is one click away rather
   // than a two-step discovery (pick the bias, then flip the option). Prefer the
@@ -805,6 +819,11 @@ export function StackView() {
                 {darkScaledNote ? (
                   <Alert color="teal" variant="light" py={6} px="sm">
                     <Text size="xs">{darkScaledNote}</Text>
+                  </Alert>
+                ) : null}
+                {darkTempWarning ? (
+                  <Alert color="yellow" variant="light" py={6} px="sm">
+                    <Text size="xs">{darkTempWarning}</Text>
                   </Alert>
                 ) : null}
                 {values.flat_master_id && darkOpts.length > 0 ? (

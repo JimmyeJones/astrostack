@@ -7363,7 +7363,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   copy; mixed → generic fallback; trailed-dominated → stays generic-reassuring). Pillar: friendliness + trust.
 - **IMPROVEMENT IDEA (Scout 2026-07-23) — surface calibration-master mismatches (and a *never-applied* wrong-shaped
   bias) at *bind time* in the calibration UI, not only buried in the stack log.** *(Friendliness + trust; size S–M;
-  PRIORITY 3, adjacent to image-quality.)* `CalibrationMasters.calibration_warnings()` already produces the right
+  PRIORITY 3, adjacent to image-quality.)*
+  **▶ PARTIAL — the two exposure/temperature mismatch advisories are now surfaced at pick-time on the Stack form.**
+  The exposure-mismatch half shipped earlier as the inline `darkWarning`/`flatDarkWarning`/`darkScaledNote`/
+  `biasIgnoredForLights` cautions the Stack form renders beside each master `Select` (with a one-click "scale this dark"
+  fix). The **temperature-mismatch** half shipped **v0.208.1** (Builder 2026-07-25, branch `claude/pensive-faraday-jqlh52`;
+  frontend-only, tested): a new inline `darkTempWarning` warns whenever the chosen light-dark's `sensor_temp_c` and the
+  target's median sub temperature (`calibrationSuggestions().params.sensor_temp_c`) are both known and differ by ≥5°C —
+  mirroring the engine's `CalibrationMasters.calibration_warnings` temperature advisory (`_TEMP_MISMATCH_TOL_C=5.0`),
+  which until now reached only the stack log. It's independent of the exposure warning (a dark can match on exposure yet
+  be temperature-mismatched — and, unlike an exposure gap, bias-scaling can't correct it), so it fires even on an
+  exposure-matched dark. Regression: `frontend/src/routes/Stack.test.tsx` (+1 — an exposure-matched 30 s dark shot 15°C
+  warmer warns on temperature with *no* exposure warning). Upgrade-safe: frontend-only, additive, reuses data already in
+  the suggestions payload; no API/schema/default change.
+  **Still open (the (c) slice):** the **loaded-but-inert** master notice — a bias whose shape doesn't match the dark, or
+  a master whose dimensions don't match the target's frames, with a "this master won't be used because it doesn't match
+  your camera/binning" note. That one needs the backend to expose per-master dims-vs-target validity (the frontend can't
+  tell a shape mismatch from the current payload), so it's a separate S–M slice.
+  `CalibrationMasters.calibration_warnings()` already produces the right
   plain-language advisories ("Master dark is 30s but your subs are 10s — its pedestal will be over-subtracted on every
   frame…"; the temperature-mismatch line), and this run's fix keeps them honest. But they only reach the *stack log* —
   a beginner binding a dark/flat/bias to a target never sees them until (if ever) they read a log, so they ship a
