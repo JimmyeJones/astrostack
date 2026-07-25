@@ -51,6 +51,45 @@ describe("nextBestMove", () => {
     expect(tip?.kind).toBe("locate");
   });
 
+  it("advises a refocus when a healthy stack came out softer than usual", () => {
+    const tip = nextBestMove({
+      nFramesUsed: 40,
+      integrationS: 2 * HOUR,
+      softStars: { currentFwhmPx: 4.5, typicalFwhmPx: 3.0 },
+    });
+    expect(tip?.kind).toBe("soft");
+    expect(tip?.phrase).toContain("4.5 px");
+    expect(tip?.phrase).toContain("3.0 px");
+    expect(tip?.phrase.toLowerCase()).toContain("refocus");
+  });
+
+  it("fires the soft rung even when integration time is unknown", () => {
+    const tip = nextBestMove({
+      nFramesUsed: 40,
+      integrationS: null,
+      softStars: { currentFwhmPx: 5.0, typicalFwhmPx: 3.0 },
+    });
+    expect(tip?.kind).toBe("soft");
+  });
+
+  it("prioritises locate and thin over soft-stars", () => {
+    const soft = { currentFwhmPx: 5.0, typicalFwhmPx: 3.0 };
+    // A thin stack that's also soft → thin outranks soft.
+    expect(nextBestMove({ nFramesUsed: 2, softStars: soft })?.kind).toBe("thin");
+    // Mostly-unsolved AND soft → locate is still the top lever.
+    expect(nextBestMove({ nFramesUsed: 30, nUnsolved: 30, softStars: soft })?.kind).toBe("locate");
+  });
+
+  it("prefers the refocus nudge over add-time advice when both apply", () => {
+    // Healthy count, under an hour, AND soft stars → soft outranks integration.
+    const tip = nextBestMove({
+      nFramesUsed: 40,
+      integrationS: 18 * 60,
+      softStars: { currentFwhmPx: 5.0, typicalFwhmPx: 3.0 },
+    });
+    expect(tip?.kind).toBe("soft");
+  });
+
   it("advises more time for a healthy stack under an hour", () => {
     const tip = nextBestMove({ nFramesUsed: 40, integrationS: 18 * 60 }); // 18 min
     expect(tip?.kind).toBe("integration");

@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { Alert, Text } from "@mantine/core";
 import { IconBulb } from "@tabler/icons-react";
 import { nextBestMove } from "./nextBestMove";
+import { softerThanUsual } from "./softStars";
 
 /**
  * "💡 To make this even better" — a single calm, plain-language line on the
@@ -25,16 +26,27 @@ export function NextBestMoveBadge(
     nFramesUsed,
     integrationS,
     nUnsolved,
+    runs,
   }: {
     name: string;
     nFramesUsed: number | null | undefined;
     integrationS: number | null | undefined;
     nUnsolved: number | null | undefined;
+    /** The target's stack runs newest-first (from `listStackRuns`) — used to
+     * derive the relative soft-star signal. Optional; the tip degrades to the
+     * non-soft ladder when it's missing. */
+    runs?: { stack_fwhm_px?: number | null }[] | null;
   },
 ) {
   const tip = useMemo(
-    () => nextBestMove({ nFramesUsed, integrationS, nUnsolved }),
-    [nFramesUsed, integrationS, nUnsolved],
+    () =>
+      nextBestMove({
+        nFramesUsed,
+        integrationS,
+        nUnsolved,
+        softStars: softerThanUsual(runs),
+      }),
+    [nFramesUsed, integrationS, nUnsolved, runs],
   );
   if (!tip) return null;
 

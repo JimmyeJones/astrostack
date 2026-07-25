@@ -11,11 +11,13 @@
  * head.
  *
  * This picks exactly ONE lever — the highest-priority unmet one, in a fixed sane
- * order (can't-locate-subs → too-thin → short-integration → all-good) — and says
- * it plainly, translating counts/minutes into "install the star DB / add subs /
- * add time" rather than a QC table. It never judges star sharpness against an
- * absolute bar (FWHM in pixels needs per-camera calibration to read as
- * "soft" — the deliberately-deferred soft-star lever), so it can't false-alarm.
+ * order (can't-locate-subs → too-thin → soft-stars → short-integration →
+ * all-good) — and says it plainly, translating counts/minutes into "install the
+ * star DB / add subs / refocus / add time" rather than a QC table. It never
+ * judges star sharpness against an absolute bar (FWHM in pixels needs per-camera
+ * calibration to read as "soft"); the soft-star rung fires only on a *relative*
+ * signal — this target's newest stack being softer than its own history (see
+ * `softStars.ts`) — so it can't false-alarm across camera models.
  *
  * Pure + threshold-driven so it's trivially unit-testable. Returns `null`
  * (card hidden) when there's no finished stack to advise on, when inputs are
@@ -23,6 +25,7 @@
  */
 
 import { THIN_STACK_MAX_FRAMES } from "./thinStack";
+import type { SoftStars } from "./softStars";
 
 // A plate-solve shortfall is worth flagging as the top lever only when it's both
 // a real share of the session AND several subs — a stray unsolved frame or two
@@ -40,7 +43,7 @@ export const SHORT_INTEGRATION_S = 60 * 60; // 1 hour
 // nothing to nudge, so stay silent rather than nag a good result.
 export const DEEP_INTEGRATION_S = 3 * 60 * 60; // 3 hours
 
-export type NextBestMoveKind = "locate" | "thin" | "integration" | "good";
+export type NextBestMoveKind = "locate" | "thin" | "soft" | "integration" | "good";
 
 export interface NextBestMove {
   kind: NextBestMoveKind;
@@ -54,6 +57,10 @@ export interface NextBestMoveInput {
   integrationS?: number | null;
   /** Accepted subs that couldn't be plate-solved (the "unsolved" reject bucket). */
   nUnsolved?: number | null;
+  /** Relative star-softness signal vs this target's own history, if computable
+   * (from `softerThanUsual(runs)`). Present only when the newest stack came out
+   * materially softer than usual; drives the "refocus" rung. */
+  softStars?: SoftStars | null;
 }
 
 function finite(v: number | null | undefined): number | null {
@@ -67,8 +74,10 @@ function finite(v: number | null | undefined): number | null {
  *   1. `locate`      — a real share of subs failed to plate-solve.
  *   2. `thin`        — barely any frames combined (also covered by the louder
  *                      thin-stack warning; kept here so the ladder is complete).
- *   3. `integration` — a healthy stack but under ~1 hour total.
- *   4. `good`        — decent result; encourage + name the one lever (time) that
+ *   3. `soft`        — a healthy stack whose stars came out softer than usual for
+ *                      this target (relative to its own history) → check focus.
+ *   4. `integration` — a healthy stack but under ~1 hour total.
+ *   5. `good`        — decent result; encourage + name the one lever (time) that
  *                      still helps. Silent once the stack is genuinely deep.
  */
 export function nextBestMove(input: NextBestMoveInput): NextBestMove | null {
@@ -107,6 +116,24 @@ export function nextBestMove(input: NextBestMoveInput): NextBestMove | null {
         `This stack combined only ${nUsed} ${nUsed === 1 ? "sub" : "subs"} — ` +
         `too few to smooth out the noise. Adding more subs is the biggest win ` +
         `here; a stack only gets cleaner as it combines more frames.`,
+    };
+  }
+
+  // 3. Soft-stars. A healthy stack, but its stars came out softer than this
+  //    target's own usual (a relative signal — no absolute px bar, so no
+  //    per-camera calibration needed). A quick refocus next session is the
+  //    highest-leverage fix — it tightens every future sub — so it outranks the
+  //    add-time nudges below. Only ever fires on a real regression vs history.
+  if (input.softStars) {
+    const now = input.softStars.currentFwhmPx.toFixed(1);
+    const usual = input.softStars.typicalFwhmPx.toFixed(1);
+    return {
+      kind: "soft",
+      phrase:
+        `Your stars came out a little softer than usual on this one — about ` +
+        `${now} px across, vs your typical ${usual} px for this target. A quick ` +
+        `refocus at the start of your next session usually tightens them back ` +
+        `up, which sharpens every sub you shoot.`,
     };
   }
 
