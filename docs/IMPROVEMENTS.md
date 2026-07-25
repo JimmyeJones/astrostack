@@ -1525,6 +1525,41 @@ when you take it.
   small tier); (c) **cheap interim** — lower the main-tier reconcile fraction (κ-σ safely cleans a re-accepted
   minority once ≥10 frames), keeping the small tier. Add a fail-before/pass-after regression test with a synthetic
   variable-subset flag pattern. **Scout: validate on a real edge-on-galaxy stack before flipping.**
+  - **Builder note 2026-07-25 (branch `claude/pensive-faraday-n1ksyw`) — an ordering-safe implementation path for
+    fix-direction (b) (the "denominator" fix), so a future run isn't blocked by the timing objection.** I traced the
+    live call order: `reconcile_streak_rejections` is invoked **inside the QC phase, *before* the solve phase**
+    (`seestack/io/scanner.py:522-525` runs it right after the QC loop; the solve loop only begins at line 527). At that
+    point **no frame carries a `wcs_json` yet**, so naively narrowing the reconcile denominator to the *solved/stackable*
+    population would collapse it to zero on every fresh scan (or into the small-tier branch) and mis-fire — which is
+    exactly the "guard the QC-runs-before-solve ordering" caveat the original entry flags. **The clean way to do (b)
+    without that hazard:** leave the existing pre-solve reconcile **byte-for-byte unchanged** (it stays the transient-trail
+    safety net over the full eligible set), and add a **second, additive reconcile pass at the end of the solve phase**
+    that computes the streak fraction over the **solved** subset only (`wcs_json IS NOT NULL`) — the frames that actually
+    reach the stacker. That directly removes the "accepted-but-unsolved subs dilute the denominator" failure the entry
+    describes (a handful of solved edge-on-galaxy subs no longer hide under hundreds of unsolved faint-field subs), while
+    the pre-solve pass keeps its current conservative contract. It's still **un-reject-only** and still leaves the stack's
+    per-pixel κ-σ/drizzle rejection as the genuine-trail backstop, so the fail-safe direction is unchanged. **Still
+    real-data-gated:** the *fraction/threshold* for the post-solve pass wants tuning on a real elongated-target stack
+    before it ships (same gate as before) — this note only resolves the *ordering* blocker and pins the exact call site,
+    so the remaining work is threshold validation + a fail-before/pass-after test, not architecture. (Recorded, not
+    shipped — a blind threshold flip on this on-by-default hot path still needs the real edge-on-galaxy data the entry
+    asks for.)
+
+> **Builder QA note 2026-07-25 (branch `claude/pensive-faraday-n1ksyw`) — stacking/calibration engine re-audited CLEAN
+> (fresh empirical pass).** Baseline suite green before any change (**2031 passed, 2 skipped**). A dedicated adversarial
+> audit re-covered `seestack/stack/{stacker,accumulator,align,drizzle_path,mosaic,weighting,photometric,reference}.py`
+> and `seestack/calibrate/{apply,masters}.py` by *reading* **and** by *running* targeted reproductions on realistic
+> synthetic Seestar OSC (RGGB, 10 s) data — **no new bug found**. Empirically re-confirmed correct: the three
+> accumulators (Welford / WeightedSum / MinMaxReject at **k=1 and k=3**, plus `rejection_counts`) against hand-computed
+> trimmed means and drop schedules; κ-σ end-to-end (dithered + non-dithered, satellite trail at n=12) with the correct
+> rejection fraction and **no interior NaN leak** (the only NaNs were the documented 3 px `FRAME_EDGE_INSET_PX` border);
+> the `auto` dispatch gates (min/max n≥3, κ-σ n≥4, drizzle-reject n≥4); drizzle single- and two-pass reject (flux
+> conserved vs mean, zero star-core holes); calibration `(light−dark)/flat` ordering + dark exposure-scaling
+> (unscaled 30 s dark correctly over-subtracts a 10 s light; scaled recovers the true signal); photometric ↔
+> inverse-variance (`1/s²`) weight pairing; honest frame-count coverage (0..N counts, not Σweights); and a real
+> two-panel union-canvas mosaic (no seam). The two `align.py`/`weighting.py` items already filed **unreachable** in the
+> "Minor / low-priority" cluster were re-confirmed unreachable (not re-reported). So this hour added no engine fix
+> because the engine remains clean within scope — recorded so a future run doesn't re-burn a cycle on the same audit.
 
 - ~~**⭐ Clearing the Stage-1 cache silently makes a target un-stackable *and* un-QC-able even though the original
   subs are still on disk — every frame is dropped because the DB's dangling `cached_path` is followed instead of
