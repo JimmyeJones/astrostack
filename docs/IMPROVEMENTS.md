@@ -8895,9 +8895,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   everywhere. Insert the rung between `thin` and `integration` in the ladder. Confidence: traced (the
   calibration gap is why it was deferred). (S–M, autonomy/image-quality — PRIORITY 2/4.)
 
-- **NEW IDEA (Builder 2026-07-25, spotted while shipping the soft-star "refocus" rung v0.205.0) — surface the
+- ~~**NEW IDEA (Builder 2026-07-25, spotted while shipping the soft-star "refocus" rung v0.205.0) — surface the
   "softer than usual" signal as a small per-run chip in the target's History table, so a beginner scanning past
-  nights can *see at a glance* which sessions had focus trouble.** *(Pillar: 3 friendliness + 4 understand-your-data;
+  nights can *see at a glance* which sessions had focus trouble.**~~ — **SHIPPED v0.206.0** (Builder 2026-07-25,
+  branch `claude/pensive-faraday-8u4hoe`; tested). Added a pure helper `frontend/src/components/target/focusChips.ts`
+  (`focusChips(runs) -> Map<runId, "sharpest" | "soft">`) that judges **each** history row against only its own priors
+  (the runs shot before it): for the newest-first list, the run at index `i` is scored on the slice `runs.slice(i)`
+  (`[thisRun, ...olderRuns]`) by reusing the *exact* shipped `sharpestYet` / `softerThanUsual` helpers — so it stays
+  purely relative to the target's own history (no absolute px bar, no per-camera tuning). A tiny presentational
+  `FocusChip` (`FocusChip.tsx`) renders "✨ sharpest yet" (grape) or "softer than usual" (orange) with a plain-language
+  tooltip, in the History card's badge row beside the frame count; it renders nothing for a run with no verdict, so it's
+  fail-safe on the first run, unmeasured runs, and the normal band. The chips are computed from the API's chronological
+  (newest-first) list, not the display sort, so they're stable under the Cleanest/Newest toggle. Frontend-only +
+  additive (no backend/DB/API-shape/default change; reuses the already-served `stack_fwhm_px`). Tests:
+  `focusChips.test.ts` (+6 — empty input, oldest run gets no chip, a new-best → "sharpest", a materially-soft row →
+  "soft", each row judged against only its priors, silent in the normal band / on unmeasured runs) and
+  `FocusChip.test.tsx` (+3 — renders each chip, nothing when absent). (S, friendliness — PRIORITY 3.)
+  *(Original idea kept for provenance.)* *(Pillar: 3 friendliness + 4 understand-your-data;
   size S — frontend-only.)* **The gap:** v0.205.0's `softerThanUsual(runs)` (`frontend/src/components/target/
   softStars.ts`) computes a purely relative, zero-calibration verdict — is *this* run materially softer than the
   target's own median — but it's consumed **only** by the newest-result "next best move" coaching line. The History
