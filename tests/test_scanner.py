@@ -301,6 +301,51 @@ def test_reject_seestar_output_frames_rejects_output_and_video_not_subs(tmp_path
         proj.close()
 
 
+def test_reject_seestar_output_frames_keeps_a_real_subs_folder_sharing_the_base_name(tmp_path):
+    """Mixed-source guard (regression): a genuine ``<T>/`` folder of many raw subs
+    — a user's own non-Seestar capture — that merely shares the base name of a
+    Seestar ``<T>_sub/`` seen in the same scan must NOT be mass-rejected as
+    on-device output. The Seestar's output is a *single* image, so only a folder
+    with ``<= _MAX_SEESTAR_OUTPUT_FRAMES`` frames is treated as output. Fails
+    before the frame-count guard (all 8 subs were rejected by basename alone)."""
+    proj = Project.create(tmp_path / "proj", name="Andromeda")
+    try:
+        root = tmp_path / "incoming"
+        # 8 real subs the user dropped into a plain folder literally named "Andromeda".
+        real_ids = [
+            proj.add_frame(FrameRow(source_path=str(root / "Andromeda" / f"Light_{i:03d}.fit")))
+            for i in range(8)
+        ]
+        # 3 Seestar subs merged in from the sibling "Andromeda_sub/".
+        sub_ids = [
+            proj.add_frame(FrameRow(source_path=str(root / "Andromeda_sub" / f"Light_{i:03d}.fit")))
+            for i in range(3)
+        ]
+        rejected = proj.reject_seestar_output_frames("Andromeda")
+        assert rejected == []  # folder too big to be the on-device output — nothing rejected
+        for fid in real_ids + sub_ids:
+            assert proj.get_frame(fid).accept is True
+    finally:
+        proj.close()
+
+
+def test_reject_seestar_output_frames_rejects_a_multi_frame_video_folder(tmp_path):
+    """A ``*_video`` capture legitimately holds many frames and they are all junk
+    (not stackable deep-sky subs), so the single-image size guard applies only to
+    the bare ``<T>/`` output folder and must NOT spare a multi-frame video folder."""
+    proj = Project.create(tmp_path / "proj", name="M 31")
+    try:
+        root = tmp_path / "incoming"
+        vids = [
+            proj.add_frame(FrameRow(source_path=str(root / "M 31_video" / f"frame_{i:03d}.fit")))
+            for i in range(6)
+        ]
+        rejected = proj.reject_seestar_output_frames("M 31")
+        assert set(rejected) == set(vids)
+    finally:
+        proj.close()
+
+
 def test_rescan_rejects_pre_v0_184_9_output_pollution_end_to_end(tmp_path):
     """Upgrade path: a library first scanned before the Seestar convention
     shipped merged the on-device output into the ``<T>`` target. Re-scanning with
