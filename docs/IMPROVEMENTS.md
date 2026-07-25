@@ -8895,6 +8895,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   everywhere. Insert the rung between `thin` and `integration` in the ladder. Confidence: traced (the
   calibration gap is why it was deferred). (S–M, autonomy/image-quality — PRIORITY 2/4.)
 
+- **NEW IDEA (Builder 2026-07-25, spotted while shipping the soft-star "refocus" rung v0.205.0) — surface the
+  "softer than usual" signal as a small per-run chip in the target's History table, so a beginner scanning past
+  nights can *see at a glance* which sessions had focus trouble.** *(Pillar: 3 friendliness + 4 understand-your-data;
+  size S — frontend-only.)* **The gap:** v0.205.0's `softerThanUsual(runs)` (`frontend/src/components/target/
+  softStars.ts`) computes a purely relative, zero-calibration verdict — is *this* run materially softer than the
+  target's own median — but it's consumed **only** by the newest-result "next best move" coaching line. The History
+  table already lists every run with its own `stack_fwhm_px`, yet a beginner has to eyeball the raw px column to spot a
+  bad-focus night. **The feature:** for each history row, reuse the same median-of-*that-row's*-priors logic to render
+  a tiny neutral "softer than usual" / "sharpest yet" chip beside the FWHM (mirroring the existing `SharpestYetBadge`
+  colour language), so the focus story of a target across nights is legible without maths. Must stay fail-safe (no chip
+  on the first run, unmeasured runs, or the normal band) and never use an absolute px bar. Frontend-only, additive,
+  reuses the shipped helper (extend it to take an explicit "priors" slice so a mid-history row can be judged against
+  only the runs *before* it). Testable via the pure helper. (S, friendliness — PRIORITY 3.)
+
 - ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "You beat your best!" (sharpest-yet slice): when a fresh stack of a
   target comes out sharper than your previous best of that same target, say so with a small celebratory callout.**~~
   — **SHIPPED v0.198.0** (Builder 2026-07-24, branch `claude/pensive-faraday-jtfnbq`; tested). Now unblocked by the
