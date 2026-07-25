@@ -734,6 +734,22 @@ when you take it.
   output/`_video` reject against any existing target whose registered source paths live under that container; or teach
   the junk detector to flag a multi-folder target mixing `_sub` + bare + `_video` sources. Confidence: reproduced.
   (M, ingest — PRIORITY 2.)
+  **⚠ Builder note (2026-07-25, `claude/pensive-faraday-v8z2rz`) — two design constraints found while scoping; do the
+  SCAN-TIME variant, not the poll-time one.** (1) **Don't put this in `cleanup-suggestions` as a poll-time detector.**
+  Unlike the existing junk/`_sub`-dup checks (cheap: gated on `n_frames ≤ _MAX_CLEANUP_FRAMES` or a `_sub` name
+  prefilter, so big real stacks are never opened), a wholesale-drop target is *large* (all the subs from several
+  targets), so detecting "frames from multiple mixed folders" would force opening **every** big project and reading
+  every source path on **every** Library-page poll — a real cost on the owner's thousands-of-subs library, for a rare
+  legacy artifact they don't even have. (2) **Rejecting only the output/`_video` frames does not fully heal it** — the
+  giant target still holds raw subs from *two different sky regions* (e.g. M 31 + NGC 7000), so it would still try to
+  stack mixed pointings (mosaic-canvas blow-up / gibberish), and the correct per-target versions already exist after the
+  container-expansion re-scan, making the whole giant target a duplicate that should not auto-stack at all. **Better
+  direction:** detect it **at scan time** (once, cheap — the container expansion already runs there), and stamp an
+  additive nullable marker (e.g. a project-meta flag or a `TargetScanResult` field) on the pre-existing giant target so
+  the *poll-time* `cleanup-suggestions` endpoint can surface it for one-click removal **without** re-scanning source
+  paths — mirroring how `reject_seestar_output_frames` already runs additively inside `scan_and_organize`. Removal stays
+  `remove_files=false` (raw subs on disk untouched → a later scan re-ingests them correctly under the right targets), so
+  it's fully reversible. Still narrow (legacy wholesale-drop libraries only) — a good careful task, not a rushed one.
 
 - ~~**One-click `<T>_sub` duplicate cleanup silently discards the duplicate target's user data (stack-run history, notes)
   — and a genuinely-named standalone `<T>_sub` target gets cloned on re-scan, then its ORIGINAL offered for deletion.**~~
@@ -8973,6 +8989,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   suggestion ("You've got this one about as clean as your sky allows — a fresh target would pay off more tonight").
   Purely additive copy tying two shipped surfaces together; self-hides otherwise. Validate the plateau threshold
   reads sensibly on a real multi-night target before making the nudge loud. (S, autonomy — PRIORITY 2–3.)
+  **Note (Builder 2026-07-25, `v8z2rz`): partly delivered by v0.209.0's `IntegrationTrendBadge`** — the plateau
+  sentence it renders on the Target page already says "*A darker sky or a brighter target will do more than extra time
+  on this one*", so the core "move on" nudge is now shown where a beginner decides. What remains here is only the
+  *cross-page* tie-in: highlighting the Dashboard `SuggestTargetsCard` when a viewed target is plateaued — which needs
+  per-target plateau computation on the Dashboard (extra run fetches), not "purely additive copy". Lower value now that
+  the on-page nudge exists; keep the real-data threshold-validation caveat before making anything loud.
 
 - ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "You beat your best!" (sharpest-yet slice): when a fresh stack of a
   target comes out sharper than your previous best of that same target, say so with a small celebratory callout.**~~
