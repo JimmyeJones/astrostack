@@ -125,6 +125,7 @@ def _pipeline_body(
                             only_new_qc=True,  # don't re-QC frames already done on re-scans
                             use_solve_hints=settings.astap_use_solve_hints,
                             auto_reject_streaks=not settings.keep_streaked_frames,
+                            bootstrap_solve=settings.astap_bootstrap_solve,
                             progress=_progress(jm, job),
                             should_stop=job.cancel_requested,
                         )
@@ -409,6 +410,7 @@ def submit_qc_solve(settings: Settings, jm: JobManager, safe: str) -> Job:
                     run_solve=settings.auto_solve or True,
                     use_solve_hints=settings.astap_use_solve_hints,
                     auto_reject_streaks=not settings.keep_streaked_frames,
+                    bootstrap_solve=settings.astap_bootstrap_solve,
                     progress=_progress(jm, job),
                     should_stop=job.cancel_requested,
                 )
@@ -463,6 +465,7 @@ def submit_process_target(settings: Settings, jm: JobManager, safe: str) -> Job:
                     run_solve=True,
                     use_solve_hints=settings.astap_use_solve_hints,
                     auto_reject_streaks=not settings.keep_streaked_frames,
+                    bootstrap_solve=settings.astap_bootstrap_solve,
                     progress=_progress(jm, job),
                     should_stop=job.cancel_requested,
                 ))
@@ -762,6 +765,7 @@ def _refresh_target(settings: Settings, jm: JobManager, job: Job,
                 only_new_qc=False,  # re-derive QC for *every* frame with the new engine
                 use_solve_hints=settings.astap_use_solve_hints,
                 auto_reject_streaks=not settings.keep_streaked_frames,
+                bootstrap_solve=settings.astap_bootstrap_solve,
                 progress=_progress(jm, job),
                 should_stop=job.cancel_requested,
             )

@@ -1333,8 +1333,32 @@ when you take it.
   (`tests/test_astap.py`, structural ones fail-before/pass-after): `test_solve_ladder_never_bins_past_2x`,
   `test_solve_ladder_has_full_res_widened_star_pool_rung`, `test_solve_ladder_first_rung_is_astap_default`,
   `test_ladder_solves_on_full_res_widened_star_pool_rung` (a frame that only locks with the widened `-s` is rescued by
-  the new rung, proving it is reached and useful). **Slice (b) — the stack-then-solve bootstrap (the real cure) —
-  remains open** (M–L; see the queued idea below).
+  the new rung, proving it is reached and useful).
+  **▶ SLICE (b) SHIPPED — the stack-then-solve bootstrap (the real cure) (Builder 2026-07-25, v0.210.0, branch
+  `claude/pensive-faraday-0ijrph`).** New engine module `seestack/solve/bootstrap.py::bootstrap_solve` +
+  new **off-by-default** setting `astap_bootstrap_solve` (`webapp/config.py`), wired into `run_qc_and_solve`
+  (`seestack/io/scanner.py`) to run **after** the per-sub solve pass and threaded from all four webapp callers
+  (auto pipeline / qc_solve / process-target / reprocess). When enabled and the per-sub pass left **fewer than
+  `min_frames` (8) subs solved** yet there are **≥8 accepted-but-unsolved** subs, it: (1) loads + debayers +
+  background-flattens the star-richest unsolved subs (capped at 16), (2) registers each to a reference sub with
+  `skimage.registration.phase_cross_correlation` (integer-pixel shift, skipping any beyond a 200 px cap — a bad
+  lock is left honestly unsolved, never mis-placed), (3) means the registered members onto the reference grid into
+  a higher-SNR **deep image**, (4) plate-solves *that* once (the deep image shares the reference sub's grid, so its
+  WCS is the reference's), (5) propagates the solved WCS to each member by offsetting `CRPIX` by the member's
+  measured shift (`CRPIX_member = CRPIX_ref − (dc, dr)`), writing `wcs_json` + centre so the whole burst finally
+  stacks. Fully additive/reversible/guarded: never deletes, never touches an already-solved or deliberately-rejected
+  sub, clears only a stale `solve_failed:` reason on rescue, and is a strict no-op unless enough subs stayed unsolved.
+  The one ASTAP call is injected (`deep_solver`) so the pure logic is fully tested. Regression tests
+  (`tests/test_bootstrap_solve.py`, 11): registration recovers the dither shift and rejects out-of-bounds locks;
+  integration averages the noise down; **WCS propagation matches synthetic ground-truth CRPIX** (the core
+  correctness check — each rescued sub's propagated WCS lands within ~1.5 px of its true dithered WCS); the guards
+  (too-few-unsolved / enough-already-solved), the deep-solve-failure no-op, the reject-safety, the stale-reason
+  clear, and the scanner flag wiring. Upgrade-safe: additive setting defaulting off + config-upgrade test
+  (`tests/webapp/test_config_upgrade.py`), no DB/API-shape/on-disk change; Settings UI toggle + plain-language
+  help added. **This closes the root-cause half of the ⭐⭐ faint-field family** (the honest-accounting +
+  minimum-frames-guard halves shipped earlier). Note it defaults off pending real faint-field validation — once the
+  owner confirms the gain on real data it can be promoted to on-by-default. The ⭐ streak-reject interaction and the
+  device-naming mosaic bare-output gap remain their own filed items.
 
 - ~~**A per-target failure in the auto-stack *pre-check* phase aborts the whole walk-away pipeline job (marks it
   `error`) and skips auto-stack for every remaining target — violating the documented "non-fatal per target"
@@ -6330,10 +6354,13 @@ problems. Dogfood it every big-picture run and fix root causes.
   unsolved, cap to one extra pass so it can't loop). Test with a fake solver that fails at 30° but "solves" at ≤5°
   around the sibling centre → the frame ends solved after the second pass. This is the rung that reaches the owner's
   reported header-hint-present-but-still-failing thin-stack case.
-- **IMPROVEMENT IDEA (Scout 2026-07-23) — "stack-then-solve" bootstrap: rescue a faint field that won't plate-solve
-  per-sub by solving a rough integration instead, then reusing that WCS.** *(Autonomy / image-quality — directly
-  attacks the ⭐⭐ owner top bug's root cause; PRIORITY 2; size L; idea, not yet traced to code — needs the owner's
-  real faint-field data to validate the gain.)* **What prompts it:** the ⭐⭐ top bug is a *thin stack* because on a
+- ~~**IMPROVEMENT IDEA (Scout 2026-07-23) — "stack-then-solve" bootstrap: rescue a faint field that won't plate-solve
+  per-sub by solving a rough integration instead, then reusing that WCS.**~~ — **SHIPPED v0.210.0** (Builder
+  2026-07-25, branch `claude/pensive-faraday-0ijrph`; `seestack/solve/bootstrap.py`, off-by-default setting
+  `astap_bootstrap_solve`, wired into `run_qc_and_solve`; 11 regression tests incl. the WCS-propagation
+  ground-truth check). See the ▶ SLICE (b) SHIPPED block in the ⭐⭐ thin-stack "Bugs" entry for the full
+  write-up. Defaults off pending real faint-field validation; promote to on-by-default once the owner confirms the
+  gain. *(Original idea kept for provenance.)* **What prompts it:** the ⭐⭐ top bug is a *thin stack* because on a
   faint / sparse-star field ASTAP fails on most subs (no WCS → dropped by `run_stack`, which stacks only
   accepted **and** solved frames). The existing solve ladder already helps within a sub (`solve/astap.py`:
   default → bin-2 → bin-4/200-stars downsample rungs), but when a *single* 10 s Seestar sub simply lacks the SNR

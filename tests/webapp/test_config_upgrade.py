@@ -59,6 +59,16 @@ def test_old_config_loads_keeps_values_and_defaults_new_fields(tmp_path):
     assert s.site_lat is None and s.site_lon is None
     assert s.site_elevation_m == 0.0
     assert s.min_target_altitude_deg == 30
+    # New stack-then-solve bootstrap defaults off → an upgrade never adds the
+    # extra deep-image-solve pass on its own; solving behaves exactly as before
+    # until the user opts in (loads cleanly from an old config missing the field).
+    assert s.astap_bootstrap_solve is False
+
+
+def test_astap_bootstrap_solve_round_trips(tmp_path):
+    _write_cfg(tmp_path, {"astap_bootstrap_solve": True})
+    s = SettingsStore(str(tmp_path)).get()
+    assert s.astap_bootstrap_solve is True
 
 
 def test_observing_site_config_round_trips(tmp_path):

@@ -45,6 +45,7 @@ const HINTS: Record<string, string> = {
   max_stack_memory_gb: "Working-memory cap for a single stack. Blank = auto (~70% of RAM). Raise it on a big box to allow larger drizzle/mosaic canvases; lower it to leave more headroom. The ASTROSTACK_MAX_STACK_GB env var, if set, overrides this.",
   job_history_limit: "How many finished jobs to keep in the Jobs history (the jobs.sqlite database retains about 10× this). Higher keeps more history at the cost of a slightly larger DB. Takes effect immediately. Default 200.",
   astap_use_solve_hints: "Use each frame's telescope target RA/Dec (from its FITS header) to localise ASTAP's search — faster, more reliable solving. Turn off if your frames lack/contain wrong coordinates.",
+  astap_bootstrap_solve: "On a faint or star-poor target, a single 10s sub often can't be located in the sky, so most subs are left out and your picture stays noisy. With this on, the app quietly combines the un-located subs into one deeper image, locates that, and copies the position back to each sub — so the whole night can stack. Off by default; turn it on if faint targets keep coming out noisy with 'not located yet' subs.",
   seestar_enabled: "Discover and monitor Seestar telescopes on the LAN via their unofficial local API (port 4700). The container must be able to reach the scope (Station mode).",
   seestar_control_enabled: "Allow sending commands (goto / start / stop / park) to the scope. Off = monitoring only, so watching can never disturb a session.",
   seestar_scan_subnet: "CIDR to scan for scopes, e.g. 192.168.1.0/24. Blank = auto-detect from the container's network.",
@@ -657,6 +658,9 @@ export function SettingsView() {
           <Switch label={lbl("astap_use_solve_hints", "Use telescope target as solve hint")}
             checked={bool("astap_use_solve_hints")}
             onChange={(e) => set("astap_use_solve_hints", e.currentTarget.checked)} />
+          <Switch label={lbl("astap_bootstrap_solve", "Rescue faint fields with a deep-image solve")}
+            checked={bool("astap_bootstrap_solve")}
+            onChange={(e) => set("astap_bootstrap_solve", e.currentTarget.checked)} />
 
           <Divider label="Observing site (Tonight planner)" />
           <Text size="xs" c="dimmed">

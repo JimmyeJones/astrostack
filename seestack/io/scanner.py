@@ -466,6 +466,7 @@ def run_qc_and_solve(
     only_new_qc: bool = False,
     use_solve_hints: bool = True,
     auto_reject_streaks: bool = True,
+    bootstrap_solve: bool = False,
     progress: ProgressFn | None = None,
     should_stop: ShouldStopFn | None = None,
 ) -> dict:
@@ -556,6 +557,33 @@ def run_qc_and_solve(
                 except Exception as exc:  # noqa: BLE001
                     log.warning("solve DB write failed: %s", exc)
             summary["solve_done"] = done
+
+        # Stack-then-solve bootstrap: if the per-sub pass left most subs unsolved
+        # (a faint / sparse-star field), integrate the accepted-but-unsolved subs
+        # into a deep image, solve that once, and propagate the WCS back — so the
+        # whole burst can stack instead of the handful that solved individually.
+        # Opt-in and self-guarded (a no-op unless enough subs stayed unsolved).
+        if bootstrap_solve and not _stopped(should_stop):
+            try:
+                from seestack.solve.bootstrap import bootstrap_solve as _bootstrap
+
+                bres = _bootstrap(
+                    project,
+                    astap_path=str(astap_path) if astap_path is not None else None,
+                    fov_deg=astap_fov_deg if astap_fov_deg is not None else 1.3,
+                    timeout_s=astap_timeout_s if astap_timeout_s is not None else 60.0,
+                )
+                if bres.engaged:
+                    summary["bootstrap_engaged"] = True
+                    summary["bootstrap_solved"] = bres.deep_solved
+                    summary["bootstrap_propagated"] = bres.n_propagated
+                    if bres.n_propagated:
+                        log.info(
+                            "stack-then-solve bootstrap rescued %d sub(s) for %s",
+                            bres.n_propagated, project.name,
+                        )
+            except Exception as exc:  # noqa: BLE001 — a bootstrap failure is non-fatal
+                log.warning("stack-then-solve bootstrap failed: %s", exc)
 
     return summary
 
