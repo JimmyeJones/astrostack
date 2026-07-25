@@ -121,6 +121,39 @@ def test_auto_stack_holds_back_a_thin_solved_target(solved_library, monkeypatch)
         lib.close()
 
 
+def test_auto_stack_skips_a_legacy_mixed_drop_target(solved_library, monkeypatch):
+    """A target flagged as a legacy whole-device / mixed-folder drop must be
+    skipped by the walk-away auto-stack — it holds several objects' subs jumbled
+    together, so stacking it just makes mixed-pointing gibberish and burns compute,
+    and the correct per-target versions already exist. Fail-before: the flagged
+    giant target was auto-stacked like any other. Other targets still stack."""
+    calls = _patch_run_stack(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        targets = lib.list_targets()
+        assert len(targets) >= 2, "fixture should have multiple targets to compare"
+        flagged = targets[0]
+        lib.flag_legacy_mixed_drop(flagged.safe_name)
+
+        summary = pipeline._pipeline_body(
+            _settings(solved_library), _FakeJM(), Job(kind="pipeline"), root=None)
+        # The flagged target is reported skipped and never handed to run_stack.
+        assert flagged.safe_name in summary.get("auto_stack_legacy_skipped", [])
+        assert flagged.safe_name not in summary.get("auto_stacked", [])
+        # It's skipped cheaply — no attempt marker written, so removing it (or a
+        # user re-accept) is the only state change.
+        proj = lib.open_target(flagged.safe_name)
+        try:
+            assert proj.get_meta(pipeline.AUTO_STACK_ATTEMPT_META_KEY) is None
+        finally:
+            proj.close()
+        # The other (unflagged) targets still auto-stack as normal.
+        assert summary["auto_stacked"], "unflagged targets should still stack"
+        assert calls, "unflagged targets should reach run_stack"
+    finally:
+        lib.close()
+
+
 def test_auto_stack_min_frames_one_restores_stacking_from_first_frame(
     solved_library, monkeypatch,
 ):

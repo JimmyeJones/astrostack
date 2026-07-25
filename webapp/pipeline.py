@@ -168,6 +168,7 @@ def _pipeline_body(
             skipped: list[str] = []
             held_thin: list[dict[str, Any]] = []
             mixed_skipped: list[str] = []
+            legacy_skipped: list[str] = []
             stack_errors: dict[str, str] = {}
             auto_edited = 0
             for entry in lib.list_targets():
@@ -175,6 +176,17 @@ def _pipeline_body(
                     summary["cancelled"] = True
                     break
                 safe = entry.safe_name
+                if entry.legacy_mixed_drop:
+                    # A legacy whole-device / mixed-folder drop the container-
+                    # expansion re-scan superseded: it holds several objects' subs
+                    # (plus on-device outputs/videos) jumbled into one target, so
+                    # auto-stacking it just makes mixed-pointing gibberish and burns
+                    # compute — and the correct per-target versions already exist.
+                    # Skip it (it's surfaced for one-click cleanup) without marking
+                    # an attempt, so removing it is the only state change. A user can
+                    # still stack it by hand if they really want to.
+                    legacy_skipped.append(safe)
+                    continue
                 # The whole per-target body — pre-checks included — is wrapped so
                 # one target can't sink the batch. The pre-check helpers each
                 # open_target(safe), which raises FileNotFoundError if the target
@@ -282,6 +294,8 @@ def _pipeline_body(
                 summary["auto_stack_held_thin"] = held_thin
             if mixed_skipped:
                 summary["auto_stack_mixed_skipped"] = mixed_skipped
+            if legacy_skipped:
+                summary["auto_stack_legacy_skipped"] = legacy_skipped
             if auto_edited:
                 summary["auto_edited"] = auto_edited
             if stack_errors:

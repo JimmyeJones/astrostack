@@ -739,7 +739,13 @@ when you take it.
   `legacy_mixed_drop` cleanup reason with its own plain-language explanation; removal stays `remove_files=false` (raw
   subs on disk untouched → the container-expansion re-scan already re-ingested them correctly, so it's fully
   reversible). Frontend: a third, independently-dismissible cleanup group ("A target looks like a whole Seestar card
-  dropped in at once"). Nothing is ever deleted, a fresh library / real single-field target is never flagged, and the
+  dropped in at once"). **Second slice (v0.210.2, same run):** the walk-away auto-stack pass
+  (`webapp/pipeline.py::_pipeline_body`) now **skips** a `legacy_mixed_drop`-flagged target (new
+  `auto_stack_legacy_skipped` summary bucket), so the giant jumble stops producing mixed-pointing gibberish and burning
+  compute the moment it's flagged — not only once the user clicks cleanup — while a manual stack still works and no
+  attempt marker is written (removing it stays the only state change). Regression:
+  `tests/webapp/test_auto_stack_pipeline.py::test_auto_stack_skips_a_legacy_mixed_drop_target` (flagged target skipped +
+  no marker; unflagged targets still stack). Nothing is ever deleted, a fresh library / real single-field target is never flagged, and the
   flag is idempotent. Regression tests (all fail-before/pass-after where applicable): `tests/test_scanner.py`
   (`container_target_children` multi/single/outside cases; `test_rescan_flags_a_legacy_whole_device_drop_target`
   end-to-end — seed the old giant target, re-scan, assert the correct per-target versions exist AND the giant is
