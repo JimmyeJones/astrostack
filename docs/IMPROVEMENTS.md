@@ -47,7 +47,262 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
-- ~~**⭐⭐⭐ OWNER-REPORTED (2026-07 — TOP PRIORITY; LIKELY ROOT CAUSE of the gibberish
+> **Deep audit — FINAL-IMAGE QUALITY of the one-click auto chain MEASURED end-to-end on realistic synthetic S30
+> stacks; the deferred quality sweep is done and the owner's "results look broken" now has measured root causes
+> (Audit 2026-07-26, branch `claude/astrostack-deep-audit-485gr7`).** Baseline suites green (Python **2040 passed,
+> 2 skipped**; frontend 132 files / 1314 passed after the flake fix below). Method: built ground-truth S30 scenes
+> (1080×1920, OSC sky R/G/B = 1050/1650/820 ADU, 0/8/18 % light-pollution gradients, 180 stars FWHM 2.4 px whose
+> *median star is truly white*, faint red nebula, per-sub σ_G = 45 ADU) and pushed them through the **exact**
+> shipping chain (`get_proxy` → `auto_recipe` → `apply_recipe`, and the honest path: 12 subs each through the
+> default per-frame `subtract_background(per_channel)` then stacked). **Headline (all reproduced, numbers in the
+> entries below):** the one-click result on ordinarily light-polluted data is **purple on one side / green-or-blown
+> on the other** (sky cast left −44 %, residual brightness tilt +182 % of sky on the honest path; −91 %/+107 % on
+> an unflattened 18 % gradient) — three stacked mechanisms: per-channel gradient *shapes* survive the Auto recipe's
+> luminance-mode gradient removal, Background2D can't null a smooth gradient below the noise (systematic per-sub
+> fit bias survives averaging), and per-channel STF turns any residual into diverging colour. Plus: **SCNR's
+> per-pixel `min()` drags every noisy stack's sky ~−10 % magenta even with zero gradient** (isolated: −3.9 %/−9.6 %/
+> −15.5 % at σ 0.02/0.05/0.08); the **auto-contrast curve lifts the whole sky +42 %** (its p50 "midtone" IS the sky);
+> the **History "Full-res PNG" of a Process-target run serves the un-edited STF render** (meanAbsDiff 0.132 vs the
+> preview the user clicked); and auto denoise hits strength 1.0 on a realistic 12-sub stack (glass-smooth grain,
+> untouched chroma blotch). **Measured non-bugs (don't re-chase):** gray-star colour calibration recovers true
+> scales well; STF median→target mapping is exact per channel; baked-preview stride-2 aliasing is insignificant
+> (star-peak ratio 1.007); "denoise bloats stars" was a stretch artefact. Also this run: the Editor.test.tsx flake
+> was root-caused to a real product defect (debounce-keyed queries dropping `data` → editor controls blink out per
+> slider drag) and FIXED (see the struck flaky-test entry below); a frontend/API click-path audit filed its own
+> entries below.
+
+- **⭐⭐ MEASURED (2026-07-26 quality audit) — the one-click Auto result is purple-one-side / green-or-blown-the-other
+  on any stack with a residual sky gradient: the Auto recipe's luminance-mode gradient removal + per-channel STF
+  turn ordinary light pollution into a strong spatial COLOUR split.** *(Editor/auto image quality — PRIORITY 1;
+  wrong-result on the flagship "Process target" picture; **reproduced** end-to-end at three gradient strengths.)*
+  Mechanisms, each isolated: **(1)** `auto_recipe` hardcodes `background.final_gradient(mode="luminance")`
+  (`seestack/edit/presets.py:396`) — one luminance model + per-channel DC offset
+  (`seestack/bg/final_gradient.py:198-236`) leaves each channel's gradient *shape* in place by design (LP gradient
+  amplitude scales with each channel's sky level; measured post-op residual tilts −17/+76/−52 ADU R/G/B on an 18 %
+  gradient whose input tilts were +164/+259/+128). **(2)** Background2D cannot null a smooth gradient below the
+  noise even in `per_channel` mode (+20…+39 ADU same-sign residual tilts = 2–4σ of stack noise; corner/edge spline
+  extrapolation is worst) — and the per-frame default flatten has the same *systematic* bias in every sub, so it
+  survives averaging (honest path: 12 subs through default `subtract_background(per_channel)` → stack still tilted
+  +17/+25/+13 ADU). **(3)** per-channel STF (`autostretch`, `seestack/render/thumbnail.py:558-645`) maps each
+  channel through wildly different curves (measured midtones m = 0.80/0.97/0.66), so the sky is neutral only AT the
+  median level — any spatial residual diverges into colour (greener above, magenta below). **End-state numbers:**
+  honest path, 18 % LP gradient → final sky cast **left −43.6 % / mid −7.5 % / right +2.2 %** with a **+182 %-of-sky
+  brightness tilt** (bottom-right corner blows to near-white, nebula buried); unflattened 18 % → −91 %/+107 % split;
+  even a mild 8 % → −86 %/+52 %. A beginner cannot fix this (they'd need to discover per-channel gradient mode).
+  **Dither does NOT rescue it (measured):** the per-sub fit bias follows the ground-fixed LP gradient, so with
+  ±40 px dither + reproject the stack tilts are unchanged (+17/+25/+13 ADU) and the end state is the same
+  (−48 % left cast, +178 % tilt). **Fix directions — measured constraints from this audit's validation runs (no
+  blind flips!):** (a) a **masked low-order per-channel poly residual pass** (deg ≤ 2, sky-masked, applied per sub
+  inside/after `subtract_background` and again in `remove_final_gradient`) kills the colour split — validated:
+  end-state cast collapses to a uniform ≈ −8 % (just the SCNR bias, filed separately) and stack tilts halve —
+  **but** measured cost: very faint extended *colour* gets partially absorbed (the test nebula's core desaturated
+  0.53/0.18/0.31 → 0.24/0.23/0.23), so the pass needs a generous object mask (mask ≥ ~1σ structure + wide dilate,
+  or reuse the final stack's object mask) and ideally fits the *colour* residual (channel − α·luminance) rather
+  than each channel raw; (b) blindly switching the Auto recipe to `mode="per_channel"` is NOT safe — validated:
+  it erases a faint nebula entirely (core lands *below* sky) because each channel's Background2D interpolates
+  the masked hole from nebula-lifted neighbours; (c) the residual *luminance* tilt (the blown corner) is
+  mesh-scale Background2D bias that no global poly fully removes (+71 % remains even with per-sub poly) — that
+  half needs gradient-fit accuracy work (larger effective smoothing / corner handling in `_fit_background_2d`,
+  or a dedicated final pass fit at multiple scales); (d) belt-and-braces for the *global* cast only: append the
+  existing `tone.neutralize_background` after the stretch in `auto_recipe` (does not address the spatial split).
+  Regression: the honest-path scene above; assert |sky cast| < 5 % in the left/mid/right eighths, relative
+  luminance tilt < 10 %, AND the faint-nebula core keeps ≥ 80 % of its chroma. Confidence: reproduced (harness +
+  scene recipe in the audit session's scratchpad, documented in this entry). (M–L, editor/image-quality —
+  PRIORITY 1.)
+
+- **⭐ MEASURED (2026-07-26 quality audit) — SCNR at the Auto recipe's fixed 0.7 drags the whole sky ~−10 % magenta
+  on any noisy stack: the per-pixel `min(G, (R+B)/2)` estimator is systematically biased by noise.** *(Editor/auto
+  image quality — PRIORITY 1; wrong-result colour on every noisy (i.e. every real S30) auto result, even with zero
+  gradient; **reproduced** in isolation and end-to-end.)* `_scnr` (`seestack/edit/ops/tone.py:173-183`) caps green
+  per pixel against the *raw noisy* R/B average; on a perfectly neutral sky `E[min(G, N)] < E[G]` whenever there is
+  per-pixel noise, so the op *creates* a magenta cast proportional to the noise: measured on a neutral sky at
+  amount 0.7 — **−3.9 % (σ = 0.02), −9.6 % (σ = 0.05), −15.5 % (σ = 0.08)**; a stretched S30 stack sits near
+  σ ≈ 0.05, and the zero-gradient end-to-end chain lands at −12 %. The owner's "green cast removal" thus ships a
+  *magenta* cast a beginner can't name or undo. **Fix direction (validated in the audit):** cap against a
+  noise-suppressed green *excess* instead of the raw per-pixel neutral — e.g.
+  `excess = clip(gauss(G, 3σpx) − gauss((R+B)/2, 3σpx), 0, ∞); G −= amount·excess`. Measured: neutral-sky bias
+  −9.6 % → **−1.0 %** while removing the same real green (synthetic green blob +133 % → +39.8 % vs +39.2 % for the
+  current op). Keep the current per-pixel behaviour as an advanced mode if desired; add a regression asserting
+  |cast| < 2 % on a neutral noisy sky at amount 0.7 and unchanged real-green removal. Confidence: reproduced.
+  (S–M, editor/image-quality — PRIORITY 1.)
+
+- **⭐ MEASURED (2026-07-26 quality audit) — the Auto recipe's auto-contrast curve lifts the ENTIRE sky (+42 %
+  background brightness), because its "midtone" anchor (p50) IS the sky on a deep-sky frame.** *(Editor/auto image
+  quality — PRIORITY 1; wrong-result/washed-out background on every one-click result; **reproduced** via variant
+  ablation.)* `tone.curves(auto=True)` → `suggest_tone_curve` (`seestack/edit/curve.py:74-91`) pins "sky" at p1 and
+  lifts p50 halfway toward 0.25 — but p1 is just the deepest noise dips; the *bulk* of the sky sits exactly at p50
+  on a sky-dominated frame, so the whole background rides the lift: measured final sky 0.125 (without curves) →
+  0.178 (with), directly negating the noise-aware `target_bg` (0.14) the stretch op just chose and amplifying
+  visible noise. The docstring's "keeps the sky floor on the identity so the background is neither crushed nor
+  lifted" is untrue whenever sky ≈ median, i.e. almost always. **Fix direction:** anchor the sky point at the sky
+  *population* level (median of below-median pixels, or med + k·σ like the stretch does), lift a percentile clearly
+  above the sky (e.g. p80 of above-sky pixels), and decline when the midtone ≈ sky; regression: on a sky-dominated
+  synthetic stack the suggested curve must keep the sky median within a few % of identity. Confidence: reproduced.
+  (S, editor/image-quality — PRIORITY 1.)
+
+- **⭐ TRACED + QUANTIFIED (2026-07-26 quality audit) — History "Full-res PNG" of a Process-target (auto-edited) run
+  silently serves a DIFFERENT, un-edited picture than the preview it claims to match.** *(Broken-UX/parity on the
+  flagship walk-away path; the endpoint's own docstring promises "the same look as the gallery/History thumbnail".)*
+  `download_full_res_png` (`webapp/routers/stack.py:443-471`) → `render_preview_png_full_res`
+  (`seestack/render/thumbnail.py:322-369`) checks only `fits_is_display_space()`; a "Process target" auto-edit
+  leaves the FITS **linear** and marks the *run* (`preview_display_space`, `webapp/routers/stack.py:364-377`), so
+  the download renders the conservative 6 %-grey STF of the linear master instead of the Auto-edited image:
+  measured against the preview the user clicked — **meanAbsDiff 0.132 (13 % of full scale), sky 0.065 vs 0.178,
+  sky cast +12 % green vs −10 %, and the test nebula obvious in the preview but invisible in the download**. The
+  owner clicks the pretty thumbnail, downloads "full-res", and gets a dark green-tinted image — reads as "the app
+  ruined my picture". **Fix direction:** in the endpoint, when `_preview_is_display_space(options_json)` holds,
+  load the run's saved recipe (`RECIPE_META_PREFIX`) and render it at native res via the existing
+  `_render_recipe_fullres` (`webapp/pipeline.py:1071`); keep the current path for plain runs. (While there: the
+  auto-edit bakes its preview from the ≤1500 px stride proxy — `_auto_edit_process_run`,
+  `webapp/pipeline.py:1969-1979` — i.e. 960 px for a 1920-wide stack vs the 1024 px box-filtered normal preview;
+  measured stride-2 star aliasing is negligible (peak ratio 1.007) so this is a small resolution/consistency nit to
+  fold into the same fix.) Regression: process-target a synthetic run, GET `full-res-png`, assert pixel stats match
+  the recipe render, not the STF render. Confidence: traced (mechanism certain from code; numbers from the audit
+  harness). (S–M, autonomy/parity — PRIORITY 2.)
+
+- **MEASURED (2026-07-26 quality audit) — Auto denoise saturates at strength 1.0 on a realistic thin stack:
+  glass-smooth "plastic" grain while the visible chroma blotch survives untouched.** *(Editor/auto image quality —
+  PRIORITY 1/4; over-smoothing half of the "is the auto denoise right for an S30?" question; **reproduced**.)* On
+  the honest 12-sub stack `analyze_proxy` reports σ = 0.061 → `_noise_fraction` = 1.0 → `suggest_denoise_strength`
+  → wavelet at **1.0** (`seestack/edit/presets.py:350-358`): measured display high-frequency noise 0.0225 → **0.0000**
+  (adjacent-diff MAD — literally zero fine grain, a waxy sky) while the sky's *blotch* (low-frequency chroma noise,
+  sky-MAD 0.048) is untouched, because `denoise_wavelet` only shrinks fine scales. At the 20-sub scene's strength
+  0.4 the trade is reasonable (−38 % fine grain), so this is specifically the strength-1.0 end of the crossfade.
+  **Fix direction:** cap the Auto denoise strength (≈0.6) so the crossfade can't hit the glass-smooth end, and file
+  the real gap as its own idea: a chroma-blotch reducer (wide gaussian on the a/b chroma of the stretched image) —
+  that, not more wavelet, is what an S30 stack's speckle actually needs. Regression: auto recipe on a 12-sub-noise
+  synthetic stack must keep display hf-noise > 0. Confidence: reproduced. (S, editor/image-quality — PRIORITY 1.)
+
+> **Frontend/API click-path audit (2026-07-26 deep audit, same branch) — the real backend was booted against a
+> seeded synthetic library (2 targets, 3 nights, a 2,112-frame stress target, 3 real stack runs through the job
+> pipeline) and the built SPA driven with Playwright through Library → Target → History → Editor → Dashboard →
+> Tonight, plus curl-level contract checks.** Twelve verified findings below (each marked reproduced/traced), one
+> batch entry of smaller items, and — so they don't get re-filed — three suspects **cleared**: cross-route TanStack
+> invalidation gaps mostly self-heal (staleTime 0 + refetch-on-remount; only same-page Dashboard cards can hold
+> ~a minute of staleness), the navbar DOES scroll on short viewports (verified 667×375), and same-output-name
+> stacks don't overwrite (older artifacts are timestamp-archived).
+
+- **⭐ Clearing a numeric Stack-form field sends `null`, which passes validation, dies in the engine with a raw
+  `TypeError` — and can be SAVED AS DEFAULTS, poisoning every later stack including the walk-away auto-stack.**
+  *(Wrong-result; **reproduced** live.)* `StackOptionControl.tsx:99` emits `v === "" ? null : Number(v)`;
+  `validate_stack_options` (`webapp/schemas.py:696-698`) treats `None` as "use default" but `coerce_stack_options`
+  (`webapp/schemas.py:674-678`) passes it straight into the `StackOptions` dataclass. Reproduced:
+  `POST …/stack {"sigma_clip":true,"sigma_kappa":null}` → 200 → job `error: TypeError: unsupported operand
+  type(s) for *: 'NoneType' and 'float'`; the same body is *accepted* by `PUT …/stack-defaults`, after which the
+  target cannot stack at all until the value is fixed by hand. Owner path: backspace over "Sigma κ" to retype it,
+  click Stack. **Fix:** drop `None`s in `coerce_stack_options` (fall back to dataclass defaults); optionally have
+  the control restore the schema default on blur-empty. Regression: POST with a `null` numeric → stacks with the
+  default. (S, correctness — PRIORITY 2.)
+
+- **⭐ The frames list silently truncates at 2000 — the table, keyboard grading, "Reject worst" and the Stack
+  pre-flight guards all operate on a subset while the badge shows the true count.** *(Wrong-result on a realistic
+  S30 volume — ~2,100 × 10 s subs is ONE good night; **reproduced** with a 2,112-frame target.)*
+  `client.ts:1246-1247` hardcodes `limit=2000` and never pages; `webapp/routers/frames.py:148` slices with no
+  total/truncation signal. Reproduced: badge "2112/2112 ACCEPTED" while the table renders exactly 2000 rows — the
+  112 *newest* subs (sort `id asc`) are invisible to inspection, grading, "Reject worst" ordering and the Stack
+  page's mixed-pointing/quality pre-flight. **Fix:** paginate `listFrames` (offset loop) or return/show a
+  "showing 2000 of N" + fetch-more; short-term warn when `frames.length === limit`. (S–M, UX/correctness —
+  PRIORITY 2.)
+
+- **⭐ "Identify" / "Scale" overlays plot un-rotated coordinates on the North-up-rotated render — the pin for an
+  object lands diagonally opposite once "Rotate so North is up" is on.** *(Wrong-result in the "what's in my
+  picture?" feature; **reproduced** in-browser.)* `History.tsx:687-702` feeds `render?north_up=true` (rotated
+  pixels) plus `/annotations` coordinates computed on the unrotated FITS grid (`webapp/routers/stack.py:537-589`)
+  into `AnnotatedImage`, which maps `x_px/imgWidth` with no rotation. Reproduced on a run with
+  `north_up_deg=180`: the "Orion Nebula" pin renders at fractional x ≈ 0.17 where the correct rotated position is
+  x ≈ 0.83. The scale bar mis-lays the same way for non-180° angles. **Fix:** rotate marker coords client-side by
+  the already-loaded `north_up_deg`, or disable Identify/Scale under North-up with a hint. (S, UX/correctness —
+  PRIORITY 2.)
+
+- **⭐ "Save as preview" while viewing North-up saves the un-rotated image — every thumbnail/share/wallpaper then
+  shows the sideways version of what the user approved.** *(Wrong-result; **reproduced** by pixel diff: saved
+  preview ≡ un-rotated render (diff 0.0), differs 22.9 mean-abs from the on-screen North-up render.)*
+  `client.ts:1421-1424` posts only `{stretch, black}`; `webapp/routers/stack.py:866-869` renders the preview
+  without `north_up`. **Fix:** include `north_up: applyNorthUp` in the POST and thread it to `render_stack_png`
+  (the code path already exists in `thumbnail.py`). (S, UX/correctness — PRIORITY 2.)
+
+- **⭐ Re-saved previews stay STALE across Gallery / Dashboard / Best pictures / Compare — even after a reload —
+  because the artifact endpoint sends no `Cache-Control` and consumers use unversioned URLs.** *(Wrong-result —
+  a stale image presented as current; **reproduced**: after a server-side preview regeneration, a Gallery revisit
+  made 0 requests and rendered the identical stale pixels — RFC 9111 heuristic freshness ≈ 10 % of file age, up to
+  ~a day on an old stack.)* `webapp/routers/stack.py:1474-1483` serves the preview with etag/last-modified only
+  (contrast `/render` + `/sky-overlay`, which set `no-store`); `Gallery.tsx:129`, `BestPictures.tsx:36`,
+  `BestPicturesStrip.tsx:40`, `Compare.tsx`, `Dashboard.tsx:226`, `OneFrameVsStackCard.tsx:50-51` all use the bare
+  URL — only the History card that performed a save cache-busts locally. This also mutes the Process-target
+  auto-edit: its rewritten preview may not show up in the Gallery for hours. **Fix:** `Cache-Control: no-cache` on
+  the preview/thumbnail branches (etag revalidation is cheap) or a version token (preview mtime) in `preview_url`.
+  (S, UX/correctness — PRIORITY 2.)
+
+- **⭐ The Tonight planner strips `object_type` from every already-owned target (`type:""`), so Continue-tonight
+  and Tonight bucket everything as "Other" (flat 4 h goal) and contradict the Library-progress card beside them.**
+  *(Wrong-result in planning guidance; **reproduced** at the API level, effects traced through pure functions.)*
+  `seestack/nightplan.py:861` emits `type:"", con:""` for `already_targeted` rows while `/api/library-progress`
+  returns the real `object_type` for the same objects; `objectTypeBucket("")` → "Other" → `readiness.ts` flat 4 h.
+  Consequence: a galaxy at 5 h of its 6 h goal scores "plenty" and is *filtered out* of "Continue tonight"
+  (`continueTonight.ts:89-92`) while "Target progress" above says "5 h of ~6 h"; clusters get over-nudged; Tonight
+  rows render blank type/constellation. The card tests fixture `type:"Galaxy"` — a payload the backend can never
+  produce. **Fix:** populate type/con for already-targeted rows in `plan_tonight` (identify data already computed
+  for library-progress), or join `object_type` from the progress query already fetched in
+  `ContinueTonightCard.tsx:70`. (S, autonomy/planning — PRIORITY 2.)
+
+- **Dashboard shows two contradictory integration totals: the stats tile counts kept frames, the imaging calendar
+  counts everything including set-aside nights.** *(Wrong-result (calendar variant); **reproduced**: after setting
+  a night aside, `/api/stats.total_exposure_s` = 200 vs `/api/activity-calendar.total_exposure_s` = 240 on the same
+  Dashboard; a fully-rejected clouded-out night still paints as a deep "long night" cell.)*
+  `webapp/routers/stats.py:467` (accepted_only) vs `stats.py:519` + `seestack/activity_calendar.py:128-140` (never
+  checks `accept`). **Fix:** feed accepted-only frames into `build_activity_calendar` (or add `kept_exposure_s`
+  per night and render that). (S, friendliness — PRIORITY 3.)
+
+- **"Save as defaults" on the Stack form silently drops the calibration-master picks while the toast says they'll
+  drive auto-stacking.** *(Broken-UX — silent loss of a user choice; **reproduced**:
+  `PUT …/stack-defaults {"sigma_clip":true,"dark_master_id":1,"flat_master_id":2}` echoes `{"sigma_clip":true}`.)*
+  `Stack.tsx:234-242` posts the whole form with an unconditional success toast;
+  `webapp/routers/stack.py:150-152` whitelists schema fields only, and the four `*_master_id` keys aren't schema
+  fields. Master selects come back empty next visit; unattended stacks stay uncalibrated (auto_bind_calibration is
+  a separate, off-by-default setting) despite the toast. **Fix:** persist the four ids in target stack-defaults, or
+  exclude them from the save and say so in the toast. (S, UX — PRIORITY 3.)
+
+- **"Plan your next night" names the wrong night for any owner west of UTC — and disagrees with its own .ics file
+  and the adjacent "Point here tonight" card.** *(Broken-UX — a real-world wrong night; **reproduced** with a
+  Seattle site: `dark_start_utc 2026-07-27T06:17Z` is locally Sunday 23:17, card says "Mon 27 Jul … UTC", the .ics
+  lands on Sunday in the calendar app, and the neighbouring card shows unlabeled LOCAL time.)*
+  `nextSession.ts:20-25,81-90` formats via `getUTC*`; the tests fixture Europe-shaped pre-midnight-UTC windows so
+  vitest stays green. **Fix:** render with the browser's local clock (as `tonight.ts:202-207` already does), label
+  the night by the local date of `dark_start`, keep UTC as a tooltip. (S, friendliness — PRIORITY 3.)
+
+- **Emptying any of six numeric Settings fields coerces to `0` and the whole settings save 422s — every other edit
+  in the form is lost behind a raw pydantic toast.** *(Broken-UX; backend half **reproduced**
+  (`PUT /api/settings {"astap_fov_deg":0}` → 422), frontend coercion traced — the guarded
+  `v === "" ? null : …` pattern exists on eight sibling inputs in the same file.)* `Settings.tsx:580,583,652,654,
+  766,769` use bare `Number(v)` (`Number("") === 0`) against `ge=` bounds in `webapp/config.py`. **Fix:** apply the
+  existing empty-guard to the six fields (or clamp on blur); optionally surface per-field errors. (S, UX —
+  PRIORITY 3.)
+
+- **Jobs page is pinned to the backend's default 100 rows — the "Job history to keep" setting (default 200) has no
+  visible effect and "Clear N finished" understates what it deletes.** *(Broken-UX; traced on both sides:
+  `client.ts:1480` sends no `limit`; `webapp/routers/jobs.py:24-28` defaults 100; `Jobs.tsx:544-546` counts the
+  ≤100 visible rows while `POST /api/jobs/clear` deletes finished jobs DB-wide.)* **Fix:** send `?limit=` (e.g. the
+  configured history limit) and label the button "Clear all finished". (S, UX — PRIORITY 3.)
+
+- **Telescope page: the live "stacking" progress bar resets to zero every 100 subs** — `Seestar.tsx:130-132`
+  renders `stacked_frames % 100` as a percentage (99 subs → full, 100 → empty, 150 → half; a session routinely
+  passes 100 × 10 s subs). No denominator exists in telemetry, so show the count ("142 subs stacked") or an
+  indeterminate indicator. *(Traced; broken-UX/misleading telemetry.)* (S, UX — PRIORITY 3.)
+
+- **Smaller click-path items (2026-07-26 audit — batch into cleanup passes; each traced, several reproduced):**
+  (a) Editor PNG/share job polling has no try/catch and survives unmount (`Editor.tsx:678+,690-722,729-768`) — a
+  transient 5xx or a concurrent "Clear finished jobs" discards a FINISHED render that is still downloadable, and
+  navigating away later fires a surprise download; contrast `pollJobForOpErrors` (655-668) which swallows errors;
+  (b) Seestar page spins forever on API error (`Seestar.tsx:174-189` never checks `isError`; every other route
+  uses `QueryError`); (c) Tonight's error state unmounts its own date picker and altitude select
+  (`Tonight.tsx:187-192`) — one failing date strands the user; (d) single-frame accept/reject doesn't invalidate
+  `["reject-summary", safe]` (`Target.tsx:425-432`, unlike every sibling mutation) so the left-out hovercard goes
+  stale; (e) Storage "Prune old stacks" with an emptied keep box means keep **0** (`Storage.tsx:21,110-111`,
+  `Number("") === 0` passes the backend's `keep<0` guard) — one confirm deletes every run for the target;
+  (f) "Reject worst" on metric-less frames silently reports "Updated 0 frames" (`webapp/routers/frames.py:378-380`
+  excludes NULL-QC frames; reproduced `{"changed":0}`) with no explanation; (g) `/sky-so-far` double-highlights two
+  nav items (`App.tsx:168` prefix match). (S each, UX — PRIORITY 3.)
+
   AND low-resolution reports) — the scanner ignores the Seestar folder convention:
   it ingests the Seestar's own OUTPUT folders (and `_video` folders) as if they were
   raw sub-frames.**~~ — **FIXED v0.184.9** (Builder 2026-07-24, branch
@@ -949,8 +1204,25 @@ when you take it.
   re-scan stays idempotent; an existing library keeps its folder names. Confidence: traced + reproduced.
   (S–M, ingest/correctness — PRIORITY 2.)
 
-- **FLAKY TEST (test-infra, not a product bug) — `frontend/src/routes/Editor.test.tsx` fails ~2 of 68 whenever the
-  whole file runs, with a *different* victim set each time.** *(CI reliability; Medium-infra — a flaky suite erodes
+- ~~**FLAKY TEST (test-infra, not a product bug) — `frontend/src/routes/Editor.test.tsx` fails ~2 of 68 whenever the
+  whole file runs, with a *different* victim set each time.**~~ — **FIXED (2026-07-26 deep audit, branch
+  `claude/astrostack-deep-audit-485gr7`; root-caused + reproduced + validated) — and it WAS a product bug after
+  all, not test-infra.** Root cause: every debounce-keyed TanStack query in `Editor.tsx` except the main preview
+  (`hist`, the levels/stretch/curve/denoise suggestions, `basePreview`, `maskPreview`, `coveragePreview`,
+  `withoutOpPreview`, `lookPreview`) got a **new query key** each time the debounced recipe key flipped (each edit,
+  and the initial saved-recipe seed), dropping `data` to `undefined` for one fetch — so everything gated on it (the
+  Coverage toggle via `hist.data?.is_mosaic`, the "from your data" suggestion buttons, the split/mask/overlay
+  images, the clipping captions) **unmounted and remounted a tick later**: a visible per-slider-drag UI blink for
+  the user, and under a loaded test runner the flip landed mid-assertion — a button found and clicked in that
+  window is a detached DOM node, so the click landed nowhere (hence "expected editCoverageMapUrl to be called …
+  Number of calls: 0" and the rotating victim set). Fix: `placeholderData: keepPreviousData` on those ten queries
+  (the exact pattern the main preview query already used), so gated UI updates in place instead of remounting —
+  eliminating the mechanism, not just widening timeouts. Validation: before — 4–5 failures per full-file run (2
+  runs); after — **6 consecutive full-file runs 68/68 green** (runtime also fell ~80 s → ~34 s as the 20 s timeout
+  stalls vanished), `npx tsc --noEmit` clean, full `npx vitest run` 132 files / 1314 passed. Known benign residue:
+  the "shows render progress" test leaves `downloadPng`'s 500 ms poll loop running past test end (caught, harmless,
+  jsdom "Not implemented: navigation" noise only). *(Original analysis kept below for provenance.)*
+  *(CI reliability; Medium-infra — a flaky suite erodes
   the green-gate the whole autonomous project leans on; **reproduced** on clean `origin/main` 2026-07-23, branch
   `claude/pensive-faraday-n7pg4t`.)* Running the file end-to-end (`npx vitest run src/routes/Editor.test.tsx`, ~50 s
   of full-app canvas renders) reliably reddens **two** tests, but *which* two varies run-to-run — observed victims
