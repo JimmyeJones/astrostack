@@ -320,6 +320,14 @@ export function EditorView() {
   const hist = useQuery({
     queryKey: ["edit-hist", safe, rid, dKey],
     queryFn: ({ signal }) => api.getHistogram(safe, rid, dRecipe, signal),
+    // Keep the previous histogram while the debounced recipe re-measures. Without
+    // this, every debounce flip (each edit — and the initial seed) drops `data` to
+    // undefined for one fetch, so everything gated on it (the Coverage toggle via
+    // `is_mosaic`, the clipping/sky-cast captions, the histogram panel itself)
+    // unmounts and remounts a tick later — a visible flash per slider drag, and
+    // the root cause of the Editor.test.tsx flake (a button found/clicked in that
+    // window is a detached node, so the click lands nowhere).
+    placeholderData: keepPreviousData,
     // Gate on `seeded` exactly like the live preview above: until the saved
     // recipe loads, `dRecipe` is the empty pre-seed pipeline, so an ungated
     // query would fetch the histogram for the un-edited image on open — a wasted
@@ -339,6 +347,10 @@ export function EditorView() {
     queryFn: () => api.levelsSuggestion(safe, rid, dRecipe, levelsSelUid!),
     enabled: !!opsSchema.data && !saved.isLoading && !!levelsSelUid,
     staleTime: 30_000,
+    // Keep the previous suggestion while the debounced recipe re-measures, so the
+    // "From your image" buttons update in place instead of vanishing for a tick on
+    // every debounce flip (see the `hist` query above — same flash/flake source).
+    placeholderData: keepPreviousData,
   });
   // Data-driven asinh Strength + Black point for the selected Stretch op, measured
   // from the *linear* image entering it (any prior linear ops applied). Enabled only
@@ -351,6 +363,7 @@ export function EditorView() {
     queryFn: () => api.stretchSuggestion(safe, rid, dRecipe, stretchSelUid!),
     enabled: !!opsSchema.data && !saved.isLoading && !!stretchSelUid,
     staleTime: 30_000,
+    placeholderData: keepPreviousData,  // see `levels` — no per-debounce flash
   });
   // Data-driven starting tone curve for the selected Curves op, measured from the
   // display-space image *entering* that op (all prior ops applied). Enabled only
@@ -362,6 +375,7 @@ export function EditorView() {
     queryFn: () => api.curveSuggestion(safe, rid, dRecipe, curveSelUid!),
     enabled: !!opsSchema.data && !saved.isLoading && !!curveSelUid,
     staleTime: 30_000,
+    placeholderData: keepPreviousData,  // see `levels` — no per-debounce flash
   });
   // Recipe-aware denoise strength for the *selected* denoise op: measures the
   // linear image entering it (any prior linear ops — e.g. a background/gradient or
@@ -376,6 +390,7 @@ export function EditorView() {
     queryFn: () => api.denoiseSuggestion(safe, rid, dRecipe, denoiseSelUid!),
     enabled: !!opsSchema.data && !saved.isLoading && !!denoiseSelUid,
     staleTime: 30_000,
+    placeholderData: keepPreviousData,  // see `levels` — no per-debounce flash
   });
   const refreshPreview = () => {
     setBust(Date.now());
@@ -409,6 +424,10 @@ export function EditorView() {
   const basePreview = useQuery({
     queryKey: ["edit-base", safe, rid, geometryOpsKey(dRecipe.ops)],
     gcTime: 0,  // see the preview query — blob URLs are revoked, never re-serve a dead one
+    // Keep the previous render while a geometry change re-fetches (exactly like
+    // the main preview): otherwise the overlay/split image unmounts for a tick on
+    // every key flip — a visible flash, and the Editor.test.tsx flake source.
+    placeholderData: keepPreviousData,
     enabled: (showBase || splitCompare) && !!opsSchema.data && !saved.isLoading,
     queryFn: async ({ signal }) => {
       const res = await fetch(
@@ -440,6 +459,7 @@ export function EditorView() {
   const maskPreview = useQuery({
     queryKey: ["edit-mask", safe, rid, dMaskSizePx ?? "default", dKey, starSelUid ?? ""],
     gcTime: 0,  // see the preview query — blob URLs are revoked, never re-serve a dead one
+    placeholderData: keepPreviousData,  // see `basePreview` — no per-debounce flash
     enabled: showMask && !!opsSchema.data && !saved.isLoading,
     queryFn: async ({ signal }) => {
       const res = await fetch(
@@ -464,6 +484,7 @@ export function EditorView() {
   const coveragePreview = useQuery({
     queryKey: ["edit-coverage", safe, rid, geomKey],
     gcTime: 0,  // see the preview query — blob URLs are revoked, never re-serve a dead one
+    placeholderData: keepPreviousData,  // see `basePreview` — no per-debounce flash
     enabled: showCoverage && !!opsSchema.data && !saved.isLoading,
     queryFn: async ({ signal }) => {
       const res = await fetch(api.editCoverageMapUrl(safe, rid, dRecipe), { signal });
@@ -497,6 +518,7 @@ export function EditorView() {
   const withoutOpPreview = useQuery({
     queryKey: ["edit-without-op", safe, rid, dKey, selected, bust],
     gcTime: 0,  // see the preview query — blob URLs are revoked, never re-serve a dead one
+    placeholderData: keepPreviousData,  // see `basePreview` — no per-debounce flash
     enabled: soloWanted && !!opsSchema.data && !saved.isLoading,
     queryFn: async ({ signal }) => {
       const withoutRecipe: Recipe = {
@@ -531,6 +553,7 @@ export function EditorView() {
     queryKey: ["edit-look", safe, rid, lookSel?.label,
       lookPreviewRecipe ? JSON.stringify(lookPreviewRecipe.ops) : ""],
     gcTime: 0,  // see the preview query — blob URLs are revoked, never re-serve a dead one
+    placeholderData: keepPreviousData,  // see `basePreview` — no per-debounce flash
     enabled: lookSplit && !!lookPreviewRecipe && !!opsSchema.data && !saved.isLoading,
     queryFn: async ({ signal }) => {
       const res = await fetch(api.editPreviewUrl(safe, rid, lookPreviewRecipe!), { signal });
