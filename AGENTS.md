@@ -80,90 +80,42 @@ higher on this list wins — always:
 4. **Best-possible image quality** for the OSC Seestar workflow (clean, detailed
    final images).
 
-**⚡ IMMEDIATE PRIORITY #1 (owner-CONFIRMED Seestar S30) — every plate-solve uses the
-WRONG field of view.** The owner runs a Seestar **S30** (true FOV ≈ 2.1°), but every
-real solve is hardcoded to **1.3°** and the Settings that would fix it are dead
-(`runner.py:167-169` reads project-meta keys nothing writes; webapp threads only
-`astap_path`). ASTAP's quad-matching does not forgive a wrong FOV, so this plausibly
-fails MOST of the owner's subs across ALL targets (not just faint) → thin "gibberish"
-stacks. **Fix (do the robust version): auto-derive the solve FOV per frame from the
-Seestar FITS header** (`FOCALLEN` + `XPIXSZ`/`YPIXSZ` → pixel scale → `fov = scale ·
-width_px / 3600`; S30 ≈ 2.1°, S50 ≈ 1.27° — works for any model, no user config),
-falling back to a now-wired-through Settings value, then 1.3°. See the ⭐⭐⭐ entry in
-`docs/IMPROVEMENTS.md` → "Bugs". This is the single highest-yield fix for the owner's
-reported problem — do it first.
+**⚡ IMMEDIATE PRIORITY (owner-reported + 2026-07 audits) — the plate-solve + ingest
+fixes shipped; the top OPEN issues are now IMAGE QUALITY and a few real data bugs.**
+The S30 wrong-FOV solve failures, the ASTAP ladder, the faint-field stack-then-solve
+bootstrap, and the Seestar ingest/upgrade-heal are all FIXED and verified
+(v0.184–v0.210). Front-of-queue now (see the ⭐ entries in `docs/IMPROVEMENTS.md` →
+"Bugs"), highest owner-impact first:
 
-**⚡ IMMEDIATE PRIORITY #2 (2026-07-24 plate-solve audit, MEASURED) —
-fix faint-field plate-solve: the ASTAP ladder is backwards, and the stack-then-solve
-bootstrap is validated.** This is the measured root cause of the owner's #1 remaining
-pain (faint targets → few solved subs → thin "gibberish" stacks). The audit measured
-the real ASTAP CLI + bundled d05 DB on realistic Seestar subs: ASTAP already auto-bins
-1×1 on the first rung, so `_SOLVE_LADDER`'s bin-2/bin-4 rungs **strictly destroy**
-faint-field star detection (5.0 → 1.0 → 0.0 stars of 25, vs ASTAP's ≥3-star abort),
-and the hot-pixel rationale for binning is empirically void. Two slices: **(a, S)**
-reorder the ladder — never bin past 2, keep/boost a bin-1 rung (raise `-s`); **(b,
-M–L, the real cure)** ship the now-validated **stack-then-solve bootstrap** (mean the
-first ~8–16 accepted-but-unsolved subs → solvable at faintness where a single sub
-isn't → propagate WCS). See the ⭐⭐ thin-stack entry's "▶ ROOT CAUSE MEASURED" block.
-The audit also recorded the measured **non-levers** (deeper star DB, radius/timeout,
-`-check`/`-m 1`/`-speed slow` — don't build these) and filed a related ⭐ bug: the
-**Settings' ASTAP FOV/timeout never reach a real solve** (`runner.py:167-169`), so a
-Seestar **S30** owner (true FOV ≈ 2.1° vs the hardcoded 1.3°) cannot fix their solves
-at all — a likely large contributor if the owner runs an S30.
+1. **⭐⭐ Auto one-click colour breakage on light-polluted data (MEASURED).** On
+   ordinary LP-gradient data the finished Auto picture comes out purple on one side,
+   green/blown on the other (sky cast −44% / brightness +182% on an 18% gradient;
+   −86%/+52% even on a mild 8% one). Three isolated mechanisms: luminance-mode gradient
+   removal leaves per-channel gradient shapes; Background2D fit bias survives stacking
+   (dither doesn't decorrelate it); per-channel STF turns the residual into diverging
+   colour. **Measured trap: naively switching to per-channel gradient mode erases faint
+   nebulae** — the backlog entry has the validated safe fix. This is the owner's #1
+   priority (a good final picture) and the biggest reason results still look wrong.
+   Also filed & measured: SCNR ~−10% magenta sky on noisy stacks (validated
+   smoothed-excess fix → −1%); auto-contrast curve lifts the whole sky +42%; auto
+   denoise saturates to a waxy sky on thin stacks.
+2. **⭐ Clearing a numeric Stack field sends `null` → engine TypeError, and it can be
+   SAVED into stack-defaults — poisoning every future stack.** Data-integrity; coerce/
+   validate nulls at the API + defaults layers.
+3. **⭐ The frames list silently truncates at 2000 — one S30 night ≈ 2,100 subs**, so
+   grading + pre-flight checks silently operate on a subset. Paginate / raise the cap
+   for the real Seestar workload.
+4. Other verified click-path bugs (filed): History "Full-res PNG" of a Process-target
+   run serves the UN-edited image; North-up mode mis-places Identify pins and saves the
+   sideways image; re-saved previews stay stale up to a day (no Cache-Control); Tonight
+   planner strips object types; "next night" names the wrong night west of UTC.
 
-**(Resolved/verified — background):** the Seestar upgrade-path pollution is FIXED
-(v0.184.15) and the owner's re-scan heal is verified SAFE end-to-end (idempotent,
-non-destructive); three heal edge-defects remain filed (mixed-library mass-reject,
-legacy whole-device-drop, cleanup-discards-history). Original ingest context:
-The fresh-library Seestar-convention scanner fix shipped (v0.184.9 — verified correct
-by the audit). The owner's *already-polluted* install — where a re-scan merged the raw
-subs INTO the old bare-output target (`<T>_sub/` → target `<T>` → same `safe_name` as
-the pre-fix `<T>/` output target), so the Seestar's own on-device `Stacked_*.fit` kept
-stacking in, got preferentially picked as the stack reference, and flipped `is_mosaic`
-into a padded low-res "mosaic" — is now healed by **v0.184.15**: `scan_and_organize`
-additively rejects any already-registered frame whose source parent is the bare `<T>/`
-(or a `*_video/`) folder as `auto:seestar_output` (never deleted; user can re-accept),
-so it leaves the stack + reference pool. The stale `<T>_sub`-named *duplicate target* it
-leaves behind is correctness-neutral (it stacks the correct subs) and is filed as a
-one-click-cleanup Idea. **Still open — fix these next:** the two sibling ingest bugs the
-audit filed (whole-device `MyWorks/` drop merging everything; unicode names collapsing to
-one project). **This is why the owner's
-redeploy would still produce bad stacks — fix it before anything else.**
+**(Resolved this cycle):** the `Editor.test.tsx` flake was a REAL product bug — debounce-
+keyed queries dropped their data for one fetch per edit, so editor controls (Coverage
+toggle, suggestions, overlays) blinked out on every slider drag — fixed at root with
+`keepPreviousData` (v0.210.3). Ingest/upgrade-heal, legacy whole-device-drop targets,
+and all three solve fixes are shipped and verified.
 
-**Background (fresh-library convention, already shipped v0.184.9):** a Seestar writes
-`<Target>_sub/` (raw subs) *and* `<Target>/` (its own single stacked OUTPUT), plus
-`_mosaic`/`_video` variants; the scanner now maps `_sub`/`_mosaic_sub`, skips the
-output + `*_video` folders, and keeps **mosaic vs single-field as separate targets**.
-Original root-cause context:
-scanner first, then re-check whether (A)/(B) below persist.
-
-**Then the two output symptoms (see the ⭐⭐ entries in `docs/IMPROVEMENTS.md` → "Bugs"):**
-
-**(A) Final stacked-output RESOLUTION is much lower than it should be.** Reproduce
-and pin which artifact loses pixels: prime suspect is the **memory-budget
-drizzle-scale reduction** (`_largest_drizzle_scale_within_budget`, `stacker.py`)
-silently shrinking the canvas on a RAM-capped NAS container; also verify the base
-canvas equals the native sub, and rule the display-only caps (1024px preview /
-2048px share JPEG) in or out. If RAM forces a reduction, say so plainly instead of
-silently shipping low-res; and show the output pixel size on the run info.
-
-**(B) auto-stacked
-FINAL results come out as single-frame colour-speckle "gibberish" for faint/
-sparse-star targets** (a bright galaxy stacks cleanly — so it's data-dependent).
-[Engine ruled out + honest thin-stack warnings/guard shipped v0.159–v0.183; the
-remaining root is plate-solve failing on faint fields so most subs stay
-accepted-but-unsolved — keep improving faint-field solve success / surfacing.]
-See the ⭐⭐ entry in `docs/IMPROVEMENTS.md` → "Bugs (fix these first)". The
-data-dependence points away from a render/debayer bug and toward **the auto-pipeline
-combining too few frames** (plate-solve failing on faint fields and/or over-aggressive
-auto-reject/grade — note v0.149 defaulted `auto_reject` ON for a never-configured
-form), so the "stack" is ~1 sub and noise never averages out. **Instrument the real
-accepted+solved+surviving frame count on a faint target, find the over-dropping
-stage, fix it, and add a minimum-frames guard + honest "only N of M frames stacked"
-warning.** Reproduce with synthetic noisy few-star subs (output noise must fall
-~√N). This is the front-of-queue focus right now. (Earlier immediate priorities —
-bright-core/STF autostretch and the Sky-map bugs — are both fixed; see their
-struck-through backlog entries.)
 
 **Current focus (2026-07 — set by the owner).** The editor (priority 1) is now
 **well-hardened**: its traced bug backlog is drained and repeated adversarial
