@@ -9022,6 +9022,54 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **⭐ OWNER-REQUESTED — "Stack video": lucky-imaging stack of the Seestar's Solar/
+  Lunar video captures (already sitting in `incoming/` as `*_video/` folders).**
+  The owner shoots the Moon/Sun with the Seestar, which drops a **video file
+  (.mp4/.avi/.mov)** into a `Lunar_video/` / `Solar_video/` folder — currently the
+  scanner **skips** these (`_VIDEO_SUFFIX`, `seestack/io/scanner.py`). Give the owner
+  a one-click way to turn that video into a **single sharp Moon/Sun still** via
+  *lucky imaging* (grade frames by sharpness → keep the best → align on the disk →
+  stack). **Owner has approved bundling `ffmpeg` in the Docker image** for decoding
+  (a plain offline codec — add to `docker/Dockerfile`; decode via a subprocess
+  `ffmpeg` call, or PyAV — keep the Python deps light; no runtime download, nothing
+  leaves the box). This is a **separate pipeline from deep-sky `run_stack`** — build
+  it as its own module; do **NOT** reuse plate-solving (no stars on a lunar disk) or
+  the deep-sky auto-edit (STF/SCNR/gradient removal would wreck a bright disk).
+  Pipeline (new `seestack/video/` module):
+  1. **Recognise `*_video/` as a new "video" target kind** (route it here instead of
+     skipping; classify `Lunar_`/`Solar_` by prefix; a `Scenery_` video can be
+     skipped or handled generically). Reuse the existing `_VIDEO_SUFFIX`.
+  2. **Decode with ffmpeg, memory-bounded.** A video is potentially **thousands** of
+     frames — never load them all into RAM. Stream/decode, and cap or evenly sample
+     to a sane working count (e.g. ≤ a few thousand) with a `log()` note of what was
+     dropped. Respect the hot-path memory discipline (OOM history).
+  3. **Grade each frame by sharpness** (Laplacian / gradient / high-frequency-energy
+     variance) — seeing makes a few frames sharp and most soft — and **keep the best
+     N%** (a "keep %" like AutoStakkert; sensible default ~25–50%).
+  4. **Register the kept frames on the disk** by phase/cross-correlation (sub-pixel),
+     *not* star alignment — the full disk drifts/jitters frame to frame.
+  5. **Stack** (average or median) the aligned best frames → a high-SNR sharp still.
+     Handle the Seestar's colour: debayer if the frames are raw OSC, else take RGB
+     as-is. A gentle optional final unsharp/wavelet is fine but keep it light (the
+     editor can sharpen further).
+  6. **Output a normal image artifact** (FITS/TIFF/PNG) into History so it flows into
+     the editor/export like any result — **but with a lunar/solar-appropriate display
+     (simple normalize/gamma), NOT the deep-sky auto STF/SCNR/gradient chain.**
+  7. **UI:** a **"Stack video"** action on the video target (auto-offer it when a
+     `*_video/` target is present), with a keep-% control and progress; beginner-simple.
+  **Keep it SIMPLE (beginner scope):** full-disk alignment + best-frame stack is the
+  goal — a single crisp disk. Do **not** build multi-point planetary alignment,
+  drizzle, or derotation (pro territory, out of scope). Guardrails: the only new dep
+  is the owner-approved `ffmpeg` (offline, in the image); additive (new module + job
+  kind + UI, a new run/target "kind"; upgrade-safe — existing scans/targets
+  unaffected); memory-bounded; the video result must bypass the deep-sky auto-edit.
+  Slices: **(a)** core — recognise `*_video` → ffmpeg decode (capped) → sharpness
+  grade → keep-best → cross-correlation disk align → average stack → save still +
+  "Stack video" button (delivers the ask); **(b)** sub-pixel align, keep-% slider,
+  colour/debayer handling, optional final sharpen, progress + big-video sampling;
+  **(c)** disk crop/centre, quality histogram, drizzle-upscale. (L; slice (a) is the
+  shippable M — beginner-feature/workflow, PRIORITY 2/3.)
+
 > **Note (Scout 2026-07-24):** this section is now amply stocked (many ready, unbuilt beginner features below) and the
 > app's beginner surface is genuinely broad — planning (Tonight: moon/altitude/clouds/`suggest` new targets/
 > `next-session`/`best-months`), calendar export (`ics.py`), a "Last night" recap card, per-object info blurbs
