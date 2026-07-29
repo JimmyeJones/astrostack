@@ -13076,6 +13076,15 @@ problems. Dogfood it every big-picture run and fix root causes.
   friendly name instead of the bare code. Unknown codes fall back to the raw code (never hide data),
   and a missing code stays `None`. Regression tests `test_friendly_object_type_maps_known_codes_to_plain_words`
   and `test_friendly_object_type_falls_back_to_the_raw_code`.
+- **DEV-INFRA NOTE (Builder 2026-07-29) — a bare `npx vitest run` flakes catastrophically on a high-core
+  machine.** On a container that reports many CPUs, vitest spins up one jsdom worker per core and exhausts
+  resources: the environment silently fails to initialise (`environment 0ms`) and ~500 tests fail spuriously
+  with `ReferenceError: document is not defined` even though each file passes in isolation. It is NOT a product
+  bug and NOT a code regression — CI's 2-core `ubuntu-latest` runner doesn't hit it (few workers). **If you see a
+  wall of `document is not defined` failures, re-run with bounded parallelism:**
+  `npx vitest run --pool=forks --poolOptions.forks.maxForks=2` (all 1336 tests pass, ~200s). Only worth pinning
+  in `vite.config.ts` if CI ever actually flakes this way — speculative today, so left as a note, not a change.
+  (Recorded so a future agent doesn't lose a run diagnosing phantom failures.)
 - Expand `docs/` (webapp.md) to cover calibration, mono/LRGB, auth. (S)
 - `npm audit` still reports `esbuild`≤0.24.2/`vite`≤6.4.2/`vitest`≤3.2.5
   (moderate — dev server only, not the production build) after this run's
