@@ -1136,6 +1136,49 @@ def _render_recipe_fullres(fits_path: str, recipe_dict: dict, progress,
     return out, recipe
 
 
+def render_run_recipe_fullres_png(
+    fits_path: str, recipe_dict: dict, *,
+    max_long_edge: int = 8000, north_up: bool = False,
+) -> bytes:
+    """PNG bytes of a run's full-res FITS rendered through a *saved editor recipe* —
+    the finished, edited picture at native resolution, matching the preview the user
+    clicked.
+
+    A "Process target" auto-edit leaves the run's FITS **linear** and stores the
+    tone-mapped look as the run's editor recipe, so the plain STF render
+    (:func:`~seestack.render.thumbnail.render_preview_png_full_res`) serves the
+    *un-edited* master — the wrong picture — for such a run. This renders the recipe
+    instead and encodes it exactly like ``render_preview_png_full_res`` (same
+    ``north_up`` rotation + ``max_long_edge`` decimation), so the full-res download
+    is the picture on screen, just bigger.
+    """
+    import io
+
+    import numpy as np
+    from PIL import Image
+
+    from seestack.render.thumbnail import _apply_north_up
+
+    def _noop_progress(*_a: Any, **_k: Any) -> None:  # this path has no job to report to
+        return None
+
+    out, _recipe = _render_recipe_fullres(fits_path, recipe_dict, _noop_progress)
+    disp = np.clip(np.nan_to_num(np.asarray(out, dtype=np.float32)), 0.0, 1.0)
+    if north_up:
+        disp = _apply_north_up(disp, fits_path)
+    u8 = (disp * 255).astype(np.uint8)
+    img = Image.fromarray(u8, mode="RGB")
+    h, w = u8.shape[:2]
+    long_edge = max(h, w)
+    if long_edge > max_long_edge:
+        scale = max_long_edge / long_edge
+        img = img.resize((max(1, round(w * scale)), max(1, round(h * scale))),
+                         Image.BOX)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
 def _apply_editor_to_run(lib: Library, safe: str, run_id: int, recipe_dict: dict,
                          *, output_name: str | None, tiff_mode: str,
                          progress) -> dict[str, Any]:

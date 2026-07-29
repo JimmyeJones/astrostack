@@ -140,25 +140,23 @@ when you take it.
   no config/DB/API-shape change; the Curves op default is unchanged. Confidence: reproduced. (S, editor/image-quality
   — PRIORITY 1.)
 
-- **⭐ TRACED + QUANTIFIED (2026-07-26 quality audit) — History "Full-res PNG" of a Process-target (auto-edited) run
-  silently serves a DIFFERENT, un-edited picture than the preview it claims to match.** *(Broken-UX/parity on the
-  flagship walk-away path; the endpoint's own docstring promises "the same look as the gallery/History thumbnail".)*
-  `download_full_res_png` (`webapp/routers/stack.py:443-471`) → `render_preview_png_full_res`
-  (`seestack/render/thumbnail.py:322-369`) checks only `fits_is_display_space()`; a "Process target" auto-edit
-  leaves the FITS **linear** and marks the *run* (`preview_display_space`, `webapp/routers/stack.py:364-377`), so
-  the download renders the conservative 6 %-grey STF of the linear master instead of the Auto-edited image:
-  measured against the preview the user clicked — **meanAbsDiff 0.132 (13 % of full scale), sky 0.065 vs 0.178,
-  sky cast +12 % green vs −10 %, and the test nebula obvious in the preview but invisible in the download**. The
-  owner clicks the pretty thumbnail, downloads "full-res", and gets a dark green-tinted image — reads as "the app
-  ruined my picture". **Fix direction:** in the endpoint, when `_preview_is_display_space(options_json)` holds,
-  load the run's saved recipe (`RECIPE_META_PREFIX`) and render it at native res via the existing
-  `_render_recipe_fullres` (`webapp/pipeline.py:1071`); keep the current path for plain runs. (While there: the
-  auto-edit bakes its preview from the ≤1500 px stride proxy — `_auto_edit_process_run`,
-  `webapp/pipeline.py:1969-1979` — i.e. 960 px for a 1920-wide stack vs the 1024 px box-filtered normal preview;
-  measured stride-2 star aliasing is negligible (peak ratio 1.007) so this is a small resolution/consistency nit to
-  fold into the same fix.) Regression: process-target a synthetic run, GET `full-res-png`, assert pixel stats match
-  the recipe render, not the STF render. Confidence: traced (mechanism certain from code; numbers from the audit
-  harness). (S–M, autonomy/parity — PRIORITY 2.)
+- ~~**⭐ TRACED + QUANTIFIED (2026-07-26 quality audit) — History "Full-res PNG" of a Process-target (auto-edited) run
+  silently serves a DIFFERENT, un-edited picture than the preview it claims to match.**~~ — **FIXED v0.210.9**
+  (Builder 2026-07-29, branch `claude/pensive-faraday-c8p19o`). `download_full_res_png` (`webapp/routers/stack.py`)
+  now opens the run, and when its preview is a baked display-space edit (`_preview_is_display_space(options_json)`)
+  and a saved recipe exists (`RECIPE_META_PREFIX`), renders **that recipe at native resolution** via a new
+  `render_run_recipe_fullres_png` (`webapp/pipeline.py`, built on the existing `_render_recipe_fullres`) instead of
+  the conservative STF of the still-linear master — so the download is the picture the user clicked, at full res.
+  Plain (un-edited) runs keep the original `render_preview_png_full_res` path unchanged, and a malformed/absent
+  recipe falls back to it too. The new helper encodes exactly like `render_preview_png_full_res` (same `north_up`
+  rotation + `max_long_edge` decimation). This also closes the resolution nit: the download is now native-res, not
+  the ≤1500 px auto-edit preview proxy. Regression test (fail-before/pass-after)
+  `test_full_res_png_of_a_process_target_run_serves_the_edited_recipe` (`tests/webapp/test_full_res_png.py`)
+  process-target-marks a synthetic run, GETs `full-res-png`, and asserts the pixels equal the recipe render and
+  differ visibly from the un-edited STF; the three existing full-res-png tests still pass. Upgrade-safe: endpoint
+  behaviour is additive (same URL/response shape; only display-space+recipe runs change output, and toward the
+  correct picture), no config/DB/API-shape change. Confidence: traced + regression-tested. (S–M, autonomy/parity —
+  PRIORITY 2.)
 
 - ~~**MEASURED (2026-07-26 quality audit) — Auto denoise saturates at strength 1.0 on a realistic thin stack:
   glass-smooth "plastic" grain while the visible chroma blotch survives untouched.**~~ — **FIXED v0.210.8**
