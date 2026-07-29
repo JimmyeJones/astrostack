@@ -240,17 +240,20 @@ when you take it.
   preview carries `no-cache` while FITS does not. Upgrade-safe: response-header-only, no API-shape/URL/DB change.
   Confidence: reproduced. (S, UX/correctness — PRIORITY 2.)
 
-- **⭐ The Tonight planner strips `object_type` from every already-owned target (`type:""`), so Continue-tonight
-  and Tonight bucket everything as "Other" (flat 4 h goal) and contradict the Library-progress card beside them.**
-  *(Wrong-result in planning guidance; **reproduced** at the API level, effects traced through pure functions.)*
-  `seestack/nightplan.py:861` emits `type:"", con:""` for `already_targeted` rows while `/api/library-progress`
-  returns the real `object_type` for the same objects; `objectTypeBucket("")` → "Other" → `readiness.ts` flat 4 h.
-  Consequence: a galaxy at 5 h of its 6 h goal scores "plenty" and is *filtered out* of "Continue tonight"
-  (`continueTonight.ts:89-92`) while "Target progress" above says "5 h of ~6 h"; clusters get over-nudged; Tonight
-  rows render blank type/constellation. The card tests fixture `type:"Galaxy"` — a payload the backend can never
-  produce. **Fix:** populate type/con for already-targeted rows in `plan_tonight` (identify data already computed
-  for library-progress), or join `object_type` from the progress query already fetched in
-  `ContinueTonightCard.tsx:70`. (S, autonomy/planning — PRIORITY 2.)
+- ~~**⭐ The Tonight planner strips `object_type` from every already-owned target (`type:""`), so Continue-tonight
+  and Tonight bucket everything as "Other" (flat 4 h goal) and contradict the Library-progress card beside them.**~~
+  — **FIXED v0.210.11** (Builder 2026-07-29, branch `claude/pensive-faraday-yg1ma1`). `LibraryTarget`
+  (`seestack/nightplan.py`) gained optional `object_type` / `con` fields (default `""`, backward-compatible) that
+  `plan_tonight` now threads onto the `already_targeted` `PlannedTarget` rows instead of hardcoding `type:"" con:""`.
+  The webapp's `_library_targets` (`webapp/routers/plan.py`) populates them via the **same** `identify_object`
+  catalog path the Dashboard "Target progress" card uses, so the two surfaces agree by construction (a galaxy near
+  its goal is no longer mis-bucketed as "Other" → flat 4 h and filtered out of "Continue tonight", and Tonight rows
+  render the real type/constellation). Regression tests (fail-before/pass-after):
+  `test_library_target_carries_its_object_type_and_constellation` (`tests/test_nightplan.py`) and
+  `test_tonight_already_targeted_rows_carry_object_type` (`tests/webapp/test_plan.py`, which also asserts agreement
+  with `/api/library-progress`). Upgrade-safe: additive optional dataclass fields, no config/DB/API-shape change
+  (the `/tonight` rows simply gain real type/con where they were blank before). Confidence: reproduced.
+  (S, autonomy/planning — PRIORITY 2.)
 
 - **Dashboard shows two contradictory integration totals: the stats tile counts kept frames, the imaging calendar
   counts everything including set-aside nights.** *(Wrong-result (calendar variant); **reproduced**: after setting

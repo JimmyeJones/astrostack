@@ -102,18 +102,31 @@ def _resolve_observer(request: Request, settings) -> tuple[Observer | None, str]
 
 
 def _library_targets(request: Request) -> list[LibraryTarget]:
-    """Library targets that have a position, for the 'already targeted' set."""
+    """Library targets that have a position, for the 'already targeted' set.
+
+    Each row is annotated with its catalog-resolved object type/constellation via
+    the same ``identify_object`` path the Dashboard "Target progress" card uses, so
+    the two surfaces agree (previously these were left blank, so every already-owned
+    target bucketed as "Other" and got the flat 4 h goal, contradicting the card).
+    """
+    from seestack.objectinfo import identify_object
+
     lib = deps.open_library(request)
     try:
+        catalog = load_catalog()
         out: list[LibraryTarget] = []
         for t in lib.list_targets():
             if t.ra_deg is None or t.dec_deg is None:
                 continue
+            info = identify_object(t.name, float(t.ra_deg), float(t.dec_deg),
+                                   catalog=catalog)
             out.append(LibraryTarget(
                 safe=t.safe_name, name=t.name,
                 ra_deg=float(t.ra_deg), dec_deg=float(t.dec_deg),
                 frames_accepted=int(t.n_frames_accepted or 0),
                 total_exposure_s=float(t.total_exposure_s or 0.0),
+                object_type=info.type if info is not None else "",
+                con=info.constellation_abbr if info is not None else "",
             ))
         return out
     finally:
