@@ -257,13 +257,16 @@ when you take it.
   (the `/tonight` rows simply gain real type/con where they were blank before). Confidence: reproduced.
   (S, autonomy/planning — PRIORITY 2.)
 
-- **Dashboard shows two contradictory integration totals: the stats tile counts kept frames, the imaging calendar
-  counts everything including set-aside nights.** *(Wrong-result (calendar variant); **reproduced**: after setting
-  a night aside, `/api/stats.total_exposure_s` = 200 vs `/api/activity-calendar.total_exposure_s` = 240 on the same
-  Dashboard; a fully-rejected clouded-out night still paints as a deep "long night" cell.)*
-  `webapp/routers/stats.py:467` (accepted_only) vs `stats.py:519` + `seestack/activity_calendar.py:128-140` (never
-  checks `accept`). **Fix:** feed accepted-only frames into `build_activity_calendar` (or add `kept_exposure_s`
-  per night and render that). (S, friendliness — PRIORITY 3.)
+- ~~**Dashboard shows two contradictory integration totals: the stats tile counts kept frames, the imaging calendar
+  counts everything including set-aside nights.**~~ — **FIXED v0.210.13** (Builder 2026-07-29, branch
+  `claude/pensive-faraday-yg1ma1`). `_collect_activity_calendar` (`webapp/routers/stats.py`) now streams
+  `proj.iter_frames(accepted_only=True)` into the per-night accumulator, so the calendar's per-night and total
+  exposure count only kept subs — matching the stats tile (which already counts `accept=1`). A clouded-out,
+  fully-rejected night no longer paints a deep "long night" cell, and the two Dashboard totals agree. Regression
+  test (fail-before/pass-after): `test_activity_calendar_counts_accepted_frames_only`
+  (`tests/webapp/test_activity_calendar.py`) rejects one sub of a 3-sub night and asserts the cell reads 120 s / 2
+  frames, not 180 s / 3. Upgrade-safe: read-path filter only, no config/DB/API-shape change (the response gains no
+  fields; only the counted set narrows to accepted). Confidence: reproduced. (S, friendliness — PRIORITY 3.)
 
 - **"Save as defaults" on the Stack form silently drops the calibration-master picks while the toast says they'll
   drive auto-stacking.** *(Broken-UX — silent loss of a user choice; **reproduced**:

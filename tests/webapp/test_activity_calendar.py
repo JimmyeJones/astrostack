@@ -51,6 +51,37 @@ def test_activity_calendar_buckets_two_nights(client, built_library):
     assert data["end_date"] == now.date().isoformat()
 
 
+def test_activity_calendar_counts_accepted_frames_only(client, built_library):
+    # Regression: the calendar streamed every frame (accept=0 included), so a
+    # night with rejected/set-aside subs over-reported exposure and a fully
+    # clouded-out night still painted a deep "long night" cell — contradicting
+    # the stats tile, which counts kept frames. The two must now agree.
+    from seestack.io.library import Library
+
+    now = datetime.now(timezone.utc)
+    day = (now - timedelta(days=5)).date()
+
+    lib = Library.open_or_create(built_library / "library")
+    try:
+        _set_night(lib, "M_42", day, 22, 60.0)  # 3 subs × 60 s
+        # Reject the middle sub of the night (e.g. a passing cloud / satellite).
+        proj = lib.open_target("M_42")
+        try:
+            fids = [f.id for f in proj.iter_frames()]
+            proj.update_frame(fids[1], accept=0, reject_reason="qc:manual")
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    cal = client.get("/api/activity-calendar").json()
+    nights = {n["date"]: n for n in cal["nights"]}
+    # Only the two accepted subs count: 2 × 60 s, not 180 s. (Before the fix the
+    # rejected sub was still folded in, so this night read 180 s / 3 frames.)
+    assert nights[day.isoformat()]["exposure_s"] == 120.0
+    assert nights[day.isoformat()]["n_frames"] == 2
+
+
 def test_activity_calendar_empty_library_is_valid(client, data_root):
     # data_root has an incoming/ but no scanned library yet.
     r = client.get("/api/activity-calendar")
