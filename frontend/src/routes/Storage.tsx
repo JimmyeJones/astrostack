@@ -8,6 +8,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, type TargetStorage } from "../api/client";
 import { QueryError } from "../components/QueryError";
+import { sanitizeKeep } from "../components/pruneKeep";
 import { storageHeadroom } from "../components/storageHeadroom";
 
 function gb(bytes: number): string {
@@ -50,10 +51,21 @@ function TargetRow({ row, total }: { row: TargetStorage; total: number }) {
   };
 
   const confirmPrune = () => {
+    // Guard the emptied-box footgun: a cleared NumberInput is "" and Number("")
+    // is 0, which the backend would honour as "delete every stack". Refuse and
+    // prompt instead of silently wiping the target's whole history.
+    const k = sanitizeKeep(keep, row.n_stack_runs);
+    if (k === null) {
+      notifications.show({
+        message: "Enter how many recent stacks to keep (at least 1).",
+        color: "red",
+      });
+      return;
+    }
     if (window.confirm(
-      `Keep the ${Number(keep)} newest stack(s) for ${row.name} and permanently delete the rest `
+      `Keep the ${k} newest stack(s) for ${row.name} and permanently delete the rest `
       + `(including their FITS/TIFF/preview files)?\n\nThis cannot be undone.`)) {
-      prune.mutate(Number(keep));
+      prune.mutate(k);
     }
   };
 
@@ -107,7 +119,7 @@ function TargetRow({ row, total }: { row: TargetStorage; total: number }) {
         {row.n_stack_runs > 1 ? (
           <Group gap={6}>
             <Text size="xs" c="dimmed">keep</Text>
-            <NumberInput size="xs" w={64} min={0} max={row.n_stack_runs}
+            <NumberInput size="xs" w={64} min={1} max={row.n_stack_runs}
               value={keep} onChange={setKeep} />
             <Button size="xs" variant="subtle" color="red" loading={prune.isPending}
               onClick={confirmPrune}>

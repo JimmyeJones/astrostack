@@ -327,8 +327,13 @@ when you take it.
   uses `QueryError`); (c) Tonight's error state unmounts its own date picker and altitude select
   (`Tonight.tsx:187-192`) — one failing date strands the user; (d) single-frame accept/reject doesn't invalidate
   `["reject-summary", safe]` (`Target.tsx:425-432`, unlike every sibling mutation) so the left-out hovercard goes
-  stale; (e) Storage "Prune old stacks" with an emptied keep box means keep **0** (`Storage.tsx:21,110-111`,
-  `Number("") === 0` passes the backend's `keep<0` guard) — one confirm deletes every run for the target;
+  stale; (e) ~~Storage "Prune old stacks" with an emptied keep box means keep **0** (`Storage.tsx:21,110-111`,
+  `Number("") === 0` passes the backend's `keep<0` guard) — one confirm deletes every run for the target~~
+  **FIXED v0.210.17** (Builder 2026-07-29, branch `claude/pensive-faraday-nl5fvd`): a new pure `sanitizeKeep`
+  helper (`frontend/src/components/pruneKeep.ts`) rejects an emptied/blank/zero/negative/non-integer keep box, and
+  `confirmPrune` (`Storage.tsx`) now refuses to prune (prompting "keep at least 1") instead of honouring `keep: 0`
+  as delete-everything; the `NumberInput` min is also raised 0→1. Tests: `pruneKeep.test.ts`. (The backend `keep=0`
+  stays valid for the explicit-ids delete path.);
   (f) "Reject worst" on metric-less frames silently reports "Updated 0 frames" (`webapp/routers/frames.py:378-380`
   excludes NULL-QC frames; reproduced `{"changed":0}`) with no explanation; (g) `/sky-so-far` double-highlights two
   nav items (`App.tsx:168` prefix match). (S each, UX — PRIORITY 3.)
