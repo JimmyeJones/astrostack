@@ -223,17 +223,16 @@ when you take it.
   without `north_up`. **Fix:** include `north_up: applyNorthUp` in the POST and thread it to `render_stack_png`
   (the code path already exists in `thumbnail.py`). (S, UX/correctness — PRIORITY 2.)
 
-- **⭐ Re-saved previews stay STALE across Gallery / Dashboard / Best pictures / Compare — even after a reload —
-  because the artifact endpoint sends no `Cache-Control` and consumers use unversioned URLs.** *(Wrong-result —
-  a stale image presented as current; **reproduced**: after a server-side preview regeneration, a Gallery revisit
-  made 0 requests and rendered the identical stale pixels — RFC 9111 heuristic freshness ≈ 10 % of file age, up to
-  ~a day on an old stack.)* `webapp/routers/stack.py:1474-1483` serves the preview with etag/last-modified only
-  (contrast `/render` + `/sky-overlay`, which set `no-store`); `Gallery.tsx:129`, `BestPictures.tsx:36`,
-  `BestPicturesStrip.tsx:40`, `Compare.tsx`, `Dashboard.tsx:226`, `OneFrameVsStackCard.tsx:50-51` all use the bare
-  URL — only the History card that performed a save cache-busts locally. This also mutes the Process-target
-  auto-edit: its rewritten preview may not show up in the Gallery for hours. **Fix:** `Cache-Control: no-cache` on
-  the preview/thumbnail branches (etag revalidation is cheap) or a version token (preview mtime) in `preview_url`.
-  (S, UX/correctness — PRIORITY 2.)
+- ~~**⭐ Re-saved previews stay STALE across Gallery / Dashboard / Best pictures / Compare — even after a reload —
+  because the artifact endpoint sends no `Cache-Control` and consumers use unversioned URLs.**~~ — **FIXED v0.210.7**
+  (Builder 2026-07-29, branch `claude/pensive-faraday-9vlibh`). The `preview` branch of `download_stack_run`
+  (`webapp/routers/stack.py`) now sends `Cache-Control: no-cache`, forcing a cheap conditional revalidation
+  (a 304 when the bytes are unchanged, fresh bytes the moment "Save as preview" / the Process-target auto-edit
+  regenerates the file in place) instead of RFC 9111 heuristic freshness. FITS/TIFF are immutable per run so they
+  keep the default cacheable behaviour. Regression test
+  `test_preview_download_sets_no_cache_so_regenerated_previews_are_not_stale` (fail-before/pass-after) asserts the
+  preview carries `no-cache` while FITS does not. Upgrade-safe: response-header-only, no API-shape/URL/DB change.
+  Confidence: reproduced. (S, UX/correctness — PRIORITY 2.)
 
 - **⭐ The Tonight planner strips `object_type` from every already-owned target (`type:""`), so Continue-tonight
   and Tonight bucket everything as "Other" (flat 4 h goal) and contradict the Library-progress card beside them.**
