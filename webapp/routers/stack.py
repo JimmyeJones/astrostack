@@ -149,7 +149,10 @@ def get_stack_defaults(safe: str, request: Request) -> dict[str, Any]:
 @router.put("/api/targets/{safe}/stack-defaults")
 def put_stack_defaults(safe: str, body: dict[str, Any], request: Request) -> dict[str, Any]:
     valid = {fld.key for fld in stack_option_fields()}
-    clean = {k: v for k, v in body.items() if k in valid}
+    # A cleared numeric field posts ``null`` ("use the default"); never persist it
+    # as a saved default, or it would flow back into every future stack (including
+    # the walk-away auto-stack) and die in the engine with a raw ``TypeError``.
+    clean = {k: v for k, v in body.items() if k in valid and v is not None}
     # Don't persist a default that would later fail every stack cryptically.
     try:
         validate_stack_options(clean)

@@ -182,17 +182,19 @@ when you take it.
 > ~a minute of staleness), the navbar DOES scroll on short viewports (verified 667×375), and same-output-name
 > stacks don't overwrite (older artifacts are timestamp-archived).
 
-- **⭐ Clearing a numeric Stack-form field sends `null`, which passes validation, dies in the engine with a raw
-  `TypeError` — and can be SAVED AS DEFAULTS, poisoning every later stack including the walk-away auto-stack.**
-  *(Wrong-result; **reproduced** live.)* `StackOptionControl.tsx:99` emits `v === "" ? null : Number(v)`;
-  `validate_stack_options` (`webapp/schemas.py:696-698`) treats `None` as "use default" but `coerce_stack_options`
-  (`webapp/schemas.py:674-678`) passes it straight into the `StackOptions` dataclass. Reproduced:
-  `POST …/stack {"sigma_clip":true,"sigma_kappa":null}` → 200 → job `error: TypeError: unsupported operand
-  type(s) for *: 'NoneType' and 'float'`; the same body is *accepted* by `PUT …/stack-defaults`, after which the
-  target cannot stack at all until the value is fixed by hand. Owner path: backspace over "Sigma κ" to retype it,
-  click Stack. **Fix:** drop `None`s in `coerce_stack_options` (fall back to dataclass defaults); optionally have
-  the control restore the schema default on blur-empty. Regression: POST with a `null` numeric → stacks with the
-  default. (S, correctness — PRIORITY 2.)
+- ~~**⭐ Clearing a numeric Stack-form field sends `null`, which passes validation, dies in the engine with a raw
+  `TypeError` — and can be SAVED AS DEFAULTS, poisoning every later stack including the walk-away auto-stack.**~~
+  — **FIXED v0.210.4** (Builder 2026-07-29, branch `claude/pensive-faraday-9vlibh`). Fixed at the single choke point
+  every stack path funnels through: `coerce_stack_options` (`webapp/schemas.py`) now drops `None` values so a
+  non-optional field like `sigma_kappa: float` falls back to its dataclass default instead of writing `None` into
+  the engine (`NoneType * float` TypeError). Safe for the genuinely-optional fields (`max_workers`, `dark_path` …)
+  whose default is itself `None`. Also hardened `put_stack_defaults` (`webapp/routers/stack.py`) so a cleared-field
+  `null` is never *persisted* as a saved default (which would re-poison every future stack, including the walk-away
+  auto-stack). Regression tests (fail-before/pass-after): `test_coerce_drops_null_numeric_falls_back_to_default`,
+  `test_coerce_preserves_optional_none_fields`, `test_stack_defaults_does_not_persist_a_cleared_numeric_null`
+  (`tests/webapp/test_stack_option_validation.py`). Upgrade-safe: no config/DB/API-shape/default change (an old
+  persisted `null` default is now simply dropped at coerce time rather than crashing). Confidence: reproduced.
+  (S, correctness — PRIORITY 2.)
 
 - **⭐ The frames list silently truncates at 2000 — the table, keyboard grading, "Reject worst" and the Stack
   pre-flight guards all operate on a subset while the badge shows the true count.** *(Wrong-result on a realistic
