@@ -188,7 +188,32 @@ export function TonightView() {
     return <Center h={300}><Loader /></Center>;
   }
   if (isError || !data) {
-    return <QueryError error={error} onRetry={() => refetch()} />;
+    // Keep the Night picker mounted on error, so a single failing date doesn't
+    // strand the user with no way to pick a different night (the full header
+    // below needs `data` for the altitude select, so render a minimal one here).
+    return (
+      <Stack gap="lg">
+        <Group justify="space-between" align="flex-end" wrap="wrap">
+          <Title order={2}>
+            <Group gap="xs"><IconStars size={26} /> Tonight</Group>
+          </Title>
+          <TextInput
+            type="date"
+            label="Night"
+            value={date}
+            min={bounds.min}
+            max={bounds.max}
+            onChange={(e) => setDate(e.currentTarget.value)}
+            rightSection={date
+              ? <Button variant="subtle" size="compact-xs" onClick={() => setDate("")}>Tonight</Button>
+              : undefined}
+            rightSectionWidth={date ? 72 : undefined}
+            w={200}
+          />
+        </Group>
+        <QueryError error={error} onRetry={() => refetch()} />
+      </Stack>
+    );
   }
 
   const header = (

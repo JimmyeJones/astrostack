@@ -1267,10 +1267,10 @@ export const api = {
       body: JSON.stringify(body),
     }),
   bulkFrames: (safe: string, body: Record<string, unknown>) =>
-    req<{ changed: number; changed_ids: number[] }>(`/api/targets/${safe}/frames/bulk`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
+    req<{ changed: number; changed_ids: number[]; note?: string | null }>(
+      `/api/targets/${safe}/frames/bulk`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
   // Opt-in "set this night aside": reject the accepted subs of one capture night
   // (bounded by a NightSummary's start/end). Returns the touched ids for undo.
   setAsideNight: (safe: string, start_utc: string, end_utc: string) =>

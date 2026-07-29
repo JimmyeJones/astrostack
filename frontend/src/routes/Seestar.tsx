@@ -10,6 +10,7 @@ import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, type SeestarDevice } from "../api/client";
+import { QueryError } from "../components/QueryError";
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
@@ -128,7 +129,12 @@ function DeviceCard({ dev, controlEnabled }: { dev: SeestarDevice; controlEnable
                 ) : null}
               </Group>
               {t.stacked_frames != null ? (
-                <Progress mt={6} value={Math.min(100, (t.stacked_frames % 100))} color="violet" size="sm" />
+                // Live telemetry carries no target sub-count, so there's no honest
+                // denominator for a percentage. The old bar showed `frames % 100`,
+                // which sawtooths back to empty every 100 subs (99 → full, 100 →
+                // empty). Show an indeterminate "working" bar instead; the exact
+                // count is already spelled out in the "Stacked: N" line above.
+                <Progress mt={6} value={100} striped animated color="violet" size="sm" />
               ) : null}
             </Paper>
           ) : null}
@@ -171,7 +177,7 @@ function DeviceCard({ dev, controlEnabled }: { dev: SeestarDevice; controlEnable
 
 export function SeestarView() {
   const qc = useQueryClient();
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["seestar"], queryFn: api.getSeestarDevices, refetchInterval: 3000,
   });
 
@@ -184,8 +190,13 @@ export function SeestarView() {
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
 
-  if (isLoading || !data) {
+  if (isLoading) {
     return <Center h={300}><Loader /></Center>;
+  }
+  if (isError || !data) {
+    // Without this the page span forever on an API error (data stays undefined),
+    // unlike every other route which surfaces a retryable QueryError.
+    return <QueryError error={error} onRetry={() => refetch()} />;
   }
 
   return (

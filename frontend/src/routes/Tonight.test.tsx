@@ -291,4 +291,22 @@ describe("TonightView", () => {
     // The barely-started target gets no readiness nudge.
     expect(screen.queryByText("Nearly there")).not.toBeInTheDocument();
   });
+
+  it("keeps the Night picker mounted on error so a bad date doesn't strand the user", async () => {
+    vi.spyOn(client.api, "getTonight").mockRejectedValue(new Error("boom"));
+    render(
+      <MantineProvider>
+        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+          <MemoryRouter><TonightView /></MemoryRouter>
+        </QueryClientProvider>
+      </MantineProvider>,
+    );
+    // The error is surfaced (not a spinner forever)...
+    await waitFor(() =>
+      expect(screen.getByText("Couldn't load this page")).toBeInTheDocument());
+    // ...AND the Night date picker + a Retry are still there, so the user can
+    // recover by picking another night instead of being stranded.
+    expect(screen.getByLabelText("Night")).toBeInTheDocument();
+    expect(screen.getByText("Retry")).toBeInTheDocument();
+  });
 });

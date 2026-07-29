@@ -321,29 +321,47 @@ when you take it.
   honoured). Upgrade-safe: frontend-only, no API/DB/config change (the endpoint already accepted `limit`, capped at
   2000). (S, UX — PRIORITY 3.)
 
-- **Telescope page: the live "stacking" progress bar resets to zero every 100 subs** — `Seestar.tsx:130-132`
-  renders `stacked_frames % 100` as a percentage (99 subs → full, 100 → empty, 150 → half; a session routinely
-  passes 100 × 10 s subs). No denominator exists in telemetry, so show the count ("142 subs stacked") or an
-  indeterminate indicator. *(Traced; broken-UX/misleading telemetry.)* (S, UX — PRIORITY 3.)
+- ~~**Telescope page: the live "stacking" progress bar resets to zero every 100 subs** — `Seestar.tsx:130-132`
+  renders `stacked_frames % 100` as a percentage.~~ — **FIXED v0.210.19** (Builder 2026-07-29, branch
+  `claude/pensive-faraday-rlkdvs`). Live telemetry carries no target sub-count, so there is no honest denominator
+  for a percentage; the sawtooth `stacked_frames % 100` bar is replaced with an **indeterminate striped/animated
+  "working" bar** (`value={100} striped animated`), and the exact count is already spelled out in the adjacent
+  "Stacked: N" line. Also fixed alongside (same batch): `SeestarView` now surfaces a retryable `QueryError` on API
+  failure instead of spinning a `Loader` forever (`isError` was never checked, unlike every other route). Tests:
+  `Seestar.test.tsx` (+1, "surfaces a retryable error instead of spinning forever"). Frontend-only, upgrade-safe.
+  (S, UX — PRIORITY 3.)
 
 - **Smaller click-path items (2026-07-26 audit — batch into cleanup passes; each traced, several reproduced):**
   (a) Editor PNG/share job polling has no try/catch and survives unmount (`Editor.tsx:678+,690-722,729-768`) — a
   transient 5xx or a concurrent "Clear finished jobs" discards a FINISHED render that is still downloadable, and
   navigating away later fires a surprise download; contrast `pollJobForOpErrors` (655-668) which swallows errors;
-  (b) Seestar page spins forever on API error (`Seestar.tsx:174-189` never checks `isError`; every other route
-  uses `QueryError`); (c) Tonight's error state unmounts its own date picker and altitude select
-  (`Tonight.tsx:187-192`) — one failing date strands the user; (d) single-frame accept/reject doesn't invalidate
-  `["reject-summary", safe]` (`Target.tsx:425-432`, unlike every sibling mutation) so the left-out hovercard goes
-  stale; (e) ~~Storage "Prune old stacks" with an emptied keep box means keep **0** (`Storage.tsx:21,110-111`,
+  (b) ~~Seestar page spins forever on API error~~ **FIXED v0.210.19** (Builder 2026-07-29, branch
+  `claude/pensive-faraday-rlkdvs`): `SeestarView` now returns a retryable `QueryError` on `isError` like every
+  other route (test in `Seestar.test.tsx`); (c) ~~Tonight's error state unmounts its own date picker and altitude
+  select (`Tonight.tsx:187-192`) — one failing date strands the user~~ **FIXED v0.210.19** (same branch): the error
+  branch now keeps a minimal header with the **Night date picker** mounted (+ Retry) so the user can pick a different
+  night to recover (test `Tonight.test.tsx` "keeps the Night picker mounted on error"); (d) ~~single-frame
+  accept/reject doesn't invalidate `["reject-summary", safe]` (`Target.tsx:425-432`, unlike every sibling mutation)
+  so the left-out hovercard goes stale~~ **FIXED v0.210.20** (same branch): the `patch` mutation's `onSuccess` now
+  invalidates `["reject-summary", safe]` too; (e) ~~Storage "Prune old stacks" with an emptied keep box means keep
+  **0** (`Storage.tsx:21,110-111`,
   `Number("") === 0` passes the backend's `keep<0` guard) — one confirm deletes every run for the target~~
   **FIXED v0.210.17** (Builder 2026-07-29, branch `claude/pensive-faraday-nl5fvd`): a new pure `sanitizeKeep`
   helper (`frontend/src/components/pruneKeep.ts`) rejects an emptied/blank/zero/negative/non-integer keep box, and
   `confirmPrune` (`Storage.tsx`) now refuses to prune (prompting "keep at least 1") instead of honouring `keep: 0`
   as delete-everything; the `NumberInput` min is also raised 0→1. Tests: `pruneKeep.test.ts`. (The backend `keep=0`
   stays valid for the explicit-ids delete path.);
-  (f) "Reject worst" on metric-less frames silently reports "Updated 0 frames" (`webapp/routers/frames.py:378-380`
-  excludes NULL-QC frames; reproduced `{"changed":0}`) with no explanation; (g) `/sky-so-far` double-highlights two
-  nav items (`App.tsx:168` prefix match). (S each, UX — PRIORITY 3.)
+  (f) ~~"Reject worst" on metric-less frames silently reports "Updated 0 frames" (`webapp/routers/frames.py:378-380`
+  excludes NULL-QC frames; reproduced `{"changed":0}`) with no explanation~~ **FIXED v0.210.20** (Builder
+  2026-07-29, branch `claude/pensive-faraday-rlkdvs`): `bulk_frames` now returns an optional `note` explaining the
+  no-op ("No accepted frames have a <metric> measurement yet — run QC / grade first, then try again.") when a
+  `reject_worst` finds accepted frames but none carry the chosen metric, and the Target-page toast shows that
+  guidance (yellow) instead of a bare "Updated 0 frames"; additive response field, upgrade-safe. Tests:
+  `test_bulk_reject_worst_metricless_explains_the_no_op` (`tests/webapp/test_api.py`); (g) ~~`/sky-so-far`
+  double-highlights two nav items (`App.tsx:168` prefix match)~~ **FIXED v0.210.19** (same branch): a pure
+  `isNavActive(pathname, to, end)` helper (`frontend/src/navActive.ts`) matches whole path segments (exact or
+  `to + "/"`), so `/sky-so-far` no longer also lights "Sky Map" (`/sky`). Tests: `navActive.test.ts`.
+  (S each, UX — PRIORITY 3.)
 
   AND low-resolution reports) — the scanner ignores the Seestar folder convention:
   it ingests the Seestar's own OUTPUT folders (and `_video` folders) as if they were
@@ -13058,6 +13076,15 @@ problems. Dogfood it every big-picture run and fix root causes.
   friendly name instead of the bare code. Unknown codes fall back to the raw code (never hide data),
   and a missing code stays `None`. Regression tests `test_friendly_object_type_maps_known_codes_to_plain_words`
   and `test_friendly_object_type_falls_back_to_the_raw_code`.
+- **DEV-INFRA NOTE (Builder 2026-07-29) — a bare `npx vitest run` flakes catastrophically on a high-core
+  machine.** On a container that reports many CPUs, vitest spins up one jsdom worker per core and exhausts
+  resources: the environment silently fails to initialise (`environment 0ms`) and ~500 tests fail spuriously
+  with `ReferenceError: document is not defined` even though each file passes in isolation. It is NOT a product
+  bug and NOT a code regression — CI's 2-core `ubuntu-latest` runner doesn't hit it (few workers). **If you see a
+  wall of `document is not defined` failures, re-run with bounded parallelism:**
+  `npx vitest run --pool=forks --poolOptions.forks.maxForks=2` (all 1336 tests pass, ~200s). Only worth pinning
+  in `vite.config.ts` if CI ever actually flakes this way — speculative today, so left as a note, not a change.
+  (Recorded so a future agent doesn't lose a run diagnosing phantom failures.)
 - Expand `docs/` (webapp.md) to cover calibration, mono/LRGB, auth. (S)
 - `npm audit` still reports `esbuild`≤0.24.2/`vite`≤6.4.2/`vitest`≤3.2.5
   (moderate — dev server only, not the production build) after this run's
@@ -13117,6 +13144,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.210.20** — Click-path audit fix (f) + (d): `bulk_frames` now returns a `note` so "Reject worst" on a
+  metric-less batch explains "run QC first" instead of a silent "Updated 0 frames" (Target toast shows it in yellow);
+  and the single-frame accept/reject `patch` mutation now invalidates `["reject-summary", …]` like every sibling so
+  the left-out hovercard doesn't go stale. Tests: `test_bulk_reject_worst_metricless_explains_the_no_op`.
+- **v0.210.19** — Four frontend click-path/UX fixes from the 2026-07-26 audit: (g) `isNavActive` matches whole path
+  segments so `/sky-so-far` no longer double-highlights "Sky Map"; (b) `SeestarView` surfaces a retryable
+  `QueryError` instead of spinning forever on API error; the Telescope live-stacking bar is now an honest
+  indeterminate "working" bar (was a `% 100` sawtooth); (c) the Tonight error state keeps the Night date-picker
+  mounted so a failing date doesn't strand the user. Tests: `navActive.test.ts`, `Seestar.test.tsx`,
+  `Tonight.test.tsx`.
 - **v0.203.0** — Fix the aliased/low-res interactive stack render: `load_stack_rgb` now downscales with a NaN-aware
   area (box) average to the full `max_width` instead of nearest striding, so the History "Adjust" view (and the
   stretch-suggestion measurement + >8000 px full-res PNG) renders a native 1080-wide stack at 1024 px, not a coarse,
