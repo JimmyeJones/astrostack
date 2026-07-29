@@ -196,15 +196,17 @@ when you take it.
   persisted `null` default is now simply dropped at coerce time rather than crashing). Confidence: reproduced.
   (S, correctness — PRIORITY 2.)
 
-- **⭐ The frames list silently truncates at 2000 — the table, keyboard grading, "Reject worst" and the Stack
-  pre-flight guards all operate on a subset while the badge shows the true count.** *(Wrong-result on a realistic
-  S30 volume — ~2,100 × 10 s subs is ONE good night; **reproduced** with a 2,112-frame target.)*
-  `client.ts:1246-1247` hardcodes `limit=2000` and never pages; `webapp/routers/frames.py:148` slices with no
-  total/truncation signal. Reproduced: badge "2112/2112 ACCEPTED" while the table renders exactly 2000 rows — the
-  112 *newest* subs (sort `id asc`) are invisible to inspection, grading, "Reject worst" ordering and the Stack
-  page's mixed-pointing/quality pre-flight. **Fix:** paginate `listFrames` (offset loop) or return/show a
-  "showing 2000 of N" + fetch-more; short-term warn when `frames.length === limit`. (S–M, UX/correctness —
-  PRIORITY 2.)
+- ~~**⭐ The frames list silently truncates at 2000 — the table, keyboard grading, "Reject worst" and the Stack
+  pre-flight guards all operate on a subset while the badge shows the true count.**~~ — **FIXED v0.210.12**
+  (Builder 2026-07-29, branch `claude/pensive-faraday-yg1ma1`). `listFrames` (`frontend/src/api/client.ts`) now
+  pages the endpoint (fixed 2000-frame requests, incrementing `offset`, stopping on the first short page) and
+  concatenates the whole target instead of capping at one request — so the table, keyboard grading, "Reject worst"
+  ordering and the Stack pre-flight guards see every sub (the newest 112 of a 2,112-sub night are no longer hidden).
+  The backend already sliced correctly with `offset`/`limit`; no server change was needed. The signature/return type
+  are unchanged (`Promise<Frame[]>`), so no caller changes. Regression tests: `src/api/listFrames.test.ts` (stubs
+  `fetch`) asserts a small target is one request, a 2,112-sub target pages into a complete 2,112-row list with the
+  newest subs present, an exact-multiple page count terminates cleanly, and sort/order thread through every page.
+  Upgrade-safe: frontend-only, no API/DB/config change. Confidence: reproduced. (S–M, UX/correctness — PRIORITY 2.)
 
 - ~~**⭐ "Identify" / "Scale" overlays plot un-rotated coordinates on the North-up-rotated render — the pin for an
   object lands diagonally opposite once "Rotate so North is up" is on.**~~ — **FIXED v0.210.10** (Builder 2026-07-29,
