@@ -213,6 +213,22 @@ def test_library_target_dedupes_matching_catalog_object():
     assert m42_entries[0].already_targeted is True
 
 
+def test_library_target_carries_its_object_type_and_constellation():
+    # Regression: the 'already targeted' rows used to hardcode type="" / con="",
+    # so every owned target bucketed as "Other" (flat 4 h goal) and contradicted
+    # the Dashboard "Target progress" card. plan_tonight must now thread the
+    # classification the caller resolved onto the LibraryTarget.
+    m42 = LibraryTarget(safe="M42", name="Orion Nebula", ra_deg=83.82,
+                        dec_deg=-5.39, frames_accepted=100, total_exposure_s=1000.0,
+                        object_type="nebula", con="Ori")
+    plan = plan_tonight(LONDON, JAN_EVENING, library_targets=[m42],
+                        include_catalog=False)
+    entry = next(p for p in plan.targets if p.id == "M42")
+    assert entry.already_targeted is True
+    assert entry.type == "nebula"
+    assert entry.con == "Ori"
+
+
 def test_never_rising_target_scores_zero():
     # A deep-southern target can never clear 30° from London.
     south = LibraryTarget(safe="deep-south", name="Deep South", ra_deg=90.0,

@@ -95,6 +95,24 @@ def test_tonight_with_settings_location(client, solved_library):
         assert m31["difficulty"]["text"]
 
 
+def test_tonight_already_targeted_rows_carry_object_type(client, solved_library):
+    # Regression: 'already targeted' rows used to emit type="" / con="", so every
+    # owned target bucketed as "Other" (flat 4 h goal) and contradicted the
+    # Dashboard "Target progress" card. The already-targeted M_42 must now carry
+    # its catalog classification, resolved via the same identify_object path.
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    body = client.get("/api/plan/tonight", params={"when": JAN_EVENING}).json()
+    m42 = next(t for t in body["targets"]
+               if t["already_targeted"] and t["target_safe"] == "M_42")
+    assert m42["type"] == "nebula"
+    assert m42["con"] == "Ori"
+    # ...and it agrees with what /api/library-progress reports for the same target.
+    prog = client.get("/api/library-progress").json()
+    m42_prog = next((r for r in prog if r["safe"] == "M_42"), None)
+    if m42_prog is not None:
+        assert m42_prog["object_type"] == m42["type"]
+
+
 def test_tonight_min_alt_override_changes_usable_window(client, solved_library):
     client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
     low = client.get("/api/plan/tonight", params={"when": JAN_EVENING, "min_alt": 10}).json()

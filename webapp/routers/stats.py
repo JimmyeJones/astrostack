@@ -515,8 +515,14 @@ def _collect_activity_calendar(lib, targets, *, today, months, lon_deg):
         proj = None
         try:
             proj = Project.open(lib.target_dir(t))
+            # Accepted-only so the calendar's per-night exposure agrees with the
+            # stats tile's kept-frame total (which counts accept=1). Counting
+            # rejected/set-aside subs here painted a clouded-out, fully-rejected
+            # night as a deep "long night" cell and over-reported total exposure
+            # versus the tile beside it.
             accumulate_nights(
-                ((f.timestamp_utc, f.exposure_s, t.name) for f in proj.iter_frames()),
+                ((f.timestamp_utc, f.exposure_s, t.name)
+                 for f in proj.iter_frames(accepted_only=True)),
                 acc, lon_deg=lon_deg,
             )
         except Exception:  # noqa: BLE001 — a broken project must not 500 the dashboard

@@ -5,7 +5,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  autoCastSummaryText, Maintenance, reprocessNudgeText,
+  autoCastSummaryText, dropEmptyFields, Maintenance, reprocessNudgeText,
   WALK_AWAY_KEYS, walkAwayEnabled, withWalkAway,
 } from "./Settings";
 import * as client from "../api/client";
@@ -39,6 +39,35 @@ beforeEach(() => {
 });
 
 afterEach(() => vi.restoreAllMocks());
+
+describe("dropEmptyFields", () => {
+  it("omits emptied (\"\") fields so a cleared non-nullable numeric never 422s the whole save", () => {
+    // Regression: clearing e.g. ASTAP FOV sent 0/"" which failed the backend's
+    // ge= bound with a raw 422, discarding every other edit in the form. The
+    // emptied field is now dropped (keeps its stored value); the rest still save.
+    const out = dropEmptyFields({
+      astap_fov_deg: "",
+      watch_quiet_period_s: 45,
+      auth_enabled: true,
+    });
+    expect(out).not.toHaveProperty("astap_fov_deg");
+    expect(out.watch_quiet_period_s).toBe(45);
+    expect(out.auth_enabled).toBe(true);
+  });
+
+  it("preserves an explicit null (a nullable field the user cleared) and falsy-but-valid values", () => {
+    const out = dropEmptyFields({
+      cpu_workers: null,     // "auto" — a real, intended value
+      astap_timeout_s: 0,    // still sent (bounds-checked server-side), not ""
+      watcher_enabled: false,
+      seestar_known_ips: [],
+    });
+    expect(out.cpu_workers).toBeNull();
+    expect(out.astap_timeout_s).toBe(0);
+    expect(out.watcher_enabled).toBe(false);
+    expect(out.seestar_known_ips).toEqual([]);
+  });
+});
 
 describe("reprocessNudgeText", () => {
   it("returns null when nothing is outdated or status is missing", () => {

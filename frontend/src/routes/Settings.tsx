@@ -86,6 +86,24 @@ export function withWalkAway(
   return next;
 }
 
+// Drop keys the user emptied out (value === "") before PUTting the settings
+// patch. A cleared *non-nullable* numeric field (quiet period, ASTAP FOV, …)
+// would otherwise be sent as 0 or "" and fail the backend's ge= bounds with a
+// raw 422 — losing every *other* edit in the form behind a pydantic toast.
+// Omitting the emptied field instead keeps its stored value and lets the rest
+// save. Nullable fields the user explicitly clears send `null` (not ""), so
+// they are preserved here and still cleared server-side.
+export function dropEmptyFields(
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === "") continue;
+    out[k] = v;
+  }
+  return out;
+}
+
 type HorizonPoint = [number, number];
 
 // Editor for the Tonight planner's horizon / tree-cover mask: a small list of
@@ -476,7 +494,7 @@ export function SettingsView() {
   const astapTest = useMutation({ mutationFn: () => api.astapTest() });
 
   const save = useMutation({
-    mutationFn: (patch: Record<string, unknown>) => api.putSettings(patch),
+    mutationFn: (patch: Record<string, unknown>) => api.putSettings(dropEmptyFields(patch)),
     onSuccess: () => {
       notifications.show({ message: "Settings saved", color: "teal" });
       qc.invalidateQueries({ queryKey: ["settings"] });
@@ -577,10 +595,10 @@ export function SettingsView() {
           <SimpleGrid cols={{ base: 1, xs: 2 }}>
             <NumberInput label={lbl("watch_quiet_period_s", "Quiet period (s)")}
               value={num("watch_quiet_period_s")} min={5}
-              onChange={(v) => set("watch_quiet_period_s", Number(v))} />
+              onChange={(v) => set("watch_quiet_period_s", v === "" ? "" : Number(v))} />
             <NumberInput label={lbl("watch_poll_interval_s", "Poll interval (s)")}
               value={num("watch_poll_interval_s")} min={2}
-              onChange={(v) => set("watch_poll_interval_s", Number(v))} />
+              onChange={(v) => set("watch_poll_interval_s", v === "" ? "" : Number(v))} />
           </SimpleGrid>
 
           <Divider label="Automatic pipeline" />
@@ -649,9 +667,9 @@ export function SettingsView() {
             onChange={(e) => set("astap_path", e.currentTarget.value || null)} />
           <SimpleGrid cols={{ base: 1, xs: 3 }}>
             <NumberInput label={lbl("astap_fov_deg", "ASTAP FOV (deg)")} value={num("astap_fov_deg")}
-              step={0.1} min={0.1} onChange={(v) => set("astap_fov_deg", Number(v))} />
+              step={0.1} min={0.1} onChange={(v) => set("astap_fov_deg", v === "" ? "" : Number(v))} />
             <NumberInput label={lbl("astap_timeout_s", "ASTAP timeout (s)")} value={num("astap_timeout_s")}
-              min={5} onChange={(v) => set("astap_timeout_s", Number(v))} />
+              min={5} onChange={(v) => set("astap_timeout_s", v === "" ? "" : Number(v))} />
             <NumberInput label={lbl("cpu_workers", "CPU workers")} value={num("cpu_workers")}
               min={1} onChange={(v) => set("cpu_workers", v === "" ? null : Number(v))} />
           </SimpleGrid>
@@ -763,10 +781,10 @@ export function SettingsView() {
           <SimpleGrid cols={{ base: 1, xs: 2 }}>
             <NumberInput label={lbl("seestar_scan_interval_s", "Scan interval (s)")}
               value={num("seestar_scan_interval_s")} min={30}
-              onChange={(v) => set("seestar_scan_interval_s", Number(v))} />
+              onChange={(v) => set("seestar_scan_interval_s", v === "" ? "" : Number(v))} />
             <NumberInput label={lbl("seestar_poll_interval_s", "Poll interval (s)")}
               value={num("seestar_poll_interval_s")} min={2}
-              onChange={(v) => set("seestar_poll_interval_s", Number(v))} />
+              onChange={(v) => set("seestar_poll_interval_s", v === "" ? "" : Number(v))} />
           </SimpleGrid>
           <Group justify="flex-end">
             <Button leftSection={<IconDeviceFloppy size={16} />}

@@ -1243,8 +1243,24 @@ export const api = {
     }),
 
   // frames
-  listFrames: (safe: string, sort = "id", order = "asc") =>
-    req<Frame[]>(`/api/targets/${safe}/frames?sort=${sort}&order=${order}&limit=2000`),
+  // Page through the whole target rather than capping at one request: one good
+  // S30 night is ~2,100 × 10 s subs, so a fixed limit silently hid the newest
+  // frames from the table, keyboard grading, "Reject worst" ordering and the
+  // Stack pre-flight guards. We fetch fixed-size pages until a short page proves
+  // we've reached the end, so callers always receive the complete, consistently
+  // sorted list.
+  listFrames: async (safe: string, sort = "id", order = "asc"): Promise<Frame[]> => {
+    const pageSize = 2000;
+    const all: Frame[] = [];
+    for (let offset = 0; ; offset += pageSize) {
+      const page = await req<Frame[]>(
+        `/api/targets/${safe}/frames?sort=${sort}&order=${order}&limit=${pageSize}&offset=${offset}`,
+      );
+      all.push(...page);
+      if (page.length < pageSize) break;
+    }
+    return all;
+  },
   patchFrame: (safe: string, id: number, body: Record<string, unknown>) =>
     req<Frame>(`/api/targets/${safe}/frames/${id}`, {
       method: "PATCH",

@@ -775,6 +775,11 @@ class LibraryTarget:
     dec_deg: float
     frames_accepted: int
     total_exposure_s: float
+    # Catalog-resolved classification (best-effort), so an already-targeted row
+    # carries the same object type/constellation as the un-targeted catalog rows
+    # and the Dashboard "Target progress" card. Empty when unknown.
+    object_type: str = ""
+    con: str = ""
 
 
 def plan_tonight(observer: Observer, when_utc: datetime, *,
@@ -858,7 +863,7 @@ def plan_tonight(observer: Observer, when_utc: datetime, *,
             t: LibraryTarget = m["target"]
             plan.targets.append(PlannedTarget(
                 id=t.safe, name=t.name, ra_deg=t.ra_deg, dec_deg=t.dec_deg,
-                type="", con="", already_targeted=True,
+                type=t.object_type, con=t.con, already_targeted=True,
                 max_altitude_deg=o.max_altitude_deg,
                 transit_utc=o.transit_utc.isoformat() if o.transit_utc else None,
                 minutes_above_min_alt=o.minutes_above_min_alt,

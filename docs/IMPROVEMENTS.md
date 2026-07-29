@@ -196,15 +196,17 @@ when you take it.
   persisted `null` default is now simply dropped at coerce time rather than crashing). Confidence: reproduced.
   (S, correctness — PRIORITY 2.)
 
-- **⭐ The frames list silently truncates at 2000 — the table, keyboard grading, "Reject worst" and the Stack
-  pre-flight guards all operate on a subset while the badge shows the true count.** *(Wrong-result on a realistic
-  S30 volume — ~2,100 × 10 s subs is ONE good night; **reproduced** with a 2,112-frame target.)*
-  `client.ts:1246-1247` hardcodes `limit=2000` and never pages; `webapp/routers/frames.py:148` slices with no
-  total/truncation signal. Reproduced: badge "2112/2112 ACCEPTED" while the table renders exactly 2000 rows — the
-  112 *newest* subs (sort `id asc`) are invisible to inspection, grading, "Reject worst" ordering and the Stack
-  page's mixed-pointing/quality pre-flight. **Fix:** paginate `listFrames` (offset loop) or return/show a
-  "showing 2000 of N" + fetch-more; short-term warn when `frames.length === limit`. (S–M, UX/correctness —
-  PRIORITY 2.)
+- ~~**⭐ The frames list silently truncates at 2000 — the table, keyboard grading, "Reject worst" and the Stack
+  pre-flight guards all operate on a subset while the badge shows the true count.**~~ — **FIXED v0.210.12**
+  (Builder 2026-07-29, branch `claude/pensive-faraday-yg1ma1`). `listFrames` (`frontend/src/api/client.ts`) now
+  pages the endpoint (fixed 2000-frame requests, incrementing `offset`, stopping on the first short page) and
+  concatenates the whole target instead of capping at one request — so the table, keyboard grading, "Reject worst"
+  ordering and the Stack pre-flight guards see every sub (the newest 112 of a 2,112-sub night are no longer hidden).
+  The backend already sliced correctly with `offset`/`limit`; no server change was needed. The signature/return type
+  are unchanged (`Promise<Frame[]>`), so no caller changes. Regression tests: `src/api/listFrames.test.ts` (stubs
+  `fetch`) asserts a small target is one request, a 2,112-sub target pages into a complete 2,112-row list with the
+  newest subs present, an exact-multiple page count terminates cleanly, and sort/order thread through every page.
+  Upgrade-safe: frontend-only, no API/DB/config change. Confidence: reproduced. (S–M, UX/correctness — PRIORITY 2.)
 
 - ~~**⭐ "Identify" / "Scale" overlays plot un-rotated coordinates on the North-up-rotated render — the pin for an
   object lands diagonally opposite once "Rotate so North is up" is on.**~~ — **FIXED v0.210.10** (Builder 2026-07-29,
@@ -240,25 +242,31 @@ when you take it.
   preview carries `no-cache` while FITS does not. Upgrade-safe: response-header-only, no API-shape/URL/DB change.
   Confidence: reproduced. (S, UX/correctness — PRIORITY 2.)
 
-- **⭐ The Tonight planner strips `object_type` from every already-owned target (`type:""`), so Continue-tonight
-  and Tonight bucket everything as "Other" (flat 4 h goal) and contradict the Library-progress card beside them.**
-  *(Wrong-result in planning guidance; **reproduced** at the API level, effects traced through pure functions.)*
-  `seestack/nightplan.py:861` emits `type:"", con:""` for `already_targeted` rows while `/api/library-progress`
-  returns the real `object_type` for the same objects; `objectTypeBucket("")` → "Other" → `readiness.ts` flat 4 h.
-  Consequence: a galaxy at 5 h of its 6 h goal scores "plenty" and is *filtered out* of "Continue tonight"
-  (`continueTonight.ts:89-92`) while "Target progress" above says "5 h of ~6 h"; clusters get over-nudged; Tonight
-  rows render blank type/constellation. The card tests fixture `type:"Galaxy"` — a payload the backend can never
-  produce. **Fix:** populate type/con for already-targeted rows in `plan_tonight` (identify data already computed
-  for library-progress), or join `object_type` from the progress query already fetched in
-  `ContinueTonightCard.tsx:70`. (S, autonomy/planning — PRIORITY 2.)
+- ~~**⭐ The Tonight planner strips `object_type` from every already-owned target (`type:""`), so Continue-tonight
+  and Tonight bucket everything as "Other" (flat 4 h goal) and contradict the Library-progress card beside them.**~~
+  — **FIXED v0.210.11** (Builder 2026-07-29, branch `claude/pensive-faraday-yg1ma1`). `LibraryTarget`
+  (`seestack/nightplan.py`) gained optional `object_type` / `con` fields (default `""`, backward-compatible) that
+  `plan_tonight` now threads onto the `already_targeted` `PlannedTarget` rows instead of hardcoding `type:"" con:""`.
+  The webapp's `_library_targets` (`webapp/routers/plan.py`) populates them via the **same** `identify_object`
+  catalog path the Dashboard "Target progress" card uses, so the two surfaces agree by construction (a galaxy near
+  its goal is no longer mis-bucketed as "Other" → flat 4 h and filtered out of "Continue tonight", and Tonight rows
+  render the real type/constellation). Regression tests (fail-before/pass-after):
+  `test_library_target_carries_its_object_type_and_constellation` (`tests/test_nightplan.py`) and
+  `test_tonight_already_targeted_rows_carry_object_type` (`tests/webapp/test_plan.py`, which also asserts agreement
+  with `/api/library-progress`). Upgrade-safe: additive optional dataclass fields, no config/DB/API-shape change
+  (the `/tonight` rows simply gain real type/con where they were blank before). Confidence: reproduced.
+  (S, autonomy/planning — PRIORITY 2.)
 
-- **Dashboard shows two contradictory integration totals: the stats tile counts kept frames, the imaging calendar
-  counts everything including set-aside nights.** *(Wrong-result (calendar variant); **reproduced**: after setting
-  a night aside, `/api/stats.total_exposure_s` = 200 vs `/api/activity-calendar.total_exposure_s` = 240 on the same
-  Dashboard; a fully-rejected clouded-out night still paints as a deep "long night" cell.)*
-  `webapp/routers/stats.py:467` (accepted_only) vs `stats.py:519` + `seestack/activity_calendar.py:128-140` (never
-  checks `accept`). **Fix:** feed accepted-only frames into `build_activity_calendar` (or add `kept_exposure_s`
-  per night and render that). (S, friendliness — PRIORITY 3.)
+- ~~**Dashboard shows two contradictory integration totals: the stats tile counts kept frames, the imaging calendar
+  counts everything including set-aside nights.**~~ — **FIXED v0.210.13** (Builder 2026-07-29, branch
+  `claude/pensive-faraday-yg1ma1`). `_collect_activity_calendar` (`webapp/routers/stats.py`) now streams
+  `proj.iter_frames(accepted_only=True)` into the per-night accumulator, so the calendar's per-night and total
+  exposure count only kept subs — matching the stats tile (which already counts `accept=1`). A clouded-out,
+  fully-rejected night no longer paints a deep "long night" cell, and the two Dashboard totals agree. Regression
+  test (fail-before/pass-after): `test_activity_calendar_counts_accepted_frames_only`
+  (`tests/webapp/test_activity_calendar.py`) rejects one sub of a 3-sub night and asserts the cell reads 120 s / 2
+  frames, not 180 s / 3. Upgrade-safe: read-path filter only, no config/DB/API-shape change (the response gains no
+  fields; only the counted set narrows to accepted). Confidence: reproduced. (S, friendliness — PRIORITY 3.)
 
 - **"Save as defaults" on the Stack form silently drops the calibration-master picks while the toast says they'll
   drive auto-stacking.** *(Broken-UX — silent loss of a user choice; **reproduced**:
@@ -277,13 +285,17 @@ when you take it.
   vitest stays green. **Fix:** render with the browser's local clock (as `tonight.ts:202-207` already does), label
   the night by the local date of `dark_start`, keep UTC as a tooltip. (S, friendliness — PRIORITY 3.)
 
-- **Emptying any of six numeric Settings fields coerces to `0` and the whole settings save 422s — every other edit
-  in the form is lost behind a raw pydantic toast.** *(Broken-UX; backend half **reproduced**
-  (`PUT /api/settings {"astap_fov_deg":0}` → 422), frontend coercion traced — the guarded
-  `v === "" ? null : …` pattern exists on eight sibling inputs in the same file.)* `Settings.tsx:580,583,652,654,
-  766,769` use bare `Number(v)` (`Number("") === 0`) against `ge=` bounds in `webapp/config.py`. **Fix:** apply the
-  existing empty-guard to the six fields (or clamp on blur); optionally surface per-field errors. (S, UX —
-  PRIORITY 3.)
+- ~~**Emptying any of six numeric Settings fields coerces to `0` and the whole settings save 422s — every other edit
+  in the form is lost behind a raw pydantic toast.**~~ — **FIXED v0.210.14** (Builder 2026-07-29, branch
+  `claude/pensive-faraday-yg1ma1`). These six fields are non-nullable with `ge=` bounds, so the null-guard used on
+  the nullable siblings (`cpu_workers`, `site_lat` …) can't apply — sending `null` would 422 just like the old
+  `Number("")===0` did. Instead the six fields now emit `""` when cleared, and a new pure `dropEmptyFields` helper
+  (`frontend/src/routes/Settings.tsx`) omits any `""`-valued key from the PUT patch — so an emptied non-nullable
+  field simply keeps its stored value while **every other edit still saves**, no 422. Explicit `null` (a nullable
+  field the user cleared) and falsy-but-valid values (`0`, `false`, `[]`) are preserved. Regression tests:
+  `dropEmptyFields` — "omits emptied fields so a cleared non-nullable numeric never 422s the whole save" and
+  "preserves an explicit null … and falsy-but-valid values" (`Settings.test.tsx`). Upgrade-safe: frontend-only,
+  no API/DB/config change (the PUT accepts a strict subset of what it did before). (S, UX — PRIORITY 3.)
 
 - **Jobs page is pinned to the backend's default 100 rows — the "Job history to keep" setting (default 200) has no
   visible effect and "Clear N finished" understates what it deletes.** *(Broken-UX; traced on both sides:
