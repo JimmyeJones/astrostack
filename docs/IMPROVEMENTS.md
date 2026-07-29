@@ -71,9 +71,60 @@ when you take it.
 > slider drag) and FIXED (see the struck flaky-test entry below); a frontend/API click-path audit filed its own
 > entries below.
 
-- **⭐⭐ MEASURED (2026-07-26 quality audit) — the one-click Auto result is purple-one-side / green-or-blown-the-other
+- ~~**⭐⭐ MEASURED (2026-07-26 quality audit) — the one-click Auto result is purple-one-side / green-or-blown-the-other
   on any stack with a residual sky gradient: the Auto recipe's luminance-mode gradient removal + per-channel STF
-  turn ordinary light pollution into a strong spatial COLOUR split.** *(Editor/auto image quality — PRIORITY 1;
+  turn ordinary light pollution into a strong spatial COLOUR split.**~~ — **FIXED v0.211.0** (Builder 2026-07-29,
+  branch `claude/loving-bardeen-wwcey3`). Root-caused deeper than the original entry: **the gradient pass was barely
+  doing anything at all.** `_build_object_mask` thresholded luminance against the *whole-frame* median, so on a frame
+  that still carries an ordinary LP gradient the entire **bright half reads as "object"** — measured on the audit's
+  realistic S30 scene: **5 % of the dim fifth masked vs 66 % of the bright fifth** — which starves `Background2D` of
+  sky exactly where the gradient is. Its boxes on the bright side exceeded `exclude_percentile` and were dropped, so
+  the fitted mesh extrapolated flat (mesh max +2.7 ADU where the sky was +45) and `remove_final_gradient`
+  **removed only ~10 % of the tilt it exists to remove** (G tilt 70.6 → 63.1 ADU). Two fixes, both in
+  `seestack/bg/final_gradient.py`:
+  **(1) the detection threshold is now local.** Objects are detected on the luminance *detrended by a robust
+  low-order polynomial* (`_fit_sky_poly`, deg 2, fitted to per-tile sky **medians** so it is unbiased however much of
+  a tile the mask removed) rather than against a global median — light pollution is low-order, a galaxy/nebula is
+  not, so subtracting the trend makes the threshold local without hiding real objects. Noise-sized detections are
+  dropped (`_MIN_DETECT_AREA`, proxy-scaled): a σ-threshold flags ~0.6 % of pixels *anywhere* and dilating those
+  single-pixel spikes by the default 16 px was swelling the mask over most of the frame by a second route (measured
+  78–100 % on a well-flattened stack). A second, smoothed pass detects faint **extended** structure so outer
+  nebulosity is masked rather than quietly absorbed into the "sky".
+  **(2) `luminance` mode now flattens each channel's own gradient** (new `match_channels`, default **on**; the
+  historical brightness-only behaviour stays reachable). LP amplitude scales with each channel's sky level, so one
+  luminance-weighted model plus a per-channel *constant* mathematically cannot flatten all three — this is
+  mechanism (1) of the original entry. Each channel first has its own **deg-2 tile-median poly** removed (stiff
+  enough that it cannot bend into a nebula — the measured hazard that rules out per-channel `Background2D`), then the
+  shared mesh model mops up what all three have in common, then the existing mode-based DC offset. Fitting the
+  *original* data rather than the mesh's leftovers is what keeps it honest on flat frames: a gradient-free stack gets
+  a surface of ~0 amplitude instead of one chasing mesh noise into a new cast (that regression was measured and fixed
+  by switching from clipped raw-pixel least-squares to tile medians).
+  **Measured end-to-end** (12-sub honest path: subs → default per-frame `subtract_background` → stack →
+  `auto_recipe` → `apply_recipe`), sky cast per frame-eighth:
+
+  | scene | sky cast left | sky cast right | luminance tilt | colour spread (ADU) | nebula core chroma |
+  |---|---|---|---|---|---|
+  | 18 % LP, before | −15.3 % | +11.2 % | +103 % of sky | 34.3 (op removed **none**) | 0.56 |
+  | 18 % LP, after  | −4.8 %  | +2.0 %  | +46 % of sky  | **3.9** | 0.61 |
+  | 8 % LP, before  | −13.7 % | +14.0 % | +87 % of sky  | 17.5 | 0.61 |
+  | 8 % LP, after   | −5.1 %  | +1.6 %  | +28 % of sky  | **2.2** | 0.57 |
+  | no gradient, before | ±1.5 % | ±4.4 % | −0.9 % | 1.0 | 0.50 |
+  | no gradient, after  | ±0.8 % | ±3.2 % | −1.2 % | 1.0 | 0.51 |
+
+  ("Colour spread" = worst cross-channel disagreement of the sky across the frame — the defect itself; it collapses
+  ~8×, from 1.7 σ of stack noise to 0.20 σ, i.e. below the grain.) Regression tests, all fail-before/pass-after:
+  `test_object_mask_is_not_starved_by_a_sky_gradient`, `test_object_mask_ignores_noise_sized_detections`,
+  `test_luminance_mode_flattens_each_channels_own_gradient`, `test_match_channels_off_is_brightness_only`,
+  `test_match_channels_does_not_invent_a_cast_on_a_flat_frame` (`tests/test_final_gradient.py`), plus the
+  end-to-end `test_one_click_auto_does_not_split_the_sky_into_colours` (`tests/test_edit_engine.py`, asserts every
+  frame-eighth of the finished Auto sky is < 8 % off neutral *and* the faint nebula keeps its colour — 19 % before).
+  `_dense_star_field` was upgraded to place *resolved* stars rather than single hot pixels, since the mask builder now
+  correctly ignores single-pixel (noise-sized) detections; its premise assertion (the strict fit still raises) holds.
+  Upgrade-safe: additive dataclass field + additive advanced editor param (descriptor-driven, so it surfaces with no
+  frontend work); no config/DB/API-shape/on-disk change, `StackOptions` untouched, and an old saved recipe simply gets
+  the corrected default on re-render. **Still open (filed as its own entry below):** the residual *luminance* tilt —
+  mesh-scale `Background2D` bias, now +46 % of sky rather than +103 %, so the far corner still brightens. Confidence:
+  reproduced + measured. *(Original analysis retained below for provenance.)* *(Editor/auto image quality — PRIORITY 1;
   wrong-result on the flagship "Process target" picture; **reproduced** end-to-end at three gradient strengths.)*
   Mechanisms, each isolated: **(1)** `auto_recipe` hardcodes `background.final_gradient(mode="luminance")`
   (`seestack/edit/presets.py:396`) — one luminance model + per-channel DC offset
@@ -330,6 +381,31 @@ when you take it.
   failure instead of spinning a `Loader` forever (`isError` was never checked, unlike every other route). Tests:
   `Seestar.test.tsx` (+1, "surfaces a retryable error instead of spinning forever"). Frontend-only, upgrade-safe.
   (S, UX — PRIORITY 3.)
+
+- **⭐ MEASURED (2026-07-29, the surviving half of the ⭐⭐ colour-split bug above) — the finished Auto picture still
+  brightens strongly toward the light-polluted corner: a residual LUMINANCE tilt of ~+46 % of sky that mesh-scale
+  `Background2D` bias leaves behind.** *(Editor/auto image quality — PRIORITY 1; wrong-result on the flagship
+  "Process target" picture; **reproduced** at two gradient strengths.)* With the object-mask and per-channel fixes
+  (v0.211.0) the *colour* split is gone (cross-channel sky spread 34.3 → 3.9 ADU, i.e. below the grain), but the
+  **brightness** ramp is only halved: measured on the honest 12-sub path, left→right sky level after the full Auto
+  chain is 0.170 → 0.259 on an 18 % LP gradient (**+46 % of sky**, was +103 %) and +28 % on an 8 % one. A beginner
+  reads that as "one corner is washed out". Root cause is *not* the colour handling: it is that neither the per-frame
+  `subtract_background` nor the final `Background2D` mesh can null a smooth gradient to better than a few ADU — the
+  per-sub fit bias is *systematic* (same sign every sub, so averaging and even ±40 px dither don't remove it: measured
+  stack tilts +42/+71/+34 ADU), and the final mesh's own residual is worst where the spline extrapolates at the frame
+  edge and corner. The linear-domain residual after v0.211.0 is a **non-monotone, mesh-scale** shape (measured
+  frame-eighth sky in G: −4.1, +5.2, +1.2, −3.3, 0.0, +1.3, +2.7, +10.0 ADU on σ≈20) — deg-2 poly cannot follow it,
+  and a second per-channel poly pass measurably adds nothing (mid-band cast 12.9 % → 12.7 %). **Fix directions
+  (measured constraints — no blind flips):** (a) improve the *fit accuracy* in `_fit_background_2d` — the corner/edge
+  behaviour specifically (a larger effective smoothing, an edge-aware interpolator, or a two-scale fit: coarse global
+  surface + fine mesh) — validated as the half a global poly cannot reach; (b) a validated small extra win was
+  available by scaling the shared mesh model per channel from tile-median regression (mid-band cast 12.9 % → 9.8 %,
+  luminance tilt 46 % → 30 %) but it costs a little nebula chroma (0.61 → 0.59) and complexity, so it was left
+  out of v0.211.0 — revisit *with* (a); (c) attack it upstream: the per-frame flatten's systematic bias is the larger
+  term, so a masked low-order residual pass *inside* `subtract_background` would stop it entering the stack at all
+  (the audit measured this halves the stack tilts). Regression metric to use: the frame-eighth sky *level* spread of
+  the finished Auto render (currently 0.170 → 0.259 at 18 % LP); target < 15 % of sky. The harness is the honest path
+  in the ⭐⭐ entry above. Confidence: reproduced + measured. (M, editor/image-quality — PRIORITY 1.)
 
 - **Smaller click-path items (2026-07-26 audit — batch into cleanup passes; each traced, several reproduced):**
   (a) Editor PNG/share job polling has no try/catch and survives unmount (`Editor.tsx:678+,690-722,729-768`) — a
@@ -13144,6 +13220,13 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.211.0** — ⭐⭐ Fixed the one-click Auto colour split (purple one side / green the other) at its root: the
+  final-gradient object mask was reading the whole *bright half* of a light-polluted frame as "object" (5 % vs 66 %
+  masked), starving the fit so it removed only ~10 % of the gradient. Detection is now against a robust low-order
+  tile-median trend (plus a minimum detection area and a faint-extended pass), and `luminance` mode also flattens each
+  channel's own low-order gradient (`match_channels`, default on). Cross-channel sky spread 34.3 → 3.9 ADU (1.7 σ →
+  0.20 σ) on an 18 % LP gradient; luminance tilt +103 % → +46 % of sky; faint-nebula chroma preserved. Tests:
+  `tests/test_final_gradient.py` (+5), `tests/test_edit_engine.py` (+1 end-to-end).
 - **v0.210.20** — Click-path audit fix (f) + (d): `bulk_frames` now returns a `note` so "Reject worst" on a
   metric-less batch explains "run QC first" instead of a silent "Updated 0 frames" (Target toast shows it in yellow);
   and the single-frame accept/reject `patch` mutation now invalidates `["reject-summary", …]` like every sibling so
