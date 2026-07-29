@@ -5833,6 +5833,27 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
+- **NEW IDEA (Builder 2026-07-29, observed while fixing the "Save as defaults drops master picks" bug, v0.210.15) —
+  let the walk-away auto-stack honour a target's *saved* calibration masters, not just `auto_bind_calibration`.**
+  Now that "Save as defaults" persists the four `*_master_id` picks (v0.210.15), a beginner reasonably expects "I
+  chose my darks once → every future auto-stack of this target uses them". But the unattended path
+  (`webapp/pipeline.py::_resolve_stack_options` → `coerce_stack_options`) drops the saved ids and only applies
+  calibration when the separate, off-by-default `auto_bind_calibration` is on (which *auto-picks* masters, ignoring
+  the user's explicit choice). **Idea:** when a target has saved master ids in its stack-defaults and
+  `auto_bind_calibration` is off, resolve those ids to server-side paths (the same `calibration.resolve_master_paths`
+  the manual trigger uses) and apply them in the auto-stack — so the user's *explicit* pick wins. Arguably opt-in by
+  the act of saving, but confirm §9-safety first (an install that saved masters would start calibrating unattended
+  stacks that previously ran uncalibrated — that's a behaviour change; gate it so it only bites targets whose
+  defaults carry a real id, and add an upgrade test). Also tighten the "Save as defaults" toast to say the picks are
+  *remembered/pre-filled* rather than implying they already drive auto-stack. (M, autonomy — PRIORITY 2.)
+- **NEW IDEA (Builder 2026-07-29, observed while fixing the west-of-UTC night-labelling bug, v0.210.16) — QA the
+  other planner/date surfaces for the same UTC-vs-local labelling drift.** The "Plan your next night" card named the
+  wrong night for owners west of UTC because it formatted `dark_start` in UTC. The same class of bug can hide
+  anywhere a UTC timestamp is rendered as a *date* the user plans around: the Tonight page's window rows, the imaging
+  calendar/streak cells, "Continue tonight", NightsCard, the `.ics` export's DTSTART, and any "next N nights" list.
+  **Idea (Scout-shaped QA sweep):** audit each for `getUTC*`/UTC-string date formatting that should be local
+  wall-clock, with a `TZ=America/Los_Angeles` regression test per surface, and reconcile them so two adjacent cards
+  never disagree on which night it is. (S–M each, friendliness — PRIORITY 3.)
 - ~~**NEW IDEA (Builder 2026-07-24, follow-up to the v0.184.15 upgrade-pollution fix) — surface & offer one-click
   cleanup of the stale `<T>_sub`-named *duplicate targets* a pre-v0.184.9 scan left behind.**~~ — **SHIPPED v0.191.0**
   (Builder 2026-07-24, branch `claude/pensive-faraday-klqhi9`; tested). Extended the existing v0.185.0 cleanup-suggestions
