@@ -647,6 +647,35 @@ def test_stack_defaults_roundtrip(client, built_library):
     assert client.get("/api/targets/M_42/stack-defaults").json()["sigma_kappa"] == 2.0
 
 
+def test_stack_defaults_persists_calibration_master_picks(client, built_library):
+    # "Save as defaults" used to silently drop the calibration-master picks (they
+    # aren't StackOptions fields, so the schema whitelist excluded them), leaving
+    # the Dark/Flat/Bias selects empty next visit even though the toast promised
+    # they'd be remembered. They must now round-trip so the form pre-fills them.
+    r = client.put("/api/targets/M_42/stack-defaults", json={
+        "sigma_kappa": 2.0,
+        "dark_master_id": 7,
+        "flat_master_id": "3",   # the Select posts strings — coerce to an int id
+        "flat_dark_master_id": "",  # "" means "not selected" → stored as null
+        "bias_master_id": None,
+    })
+    assert r.status_code == 200
+    body = r.json()
+    assert body["dark_master_id"] == 7
+    assert body["flat_master_id"] == 3
+    assert body["flat_dark_master_id"] is None
+    assert body["bias_master_id"] is None
+    # ...and they survive a reload (the GET pre-fills the form).
+    saved = client.get("/api/targets/M_42/stack-defaults").json()
+    assert saved["dark_master_id"] == 7
+    assert saved["flat_master_id"] == 3
+    # A subsequent save that clears a pick must clear the stored id, not keep it.
+    client.put("/api/targets/M_42/stack-defaults", json={
+        "sigma_kappa": 2.0, "dark_master_id": "",
+    })
+    assert client.get("/api/targets/M_42/stack-defaults").json()["dark_master_id"] is None
+
+
 def test_stack_defaults_auto_reject_on_for_never_configured_target(client, built_library):
     # A never-configured target's Stack form should default the smart
     # "Auto outlier removal" (auto_reject) ON, so a beginner's first stack picks

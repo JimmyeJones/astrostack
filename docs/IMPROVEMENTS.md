@@ -268,14 +268,19 @@ when you take it.
   frames, not 180 s / 3. Upgrade-safe: read-path filter only, no config/DB/API-shape change (the response gains no
   fields; only the counted set narrows to accepted). Confidence: reproduced. (S, friendliness — PRIORITY 3.)
 
-- **"Save as defaults" on the Stack form silently drops the calibration-master picks while the toast says they'll
-  drive auto-stacking.** *(Broken-UX — silent loss of a user choice; **reproduced**:
-  `PUT …/stack-defaults {"sigma_clip":true,"dark_master_id":1,"flat_master_id":2}` echoes `{"sigma_clip":true}`.)*
-  `Stack.tsx:234-242` posts the whole form with an unconditional success toast;
-  `webapp/routers/stack.py:150-152` whitelists schema fields only, and the four `*_master_id` keys aren't schema
-  fields. Master selects come back empty next visit; unattended stacks stay uncalibrated (auto_bind_calibration is
-  a separate, off-by-default setting) despite the toast. **Fix:** persist the four ids in target stack-defaults, or
-  exclude them from the save and say so in the toast. (S, UX — PRIORITY 3.)
+- ~~**"Save as defaults" on the Stack form silently drops the calibration-master picks while the toast says they'll
+  drive auto-stacking.**~~ — **FIXED v0.210.15** (Builder 2026-07-29, branch `claude/pensive-faraday-nl5fvd`).
+  `put_stack_defaults` (`webapp/routers/stack.py`) whitelisted only `StackOptions` schema fields, so the four
+  `*_master_id` keys the Stack form posts were dropped and the Dark/Flat/Bias selects came back empty next visit.
+  It now also persists those four keys (coerced to a clean int id via `_coerce_master_id`, or `null` to clear a
+  previously-saved pick) into the same per-target `STACK_DEFAULTS_META_KEY` blob, so the form round-trips them and
+  pre-fills on the next manual stack. Safe on the walk-away auto-stack path: `coerce_stack_options` drops unknown
+  keys, so the master ids are inert there (unattended calibration is still governed by the separate
+  `auto_bind_calibration` setting — unchanged). Regression test (fail-before/pass-after):
+  `test_stack_defaults_persists_calibration_master_picks` (`tests/webapp/test_api.py`) asserts the ids round-trip,
+  string picks coerce to ints, `""`/`null` store as `null`, and a later cleared pick clears the stored id.
+  Upgrade-safe: additive keys in an existing meta blob, no config/DB-schema/API-shape/default change. Confidence:
+  reproduced. (S, UX — PRIORITY 3.)
 
 - **"Plan your next night" names the wrong night for any owner west of UTC — and disagrees with its own .ics file
   and the adjacent "Point here tonight" card.** *(Broken-UX — a real-world wrong night; **reproduced** with a

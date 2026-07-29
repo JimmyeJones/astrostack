@@ -146,6 +146,26 @@ def get_stack_defaults(safe: str, request: Request) -> dict[str, Any]:
     return merged
 
 
+#: The calibration-master picks the Stack form posts alongside the engine
+#: options. They're not ``StackOptions`` fields (they resolve to server-side
+#: paths at stack time), so the schema whitelist below drops them — but the user
+#: still expects "Save as defaults" to remember them and pre-fill the form next
+#: visit. We persist them into the same per-target blob so the manual Stack form
+#: round-trips them; ``coerce_stack_options`` harmlessly ignores them on the
+#: walk-away auto-stack path (unknown keys are dropped), so this is inert there.
+_MASTER_ID_KEYS = ("dark_master_id", "flat_master_id", "flat_dark_master_id", "bias_master_id")
+
+
+def _coerce_master_id(value: Any) -> int | None:
+    """A Stack-form master pick → an int id, or ``None`` for "not selected"."""
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 @router.put("/api/targets/{safe}/stack-defaults")
 def put_stack_defaults(safe: str, body: dict[str, Any], request: Request) -> dict[str, Any]:
     valid = {fld.key for fld in stack_option_fields()}
@@ -159,6 +179,13 @@ def put_stack_defaults(safe: str, body: dict[str, Any], request: Request) -> dic
     except ValueError as exc:
         raise HTTPException(status_code=400,
                             detail=f"invalid stack option: {exc}") from exc
+    # Also remember the calibration-master picks so the form pre-fills them next
+    # time (they used to be silently dropped, leaving the selects empty). Only
+    # persist a key the user actually posted, coerced to a clean int id (or
+    # ``None`` to clear a previously-saved pick).
+    for key in _MASTER_ID_KEYS:
+        if key in body:
+            clean[key] = _coerce_master_id(body[key])
     lib, proj = deps.open_target_project(request, safe)
     try:
         proj.set_meta(STACK_DEFAULTS_META_KEY, json.dumps(clean))
