@@ -224,6 +224,35 @@ def reject_summary(safe: str, request: Request) -> dict:
     }
 
 
+@router.get("/sky-brightness")
+def sky_brightness_read(safe: str, request: Request) -> dict:
+    """Was the sky on this target's latest night brighter than usual?
+
+    Read-only; derived from the ``sky_adu_median`` QC already measures on every
+    sub. ``{"read": null}`` whenever the data can't support an honest answer (too
+    few nights, too few measured subs, no exposure), so the card self-hides rather
+    than guessing. Declared before ``/{frame_id}`` so the literal path isn't
+    captured as an id."""
+    from seestack.qc.sky_quality import SkySample, sky_brightness
+
+    settings = deps.get_settings(request)
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        samples = [
+            SkySample(timestamp_utc=f.timestamp_utc, sky_adu_median=f.sky_adu_median,
+                      exposure_s=f.exposure_s, gain=f.gain)
+            for f in proj.iter_frames()
+        ]
+    finally:
+        proj.close()
+        lib.close()
+    # Nights are bucketed local-noon-to-noon so one midnight-spanning session is
+    # one night; with no configured location that degrades to UTC noon-to-noon,
+    # which still groups a night correctly for most observers.
+    read = sky_brightness(samples, lon_deg=settings.site_lon)
+    return {"read": read.as_dict() if read is not None else None}
+
+
 def _grade_report_out(report, changed_ids: list[int] | None = None) -> GradeReportOut:
     return GradeReportOut(
         sensitivity=report.sensitivity,

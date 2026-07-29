@@ -183,6 +183,21 @@ export interface MoonInterferenceResponse {
 }
 
 // Plain-language "why were some frames left out?" breakdown (from
+/** A plain-language read on how bright the sky was on this target's most recent
+ * observing night, relative to its other nights (`/frames/sky-brightness`).
+ * Purely relative — the app makes no absolute sky-brightness claim. */
+export interface SkyBrightnessRead {
+  level: "darker" | "typical" | "brighter" | "much_brighter";
+  label: string;
+  text: string;
+  /** ISO date (YYYY-MM-DD) of the observing night being reported. */
+  night: string;
+  /** How many of this target's nights the comparison is based on. */
+  nights: number;
+  /** That night's sky rate divided by the median night's. */
+  ratio: number;
+}
+
 // /frames/reject-summary). Buckets are non-zero and pre-ordered by the server.
 export interface RejectionBucket {
   key: string;
@@ -1291,6 +1306,13 @@ export const api = {
       summary?: RejectionSummary;
     }>(
       `/api/targets/${safe}/frames/reject-summary`,
+    ),
+  // Was the sky on this target's latest night brighter than usual? Derived from
+  // the sky level QC already measures on every sub. `read` is null whenever the
+  // data can't support an honest answer, so the card self-hides.
+  skyBrightness: (safe: string) =>
+    req<{ read: SkyBrightnessRead | null }>(
+      `/api/targets/${safe}/frames/sky-brightness`,
     ),
   autoGradePreview: (safe: string, sensitivity?: string) =>
     req<GradeReport>(

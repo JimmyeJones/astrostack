@@ -10307,8 +10307,35 @@ problems. Dogfood it every big-picture run and fix root causes.
   noise-vs-time sparkline, shown only when the estimate is trustworthy. Keeps the beginner-feature pipeline stocked
   with a *plan/understand* capability that no existing card (First look, thin-stack warning, best months,
   what-to-shoot-next) covers — those tell you *what to shoot* or *what you got*; this tells you *when to stop*.
-- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "How dark is your sky?": a plain-language read on the beginner's
-  sky brightness, computed from the sky level QC already measures.** *(Friendliness / understand-and-plan,
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "How dark is your sky?": a plain-language read on the beginner's
+  sky brightness, computed from the sky level QC already measures.**~~ — **SHIPPED (relative slice) v0.212.0**
+  (Builder 2026-07-29, branch `claude/loving-bardeen-wwcey3`). Built end-to-end across engine/webapp/frontend, taking
+  exactly the Scout's recommended **safe default**: a *relative* read against the owner's own nights, with **no**
+  absolute Bortle-style claim (that still needs per-model, per-gain calibration on real data — kept as the follow-on
+  below). **Engine** (`seestack/qc/sky_quality.py`, pure + deterministic): `sky_brightness(samples, lon_deg=…)` →
+  `SkyBrightnessRead {level, label, text, night, nights, ratio} | None`. It keeps frames with a usable
+  `sky_adu_median` and a positive `exposure_s`, groups by `(gain, exposure_s)` and uses only the **largest** group
+  (sky ADU scales with both, so a mixed 10 s/30 s or gain-80/gain-200 set would read as a sky change that isn't one),
+  takes each frame's sky **rate** = `sky_adu_median / exposure_s`, medians it per **observing night** (reusing
+  `activity_calendar.night_date_of`, so a session straddling midnight is one night), and compares the **latest**
+  night against the median of all this target's nights. Buckets `darker < 0.80 < typical < 1.25 < brighter < 1.80 <
+  much_brighter`, each with a plain sentence *and* an action ("bright galaxies, clusters and the Moon cope much
+  better"; "save this target for a darker night"). Returns `None` — say nothing — below `MIN_FRAMES_PER_NIGHT` (5)
+  measured subs per night or `MIN_NIGHTS` (3) qualifying nights, because with no "usual" there is no honest answer.
+  **Webapp**: read-only `GET /api/targets/{safe}/frames/sky-brightness` → `{"read": …|null}` (declared before
+  `/{frame_id}`; night bucketing uses `settings.site_lon`, degrading to UTC noon-to-noon). **Frontend**: a
+  self-hiding `SkyBrightnessNote` Alert on the Target page (moon-phase icon + tone per level) that names the night,
+  the verdict and the advice, and states plainly that it is measured from the owner's own subs and *not* an absolute
+  rating. A "typical" night is deliberately still shown — "nothing unusual here" is the reassurance a beginner
+  actually wants when a picture disappoints. **Why it matters now:** this is the honest companion to the v0.211.0
+  gradient fix — the app can flatten light pollution far better, but it can't invent signal that a bright sky never
+  let through, and until now the owner had no way to tell those two apart. Tests: `tests/test_sky_quality.py` (+13 —
+  hidden below the night/sub floors, all four buckets, exposure normalised out, a gain change not mistaken for a
+  brighter sky, across-midnight grouping, junk rows skipped not fatal, missing gain, JSON-safety, longitude shifting
+  the night boundary), `tests/webapp/test_api.py` (+3 — self-hide, the much-brighter verdict end to end, 404),
+  `SkyBrightnessNote.test.tsx` (+5). Upgrade-safe: new read-only endpoint + new frontend component only; no
+  config/DB-schema/on-disk/API-shape/default change, and no new dependency. *(Original spec below.)*
+  *(Friendliness / understand-and-plan,
   PRIORITY 3; size M; offline, additive, no new deps.)* **Why a beginner wants it:** a Seestar owner has no SQM
   and no idea whether their backyard is "dark enough" — which is *the* thing that decides whether faint nebulae
   are even worth attempting, and why their faint-target subs come out washed out. We already measure
@@ -13232,6 +13259,12 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.212.0** — NEW beginner feature "Was last night's sky bright?": a relative, self-hiding read on the latest
+  night's sky brightness, measured from the `sky_adu_median` QC already records and compared against the target's own
+  nights (never an absolute Bortle claim). Exposure- and gain-grouped so a settings change can't masquerade as a
+  brighter sky; hidden until there are 3 nights of ≥5 measured subs. Pure engine module + read-only endpoint +
+  Target-page note. Tests: `tests/test_sky_quality.py` (+13), `tests/webapp/test_api.py` (+3),
+  `SkyBrightnessNote.test.tsx` (+5).
 - **v0.211.1** — Editor export/render job polling hardened into one tested helper (`pollJob.ts`): rides out up to 5
   consecutive status-fetch failures so a transient 5xx no longer discards a full-res render that is still going, and
   stops on unmount so a late-finishing render can't fire a surprise download on another page. Click-path audit item
