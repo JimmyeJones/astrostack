@@ -382,6 +382,40 @@ when you take it.
   `Seestar.test.tsx` (+1, "surfaces a retryable error instead of spinning forever"). Frontend-only, upgrade-safe.
   (S, UX — PRIORITY 3.)
 
+- **⭐⭐ MEASURED (2026-07-29) — the PER-FRAME background flatten has exactly the same starved-object-mask bug that
+  was just fixed in the final-gradient pass, and it is on the hot path for every single sub: on a light-polluted sub
+  it masks 0.4 % of the dim fifth but 60 % of the BRIGHT fifth, and on a gradient-free sub it masks 60 % of the whole
+  frame.** *(Stacking-engine correctness — PRIORITY 1 per AGENTS.md §1 "Current focus"; wrong-result, it corrupts
+  every stack's sky before the frames are even combined; **reproduced + measured**.)*
+  `_build_object_mask_for_bg` (`seestack/bg/per_frame.py:316-343`) thresholds luminance at `med + 2.0·σ` where both
+  are **whole-frame** sigma-clipped statistics. On a raw Seestar sub that still has its full light-pollution gradient
+  (which is the entire point of running the flatten) the global σ is dominated by the *gradient*, so the threshold
+  sits high above the dim side and below the bright side — the bright half is classified as "object" and excluded from
+  the very fit meant to remove it. Measured on the audit's realistic S30 sub (`_build_object_mask_for_bg(sub, 2.0,
+  4)`), mask coverage by fifth, dim → bright:
+  * 18 % LP gradient: **0.4 %, 0.3 %, 1.4 %, 13.9 %, 59.7 %** (total 15.1 %) — a 150× skew
+  * 8 % LP gradient: **1.0 %, 4.1 %, 27.5 %, 58.7 %, 84.3 %** (total 35.1 %)
+  * no gradient: **55.9 %, 57.4 %, 67.2 %, 64.8 %, 56.4 %** (total **60.3 %**) — here the skew is gone but the mask
+    still swallows the frame, because a 2.0 σ threshold flags ~2 % of pixels *anywhere* and `dilate_px=4` grows each
+    isolated noise spike into a ~50 px blob.
+  **Why this is probably the biggest remaining image-quality lever:** it is the most likely mechanism behind the
+  *systematic* per-sub fit bias the 2026-07-26 audit measured — the bias that is the same sign in every sub, survives
+  averaging and even ±40 px dither, and leaves the stack tilted +42/+71/+34 ADU R/G/B. That leftover tilt is exactly
+  what the surviving-luminance-tilt entry below is about, and it enters the pipeline *here*, one sub at a time.
+  **The fix is already written and validated** — `seestack/bg/final_gradient.py` (v0.211.0) now detects against a
+  robust low-order tile-median trend (`_fit_sky_poly`) plus a minimum detection area, which took that same scene's
+  mask from 5 %/66 % dim/bright to a flat ~8 % and let the fit actually see the gradient. Port the same two ideas
+  here. **Constraints — this is the memory-bounded hot path (AGENTS.md §10, OOM history), so unlike the final pass it
+  runs once per sub on a full-res frame:** the tile-median poly fit is cheap (~600 samples, one `lstsq`) but the
+  `label()` pass for the minimum-area filter and any extra smoothing must be measured for time and peak RSS on a
+  1080×1920 sub before shipping — budget it against the existing per-frame cost and skip the extended-structure pass
+  here (the per-frame path deliberately doesn't try to protect faint nebulosity; that's the final pass's job).
+  Regression tests to write, both fail-before: (1) mask coverage of the bright fifth is within ~2× the dim fifth on a
+  gradient-y sub; (2) mask covers < 35 % of a gradient-free noisy sub. Then re-measure the honest-path stack tilts
+  (currently +42/+71/+34 ADU) — that number is the real acceptance criterion, and halving it would roughly halve the
+  residual luminance tilt in the finished picture. Confidence: reproduced + measured. (M, stacking-engine correctness
+  — PRIORITY 1.)
+
 - **⭐ MEASURED (2026-07-29, the surviving half of the ⭐⭐ colour-split bug above) — the finished Auto picture still
   brightens strongly toward the light-polluted corner: a residual LUMINANCE tilt of ~+46 % of sky that mesh-scale
   `Background2D` bias leaves behind.** *(Editor/auto image quality — PRIORITY 1; wrong-result on the flagship
