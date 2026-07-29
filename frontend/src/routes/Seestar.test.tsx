@@ -53,4 +53,18 @@ describe("SeestarView", () => {
     // Control panel hidden because control_enabled is false.
     expect(screen.queryByText("Goto & image")).not.toBeInTheDocument();
   });
+
+  it("surfaces a retryable error instead of spinning forever on API failure", async () => {
+    vi.spyOn(client.api, "getSeestarDevices").mockRejectedValue(new Error("boom"));
+    render(
+      <MantineProvider>
+        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+          <MemoryRouter><SeestarView /></MemoryRouter>
+        </QueryClientProvider>
+      </MantineProvider>,
+    );
+    await waitFor(() =>
+      expect(screen.getByText("Couldn't load this page")).toBeInTheDocument());
+    expect(screen.getByText("Retry")).toBeInTheDocument();
+  });
 });

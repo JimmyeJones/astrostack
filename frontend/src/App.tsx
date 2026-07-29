@@ -8,6 +8,7 @@ import { useEffect, useRef } from "react";
 import type { Job } from "./api/client";
 import { api } from "./api/client";
 import { isJobNotifyEnabled, justFinishedJobs, showJobNotification } from "./jobNotify";
+import { isNavActive } from "./navActive";
 import { jobKindLabel } from "./routes/Jobs";
 
 // Shows the running backend build, so you can confirm a rebuild actually took
@@ -169,7 +170,7 @@ export function App() {
               leftSection={l.icon}
               rightSection={l.to === "/settings" ? <OutdatedTargetsBadge /> : undefined}
               onClick={closeNav}
-              active={l.end ? location.pathname === "/" : location.pathname.startsWith(l.to)}
+              active={isNavActive(location.pathname, l.to, l.end)}
             />
           ))}
           <Text size="xs" c="dimmed" mt="lg" px="sm">
