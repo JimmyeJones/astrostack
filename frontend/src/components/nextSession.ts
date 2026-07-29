@@ -4,8 +4,13 @@
  * readiness card's goal *gap* ("you're ~2 h short of a good M31") with the night
  * planner's next dark *window* ("…and Thursday 22:40 → 02:10 is when to shoot it")
  * into one plain, dated next step. All phrasing lives here (no React, no I/O) so
- * it's unit-testable in isolation. Times are UTC — shown as UTC to match the other
- * planner cues and stay honest across the viewer's own timezone.
+ * it's unit-testable in isolation. Times are shown in the viewer's *local* clock —
+ * matching the adjacent "Point here tonight" card and the local calendar an owner
+ * actually plans around — with the UTC equivalent kept as a hover tooltip. (An
+ * earlier version formatted everything in UTC, which named the wrong night for any
+ * owner west of UTC: a `dark_start` of 06:17 UTC is the previous evening locally,
+ * so the card said "Mon 27 Jul" for what is Sunday night in Seattle and disagreed
+ * with its own .ics file and the neighbouring card.)
  */
 import type { NextObservingWindow } from "../api/client";
 import { formatClockUtc } from "./focusTrend";
@@ -16,12 +21,31 @@ const MONTHS = [
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
 
-/** "Thu 15 Jan" (UTC) from an ISO timestamp, or "" if unparseable. */
+/** "Thu 15 Jan" in the viewer's *local* timezone from an ISO timestamp, or "" if
+ * unparseable. The night is labelled by the local date of its dark-start, so an
+ * owner west of UTC sees the evening they'll actually be out (not the UTC date,
+ * which rolls over around local sunset for the Americas). */
 export function formatWindowDate(iso: string | null | undefined): string {
   if (!iso) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
+  return `${WEEKDAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`;
+}
+
+/** "Thu 15 Jan" in UTC, for the hover tooltip that keeps the honest UTC anchor. */
+export function formatWindowDateUtc(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
   return `${WEEKDAYS[d.getUTCDay()]} ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
+}
+
+/** Local wall-clock "HH:MM" (24-h) for a UTC ISO stamp, or null if unparseable. */
+export function formatClockLocal(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
 /** How many more subs the goal gap needs, given the target's typical sub length.
@@ -75,16 +99,28 @@ export function moonPhrase(w: NextObservingWindow): string {
   return `Moon ${pct}%`;
 }
 
-/** One window as a dated, plain-language line:
- * "Thu 15 Jan, 22:40 → 02:10 UTC — climbs to 34°, thin Moon (12%)." */
+/** One window as a dated, plain-language line in the viewer's *local* clock:
+ * "Thu 15 Jan, 22:40 → 02:10 — climbs to 34°, thin Moon (12%)." (The UTC anchor
+ * lives in {@link windowUtcTooltip}, shown on hover.) */
 export function describeWindow(w: NextObservingWindow): string {
   const date = formatWindowDate(w.dark_start_utc);
-  const start = formatClockUtc(w.usable_start_utc ?? w.dark_start_utc);
-  const end = formatClockUtc(w.usable_end_utc ?? w.dark_end_utc);
+  const start = formatClockLocal(w.usable_start_utc ?? w.dark_start_utc);
+  const end = formatClockLocal(w.usable_end_utc ?? w.dark_end_utc);
   const alt = Math.round(w.max_altitude_deg);
   const moon = moonPhrase(w);
-  const timeClause = start && end ? `${start} → ${end} UTC` : "after dark";
+  const timeClause = start && end ? `${start} → ${end}` : "after dark";
   return `${date}, ${timeClause} — climbs to ${alt}°, ${moon}.`;
+}
+
+/** The same window's date + times in UTC, for the hover tooltip — so the local
+ * line stays honest about the underlying UTC anchor the .ics file also uses:
+ * "In UTC: Thu 15 Jan, 22:40 → 02:10". */
+export function windowUtcTooltip(w: NextObservingWindow): string {
+  const date = formatWindowDateUtc(w.dark_start_utc);
+  const start = formatClockUtc(w.usable_start_utc ?? w.dark_start_utc);
+  const end = formatClockUtc(w.usable_end_utc ?? w.dark_end_utc);
+  const timeClause = start && end ? `${start} → ${end}` : "after dark";
+  return `In UTC: ${date}, ${timeClause}`;
 }
 
 /** A short heading for the window list: the soonest window is "your next good

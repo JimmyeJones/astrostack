@@ -268,22 +268,33 @@ when you take it.
   frames, not 180 s / 3. Upgrade-safe: read-path filter only, no config/DB/API-shape change (the response gains no
   fields; only the counted set narrows to accepted). Confidence: reproduced. (S, friendliness — PRIORITY 3.)
 
-- **"Save as defaults" on the Stack form silently drops the calibration-master picks while the toast says they'll
-  drive auto-stacking.** *(Broken-UX — silent loss of a user choice; **reproduced**:
-  `PUT …/stack-defaults {"sigma_clip":true,"dark_master_id":1,"flat_master_id":2}` echoes `{"sigma_clip":true}`.)*
-  `Stack.tsx:234-242` posts the whole form with an unconditional success toast;
-  `webapp/routers/stack.py:150-152` whitelists schema fields only, and the four `*_master_id` keys aren't schema
-  fields. Master selects come back empty next visit; unattended stacks stay uncalibrated (auto_bind_calibration is
-  a separate, off-by-default setting) despite the toast. **Fix:** persist the four ids in target stack-defaults, or
-  exclude them from the save and say so in the toast. (S, UX — PRIORITY 3.)
+- ~~**"Save as defaults" on the Stack form silently drops the calibration-master picks while the toast says they'll
+  drive auto-stacking.**~~ — **FIXED v0.210.15** (Builder 2026-07-29, branch `claude/pensive-faraday-nl5fvd`).
+  `put_stack_defaults` (`webapp/routers/stack.py`) whitelisted only `StackOptions` schema fields, so the four
+  `*_master_id` keys the Stack form posts were dropped and the Dark/Flat/Bias selects came back empty next visit.
+  It now also persists those four keys (coerced to a clean int id via `_coerce_master_id`, or `null` to clear a
+  previously-saved pick) into the same per-target `STACK_DEFAULTS_META_KEY` blob, so the form round-trips them and
+  pre-fills on the next manual stack. Safe on the walk-away auto-stack path: `coerce_stack_options` drops unknown
+  keys, so the master ids are inert there (unattended calibration is still governed by the separate
+  `auto_bind_calibration` setting — unchanged). Regression test (fail-before/pass-after):
+  `test_stack_defaults_persists_calibration_master_picks` (`tests/webapp/test_api.py`) asserts the ids round-trip,
+  string picks coerce to ints, `""`/`null` store as `null`, and a later cleared pick clears the stored id.
+  Upgrade-safe: additive keys in an existing meta blob, no config/DB-schema/API-shape/default change. Confidence:
+  reproduced. (S, UX — PRIORITY 3.)
 
-- **"Plan your next night" names the wrong night for any owner west of UTC — and disagrees with its own .ics file
-  and the adjacent "Point here tonight" card.** *(Broken-UX — a real-world wrong night; **reproduced** with a
-  Seattle site: `dark_start_utc 2026-07-27T06:17Z` is locally Sunday 23:17, card says "Mon 27 Jul … UTC", the .ics
-  lands on Sunday in the calendar app, and the neighbouring card shows unlabeled LOCAL time.)*
-  `nextSession.ts:20-25,81-90` formats via `getUTC*`; the tests fixture Europe-shaped pre-midnight-UTC windows so
-  vitest stays green. **Fix:** render with the browser's local clock (as `tonight.ts:202-207` already does), label
-  the night by the local date of `dark_start`, keep UTC as a tooltip. (S, friendliness — PRIORITY 3.)
+- ~~**"Plan your next night" names the wrong night for any owner west of UTC — and disagrees with its own .ics file
+  and the adjacent "Point here tonight" card.**~~ — **FIXED v0.210.16** (Builder 2026-07-29, branch
+  `claude/pensive-faraday-nl5fvd`). `nextSession.ts` formatted the date and clock via `getUTC*`/`formatClockUtc`, so
+  a Seattle owner whose next dark window starts 06:17 UTC (Sunday 23:17 local) saw "Mon 27 Jul … UTC" — the wrong
+  night, disagreeing with the .ics file and the neighbouring local-clock card. `formatWindowDate` now uses local
+  `getDay/getDate/getMonth` (labelling the night by the local date of `dark_start`) and `describeWindow` renders
+  local wall-clock times via a new `formatClockLocal`, dropping the "UTC" suffix. The honest UTC anchor is kept in a
+  hover tooltip (`windowUtcTooltip` + a Mantine `Tooltip` on each `NextSessionCard` window row). Regression tests
+  (fail-before/pass-after): a `TZ=America/Los_Angeles` block (`vi.stubEnv`) in `nextSession.test.ts` asserts the
+  window is labelled "Sun 26 Jul" (not "Mon 27 Jul"), the line reads local "23:40 → 03:10" with no "UTC", and the
+  tooltip keeps "In UTC: Mon 27 Jul, 06:40 → 10:10"; existing UTC-suffix assertions updated (CI runs in UTC, where
+  local == UTC). Upgrade-safe: frontend-only, no API/DB/config change. Confidence: reproduced. (S, friendliness —
+  PRIORITY 3.)
 
 - ~~**Emptying any of six numeric Settings fields coerces to `0` and the whole settings save 422s — every other edit
   in the form is lost behind a raw pydantic toast.**~~ — **FIXED v0.210.14** (Builder 2026-07-29, branch
@@ -297,11 +308,18 @@ when you take it.
   "preserves an explicit null … and falsy-but-valid values" (`Settings.test.tsx`). Upgrade-safe: frontend-only,
   no API/DB/config change (the PUT accepts a strict subset of what it did before). (S, UX — PRIORITY 3.)
 
-- **Jobs page is pinned to the backend's default 100 rows — the "Job history to keep" setting (default 200) has no
-  visible effect and "Clear N finished" understates what it deletes.** *(Broken-UX; traced on both sides:
-  `client.ts:1480` sends no `limit`; `webapp/routers/jobs.py:24-28` defaults 100; `Jobs.tsx:544-546` counts the
-  ≤100 visible rows while `POST /api/jobs/clear` deletes finished jobs DB-wide.)* **Fix:** send `?limit=` (e.g. the
-  configured history limit) and label the button "Clear all finished". (S, UX — PRIORITY 3.)
+- ~~**Jobs page is pinned to the backend's default 100 rows — the "Job history to keep" setting (default 200) has no
+  visible effect and "Clear N finished" understates what it deletes.**~~ — **FIXED v0.210.18** (Builder 2026-07-29,
+  branch `claude/pensive-faraday-nl5fvd`). `listJobs` (`frontend/src/api/client.ts`) now requests
+  `/api/jobs?limit=2000` (the backend's hard cap) instead of no limit — so the whole retained history shows and the
+  "Job history to keep" setting (default 200) finally has a visible effect. The "Clear finished" button is relabelled
+  **"Clear all finished"** to match that `POST /api/jobs/clear` deletes finished jobs DB-wide, not just the visible
+  rows. Bonus safety: `listJobs` gained a `limit` param, so all three `queryFn: api.listJobs` call sites (Jobs page,
+  ActiveJobsBadge, GlobalJobNotifier) were wrapped as `() => api.listJobs()` to keep TanStack's query context from
+  being passed in as `limit` (a latent bug the old no-arg signature happened to dodge). Regression test:
+  `src/api/listJobs.test.ts` (stubs `fetch`, asserts the default `?limit=2000` URL and that an explicit limit is
+  honoured). Upgrade-safe: frontend-only, no API/DB/config change (the endpoint already accepted `limit`, capped at
+  2000). (S, UX — PRIORITY 3.)
 
 - **Telescope page: the live "stacking" progress bar resets to zero every 100 subs** — `Seestar.tsx:130-132`
   renders `stacked_frames % 100` as a percentage (99 subs → full, 100 → empty, 150 → half; a session routinely
@@ -316,8 +334,13 @@ when you take it.
   uses `QueryError`); (c) Tonight's error state unmounts its own date picker and altitude select
   (`Tonight.tsx:187-192`) — one failing date strands the user; (d) single-frame accept/reject doesn't invalidate
   `["reject-summary", safe]` (`Target.tsx:425-432`, unlike every sibling mutation) so the left-out hovercard goes
-  stale; (e) Storage "Prune old stacks" with an emptied keep box means keep **0** (`Storage.tsx:21,110-111`,
-  `Number("") === 0` passes the backend's `keep<0` guard) — one confirm deletes every run for the target;
+  stale; (e) ~~Storage "Prune old stacks" with an emptied keep box means keep **0** (`Storage.tsx:21,110-111`,
+  `Number("") === 0` passes the backend's `keep<0` guard) — one confirm deletes every run for the target~~
+  **FIXED v0.210.17** (Builder 2026-07-29, branch `claude/pensive-faraday-nl5fvd`): a new pure `sanitizeKeep`
+  helper (`frontend/src/components/pruneKeep.ts`) rejects an emptied/blank/zero/negative/non-integer keep box, and
+  `confirmPrune` (`Storage.tsx`) now refuses to prune (prompting "keep at least 1") instead of honouring `keep: 0`
+  as delete-everything; the `NumberInput` min is also raised 0→1. Tests: `pruneKeep.test.ts`. (The backend `keep=0`
+  stays valid for the explicit-ids delete path.);
   (f) "Reject worst" on metric-less frames silently reports "Updated 0 frames" (`webapp/routers/frames.py:378-380`
   excludes NULL-QC frames; reproduced `{"changed":0}`) with no explanation; (g) `/sky-so-far` double-highlights two
   nav items (`App.tsx:168` prefix match). (S each, UX — PRIORITY 3.)
@@ -5810,6 +5833,27 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
+- **NEW IDEA (Builder 2026-07-29, observed while fixing the "Save as defaults drops master picks" bug, v0.210.15) —
+  let the walk-away auto-stack honour a target's *saved* calibration masters, not just `auto_bind_calibration`.**
+  Now that "Save as defaults" persists the four `*_master_id` picks (v0.210.15), a beginner reasonably expects "I
+  chose my darks once → every future auto-stack of this target uses them". But the unattended path
+  (`webapp/pipeline.py::_resolve_stack_options` → `coerce_stack_options`) drops the saved ids and only applies
+  calibration when the separate, off-by-default `auto_bind_calibration` is on (which *auto-picks* masters, ignoring
+  the user's explicit choice). **Idea:** when a target has saved master ids in its stack-defaults and
+  `auto_bind_calibration` is off, resolve those ids to server-side paths (the same `calibration.resolve_master_paths`
+  the manual trigger uses) and apply them in the auto-stack — so the user's *explicit* pick wins. Arguably opt-in by
+  the act of saving, but confirm §9-safety first (an install that saved masters would start calibrating unattended
+  stacks that previously ran uncalibrated — that's a behaviour change; gate it so it only bites targets whose
+  defaults carry a real id, and add an upgrade test). Also tighten the "Save as defaults" toast to say the picks are
+  *remembered/pre-filled* rather than implying they already drive auto-stack. (M, autonomy — PRIORITY 2.)
+- **NEW IDEA (Builder 2026-07-29, observed while fixing the west-of-UTC night-labelling bug, v0.210.16) — QA the
+  other planner/date surfaces for the same UTC-vs-local labelling drift.** The "Plan your next night" card named the
+  wrong night for owners west of UTC because it formatted `dark_start` in UTC. The same class of bug can hide
+  anywhere a UTC timestamp is rendered as a *date* the user plans around: the Tonight page's window rows, the imaging
+  calendar/streak cells, "Continue tonight", NightsCard, the `.ics` export's DTSTART, and any "next N nights" list.
+  **Idea (Scout-shaped QA sweep):** audit each for `getUTC*`/UTC-string date formatting that should be local
+  wall-clock, with a `TZ=America/Los_Angeles` regression test per surface, and reconcile them so two adjacent cards
+  never disagree on which night it is. (S–M each, friendliness — PRIORITY 3.)
 - ~~**NEW IDEA (Builder 2026-07-24, follow-up to the v0.184.15 upgrade-pollution fix) — surface & offer one-click
   cleanup of the stale `<T>_sub`-named *duplicate targets* a pre-v0.184.9 scan left behind.**~~ — **SHIPPED v0.191.0**
   (Builder 2026-07-24, branch `claude/pensive-faraday-klqhi9`; tested). Extended the existing v0.185.0 cleanup-suggestions

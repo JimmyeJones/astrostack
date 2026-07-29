@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   describeGap,
   describeWindow,
@@ -6,6 +6,7 @@ import {
   formatWindowDate,
   moonPhrase,
   subsToGo,
+  windowUtcTooltip,
   windowsIntro,
 } from "./nextSession";
 import type { NextObservingWindow } from "../api/client";
@@ -26,14 +27,45 @@ function win(over: Partial<NextObservingWindow> = {}): NextObservingWindow {
 }
 
 describe("formatWindowDate", () => {
-  it("formats a UTC ISO stamp as 'Wkd D Mon' without timezone drift", () => {
-    // 2026-01-15 is a Thursday.
+  it("formats a UTC ISO stamp as 'Wkd D Mon' in the local timezone (TZ=UTC here)", () => {
+    // The CI/test machine runs in UTC, so local == UTC: 2026-01-15 is a Thursday.
     expect(formatWindowDate("2026-01-15T22:00:00+00:00")).toBe("Thu 15 Jan");
   });
   it("returns empty for missing/unparseable input", () => {
     expect(formatWindowDate(null)).toBe("");
     expect(formatWindowDate("")).toBe("");
     expect(formatWindowDate("not-a-date")).toBe("");
+  });
+});
+
+describe("west-of-UTC night labelling (regression)", () => {
+  // Reproduces the reported bug: an owner in Seattle whose next dark window starts
+  // at 06:17 UTC is actually going out on *Sunday* evening (23:17 local), but the
+  // card used to format everything in UTC and call it "Mon 27 Jul" — disagreeing
+  // with the .ics file and the adjacent "Point here tonight" card. With local
+  // formatting the card must name the Sunday night, with UTC kept in the tooltip.
+  beforeAll(() => { vi.stubEnv("TZ", "America/Los_Angeles"); });
+  afterAll(() => { vi.unstubAllEnvs(); });
+
+  const seattleWin = win({
+    dark_start_utc: "2026-07-27T06:17:00+00:00",   // Sun 23:17 local
+    dark_end_utc: "2026-07-27T11:30:00+00:00",
+    usable_start_utc: "2026-07-27T06:40:00+00:00", // Sun 23:40 local
+    usable_end_utc: "2026-07-27T10:10:00+00:00",   // Mon 03:10 local
+  });
+
+  it("labels the night by the local date, not the UTC date", () => {
+    expect(formatWindowDate(seattleWin.dark_start_utc)).toBe("Sun 26 Jul");
+    const line = describeWindow(seattleWin);
+    expect(line).toContain("Sun 26 Jul");
+    expect(line).not.toContain("Mon 27 Jul");   // the old, wrong label
+    expect(line).toContain("23:40 → 03:10");     // local wall-clock, not "06:40 UTC"
+    expect(line).not.toContain("UTC");           // the local line no longer says UTC
+  });
+
+  it("keeps the honest UTC anchor in the hover tooltip", () => {
+    const tip = windowUtcTooltip(seattleWin);
+    expect(tip).toBe("In UTC: Mon 27 Jul, 06:40 → 10:10");
   });
 });
 
@@ -90,16 +122,16 @@ describe("moonPhrase", () => {
 });
 
 describe("describeWindow", () => {
-  it("reads as a dated, plain-language shoot-between line", () => {
+  it("reads as a dated, plain-language shoot-between line (local clock; TZ=UTC here)", () => {
     const s = describeWindow(win());
     expect(s).toContain("Thu 15 Jan");
-    expect(s).toContain("22:40 → 02:10 UTC");
+    expect(s).toContain("22:40 → 02:10");
     expect(s).toContain("climbs to 34°");
     expect(s).toContain("Moon out of the way");
   });
   it("falls back to the dark-window bounds when the usable ones are missing", () => {
     const s = describeWindow(win({ usable_start_utc: null, usable_end_utc: null }));
-    expect(s).toContain("22:00 → 06:00 UTC");
+    expect(s).toContain("22:00 → 06:00");
   });
 });
 

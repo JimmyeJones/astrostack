@@ -528,7 +528,9 @@ export function JobsView() {
   const qc = useQueryClient();
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["jobs"],
-    queryFn: api.listJobs,
+    // Wrap so the default limit applies — a bare `api.listJobs` would receive
+    // TanStack's query context as its `limit` argument.
+    queryFn: () => api.listJobs(),
     refetchInterval: 1500,
   });
   const notify = useJobFinishNotifications();
@@ -581,7 +583,7 @@ export function JobsView() {
           {finished > 0 ? (
             <Button size="xs" variant="subtle" color="gray" loading={clear.isPending}
               onClick={() => clear.mutate()}>
-              Clear {finished} finished
+              Clear all finished
             </Button>
           ) : null}
         </Group>
