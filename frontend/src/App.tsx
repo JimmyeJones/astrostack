@@ -38,7 +38,9 @@ function AppVersion() {
 export function GlobalJobNotifier() {
   const { data } = useQuery({
     queryKey: ["jobs"],
-    queryFn: api.listJobs,
+    // Wrap so the default limit applies (a bare `api.listJobs` would receive the
+    // TanStack query context as its `limit` argument).
+    queryFn: () => api.listJobs(),
     // Gentler than the Jobs page's 1.5 s live poll; the always-mounted
     // ActiveJobsBadge already refreshes this shared query, so this adds no real load.
     refetchInterval: 8000,
@@ -59,7 +61,9 @@ export function GlobalJobNotifier() {
 function ActiveJobsBadge() {
   const { data } = useQuery({
     queryKey: ["jobs"],
-    queryFn: api.listJobs,
+    // Wrap so the default limit applies (a bare `api.listJobs` would receive the
+    // TanStack query context as its `limit` argument).
+    queryFn: () => api.listJobs(),
     refetchInterval: 2000,
   });
   const active = (data ?? []).filter((j) => j.state === "running" || j.state === "queued").length;

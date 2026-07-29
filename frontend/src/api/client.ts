@@ -1497,7 +1497,13 @@ export const api = {
     req<{ job_id: string }>(`/api/targets/${safe}/process`, { method: "POST" }),
 
   // jobs
-  listJobs: () => req<Job[]>("/api/jobs"),
+  // Ask for the whole retained history (up to the backend's hard 2000 cap), not
+  // the endpoint's silent default of 100 — otherwise the "Job history to keep"
+  // setting (default 200) has no visible effect and "Clear finished" looks like
+  // it deletes fewer jobs than it actually does (it clears DB-wide). Callers must
+  // invoke it with no args (or an explicit number); never pass it straight as a
+  // TanStack `queryFn`, which would hand the query context in as `limit`.
+  listJobs: (limit = 2000) => req<Job[]>(`/api/jobs?limit=${limit}`),
   clearJobs: () => req<{ removed: number }>("/api/jobs/clear", { method: "POST" }),
   getJob: (id: string) => req<Job>(`/api/jobs/${id}`),
   cancelJob: (id: string) => req(`/api/jobs/${id}/cancel`, { method: "POST" }),

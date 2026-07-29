@@ -308,11 +308,18 @@ when you take it.
   "preserves an explicit null … and falsy-but-valid values" (`Settings.test.tsx`). Upgrade-safe: frontend-only,
   no API/DB/config change (the PUT accepts a strict subset of what it did before). (S, UX — PRIORITY 3.)
 
-- **Jobs page is pinned to the backend's default 100 rows — the "Job history to keep" setting (default 200) has no
-  visible effect and "Clear N finished" understates what it deletes.** *(Broken-UX; traced on both sides:
-  `client.ts:1480` sends no `limit`; `webapp/routers/jobs.py:24-28` defaults 100; `Jobs.tsx:544-546` counts the
-  ≤100 visible rows while `POST /api/jobs/clear` deletes finished jobs DB-wide.)* **Fix:** send `?limit=` (e.g. the
-  configured history limit) and label the button "Clear all finished". (S, UX — PRIORITY 3.)
+- ~~**Jobs page is pinned to the backend's default 100 rows — the "Job history to keep" setting (default 200) has no
+  visible effect and "Clear N finished" understates what it deletes.**~~ — **FIXED v0.210.18** (Builder 2026-07-29,
+  branch `claude/pensive-faraday-nl5fvd`). `listJobs` (`frontend/src/api/client.ts`) now requests
+  `/api/jobs?limit=2000` (the backend's hard cap) instead of no limit — so the whole retained history shows and the
+  "Job history to keep" setting (default 200) finally has a visible effect. The "Clear finished" button is relabelled
+  **"Clear all finished"** to match that `POST /api/jobs/clear` deletes finished jobs DB-wide, not just the visible
+  rows. Bonus safety: `listJobs` gained a `limit` param, so all three `queryFn: api.listJobs` call sites (Jobs page,
+  ActiveJobsBadge, GlobalJobNotifier) were wrapped as `() => api.listJobs()` to keep TanStack's query context from
+  being passed in as `limit` (a latent bug the old no-arg signature happened to dodge). Regression test:
+  `src/api/listJobs.test.ts` (stubs `fetch`, asserts the default `?limit=2000` URL and that an explicit limit is
+  honoured). Upgrade-safe: frontend-only, no API/DB/config change (the endpoint already accepted `limit`, capped at
+  2000). (S, UX — PRIORITY 3.)
 
 - **Telescope page: the live "stacking" progress bar resets to zero every 100 subs** — `Seestar.tsx:130-132`
   renders `stacked_frames % 100` as a percentage (99 subs → full, 100 → empty, 150 → half; a session routinely
