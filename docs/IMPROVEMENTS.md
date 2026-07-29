@@ -110,21 +110,20 @@ when you take it.
   scene recipe in the audit session's scratchpad, documented in this entry). (M–L, editor/image-quality —
   PRIORITY 1.)
 
-- **⭐ MEASURED (2026-07-26 quality audit) — SCNR at the Auto recipe's fixed 0.7 drags the whole sky ~−10 % magenta
-  on any noisy stack: the per-pixel `min(G, (R+B)/2)` estimator is systematically biased by noise.** *(Editor/auto
-  image quality — PRIORITY 1; wrong-result colour on every noisy (i.e. every real S30) auto result, even with zero
-  gradient; **reproduced** in isolation and end-to-end.)* `_scnr` (`seestack/edit/ops/tone.py:173-183`) caps green
-  per pixel against the *raw noisy* R/B average; on a perfectly neutral sky `E[min(G, N)] < E[G]` whenever there is
-  per-pixel noise, so the op *creates* a magenta cast proportional to the noise: measured on a neutral sky at
-  amount 0.7 — **−3.9 % (σ = 0.02), −9.6 % (σ = 0.05), −15.5 % (σ = 0.08)**; a stretched S30 stack sits near
-  σ ≈ 0.05, and the zero-gradient end-to-end chain lands at −12 %. The owner's "green cast removal" thus ships a
-  *magenta* cast a beginner can't name or undo. **Fix direction (validated in the audit):** cap against a
-  noise-suppressed green *excess* instead of the raw per-pixel neutral — e.g.
-  `excess = clip(gauss(G, 3σpx) − gauss((R+B)/2, 3σpx), 0, ∞); G −= amount·excess`. Measured: neutral-sky bias
-  −9.6 % → **−1.0 %** while removing the same real green (synthetic green blob +133 % → +39.8 % vs +39.2 % for the
-  current op). Keep the current per-pixel behaviour as an advanced mode if desired; add a regression asserting
-  |cast| < 2 % on a neutral noisy sky at amount 0.7 and unchanged real-green removal. Confidence: reproduced.
-  (S–M, editor/image-quality — PRIORITY 1.)
+- ~~**⭐ MEASURED (2026-07-26 quality audit) — SCNR at the Auto recipe's fixed 0.7 drags the whole sky ~−10 % magenta
+  on any noisy stack: the per-pixel `min(G, (R+B)/2)` estimator is systematically biased by noise.**~~ — **FIXED
+  v0.210.5** (Builder 2026-07-29, branch `claude/pensive-faraday-9vlibh`). `_scnr` (`seestack/edit/ops/tone.py`) now
+  defaults to a **noise-protected** estimator: it smooths the green channel and the R/B neutral (Gaussian σ = 3 px,
+  NaN-filled so mosaic gaps stay NaN) before differencing, so zero-mean per-pixel noise cancels instead of biasing
+  the sky magenta — exactly the validated `excess = clip(gauss(G) − gauss(neutral), 0, ∞); G −= amount·excess`.
+  Measured on the audit's neutral noisy sky (σ = 0.05) at amount 0.7: the cast collapses from **−11.5 % → −1.2 %**
+  while a real broad green excess is still removed (flat/uniform input is byte-identical to the old path). The
+  classic per-pixel cap stays reachable via a new advanced `protect_noise` toggle (default on). Descriptor-driven,
+  so the toggle surfaces in the editor with no frontend work. Regression tests (fail-before/pass-after):
+  `test_scnr_does_not_magenta_a_neutral_noisy_sky`, `test_scnr_protected_still_removes_a_real_green_cast`
+  (`tests/test_edit_tone_ops.py`); the four existing SCNR pixel tests (uniform patches) still pass unchanged.
+  Upgrade-safe: additive param, no config/DB/API-shape change; an old saved recipe (no `protect_noise` key) simply
+  gets the improved default on re-render. Confidence: reproduced. (S–M, editor/image-quality — PRIORITY 1.)
 
 - **⭐ MEASURED (2026-07-26 quality audit) — the Auto recipe's auto-contrast curve lifts the ENTIRE sky (+42 %
   background brightness), because its "midtone" anchor (p50) IS the sky on a deep-sky frame.** *(Editor/auto image

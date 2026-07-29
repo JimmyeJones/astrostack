@@ -170,16 +170,55 @@ def _neutralize_background(rgb: np.ndarray, params: dict, ctx: EditContext) -> n
     return out
 
 
+# Pixels of Gaussian smoothing used to estimate the green *excess* in the default
+# (noise-protected) SCNR path. Wide enough that per-pixel chroma noise averages
+# out (so a truly neutral but noisy sky isn't dragged magenta) while real green
+# structure — always broader than a few px — survives and is still removed.
+_SCNR_NOISE_SIGMA = 3.0
+
+
 def _scnr(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
-    """Subtractive chromatic noise reduction: clip the green channel to the
-    neutral of red/blue (removes the green cast common on OSC nebulae)."""
+    """Subtractive chromatic noise reduction: pull the green channel down toward
+    the neutral of red/blue (removes the green cast common on OSC nebulae).
+
+    The classic per-pixel estimator caps green against the *raw* red/blue neutral
+    (``min(G, neutral)``). On a truly neutral but noisy sky ``E[min(G, N)] < E[G]``
+    whenever there is per-pixel noise, so the op *creates* a magenta cast
+    proportional to the noise — measured −10 %..−15 % on a realistic S30 stack, a
+    cast a beginner can't name or undo. The default now instead subtracts a
+    *noise-suppressed* green excess: smooth green and the neutral before
+    differencing so per-pixel noise cancels, while genuine (broad) green structure
+    survives and is removed just as before. On a flat patch the two paths are
+    identical. The old per-pixel behaviour stays available via ``protect_noise``
+    off for anyone who wants it."""
     amount = float(params.get("amount", 0.8))
     out = as_rgb(rgb).copy()
+    if amount <= 0.0:
+        return out
     r, g, b = out[..., 0], out[..., 1], out[..., 2]
     neutral = np.maximum.reduce([r, b]) if str(params.get("mode", "average")) == "maximum" \
         else 0.5 * (r + b)
-    capped = np.minimum(g, neutral)
-    out[..., 1] = g + amount * (capped - g)
+    if not bool(params.get("protect_noise", True)):
+        capped = np.minimum(g, neutral)
+        out[..., 1] = g + amount * (capped - g)
+        return out
+    # Noise-protected default: estimate the green excess from smoothed channels so
+    # zero-mean per-pixel noise doesn't bias it (no more magenta sky). Smooth on a
+    # NaN-filled copy and keep NaN gaps as NaN — never invent green over a mosaic
+    # hole. Green is only ever *reduced* (excess clipped at 0), never added.
+    from scipy.ndimage import gaussian_filter
+
+    mask = finite_mask(out)
+    g_fill = np.where(mask, g, np.nan)
+    n_fill = np.where(mask, neutral, np.nan)
+    g_med = float(np.nanmedian(g_fill)) if mask.any() else 0.0
+    n_med = float(np.nanmedian(n_fill)) if mask.any() else 0.0
+    g_s = gaussian_filter(np.where(mask, g, g_med).astype(np.float32),
+                          sigma=_SCNR_NOISE_SIGMA, mode="nearest")
+    n_s = gaussian_filter(np.where(mask, neutral, n_med).astype(np.float32),
+                          sigma=_SCNR_NOISE_SIGMA, mode="nearest")
+    excess = np.clip(g_s - n_s, 0.0, None)
+    out[..., 1] = g - amount * excess  # g is NaN over gaps → stays NaN
     return out
 
 
@@ -312,5 +351,11 @@ register(OpSpec(
                                  "maximum": "Maximum of red & blue"},
                   group="advanced",
                   help="How to cap green: to the average (stronger) or maximum (gentler) of red/blue."),
+        EditParam("protect_noise", "Protect from noise", "bool", default=True,
+                  group="advanced",
+                  help="On (recommended): estimate the excess green from smoothed "
+                       "channels so a noisy but neutral sky isn't turned magenta. "
+                       "Off: the classic per-pixel cap (can add a faint magenta cast "
+                       "to noisy skies)."),
     ],
 ))

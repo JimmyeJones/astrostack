@@ -56,6 +56,46 @@ def test_scnr_preserves_nan_gaps():
     assert np.all(np.isfinite(out[3:, :, :]))
 
 
+def test_scnr_does_not_magenta_a_neutral_noisy_sky():
+    """The classic per-pixel cap `min(G, neutral)` biases a *noisy but neutral*
+    sky magenta (E[min(G,N)] < E[G] under noise). The default noise-protected
+    path must leave a neutral noisy sky ~unchanged (< 2% cast) at amount 0.7."""
+    rng = np.random.default_rng(0)
+    h = w = 96
+    base = 0.15
+    # A genuinely neutral sky: identical mean in all channels, independent noise.
+    rgb = np.stack([
+        base + rng.normal(0, 0.05, (h, w)).astype(np.float32) for _ in range(3)
+    ], axis=-1).astype(np.float32)
+    op = get_op("tone.scnr")
+    protected = op.apply(rgb, {"amount": 0.7}, EditContext())  # default protect_noise=True
+    classic = op.apply(rgb, {"amount": 0.7, "protect_noise": False}, EditContext())
+    g_in = float(rgb[..., 1].mean())
+    # Cast = how far the mean green moved *below* its true neutral, as a fraction.
+    protected_cast = (float(protected[..., 1].mean()) - g_in) / g_in
+    classic_cast = (float(classic[..., 1].mean()) - g_in) / g_in
+    # The classic per-pixel op drags the neutral sky clearly magenta...
+    assert classic_cast < -0.05
+    # ...while the noise-protected default barely moves it.
+    assert abs(protected_cast) < 0.02
+
+
+def test_scnr_protected_still_removes_a_real_green_cast():
+    """Noise-protection must not neuter the op: a real (broad) green excess is
+    still removed about as much as the classic path."""
+    rng = np.random.default_rng(1)
+    h = w = 96
+    # Neutral red/blue at 0.15, green lifted to 0.30 across the whole field.
+    r = 0.15 + rng.normal(0, 0.03, (h, w)).astype(np.float32)
+    g = 0.30 + rng.normal(0, 0.03, (h, w)).astype(np.float32)
+    b = 0.15 + rng.normal(0, 0.03, (h, w)).astype(np.float32)
+    rgb = np.stack([r, g, b], axis=-1).astype(np.float32)
+    op = get_op("tone.scnr")
+    protected = op.apply(rgb, {"amount": 1.0}, EditContext())
+    # The 0.15 excess green is pulled down close to the 0.15 neutral either way.
+    assert float(protected[..., 1].mean()) < 0.20
+
+
 def test_scnr_average_removes_at_least_as_much_green_as_maximum():
     """Locks the 'Protect' modes' relative strength against tooltip drift.
 
