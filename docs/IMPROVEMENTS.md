@@ -125,19 +125,20 @@ when you take it.
   Upgrade-safe: additive param, no config/DB/API-shape change; an old saved recipe (no `protect_noise` key) simply
   gets the improved default on re-render. Confidence: reproduced. (S–M, editor/image-quality — PRIORITY 1.)
 
-- **⭐ MEASURED (2026-07-26 quality audit) — the Auto recipe's auto-contrast curve lifts the ENTIRE sky (+42 %
-  background brightness), because its "midtone" anchor (p50) IS the sky on a deep-sky frame.** *(Editor/auto image
-  quality — PRIORITY 1; wrong-result/washed-out background on every one-click result; **reproduced** via variant
-  ablation.)* `tone.curves(auto=True)` → `suggest_tone_curve` (`seestack/edit/curve.py:74-91`) pins "sky" at p1 and
-  lifts p50 halfway toward 0.25 — but p1 is just the deepest noise dips; the *bulk* of the sky sits exactly at p50
-  on a sky-dominated frame, so the whole background rides the lift: measured final sky 0.125 (without curves) →
-  0.178 (with), directly negating the noise-aware `target_bg` (0.14) the stretch op just chose and amplifying
-  visible noise. The docstring's "keeps the sky floor on the identity so the background is neither crushed nor
-  lifted" is untrue whenever sky ≈ median, i.e. almost always. **Fix direction:** anchor the sky point at the sky
-  *population* level (median of below-median pixels, or med + k·σ like the stretch does), lift a percentile clearly
-  above the sky (e.g. p80 of above-sky pixels), and decline when the midtone ≈ sky; regression: on a sky-dominated
-  synthetic stack the suggested curve must keep the sky median within a few % of identity. Confidence: reproduced.
-  (S, editor/image-quality — PRIORITY 1.)
+- ~~**⭐ MEASURED (2026-07-26 quality audit) — the Auto recipe's auto-contrast curve lifts the ENTIRE sky (+42 %
+  background brightness), because its "midtone" anchor (p50) IS the sky on a deep-sky frame.**~~ — **FIXED v0.210.6**
+  (Builder 2026-07-29, branch `claude/pensive-faraday-9vlibh`). `suggest_tone_curve` (`seestack/edit/curve.py`) now
+  anchors the sky at the histogram **mode** (searched in the lower half `[p0.5, median]`, so a saturated object
+  plateau can't be mistaken for the sky) instead of p1, and only lifts the midtone (p50) when it sits clearly
+  **above** the sky mode (`sky + gap ≤ mid`). On a sky-dominated frame the median IS the sky → the gate declines and
+  leaves the identity line (safe: the noise-aware stretch already placed the sky), so the background no longer rides
+  the lift. When real extended structure is present (median above the sky) the curve lifts it exactly as before, sky
+  pinned on identity. Regression `test_sky_dominated_frame_does_not_lift_the_sky` (fail-before/pass-after) asserts a
+  background patch moves < 3 % after applying the suggested curve; the eight existing curve tests plus the end-to-end
+  `test_auto_recipe_contrast_curve_lifts_the_rendered_result` and the webapp `test_curve_suggestion_from_image` all
+  still pass (updated only where they encoded the old sky-lift as "contrast"). Upgrade-safe: pure suggestion logic,
+  no config/DB/API-shape change; the Curves op default is unchanged. Confidence: reproduced. (S, editor/image-quality
+  — PRIORITY 1.)
 
 - **⭐ TRACED + QUANTIFIED (2026-07-26 quality audit) — History "Full-res PNG" of a Process-target (auto-edited) run
   silently serves a DIFFERENT, un-edited picture than the preview it claims to match.** *(Broken-UX/parity on the
