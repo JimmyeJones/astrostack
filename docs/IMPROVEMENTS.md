@@ -285,13 +285,17 @@ when you take it.
   vitest stays green. **Fix:** render with the browser's local clock (as `tonight.ts:202-207` already does), label
   the night by the local date of `dark_start`, keep UTC as a tooltip. (S, friendliness — PRIORITY 3.)
 
-- **Emptying any of six numeric Settings fields coerces to `0` and the whole settings save 422s — every other edit
-  in the form is lost behind a raw pydantic toast.** *(Broken-UX; backend half **reproduced**
-  (`PUT /api/settings {"astap_fov_deg":0}` → 422), frontend coercion traced — the guarded
-  `v === "" ? null : …` pattern exists on eight sibling inputs in the same file.)* `Settings.tsx:580,583,652,654,
-  766,769` use bare `Number(v)` (`Number("") === 0`) against `ge=` bounds in `webapp/config.py`. **Fix:** apply the
-  existing empty-guard to the six fields (or clamp on blur); optionally surface per-field errors. (S, UX —
-  PRIORITY 3.)
+- ~~**Emptying any of six numeric Settings fields coerces to `0` and the whole settings save 422s — every other edit
+  in the form is lost behind a raw pydantic toast.**~~ — **FIXED v0.210.14** (Builder 2026-07-29, branch
+  `claude/pensive-faraday-yg1ma1`). These six fields are non-nullable with `ge=` bounds, so the null-guard used on
+  the nullable siblings (`cpu_workers`, `site_lat` …) can't apply — sending `null` would 422 just like the old
+  `Number("")===0` did. Instead the six fields now emit `""` when cleared, and a new pure `dropEmptyFields` helper
+  (`frontend/src/routes/Settings.tsx`) omits any `""`-valued key from the PUT patch — so an emptied non-nullable
+  field simply keeps its stored value while **every other edit still saves**, no 422. Explicit `null` (a nullable
+  field the user cleared) and falsy-but-valid values (`0`, `false`, `[]`) are preserved. Regression tests:
+  `dropEmptyFields` — "omits emptied fields so a cleared non-nullable numeric never 422s the whole save" and
+  "preserves an explicit null … and falsy-but-valid values" (`Settings.test.tsx`). Upgrade-safe: frontend-only,
+  no API/DB/config change (the PUT accepts a strict subset of what it did before). (S, UX — PRIORITY 3.)
 
 - **Jobs page is pinned to the backend's default 100 rows — the "Job history to keep" setting (default 200) has no
   visible effect and "Clear N finished" understates what it deletes.** *(Broken-UX; traced on both sides:
