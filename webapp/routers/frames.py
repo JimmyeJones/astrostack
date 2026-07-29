@@ -34,6 +34,16 @@ router = APIRouter(prefix="/api/targets/{safe}/frames", tags=["frames"])
 
 _BAYER_PATTERNS = {"RGGB", "BGGR", "GRBG", "GBRG"}
 
+# Plain-language names for the QC metrics a "Reject worst" action can target, used
+# when explaining a no-op (see ``bulk_frames``). Falls back to the raw field name.
+_METRIC_LABELS = {
+    "fwhm_px": "sharpness (FWHM)",
+    "star_count": "star-count",
+    "eccentricity_median": "star-roundness (eccentricity)",
+    "sky_adu_median": "sky-brightness",
+    "transparency_score": "transparency",
+}
+
 # The app is built to survive a NAS mount going read-only or a locked
 # ``project.sqlite`` (see ``system._folder_status`` and the connection-leak fixes
 # throughout this file). When a frame write actually fails in that state, SQLite
@@ -365,6 +375,7 @@ def bulk_frames(safe: str, body: BulkFrameAction, request: Request) -> dict:
             # Track exactly which frames this action touched so the client can offer
             # a one-click undo of an over-aggressive bulk reject.
             changed_ids: list[int] = []
+            note: str | None = None
             if body.action in ("accept", "reject") and body.ids:
                 accept = body.action == "accept"
                 for fid in body.ids:
@@ -374,8 +385,17 @@ def bulk_frames(safe: str, body: BulkFrameAction, request: Request) -> dict:
                     )
                     changed_ids.append(fid)
             elif body.action == "reject_worst":
-                frames = [f for f in proj.iter_frames(accepted_only=True)
-                          if getattr(f, body.metric) is not None]
+                accepted = list(proj.iter_frames(accepted_only=True))
+                frames = [f for f in accepted if getattr(f, body.metric) is not None]
+                # A metric-less batch (QC/grade never measured this quantity) would
+                # otherwise reject nothing and report a bare "Updated 0 frames" with
+                # no hint why. Explain it so the user knows to run QC first rather
+                # than assuming the button is broken.
+                if accepted and not frames:
+                    note = (
+                        f"No accepted frames have a {_METRIC_LABELS.get(body.metric, body.metric)} "
+                        "measurement yet — run QC / grade first, then try again."
+                    )
                 # Higher FWHM/ecc/sky is worse; higher star_count / transparency is
                 # better (so their "worst" are the *lowest* values).
                 higher_is_better = {"star_count", "transparency_score"}
@@ -420,7 +440,7 @@ def bulk_frames(safe: str, body: BulkFrameAction, request: Request) -> dict:
         raise HTTPException(status_code=503, detail=STORAGE_READONLY_MSG) from exc
     finally:
         lib.close()
-    return {"changed": len(changed_ids), "changed_ids": changed_ids}
+    return {"changed": len(changed_ids), "changed_ids": changed_ids, "note": note}
 
 
 @router.post("/set-aside-night")

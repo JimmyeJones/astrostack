@@ -428,13 +428,23 @@ export function TargetView() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["frames", safe] });
       qc.invalidateQueries({ queryKey: ["target", safe] });
+      // A single accept/reject changes the "why frames were left out" breakdown
+      // too — invalidate it like every sibling bulk mutation does, or the
+      // left-out hovercard goes stale until the next refetch.
+      qc.invalidateQueries({ queryKey: ["reject-summary", safe] });
     },
   });
 
   const bulk = useMutation({
     mutationFn: (body: Record<string, unknown>) => api.bulkFrames(safe, body),
     onSuccess: (r, body) => {
-      notifications.show({ message: `Updated ${r.changed} frames`, color: "violet" });
+      // When the backend explains a no-op (e.g. "Reject worst" with no QC metric
+      // measured yet), surface that guidance instead of a bare "Updated 0 frames".
+      if (r.note) {
+        notifications.show({ message: r.note, color: "yellow" });
+      } else {
+        notifications.show({ message: `Updated ${r.changed} frames`, color: "violet" });
+      }
       qc.invalidateQueries({ queryKey: ["frames", safe] });
       qc.invalidateQueries({ queryKey: ["target", safe] });  // accepted-count badge
       qc.invalidateQueries({ queryKey: ["reject-summary", safe] });

@@ -327,6 +327,31 @@ def test_bulk_reject_worst_by_transparency(client, built_library, data_root):
     assert after[frames[2]["id"]]["accept"] is True
 
 
+def test_bulk_reject_worst_metricless_explains_the_no_op(client, built_library):
+    # The built frames carry no transparency_score, so "Reject worst by transparency"
+    # can reject nothing. The response must EXPLAIN that (so the UI can guide the
+    # user to run QC first) rather than silently reporting a bare "changed: 0".
+    frames = client.get("/api/targets/M_42/frames").json()
+    assert len(frames) == 3
+    r = client.post(
+        "/api/targets/M_42/frames/bulk",
+        json={"action": "reject_worst", "metric": "transparency_score", "fraction": 0.5},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["changed"] == 0
+    assert body["note"] and "transparency" in body["note"].lower()
+
+    # A normal action still carries no note (note defaults to None off this path).
+    r2 = client.post(
+        "/api/targets/M_42/frames/bulk",
+        json={"action": "reject", "ids": [frames[0]["id"]]},
+    )
+    assert r2.status_code == 200
+    assert r2.json()["changed"] == 1
+    assert r2.json()["note"] is None
+
+
 def test_bulk_reject_streaked(client, built_library, data_root):
     from seestack.io.library import Library
 
