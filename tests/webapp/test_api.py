@@ -454,6 +454,52 @@ def test_bulk_returns_changed_ids_for_undo(client, built_library):
         assert after[fid]["reject_reason"] is None
 
 
+def test_sky_brightness_self_hides_without_enough_nights(client, built_library):
+    """The fixture library's subs are all one night, so there is no "usual" to
+    compare against — the card must return nothing rather than guess."""
+    body = client.get("/api/targets/M_42/frames/sky-brightness").json()
+    assert body == {"read": None}
+
+
+def test_sky_brightness_calls_out_a_much_brighter_night(client, built_library, data_root):
+    """With three ordinary nights plus a strongly-lit one, the endpoint reports the
+    latest night as much brighter and says what to do about it."""
+    from seestack.io.library import Library
+    from seestack.io.project import FrameRow
+    from seestack.qc.sky_quality import MIN_FRAMES_PER_NIGHT
+
+    nights = ["2026-07-20", "2026-07-21", "2026-07-22", "2026-07-23"]
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target("M_42")
+        try:
+            # Four nights of MIN_FRAMES_PER_NIGHT measured subs; the last is bright.
+            for i in range(MIN_FRAMES_PER_NIGHT * len(nights)):
+                night = nights[i // MIN_FRAMES_PER_NIGHT]
+                proj.add_frame(FrameRow(
+                    source_path=f"/synthetic/sky_{i}.fit",
+                    timestamp_utc=f"{night}T22:{i % 60:02d}:00Z",
+                    exposure_s=10.0, gain=80.0,
+                    sky_adu_median=2500.0 if night == nights[-1] else 1000.0,
+                ))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    read = client.get("/api/targets/M_42/frames/sky-brightness").json()["read"]
+    assert read is not None
+    assert read["level"] == "much_brighter"
+    assert read["night"] == "2026-07-23"
+    assert read["nights"] == 4
+    assert read["ratio"] > 1.8
+    assert "darker night" in read["text"]
+
+
+def test_sky_brightness_404s_for_an_unknown_target(client, built_library):
+    assert client.get("/api/targets/nope/frames/sky-brightness").status_code == 404
+
+
 def test_reject_summary_surfaces_accepted_unsolved_frames(client, built_library):
     """The owner's gibberish case: subs are accepted but not plate-solved yet, so
     they never reach the stack. The breakdown must surface them as "not located

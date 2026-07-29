@@ -71,9 +71,60 @@ when you take it.
 > slider drag) and FIXED (see the struck flaky-test entry below); a frontend/API click-path audit filed its own
 > entries below.
 
-- **⭐⭐ MEASURED (2026-07-26 quality audit) — the one-click Auto result is purple-one-side / green-or-blown-the-other
+- ~~**⭐⭐ MEASURED (2026-07-26 quality audit) — the one-click Auto result is purple-one-side / green-or-blown-the-other
   on any stack with a residual sky gradient: the Auto recipe's luminance-mode gradient removal + per-channel STF
-  turn ordinary light pollution into a strong spatial COLOUR split.** *(Editor/auto image quality — PRIORITY 1;
+  turn ordinary light pollution into a strong spatial COLOUR split.**~~ — **FIXED v0.211.0** (Builder 2026-07-29,
+  branch `claude/loving-bardeen-wwcey3`). Root-caused deeper than the original entry: **the gradient pass was barely
+  doing anything at all.** `_build_object_mask` thresholded luminance against the *whole-frame* median, so on a frame
+  that still carries an ordinary LP gradient the entire **bright half reads as "object"** — measured on the audit's
+  realistic S30 scene: **5 % of the dim fifth masked vs 66 % of the bright fifth** — which starves `Background2D` of
+  sky exactly where the gradient is. Its boxes on the bright side exceeded `exclude_percentile` and were dropped, so
+  the fitted mesh extrapolated flat (mesh max +2.7 ADU where the sky was +45) and `remove_final_gradient`
+  **removed only ~10 % of the tilt it exists to remove** (G tilt 70.6 → 63.1 ADU). Two fixes, both in
+  `seestack/bg/final_gradient.py`:
+  **(1) the detection threshold is now local.** Objects are detected on the luminance *detrended by a robust
+  low-order polynomial* (`_fit_sky_poly`, deg 2, fitted to per-tile sky **medians** so it is unbiased however much of
+  a tile the mask removed) rather than against a global median — light pollution is low-order, a galaxy/nebula is
+  not, so subtracting the trend makes the threshold local without hiding real objects. Noise-sized detections are
+  dropped (`_MIN_DETECT_AREA`, proxy-scaled): a σ-threshold flags ~0.6 % of pixels *anywhere* and dilating those
+  single-pixel spikes by the default 16 px was swelling the mask over most of the frame by a second route (measured
+  78–100 % on a well-flattened stack). A second, smoothed pass detects faint **extended** structure so outer
+  nebulosity is masked rather than quietly absorbed into the "sky".
+  **(2) `luminance` mode now flattens each channel's own gradient** (new `match_channels`, default **on**; the
+  historical brightness-only behaviour stays reachable). LP amplitude scales with each channel's sky level, so one
+  luminance-weighted model plus a per-channel *constant* mathematically cannot flatten all three — this is
+  mechanism (1) of the original entry. Each channel first has its own **deg-2 tile-median poly** removed (stiff
+  enough that it cannot bend into a nebula — the measured hazard that rules out per-channel `Background2D`), then the
+  shared mesh model mops up what all three have in common, then the existing mode-based DC offset. Fitting the
+  *original* data rather than the mesh's leftovers is what keeps it honest on flat frames: a gradient-free stack gets
+  a surface of ~0 amplitude instead of one chasing mesh noise into a new cast (that regression was measured and fixed
+  by switching from clipped raw-pixel least-squares to tile medians).
+  **Measured end-to-end** (12-sub honest path: subs → default per-frame `subtract_background` → stack →
+  `auto_recipe` → `apply_recipe`), sky cast per frame-eighth:
+
+  | scene | sky cast left | sky cast right | luminance tilt | colour spread (ADU) | nebula core chroma |
+  |---|---|---|---|---|---|
+  | 18 % LP, before | −15.3 % | +11.2 % | +103 % of sky | 34.3 (op removed **none**) | 0.56 |
+  | 18 % LP, after  | −4.8 %  | +2.0 %  | +46 % of sky  | **3.9** | 0.61 |
+  | 8 % LP, before  | −13.7 % | +14.0 % | +87 % of sky  | 17.5 | 0.61 |
+  | 8 % LP, after   | −5.1 %  | +1.6 %  | +28 % of sky  | **2.2** | 0.57 |
+  | no gradient, before | ±1.5 % | ±4.4 % | −0.9 % | 1.0 | 0.50 |
+  | no gradient, after  | ±0.8 % | ±3.2 % | −1.2 % | 1.0 | 0.51 |
+
+  ("Colour spread" = worst cross-channel disagreement of the sky across the frame — the defect itself; it collapses
+  ~8×, from 1.7 σ of stack noise to 0.20 σ, i.e. below the grain.) Regression tests, all fail-before/pass-after:
+  `test_object_mask_is_not_starved_by_a_sky_gradient`, `test_object_mask_ignores_noise_sized_detections`,
+  `test_luminance_mode_flattens_each_channels_own_gradient`, `test_match_channels_off_is_brightness_only`,
+  `test_match_channels_does_not_invent_a_cast_on_a_flat_frame` (`tests/test_final_gradient.py`), plus the
+  end-to-end `test_one_click_auto_does_not_split_the_sky_into_colours` (`tests/test_edit_engine.py`, asserts every
+  frame-eighth of the finished Auto sky is < 8 % off neutral *and* the faint nebula keeps its colour — 19 % before).
+  `_dense_star_field` was upgraded to place *resolved* stars rather than single hot pixels, since the mask builder now
+  correctly ignores single-pixel (noise-sized) detections; its premise assertion (the strict fit still raises) holds.
+  Upgrade-safe: additive dataclass field + additive advanced editor param (descriptor-driven, so it surfaces with no
+  frontend work); no config/DB/API-shape/on-disk change, `StackOptions` untouched, and an old saved recipe simply gets
+  the corrected default on re-render. **Still open (filed as its own entry below):** the residual *luminance* tilt —
+  mesh-scale `Background2D` bias, now +46 % of sky rather than +103 %, so the far corner still brightens. Confidence:
+  reproduced + measured. *(Original analysis retained below for provenance.)* *(Editor/auto image quality — PRIORITY 1;
   wrong-result on the flagship "Process target" picture; **reproduced** end-to-end at three gradient strengths.)*
   Mechanisms, each isolated: **(1)** `auto_recipe` hardcodes `background.final_gradient(mode="luminance")`
   (`seestack/edit/presets.py:396`) — one luminance model + per-channel DC offset
@@ -331,10 +382,47 @@ when you take it.
   `Seestar.test.tsx` (+1, "surfaces a retryable error instead of spinning forever"). Frontend-only, upgrade-safe.
   (S, UX — PRIORITY 3.)
 
+- **⭐ MEASURED (2026-07-29, the surviving half of the ⭐⭐ colour-split bug above) — the finished Auto picture still
+  brightens strongly toward the light-polluted corner: a residual LUMINANCE tilt of ~+46 % of sky that mesh-scale
+  `Background2D` bias leaves behind.** *(Editor/auto image quality — PRIORITY 1; wrong-result on the flagship
+  "Process target" picture; **reproduced** at two gradient strengths.)* With the object-mask and per-channel fixes
+  (v0.211.0) the *colour* split is gone (cross-channel sky spread 34.3 → 3.9 ADU, i.e. below the grain), but the
+  **brightness** ramp is only halved: measured on the honest 12-sub path, left→right sky level after the full Auto
+  chain is 0.170 → 0.259 on an 18 % LP gradient (**+46 % of sky**, was +103 %) and +28 % on an 8 % one. A beginner
+  reads that as "one corner is washed out". Root cause is *not* the colour handling: it is that neither the per-frame
+  `subtract_background` nor the final `Background2D` mesh can null a smooth gradient to better than a few ADU — the
+  per-sub fit bias is *systematic* (same sign every sub, so averaging and even ±40 px dither don't remove it: measured
+  stack tilts +42/+71/+34 ADU), and the final mesh's own residual is worst where the spline extrapolates at the frame
+  edge and corner. The linear-domain residual after v0.211.0 is a **non-monotone, mesh-scale** shape (measured
+  frame-eighth sky in G: −4.1, +5.2, +1.2, −3.3, 0.0, +1.3, +2.7, +10.0 ADU on σ≈20) — deg-2 poly cannot follow it,
+  and a second per-channel poly pass measurably adds nothing (mid-band cast 12.9 % → 12.7 %). **Fix directions
+  (measured constraints — no blind flips):** (a) improve the *fit accuracy* in `_fit_background_2d` — the corner/edge
+  behaviour specifically (a larger effective smoothing, an edge-aware interpolator, or a two-scale fit: coarse global
+  surface + fine mesh) — validated as the half a global poly cannot reach; (b) a validated small extra win was
+  available by scaling the shared mesh model per channel from tile-median regression (mid-band cast 12.9 % → 9.8 %,
+  luminance tilt 46 % → 30 %) but it costs a little nebula chroma (0.61 → 0.59) and complexity, so it was left
+  out of v0.211.0 — revisit *with* (a); (c) attack it upstream: the per-frame flatten's systematic bias is the larger
+  term, so a masked low-order residual pass *inside* `subtract_background` would stop it entering the stack at all
+  (the audit measured this halves the stack tilts). Regression metric to use: the frame-eighth sky *level* spread of
+  the finished Auto render (currently 0.170 → 0.259 at 18 % LP); target < 15 % of sky. The harness is the honest path
+  in the ⭐⭐ entry above. Confidence: reproduced + measured. (M, editor/image-quality — PRIORITY 1.)
+
 - **Smaller click-path items (2026-07-26 audit — batch into cleanup passes; each traced, several reproduced):**
-  (a) Editor PNG/share job polling has no try/catch and survives unmount (`Editor.tsx:678+,690-722,729-768`) — a
+  (a) ~~Editor PNG/share job polling has no try/catch and survives unmount (`Editor.tsx:678+,690-722,729-768`) — a
   transient 5xx or a concurrent "Clear finished jobs" discards a FINISHED render that is still downloadable, and
-  navigating away later fires a surprise download; contrast `pollJobForOpErrors` (655-668) which swallows errors;
+  navigating away later fires a surprise download; contrast `pollJobForOpErrors` (655-668) which swallows errors~~ —
+  **FIXED v0.211.1** (Builder 2026-07-29, branch `claude/loving-bardeen-wwcey3`). All four of the editor's
+  copy-pasted polling loops (full-res PNG, share JPEG, share-to-app, and the advisory op-errors watcher) now go
+  through one tested helper, `pollJobUntilDone` (`frontend/src/components/editor/pollJob.ts`), which (i) rides out up
+  to 5 *consecutive* status-fetch failures — a success resets the budget — so one 5xx or dropped connection mid-render
+  no longer surfaces "PNG render failed" and throws away a render that is still going, and (ii) takes an
+  `isAbandoned` predicate wired to an Editor `mounted` ref, so a poll that resolves after the user navigated away
+  rejects with a `JobPollAbort` sentinel instead of clicking a hidden download link on an unrelated screen (the three
+  export `onError` handlers stay silent for that sentinel). Frontend-only, no API/schema/default change. Tests:
+  `pollJob.test.ts` (+9 — happy path, transient-failure ride-out, error-budget reset, persistent-failure give-up,
+  terminal `error`/`cancelled`/`interrupted` with and without job text, abandon-on-unmount before and after the first
+  poll). *(A job record genuinely **deleted** by "Clear finished jobs" still ends as an error after the retries —
+  correct, since the client can't know it had finished.)*;
   (b) ~~Seestar page spins forever on API error~~ **FIXED v0.210.19** (Builder 2026-07-29, branch
   `claude/pensive-faraday-rlkdvs`): `SeestarView` now returns a retryable `QueryError` on `isError` like every
   other route (test in `Seestar.test.tsx`); (c) ~~Tonight's error state unmounts its own date picker and altitude
@@ -10219,8 +10307,35 @@ problems. Dogfood it every big-picture run and fix root causes.
   noise-vs-time sparkline, shown only when the estimate is trustworthy. Keeps the beginner-feature pipeline stocked
   with a *plan/understand* capability that no existing card (First look, thin-stack warning, best months,
   what-to-shoot-next) covers — those tell you *what to shoot* or *what you got*; this tells you *when to stop*.
-- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "How dark is your sky?": a plain-language read on the beginner's
-  sky brightness, computed from the sky level QC already measures.** *(Friendliness / understand-and-plan,
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "How dark is your sky?": a plain-language read on the beginner's
+  sky brightness, computed from the sky level QC already measures.**~~ — **SHIPPED (relative slice) v0.212.0**
+  (Builder 2026-07-29, branch `claude/loving-bardeen-wwcey3`). Built end-to-end across engine/webapp/frontend, taking
+  exactly the Scout's recommended **safe default**: a *relative* read against the owner's own nights, with **no**
+  absolute Bortle-style claim (that still needs per-model, per-gain calibration on real data — kept as the follow-on
+  below). **Engine** (`seestack/qc/sky_quality.py`, pure + deterministic): `sky_brightness(samples, lon_deg=…)` →
+  `SkyBrightnessRead {level, label, text, night, nights, ratio} | None`. It keeps frames with a usable
+  `sky_adu_median` and a positive `exposure_s`, groups by `(gain, exposure_s)` and uses only the **largest** group
+  (sky ADU scales with both, so a mixed 10 s/30 s or gain-80/gain-200 set would read as a sky change that isn't one),
+  takes each frame's sky **rate** = `sky_adu_median / exposure_s`, medians it per **observing night** (reusing
+  `activity_calendar.night_date_of`, so a session straddling midnight is one night), and compares the **latest**
+  night against the median of all this target's nights. Buckets `darker < 0.80 < typical < 1.25 < brighter < 1.80 <
+  much_brighter`, each with a plain sentence *and* an action ("bright galaxies, clusters and the Moon cope much
+  better"; "save this target for a darker night"). Returns `None` — say nothing — below `MIN_FRAMES_PER_NIGHT` (5)
+  measured subs per night or `MIN_NIGHTS` (3) qualifying nights, because with no "usual" there is no honest answer.
+  **Webapp**: read-only `GET /api/targets/{safe}/frames/sky-brightness` → `{"read": …|null}` (declared before
+  `/{frame_id}`; night bucketing uses `settings.site_lon`, degrading to UTC noon-to-noon). **Frontend**: a
+  self-hiding `SkyBrightnessNote` Alert on the Target page (moon-phase icon + tone per level) that names the night,
+  the verdict and the advice, and states plainly that it is measured from the owner's own subs and *not* an absolute
+  rating. A "typical" night is deliberately still shown — "nothing unusual here" is the reassurance a beginner
+  actually wants when a picture disappoints. **Why it matters now:** this is the honest companion to the v0.211.0
+  gradient fix — the app can flatten light pollution far better, but it can't invent signal that a bright sky never
+  let through, and until now the owner had no way to tell those two apart. Tests: `tests/test_sky_quality.py` (+13 —
+  hidden below the night/sub floors, all four buckets, exposure normalised out, a gain change not mistaken for a
+  brighter sky, across-midnight grouping, junk rows skipped not fatal, missing gain, JSON-safety, longitude shifting
+  the night boundary), `tests/webapp/test_api.py` (+3 — self-hide, the much-brighter verdict end to end, 404),
+  `SkyBrightnessNote.test.tsx` (+5). Upgrade-safe: new read-only endpoint + new frontend component only; no
+  config/DB-schema/on-disk/API-shape/default change, and no new dependency. *(Original spec below.)*
+  *(Friendliness / understand-and-plan,
   PRIORITY 3; size M; offline, additive, no new deps.)* **Why a beginner wants it:** a Seestar owner has no SQM
   and no idea whether their backyard is "dark enough" — which is *the* thing that decides whether faint nebulae
   are even worth attempting, and why their faint-target subs come out washed out. We already measure
@@ -13144,6 +13259,23 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.212.0** — NEW beginner feature "Was last night's sky bright?": a relative, self-hiding read on the latest
+  night's sky brightness, measured from the `sky_adu_median` QC already records and compared against the target's own
+  nights (never an absolute Bortle claim). Exposure- and gain-grouped so a settings change can't masquerade as a
+  brighter sky; hidden until there are 3 nights of ≥5 measured subs. Pure engine module + read-only endpoint +
+  Target-page note. Tests: `tests/test_sky_quality.py` (+13), `tests/webapp/test_api.py` (+3),
+  `SkyBrightnessNote.test.tsx` (+5).
+- **v0.211.1** — Editor export/render job polling hardened into one tested helper (`pollJob.ts`): rides out up to 5
+  consecutive status-fetch failures so a transient 5xx no longer discards a full-res render that is still going, and
+  stops on unmount so a late-finishing render can't fire a surprise download on another page. Click-path audit item
+  (a). Tests: `pollJob.test.ts` (+9).
+- **v0.211.0** — ⭐⭐ Fixed the one-click Auto colour split (purple one side / green the other) at its root: the
+  final-gradient object mask was reading the whole *bright half* of a light-polluted frame as "object" (5 % vs 66 %
+  masked), starving the fit so it removed only ~10 % of the gradient. Detection is now against a robust low-order
+  tile-median trend (plus a minimum detection area and a faint-extended pass), and `luminance` mode also flattens each
+  channel's own low-order gradient (`match_channels`, default on). Cross-channel sky spread 34.3 → 3.9 ADU (1.7 σ →
+  0.20 σ) on an 18 % LP gradient; luminance tilt +103 % → +46 % of sky; faint-nebula chroma preserved. Tests:
+  `tests/test_final_gradient.py` (+5), `tests/test_edit_engine.py` (+1 end-to-end).
 - **v0.210.20** — Click-path audit fix (f) + (d): `bulk_frames` now returns a `note` so "Reject worst" on a
   metric-less batch explains "run QC first" instead of a silent "Updated 0 frames" (Target toast shows it in yellow);
   and the single-frame accept/reject `patch` mutation now invalidates `["reject-summary", …]` like every sibling so

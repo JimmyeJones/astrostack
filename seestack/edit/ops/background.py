@@ -57,6 +57,10 @@ def _final_gradient(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarr
         # dilate_px is a full-res pixel measure too — scale it (floor 0 so a
         # small full-res dilation can legitimately vanish on a heavy proxy).
         dilate_px=_scaled_box(ctx, int(params.get("dilate_px", 16)), minimum=0),
+        match_channels=bool(params.get("match_channels", True)),
+        # Lets the object detector scale its own internal full-res pixel
+        # measures the same way, so preview and export mask the same structure.
+        proxy_scale=float(ctx.proxy_scale),
     )
     # Surface a failed gradient fit in the editor rather than silently returning
     # the input (Background2D failure is this op's most likely real failure).
@@ -132,6 +136,12 @@ register(OpSpec(
                   group="advanced",
                   help="Grow the object mask by this many pixels so faint halos around "
                        "bright stars aren't treated as sky."),
+        EditParam("match_channels", "Remove the gradient's colour", "bool", default=True,
+                  group="advanced",
+                  help="In Luminance mode, also flatten each colour's own gradient — "
+                       "light pollution tints one side of the frame differently, and "
+                       "without this the sky ends up green on one side and magenta on "
+                       "the other. Off = flatten brightness only."),
     ],
 ))
 

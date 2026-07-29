@@ -35,6 +35,7 @@ import { sharePictureText } from "../share";
 import { detectSolveSetupProblem } from "../components/target/solveSetup";
 import { RejectionBreakdown } from "../components/target/RejectionBreakdown";
 import { UnsolvedHelp } from "../components/target/UnsolvedHelp";
+import { SkyBrightnessNote } from "../components/target/SkyBrightnessNote";
 import { thinStackWarning } from "../components/target/thinStack";
 import { SharpestYetBadge } from "../components/target/SharpestYetBadge";
 import { NextBestMoveBadge } from "../components/target/NextBestMoveBadge";
@@ -366,6 +367,13 @@ export function TargetView() {
   const unsolvedCount =
     rejectSummary.data?.summary?.buckets.find((b) => b.key === "unsolved")
       ?.count ?? 0;
+  // "Was last night's sky bright?" — the honest explanation for a washed-out
+  // result. Self-hiding: the endpoint returns null unless it can answer honestly.
+  const skyBrightness = useQuery({
+    queryKey: ["sky-brightness", safe],
+    queryFn: () => api.skyBrightness(safe),
+    enabled: !!target.data,
+  });
   const frames = useQuery({
     queryKey: ["frames", safe, sort, order],
     queryFn: () => api.listFrames(safe, sort, order),
@@ -844,6 +852,9 @@ export function TargetView() {
           ) : null}
         </Alert>
       ) : null}
+      {/* Was the sky brighter than usual on the latest night? Explains a washed-out
+          result the owner would otherwise blame on themselves. Self-hides. */}
+      <SkyBrightnessNote read={skyBrightness.data?.read} />
       {heldForSolve ? (
         <Alert
           color="blue"

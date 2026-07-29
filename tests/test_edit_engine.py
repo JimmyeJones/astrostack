@@ -594,6 +594,55 @@ def test_auto_recipe_saturation_eases_off_on_noisy_stacks():
     assert float(op.params["amount"]) == 1.2
 
 
+def test_one_click_auto_does_not_split_the_sky_into_colours():
+    """⭐⭐ The owner's headline complaint, end to end: on ordinary light-polluted
+    data the finished one-click picture came out magenta down one side and green
+    down the other (measured −15 % / +11 % green on an 18 % LP gradient).
+
+    Cause: light pollution tilts each channel in proportion to its own sky level,
+    the Auto recipe's shared-luminance gradient removal leaves those per-channel
+    *shapes* in place, and the per-channel STF stretch then maps the residual into
+    diverging colour. Render the real chain and require the finished sky to stay
+    near-neutral across the whole frame — and the faint nebula to keep its colour,
+    which is the measured hazard of the naive fixes."""
+    from seestack.edit.pipeline import apply_recipe
+    from seestack.edit.presets import auto_recipe
+    from seestack.edit.registry import EditContext
+
+    rng = np.random.default_rng(23)
+    h, w = 300, 480
+    yy, xx = np.indices((h, w), dtype=np.float32)
+    ramp = (xx / (w - 1)) * 0.75 + (yy / (h - 1)) * 0.25
+    # Residual sky tilt of a 12-sub S30 stack after the default per-frame flatten.
+    rgb = np.stack([ramp * t for t in (42.0, 71.0, 34.0)], axis=-1).astype(np.float32)
+    rgb += rng.normal(scale=20.0, size=rgb.shape).astype(np.float32)
+    dy, dx = np.mgrid[-3:4, -3:4].astype(np.float32)
+    stamp = np.exp(-(dy * dy + dx * dx) / 2.25)
+    for y, x, amp in zip(rng.integers(4, h - 4, 40), rng.integers(4, w - 4, 40),
+                         rng.uniform(300.0, 2000.0, 40), strict=True):
+        rgb[y - 3:y + 4, x - 3:x + 4, :] += (amp * stamp).astype(np.float32)[:, :, None]
+    neb = np.exp(-(((yy - h * 0.42) / (h * 0.16)) ** 2
+                   + ((xx - w * 0.58) / (w * 0.13)) ** 2)).astype(np.float32)
+    for c, amp in enumerate((55.0, 18.0, 32.0)):
+        rgb[..., c] += neb * amp
+
+    out = apply_recipe(rgb, auto_recipe(rgb), EditContext())
+
+    def cast(x0f, x1f):
+        band = out[int(h * 0.80):int(h * 0.95), int(w * x0f):int(w * x1f)]
+        levels = np.array([float(np.nanmedian(band[..., c])) for c in range(3)])
+        return float(np.max(np.abs(levels - levels.mean())) / max(levels.mean(), 1e-6))
+
+    # Fails before the fix (left −15 %, right +11 %); after, every eighth is near
+    # neutral. 8 % leaves room for the sky grain a thin stack legitimately has.
+    for i in range(8):
+        assert cast(i / 8, (i + 1) / 8) < 0.08, f"eighth {i} sky cast {cast(i/8,(i+1)/8):.0%}"
+
+    core = neb > 0.8
+    lv = np.array([float(np.nanmedian(out[..., c][core])) for c in range(3)])
+    assert (lv.max() - lv.min()) / max(lv.max(), 1e-6) > 0.15, "nebula lost its colour"
+
+
 def test_auto_recipe_appends_contrast_curve():
     """Auto must append a gentle contrast curve (tone.curves, auto=True) after the
     saturation boost — matching the built-in presets, which the previously-flat

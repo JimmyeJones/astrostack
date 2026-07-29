@@ -42,6 +42,7 @@ import { splitFraction, splitClipLeft, splitLeftPct, lookCompareOps, reshapesFra
   from "../components/editor/splitCompare";
 import { LookComparePicker, type LookChoice } from "../components/editor/LookComparePicker";
 import { pngProgressLabel } from "../components/editor/pngProgress";
+import { isJobPollAbort, pollJobUntilDone } from "../components/editor/pollJob";
 import { opErrorsMessage } from "../components/editor/opErrors";
 import { clippingCaption } from "../components/editor/clipping";
 import { previewDebounceMs } from "../components/editor/previewDebounce";
@@ -244,6 +245,15 @@ export function EditorView() {
   // after a Save re-syncs `saved.data`) because this key stays frozen for the run.
   const [seedKey, setSeedKey] = useState<string | null>(null);
   useEffect(() => { setSeeded(false); setSeedKey(null); }, [rid]);
+  // Export/render jobs are polled in a loop that used to outlive the page: a poll
+  // resolving after the user navigated away still clicked a hidden download link,
+  // firing a surprise download on an unrelated screen. The pollers check this.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  const pollOptions = { getJob: api.getJob, isAbandoned: () => !mounted.current };
   useEffect(() => {
     if (saved.data && !seeded) {
       const ops0 = saved.data.ops ?? [];
@@ -654,16 +664,11 @@ export function EditorView() {
   // full-res data. Best-effort and non-blocking; failures to poll are ignored.
   const pollJobForOpErrors = async (jobId: string) => {
     try {
-      for (;;) {
-        const j = await api.getJob(jobId);
-        if (["error", "cancelled", "interrupted"].includes(j.state)) return;
-        if (j.state === "done") {
-          const msg = opErrorsMessage(j.result?.op_errors);
-          if (msg) notifications.show({ message: msg, color: "orange", autoClose: 10000 });
-          return;
-        }
-        await new Promise((r) => setTimeout(r, 800));
-      }
+      const j = await pollJobUntilDone(jobId, {
+        getJob: api.getJob, isAbandoned: () => !mounted.current, intervalMs: 800,
+      });
+      const msg = opErrorsMessage(j.result?.op_errors);
+      if (msg) notifications.show({ message: msg, color: "orange", autoClose: 10000 });
     } catch {
       /* advisory only — never surface a polling error */
     }
@@ -677,15 +682,11 @@ export function EditorView() {
       setPngProgress("Rendering…");
       const { job_id } = await api.exportPng(safe, rid, recipe);
       // Full-res render can be slow on mosaics — poll the job to completion.
-      for (;;) {
-        const j = await api.getJob(job_id);
-        if (j.state === "done") return { jobId: job_id, opErrors: opErrorsMessage(j.result?.op_errors) };
-        if (["error", "cancelled", "interrupted"].includes(j.state)) {
-          throw new Error(j.error || "PNG render failed");
-        }
-        setPngProgress(pngProgressLabel(j));
-        await new Promise((r) => setTimeout(r, 500));
-      }
+      const j = await pollJobUntilDone(job_id, {
+        ...pollOptions, failureMessage: "PNG render failed",
+        onProgress: (job) => setPngProgress(pngProgressLabel(job)),
+      });
+      return { jobId: job_id, opErrors: opErrorsMessage(j.result?.op_errors) };
     },
     onSuccess: ({ jobId, opErrors }) => {
       const a = document.createElement("a");
@@ -696,7 +697,7 @@ export function EditorView() {
       notifications.show({ message: "Full-resolution PNG ready", color: "teal" });
       if (opErrors) notifications.show({ message: opErrors, color: "orange", autoClose: 10000 });
     },
-    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+    onError: (e: Error) => { if (!isJobPollAbort(e)) notifications.show({ message: e.message, color: "red" }); },
     onSettled: () => setPngProgress(null),
   });
 
@@ -714,21 +715,15 @@ export function EditorView() {
     mutationFn: async () => {
       setShareProgress("Preparing…");
       const { job_id } = await api.exportShare(safe, rid, recipe, nameplate);
-      for (;;) {
-        const j = await api.getJob(job_id);
-        if (j.state === "done") {
-          return {
-            jobId: job_id,
-            blurb: typeof j.result?.blurb === "string" ? j.result.blurb : null,
-            opErrors: opErrorsMessage(j.result?.op_errors),
-          };
-        }
-        if (["error", "cancelled", "interrupted"].includes(j.state)) {
-          throw new Error(j.error || "Share image failed");
-        }
-        setShareProgress(pngProgressLabel(j));
-        await new Promise((r) => setTimeout(r, 500));
-      }
+      const j = await pollJobUntilDone(job_id, {
+        ...pollOptions, failureMessage: "Share image failed",
+        onProgress: (job) => setShareProgress(pngProgressLabel(job)),
+      });
+      return {
+        jobId: job_id,
+        blurb: typeof j.result?.blurb === "string" ? j.result.blurb : null,
+        opErrors: opErrorsMessage(j.result?.op_errors),
+      };
     },
     onSuccess: ({ jobId, blurb, opErrors }) => {
       const a = document.createElement("a");
@@ -740,7 +735,7 @@ export function EditorView() {
       notifications.show({ message: "Share image ready", color: "teal" });
       if (opErrors) notifications.show({ message: opErrors, color: "orange", autoClose: 10000 });
     },
-    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+    onError: (e: Error) => { if (!isJobPollAbort(e)) notifications.show({ message: e.message, color: "red" }); },
     onSettled: () => setShareProgress(null),
   });
 
@@ -753,22 +748,16 @@ export function EditorView() {
     mutationFn: async () => {
       setShareProgress("Preparing…");
       const { job_id } = await api.exportShare(safe, rid, recipe, nameplate);
-      for (;;) {
-        const j = await api.getJob(job_id);
-        if (j.state === "done") {
-          return {
-            jobId: job_id,
-            filename: typeof j.result?.filename === "string" ? j.result.filename : "astrophoto.jpg",
-            blurb: typeof j.result?.blurb === "string" ? j.result.blurb : null,
-            opErrors: opErrorsMessage(j.result?.op_errors),
-          };
-        }
-        if (["error", "cancelled", "interrupted"].includes(j.state)) {
-          throw new Error(j.error || "Share image failed");
-        }
-        setShareProgress(pngProgressLabel(j));
-        await new Promise((r) => setTimeout(r, 500));
-      }
+      const j = await pollJobUntilDone(job_id, {
+        ...pollOptions, failureMessage: "Share image failed",
+        onProgress: (job) => setShareProgress(pngProgressLabel(job)),
+      });
+      return {
+        jobId: job_id,
+        filename: typeof j.result?.filename === "string" ? j.result.filename : "astrophoto.jpg",
+        blurb: typeof j.result?.blurb === "string" ? j.result.blurb : null,
+        opErrors: opErrorsMessage(j.result?.op_errors),
+      };
     },
     onSuccess: async ({ jobId, filename, blurb, opErrors }) => {
       setShareBlurb(blurb);
@@ -786,7 +775,7 @@ export function EditorView() {
       }
       if (opErrors) notifications.show({ message: opErrors, color: "orange", autoClose: 10000 });
     },
-    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+    onError: (e: Error) => { if (!isJobPollAbort(e)) notifications.show({ message: e.message, color: "red" }); },
     onSettled: () => setShareProgress(null),
   });
 
