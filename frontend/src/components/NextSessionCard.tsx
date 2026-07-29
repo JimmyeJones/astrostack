@@ -1,8 +1,8 @@
-import { Anchor, Group, List, Paper, Stack, Text, ThemeIcon } from "@mantine/core";
+import { Anchor, Group, List, Paper, Stack, Text, ThemeIcon, Tooltip } from "@mantine/core";
 import { IconCalendarPlus, IconCalendarStar } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
-import { describeGap, describeWindow, windowsIntro } from "./nextSession";
+import { describeGap, describeWindow, windowUtcTooltip, windowsIntro } from "./nextSession";
 
 /**
  * "Plan your next night" — the forward-looking companion to the retrospective
@@ -49,7 +49,11 @@ export function NextSessionCard({
           <Text size="xs" fw={500}>{windowsIntro(windows.length)}</Text>
           <List size="xs" spacing={2} c="dimmed" listStyleType="none" withPadding={false}>
             {windows.map((w) => (
-              <List.Item key={w.dark_start_utc}>{describeWindow(w)}</List.Item>
+              <List.Item key={w.dark_start_utc}>
+                <Tooltip label={windowUtcTooltip(w)} withArrow position="top-start">
+                  <span>{describeWindow(w)}</span>
+                </Tooltip>
+              </List.Item>
             ))}
           </List>
           {/* Turn the plan into a reminder the beginner won't miss: a one-tap

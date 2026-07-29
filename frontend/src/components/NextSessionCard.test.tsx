@@ -57,7 +57,9 @@ describe("NextSessionCard", () => {
     );
     expect(screen.getByText(/About 2 more clear hours.*720 more subs/)).toBeInTheDocument();
     expect(screen.getByText("Your next good window:")).toBeInTheDocument();
-    expect(screen.getByText(/Thu 15 Jan.*22:40 → 02:10 UTC/)).toBeInTheDocument();
+    // Local wall-clock (TZ=UTC on CI, so local == UTC), no "UTC" suffix — that
+    // anchor now lives in the hover tooltip instead.
+    expect(screen.getByText(/Thu 15 Jan.*22:40 → 02:10/)).toBeInTheDocument();
   });
 
   it("offers an 'Add to calendar' .ics download pointing at the target's endpoint", async () => {

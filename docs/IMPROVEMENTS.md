@@ -282,13 +282,19 @@ when you take it.
   Upgrade-safe: additive keys in an existing meta blob, no config/DB-schema/API-shape/default change. Confidence:
   reproduced. (S, UX — PRIORITY 3.)
 
-- **"Plan your next night" names the wrong night for any owner west of UTC — and disagrees with its own .ics file
-  and the adjacent "Point here tonight" card.** *(Broken-UX — a real-world wrong night; **reproduced** with a
-  Seattle site: `dark_start_utc 2026-07-27T06:17Z` is locally Sunday 23:17, card says "Mon 27 Jul … UTC", the .ics
-  lands on Sunday in the calendar app, and the neighbouring card shows unlabeled LOCAL time.)*
-  `nextSession.ts:20-25,81-90` formats via `getUTC*`; the tests fixture Europe-shaped pre-midnight-UTC windows so
-  vitest stays green. **Fix:** render with the browser's local clock (as `tonight.ts:202-207` already does), label
-  the night by the local date of `dark_start`, keep UTC as a tooltip. (S, friendliness — PRIORITY 3.)
+- ~~**"Plan your next night" names the wrong night for any owner west of UTC — and disagrees with its own .ics file
+  and the adjacent "Point here tonight" card.**~~ — **FIXED v0.210.16** (Builder 2026-07-29, branch
+  `claude/pensive-faraday-nl5fvd`). `nextSession.ts` formatted the date and clock via `getUTC*`/`formatClockUtc`, so
+  a Seattle owner whose next dark window starts 06:17 UTC (Sunday 23:17 local) saw "Mon 27 Jul … UTC" — the wrong
+  night, disagreeing with the .ics file and the neighbouring local-clock card. `formatWindowDate` now uses local
+  `getDay/getDate/getMonth` (labelling the night by the local date of `dark_start`) and `describeWindow` renders
+  local wall-clock times via a new `formatClockLocal`, dropping the "UTC" suffix. The honest UTC anchor is kept in a
+  hover tooltip (`windowUtcTooltip` + a Mantine `Tooltip` on each `NextSessionCard` window row). Regression tests
+  (fail-before/pass-after): a `TZ=America/Los_Angeles` block (`vi.stubEnv`) in `nextSession.test.ts` asserts the
+  window is labelled "Sun 26 Jul" (not "Mon 27 Jul"), the line reads local "23:40 → 03:10" with no "UTC", and the
+  tooltip keeps "In UTC: Mon 27 Jul, 06:40 → 10:10"; existing UTC-suffix assertions updated (CI runs in UTC, where
+  local == UTC). Upgrade-safe: frontend-only, no API/DB/config change. Confidence: reproduced. (S, friendliness —
+  PRIORITY 3.)
 
 - ~~**Emptying any of six numeric Settings fields coerces to `0` and the whole settings save 422s — every other edit
   in the form is lost behind a raw pydantic toast.**~~ — **FIXED v0.210.14** (Builder 2026-07-29, branch
