@@ -261,6 +261,48 @@ def test_save_preview_overwrites_file(client, solved_library):
     assert len(after) > len(before)     # a real rendered PNG
 
 
+def test_save_preview_north_up_saves_the_rotated_image(client, solved_library):
+    """Saving a preview while the History "North up" toggle is on must persist the
+    *rotated* image — the picture the user approved on screen — not the un-rotated
+    master (the pre-fix bug served the sideways version everywhere the preview is
+    used: gallery, dashboard, cover, share)."""
+    from pathlib import Path
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    preview_path, run_id = _make_run_with_fits(solved_library, safe)
+    fits_path = Path(preview_path).parent / "master.fits"
+    _add_rotated_wcs(fits_path, rot_deg=30.0)
+
+    plain = client.post(f"/api/targets/{safe}/stack-runs/{run_id}/preview",
+                        json={"stretch": 0.5, "black": 0.35})
+    assert plain.status_code == 200 and plain.json()["north_up"] is False
+    plain_bytes = Path(preview_path).read_bytes()
+
+    oriented = client.post(f"/api/targets/{safe}/stack-runs/{run_id}/preview",
+                           json={"stretch": 0.5, "black": 0.35, "north_up": True})
+    assert oriented.status_code == 200 and oriented.json()["north_up"] is True
+    oriented_bytes = Path(preview_path).read_bytes()
+
+    assert oriented_bytes[:8] == b"\x89PNG\r\n\x1a\n"
+    # A real 30° correction changes the pixels — the saved preview is the rotated one.
+    assert oriented_bytes != plain_bytes
+
+
+def test_save_preview_north_up_is_a_noop_without_a_wcs(client, solved_library):
+    """A run with no usable WCS can't be oriented → north_up=true saves the same
+    bytes as the plain save (graceful no-op, never a broken render)."""
+    from pathlib import Path
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    preview_path, run_id = _make_run_with_fits(solved_library, safe)  # no WCS
+
+    assert client.post(f"/api/targets/{safe}/stack-runs/{run_id}/preview",
+                       json={"stretch": 0.5, "black": 0.35}).status_code == 200
+    plain_bytes = Path(preview_path).read_bytes()
+    assert client.post(f"/api/targets/{safe}/stack-runs/{run_id}/preview",
+                       json={"stretch": 0.5, "black": 0.35,
+                             "north_up": True}).status_code == 200
+    assert Path(preview_path).read_bytes() == plain_bytes
+
+
 def test_preview_download_sets_no_cache_so_regenerated_previews_are_not_stale(
         client, solved_library):
     """The preview PNG is regenerated in place by "Save as preview"/auto-edit, but

@@ -206,22 +206,28 @@ when you take it.
   "showing 2000 of N" + fetch-more; short-term warn when `frames.length === limit`. (S–M, UX/correctness —
   PRIORITY 2.)
 
-- **⭐ "Identify" / "Scale" overlays plot un-rotated coordinates on the North-up-rotated render — the pin for an
-  object lands diagonally opposite once "Rotate so North is up" is on.** *(Wrong-result in the "what's in my
-  picture?" feature; **reproduced** in-browser.)* `History.tsx:687-702` feeds `render?north_up=true` (rotated
-  pixels) plus `/annotations` coordinates computed on the unrotated FITS grid (`webapp/routers/stack.py:537-589`)
-  into `AnnotatedImage`, which maps `x_px/imgWidth` with no rotation. Reproduced on a run with
-  `north_up_deg=180`: the "Orion Nebula" pin renders at fractional x ≈ 0.17 where the correct rotated position is
-  x ≈ 0.83. The scale bar mis-lays the same way for non-180° angles. **Fix:** rotate marker coords client-side by
-  the already-loaded `north_up_deg`, or disable Identify/Scale under North-up with a hint. (S, UX/correctness —
-  PRIORITY 2.)
+- ~~**⭐ "Identify" / "Scale" overlays plot un-rotated coordinates on the North-up-rotated render — the pin for an
+  object lands diagonally opposite once "Rotate so North is up" is on.**~~ — **FIXED v0.210.10** (Builder 2026-07-29,
+  branch `claude/pensive-faraday-c8p19o`). The object pins and scale bar are computed on the un-rotated FITS grid, so
+  they'd mis-place on the North-up render. Rather than replicate the backend's rotate+bounding-box math client-side
+  (fragile), `History.tsx` now **suppresses the pin overlay, the scale-bar overlay, and the position-describing text
+  panels while North-up is applied** (`show={identify && !applyNorthUp}`, `showScale={scale && !applyNorthUp}`, both
+  text panels gated) and shows a plain-language hint ("Turn off 'Rotate so North is up' to place object pins and the
+  scale bar — they're measured on the un-rotated image."). No wrong pin is ever drawn; the feature is honest about
+  when it applies. Frontend-only, no API change. Covered by `npx tsc --noEmit` + the full vitest suite (green). (S,
+  UX/correctness — PRIORITY 2.)
 
-- **⭐ "Save as preview" while viewing North-up saves the un-rotated image — every thumbnail/share/wallpaper then
-  shows the sideways version of what the user approved.** *(Wrong-result; **reproduced** by pixel diff: saved
-  preview ≡ un-rotated render (diff 0.0), differs 22.9 mean-abs from the on-screen North-up render.)*
-  `client.ts:1421-1424` posts only `{stretch, black}`; `webapp/routers/stack.py:866-869` renders the preview
-  without `north_up`. **Fix:** include `north_up: applyNorthUp` in the POST and thread it to `render_stack_png`
-  (the code path already exists in `thumbnail.py`). (S, UX/correctness — PRIORITY 2.)
+- ~~**⭐ "Save as preview" while viewing North-up saves the un-rotated image — every thumbnail/share/wallpaper then
+  shows the sideways version of what the user approved.**~~ — **FIXED v0.210.10** (Builder 2026-07-29, branch
+  `claude/pensive-faraday-c8p19o`). `POST …/stack-runs/{id}/preview` (`webapp/routers/stack.py`) now reads a
+  `north_up` body flag and threads it to `render_stack_png`, and `saveStackPreview` (`frontend/src/api/client.ts`)
+  posts `north_up: applyNorthUp` so saving while the History "North up" toggle is on persists the **rotated** image
+  the user approved — everywhere the preview is used (gallery, dashboard, cover, share). A run with no usable WCS is a
+  graceful no-op (same bytes). Regression tests (fail-before/pass-after): backend
+  `test_save_preview_north_up_saves_the_rotated_image` + `test_save_preview_north_up_is_a_noop_without_a_wcs`
+  (`tests/webapp/test_stack_render.py`) and frontend `saveStackPreview` body tests (`stackRenderUrl.test.ts`).
+  Upgrade-safe: additive optional body flag (default false → byte-for-byte the old behaviour), response gains a
+  `north_up` echo field, no config/DB/API-breaking change. (S, UX/correctness — PRIORITY 2.)
 
 - ~~**⭐ Re-saved previews stay STALE across Gallery / Dashboard / Best pictures / Compare — even after a reload —
   because the artifact endpoint sends no `Cache-Control` and consumers use unversioned URLs.**~~ — **FIXED v0.210.7**

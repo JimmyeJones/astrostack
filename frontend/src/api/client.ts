@@ -1418,9 +1418,13 @@ export const api = {
       format?: string;
     }>(`/api/targets/${safe}/deepening-reel/info`),
   deepeningReelUrl: (safe: string) => `/api/targets/${safe}/deepening-reel`,
-  saveStackPreview: (safe: string, id: number, stretch: number, black: number) =>
+  saveStackPreview: (
+    safe: string, id: number, stretch: number, black: number, northUp = false,
+  ) =>
     req<{ ok: boolean }>(`/api/targets/${safe}/stack-runs/${id}/preview`, {
-      method: "POST", body: JSON.stringify({ stretch, black }),
+      // north_up saves the image rotated so North is up, matching what the user
+      // sees on screen when they save with the History "North up" toggle on.
+      method: "POST", body: JSON.stringify({ stretch, black, north_up: northUp }),
     }),
 
   // pipeline

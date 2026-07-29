@@ -873,7 +873,10 @@ async def save_stack_preview(
 
     Re-renders from the FITS at the chosen stretch/black point and overwrites
     the run's ``preview_path`` so the new look shows everywhere the preview is
-    used (history thumbnails and the Sky Map).
+    used (history thumbnails and the Sky Map). ``north_up`` (default false)
+    rotates the saved image so celestial North points up, matching what the user
+    sees on screen when they save while the History "North up" toggle is on — a
+    no-op when the run has no usable WCS.
     """
     lib, proj = deps.open_target_project(request, safe)
     try:
@@ -894,12 +897,13 @@ async def save_stack_preview(
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400,
                             detail=f"stretch/black must be numbers: {exc}") from exc
+    north_up = bool(body.get("north_up", False))
 
     from seestack.render.thumbnail import render_stack_png
     from seestack.stack.output import fits_is_display_space
     png = await run_in_threadpool(
         render_stack_png, run.fits_path,
-        stretch=stretch, black=black, max_width=1024,
+        stretch=stretch, black=black, max_width=1024, north_up=north_up,
     )
     Path(run.preview_path).write_bytes(png)
 
@@ -918,7 +922,7 @@ async def save_stack_preview(
     finally:
         proj.close()
         lib.close()
-    return {"ok": True, "stretch": stretch, "black": black}
+    return {"ok": True, "stretch": stretch, "black": black, "north_up": north_up}
 
 
 _BAYER_PATTERNS = {"RGGB", "BGGR", "GRBG", "GBRG"}
