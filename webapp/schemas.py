@@ -672,9 +672,22 @@ def strip_non_form_keys(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def coerce_stack_options(data: dict[str, Any]) -> StackOptions:
-    """Build a StackOptions from a (possibly partial) dict, ignoring unknowns."""
+    """Build a StackOptions from a (possibly partial) dict, ignoring unknowns.
+
+    ``None`` means "use the dataclass default" (that is how
+    :func:`validate_stack_options` treats it too). A cleared numeric field in the
+    React form posts ``null`` (``StackOptionControl`` emits ``v === "" ? null``),
+    which for a non-optional field like ``sigma_kappa: float`` would otherwise be
+    written straight into the dataclass and blow up in the engine with a raw
+    ``TypeError`` (``NoneType * float``). Dropping ``None`` here is also safe for
+    the genuinely-optional fields (``max_workers``, ``dark_path`` …) whose default
+    is itself ``None`` — dropping the key yields the identical value. This is the
+    single choke point every stack path funnels through (form POST, per-target
+    stack-defaults, the global ``default_stack_options``), so guarding it here
+    protects them all — including the walk-away auto-stack.
+    """
     valid = {f.name for f in dataclasses.fields(StackOptions)}
-    clean = {k: v for k, v in data.items() if k in valid}
+    clean = {k: v for k, v in data.items() if k in valid and v is not None}
     return StackOptions(**clean)
 
 

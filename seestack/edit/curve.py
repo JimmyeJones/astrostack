@@ -7,12 +7,20 @@ your image" starting point. This module derives a gentle, well-anchored midtone
 lift curve straight from the display-space histogram of the image *entering* the
 op, so a beginner gets a pleasant contrast start to nudge instead of a blank line.
 
-The shape (mirroring the backlog spec) keeps the sky floor on the identity so the
-background is neither crushed nor lifted, lifts the typical midtone a *touch*
-toward a pleasant grey, and holds the highlight shoulder on the identity so star
-cores roll off rather than blow. It is strictly monotone by construction (the
-control points are sorted and strictly increasing in both x and y), so the
-resulting ``np.interp`` LUT can never invert or posterise the picture.
+The shape keeps the *sky* on the identity so the background is neither crushed
+nor lifted, lifts a typical midtone that sits **above** the sky a *touch* toward
+a pleasant grey, and holds the highlight shoulder on the identity so star cores
+roll off rather than blow. It is strictly monotone by construction (the control
+points are sorted and strictly increasing in both x and y), so the resulting
+``np.interp`` LUT can never invert or posterise the picture.
+
+The sky anchor is the histogram **mode** (the dominant background level), not a
+fixed low percentile. On a deep-sky frame the *bulk* of the sky sits at the
+median, so the old design — anchoring the sky at p1 and lifting p50 — lifted the
+entire sky (measured +42 % background brightness), undoing the noise-aware target
+the stretch just chose. Anchoring at the mode keeps the sky exactly on identity
+and lifts only tones clearly above it (the faint structure a beginner actually
+wants to bring out).
 
 Pure-numpy and engine-side so it's testable in isolation from the webapp. NaN =
 uncovered (mosaic gaps) and is excluded from every percentile.
@@ -27,18 +35,14 @@ import numpy as np
 #: name the goal the suggested curve solves for rather than showing a bare curve.
 CURVE_TARGET_BG = 0.25
 
-#: Fraction of the gap between the median and the target the midtone is lifted —
+#: Fraction of the gap between the midtone and the target the midtone is lifted —
 #: deliberately gentle (a *touch* toward the target, not all the way) so the curve
 #: stays subtle and can never over-brighten into a blown, garish result.
 _LIFT_FRACTION = 0.5
 
-#: Percentiles anchoring the curve: the sky floor (kept on identity so the
-#: background isn't crushed or lifted), the typical midtone (the point we lift),
-#: and the highlight shoulder (kept on identity so star cores roll off). The floor
-#: and shoulder use the same low/high percentiles as the Levels black/white
-#: suggestion (p1 / p99.5) so the anchors stay well clear of the sky-dominated
-#: median even on a sparse starfield — where p10/p90 would collapse onto it.
-_SKY_PCT = 1.0
+#: Percentiles anchoring the curve above the sky: the typical midtone (the point
+#: we lift) and the highlight shoulder (kept on identity so star cores roll off,
+#: same high percentile as the Levels white suggestion, p99.5).
 _MID_PCT = 50.0
 _HIGH_PCT = 99.5
 
@@ -48,6 +52,26 @@ _HIGH_PCT = 99.5
 #: ``None`` and leave the identity line.
 _MIN_GAP = 0.02
 _MIN_LIFT = 0.01
+
+
+def _sky_mode(finite: np.ndarray) -> float:
+    """Robust estimate of the dominant background (sky) level: the peak of the
+    histogram over the image's *lower half* (``[p0.5, median]``).
+
+    The sky is always at or below the median of an astro frame — stars and any
+    object pull the upper tail up, never the background down — so searching only
+    the lower half finds the sky reliably whether the frame is sky-dominated (the
+    median itself is the sky) or object-dominated (the median has drifted up into
+    the object, but the sky is still the dominant peak below it). Searching the
+    full range instead lets a *saturated* object plateau (many pixels piled in one
+    bright bin) outvote the noise-spread sky and misreport the sky as near-white."""
+    lo = float(np.percentile(finite, 0.5))
+    hi = float(np.median(finite))
+    if not (hi > lo):
+        return hi
+    counts, edges = np.histogram(finite, bins=128, range=(lo, hi))
+    i = int(np.argmax(counts))
+    return float((edges[i] + edges[i + 1]) / 2.0)
 
 
 def suggest_tone_curve(
@@ -62,8 +86,9 @@ def suggest_tone_curve(
     expects). Returns an ordered list of ``[x, y]`` control points (endpoints
     pinned at ``0`` and ``1``) forming a strictly-monotone midtone-lift curve, or
     ``None`` when there's no useful suggestion: too few finite pixels, a
-    degenerate/flat range where the anchors would collide, or a typical tone that
-    already sits at or above the target grey (nothing to lift).
+    degenerate/flat range where the anchors would collide, nothing meaningfully
+    above the sky to lift, or a typical tone that already sits at or above the
+    target grey (nothing to lift).
     """
     finite = rgb[np.isfinite(rgb)]
     if finite.size < 100:
@@ -71,12 +96,19 @@ def suggest_tone_curve(
     if not (0.0 < target < 1.0):
         return None
 
-    sky = min(max(float(np.percentile(finite, _SKY_PCT)), 0.0), 1.0)
+    # The sky is the histogram mode — the background level that must stay put. The
+    # old design anchored the sky at p1 and lifted p50, but on a sky-dominated
+    # deep-sky frame p50 *is* the sky, so the whole background rode the lift.
+    sky = min(max(_sky_mode(finite), 0.0), 1.0)
     mid = min(max(float(np.percentile(finite, _MID_PCT)), 0.0), 1.0)
     high = min(max(float(np.percentile(finite, _HIGH_PCT)), 0.0), 1.0)
 
-    # The midtone must sit strictly inside the sky→highlight range with headroom,
-    # or the curve can't be monotone — a flat/degenerate image collapses them.
+    # The midtone must sit strictly ABOVE the sky (with headroom) and strictly
+    # below the highlight shoulder, or the curve can't be monotone — and, crucially,
+    # when the median IS the sky (a sky-dominated frame with little extended signal)
+    # this gate declines rather than lifting the background. Leaving the identity
+    # line is the safe, correct result there: the noise-aware stretch already placed
+    # the sky where it wants it.
     if not (sky + _MIN_GAP <= mid and mid + _MIN_GAP <= high):
         return None
 

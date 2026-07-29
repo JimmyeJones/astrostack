@@ -77,6 +77,47 @@ def test_returns_none_when_range_is_degenerate():
     assert suggest_tone_curve(allnan) is None
 
 
+def _sky_dominated_scene(sky=0.14, neb=0.08, h=400, w=400, seed=3):
+    """A realistic S30-style stack: a bright, noisy sky filling most of the frame
+    (so the *median* IS the sky), a small faint nebula, and a scatter of stars."""
+    rng = np.random.default_rng(seed)
+    yy, xx = np.mgrid[0:h, 0:w]
+    img = sky + rng.normal(0.0, 0.03, (h, w))
+    img += neb * np.exp(-(((xx - w / 2) / 40.0) ** 2 + ((yy - h / 2) / 40.0) ** 2))
+    for _ in range(30):
+        cy, cx = int(rng.integers(0, h)), int(rng.integers(0, w))
+        img[max(0, cy):cy + 2, max(0, cx):cx + 2] = 0.9
+    return np.clip(np.repeat(img[..., None], 3, axis=2), 0.0, 1.0).astype("float32")
+
+
+def test_sky_dominated_frame_does_not_lift_the_sky():
+    """Regression for the +42% background lift: on a sky-dominated frame the old
+    curve anchored the sky at p1 and lifted p50 — but p50 IS the sky there, so the
+    whole background rode the lift, brightening the sky and undoing the stretch's
+    noise-aware target. The suggested curve must now keep the *sky* (measured on a
+    known background patch) within a couple of percent of identity, whether it
+    lifts faint structure or declines to the identity line."""
+    from seestack.edit.ops.tone import _curves
+
+    img = _sky_dominated_scene(sky=0.14)
+    # A corner patch that is pure background (the nebula is centred, stars sparse).
+    sky_patch = img[:60, :60, 1]
+    sky_in = float(np.median(sky_patch))
+
+    pts = suggest_tone_curve(img)
+    if pts is not None:
+        # The sky anchor sits on the identity at (or below) the sky level, and the
+        # single lifted point sits strictly ABOVE the sky — never on it.
+        assert pts[1][1] == pts[1][0]                      # sky anchor on identity
+        assert pts[1][0] <= sky_in + 0.02                  # anchored at the sky, not above it
+        mid = next(p for p in pts if p[1] > p[0])          # the one lifted point
+        assert mid[0] > sky_in                             # lifts structure above the sky
+
+    out = _curves(img, {"points": pts or [[0, 0], [1, 1]]}, None)
+    sky_out = float(np.median(out[:60, :60, 1][np.isfinite(out[:60, :60, 1])]))
+    assert abs(sky_out - sky_in) / sky_in < 0.03           # sky barely moves
+
+
 def test_returns_none_when_typical_tone_already_at_or_above_target():
     # A bright-midtone image: the median already sits at/above the target grey,
     # so there is nothing pleasant to lift — leave the identity line.
@@ -96,7 +137,7 @@ def test_saturated_highlight_p99_5_rounding_does_not_drop_the_curve():
     # so p99.5 lands at ~0.9998 (rounds to 1.0) while the median stays below target.
     yy, xx = np.mgrid[0:120, 0:160]
     img = 0.08 + rng.normal(0.0, 0.015, (120, 160))
-    img += 0.25 * np.exp(-(((xx - 80) / 45.0) ** 2 + ((yy - 60) / 35.0) ** 2))
+    img += 0.30 * np.exp(-(((xx - 80) / 60.0) ** 2 + ((yy - 60) / 50.0) ** 2))
     img[50:70, 70:90] = 0.9998                  # a bright saturated patch (>0.5% of px)
     img = np.clip(np.repeat(img[..., None], 3, axis=2), 0.0, 1.0).astype("float32")
     high = float(np.percentile(img[np.isfinite(img)], 99.5))

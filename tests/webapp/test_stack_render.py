@@ -261,6 +261,24 @@ def test_save_preview_overwrites_file(client, solved_library):
     assert len(after) > len(before)     # a real rendered PNG
 
 
+def test_preview_download_sets_no_cache_so_regenerated_previews_are_not_stale(
+        client, solved_library):
+    """The preview PNG is regenerated in place by "Save as preview"/auto-edit, but
+    every gallery/dashboard surface embeds it at a bare, unversioned URL. Without
+    `Cache-Control: no-cache` the browser would apply heuristic freshness and keep
+    showing the pre-regeneration pixels for up to a day. The endpoint must ask for
+    revalidation so a re-saved preview appears immediately."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/preview")
+    assert r.status_code == 200
+    assert "no-cache" in r.headers.get("cache-control", "").lower()
+    # FITS/TIFF are immutable per run, so they keep the default cacheable behaviour
+    # (no forced no-cache) — only the mutable preview needs revalidation.
+    rf = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/fits")
+    assert "no-cache" not in rf.headers.get("cache-control", "").lower()
+
+
 def test_render_404_without_fits(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
     r = client.get(f"/api/targets/{safe}/stack-runs/99999/render")

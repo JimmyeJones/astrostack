@@ -110,35 +110,35 @@ when you take it.
   scene recipe in the audit session's scratchpad, documented in this entry). (M–L, editor/image-quality —
   PRIORITY 1.)
 
-- **⭐ MEASURED (2026-07-26 quality audit) — SCNR at the Auto recipe's fixed 0.7 drags the whole sky ~−10 % magenta
-  on any noisy stack: the per-pixel `min(G, (R+B)/2)` estimator is systematically biased by noise.** *(Editor/auto
-  image quality — PRIORITY 1; wrong-result colour on every noisy (i.e. every real S30) auto result, even with zero
-  gradient; **reproduced** in isolation and end-to-end.)* `_scnr` (`seestack/edit/ops/tone.py:173-183`) caps green
-  per pixel against the *raw noisy* R/B average; on a perfectly neutral sky `E[min(G, N)] < E[G]` whenever there is
-  per-pixel noise, so the op *creates* a magenta cast proportional to the noise: measured on a neutral sky at
-  amount 0.7 — **−3.9 % (σ = 0.02), −9.6 % (σ = 0.05), −15.5 % (σ = 0.08)**; a stretched S30 stack sits near
-  σ ≈ 0.05, and the zero-gradient end-to-end chain lands at −12 %. The owner's "green cast removal" thus ships a
-  *magenta* cast a beginner can't name or undo. **Fix direction (validated in the audit):** cap against a
-  noise-suppressed green *excess* instead of the raw per-pixel neutral — e.g.
-  `excess = clip(gauss(G, 3σpx) − gauss((R+B)/2, 3σpx), 0, ∞); G −= amount·excess`. Measured: neutral-sky bias
-  −9.6 % → **−1.0 %** while removing the same real green (synthetic green blob +133 % → +39.8 % vs +39.2 % for the
-  current op). Keep the current per-pixel behaviour as an advanced mode if desired; add a regression asserting
-  |cast| < 2 % on a neutral noisy sky at amount 0.7 and unchanged real-green removal. Confidence: reproduced.
-  (S–M, editor/image-quality — PRIORITY 1.)
+- ~~**⭐ MEASURED (2026-07-26 quality audit) — SCNR at the Auto recipe's fixed 0.7 drags the whole sky ~−10 % magenta
+  on any noisy stack: the per-pixel `min(G, (R+B)/2)` estimator is systematically biased by noise.**~~ — **FIXED
+  v0.210.5** (Builder 2026-07-29, branch `claude/pensive-faraday-9vlibh`). `_scnr` (`seestack/edit/ops/tone.py`) now
+  defaults to a **noise-protected** estimator: it smooths the green channel and the R/B neutral (Gaussian σ = 3 px,
+  NaN-filled so mosaic gaps stay NaN) before differencing, so zero-mean per-pixel noise cancels instead of biasing
+  the sky magenta — exactly the validated `excess = clip(gauss(G) − gauss(neutral), 0, ∞); G −= amount·excess`.
+  Measured on the audit's neutral noisy sky (σ = 0.05) at amount 0.7: the cast collapses from **−11.5 % → −1.2 %**
+  while a real broad green excess is still removed (flat/uniform input is byte-identical to the old path). The
+  classic per-pixel cap stays reachable via a new advanced `protect_noise` toggle (default on). Descriptor-driven,
+  so the toggle surfaces in the editor with no frontend work. Regression tests (fail-before/pass-after):
+  `test_scnr_does_not_magenta_a_neutral_noisy_sky`, `test_scnr_protected_still_removes_a_real_green_cast`
+  (`tests/test_edit_tone_ops.py`); the four existing SCNR pixel tests (uniform patches) still pass unchanged.
+  Upgrade-safe: additive param, no config/DB/API-shape change; an old saved recipe (no `protect_noise` key) simply
+  gets the improved default on re-render. Confidence: reproduced. (S–M, editor/image-quality — PRIORITY 1.)
 
-- **⭐ MEASURED (2026-07-26 quality audit) — the Auto recipe's auto-contrast curve lifts the ENTIRE sky (+42 %
-  background brightness), because its "midtone" anchor (p50) IS the sky on a deep-sky frame.** *(Editor/auto image
-  quality — PRIORITY 1; wrong-result/washed-out background on every one-click result; **reproduced** via variant
-  ablation.)* `tone.curves(auto=True)` → `suggest_tone_curve` (`seestack/edit/curve.py:74-91`) pins "sky" at p1 and
-  lifts p50 halfway toward 0.25 — but p1 is just the deepest noise dips; the *bulk* of the sky sits exactly at p50
-  on a sky-dominated frame, so the whole background rides the lift: measured final sky 0.125 (without curves) →
-  0.178 (with), directly negating the noise-aware `target_bg` (0.14) the stretch op just chose and amplifying
-  visible noise. The docstring's "keeps the sky floor on the identity so the background is neither crushed nor
-  lifted" is untrue whenever sky ≈ median, i.e. almost always. **Fix direction:** anchor the sky point at the sky
-  *population* level (median of below-median pixels, or med + k·σ like the stretch does), lift a percentile clearly
-  above the sky (e.g. p80 of above-sky pixels), and decline when the midtone ≈ sky; regression: on a sky-dominated
-  synthetic stack the suggested curve must keep the sky median within a few % of identity. Confidence: reproduced.
-  (S, editor/image-quality — PRIORITY 1.)
+- ~~**⭐ MEASURED (2026-07-26 quality audit) — the Auto recipe's auto-contrast curve lifts the ENTIRE sky (+42 %
+  background brightness), because its "midtone" anchor (p50) IS the sky on a deep-sky frame.**~~ — **FIXED v0.210.6**
+  (Builder 2026-07-29, branch `claude/pensive-faraday-9vlibh`). `suggest_tone_curve` (`seestack/edit/curve.py`) now
+  anchors the sky at the histogram **mode** (searched in the lower half `[p0.5, median]`, so a saturated object
+  plateau can't be mistaken for the sky) instead of p1, and only lifts the midtone (p50) when it sits clearly
+  **above** the sky mode (`sky + gap ≤ mid`). On a sky-dominated frame the median IS the sky → the gate declines and
+  leaves the identity line (safe: the noise-aware stretch already placed the sky), so the background no longer rides
+  the lift. When real extended structure is present (median above the sky) the curve lifts it exactly as before, sky
+  pinned on identity. Regression `test_sky_dominated_frame_does_not_lift_the_sky` (fail-before/pass-after) asserts a
+  background patch moves < 3 % after applying the suggested curve; the eight existing curve tests plus the end-to-end
+  `test_auto_recipe_contrast_curve_lifts_the_rendered_result` and the webapp `test_curve_suggestion_from_image` all
+  still pass (updated only where they encoded the old sky-lift as "contrast"). Upgrade-safe: pure suggestion logic,
+  no config/DB/API-shape change; the Curves op default is unchanged. Confidence: reproduced. (S, editor/image-quality
+  — PRIORITY 1.)
 
 - **⭐ TRACED + QUANTIFIED (2026-07-26 quality audit) — History "Full-res PNG" of a Process-target (auto-edited) run
   silently serves a DIFFERENT, un-edited picture than the preview it claims to match.** *(Broken-UX/parity on the
@@ -182,17 +182,19 @@ when you take it.
 > ~a minute of staleness), the navbar DOES scroll on short viewports (verified 667×375), and same-output-name
 > stacks don't overwrite (older artifacts are timestamp-archived).
 
-- **⭐ Clearing a numeric Stack-form field sends `null`, which passes validation, dies in the engine with a raw
-  `TypeError` — and can be SAVED AS DEFAULTS, poisoning every later stack including the walk-away auto-stack.**
-  *(Wrong-result; **reproduced** live.)* `StackOptionControl.tsx:99` emits `v === "" ? null : Number(v)`;
-  `validate_stack_options` (`webapp/schemas.py:696-698`) treats `None` as "use default" but `coerce_stack_options`
-  (`webapp/schemas.py:674-678`) passes it straight into the `StackOptions` dataclass. Reproduced:
-  `POST …/stack {"sigma_clip":true,"sigma_kappa":null}` → 200 → job `error: TypeError: unsupported operand
-  type(s) for *: 'NoneType' and 'float'`; the same body is *accepted* by `PUT …/stack-defaults`, after which the
-  target cannot stack at all until the value is fixed by hand. Owner path: backspace over "Sigma κ" to retype it,
-  click Stack. **Fix:** drop `None`s in `coerce_stack_options` (fall back to dataclass defaults); optionally have
-  the control restore the schema default on blur-empty. Regression: POST with a `null` numeric → stacks with the
-  default. (S, correctness — PRIORITY 2.)
+- ~~**⭐ Clearing a numeric Stack-form field sends `null`, which passes validation, dies in the engine with a raw
+  `TypeError` — and can be SAVED AS DEFAULTS, poisoning every later stack including the walk-away auto-stack.**~~
+  — **FIXED v0.210.4** (Builder 2026-07-29, branch `claude/pensive-faraday-9vlibh`). Fixed at the single choke point
+  every stack path funnels through: `coerce_stack_options` (`webapp/schemas.py`) now drops `None` values so a
+  non-optional field like `sigma_kappa: float` falls back to its dataclass default instead of writing `None` into
+  the engine (`NoneType * float` TypeError). Safe for the genuinely-optional fields (`max_workers`, `dark_path` …)
+  whose default is itself `None`. Also hardened `put_stack_defaults` (`webapp/routers/stack.py`) so a cleared-field
+  `null` is never *persisted* as a saved default (which would re-poison every future stack, including the walk-away
+  auto-stack). Regression tests (fail-before/pass-after): `test_coerce_drops_null_numeric_falls_back_to_default`,
+  `test_coerce_preserves_optional_none_fields`, `test_stack_defaults_does_not_persist_a_cleared_numeric_null`
+  (`tests/webapp/test_stack_option_validation.py`). Upgrade-safe: no config/DB/API-shape/default change (an old
+  persisted `null` default is now simply dropped at coerce time rather than crashing). Confidence: reproduced.
+  (S, correctness — PRIORITY 2.)
 
 - **⭐ The frames list silently truncates at 2000 — the table, keyboard grading, "Reject worst" and the Stack
   pre-flight guards all operate on a subset while the badge shows the true count.** *(Wrong-result on a realistic
@@ -221,17 +223,16 @@ when you take it.
   without `north_up`. **Fix:** include `north_up: applyNorthUp` in the POST and thread it to `render_stack_png`
   (the code path already exists in `thumbnail.py`). (S, UX/correctness — PRIORITY 2.)
 
-- **⭐ Re-saved previews stay STALE across Gallery / Dashboard / Best pictures / Compare — even after a reload —
-  because the artifact endpoint sends no `Cache-Control` and consumers use unversioned URLs.** *(Wrong-result —
-  a stale image presented as current; **reproduced**: after a server-side preview regeneration, a Gallery revisit
-  made 0 requests and rendered the identical stale pixels — RFC 9111 heuristic freshness ≈ 10 % of file age, up to
-  ~a day on an old stack.)* `webapp/routers/stack.py:1474-1483` serves the preview with etag/last-modified only
-  (contrast `/render` + `/sky-overlay`, which set `no-store`); `Gallery.tsx:129`, `BestPictures.tsx:36`,
-  `BestPicturesStrip.tsx:40`, `Compare.tsx`, `Dashboard.tsx:226`, `OneFrameVsStackCard.tsx:50-51` all use the bare
-  URL — only the History card that performed a save cache-busts locally. This also mutes the Process-target
-  auto-edit: its rewritten preview may not show up in the Gallery for hours. **Fix:** `Cache-Control: no-cache` on
-  the preview/thumbnail branches (etag revalidation is cheap) or a version token (preview mtime) in `preview_url`.
-  (S, UX/correctness — PRIORITY 2.)
+- ~~**⭐ Re-saved previews stay STALE across Gallery / Dashboard / Best pictures / Compare — even after a reload —
+  because the artifact endpoint sends no `Cache-Control` and consumers use unversioned URLs.**~~ — **FIXED v0.210.7**
+  (Builder 2026-07-29, branch `claude/pensive-faraday-9vlibh`). The `preview` branch of `download_stack_run`
+  (`webapp/routers/stack.py`) now sends `Cache-Control: no-cache`, forcing a cheap conditional revalidation
+  (a 304 when the bytes are unchanged, fresh bytes the moment "Save as preview" / the Process-target auto-edit
+  regenerates the file in place) instead of RFC 9111 heuristic freshness. FITS/TIFF are immutable per run so they
+  keep the default cacheable behaviour. Regression test
+  `test_preview_download_sets_no_cache_so_regenerated_previews_are_not_stale` (fail-before/pass-after) asserts the
+  preview carries `no-cache` while FITS does not. Upgrade-safe: response-header-only, no API-shape/URL/DB change.
+  Confidence: reproduced. (S, UX/correctness — PRIORITY 2.)
 
 - **⭐ The Tonight planner strips `object_type` from every already-owned target (`type:""`), so Continue-tonight
   and Tonight bucket everything as "Other" (flat 4 h goal) and contradict the Library-progress card beside them.**

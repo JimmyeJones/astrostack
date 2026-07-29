@@ -149,7 +149,10 @@ def get_stack_defaults(safe: str, request: Request) -> dict[str, Any]:
 @router.put("/api/targets/{safe}/stack-defaults")
 def put_stack_defaults(safe: str, body: dict[str, Any], request: Request) -> dict[str, Any]:
     valid = {fld.key for fld in stack_option_fields()}
-    clean = {k: v for k, v in body.items() if k in valid}
+    # A cleared numeric field posts ``null`` ("use the default"); never persist it
+    # as a saved default, or it would flow back into every future stack (including
+    # the walk-away auto-stack) and die in the engine with a raw ``TypeError``.
+    clean = {k: v for k, v in body.items() if k in valid and v is not None}
     # Don't persist a default that would later fail every stack cryptically.
     try:
         validate_stack_options(clean)
@@ -1477,9 +1480,21 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
         raise HTTPException(status_code=404, detail=f"No {kind} for this run")
     filename = f"{run.output_basename}{Path(path).suffix}"
     download = kind in ("fits", "tiff", "preview")
+    # The preview PNG is regenerated *in place* (same path) by "Save as preview"
+    # and the Process-target auto-edit, but every gallery/dashboard/compare
+    # surface embeds it at the bare, unversioned URL. Without an explicit
+    # Cache-Control, FileResponse sends only ETag/Last-Modified, so a browser
+    # applies RFC 9111 heuristic freshness (~10% of file age — up to a day on an
+    # old stack) and keeps showing the pre-regeneration pixels even after a
+    # reload. `no-cache` forces a cheap conditional revalidation (a 304 when the
+    # bytes are unchanged, fresh bytes the moment they change) so a re-saved
+    # preview appears immediately everywhere. FITS/TIFF are immutable per run, so
+    # they keep the default (cacheable) behaviour.
+    headers = {"Cache-Control": "no-cache"} if kind == "preview" else None
     return FileResponse(
         path, media_type=media,
         filename=filename if download else None,
+        headers=headers,
     )
 
 

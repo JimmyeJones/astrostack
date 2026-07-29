@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from webapp.schemas import validate_stack_options
+from webapp.schemas import coerce_stack_options, validate_stack_options
 
 
 # --- unit: the validator itself -------------------------------------------
@@ -56,6 +56,26 @@ def test_validate_accepts_integral_float_for_int_field():
     validate_stack_options({"max_workers": 3.0, "background_box_size": 128.0})
 
 
+# --- coerce: a cleared numeric field posts null; must fall back to default -
+
+
+def test_coerce_drops_null_numeric_falls_back_to_default():
+    # Backspacing over "Sigma κ" in the React form posts sigma_kappa=null. Coerce
+    # must NOT write None into the (non-optional) dataclass field — that reaches
+    # the engine as `NoneType * float` and dies with a raw TypeError.
+    opts = coerce_stack_options({"sigma_clip": True, "sigma_kappa": None})
+    assert opts.sigma_kappa == 3.0  # the dataclass default, not None
+    assert opts.sigma_clip is True
+
+
+def test_coerce_preserves_optional_none_fields():
+    # For a genuinely-optional field the default is itself None, so dropping a
+    # null key yields the identical value (max_workers stays None = auto).
+    opts = coerce_stack_options({"max_workers": None, "output_name": "m42"})
+    assert opts.max_workers is None
+    assert opts.output_name == "m42"
+
+
 # --- endpoint: bad options -> 400, not a submitted-then-errored job --------
 
 
@@ -81,3 +101,18 @@ def test_trigger_stack_still_accepts_valid_options(client, solved_library):
     )
     assert r.status_code == 200
     assert "job_id" in r.json()
+
+
+def test_stack_defaults_does_not_persist_a_cleared_numeric_null(client, solved_library):
+    # Backspacing over "Sigma κ" then "Save as defaults" posts sigma_kappa=null.
+    # It must NOT be stored — a persisted null would poison every future stack
+    # for this target (including the walk-away auto-stack) with an engine TypeError.
+    r = client.put(
+        "/api/targets/M_42/stack-defaults",
+        json={"sigma_clip": True, "sigma_kappa": None},
+    )
+    assert r.status_code == 200
+    assert "sigma_kappa" not in r.json()
+    # And it round-trips clean from the GET (no null lurking in the saved defaults).
+    got = client.get("/api/targets/M_42/stack-defaults").json()
+    assert got.get("sigma_kappa") != None  # noqa: E711 — explicitly assert not None
