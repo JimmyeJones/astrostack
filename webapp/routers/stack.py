@@ -456,17 +456,48 @@ async def download_full_res_png(
     the quick PNG button serves the small preview. This serves the picture the user
     sees at full size. ``north_up`` rotates it so celestial North points up (like
     the shared JPEG), a no-op when the run has no usable WCS. Runs in a threadpool
-    so it never blocks the job worker."""
-    basename, fits_path = _run_fits_path(request, safe, run_id)
-    if not fits_path or not Path(fits_path).exists():
-        raise HTTPException(status_code=404,
-                            detail="No FITS for this run to render at full resolution")
+    so it never blocks the job worker.
 
-    from seestack.render.thumbnail import render_preview_png_full_res
-    png = await run_in_threadpool(
-        render_preview_png_full_res, fits_path,
-        max_long_edge=_FULL_RES_PNG_MAX_LONG_EDGE, north_up=bool(north_up),
-    )
+    A "Process target" auto-edit leaves the FITS linear and stores the finished look
+    as the run's editor recipe, so for such a run the plain STF render would serve
+    the *un-edited* master. When the run's preview is a baked display-space edit and
+    a saved recipe exists, render that recipe at native resolution instead, so the
+    download matches the preview the user clicked."""
+    from webapp.routers.editor import RECIPE_META_PREFIX
+
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
+        if run is None or not run.fits_path or not Path(run.fits_path).exists():
+            raise HTTPException(
+                status_code=404,
+                detail="No FITS for this run to render at full resolution")
+        basename, fits_path = run.output_basename, run.fits_path
+        recipe_json = None
+        if _preview_is_display_space(run.options_json):
+            recipe_json = proj.get_meta(f"{RECIPE_META_PREFIX}{run_id}")
+    finally:
+        proj.close()
+        lib.close()
+
+    recipe_dict = None
+    if recipe_json:
+        with contextlib.suppress(json.JSONDecodeError):
+            parsed = json.loads(recipe_json)
+            if isinstance(parsed, dict):
+                recipe_dict = parsed
+
+    if recipe_dict is not None:
+        png = await run_in_threadpool(
+            pipeline.render_run_recipe_fullres_png, fits_path, recipe_dict,
+            max_long_edge=_FULL_RES_PNG_MAX_LONG_EDGE, north_up=bool(north_up),
+        )
+    else:
+        from seestack.render.thumbnail import render_preview_png_full_res
+        png = await run_in_threadpool(
+            render_preview_png_full_res, fits_path,
+            max_long_edge=_FULL_RES_PNG_MAX_LONG_EDGE, north_up=bool(north_up),
+        )
     filename = f"{basename}_fullres.png"
     return Response(
         content=png, media_type="image/png",
@@ -842,7 +873,10 @@ async def save_stack_preview(
 
     Re-renders from the FITS at the chosen stretch/black point and overwrites
     the run's ``preview_path`` so the new look shows everywhere the preview is
-    used (history thumbnails and the Sky Map).
+    used (history thumbnails and the Sky Map). ``north_up`` (default false)
+    rotates the saved image so celestial North points up, matching what the user
+    sees on screen when they save while the History "North up" toggle is on — a
+    no-op when the run has no usable WCS.
     """
     lib, proj = deps.open_target_project(request, safe)
     try:
@@ -863,12 +897,13 @@ async def save_stack_preview(
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400,
                             detail=f"stretch/black must be numbers: {exc}") from exc
+    north_up = bool(body.get("north_up", False))
 
     from seestack.render.thumbnail import render_stack_png
     from seestack.stack.output import fits_is_display_space
     png = await run_in_threadpool(
         render_stack_png, run.fits_path,
-        stretch=stretch, black=black, max_width=1024,
+        stretch=stretch, black=black, max_width=1024, north_up=north_up,
     )
     Path(run.preview_path).write_bytes(png)
 
@@ -887,7 +922,7 @@ async def save_stack_preview(
     finally:
         proj.close()
         lib.close()
-    return {"ok": True, "stretch": stretch, "black": black}
+    return {"ok": True, "stretch": stretch, "black": black, "north_up": north_up}
 
 
 _BAYER_PATTERNS = {"RGGB", "BGGR", "GRBG", "GBRG"}

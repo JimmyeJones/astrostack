@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { api } from "./client";
 
 describe("stackRenderUrl", () => {
@@ -44,5 +44,35 @@ describe("stackArtifactUrl", () => {
     // Non-JPEG artifacts never take the caption.
     expect(api.stackArtifactUrl("M_31", 5, "preview", false, true)).toBe(
       "/api/targets/M_31/stack-runs/5/preview");
+  });
+});
+
+describe("saveStackPreview", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  function mockFetch() {
+    const fetchMock = vi.fn(
+      async (_path: string, _init?: RequestInit) =>
+        new Response(JSON.stringify({ ok: true }),
+          { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("posts north_up:false by default so a normal save is WCS-aligned", async () => {
+    const fetchMock = mockFetch();
+    await api.saveStackPreview("M_31", 5, 0.4, 0.3);
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(init?.body as string)).toEqual(
+      { stretch: 0.4, black: 0.3, north_up: false });
+  });
+
+  it("posts north_up:true so saving under the North-up toggle persists the rotated image", async () => {
+    const fetchMock = mockFetch();
+    await api.saveStackPreview("M_31", 5, 0.4, 0.3, true);
+    const [path, init] = fetchMock.mock.calls[0];
+    expect(path).toBe("/api/targets/M_31/stack-runs/5/preview");
+    expect(JSON.parse(init?.body as string)).toEqual(
+      { stretch: 0.4, black: 0.3, north_up: true });
   });
 });

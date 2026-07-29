@@ -126,6 +126,15 @@ def analyze_proxy(rgb: np.ndarray) -> dict[str, Any]:
 _NOISE_LO = 0.012
 _NOISE_HI = 0.028
 
+# Ceiling on the *one-click* Auto denoise strength. At the top of the crossfade a
+# thin (e.g. 12-sub) S30 stack measures σ high enough that both the crossfade
+# weight and the measured-noise suggestion saturate, so Auto would emit wavelet
+# denoise at ~1.0 — which zeroes the fine grain (a waxy, "plastic" sky) while
+# leaving the low-frequency chroma blotch untouched (measured on a realistic
+# 12-sub stack). Cap the automatic value so the crossfade can't reach that
+# glass-smooth end; the editor still lets the user push denoise higher by hand.
+_AUTO_DENOISE_MAX = 0.6
+
 
 def _noise_fraction(sky_sigma: float) -> float:
     """Map the measured background σ to a 0..1 crossfade weight: 0 at/below the
@@ -385,6 +394,11 @@ def auto_recipe(rgb: np.ndarray | None = None,
         sharpen_amount = adj["sharpen_amount"]
         denoise_strength = adj["denoise_strength"]
         scnr_amount = adj["scnr_amount"]
+
+    # Never let the automatic denoise reach the glass-smooth end of the wavelet
+    # op (see _AUTO_DENOISE_MAX). Applied after the taste profile so a learned
+    # "too noisy" bias can't push the one-click result back to a waxy sky either.
+    denoise_strength = min(denoise_strength, _AUTO_DENOISE_MAX)
 
     ops: list[tuple[str, dict]] = []
     if is_mosaic:

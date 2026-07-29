@@ -140,38 +140,38 @@ when you take it.
   no config/DB/API-shape change; the Curves op default is unchanged. Confidence: reproduced. (S, editor/image-quality
   — PRIORITY 1.)
 
-- **⭐ TRACED + QUANTIFIED (2026-07-26 quality audit) — History "Full-res PNG" of a Process-target (auto-edited) run
-  silently serves a DIFFERENT, un-edited picture than the preview it claims to match.** *(Broken-UX/parity on the
-  flagship walk-away path; the endpoint's own docstring promises "the same look as the gallery/History thumbnail".)*
-  `download_full_res_png` (`webapp/routers/stack.py:443-471`) → `render_preview_png_full_res`
-  (`seestack/render/thumbnail.py:322-369`) checks only `fits_is_display_space()`; a "Process target" auto-edit
-  leaves the FITS **linear** and marks the *run* (`preview_display_space`, `webapp/routers/stack.py:364-377`), so
-  the download renders the conservative 6 %-grey STF of the linear master instead of the Auto-edited image:
-  measured against the preview the user clicked — **meanAbsDiff 0.132 (13 % of full scale), sky 0.065 vs 0.178,
-  sky cast +12 % green vs −10 %, and the test nebula obvious in the preview but invisible in the download**. The
-  owner clicks the pretty thumbnail, downloads "full-res", and gets a dark green-tinted image — reads as "the app
-  ruined my picture". **Fix direction:** in the endpoint, when `_preview_is_display_space(options_json)` holds,
-  load the run's saved recipe (`RECIPE_META_PREFIX`) and render it at native res via the existing
-  `_render_recipe_fullres` (`webapp/pipeline.py:1071`); keep the current path for plain runs. (While there: the
-  auto-edit bakes its preview from the ≤1500 px stride proxy — `_auto_edit_process_run`,
-  `webapp/pipeline.py:1969-1979` — i.e. 960 px for a 1920-wide stack vs the 1024 px box-filtered normal preview;
-  measured stride-2 star aliasing is negligible (peak ratio 1.007) so this is a small resolution/consistency nit to
-  fold into the same fix.) Regression: process-target a synthetic run, GET `full-res-png`, assert pixel stats match
-  the recipe render, not the STF render. Confidence: traced (mechanism certain from code; numbers from the audit
-  harness). (S–M, autonomy/parity — PRIORITY 2.)
+- ~~**⭐ TRACED + QUANTIFIED (2026-07-26 quality audit) — History "Full-res PNG" of a Process-target (auto-edited) run
+  silently serves a DIFFERENT, un-edited picture than the preview it claims to match.**~~ — **FIXED v0.210.9**
+  (Builder 2026-07-29, branch `claude/pensive-faraday-c8p19o`). `download_full_res_png` (`webapp/routers/stack.py`)
+  now opens the run, and when its preview is a baked display-space edit (`_preview_is_display_space(options_json)`)
+  and a saved recipe exists (`RECIPE_META_PREFIX`), renders **that recipe at native resolution** via a new
+  `render_run_recipe_fullres_png` (`webapp/pipeline.py`, built on the existing `_render_recipe_fullres`) instead of
+  the conservative STF of the still-linear master — so the download is the picture the user clicked, at full res.
+  Plain (un-edited) runs keep the original `render_preview_png_full_res` path unchanged, and a malformed/absent
+  recipe falls back to it too. The new helper encodes exactly like `render_preview_png_full_res` (same `north_up`
+  rotation + `max_long_edge` decimation). This also closes the resolution nit: the download is now native-res, not
+  the ≤1500 px auto-edit preview proxy. Regression test (fail-before/pass-after)
+  `test_full_res_png_of_a_process_target_run_serves_the_edited_recipe` (`tests/webapp/test_full_res_png.py`)
+  process-target-marks a synthetic run, GETs `full-res-png`, and asserts the pixels equal the recipe render and
+  differ visibly from the un-edited STF; the three existing full-res-png tests still pass. Upgrade-safe: endpoint
+  behaviour is additive (same URL/response shape; only display-space+recipe runs change output, and toward the
+  correct picture), no config/DB/API-shape change. Confidence: traced + regression-tested. (S–M, autonomy/parity —
+  PRIORITY 2.)
 
-- **MEASURED (2026-07-26 quality audit) — Auto denoise saturates at strength 1.0 on a realistic thin stack:
-  glass-smooth "plastic" grain while the visible chroma blotch survives untouched.** *(Editor/auto image quality —
-  PRIORITY 1/4; over-smoothing half of the "is the auto denoise right for an S30?" question; **reproduced**.)* On
-  the honest 12-sub stack `analyze_proxy` reports σ = 0.061 → `_noise_fraction` = 1.0 → `suggest_denoise_strength`
-  → wavelet at **1.0** (`seestack/edit/presets.py:350-358`): measured display high-frequency noise 0.0225 → **0.0000**
-  (adjacent-diff MAD — literally zero fine grain, a waxy sky) while the sky's *blotch* (low-frequency chroma noise,
-  sky-MAD 0.048) is untouched, because `denoise_wavelet` only shrinks fine scales. At the 20-sub scene's strength
-  0.4 the trade is reasonable (−38 % fine grain), so this is specifically the strength-1.0 end of the crossfade.
-  **Fix direction:** cap the Auto denoise strength (≈0.6) so the crossfade can't hit the glass-smooth end, and file
-  the real gap as its own idea: a chroma-blotch reducer (wide gaussian on the a/b chroma of the stretched image) —
-  that, not more wavelet, is what an S30 stack's speckle actually needs. Regression: auto recipe on a 12-sub-noise
-  synthetic stack must keep display hf-noise > 0. Confidence: reproduced. (S, editor/image-quality — PRIORITY 1.)
+- ~~**MEASURED (2026-07-26 quality audit) — Auto denoise saturates at strength 1.0 on a realistic thin stack:
+  glass-smooth "plastic" grain while the visible chroma blotch survives untouched.**~~ — **FIXED v0.210.8**
+  (Builder 2026-07-29, branch `claude/pensive-faraday-c8p19o`). `auto_recipe` (`seestack/edit/presets.py`) now caps
+  the one-click denoise strength at `_AUTO_DENOISE_MAX = 0.6` — applied *after* the taste-profile nudge, so a learned
+  "too noisy" bias can't push the result back to a waxy sky either. At the top of the crossfade a thin stack measured
+  σ high enough that both the crossfade weight *and* the measured-noise suggestion saturated → wavelet at ~1.0, which
+  zeroed the fine grain; capping keeps the natural grain (measured: capped render retains > 1.5× the fine-grain of the
+  forced-1.0 render). The editor still lets the user push denoise higher by hand. The real remaining gap — a
+  low-frequency **chroma-blotch reducer** for S30 speckle — stays filed as an Idea below. Regression tests
+  (fail-before/pass-after): `test_auto_denoise_is_capped_below_the_glass_smooth_end` (`tests/test_edit_engine.py`)
+  asserts the auto strength is `0 < s ≤ 0.6` on a very noisy stack and that the capped render keeps clearly more grain
+  than the glass-smooth end; the existing `test_auto_recipe_denoise_strength_scales_with_noise` still passes (heavy
+  0.6 > mild 0.38). Upgrade-safe: pure suggestion-value clamp, no config/DB/API-shape/default change. Confidence:
+  reproduced. (S, editor/image-quality — PRIORITY 1.)
 
 > **Frontend/API click-path audit (2026-07-26 deep audit, same branch) — the real backend was booted against a
 > seeded synthetic library (2 targets, 3 nights, a 2,112-frame stress target, 3 real stack runs through the job
@@ -206,22 +206,28 @@ when you take it.
   "showing 2000 of N" + fetch-more; short-term warn when `frames.length === limit`. (S–M, UX/correctness —
   PRIORITY 2.)
 
-- **⭐ "Identify" / "Scale" overlays plot un-rotated coordinates on the North-up-rotated render — the pin for an
-  object lands diagonally opposite once "Rotate so North is up" is on.** *(Wrong-result in the "what's in my
-  picture?" feature; **reproduced** in-browser.)* `History.tsx:687-702` feeds `render?north_up=true` (rotated
-  pixels) plus `/annotations` coordinates computed on the unrotated FITS grid (`webapp/routers/stack.py:537-589`)
-  into `AnnotatedImage`, which maps `x_px/imgWidth` with no rotation. Reproduced on a run with
-  `north_up_deg=180`: the "Orion Nebula" pin renders at fractional x ≈ 0.17 where the correct rotated position is
-  x ≈ 0.83. The scale bar mis-lays the same way for non-180° angles. **Fix:** rotate marker coords client-side by
-  the already-loaded `north_up_deg`, or disable Identify/Scale under North-up with a hint. (S, UX/correctness —
-  PRIORITY 2.)
+- ~~**⭐ "Identify" / "Scale" overlays plot un-rotated coordinates on the North-up-rotated render — the pin for an
+  object lands diagonally opposite once "Rotate so North is up" is on.**~~ — **FIXED v0.210.10** (Builder 2026-07-29,
+  branch `claude/pensive-faraday-c8p19o`). The object pins and scale bar are computed on the un-rotated FITS grid, so
+  they'd mis-place on the North-up render. Rather than replicate the backend's rotate+bounding-box math client-side
+  (fragile), `History.tsx` now **suppresses the pin overlay, the scale-bar overlay, and the position-describing text
+  panels while North-up is applied** (`show={identify && !applyNorthUp}`, `showScale={scale && !applyNorthUp}`, both
+  text panels gated) and shows a plain-language hint ("Turn off 'Rotate so North is up' to place object pins and the
+  scale bar — they're measured on the un-rotated image."). No wrong pin is ever drawn; the feature is honest about
+  when it applies. Frontend-only, no API change. Covered by `npx tsc --noEmit` + the full vitest suite (green). (S,
+  UX/correctness — PRIORITY 2.)
 
-- **⭐ "Save as preview" while viewing North-up saves the un-rotated image — every thumbnail/share/wallpaper then
-  shows the sideways version of what the user approved.** *(Wrong-result; **reproduced** by pixel diff: saved
-  preview ≡ un-rotated render (diff 0.0), differs 22.9 mean-abs from the on-screen North-up render.)*
-  `client.ts:1421-1424` posts only `{stretch, black}`; `webapp/routers/stack.py:866-869` renders the preview
-  without `north_up`. **Fix:** include `north_up: applyNorthUp` in the POST and thread it to `render_stack_png`
-  (the code path already exists in `thumbnail.py`). (S, UX/correctness — PRIORITY 2.)
+- ~~**⭐ "Save as preview" while viewing North-up saves the un-rotated image — every thumbnail/share/wallpaper then
+  shows the sideways version of what the user approved.**~~ — **FIXED v0.210.10** (Builder 2026-07-29, branch
+  `claude/pensive-faraday-c8p19o`). `POST …/stack-runs/{id}/preview` (`webapp/routers/stack.py`) now reads a
+  `north_up` body flag and threads it to `render_stack_png`, and `saveStackPreview` (`frontend/src/api/client.ts`)
+  posts `north_up: applyNorthUp` so saving while the History "North up" toggle is on persists the **rotated** image
+  the user approved — everywhere the preview is used (gallery, dashboard, cover, share). A run with no usable WCS is a
+  graceful no-op (same bytes). Regression tests (fail-before/pass-after): backend
+  `test_save_preview_north_up_saves_the_rotated_image` + `test_save_preview_north_up_is_a_noop_without_a_wcs`
+  (`tests/webapp/test_stack_render.py`) and frontend `saveStackPreview` body tests (`stackRenderUrl.test.ts`).
+  Upgrade-safe: additive optional body flag (default false → byte-for-byte the old behaviour), response gains a
+  `north_up` echo field, no config/DB/API-breaking change. (S, UX/correctness — PRIORITY 2.)
 
 - ~~**⭐ Re-saved previews stay STALE across Gallery / Dashboard / Best pictures / Compare — even after a reload —
   because the artifact endpoint sends no `Cache-Control` and consumers use unversioned URLs.**~~ — **FIXED v0.210.7**
@@ -8209,6 +8215,17 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+- **NEW IDEA (Builder 2026-07-29, split out while capping the Auto denoise strength) — a low-frequency
+  *chroma-blotch* reducer for the Auto recipe.** The 2026-07-26 audit measured that on a thin S30 stack the visible
+  sky defect after denoise isn't fine grain (wavelet handles that) but a **low-frequency colour blotch** — patches of
+  the sky drift green/magenta over ~tens of px (sky chroma-MAD ≈ 0.048), which the wavelet denoise leaves untouched
+  because it only shrinks fine scales. Cranking wavelet strength to "fix" it just waxes the luminance grain (the bug we
+  just capped) without touching the blotch. **Idea:** after the stretch, convert to a luminance/chroma space (e.g.
+  CIELab or a simple Y + R−Y/B−Y), apply a *wide* gaussian to the chroma (a/b) channels only — leaving luminance
+  detail and stars sharp — with a gentle default strength, and recombine. Sane default: a small always-on amount tuned
+  so a clean stack is untouched; expose a single "chroma smoothing" slider. Must stay NaN-aware (mosaic gaps) and not
+  desaturate real extended colour (mask/limit by luminance-structure like the SCNR protect-noise path does). Serves
+  image quality (pillar 4) + editor (1). (M, image-quality — PRIORITY 4, needs measured validation on the audit scene.)
 - ~~**IMPROVEMENT IDEA (Builder 2026-07-24, spotted while shipping "Your sharpest yet") — a *threshold-free* soft-star
   note for "How's my stack?": flag when the finished stack's stars are materially **bloated relative to the target's
   own subs**, pointing at alignment/tracking loss rather than nagging on an absolute FWHM bar.**~~ — **SHIPPED v0.200.0**

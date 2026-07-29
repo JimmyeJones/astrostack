@@ -589,7 +589,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
   }, [sugStretch, sugBlack]);
 
   const save = useMutation({
-    mutationFn: () => api.saveStackPreview(safe, run.id, dStretch, dBlack),
+    mutationFn: () => api.saveStackPreview(safe, run.id, dStretch, dBlack, applyNorthUp),
     onSuccess: () => {
       setCacheBust(Date.now());
       qc.invalidateQueries({ queryKey: ["sky"] });
@@ -696,8 +696,8 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
             src={imgSrc} alt={run.output_basename}
             imgWidth={annotations.data?.width ?? run.canvas_w}
             imgHeight={annotations.data?.height ?? run.canvas_h}
-            objects={objects} show={identify} height={180}
-            scaleBar={scaleBar} showScale={scale}
+            objects={objects} show={identify && !applyNorthUp} height={180}
+            scaleBar={scaleBar} showScale={scale && !applyNorthUp}
             onClick={() => setLight(true)}
           />
         ) : (
@@ -705,7 +705,17 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
         )}
       </Card.Section>
 
-      {identify && !annotations.isLoading && annotations.isSuccess ? (
+      {applyNorthUp && (identify || scale) ? (
+        // Object pins and the scale bar are computed on the un-rotated FITS grid,
+        // so they'd land in the wrong place on the North-up-rotated render. Hide
+        // them (rather than mis-plot) and say why.
+        <Text size="xs" c="dimmed" mt={6}>
+          Turn off “Rotate so North is up” to place object pins and the scale bar —
+          they’re measured on the un-rotated image.
+        </Text>
+      ) : null}
+
+      {identify && !applyNorthUp && !annotations.isLoading && annotations.isSuccess ? (
         objects.length ? (
           // Plain-language "what else is in this picture?" list — the friendly
           // read of the same objects the overlay labels on the image, so a
@@ -731,7 +741,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
         )
       ) : null}
 
-      {scale && !annotations.isLoading && annotations.isSuccess ? (
+      {scale && !applyNorthUp && !annotations.isLoading && annotations.isSuccess ? (
         <Text size="xs" c={scaleBar ? "grape.3" : "dimmed"} mt={6}>
           {scaleBar
             // Capitalise the plain-language Moon sentence for the caption.
