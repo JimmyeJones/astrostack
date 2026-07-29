@@ -408,9 +408,21 @@ when you take it.
   in the ⭐⭐ entry above. Confidence: reproduced + measured. (M, editor/image-quality — PRIORITY 1.)
 
 - **Smaller click-path items (2026-07-26 audit — batch into cleanup passes; each traced, several reproduced):**
-  (a) Editor PNG/share job polling has no try/catch and survives unmount (`Editor.tsx:678+,690-722,729-768`) — a
+  (a) ~~Editor PNG/share job polling has no try/catch and survives unmount (`Editor.tsx:678+,690-722,729-768`) — a
   transient 5xx or a concurrent "Clear finished jobs" discards a FINISHED render that is still downloadable, and
-  navigating away later fires a surprise download; contrast `pollJobForOpErrors` (655-668) which swallows errors;
+  navigating away later fires a surprise download; contrast `pollJobForOpErrors` (655-668) which swallows errors~~ —
+  **FIXED v0.211.1** (Builder 2026-07-29, branch `claude/loving-bardeen-wwcey3`). All four of the editor's
+  copy-pasted polling loops (full-res PNG, share JPEG, share-to-app, and the advisory op-errors watcher) now go
+  through one tested helper, `pollJobUntilDone` (`frontend/src/components/editor/pollJob.ts`), which (i) rides out up
+  to 5 *consecutive* status-fetch failures — a success resets the budget — so one 5xx or dropped connection mid-render
+  no longer surfaces "PNG render failed" and throws away a render that is still going, and (ii) takes an
+  `isAbandoned` predicate wired to an Editor `mounted` ref, so a poll that resolves after the user navigated away
+  rejects with a `JobPollAbort` sentinel instead of clicking a hidden download link on an unrelated screen (the three
+  export `onError` handlers stay silent for that sentinel). Frontend-only, no API/schema/default change. Tests:
+  `pollJob.test.ts` (+9 — happy path, transient-failure ride-out, error-budget reset, persistent-failure give-up,
+  terminal `error`/`cancelled`/`interrupted` with and without job text, abandon-on-unmount before and after the first
+  poll). *(A job record genuinely **deleted** by "Clear finished jobs" still ends as an error after the retries —
+  correct, since the client can't know it had finished.)*;
   (b) ~~Seestar page spins forever on API error~~ **FIXED v0.210.19** (Builder 2026-07-29, branch
   `claude/pensive-faraday-rlkdvs`): `SeestarView` now returns a retryable `QueryError` on `isError` like every
   other route (test in `Seestar.test.tsx`); (c) ~~Tonight's error state unmounts its own date picker and altitude
@@ -13220,6 +13232,10 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.211.1** — Editor export/render job polling hardened into one tested helper (`pollJob.ts`): rides out up to 5
+  consecutive status-fetch failures so a transient 5xx no longer discards a full-res render that is still going, and
+  stops on unmount so a late-finishing render can't fire a surprise download on another page. Click-path audit item
+  (a). Tests: `pollJob.test.ts` (+9).
 - **v0.211.0** — ⭐⭐ Fixed the one-click Auto colour split (purple one side / green the other) at its root: the
   final-gradient object mask was reading the whole *bright half* of a light-polluted frame as "object" (5 % vs 66 %
   masked), starving the fit so it removed only ~10 % of the gradient. Detection is now against a robust low-order
