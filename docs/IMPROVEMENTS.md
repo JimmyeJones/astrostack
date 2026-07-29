@@ -160,18 +160,20 @@ when you take it.
   the recipe render, not the STF render. Confidence: traced (mechanism certain from code; numbers from the audit
   harness). (S–M, autonomy/parity — PRIORITY 2.)
 
-- **MEASURED (2026-07-26 quality audit) — Auto denoise saturates at strength 1.0 on a realistic thin stack:
-  glass-smooth "plastic" grain while the visible chroma blotch survives untouched.** *(Editor/auto image quality —
-  PRIORITY 1/4; over-smoothing half of the "is the auto denoise right for an S30?" question; **reproduced**.)* On
-  the honest 12-sub stack `analyze_proxy` reports σ = 0.061 → `_noise_fraction` = 1.0 → `suggest_denoise_strength`
-  → wavelet at **1.0** (`seestack/edit/presets.py:350-358`): measured display high-frequency noise 0.0225 → **0.0000**
-  (adjacent-diff MAD — literally zero fine grain, a waxy sky) while the sky's *blotch* (low-frequency chroma noise,
-  sky-MAD 0.048) is untouched, because `denoise_wavelet` only shrinks fine scales. At the 20-sub scene's strength
-  0.4 the trade is reasonable (−38 % fine grain), so this is specifically the strength-1.0 end of the crossfade.
-  **Fix direction:** cap the Auto denoise strength (≈0.6) so the crossfade can't hit the glass-smooth end, and file
-  the real gap as its own idea: a chroma-blotch reducer (wide gaussian on the a/b chroma of the stretched image) —
-  that, not more wavelet, is what an S30 stack's speckle actually needs. Regression: auto recipe on a 12-sub-noise
-  synthetic stack must keep display hf-noise > 0. Confidence: reproduced. (S, editor/image-quality — PRIORITY 1.)
+- ~~**MEASURED (2026-07-26 quality audit) — Auto denoise saturates at strength 1.0 on a realistic thin stack:
+  glass-smooth "plastic" grain while the visible chroma blotch survives untouched.**~~ — **FIXED v0.210.8**
+  (Builder 2026-07-29, branch `claude/pensive-faraday-c8p19o`). `auto_recipe` (`seestack/edit/presets.py`) now caps
+  the one-click denoise strength at `_AUTO_DENOISE_MAX = 0.6` — applied *after* the taste-profile nudge, so a learned
+  "too noisy" bias can't push the result back to a waxy sky either. At the top of the crossfade a thin stack measured
+  σ high enough that both the crossfade weight *and* the measured-noise suggestion saturated → wavelet at ~1.0, which
+  zeroed the fine grain; capping keeps the natural grain (measured: capped render retains > 1.5× the fine-grain of the
+  forced-1.0 render). The editor still lets the user push denoise higher by hand. The real remaining gap — a
+  low-frequency **chroma-blotch reducer** for S30 speckle — stays filed as an Idea below. Regression tests
+  (fail-before/pass-after): `test_auto_denoise_is_capped_below_the_glass_smooth_end` (`tests/test_edit_engine.py`)
+  asserts the auto strength is `0 < s ≤ 0.6` on a very noisy stack and that the capped render keeps clearly more grain
+  than the glass-smooth end; the existing `test_auto_recipe_denoise_strength_scales_with_noise` still passes (heavy
+  0.6 > mild 0.38). Upgrade-safe: pure suggestion-value clamp, no config/DB/API-shape/default change. Confidence:
+  reproduced. (S, editor/image-quality — PRIORITY 1.)
 
 > **Frontend/API click-path audit (2026-07-26 deep audit, same branch) — the real backend was booted against a
 > seeded synthetic library (2 targets, 3 nights, a 2,112-frame stress target, 3 real stack runs through the job
@@ -8209,6 +8211,17 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+- **NEW IDEA (Builder 2026-07-29, split out while capping the Auto denoise strength) — a low-frequency
+  *chroma-blotch* reducer for the Auto recipe.** The 2026-07-26 audit measured that on a thin S30 stack the visible
+  sky defect after denoise isn't fine grain (wavelet handles that) but a **low-frequency colour blotch** — patches of
+  the sky drift green/magenta over ~tens of px (sky chroma-MAD ≈ 0.048), which the wavelet denoise leaves untouched
+  because it only shrinks fine scales. Cranking wavelet strength to "fix" it just waxes the luminance grain (the bug we
+  just capped) without touching the blotch. **Idea:** after the stretch, convert to a luminance/chroma space (e.g.
+  CIELab or a simple Y + R−Y/B−Y), apply a *wide* gaussian to the chroma (a/b) channels only — leaving luminance
+  detail and stars sharp — with a gentle default strength, and recombine. Sane default: a small always-on amount tuned
+  so a clean stack is untouched; expose a single "chroma smoothing" slider. Must stay NaN-aware (mosaic gaps) and not
+  desaturate real extended colour (mask/limit by luminance-structure like the SCNR protect-noise path does). Serves
+  image quality (pillar 4) + editor (1). (M, image-quality — PRIORITY 4, needs measured validation on the audit scene.)
 - ~~**IMPROVEMENT IDEA (Builder 2026-07-24, spotted while shipping "Your sharpest yet") — a *threshold-free* soft-star
   note for "How's my stack?": flag when the finished stack's stars are materially **bloated relative to the target's
   own subs**, pointing at alignment/tracking loss rather than nagging on an absolute FWHM bar.**~~ — **SHIPPED v0.200.0**

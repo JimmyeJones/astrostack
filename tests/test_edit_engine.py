@@ -509,6 +509,39 @@ def test_auto_recipe_denoise_strength_scales_with_noise():
     assert s_heavy > s_mild  # stronger noise → stronger denoise
 
 
+def test_auto_denoise_is_capped_below_the_glass_smooth_end():
+    """A thin, very noisy S30-style stack must not get wavelet denoise at the
+    saturated (~1.0) end — that zeroes the fine grain into a waxy "plastic" sky.
+    Auto caps the one-click strength (_AUTO_DENOISE_MAX) so the rendered result
+    keeps its natural grain; the editor still lets the user push it higher."""
+    from seestack.edit.pipeline import apply_recipe
+    from seestack.edit.presets import _AUTO_DENOISE_MAX, auto_recipe
+    from seestack.edit.registry import EditContext
+
+    rng = np.random.default_rng(3)
+    base = np.full((120, 160, 3), 0.03, np.float32)
+    base[50:70, 70:90] += 0.25  # a faint object on a low, noisy sky
+    noisy = np.clip(base + rng.normal(0, 0.06, base.shape).astype("float32"), 0, None)
+
+    rec = auto_recipe(noisy)
+    op = next((o for o in rec.ops if o.id == "detail.denoise"), None)
+    assert op is not None  # noisy enough that Auto does denoise
+    # Fails before the fix (Auto emitted ~0.95–1.0), passes after (≤ 0.6, > 0).
+    assert 0.0 < float(op.params["strength"]) <= _AUTO_DENOISE_MAX
+
+    def hf_noise(disp):
+        return float(np.mean(np.abs(np.diff(disp[..., 1], axis=1))))
+
+    capped = apply_recipe(noisy, auto_recipe(noisy), EditContext())
+    forced = auto_recipe(noisy)
+    for o in forced.ops:
+        if o.id == "detail.denoise":
+            o.params["strength"] = 1.0
+    glass = apply_recipe(noisy, forced, EditContext())
+    # The capped render keeps clearly more fine grain than the glass-smooth end.
+    assert hf_noise(capped) > 1.5 * hf_noise(glass)
+
+
 def test_auto_recipe_sharpen_radius_from_fwhm():
     """Auto's sharpen radius should track the target's own star size (median FWHM
     → Gaussian σ, clamped to the op's step/range), not a fixed 2.0 guess. A clean
