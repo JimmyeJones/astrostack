@@ -332,7 +332,8 @@ def auto_recipe(rgb: np.ndarray | None = None,
                 median_fwhm: float | None = None,
                 is_mosaic: bool = False,
                 trim_crop: tuple[float, float, float, float] | None = None,
-                prefs: dict[str, Any] | None = None) -> Recipe:
+                prefs: dict[str, Any] | None = None,
+                auto_crop: bool = True) -> Recipe:
     """One-click auto-process built from the image, not hardcoded.
 
     Always: background/gradient removal → photometric colour balance → a proper
@@ -375,6 +376,14 @@ def auto_recipe(rgb: np.ndarray | None = None,
     result), so a single-field stack is never cropped. The crop runs last (after
     all tone/detail ops), which is safe and keeps the coverage-leveling op — which
     needs the native-geometry coverage map — operating on the uncropped frame.
+
+    ``auto_crop`` (default ``True`` — today's behaviour) is the owner's preference
+    for that last step: some would rather keep the *whole* frame, ragged edges and
+    all, than have Auto quietly reframe their picture. With it off the
+    ``geometry.crop`` op is simply not emitted and nothing else about the recipe
+    changes ("Trim border" is still there to crop by hand). The caller still
+    *measures* the trim rectangle either way, so ``analyze_auto_inputs`` can report
+    what Auto would have trimmed.
     """
     target_bg = 0.20
     saturation = 1.2          # neutral fallback when the image can't be measured
@@ -490,8 +499,9 @@ def auto_recipe(rgb: np.ndarray | None = None,
     if chroma_strength >= 0.05:
         ops.append(("detail.chroma_denoise", {"strength": chroma_strength}))
     # Trim the ragged, low-coverage mosaic border last (after tone/detail ops), so
-    # the auto result is cleanly framed. Only supplied when the trim is meaningful.
-    if trim_crop is not None:
+    # the auto result is cleanly framed. Only supplied when the trim is meaningful,
+    # and only when the owner wants Auto to reframe at all (`auto_crop`).
+    if trim_crop is not None and auto_crop:
         x0, y0, x1, y1 = trim_crop
         ops.append(("geometry.crop", {"x0": x0, "y0": y0, "x1": x1, "y1": y1}))
     return Recipe(ops=_ops(*ops))
@@ -502,6 +512,7 @@ def analyze_auto_inputs(
     median_fwhm: float | None = None,
     is_mosaic: bool = False,
     trim_crop: tuple[float, float, float, float] | None = None,
+    auto_crop: bool = True,
 ) -> dict[str, Any]:
     """The *measured cues* that drove the Auto recipe — the causal inputs behind
     each op, surfaced so the user sees Auto tuned itself to *their* data (not a
@@ -513,6 +524,12 @@ def analyze_auto_inputs(
     ``None`` when the proxy can't be measured, ``median_fwhm`` is ``None`` when no
     solved stars gave a FWHM, and ``trim_fraction`` is ``None`` on a single-field
     (non-trimmed) stack. Values are rounded to the precision a UI would show.
+
+    ``trim_fraction`` reports what the recipe *actually* trimmed, so with
+    ``auto_crop`` off it is ``None`` even on a mosaic — matching the recipe, which
+    is the whole point of this function. ``trim_fraction_available`` reports what
+    the trim *would* have removed, so the UI can offer "Auto could trim 12% of
+    ragged edge" without lying about what happened.
     """
     out: dict[str, Any] = {
         "sky": None,
@@ -524,6 +541,8 @@ def analyze_auto_inputs(
         "sharpen_radius": None,
         "is_mosaic": bool(is_mosaic),
         "trim_fraction": None,
+        "trim_fraction_available": None,
+        "auto_crop": bool(auto_crop),
     }
     if rgb is not None:
         a = analyze_proxy(rgb)
@@ -539,7 +558,10 @@ def analyze_auto_inputs(
     if trim_crop is not None:
         x0, y0, x1, y1 = trim_crop
         kept = max(0.0, x1 - x0) * max(0.0, y1 - y0)
-        out["trim_fraction"] = round(max(0.0, 1.0 - kept), 3)
+        frac = round(max(0.0, 1.0 - kept), 3)
+        out["trim_fraction_available"] = frac
+        if auto_crop:
+            out["trim_fraction"] = frac
     return out
 
 

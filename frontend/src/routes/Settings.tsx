@@ -32,6 +32,7 @@ const HINTS: Record<string, string> = {
   auto_stack: "On new files: also stack each touched target automatically (uses the defaults below, or a target's saved defaults).",
   auto_edit_on_autostack: "After an automatic stack, also auto-edit the master into a finished picture (the same one-click Auto processing), so an unattended run comes back to a great image, not a flat linear master. Reversible in the editor (Reset). Needs Auto-stack on.",
   auto_stack_min_frames: "How many of a target's subs must be located (plate-solved) before a hands-off auto-stack will make a picture. A faint field where ASTAP can only locate one or two subs would otherwise auto-stack a single frame — pure colour noise. Below this floor the target waits (\"held for more located subs\") and stacks itself the moment enough subs solve. 3 is a good default; set to 1 to stack from the very first located sub. The Stack form and Process-target button are unaffected.",
+  auto_crop_border: "When the one-click Auto edit finishes a mosaic or dithered stack, trim the ragged, uneven edge away so the picture is cleanly framed. Turn this off to keep the whole frame exactly as it was stacked — nothing else about Auto changes, and the editor's \"Trim border\" button still crops by hand whenever you want it. Applies to Auto-process in the editor and to the hands-off chains (Process target, auto-edit, Reprocess everything).",
   auto_bind_calibration: "When a hands-off stack (auto-stack, Process target, or Reprocess everything) has no calibration masters chosen, automatically use the library's best matching master dark/flat/bias for it — so a stack you didn't set up by hand is still calibrated. Only a confident match is used (a dark whose exposure matches your subs within 25%); if nothing matches, the stack is left uncalibrated as before. The Stack form is unaffected — it always uses exactly what you pick.",
   mixed_pointing_guard: "Before a hands-off stack (auto-stack or Process target), check whether the target's solved frames actually point at one object. If they look like two different targets accidentally dropped in one folder (a mosaic never trips it), skip the stack with a message instead of silently combining only one pointing and wasting the run. Open the Frames table and reject the odd-target frames, then stack. The Stack form is unaffected — it already warns you before you stack.",
   copy_to_cache: "Copy each frame into a fast local cache before processing. Helps with slow or network-mounted sources.",
@@ -633,6 +634,9 @@ export function SettingsView() {
             value={num("auto_stack_min_frames")} min={1} max={1000} w={280}
             disabled={!bool("auto_stack")}
             onChange={(v) => set("auto_stack_min_frames", Number(v))} />
+          <Switch label={lbl("auto_crop_border", "Let Auto trim the ragged border off a mosaic")}
+            checked={form.auto_crop_border !== false}
+            onChange={(e) => set("auto_crop_border", e.currentTarget.checked)} />
           <Switch label={lbl("auto_bind_calibration", "Auto-apply matching calibration masters to hands-off stacks")}
             checked={bool("auto_bind_calibration")}
             onChange={(e) => set("auto_bind_calibration", e.currentTarget.checked)} />

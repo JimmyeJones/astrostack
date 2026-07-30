@@ -1876,3 +1876,71 @@ def test_export_share_bad_job_id_404(client, solved_library):
     rid = _make_run(solved_library, safe)
     dl = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/share/nope")
     assert dl.status_code == 404
+
+
+def test_auto_crop_setting_off_keeps_the_full_frame(client, solved_library):
+    """The owner's "Auto-crop ragged border" setting governs the Auto endpoint: with
+    it off, a mosaic that would otherwise be trimmed keeps its full frame."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, h=80, w=100, is_mosaic=True)
+    cov = np.full((80, 100), 1.0, dtype=np.float32)
+    cov[15:65, 20:80] = 5.0
+    _write_coverage(solved_library, safe, cov)
+
+    # On (the default) → trimmed, exactly as before this setting existed.
+    on = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/auto").json()
+    assert "geometry.crop" in [o["id"] for o in on["ops"]]
+
+    assert client.put("/api/settings", json={"auto_crop_border": False}).status_code == 200
+    off = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/auto").json()
+    assert "geometry.crop" not in [o["id"] for o in off["ops"]]
+    # Nothing else about the recipe changed — only the framing.
+    assert [o["id"] for o in off["ops"]] == [o["id"] for o in on["ops"]][:-1]
+
+    # And the analysis agrees, so the "what Auto did" note can't claim a crop.
+    a = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/auto-analysis").json()
+    assert a["auto_crop"] is False
+    assert a["trim_fraction"] is None
+    assert a["trim_fraction_available"] is not None and a["trim_fraction_available"] > 0
+
+
+def test_auto_crop_body_overrides_the_setting_for_one_run(client, solved_library):
+    """The editor's per-run switch: an explicit `auto_crop` in the request body wins
+    over the saved setting, in both directions, without persisting anything."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, h=80, w=100, is_mosaic=True)
+    cov = np.full((80, 100), 1.0, dtype=np.float32)
+    cov[15:65, 20:80] = 5.0
+    _write_coverage(solved_library, safe, cov)
+    url = f"/api/targets/{safe}/stack-runs/{rid}/editor/auto"
+
+    # Setting on, this run off.
+    off = client.post(url, json={"auto_crop": False}).json()
+    assert "geometry.crop" not in [o["id"] for o in off["ops"]]
+    # …and the setting itself is untouched (a body-less call still crops).
+    assert "geometry.crop" in [o["id"] for o in client.post(url).json()["ops"]]
+    assert client.get("/api/settings").json()["auto_crop_border"] is True
+
+    # Setting off, this run on.
+    client.put("/api/settings", json={"auto_crop_border": False})
+    on = client.post(url, json={"auto_crop": True}).json()
+    assert "geometry.crop" in [o["id"] for o in on["ops"]]
+
+
+def test_auto_endpoints_ignore_a_junk_auto_crop_body(client, solved_library):
+    """A malformed/absent body reads as "use the saved setting" — an older frontend
+    (which posts no body at all) and a garbled one both behave as before."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, h=80, w=100, is_mosaic=True)
+    cov = np.full((80, 100), 1.0, dtype=np.float32)
+    cov[15:65, 20:80] = 5.0
+    _write_coverage(solved_library, safe, cov)
+    url = f"/api/targets/{safe}/stack-runs/{rid}/editor/auto"
+
+    for body in ({"auto_crop": "yes please"}, {"unrelated": 1}, [1, 2, 3]):
+        r = client.post(url, json=body)
+        assert r.status_code == 200
+        assert "geometry.crop" in [o["id"] for o in r.json()["ops"]]
+    r = client.post(url, content=b"not json at all")
+    assert r.status_code == 200
+    assert "geometry.crop" in [o["id"] for o in r.json()["ops"]]

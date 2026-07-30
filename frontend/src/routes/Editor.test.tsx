@@ -905,7 +905,9 @@ describe("EditorView", () => {
       .toBeInTheDocument();
     // Clicking it (the in-panel one) kicks off auto-process.
     fireEvent.click(screen.getAllByRole("button", { name: /Auto-process/ })[1]);
-    await waitFor(() => expect(autoProcess).toHaveBeenCalledWith("M_42", 3));
+    // The trailing arg is the per-run "Auto-crop edges" override; undefined
+    // means "use the saved setting", which is what an untouched editor sends.
+    await waitFor(() => expect(autoProcess).toHaveBeenCalledWith("M_42", 3, undefined));
     // ...and a plain-language note explains what Auto did.
     expect(await screen.findByText("What Auto-process did")).toBeInTheDocument();
     expect(screen.getByText("Applied a natural stretch.")).toBeInTheDocument();
@@ -1008,7 +1010,9 @@ describe("EditorView", () => {
     // Wait for the empty-pipeline nudge (with its in-panel Auto-process button).
     await screen.findByText(/build a good starting recipe from/i);
     fireEvent.click(screen.getAllByRole("button", { name: /Auto-process/ })[1]);
-    await waitFor(() => expect(autoProcess).toHaveBeenCalledWith("M_42", 3));
+    // The trailing arg is the per-run "Auto-crop edges" override; undefined
+    // means "use the saved setting", which is what an untouched editor sends.
+    await waitFor(() => expect(autoProcess).toHaveBeenCalledWith("M_42", 3, undefined));
     expect(await screen.findByText("What Auto-process did")).toBeInTheDocument();
     // The informational classification line rides alongside the recipe explanation.
     expect(screen.getByText(
@@ -2154,6 +2158,99 @@ describe("EditorView", () => {
     await waitFor(() => expect(client.api.getHistogram).toHaveBeenCalled());
     expect(screen.queryByText(/No effect on this stack/i)).not.toBeInTheDocument();
   });
+
+  // --- "don't crop my picture automatically" (owner-requested) --------------
+
+  function mockMosaicWithRaggedBorder() {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CROP]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({ ops: [], base_run_id: 3 });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0],
+        b: [0, 0, 0, 0], is_mosaic: true });
+    // A mosaic with a well-covered rectangle worth cropping to — the only case
+    // where Auto would add a crop, and so the only case the switch is offered.
+    vi.spyOn(client.api, "trimSuggestion").mockResolvedValue(
+      { is_mosaic: true, crop: { x0: 0.05, y0: 0.05, x1: 0.95, y1: 0.95 } });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+    return vi.spyOn(client.api, "autoProcess").mockResolvedValue({
+      ops: [{ uid: "a1", id: "tone.stretch", enabled: true, params: { stretch: 0.5 } }],
+      base_run_id: 3,
+    });
+  }
+
+  it("shows the owner's saved 'keep the full frame' default on a mosaic, and sends "
+    + "no override so the setting itself governs", async () => {
+      const autoProcess = mockMosaicWithRaggedBorder();
+      // The library-wide default: this owner does NOT want Auto cropping.
+      vi.spyOn(client.api, "getSettings").mockResolvedValue({
+        auto_crop_border: false,
+        resolved_incoming_dir: "/in", resolved_library_root: "/lib",
+      });
+
+      renderEditor();
+
+      const sw = await screen.findByLabelText("Auto-crop edges");
+      await waitFor(() => expect(sw).not.toBeChecked());
+      fireEvent.click(screen.getAllByRole("button", { name: /Auto-process/ })[0]);
+      // Untouched → no per-run override on the wire (a slow settings fetch can
+      // then never crop a picture the owner asked Auto to leave alone).
+      await waitFor(() =>
+        expect(autoProcess).toHaveBeenCalledWith("M_42", 3, undefined));
+    });
+
+  it("lets the user override the saved default for this one picture", async () => {
+    const autoProcess = mockMosaicWithRaggedBorder();
+    vi.spyOn(client.api, "getSettings").mockResolvedValue({
+      auto_crop_border: false,
+      resolved_incoming_dir: "/in", resolved_library_root: "/lib",
+    });
+
+    renderEditor();
+
+    const sw = await screen.findByLabelText("Auto-crop edges");
+    await waitFor(() => expect(sw).not.toBeChecked());
+    fireEvent.click(sw);
+    fireEvent.click(screen.getAllByRole("button", { name: /Auto-process/ })[0]);
+    await waitFor(() => expect(autoProcess).toHaveBeenCalledWith("M_42", 3, true));
+  });
+
+  it("sends an explicit off when the owner turns the crop off for one picture",
+    async () => {
+      const autoProcess = mockMosaicWithRaggedBorder();
+      vi.spyOn(client.api, "getSettings").mockResolvedValue({
+        auto_crop_border: true,
+        resolved_incoming_dir: "/in", resolved_library_root: "/lib",
+      });
+
+      renderEditor();
+
+      const sw = await screen.findByLabelText("Auto-crop edges");
+      await waitFor(() => expect(sw).toBeChecked());
+      fireEvent.click(sw);
+      fireEvent.click(screen.getAllByRole("button", { name: /Auto-process/ })[0]);
+      await waitFor(() =>
+        expect(autoProcess).toHaveBeenCalledWith("M_42", 3, false));
+    });
+
+  it("hides the switch on a single-field stack, where Auto never crops anyway",
+    async () => {
+      mockMosaicWithRaggedBorder();
+      vi.spyOn(client.api, "trimSuggestion").mockResolvedValue(
+        { is_mosaic: false, crop: null });
+      vi.spyOn(client.api, "getSettings").mockResolvedValue({
+        auto_crop_border: true,
+        resolved_incoming_dir: "/in", resolved_library_root: "/lib",
+      });
+
+      renderEditor();
+
+      await screen.findAllByRole("button", { name: /Auto-process/ });
+      await waitFor(() => expect(client.api.trimSuggestion).toHaveBeenCalled());
+      expect(screen.queryByLabelText("Auto-crop edges")).not.toBeInTheDocument();
+    });
 });
 
 describe("editPreviewUrl", () => {

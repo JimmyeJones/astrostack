@@ -50,6 +50,10 @@ def test_old_config_loads_keeps_values_and_defaults_new_fields(tmp_path):
     # instead of publishing it, while a real stack still goes through. Loads
     # cleanly from an old config that never wrote the field.
     assert s.auto_stack_min_frames == 3
+    # New "let Auto trim the ragged mosaic border" preference defaults ON — the
+    # historical behaviour — so an upgraded install's one-click Auto frames every
+    # picture exactly as it did before the setting existed.
+    assert s.auto_crop_border is True
     # New job-history cap defaults to the long-standing hard-coded value, so an
     # upgraded install keeps exactly as much job history as before.
     assert s.job_history_limit == 200

@@ -287,7 +287,9 @@ def _pipeline_body(
                     run_id = res.get("run_id")
                     if (settings.auto_edit_on_autostack and run_id is not None
                             and not job.cancel_requested()):
-                        if _auto_edit_process_run(lib, safe, run_id) is not None:
+                        if _auto_edit_process_run(
+                                lib, safe, run_id,
+                                auto_crop=settings.auto_crop_border) is not None:
                             auto_edited += 1
                 except Exception as exc:  # noqa: BLE001 — one target shouldn't sink the batch
                     # The process survived this failure, so the crash-loop marker
@@ -597,7 +599,8 @@ def submit_process_target(settings: Settings, jm: JobManager, safe: str) -> Job:
                 # re-render its History/Target thumbnail through that recipe.
                 # Best-effort — a failure here never fails the whole Process job;
                 # the linear master is already recorded.
-                n_ops = _auto_edit_process_run(lib, safe, run_id)
+                n_ops = _auto_edit_process_run(
+                    lib, safe, run_id, auto_crop=settings.auto_crop_border)
                 if n_ops is not None:
                     summary["auto_edited"] = n_ops
             return summary
@@ -964,7 +967,9 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
                         # reprocess yields a finished *picture*, not a flat linear
                         # stack — same helper the single-target Process action uses.
                         # Best-effort: a failure here never fails the batch.
-                        if _auto_edit_process_run(lib, safe, run_id) is not None:
+                        if _auto_edit_process_run(
+                                lib, safe, run_id,
+                                auto_crop=settings.auto_crop_border) is not None:
                             auto_edited += 1
                 job.set_progress("reprocess", i + 1, total, f"{i + 1}/{total} targets")
                 jm.maybe_flush(job)
@@ -2151,7 +2156,8 @@ def _stack_target(
     }
 
 
-def _auto_edit_process_run(lib: Library, safe: str, run_id: int) -> int | None:
+def _auto_edit_process_run(lib: Library, safe: str, run_id: int,
+                           auto_crop: bool = True) -> int | None:
     """Chain the one-click Auto recipe onto a freshly-produced stack run so the
     "Process target" result is a finished picture: persist the Auto recipe as the
     run's editor recipe (the editor then opens on the edited image) and re-render
@@ -2162,7 +2168,11 @@ def _auto_edit_process_run(lib: Library, safe: str, run_id: int) -> int | None:
     this; the recipe is a normal saved editor recipe (Reset/undo restores linear)
     and only this run's own preview PNG is rewritten. Returns the number of enabled
     ops applied, or ``None`` when it was skipped (no such run / no FITS) or failed
-    (best-effort — never fails the Process job)."""
+    (best-effort — never fails the Process job).
+
+    ``auto_crop`` carries the owner's ``auto_crop_border`` preference through to the
+    recipe, so an unattended auto-edit frames the picture the same way clicking Auto
+    in the editor would."""
     from webapp.routers.editor import (
         AUTO_EDIT_COLORCAL_PREFIX,
         AUTO_EDIT_NOTE_PREFIX,
@@ -2193,14 +2203,15 @@ def _auto_edit_process_run(lib: Library, safe: str, run_id: int) -> int | None:
             # would get clicking Auto interactively.
             prefs = _read_auto_preferences(lib)
             recipe = build_auto_recipe_for_run(
-                proj.project_dir, run, median_fwhm, prefs=prefs)
+                proj.project_dir, run, median_fwhm, prefs=prefs,
+                auto_crop=auto_crop)
             proj.set_meta(f"{RECIPE_META_PREFIX}{run_id}", recipe.to_json())
             # Stamp a plain-language "what Auto did (and why)" note so the History
             # Info panel can explain this silently-applied edit — the same reasoning
             # the interactive editor shows when a user clicks Auto themselves.
             try:
                 analysis = build_auto_analysis_for_run(
-                    proj.project_dir, run, median_fwhm)
+                    proj.project_dir, run, median_fwhm, auto_crop=auto_crop)
                 note = presets_mod.auto_edit_summary(recipe, analysis)
             except Exception:  # noqa: BLE001 — the note is a nicety, never fatal
                 note = presets_mod.auto_edit_summary(recipe, None)

@@ -1453,3 +1453,73 @@ def test_auto_recipe_no_trim_crop_when_none():
     single_field = auto_recipe(is_mosaic=False, trim_crop=None)
     assert "geometry.crop" not in [op.id for op in mosaic_no_trim.ops]
     assert "geometry.crop" not in [op.id for op in single_field.ops]
+
+
+# ---- auto-crop preference (owner: "don't crop my images automatically") ------
+
+def test_auto_crop_off_keeps_the_full_frame():
+    """With the owner's "Auto-crop ragged border" preference off, the one-click
+    Auto recipe emits no geometry.crop even on a mosaic with a meaningful trim —
+    the full frame, ragged edges and all, is kept."""
+    from seestack.edit.presets import auto_recipe
+
+    rec = auto_recipe(is_mosaic=True, trim_crop=(0.1, 0.12, 0.9, 0.88),
+                      auto_crop=False)
+    assert "geometry.crop" not in [op.id for op in rec.ops]
+
+
+def test_auto_crop_off_changes_nothing_else_about_the_recipe():
+    """Turning the crop off is exactly that — every other op (and every parameter)
+    is identical to the cropping recipe, so a beginner's picture is framed
+    differently but processed the same."""
+    from seestack.edit.presets import auto_recipe
+
+    rng = np.random.default_rng(11)
+    rgb = np.clip(0.08 + rng.normal(0, 0.01, (48, 64, 3)), 0, 1).astype(np.float32)
+    on = auto_recipe(rgb, median_fwhm=3.4, is_mosaic=True,
+                     trim_crop=(0.05, 0.05, 0.95, 0.95), auto_crop=True)
+    off = auto_recipe(rgb, median_fwhm=3.4, is_mosaic=True,
+                      trim_crop=(0.05, 0.05, 0.95, 0.95), auto_crop=False)
+    on_ops = [(op.id, op.params) for op in on.ops]
+    off_ops = [(op.id, op.params) for op in off.ops]
+    assert on_ops[-1][0] == "geometry.crop"
+    assert off_ops == on_ops[:-1]
+
+
+def test_auto_crop_defaults_to_on_so_existing_installs_are_unchanged():
+    """The parameter is additive: calling auto_recipe exactly as every older
+    caller does still trims the mosaic border."""
+    from seestack.edit.presets import auto_recipe
+
+    rec = auto_recipe(is_mosaic=True, trim_crop=(0.1, 0.1, 0.9, 0.9))
+    assert [op.id for op in rec.ops][-1] == "geometry.crop"
+
+
+def test_analysis_reports_no_trim_but_still_reports_what_was_available():
+    """The analysis mirrors the recipe: with auto-crop off nothing was trimmed
+    (`trim_fraction` None, so the "what Auto did" note can't claim a crop), but
+    the measured trim stays visible as `trim_fraction_available` so the UI can
+    still offer it."""
+    from seestack.edit.presets import analyze_auto_inputs
+
+    off = analyze_auto_inputs(is_mosaic=True, trim_crop=(0.1, 0.0, 1.0, 1.0),
+                              auto_crop=False)
+    assert off["auto_crop"] is False
+    assert off["trim_fraction"] is None
+    assert off["trim_fraction_available"] == pytest.approx(0.1, abs=1e-6)
+
+    on = analyze_auto_inputs(is_mosaic=True, trim_crop=(0.1, 0.0, 1.0, 1.0))
+    assert on["auto_crop"] is True
+    assert on["trim_fraction"] == pytest.approx(0.1, abs=1e-6)
+    assert on["trim_fraction_available"] == pytest.approx(0.1, abs=1e-6)
+
+
+def test_analysis_single_field_reports_nothing_available_to_trim():
+    """A single-field stack has no ragged border either way, so both trim fields
+    stay None whatever the preference says."""
+    from seestack.edit.presets import analyze_auto_inputs
+
+    for pref in (True, False):
+        a = analyze_auto_inputs(is_mosaic=False, trim_crop=None, auto_crop=pref)
+        assert a["trim_fraction"] is None
+        assert a["trim_fraction_available"] is None

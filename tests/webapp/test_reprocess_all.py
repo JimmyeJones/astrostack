@@ -757,9 +757,16 @@ def test_reprocess_all_auto_edit_chains_on_each_restacked_run(solved_library, mo
     (via _auto_edit_process_run), so a reprocess yields finished pictures. The
     default (off) never auto-edits."""
     _patch_run_stack(monkeypatch)
-    edited: list[tuple[str, int]] = []
-    monkeypatch.setattr("webapp.pipeline._auto_edit_process_run",
-                        lambda lib, safe, run_id: (edited.append((safe, run_id)), 3)[1])  # noqa: ANN001
+    # (safe, run_id, auto_crop) — the trailing flag is the owner's "let Auto trim
+    # the ragged border" preference, which the reprocess chain must pass through
+    # so a library-wide reprocess frames pictures the same way the editor does.
+    edited: list[tuple[str, int, bool]] = []
+
+    def _fake_auto_edit(lib, safe, run_id, auto_crop=True):  # noqa: ANN001
+        edited.append((safe, run_id, auto_crop))
+        return 3
+
+    monkeypatch.setattr("webapp.pipeline._auto_edit_process_run", _fake_auto_edit)
 
     lib = Library.open_or_create(solved_library / "library")
     try:
@@ -778,14 +785,17 @@ def test_reprocess_all_auto_edit_chains_on_each_restacked_run(solved_library, mo
     assert summary["stacked"] == 2
     assert summary["auto_edited"] == 2      # one per restacked run
     assert len(edited) == 2
+    # The default setting (crop on) reaches the chain rather than being lost.
+    assert all(e[2] is True for e in edited), edited
 
 
 def test_reprocess_all_default_does_not_auto_edit(solved_library, monkeypatch):
     """Without auto_edit (the default), the auto-edit chain never runs."""
     _patch_run_stack(monkeypatch)
     calls: list = []
-    monkeypatch.setattr("webapp.pipeline._auto_edit_process_run",
-                        lambda lib, safe, run_id: calls.append(1))  # noqa: ANN001
+    monkeypatch.setattr(
+        "webapp.pipeline._auto_edit_process_run",
+        lambda lib, safe, run_id, auto_crop=True: calls.append(1))  # noqa: ANN001
 
     lib = Library.open_or_create(solved_library / "library")
     try:

@@ -9764,8 +9764,39 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **⭐ OWNER-REQUESTED (2026-07-30) — let the user turn OFF the Auto auto-crop; make the ragged-border trim a
-  toggle.** The one-click Auto chain ends with a `geometry.crop` op (`seestack/edit/presets.py:462–466`,
+- ~~**⭐ OWNER-REQUESTED (2026-07-30) — let the user turn OFF the Auto auto-crop; make the ragged-border trim a
+  toggle.**~~ — **SHIPPED v0.226.0** (Builder 2026-07-30, branch `claude/relaxed-turing-zajzay`). The one-click
+  Auto chain ended with a `geometry.crop` that silently reframed the owner's picture; it is now a plain choice,
+  **defaulting to on** so no other install's result changes.
+  **Engine:** `auto_recipe` and `analyze_auto_inputs` (`seestack/edit/presets.py`) take an additive
+  `auto_crop: bool = True`. Off ⇒ the `geometry.crop` op is simply not emitted and **every other op and parameter
+  is byte-identical** (pinned by `test_auto_crop_off_changes_nothing_else_about_the_recipe`) — the trim rectangle
+  is still *measured*, it just isn't applied. The analysis mirrors the recipe rather than the measurement, so
+  `trim_fraction` is `None` when nothing was trimmed (the "what Auto did" note can never claim a crop that didn't
+  happen) while a new `trim_fraction_available` still reports what the trim *would* remove, so the UI can offer it.
+  **Webapp:** new setting `auto_crop_border` (`webapp/config.py`, default `True`) is the library-level default and
+  is honoured on **every** Auto path — the editor's Auto-process button, the one-click "Process target", the
+  walk-away auto-stack auto-edit, and "Reprocess everything" (`_auto_edit_process_run` now takes the preference and
+  all three call sites pass `settings.auto_crop_border`). The two Auto endpoints accept an optional
+  `{"auto_crop": bool}` body that overrides the setting for that call alone; a body-less POST — what every older
+  frontend sends — and a garbled body both read as "use the setting", so the endpoints stay backward-compatible.
+  **Frontend:** a "Let Auto trim the ragged border off a mosaic" switch in Settings → Automatic pipeline (with a
+  plain-language hint), plus a compact **"Auto-crop edges"** switch beside Auto-process in the editor for a
+  per-run override. The editor switch is shown **only when there is a ragged border to trim** (a mosaic with a
+  well-covered rectangle — exactly when Auto would crop), so it is never a decision about nothing, and while the
+  user hasn't touched it the client sends **no** override at all, so a slow settings fetch can't crop a picture the
+  owner asked Auto to leave alone.
+  **Tests (+16):** engine `tests/test_edit_engine.py` (+6 — crop suppressed, everything-else-identical, default
+  still crops, analysis mirrors the recipe while reporting what was available, single-field unaffected); webapp
+  `tests/webapp/test_editor.py` (+3 — the setting governs the endpoint, the body overrides it in both directions
+  without persisting, junk/absent bodies fall back), `tests/webapp/test_pipeline.py` (+3 — the setting reaches the
+  Process-target and watcher auto-edit chains, and defaults to cropping on an untouched install),
+  `tests/webapp/test_config_upgrade.py` (+1 — an old config upgrades to `auto_crop_border=True`); frontend
+  `src/api/autoCropBody.test.ts` (+4) and `src/routes/Editor.test.tsx` (+3 — the switch reflects the saved default,
+  overrides it either way, and hides on a single-field stack). Upgrade-safe: additive setting defaulting to the
+  historical behaviour, additive optional request body, additive analysis fields, no DB/on-disk/API-shape change,
+  and an already-saved recipe is untouched (this only changes what Auto *emits* next time).
+  *(Original request kept below for provenance.)* The one-click Auto chain ends with a `geometry.crop` op (`seestack/edit/presets.py:462–466`,
   `trim_crop`) that trims the ragged, low-coverage mosaic/dither border so the result is cleanly framed. The owner
   **does not like Auto cropping his images automatically** and wants to keep the full frame. Add a user-facing
   setting — **"Auto-crop ragged border" (default ON**, so nobody else's result changes) — that, when off, drops the
